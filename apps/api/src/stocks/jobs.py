@@ -22,16 +22,19 @@ async def collect_intraday_data_job() -> dict:
     symbols = [s.strip() for s in settings.intraday_symbols.split(",") if s.strip()]
     logger.info(f"Starting intraday collection for {len(symbols)} symbols: {symbols}")
 
-    async with async_session_factory() as db:
-        collector = IntradayCollector(db)
-        result = await collector.collect_and_save(symbols)
-        await db.commit()
+    try:
+        async with async_session_factory() as db:
+            collector = IntradayCollector(db)
+            result = await collector.collect_and_save(symbols)
 
-    logger.info(
-        f"Collection complete: {len(result['success'])} success, "
-        f"{len(result['failed'])} failed, {result['total_bars']} bars"
-    )
-    return result
+        logger.info(
+            f"Collection complete: {len(result['success'])} success, "
+            f"{len(result['failed'])} failed, {result['total_bars']} bars"
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Intraday collection job failed: {e}")
+        return {"success": [], "failed": symbols, "total_bars": 0, "error": str(e)}
 
 
 async def cleanup_old_data_job() -> int:
@@ -43,11 +46,15 @@ async def cleanup_old_data_job() -> int:
     cutoff = datetime.now() - timedelta(days=settings.intraday_retention_days)
     logger.info(f"Cleaning up data older than {cutoff.date()}")
 
-    async with async_session_factory() as db:
-        stmt = delete(StockIntradayBar).where(StockIntradayBar.bar_time < cutoff)
-        result = await db.execute(stmt)
-        await db.commit()
-        deleted_count = result.rowcount
+    try:
+        async with async_session_factory() as db:
+            stmt = delete(StockIntradayBar).where(StockIntradayBar.bar_time < cutoff)
+            result = await db.execute(stmt)
+            await db.commit()
+            deleted_count = result.rowcount
 
-    logger.info(f"Deleted {deleted_count} old records")
-    return deleted_count
+        logger.info(f"Deleted {deleted_count} old records")
+        return deleted_count
+    except Exception as e:
+        logger.error(f"Cleanup job failed: {e}")
+        return 0
