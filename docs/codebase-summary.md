@@ -153,6 +153,7 @@ Base URL: `/api/v1`
 | GET | `/stocks/{symbol}/history` | `start`, `end`, `interval` | Historical OHLCV |
 | GET | `/stocks/{symbol}/intraday` | - | Intraday tick data |
 | GET | `/stocks/price-board` | `symbols` (list) | Real-time prices |
+| GET | `/stocks/{symbol}/detail` | - | Comprehensive stock detail (price + company + ratios) |
 
 #### Company Info
 | Method | Endpoint | Description |
@@ -177,6 +178,7 @@ Base URL: `/api/v1`
   - `get_history(symbol, start, end, interval)` - OHLCV data
   - `get_intraday(symbol)` - Tick data
   - `get_price_board(symbols)` - Real-time quotes
+  - `get_stock_detail(symbol)` - Combined price + company + ratios
   - `get_company_overview(symbol)` - Company info
   - `get_financial_ratios(symbol, period)` - Ratios
   - `get_income_statement(symbol, period, limit)` - P&L
@@ -188,7 +190,8 @@ Base URL: `/api/v1`
 - `StockSymbol` - Symbol info
 - `StockHistory` - OHLCV record
 - `IntradayTick` - Tick data
-- `PriceBoard` - Real-time quote
+- `PriceBoardItem` - Real-time quote (updated with optional fields)
+- `StockDetail` - Comprehensive stock data (price + company + ratios)
 - `CompanyOverview` - Company details
 - `FinancialRatio` - Ratio data
 - `IncomeStatement` - P&L line items
@@ -280,7 +283,7 @@ httpx
 | ShadCN Components | Done | 11 components installed |
 | Dashboard Index Cards | Done | Real API integration, loading/error states |
 | API Utility | Done | Generic fetch, market indices |
-| Stock API | Done | 10 endpoints working |
+| Stock API | Done | 11 endpoints working |
 | vnstock Integration | Done | VCI data source |
 | Auth Module | Pending | Placeholder exists |
 | Database Models | Pending | SQLAlchemy configured |

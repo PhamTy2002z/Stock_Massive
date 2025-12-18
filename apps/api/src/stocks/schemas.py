@@ -115,6 +115,13 @@ class PriceBoardItem(BaseModel):
     """Price board data for a single stock."""
 
     symbol: str
+    # New fields for stock detail
+    match_price: Optional[float] = None
+    highest: Optional[float] = None
+    lowest: Optional[float] = None
+    accumulated_volume: Optional[int] = None
+    accumulated_value: Optional[float] = None
+    # Existing fields
     ceiling: Optional[float] = None
     floor: Optional[float] = None
     ref_price: Optional[float] = None
@@ -141,3 +148,55 @@ class ErrorResponse(BaseModel):
 
     detail: str
     code: str = "error"
+
+
+class StockDetail(BaseModel):
+    """Comprehensive stock detail data combining price, company, and financial info."""
+
+    # Basic Info
+    symbol: str
+    company_name: Optional[str] = None
+    exchange: Optional[str] = None
+    industry: Optional[str] = None
+
+    # Real-time Price Data
+    price: Optional[float] = None
+    change: Optional[float] = None
+    change_pct: Optional[float] = None
+    ceiling: Optional[float] = None
+    floor: Optional[float] = None
+    ref_price: Optional[float] = None
+
+    # Intraday Range
+    open_price: Optional[float] = None
+    high_price: Optional[float] = None
+    low_price: Optional[float] = None
+
+    # Volume & Value
+    volume: Optional[int] = None
+    trading_value: Optional[float] = None
+
+    # Market Cap & Shares
+    market_cap: Optional[float] = None
+    outstanding_shares: Optional[float] = None
+    issue_share: Optional[float] = None
+
+    # 52-Week Data
+    high_52_week: Optional[float] = None
+    low_52_week: Optional[float] = None
+    avg_volume_52_week: Optional[int] = None
+
+    # Financial Ratios
+    eps: Optional[float] = None
+    pe: Optional[float] = None
+    pb: Optional[float] = None
+    beta: Optional[float] = None
+    dividend_yield: Optional[float] = None
+    roe: Optional[float] = None
+    roa: Optional[float] = None
+
+    # Company Details
+    description: Optional[str] = None
+    website: Optional[str] = None
+    employees: Optional[int] = None
+    established_year: Optional[int] = None

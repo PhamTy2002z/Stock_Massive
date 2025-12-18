@@ -17,6 +17,7 @@ from src.stocks.schemas import (
     BalanceSheetItem,
     PriceBoardItem,
     MarketIndexItem,
+    StockDetail,
 )
 
 logger = logging.getLogger(__name__)
@@ -396,6 +397,117 @@ class StockService:
 
         return results
 
+    def get_stock_detail(self, symbol: str) -> StockDetail:
+        """Get comprehensive stock detail data.
+
+        Combines price board, company overview, and financial ratios.
+
+        Args:
+            symbol: Stock symbol
+
+        Returns:
+            StockDetail object with all available data
+        """
+        symbol = validate_symbol(symbol)
+        result: dict = {"symbol": symbol.upper()}
+
+        # 1. Get price board data
+        try:
+            trading = Trading()
+            price_df = trading.price_board(
+                symbols_list=[symbol],
+                flatten_columns=True,
+                drop_levels=[0],
+            )
+
+            if price_df is not None and not price_df.empty:
+                row = price_df.iloc[0]
+                result.update({
+                    "price": self._safe_float(row.get("match_price")),
+                    "ceiling": self._safe_float(row.get("ceiling")),
+                    "floor": self._safe_float(row.get("floor")),
+                    "ref_price": self._safe_float(row.get("ref_price")),
+                    "high_price": self._safe_float(row.get("highest")),
+                    "low_price": self._safe_float(row.get("lowest")),
+                    "volume": int(row.get("accumulated_volume", 0)) if pd.notna(row.get("accumulated_volume")) else None,
+                    "trading_value": self._safe_float(row.get("accumulated_value")),
+                })
+
+                # Calculate change if we have price and ref_price
+                if result.get("price") and result.get("ref_price"):
+                    change = result["price"] - result["ref_price"]
+                    change_pct = (change / result["ref_price"]) * 100
+                    result["change"] = round(change, 2)
+                    result["change_pct"] = round(change_pct, 2)
+
+        except Exception as e:
+            logger.warning(f"Error fetching price board for {symbol}: {e}")
+
+        # 2. Get company overview
+        try:
+            stock = Vnstock().stock(symbol=symbol, source=self.source)
+            overview = stock.company.overview()
+
+            if overview is not None and not (isinstance(overview, pd.DataFrame) and overview.empty):
+                if isinstance(overview, pd.DataFrame):
+                    row = overview.iloc[0].to_dict() if len(overview) > 0 else {}
+                else:
+                    row = overview if isinstance(overview, dict) else {}
+
+                result.update({
+                    "company_name": row.get("organ_name") or row.get("short_name") or row.get("company_name"),
+                    "exchange": row.get("exchange"),
+                    "industry": row.get("icb_name3") or row.get("icb_name2") or row.get("industry"),
+                    "issue_share": self._safe_float(row.get("issue_share")),
+                    "outstanding_shares": self._safe_float(row.get("outstanding_share")),
+                    "description": row.get("company_profile") or row.get("description"),
+                    "website": row.get("website"),
+                    "employees": row.get("no_employees"),
+                    "established_year": row.get("established_year"),
+                })
+
+                # Calculate market cap if we have price and issue_share
+                if result.get("price") and result.get("issue_share"):
+                    market_cap = (result["price"] * 1000 * result["issue_share"]) / 1_000_000_000
+                    result["market_cap"] = round(market_cap, 2)
+
+        except Exception as e:
+            logger.warning(f"Error fetching company overview for {symbol}: {e}")
+
+        # 3. Get financial ratios (summary)
+        try:
+            stock = Vnstock().stock(symbol=symbol, source=self.source)
+            ratios = stock.company.ratio_summary()
+
+            if ratios is not None and not (isinstance(ratios, pd.DataFrame) and ratios.empty):
+                if isinstance(ratios, pd.DataFrame):
+                    row = ratios.iloc[0].to_dict() if len(ratios) > 0 else {}
+                else:
+                    row = ratios if isinstance(ratios, dict) else {}
+
+                result.update({
+                    "eps": self._safe_float(row.get("eps") or row.get("eps_ttm")),
+                    "pe": self._safe_float(row.get("pe") or row.get("price_to_earning")),
+                    "pb": self._safe_float(row.get("pb") or row.get("price_to_book")),
+                    "roe": self._safe_float(row.get("roe")),
+                    "roa": self._safe_float(row.get("roa")),
+                })
+
+        except Exception as e:
+            logger.warning(f"Error fetching financial ratios for {symbol}: {e}")
+
+        # 4. Try to get Beta from Vietnamese ratio data
+        try:
+            finance = Finance(symbol=symbol, source=self.source)
+            ratio_df = finance.ratio(period="year", lang="vi", dropna=True)
+            if ratio_df is not None and not ratio_df.empty and "Beta" in ratio_df.columns:
+                beta_val = ratio_df["Beta"].iloc[0] if len(ratio_df) > 0 else None
+                result["beta"] = self._safe_float(beta_val)
+        except Exception:
+            pass
+
+        return StockDetail(**result)
+
     # === Private conversion methods ===
 
     def _df_to_stock_prices(self, df: pd.DataFrame) -> list[StockPrice]:
@@ -575,6 +687,13 @@ class StockService:
                 items.append(
                     PriceBoardItem(
                         symbol=str(row.get("symbol", row.get("ticker", ""))),
+                        # New fields
+                        match_price=self._safe_float(row.get("match_price")),
+                        highest=self._safe_float(row.get("highest")),
+                        lowest=self._safe_float(row.get("lowest")),
+                        accumulated_volume=int(row.get("accumulated_volume", 0)) if pd.notna(row.get("accumulated_volume")) else None,
+                        accumulated_value=self._safe_float(row.get("accumulated_value")),
+                        # Existing fields
                         ceiling=self._safe_float(row.get("ceiling")),
                         floor=self._safe_float(row.get("floor")),
                         ref_price=self._safe_float(row.get("ref_price") or row.get("refPrice")),

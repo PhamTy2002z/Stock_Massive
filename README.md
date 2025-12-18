@@ -55,6 +55,7 @@ All endpoints prefixed with `/api/v1`:
 | `/stocks/{symbol}/history` | GET | Historical OHLCV data |
 | `/stocks/{symbol}/intraday` | GET | Intraday tick data |
 | `/stocks/price-board` | GET | Real-time price board |
+| `/stocks/{symbol}/detail` | GET | Comprehensive stock detail data |
 | `/stocks/{symbol}/company` | GET | Company overview |
 | `/stocks/{symbol}/financials/ratios` | GET | Financial ratios |
 | `/stocks/{symbol}/financials/income` | GET | Income statement |
