@@ -1,0 +1,99 @@
+"use client"
+
+import { Card } from "@/components/ui/card"
+import { Sparkline } from "@/components/ui/sparkline"
+import { cn } from "@/lib/utils"
+import { TrendingUp, TrendingDown } from "lucide-react"
+
+interface StockIndexCardProps {
+  symbol: string
+  name: string
+  value: number
+  change: number
+  changePercent: number
+  chartData?: number[]
+  className?: string
+}
+
+export function StockIndexCard({
+  symbol,
+  name,
+  value,
+  change,
+  changePercent,
+  chartData = [],
+  className,
+}: StockIndexCardProps) {
+  const isPositive = change >= 0
+
+  // Format value with thousand separator
+  const formattedValue = value.toLocaleString("vi-VN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
+
+  // Format change with sign
+  const formattedChange = `${isPositive ? "+" : ""}${change.toLocaleString("vi-VN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`
+
+  // Format percentage
+  const formattedPercent = `${isPositive ? "+" : ""}${changePercent.toFixed(2)}%`
+
+  return (
+    <Card className={cn("p-5 hover:shadow-md transition-shadow cursor-pointer", className)}>
+      <div className="flex items-start justify-between gap-4">
+        {/* Left: Index info */}
+        <div className="flex-1 min-w-0">
+          {/* Index name */}
+          <p className="text-sm font-medium text-muted-foreground truncate">
+            {name}
+          </p>
+
+          {/* Value */}
+          <p className="text-2xl font-semibold text-foreground mt-1 tabular-nums">
+            {formattedValue}
+          </p>
+
+          {/* Change */}
+          <div className="flex items-center gap-1.5 mt-1">
+            {isPositive ? (
+              <TrendingUp className="h-3.5 w-3.5 text-green-500" />
+            ) : (
+              <TrendingDown className="h-3.5 w-3.5 text-red-500" />
+            )}
+            <span
+              className={cn(
+                "text-sm font-medium tabular-nums",
+                isPositive ? "text-green-500" : "text-red-500"
+              )}
+            >
+              {formattedChange}
+            </span>
+            <span
+              className={cn(
+                "text-sm font-medium tabular-nums",
+                isPositive ? "text-green-500" : "text-red-500"
+              )}
+            >
+              ({formattedPercent})
+            </span>
+          </div>
+        </div>
+
+        {/* Right: Sparkline chart */}
+        {chartData.length > 1 && (
+          <div className="flex-shrink-0">
+            <Sparkline
+              data={chartData}
+              width={80}
+              height={40}
+              positive={isPositive}
+            />
+          </div>
+        )}
+      </div>
+    </Card>
+  )
+}
