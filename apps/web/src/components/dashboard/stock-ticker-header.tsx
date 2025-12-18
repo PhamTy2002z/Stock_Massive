@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 
 interface StockTickerHeaderProps {
@@ -19,40 +20,64 @@ export function StockTickerHeader({
   changePercent,
   className,
 }: StockTickerHeaderProps) {
+  const [priceFlash, setPriceFlash] = useState(false)
+  const prevPriceRef = useRef(price)
   const isPositive = change >= 0
+
+  // Trigger flash animation when price changes
+  useEffect(() => {
+    if (price !== prevPriceRef.current && prevPriceRef.current !== 0) {
+      setPriceFlash(true)
+      const timer = setTimeout(() => setPriceFlash(false), 500)
+      prevPriceRef.current = price
+      return () => clearTimeout(timer)
+    }
+    prevPriceRef.current = price
+  }, [price])
 
   // Format with comma as decimal separator (Vietnamese style)
   const formattedPrice = price.toLocaleString("vi-VN", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).replace(".", ",")
+  })
 
   const formattedChange = change.toLocaleString("vi-VN", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).replace(".", ",")
+  })
 
   const formattedPercent = `${isPositive ? "+" : ""}${changePercent.toFixed(2).replace(".", ",")}%`
 
   return (
     <div className={cn("py-4", className)}>
-      <div className="flex items-start justify-between gap-4">
-        {/* Left: Company Name & Symbol */}
+      <div className="flex items-center justify-between gap-4">
+        {/* Left: Symbol | Company Name */}
         <div className="min-w-0 flex-1">
-          <h2 className="text-xl font-semibold text-foreground leading-tight">
-            {companyName}
-          </h2>
-          <p className="mt-1 text-sm text-muted-foreground">{symbol}</p>
+          <div className="flex items-baseline gap-2">
+            <span className="text-xl font-bold text-foreground">
+              {symbol}
+            </span>
+            <span className="text-muted-foreground/60">|</span>
+            <span className="text-base text-muted-foreground truncate">
+              {companyName}
+            </span>
+          </div>
         </div>
 
         {/* Right: Price & Change */}
         <div className="text-right shrink-0">
-          <p className="text-2xl font-semibold tabular-nums text-emerald-500">
+          <p
+            className={cn(
+              "text-2xl font-semibold tabular-nums transition-all duration-300",
+              isPositive ? "text-emerald-500" : "text-red-500",
+              priceFlash && "scale-110 brightness-125"
+            )}
+          >
             {formattedPrice}
           </p>
           <p
             className={cn(
-              "mt-1 text-sm font-medium tabular-nums",
+              "text-sm font-medium tabular-nums",
               isPositive ? "text-emerald-500" : "text-red-500"
             )}
           >
