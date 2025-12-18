@@ -14,6 +14,7 @@ from src.stocks.schemas import (
     BalanceSheetItem,
     PriceBoardItem,
     MarketIndexItem,
+    StockDetail,
 )
 from src.stocks.service import StockService, StockServiceError, get_stock_service
 
@@ -161,6 +162,22 @@ async def get_company_overview(symbol: str) -> CompanyOverview:
     try:
         service = get_service()
         return service.get_company_overview(symbol)
+    except StockServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/{symbol}/detail", response_model=StockDetail)
+async def get_stock_detail(symbol: str) -> StockDetail:
+    """Get comprehensive stock detail data.
+
+    Returns combined data from price board, company overview, and financial ratios.
+    Single endpoint for all stock detail page requirements.
+
+    - **symbol**: Stock ticker (e.g., VCB, ACB, TCB)
+    """
+    try:
+        service = get_service()
+        return service.get_stock_detail(symbol)
     except StockServiceError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
