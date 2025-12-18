@@ -4,7 +4,6 @@
   "private": true,
   "scripts": {
     "dev": "docker-compose up --build",
-    "dev:watch": "docker-compose up --build --watch",
     "dev:detach": "docker-compose up --build -d",
     "stop": "docker-compose down",
     "stop:clean": "docker-compose down -v",
