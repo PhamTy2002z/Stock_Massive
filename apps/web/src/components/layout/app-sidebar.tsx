@@ -131,9 +131,11 @@ function SidebarBrand() {
     <SidebarMenu>
       <SidebarMenuItem>
         <SidebarMenuButton size="lg" className="cursor-default hover:bg-transparent">
-          <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <TrendingUp className="size-4" />
-          </div>
+          <img
+            src="/images/logo.jpg"
+            alt="Stock Massive"
+            className="size-8 rounded-lg object-cover"
+          />
           <div className="grid flex-1 text-left text-sm leading-tight">
             <span className="truncate font-bold text-base">Stock Massive</span>
             <span className="truncate text-xs text-muted-foreground">Analytics Platform</span>
