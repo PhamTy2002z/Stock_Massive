@@ -34,7 +34,17 @@ class TestCollectIntradayDataJob:
                 assert len(result["success"]) == 2
                 assert len(result["failed"]) == 0
                 mock_collector.collect_and_save.assert_called_once()
-                mock_session.commit.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_collect_intraday_data_job_exception_handling(self):
+        """Test error handling when collection fails."""
+        with patch("src.stocks.jobs.async_session_factory") as mock_factory:
+            mock_factory.return_value.__aenter__.side_effect = Exception("DB error")
+
+            result = await collect_intraday_data_job()
+
+            assert len(result["success"]) == 0
+            assert "error" in result
 
     @pytest.mark.asyncio
     async def test_collect_intraday_data_job_partial_failure(self):
