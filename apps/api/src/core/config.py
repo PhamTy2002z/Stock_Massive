@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     # Vnstock
     vnstock_source: str = "VCI"  # Default data source (VCI is most reliable)
 
+    # Scheduler
+    scheduler_enabled: bool = True
+    intraday_collect_hour: int = 15
+    intraday_collect_minute: int = 30
+    intraday_symbols: str = "VCB,FPT,VNM,VIC,VHM"  # Comma-separated VN30 subset
+    intraday_retention_days: int = 30
+
 
 @lru_cache
 def get_settings() -> Settings:
