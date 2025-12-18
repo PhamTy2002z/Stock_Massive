@@ -95,3 +95,43 @@ type(scope): short description
 - Unit: pytest
 - Integration: pytest + TestClient
 - Coverage target: 80%+
+
+## API Design
+
+### Endpoint Naming
+- Use plural nouns: `/stocks`, `/users`
+- Use kebab-case for multi-word: `/price-board`
+- Nest resources logically: `/stocks/{symbol}/financials/ratios`
+
+### Response Format
+- Always return JSON
+- Use consistent field naming (snake_case for Python responses)
+- Include pagination for list endpoints
+
+### Error Handling
+```python
+# Standard error response
+{
+    "detail": "Error message",
+    "code": "ERROR_CODE"
+}
+```
+
+## vnstock Integration
+
+### Service Pattern
+```python
+# stocks/service.py
+class StockService:
+    def __init__(self):
+        self.stock = Vnstock().stock(symbol="VN30", source="VCI")
+
+    async def get_history(self, symbol: str, ...):
+        # Update symbol, fetch data
+        self.stock.symbol = symbol
+        return self.stock.quote.history(...)
+```
+
+### Data Source
+- Primary: VCI (Vietnam)
+- Always handle vnstock exceptions gracefully

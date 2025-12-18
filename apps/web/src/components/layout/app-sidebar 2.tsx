@@ -67,16 +67,6 @@ const data = {
       isActive: true,
     },
     {
-      title: "Analytics",
-      url: "#",
-      icon: BarChart3,
-      items: [
-        { title: "Reports", url: "#" },
-        { title: "Insights", url: "#" },
-        { title: "Alerts", url: "#" },
-      ],
-    },
-    {
       title: "Markets",
       url: "#",
       icon: TrendingUp,
@@ -116,6 +106,16 @@ const data = {
         { title: "Holdings", url: "#" },
         { title: "Performance", url: "#" },
         { title: "Transactions", url: "#" },
+      ],
+    },
+    {
+      title: "Analytics",
+      url: "#",
+      icon: BarChart3,
+      items: [
+        { title: "Reports", url: "#" },
+        { title: "Insights", url: "#" },
+        { title: "Alerts", url: "#" },
       ],
     },
   ],
@@ -250,12 +250,11 @@ function NavUser({
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
               size="lg"
-              tooltip={user.name}
-              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground group-data-[collapsible=icon]:!size-10 group-data-[collapsible=icon]:!p-1"
+              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
             >
-              <Avatar className="h-8 w-8 rounded-lg shrink-0">
+              <Avatar className="h-8 w-8 rounded-lg">
                 <AvatarImage src={user.avatar} alt={user.name} />
-                <AvatarFallback className="rounded-lg bg-primary text-primary-foreground font-medium">
+                <AvatarFallback className="rounded-lg">
                   {user.name.slice(0, 2).toUpperCase()}
                 </AvatarFallback>
               </Avatar>
