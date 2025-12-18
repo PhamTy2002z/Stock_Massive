@@ -27,19 +27,12 @@ services:
       DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-stockmassive}
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
     volumes:
-      - ./apps/api:/code
+      - ./apps/api/src:/code/src
     ports:
       - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
-    develop:
-      watch:
-        - action: sync
-          path: ./apps/api/src
-          target: /code/src
-        - action: rebuild
-          path: ./apps/api/requirements.txt
 
   web:
     build:
@@ -48,20 +41,15 @@ services:
     container_name: stockmassive-web
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000
+      WATCHPACK_POLLING: "true"
     volumes:
-      - ./apps/web:/app
-      - /app/node_modules
+      - ./apps/web/src:/app/src
+      - ./apps/web/public:/app/public
     ports:
       - "3000:3000"
     depends_on:
       - api
-    develop:
-      watch:
-        - action: sync
-          path: ./apps/web/src
-          target: /app/src
-        - action: rebuild
-          path: ./apps/web/package.json
 
 volumes:
   postgres_data:
+  web_node_modules:
