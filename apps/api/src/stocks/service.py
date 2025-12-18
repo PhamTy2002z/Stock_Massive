@@ -16,6 +16,7 @@ from src.stocks.schemas import (
     IncomeStatementItem,
     BalanceSheetItem,
     PriceBoardItem,
+    MarketIndexItem,
 )
 
 logger = logging.getLogger(__name__)
@@ -281,6 +282,40 @@ class StockService:
             logger.error(f"Error fetching symbols for group {group}: {e}")
             raise StockServiceError(f"Failed to fetch symbols for group {group}: {e}")
 
+    def search_symbols(self, query: str, limit: int = 20) -> list[StockSymbol]:
+        """Search stock symbols by ticker or company name.
+
+        Args:
+            query: Search query (matches symbol or company name)
+            limit: Maximum results to return
+
+        Returns:
+            List of matching StockSymbol objects
+        """
+        if not query or len(query.strip()) < 1:
+            return []
+
+        query = query.strip().upper()
+
+        try:
+            listing = Listing()
+            df = listing.all_symbols()
+
+            if df is None or df.empty:
+                return []
+
+            # Filter by symbol or organ_name (case-insensitive)
+            mask = df["symbol"].str.upper().str.contains(query, na=False)
+            if "organ_name" in df.columns:
+                mask |= df["organ_name"].str.upper().str.contains(query, na=False)
+
+            filtered = df[mask].head(limit)
+
+            return self._df_to_stock_symbols(filtered)
+        except Exception as e:
+            logger.error(f"Error searching symbols for '{query}': {e}")
+            raise StockServiceError(f"Failed to search symbols: {e}")
+
     def get_price_board(self, symbols: list[str]) -> list[PriceBoardItem]:
         """Get real-time price board for multiple symbols.
 
@@ -305,6 +340,61 @@ class StockService:
         except Exception as e:
             logger.error(f"Error fetching price board: {e}")
             raise StockServiceError(f"Failed to fetch price board: {e}")
+
+    def get_market_indices(self) -> list[MarketIndexItem]:
+        """Get market indices data (VN-INDEX, VN30, HNX-INDEX, UPCOM-INDEX).
+
+        Uses Quote.history to get latest closing prices and calculate changes.
+
+        Returns:
+            List of MarketIndexItem objects
+        """
+        # Index symbols and display names
+        indices = [
+            ("VNINDEX", "VN-INDEX"),
+            ("VN30", "VN30"),
+            ("HNXINDEX", "HNX-INDEX"),
+            ("UPCOMINDEX", "UPCOM-INDEX"),
+        ]
+
+        results = []
+        for symbol, name in indices:
+            try:
+                quote = Quote(symbol=symbol, source="VCI")
+                # Get last 2 trading days to calculate change
+                df = quote.history(start="2025-01-01", end=date.today().isoformat())
+
+                if df is None or df.empty or len(df) < 1:
+                    logger.warning(f"No data for index {symbol}")
+                    continue
+
+                # Get latest and previous day data
+                latest = df.iloc[-1]
+                current_value = float(latest["close"])
+
+                if len(df) >= 2:
+                    previous = df.iloc[-2]
+                    prev_close = float(previous["close"])
+                    change = current_value - prev_close
+                    change_pct = (change / prev_close) * 100 if prev_close != 0 else 0
+                else:
+                    change = 0.0
+                    change_pct = 0.0
+
+                results.append(
+                    MarketIndexItem(
+                        symbol=symbol,
+                        name=name,
+                        value=round(current_value, 2),
+                        change=round(change, 2),
+                        change_pct=round(change_pct, 2),
+                    )
+                )
+            except Exception as e:
+                logger.warning(f"Error fetching index {symbol}: {e}")
+                continue
+
+        return results
 
     # === Private conversion methods ===
 
@@ -466,6 +556,17 @@ class StockService:
                 continue
         return items
 
+    def _safe_float(self, value) -> float | None:
+        """Convert value to float, returning None for NaN/invalid values."""
+        if value is None:
+            return None
+        if pd.isna(value):
+            return None
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return None
+
     def _df_to_price_board(self, df: pd.DataFrame) -> list[PriceBoardItem]:
         """Convert DataFrame to list of PriceBoardItem."""
         items = []
@@ -474,15 +575,15 @@ class StockService:
                 items.append(
                     PriceBoardItem(
                         symbol=str(row.get("symbol", row.get("ticker", ""))),
-                        ceiling=row.get("ceiling"),
-                        floor=row.get("floor"),
-                        ref_price=row.get("ref_price") or row.get("refPrice"),
-                        last_price=row.get("last_price") or row.get("lastPrice"),
-                        last_vol=row.get("last_vol") or row.get("lastVol"),
-                        total_vol=row.get("total_vol") or row.get("totalVol"),
-                        total_val=row.get("total_val") or row.get("totalVal"),
-                        change=row.get("change"),
-                        change_pct=row.get("change_pct") or row.get("changePct"),
+                        ceiling=self._safe_float(row.get("ceiling")),
+                        floor=self._safe_float(row.get("floor")),
+                        ref_price=self._safe_float(row.get("ref_price") or row.get("refPrice")),
+                        last_price=self._safe_float(row.get("last_price") or row.get("lastPrice")),
+                        last_vol=self._safe_float(row.get("last_vol") or row.get("lastVol")),
+                        total_vol=self._safe_float(row.get("total_vol") or row.get("totalVol")),
+                        total_val=self._safe_float(row.get("total_val") or row.get("totalVal")),
+                        change=self._safe_float(row.get("change")),
+                        change_pct=self._safe_float(row.get("change_pct") or row.get("changePct")),
                     )
                 )
             except Exception as e:

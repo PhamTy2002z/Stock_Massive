@@ -3,7 +3,6 @@
 import { Bell, Search, Share2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,19 +12,24 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Separator } from "@/components/ui/separator"
+import { StockSearchBar } from "@/components/dashboard"
+import { StockSymbol } from "@/lib/api"
 
 export function DashboardHeader() {
+  const handleStockSelect = (stock: StockSymbol) => {
+    // TODO: Navigate to stock detail page or update dashboard
+    console.log("Selected stock:", stock.symbol)
+  }
+
   return (
     <header className="sticky top-0 z-10 flex h-16 shrink-0 items-center justify-between border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-4 transition-all duration-200">
       <div className="flex items-center gap-3">
         <SidebarTrigger className="-ml-1" />
         <Separator orientation="vertical" className="h-6" />
-        <div className="relative hidden md:block">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            type="search"
+        <div className="hidden md:block">
+          <StockSearchBar
+            onSelect={handleStockSelect}
             placeholder="Search stocks, markets..."
-            className="h-9 w-64 pl-9 lg:w-80 bg-muted/50 border-transparent focus:bg-background focus:border-input transition-all duration-200"
           />
         </div>
       </div>
