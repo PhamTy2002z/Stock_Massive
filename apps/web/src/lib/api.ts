@@ -87,3 +87,58 @@ export async function searchStocks(query: string, limit: number = 20): Promise<S
   }
   return fetchApi<StockSymbol[]>(`/stocks/symbols/search?q=${encodeURIComponent(query)}&limit=${limit}`)
 }
+
+// Stock Detail Types
+export interface StockDetail {
+  // Basic Info
+  symbol: string
+  company_name: string | null
+  exchange: string | null
+  industry: string | null
+
+  // Real-time Price Data
+  price: number | null
+  change: number | null
+  change_pct: number | null
+  ceiling: number | null
+  floor: number | null
+  ref_price: number | null
+
+  // Intraday Range
+  open_price: number | null
+  high_price: number | null
+  low_price: number | null
+
+  // Volume & Value
+  volume: number | null
+  trading_value: number | null
+
+  // Market Cap & Shares
+  market_cap: number | null
+  outstanding_shares: number | null
+  issue_share: number | null
+
+  // 52-Week Data
+  high_52_week: number | null
+  low_52_week: number | null
+  avg_volume_52_week: number | null
+
+  // Financial Ratios
+  eps: number | null
+  pe: number | null
+  pb: number | null
+  beta: number | null
+  dividend_yield: number | null
+  roe: number | null
+  roa: number | null
+
+  // Company Details
+  description: string | null
+  website: string | null
+  employees: number | null
+  established_year: number | null
+}
+
+export async function fetchStockDetail(symbol: string): Promise<StockDetail> {
+  return fetchApi<StockDetail>(`/stocks/${encodeURIComponent(symbol)}/detail`)
+}

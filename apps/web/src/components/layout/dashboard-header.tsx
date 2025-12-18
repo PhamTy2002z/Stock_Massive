@@ -15,10 +15,15 @@ import { Separator } from "@/components/ui/separator"
 import { StockSearchBar } from "@/components/dashboard"
 import { StockSymbol } from "@/lib/api"
 
-export function DashboardHeader() {
+interface DashboardHeaderProps {
+  onStockSelect?: (symbol: string) => void
+}
+
+export function DashboardHeader({ onStockSelect }: DashboardHeaderProps) {
   const handleStockSelect = (stock: StockSymbol) => {
-    // TODO: Navigate to stock detail page or update dashboard
-    console.log("Selected stock:", stock.symbol)
+    if (onStockSelect) {
+      onStockSelect(stock.symbol)
+    }
   }
 
   return (

@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils"
 
 interface StockDetailPanelProps {
   volume: number // Khối lượng (shares)
-  tradingValue: number // GTGD (billion VND)
+  exchange: string // Sàn giao dịch (HOSE, HNX, UPCOM)
   marketCap: number // Vốn hóa (billion VND)
   industry: string // Ngành
   className?: string
@@ -39,7 +39,7 @@ function formatVolume(value: number): string {
 
 export function StockDetailPanel({
   volume,
-  tradingValue,
+  exchange,
   marketCap,
   industry,
   className,
@@ -47,7 +47,7 @@ export function StockDetailPanel({
   return (
     <div className={cn("grid grid-cols-2 gap-3 sm:grid-cols-4", className)}>
       <StatCard label="Khối lượng" value={formatVolume(volume)} />
-      <StatCard label="GTGD" value={formatBillion(tradingValue)} />
+      <StatCard label="Sàn giao dịch" value={exchange || "N/A"} />
       <StatCard label="Vốn hóa" value={formatBillion(marketCap)} />
       <StatCard label="Ngành" value={industry} />
     </div>
