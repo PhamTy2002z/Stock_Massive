@@ -21,6 +21,9 @@ httpx>=0.25.0
 # Stock Data
 vnstock>=3.0.0
 
+# Scheduler
+apscheduler>=4.0.0
+
 # Dev
 pytest>=7.4.0
 pytest-asyncio>=0.21.0
