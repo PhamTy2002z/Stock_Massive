@@ -411,7 +411,7 @@ class StockService:
         symbol = validate_symbol(symbol)
         result: dict = {"symbol": symbol.upper()}
 
-        # 1. Get price board data
+        # 1. Get price board data (includes organ_name for company name)
         try:
             trading = Trading()
             price_df = trading.price_board(
@@ -431,7 +431,13 @@ class StockService:
                     "low_price": self._safe_float(row.get("lowest")),
                     "volume": int(row.get("accumulated_volume", 0)) if pd.notna(row.get("accumulated_volume")) else None,
                     "trading_value": self._safe_float(row.get("accumulated_value")),
+                    "exchange": row.get("exchange"),
                 })
+
+                # Get company name from price_board (organ_name field)
+                organ_name = row.get("organ_name")
+                if organ_name and pd.notna(organ_name):
+                    result["company_name"] = str(organ_name)
 
                 # Calculate change if we have price and ref_price
                 if result.get("price") and result.get("ref_price"):
@@ -454,12 +460,21 @@ class StockService:
                 else:
                     row = overview if isinstance(overview, dict) else {}
 
+                # Only set company_name from overview if not already set from price_board
+                if not result.get("company_name"):
+                    company_name = row.get("organ_name") or row.get("short_name") or row.get("company_name")
+                    if company_name:
+                        result["company_name"] = company_name
+
+                # Only set exchange if not already set
+                if not result.get("exchange"):
+                    result["exchange"] = row.get("exchange")
+
                 result.update({
-                    "company_name": row.get("organ_name") or row.get("short_name") or row.get("company_name"),
-                    "exchange": row.get("exchange"),
                     "industry": row.get("icb_name3") or row.get("icb_name2") or row.get("industry"),
                     "issue_share": self._safe_float(row.get("issue_share")),
-                    "outstanding_shares": self._safe_float(row.get("outstanding_share")),
+                    # Fallback to issue_share if outstanding_share not available
+                    "outstanding_shares": self._safe_float(row.get("outstanding_share")) or self._safe_float(row.get("issue_share")),
                     "description": row.get("company_profile") or row.get("description"),
                     "website": row.get("website"),
                     "employees": row.get("no_employees"),

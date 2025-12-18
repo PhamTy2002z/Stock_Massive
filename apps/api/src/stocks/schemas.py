@@ -150,6 +150,65 @@ class ErrorResponse(BaseModel):
     code: str = "error"
 
 
+# === Intraday Bar Schemas ===
+
+
+class IntradayBarCreate(BaseModel):
+    """Schema for creating intraday bar records."""
+
+    symbol: str
+    bar_time: datetime
+    open_price: Optional[float] = None
+    high_price: Optional[float] = None
+    low_price: Optional[float] = None
+    close_price: Optional[float] = None
+    volume: int
+    trade_value: Optional[float] = None
+    trade_count: Optional[int] = None
+
+
+class IntradayBar(IntradayBarCreate):
+    """Schema for intraday bar with database fields."""
+
+    id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class IntradayCollectionResult(BaseModel):
+    """Result of intraday data collection operation."""
+
+    success: list[str] = Field(default_factory=list)
+    failed: list[dict] = Field(default_factory=list)
+    total_bars: int = 0
+
+
+# === Volume Analysis Schemas ===
+
+
+class VolumeTimePeriod(BaseModel):
+    """Volume data for a specific time period within trading session."""
+
+    hour: int
+    minute_bucket: int  # 0, 5, 10, 15, ...
+    time_label: str  # "09:00", "09:05", etc.
+    avg_volume: float
+    total_volume: int
+    sample_count: int
+
+
+class VolumeAnalysisResponse(BaseModel):
+    """Response for volume analysis endpoint."""
+
+    symbol: str
+    days_analyzed: int
+    trading_session: str = "09:00-15:00"
+    peak_periods: list[VolumeTimePeriod]
+    generated_at: datetime
+
+
 class StockDetail(BaseModel):
     """Comprehensive stock detail data combining price, company, and financial info."""
 

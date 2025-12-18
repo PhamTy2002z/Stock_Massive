@@ -4,6 +4,11 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
+from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.database import get_db
+from src.stocks.intraday_collector import IntradayCollector
 from src.stocks.schemas import (
     StockPrice,
     IntradayTick,
@@ -15,6 +20,8 @@ from src.stocks.schemas import (
     PriceBoardItem,
     MarketIndexItem,
     StockDetail,
+    IntradayCollectionResult,
+    VolumeAnalysisResponse,
 )
 from src.stocks.service import StockService, StockServiceError, get_stock_service
 
@@ -246,3 +253,58 @@ async def get_balance_sheet(
         return service.get_balance_sheet(symbol, period, lang)
     except StockServiceError as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+
+# === Intraday Data Collection Endpoints ===
+
+
+@router.post("/intraday/collect", response_model=IntradayCollectionResult)
+async def collect_intraday_data(
+    symbols: list[str] = Query(
+        default=["VCB", "FPT", "VNM"],
+        description="List of stock symbols to collect",
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> IntradayCollectionResult:
+    """Manually trigger intraday data collection.
+
+    Collects tick data from vnstock, aggregates to 5-minute OHLCV bars,
+    and stores in database. Uses upsert for idempotent operations.
+
+    - **symbols**: List of stock symbols (default: VCB, FPT, VNM)
+    """
+    if len(symbols) > 50:
+        raise HTTPException(status_code=400, detail="Maximum 50 symbols allowed")
+
+    collector = IntradayCollector(db)
+    result = await collector.collect_and_save(symbols)
+    return IntradayCollectionResult(**result)
+
+
+@router.get("/{symbol}/volume-analysis", response_model=VolumeAnalysisResponse)
+async def get_volume_analysis(
+    symbol: str,
+    days: int = Query(default=10, ge=1, le=30, description="Number of days to analyze"),
+    top_n: int = Query(default=10, ge=1, le=72, description="Number of top periods to return"),
+    db: AsyncSession = Depends(get_db),
+) -> VolumeAnalysisResponse:
+    """Analyze intraday volume patterns for a stock.
+
+    Returns peak volume periods within trading session (09:00-15:00).
+    Groups historical 5-minute bars by time-of-day to identify when
+    trading activity is typically highest.
+
+    - **symbol**: Stock ticker (e.g., VCB, ACB, TCB)
+    - **days**: Number of days to analyze (default 10, max 30)
+    - **top_n**: Number of top periods to return (default 10, max 72)
+    """
+    collector = IntradayCollector(db)
+    result = await collector.analyze_volume(symbol, days, top_n)
+
+    if not result["peak_periods"]:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No intraday data found for {symbol.upper()} in last {days} days",
+        )
+
+    return VolumeAnalysisResponse(**result)
