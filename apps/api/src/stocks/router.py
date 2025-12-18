@@ -13,6 +13,7 @@ from src.stocks.schemas import (
     IncomeStatementItem,
     BalanceSheetItem,
     PriceBoardItem,
+    MarketIndexItem,
 )
 from src.stocks.service import StockService, StockServiceError, get_stock_service
 
@@ -45,6 +46,23 @@ async def list_symbols_by_group(group: str) -> list[str]:
     try:
         service = get_service()
         return service.list_symbols_by_group(group)
+    except StockServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/symbols/search", response_model=list[StockSymbol])
+async def search_symbols(
+    q: str = Query(..., min_length=1, description="Search query (symbol or company name)"),
+    limit: int = Query(20, ge=1, le=50, description="Maximum results to return"),
+) -> list[StockSymbol]:
+    """Search stock symbols by ticker or company name.
+
+    - **q**: Search query (matches symbol or company name, case-insensitive)
+    - **limit**: Maximum number of results (default 20, max 50)
+    """
+    try:
+        service = get_service()
+        return service.search_symbols(q, limit)
     except StockServiceError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -91,6 +109,19 @@ async def get_intraday(
     try:
         service = get_service()
         return service.get_intraday(symbol, page_size)
+    except StockServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/market-indices", response_model=list[MarketIndexItem])
+async def get_market_indices() -> list[MarketIndexItem]:
+    """Get market indices data (VN-INDEX, VN30, HNX-INDEX, UPCOM-INDEX).
+
+    Returns current values and daily changes for major Vietnamese market indices.
+    """
+    try:
+        service = get_service()
+        return service.get_market_indices()
     except StockServiceError as e:
         raise HTTPException(status_code=502, detail=str(e))
 

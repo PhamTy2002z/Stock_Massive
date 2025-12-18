@@ -61,13 +61,29 @@ export async function fetchPriceBoard(symbols: string[]): Promise<PriceBoardItem
 }
 
 export async function fetchMarketIndices(): Promise<MarketIndex[]> {
-  const data = await fetchPriceBoard(MARKET_INDEX_SYMBOLS)
+  const data = await fetchApi<{ symbol: string; name: string; value: number; change: number; change_pct: number }[]>(
+    "/stocks/market-indices"
+  )
 
   return data.map((item) => ({
     symbol: item.symbol,
-    name: INDEX_NAMES[item.symbol] || item.symbol,
-    value: item.last_price ?? 0,
-    change: item.change ?? 0,
-    changePercent: item.change_pct ?? 0,
+    name: item.name,
+    value: item.value,
+    change: item.change,
+    changePercent: item.change_pct,
   }))
+}
+
+export interface StockSymbol {
+  symbol: string
+  organ_name: string | null
+  exchange: string | null
+  organ_type_code: string | null
+}
+
+export async function searchStocks(query: string, limit: number = 20): Promise<StockSymbol[]> {
+  if (!query || query.trim().length < 1) {
+    return []
+  }
+  return fetchApi<StockSymbol[]>(`/stocks/symbols/search?q=${encodeURIComponent(query)}&limit=${limit}`)
 }

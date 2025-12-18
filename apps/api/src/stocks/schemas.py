@@ -126,6 +126,16 @@ class PriceBoardItem(BaseModel):
     change_pct: Optional[float] = None
 
 
+class MarketIndexItem(BaseModel):
+    """Market index data (VN-INDEX, VN30, etc.)."""
+
+    symbol: str
+    name: str
+    value: float
+    change: float
+    change_pct: float
+
+
 class ErrorResponse(BaseModel):
     """Standard error response."""
 

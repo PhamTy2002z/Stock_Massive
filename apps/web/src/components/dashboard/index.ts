@@ -1,2 +1,7 @@
 export { StockIndexCard } from "./stock-index-card"
 export { MarketIndices } from "./market-indices"
+export { StockTickerHeader } from "./stock-ticker-header"
+export { StockDetailPanel } from "./stock-detail-panel"
+export { StockStatsTable } from "./stock-stats-table"
+export { StockCompanyInfo } from "./stock-company-info"
+export { StockSearchBar } from "./stock-search-bar"
