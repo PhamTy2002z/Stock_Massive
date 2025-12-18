@@ -3,15 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "docker-compose up --build",
-    "dev:detach": "docker-compose up --build -d",
-    "stop": "docker-compose down",
-    "stop:clean": "docker-compose down -v",
-    "logs": "docker-compose logs -f",
-    "logs:api": "docker-compose logs -f api",
-    "logs:web": "docker-compose logs -f web",
-    "db:shell": "docker-compose exec db psql -U postgres -d stockmassive",
-    "api:shell": "docker-compose exec api bash",
-    "web:shell": "docker-compose exec web sh"
+    "dev": "docker compose up --build",
+    "dev:detach": "docker compose up --build -d",
+    "stop": "docker compose down",
+    "stop:clean": "docker compose down -v",
+    "logs": "docker compose logs -f",
+    "logs:api": "docker compose logs -f api",
+    "logs:web": "docker compose logs -f web",
+    "db:shell": "docker compose exec db psql -U postgres -d stockmassive",
+    "api:shell": "docker compose exec api bash",
+    "web:shell": "docker compose exec web sh"
   }
 }
