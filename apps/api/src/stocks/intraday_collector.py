@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.stocks.models import StockIntradayBar
 from src.stocks.schemas import IntradayTick
-from src.stocks.service import get_stock_service, StockServiceError, validate_symbol
+from src.stocks.shared import StockServiceError, validate_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,8 @@ class IntradayCollector:
             db: Async database session
         """
         self.db = db
+        # Lazy import to avoid circular dependency
+        from src.stocks.service import get_stock_service
         self.stock_service = get_stock_service()
 
     def aggregate_ticks_to_bars(

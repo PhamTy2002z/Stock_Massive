@@ -112,7 +112,7 @@ class TestAnalyzeVolumeMethod:
     @pytest.fixture
     def collector(self, mock_db):
         """Create collector instance with mocked dependencies."""
-        with patch("src.stocks.intraday_collector.get_stock_service"):
+        with patch("src.stocks.service.get_stock_service"):
             return IntradayCollector(mock_db)
 
     @pytest.mark.asyncio
@@ -271,10 +271,10 @@ class TestVolumeAnalysisEndpoint:
     @pytest.mark.asyncio
     async def test_endpoint_happy_path(self, mock_db):
         """Test endpoint with valid symbol returns 200 and data."""
-        from src.stocks.router import get_volume_analysis
+        from src.stocks.price.router import get_volume_analysis
 
         # Mock IntradayCollector.analyze_volume
-        with patch("src.stocks.router.IntradayCollector") as MockCollector:
+        with patch("src.stocks.price.router.IntradayCollector") as MockCollector:
             mock_collector = MockCollector.return_value
             # Make analyze_volume return an async coroutine
             async def mock_analyze_volume(*args, **kwargs):
@@ -305,9 +305,9 @@ class TestVolumeAnalysisEndpoint:
     @pytest.mark.asyncio
     async def test_endpoint_no_data_returns_404(self, mock_db):
         """Test endpoint returns 404 when no data found."""
-        from src.stocks.router import get_volume_analysis
+        from src.stocks.price.router import get_volume_analysis
 
-        with patch("src.stocks.router.IntradayCollector") as MockCollector:
+        with patch("src.stocks.price.router.IntradayCollector") as MockCollector:
             mock_collector = MockCollector.return_value
             # Make analyze_volume return an async coroutine
             async def mock_analyze_volume(*args, **kwargs):
@@ -330,9 +330,9 @@ class TestVolumeAnalysisEndpoint:
     @pytest.mark.asyncio
     async def test_endpoint_default_parameters(self, mock_db):
         """Test endpoint uses default parameters correctly."""
-        from src.stocks.router import get_volume_analysis
+        from src.stocks.price.router import get_volume_analysis
 
-        with patch("src.stocks.router.IntradayCollector") as MockCollector:
+        with patch("src.stocks.price.router.IntradayCollector") as MockCollector:
             mock_collector = MockCollector.return_value
             call_args = []
 
@@ -416,7 +416,7 @@ class TestVolumeAnalysisIntegration:
     @pytest.mark.asyncio
     async def test_full_flow_with_mock_data(self):
         """Test complete flow from endpoint to database query."""
-        from src.stocks.router import get_volume_analysis
+        from src.stocks.price.router import get_volume_analysis
 
         mock_db = AsyncMock()
 
@@ -448,7 +448,7 @@ class TestVolumeAnalysisIntegration:
     @pytest.mark.asyncio
     async def test_sorting_by_avg_volume_desc(self):
         """Test peak periods are sorted by avg_volume descending."""
-        from src.stocks.router import get_volume_analysis
+        from src.stocks.price.router import get_volume_analysis
 
         mock_db = AsyncMock()
 
@@ -471,7 +471,7 @@ class TestVolumeAnalysisIntegration:
     @pytest.mark.asyncio
     async def test_edge_case_single_period(self):
         """Test with single peak period."""
-        from src.stocks.router import get_volume_analysis
+        from src.stocks.price.router import get_volume_analysis
 
         mock_db = AsyncMock()
 
@@ -490,7 +490,7 @@ class TestVolumeAnalysisIntegration:
     @pytest.mark.asyncio
     async def test_edge_case_max_periods(self):
         """Test with maximum number of periods (72)."""
-        from src.stocks.router import get_volume_analysis
+        from src.stocks.price.router import get_volume_analysis
 
         mock_db = AsyncMock()
 

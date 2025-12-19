@@ -144,8 +144,8 @@ class TestGetSectorPerformance:
             'accumulated_value': [100_000_000_000, 50_000_000_000, 30_000_000_000],
         })
 
-    @patch('src.stocks.service.Listing')
-    @patch('src.stocks.service.Trading')
+    @patch('src.stocks.market.service.Listing')
+    @patch('src.stocks.market.service.Trading')
     def test_get_sector_performance_success(self, mock_trading_cls, mock_listing_cls, service, mock_industries_df):
         """Test successful sector performance retrieval."""
         # Setup mocks
@@ -192,7 +192,7 @@ class TestGetSectorPerformance:
         changes = [s.change_pct for s in result.sectors]
         assert changes == sorted(changes, reverse=True)
 
-    @patch('src.stocks.service.Listing')
+    @patch('src.stocks.market.service.Listing')
     def test_get_sector_performance_empty_industries(self, mock_listing_cls, service):
         """Test with empty industries DataFrame."""
         mock_listing = MagicMock()
@@ -205,7 +205,7 @@ class TestGetSectorPerformance:
         assert result.sectors == []
         assert result.total_sectors == 0
 
-    @patch('src.stocks.service.Listing')
+    @patch('src.stocks.market.service.Listing')
     def test_get_sector_performance_none_industries(self, mock_listing_cls, service):
         """Test with None industries DataFrame."""
         mock_listing = MagicMock()
@@ -218,8 +218,8 @@ class TestGetSectorPerformance:
         assert result.sectors == []
         assert result.total_sectors == 0
 
-    @patch('src.stocks.service.Listing')
-    @patch('src.stocks.service.Trading')
+    @patch('src.stocks.market.service.Listing')
+    @patch('src.stocks.market.service.Trading')
     def test_get_sector_performance_empty_price_board(self, mock_trading_cls, mock_listing_cls, service, mock_industries_df):
         """Test with empty price board response."""
         mock_listing = MagicMock()
@@ -236,8 +236,8 @@ class TestGetSectorPerformance:
         assert result.sectors == []
         assert result.total_sectors == 0
 
-    @patch('src.stocks.service.Listing')
-    @patch('src.stocks.service.Trading')
+    @patch('src.stocks.market.service.Listing')
+    @patch('src.stocks.market.service.Trading')
     def test_get_sector_performance_price_board_exception(self, mock_trading_cls, mock_listing_cls, service, mock_industries_df):
         """Test graceful handling of price board exceptions."""
         mock_listing = MagicMock()
@@ -254,7 +254,7 @@ class TestGetSectorPerformance:
         assert isinstance(result, SectorPerformanceResponse)
         assert result.sectors == []
 
-    @patch('src.stocks.service.Listing')
+    @patch('src.stocks.market.service.Listing')
     def test_get_sector_performance_listing_exception(self, mock_listing_cls, service):
         """Test exception from Listing API raises StockServiceError."""
         mock_listing = MagicMock()
@@ -266,8 +266,8 @@ class TestGetSectorPerformance:
 
         assert "Failed to fetch sector performance" in str(exc_info.value)
 
-    @patch('src.stocks.service.Listing')
-    @patch('src.stocks.service.Trading')
+    @patch('src.stocks.market.service.Listing')
+    @patch('src.stocks.market.service.Trading')
     def test_get_sector_performance_alternative_columns(self, mock_trading_cls, mock_listing_cls, service):
         """Test with alternative column names (icb_code instead of icb_code2)."""
         # Use icb_code/icb_name instead of icb_code2/icb_name2
@@ -296,8 +296,8 @@ class TestGetSectorPerformance:
         assert result.sectors[0].icb_code == '8000'
         assert result.sectors[0].icb_name == 'Tai chinh'
 
-    @patch('src.stocks.service.Listing')
-    @patch('src.stocks.service.Trading')
+    @patch('src.stocks.market.service.Listing')
+    @patch('src.stocks.market.service.Trading')
     def test_get_sector_performance_nan_icb_code(self, mock_trading_cls, mock_listing_cls, service):
         """Test handling of NaN ICB codes."""
         industries_df = pd.DataFrame({
@@ -334,8 +334,8 @@ class TestMarketCapWeightedCalculation:
     def service(self):
         return StockService(source="VCI")
 
-    @patch('src.stocks.service.Listing')
-    @patch('src.stocks.service.Trading')
+    @patch('src.stocks.market.service.Listing')
+    @patch('src.stocks.market.service.Trading')
     def test_weighted_calculation_accuracy(self, mock_trading_cls, mock_listing_cls, service):
         """Test market-cap weighted calculation is accurate."""
         industries_df = pd.DataFrame({
@@ -364,8 +364,8 @@ class TestMarketCapWeightedCalculation:
         assert result.total_sectors == 1
         assert result.sectors[0].change_pct == 1.0
 
-    @patch('src.stocks.service.Listing')
-    @patch('src.stocks.service.Trading')
+    @patch('src.stocks.market.service.Listing')
+    @patch('src.stocks.market.service.Trading')
     def test_top_gainers_losers_sorting(self, mock_trading_cls, mock_listing_cls, service):
         """Test top gainers and losers are correctly sorted."""
         industries_df = pd.DataFrame({
@@ -392,8 +392,8 @@ class TestMarketCapWeightedCalculation:
         assert sector.top_gainers == ['A', 'B', 'C']
         assert sector.top_losers == ['C', 'D', 'E']
 
-    @patch('src.stocks.service.Listing')
-    @patch('src.stocks.service.Trading')
+    @patch('src.stocks.market.service.Listing')
+    @patch('src.stocks.market.service.Trading')
     def test_zero_market_cap_handling(self, mock_trading_cls, mock_listing_cls, service):
         """Test handling of zero/missing market cap values."""
         industries_df = pd.DataFrame({
@@ -419,8 +419,8 @@ class TestMarketCapWeightedCalculation:
         # Should handle gracefully - uses default 1.0 for missing market cap
         assert isinstance(result, SectorPerformanceResponse)
 
-    @patch('src.stocks.service.Listing')
-    @patch('src.stocks.service.Trading')
+    @patch('src.stocks.market.service.Listing')
+    @patch('src.stocks.market.service.Trading')
     def test_total_market_cap_in_billions(self, mock_trading_cls, mock_listing_cls, service):
         """Test total market cap is converted to billions."""
         industries_df = pd.DataFrame({

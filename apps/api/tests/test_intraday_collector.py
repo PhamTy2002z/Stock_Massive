@@ -22,7 +22,7 @@ class TestIntradayCollector:
     @pytest.fixture
     def collector(self, mock_db):
         """Create collector instance with mocked dependencies."""
-        with patch("src.stocks.intraday_collector.get_stock_service"):
+        with patch("src.stocks.service.get_stock_service"):
             return IntradayCollector(mock_db)
 
     @pytest.fixture
