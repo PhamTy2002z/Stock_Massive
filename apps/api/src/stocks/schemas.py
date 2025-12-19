@@ -79,7 +79,7 @@ class FinancialRatio(BaseModel):
 
 
 class IncomeStatementItem(BaseModel):
-    """Income statement line item."""
+    """Income statement line item - simplified summary."""
 
     year: Optional[int] = None
     quarter: Optional[int] = None
@@ -88,6 +88,26 @@ class IncomeStatementItem(BaseModel):
     operating_profit: Optional[float] = None
     net_income: Optional[float] = None
     eps: Optional[float] = None
+
+
+class IncomeStatementRow(BaseModel):
+    """Detailed income statement row for financial table display."""
+
+    id: str  # Unique identifier for the row
+    label: str  # Vietnamese label for display
+    values: dict[str, Optional[float]]  # Period -> value mapping (e.g., "Q3/2025": 1234.5)
+    level: int = 0  # Indentation level (0 = root, 1 = child, etc.)
+    is_header: bool = False  # Bold section headers
+    is_summary: bool = False  # Bold summary rows
+
+
+class IncomeStatementResponse(BaseModel):
+    """Response for detailed income statement endpoint."""
+
+    symbol: str
+    periods: list[str]  # List of period labels (e.g., ["Q3/2025", "Q2/2025", ...])
+    rows: list[IncomeStatementRow]
+    unit: str = "VND"  # Currency unit
 
 
 class BalanceSheetItem(BaseModel):
@@ -99,6 +119,46 @@ class BalanceSheetItem(BaseModel):
     total_liabilities: Optional[float] = None
     total_equity: Optional[float] = None
     cash: Optional[float] = None
+
+
+class BalanceSheetRow(BaseModel):
+    """Detailed balance sheet row for financial table display."""
+
+    id: str  # Unique identifier for the row
+    label: str  # Vietnamese label for display
+    values: dict[str, Optional[float]]  # Period -> value mapping (e.g., "Q3/2025": 1234.5)
+    level: int = 0  # Indentation level (0 = root, 1 = child, etc.)
+    is_header: bool = False  # Bold section headers
+    is_summary: bool = False  # Bold summary rows
+
+
+class BalanceSheetResponse(BaseModel):
+    """Response for detailed balance sheet endpoint."""
+
+    symbol: str
+    periods: list[str]  # List of period labels (e.g., ["Q3/2025", "Q2/2025", ...])
+    rows: list[BalanceSheetRow]
+    unit: str = "VND"  # Currency unit
+
+
+class CashFlowRow(BaseModel):
+    """Detailed cash flow row for financial table display."""
+
+    id: str  # Unique identifier for the row
+    label: str  # Vietnamese label for display
+    values: dict[str, Optional[float]]  # Period -> value mapping (e.g., "Q3/2025": 1234.5)
+    level: int = 0  # Indentation level (0 = root, 1 = child, etc.)
+    is_header: bool = False  # Bold section headers
+    is_summary: bool = False  # Bold summary rows
+
+
+class CashFlowResponse(BaseModel):
+    """Response for detailed cash flow endpoint."""
+
+    symbol: str
+    periods: list[str]  # List of period labels (e.g., ["Q3/2025", "Q2/2025", ...])
+    rows: list[CashFlowRow]
+    unit: str = "VND"  # Currency unit
 
 
 # === Request/Response Schemas ===
@@ -259,3 +319,63 @@ class StockDetail(BaseModel):
     website: Optional[str] = None
     employees: Optional[int] = None
     established_year: Optional[int] = None
+
+
+# === Shareholders Schemas ===
+
+
+class ShareholderItem(BaseModel):
+    """Major shareholder data."""
+
+    id: str
+    name: str
+    shares: float  # Number of shares
+    ownership_pct: float  # Ownership percentage (0-100)
+    update_date: Optional[str] = None
+
+
+class ShareholdersResponse(BaseModel):
+    """Response for shareholders endpoint."""
+
+    symbol: str
+    shareholders: list[ShareholderItem]
+    total_count: int
+
+
+class OfficerItem(BaseModel):
+    """Company officer/insider data."""
+
+    id: str
+    name: str
+    position: str
+    position_short: Optional[str] = None
+    shares: Optional[float] = None  # Number of shares
+    ownership_pct: Optional[float] = None  # Ownership percentage
+    update_date: Optional[str] = None
+    status: Optional[str] = None  # working/resigned
+
+
+class OfficersResponse(BaseModel):
+    """Response for officers endpoint."""
+
+    symbol: str
+    officers: list[OfficerItem]
+    total_count: int
+
+
+class InsiderDealItem(BaseModel):
+    """Insider trading deal data."""
+
+    announce_date: str
+    action: str  # Mua/Bán
+    quantity: float
+    price: Optional[float] = None
+    ratio: Optional[float] = None
+
+
+class InsiderDealsResponse(BaseModel):
+    """Response for insider deals endpoint."""
+
+    symbol: str
+    deals: list[InsiderDealItem]
+    total_count: int

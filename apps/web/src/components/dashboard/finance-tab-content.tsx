@@ -9,12 +9,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { useIncomeStatement } from "@/hooks/use-income-statement"
+import { useBalanceSheet } from "@/hooks/use-balance-sheet"
+import { useCashFlow } from "@/hooks/use-cash-flow"
+import type { IncomeStatementRow, BalanceSheetRow, CashFlowRow } from "@/lib/api"
 
 // Types for financial data
 export type FinanceSubTab = "income" | "balance" | "cashflow"
 export type PeriodType = "quarter" | "year"
 
 interface FinanceTabContentProps {
+  symbol: string
   className?: string
 }
 
@@ -143,12 +148,12 @@ function formatFinancialValue(value: number | null): string {
   return isNegative ? `(${formatted})` : formatted
 }
 
-// Financial Data Table Component
+// Financial Data Table Component - supports legacy FinancialRow and API response rows
 function FinancialTable({
   data,
   periods,
 }: {
-  data: FinancialRow[]
+  data: (FinancialRow | IncomeStatementRow | BalanceSheetRow | CashFlowRow)[]
   periods: string[]
 }) {
   return (
@@ -170,70 +175,106 @@ function FinancialTable({
           </tr>
         </thead>
         <tbody>
-          {data.map((row, index) => (
-            <tr
-              key={row.id}
-              className={cn(
-                "border-b border-border/30 transition-colors hover:bg-muted/30",
-                row.isHeader && "bg-muted/20"
-              )}
-            >
-              <td
+          {data.map((row) => {
+            // Handle both legacy format (isHeader/isSummary) and API format (is_header/is_summary)
+            const rowAny = row as unknown as Record<string, unknown>
+            const isHeader = rowAny.isHeader ?? rowAny.is_header ?? false
+            const isSummary = rowAny.isSummary ?? rowAny.is_summary ?? false
+            const level = (row.level as number) || 0
+
+            return (
+              <tr
+                key={row.id}
                 className={cn(
-                  "sticky left-0 z-10 bg-background py-2.5 px-4 text-sm",
-                  row.isSummary || row.isHeader
-                    ? "font-semibold text-foreground"
-                    : "text-foreground/90",
-                  row.isHeader && "bg-muted/20 uppercase text-xs tracking-wide"
+                  "border-b border-border/30 transition-colors hover:bg-muted/30",
+                  isHeader && "bg-muted/20"
                 )}
-                style={{
-                  paddingLeft: row.level
-                    ? `${16 + row.level * 16}px`
-                    : "16px",
-                }}
               >
-                {row.label}
-              </td>
-              {periods.map((period) => (
                 <td
-                  key={period}
                   className={cn(
-                    "py-2.5 px-3 text-right text-sm tabular-nums whitespace-nowrap",
-                    row.isSummary || row.isHeader
+                    "sticky left-0 z-10 bg-background py-2.5 px-4 text-sm",
+                    isSummary || isHeader
                       ? "font-semibold text-foreground"
-                      : "text-foreground/90"
+                      : "text-foreground/90",
+                    isHeader && "bg-muted/20 uppercase text-xs tracking-wide"
                   )}
+                  style={{
+                    paddingLeft: level ? `${16 + level * 16}px` : "16px",
+                  }}
                 >
-                  {formatFinancialValue(row.values[period])}
+                  {row.label}
                 </td>
-              ))}
-            </tr>
-          ))}
+                {periods.map((period) => (
+                  <td
+                    key={period}
+                    className={cn(
+                      "py-2.5 px-3 text-right text-sm tabular-nums whitespace-nowrap",
+                      isSummary || isHeader
+                        ? "font-semibold text-foreground"
+                        : "text-foreground/90"
+                    )}
+                  >
+                    {formatFinancialValue(row.values[period])}
+                  </td>
+                ))}
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>
   )
 }
 
-export function FinanceTabContent({ className }: FinanceTabContentProps) {
+export function FinanceTabContent({ symbol, className }: FinanceTabContentProps) {
   const [activeSubTab, setActiveSubTab] = useState<FinanceSubTab>("income")
   const [periodType, setPeriodType] = useState<PeriodType>("quarter")
+
+  // Fetch income statement data from API
+  const {
+    data: incomeData,
+    isLoading: incomeLoading,
+  } = useIncomeStatement(symbol, periodType, 4)
+
+  // Fetch balance sheet data from API
+  const {
+    data: balanceData,
+    isLoading: balanceLoading,
+  } = useBalanceSheet(symbol, periodType, 4)
+
+  // Fetch cash flow data from API
+  const {
+    data: cashFlowApiData,
+    isLoading: cashFlowLoading,
+  } = useCashFlow(symbol, periodType, 4)
 
   // Get the appropriate data and periods based on active sub-tab
   const getTableData = () => {
     switch (activeSubTab) {
       case "income":
-        return { data: incomeStatementData, periods: mockQuarters }
+        // Use API data if available, otherwise fall back to mock
+        if (incomeData && incomeData.rows.length > 0) {
+          return { data: incomeData.rows, periods: incomeData.periods, isLoading: incomeLoading }
+        }
+        return { data: incomeStatementData, periods: mockQuarters, isLoading: incomeLoading }
       case "balance":
-        return { data: balanceSheetData, periods: ["Q4/2024", "Q3/2024", "Q2/2024", "Q1/2024"] }
+        // Use API data if available, otherwise fall back to mock
+        if (balanceData && balanceData.rows.length > 0) {
+          return { data: balanceData.rows, periods: balanceData.periods, isLoading: balanceLoading }
+        }
+        return { data: balanceSheetData, periods: ["Q4/2024", "Q3/2024", "Q2/2024", "Q1/2024"], isLoading: balanceLoading }
       case "cashflow":
-        return { data: cashFlowData, periods: mockQuarters }
+        // Use API data if available, otherwise fall back to mock
+        if (cashFlowApiData && cashFlowApiData.rows.length > 0) {
+          return { data: cashFlowApiData.rows, periods: cashFlowApiData.periods, isLoading: cashFlowLoading }
+        }
+        return { data: cashFlowData, periods: mockQuarters, isLoading: cashFlowLoading }
       default:
-        return { data: incomeStatementData, periods: mockQuarters }
+        return { data: incomeStatementData, periods: mockQuarters, isLoading: false }
     }
   }
 
-  const { data, periods } = getTableData()
+  const { data, periods, isLoading } = getTableData()
 
   return (
     <div className={cn("space-y-4", className)}>
@@ -283,7 +324,21 @@ export function FinanceTabContent({ className }: FinanceTabContentProps) {
 
       {/* Financial Table */}
       <div className="rounded-lg border border-border/50 bg-card/50 overflow-hidden">
-        <FinancialTable data={data} periods={periods} />
+        {isLoading ? (
+          <div className="p-4 space-y-3">
+            {[...Array(10)].map((_, i) => (
+              <div key={i} className="flex gap-4">
+                <div className="h-4 w-48 rounded bg-muted animate-pulse" />
+                <div className="h-4 w-20 rounded bg-muted animate-pulse ml-auto" />
+                <div className="h-4 w-20 rounded bg-muted animate-pulse" />
+                <div className="h-4 w-20 rounded bg-muted animate-pulse" />
+                <div className="h-4 w-20 rounded bg-muted animate-pulse" />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <FinancialTable data={data} periods={periods} />
+        )}
       </div>
     </div>
   )

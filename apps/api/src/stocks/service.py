@@ -14,10 +14,22 @@ from src.stocks.schemas import (
     StockSymbol,
     FinancialRatio,
     IncomeStatementItem,
+    IncomeStatementRow,
+    IncomeStatementResponse,
     BalanceSheetItem,
+    BalanceSheetRow,
+    BalanceSheetResponse,
+    CashFlowRow,
+    CashFlowResponse,
     PriceBoardItem,
     MarketIndexItem,
     StockDetail,
+    ShareholderItem,
+    ShareholdersResponse,
+    OfficerItem,
+    OfficersResponse,
+    InsiderDealItem,
+    InsiderDealsResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -200,6 +212,35 @@ class StockService:
             logger.error(f"Error fetching income statement for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch income statement for {symbol}: {e}")
 
+    def get_income_statement_detailed(
+        self,
+        symbol: str,
+        period: str = "quarter",
+        limit: int = 4,
+    ) -> IncomeStatementResponse:
+        """Get detailed income statement data for financial table display.
+
+        Args:
+            symbol: Stock symbol
+            period: 'year' or 'quarter'
+            limit: Number of periods to return (default 4)
+
+        Returns:
+            IncomeStatementResponse with rows and periods
+        """
+        symbol = validate_symbol(symbol)
+        try:
+            finance = Finance(symbol=symbol, source=self.source)
+            df = finance.income_statement(period=period, lang="vi", dropna=True)
+
+            if df is None or df.empty:
+                return IncomeStatementResponse(symbol=symbol, periods=[], rows=[])
+
+            return self._df_to_income_statement_response(df, symbol, period, limit)
+        except Exception as e:
+            logger.error(f"Error fetching detailed income statement for {symbol}: {e}")
+            raise StockServiceError(f"Failed to fetch income statement for {symbol}: {e}")
+
     def get_balance_sheet(
         self,
         symbol: str,
@@ -228,6 +269,64 @@ class StockService:
         except Exception as e:
             logger.error(f"Error fetching balance sheet for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch balance sheet for {symbol}: {e}")
+
+    def get_balance_sheet_detailed(
+        self,
+        symbol: str,
+        period: str = "quarter",
+        limit: int = 4,
+    ) -> BalanceSheetResponse:
+        """Get detailed balance sheet data for financial table display.
+
+        Args:
+            symbol: Stock symbol
+            period: 'year' or 'quarter'
+            limit: Number of periods to return (default 4)
+
+        Returns:
+            BalanceSheetResponse with rows and periods
+        """
+        symbol = validate_symbol(symbol)
+        try:
+            finance = Finance(symbol=symbol, source=self.source)
+            df = finance.balance_sheet(period=period, lang="vi", dropna=True)
+
+            if df is None or df.empty:
+                return BalanceSheetResponse(symbol=symbol, periods=[], rows=[])
+
+            return self._df_to_balance_sheet_response(df, symbol, period, limit)
+        except Exception as e:
+            logger.error(f"Error fetching detailed balance sheet for {symbol}: {e}")
+            raise StockServiceError(f"Failed to fetch balance sheet for {symbol}: {e}")
+
+    def get_cash_flow_detailed(
+        self,
+        symbol: str,
+        period: str = "quarter",
+        limit: int = 4,
+    ) -> CashFlowResponse:
+        """Get detailed cash flow data for financial table display.
+
+        Args:
+            symbol: Stock symbol
+            period: 'year' or 'quarter'
+            limit: Number of periods to return (default 4)
+
+        Returns:
+            CashFlowResponse with rows and periods
+        """
+        symbol = validate_symbol(symbol)
+        try:
+            finance = Finance(symbol=symbol, source=self.source)
+            df = finance.cash_flow(period=period, lang="vi", dropna=True)
+
+            if df is None or df.empty:
+                return CashFlowResponse(symbol=symbol, periods=[], rows=[])
+
+            return self._df_to_cash_flow_response(df, symbol, period, limit)
+        except Exception as e:
+            logger.error(f"Error fetching detailed cash flow for {symbol}: {e}")
+            raise StockServiceError(f"Failed to fetch cash flow for {symbol}: {e}")
 
     def list_symbols(self, exchange: Optional[str] = None) -> list[StockSymbol]:
         """List all stock symbols.
@@ -523,6 +622,164 @@ class StockService:
 
         return StockDetail(**result)
 
+    def get_shareholders(self, symbol: str) -> ShareholdersResponse:
+        """Get major shareholders for a stock.
+
+        Args:
+            symbol: Stock symbol
+
+        Returns:
+            ShareholdersResponse with list of major shareholders
+        """
+        symbol = validate_symbol(symbol)
+        try:
+            stock = Vnstock().stock(symbol=symbol, source=self.source)
+            df = stock.company.shareholders()
+
+            if df is None or df.empty:
+                return ShareholdersResponse(symbol=symbol, shareholders=[], total_count=0)
+
+            shareholders = []
+            for _, row in df.iterrows():
+                try:
+                    # Handle update_date - convert to string if datetime
+                    update_date = row.get("update_date")
+                    if update_date is not None and pd.notna(update_date):
+                        if hasattr(update_date, "strftime"):
+                            update_date = update_date.strftime("%Y-%m-%d")
+                        else:
+                            update_date = str(update_date)
+                    else:
+                        update_date = None
+
+                    shareholders.append(ShareholderItem(
+                        id=str(row.get("id", "")),
+                        name=str(row.get("share_holder", "")),
+                        shares=float(row.get("quantity", 0)),
+                        ownership_pct=float(row.get("share_own_percent", 0)) * 100,  # Convert to percentage
+                        update_date=update_date,
+                    ))
+                except Exception as e:
+                    logger.warning(f"Skipping shareholder row due to error: {e}")
+                    continue
+
+            return ShareholdersResponse(
+                symbol=symbol,
+                shareholders=shareholders,
+                total_count=len(shareholders),
+            )
+        except Exception as e:
+            logger.error(f"Error fetching shareholders for {symbol}: {e}")
+            raise StockServiceError(f"Failed to fetch shareholders for {symbol}: {e}")
+
+    def get_officers(
+        self,
+        symbol: str,
+        filter_by: str = "working",
+    ) -> OfficersResponse:
+        """Get company officers/management for a stock.
+
+        Args:
+            symbol: Stock symbol
+            filter_by: Filter by status ('working', 'resigned', 'all')
+
+        Returns:
+            OfficersResponse with list of officers
+        """
+        symbol = validate_symbol(symbol)
+        try:
+            stock = Vnstock().stock(symbol=symbol, source=self.source)
+            df = stock.company.officers(filter_by=filter_by)
+
+            if df is None or df.empty:
+                return OfficersResponse(symbol=symbol, officers=[], total_count=0)
+
+            officers = []
+            for _, row in df.iterrows():
+                try:
+                    # Handle update_date
+                    update_date = row.get("update_date")
+                    if update_date is not None and pd.notna(update_date):
+                        if hasattr(update_date, "strftime"):
+                            update_date = update_date.strftime("%Y-%m-%d")
+                        else:
+                            update_date = str(update_date)
+                    else:
+                        update_date = None
+
+                    officers.append(OfficerItem(
+                        id=str(row.get("id", "")),
+                        name=str(row.get("officer_name", "")),
+                        position=str(row.get("officer_position", "")),
+                        position_short=row.get("position_short_name"),
+                        shares=self._safe_float(row.get("quantity")),
+                        ownership_pct=self._safe_float(row.get("officer_own_percent")) * 100 if row.get("officer_own_percent") else None,
+                        update_date=update_date,
+                        status=row.get("type"),
+                    ))
+                except Exception as e:
+                    logger.warning(f"Skipping officer row due to error: {e}")
+                    continue
+
+            return OfficersResponse(
+                symbol=symbol,
+                officers=officers,
+                total_count=len(officers),
+            )
+        except Exception as e:
+            logger.error(f"Error fetching officers for {symbol}: {e}")
+            raise StockServiceError(f"Failed to fetch officers for {symbol}: {e}")
+
+    def get_insider_deals(self, symbol: str) -> InsiderDealsResponse:
+        """Get insider trading deals for a stock.
+
+        Args:
+            symbol: Stock symbol
+
+        Returns:
+            InsiderDealsResponse with list of insider deals
+        """
+        symbol = validate_symbol(symbol)
+        try:
+            stock = Vnstock().stock(symbol=symbol, source=self.source)
+            df = stock.company.insider_deals()
+
+            if df is None or df.empty:
+                return InsiderDealsResponse(symbol=symbol, deals=[], total_count=0)
+
+            deals = []
+            for _, row in df.iterrows():
+                try:
+                    # Handle announce_date
+                    announce_date = row.get("deal_announce_date")
+                    if announce_date is not None and pd.notna(announce_date):
+                        if hasattr(announce_date, "strftime"):
+                            announce_date = announce_date.strftime("%Y-%m-%d")
+                        else:
+                            announce_date = str(announce_date)
+                    else:
+                        announce_date = ""
+
+                    deals.append(InsiderDealItem(
+                        announce_date=announce_date,
+                        action=str(row.get("deal_action", "")),
+                        quantity=float(row.get("deal_quantity", 0)),
+                        price=self._safe_float(row.get("deal_price")),
+                        ratio=self._safe_float(row.get("deal_ratio")),
+                    ))
+                except Exception as e:
+                    logger.warning(f"Skipping insider deal row due to error: {e}")
+                    continue
+
+            return InsiderDealsResponse(
+                symbol=symbol,
+                deals=deals,
+                total_count=len(deals),
+            )
+        except Exception as e:
+            logger.error(f"Error fetching insider deals for {symbol}: {e}")
+            raise StockServiceError(f"Failed to fetch insider deals for {symbol}: {e}")
+
     # === Private conversion methods ===
 
     def _df_to_stock_prices(self, df: pd.DataFrame) -> list[StockPrice]:
@@ -682,6 +939,320 @@ class StockService:
                 logger.warning(f"Skipping balance sheet item due to error: {e}")
                 continue
         return items
+
+    def _df_to_income_statement_response(
+        self, df: pd.DataFrame, symbol: str, period: str, limit: int
+    ) -> IncomeStatementResponse:
+        """Convert vnstock income statement DataFrame to detailed response.
+
+        Maps Vietnamese column names to structured rows for frontend display.
+        Supports both regular companies and banks (different column structures).
+        """
+        # Limit to most recent periods
+        df = df.head(limit)
+
+        # Build period labels (e.g., "Q3/2025" or "2024")
+        periods = []
+        for _, row in df.iterrows():
+            year = row.get("Năm", row.get("year", ""))
+            if period == "quarter":
+                quarter = row.get("Kỳ", row.get("quarter", ""))
+                periods.append(f"Q{quarter}/{year}")
+            else:
+                periods.append(str(year))
+
+        # Detect if this is a bank (has banking-specific columns)
+        is_bank = "Thu nhập lãi thuần" in df.columns or "Thu nhập lãi và các khoản tương tự" in df.columns
+
+        # Define row mappings based on company type
+        # Format: (id, label, column_names_to_try, level, is_summary)
+        if is_bank:
+            row_mappings = [
+                ("interest_income", "Thu nhập lãi và các khoản tương tự", ["Thu nhập lãi và các khoản tương tự", "Doanh thu (đồng)"], 0, True),
+                ("interest_expense", "Chi phí lãi và các khoản tương tự", ["Chi phí lãi và các khoản tương tự"], 1, False),
+                ("net_interest_income", "Thu nhập lãi thuần", ["Thu nhập lãi thuần"], 0, True),
+                ("service_income", "Thu nhập từ hoạt động dịch vụ", ["Thu nhập từ hoạt động dịch vụ"], 1, False),
+                ("service_expense", "Chi phí hoạt động dịch vụ", ["Chi phí hoạt động dịch vụ"], 1, False),
+                ("net_service_income", "Lãi thuần từ hoạt động dịch vụ", ["Lãi thuần từ hoạt động dịch vụ"], 0, True),
+                ("forex_gold", "Kinh doanh ngoại hối và vàng", ["Kinh doanh ngoại hối và vàng"], 1, False),
+                ("trading_securities", "Chứng khoán kinh doanh", ["Chứng khoán kinh doanh"], 1, False),
+                ("investment_securities", "Chứng khoán đầu tư", ["Chứng khoán đầu tư"], 1, False),
+                ("other_income", "Hoạt động khác", ["Hoạt động khác"], 1, False),
+                ("other_expense", "Chi phí hoạt động khác", ["Chi phí hoạt động khác"], 1, False),
+                ("net_other", "Lãi/lỗ thuần từ hoạt động khác", ["Lãi/lỗ thuần từ hoạt động khác"], 1, False),
+                ("dividend_received", "Cổ tức đã nhận", ["Cố tức đã nhận", "Cổ tức đã nhận"], 1, False),
+                ("total_operating_income", "Tổng thu nhập hoạt động", ["Tổng thu nhập hoạt động"], 0, True),
+                ("admin_exp", "Chi phí quản lý doanh nghiệp", ["Chi phí quản lý DN"], 1, False),
+                ("operating_profit", "LN từ HĐKD trước CF dự phòng", ["LN từ HĐKD trước CF dự phòng"], 0, True),
+                ("provision_expense", "Chi phí dự phòng rủi ro tín dụng", ["Chi phí dự phòng rủi ro tín dụng"], 1, False),
+                ("ebt", "Lợi nhuận trước thuế", ["LN trước thuế"], 0, True),
+                ("tax", "Thuế TNDN", ["Thuế TNDN"], 1, False),
+                ("tax_current", "Chi phí thuế TNDN hiện hành", ["Chi phí thuế TNDN hiện hành"], 2, False),
+                ("tax_deferred", "Chi phí thuế TNDN hoãn lại", ["Chi phí thuế TNDN hoãn lại"], 2, False),
+                ("net_profit", "Lợi nhuận thuần", ["Lợi nhuận thuần"], 0, True),
+                ("parent_profit", "Cổ đông của Công ty mẹ", ["Cổ đông của Công ty mẹ"], 1, False),
+                ("minority_profit", "Cổ đông thiểu số", ["Cổ đông thiểu số"], 1, False),
+                ("eps", "Lãi cơ bản trên cổ phiếu", ["Lãi cơ bản trên cổ phiếu"], 0, True),
+            ]
+        else:
+            # Regular company mappings
+            row_mappings = [
+                ("revenue", "Doanh thu bán hàng và cung cấp dịch vụ", ["Doanh thu bán hàng và cung cấp dịch vụ", "Doanh thu (đồng)"], 0, True),
+                ("deductions", "Các khoản giảm trừ doanh thu", ["Các khoản giảm trừ doanh thu"], 1, False),
+                ("net_revenue", "Doanh thu thuần", ["Doanh thu thuần"], 0, True),
+                ("cogs", "Giá vốn hàng bán", ["Giá vốn hàng bán"], 1, False),
+                ("gross_profit", "Lãi gộp", ["Lãi gộp"], 0, True),
+                ("finance_income", "Thu nhập tài chính", ["Thu nhập tài chính"], 1, False),
+                ("finance_exp", "Chi phí tài chính", ["Chi phí tài chính"], 1, False),
+                ("interest_exp", "Chi phí tiền lãi vay", ["Chi phí tiền lãi vay"], 2, False),
+                ("selling_exp", "Chi phí bán hàng", ["Chi phí bán hàng"], 1, False),
+                ("admin_exp", "Chi phí quản lý doanh nghiệp", ["Chi phí quản lý DN", "Chi phí quản lý doanh nghiệp"], 1, False),
+                ("operating_profit", "Lãi/Lỗ từ hoạt động kinh doanh", ["Lãi/Lỗ từ hoạt động kinh doanh"], 0, True),
+                ("other_income", "Thu nhập khác", ["Thu nhập khác"], 1, False),
+                ("other_exp", "Chi phí khác", ["Thu nhập/Chi phí khác", "Chi phí khác"], 1, False),
+                ("other_profit", "Lợi nhuận khác", ["Lợi nhuận khác"], 1, False),
+                ("ebt", "Lợi nhuận trước thuế", ["LN trước thuế", "Lợi nhuận trước thuế"], 0, True),
+                ("tax_current", "Chi phí thuế TNDN hiện hành", ["Chi phí thuế TNDN hiện hành"], 1, False),
+                ("tax_deferred", "Chi phí thuế TNDN hoãn lại", ["Chi phí thuế TNDN hoãn lại"], 1, False),
+                ("net_profit", "Lợi nhuận thuần", ["Lợi nhuận thuần"], 0, True),
+                ("parent_profit", "Cổ đông của Công ty mẹ", ["Cổ đông của Công ty mẹ", "Lợi nhuận sau thuế của Cổ đông công ty mẹ (đồng)"], 1, False),
+                ("minority_profit", "Cổ đông thiểu số", ["Cổ đông thiểu số"], 1, False),
+                ("eps", "Lãi cơ bản trên cổ phiếu", ["Lãi cơ bản trên cổ phiếu"], 0, True),
+            ]
+
+        rows = []
+        for row_id, label, col_names, level, is_summary in row_mappings:
+            values = {}
+            for i, period_label in enumerate(periods):
+                if i < len(df):
+                    row_data = df.iloc[i]
+                    val = None
+                    # Try each column name in order
+                    for col_name in col_names:
+                        if col_name in df.columns:
+                            val = row_data.get(col_name)
+                            if val is not None and not pd.isna(val):
+                                break
+                    # Convert to millions for display (except EPS which stays as-is)
+                    if val is not None and not pd.isna(val):
+                        if row_id == "eps":
+                            values[period_label] = float(val)  # EPS in VND
+                        else:
+                            values[period_label] = float(val) / 1_000_000  # Convert to millions
+                    else:
+                        values[period_label] = None
+                else:
+                    values[period_label] = None
+
+            # Only add row if it has at least one non-null value
+            if any(v is not None for v in values.values()):
+                rows.append(IncomeStatementRow(
+                    id=row_id,
+                    label=label,
+                    values=values,
+                    level=level,
+                    is_header=False,
+                    is_summary=is_summary,
+                ))
+
+        return IncomeStatementResponse(
+            symbol=symbol,
+            periods=periods,
+            rows=rows,
+            unit="Triệu VND",
+        )
+
+    def _df_to_balance_sheet_response(
+        self,
+        df: pd.DataFrame,
+        symbol: str,
+        period: str,
+        limit: int,
+    ) -> BalanceSheetResponse:
+        """Convert balance sheet DataFrame to BalanceSheetResponse."""
+        # Limit the data
+        df = df.head(limit)
+
+        # Generate period labels
+        periods = []
+        for i in range(len(df)):
+            row = df.iloc[i]
+            year = row.get("Năm") or row.get("year")
+            quarter = row.get("Kỳ") or row.get("quarter")
+            if period == "quarter" and quarter:
+                periods.append(f"Q{int(quarter)}/{int(year)}")
+            else:
+                periods.append(str(int(year)))
+
+        # Balance sheet row mappings: (id, label, [possible_column_names], level, is_summary)
+        row_mappings = [
+            ("current_assets", "TÀI SẢN NGẮN HẠN", ["TÀI SẢN NGẮN HẠN (đồng)", "TÀI SẢN NGẮN HẠN"], 0, True),
+            ("cash", "Tiền và tương đương tiền", ["Tiền và tương đương tiền (đồng)", "Tiền và tương đương tiền"], 1, False),
+            ("short_invest", "Giá trị thuần đầu tư ngắn hạn", ["Giá trị thuần đầu tư ngắn hạn (đồng)", "Giá trị thuần đầu tư ngắn hạn"], 1, False),
+            ("receivables", "Các khoản phải thu ngắn hạn", ["Các khoản phải thu ngắn hạn (đồng)", "Các khoản phải thu ngắn hạn"], 1, False),
+            ("inventory", "Hàng tồn kho ròng", ["Hàng tồn kho ròng", "Hàng tồn kho, ròng (đồng)"], 1, False),
+            ("other_current", "Tài sản lưu động khác", ["Tài sản lưu động khác (đồng)", "Tài sản lưu động khác"], 1, False),
+            ("long_assets", "TÀI SẢN DÀI HẠN", ["TÀI SẢN DÀI HẠN (đồng)", "TÀI SẢN DÀI HẠN"], 0, True),
+            ("long_receivables", "Phải thu dài hạn", ["Phải thu dài hạn (đồng)", "Phải thu dài hạn"], 1, False),
+            ("fixed_assets", "Tài sản cố định", ["Tài sản cố định (đồng)", "Tài sản cố định"], 1, False),
+            ("long_invest", "Đầu tư dài hạn", ["Đầu tư dài hạn (đồng)", "Đầu tư dài hạn"], 1, False),
+            ("goodwill", "Lợi thế thương mại", ["Lợi thế thương mại"], 1, False),
+            ("other_long", "Tài sản dài hạn khác", ["Tài sản dài hạn khác (đồng)", "Tài sản dài hạn khác"], 1, False),
+            ("total_assets", "TỔNG CỘNG TÀI SẢN", ["TỔNG CỘNG TÀI SẢN (đồng)", "TỔNG CỘNG TÀI SẢN"], 0, True),
+            ("liabilities", "NỢ PHẢI TRẢ", ["NỢ PHẢI TRẢ (đồng)", "NỢ PHẢI TRẢ"], 0, True),
+            ("short_debt", "Nợ ngắn hạn", ["Nợ ngắn hạn (đồng)", "Nợ ngắn hạn"], 1, False),
+            ("long_debt", "Nợ dài hạn", ["Nợ dài hạn (đồng)", "Nợ dài hạn"], 1, False),
+            ("equity", "VỐN CHỦ SỞ HỮU", ["VỐN CHỦ SỞ HỮU (đồng)", "VỐN CHỦ SỞ HỮU"], 0, True),
+            ("capital_fund", "Vốn và các quỹ", ["Vốn và các quỹ (đồng)", "Vốn và các quỹ"], 1, False),
+            ("owner_capital", "Vốn góp của chủ sở hữu", ["Vốn góp của chủ sở hữu (đồng)", "Vốn góp của chủ sở hữu"], 1, False),
+            ("other_fund", "Các quỹ khác", ["Các quỹ khác"], 1, False),
+            ("retained", "Lãi chưa phân phối", ["Lãi chưa phân phối (đồng)", "Lãi chưa phân phối"], 1, False),
+            ("minority", "LỢI ÍCH CỦA CỔ ĐÔNG THIỂU SỐ", ["LỢI ÍCH CỦA CỔ ĐÔNG THIỂU SỐ", "Cổ đông thiểu số"], 0, True),
+            ("total_capital", "TỔNG CỘNG NGUỒN VỐN", ["TỔNG CỘNG NGUỒN VỐN (đồng)", "TỔNG CỘNG NGUỒN VỐN"], 0, True),
+        ]
+
+        rows = []
+        for row_id, label, col_names, level, is_summary in row_mappings:
+            values = {}
+            for i, period_label in enumerate(periods):
+                if i < len(df):
+                    row_data = df.iloc[i]
+                    val = None
+                    # Try each column name in order
+                    for col_name in col_names:
+                        if col_name in df.columns:
+                            val = row_data.get(col_name)
+                            if val is not None and not pd.isna(val):
+                                break
+                    # Convert to millions for display
+                    if val is not None and not pd.isna(val):
+                        values[period_label] = float(val) / 1_000_000  # Convert to millions
+                    else:
+                        values[period_label] = None
+                else:
+                    values[period_label] = None
+
+            # Only add row if it has at least one non-null value
+            if any(v is not None for v in values.values()):
+                rows.append(BalanceSheetRow(
+                    id=row_id,
+                    label=label,
+                    values=values,
+                    level=level,
+                    is_header=level == 0 and is_summary,
+                    is_summary=is_summary,
+                ))
+
+        return BalanceSheetResponse(
+            symbol=symbol,
+            periods=periods,
+            rows=rows,
+            unit="Triệu VND",
+        )
+
+    def _df_to_cash_flow_response(
+        self,
+        df: pd.DataFrame,
+        symbol: str,
+        period: str,
+        limit: int,
+    ) -> CashFlowResponse:
+        """Convert cash flow DataFrame to CashFlowResponse."""
+        # Limit the data
+        df = df.head(limit)
+
+        # Generate period labels
+        periods = []
+        for i in range(len(df)):
+            row = df.iloc[i]
+            year = row.get("Năm") or row.get("year")
+            quarter = row.get("Kỳ") or row.get("quarter")
+            if period == "quarter" and quarter:
+                periods.append(f"Q{int(quarter)}/{int(year)}")
+            else:
+                periods.append(str(int(year)))
+
+        # Cash flow row mappings: (id, label, [possible_column_names], level, is_summary)
+        row_mappings = [
+            # Operating Activities
+            ("ebt_cf", "Lãi/Lỗ ròng trước thuế", ["Lãi/Lỗ ròng trước thuế"], 0, True),
+            ("depreciation", "Khấu hao TSCĐ", ["Khấu hao TSCĐ"], 1, False),
+            ("provision", "Dự phòng RR tín dụng", ["Dự phòng RR tín dụng"], 1, False),
+            ("asset_loss", "Lãi/Lỗ từ thanh lý tài sản cố định", ["Lãi/Lỗ từ thanh lý tài sản cố định"], 1, False),
+            ("invest_loss", "Lãi/Lỗ từ hoạt động đầu tư", ["Lãi/Lỗ từ hoạt động đầu tư"], 1, False),
+            ("interest_income", "Thu nhập lãi", ["Thu nhập lãi"], 1, False),
+            ("dividend_income", "Thu lãi và cổ tức", ["Thu lãi và cổ tức"], 1, False),
+            ("cfo_before_wc", "Lưu chuyển tiền thuần từ HĐKD trước thay đổi VLĐ", ["Lưu chuyển tiền thuần từ HĐKD trước thay đổi VLĐ"], 0, True),
+            ("receivables_change", "Tăng/Giảm các khoản phải thu", ["Tăng/Giảm các khoản phải thu", "_Tăng/Giảm các khoản phải thu"], 1, False),
+            ("inventory_change", "Tăng/Giảm hàng tồn kho", ["Tăng/Giảm hàng tồn kho"], 1, False),
+            ("payables_change", "Tăng/Giảm các khoản phải trả", ["Tăng/Giảm các khoản phải trả", "_Tăng/Giảm các khoản phải trả"], 1, False),
+            ("prepaid_change", "Tăng/Giảm chi phí trả trước", ["Tăng/Giảm chi phí trả trước"], 1, False),
+            ("interest_paid", "Chi phí lãi vay đã trả", ["Chi phí lãi vay đã trả"], 1, False),
+            ("tax_paid", "Tiền thu nhập doanh nghiệp đã trả", ["Tiền thu nhập doanh nghiệp đã trả"], 1, False),
+            ("other_cfo_in", "Tiền thu khác từ các hoạt động kinh doanh", ["Tiền thu khác từ các hoạt động kinh doanh"], 1, False),
+            ("other_cfo_out", "Tiền chi khác từ các hoạt động kinh doanh", ["Tiền chi khác từ các hoạt động kinh doanh"], 1, False),
+            ("net_cfo", "Lưu chuyển tiền tệ ròng từ các hoạt động SXKD", ["Lưu chuyển tiền tệ ròng từ các hoạt động SXKD"], 0, True),
+            # Investing Activities
+            ("capex", "Mua sắm TSCĐ", ["Mua sắm TSCĐ"], 1, False),
+            ("asset_sale", "Tiền thu được từ thanh lý tài sản cố định", ["Tiền thu được từ thanh lý tài sản cố định"], 1, False),
+            ("loan_collect", "Tiền thu hồi cho vay, bán lại các công cụ nợ của đơn vị khác", ["Tiền thu hồi cho vay, bán lại các công cụ nợ của đơn vị khác (đồng)"], 1, False),
+            ("invest_other", "Đầu tư vào các doanh nghiệp khác", ["Đầu tư vào các doanh nghiệp khác"], 1, False),
+            ("invest_sale", "Tiền thu từ việc bán các khoản đầu tư vào doanh nghiệp khác", ["Tiền thu từ việc bán các khoản đầu tư vào doanh nghiệp khác"], 1, False),
+            ("dividend_received", "Tiền thu cổ tức và lợi nhuận được chia", ["Tiền thu cổ tức và lợi nhuận được chia"], 1, False),
+            ("net_cfi", "Lưu chuyển từ hoạt động đầu tư", ["Lưu chuyển từ hoạt động đầu tư"], 0, True),
+            # Financing Activities
+            ("equity_issue", "Tăng vốn cổ phần từ góp vốn và/hoặc phát hành cổ phiếu", ["Tăng vốn cổ phần từ góp vốn và/hoặc phát hành cổ phiếu"], 1, False),
+            ("equity_buyback", "Chi trả cho việc mua lại, trả cổ phiếu", ["Chi trả cho việc mua lại, trả cổ phiếu"], 1, False),
+            ("borrow_receive", "Tiền thu được các khoản đi vay", ["Tiền thu được các khoản đi vay"], 1, False),
+            ("borrow_repay", "Tiền trả các khoản đi vay", ["Tiền trả các khoản đi vay"], 1, False),
+            ("lease_payment", "Tiền thanh toán vốn gốc đi thuê tài chính", ["Tiền thanh toán vốn gốc đi thuê tài chính"], 1, False),
+            ("dividend_paid", "Cổ tức đã trả", ["Cổ tức đã trả"], 1, False),
+            ("net_cff", "Lưu chuyển tiền từ hoạt động tài chính", ["Lưu chuyển tiền từ hoạt động tài chính"], 0, True),
+            # Summary
+            ("net_change", "Lưu chuyển tiền thuần trong kỳ", ["Lưu chuyển tiền thuần trong kỳ"], 0, True),
+            ("cash_begin", "Tiền và tương đương tiền", ["Tiền và tương đương tiền"], 1, False),
+            ("fx_effect", "Ảnh hưởng của chênh lệch tỷ giá", ["Ảnh hưởng của chênh lệch tỷ giá"], 1, False),
+            ("cash_end", "Tiền và tương đương tiền cuối kỳ", ["Tiền và tương đương tiền cuối kỳ"], 0, True),
+        ]
+
+        rows = []
+        for row_id, label, col_names, level, is_summary in row_mappings:
+            values = {}
+            for i, period_label in enumerate(periods):
+                if i < len(df):
+                    row_data = df.iloc[i]
+                    val = None
+                    # Try each column name in order
+                    for col_name in col_names:
+                        if col_name in df.columns:
+                            val = row_data.get(col_name)
+                            if val is not None and not pd.isna(val):
+                                break
+                    # Convert to millions for display
+                    if val is not None and not pd.isna(val):
+                        values[period_label] = float(val) / 1_000_000  # Convert to millions
+                    else:
+                        values[period_label] = None
+                else:
+                    values[period_label] = None
+
+            # Only add row if it has at least one non-null value
+            if any(v is not None for v in values.values()):
+                rows.append(CashFlowRow(
+                    id=row_id,
+                    label=label,
+                    values=values,
+                    level=level,
+                    is_header=level == 0 and is_summary,
+                    is_summary=is_summary,
+                ))
+
+        return CashFlowResponse(
+            symbol=symbol,
+            periods=periods,
+            rows=rows,
+            unit="Triệu VND",
+        )
 
     def _safe_float(self, value) -> float | None:
         """Convert value to float, returning None for NaN/invalid values."""

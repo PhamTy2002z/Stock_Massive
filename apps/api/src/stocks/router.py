@@ -16,12 +16,18 @@ from src.stocks.schemas import (
     StockSymbol,
     FinancialRatio,
     IncomeStatementItem,
+    IncomeStatementResponse,
     BalanceSheetItem,
+    BalanceSheetResponse,
+    CashFlowResponse,
     PriceBoardItem,
     MarketIndexItem,
     StockDetail,
     IntradayCollectionResult,
     VolumeAnalysisResponse,
+    ShareholdersResponse,
+    OfficersResponse,
+    InsiderDealsResponse,
 )
 from src.stocks.service import StockService, StockServiceError, get_stock_service
 
@@ -221,7 +227,7 @@ async def get_income_statement(
     period: str = Query("year", description="Period: year or quarter"),
     lang: str = Query("en", description="Language: en or vi"),
 ) -> list[IncomeStatementItem]:
-    """Get income statement data for a stock.
+    """Get income statement data for a stock (simplified).
 
     Returns revenue, profit, and earnings data.
     """
@@ -235,13 +241,38 @@ async def get_income_statement(
         raise HTTPException(status_code=502, detail=str(e))
 
 
+@router.get("/{symbol}/financials/income-statement", response_model=IncomeStatementResponse)
+async def get_income_statement_detailed(
+    symbol: str,
+    period: str = Query("quarter", description="Period: year or quarter"),
+    limit: int = Query(4, ge=1, le=12, description="Number of periods to return"),
+) -> IncomeStatementResponse:
+    """Get detailed income statement data for financial table display.
+
+    Returns structured rows with Vietnamese labels for the Finance tab.
+    Values are in millions VND.
+
+    - **symbol**: Stock ticker (e.g., VCB, ACB, TCB)
+    - **period**: 'quarter' for quarterly data, 'year' for annual data
+    - **limit**: Number of periods to return (default 4, max 12)
+    """
+    if period not in ("year", "quarter"):
+        raise HTTPException(status_code=400, detail="Invalid period. Use 'year' or 'quarter'")
+
+    try:
+        service = get_service()
+        return service.get_income_statement_detailed(symbol, period, limit)
+    except StockServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 @router.get("/{symbol}/financials/balance-sheet", response_model=list[BalanceSheetItem])
 async def get_balance_sheet(
     symbol: str,
     period: str = Query("year", description="Period: year or quarter"),
     lang: str = Query("en", description="Language: en or vi"),
 ) -> list[BalanceSheetItem]:
-    """Get balance sheet data for a stock.
+    """Get balance sheet data for a stock (simplified).
 
     Returns assets, liabilities, and equity data.
     """
@@ -251,6 +282,56 @@ async def get_balance_sheet(
     try:
         service = get_service()
         return service.get_balance_sheet(symbol, period, lang)
+    except StockServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/{symbol}/financials/balance-sheet-detailed", response_model=BalanceSheetResponse)
+async def get_balance_sheet_detailed(
+    symbol: str,
+    period: str = Query("quarter", description="Period: year or quarter"),
+    limit: int = Query(4, ge=1, le=12, description="Number of periods to return"),
+) -> BalanceSheetResponse:
+    """Get detailed balance sheet data for financial table display.
+
+    Returns structured rows with Vietnamese labels for the Finance tab.
+    Values are in millions VND.
+
+    - **symbol**: Stock ticker (e.g., VCB, ACB, TCB)
+    - **period**: 'quarter' for quarterly data, 'year' for annual data
+    - **limit**: Number of periods to return (default 4, max 12)
+    """
+    if period not in ("year", "quarter"):
+        raise HTTPException(status_code=400, detail="Invalid period. Use 'year' or 'quarter'")
+
+    try:
+        service = get_service()
+        return service.get_balance_sheet_detailed(symbol, period, limit)
+    except StockServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/{symbol}/financials/cash-flow", response_model=CashFlowResponse)
+async def get_cash_flow_detailed(
+    symbol: str,
+    period: str = Query("quarter", description="Period: year or quarter"),
+    limit: int = Query(4, ge=1, le=12, description="Number of periods to return"),
+) -> CashFlowResponse:
+    """Get detailed cash flow data for financial table display.
+
+    Returns structured rows with Vietnamese labels for the Finance tab.
+    Values are in millions VND.
+
+    - **symbol**: Stock ticker (e.g., VCB, ACB, TCB)
+    - **period**: 'quarter' for quarterly data, 'year' for annual data
+    - **limit**: Number of periods to return (default 4, max 12)
+    """
+    if period not in ("year", "quarter"):
+        raise HTTPException(status_code=400, detail="Invalid period. Use 'year' or 'quarter'")
+
+    try:
+        service = get_service()
+        return service.get_cash_flow_detailed(symbol, period, limit)
     except StockServiceError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -279,6 +360,61 @@ async def collect_intraday_data(
     collector = IntradayCollector(db)
     result = await collector.collect_and_save(symbols)
     return IntradayCollectionResult(**result)
+
+
+# === Shareholders & Officers Endpoints ===
+
+
+@router.get("/{symbol}/shareholders", response_model=ShareholdersResponse)
+async def get_shareholders(symbol: str) -> ShareholdersResponse:
+    """Get major shareholders for a stock.
+
+    Returns list of major shareholders with ownership percentages.
+
+    - **symbol**: Stock ticker (e.g., VCB, ACB, TCB)
+    """
+    try:
+        service = get_service()
+        return service.get_shareholders(symbol)
+    except StockServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/{symbol}/officers", response_model=OfficersResponse)
+async def get_officers(
+    symbol: str,
+    filter_by: str = Query("working", description="Filter: working, resigned, all"),
+) -> OfficersResponse:
+    """Get company officers/management for a stock.
+
+    Returns list of officers with positions and ownership.
+
+    - **symbol**: Stock ticker (e.g., VCB, ACB, TCB)
+    - **filter_by**: Filter by status (working, resigned, all)
+    """
+    if filter_by not in ("working", "resigned", "all"):
+        raise HTTPException(status_code=400, detail="Invalid filter_by. Use 'working', 'resigned', or 'all'")
+
+    try:
+        service = get_service()
+        return service.get_officers(symbol, filter_by)
+    except StockServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/{symbol}/insider-deals", response_model=InsiderDealsResponse)
+async def get_insider_deals(symbol: str) -> InsiderDealsResponse:
+    """Get insider trading deals for a stock.
+
+    Returns list of insider buy/sell transactions.
+
+    - **symbol**: Stock ticker (e.g., VCB, ACB, TCB)
+    """
+    try:
+        service = get_service()
+        return service.get_insider_deals(symbol)
+    except StockServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 @router.get("/{symbol}/volume-analysis", response_model=VolumeAnalysisResponse)

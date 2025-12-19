@@ -142,3 +142,153 @@ export interface StockDetail {
 export async function fetchStockDetail(symbol: string): Promise<StockDetail> {
   return fetchApi<StockDetail>(`/stocks/${encodeURIComponent(symbol)}/detail`)
 }
+
+// Income Statement Types
+export interface IncomeStatementRow {
+  id: string
+  label: string
+  values: Record<string, number | null>
+  level: number
+  is_header: boolean
+  is_summary: boolean
+}
+
+export interface IncomeStatementResponse {
+  symbol: string
+  periods: string[]
+  rows: IncomeStatementRow[]
+  unit: string
+}
+
+export type PeriodType = "quarter" | "year"
+
+export async function fetchIncomeStatement(
+  symbol: string,
+  period: PeriodType = "quarter",
+  limit: number = 4
+): Promise<IncomeStatementResponse> {
+  return fetchApi<IncomeStatementResponse>(
+    `/stocks/${encodeURIComponent(symbol)}/financials/income-statement?period=${period}&limit=${limit}`
+  )
+}
+
+// Balance Sheet Types
+export interface BalanceSheetRow {
+  id: string
+  label: string
+  values: Record<string, number | null>
+  level: number
+  is_header: boolean
+  is_summary: boolean
+}
+
+export interface BalanceSheetResponse {
+  symbol: string
+  periods: string[]
+  rows: BalanceSheetRow[]
+  unit: string
+}
+
+export async function fetchBalanceSheet(
+  symbol: string,
+  period: PeriodType = "quarter",
+  limit: number = 4
+): Promise<BalanceSheetResponse> {
+  return fetchApi<BalanceSheetResponse>(
+    `/stocks/${encodeURIComponent(symbol)}/financials/balance-sheet-detailed?period=${period}&limit=${limit}`
+  )
+}
+
+// Cash Flow Types
+export interface CashFlowRow {
+  id: string
+  label: string
+  values: Record<string, number | null>
+  level: number
+  is_header: boolean
+  is_summary: boolean
+}
+
+export interface CashFlowResponse {
+  symbol: string
+  periods: string[]
+  rows: CashFlowRow[]
+  unit: string
+}
+
+export async function fetchCashFlow(
+  symbol: string,
+  period: PeriodType = "quarter",
+  limit: number = 4
+): Promise<CashFlowResponse> {
+  return fetchApi<CashFlowResponse>(
+    `/stocks/${encodeURIComponent(symbol)}/financials/cash-flow?period=${period}&limit=${limit}`
+  )
+}
+
+// Shareholders Types
+export interface ShareholderItem {
+  id: string
+  name: string
+  shares: number
+  ownership_pct: number
+  update_date: string | null
+}
+
+export interface ShareholdersResponse {
+  symbol: string
+  shareholders: ShareholderItem[]
+  total_count: number
+}
+
+export async function fetchShareholders(symbol: string): Promise<ShareholdersResponse> {
+  return fetchApi<ShareholdersResponse>(`/stocks/${encodeURIComponent(symbol)}/shareholders`)
+}
+
+// Officers Types
+export interface OfficerItem {
+  id: string
+  name: string
+  position: string
+  position_short: string | null
+  shares: number | null
+  ownership_pct: number | null
+  update_date: string | null
+  status: string | null
+}
+
+export interface OfficersResponse {
+  symbol: string
+  officers: OfficerItem[]
+  total_count: number
+}
+
+export type OfficerFilterType = "working" | "resigned" | "all"
+
+export async function fetchOfficers(
+  symbol: string,
+  filterBy: OfficerFilterType = "working"
+): Promise<OfficersResponse> {
+  return fetchApi<OfficersResponse>(
+    `/stocks/${encodeURIComponent(symbol)}/officers?filter_by=${filterBy}`
+  )
+}
+
+// Insider Deals Types
+export interface InsiderDealItem {
+  announce_date: string
+  action: string
+  quantity: number
+  price: number | null
+  ratio: number | null
+}
+
+export interface InsiderDealsResponse {
+  symbol: string
+  deals: InsiderDealItem[]
+  total_count: number
+}
+
+export async function fetchInsiderDeals(symbol: string): Promise<InsiderDealsResponse> {
+  return fetchApi<InsiderDealsResponse>(`/stocks/${encodeURIComponent(symbol)}/insider-deals`)
+}
