@@ -59,14 +59,14 @@ export function StockIndexCard({
           {/* Change */}
           <div className="flex items-center gap-1.5 mt-1">
             {isPositive ? (
-              <TrendingUp className="h-3.5 w-3.5 text-green-500" />
+              <TrendingUp className="h-3.5 w-3.5 text-green-500 dark:text-green-400" />
             ) : (
-              <TrendingDown className="h-3.5 w-3.5 text-red-500" />
+              <TrendingDown className="h-3.5 w-3.5 text-red-500 dark:text-red-400" />
             )}
             <span
               className={cn(
                 "text-sm font-medium tabular-nums",
-                isPositive ? "text-green-500" : "text-red-500"
+                isPositive ? "text-green-500 dark:text-green-400" : "text-red-500 dark:text-red-400"
               )}
             >
               {formattedChange}
@@ -74,7 +74,7 @@ export function StockIndexCard({
             <span
               className={cn(
                 "text-sm font-medium tabular-nums",
-                isPositive ? "text-green-500" : "text-red-500"
+                isPositive ? "text-green-500 dark:text-green-400" : "text-red-500 dark:text-red-400"
               )}
             >
               ({formattedPercent})

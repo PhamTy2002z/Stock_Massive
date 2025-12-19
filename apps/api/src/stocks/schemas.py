@@ -402,3 +402,25 @@ class SectorPerformanceResponse(BaseModel):
     sectors: list[SectorPerformanceItem]
     generated_at: datetime
     total_sectors: int
+
+
+# === Fund Certificates Schemas ===
+
+
+class FundCertificateItem(BaseModel):
+    """Fund certificate (ETF/Open-end fund) data."""
+
+    symbol: str = Field(..., description="Fund symbol (e.g., E1VFVN30, FUEVFVND)")
+    short_name: str = Field(..., description="Fund short name")
+    fund_type: Optional[str] = Field(None, description="Fund type: STOCK, BOND, BALANCED")
+    nav: Optional[float] = Field(None, description="Net Asset Value per unit")
+    price: Optional[float] = Field(None, description="Current trading price")
+    change_pct: Optional[float] = Field(None, description="Daily change percentage")
+
+
+class FundCertificatesResponse(BaseModel):
+    """Response for fund certificates endpoint."""
+
+    funds: list[FundCertificateItem]
+    generated_at: datetime
+    total_count: int
