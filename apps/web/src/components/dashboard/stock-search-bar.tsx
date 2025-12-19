@@ -1,12 +1,24 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback } from "react"
-import { Search, Loader2 } from "lucide-react"
+import { Search } from "lucide-react"
 
 import { toast } from "sonner"
 
 import { Input } from "@/components/ui/input"
+import { Spinner } from "@/components/ui/spinner"
 import { searchStocks, StockSymbol } from "@/lib/api"
+
+// Global toast ID for stock loading - allows StockDetailClient to update it
+let stockLoadingToastId: string | number | null = null
+
+export function getStockLoadingToastId() {
+  return stockLoadingToastId
+}
+
+export function clearStockLoadingToast() {
+  stockLoadingToastId = null
+}
 
 interface StockSearchBarProps {
   onSelect?: (symbol: StockSymbol) => void
@@ -68,7 +80,8 @@ export function StockSearchBar({
     (symbol: StockSymbol) => {
       setQuery(symbol.symbol)
       setIsOpen(false)
-      toast.success(`Loading ${symbol.symbol}`, {
+      // Show loading toast with progress indicator
+      stockLoadingToastId = toast.loading(`Loading ${symbol.symbol}...`, {
         description: symbol.organ_name || "Fetching stock data...",
       })
       onSelect?.(symbol)
@@ -115,7 +128,7 @@ export function StockSearchBar({
           className="h-9 w-64 pl-9 lg:w-80 bg-muted/50 border-transparent focus:bg-background focus:border-input transition-all duration-200"
         />
         {isLoading && (
-          <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+          <Spinner className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         )}
       </div>
 
