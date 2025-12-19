@@ -11,7 +11,7 @@
 │                 Next.js Frontend (port 3000)                 │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
 │  │  ShadCN UI  │  │  Dashboard  │  │  Theme Provider     │  │
-│  │  Components │  │  Components │  │  (dark/light)       │  │
+│  │  (16 comp)  │  │  (14 comp)  │  │  + Sonner Toasts    │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘  │
 └─────────────────────────────┬───────────────────────────────┘
                               │ REST API
@@ -121,6 +121,8 @@ Stock_Massive/
 │       ├── balance-sheet         # GET - Balance (simple)
 │       ├── balance-sheet-detailed # GET - Balance (detailed)
 │       └── cash-flow             # GET - Cash flow
+├── sector-performance            # GET - Sector performance (ICB Level 2)
+└── fund-certificates             # GET - Fund certificates data
 ```
 
 ### Backend Layers
@@ -251,11 +253,11 @@ CREATE INDEX ix_intraday_bars_timestamp ON intraday_bars(timestamp);
 
 ## Future Considerations
 
-### Sector Performance Tab (In Progress)
+### Sector Performance (Completed)
 
-- **Phase 1 (Done)**: Backend service `get_sector_performance()` - ICB Level 2 aggregation, market-cap weighted change calculation
-- **Phase 2 (Pending)**: API endpoint `/sectors/performance`
-- **Phase 3 (Pending)**: Frontend tab component
+- **Backend**: `get_sector_performance()` - ICB Level 2 aggregation, market-cap weighted change calculation
+- **API**: `GET /sector-performance` endpoint
+- **Frontend**: SectorPerformance component with sorting, auto-refresh (5-min interval)
 
 ### Caching Layer (Planned)
 

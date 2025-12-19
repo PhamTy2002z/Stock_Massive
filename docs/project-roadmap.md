@@ -8,12 +8,12 @@
 - [x] Next.js frontend with App Router
 - [x] Dashboard layout (sidebar, header, responsive)
 - [x] Dark/light theme support (next-themes)
-- [x] ShadCN/UI components (15 installed)
-- [x] Dashboard components (12 feature components)
+- [x] ShadCN/UI components (16 installed)
+- [x] Dashboard components (14 feature components)
 - [x] Stock detail page (search, header, stats, tabs)
 - [x] Market indices cards with sparklines
 - [x] FastAPI backend setup
-- [x] vnstock integration (20+ endpoints)
+- [x] vnstock integration (27 endpoints)
 - [x] Financial statements (income, balance, cash flow)
 - [x] Shareholders, officers, insider deals API
 - [x] Intraday data collection (5-min bars)
@@ -26,7 +26,9 @@
 ### In Progress
 
 - [ ] Frontend feature pages (charts, portfolio, watchlist)
-- [ ] Sector Performance Tab (25% - Phase 1 backend complete)
+- [x] Sector Performance (100% - Full-stack complete)
+- [x] Toast notifications (Sonner integration)
+- [x] Fund certificates endpoint
 
 ---
 
@@ -235,7 +237,9 @@
 
 | Feature | Date | Notes |
 |---------|------|-------|
-| Sector Performance - Phase 1 | Dec 19, 2024 | Backend schema & service (18 tests passed) |
+| Toast Notifications | Dec 19, 2024 | Sonner integration on stock search |
+| Sector Performance | Dec 19, 2024 | Full-stack: API + hook + UI component |
+| Fund Certificates | Dec 2024 | New endpoint for fund data |
 | Shareholders API | Dec 2024 | Major holders endpoint |
 | Officers API | Dec 2024 | Company management endpoint |
 | Insider Deals API | Dec 2024 | Insider trading endpoint |
@@ -245,3 +249,4 @@
 | Finance Tab | Dec 2024 | Income, balance, cash flow tables |
 | Shareholders Tab | Dec 2024 | Holders, officers, insider deals |
 | Design System | Dec 2024 | Modern + Clean established as standard |
+| Custom Hooks | Dec 2024 | 8 hooks for data fetching |

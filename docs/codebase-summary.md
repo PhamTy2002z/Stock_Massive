@@ -44,9 +44,9 @@ apps/web/src/
 │   ├── not-found.tsx           # 404 page
 │   └── globals.css             # Global styles + CSS variables
 ├── components/
-│   ├── ui/                     # ShadCN components (15)
-│   ├── dashboard/              # Dashboard feature components (13)
-│   ├── layout/                 # Layout components (3)
+│   ├── ui/                     # ShadCN components (16)
+│   ├── dashboard/              # Dashboard feature components (14)
+│   ├── layout/                 # Layout components (4)
 │   └── providers/              # Context providers (1)
 ├── hooks/
 │   └── use-mobile.tsx          # useIsMobile() viewport hook
@@ -103,10 +103,18 @@ apps/web/src/
 | DashboardHeader | dashboard-header.tsx | Top header bar |
 | DashboardLayout | dashboard-layout.tsx | Layout wrapper |
 
-### Hooks
+### Hooks (8 custom hooks)
 
-- `useIsMobile()` - Returns boolean for viewport < 768px
-- `useSectorPerformance()` - Fetches sector performance data with 5-min auto-refresh
+| Hook | Purpose |
+|------|---------|
+| `useIsMobile()` | Returns boolean for viewport < 768px |
+| `useStockDetail()` | Fetches comprehensive stock detail data |
+| `useSectorPerformance()` | Fetches sector performance with 5-min auto-refresh |
+| `useIncomeStatement()` | Fetches income statement data |
+| `useBalanceSheet()` | Fetches balance sheet data |
+| `useCashFlow()` | Fetches cash flow statement data |
+| `useShareholders()` | Fetches shareholders and officers data |
+| `useFundCertificates()` | Fetches fund certificates data |
 
 ### Utilities
 
@@ -120,6 +128,11 @@ apps/web/src/
 - `fetchStockDetail(symbol)` - Get comprehensive stock detail
 - `searchSymbols(query)` - Search stocks by symbol/name
 - `fetchSectorPerformance()` - Get sector performance data
+- `fetchFundCertificates()` - Get fund certificates data
+- `fetchIncomeStatement()` - Get income statement
+- `fetchBalanceSheet()` - Get balance sheet
+- `fetchCashFlow()` - Get cash flow statement
+- `fetchShareholders()` - Get shareholders data
 - Types: `PriceBoardItem`, `MarketIndex`, `StockDetail`, `SectorPerformanceItem`, `SectorPerformanceResponse`, `ApiError`
 
 ---
@@ -145,7 +158,7 @@ apps/api/src/
 │   └── v1/
 │       └── router.py           # API v1 router aggregator
 ├── stocks/
-│   ├── router.py               # Stock endpoints (20+)
+│   ├── router.py               # Stock endpoints (27)
 │   ├── service.py              # Business logic (vnstock)
 │   ├── schemas.py              # Pydantic models
 │   ├── models.py               # SQLAlchemy models
@@ -159,7 +172,7 @@ apps/api/src/
 └── workers/                    # Background tasks (placeholder)
 ```
 
-### API Endpoints (20+)
+### API Endpoints (27)
 
 Base URL: `/api/v1/stocks`
 
@@ -199,10 +212,11 @@ Base URL: `/api/v1/stocks`
 | GET | `/{symbol}/volume-analysis` | Volume pattern analysis |
 | POST | `/intraday/collect` | Trigger intraday collection |
 
-#### Sector Analysis (Phase 1 - Service Only)
+#### Sector & Fund Analysis
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/sectors/performance` | Sector performance (pending Phase 2) |
+| GET | `/sector-performance` | Sector performance (ICB Level 2) |
+| GET | `/fund-certificates` | Fund certificates data |
 
 ### Service Layer
 
@@ -301,13 +315,13 @@ httpx
 | Component | Status | Notes |
 |-----------|--------|-------|
 | Frontend Layout | Done | Sidebar, header, responsive, themes |
-| ShadCN Components | Done | 15 components installed |
-| Dashboard Components | Done | 13 feature components |
+| ShadCN Components | Done | 16 components installed |
+| Dashboard Components | Done | 14 feature components |
 | Stock Detail Page | Done | Search, header, stats, tabs |
 | Market Indices | Done | Real API integration |
 | Sector Performance | Done | Full-stack: API + hook + UI component |
 | API Utility | Done | Generic fetch, error handling |
-| Stock API | Done | 20+ endpoints working |
+| Stock API | Done | 27 endpoints working |
 | vnstock Integration | Done | VCI data source |
 | Database Models | Done | IntradayBar model |
 | Scheduler | Done | APScheduler 4.0 |

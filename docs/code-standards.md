@@ -73,6 +73,7 @@ export function StockChart({ symbol, className }: Props) {
 - **URL State**: Search params for shareable state (stock symbol)
 - **Server State**: Direct API calls with loading/error states
 - **Theme State**: next-themes provider
+- **Toast Notifications**: Sonner for user feedback
 
 ### Loading & Error States
 

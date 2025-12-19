@@ -21,12 +21,14 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | Dashboard Layout | Done | Responsive sidebar, header, theme toggle |
 | Stock Detail Page | Done | Search, ticker header, stats panel, tabs |
 | Market Indices | Done | VN-INDEX, VN30, HNX, UPCOM cards with sparklines |
-| Stock Data API | Done | 20+ endpoints via vnstock |
+| Stock Data API | Done | 27 endpoints via vnstock |
 | Financial Data | Done | Income, balance sheet, cash flow (detailed) |
 | Shareholders/Officers | Done | Major holders, management, insider deals |
 | Volume Analysis | Done | 5-min bar aggregation, peak period analysis |
 | Intraday Collection | Done | Scheduled data collection (15:30 ICT) |
 | Database Models | Done | IntradayBar model with SQLAlchemy |
+| Sector Performance | Done | ICB Level 2 with sorting, auto-refresh |
+| Toast Notifications | Done | Sonner integration for user feedback |
 | Auth Pages | Scaffolded | Routes exist, logic pending |
 | Charts Page | Scaffolded | Route exists, not implemented |
 | Portfolio Page | Scaffolded | Route exists, not implemented |
@@ -133,6 +135,8 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `GET /{symbol}/insider-deals` | Insider trading deals |
 | `GET /{symbol}/volume-analysis` | Volume pattern analysis |
 | `POST /intraday/collect` | Trigger intraday collection |
+| `GET /sector-performance` | Sector performance (ICB Level 2) |
+| `GET /fund-certificates` | Fund certificates data |
 
 ---
 
@@ -167,6 +171,8 @@ All endpoints prefixed with `/api/v1/stocks`:
 - [x] User can view market indices (VN-INDEX, VN30, HNX, UPCOM)
 - [x] User can view financial statements (income, balance, cash flow)
 - [x] User can view shareholders and insider deals
+- [x] User can view sector performance (ICB Level 2)
+- [x] User receives toast notifications on actions
 - [x] API handles concurrent requests efficiently
 - [ ] User can view stock price charts
 - [ ] User can register and login
