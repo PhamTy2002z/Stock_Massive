@@ -30,6 +30,8 @@ from src.stocks.schemas import (
     OfficersResponse,
     InsiderDealItem,
     InsiderDealsResponse,
+    SectorPerformanceItem,
+    SectorPerformanceResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -779,6 +781,116 @@ class StockService:
         except Exception as e:
             logger.error(f"Error fetching insider deals for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch insider deals for {symbol}: {e}")
+
+    def get_sector_performance(self) -> SectorPerformanceResponse:
+        """Get market-cap weighted sector performance.
+
+        Uses ICB Level 2 classification (10 sectors).
+
+        Returns:
+            SectorPerformanceResponse with sector performance data
+        """
+        from datetime import datetime
+
+        try:
+            listing = Listing()
+            trading = Trading()
+
+            # Get industry classification
+            industries_df = listing.symbols_by_industries()
+
+            if industries_df is None or industries_df.empty:
+                return SectorPerformanceResponse(
+                    sectors=[],
+                    generated_at=datetime.now(),
+                    total_sectors=0
+                )
+
+            # Group by ICB Level 2
+            # Expected columns: symbol, icb_code2, icb_name2, etc.
+            icb_col = 'icb_code2' if 'icb_code2' in industries_df.columns else 'icb_code'
+            name_col = 'icb_name2' if 'icb_name2' in industries_df.columns else 'icb_name'
+
+            sectors = {}
+            for icb_code in industries_df[icb_col].unique():
+                if pd.isna(icb_code):
+                    continue
+                sector_df = industries_df[industries_df[icb_col] == icb_code]
+                icb_name = sector_df[name_col].iloc[0] if name_col in sector_df.columns else str(icb_code)
+                symbols = sector_df['symbol'].tolist()
+                sectors[icb_code] = {
+                    'name': icb_name,
+                    'symbols': symbols[:100]  # Limit to avoid rate limits
+                }
+
+            results = []
+            for icb_code, sector_data in sectors.items():
+                symbols = sector_data['symbols']
+                if not symbols:
+                    continue
+
+                try:
+                    # Get price board for sector symbols
+                    price_df = trading.price_board(
+                        symbols_list=symbols,
+                        flatten_columns=True,
+                        drop_levels=[0]
+                    )
+
+                    if price_df is None or price_df.empty:
+                        continue
+
+                    # Calculate market cap weighted change
+                    total_cap = 0.0
+                    weighted_change = 0.0
+                    stock_changes = []
+
+                    for _, row in price_df.iterrows():
+                        symbol = row.get('symbol', '')
+                        change_pct = self._safe_float(row.get('change_pct')) or 0.0
+                        # Market cap from accumulated_value or estimate
+                        market_cap = self._safe_float(row.get('accumulated_value')) or 1.0
+
+                        if market_cap > 0:
+                            weighted_change += change_pct * market_cap
+                            total_cap += market_cap
+                            stock_changes.append((symbol, change_pct))
+
+                    if total_cap > 0:
+                        avg_change = weighted_change / total_cap
+                    else:
+                        avg_change = 0.0
+
+                    # Sort for top gainers/losers
+                    stock_changes.sort(key=lambda x: x[1], reverse=True)
+                    top_gainers = [s[0] for s in stock_changes[:3]]
+                    top_losers = [s[0] for s in stock_changes[-3:]]
+
+                    results.append(SectorPerformanceItem(
+                        icb_code=str(icb_code),
+                        icb_name=sector_data['name'],
+                        change_pct=round(avg_change, 2),
+                        total_market_cap=round(total_cap / 1_000_000_000, 2),
+                        stock_count=len(price_df),
+                        top_gainers=top_gainers,
+                        top_losers=top_losers,
+                    ))
+                except Exception as e:
+                    logger.warning(f"Error processing sector {icb_code}: {e}")
+                    continue
+
+            # Sort by change_pct descending
+            results.sort(key=lambda x: x.change_pct, reverse=True)
+
+            return SectorPerformanceResponse(
+                sectors=results,
+                generated_at=datetime.now(),
+                total_sectors=len(results),
+            )
+
+        except Exception as e:
+            logger.error(f"Error fetching sector performance: {e}")
+            raise StockServiceError(f"Failed to fetch sector performance: {e}")
 
     # === Private conversion methods ===
 
