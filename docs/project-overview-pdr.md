@@ -1,54 +1,78 @@
 # Project Overview - Stock Massive
 
 ## Purpose
-Vietnamese stock analysis platform powered by **vnstock** library. Provides real-time charting, data tables, and portfolio tracking for Vietnam stock market (HOSE, HNX, UPCOM).
+
+Vietnamese stock market data platform powered by **vnstock** library. Provides real-time data, charting, and analysis for Vietnam stock market (HOSE, HNX, UPCOM).
 
 ## Goals
-1. Display Vietnamese stock data with TradingView charts
+
+1. Display Vietnamese stock data with interactive charts
 2. Provide sortable/filterable data tables for stock screening
 3. Enable portfolio tracking and watchlist management
 4. Secure user authentication and data persistence
 5. Integrate vnstock library for comprehensive Vietnam market data
 
-## Current Implementation Status
+---
+
+## Current Implementation Status (December 2024)
 
 | Feature | Status | Details |
 |---------|--------|---------|
-| Dashboard Layout | Done | Responsive sidebar, header |
-| Stock Data API | Done | 10 endpoints via vnstock |
+| Dashboard Layout | Done | Responsive sidebar, header, theme toggle |
+| Stock Detail Page | Done | Search, ticker header, stats panel, tabs |
+| Market Indices | Done | VN-INDEX, VN30, HNX, UPCOM cards with sparklines |
+| Stock Data API | Done | 20+ endpoints via vnstock |
+| Financial Data | Done | Income, balance sheet, cash flow (detailed) |
+| Shareholders/Officers | Done | Major holders, management, insider deals |
+| Volume Analysis | Done | 5-min bar aggregation, peak period analysis |
+| Intraday Collection | Done | Scheduled data collection (15:30 ICT) |
+| Database Models | Done | IntradayBar model with SQLAlchemy |
 | Auth Pages | Scaffolded | Routes exist, logic pending |
 | Charts Page | Scaffolded | Route exists, not implemented |
 | Portfolio Page | Scaffolded | Route exists, not implemented |
 | Watchlist Page | Scaffolded | Route exists, not implemented |
-| Database Models | Pending | SQLAlchemy configured |
-| User Auth | Pending | JWT config exists |
+
+---
 
 ## Scope
 
-### In Scope (Phase 1)
-- Stock charting (candlestick, line, area) for VN stocks
-- Data tables with TanStack Table
+### In Scope (Phase 1 - Current)
+
+- Stock detail page with comprehensive data
+- Market indices dashboard
+- Data tables with financial statements
+- REST API via vnstock integration
+- Intraday data collection and storage
+- Volume pattern analysis
+
+### In Scope (Phase 2 - Planned)
+
+- Stock charting (candlestick, line, area)
 - User authentication (JWT)
 - Watchlist management
 - Portfolio tracking
-- REST API via vnstock integration
 
 ### Data Sources
+
 - **vnstock library** (VCI source): Primary data provider
-  - Historical OHLCV data
+  - Historical OHLCV data (daily, weekly, monthly)
   - Intraday tick data
   - Company information
-  - Financial statements (income, balance sheet)
+  - Financial statements (income, balance sheet, cash flow)
   - Financial ratios
   - Price board (real-time)
   - Stock groups (VN30, HNX30, etc.)
+  - Shareholders, officers, insider deals
 
 ### Out of Scope (Phase 1)
+
 - Real-time WebSocket streaming
 - Mobile application
 - Social features
 - Automated trading
 - Technical indicators calculation
+
+---
 
 ## Technical Decisions
 
@@ -56,30 +80,61 @@ Vietnamese stock analysis platform powered by **vnstock** library. Provides real
 |----------|--------|-----------|
 | Monorepo | Simple workspace | Lower complexity, sufficient for single team |
 | Frontend | Next.js 14.2 App Router | Modern React, SSR support, excellent DX |
-| UI Library | ShadCN/UI (new-york) | Accessible, customizable, Radix-based |
+| UI Library | ShadCN/UI | Accessible, customizable, Radix-based |
+| Design Style | Modern + Clean | HSL colors, dark/light themes, consistent patterns |
 | Tables | TanStack Table | Headless, powerful sorting/filtering |
 | Charts | TradingView Lightweight | Industry standard, performant |
 | Backend | FastAPI | Fast, async, auto-docs, type-safe |
 | Data Source | vnstock >= 3.0.0 | Comprehensive Vietnam stock data |
 | ORM | SQLAlchemy 2.0 | Mature, async support, migrations |
 | Database | PostgreSQL 16 | Reliable, feature-rich, scalable |
+| Scheduler | APScheduler 4.0 | Background job scheduling |
+
+---
 
 ## API Design
 
 ### Endpoint Structure
+
 All endpoints prefixed with `/api/v1/stocks`:
 
+#### Symbol Listing
 | Endpoint | Purpose |
 |----------|---------|
-| `GET /symbols` | List all symbols |
-| `GET /symbols/group/{group}` | Symbols by group |
+| `GET /symbols` | List all symbols (filter by exchange) |
+| `GET /symbols/group/{group}` | Symbols by group (VN30, HNX30) |
+| `GET /symbols/search` | Search by ticker or company name |
+
+#### Price Data
+| Endpoint | Purpose |
+|----------|---------|
 | `GET /{symbol}/history` | Historical OHLCV |
 | `GET /{symbol}/intraday` | Intraday ticks |
-| `GET /price-board` | Real-time prices |
+| `GET /market-indices` | VN-INDEX, VN30, HNX, UPCOM |
+| `GET /price-board` | Real-time prices (multiple symbols) |
+| `GET /{symbol}/detail` | Comprehensive stock detail |
+
+#### Company & Financials
+| Endpoint | Purpose |
+|----------|---------|
 | `GET /{symbol}/company` | Company overview |
 | `GET /{symbol}/financials/ratios` | Financial ratios |
-| `GET /{symbol}/financials/income` | Income statement |
-| `GET /{symbol}/financials/balance-sheet` | Balance sheet |
+| `GET /{symbol}/financials/income` | Income statement (simple) |
+| `GET /{symbol}/financials/income-statement` | Income statement (detailed) |
+| `GET /{symbol}/financials/balance-sheet` | Balance sheet (simple) |
+| `GET /{symbol}/financials/balance-sheet-detailed` | Balance sheet (detailed) |
+| `GET /{symbol}/financials/cash-flow` | Cash flow statement |
+
+#### Shareholders & Analysis
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /{symbol}/shareholders` | Major shareholders |
+| `GET /{symbol}/officers` | Company officers/management |
+| `GET /{symbol}/insider-deals` | Insider trading deals |
+| `GET /{symbol}/volume-analysis` | Volume pattern analysis |
+| `POST /intraday/collect` | Trigger intraday collection |
+
+---
 
 ## Risks & Mitigations
 
@@ -91,19 +146,34 @@ All endpoints prefixed with `/api/v1/stocks`:
 | vnstock library changes | Pin version, monitor updates |
 | Data accuracy | Cross-validate with official sources |
 
+---
+
 ## Success Metrics
+
 - Page load < 2s
 - API response < 200ms (p95)
 - Zero critical security vulnerabilities
 - 80%+ test coverage on critical paths
 - Support all VN30 stocks without errors
 
+---
+
 ## Acceptance Criteria
 
-### Phase 1 MVP
+### Phase 1 MVP (Current Focus)
+
+- [x] User can view stock detail with price, company info, financials
+- [x] User can search stocks by symbol or name
+- [x] User can view market indices (VN-INDEX, VN30, HNX, UPCOM)
+- [x] User can view financial statements (income, balance, cash flow)
+- [x] User can view shareholders and insider deals
+- [x] API handles concurrent requests efficiently
 - [ ] User can view stock price charts
-- [ ] User can browse stock list with filtering
-- [ ] User can view company financial data
 - [ ] User can register and login
 - [ ] User can create watchlists
-- [ ] API handles 100 concurrent users
+
+### Phase 2 (Planned)
+
+- [ ] User can track portfolio positions
+- [ ] User can set price alerts
+- [ ] User can export data to CSV/Excel

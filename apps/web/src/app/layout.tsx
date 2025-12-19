@@ -13,8 +13,8 @@ export const metadata: Metadata = {
   title: "Stock Massive",
   description: "Stock analysis platform with real-time charting",
   icons: {
-    icon: "/images/favicon.ico",
-    apple: "/images/apple-touch-icon.png",
+    icon: "/logo.png",
+    apple: "/logo.png",
   },
 };
 

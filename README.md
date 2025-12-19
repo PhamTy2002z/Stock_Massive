@@ -1,24 +1,28 @@
 # Stock Massive
 
-Vietnamese stock analysis platform powered by **vnstock** library. Provides real-time charting, data tables, and portfolio tracking for Vietnam stock market (HOSE, HNX, UPCOM).
+Vietnamese stock market data platform powered by **vnstock** library. Provides real-time data, charting, and analysis for Vietnam stock market (HOSE, HNX, UPCOM).
 
 ## Current Status
 
 | Component | Status | Notes |
 |-----------|--------|-------|
 | Dashboard Layout | Done | Sidebar, header, responsive |
-| Dashboard Index Cards | Done | Real API integration, market indices |
-| Stock Data API | Done | 10 endpoints via vnstock |
+| Stock Detail Page | Done | Search, ticker header, stats, tabs |
+| Market Indices | Done | VN-INDEX, VN30, HNX, UPCOM cards |
+| Stock Data API | Done | 20+ endpoints via vnstock |
+| Financial Data | Done | Income, balance sheet, cash flow |
+| Shareholders/Officers | Done | Major holders, management, insider deals |
+| Volume Analysis | Done | 5-min bar aggregation, peak periods |
 | Auth Pages | Scaffolded | Login/register routes exist |
-| Charts/Portfolio/Watchlist | Scaffolded | Routes exist, not implemented |
-| Database Models | Pending | SQLAlchemy configured, no models |
+| Database Models | Done | Intraday bars model, scheduler |
 
 ## Tech Stack
 
-- **Frontend**: Next.js 14.2, TypeScript, TailwindCSS 3.4, ShadCN/UI (new-york)
+- **Frontend**: Next.js 14.2, TypeScript, TailwindCSS 3.4, ShadCN/UI
 - **Backend**: FastAPI, Python 3.11+, vnstock >= 3.0.0, SQLAlchemy 2.0
 - **Database**: PostgreSQL 16
 - **DevOps**: Docker, Docker Compose
+- **Design**: Modern + Clean (HSL color system, dark/light themes)
 
 ## Project Structure
 
@@ -28,43 +32,65 @@ Stock_Massive/
 │   ├── web/                 # Next.js frontend (port 3000)
 │   │   └── src/
 │   │       ├── app/         # App Router pages
-│   │       ├── components/  # ShadCN + layout components
-│   │       ├── hooks/       # useIsMobile, etc.
-│   │       └── lib/         # cn() utility
+│   │       ├── components/  # UI + dashboard + layout components
+│   │       ├── hooks/       # Custom hooks
+│   │       └── lib/         # Utilities
 │   │
 │   └── api/                 # FastAPI backend (port 8000)
 │       └── src/
 │           ├── api/v1/      # Versioned routes
 │           ├── stocks/      # Stock module (router, service, schemas)
-│           ├── auth/        # Auth module (placeholder)
-│           └── core/        # Config, database
+│           ├── core/        # Config, database, scheduler
+│           └── main.py
 │
-├── packages/                # Shared code (empty placeholders)
+├── packages/                # Shared code (placeholders)
 ├── docker/                  # Docker configs
 └── docs/                    # Documentation
 ```
 
 ## API Endpoints
 
-All endpoints prefixed with `/api/v1`:
+All endpoints prefixed with `/api/v1/stocks`:
 
+### Symbol Listing
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/stocks/symbols` | GET | List all stock symbols |
-| `/stocks/symbols/group/{group}` | GET | Symbols by group (VN30, HNX30) |
-| `/stocks/{symbol}/history` | GET | Historical OHLCV data |
-| `/stocks/{symbol}/intraday` | GET | Intraday tick data |
-| `/stocks/price-board` | GET | Real-time price board |
-| `/stocks/{symbol}/detail` | GET | Comprehensive stock detail data |
-| `/stocks/{symbol}/company` | GET | Company overview |
-| `/stocks/{symbol}/financials/ratios` | GET | Financial ratios |
-| `/stocks/{symbol}/financials/income` | GET | Income statement |
-| `/stocks/{symbol}/financials/balance-sheet` | GET | Balance sheet |
+| `/symbols` | GET | List all stock symbols |
+| `/symbols/group/{group}` | GET | Symbols by group (VN30, HNX30) |
+| `/symbols/search` | GET | Search symbols by ticker/name |
+
+### Price Data
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/{symbol}/history` | GET | Historical OHLCV data |
+| `/{symbol}/intraday` | GET | Intraday tick data |
+| `/market-indices` | GET | VN-INDEX, VN30, HNX, UPCOM |
+| `/price-board` | GET | Real-time price board |
+| `/{symbol}/detail` | GET | Comprehensive stock detail |
+
+### Company & Financials
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/{symbol}/company` | GET | Company overview |
+| `/{symbol}/financials/ratios` | GET | Financial ratios |
+| `/{symbol}/financials/income` | GET | Income statement (simple) |
+| `/{symbol}/financials/income-statement` | GET | Income statement (detailed) |
+| `/{symbol}/financials/balance-sheet` | GET | Balance sheet (simple) |
+| `/{symbol}/financials/balance-sheet-detailed` | GET | Balance sheet (detailed) |
+| `/{symbol}/financials/cash-flow` | GET | Cash flow statement |
+
+### Shareholders & Analysis
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/{symbol}/shareholders` | GET | Major shareholders |
+| `/{symbol}/officers` | GET | Company officers |
+| `/{symbol}/insider-deals` | GET | Insider trading deals |
+| `/{symbol}/volume-analysis` | GET | Volume pattern analysis |
+| `/intraday/collect` | POST | Trigger intraday collection |
 
 ## Getting Started
 
 ### Prerequisites
-
 - Node.js 18+
 - Python 3.11+
 - Docker & Docker Compose
@@ -91,7 +117,7 @@ pnpm dev
 # Backend
 cd apps/api
 python -m venv .venv
-source .venv/bin/activate
+.venv\Scripts\activate  # Windows
 pip install -r requirements.txt
 uvicorn src.main:app --reload
 ```
@@ -101,7 +127,7 @@ uvicorn src.main:app --reload
 - [Project Overview & PDR](docs/project-overview-pdr.md)
 - [System Architecture](docs/system-architecture.md)
 - [Code Standards](docs/code-standards.md)
-- [Tech Stack](docs/tech-stack.md)
+- [Design Guidelines](docs/design-guidelines.md)
 - [Codebase Summary](docs/codebase-summary.md)
 - [Project Roadmap](docs/project-roadmap.md)
 - [Deployment Guide](docs/deployment-guide.md)

@@ -1,7 +1,8 @@
 # Codebase Summary - Stock Massive
 
 ## Overview
-Vietnamese stock analysis platform with monorepo architecture. Next.js frontend, FastAPI backend, PostgreSQL database.
+
+Vietnamese stock market data platform with monorepo architecture. Next.js frontend, FastAPI backend, PostgreSQL database.
 
 ## Repository Structure
 
@@ -11,10 +12,11 @@ Stock_Massive/
 │   ├── web/                    # Next.js 14.2 frontend
 │   └── api/                    # FastAPI backend
 ├── packages/
-│   ├── config/                 # Shared configs (empty)
-│   └── types/                  # Shared types (empty)
+│   ├── config/                 # Shared configs (placeholder)
+│   └── types/                  # Shared types (placeholder)
 ├── docker/                     # Docker configs
 ├── docs/                       # Documentation
+├── plans/                      # Plans and reports
 └── docker-compose.yml
 ```
 
@@ -23,42 +25,29 @@ Stock_Massive/
 ## Frontend (apps/web)
 
 ### Tech Stack
+
 - Next.js 14.2.18 with App Router
-- TypeScript 5.x
+- React 18.3.1
+- TypeScript 5.3
 - TailwindCSS 3.4
 - ShadCN/UI (new-york style)
 - Radix UI primitives
+- next-themes (dark/light mode)
 
 ### Directory Structure
+
 ```
 apps/web/src/
 ├── app/                        # App Router pages
-│   ├── (auth)/                 # Auth route group
-│   │   ├── login/page.tsx      # Scaffolded
-│   │   └── register/page.tsx   # Scaffolded
-│   ├── (dashboard)/            # Dashboard route group
-│   │   ├── layout.tsx          # Dashboard layout wrapper
-│   │   ├── page.tsx            # Main dashboard (implemented)
-│   │   ├── charts/page.tsx     # Scaffolded
-│   │   ├── portfolio/page.tsx  # Scaffolded
-│   │   └── watchlist/page.tsx  # Scaffolded
-│   ├── layout.tsx              # Root layout
-│   └── globals.css             # Global styles
+│   ├── layout.tsx              # Root layout with providers
+│   ├── page.tsx                # Dashboard home
+│   ├── not-found.tsx           # 404 page
+│   └── globals.css             # Global styles + CSS variables
 ├── components/
-│   ├── ui/                     # ShadCN components (10)
-│   │   ├── button.tsx
-│   │   ├── card.tsx
-│   │   ├── input.tsx
-│   │   ├── label.tsx
-│   │   ├── separator.tsx
-│   │   ├── sheet.tsx
-│   │   ├── sidebar.tsx
-│   │   ├── skeleton.tsx
-│   │   ├── tooltip.tsx
-│   │   └── ...
-│   ├── app-sidebar.tsx         # Main navigation sidebar
-│   ├── dashboard-header.tsx    # Top header bar
-│   └── dashboard-layout.tsx    # Layout wrapper
+│   ├── ui/                     # ShadCN components (15)
+│   ├── dashboard/              # Dashboard feature components (12)
+│   ├── layout/                 # Layout components (3)
+│   └── providers/              # Context providers (1)
 ├── hooks/
 │   └── use-mobile.tsx          # useIsMobile() viewport hook
 └── lib/
@@ -66,32 +55,55 @@ apps/web/src/
     └── utils.ts                # cn() class merge utility
 ```
 
-### Routes
+### UI Components (ShadCN)
 
-| Route | Status | Description |
-|-------|--------|-------------|
-| `/` | Implemented | Dashboard home |
-| `/login` | Scaffolded | Login page |
-| `/register` | Scaffolded | Registration page |
-| `/charts` | Scaffolded | Stock charts |
-| `/portfolio` | Scaffolded | Portfolio tracking |
-| `/watchlist` | Scaffolded | Watchlist management |
+| Component | File | Purpose |
+|-----------|------|---------|
+| Alert | alert.tsx | Alert messages |
+| Avatar | avatar.tsx | User avatars |
+| Button | button.tsx | Action buttons (variants) |
+| Card | card.tsx | Content containers |
+| Collapsible | collapsible.tsx | Expandable sections |
+| Dropdown Menu | dropdown-menu.tsx | Dropdown menus |
+| Input | input.tsx | Text inputs |
+| Select | select.tsx | Select dropdowns |
+| Separator | separator.tsx | Visual dividers |
+| Sheet | sheet.tsx | Slide-out panels |
+| Sidebar | sidebar.tsx | Navigation sidebar |
+| Skeleton | skeleton.tsx | Loading placeholders |
+| Sonner | sonner.tsx | Toast notifications |
+| Sparkline | sparkline.tsx | Mini charts |
+| Tabs | tabs.tsx | Tab navigation |
+| Tooltip | tooltip.tsx | Hover tooltips |
 
-### Key Components
+### Dashboard Components
 
-**Layout Components:**
-- `app-sidebar.tsx` - Navigation sidebar with links
-- `dashboard-header.tsx` - Top header with user menu
-- `dashboard-layout.tsx` - Wraps dashboard pages
+| Component | File | Purpose |
+|-----------|------|---------|
+| MarketIndices | market-indices.tsx | Market index cards grid |
+| StockIndexCard | stock-index-card.tsx | Individual index card |
+| StockSearchBar | stock-search-bar.tsx | Symbol search with debounce |
+| StockTickerHeader | stock-ticker-header.tsx | Stock price header |
+| StockDetailPanel | stock-detail-panel.tsx | Stats grid (volume, cap, etc.) |
+| StockDetailTabs | stock-detail-tabs.tsx | Tab container |
+| StockDetailSkeleton | stock-detail-skeleton.tsx | Loading skeleton |
+| StockDetailEmpty | stock-detail-empty.tsx | Empty state |
+| StockDetailError | stock-detail-error.tsx | Error state |
+| StockCompanyInfo | stock-company-info.tsx | Company overview |
+| StockStatsTable | stock-stats-table.tsx | Financial stats table |
+| FinanceTabContent | finance-tab-content.tsx | Financial statements tab |
+| ShareholdersTabContent | shareholders-tab-content.tsx | Shareholders/officers tab |
 
-**Dashboard Components:**
-- `market-indices.tsx` - Market index cards grid with loading/error states
-- `stock-index-card.tsx` - Individual index card with sparkline
+### Layout Components
 
-**ShadCN UI Components (11):**
-- button, card, input, label, separator, sheet, sidebar, skeleton, sparkline, tooltip
+| Component | File | Purpose |
+|-----------|------|---------|
+| AppSidebar | app-sidebar.tsx | Main navigation sidebar |
+| DashboardHeader | dashboard-header.tsx | Top header bar |
+| DashboardLayout | dashboard-layout.tsx | Layout wrapper |
 
 ### Hooks
+
 - `useIsMobile()` - Returns boolean for viewport < 768px
 
 ### Utilities
@@ -101,24 +113,28 @@ apps/web/src/
 
 **lib/api.ts:**
 - `fetchApi<T>()` - Generic fetch wrapper with error handling
-- `fetchPriceBoard(symbols)` - Get real-time prices for symbols
-- `fetchMarketIndices()` - Get VN-INDEX, VN30, HNX-INDEX, UPCOM-INDEX data
-- Types: `PriceBoardItem`, `MarketIndex`, `ApiError`
-- Config: `API_BASE_URL` from `NEXT_PUBLIC_API_URL` env var
+- `fetchPriceBoard(symbols)` - Get real-time prices
+- `fetchMarketIndices()` - Get market indices data
+- `fetchStockDetail(symbol)` - Get comprehensive stock detail
+- `searchSymbols(query)` - Search stocks by symbol/name
+- Types: `PriceBoardItem`, `MarketIndex`, `StockDetail`, `ApiError`
 
 ---
 
 ## Backend (apps/api)
 
 ### Tech Stack
+
 - Python 3.11+
-- FastAPI
+- FastAPI 0.100+
 - Pydantic v2
-- SQLAlchemy 2.0
+- SQLAlchemy 2.0 (async)
 - Alembic (migrations)
+- APScheduler 4.0
 - vnstock >= 3.0.0
 
 ### Directory Structure
+
 ```
 apps/api/src/
 ├── main.py                     # FastAPI app entry
@@ -126,104 +142,80 @@ apps/api/src/
 │   └── v1/
 │       └── router.py           # API v1 router aggregator
 ├── stocks/
-│   ├── router.py               # Stock endpoints
+│   ├── router.py               # Stock endpoints (20+)
 │   ├── service.py              # Business logic (vnstock)
-│   └── schemas.py              # Pydantic models
-├── auth/
-│   └── (placeholder)           # Auth module (empty)
+│   ├── schemas.py              # Pydantic models
+│   ├── models.py               # SQLAlchemy models
+│   ├── jobs.py                 # Scheduled jobs
+│   └── intraday_collector.py   # Intraday data collection
 ├── core/
 │   ├── config.py               # Settings (env vars)
-│   └── database.py             # SQLAlchemy setup
-└── workers/                    # Background tasks (empty)
+│   ├── database.py             # SQLAlchemy setup
+│   ├── dependencies.py         # FastAPI dependencies
+│   └── scheduler.py            # APScheduler setup
+└── workers/                    # Background tasks (placeholder)
 ```
 
-### API Endpoints
+### API Endpoints (20+)
 
-Base URL: `/api/v1`
+Base URL: `/api/v1/stocks`
 
-#### Stock Symbols
+#### Symbol Listing
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/stocks/symbols` | List all stock symbols |
-| GET | `/stocks/symbols/group/{group}` | Symbols by group (VN30, HNX30, etc.) |
+| GET | `/symbols` | List all symbols (filter by exchange) |
+| GET | `/symbols/group/{group}` | Symbols by group (VN30, HNX30) |
+| GET | `/symbols/search` | Search by ticker or company name |
 
-#### Stock Data
-| Method | Endpoint | Query Params | Description |
-|--------|----------|--------------|-------------|
-| GET | `/stocks/{symbol}/history` | `start`, `end`, `interval` | Historical OHLCV |
-| GET | `/stocks/{symbol}/intraday` | - | Intraday tick data |
-| GET | `/stocks/price-board` | `symbols` (list) | Real-time prices |
-| GET | `/stocks/{symbol}/detail` | - | Comprehensive stock detail (price + company + ratios) |
-
-#### Company Info
+#### Price Data
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/stocks/{symbol}/company` | Company overview |
+| GET | `/{symbol}/history` | Historical OHLCV |
+| GET | `/{symbol}/intraday` | Intraday tick data |
+| GET | `/market-indices` | VN-INDEX, VN30, HNX, UPCOM |
+| GET | `/price-board` | Real-time prices (multiple symbols) |
+| GET | `/{symbol}/detail` | Comprehensive stock detail |
 
-#### Financials
-| Method | Endpoint | Query Params | Description |
-|--------|----------|--------------|-------------|
-| GET | `/stocks/{symbol}/financials/ratios` | `period` | Financial ratios |
-| GET | `/stocks/{symbol}/financials/income` | `period`, `limit` | Income statement |
-| GET | `/stocks/{symbol}/financials/balance-sheet` | `period`, `limit` | Balance sheet |
+#### Company & Financials
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/{symbol}/company` | Company overview |
+| GET | `/{symbol}/financials/ratios` | Financial ratios |
+| GET | `/{symbol}/financials/income` | Income statement (simple) |
+| GET | `/{symbol}/financials/income-statement` | Income statement (detailed) |
+| GET | `/{symbol}/financials/balance-sheet` | Balance sheet (simple) |
+| GET | `/{symbol}/financials/balance-sheet-detailed` | Balance sheet (detailed) |
+| GET | `/{symbol}/financials/cash-flow` | Cash flow statement |
+
+#### Shareholders & Analysis
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/{symbol}/shareholders` | Major shareholders |
+| GET | `/{symbol}/officers` | Company officers |
+| GET | `/{symbol}/insider-deals` | Insider trading deals |
+| GET | `/{symbol}/volume-analysis` | Volume pattern analysis |
+| POST | `/intraday/collect` | Trigger intraday collection |
 
 ### Service Layer
 
 **StockService** (`stocks/service.py`):
 - Wraps vnstock library
 - Data source: VCI (Vietnam)
-- Methods:
-  - `get_all_symbols()` - All listed symbols
-  - `get_symbols_by_group(group)` - Filter by index
-  - `get_history(symbol, start, end, interval)` - OHLCV data
-  - `get_intraday(symbol)` - Tick data
-  - `get_price_board(symbols)` - Real-time quotes
-  - `get_stock_detail(symbol)` - Combined price + company + ratios
-  - `get_company_overview(symbol)` - Company info
-  - `get_financial_ratios(symbol, period)` - Ratios
-  - `get_income_statement(symbol, period, limit)` - P&L
-  - `get_balance_sheet(symbol, period, limit)` - Balance sheet
+- Singleton pattern via `get_stock_service()`
 
-### Schemas (Pydantic)
+### Database Models
 
-**Request/Response Models:**
-- `StockSymbol` - Symbol info
-- `StockHistory` - OHLCV record
-- `IntradayTick` - Tick data
-- `PriceBoardItem` - Real-time quote (updated with optional fields)
-- `StockDetail` - Comprehensive stock data (price + company + ratios)
-- `CompanyOverview` - Company details
-- `FinancialRatio` - Ratio data
-- `IncomeStatement` - P&L line items
-- `BalanceSheet` - Balance sheet items
+**IntradayBar** (`stocks/models.py`):
+- 5-minute OHLCV bars
+- Composite primary key: (symbol, timestamp)
+- Indexes for efficient querying
 
-### Database
+### Scheduled Jobs
 
-**Configuration:**
-- PostgreSQL 16
-- SQLAlchemy 2.0 async
-- Alembic for migrations
-- Connection via asyncpg
-
-**Status:** Configured but no models defined yet.
-
-### Tests
-
-**Coverage:** 30 tests
-- `tests/stocks/test_router.py` - API endpoint tests
-- `tests/stocks/test_service.py` - Service layer tests
-
----
-
-## Shared Packages
-
-### packages/config/
-- Status: Empty placeholder
-- Purpose: Shared configuration
-
-### packages/types/
-- Status: Empty placeholder
-- Purpose: Shared TypeScript types
+**Intraday Collection** (`stocks/jobs.py`):
+- Runs daily at 15:30 ICT (after market close)
+- Collects tick data, aggregates to 5-min bars
+- Stores in PostgreSQL via upsert
 
 ---
 
@@ -233,11 +225,12 @@ Base URL: `/api/v1`
 
 | Service | Port | Image |
 |---------|------|-------|
-| db | 5432 | postgres:16 |
+| db | 5432 | postgres:16-alpine |
 | api | 8000 | ./apps/api |
 | web | 3000 | ./apps/web |
 
 ### Features
+
 - Health checks configured
 - Hot-reload for development
 - Volume mounts for code changes
@@ -248,25 +241,32 @@ Base URL: `/api/v1`
 ## Dependencies
 
 ### Frontend (package.json)
+
 ```
 next: 14.2.18
-react: ^18
+react: ^18.3.1
+typescript: ^5.3
 tailwindcss: ^3.4
 @radix-ui/*: various
 class-variance-authority
 clsx
 tailwind-merge
+next-themes
+lucide-react
+sonner
 ```
 
 ### Backend (requirements.txt)
+
 ```
-fastapi
+fastapi>=0.100
 uvicorn
 sqlalchemy[asyncio]>=2.0
 alembic
 asyncpg
 pydantic>=2.0
 vnstock>=3.0.0
+apscheduler>=4.0
 python-jose[cryptography]
 passlib[bcrypt]
 pytest
@@ -279,13 +279,17 @@ httpx
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| Frontend Layout | Done | Sidebar, header, responsive |
-| ShadCN Components | Done | 11 components installed |
-| Dashboard Index Cards | Done | Real API integration, loading/error states |
-| API Utility | Done | Generic fetch, market indices |
-| Stock API | Done | 11 endpoints working |
+| Frontend Layout | Done | Sidebar, header, responsive, themes |
+| ShadCN Components | Done | 15 components installed |
+| Dashboard Components | Done | 12 feature components |
+| Stock Detail Page | Done | Search, header, stats, tabs |
+| Market Indices | Done | Real API integration |
+| API Utility | Done | Generic fetch, error handling |
+| Stock API | Done | 20+ endpoints working |
 | vnstock Integration | Done | VCI data source |
+| Database Models | Done | IntradayBar model |
+| Scheduler | Done | APScheduler 4.0 |
+| Intraday Collection | Done | 5-min bar aggregation |
 | Auth Module | Pending | Placeholder exists |
-| Database Models | Pending | SQLAlchemy configured |
-| Frontend Features | Partial | Dashboard implemented, others scaffolded |
+| Frontend Features | Partial | Dashboard done, others scaffolded |
 | Tests | Partial | Backend tests exist |
