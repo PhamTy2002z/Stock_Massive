@@ -36,12 +36,12 @@ Aggregate → Market cap weighted change per sector
 |-------|-------------|--------|------|
 | 1 | Backend Schema & Service | ✅ DONE | [phase-01-backend-schema-service.md](./phase-01-backend-schema-service.md) |
 | 2 | Backend API Endpoint | ✅ DONE | [phase-02-backend-api-endpoint.md](./phase-02-backend-api-endpoint.md) |
-| 3 | Frontend API & Hook | ⏳ Pending | [phase-03-frontend-api-hook.md](./phase-03-frontend-api-hook.md) |
+| 3 | Frontend API & Hook | ✅ DONE | [phase-03-frontend-api-hook.md](./phase-03-frontend-api-hook.md) |
 | 4 | Frontend Component & Integration | ⏳ Pending | [phase-04-frontend-component-integration.md](./phase-04-frontend-component-integration.md) |
 
 ## Progress
 
-**Overall:** 50% (2/4 phases complete)
+**Overall:** 75% (3/4 phases complete)
 **Last Updated:** 2025-12-19
 
 ### Phase 1 Summary (DONE)
@@ -52,6 +52,11 @@ Aggregate → Market cap weighted change per sector
 ### Phase 2 Summary (DONE)
 - Files: `router.py` (added endpoint)
 - Tests: 18/18 passed
+- Review: 0 critical issues
+
+### Phase 3 Summary (DONE)
+- Files: `api.ts` (added types/fetch), `use-sector-performance.ts` (new)
+- Tests: 7/7 passed
 - Review: 0 critical issues
 
 ## Success Criteria

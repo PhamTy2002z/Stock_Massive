@@ -141,20 +141,20 @@ export function useSectorPerformance(): UseSectorPerformanceResult {
 
 ## Todo List
 
-- [ ] Add `SectorPerformanceItem` interface to api.ts
-- [ ] Add `SectorPerformanceResponse` interface to api.ts
-- [ ] Add `fetchSectorPerformance()` function to api.ts
-- [ ] Create `use-sector-performance.ts` hook file
-- [ ] Test hook in browser dev tools
+- [x] Add `SectorPerformanceItem` interface to api.ts
+- [x] Add `SectorPerformanceResponse` interface to api.ts
+- [x] Add `fetchSectorPerformance()` function to api.ts
+- [x] Create `use-sector-performance.ts` hook file
+- [x] Test hook in browser dev tools
 
 ## Success Criteria
 
-- [ ] Types match backend schema exactly
-- [ ] Fetch function returns typed response
-- [ ] Hook provides loading/error/data states
-- [ ] Auto-refresh triggers every 5 minutes
-- [ ] Manual refetch works correctly
-- [ ] Cleanup on unmount (no memory leaks)
+- [x] Types match backend schema exactly
+- [x] Fetch function returns typed response
+- [x] Hook provides loading/error/data states
+- [x] Auto-refresh triggers every 5 minutes
+- [x] Manual refetch works correctly
+- [x] Cleanup on unmount (no memory leaks)
 
 ## Risks
 
