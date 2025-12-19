@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { Search, Loader2 } from "lucide-react"
 
+import { toast } from "sonner"
+
 import { Input } from "@/components/ui/input"
 import { searchStocks, StockSymbol } from "@/lib/api"
 
@@ -66,6 +68,9 @@ export function StockSearchBar({
     (symbol: StockSymbol) => {
       setQuery(symbol.symbol)
       setIsOpen(false)
+      toast.success(`Loading ${symbol.symbol}`, {
+        description: symbol.organ_name || "Fetching stock data...",
+      })
       onSelect?.(symbol)
     },
     [onSelect]

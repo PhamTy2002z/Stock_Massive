@@ -1,8 +1,9 @@
 # Phase 2: Component Fixes
 
-**Status**: Pending
+**Status**: Incomplete (60%)
 **Estimated**: 20 min
 **Depends on**: Phase 1
+**Issues Found**: 2 critical fixes needed
 
 ## Context
 
@@ -86,10 +87,35 @@ bg-red-500/10 dark:bg-red-400/10
 
 ## Todo
 
-- [ ] Update sparkline.tsx to use CSS variables
-- [ ] Add dark: variants to fund-certificates.tsx
-- [ ] Test both components in dark mode
-- [ ] Verify colors match design intent
+- [x] Update sparkline.tsx to use CSS variables
+- [x] Add dark: variants to fund-certificates.tsx
+- [ ] **CRITICAL**: Add dark: variants to stock-ticker-header.tsx (lines 72, 81)
+- [ ] **HIGH**: Complete dark: variants in sector-performance.tsx (line 133)
+- [ ] Test all components in dark mode
+- [ ] Verify colors match design intent and meet WCAG AA contrast
+
+## Critical Issues Found
+
+### stock-ticker-header.tsx
+Missing dark variants causes WCAG AA contrast failure (3.8:1 vs required 4.5:1).
+
+**Fix needed**:
+```tsx
+// Lines 72, 81
+isPositive
+  ? "text-emerald-500 dark:text-emerald-400"
+  : "text-red-500 dark:text-red-400"
+```
+
+### sector-performance.tsx
+Background colors missing dark variants (line 133).
+
+**Fix needed**:
+```tsx
+const bgClass = isGainer
+  ? "bg-green-500/10 dark:bg-green-400/10"
+  : "bg-red-500/10 dark:bg-red-400/10"
+```
 
 ## Success Criteria
 
