@@ -132,9 +132,9 @@ function SidebarBrand() {
       <SidebarMenuItem>
         <SidebarMenuButton size="lg" className="cursor-default hover:bg-transparent">
           <img
-            src="/images/logo.jpg"
+            src="/logo.png"
             alt="Stock Massive"
-            className="size-8 rounded-lg object-cover"
+            className="size-10 object-contain"
           />
           <div className="grid flex-1 text-left text-sm leading-tight">
             <span className="truncate font-bold text-base">Stock Massive</span>
