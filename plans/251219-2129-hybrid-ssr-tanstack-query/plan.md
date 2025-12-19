@@ -41,10 +41,27 @@ Install TanStack Query v5, create QueryClientProvider, setup query key factory
 - MOD: `package.json`
 
 ### Phase 2: Hooks Migration
-**Status**: pending
+**Status**: done (2024-12-19)
 **File**: [phase-02-hooks-migration.md](./phase-02-hooks-migration.md)
 **Effort**: 2.5h
 Convert 7 custom hooks to TanStack Query hooks with proper error/loading states
+
+**Completed:**
+- Migrated 7 hooks from useState/useEffect to TanStack Query useQuery
+- Fixed fund-certificates.tsx refetch onClick handler
+- 78% code reduction (700→150 lines)
+- All hooks use centralized query keys
+- Proper staleTime and refetchInterval configured
+
+**Files Changed:**
+- MOD: `src/hooks/use-stock-detail.ts`
+- MOD: `src/hooks/use-sector-performance.ts`
+- MOD: `src/hooks/use-income-statement.ts`
+- MOD: `src/hooks/use-balance-sheet.ts`
+- MOD: `src/hooks/use-cash-flow.ts`
+- MOD: `src/hooks/use-shareholders.ts`
+- MOD: `src/hooks/use-fund-certificates.ts`
+- MOD: `src/components/dashboard/fund-certificates.tsx`
 
 ### Phase 3: SSR Integration
 **Status**: pending
