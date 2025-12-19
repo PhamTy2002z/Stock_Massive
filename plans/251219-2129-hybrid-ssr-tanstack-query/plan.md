@@ -1,12 +1,13 @@
 ---
 title: "Hybrid SSR + TanStack Query Migration"
 description: "Migrate frontend from CSR to hybrid SSR with TanStack Query for better performance"
-status: in-progress
+status: completed
 priority: P1
 effort: 6h
 branch: main
 tags: [frontend, ssr, tanstack-query, performance]
 created: 2024-12-19
+completed: 2024-12-19
 ---
 
 # Hybrid SSR + TanStack Query Migration Plan
@@ -64,16 +65,42 @@ Convert 7 custom hooks to TanStack Query hooks with proper error/loading states
 - MOD: `src/components/dashboard/fund-certificates.tsx`
 
 ### Phase 3: SSR Integration
-**Status**: pending
+**Status**: done (2024-12-19)
 **File**: [phase-03-ssr-integration.md](./phase-03-ssr-integration.md)
 **Effort**: 2h
 Convert page.tsx to Server Component, add prefetching, create client islands
 
+**Completed:**
+- Created api-server.ts with server-only import and ISR revalidate 60s
+- Created StockDetailClient component (client island)
+- Created DashboardLayoutClient component (client island)
+- Converted page.tsx to async Server Component
+- Added HydrationBoundary for prefetched data
+- Parallel prefetching: market indices + sector performance + stock detail
+- Build passed, page is dynamic
+
+**Files Changed:**
+- NEW: `src/lib/api-server.ts`
+- NEW: `src/components/dashboard/stock-detail-client.tsx`
+- NEW: `src/components/layout/dashboard-layout-client.tsx`
+- MOD: `src/app/page.tsx`
+- MOD: `src/components/dashboard/index.ts`
+- MOD: `src/components/layout/index.ts`
+- MOD: `package.json` (added server-only)
+
 ### Phase 4: Cleanup & Testing
-**Status**: pending
+**Status**: done (2024-12-19)
 **File**: [phase-04-cleanup-testing.md](./phase-04-cleanup-testing.md)
 **Effort**: 0.5h
 Remove old hooks, verify all flows, performance check
+
+**Completed:**
+- All 6 verification tests passed
+- Code review passed with 0 critical issues
+- Build and type-check passed
+- Query keys match between server/client
+- No hydration errors
+- All features functional
 
 ## Success Criteria
 
