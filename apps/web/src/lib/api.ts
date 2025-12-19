@@ -292,3 +292,24 @@ export interface InsiderDealsResponse {
 export async function fetchInsiderDeals(symbol: string): Promise<InsiderDealsResponse> {
   return fetchApi<InsiderDealsResponse>(`/stocks/${encodeURIComponent(symbol)}/insider-deals`)
 }
+
+// Sector Performance Types
+export interface SectorPerformanceItem {
+  icb_code: string
+  icb_name: string
+  change_pct: number
+  total_market_cap: number
+  stock_count: number
+  top_gainers: string[]
+  top_losers: string[]
+}
+
+export interface SectorPerformanceResponse {
+  sectors: SectorPerformanceItem[]
+  generated_at: string
+  total_sectors: number
+}
+
+export async function fetchSectorPerformance(): Promise<SectorPerformanceResponse> {
+  return fetchApi<SectorPerformanceResponse>("/stocks/sector-performance")
+}

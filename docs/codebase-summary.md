@@ -105,6 +105,7 @@ apps/web/src/
 ### Hooks
 
 - `useIsMobile()` - Returns boolean for viewport < 768px
+- `useSectorPerformance()` - Fetches sector performance data with 5-min auto-refresh
 
 ### Utilities
 
@@ -117,7 +118,8 @@ apps/web/src/
 - `fetchMarketIndices()` - Get market indices data
 - `fetchStockDetail(symbol)` - Get comprehensive stock detail
 - `searchSymbols(query)` - Search stocks by symbol/name
-- Types: `PriceBoardItem`, `MarketIndex`, `StockDetail`, `ApiError`
+- `fetchSectorPerformance()` - Get sector performance data
+- Types: `PriceBoardItem`, `MarketIndex`, `StockDetail`, `SectorPerformanceItem`, `SectorPerformanceResponse`, `ApiError`
 
 ---
 
@@ -311,4 +313,4 @@ httpx
 | Auth Module | Pending | Placeholder exists |
 | Frontend Features | Partial | Dashboard done, others scaffolded |
 | Tests | Partial | Backend tests exist |
-| Sector Performance | Phase 1 | Backend service ready, endpoint pending |
+| Sector Performance | Phase 3 | Backend + API + Frontend hook complete |
