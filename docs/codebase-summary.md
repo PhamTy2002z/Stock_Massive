@@ -204,9 +204,20 @@ apps/api/src/
 │   └── v1/
 │       └── router.py           # API v1 router aggregator
 ├── stocks/
+│   ├── shared/                 # Shared utilities (Phase 1)
+│   │   ├── __init__.py         # Re-exports all utilities
+│   │   ├── exceptions.py       # StockServiceError
+│   │   ├── validators.py       # validate_symbol, SYMBOL_PATTERN
+│   │   └── converters.py       # safe_float helper
+│   ├── schemas/                # Domain schemas (Phase 2, 33 total)
+│   │   ├── __init__.py         # Re-exports for backward compat
+│   │   ├── common.py           # ErrorResponse, HistoryParams
+│   │   ├── price.py            # 10 price-related schemas
+│   │   ├── company.py          # 9 company-related schemas
+│   │   ├── financial.py        # 9 financial statement schemas
+│   │   └── market.py           # 4 market/sector schemas
 │   ├── router.py               # Stock endpoints (27)
 │   ├── service.py              # Business logic (vnstock)
-│   ├── schemas.py              # Pydantic models
 │   ├── models.py               # SQLAlchemy models
 │   ├── jobs.py                 # Scheduled jobs
 │   └── intraday_collector.py   # Intraday data collection
@@ -217,6 +228,20 @@ apps/api/src/
 │   └── scheduler.py            # APScheduler setup
 └── workers/                    # Background tasks (placeholder)
 ```
+
+### Modular Architecture (Domain-based)
+
+The `stocks/` module follows a modular architecture with separation of concerns:
+
+**Shared Utilities (`stocks/shared/`):**
+- `exceptions.py` - Custom `StockServiceError` exception class
+- `validators.py` - Symbol validation with `SYMBOL_PATTERN` regex, `validate_symbol()` function
+- `converters.py` - Data conversion helpers like `safe_float()` for handling None/NaN values
+
+**Domain Schemas (`stocks/schemas/`):**
+- Organized by domain: price, company, financial, market
+- 33 Pydantic models total with clear separation
+- Backward-compatible re-exports via `__init__.py`
 
 ### API Endpoints (27)
 

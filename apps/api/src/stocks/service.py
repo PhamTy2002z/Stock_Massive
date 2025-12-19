@@ -1,6 +1,5 @@
 """Stock data service wrapping vnstock library."""
 import logging
-import re
 from datetime import date
 from typing import Optional
 
@@ -35,36 +34,9 @@ from src.stocks.schemas import (
     FundCertificateItem,
     FundCertificatesResponse,
 )
+from src.stocks.shared import StockServiceError, validate_symbol
 
 logger = logging.getLogger(__name__)
-
-
-class StockServiceError(Exception):
-    """Custom exception for stock service errors."""
-
-    pass
-
-
-# Symbol validation pattern: 1-10 uppercase alphanumeric characters
-SYMBOL_PATTERN = re.compile(r"^[A-Z0-9]{1,10}$")
-
-
-def validate_symbol(symbol: str) -> str:
-    """Validate and normalize stock symbol.
-
-    Args:
-        symbol: Stock symbol to validate
-
-    Returns:
-        Normalized uppercase symbol
-
-    Raises:
-        StockServiceError: If symbol is invalid
-    """
-    normalized = symbol.strip().upper()
-    if not SYMBOL_PATTERN.match(normalized):
-        raise StockServiceError(f"Invalid symbol format: {symbol}")
-    return normalized
 
 
 class StockService:

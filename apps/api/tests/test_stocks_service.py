@@ -3,7 +3,8 @@ from datetime import date, timedelta
 
 import pytest
 
-from src.stocks.service import StockService, StockServiceError
+from src.stocks.service import StockService
+from src.stocks.shared import StockServiceError
 
 
 class TestStockService:
