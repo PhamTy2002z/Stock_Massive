@@ -87,6 +87,7 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `/{symbol}/insider-deals` | GET | Insider trading deals |
 | `/{symbol}/volume-analysis` | GET | Volume pattern analysis |
 | `/intraday/collect` | POST | Trigger intraday collection |
+| `/sector-performance` | GET | Sector performance (ICB Level 2) |
 
 ## Getting Started
 

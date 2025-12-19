@@ -28,6 +28,7 @@ from src.stocks.schemas import (
     ShareholdersResponse,
     OfficersResponse,
     InsiderDealsResponse,
+    SectorPerformanceResponse,
 )
 from src.stocks.service import StockService, StockServiceError, get_stock_service
 
@@ -136,6 +137,23 @@ async def get_market_indices() -> list[MarketIndexItem]:
     try:
         service = get_service()
         return service.get_market_indices()
+    except StockServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/sector-performance", response_model=SectorPerformanceResponse)
+async def get_sector_performance() -> SectorPerformanceResponse:
+    """Get market-cap weighted sector performance.
+
+    Returns ICB Level 2 sector performance data with:
+    - Market-cap weighted average change percentage
+    - Total market cap per sector
+    - Stock count per sector
+    - Top gainers and losers
+    """
+    try:
+        service = get_service()
+        return service.get_sector_performance()
     except StockServiceError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
