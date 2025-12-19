@@ -2,7 +2,7 @@
 
 **Date:** 2024-12-19
 **Priority:** P2
-**Status:** pending
+**Status:** done
 **Effort:** 1h
 
 ## Context
