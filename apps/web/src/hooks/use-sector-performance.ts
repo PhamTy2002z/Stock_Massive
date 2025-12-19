@@ -1,9 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
-import { fetchSectorPerformance, SectorPerformanceResponse } from "@/lib/api"
-
-const REFRESH_INTERVAL = 5 * 60 * 1000 // 5 minutes
+import { useQuery } from "@tanstack/react-query"
+import { fetchSectorPerformance, type SectorPerformanceResponse } from "@/lib/api"
+import { queryKeys } from "@/lib/query-keys"
 
 interface UseSectorPerformanceResult {
   data: SectorPerformanceResponse | null
@@ -14,54 +13,18 @@ interface UseSectorPerformanceResult {
 }
 
 export function useSectorPerformance(): UseSectorPerformanceResult {
-  const [data, setData] = useState<SectorPerformanceResponse | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<Error | null>(null)
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
-  const isMountedRef = useRef(true)
-  const intervalRef = useRef<NodeJS.Timeout | null>(null)
+  const query = useQuery({
+    queryKey: queryKeys.sectorPerformance,
+    queryFn: fetchSectorPerformance,
+    staleTime: 60 * 1000, // 1 minute
+    refetchInterval: 5 * 60 * 1000, // Auto-refresh every 5 minutes
+  })
 
-  const fetchData = useCallback(async () => {
-    setIsLoading(true)
-    setError(null)
-
-    try {
-      const result = await fetchSectorPerformance()
-      if (isMountedRef.current) {
-        setData(result)
-        setLastUpdated(new Date())
-      }
-    } catch (err) {
-      if (isMountedRef.current) {
-        setError(err instanceof Error ? err : new Error("Failed to fetch sector performance"))
-      }
-    } finally {
-      if (isMountedRef.current) {
-        setIsLoading(false)
-      }
-    }
-  }, [])
-
-  useEffect(() => {
-    isMountedRef.current = true
-
-    // Initial fetch
-    fetchData()
-
-    // Set up auto-refresh
-    intervalRef.current = setInterval(fetchData, REFRESH_INTERVAL)
-
-    return () => {
-      isMountedRef.current = false
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-      }
-    }
-  }, [fetchData])
-
-  const refetch = useCallback(() => {
-    fetchData()
-  }, [fetchData])
-
-  return { data, isLoading, error, refetch, lastUpdated }
+  return {
+    data: query.data ?? null,
+    isLoading: query.isLoading,
+    error: query.error,
+    refetch: query.refetch,
+    lastUpdated: query.dataUpdatedAt ? new Date(query.dataUpdatedAt) : null,
+  }
 }

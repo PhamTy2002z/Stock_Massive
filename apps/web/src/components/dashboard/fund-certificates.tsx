@@ -25,7 +25,7 @@ export function FundCertificates({ className }: FundCertificatesProps) {
         <AlertCircle className="h-8 w-8 text-destructive mx-auto mb-2" />
         <p className="text-sm text-muted-foreground mb-3">{error.message}</p>
         <button
-          onClick={refetch}
+          onClick={() => refetch()}
           className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
         >
           <RefreshCw className="h-4 w-4" />
