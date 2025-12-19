@@ -168,8 +168,9 @@ Router (HTTP) → Service (Business Logic) → vnstock/Repository
 
 ```
 RootLayout
-└── ThemeProvider
-    └── SidebarProvider
+└── QueryProvider (TanStack Query)
+    └── ThemeProvider
+        └── SidebarProvider
         ├── AppSidebar
         └── SidebarInset
             ├── DashboardHeader
@@ -189,8 +190,14 @@ RootLayout
 
 - **Local State**: useState for component-level state
 - **URL State**: Search params for stock symbol
-- **Server State**: Direct API calls with loading/error states
+- **Server State**: TanStack Query v5 for data fetching, caching, and synchronization
 - **Theme State**: next-themes for dark/light mode
+
+### Data Fetching Layer (TanStack Query)
+
+- **QueryProvider**: Wraps app with QueryClient configuration
+- **Query Keys**: Centralized key factory at `lib/query-keys.ts`
+- **DevTools**: React Query DevTools enabled in development
 
 ---
 
