@@ -117,7 +117,7 @@ export function DashboardHeader({ onStockSelect }: DashboardHeaderProps) {
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-destructive">
+            <DropdownMenuItem className="text-red-500 hover:text-red-600 focus:text-red-600">
               <LogOut className="mr-2 h-4 w-4" />
               Sign out
             </DropdownMenuItem>
