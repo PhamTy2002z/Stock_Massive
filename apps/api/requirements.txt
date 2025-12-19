@@ -22,7 +22,7 @@ httpx>=0.25.0
 vnstock>=3.0.0
 
 # Scheduler
-apscheduler>=4.0.0
+apscheduler>=4.0.0a6
 
 # Dev
 pytest>=7.4.0
