@@ -69,7 +69,7 @@ export function StockTickerHeader({
           <p
             className={cn(
               "text-2xl font-semibold tabular-nums transition-all duration-300",
-              isPositive ? "text-emerald-500" : "text-red-500",
+              isPositive ? "text-emerald-500 dark:text-emerald-400" : "text-red-500 dark:text-red-400",
               priceFlash && "scale-110 brightness-125"
             )}
           >
@@ -78,7 +78,7 @@ export function StockTickerHeader({
           <p
             className={cn(
               "text-sm font-medium tabular-nums",
-              isPositive ? "text-emerald-500" : "text-red-500"
+              isPositive ? "text-emerald-500 dark:text-emerald-400" : "text-red-500 dark:text-red-400"
             )}
           >
             ({formattedPercent}) {isPositive ? "+" : ""}{formattedChange}

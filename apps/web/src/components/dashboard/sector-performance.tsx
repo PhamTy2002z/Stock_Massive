@@ -130,7 +130,7 @@ interface SectorRowProps {
 function SectorRow({ sector, rank, type }: SectorRowProps) {
   const isGainer = type === "gainer"
   const colorClass = isGainer ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
-  const bgClass = isGainer ? "bg-green-500/10" : "bg-red-500/10"
+  const bgClass = isGainer ? "bg-green-500/10 dark:bg-green-400/10" : "bg-red-500/10 dark:bg-red-400/10"
 
   return (
     <div className="flex items-center gap-3 p-3 hover:bg-muted/30 transition-colors">
