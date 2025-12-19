@@ -127,12 +127,13 @@ class TestGetSectorPerformance:
         return StockService(source="VCI")
 
     @pytest.fixture
-    def mock_industries_df(self):
-        """Mock industries DataFrame."""
+    def mock_symbols_by_industries_df(self):
+        """Mock symbols_by_industries DataFrame with ICB classification."""
         return pd.DataFrame({
             'symbol': ['VCB', 'ACB', 'TCB', 'VNM', 'MSN', 'HPG', 'HSG'],
             'icb_code2': ['8000', '8000', '8000', '5000', '5000', '2000', '2000'],
             'icb_name2': ['Tai chinh', 'Tai chinh', 'Tai chinh', 'Hang tieu dung', 'Hang tieu dung', 'Vat lieu co ban', 'Vat lieu co ban'],
+            'icb_name3': ['Ngan hang', 'Ngan hang', 'Ngan hang', 'Thuc pham', 'Thuc pham', 'Thep', 'Thep'],
         })
 
     @pytest.fixture
@@ -146,35 +147,31 @@ class TestGetSectorPerformance:
 
     @patch('src.stocks.market.service.Listing')
     @patch('src.stocks.market.service.Trading')
-    def test_get_sector_performance_success(self, mock_trading_cls, mock_listing_cls, service, mock_industries_df):
+    def test_get_sector_performance_success(self, mock_trading_cls, mock_listing_cls, service, mock_symbols_by_industries_df):
         """Test successful sector performance retrieval."""
         # Setup mocks
         mock_listing = MagicMock()
-        mock_listing.symbols_by_industries.return_value = mock_industries_df
+        mock_listing.symbols_by_industries.return_value = mock_symbols_by_industries_df
         mock_listing_cls.return_value = mock_listing
 
         mock_trading = MagicMock()
-        # Return different price boards for different sectors
+        # Return price board with all symbols in batches
         def price_board_side_effect(symbols_list, **kwargs):
-            if 'VCB' in symbols_list:
-                return pd.DataFrame({
-                    'symbol': ['VCB', 'ACB', 'TCB'],
-                    'change_pct': [1.5, 2.0, -0.5],
-                    'accumulated_value': [100e9, 50e9, 30e9],
-                })
-            elif 'VNM' in symbols_list:
-                return pd.DataFrame({
-                    'symbol': ['VNM', 'MSN'],
-                    'change_pct': [0.8, 1.2],
-                    'accumulated_value': [80e9, 40e9],
-                })
-            elif 'HPG' in symbols_list:
-                return pd.DataFrame({
-                    'symbol': ['HPG', 'HSG'],
-                    'change_pct': [-1.0, -2.0],
-                    'accumulated_value': [60e9, 20e9],
-                })
-            return pd.DataFrame()
+            # Return price data for requested symbols
+            data = {
+                'VCB': {'match_price': 101.5, 'ref_price': 100.0, 'accumulated_value': 100e9},
+                'ACB': {'match_price': 25.5, 'ref_price': 25.0, 'accumulated_value': 50e9},
+                'TCB': {'match_price': 29.5, 'ref_price': 30.0, 'accumulated_value': 30e9},
+                'VNM': {'match_price': 81.0, 'ref_price': 80.0, 'accumulated_value': 80e9},
+                'MSN': {'match_price': 66.0, 'ref_price': 65.0, 'accumulated_value': 40e9},
+                'HPG': {'match_price': 24.5, 'ref_price': 25.0, 'accumulated_value': 60e9},
+                'HSG': {'match_price': 14.0, 'ref_price': 15.0, 'accumulated_value': 20e9},
+            }
+            rows = []
+            for s in symbols_list:
+                if s in data:
+                    rows.append({'symbol': s, **data[s]})
+            return pd.DataFrame(rows) if rows else pd.DataFrame()
 
         mock_trading.price_board.side_effect = price_board_side_effect
         mock_trading_cls.return_value = mock_trading
@@ -193,8 +190,8 @@ class TestGetSectorPerformance:
         assert changes == sorted(changes, reverse=True)
 
     @patch('src.stocks.market.service.Listing')
-    def test_get_sector_performance_empty_industries(self, mock_listing_cls, service):
-        """Test with empty industries DataFrame."""
+    def test_get_sector_performance_empty_symbols(self, mock_listing_cls, service):
+        """Test with empty symbols_by_industries DataFrame."""
         mock_listing = MagicMock()
         mock_listing.symbols_by_industries.return_value = pd.DataFrame()
         mock_listing_cls.return_value = mock_listing
@@ -206,8 +203,8 @@ class TestGetSectorPerformance:
         assert result.total_sectors == 0
 
     @patch('src.stocks.market.service.Listing')
-    def test_get_sector_performance_none_industries(self, mock_listing_cls, service):
-        """Test with None industries DataFrame."""
+    def test_get_sector_performance_none_symbols(self, mock_listing_cls, service):
+        """Test with None symbols_by_industries DataFrame."""
         mock_listing = MagicMock()
         mock_listing.symbols_by_industries.return_value = None
         mock_listing_cls.return_value = mock_listing
@@ -220,10 +217,10 @@ class TestGetSectorPerformance:
 
     @patch('src.stocks.market.service.Listing')
     @patch('src.stocks.market.service.Trading')
-    def test_get_sector_performance_empty_price_board(self, mock_trading_cls, mock_listing_cls, service, mock_industries_df):
+    def test_get_sector_performance_empty_price_board(self, mock_trading_cls, mock_listing_cls, service, mock_symbols_by_industries_df):
         """Test with empty price board response."""
         mock_listing = MagicMock()
-        mock_listing.symbols_by_industries.return_value = mock_industries_df
+        mock_listing.symbols_by_industries.return_value = mock_symbols_by_industries_df
         mock_listing_cls.return_value = mock_listing
 
         mock_trading = MagicMock()
@@ -238,10 +235,10 @@ class TestGetSectorPerformance:
 
     @patch('src.stocks.market.service.Listing')
     @patch('src.stocks.market.service.Trading')
-    def test_get_sector_performance_price_board_exception(self, mock_trading_cls, mock_listing_cls, service, mock_industries_df):
+    def test_get_sector_performance_price_board_exception(self, mock_trading_cls, mock_listing_cls, service, mock_symbols_by_industries_df):
         """Test graceful handling of price board exceptions."""
         mock_listing = MagicMock()
-        mock_listing.symbols_by_industries.return_value = mock_industries_df
+        mock_listing.symbols_by_industries.return_value = mock_symbols_by_industries_df
         mock_listing_cls.return_value = mock_listing
 
         mock_trading = MagicMock()
@@ -268,23 +265,24 @@ class TestGetSectorPerformance:
 
     @patch('src.stocks.market.service.Listing')
     @patch('src.stocks.market.service.Trading')
-    def test_get_sector_performance_alternative_columns(self, mock_trading_cls, mock_listing_cls, service):
-        """Test with alternative column names (icb_code instead of icb_code2)."""
-        # Use icb_code/icb_name instead of icb_code2/icb_name2
-        industries_df = pd.DataFrame({
+    def test_get_sector_performance_with_icb_columns(self, mock_trading_cls, mock_listing_cls, service):
+        """Test with icb_name2 column for sector grouping."""
+        symbols_df = pd.DataFrame({
             'symbol': ['VCB', 'ACB'],
-            'icb_code': ['8000', '8000'],
-            'icb_name': ['Tai chinh', 'Tai chinh'],
+            'icb_code2': ['8000', '8000'],
+            'icb_name2': ['Tai chinh', 'Tai chinh'],
+            'icb_name3': ['Ngan hang', 'Ngan hang'],
         })
 
         mock_listing = MagicMock()
-        mock_listing.symbols_by_industries.return_value = industries_df
+        mock_listing.symbols_by_industries.return_value = symbols_df
         mock_listing_cls.return_value = mock_listing
 
         mock_trading = MagicMock()
         mock_trading.price_board.return_value = pd.DataFrame({
             'symbol': ['VCB', 'ACB'],
-            'change_pct': [1.0, 2.0],
+            'match_price': [101.0, 25.5],
+            'ref_price': [100.0, 25.0],
             'accumulated_value': [100e9, 50e9],
         })
         mock_trading_cls.return_value = mock_trading
@@ -293,34 +291,35 @@ class TestGetSectorPerformance:
 
         assert isinstance(result, SectorPerformanceResponse)
         assert result.total_sectors == 1
-        assert result.sectors[0].icb_code == '8000'
         assert result.sectors[0].icb_name == 'Tai chinh'
 
     @patch('src.stocks.market.service.Listing')
     @patch('src.stocks.market.service.Trading')
-    def test_get_sector_performance_nan_icb_code(self, mock_trading_cls, mock_listing_cls, service):
-        """Test handling of NaN ICB codes."""
-        industries_df = pd.DataFrame({
+    def test_get_sector_performance_nan_sector_skipped(self, mock_trading_cls, mock_listing_cls, service):
+        """Test handling of NaN sector names - they should be skipped."""
+        symbols_df = pd.DataFrame({
             'symbol': ['VCB', 'ACB', 'XXX'],
             'icb_code2': ['8000', '8000', None],
             'icb_name2': ['Tai chinh', 'Tai chinh', None],
+            'icb_name3': ['Ngan hang', 'Ngan hang', None],
         })
 
         mock_listing = MagicMock()
-        mock_listing.symbols_by_industries.return_value = industries_df
+        mock_listing.symbols_by_industries.return_value = symbols_df
         mock_listing_cls.return_value = mock_listing
 
         mock_trading = MagicMock()
         mock_trading.price_board.return_value = pd.DataFrame({
-            'symbol': ['VCB', 'ACB'],
-            'change_pct': [1.0, 2.0],
-            'accumulated_value': [100e9, 50e9],
+            'symbol': ['VCB', 'ACB', 'XXX'],
+            'match_price': [101.0, 25.5, 10.0],
+            'ref_price': [100.0, 25.0, 10.0],
+            'accumulated_value': [100e9, 50e9, 1e9],
         })
         mock_trading_cls.return_value = mock_trading
 
         result = service.get_sector_performance()
 
-        # Should only have 1 sector (NaN icb_code skipped)
+        # Should only have 1 sector (NaN sector name skipped)
         assert result.total_sectors == 1
 
 
@@ -328,7 +327,7 @@ class TestGetSectorPerformance:
 
 
 class TestMarketCapWeightedCalculation:
-    """Test market-cap weighted change calculation logic."""
+    """Test change calculation and top gainers/losers logic."""
 
     @pytest.fixture
     def service(self):
@@ -336,25 +335,26 @@ class TestMarketCapWeightedCalculation:
 
     @patch('src.stocks.market.service.Listing')
     @patch('src.stocks.market.service.Trading')
-    def test_weighted_calculation_accuracy(self, mock_trading_cls, mock_listing_cls, service):
-        """Test market-cap weighted calculation is accurate."""
-        industries_df = pd.DataFrame({
+    def test_change_calculation_accuracy(self, mock_trading_cls, mock_listing_cls, service):
+        """Test change percentage calculation is accurate."""
+        symbols_df = pd.DataFrame({
             'symbol': ['A', 'B'],
             'icb_code2': ['1000', '1000'],
             'icb_name2': ['Test Sector', 'Test Sector'],
+            'icb_name3': ['Test', 'Test'],
         })
 
         mock_listing = MagicMock()
-        mock_listing.symbols_by_industries.return_value = industries_df
+        mock_listing.symbols_by_industries.return_value = symbols_df
         mock_listing_cls.return_value = mock_listing
 
-        # Stock A: 2% change, 100B market cap
-        # Stock B: -1% change, 50B market cap
-        # Weighted avg = (2*100 + -1*50) / (100+50) = 150/150 = 1.0%
+        # Stock A: 2% change (102/100), Stock B: -1% change (99/100)
+        # Simple average = (2 + -1) / 2 = 0.5%
         mock_trading = MagicMock()
         mock_trading.price_board.return_value = pd.DataFrame({
             'symbol': ['A', 'B'],
-            'change_pct': [2.0, -1.0],
+            'match_price': [102.0, 99.0],
+            'ref_price': [100.0, 100.0],
             'accumulated_value': [100e9, 50e9],
         })
         mock_trading_cls.return_value = mock_trading
@@ -362,26 +362,29 @@ class TestMarketCapWeightedCalculation:
         result = service.get_sector_performance()
 
         assert result.total_sectors == 1
-        assert result.sectors[0].change_pct == 1.0
+        assert result.sectors[0].change_pct == 0.5
 
     @patch('src.stocks.market.service.Listing')
     @patch('src.stocks.market.service.Trading')
     def test_top_gainers_losers_sorting(self, mock_trading_cls, mock_listing_cls, service):
         """Test top gainers and losers are correctly sorted."""
-        industries_df = pd.DataFrame({
+        symbols_df = pd.DataFrame({
             'symbol': ['A', 'B', 'C', 'D', 'E'],
             'icb_code2': ['1000'] * 5,
             'icb_name2': ['Test'] * 5,
+            'icb_name3': ['Test'] * 5,
         })
 
         mock_listing = MagicMock()
-        mock_listing.symbols_by_industries.return_value = industries_df
+        mock_listing.symbols_by_industries.return_value = symbols_df
         mock_listing_cls.return_value = mock_listing
 
         mock_trading = MagicMock()
+        # +5%, +3%, 0%, -2%, -4% changes
         mock_trading.price_board.return_value = pd.DataFrame({
             'symbol': ['A', 'B', 'C', 'D', 'E'],
-            'change_pct': [5.0, 3.0, 0.0, -2.0, -4.0],
+            'match_price': [105.0, 103.0, 100.0, 98.0, 96.0],
+            'ref_price': [100.0, 100.0, 100.0, 100.0, 100.0],
             'accumulated_value': [10e9] * 5,
         })
         mock_trading_cls.return_value = mock_trading
@@ -394,49 +397,54 @@ class TestMarketCapWeightedCalculation:
 
     @patch('src.stocks.market.service.Listing')
     @patch('src.stocks.market.service.Trading')
-    def test_zero_market_cap_handling(self, mock_trading_cls, mock_listing_cls, service):
-        """Test handling of zero/missing market cap values."""
-        industries_df = pd.DataFrame({
+    def test_zero_accumulated_value_handling(self, mock_trading_cls, mock_listing_cls, service):
+        """Test handling of zero/missing accumulated_value."""
+        symbols_df = pd.DataFrame({
             'symbol': ['A', 'B'],
             'icb_code2': ['1000', '1000'],
             'icb_name2': ['Test', 'Test'],
+            'icb_name3': ['Test', 'Test'],
         })
 
         mock_listing = MagicMock()
-        mock_listing.symbols_by_industries.return_value = industries_df
+        mock_listing.symbols_by_industries.return_value = symbols_df
         mock_listing_cls.return_value = mock_listing
 
         mock_trading = MagicMock()
         mock_trading.price_board.return_value = pd.DataFrame({
             'symbol': ['A', 'B'],
-            'change_pct': [2.0, 1.0],
+            'match_price': [102.0, 101.0],
+            'ref_price': [100.0, 100.0],
             'accumulated_value': [0, None],  # Zero and None values
         })
         mock_trading_cls.return_value = mock_trading
 
         result = service.get_sector_performance()
 
-        # Should handle gracefully - uses default 1.0 for missing market cap
+        # Should handle gracefully
         assert isinstance(result, SectorPerformanceResponse)
+        assert result.total_sectors == 1
 
     @patch('src.stocks.market.service.Listing')
     @patch('src.stocks.market.service.Trading')
     def test_total_market_cap_in_billions(self, mock_trading_cls, mock_listing_cls, service):
         """Test total market cap is converted to billions."""
-        industries_df = pd.DataFrame({
+        symbols_df = pd.DataFrame({
             'symbol': ['A'],
             'icb_code2': ['1000'],
             'icb_name2': ['Test'],
+            'icb_name3': ['Test'],
         })
 
         mock_listing = MagicMock()
-        mock_listing.symbols_by_industries.return_value = industries_df
+        mock_listing.symbols_by_industries.return_value = symbols_df
         mock_listing_cls.return_value = mock_listing
 
         mock_trading = MagicMock()
         mock_trading.price_board.return_value = pd.DataFrame({
             'symbol': ['A'],
-            'change_pct': [1.0],
+            'match_price': [101.0],
+            'ref_price': [100.0],
             'accumulated_value': [150_000_000_000],  # 150 billion
         })
         mock_trading_cls.return_value = mock_trading

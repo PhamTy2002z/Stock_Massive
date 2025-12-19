@@ -1,7 +1,9 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
+import { toast } from "sonner"
 import { useStockDetail } from "@/hooks/use-stock-detail"
+import { getStockLoadingToastId, clearStockLoadingToast } from "./stock-search-bar"
 import {
   StockTickerHeader,
   StockDetailPanel,
@@ -27,6 +29,32 @@ interface StockDetailClientProps {
 export function StockDetailClient({ initialSymbol }: StockDetailClientProps) {
   const [activeTab, setActiveTab] = useState<StockDetailTabValue>("overview")
   const { data, isLoading, error, refetch } = useStockDetail(initialSymbol)
+  const prevSymbolRef = useRef<string | null>(null)
+
+  // Update loading toast when data loads or errors
+  useEffect(() => {
+    const toastId = getStockLoadingToastId()
+    if (!toastId) return
+
+    // Only update toast when symbol changes and loading completes
+    if (initialSymbol !== prevSymbolRef.current) {
+      prevSymbolRef.current = initialSymbol
+
+      if (!isLoading && data) {
+        toast.success(`${data.symbol} loaded`, {
+          id: toastId,
+          description: data.company_name || "Stock data ready",
+        })
+        clearStockLoadingToast()
+      } else if (!isLoading && error) {
+        toast.error("Failed to load stock", {
+          id: toastId,
+          description: error.message || "Please try again",
+        })
+        clearStockLoadingToast()
+      }
+    }
+  }, [initialSymbol, isLoading, data, error])
 
   return (
     <section className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">

@@ -92,8 +92,8 @@ class MarketService:
             listing = Listing()
             trading = Trading()
 
-            # Get all symbols with ICB classification
-            all_symbols_df = listing.all_symbols()
+            # Get all symbols with ICB classification (symbols_by_industries has ICB data)
+            all_symbols_df = listing.symbols_by_industries()
             if all_symbols_df is None or all_symbols_df.empty:
                 return SectorPerformanceResponse(sectors=[], generated_at=pd.Timestamp.now(), total_sectors=0)
 
@@ -107,13 +107,17 @@ class MarketService:
             for i in range(0, len(symbols_list), batch_size):
                 batch = symbols_list[i:i + batch_size]
                 try:
-                    price_df = trading.price_board(
+                    batch_price_df = trading.price_board(
                         symbols_list=batch,
                         flatten_columns=True,
                         drop_levels=[0],
                     )
-                    if price_df is not None and not price_df.empty:
-                        all_price_data.append(price_df)
+                    if batch_price_df is not None and not batch_price_df.empty:
+                        # Remove duplicate columns (vnstock returns duplicates like _sending_time)
+                        batch_price_df = batch_price_df.loc[:, ~batch_price_df.columns.duplicated()]
+                        # Reset index to avoid reindexing errors during concat
+                        batch_price_df = batch_price_df.reset_index(drop=True)
+                        all_price_data.append(batch_price_df)
                 except Exception as e:
                     logger.warning(f"Error fetching price batch {i}: {e}")
                     continue
@@ -121,11 +125,22 @@ class MarketService:
             if not all_price_data:
                 return SectorPerformanceResponse(sectors=[], generated_at=pd.Timestamp.now(), total_sectors=0)
 
-            price_df = pd.concat(all_price_data, ignore_index=True)
+            # Concatenate with ignore_index to avoid index conflicts
+            price_df = pd.concat(all_price_data, ignore_index=True, copy=False)
+            # Remove duplicate symbols to avoid reindexing errors
+            price_df = price_df.drop_duplicates(subset=["symbol"], keep="first")
+
+            # Ensure unique symbols in all_symbols_df before merge
+            # Select ICB columns that exist in the DataFrame
+            icb_cols = ["symbol"]
+            for col in ["icb_name2", "icb_name3", "icb_code2"]:
+                if col in all_symbols_df.columns:
+                    icb_cols.append(col)
+            symbols_for_merge = all_symbols_df[icb_cols].drop_duplicates(subset=["symbol"], keep="first")
 
             # Merge with symbol data
             merged = price_df.merge(
-                all_symbols_df[["symbol", "icb_name2", "icb_name3"]],
+                symbols_for_merge,
                 on="symbol",
                 how="left",
             )
@@ -164,10 +179,14 @@ class MarketService:
                 if "icb_code2" in group.columns:
                     icb_code = str(group["icb_code2"].iloc[0]) if pd.notna(group["icb_code2"].iloc[0]) else ""
 
-                # Get top gainers and losers
-                sorted_changes = changes.sort_values(ascending=False)
-                top_gainers = valid_rows.loc[sorted_changes.head(3).index, "symbol"].tolist() if len(sorted_changes) >= 1 else []
-                top_losers = valid_rows.loc[sorted_changes.tail(3).index, "symbol"].tolist() if len(sorted_changes) >= 1 else []
+                # Get top gainers and losers using argsort for robust indexing
+                changes_series = (valid_rows["match_price"] - valid_rows["ref_price"]) / valid_rows["ref_price"] * 100
+                symbols_list = valid_rows["symbol"].tolist()
+                changes_list = changes_series.tolist()
+                # Sort by change descending
+                sorted_pairs = sorted(zip(symbols_list, changes_list), key=lambda x: x[1], reverse=True)
+                top_gainers = [s for s, _ in sorted_pairs[:3]]
+                top_losers = [s for s, _ in sorted_pairs[-3:]]
 
                 sectors.append(SectorPerformanceItem(
                     icb_code=icb_code,
