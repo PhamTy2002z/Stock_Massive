@@ -21,6 +21,7 @@ import {
   FinanceTabContentSkeleton,
   ShareholdersTabContent,
   ShareholdersTabContentSkeleton,
+  SectorPerformance,
 } from "@/components/dashboard"
 import type { StockDetailTabValue } from "@/components/dashboard"
 import { useStockDetail } from "@/hooks/use-stock-detail"
@@ -66,6 +67,14 @@ function HomeContent() {
             Chỉ số thị trường
           </h2>
           <MarketIndices />
+        </section>
+
+        {/* Sector Performance Section */}
+        <section>
+          <h2 className="text-lg font-semibold text-foreground mb-4">
+            Hiệu suất ngành
+          </h2>
+          <SectorPerformance />
         </section>
 
         {/* Selected Stock Detail */}
@@ -175,6 +184,12 @@ export default function Home() {
               Chỉ số thị trường
             </h2>
             <MarketIndices />
+          </section>
+          <section>
+            <h2 className="text-lg font-semibold text-foreground mb-4">
+              Hiệu suất ngành
+            </h2>
+            <SectorPerformance />
           </section>
           <section className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
             <div className="space-y-4">

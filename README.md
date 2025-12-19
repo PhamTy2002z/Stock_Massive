@@ -9,6 +9,7 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | Dashboard Layout | Done | Sidebar, header, responsive |
 | Stock Detail Page | Done | Search, ticker header, stats, tabs |
 | Market Indices | Done | VN-INDEX, VN30, HNX, UPCOM cards |
+| Sector Performance | Done | ICB Level 2 sectors with sorting, auto-refresh |
 | Stock Data API | Done | 20+ endpoints via vnstock |
 | Financial Data | Done | Income, balance sheet, cash flow |
 | Shareholders/Officers | Done | Major holders, management, insider deals |

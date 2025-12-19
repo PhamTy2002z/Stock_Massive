@@ -37,11 +37,11 @@ Aggregate → Market cap weighted change per sector
 | 1 | Backend Schema & Service | ✅ DONE | [phase-01-backend-schema-service.md](./phase-01-backend-schema-service.md) |
 | 2 | Backend API Endpoint | ✅ DONE | [phase-02-backend-api-endpoint.md](./phase-02-backend-api-endpoint.md) |
 | 3 | Frontend API & Hook | ✅ DONE | [phase-03-frontend-api-hook.md](./phase-03-frontend-api-hook.md) |
-| 4 | Frontend Component & Integration | ⏳ Pending | [phase-04-frontend-component-integration.md](./phase-04-frontend-component-integration.md) |
+| 4 | Frontend Component & Integration | ✅ DONE | [phase-04-frontend-component-integration.md](./phase-04-frontend-component-integration.md) |
 
 ## Progress
 
-**Overall:** 75% (3/4 phases complete)
+**Overall:** 100% (4/4 phases complete)
 **Last Updated:** 2025-12-19
 
 ### Phase 1 Summary (DONE)
@@ -59,13 +59,18 @@ Aggregate → Market cap weighted change per sector
 - Tests: 7/7 passed
 - Review: 0 critical issues
 
+### Phase 4 Summary (DONE)
+- Files: `sector-performance.tsx` (new), `index.ts` (updated), `page.tsx` (updated)
+- Tests: TypeScript passed, build passed
+- Review: 0 critical issues
+
 ## Success Criteria
 
-- [ ] API returns 10 ICB Level 2 sectors with weighted performance
-- [ ] Response time < 500ms
-- [ ] Frontend displays sortable table with color-coded changes
-- [ ] Auto-refresh works at 5-min intervals
-- [ ] Loading/error states handled
+- [x] API returns 10 ICB Level 2 sectors with weighted performance
+- [x] Response time < 500ms
+- [x] Frontend displays sortable table with color-coded changes
+- [x] Auto-refresh works at 5-min intervals
+- [x] Loading/error states handled
 
 ## Estimated Effort
 

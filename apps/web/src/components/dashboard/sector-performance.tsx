@@ -1,49 +1,3 @@
-# Phase 4: Frontend Component & Integration
-
-## Context
-
-Final phase of Sector Performance Tab feature. Create the UI component and integrate into dashboard.
-
-## Overview
-
-Build `sector-performance.tsx` component with sortable table, color-coded changes, and integrate as new tab/section on dashboard.
-
-## Requirements
-
-1. Create `SectorPerformance` component with:
-   - Table displaying all sectors
-   - Green/red color coding for positive/negative changes
-   - Sortable columns (by change %, market cap)
-   - Loading skeleton
-   - Error state with retry
-2. Export from dashboard index
-3. Add to dashboard page as new section or tab
-
-## Architecture
-
-```
-page.tsx
-    ↓
-<SectorPerformance />
-    ↓
-useSectorPerformance() hook
-    ↓
-Table with SectorPerformanceItem rows
-```
-
-## Related Files
-
-| File | Action |
-|------|--------|
-| `apps/web/src/components/dashboard/sector-performance.tsx` | Create |
-| `apps/web/src/components/dashboard/index.ts` | Add export |
-| `apps/web/src/app/page.tsx` | Integrate |
-
-## Implementation Steps
-
-### Step 1: Create `sector-performance.tsx`
-
-```tsx
 "use client"
 
 import { useState } from "react"
@@ -116,18 +70,19 @@ export function SectorPerformance({ className }: SectorPerformanceProps) {
     <div className={cn("rounded-xl border bg-card", className)}>
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b">
-        <h3 className="font-semibold">Sector Performance</h3>
+        <h3 className="font-semibold">Hiệu suất ngành</h3>
         <div className="flex items-center gap-3">
           {lastUpdated && (
             <span className="text-xs text-muted-foreground">
-              Updated: {lastUpdated.toLocaleTimeString()}
+              Cập nhật: {lastUpdated.toLocaleTimeString("vi-VN")}
             </span>
           )}
           <button
             onClick={refetch}
             disabled={isLoading}
             className="p-1.5 rounded-md hover:bg-muted transition-colors"
-            title="Refresh"
+            title="Làm mới"
+            aria-label="Làm mới dữ liệu"
           >
             <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
           </button>
@@ -135,52 +90,54 @@ export function SectorPerformance({ className }: SectorPerformanceProps) {
       </div>
 
       {/* Table */}
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto scrollbar-thin">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b bg-muted/50">
               <th className="text-left p-3 font-medium">
                 <button
                   onClick={() => handleSort("icb_name")}
-                  className="inline-flex items-center gap-1 hover:text-foreground"
+                  className="inline-flex items-center gap-1 hover:text-foreground text-muted-foreground"
                 >
-                  Sector
+                  Ngành
                   <ArrowUpDown className="h-3 w-3" />
                 </button>
               </th>
               <th className="text-right p-3 font-medium">
                 <button
                   onClick={() => handleSort("change_pct")}
-                  className="inline-flex items-center gap-1 hover:text-foreground"
+                  className="inline-flex items-center gap-1 hover:text-foreground text-muted-foreground ml-auto"
                 >
-                  Change %
+                  Thay đổi %
                   <ArrowUpDown className="h-3 w-3" />
                 </button>
               </th>
               <th className="text-right p-3 font-medium">
                 <button
                   onClick={() => handleSort("total_market_cap")}
-                  className="inline-flex items-center gap-1 hover:text-foreground"
+                  className="inline-flex items-center gap-1 hover:text-foreground text-muted-foreground ml-auto"
                 >
-                  Market Cap
+                  Vốn hóa
                   <ArrowUpDown className="h-3 w-3" />
                 </button>
               </th>
               <th className="text-right p-3 font-medium">
                 <button
                   onClick={() => handleSort("stock_count")}
-                  className="inline-flex items-center gap-1 hover:text-foreground"
+                  className="inline-flex items-center gap-1 hover:text-foreground text-muted-foreground ml-auto"
                 >
-                  Stocks
+                  Số CP
                   <ArrowUpDown className="h-3 w-3" />
                 </button>
               </th>
-              <th className="text-left p-3 font-medium hidden lg:table-cell">Top Movers</th>
+              <th className="text-left p-3 font-medium hidden lg:table-cell text-muted-foreground">
+                Top tăng/giảm
+              </th>
             </tr>
           </thead>
           <tbody>
             {sortedSectors.map((sector) => (
-              <tr key={sector.icb_code} className="border-b last:border-0 hover:bg-muted/30">
+              <tr key={sector.icb_code} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
                 <td className="p-3">
                   <div className="font-medium">{sector.icb_name}</div>
                   <div className="text-xs text-muted-foreground">{sector.icb_code}</div>
@@ -188,7 +145,7 @@ export function SectorPerformance({ className }: SectorPerformanceProps) {
                 <td className="p-3 text-right">
                   <div
                     className={cn(
-                      "inline-flex items-center gap-1 font-medium",
+                      "inline-flex items-center gap-1 font-medium tabular-nums",
                       sector.change_pct > 0 && "text-green-600 dark:text-green-400",
                       sector.change_pct < 0 && "text-red-600 dark:text-red-400",
                       sector.change_pct === 0 && "text-muted-foreground"
@@ -203,19 +160,21 @@ export function SectorPerformance({ className }: SectorPerformanceProps) {
                     {sector.change_pct.toFixed(2)}%
                   </div>
                 </td>
-                <td className="p-3 text-right text-muted-foreground">
+                <td className="p-3 text-right text-muted-foreground tabular-nums">
                   {formatMarketCap(sector.total_market_cap)}
                 </td>
-                <td className="p-3 text-right text-muted-foreground">{sector.stock_count}</td>
+                <td className="p-3 text-right text-muted-foreground tabular-nums">
+                  {sector.stock_count}
+                </td>
                 <td className="p-3 hidden lg:table-cell">
-                  <div className="flex gap-2 text-xs">
+                  <div className="flex gap-2 text-xs flex-wrap">
                     {sector.top_gainers.slice(0, 2).map((s) => (
-                      <span key={s} className="text-green-600 dark:text-green-400">
+                      <span key={s} className="text-green-600 dark:text-green-400 font-medium">
                         {s}
                       </span>
                     ))}
                     {sector.top_losers.slice(0, 2).map((s) => (
-                      <span key={s} className="text-red-600 dark:text-red-400">
+                      <span key={s} className="text-red-600 dark:text-red-400 font-medium">
                         {s}
                       </span>
                     ))}
@@ -234,7 +193,7 @@ function SectorPerformanceSkeleton() {
   return (
     <div className="rounded-xl border bg-card">
       <div className="flex items-center justify-between p-4 border-b">
-        <Skeleton className="h-5 w-40" />
+        <Skeleton className="h-5 w-32" />
         <Skeleton className="h-4 w-24" />
       </div>
       <div className="p-4 space-y-3">
@@ -259,79 +218,3 @@ function formatMarketCap(value: number): string {
 }
 
 export { SectorPerformanceSkeleton }
-```
-
-### Step 2: Update `index.ts` Export
-
-Add to `apps/web/src/components/dashboard/index.ts`:
-
-```typescript
-export { SectorPerformance, SectorPerformanceSkeleton } from "./sector-performance"
-```
-
-### Step 3: Integrate in `page.tsx`
-
-Add import:
-```typescript
-import { SectorPerformance } from "@/components/dashboard"
-```
-
-Add section after Market Indices (around line 68):
-```tsx
-{/* Sector Performance Section */}
-<section>
-  <h2 className="text-lg font-semibold text-foreground mb-4">
-    Sector Performance
-  </h2>
-  <SectorPerformance />
-</section>
-```
-
-## Todo List
-
-- [x] Create `sector-performance.tsx` component
-- [x] Add skeleton loading state
-- [x] Implement sortable columns
-- [x] Add green/red color coding
-- [x] Export from dashboard index.ts
-- [x] Add section to page.tsx
-- [x] Test responsive layout
-- [x] Verify auto-refresh works
-
-## Success Criteria
-
-- [x] Table displays all 10 ICB Level 2 sectors
-- [x] Positive changes show green, negative show red
-- [x] Columns sortable by clicking headers
-- [x] Loading skeleton shows during fetch
-- [x] Error state with retry button works
-- [x] Auto-refresh updates data every 5 min
-- [x] Responsive on mobile (hide some columns)
-- [x] Matches existing design patterns
-
-## Risks
-
-| Risk | Mitigation |
-|------|------------|
-| Table overflow on mobile | Use overflow-x-auto, hide columns |
-| Color accessibility | Use sufficient contrast ratios |
-| Too many re-renders | Memoize sorted data if needed |
-
-## Design Notes
-
-- Follow existing card pattern (rounded-xl border bg-card)
-- Use muted-foreground for secondary text
-- TrendingUp/TrendingDown icons from lucide-react
-- Match existing table styles from finance-tab-content.tsx
-
-## Testing Checklist
-
-- [x] Component renders without errors
-- [x] Loading state shows skeleton
-- [x] Error state shows message and retry
-- [x] Empty state handled gracefully
-- [x] Sort by each column works
-- [x] Colors correct for +/- changes
-- [x] Refresh button triggers refetch
-- [x] Auto-refresh after 5 minutes
-- [x] Mobile layout acceptable

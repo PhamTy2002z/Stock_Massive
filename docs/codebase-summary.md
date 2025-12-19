@@ -45,7 +45,7 @@ apps/web/src/
 │   └── globals.css             # Global styles + CSS variables
 ├── components/
 │   ├── ui/                     # ShadCN components (15)
-│   ├── dashboard/              # Dashboard feature components (12)
+│   ├── dashboard/              # Dashboard feature components (13)
 │   ├── layout/                 # Layout components (3)
 │   └── providers/              # Context providers (1)
 ├── hooks/
@@ -93,6 +93,7 @@ apps/web/src/
 | StockStatsTable | stock-stats-table.tsx | Financial stats table |
 | FinanceTabContent | finance-tab-content.tsx | Financial statements tab |
 | ShareholdersTabContent | shareholders-tab-content.tsx | Shareholders/officers tab |
+| SectorPerformance | sector-performance.tsx | Sector performance table with sorting |
 
 ### Layout Components
 
@@ -301,9 +302,10 @@ httpx
 |-----------|--------|-------|
 | Frontend Layout | Done | Sidebar, header, responsive, themes |
 | ShadCN Components | Done | 15 components installed |
-| Dashboard Components | Done | 12 feature components |
+| Dashboard Components | Done | 13 feature components |
 | Stock Detail Page | Done | Search, header, stats, tabs |
 | Market Indices | Done | Real API integration |
+| Sector Performance | Done | Full-stack: API + hook + UI component |
 | API Utility | Done | Generic fetch, error handling |
 | Stock API | Done | 20+ endpoints working |
 | vnstock Integration | Done | VCI data source |
@@ -313,4 +315,3 @@ httpx
 | Auth Module | Pending | Placeholder exists |
 | Frontend Features | Partial | Dashboard done, others scaffolded |
 | Tests | Partial | Backend tests exist |
-| Sector Performance | Phase 3 | Backend + API + Frontend hook complete |
