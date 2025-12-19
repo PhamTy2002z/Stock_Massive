@@ -19,3 +19,4 @@ export { FinanceTabContent, FinanceTabContentSkeleton } from "./finance-tab-cont
 export type { FinanceSubTab, PeriodType } from "./finance-tab-content"
 export { ShareholdersTabContent, ShareholdersTabContentSkeleton } from "./shareholders-tab-content"
 export { SectorPerformance, SectorPerformanceSkeleton } from "./sector-performance"
+export { FundCertificates, FundCertificatesSkeleton } from "./fund-certificates"

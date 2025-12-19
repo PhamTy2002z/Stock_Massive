@@ -22,6 +22,7 @@ import {
   ShareholdersTabContent,
   ShareholdersTabContentSkeleton,
   SectorPerformance,
+  FundCertificates,
 } from "@/components/dashboard"
 import type { StockDetailTabValue } from "@/components/dashboard"
 import { useStockDetail } from "@/hooks/use-stock-detail"
@@ -67,14 +68,6 @@ function HomeContent() {
             Chỉ số thị trường
           </h2>
           <MarketIndices />
-        </section>
-
-        {/* Sector Performance Section */}
-        <section>
-          <h2 className="text-lg font-semibold text-foreground mb-4">
-            Hiệu suất ngành
-          </h2>
-          <SectorPerformance />
         </section>
 
         {/* Selected Stock Detail */}
@@ -168,6 +161,25 @@ function HomeContent() {
             )}
           </div>
         </section>
+
+        {/* Sector Performance & Fund Certificates - Side by side below Stock Overview */}
+        <section className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
+          {/* Sector Performance - Takes more space */}
+          <div>
+            <h2 className="text-lg font-semibold text-foreground mb-4">
+              Hiệu suất ngành
+            </h2>
+            <SectorPerformance />
+          </div>
+
+          {/* Fund Certificates - Fixed width like company info */}
+          <div>
+            <h2 className="text-lg font-semibold text-foreground mb-4">
+              Chứng chỉ quỹ
+            </h2>
+            <FundCertificates />
+          </div>
+        </section>
       </div>
     </DashboardLayout>
   )
@@ -185,12 +197,6 @@ export default function Home() {
             </h2>
             <MarketIndices />
           </section>
-          <section>
-            <h2 className="text-lg font-semibold text-foreground mb-4">
-              Hiệu suất ngành
-            </h2>
-            <SectorPerformance />
-          </section>
           <section className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
             <div className="space-y-4">
               <StockTickerHeaderSkeleton />
@@ -200,6 +206,20 @@ export default function Home() {
             </div>
             <div className="space-y-4">
               <StockCompanyInfoSkeleton />
+            </div>
+          </section>
+          <section className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
+            <div>
+              <h2 className="text-lg font-semibold text-foreground mb-4">
+                Hiệu suất ngành
+              </h2>
+              <SectorPerformance />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-foreground mb-4">
+                Chứng chỉ quỹ
+              </h2>
+              <FundCertificates />
             </div>
           </section>
         </div>

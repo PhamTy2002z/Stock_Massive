@@ -45,7 +45,7 @@ export function Sparkline({
   // Gradient fill path (area under the line)
   const areaPathD = `${pathD} L ${width - padding},${height - padding} L ${padding},${height - padding} Z`
 
-  const strokeColor = positive ? "#22C55E" : "#EF4444"
+  const strokeColor = positive ? "hsl(var(--chart-1))" : "hsl(var(--chart-2))"
   const gradientId = React.useId()
 
   return (

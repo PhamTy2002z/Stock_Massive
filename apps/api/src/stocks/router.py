@@ -29,6 +29,7 @@ from src.stocks.schemas import (
     OfficersResponse,
     InsiderDealsResponse,
     SectorPerformanceResponse,
+    FundCertificatesResponse,
 )
 from src.stocks.service import StockService, StockServiceError, get_stock_service
 
@@ -154,6 +155,26 @@ async def get_sector_performance() -> SectorPerformanceResponse:
     try:
         service = get_service()
         return service.get_sector_performance()
+    except StockServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/fund-certificates", response_model=FundCertificatesResponse)
+async def get_fund_certificates(
+    fund_type: Optional[str] = Query(None, description="Filter by type: STOCK, BOND, BALANCED"),
+) -> FundCertificatesResponse:
+    """Get fund certificates (ETFs and open-end funds).
+
+    Returns list of funds with NAV and price change data.
+
+    - **fund_type**: Optional filter by fund type (STOCK, BOND, BALANCED)
+    """
+    if fund_type and fund_type.upper() not in ("STOCK", "BOND", "BALANCED"):
+        raise HTTPException(status_code=400, detail="Invalid fund_type. Use STOCK, BOND, or BALANCED")
+
+    try:
+        service = get_service()
+        return service.get_fund_certificates(fund_type)
     except StockServiceError as e:
         raise HTTPException(status_code=502, detail=str(e))
 

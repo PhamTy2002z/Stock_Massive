@@ -313,3 +313,24 @@ export interface SectorPerformanceResponse {
 export async function fetchSectorPerformance(): Promise<SectorPerformanceResponse> {
   return fetchApi<SectorPerformanceResponse>("/stocks/sector-performance")
 }
+
+// Fund Certificates Types
+export interface FundCertificateItem {
+  symbol: string
+  short_name: string
+  fund_type: string | null
+  nav: number | null
+  price: number | null
+  change_pct: number | null
+}
+
+export interface FundCertificatesResponse {
+  funds: FundCertificateItem[]
+  generated_at: string
+  total_count: number
+}
+
+export async function fetchFundCertificates(fundType?: string): Promise<FundCertificatesResponse> {
+  const params = fundType ? `?fund_type=${encodeURIComponent(fundType)}` : ""
+  return fetchApi<FundCertificatesResponse>(`/stocks/fund-certificates${params}`)
+}

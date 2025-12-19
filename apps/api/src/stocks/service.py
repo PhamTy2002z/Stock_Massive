@@ -32,6 +32,8 @@ from src.stocks.schemas import (
     InsiderDealsResponse,
     SectorPerformanceItem,
     SectorPerformanceResponse,
+    FundCertificateItem,
+    FundCertificatesResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -786,6 +788,8 @@ class StockService:
         """Get market-cap weighted sector performance.
 
         Uses ICB Level 2 classification (10 sectors).
+        Calculates change_pct from match_price and ref_price.
+        Calculates market_cap from listed_share * match_price.
 
         Returns:
             SectorPerformanceResponse with sector performance data
@@ -807,7 +811,6 @@ class StockService:
                 )
 
             # Group by ICB Level 2
-            # Expected columns: symbol, icb_code2, icb_name2, etc.
             icb_col = 'icb_code2' if 'icb_code2' in industries_df.columns else 'icb_code'
             name_col = 'icb_name2' if 'icb_name2' in industries_df.columns else 'icb_name'
 
@@ -847,30 +850,48 @@ class StockService:
 
                     for _, row in price_df.iterrows():
                         symbol = row.get('symbol', '')
-                        change_pct = self._safe_float(row.get('change_pct')) or 0.0
-                        # Market cap from accumulated_value or estimate
-                        market_cap = self._safe_float(row.get('accumulated_value')) or 1.0
+
+                        # Calculate change_pct from match_price and ref_price
+                        match_price = self._safe_float(row.get('match_price')) or 0.0
+                        ref_price = self._safe_float(row.get('ref_price')) or 0.0
+
+                        if ref_price > 0 and match_price > 0:
+                            change_pct = ((match_price - ref_price) / ref_price) * 100
+                        else:
+                            change_pct = 0.0
+
+                        # Calculate market cap from listed_share * match_price
+                        # listed_share is in shares, match_price is in VND
+                        listed_share = self._safe_float(row.get('listed_share')) or 0.0
+                        if listed_share > 0 and match_price > 0:
+                            # Market cap in VND
+                            market_cap = listed_share * match_price
+                        else:
+                            # Fallback to accumulated_value if no listed_share
+                            market_cap = self._safe_float(row.get('accumulated_value')) or 0.0
 
                         if market_cap > 0:
                             weighted_change += change_pct * market_cap
                             total_cap += market_cap
-                            stock_changes.append((symbol, change_pct))
+                            stock_changes.append((symbol, change_pct, market_cap))
 
                     if total_cap > 0:
                         avg_change = weighted_change / total_cap
                     else:
                         avg_change = 0.0
 
-                    # Sort for top gainers/losers
+                    # Sort for top gainers/losers by change_pct
                     stock_changes.sort(key=lambda x: x[1], reverse=True)
-                    top_gainers = [s[0] for s in stock_changes[:3]]
-                    top_losers = [s[0] for s in stock_changes[-3:]]
+                    top_gainers = [s[0] for s in stock_changes[:3] if s[1] > 0]
+                    top_losers = [s[0] for s in stock_changes[-3:] if s[1] < 0]
+                    # Reverse losers to show worst first
+                    top_losers = list(reversed(top_losers))
 
                     results.append(SectorPerformanceItem(
                         icb_code=str(icb_code),
                         icb_name=sector_data['name'],
                         change_pct=round(avg_change, 2),
-                        total_market_cap=round(total_cap / 1_000_000_000, 2),
+                        total_market_cap=round(total_cap / 1_000_000_000, 2),  # Convert to billion VND
                         stock_count=len(price_df),
                         top_gainers=top_gainers,
                         top_losers=top_losers,
@@ -891,6 +912,71 @@ class StockService:
         except Exception as e:
             logger.error(f"Error fetching sector performance: {e}")
             raise StockServiceError(f"Failed to fetch sector performance: {e}")
+
+    def get_fund_certificates(self, fund_type: Optional[str] = None) -> FundCertificatesResponse:
+        """Get fund certificates (ETFs and open-end funds) with price changes.
+
+        Args:
+            fund_type: Optional filter by type (STOCK, BOND, BALANCED)
+
+        Returns:
+            FundCertificatesResponse with fund data
+        """
+        from datetime import datetime
+        from vnstock.explorer.fmarket.fund import Fund
+
+        try:
+            fund = Fund()
+
+            # Get fund listing - already includes nav_change_previous
+            funds_df = fund.listing()
+
+            if funds_df is None or funds_df.empty:
+                return FundCertificatesResponse(
+                    funds=[],
+                    generated_at=datetime.now(),
+                    total_count=0
+                )
+
+            # Filter by fund type if specified
+            if fund_type and 'fund_type' in funds_df.columns:
+                funds_df = funds_df[funds_df['fund_type'].str.upper() == fund_type.upper()]
+
+            results = []
+
+            # Build response - nav_change_previous is already in listing data
+            for _, row in funds_df.iterrows():
+                symbol = row.get('short_name', '')
+                if not symbol:
+                    continue
+
+                fund_name = row.get('name', symbol)
+                fund_type_val = row.get('fund_type', None)
+                nav = self._safe_float(row.get('nav'))
+                # Use nav_change_previous directly from listing (% change vs previous day)
+                change_pct = self._safe_float(row.get('nav_change_previous'))
+
+                results.append(FundCertificateItem(
+                    symbol=symbol,
+                    short_name=fund_name[:50] if fund_name else symbol,
+                    fund_type=fund_type_val,
+                    nav=nav,
+                    price=None,
+                    change_pct=change_pct,
+                ))
+
+            # Sort by change_pct (gainers first), None values at end
+            results.sort(key=lambda x: (x.change_pct is None, -(x.change_pct or 0)))
+
+            return FundCertificatesResponse(
+                funds=results,
+                generated_at=datetime.now(),
+                total_count=len(results),
+            )
+
+        except Exception as e:
+            logger.error(f"Error fetching fund certificates: {e}")
+            raise StockServiceError(f"Failed to fetch fund certificates: {e}")
 
     # === Private conversion methods ===
 
