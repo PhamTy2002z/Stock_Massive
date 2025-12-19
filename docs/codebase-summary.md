@@ -33,6 +33,7 @@ Stock_Massive/
 - ShadCN/UI (new-york style)
 - Radix UI primitives
 - next-themes (dark/light mode)
+- TanStack Query v5.90 (server state management)
 
 ### Directory Structure
 
@@ -47,11 +48,12 @@ apps/web/src/
 │   ├── ui/                     # ShadCN components (16)
 │   ├── dashboard/              # Dashboard feature components (14)
 │   ├── layout/                 # Layout components (4)
-│   └── providers/              # Context providers (1)
+│   └── providers/              # Context providers (2)
 ├── hooks/
 │   └── use-mobile.tsx          # useIsMobile() viewport hook
 └── lib/
     ├── api.ts                  # API fetch utility + market data
+    ├── query-keys.ts           # TanStack Query key factory
     └── utils.ts                # cn() class merge utility
 ```
 
@@ -283,6 +285,8 @@ react: ^18.3.1
 typescript: ^5.3
 tailwindcss: ^3.4
 @radix-ui/*: various
+@tanstack/react-query: ^5.90.12
+@tanstack/react-query-devtools: ^5.90.12
 class-variance-authority
 clsx
 tailwind-merge
