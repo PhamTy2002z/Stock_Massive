@@ -41,21 +41,51 @@ Stock_Massive/
 apps/web/src/
 ├── app/                        # App Router pages
 │   ├── layout.tsx              # Root layout with providers
-│   ├── page.tsx                # Dashboard home
+│   ├── page.tsx                # Dashboard home (Server Component with SSR)
 │   ├── not-found.tsx           # 404 page
 │   └── globals.css             # Global styles + CSS variables
 ├── components/
 │   ├── ui/                     # ShadCN components (16)
-│   ├── dashboard/              # Dashboard feature components (14)
-│   ├── layout/                 # Layout components (4)
+│   ├── dashboard/              # Dashboard feature components (16)
+│   ├── layout/                 # Layout components (5)
 │   └── providers/              # Context providers (2)
 ├── hooks/
 │   └── use-mobile.tsx          # useIsMobile() viewport hook
 └── lib/
-    ├── api.ts                  # API fetch utility + market data
+    ├── api.ts                  # Client-side API fetch utility
+    ├── api-server.ts           # Server-side API functions with ISR
     ├── query-keys.ts           # TanStack Query key factory
     └── utils.ts                # cn() class merge utility
 ```
+
+### SSR Architecture (Server Components + Client Islands)
+
+The dashboard uses a hybrid SSR pattern with TanStack Query:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  page.tsx (Server Component)                                │
+│  ├── prefetchData() - Parallel prefetch on server           │
+│  │   ├── fetchMarketIndicesServer()                         │
+│  │   ├── fetchSectorPerformanceServer()                     │
+│  │   └── fetchStockDetailServer(symbol)                     │
+│  ├── dehydrate(queryClient) - Serialize cache               │
+│  └── HydrationBoundary - Pass state to client               │
+│       └── Client Islands (use cached data)                  │
+│           ├── DashboardLayoutClient                         │
+│           ├── StockDetailClient                             │
+│           ├── MarketIndices                                 │
+│           └── SectorPerformance                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Data Flow:**
+1. Server Component receives request with `?symbol=XXX`
+2. `prefetchData()` fetches data in parallel using server-side API functions
+3. `dehydrate()` serializes QueryClient cache to JSON
+4. `HydrationBoundary` passes dehydrated state to client
+5. Client hooks (`useStockDetail`, etc.) use cached data instantly (no loading state)
+6. Subsequent client-side navigation uses client API functions
 
 ### UI Components (ShadCN)
 
@@ -104,6 +134,13 @@ apps/web/src/
 | AppSidebar | app-sidebar.tsx | Main navigation sidebar |
 | DashboardHeader | dashboard-header.tsx | Top header bar |
 | DashboardLayout | dashboard-layout.tsx | Layout wrapper |
+| DashboardLayoutClient | dashboard-layout-client.tsx | Client island for layout with URL state |
+
+### Dashboard Client Islands
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| StockDetailClient | stock-detail-client.tsx | Client island for stock detail with tabs |
 
 ### Hooks (8 custom hooks)
 
@@ -123,7 +160,7 @@ apps/web/src/
 **lib/utils.ts:**
 - `cn()` - Merges Tailwind classes (clsx + tailwind-merge)
 
-**lib/api.ts:**
+**lib/api.ts (Client-side):**
 - `fetchApi<T>()` - Generic fetch wrapper with error handling
 - `fetchPriceBoard(symbols)` - Get real-time prices
 - `fetchMarketIndices()` - Get market indices data
@@ -136,6 +173,13 @@ apps/web/src/
 - `fetchCashFlow()` - Get cash flow statement
 - `fetchShareholders()` - Get shareholders data
 - Types: `PriceBoardItem`, `MarketIndex`, `StockDetail`, `SectorPerformanceItem`, `SectorPerformanceResponse`, `ApiError`
+
+**lib/api-server.ts (Server-side with ISR):**
+- `fetchApiServer<T>()` - Server fetch with ISR (60s revalidation)
+- `fetchMarketIndicesServer()` - SSR market indices
+- `fetchSectorPerformanceServer()` - SSR sector performance
+- `fetchStockDetailServer(symbol)` - SSR stock detail
+- Uses `import "server-only"` to prevent client bundle inclusion
 
 ---
 
@@ -320,11 +364,12 @@ httpx
 |-----------|--------|-------|
 | Frontend Layout | Done | Sidebar, header, responsive, themes |
 | ShadCN Components | Done | 16 components installed |
-| Dashboard Components | Done | 14 feature components |
+| Dashboard Components | Done | 16 feature components (incl. client islands) |
 | Stock Detail Page | Done | Search, header, stats, tabs |
 | Market Indices | Done | Real API integration |
 | Sector Performance | Done | Full-stack: API + hook + UI component |
-| API Utility | Done | Generic fetch, error handling |
+| API Utility | Done | Client + Server-side fetch functions |
+| SSR + TanStack Query | Done | Server prefetch, HydrationBoundary, ISR |
 | Stock API | Done | 27 endpoints working |
 | vnstock Integration | Done | VCI data source |
 | Database Models | Done | IntradayBar model |
