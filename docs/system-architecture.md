@@ -251,6 +251,12 @@ CREATE INDEX ix_intraday_bars_timestamp ON intraday_bars(timestamp);
 
 ## Future Considerations
 
+### Sector Performance Tab (In Progress)
+
+- **Phase 1 (Done)**: Backend service `get_sector_performance()` - ICB Level 2 aggregation, market-cap weighted change calculation
+- **Phase 2 (Pending)**: API endpoint `/sectors/performance`
+- **Phase 3 (Pending)**: Frontend tab component
+
 ### Caching Layer (Planned)
 
 - Redis for vnstock response caching

@@ -26,6 +26,7 @@
 ### In Progress
 
 - [ ] Frontend feature pages (charts, portfolio, watchlist)
+- [ ] Sector Performance Tab (25% - Phase 1 backend complete)
 
 ---
 
@@ -234,6 +235,7 @@
 
 | Feature | Date | Notes |
 |---------|------|-------|
+| Sector Performance - Phase 1 | Dec 19, 2024 | Backend schema & service (18 tests passed) |
 | Shareholders API | Dec 2024 | Major holders endpoint |
 | Officers API | Dec 2024 | Company management endpoint |
 | Insider Deals API | Dec 2024 | Insider trading endpoint |

@@ -196,12 +196,30 @@ Base URL: `/api/v1/stocks`
 | GET | `/{symbol}/volume-analysis` | Volume pattern analysis |
 | POST | `/intraday/collect` | Trigger intraday collection |
 
+#### Sector Analysis (Phase 1 - Service Only)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/sectors/performance` | Sector performance (pending Phase 2) |
+
 ### Service Layer
 
 **StockService** (`stocks/service.py`):
 - Wraps vnstock library
 - Data source: VCI (Vietnam)
 - Singleton pattern via `get_stock_service()`
+
+**Key Methods:**
+- `get_history()` - Historical OHLCV data
+- `get_intraday()` - Intraday tick data
+- `get_company_overview()` - Company info
+- `get_financial_ratios()` - Financial ratios
+- `get_income_statement_detailed()` - Income statement
+- `get_balance_sheet_detailed()` - Balance sheet
+- `get_cash_flow_detailed()` - Cash flow
+- `get_shareholders()` - Major shareholders
+- `get_officers()` - Company officers
+- `get_insider_deals()` - Insider trading
+- `get_sector_performance()` - Sector performance aggregation (Phase 1)
 
 ### Database Models
 
@@ -293,3 +311,4 @@ httpx
 | Auth Module | Pending | Placeholder exists |
 | Frontend Features | Partial | Dashboard done, others scaffolded |
 | Tests | Partial | Backend tests exist |
+| Sector Performance | Phase 1 | Backend service ready, endpoint pending |

@@ -379,3 +379,26 @@ class InsiderDealsResponse(BaseModel):
     symbol: str
     deals: list[InsiderDealItem]
     total_count: int
+
+
+# === Sector Performance Schemas ===
+
+
+class SectorPerformanceItem(BaseModel):
+    """Sector performance data."""
+
+    icb_code: str = Field(..., description="ICB Level 2 code")
+    icb_name: str = Field(..., description="Sector name (Vietnamese)")
+    change_pct: float = Field(..., description="Market-cap weighted change %")
+    total_market_cap: float = Field(..., description="Total market cap (billion VND)")
+    stock_count: int = Field(..., description="Number of stocks in sector")
+    top_gainers: list[str] = Field(default_factory=list, description="Top 3 gaining symbols")
+    top_losers: list[str] = Field(default_factory=list, description="Top 3 losing symbols")
+
+
+class SectorPerformanceResponse(BaseModel):
+    """Response for sector performance endpoint."""
+
+    sectors: list[SectorPerformanceItem]
+    generated_at: datetime
+    total_sectors: int
