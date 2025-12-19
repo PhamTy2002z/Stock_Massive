@@ -132,7 +132,7 @@ function HomeContent() {
 
                 {/* Tab Content - Finance */}
                 {activeTab === "finance" && (
-                  <FinanceTabContent />
+                  <FinanceTabContent symbol={data.symbol} />
                 )}
 
                 {/* Tab Content - Shareholders */}

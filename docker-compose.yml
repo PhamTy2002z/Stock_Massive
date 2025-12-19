@@ -43,6 +43,8 @@ services:
     volumes:
       - ./apps/web/src:/app/src
       - ./apps/web/public:/app/public
+      - ./apps/web/package.json:/app/package.json
+      - ./apps/web/package-lock.json:/app/package-lock.json
     ports:
       - "3000:3000"
     depends_on:
