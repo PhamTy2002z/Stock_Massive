@@ -277,9 +277,15 @@ CREATE INDEX ix_intraday_bars_timestamp ON intraday_bars(timestamp);
 ## Future Considerations
 
 ### Caching Layer
-- Redis caching has been implemented for volume anomaly detection results, reducing redundant computations and improving response times.
-- Keyed by symbol and baseline days (`{symbol}:{days}`), with TTL based on trading hours.
-- Plans for vnstock response caching are still pending.
+
+- **Redis Caching (Implemented)**:
+    - **Generic Cache Class**: Introduced `TradingHoursCache` in `core/cache.py` for managing time-sensitive data.
+    - **Cache Instances**: Five cache instances are utilized for: `volume_anomaly`, `market_indices`, `price_board`, `symbols`, and `sector_performance`.
+    - **Trading-Hours-Aware TTL**: Cache entries have a Time-To-Live (TTL) that is intelligent about Vietnam market trading hours (09:00-15:00), ensuring data freshness during active periods and longer persistence off-hours.
+    - **Graceful Degradation**: The system is designed to handle Redis unavailability gracefully, ensuring continuous operation even if the cache service is down.
+    - **Affected Endpoints**:
+        - `apps/api/src/stocks/price/router.py`: Caches `market-indices` and `price-board`.
+        - `apps/api/src/stocks/market/router.py`: Caches `symbols` and `sector-performance`.
 
 ### WebSocket Support (Planned)
 

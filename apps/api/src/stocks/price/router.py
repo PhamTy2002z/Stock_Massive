@@ -9,8 +9,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
 from src.stocks.intraday_collector import IntradayCollector
+from src.core.cache import TradingHoursCache
 from src.stocks.price.cache import volume_anomaly_cache
 from ..service import get_stock_service
+
+# Cache instances for endpoints
+market_indices_cache = TradingHoursCache(
+    key_prefix="stock:indices:",
+    ttl_trading=30,
+    ttl_off_hours=3600,
+)
+price_board_cache = TradingHoursCache(
+    key_prefix="stock:price_board:",
+    ttl_trading=15,
+    ttl_off_hours=3600,
+)
 from ..schemas.price import (
     StockPrice,
     IntradayTick,
@@ -62,9 +75,22 @@ async def get_intraday(
 @router.get("/market-indices", response_model=List[MarketIndexItem])
 async def get_market_indices() -> List[MarketIndexItem]:
     """Get market indices data (VN-INDEX, VN30, HNX-INDEX, UPCOM-INDEX)."""
+    cache_key = "all"
+
+    # Check cache first
+    cached = market_indices_cache.get(cache_key)
+    if cached is not None:
+        return [MarketIndexItem(**item) for item in cached]
+
+    # Cache miss - fetch from service
     try:
         service = get_stock_service()
-        return service.get_market_indices()
+        result = service.get_market_indices()
+
+        # Cache the result (serialize to dict)
+        market_indices_cache.set(cache_key, [item.model_dump() for item in result])
+
+        return result
     except StockServiceError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -82,9 +108,23 @@ async def get_price_board(
     if len(symbol_list) > 50:
         raise HTTPException(status_code=400, detail="Maximum 50 symbols allowed")
 
+    # Use sorted symbols as cache key for consistency
+    cache_key = ",".join(sorted(symbol_list))
+
+    # Check cache first
+    cached = price_board_cache.get(cache_key)
+    if cached is not None:
+        return [PriceBoardItem(**item) for item in cached]
+
+    # Cache miss - fetch from service
     try:
         service = get_stock_service()
-        return service.get_price_board(symbol_list)
+        result = service.get_price_board(symbol_list)
+
+        # Cache the result
+        price_board_cache.set(cache_key, [item.model_dump() for item in result])
+
+        return result
     except StockServiceError as e:
         raise HTTPException(status_code=502, detail=str(e))
 

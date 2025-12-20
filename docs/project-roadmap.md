@@ -118,10 +118,10 @@
 
 **Priority: Medium**
 
-- [ ] Redis integration
-- [ ] Cache vnstock responses
+- [x] Redis integration
+- [x] Cache vnstock responses
 - [ ] Cache invalidation strategy
-- [ ] Rate limiting
+- [x] Rate limiting
 
 ---
 
@@ -254,3 +254,4 @@
 | Design System | Dec 20, 2025 | Modern + Clean established as standard |
 | Volume Anomaly Detection (On-Demand Collector) | Dec 20, 2025 | Auto-collect intraday data on endpoint request |
 | Custom Hooks | Dec 20, 2025 | 9 hooks for data fetching |
+| Extended Caching | Dec 20, 2025 | Caching for 4 high-traffic endpoints |

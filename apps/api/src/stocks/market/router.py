@@ -4,6 +4,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
+from src.core.cache import TradingHoursCache
 from ..service import get_stock_service
 from ..schemas.company import StockSymbol
 from ..schemas.market import (
@@ -14,15 +15,40 @@ from ..shared import StockServiceError
 
 router = APIRouter()
 
+# Cache instances for endpoints
+symbols_cache = TradingHoursCache(
+    key_prefix="stock:symbols:",
+    ttl_trading=3600,
+    ttl_off_hours=86400,
+)
+sector_performance_cache = TradingHoursCache(
+    key_prefix="stock:sector:",
+    ttl_trading=300,
+    ttl_off_hours=3600,
+)
+
 
 @router.get("/symbols", response_model=List[StockSymbol])
 async def list_symbols(
     exchange: Optional[str] = Query(None, description="Filter by exchange: HOSE, HNX, UPCOM"),
 ) -> List[StockSymbol]:
     """List all available stock symbols."""
+    cache_key = exchange or "all"
+
+    # Check cache first
+    cached = symbols_cache.get(cache_key)
+    if cached is not None:
+        return [StockSymbol(**item) for item in cached]
+
+    # Cache miss - fetch from service
     try:
         service = get_stock_service()
-        return service.list_symbols(exchange=exchange)
+        result = service.list_symbols(exchange=exchange)
+
+        # Cache the result
+        symbols_cache.set(cache_key, [item.model_dump() for item in result])
+
+        return result
     except StockServiceError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -53,9 +79,22 @@ async def search_symbols(
 @router.get("/sector-performance", response_model=SectorPerformanceResponse)
 async def get_sector_performance() -> SectorPerformanceResponse:
     """Get market-cap weighted sector performance (ICB Level 2)."""
+    cache_key = "performance"
+
+    # Check cache first
+    cached = sector_performance_cache.get(cache_key)
+    if cached is not None:
+        return SectorPerformanceResponse(**cached)
+
+    # Cache miss - fetch from service
     try:
         service = get_stock_service()
-        return service.get_sector_performance()
+        result = service.get_sector_performance()
+
+        # Cache the result
+        sector_performance_cache.set(cache_key, result.model_dump())
+
+        return result
     except StockServiceError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
