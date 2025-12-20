@@ -245,7 +245,8 @@
 | Insider Deals API | Dec 2024 | Insider trading endpoint |
 | Volume Analysis | Dec 2024 | Peak period analysis |
 | Volume Anomaly Detection (Backend API) | Dec 20, 2025 | New API for detailed anomaly detection |
-| Volume Anomaly Detection (Frontend Chart) | Dec 20, 2025 | Frontend chart component with anomaly highlighting |
+| Volume Anomaly Detection (Frontend Integration) | Dec 20, 2025 | Frontend integration of chart into stock detail page |
+| Volume Anomaly Detection (Full Feature) | Dec 20, 2025 | Full-stack implementation of volume anomaly detection complete | |
 | Intraday Collection | Dec 2024 | 5-min bar aggregation |
 | Stock Detail Page | Dec 2024 | Search, header, stats, tabs |
 | Finance Tab | Dec 2024 | Income, balance, cash flow tables |
