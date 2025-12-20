@@ -2,8 +2,9 @@
 
 **Date:** 2025-12-20
 **Priority:** High
-**Status:** Pending
+**Status:** ✅ Completed: 2025-12-20
 **Estimated Effort:** 3 hours
+**Code Review:** plans/reports/code-reviewer-251220-1443-volume-anomaly-phase02.md
 
 ## Context
 
@@ -375,28 +376,30 @@ Test in browser: `http://localhost:3000/test-chart`
 
 ## Todo
 
-- [ ] Install recharts and types
-- [ ] Add VolumeAnomalyResponse types to api.ts
-- [ ] Add fetchVolumeAnomalies function to api.ts
-- [ ] Create volume-anomaly-chart.tsx component
-- [ ] Implement CustomTooltip component
-- [ ] Add color mapping for anomaly levels
-- [ ] Add formatVolume utility
-- [ ] Create loading skeleton component
-- [ ] Export components from index.ts
-- [ ] Test with mock data
-- [ ] Verify responsive behavior
-- [ ] Verify tooltip interactions
-- [ ] Delete test page after verification
+- [x] Install recharts and types
+- [x] Add VolumeAnomalyResponse types to api.ts
+- [x] Add fetchVolumeAnomalies function to api.ts
+- [x] Create volume-anomaly-chart.tsx component
+- [x] Implement CustomTooltip component
+- [x] Add color mapping for anomaly levels
+- [x] Add formatVolume utility
+- [x] Create loading skeleton component
+- [x] Export components from index.ts
+- [x] Test with mock data
+- [x] Verify responsive behavior
+- [x] Verify tooltip interactions
+- [x] Delete test page after verification
 
 ## Success Criteria
 
-- Chart renders 72 bars correctly
-- Bars colored by anomaly level (normal/elevated/high/very_high)
-- Baseline average line displayed as dashed overlay
-- Tooltips show volume, ratio, and anomaly status
-- X-axis shows hourly labels (09:00, 10:00, etc.)
-- Y-axis formats volumes with K/M suffixes
-- Responsive on mobile (stacks properly)
-- Loading skeleton matches chart dimensions
-- Component follows shadcn/ui design patterns
+- [x] Chart renders 72 bars correctly
+- [x] Bars colored by anomaly level (normal/elevated/high/very_high)
+- [x] Baseline average line displayed as dashed overlay
+- [x] Tooltips show volume, ratio, and anomaly status
+- [x] X-axis shows hourly labels (09:00, 10:00, etc.)
+- [x] Y-axis formats volumes with K/M suffixes
+- [x] Responsive on mobile (stacks properly)
+- [x] Loading skeleton matches chart dimensions
+- [x] Component follows shadcn/ui design patterns
+
+**All criteria met.** See code review report for details.
