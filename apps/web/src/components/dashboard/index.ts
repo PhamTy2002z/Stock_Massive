@@ -21,3 +21,5 @@ export { ShareholdersTabContent, ShareholdersTabContentSkeleton } from "./shareh
 export { SectorPerformance, SectorPerformanceSkeleton } from "./sector-performance"
 export { FundCertificates, FundCertificatesSkeleton } from "./fund-certificates"
 export { StockDetailClient } from "./stock-detail-client"
+export { VolumeAnomalyChart, VolumeAnomalyChartSkeleton } from "./volume-anomaly-chart"
+export { VolumeTabContent } from "./volume-tab-content"
