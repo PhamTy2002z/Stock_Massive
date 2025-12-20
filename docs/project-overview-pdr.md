@@ -11,6 +11,7 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 3. Enable portfolio tracking and watchlist management
 4. Secure user authentication and data persistence
 5. Integrate vnstock library for comprehensive Vietnam market data
+6. Implement advanced analytical features like Volume Anomaly Detection
 
 ---
 
@@ -29,6 +30,7 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | Database Models | Done | IntradayBar model with SQLAlchemy |
 | Sector Performance | Done | ICB Level 2 with sorting, auto-refresh |
 | Toast Notifications | Done | Sonner integration for user feedback |
+| Volume Anomaly Detection API | Done | New endpoint and core logic for detecting volume anomalies |
 | Auth Pages | Scaffolded | Routes exist, logic pending |
 | Charts Page | Scaffolded | Route exists, not implemented |
 | Portfolio Page | Scaffolded | Route exists, not implemented |
@@ -46,6 +48,7 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 - REST API via vnstock integration
 - Intraday data collection and storage
 - Volume pattern analysis
+- **Volume Anomaly Detection with API endpoint**
 
 ### In Scope (Phase 2 - Planned)
 
@@ -53,6 +56,7 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 - User authentication (JWT)
 - Watchlist management
 - Portfolio tracking
+- **Frontend integration for Volume Anomaly Detection visualization**
 
 ### Data Sources
 
@@ -65,6 +69,7 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
   - Price board (real-time)
   - Stock groups (VN30, HNX30, etc.)
   - Shareholders, officers, insider deals
+  - **Volume Anomaly Data**
 
 ### Out of Scope (Phase 1)
 
@@ -91,6 +96,7 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | ORM | SQLAlchemy 2.0 | Mature, async support, migrations |
 | Database | PostgreSQL 16 | Reliable, feature-rich, scalable |
 | Scheduler | APScheduler 4.0 | Background job scheduling |
+| **Volume Anomaly Detection Libraries** | **Pandas, Greenlet** | **Efficient data manipulation and asynchronous processing for anomaly detection** |
 
 ---
 
@@ -115,6 +121,7 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `GET /market-indices` | VN-INDEX, VN30, HNX, UPCOM |
 | `GET /price-board` | Real-time prices (multiple symbols) |
 | `GET /{symbol}/detail` | Comprehensive stock detail |
+| `GET /{symbol}/volume-anomalies` | **Retrieve volume anomaly detection results** |
 
 #### Company & Financials
 | Endpoint | Purpose |
@@ -124,7 +131,7 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `GET /{symbol}/financials/income` | Income statement (simple) |
 | `GET /{symbol}/financials/income-statement` | Income statement (detailed) |
 | `GET /{symbol}/financials/balance-sheet` | Balance sheet (simple) |
-| `GET /{symbol}/financials/balance-sheet-detailed` | Balance sheet (detailed) |
+| `GET /{symbol}/financial-statement-detailed` | Balance sheet (detailed) |
 | `GET /{symbol}/financials/cash-flow` | Cash flow statement |
 
 #### Shareholders & Analysis
@@ -134,7 +141,7 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `GET /{symbol}/officers` | Company officers/management |
 | `GET /{symbol}/insider-deals` | Insider trading deals |
 | `GET /{symbol}/volume-analysis` | Volume pattern analysis |
-| `POST /intraday/collect` | Trigger intraday collection |
+| `POST /intraday/collect` | Trigger intraday collection and **volume anomaly detection** |
 | `GET /sector-performance` | Sector performance (ICB Level 2) |
 | `GET /fund-certificates` | Fund certificates data |
 
@@ -149,6 +156,7 @@ All endpoints prefixed with `/api/v1/stocks`:
 | Security vulnerabilities | OWASP guidelines, input validation |
 | vnstock library changes | Pin version, monitor updates |
 | Data accuracy | Cross-validate with official sources |
+| **Complexity of Volume Anomaly Detection** | **Modularize logic, extensive testing, clear schema definitions** |
 
 ---
 
@@ -159,6 +167,7 @@ All endpoints prefixed with `/api/v1/stocks`:
 - Zero critical security vulnerabilities
 - 80%+ test coverage on critical paths
 - Support all VN30 stocks without errors
+- **Accurate and timely detection of volume anomalies**
 
 ---
 
@@ -174,6 +183,7 @@ All endpoints prefixed with `/api/v1/stocks`:
 - [x] User can view sector performance (ICB Level 2)
 - [x] User receives toast notifications on actions
 - [x] API handles concurrent requests efficiently
+- [x] **API provides volume anomaly detection results**
 - [ ] User can view stock price charts
 - [ ] User can register and login
 - [ ] User can create watchlists
@@ -183,3 +193,4 @@ All endpoints prefixed with `/api/v1/stocks`:
 - [ ] User can track portfolio positions
 - [ ] User can set price alerts
 - [ ] User can export data to CSV/Excel
+- [ ] **Frontend visualization of volume anomalies on charts**

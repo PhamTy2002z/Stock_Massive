@@ -1,7 +1,7 @@
 ---
 title: "Volume Anomaly Detection"
 description: "Detect unusual trading volume by time slot with bar chart visualization"
-status: validated
+status: in-progress
 effort: 8h
 priority: high
 branch: main
@@ -48,7 +48,7 @@ Implement historical volume anomaly detection feature for intraday trading analy
 
 ## Phases
 
-1. **Phase 01: Backend API** (3h)
+1. **Phase 01: Backend API** (3h) - Completed: 2025-12-20
    - Update schemas with anomaly fields
    - Enhance `analyze_volume()` method
    - Test endpoint with sample data

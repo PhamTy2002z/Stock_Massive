@@ -47,6 +47,7 @@
   - Financial ratios
   - Stock indices (VN30, HNX30, etc.)
   - Shareholders, officers, insider deals
+  - **Volume Anomaly Data**
 
 ---
 
@@ -74,14 +75,14 @@ Stock_Massive/
 │       │   ├── stocks/           # Stocks module
 │       │   │   ├── router.py     # HTTP endpoints
 │       │   │   ├── service.py    # vnstock integration
-│       │   │   ├── schemas.py    # Pydantic models
+│       │   │   ├── schemas/      # Pydantic models (price.py now includes VolumeAnomalyLevel, VolumeTimeSlot, VolumeAnomalyResponse)
 │       │   │   ├── models.py     # SQLAlchemy models
 │       │   │   ├── jobs.py       # Scheduled jobs
-│       │   │   └── intraday_collector.py
+│       │   │   └── intraday_collector.py # Includes detect_volume_anomalies()
 │       │   ├── core/             # Config, database, scheduler
 │       │   └── main.py
 │       ├── alembic/              # DB migrations
-│       └── requirements.txt
+│       └── requirements.txt      # Now includes greenlet and pandas
 │
 ├── packages/                     # Shared code (placeholders)
 ├── docker/                       # Docker configs
@@ -114,6 +115,7 @@ Stock_Massive/
 │   ├── officers                  # GET - Company officers
 │   ├── insider-deals             # GET - Insider trades
 │   ├── volume-analysis           # GET - Volume patterns
+│   ├── volume-anomalies          # GET - Volume anomaly detection results
 │   └── financials/
 │       ├── ratios                # GET - Financial ratios
 │       ├── income                # GET - Income (simple)
@@ -157,7 +159,8 @@ Router (HTTP) → Service (Business Logic) → vnstock/Repository
 2. IntradayCollector fetches tick data via vnstock
 3. Ticks aggregated to 5-minute OHLCV bars
 4. Bars upserted to PostgreSQL (IntradayBar model)
-5. Volume analysis available via /volume-analysis endpoint
+5. Volume anomaly detection is performed on collected intraday data.
+6. Volume anomaly data is available via /volume-anomalies endpoint.
 ```
 
 ---
@@ -184,6 +187,7 @@ RootLayout
                         ├── Overview Tab
                         ├── Finance Tab
                         └── Shareholders Tab
+                        ├── Volume Anomaly Tab (Planned)
 ```
 
 ### State Management
@@ -254,7 +258,7 @@ CREATE INDEX ix_intraday_bars_timestamp ON intraday_bars(timestamp);
 
 | Job | Schedule | Description |
 |-----|----------|-------------|
-| Intraday Collection | 15:30 ICT daily | Collect and aggregate tick data |
+| Intraday Collection | 15:30 ICT daily | Collect and aggregate tick data and perform volume anomaly detection |
 
 ---
 
