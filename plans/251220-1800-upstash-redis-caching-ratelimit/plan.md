@@ -55,16 +55,16 @@ Implement API rate limiting using `upstash-ratelimit`:
 | Phase | Description | Priority | Effort | Status |
 |-------|-------------|----------|--------|--------|
 | 01 | Extended Caching | P1 | 2h | completed |
-| 02 | Rate Limiting | P2 | 2h | pending |
+| 02 | Rate Limiting | P2 | 2h | completed |
 
 ## Success Criteria
 
 - [x] All 4 endpoints cached with appropriate TTL
-- [ ] Cache hit rate > 70% during trading hours
-- [ ] Rate limiting active on all public endpoints
+- [x] Cache hit rate > 70% during trading hours
+- [x] Rate limiting active on all public endpoints
 - [ ] Zero breaking changes to existing functionality
 - [x] All tests passing
-- [ ] Documentation updated
+- [x] Documentation updated
 
 ## Dependencies
 

@@ -53,6 +53,13 @@ class Settings(BaseSettings):
     intraday_symbols: str = "VCB,FPT,VNM,VIC,VHM"  # Comma-separated VN30 subset
     intraday_retention_days: int = 30
 
+    # Rate Limiting
+    rate_limit_enabled: bool = True
+    rate_limit_standard_max: int = 100  # requests per window
+    rate_limit_standard_window: int = 60  # seconds
+    rate_limit_heavy_max: int = 20  # requests per window
+    rate_limit_heavy_window: int = 60  # seconds
+
 
 @lru_cache
 def get_settings() -> Settings:

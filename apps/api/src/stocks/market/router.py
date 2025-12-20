@@ -2,9 +2,10 @@
 
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.core.cache import TradingHoursCache
+from src.core.ratelimit import standard_rate_limit
 from ..service import get_stock_service
 from ..schemas.company import StockSymbol
 from ..schemas.market import (
@@ -28,7 +29,7 @@ sector_performance_cache = TradingHoursCache(
 )
 
 
-@router.get("/symbols", response_model=List[StockSymbol])
+@router.get("/symbols", response_model=List[StockSymbol], dependencies=[Depends(standard_rate_limit)])
 async def list_symbols(
     exchange: Optional[str] = Query(None, description="Filter by exchange: HOSE, HNX, UPCOM"),
 ) -> List[StockSymbol]:
@@ -53,7 +54,7 @@ async def list_symbols(
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@router.get("/symbols/group/{group}", response_model=List[str])
+@router.get("/symbols/group/{group}", response_model=List[str], dependencies=[Depends(standard_rate_limit)])
 async def list_symbols_by_group(group: str) -> List[str]:
     """List symbols by group (e.g., VN30, HNX30, VN100)."""
     try:
@@ -63,7 +64,7 @@ async def list_symbols_by_group(group: str) -> List[str]:
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@router.get("/symbols/search", response_model=List[StockSymbol])
+@router.get("/symbols/search", response_model=List[StockSymbol], dependencies=[Depends(standard_rate_limit)])
 async def search_symbols(
     q: str = Query(..., min_length=1, description="Search query (symbol or company name)"),
     limit: int = Query(20, ge=1, le=50, description="Maximum results to return"),
@@ -76,7 +77,7 @@ async def search_symbols(
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@router.get("/sector-performance", response_model=SectorPerformanceResponse)
+@router.get("/sector-performance", response_model=SectorPerformanceResponse, dependencies=[Depends(standard_rate_limit)])
 async def get_sector_performance() -> SectorPerformanceResponse:
     """Get market-cap weighted sector performance (ICB Level 2)."""
     cache_key = "performance"
@@ -99,7 +100,7 @@ async def get_sector_performance() -> SectorPerformanceResponse:
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@router.get("/fund-certificates", response_model=FundCertificatesResponse)
+@router.get("/fund-certificates", response_model=FundCertificatesResponse, dependencies=[Depends(standard_rate_limit)])
 async def get_fund_certificates(
     fund_type: Optional[str] = Query(None, description="Filter by type: STOCK, BOND, BALANCED"),
 ) -> FundCertificatesResponse:

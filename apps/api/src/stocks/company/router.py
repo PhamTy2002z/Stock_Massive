@@ -1,7 +1,8 @@
 """Company domain router for company-related endpoints."""
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from src.core.ratelimit import standard_rate_limit
 from ..service import get_stock_service
 from ..schemas.company import (
     CompanyOverview,
@@ -15,7 +16,7 @@ from ..shared import StockServiceError
 router = APIRouter()
 
 
-@router.get("/{symbol}/company", response_model=CompanyOverview)
+@router.get("/{symbol}/company", response_model=CompanyOverview, dependencies=[Depends(standard_rate_limit)])
 async def get_company_overview(symbol: str) -> CompanyOverview:
     """Get company overview information."""
     try:
@@ -25,7 +26,7 @@ async def get_company_overview(symbol: str) -> CompanyOverview:
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@router.get("/{symbol}/detail", response_model=StockDetail)
+@router.get("/{symbol}/detail", response_model=StockDetail, dependencies=[Depends(standard_rate_limit)])
 async def get_stock_detail(symbol: str) -> StockDetail:
     """Get comprehensive stock detail data (composite endpoint)."""
     try:
@@ -35,7 +36,7 @@ async def get_stock_detail(symbol: str) -> StockDetail:
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@router.get("/{symbol}/shareholders", response_model=ShareholdersResponse)
+@router.get("/{symbol}/shareholders", response_model=ShareholdersResponse, dependencies=[Depends(standard_rate_limit)])
 async def get_shareholders(symbol: str) -> ShareholdersResponse:
     """Get major shareholders for a stock."""
     try:
@@ -45,7 +46,7 @@ async def get_shareholders(symbol: str) -> ShareholdersResponse:
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@router.get("/{symbol}/officers", response_model=OfficersResponse)
+@router.get("/{symbol}/officers", response_model=OfficersResponse, dependencies=[Depends(standard_rate_limit)])
 async def get_officers(
     symbol: str,
     filter_by: str = Query("working", description="Filter: working, resigned, all"),
@@ -61,7 +62,7 @@ async def get_officers(
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@router.get("/{symbol}/insider-deals", response_model=InsiderDealsResponse)
+@router.get("/{symbol}/insider-deals", response_model=InsiderDealsResponse, dependencies=[Depends(standard_rate_limit)])
 async def get_insider_deals(symbol: str) -> InsiderDealsResponse:
     """Get insider trading deals for a stock."""
     try:

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
+from src.core.ratelimit import standard_rate_limit, heavy_rate_limit
 from src.stocks.intraday_collector import IntradayCollector
 from src.core.cache import TradingHoursCache
 from src.stocks.price.cache import volume_anomaly_cache
@@ -38,7 +39,7 @@ from ..shared import StockServiceError
 router = APIRouter()
 
 
-@router.get("/{symbol}/history", response_model=List[StockPrice])
+@router.get("/{symbol}/history", response_model=List[StockPrice], dependencies=[Depends(standard_rate_limit)])
 async def get_history(
     symbol: str,
     start: date = Query(..., description="Start date (YYYY-MM-DD)"),
@@ -59,7 +60,7 @@ async def get_history(
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@router.get("/{symbol}/intraday", response_model=List[IntradayTick])
+@router.get("/{symbol}/intraday", response_model=List[IntradayTick], dependencies=[Depends(standard_rate_limit)])
 async def get_intraday(
     symbol: str,
     page_size: int = Query(10000, ge=100, le=50000, description="Number of ticks to fetch"),
@@ -72,7 +73,7 @@ async def get_intraday(
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@router.get("/market-indices", response_model=List[MarketIndexItem])
+@router.get("/market-indices", response_model=List[MarketIndexItem], dependencies=[Depends(standard_rate_limit)])
 async def get_market_indices() -> List[MarketIndexItem]:
     """Get market indices data (VN-INDEX, VN30, HNX-INDEX, UPCOM-INDEX)."""
     cache_key = "all"
@@ -95,7 +96,7 @@ async def get_market_indices() -> List[MarketIndexItem]:
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@router.get("/price-board", response_model=List[PriceBoardItem])
+@router.get("/price-board", response_model=List[PriceBoardItem], dependencies=[Depends(standard_rate_limit)])
 async def get_price_board(
     symbols: str = Query(..., description="Comma-separated list of symbols (e.g., VCB,ACB,TCB)"),
 ) -> List[PriceBoardItem]:
@@ -129,7 +130,7 @@ async def get_price_board(
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@router.post("/intraday/collect", response_model=IntradayCollectionResult)
+@router.post("/intraday/collect", response_model=IntradayCollectionResult, dependencies=[Depends(heavy_rate_limit)])
 async def collect_intraday_data(
     symbols: list[str] = Query(
         default=["VCB", "FPT", "VNM"],
@@ -146,7 +147,7 @@ async def collect_intraday_data(
     return IntradayCollectionResult(**result)
 
 
-@router.get("/{symbol}/volume-analysis", response_model=VolumeAnalysisResponse)
+@router.get("/{symbol}/volume-analysis", response_model=VolumeAnalysisResponse, dependencies=[Depends(standard_rate_limit)])
 async def get_volume_analysis(
     symbol: str,
     days: int = Query(default=10, ge=1, le=30, description="Number of days to analyze"),
@@ -166,7 +167,7 @@ async def get_volume_analysis(
     return VolumeAnalysisResponse(**result)
 
 
-@router.get("/{symbol}/volume-anomalies", response_model=VolumeAnomalyResponse)
+@router.get("/{symbol}/volume-anomalies", response_model=VolumeAnomalyResponse, dependencies=[Depends(heavy_rate_limit)])
 async def get_volume_anomalies(
     symbol: str,
     days: int = Query(default=20, ge=5, le=60, description="Baseline period in days"),

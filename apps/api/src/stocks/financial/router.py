@@ -2,8 +2,9 @@
 
 from typing import List
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from src.core.ratelimit import heavy_rate_limit
 from ..service import get_stock_service
 from ..schemas.financial import (
     FinancialRatio,
@@ -18,7 +19,7 @@ from ..shared import StockServiceError
 router = APIRouter()
 
 
-@router.get("/{symbol}/financials/ratios", response_model=List[FinancialRatio])
+@router.get("/{symbol}/financials/ratios", response_model=List[FinancialRatio], dependencies=[Depends(heavy_rate_limit)])
 async def get_financial_ratios(
     symbol: str,
     period: str = Query("year", description="Period: year or quarter"),
@@ -38,7 +39,7 @@ async def get_financial_ratios(
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@router.get("/{symbol}/financials/income", response_model=List[IncomeStatementItem])
+@router.get("/{symbol}/financials/income", response_model=List[IncomeStatementItem], dependencies=[Depends(heavy_rate_limit)])
 async def get_income_statement(
     symbol: str,
     period: str = Query("year", description="Period: year or quarter"),
@@ -55,7 +56,7 @@ async def get_income_statement(
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@router.get("/{symbol}/financials/income-statement", response_model=IncomeStatementResponse)
+@router.get("/{symbol}/financials/income-statement", response_model=IncomeStatementResponse, dependencies=[Depends(heavy_rate_limit)])
 async def get_income_statement_detailed(
     symbol: str,
     period: str = Query("quarter", description="Period: year or quarter"),
@@ -72,7 +73,7 @@ async def get_income_statement_detailed(
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@router.get("/{symbol}/financials/balance-sheet", response_model=List[BalanceSheetItem])
+@router.get("/{symbol}/financials/balance-sheet", response_model=List[BalanceSheetItem], dependencies=[Depends(heavy_rate_limit)])
 async def get_balance_sheet(
     symbol: str,
     period: str = Query("year", description="Period: year or quarter"),
@@ -89,7 +90,7 @@ async def get_balance_sheet(
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@router.get("/{symbol}/financials/balance-sheet-detailed", response_model=BalanceSheetResponse)
+@router.get("/{symbol}/financials/balance-sheet-detailed", response_model=BalanceSheetResponse, dependencies=[Depends(heavy_rate_limit)])
 async def get_balance_sheet_detailed(
     symbol: str,
     period: str = Query("quarter", description="Period: year or quarter"),
@@ -106,7 +107,7 @@ async def get_balance_sheet_detailed(
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@router.get("/{symbol}/financials/cash-flow", response_model=CashFlowResponse)
+@router.get("/{symbol}/financials/cash-flow", response_model=CashFlowResponse, dependencies=[Depends(heavy_rate_limit)])
 async def get_cash_flow_detailed(
     symbol: str,
     period: str = Query("quarter", description="Period: year or quarter"),
