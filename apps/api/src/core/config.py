@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     # Vnstock
     vnstock_source: str = "VCI"  # Default data source (VCI is most reliable)
 
+    # Upstash Redis
+    upstash_redis_url: str = ""
+    upstash_redis_token: str = ""
+
     # Scheduler
     scheduler_enabled: bool = True
     intraday_collect_hour: int = 15

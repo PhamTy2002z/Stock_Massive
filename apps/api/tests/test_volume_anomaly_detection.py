@@ -457,8 +457,16 @@ class TestVolumeAnomalyEndpoint:
         """Test endpoint with valid symbol returns 200 and 72 slots."""
         from src.stocks.price.router import get_volume_anomalies
 
-        with patch("src.stocks.price.router.IntradayCollector") as MockCollector:
+        with patch("src.stocks.price.router.IntradayCollector") as MockCollector, \
+             patch("src.stocks.price.router.volume_anomaly_cache") as mock_cache:
             mock_collector = MockCollector.return_value
+            mock_cache.get.return_value = None  # Cache miss
+
+            async def mock_collect_symbol(*args, **kwargs):
+                return []
+
+            async def mock_save_bars(*args, **kwargs):
+                return 0
 
             async def mock_detect_volume_anomalies(*args, **kwargs):
                 slots = []
@@ -485,6 +493,8 @@ class TestVolumeAnomalyEndpoint:
                     "latest_date": date.today(),
                 }
 
+            mock_collector.collect_symbol = mock_collect_symbol
+            mock_collector.save_bars = mock_save_bars
             mock_collector.detect_volume_anomalies = mock_detect_volume_anomalies
 
             result = await get_volume_anomalies("VCB", days=20, db=mock_db)
@@ -492,14 +502,55 @@ class TestVolumeAnomalyEndpoint:
             assert result.symbol == "VCB"
             assert result.days_analyzed == 20
             assert len(result.time_slots) == 72
+            mock_cache.set.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_endpoint_no_data_returns_404(self, mock_db):
-        """Test endpoint returns 404 when no data found."""
+    async def test_endpoint_cache_hit(self, mock_db):
+        """Test endpoint returns cached response without DB query."""
         from src.stocks.price.router import get_volume_anomalies
 
-        with patch("src.stocks.price.router.IntradayCollector") as MockCollector:
+        cached_data = {
+            "symbol": "VCB",
+            "days_analyzed": 20,
+            "trading_session": "09:00-15:00",
+            "time_slots": [{
+                "hour": 9,
+                "minute_bucket": 0,
+                "time_label": "09:00",
+                "current_volume": 100000,
+                "avg_volume": 100000.0,
+                "volume_ratio": 1.0,
+                "anomaly_level": "normal",
+                "sample_count": 10,
+            }],
+            "generated_at": datetime.now().isoformat(),
+            "latest_date": date.today().isoformat(),
+        }
+
+        with patch("src.stocks.price.router.IntradayCollector") as MockCollector, \
+             patch("src.stocks.price.router.volume_anomaly_cache") as mock_cache:
+            mock_cache.get.return_value = cached_data  # Cache hit
+
+            result = await get_volume_anomalies("VCB", days=20, db=mock_db)
+
+            assert result.symbol == "VCB"
+            MockCollector.assert_not_called()  # No collector instantiated on cache hit
+
+    @pytest.mark.asyncio
+    async def test_endpoint_no_data_returns_empty_slots(self, mock_db):
+        """Test endpoint returns empty time_slots when no data available."""
+        from src.stocks.price.router import get_volume_anomalies
+
+        with patch("src.stocks.price.router.IntradayCollector") as MockCollector, \
+             patch("src.stocks.price.router.volume_anomaly_cache") as mock_cache:
             mock_collector = MockCollector.return_value
+            mock_cache.get.return_value = None  # Cache miss
+
+            async def mock_collect_symbol(*args, **kwargs):
+                return []  # No bars collected
+
+            async def mock_save_bars(*args, **kwargs):
+                return 0
 
             async def mock_detect_volume_anomalies(*args, **kwargs):
                 return {
@@ -511,23 +562,73 @@ class TestVolumeAnomalyEndpoint:
                     "latest_date": None,
                 }
 
+            mock_collector.collect_symbol = mock_collect_symbol
+            mock_collector.save_bars = mock_save_bars
             mock_collector.detect_volume_anomalies = mock_detect_volume_anomalies
 
-            with pytest.raises(HTTPException) as exc_info:
-                await get_volume_anomalies("INVALID", days=20, db=mock_db)
+            result = await get_volume_anomalies("INVALID", days=20, db=mock_db)
 
-            assert exc_info.value.status_code == 404
-            assert "No intraday data found" in exc_info.value.detail
-            assert "INVALID" in exc_info.value.detail
+            assert result.symbol == "INVALID"
+            assert result.time_slots == []
+            assert result.latest_date is None
+
+    @pytest.mark.asyncio
+    async def test_endpoint_collection_failure_returns_historical(self, mock_db):
+        """Test endpoint still returns data when collection fails."""
+        from src.stocks.price.router import get_volume_anomalies
+
+        with patch("src.stocks.price.router.IntradayCollector") as MockCollector, \
+             patch("src.stocks.price.router.volume_anomaly_cache") as mock_cache:
+            mock_collector = MockCollector.return_value
+            mock_cache.get.return_value = None  # Cache miss
+
+            async def mock_collect_symbol_fail(*args, **kwargs):
+                raise Exception("vnstock API error")
+
+            async def mock_detect_volume_anomalies(*args, **kwargs):
+                return {
+                    "symbol": "VCB",
+                    "days_analyzed": 20,
+                    "trading_session": "09:00-15:00",
+                    "time_slots": [{
+                        "hour": 9,
+                        "minute_bucket": 0,
+                        "time_label": "09:00",
+                        "current_volume": 100000,
+                        "avg_volume": 100000.0,
+                        "volume_ratio": 1.0,
+                        "anomaly_level": "normal",
+                        "sample_count": 10,
+                    }],
+                    "generated_at": datetime.now(),
+                    "latest_date": date.today(),
+                }
+
+            mock_collector.collect_symbol = mock_collect_symbol_fail
+            mock_collector.detect_volume_anomalies = mock_detect_volume_anomalies
+
+            result = await get_volume_anomalies("VCB", days=20, db=mock_db)
+
+            # Should still return historical data despite collection failure
+            assert result.symbol == "VCB"
+            assert len(result.time_slots) == 1
 
     @pytest.mark.asyncio
     async def test_endpoint_default_days_parameter(self, mock_db):
         """Test endpoint uses default days=20."""
         from src.stocks.price.router import get_volume_anomalies
 
-        with patch("src.stocks.price.router.IntradayCollector") as MockCollector:
+        with patch("src.stocks.price.router.IntradayCollector") as MockCollector, \
+             patch("src.stocks.price.router.volume_anomaly_cache") as mock_cache:
             mock_collector = MockCollector.return_value
+            mock_cache.get.return_value = None
             call_args = []
+
+            async def mock_collect_symbol(*args, **kwargs):
+                return []
+
+            async def mock_save_bars(*args, **kwargs):
+                return 0
 
             async def mock_detect_volume_anomalies(*args, **kwargs):
                 call_args.append((args, kwargs))
@@ -551,6 +652,8 @@ class TestVolumeAnomalyEndpoint:
                     "latest_date": date.today(),
                 }
 
+            mock_collector.collect_symbol = mock_collect_symbol
+            mock_collector.save_bars = mock_save_bars
             mock_collector.detect_volume_anomalies = mock_detect_volume_anomalies
 
             result = await get_volume_anomalies("VCB", db=mock_db)
@@ -563,8 +666,16 @@ class TestVolumeAnomalyEndpoint:
         """Test endpoint accepts custom days parameter."""
         from src.stocks.price.router import get_volume_anomalies
 
-        with patch("src.stocks.price.router.IntradayCollector") as MockCollector:
+        with patch("src.stocks.price.router.IntradayCollector") as MockCollector, \
+             patch("src.stocks.price.router.volume_anomaly_cache") as mock_cache:
             mock_collector = MockCollector.return_value
+            mock_cache.get.return_value = None
+
+            async def mock_collect_symbol(*args, **kwargs):
+                return []
+
+            async def mock_save_bars(*args, **kwargs):
+                return 0
 
             async def mock_detect_volume_anomalies(*args, **kwargs):
                 return {
@@ -587,6 +698,8 @@ class TestVolumeAnomalyEndpoint:
                     "latest_date": date.today(),
                 }
 
+            mock_collector.collect_symbol = mock_collect_symbol
+            mock_collector.save_bars = mock_save_bars
             mock_collector.detect_volume_anomalies = mock_detect_volume_anomalies
 
             result = await get_volume_anomalies("VCB", days=30, db=mock_db)
@@ -619,53 +732,76 @@ class TestVolumeAnomalyIntegration:
         mock_db = AsyncMock()
         today = date.today()
 
-        # Mock latest date query
-        mock_latest_result = MagicMock()
-        mock_latest_result.scalar.return_value = today
+        with patch("src.stocks.price.router.volume_anomaly_cache") as mock_cache:
+            mock_cache.get.return_value = None  # Cache miss
 
-        # Mock baseline query with multiple time slots
-        mock_baseline_result = MagicMock()
-        mock_baseline_result.fetchall.return_value = [
-            MagicMock(hour=9, minute_bucket=0, avg_volume=100000.0, sample_count=10),
-            MagicMock(hour=9, minute_bucket=5, avg_volume=95000.0, sample_count=10),
-            MagicMock(hour=14, minute_bucket=55, avg_volume=80000.0, sample_count=10),
-        ]
+            # Mock latest date query
+            mock_latest_result = MagicMock()
+            mock_latest_result.scalar.return_value = today
 
-        # Mock current day query
-        mock_current_result = MagicMock()
-        mock_current_result.fetchall.return_value = [
-            MagicMock(hour=9, minute_bucket=0, volume=200000),  # 2x - high
-            MagicMock(hour=9, minute_bucket=5, volume=160000),  # 1.68x - elevated
-            MagicMock(hour=14, minute_bucket=55, volume=240000),  # 3x - very_high
-        ]
+            # Mock baseline query with multiple time slots
+            mock_baseline_result = MagicMock()
+            mock_baseline_result.fetchall.return_value = [
+                MagicMock(hour=9, minute_bucket=0, avg_volume=100000.0, sample_count=10),
+                MagicMock(hour=9, minute_bucket=5, avg_volume=95000.0, sample_count=10),
+                MagicMock(hour=14, minute_bucket=55, avg_volume=80000.0, sample_count=10),
+            ]
 
-        mock_db.execute.side_effect = [
-            mock_latest_result,
-            mock_baseline_result,
-            mock_current_result,
-        ]
+            # Mock current day query
+            mock_current_result = MagicMock()
+            mock_current_result.fetchall.return_value = [
+                MagicMock(hour=9, minute_bucket=0, volume=200000),  # 2x - high
+                MagicMock(hour=9, minute_bucket=5, volume=160000),  # 1.68x - elevated
+                MagicMock(hour=14, minute_bucket=55, volume=240000),  # 3x - very_high
+            ]
 
-        result = await get_volume_anomalies("VCB", days=20, db=mock_db)
+            mock_db.execute.side_effect = [
+                mock_latest_result,
+                mock_baseline_result,
+                mock_current_result,
+            ]
 
-        # Verify response structure
-        assert isinstance(result, VolumeAnomalyResponse)
-        assert result.symbol == "VCB"
-        assert result.days_analyzed == 20
-        assert result.trading_session == "09:00-15:00"
-        assert len(result.time_slots) == 72
-        assert result.latest_date == today
+            with patch("src.stocks.price.router.IntradayCollector") as MockCollector:
+                mock_collector = MockCollector.return_value
 
-        # Verify specific anomaly levels
-        slot_9_00 = next(s for s in result.time_slots if s.hour == 9 and s.minute_bucket == 0)
-        assert slot_9_00.anomaly_level == VolumeAnomalyLevel.HIGH
-        assert slot_9_00.volume_ratio == 2.0
+                async def mock_collect_symbol(*args, **kwargs):
+                    return []
 
-        slot_9_05 = next(s for s in result.time_slots if s.hour == 9 and s.minute_bucket == 5)
-        assert slot_9_05.anomaly_level == VolumeAnomalyLevel.ELEVATED
+                async def mock_save_bars(*args, **kwargs):
+                    return 0
 
-        slot_14_55 = next(s for s in result.time_slots if s.hour == 14 and s.minute_bucket == 55)
-        assert slot_14_55.anomaly_level == VolumeAnomalyLevel.VERY_HIGH
-        assert slot_14_55.volume_ratio == 3.0
+                async def real_detect(symbol, days):
+                    # Call the real IntradayCollector logic
+                    from src.stocks.intraday_collector import IntradayCollector as RealCollector
+                    with patch("src.stocks.service.get_stock_service"):
+                        collector = RealCollector(mock_db)
+                        return await collector.detect_volume_anomalies(symbol, days)
+
+                mock_collector.collect_symbol = mock_collect_symbol
+                mock_collector.save_bars = mock_save_bars
+                mock_collector.detect_volume_anomalies = real_detect
+
+                result = await get_volume_anomalies("VCB", days=20, db=mock_db)
+
+            # Verify response structure
+            assert isinstance(result, VolumeAnomalyResponse)
+            assert result.symbol == "VCB"
+            assert result.days_analyzed == 20
+            assert result.trading_session == "09:00-15:00"
+            assert len(result.time_slots) == 72
+            assert result.latest_date == today
+
+            # Verify specific anomaly levels
+            slot_9_00 = next(s for s in result.time_slots if s.hour == 9 and s.minute_bucket == 0)
+            assert slot_9_00.anomaly_level == VolumeAnomalyLevel.HIGH
+            assert slot_9_00.volume_ratio == 2.0
+
+            slot_9_05 = next(s for s in result.time_slots if s.hour == 9 and s.minute_bucket == 5)
+            assert slot_9_05.anomaly_level == VolumeAnomalyLevel.ELEVATED
+
+            slot_14_55 = next(s for s in result.time_slots if s.hour == 14 and s.minute_bucket == 55)
+            assert slot_14_55.anomaly_level == VolumeAnomalyLevel.VERY_HIGH
+            assert slot_14_55.volume_ratio == 3.0
 
     @pytest.mark.asyncio
     async def test_edge_case_boundary_ratios(self):
@@ -675,42 +811,64 @@ class TestVolumeAnomalyIntegration:
         mock_db = AsyncMock()
         today = date.today()
 
-        mock_latest_result = MagicMock()
-        mock_latest_result.scalar.return_value = today
+        with patch("src.stocks.price.router.volume_anomaly_cache") as mock_cache:
+            mock_cache.get.return_value = None  # Cache miss
 
-        # Test exact boundary values
-        mock_baseline_result = MagicMock()
-        mock_baseline_result.fetchall.return_value = [
-            MagicMock(hour=9, minute_bucket=0, avg_volume=100000.0, sample_count=10),
-            MagicMock(hour=9, minute_bucket=5, avg_volume=100000.0, sample_count=10),
-            MagicMock(hour=9, minute_bucket=10, avg_volume=100000.0, sample_count=10),
-            MagicMock(hour=9, minute_bucket=15, avg_volume=100000.0, sample_count=10),
-        ]
+            mock_latest_result = MagicMock()
+            mock_latest_result.scalar.return_value = today
 
-        mock_current_result = MagicMock()
-        mock_current_result.fetchall.return_value = [
-            MagicMock(hour=9, minute_bucket=0, volume=149999),  # 1.49999x - normal
-            MagicMock(hour=9, minute_bucket=5, volume=150000),  # 1.5x - elevated
-            MagicMock(hour=9, minute_bucket=10, volume=200000),  # 2.0x - high
-            MagicMock(hour=9, minute_bucket=15, volume=300000),  # 3.0x - very_high
-        ]
+            # Test exact boundary values
+            mock_baseline_result = MagicMock()
+            mock_baseline_result.fetchall.return_value = [
+                MagicMock(hour=9, minute_bucket=0, avg_volume=100000.0, sample_count=10),
+                MagicMock(hour=9, minute_bucket=5, avg_volume=100000.0, sample_count=10),
+                MagicMock(hour=9, minute_bucket=10, avg_volume=100000.0, sample_count=10),
+                MagicMock(hour=9, minute_bucket=15, avg_volume=100000.0, sample_count=10),
+            ]
 
-        mock_db.execute.side_effect = [
-            mock_latest_result,
-            mock_baseline_result,
-            mock_current_result,
-        ]
+            mock_current_result = MagicMock()
+            mock_current_result.fetchall.return_value = [
+                MagicMock(hour=9, minute_bucket=0, volume=149999),  # 1.49999x - normal
+                MagicMock(hour=9, minute_bucket=5, volume=150000),  # 1.5x - elevated
+                MagicMock(hour=9, minute_bucket=10, volume=200000),  # 2.0x - high
+                MagicMock(hour=9, minute_bucket=15, volume=300000),  # 3.0x - very_high
+            ]
 
-        result = await get_volume_anomalies("VCB", days=20, db=mock_db)
+            mock_db.execute.side_effect = [
+                mock_latest_result,
+                mock_baseline_result,
+                mock_current_result,
+            ]
 
-        slot_9_00 = next(s for s in result.time_slots if s.hour == 9 and s.minute_bucket == 0)
-        assert slot_9_00.anomaly_level == VolumeAnomalyLevel.NORMAL
+            with patch("src.stocks.price.router.IntradayCollector") as MockCollector:
+                mock_collector = MockCollector.return_value
 
-        slot_9_05 = next(s for s in result.time_slots if s.hour == 9 and s.minute_bucket == 5)
-        assert slot_9_05.anomaly_level == VolumeAnomalyLevel.ELEVATED
+                async def mock_collect_symbol(*args, **kwargs):
+                    return []
 
-        slot_9_10 = next(s for s in result.time_slots if s.hour == 9 and s.minute_bucket == 10)
-        assert slot_9_10.anomaly_level == VolumeAnomalyLevel.HIGH
+                async def mock_save_bars(*args, **kwargs):
+                    return 0
 
-        slot_9_15 = next(s for s in result.time_slots if s.hour == 9 and s.minute_bucket == 15)
-        assert slot_9_15.anomaly_level == VolumeAnomalyLevel.VERY_HIGH
+                async def real_detect(symbol, days):
+                    from src.stocks.intraday_collector import IntradayCollector as RealCollector
+                    with patch("src.stocks.service.get_stock_service"):
+                        collector = RealCollector(mock_db)
+                        return await collector.detect_volume_anomalies(symbol, days)
+
+                mock_collector.collect_symbol = mock_collect_symbol
+                mock_collector.save_bars = mock_save_bars
+                mock_collector.detect_volume_anomalies = real_detect
+
+                result = await get_volume_anomalies("VCB", days=20, db=mock_db)
+
+            slot_9_00 = next(s for s in result.time_slots if s.hour == 9 and s.minute_bucket == 0)
+            assert slot_9_00.anomaly_level == VolumeAnomalyLevel.NORMAL
+
+            slot_9_05 = next(s for s in result.time_slots if s.hour == 9 and s.minute_bucket == 5)
+            assert slot_9_05.anomaly_level == VolumeAnomalyLevel.ELEVATED
+
+            slot_9_10 = next(s for s in result.time_slots if s.hour == 9 and s.minute_bucket == 10)
+            assert slot_9_10.anomaly_level == VolumeAnomalyLevel.HIGH
+
+            slot_9_15 = next(s for s in result.time_slots if s.hour == 9 and s.minute_bucket == 15)
+            assert slot_9_15.anomaly_level == VolumeAnomalyLevel.VERY_HIGH

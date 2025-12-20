@@ -9,11 +9,12 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | Dashboard Layout | Done | Sidebar, header, responsive |
 | Stock Detail Page | Done | Search, ticker header, stats, tabs |
 | Market Indices | Done | VN-INDEX, VN30, HNX, UPCOM cards |
-| Sector Performance | Done | ICB Level 2 sectors with sorting, auto-refresh |
+| Sector Performance | Done | ICB Level 2 sectors with sorting, auto-refresh (NEW: includes top gainers/losers) |
 | Stock Data API | Done | 27 endpoints via vnstock |
 | Financial Data | Done | Income, balance sheet, cash flow |
 | Shareholders/Officers | Done | Major holders, management, insider deals |
-| Volume Analysis | Done | 5-min bar aggregation, peak periods |
+| Volume Anomaly Detection | Done | Backend API + Frontend visualization (NEW) |
+| Fund Certificates | Done | Display 7 items (NEW) |
 | Auth Pages | Scaffolded | Login/register routes exist |
 | Charts Page | Scaffolded | Route exists, not implemented |
 | Portfolio/Watchlist | Scaffolded | Routes exist, not implemented |
@@ -21,10 +22,10 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 
 ## Tech Stack
 
-- **Frontend**: Next.js 14.2, TypeScript, TailwindCSS 3.4, ShadCN/UI, Sonner (toasts)
-- **Backend**: FastAPI, Python 3.11+, vnstock >= 3.0.0, SQLAlchemy 2.0
+- **Frontend**: Next.js 14.2, TypeScript, TailwindCSS 3.4, ShadCN/UI, React Query, Sonner
+- **Backend**: FastAPI, Python 3.11+, vnstock >= 3.0.0, SQLAlchemy 2.0, APScheduler
 - **Database**: PostgreSQL 16
-- **DevOps**: Docker, Docker Compose
+- **DevOps**: Docker, Docker Compose, pnpm
 - **Design**: Modern + Clean (HSL color system, dark/light themes, next-themes)
 
 ## Project Structure
@@ -41,8 +42,12 @@ Stock_Massive/
 │   │
 │   └── api/                 # FastAPI backend (port 8000)
 │       └── src/
-│           ├── api/v1/      # Versioned routes
-│           ├── stocks/      # Stock module (router, service, schemas)
+│           ├── stocks/      # Feature-based modules (market, price, company, financial)
+│           │   ├── router.py, service.py, schemas/, models.py
+│           │   ├── market/  # Symbols, sectors, fund certificates
+│           │   ├── price/   # History, intraday, indices, volume analysis
+│           │   ├── company/ # Company info
+│           │   └── financial/ # Financials, ratios
 │           ├── core/        # Config, database, scheduler
 │           └── main.py
 │
@@ -89,6 +94,7 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `/{symbol}/officers` | GET | Company officers |
 | `/{symbol}/insider-deals` | GET | Insider trading deals |
 | `/{symbol}/volume-analysis` | GET | Volume pattern analysis |
+| `/{symbol}/volume-anomalies` | GET | Volume anomaly detection (NEW) |
 | `/intraday/collect` | POST | Trigger intraday collection |
 | `/sector-performance` | GET | Sector performance (ICB Level 2) |
 | `/fund-certificates` | GET | Fund certificates data |

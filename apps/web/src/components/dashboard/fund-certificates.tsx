@@ -12,8 +12,8 @@ interface FundCertificatesProps {
 export function FundCertificates({ className }: FundCertificatesProps) {
   const { data, isLoading, error, refetch } = useFundCertificates()
 
-  // Get first 6 funds for display
-  const funds = data?.funds?.slice(0, 6) ?? []
+  // Get first 7 funds for display
+  const funds = data?.funds?.slice(0, 7) ?? []
 
   if (isLoading && !data) {
     return <FundCertificatesSkeleton />
@@ -124,7 +124,7 @@ function FundCertificatesSkeleton() {
       </div>
       {/* Body skeleton */}
       <div className="divide-y divide-border">
-        {[...Array(6)].map((_, i) => (
+        {[...Array(7)].map((_, i) => (
           <div key={i} className="grid grid-cols-[1fr_auto_auto] gap-4 px-4 py-3 border-l-2 border-l-transparent">
             <div>
               <Skeleton className="h-4 w-20 mb-1" />

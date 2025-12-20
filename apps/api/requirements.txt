@@ -19,6 +19,9 @@ python-multipart>=0.0.6
 # Utils
 httpx>=0.25.0
 
+# Cache
+upstash-redis>=1.0.0
+
 # Stock Data
 vnstock>=3.0.0
 pandas>=2.0.0
