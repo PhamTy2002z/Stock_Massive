@@ -3,8 +3,9 @@ import logging
 from contextlib import asynccontextmanager
 
 from apscheduler import AsyncScheduler
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from src.core.config import get_settings
 from src.core.database import engine
@@ -48,6 +49,16 @@ app.add_middleware(
 
 # Include routers
 app.include_router(stocks_router, prefix="/api/v1")
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Global exception handler to ensure CORS headers on errors."""
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
 
 
 @app.get("/")
