@@ -334,3 +334,35 @@ export async function fetchFundCertificates(fundType?: string): Promise<FundCert
   const params = fundType ? `?fund_type=${encodeURIComponent(fundType)}` : ""
   return fetchApi<FundCertificatesResponse>(`/stocks/fund-certificates${params}`)
 }
+
+// Volume Anomaly Types
+export type VolumeAnomalyLevel = "normal" | "elevated" | "high" | "very_high"
+
+export interface VolumeTimeSlot {
+  hour: number
+  minute_bucket: number
+  time_label: string
+  current_volume: number
+  avg_volume: number
+  volume_ratio: number
+  anomaly_level: VolumeAnomalyLevel
+  sample_count: number
+}
+
+export interface VolumeAnomalyResponse {
+  symbol: string
+  days_analyzed: number
+  trading_session: string
+  time_slots: VolumeTimeSlot[]
+  generated_at: string
+  latest_date: string | null
+}
+
+export async function fetchVolumeAnomalies(
+  symbol: string,
+  days: number = 20
+): Promise<VolumeAnomalyResponse> {
+  return fetchApi<VolumeAnomalyResponse>(
+    `/stocks/${encodeURIComponent(symbol)}/volume-anomalies?days=${days}`
+  )
+}
