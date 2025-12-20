@@ -137,6 +137,9 @@ export interface StockDetail {
   website: string | null
   employees: number | null
   established_year: number | null
+
+  // VN30 Ranking
+  vn30_rank: number | null  // Rank by market cap within VN30 (1-30), null if not in VN30
 }
 
 export async function fetchStockDetail(symbol: string): Promise<StockDetail> {

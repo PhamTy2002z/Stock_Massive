@@ -131,7 +131,7 @@ export function StockDetailClient({ initialSymbol }: StockDetailClientProps) {
             marketCap={data.market_cap || 0}
             outstandingShares={(data.outstanding_shares || 0) / 1_000_000_000}
             exchange={data.exchange}
-            vn30Rank={null}
+            vn30Rank={data.vn30_rank}
             description={data.description || "No description available."}
           />
         )}

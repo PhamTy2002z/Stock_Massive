@@ -230,7 +230,94 @@ class StockService:
         except Exception:
             pass
 
+        # 5. Get 52-week high/low from trading_stats
+        try:
+            stock = Vnstock().stock(symbol=symbol, source=self.source)
+            trading_stats = stock.company.trading_stats()
+
+            if trading_stats is not None and not (isinstance(trading_stats, pd.DataFrame) and trading_stats.empty):
+                if isinstance(trading_stats, pd.DataFrame):
+                    row = trading_stats.iloc[0].to_dict() if len(trading_stats) > 0 else {}
+                else:
+                    row = trading_stats if isinstance(trading_stats, dict) else {}
+
+                # high_price_1y and low_price_1y are in VND (not thousands)
+                high_1y = safe_float(row.get("high_price_1y"))
+                low_1y = safe_float(row.get("low_price_1y"))
+
+                # Convert from VND to thousands (matching price display format)
+                if high_1y:
+                    result["high_52_week"] = high_1y / 1000
+                if low_1y:
+                    result["low_52_week"] = low_1y / 1000
+
+                # avg_match_volume_2w as proxy for avg volume
+                avg_vol = row.get("avg_match_volume_2w")
+                if avg_vol and pd.notna(avg_vol):
+                    result["avg_volume_52_week"] = int(avg_vol)
+
+        except Exception as e:
+            logger.warning(f"Error fetching trading stats for {symbol}: {e}")
+
+        # 6. Calculate VN30 rank by market cap
+        try:
+            result["vn30_rank"] = self._get_vn30_rank(symbol, result.get("market_cap"))
+        except Exception as e:
+            logger.warning(f"Error calculating VN30 rank for {symbol}: {e}")
+
         return StockDetail(**result)
+
+    def _get_vn30_rank(self, symbol: str, current_market_cap: Optional[float] = None) -> Optional[int]:
+        """Calculate VN30 rank by market cap for a symbol.
+
+        Returns rank (1-30) if symbol is in VN30, None otherwise.
+        """
+        symbol = symbol.upper()
+
+        # Get VN30 symbols list
+        vn30_symbols = self.market.list_symbols_by_group("VN30")
+        if not vn30_symbols or symbol not in vn30_symbols:
+            return None
+
+        # Get price board for all VN30 symbols to calculate market caps
+        try:
+            trading = Trading()
+            price_df = trading.price_board(
+                symbols_list=vn30_symbols,
+                flatten_columns=True,
+                drop_levels=[0],
+            )
+
+            if price_df is None or price_df.empty:
+                return None
+
+            # Calculate market cap for each VN30 stock
+            # market_cap = match_price * listed_share / 1e9 (billion VND)
+            market_caps = []
+            for _, row in price_df.iterrows():
+                sym = row.get("symbol", "").upper()
+                price = safe_float(row.get("match_price"))
+                listed_share = safe_float(row.get("listed_share"))
+
+                if price and listed_share:
+                    cap = (price * listed_share) / 1e9
+                else:
+                    cap = 0
+
+                market_caps.append({"symbol": sym, "market_cap": cap})
+
+            # Sort by market cap descending
+            market_caps.sort(key=lambda x: x["market_cap"], reverse=True)
+
+            # Find rank for the requested symbol
+            for rank, item in enumerate(market_caps, start=1):
+                if item["symbol"] == symbol:
+                    return rank
+
+            return None
+        except Exception as e:
+            logger.warning(f"Error fetching VN30 price board: {e}")
+            return None
 
 
 from functools import lru_cache
