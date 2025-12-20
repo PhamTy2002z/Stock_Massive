@@ -31,6 +31,7 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | Sector Performance | Done | ICB Level 2 with sorting, auto-refresh (Now includes top gainers/losers) |
 | Toast Notifications | Done | Sonner integration for user feedback |
 | Volume Anomaly Detection | Done | New API endpoint and core logic, fully integrated with frontend visualization |
+| Volume Anomaly Detection Testing | Completed | All unit tests for core logic (46 tests) passed successfully |
 | Fund Certificates | Done | Adjusted display to 7 items |
 | Auth Pages | Scaffolded | Routes exist, logic pending |
 | Charts Page | Scaffolded | Route exists, not implemented |
