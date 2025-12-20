@@ -161,7 +161,6 @@ class MarketService:
                 return SectorPerformanceResponse(sectors=[], generated_at=pd.Timestamp.now(), total_sectors=0)
 
             sectors = []
-            total_market_cap = 0
 
             for sector_name, group in merged.groupby(sector_col):
                 if pd.isna(sector_name) or not sector_name:
@@ -179,12 +178,31 @@ class MarketService:
                 if valid_rows.empty:
                     continue
 
-                # Simple average change for now (market cap data not always available)
+                # Calculate change percentage for each stock
                 changes = (valid_rows["match_price"] - valid_rows["ref_price"]) / valid_rows["ref_price"] * 100
-                avg_change = changes.mean()
 
-                # Estimate trading value from accumulated_value (unit: million VND)
-                sector_value = valid_rows["accumulated_value"].sum() if "accumulated_value" in valid_rows.columns else 0
+                # Market-cap weighted average change
+                # Market cap = match_price * listed_share
+                if "listed_share" in valid_rows.columns:
+                    market_caps = valid_rows["match_price"] * valid_rows["listed_share"]
+                    total_cap = market_caps.sum()
+                    if total_cap > 0:
+                        avg_change = (changes * market_caps).sum() / total_cap
+                    else:
+                        avg_change = changes.mean()
+                else:
+                    # Fallback to simple average if listed_share not available
+                    avg_change = changes.mean()
+
+                # Calculate actual market cap (match_price * listed_share)
+                # listed_share is in shares, match_price is in VND
+                # Result in billion VND (tỷ đồng)
+                if "listed_share" in valid_rows.columns:
+                    # market_cap = price * shares / 1e9 (convert to billion VND)
+                    sector_market_cap = (valid_rows["match_price"] * valid_rows["listed_share"]).sum() / 1e9
+                else:
+                    # Fallback to accumulated_value (trading value in million VND)
+                    sector_market_cap = valid_rows["accumulated_value"].sum() / 1000 if "accumulated_value" in valid_rows.columns else 0
 
                 # Get ICB code if available
                 icb_code = ""
@@ -204,14 +222,11 @@ class MarketService:
                     icb_code=icb_code,
                     icb_name=str(sector_name),
                     change_pct=round(float(avg_change), 2),
-                    # accumulated_value is in million VND, divide by 1000 to get billion (tỷ)
-                    total_market_cap=round(float(sector_value) / 1000, 2) if sector_value else 0.0,
+                    total_market_cap=round(float(sector_market_cap), 2),
                     stock_count=len(valid_rows),
                     top_gainers=top_gainers,
                     top_losers=top_losers,
                 ))
-
-                total_market_cap += sector_value if sector_value else 0
 
             # Sort by change_pct descending
             sectors.sort(key=lambda x: x.change_pct or 0, reverse=True)

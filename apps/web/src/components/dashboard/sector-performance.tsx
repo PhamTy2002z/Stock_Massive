@@ -2,6 +2,7 @@
 
 import { useSectorPerformance } from "@/hooks/use-sector-performance"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Spinner } from "@/components/ui/spinner"
 import { AlertCircle, RefreshCw, TrendingUp, TrendingDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -60,14 +61,15 @@ export function SectorPerformance({ className }: SectorPerformanceProps) {
             </h3>
           </div>
           <div className="flex items-center gap-2">
+            {isLoading && <Spinner className="h-4 w-4 text-muted-foreground" />}
             <button
               onClick={refetch}
               disabled={isLoading}
-              className="p-1.5 rounded-md hover:bg-muted transition-colors"
+              className="p-1.5 rounded-md hover:bg-muted transition-colors disabled:opacity-50"
               title="Làm mới"
               aria-label="Làm mới dữ liệu"
             >
-              <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
+              <RefreshCw className="h-4 w-4" />
             </button>
           </div>
         </div>

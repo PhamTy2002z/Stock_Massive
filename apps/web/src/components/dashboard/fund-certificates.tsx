@@ -143,17 +143,17 @@ function FundCertificatesSkeleton() {
 function formatFundType(type: string | null): string {
   if (!type) return "N/A"
   const typeMap: Record<string, string> = {
-    STOCK: "Cổ phiếu",
-    BOND: "Trái phiếu",
-    BALANCED: "Cân bằng",
+    STOCK: "Quỹ cổ phiếu",
+    BOND: "Quỹ trái phiếu",
+    BALANCED: "Quỹ cân bằng",
   }
   return typeMap[type.toUpperCase()] || type
 }
 
-// Format NAV with Vietnamese locale
+// Format NAV with Vietnamese locale (2 decimal places)
 function formatNav(value: number): string {
   return value.toLocaleString("vi-VN", {
-    minimumFractionDigits: 0,
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })
 }
