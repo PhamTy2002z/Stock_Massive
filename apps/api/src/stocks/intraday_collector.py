@@ -71,14 +71,17 @@ class IntradayCollector:
             "volume",
         ]
 
-        # Calculate trade value from accumulated_val difference per bar
-        trade_values = df.groupby("bar_time").apply(
-            lambda x: x["accumulated_val"].iloc[-1] - x["accumulated_val"].iloc[0]
-            if len(x) > 1
-            else 0,
-            include_groups=False,
-        )
-        bars["trade_value"] = trade_values.values
+        # Calculate trade value from accumulated_val difference per bar (if available)
+        if "accumulated_val" in df.columns and df["accumulated_val"].notna().any():
+            trade_values = df.groupby("bar_time").apply(
+                lambda x: x["accumulated_val"].iloc[-1] - x["accumulated_val"].iloc[0]
+                if len(x) > 1 and x["accumulated_val"].notna().all()
+                else 0,
+                include_groups=False,
+            )
+            bars["trade_value"] = trade_values.values
+        else:
+            bars["trade_value"] = 0
 
         # Count trades per bar
         bars["trade_count"] = df.groupby("bar_time").size().values

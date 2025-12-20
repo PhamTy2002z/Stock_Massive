@@ -11,7 +11,7 @@
 │                 Next.js Frontend (port 3000)                 │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
 │  │  ShadCN UI  │  │  Dashboard  │  │  Theme Provider     │  │
-│  │  (16 comp)  │  │  (14 comp)  │  │  + Sonner Toasts    │  │
+│  │  (16 comp)  │  │  (19 comp)  │  │  + Sonner Toasts    │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘  │
 └─────────────────────────────┬───────────────────────────────┘
                               │ REST API
@@ -20,6 +20,9 @@
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
 │  │   Stocks    │  │  Scheduler  │  │   vnstock Library   │  │
 │  │   Module    │  │ (APScheduler)│  │   (VCI Source)      │  │
+│  │ (incl. Volume│  │             │  │   + Fmarket API     │  │
+│  │  Anomaly Det.│  │             │  │                     │  │
+│  │ + Redis Cache)│  │             │  │                     │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘  │
 └──────────┬──────────────────┬───────────────────────────────┘
            │                  │
@@ -47,7 +50,13 @@
   - Financial ratios
   - Stock indices (VN30, HNX30, etc.)
   - Shareholders, officers, insider deals
-  - **Volume Anomaly Data**
+  - **Volume Anomaly Data** (via new endpoint)
+
+### Fmarket API Integration
+
+- **Source**: Fmarket API
+- **Data Types**:
+  - Fund certificates data (for `/fund-certificates` endpoint)
 
 ---
 
@@ -71,8 +80,11 @@ Stock_Massive/
 │   │
 │   └── api/                      # FastAPI backend
 │       ├── src/
-│       │   ├── api/v1/           # Versioned API routes
 │       │   ├── stocks/           # Stocks module
+│       │   │   ├── market/       # Symbols, sectors, fund certificates
+│       │   │   ├── price/        # History, intraday, indices, volume analysis
+│       │   │   ├── company/      # Company info
+│       │   │   └── financial/    # Financials, ratios
 │       │   │   ├── router.py     # HTTP endpoints
 │       │   │   ├── service.py    # vnstock integration
 │       │   │   ├── schemas/      # Pydantic models (price.py now includes VolumeAnomalyLevel, VolumeTimeSlot, VolumeAnomalyResponse)
@@ -160,7 +172,7 @@ Router (HTTP) → Service (Business Logic) → vnstock/Repository
 3. Ticks aggregated to 5-minute OHLCV bars
 4. Bars upserted to PostgreSQL (IntradayBar model)
 5. Volume anomaly detection is performed on collected intraday data.
-6. Volume anomaly data is available via /volume-anomalies endpoint.
+6. Volume anomaly data is available via /volume-anomalies endpoint and visualized on the frontend.
 ```
 
 ---
@@ -186,8 +198,8 @@ RootLayout
                     └── StockDetailTabs
                         ├── Overview Tab
                         ├── Finance Tab
-                        └── Shareholders Tab
-                        ├── Volume Anomaly Tab (Planned)
+                        ├── Shareholders Tab
+                        └── Volume Anomaly Tab
 ```
 
 ### State Management
@@ -264,17 +276,10 @@ CREATE INDEX ix_intraday_bars_timestamp ON intraday_bars(timestamp);
 
 ## Future Considerations
 
-### Sector Performance (Completed)
-
-- **Backend**: `get_sector_performance()` - ICB Level 2 aggregation, market-cap weighted change calculation
-- **API**: `GET /sector-performance` endpoint
-- **Frontend**: SectorPerformance component with sorting, auto-refresh (5-min interval)
-
-### Caching Layer (Planned)
-
-- Redis for vnstock response caching
-- Reduce API calls to external data source
-- Cache invalidation on market close
+### Caching Layer
+- Redis caching has been implemented for volume anomaly detection results, reducing redundant computations and improving response times.
+- Keyed by symbol and baseline days (`{symbol}:{days}`), with TTL based on trading hours.
+- Plans for vnstock response caching are still pending.
 
 ### WebSocket Support (Planned)
 

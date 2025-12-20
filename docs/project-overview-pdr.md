@@ -11,11 +11,11 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 3. Enable portfolio tracking and watchlist management
 4. Secure user authentication and data persistence
 5. Integrate vnstock library for comprehensive Vietnam market data
-6. Implement advanced analytical features like Volume Anomaly Detection
+6. Implement and visualize advanced analytical features like Volume Anomaly Detection
 
 ---
 
-## Current Implementation Status (December 2024)
+## Current Implementation Status (December 2025)
 
 | Feature | Status | Details |
 |---------|--------|---------|
@@ -28,9 +28,10 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | Volume Analysis | Done | 5-min bar aggregation, peak period analysis |
 | Intraday Collection | Done | Scheduled data collection (15:30 ICT) |
 | Database Models | Done | IntradayBar model with SQLAlchemy |
-| Sector Performance | Done | ICB Level 2 with sorting, auto-refresh |
+| Sector Performance | Done | ICB Level 2 with sorting, auto-refresh (Now includes top gainers/losers) |
 | Toast Notifications | Done | Sonner integration for user feedback |
-| Volume Anomaly Detection API | Done | New endpoint and core logic for detecting volume anomalies |
+| Volume Anomaly Detection | Done | New API endpoint and core logic, fully integrated with frontend visualization |
+| Fund Certificates | Done | Adjusted display to 7 items |
 | Auth Pages | Scaffolded | Routes exist, logic pending |
 | Charts Page | Scaffolded | Route exists, not implemented |
 | Portfolio Page | Scaffolded | Route exists, not implemented |
@@ -48,7 +49,7 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 - REST API via vnstock integration
 - Intraday data collection and storage
 - Volume pattern analysis
-- **Volume Anomaly Detection with API endpoint**
+- **Volume Anomaly Detection with API endpoint and Frontend Visualization**
 
 ### In Scope (Phase 2 - Planned)
 
@@ -56,7 +57,6 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 - User authentication (JWT)
 - Watchlist management
 - Portfolio tracking
-- **Frontend integration for Volume Anomaly Detection visualization**
 
 ### Data Sources
 
@@ -70,6 +70,7 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
   - Stock groups (VN30, HNX30, etc.)
   - Shareholders, officers, insider deals
   - **Volume Anomaly Data**
+- **Fmarket API**: Used for `GET /fund-certificates` endpoint, providing detailed fund data.
 
 ### Out of Scope (Phase 1)
 
@@ -141,7 +142,7 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `GET /{symbol}/officers` | Company officers/management |
 | `GET /{symbol}/insider-deals` | Insider trading deals |
 | `GET /{symbol}/volume-analysis` | Volume pattern analysis |
-| `POST /intraday/collect` | Trigger intraday collection and **volume anomaly detection** |
+| `POST /intraday/collect` | Trigger intraday collection |
 | `GET /sector-performance` | Sector performance (ICB Level 2) |
 | `GET /fund-certificates` | Fund certificates data |
 
@@ -156,7 +157,7 @@ All endpoints prefixed with `/api/v1/stocks`:
 | Security vulnerabilities | OWASP guidelines, input validation |
 | vnstock library changes | Pin version, monitor updates |
 | Data accuracy | Cross-validate with official sources |
-| **Complexity of Volume Anomaly Detection** | **Modularize logic, extensive testing, clear schema definitions** |
+| Complexity of Volume Anomaly Detection | Modularize logic, extensive testing, clear schema definitions |
 
 ---
 
@@ -167,7 +168,7 @@ All endpoints prefixed with `/api/v1/stocks`:
 - Zero critical security vulnerabilities
 - 80%+ test coverage on critical paths
 - Support all VN30 stocks without errors
-- **Accurate and timely detection of volume anomalies**
+- Accurate and timely detection and visualization of volume anomalies
 
 ---
 
@@ -183,7 +184,7 @@ All endpoints prefixed with `/api/v1/stocks`:
 - [x] User can view sector performance (ICB Level 2)
 - [x] User receives toast notifications on actions
 - [x] API handles concurrent requests efficiently
-- [x] **API provides volume anomaly detection results**
+- [x] **API provides and Frontend visualizes volume anomaly detection results**
 - [ ] User can view stock price charts
 - [ ] User can register and login
 - [ ] User can create watchlists
@@ -193,4 +194,3 @@ All endpoints prefixed with `/api/v1/stocks`:
 - [ ] User can track portfolio positions
 - [ ] User can set price alerts
 - [ ] User can export data to CSV/Excel
-- [ ] **Frontend visualization of volume anomalies on charts**

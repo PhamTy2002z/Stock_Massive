@@ -173,6 +173,8 @@ class PriceService:
                         time=time_str,
                         price=safe_float(row.get("price")),
                         volume=int(row.get("volume", 0)) if pd.notna(row.get("volume")) else None,
+                        accumulated_vol=int(row.get("accumulated_vol", 0)) if pd.notna(row.get("accumulated_vol")) else None,
+                        accumulated_val=int(row.get("accumulated_val", 0)) if pd.notna(row.get("accumulated_val")) else None,
                         match_type=row.get("match_type") or row.get("type"),
                     )
                 )

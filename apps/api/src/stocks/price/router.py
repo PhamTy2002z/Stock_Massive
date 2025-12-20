@@ -1,5 +1,6 @@
 """Price domain router for price-related endpoints."""
 
+import logging
 from datetime import date
 from typing import List
 
@@ -8,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
 from src.stocks.intraday_collector import IntradayCollector
+from src.stocks.price.cache import volume_anomaly_cache
 from ..service import get_stock_service
 from ..schemas.price import (
     StockPrice,
@@ -134,14 +136,35 @@ async def get_volume_anomalies(
 
     Compares latest day's volume against N-day average baseline.
     Returns 72 time slots (09:00-14:55) with anomaly flags.
+
+    Auto-collects intraday data if stale or missing.
     """
+    symbol = symbol.upper()
+    cache_key = f"{symbol}:{days}"
+    logger = logging.getLogger(__name__)
+
+    # Check cache first
+    cached = volume_anomaly_cache.get(cache_key)
+    if cached is not None:
+        return VolumeAnomalyResponse(**cached)
+
+    # Cache miss - collect fresh data
     collector = IntradayCollector(db)
+
+    try:
+        # Fetch from vnstock and save to DB
+        bars = await collector.collect_symbol(symbol)
+        if bars:
+            await collector.save_bars(bars)
+            await db.commit()
+    except Exception as e:
+        # Log but continue - may have historical data
+        logger.warning(f"Failed to collect intraday data for {symbol}: {e}")
+
+    # Compute anomalies from DB (includes any newly collected data)
     result = await collector.detect_volume_anomalies(symbol, days)
 
-    if not result["time_slots"]:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No intraday data found for {symbol.upper()}",
-        )
+    # Cache the result
+    volume_anomaly_cache.set(cache_key, result)
 
     return VolumeAnomalyResponse(**result)

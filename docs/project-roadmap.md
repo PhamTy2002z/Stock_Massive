@@ -1,6 +1,6 @@
 # Project Roadmap - Stock Massive
 
-## Current State (December 2024)
+## Current State (December 2025)
 
 ### Completed
 
@@ -9,7 +9,7 @@
 - [x] Dashboard layout (sidebar, header, responsive)
 - [x] Dark/light theme support (next-themes)
 - [x] ShadCN/UI components (16 installed)
-- [x] Dashboard components (14 feature components)
+- [x] Dashboard components (19 feature components)
 - [x] Stock detail page (search, header, stats, tabs)
 - [x] Market indices cards with sparklines
 - [x] FastAPI backend setup
@@ -22,17 +22,20 @@
 - [x] Docker Compose configuration
 - [x] Backend test suite (30+ tests)
 - [x] Modern + Clean design system established
+- [x] Sector Performance (Full-stack complete, includes top gainers/losers)
+- [x] Toast notifications (Sonner integration)
+- [x] Fund certificates endpoint (Adjusted display to 7 items)
+- [x] Volume Anomaly Detection (Backend API + Frontend visualization)
+- [x] Loading states and skeletons (completed)
+- [x] API documentation (OpenAPI/Swagger) (completed)
 
 ### In Progress
 
 - [ ] Frontend feature pages (charts, portfolio, watchlist)
-- [x] Sector Performance (100% - Full-stack complete)
-- [x] Toast notifications (Sonner integration)
-- [x] Fund certificates endpoint
 
 ---
 
-## Phase 1: MVP (Target: Q1 2025)
+## Phase 1: MVP (Target: Q1 2026)
 
 ### 1.1 Authentication System
 
@@ -79,7 +82,7 @@
 
 ---
 
-## Phase 2: Core Features (Target: Q2 2025)
+## Phase 2: Core Features (Target: Q2 2026)
 
 ### 2.1 Watchlist Management
 
@@ -122,7 +125,7 @@
 
 ---
 
-## Phase 3: Enhanced Features (Target: Q3 2025)
+## Phase 3: Enhanced Features (Target: Q3 2026)
 
 ### 3.1 Technical Analysis
 
@@ -153,7 +156,7 @@
 
 ---
 
-## Phase 4: Advanced Features (Target: Q4 2025)
+## Phase 4: Advanced Features (Target: Q4 2026)
 
 ### 4.1 Real-time Updates
 
@@ -187,12 +190,10 @@
 
 - [ ] Add frontend tests (Vitest + RTL)
 - [ ] API error handling improvements
-- [x] Loading states and skeletons (completed)
 - [ ] Form validation (react-hook-form + zod)
 
 ### Medium-term
 
-- [x] API documentation (OpenAPI/Swagger) (completed)
 - [ ] Logging and monitoring
 - [ ] CI/CD pipeline
 - [ ] E2E tests (Playwright)
@@ -210,10 +211,10 @@
 
 | Milestone | Target Date | Key Deliverables |
 |-----------|-------------|------------------|
-| MVP | Q1 2025 | Auth, Charts, Stock List |
-| Beta | Q2 2025 | Watchlist, Portfolio |
-| v1.0 | Q3 2025 | Technical Analysis, Alerts |
-| v2.0 | Q4 2025 | Real-time, Mobile, Social |
+| MVP | Q1 2026 | Auth, Charts, Stock List |
+| Beta | Q2 2026 | Watchlist, Portfolio |
+| v1.0 | Q3 2026 | Technical Analysis, Alerts |
+| v2.0 | Q4 2026 | Real-time, Mobile, Social |
 
 ---
 
@@ -233,23 +234,23 @@
 
 ---
 
-## Recently Completed (December 2024)
+## Recently Completed (December 2025)
 
 | Feature | Date | Notes |
 |---------|------|-------|
-| Toast Notifications | Dec 19, 2024 | Sonner integration on stock search |
-| Sector Performance | Dec 19, 2024 | Full-stack: API + hook + UI component |
-| Fund Certificates | Dec 2024 | New endpoint for fund data |
-| Shareholders API | Dec 2024 | Major holders endpoint |
-| Officers API | Dec 2024 | Company management endpoint |
-| Insider Deals API | Dec 2024 | Insider trading endpoint |
-| Volume Analysis | Dec 2024 | Peak period analysis |
+| Toast Notifications | Dec 19, 2025 | Sonner integration on stock search |
+| Sector Performance | Dec 19, 2025 | Full-stack: API + hook + UI component, now includes top gainers/losers |
+| Fund Certificates | Dec 20, 2025 | New endpoint for fund data, adjusted display to 7 items |
+| Shareholders API | Dec 20, 2025 | Major holders endpoint |
+| Officers API | Dec 20, 2025 | Company management endpoint |
+| Insider Deals API | Dec 20, 2025 | Insider trading endpoint |
+| Volume Analysis | Dec 20, 2025 | Peak period analysis |
 | Volume Anomaly Detection (Backend API) | Dec 20, 2025 | New API for detailed anomaly detection |
 | Volume Anomaly Detection (Frontend Integration) | Dec 20, 2025 | Frontend integration of chart into stock detail page |
-| Volume Anomaly Detection (Full Feature) | Dec 20, 2025 | Full-stack implementation of volume anomaly detection complete | |
-| Intraday Collection | Dec 2024 | 5-min bar aggregation |
-| Stock Detail Page | Dec 2024 | Search, header, stats, tabs |
-| Finance Tab | Dec 2024 | Income, balance, cash flow tables |
-| Shareholders Tab | Dec 2024 | Holders, officers, insider deals |
-| Design System | Dec 2024 | Modern + Clean established as standard |
-| Custom Hooks | Dec 2024 | 8 hooks for data fetching |
+| Intraday Collection | Dec 20, 2025 | 5-min bar aggregation |
+| Stock Detail Page | Dec 20, 2025 | Search, header, stats, tabs |
+| Finance Tab | Dec 20, 2025 | Income, balance, cash flow tables |
+| Shareholders Tab | Dec 20, 2025 | Holders, officers, insider deals |
+| Design System | Dec 20, 2025 | Modern + Clean established as standard |
+| Volume Anomaly Detection (On-Demand Collector) | Dec 20, 2025 | Auto-collect intraday data on endpoint request |
+| Custom Hooks | Dec 20, 2025 | 9 hooks for data fetching |

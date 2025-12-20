@@ -226,46 +226,54 @@ class MarketService:
             raise StockServiceError(f"Failed to fetch sector performance: {e}")
 
     def get_fund_certificates(self, fund_type: Optional[str] = None) -> FundCertificatesResponse:
-        """Get fund certificates (ETFs and open-end funds)."""
+        """Get fund certificates (open-end funds from fmarket)."""
         # Curated list of fund symbols to display
-        FUND_SYMBOLS = ["E1VFVN30", "VFMVF1", "VEOF", "VCBF-TBF", "VNDAF", "SSI-SCA"]
+        FUND_SYMBOLS = ["MAGEF", "UVEEF", "DCDS", "VDEF", "KDEF", "TBLF", "BVFED"]
 
         try:
-            etf_symbols = FUND_SYMBOLS
+            from vnstock.explorer.fmarket.fund import Fund
 
-            if not etf_symbols:
+            fund_api = Fund()
+            df = fund_api.listing()
+
+            if df is None or df.empty:
                 return FundCertificatesResponse(funds=[], generated_at=pd.Timestamp.now(), total_count=0)
 
-            # Get price data for ETFs
-            trading = Trading()
-            price_df = trading.price_board(
-                symbols_list=etf_symbols,
-                flatten_columns=True,
-                drop_levels=[0],
-            )
+            # Filter for specific funds and maintain order
+            filtered = df[df["short_name"].isin(FUND_SYMBOLS)]
 
-            if price_df is None or price_df.empty:
+            if filtered.empty:
                 return FundCertificatesResponse(funds=[], generated_at=pd.Timestamp.now(), total_count=0)
+
+            # Sort by FUND_SYMBOLS order
+            filtered = filtered.set_index("short_name").loc[
+                [s for s in FUND_SYMBOLS if s in filtered["short_name"].values]
+            ].reset_index()
 
             funds = []
-            for _, row in price_df.iterrows():
+            for _, row in filtered.iterrows():
                 try:
-                    match_price = safe_float(row.get("match_price"))
-                    ref_price = safe_float(row.get("ref_price"))
+                    nav = safe_float(row.get("nav"))
+                    change_pct = safe_float(row.get("nav_change_previous"))
 
-                    change = None
-                    change_pct = None
-                    if match_price and ref_price and ref_price > 0:
-                        change = match_price - ref_price
-                        change_pct = (change / ref_price) * 100
+                    # Map fund_type from Vietnamese to English
+                    vn_fund_type = row.get("fund_type", "")
+                    if "cổ phiếu" in str(vn_fund_type).lower():
+                        mapped_type = "STOCK"
+                    elif "trái phiếu" in str(vn_fund_type).lower():
+                        mapped_type = "BOND"
+                    elif "cân bằng" in str(vn_fund_type).lower():
+                        mapped_type = "BALANCED"
+                    else:
+                        mapped_type = "STOCK"
 
                     funds.append(FundCertificateItem(
-                        symbol=str(row.get("symbol", "")),
-                        short_name=row.get("organ_name") or str(row.get("symbol", "")),
-                        fund_type="ETF",
-                        nav=match_price,
-                        price=match_price,
-                        change_pct=round(change_pct, 2) if change_pct else None,
+                        symbol=str(row.get("short_name", "")),
+                        short_name=str(row.get("name", "")),
+                        fund_type=mapped_type,
+                        nav=round(nav, 2) if nav else None,
+                        price=round(nav, 2) if nav else None,
+                        change_pct=round(change_pct, 2) if change_pct is not None else None,
                     ))
                 except Exception as e:
                     logger.warning(f"Skipping fund row due to error: {e}")

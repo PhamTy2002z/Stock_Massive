@@ -33,8 +33,8 @@ class IntradayTick(BaseModel):
     time: datetime
     price: float
     volume: int
-    accumulated_vol: int
-    accumulated_val: int
+    accumulated_vol: Optional[int] = None  # Not always provided by vnstock
+    accumulated_val: Optional[int] = None  # Not always provided by vnstock
     match_type: str
 
 

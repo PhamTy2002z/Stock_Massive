@@ -71,7 +71,7 @@ export function StockChart({ symbol, className }: Props) {
 
 - **Local State**: useState for component-level state
 - **URL State**: Search params for shareable state (stock symbol)
-- **Server State**: Direct API calls with loading/error states
+- **Server State**: React Query for efficient data fetching, caching, and synchronization
 - **Theme State**: next-themes provider
 - **Toast Notifications**: Sonner for user feedback
 
@@ -108,6 +108,7 @@ if (!data) return <StockDetailEmpty />
 # schemas.py - Pydantic models
 # models.py - SQLAlchemy models
 # jobs.py - Scheduled tasks
+# intraday_collector.py - Intraday data collection and volume anomaly detection logic
 ```
 
 ### Router Pattern
@@ -167,7 +168,7 @@ class StockDetail(BaseModel):
 ### Best Practices
 
 - Type hints on all functions
-- Async by default for I/O operations
+- Use `async` for I/O operations and `sync_to_async` for synchronous library calls (e.g., `vnstock`)
 - Use dependency injection
 - Validate all inputs with Pydantic
 - Handle vnstock exceptions gracefully
@@ -269,6 +270,16 @@ async def search_symbols(
 # 404 - Not found
 # 502 - External service error (vnstock)
 ```
+
+### Price Data
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /{symbol}/history` | Historical OHLCV |
+| `GET /{symbol}/intraday` | Intraday ticks |
+| `GET /market-indices` | VN-INDEX, VN30, HNX, UPCOM |
+| `GET /price-board` | Real-time prices (multiple symbols) |
+| `GET /{symbol}/detail` | Comprehensive stock detail |
+| `GET /{symbol}/volume-anomalies` | Retrieve volume anomaly detection results |
 
 ---
 

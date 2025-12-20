@@ -1,123 +1,91 @@
 # Codebase Summary
 
-This document provides a high-level overview of the codebase, focusing on recent changes related to the Volume Anomaly Detection feature.
+This document provides a high-level overview of the Stock Massive project's codebase, derived from recent scouting and `repomix` analysis.
 
-## Recent Updates (Phase 03: Frontend Integration of Volume Anomaly Detection)
+## Project Structure
 
-This phase completes the frontend integration of the Volume Anomaly Detection feature, making it fully accessible and interactive within the stock detail page.
+The project is structured as a monorepo with separate `apps` for the frontend and backend, and shared `packages`.
 
-### 1. Key Components Introduced/Modified:
+```
+Stock_Massive/
+├── apps/
+│   ├── web/                 # Next.js frontend (port 3000)
+│   │   └── src/
+│   │       ├── app/         # App Router (page.tsx, layout.tsx, not-found.tsx)
+│   │       ├── components/  # ui/, dashboard/, layout/, providers/
+│   │       ├── hooks/       # Custom React hooks
+│   │       └── lib/         # API clients, query keys, utilities
+│   │
+│   └── api/                 # FastAPI backend (port 8000)
+│       └── src/
+│           ├── stocks/      # Feature-based modules (market, price, company, financial)
+│           │   ├── router.py, service.py, schemas/, models.py
+│           │   ├── market/  # Symbols, sectors, fund certificates
+│           │   ├── price/   # History, intraday, indices, volume analysis
+│           │   ├── company/ # Company info
+│           │   └── financial/ # Financials, ratios
+│           ├── core/        # config.py, database.py, scheduler.py
+│           └── main.py
+│
+├── packages/                # Shared code (config/, types/)
+├── docker/                  # Docker configs
+└── docs/                    # Documentation
+```
 
-- **`useVolumeAnalysis`**:
-  - **Description**: React Query hook for fetching volume anomaly data from the backend API, now integrated into the frontend for display.
-  - **Location**: `apps/web/src/hooks/use-volume-analysis.ts`
+## Frontend (apps/web)
 
-- **`StockDetailTabs`**:
-  - **Description**: Modified to include the "Khối Lượng" (Volume) tab as the fourth tab in the stock detail page.
-  - **Location**: `apps/web/src/components/dashboard/stock-detail-tabs.tsx`
+-   **Framework**: Next.js 14.2 with TypeScript
+-   **Styling**: TailwindCSS 3.4, ShadCN/UI
+-   **State Management**: React Query for server state, React hooks for local UI state
+-   **UI Components**:
+    -   **UI**: 16 components (alert, avatar, button, card, collapsible, dropdown-menu, input, select, separator, sheet, skeleton, sonner, sparkline, spinner, tabs, tooltip)
+    -   **Dashboard**: 19 components (finance-tab-content, fund-certificates, market-indices, sector-performance, shareholders-tab-content, stock-company-info, stock-detail-* (client, empty, error, panel, skeleton, tabs), stock-index-card, stock-search-bar, stock-stats-table, stock-ticker-header, volume-anomaly-chart, volume-tab-content)
+    -   **Layout**: 4 components (app-sidebar, dashboard-header, dashboard-layout, dashboard-layout-client)
+    -   **Providers**: 2 components (query-provider for React Query, theme-provider for dark/light mode)
+-   **Custom Hooks**: 9 hooks (use-balance-sheet, use-cash-flow, use-fund-certificates, use-income-statement, use-mobile, use-sector-performance, use-shareholders, use-stock-detail, use-volume-analysis)
 
-- **`StockDetailClient`**:
-  - **Description**: Integrates the `VolumeTabContent` component, making the volume anomaly feature available on the stock detail page.
-  - **Location**: `apps/web/src/components/dashboard/stock-detail-client.tsx`
+## Backend (apps/api)
 
-- **`VolumeTabContent`**:
-  - **Description**: Wrapper component for the volume anomaly chart, including the baseline selector, refresh button, and handling loading/error states.
-  - **Location**: `apps/web/src/components/dashboard/volume-tab-content.tsx`
+-   **Framework**: FastAPI with Python 3.11+
+-   **Libraries**: `vnstock >= 3.0.0`, SQLAlchemy 2.0, APScheduler
+-   **Architecture**: Feature-based modular structure within the `stocks` directory.
+-   **Key Routers/Endpoints**:
+    -   `/api/v1/stocks/symbols`: List/search stock symbols
+    -   `/api/v1/stocks/{symbol}/history`: Historical OHLCV data
+    -   `/api/v1/stocks/{symbol}/intraday`: Intraday data
+    -   `/api/v1/stocks/market-indices`: VN-INDEX, VN30, HNX, UPCOM
+    -   `/api/v1/stocks/price-board`: Real-time stock prices
+    -   `/api/v1/stocks/{symbol}/company`: Company information
+    -   `/api/v1/stocks/{symbol}/financials/*`: Financial statements (balance sheet, income statement, cash flow)
+    -   `/api/v1/stocks/{symbol}/shareholders`: Major shareholder data
+    -   `/api/v1/stocks/{symbol}/officers`: Company officer information
+    -   `/api/v1/stocks/{symbol}/insider-deals`: Insider trading information
+    -   `/api/v1/stocks/{symbol}/volume-analysis`: Basic volume analysis
+    -   `/api/v1/stocks/{symbol}/volume-anomalies`: Volume anomaly detection (NEW)
+    -   `/api/v1/stocks/sector-performance`: ICB Level 2 sector performance (top gainers/losers)
+    -   `/api/v1/stocks/fund-certificates`: Fund data from Fmarket
+    -   `/api/v1/stocks/intraday/collect`: Manual trigger for intraday data collection
+-   **Database Model**: `StockIntradayBar` (stores 5-minute OHLCV bars)
+-   **Scheduler**: APScheduler is used for daily intraday data collection and cleanup tasks.
+-   **Data Sources**: Primarily `vnstock` library (VCI source) for market data, and Fmarket API for fund certificates.
 
-- **`Dashboard Index Export`**:
-  - **Description**: Ensures `VolumeTabContent` is exported for use within other dashboard components.
-  - **Location**: `apps/web/src/components/dashboard/index.ts`
+## Database
 
-### 2. Features Integrated:
+-   **Type**: PostgreSQL 16
+-   **Containerization**: Managed via Docker.
 
--   **Volume Tab**: A new "Khối Lượng" (Volume) tab is added as the 4th tab in the stock detail page, providing dedicated access to volume anomaly analysis.
--   **Baseline Selector**: Users can now select baseline periods (10/20/30/60 days) to customize the volume anomaly calculation.
--   **Refresh Button**: A refresh button with an associated loading state allows users to manually update the volume anomaly data.
--   **Error Handling with Retry**: Robust error handling is implemented, including the ability to retry fetching data in case of issues.
--   **Info Card**: An informative card is displayed, explaining the different anomaly levels to the user.
--   **Vietnamese Localization**: All new UI elements and messages are fully localized in Vietnamese for a seamless user experience.
+## DevOps
 
-## Recent Updates (Phase 02: Frontend Chart for Volume Anomaly Detection)
+-   **Tools**: Docker, Docker Compose, pnpm
+-   **Services**:
+    -   `db`: `postgres:16-alpine`
+    -   `api`: `python:3.11-slim` running Uvicorn
+    -   `web`: `node:20-alpine` running `npm run dev`
 
-This phase introduces the frontend visualization for volume anomaly detection, providing a clear and interactive chart to analyze stock volume.
+## Recent Major Features (Dec 2025)
 
-### 1. Key Components Introduced/Modified:
+-   **Volume Anomaly Detection**: Fully implemented with a new backend API endpoint (`/api/v1/stocks/{symbol}/volume-anomalies`) and a corresponding frontend visualization component (`volume-anomaly-chart`).
+-   **Fund Certificates Display Adjustment**: Frontend now displays 7 items instead of 6 for fund certificates.
+-   **Sector Performance Enhancement**: The sector performance feature now includes top gainers/losers information.
 
--   **`VolumeAnomalyChart`**:
-    -   **Description**: React component responsible for rendering the volume anomaly bar chart with color-coded anomaly levels, baseline average, and hover tooltips.
-    -   **Location**: `apps/web/src/components/dashboard/volume-anomaly-chart.tsx`
-
--   **`VolumeTabContent`**:
-    -   **Description**: Wrapper component for the volume anomaly chart, including the baseline selector and handling loading/error states.
-    -   **Location**: `apps/web/src/components/dashboard/volume-tab-content.tsx`
-
--   **`useVolumeAnalysis`**:
-    -   **Description**: Custom React Query hook for fetching volume anomaly data from the backend API.
-    -   **Location**: `apps/web/src/hooks/use-volume-analysis.ts`
-
--   **API Integration**:
-    -   **Description**: Added `VolumeAnomalyResponse` types and `fetchVolumeAnomalies` function for seamless API communication.
-    -   **Location**: `apps/web/src/lib/api.ts`
-
--   **UI Integration**:
-    -   **Description**:
-        -   Exported new components from `apps/web/src/components/dashboard/index.ts`.
-        -   Added a new "Khối Lượng" (Volume) tab to `stock-detail-tabs.tsx`.
-        -   Integrated `VolumeTabContent` into `stock-detail-client.tsx`.
-    -   **Locations**:
-        -   `apps/web/src/components/dashboard/index.ts`
-        -   `apps/web/src/components/dashboard/stock-detail-tabs.tsx`
-        -   `apps/web/src/components/dashboard/stock-detail-client.tsx`
-
-### 2. Features Added:
-
--   Volume anomaly bar chart displayed in 5-minute intervals (72 bars).
--   Color-coded representation of anomaly levels: normal, elevated, high, and very high.
--   Overlay baseline average line for easy comparison.
--   Interactive hover tooltips displaying volume, ratio, and anomaly status.
--   User-selectable baseline average (10/20/30/60 days).
--   Robust loading skeletons and error state handling.
--   Full Vietnamese localization for the user interface.
-
-## Recent Updates (Phase 01: Backend API Enhancement of Volume Anomaly Detection)
-
-The following core components have been introduced or modified:
-
-### 1. API Endpoints
-
--   **`/api/v1/stocks/{symbol}/volume-anomalies` (GET)**:
-    -   **Description**: This new endpoint retrieves volume anomaly detection results for a given stock symbol.
-    -   **Location**: `apps/api/src/stocks/price/router.py`
-
-### 2. Core Logic & Schemas
-
--   **Volume Anomaly Detection Logic**:
-    -   **Method**: `detect_volume_anomalies()`
-    -   **Location**: `apps/api/src/stocks/intraday_collector.py`
-    -   **Description**: This method is responsible for identifying significant deviations in trading volume for a stock.
-
--   **Data Models (Pydantic Schemas)**:
-    -   **`VolumeAnomalyLevel`**: Defines different levels or categories of volume anomalies.
-    -   **`VolumeTimeSlot`**: Represents a specific time interval within which volume anomalies are detected.
-    -   **`VolumeAnomalyResponse`**: Structures the response returned by the volume anomaly detection API, including anomaly levels and time slots.
-    -   **Location**: `apps/api/src/stocks/schemas/price.py`
-
-### 3. Dependencies
-
--   **`greenlet`**: Added to `apps/api/requirements.txt`.
--   **`pandas`**: Added to `apps/api/requirements.txt`.
-    -   **Purpose**: These libraries are crucial for data manipulation and potentially for asynchronous operations within the volume anomaly detection process.
-
-## Overall Structure
-
-The codebase is structured into `apps/api` (for backend services) and `apps/web` (for the frontend). The `docs` directory contains project documentation.
-
-## Top 5 Files by Token Count (as per Repomix)
-
-1.  `apps/web/tsconfig.tsbuildinfo` (61,455 tokens)
-2.  `apps/web/src/components/dashboard/finance-tab-content.tsx` (8,532 tokens)
-3.  `apps/web/src/components/ui/sidebar.tsx` (6,104 tokens)
-4.  `plans/reports/tester-251220-1450-volume-anomaly-frontend-integration.md` (4,911 tokens)
-5.  `apps/web/src/components/dashboard/sector-performance.tsx` (2,424 tokens)
-
-This summary will be updated periodically to reflect the latest state of the codebase.
+This summary provides a foundational understanding of the project's technical landscape and recent developments.
