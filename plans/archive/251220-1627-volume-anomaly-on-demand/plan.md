@@ -1,7 +1,7 @@
 ---
 title: "On-Demand Volume Anomaly Data Collection"
 description: "Auto-collect intraday data when user requests volume anomalies for a symbol"
-status: pending
+status: completed
 priority: P1
 effort: 4h
 branch: main
@@ -42,9 +42,9 @@ Request → Check Upstash Redis → Fresh? → Return cached results
 
 | Phase | Description | Effort | Status | Link |
 |-------|-------------|--------|--------|------|
-| 01 | Upstash Redis TradingHoursCache | 1.5h | pending | [phase-01](phase-01-trading-hours-cache.md) |
+| 01 | Upstash Redis TradingHoursCache | 1.5h | completed (2025-12-20) | [phase-01](phase-01-trading-hours-cache.md) |
 | 02 | On-demand collector integration | 1.5h | completed (2025-12-20) | [phase-02](phase-02-on-demand-collector.md) |
-| 03 | Testing | 1h | pending | [phase-03](phase-03-testing.md) |
+| 03 | Testing | 1h | completed (2025-12-20) | [phase-03](phase-03-testing.md) |
 
 ## Key Files
 

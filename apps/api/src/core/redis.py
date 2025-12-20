@@ -23,14 +23,14 @@ def get_redis() -> Optional[Redis]:
 
     settings = get_settings()
 
-    if not settings.upstash_redis_url or not settings.upstash_redis_token:
+    if not settings.redis_url or not settings.redis_token:
         logger.warning("Upstash Redis not configured, caching disabled")
         return None
 
     try:
         _redis_client = Redis(
-            url=settings.upstash_redis_url,
-            token=settings.upstash_redis_token,
+            url=settings.redis_url,
+            token=settings.redis_token,
         )
         logger.info("Upstash Redis client initialized")
         return _redis_client

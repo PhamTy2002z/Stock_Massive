@@ -129,6 +129,7 @@ pnpm dev
 cd apps/api
 python -m venv .venv
 .venv\Scripts\activate  # Windows
+source .venv/bin/activate #Macos
 pip install -r requirements.txt
 uvicorn src.main:app --reload
 ```

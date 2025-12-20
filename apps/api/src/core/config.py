@@ -11,6 +11,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",  # Ignore extra env vars
     )
 
     # API
@@ -29,9 +30,21 @@ class Settings(BaseSettings):
     # Vnstock
     vnstock_source: str = "VCI"  # Default data source (VCI is most reliable)
 
-    # Upstash Redis
+    # Upstash Redis (supports both naming conventions)
     upstash_redis_url: str = ""
     upstash_redis_token: str = ""
+    upstash_redis_rest_url: str = ""  # Alternative name from Upstash dashboard
+    upstash_redis_rest_token: str = ""  # Alternative name from Upstash dashboard
+
+    @property
+    def redis_url(self) -> str:
+        """Get Redis URL (supports both naming conventions)."""
+        return self.upstash_redis_rest_url or self.upstash_redis_url
+
+    @property
+    def redis_token(self) -> str:
+        """Get Redis token (supports both naming conventions)."""
+        return self.upstash_redis_rest_token or self.upstash_redis_token
 
     # Scheduler
     scheduler_enabled: bool = True
