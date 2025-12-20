@@ -14,6 +14,9 @@ from .price import (
     IntradayCollectionResult,
     VolumeTimePeriod,
     VolumeAnalysisResponse,
+    VolumeAnomalyLevel,
+    VolumeTimeSlot,
+    VolumeAnomalyResponse,
 )
 
 # Company domain
@@ -64,6 +67,9 @@ __all__ = [
     "IntradayCollectionResult",
     "VolumeTimePeriod",
     "VolumeAnalysisResponse",
+    "VolumeAnomalyLevel",
+    "VolumeTimeSlot",
+    "VolumeAnomalyResponse",
     # Company
     "CompanyOverview",
     "StockSymbol",

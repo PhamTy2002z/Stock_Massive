@@ -1,9 +1,19 @@
 """Price domain schemas."""
 
 from datetime import date, datetime
+from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, Field
+
+
+class VolumeAnomalyLevel(str, Enum):
+    """Anomaly severity levels based on volume ratio thresholds."""
+
+    NORMAL = "normal"
+    ELEVATED = "elevated"  # 1.5x-2x
+    HIGH = "high"  # 2x-3x
+    VERY_HIGH = "very_high"  # >3x
 
 
 class StockPrice(BaseModel):
@@ -117,3 +127,30 @@ class VolumeAnalysisResponse(BaseModel):
     trading_session: str = "09:00-15:00"
     peak_periods: list[VolumeTimePeriod]
     generated_at: datetime
+
+
+# === Volume Anomaly Detection Schemas ===
+
+
+class VolumeTimeSlot(BaseModel):
+    """Volume data for a single 5-minute time slot with anomaly detection."""
+
+    hour: int
+    minute_bucket: int  # 0, 5, 10, 15, ...
+    time_label: str  # "09:00", "09:05", etc.
+    current_volume: int  # Latest day's volume
+    avg_volume: float  # N-day average baseline
+    volume_ratio: float  # current / avg
+    anomaly_level: VolumeAnomalyLevel
+    sample_count: int  # Number of days in baseline
+
+
+class VolumeAnomalyResponse(BaseModel):
+    """Response for volume anomaly detection endpoint."""
+
+    symbol: str
+    days_analyzed: int
+    trading_session: str = "09:00-15:00"
+    time_slots: list[VolumeTimeSlot]  # All 72 slots
+    generated_at: datetime
+    latest_date: Optional[date] = None  # Date of current_volume data
