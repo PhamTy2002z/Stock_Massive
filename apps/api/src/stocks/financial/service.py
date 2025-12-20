@@ -222,8 +222,9 @@ class FinancialService:
 
         periods = []
         for _, row in df.iterrows():
-            year = row.get("yearReport") or row.get("year")
-            quarter = row.get("lengthReport") or row.get("quarter")
+            # Vietnamese columns first (lang="vi"), then English fallbacks
+            year = row.get("Năm") or row.get("yearReport") or row.get("year")
+            quarter = row.get("Kỳ") or row.get("lengthReport") or row.get("quarter")
             if period == "quarter" and quarter:
                 periods.append(f"Q{int(quarter)}/{year}")
             else:
@@ -323,8 +324,9 @@ class FinancialService:
 
         periods = []
         for _, row in df.iterrows():
-            year = row.get("yearReport") or row.get("year")
-            quarter = row.get("lengthReport") or row.get("quarter")
+            # Vietnamese columns first (lang="vi"), then English fallbacks
+            year = row.get("Năm") or row.get("yearReport") or row.get("year")
+            quarter = row.get("Kỳ") or row.get("lengthReport") or row.get("quarter")
             if period == "quarter" and quarter:
                 periods.append(f"Q{int(quarter)}/{year}")
             else:
@@ -393,8 +395,9 @@ class FinancialService:
 
         periods = []
         for _, row in df.iterrows():
-            year = row.get("yearReport") or row.get("year")
-            quarter = row.get("lengthReport") or row.get("quarter")
+            # Vietnamese columns first (lang="vi"), then English fallbacks
+            year = row.get("Năm") or row.get("yearReport") or row.get("year")
+            quarter = row.get("Kỳ") or row.get("lengthReport") or row.get("quarter")
             if period == "quarter" and quarter:
                 periods.append(f"Q{int(quarter)}/{year}")
             else:
