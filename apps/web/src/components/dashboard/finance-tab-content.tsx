@@ -68,30 +68,30 @@ const incomeStatementData: FinancialRow[] = [
 
 // Mock Balance Sheet Data
 const balanceSheetData: FinancialRow[] = [
-  { id: "current_assets", label: "TÀI SẢN NGẮN HẠN", values: { "Q4/2024": 8435357.7, "Q3/2024": 8867543.9, "Q2/2024": 8707882.4, "Q1/2024": 8530647.8 }, isHeader: true, isSummary: true },
-  { id: "cash", label: "Tiền và tương đương tiền", values: { "Q4/2024": 149708.8, "Q3/2024": 113974.5, "Q2/2024": 136029.1, "Q1/2024": 39930.3 }, level: 1 },
-  { id: "short_invest", label: "Giá trị thuần đầu tư ngắn hạn", values: { "Q4/2024": 0, "Q3/2024": 0, "Q2/2024": 0, "Q1/2024": 0 }, level: 1 },
-  { id: "receivables", label: "Các khoản phải thu ngắn hạn", values: { "Q4/2024": 7536948.4, "Q3/2024": 7813719.6, "Q2/2024": 7771905.9, "Q1/2024": 7657080.9 }, level: 1 },
-  { id: "inventory", label: "Hàng tồn kho ròng", values: { "Q4/2024": 694457.7, "Q3/2024": 892004, "Q2/2024": 767521.2, "Q1/2024": 803936.8 }, level: 1 },
-  { id: "other_current", label: "Tài sản lưu động khác", values: { "Q4/2024": 54242.7, "Q3/2024": 47845.9, "Q2/2024": 32426.2, "Q1/2024": 29699.7 }, level: 1 },
-  { id: "long_assets", label: "TÀI SẢN DÀI HẠN", values: { "Q4/2024": 13845458.2, "Q3/2024": 13624560.4, "Q2/2024": 12462570.6, "Q1/2024": 12639145.9 }, isHeader: true, isSummary: true },
-  { id: "long_receivables", label: "Phải thu về cho vay dài hạn", values: { "Q4/2024": 46813.2, "Q3/2024": 697004, "Q2/2024": 274178.9, "Q1/2024": 606032.2 }, level: 1 },
-  { id: "fixed_assets", label: "Tài sản cố định", values: { "Q4/2024": 6567006.9, "Q3/2024": 6030316.5, "Q2/2024": 5602001.9, "Q1/2024": 5903291.2 }, level: 1 },
-  { id: "invest_assets", label: "Giá trị ròng tài sản đầu tư", values: { "Q4/2024": 34296.3, "Q3/2024": 34769.1, "Q2/2024": 35242, "Q1/2024": 35714.9 }, level: 1 },
-  { id: "long_invest", label: "Đầu tư dài hạn", values: { "Q4/2024": 557387, "Q3/2024": 443168.3, "Q2/2024": 443168.3, "Q1/2024": 429462.5 }, level: 1 },
-  { id: "goodwill", label: "Lợi thế thương mại", values: { "Q4/2024": 0, "Q3/2024": 0, "Q2/2024": 0, "Q1/2024": 0 }, level: 1 },
-  { id: "other_long", label: "Tài sản dài hạn khác", values: { "Q4/2024": 370977.6, "Q3/2024": 360834.7, "Q2/2024": 230373.6, "Q1/2024": 265564.5 }, level: 1 },
-  { id: "total_assets", label: "TỔNG CỘNG TÀI SẢN", values: { "Q4/2024": 22280815.8, "Q3/2024": 22492104.3, "Q2/2024": 21170453, "Q1/2024": 21169793.7 }, isHeader: true, isSummary: true },
-  { id: "liabilities", label: "NỢ PHẢI TRẢ", values: { "Q4/2024": 12955187.7, "Q3/2024": 13532271.1, "Q2/2024": 12750086.3, "Q1/2024": 14137319.6 }, isHeader: true, isSummary: true },
-  { id: "short_debt", label: "Nợ ngắn hạn", values: { "Q4/2024": 11122837.7, "Q3/2024": 9530292.8, "Q2/2024": 9058255.5, "Q1/2024": 9656045.6 }, level: 1 },
-  { id: "long_debt", label: "Nợ dài hạn", values: { "Q4/2024": 1832350.1, "Q3/2024": 4001978.3, "Q2/2024": 3691830.8, "Q1/2024": 4481274 }, level: 1 },
-  { id: "equity", label: "VỐN CHỦ SỞ HỮU", values: { "Q4/2024": 9325628.1, "Q3/2024": 8959833.1, "Q2/2024": 8420366.7, "Q1/2024": 7032474.1 }, isHeader: true, isSummary: true },
-  { id: "capital_fund", label: "Vốn và các quỹ", values: { "Q4/2024": 9325628.1, "Q3/2024": 8959833.1, "Q2/2024": 8420366.7, "Q1/2024": 7032474.1 }, level: 1 },
-  { id: "other_fund", label: "Các quỹ khác", values: { "Q4/2024": 0, "Q3/2024": 0, "Q2/2024": 0, "Q1/2024": 0 }, level: 1 },
-  { id: "retained", label: "Lãi chưa phân phối", values: { "Q4/2024": -422660.1, "Q3/2024": -626177.6, "Q2/2024": -957008, "Q1/2024": -1452426.2 }, level: 1 },
-  { id: "state_fund", label: "Vốn Ngân sách nhà nước và quỹ khác", values: { "Q4/2024": 0, "Q3/2024": 0, "Q2/2024": 0, "Q1/2024": 0 }, level: 1 },
-  { id: "minority", label: "LỢI ÍCH CỦA CỔ ĐÔNG THIỂU SỐ", values: { "Q4/2024": 581381.9, "Q3/2024": 576647.4, "Q2/2024": 557338, "Q1/2024": 501041.1 }, isHeader: true, isSummary: true },
-  { id: "total_capital", label: "TỔNG CỘNG NGUỒN VỐN", values: { "Q4/2024": 22280815.8, "Q3/2024": 22492104.3, "Q2/2024": 21170453, "Q1/2024": 21169793.7 }, isHeader: true, isSummary: true },
+  { id: "current_assets", label: "TÀI SẢN NGẮN HẠN", values: { "Q3/2025": 8867543.9, "Q2/2025": 8707882.4, "Q1/2025": 8530647.8, "Q4/2024": 8435357.7 }, isHeader: true, isSummary: true },
+  { id: "cash", label: "Tiền và tương đương tiền", values: { "Q3/2025": 113974.5, "Q2/2025": 136029.1, "Q1/2025": 39930.3, "Q4/2024": 149708.8 }, level: 1 },
+  { id: "short_invest", label: "Giá trị thuần đầu tư ngắn hạn", values: { "Q3/2025": 0, "Q2/2025": 0, "Q1/2025": 0, "Q4/2024": 0 }, level: 1 },
+  { id: "receivables", label: "Các khoản phải thu ngắn hạn", values: { "Q3/2025": 7813719.6, "Q2/2025": 7771905.9, "Q1/2025": 7657080.9, "Q4/2024": 7536948.4 }, level: 1 },
+  { id: "inventory", label: "Hàng tồn kho ròng", values: { "Q3/2025": 892004, "Q2/2025": 767521.2, "Q1/2025": 803936.8, "Q4/2024": 694457.7 }, level: 1 },
+  { id: "other_current", label: "Tài sản lưu động khác", values: { "Q3/2025": 47845.9, "Q2/2025": 32426.2, "Q1/2025": 29699.7, "Q4/2024": 54242.7 }, level: 1 },
+  { id: "long_assets", label: "TÀI SẢN DÀI HẠN", values: { "Q3/2025": 13624560.4, "Q2/2025": 12462570.6, "Q1/2025": 12639145.9, "Q4/2024": 13845458.2 }, isHeader: true, isSummary: true },
+  { id: "long_receivables", label: "Phải thu về cho vay dài hạn", values: { "Q3/2025": 697004, "Q2/2025": 274178.9, "Q1/2025": 606032.2, "Q4/2024": 46813.2 }, level: 1 },
+  { id: "fixed_assets", label: "Tài sản cố định", values: { "Q3/2025": 6030316.5, "Q2/2025": 5602001.9, "Q1/2025": 5903291.2, "Q4/2024": 6567006.9 }, level: 1 },
+  { id: "invest_assets", label: "Giá trị ròng tài sản đầu tư", values: { "Q3/2025": 34769.1, "Q2/2025": 35242, "Q1/2025": 35714.9, "Q4/2024": 34296.3 }, level: 1 },
+  { id: "long_invest", label: "Đầu tư dài hạn", values: { "Q3/2025": 443168.3, "Q2/2025": 443168.3, "Q1/2025": 429462.5, "Q4/2024": 557387 }, level: 1 },
+  { id: "goodwill", label: "Lợi thế thương mại", values: { "Q3/2025": 0, "Q2/2025": 0, "Q1/2025": 0, "Q4/2024": 0 }, level: 1 },
+  { id: "other_long", label: "Tài sản dài hạn khác", values: { "Q3/2025": 360834.7, "Q2/2025": 230373.6, "Q1/2025": 265564.5, "Q4/2024": 370977.6 }, level: 1 },
+  { id: "total_assets", label: "TỔNG CỘNG TÀI SẢN", values: { "Q3/2025": 22492104.3, "Q2/2025": 21170453, "Q1/2025": 21169793.7, "Q4/2024": 22280815.8 }, isHeader: true, isSummary: true },
+  { id: "liabilities", label: "NỢ PHẢI TRẢ", values: { "Q3/2025": 13532271.1, "Q2/2025": 12750086.3, "Q1/2025": 14137319.6, "Q4/2024": 12955187.7 }, isHeader: true, isSummary: true },
+  { id: "short_debt", label: "Nợ ngắn hạn", values: { "Q3/2025": 9530292.8, "Q2/2025": 9058255.5, "Q1/2025": 9656045.6, "Q4/2024": 11122837.7 }, level: 1 },
+  { id: "long_debt", label: "Nợ dài hạn", values: { "Q3/2025": 4001978.3, "Q2/2025": 3691830.8, "Q1/2025": 4481274, "Q4/2024": 1832350.1 }, level: 1 },
+  { id: "equity", label: "VỐN CHỦ SỞ HỮU", values: { "Q3/2025": 8959833.1, "Q2/2025": 8420366.7, "Q1/2025": 7032474.1, "Q4/2024": 9325628.1 }, isHeader: true, isSummary: true },
+  { id: "capital_fund", label: "Vốn và các quỹ", values: { "Q3/2025": 8959833.1, "Q2/2025": 8420366.7, "Q1/2025": 7032474.1, "Q4/2024": 9325628.1 }, level: 1 },
+  { id: "other_fund", label: "Các quỹ khác", values: { "Q3/2025": 0, "Q2/2025": 0, "Q1/2025": 0, "Q4/2024": 0 }, level: 1 },
+  { id: "retained", label: "Lãi chưa phân phối", values: { "Q3/2025": -626177.6, "Q2/2025": -957008, "Q1/2025": -1452426.2, "Q4/2024": -422660.1 }, level: 1 },
+  { id: "state_fund", label: "Vốn Ngân sách nhà nước và quỹ khác", values: { "Q3/2025": 0, "Q2/2025": 0, "Q1/2025": 0, "Q4/2024": 0 }, level: 1 },
+  { id: "minority", label: "LỢI ÍCH CỦA CỔ ĐÔNG THIỂU SỐ", values: { "Q3/2025": 576647.4, "Q2/2025": 557338, "Q1/2025": 501041.1, "Q4/2024": 581381.9 }, isHeader: true, isSummary: true },
+  { id: "total_capital", label: "TỔNG CỘNG NGUỒN VỐN", values: { "Q3/2025": 22492104.3, "Q2/2025": 21170453, "Q1/2025": 21169793.7, "Q4/2024": 22280815.8 }, isHeader: true, isSummary: true },
 ]
 
 // Mock Cash Flow Data
@@ -262,7 +262,7 @@ export function FinanceTabContent({ symbol, className }: FinanceTabContentProps)
         if (balanceData && balanceData.rows.length > 0) {
           return { data: balanceData.rows, periods: balanceData.periods, isLoading: balanceLoading }
         }
-        return { data: balanceSheetData, periods: ["Q4/2024", "Q3/2024", "Q2/2024", "Q1/2024"], isLoading: balanceLoading }
+        return { data: balanceSheetData, periods: ["Q3/2025", "Q2/2025", "Q1/2025", "Q4/2024"], isLoading: balanceLoading }
       case "cashflow":
         // Use API data if available, otherwise fall back to mock
         if (cashFlowApiData && cashFlowApiData.rows.length > 0) {

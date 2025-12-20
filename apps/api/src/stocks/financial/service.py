@@ -230,22 +230,29 @@ class FinancialService:
             else:
                 periods.append(str(year))
 
+        # row_mappings: (id, label, column_names, level, is_summary)
+        # level: 0=root, 1=child, 2=sub-child
+        # column_names: vnstock Vietnamese column names (exact match required)
         row_mappings = [
-            ("revenue", "Doanh thu thuần", ["Doanh thu thuần", "revenue", "Net Revenue"], 0, True),
-            ("cogs", "Giá vốn hàng bán", ["Giá vốn hàng bán", "costOfGoodSold", "Cost of sales"], 1, False),
-            ("gross_profit", "Lợi nhuận gộp", ["Lợi nhuận gộp", "grossProfit", "Gross profit"], 0, True),
-            ("selling_expense", "Chi phí bán hàng", ["Chi phí bán hàng", "sellingExpense"], 1, False),
-            ("admin_expense", "Chi phí quản lý", ["Chi phí quản lý doanh nghiệp", "adminExpense"], 1, False),
-            ("operating_profit", "Lợi nhuận từ HĐKD", ["Lợi nhuận thuần từ hoạt động kinh doanh", "operationProfit"], 0, True),
-            ("financial_income", "Doanh thu tài chính", ["Doanh thu hoạt động tài chính", "financialIncome"], 1, False),
-            ("financial_expense", "Chi phí tài chính", ["Chi phí tài chính", "financialExpense"], 1, False),
-            ("other_income", "Thu nhập khác", ["Thu nhập khác", "otherIncome"], 1, False),
-            ("other_expense", "Chi phí khác", ["Chi phí khác", "otherExpense"], 1, False),
-            ("pre_tax_profit", "Lợi nhuận trước thuế", ["Tổng lợi nhuận kế toán trước thuế", "preTaxProfit"], 0, True),
-            ("tax_expense", "Chi phí thuế TNDN", ["Chi phí thuế thu nhập doanh nghiệp hiện hành", "taxExpense"], 1, False),
-            ("net_profit", "Lợi nhuận sau thuế", ["Lợi nhuận sau thuế thu nhập doanh nghiệp", "postTaxProfit"], 0, True),
-            ("parent_profit", "LNST của cổ đông công ty mẹ", ["Lợi nhuận sau thuế của cổ đông công ty mẹ", "attributableToParent"], 1, False),
-            ("eps", "EPS (VND)", ["earningPerShare", "EPS"], 0, True),
+            ("gross_revenue", "Doanh thu bán hàng và cung cấp dịch vụ", ["Doanh thu bán hàng và cung cấp dịch vụ"], 0, True),
+            ("revenue_deductions", "Các khoản giảm trừ doanh thu", ["Các khoản giảm trừ doanh thu"], 1, False),
+            ("net_revenue", "Doanh thu thuần", ["Doanh thu thuần"], 0, True),
+            ("cogs", "Giá vốn hàng bán", ["Giá vốn hàng bán"], 1, False),
+            ("gross_profit", "Lãi gộp", ["Lãi gộp"], 0, True),
+            ("selling_expense", "Chi phí bán hàng", ["Chi phí bán hàng"], 1, False),
+            ("admin_expense", "Chi phí quản lý doanh nghiệp", ["Chi phí quản lý DN", "Chi phí quản lý doanh nghiệp"], 1, False),
+            ("financial_income", "Thu nhập tài chính", ["Thu nhập tài chính"], 1, False),
+            ("financial_expense", "Chi phí tài chính", ["Chi phí tài chính"], 1, False),
+            ("interest_expense", "Chi phí tiền lãi vay", ["Chi phí tiền lãi vay"], 2, False),
+            ("operating_profit", "Lãi/Lỗ từ hoạt động kinh doanh", ["Lãi/Lỗ từ hoạt động kinh doanh"], 0, True),
+            ("other_income", "Thu nhập khác", ["Thu nhập khác"], 1, False),
+            ("other_expense", "Thu nhập/Chi phí khác", ["Thu nhập/Chi phí khác"], 1, False),
+            ("other_profit", "Lợi nhuận khác", ["Lợi nhuận khác"], 1, False),
+            ("pre_tax_profit", "Lợi nhuận trước thuế", ["LN trước thuế", "Lợi nhuận trước thuế"], 0, True),
+            ("tax_expense", "Chi phí thuế TNDN", ["Chi phí thuế TNDN hiện hành", "Chi phí thuế TNDN"], 1, False),
+            ("net_profit", "Lợi nhuận thuần", ["Lợi nhuận thuần"], 0, True),
+            ("parent_profit", "Cổ đông của Công ty mẹ", ["Cổ đông của Công ty mẹ"], 1, False),
+            ("minority_profit", "Cổ đông thiểu số", ["Cổ đông thiểu số"], 1, False),
         ]
 
         rows = []
@@ -261,10 +268,7 @@ class FinancialService:
                             if val is not None and not pd.isna(val):
                                 break
                     if val is not None and not pd.isna(val):
-                        if row_id == "eps":
-                            values[period_label] = float(val)
-                        else:
-                            values[period_label] = float(val) / 1_000_000
+                        values[period_label] = float(val) / 1_000_000
                     else:
                         values[period_label] = None
                 else:
@@ -332,23 +336,33 @@ class FinancialService:
             else:
                 periods.append(str(year))
 
+        # row_mappings: (id, label, column_names, level, is_summary)
+        # column_names: vnstock Vietnamese column names (exact match required)
         row_mappings = [
-            ("total_assets", "TỔNG TÀI SẢN", ["Tổng cộng tài sản", "asset"], 0, True),
-            ("current_assets", "Tài sản ngắn hạn", ["Tài sản ngắn hạn", "shortAsset"], 0, True),
-            ("cash", "Tiền và tương đương tiền", ["Tiền và các khoản tương đương tiền", "cash"], 1, False),
-            ("short_invest", "Đầu tư tài chính ngắn hạn", ["Đầu tư tài chính ngắn hạn", "shortInvest"], 1, False),
-            ("receivables", "Các khoản phải thu ngắn hạn", ["Các khoản phải thu ngắn hạn", "shortReceivable"], 1, False),
-            ("inventory", "Hàng tồn kho", ["Hàng tồn kho", "inventory"], 1, False),
-            ("other_current", "Tài sản ngắn hạn khác", ["Tài sản ngắn hạn khác", "otherShortAsset"], 1, False),
-            ("long_assets", "Tài sản dài hạn", ["Tài sản dài hạn", "longAsset"], 0, True),
-            ("fixed_assets", "Tài sản cố định", ["Tài sản cố định", "fixedAsset"], 1, False),
-            ("long_invest", "Đầu tư tài chính dài hạn", ["Đầu tư tài chính dài hạn", "longInvest"], 1, False),
-            ("total_liabilities", "NỢ PHẢI TRẢ", ["Nợ phải trả", "debt"], 0, True),
-            ("current_liabilities", "Nợ ngắn hạn", ["Nợ ngắn hạn", "shortDebt"], 1, False),
-            ("long_liabilities", "Nợ dài hạn", ["Nợ dài hạn", "longDebt"], 1, False),
-            ("equity", "VỐN CHỦ SỞ HỮU", ["Vốn chủ sở hữu", "equity"], 0, True),
-            ("charter_capital", "Vốn góp của chủ sở hữu", ["Vốn góp của chủ sở hữu", "capital"], 1, False),
-            ("retained_earnings", "Lợi nhuận sau thuế chưa phân phối", ["Lợi nhuận sau thuế chưa phân phối", "unDistributedIncome"], 1, False),
+            ("current_assets", "TÀI SẢN NGẮN HẠN", ["TÀI SẢN NGẮN HẠN (đồng)", "Tài sản ngắn hạn"], 0, True),
+            ("cash", "Tiền và tương đương tiền", ["Tiền và tương đương tiền (đồng)", "Tiền và các khoản tương đương tiền"], 1, False),
+            ("short_invest", "Giá trị thuần đầu tư ngắn hạn", ["Giá trị thuần đầu tư ngắn hạn (đồng)", "Đầu tư tài chính ngắn hạn"], 1, False),
+            ("receivables", "Các khoản phải thu ngắn hạn", ["Các khoản phải thu ngắn hạn (đồng)"], 1, False),
+            ("inventory", "Hàng tồn kho ròng", ["Hàng tồn kho ròng", "Hàng tồn kho, ròng (đồng)"], 1, False),
+            ("other_current", "Tài sản lưu động khác", ["Tài sản lưu động khác", "Tài sản lưu động khác (đồng)"], 1, False),
+            ("long_assets", "TÀI SẢN DÀI HẠN", ["TÀI SẢN DÀI HẠN (đồng)", "Tài sản dài hạn"], 0, True),
+            ("long_receivables", "Phải thu về cho vay dài hạn", ["Phải thu về cho vay dài hạn (đồng)", "Phải thu dài hạn (đồng)"], 1, False),
+            ("fixed_assets", "Tài sản cố định", ["Tài sản cố định (đồng)"], 1, False),
+            ("invest_assets", "Giá trị ròng tài sản đầu tư", ["Giá trị ròng tài sản đầu tư"], 1, False),
+            ("long_invest", "Đầu tư dài hạn", ["Đầu tư dài hạn (đồng)"], 1, False),
+            ("goodwill", "Lợi thế thương mại", ["Lợi thế thương mại", "Lợi thế thương mại (đồng)"], 1, False),
+            ("other_long", "Tài sản dài hạn khác", ["Tài sản dài hạn khác", "Tài sản dài hạn khác (đồng)"], 1, False),
+            ("total_assets", "TỔNG CỘNG TÀI SẢN", ["TỔNG CỘNG TÀI SẢN (đồng)"], 0, True),
+            ("liabilities", "NỢ PHẢI TRẢ", ["NỢ PHẢI TRẢ (đồng)", "Nợ phải trả"], 0, True),
+            ("short_debt", "Nợ ngắn hạn", ["Nợ ngắn hạn (đồng)"], 1, False),
+            ("long_debt", "Nợ dài hạn", ["Nợ dài hạn (đồng)"], 1, False),
+            ("equity", "VỐN CHỦ SỞ HỮU", ["VỐN CHỦ SỞ HỮU (đồng)", "Vốn chủ sở hữu"], 0, True),
+            ("capital_fund", "Vốn và các quỹ", ["Vốn và các quỹ (đồng)"], 1, False),
+            ("owner_capital", "Vốn góp của chủ sở hữu", ["Vốn góp của chủ sở hữu (đồng)"], 1, False),
+            ("retained", "Lãi chưa phân phối", ["Lãi chưa phân phối (đồng)"], 1, False),
+            ("state_fund", "Vốn Ngân sách nhà nước và quỹ khác", ["Vốn Ngân sách nhà nước và quỹ khác"], 1, False),
+            ("minority", "LỢI ÍCH CỦA CỔ ĐÔNG THIỂU SỐ", ["LỢI ÍCH CỦA CỔ ĐÔNG THIỂU SỐ"], 0, True),
+            ("total_capital", "TỔNG CỘNG NGUỒN VỐN", ["TỔNG CỘNG NGUỒN VỐN (đồng)"], 0, True),
         ]
 
         rows = []
