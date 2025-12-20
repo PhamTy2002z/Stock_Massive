@@ -16,6 +16,7 @@ from ..schemas.price import (
     MarketIndexItem,
     IntradayCollectionResult,
     VolumeAnalysisResponse,
+    VolumeAnomalyResponse,
 )
 from ..shared import StockServiceError
 
@@ -121,3 +122,26 @@ async def get_volume_analysis(
         )
 
     return VolumeAnalysisResponse(**result)
+
+
+@router.get("/{symbol}/volume-anomalies", response_model=VolumeAnomalyResponse)
+async def get_volume_anomalies(
+    symbol: str,
+    days: int = Query(default=20, ge=5, le=60, description="Baseline period in days"),
+    db: AsyncSession = Depends(get_db),
+) -> VolumeAnomalyResponse:
+    """Detect volume anomalies for all 5-minute time slots.
+
+    Compares latest day's volume against N-day average baseline.
+    Returns 72 time slots (09:00-14:55) with anomaly flags.
+    """
+    collector = IntradayCollector(db)
+    result = await collector.detect_volume_anomalies(symbol, days)
+
+    if not result["time_slots"]:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No intraday data found for {symbol.upper()}",
+        )
+
+    return VolumeAnomalyResponse(**result)

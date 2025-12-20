@@ -230,3 +230,139 @@ class IntradayCollector:
             "peak_periods": periods,
             "generated_at": datetime.now(),
         }
+
+    async def detect_volume_anomalies(self, symbol: str, days: int = 20) -> dict:
+        """Detect volume anomalies across all 5-minute time slots.
+
+        Compares latest day's volume against N-day average baseline.
+
+        Args:
+            symbol: Stock symbol (e.g., VCB, FPT)
+            days: Number of days for baseline calculation (default 20)
+
+        Returns:
+            Dictionary with symbol, time_slots (72 bars), metadata
+        """
+        symbol = validate_symbol(symbol)
+        cutoff_date = datetime.now() - timedelta(days=days)
+
+        # Get latest trading date
+        latest_stmt = (
+            select(func.max(func.date(StockIntradayBar.bar_time)))
+            .where(StockIntradayBar.symbol == symbol.upper())
+        )
+        latest_result = await self.db.execute(latest_stmt)
+        latest_date = latest_result.scalar()
+
+        if not latest_date:
+            return {
+                "symbol": symbol.upper(),
+                "days_analyzed": days,
+                "trading_session": "09:00-15:00",
+                "time_slots": [],
+                "generated_at": datetime.now(),
+                "latest_date": None,
+            }
+
+        # Extract hour and minute for grouping
+        hour_expr = func.extract("hour", StockIntradayBar.bar_time)
+        minute_expr = func.floor(
+            func.extract("minute", StockIntradayBar.bar_time) / 5
+        ) * 5
+        date_expr = func.date(StockIntradayBar.bar_time)
+
+        # Get baseline averages (exclude latest day)
+        baseline_stmt = (
+            select(
+                hour_expr.label("hour"),
+                minute_expr.label("minute_bucket"),
+                func.avg(StockIntradayBar.volume).label("avg_volume"),
+                func.count().label("sample_count"),
+            )
+            .where(StockIntradayBar.symbol == symbol.upper())
+            .where(StockIntradayBar.bar_time >= cutoff_date)
+            .where(date_expr < latest_date)
+            .where(hour_expr >= 9)
+            .where(hour_expr < 15)
+            .group_by(hour_expr, minute_expr)
+        )
+        baseline_result = await self.db.execute(baseline_stmt)
+        baseline_rows = baseline_result.fetchall()
+
+        # Build baseline lookup
+        baseline_map = {}
+        for row in baseline_rows:
+            key = (int(row.hour), int(row.minute_bucket))
+            baseline_map[key] = {
+                "avg_volume": float(row.avg_volume),
+                "sample_count": int(row.sample_count),
+            }
+
+        # Get latest day's volumes
+        current_stmt = (
+            select(
+                hour_expr.label("hour"),
+                minute_expr.label("minute_bucket"),
+                StockIntradayBar.volume,
+            )
+            .where(StockIntradayBar.symbol == symbol.upper())
+            .where(date_expr == latest_date)
+            .where(hour_expr >= 9)
+            .where(hour_expr < 15)
+        )
+        current_result = await self.db.execute(current_stmt)
+        current_rows = current_result.fetchall()
+
+        # Build current volume lookup
+        current_map = {}
+        for row in current_rows:
+            key = (int(row.hour), int(row.minute_bucket))
+            current_map[key] = int(row.volume)
+
+        # Generate all 72 time slots (09:00-14:55)
+        time_slots = []
+        for hour in range(9, 15):
+            for minute in range(0, 60, 5):
+                if hour == 14 and minute > 55:
+                    break  # Stop at 14:55
+
+                key = (hour, minute)
+                current_vol = current_map.get(key, 0)
+                baseline = baseline_map.get(key, {"avg_volume": 0, "sample_count": 0})
+                avg_vol = baseline["avg_volume"]
+
+                # Calculate ratio and anomaly level
+                if avg_vol > 0:
+                    ratio = current_vol / avg_vol
+                else:
+                    ratio = 0.0
+
+                # Determine anomaly level
+                if ratio >= 3.0:
+                    anomaly = "very_high"
+                elif ratio >= 2.0:
+                    anomaly = "high"
+                elif ratio >= 1.5:
+                    anomaly = "elevated"
+                else:
+                    anomaly = "normal"
+
+                time_slots.append({
+                    "hour": hour,
+                    "minute_bucket": minute,
+                    "time_label": f"{hour:02d}:{minute:02d}",
+                    "current_volume": current_vol,
+                    "avg_volume": avg_vol,
+                    "volume_ratio": round(ratio, 2),
+                    "anomaly_level": anomaly,
+                    "sample_count": baseline["sample_count"],
+                })
+
+        return {
+            "symbol": symbol.upper(),
+            "days_analyzed": days,
+            "trading_session": "09:00-15:00",
+            "time_slots": time_slots,
+            "generated_at": datetime.now(),
+            "latest_date": latest_date,
+        }
