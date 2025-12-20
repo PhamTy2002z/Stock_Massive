@@ -12,10 +12,10 @@ interface SectorPerformanceProps {
 export function SectorPerformance({ className }: SectorPerformanceProps) {
   const { data, isLoading, error, refetch, lastUpdated } = useSectorPerformance()
 
-  // Get top 5 gainers and top 5 losers
+  // Top 5 gainers: only positive change_pct, Top 5 losers: only negative change_pct
   const sortedSectors = data?.sectors ? [...data.sectors].sort((a, b) => b.change_pct - a.change_pct) : []
-  const topGainers = sortedSectors.filter((s) => s.change_pct > 0).slice(0, 5)
-  const topLosers = sortedSectors.filter((s) => s.change_pct < 0).slice(-5).reverse()
+  const topGainers = sortedSectors.filter(s => s.change_pct > 0).slice(0, 5)
+  const topLosers = sortedSectors.filter(s => s.change_pct < 0).sort((a, b) => a.change_pct - b.change_pct).slice(0, 5)
 
   if (isLoading && !data) {
     return <SectorPerformanceSkeleton />
@@ -128,9 +128,13 @@ interface SectorRowProps {
 }
 
 function SectorRow({ sector, rank, type }: SectorRowProps) {
-  const isGainer = type === "gainer"
-  const colorClass = isGainer ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
-  const bgClass = isGainer ? "bg-green-500/10 dark:bg-green-400/10" : "bg-red-500/10 dark:bg-red-400/10"
+  // Color based on actual change_pct value, not type
+  const isPositive = sector.change_pct >= 0
+  const colorClass = isPositive ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
+  // Rank badge color based on list type (gainer list = green, loser list = red)
+  const isGainerList = type === "gainer"
+  const bgClass = isGainerList ? "bg-green-500/10 dark:bg-green-400/10" : "bg-red-500/10 dark:bg-red-400/10"
+  const rankColorClass = isGainerList ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
 
   return (
     <div className="flex items-center gap-3 p-3 hover:bg-muted/30 transition-colors">
@@ -139,7 +143,7 @@ function SectorRow({ sector, rank, type }: SectorRowProps) {
         className={cn(
           "flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold",
           bgClass,
-          colorClass
+          rankColorClass
         )}
       >
         {rank}
@@ -158,15 +162,15 @@ function SectorRow({ sector, rank, type }: SectorRowProps) {
       {/* Change Percent */}
       <div className={cn("flex-shrink-0 text-right", colorClass)}>
         <div className="flex items-center gap-1 font-semibold tabular-nums">
-          {isGainer ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+          {isPositive ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
           <span>
-            {isGainer ? "+" : ""}
+            {isPositive ? "+" : ""}
             {sector.change_pct.toFixed(2)}%
           </span>
         </div>
         {/* Top stocks in sector */}
         <div className="text-xs mt-0.5">
-          {isGainer
+          {isGainerList
             ? sector.top_gainers.slice(0, 2).join(", ")
             : sector.top_losers.slice(0, 2).join(", ")}
         </div>
