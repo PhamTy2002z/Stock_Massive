@@ -130,6 +130,16 @@ class MarketService:
             # Remove duplicate symbols to avoid reindexing errors
             price_df = price_df.drop_duplicates(subset=["symbol"], keep="first")
 
+            # Extract actual trading session date from data
+            session_date = pd.Timestamp.now()
+            if "trading_date" in price_df.columns and price_df["trading_date"].notna().any():
+                trading_date_val = price_df["trading_date"].dropna().iloc[0]
+                if trading_date_val:
+                    try:
+                        session_date = pd.to_datetime(trading_date_val)
+                    except Exception:
+                        pass
+
             # Ensure unique symbols in all_symbols_df before merge
             # Select ICB columns that exist in the DataFrame
             icb_cols = ["symbol"]
@@ -158,9 +168,11 @@ class MarketService:
                     continue
 
                 # Calculate market cap weighted change
+                # Filter: match_price > 0 to exclude non-trading stocks
                 valid_rows = group[
                     group["match_price"].notna() &
                     group["ref_price"].notna() &
+                    (group["match_price"] > 0) &
                     (group["ref_price"] > 0)
                 ]
 
@@ -171,7 +183,7 @@ class MarketService:
                 changes = (valid_rows["match_price"] - valid_rows["ref_price"]) / valid_rows["ref_price"] * 100
                 avg_change = changes.mean()
 
-                # Estimate market cap from accumulated_value
+                # Estimate trading value from accumulated_value (unit: million VND)
                 sector_value = valid_rows["accumulated_value"].sum() if "accumulated_value" in valid_rows.columns else 0
 
                 # Get ICB code if available
@@ -192,7 +204,8 @@ class MarketService:
                     icb_code=icb_code,
                     icb_name=str(sector_name),
                     change_pct=round(float(avg_change), 2),
-                    total_market_cap=round(float(sector_value) / 1_000_000_000, 2) if sector_value else 0.0,
+                    # accumulated_value is in million VND, divide by 1000 to get billion (tỷ)
+                    total_market_cap=round(float(sector_value) / 1000, 2) if sector_value else 0.0,
                     stock_count=len(valid_rows),
                     top_gainers=top_gainers,
                     top_losers=top_losers,
@@ -205,7 +218,7 @@ class MarketService:
 
             return SectorPerformanceResponse(
                 sectors=sectors,
-                generated_at=pd.Timestamp.now(),
+                generated_at=session_date,
                 total_sectors=len(sectors),
             )
         except Exception as e:
