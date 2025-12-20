@@ -78,6 +78,9 @@ class StockDetail(BaseModel):
     employees: Optional[int] = None
     established_year: Optional[int] = None
 
+    # VN30 Ranking
+    vn30_rank: Optional[int] = None  # Rank by market cap within VN30 (1-30), None if not in VN30
+
 
 # === Shareholders Schemas ===
 
