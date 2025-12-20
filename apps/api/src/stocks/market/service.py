@@ -227,18 +227,11 @@ class MarketService:
 
     def get_fund_certificates(self, fund_type: Optional[str] = None) -> FundCertificatesResponse:
         """Get fund certificates (ETFs and open-end funds)."""
+        # Curated list of fund symbols to display
+        FUND_SYMBOLS = ["E1VFVN30", "VFMVF1", "VEOF", "VCBF-TBF", "VNDAF", "SSI-SCA"]
+
         try:
-            stock = Vnstock().stock(symbol="E1VFVN30", source=self.source)
-            df = stock.listing.symbols_by_group("ETF")
-
-            if df is None or (hasattr(df, "empty") and df.empty):
-                return FundCertificatesResponse(funds=[], generated_at=pd.Timestamp.now(), total_count=0)
-
-            # Convert to list if Series
-            if hasattr(df, "tolist"):
-                etf_symbols = df.tolist()
-            else:
-                etf_symbols = list(df) if df is not None else []
+            etf_symbols = FUND_SYMBOLS
 
             if not etf_symbols:
                 return FundCertificatesResponse(funds=[], generated_at=pd.Timestamp.now(), total_count=0)
