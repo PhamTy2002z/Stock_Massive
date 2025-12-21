@@ -5,7 +5,7 @@ from apscheduler import AsyncScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from src.core.config import get_settings
-from src.stocks.jobs import cleanup_old_data_job, collect_intraday_data_job, run_market_context_eod_job
+from src.stocks.jobs import cleanup_old_data_job, collect_intraday_data_job
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -43,11 +43,3 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
         id="data-cleanup-daily",
     )
     logger.info("Scheduled data cleanup at 16:00 ICT")
-
-    # Market context EOD pipeline at 15:45 Vietnam time (after market close)
-    await scheduler.add_schedule(
-        run_market_context_eod_job,
-        CronTrigger(hour=15, minute=45, timezone="Asia/Ho_Chi_Minh"),
-        id="market-context-eod-daily",
-    )
-    logger.info("Scheduled market context EOD pipeline at 15:45 ICT")

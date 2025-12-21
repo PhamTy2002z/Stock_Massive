@@ -10,8 +10,7 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | Market Indices | ✅ Done | VN-INDEX, VN30, HNX, UPCOM cards (1min auto-refresh) |
 | VN30 Overview Table | ✅ Done | Real-time VN30 stocks with price, volume, market cap |
 | Sector Performance | ✅ Done | ICB Level 2 with sorting, top gainers/losers |
-| Stock Detail Page | ✅ Done | Search, ticker header, stats, tabs (Overview, Finance, Shareholders, Volume, Market) |
-| Market Context Analysis | ✅ Done | Correlation, beta, sector rank, relative performance chart (Phase 1-4) |
+| Stock Detail Page | ✅ Done | Search, ticker header, stats, tabs (Overview, Finance, Shareholders, Volume) |
 | Stock Data API | ✅ Done | 25+ endpoints via vnstock + Fmarket |
 | Financial Data | ✅ Done | Income, balance sheet, cash flow (detailed) |
 | Shareholders/Officers | ✅ Done | Major holders, management, insider deals |
@@ -65,7 +64,7 @@ Stock_Massive/
 
 All endpoints prefixed with `/api/v1/stocks`:
 
-### Market Data (8 endpoints)
+### Market Data (6 endpoints)
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/symbols` | GET | List all stock symbols |
@@ -74,10 +73,8 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `/sector-performance` | GET | Sector performance (ICB Level 2) |
 | `/fund-certificates` | GET | Fund certificates data |
 | `/vn30-overview` | GET | VN30 stocks overview |
-| `/market-context/trigger-eod` | POST | Manual EOD pipeline trigger |
-| `/market-context/backfill` | POST | Backfill historical market context |
 
-### Price Data (9 endpoints)
+### Price Data (7 endpoints)
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/{symbol}/history` | GET | Historical OHLCV data |
@@ -87,7 +84,6 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `/{symbol}/detail` | GET | Comprehensive stock detail |
 | `/{symbol}/volume-analysis` | GET | Volume pattern analysis |
 | `/{symbol}/volume-anomalies` | GET | Volume anomaly detection |
-| `/{symbol}/market-context` | GET | Market context analysis (correlation, beta, sector ranking) |
 | `/intraday/collect` | POST | Trigger intraday collection |
 
 ### Company Data (5 endpoints)
