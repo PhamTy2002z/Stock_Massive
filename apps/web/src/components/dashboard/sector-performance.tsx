@@ -2,7 +2,6 @@
 
 import { useSectorPerformance } from "@/hooks/use-sector-performance"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Spinner } from "@/components/ui/spinner"
 import { AlertCircle, RefreshCw, TrendingUp, TrendingDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -10,25 +9,22 @@ import { cn } from "@/lib/utils"
  * Wrapper component with title and refresh button
  */
 export function SectorPerformanceSection({ className }: { className?: string }) {
-  const { data, isLoading, error, refetch } = useSectorPerformance()
+  const { data, isLoading, isFetching, error, refetch } = useSectorPerformance()
 
   return (
     <div className={className}>
       {/* Header with title and refresh button */}
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold text-foreground">Hiệu suất ngành</h2>
-        <div className="flex items-center gap-2">
-          {isLoading && <Spinner className="h-4 w-4 text-muted-foreground" />}
-          <button
-            onClick={() => refetch()}
-            disabled={isLoading}
-            className="p-1.5 rounded-md hover:bg-muted transition-colors disabled:opacity-50"
-            title="Làm mới dữ liệu"
-            aria-label="Làm mới dữ liệu"
-          >
-            <RefreshCw className="h-4 w-4" />
-          </button>
-        </div>
+        <button
+          onClick={() => refetch()}
+          disabled={isFetching}
+          className="p-1.5 rounded-md hover:bg-muted transition-colors disabled:opacity-50"
+          title="Làm mới dữ liệu"
+          aria-label="Làm mới dữ liệu"
+        >
+          <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
+        </button>
       </div>
       <SectorPerformanceContent data={data} isLoading={isLoading} error={error} refetch={refetch} />
     </div>

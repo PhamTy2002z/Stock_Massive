@@ -6,26 +6,13 @@ import {
   SectorPerformanceSection,
   FundCertificates,
   VN30OverviewTable,
-  StockTickerHeaderSkeleton,
-  StockDetailTabsSkeleton,
-  StockDetailPanelSkeleton,
-  StockStatsTableSkeleton,
-  StockCompanyInfoSkeleton,
-  StockDetailClient,
 } from "@/components/dashboard"
-import { fetchMarketIndicesServer, fetchSectorPerformanceServer, fetchStockDetailServer } from "@/lib/api-server"
+import { fetchMarketIndicesServer, fetchSectorPerformanceServer } from "@/lib/api-server"
 import { queryKeys } from "@/lib/query-keys"
 
-const DEFAULT_SYMBOL = "VCB"
-
-interface HomeProps {
-  searchParams: Promise<{ symbol?: string }>
-}
-
-async function prefetchData(symbol: string) {
+async function prefetchData() {
   const queryClient = new QueryClient()
 
-  // Prefetch all three in parallel
   await Promise.all([
     queryClient.prefetchQuery({
       queryKey: queryKeys.marketIndices,
@@ -35,12 +22,6 @@ async function prefetchData(symbol: string) {
       queryKey: queryKeys.sectorPerformance,
       queryFn: fetchSectorPerformanceServer,
     }),
-    symbol
-      ? queryClient.prefetchQuery({
-          queryKey: queryKeys.stockDetail(symbol),
-          queryFn: () => fetchStockDetailServer(symbol),
-        })
-      : Promise.resolve(),
   ])
 
   return dehydrate(queryClient)
@@ -55,25 +36,12 @@ function DashboardSkeleton() {
         </h2>
         <MarketIndices />
       </section>
-      <section className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
-        <div className="space-y-4">
-          <StockTickerHeaderSkeleton />
-          <StockDetailTabsSkeleton className="mt-2" />
-          <StockDetailPanelSkeleton />
-          <StockStatsTableSkeleton />
-        </div>
-        <div className="space-y-4">
-          <StockCompanyInfoSkeleton />
-        </div>
-      </section>
     </div>
   )
 }
 
-export default async function Home({ searchParams }: HomeProps) {
-  const params = await searchParams
-  const symbol = params.symbol || DEFAULT_SYMBOL
-  const dehydratedState = await prefetchData(symbol)
+export default async function Home() {
+  const dehydratedState = await prefetchData()
 
   return (
     <HydrationBoundary state={dehydratedState}>
@@ -95,9 +63,6 @@ export default async function Home({ searchParams }: HomeProps) {
               </h2>
               <VN30OverviewTable />
             </section>
-
-            {/* Selected Stock Detail */}
-            <StockDetailClient initialSymbol={symbol} />
 
             {/* Sector Performance & Fund Certificates */}
             <section className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
