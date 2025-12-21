@@ -29,8 +29,8 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
       UPSTASH_REDIS_REST_TOKEN: ${UPSTASH_REDIS_REST_TOKEN:-}
-      SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-false}
-      DAILY_OHLCV_ENABLED: ${DAILY_OHLCV_ENABLED:-false}
+      SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
+      DAILY_OHLCV_ENABLED: ${DAILY_OHLCV_ENABLED:-true}
     volumes:
       - ./apps/api/src:/code/src
       - ./apps/api/alembic:/code/alembic

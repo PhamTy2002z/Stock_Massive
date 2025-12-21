@@ -5,10 +5,15 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 from sqlalchemy import delete, text
-from vnstock import Listing, Vnstock
 
 from src.core.config import get_settings
 from src.core.database import async_session_factory, get_sync_db
+from src.core.vnstock_wrapper import (
+    VnstockRateLimitError,
+    get_adaptive_delay,
+    get_all_symbols,
+    get_stock_history,
+)
 from src.stocks.intraday_collector import IntradayCollector
 from src.stocks.models import StockDailyOHLCV, StockIntradayBar
 
@@ -67,7 +72,7 @@ def collect_daily_ohlcv_job() -> dict:
     """Daily job to collect OHLCV data for all symbols.
 
     Runs synchronously due to vnstock blocking calls.
-    Uses batch processing with delays to avoid rate limiting.
+    Uses safe wrapper with SystemExit protection and adaptive delays.
 
     Returns:
         Dictionary with success/failed counts and total rows
@@ -79,15 +84,13 @@ def collect_daily_ohlcv_job() -> dict:
     logger.info("Starting daily OHLCV collection for all symbols")
     start_time = datetime.now()
 
-    # Get all symbols
-    try:
-        listing = Listing()
-        all_symbols_df = listing.all_symbols()
-        all_symbols = all_symbols_df["symbol"].tolist()
-        logger.info(f"Found {len(all_symbols)} symbols to process")
-    except Exception as e:
-        logger.error(f"Failed to get symbol list: {e}")
-        return {"success": 0, "failed": 0, "total_rows": 0, "error": str(e)}
+    # Get all symbols using safe wrapper
+    all_symbols = get_all_symbols(max_retries=3, base_delay=5.0)
+    if not all_symbols:
+        logger.error("Failed to get symbol list (rate limited or error)")
+        return {"success": 0, "failed": 0, "total_rows": 0, "error": "Failed to fetch symbols"}
+
+    logger.info(f"Found {len(all_symbols)} symbols to process")
 
     # Date range: last 7 days (for daily updates, we only need recent data)
     end_date = datetime.now().strftime("%Y-%m-%d")
@@ -95,9 +98,10 @@ def collect_daily_ohlcv_job() -> dict:
 
     success_count = 0
     error_count = 0
+    rate_limit_count = 0
     total_rows = 0
     batch_size = settings.daily_ohlcv_batch_size
-    delay = settings.daily_ohlcv_delay
+    base_delay = settings.daily_ohlcv_delay
 
     # Process in batches
     for batch_idx in range(0, len(all_symbols), batch_size):
@@ -110,8 +114,16 @@ def collect_daily_ohlcv_job() -> dict:
         batch_data = []
         for symbol in batch:
             try:
-                stock = Vnstock().stock(symbol=symbol, source="VCI")
-                df = stock.quote.history(start=start_date, end=end_date, interval="1D")
+                # Use safe wrapper (VCI only, TCBS discontinued)
+                df = get_stock_history(
+                    symbol=symbol,
+                    start=start_date,
+                    end=end_date,
+                    interval="1D",
+                    source="VCI",
+                    max_retries=2,
+                    base_delay=3.0,
+                )
 
                 if df is not None and not df.empty:
                     df["symbol"] = symbol
@@ -119,46 +131,46 @@ def collect_daily_ohlcv_job() -> dict:
                     success_count += 1
                     total_rows += len(df)
                 else:
-                    # Fallback to TCBS
-                    try:
-                        stock = Vnstock().stock(symbol=symbol, source="TCBS")
-                        df = stock.quote.history(
-                            start=start_date, end=end_date, interval="1D"
-                        )
-                        if df is not None and not df.empty:
-                            df["symbol"] = symbol
-                            batch_data.append(df)
-                            success_count += 1
-                            total_rows += len(df)
-                        else:
-                            error_count += 1
-                    except Exception:
-                        error_count += 1
+                    error_count += 1
 
-                time.sleep(delay)
+            except VnstockRateLimitError:
+                rate_limit_count += 1
+                logger.warning(f"Rate limited for {symbol}, skipping")
 
             except Exception as e:
                 logger.debug(f"Error fetching {symbol}: {e}")
                 error_count += 1
-                time.sleep(delay)
+
+            # Adaptive delay based on recent failures
+            delay = get_adaptive_delay(base_delay)
+            time.sleep(delay)
 
         # Save batch to database
         if batch_data:
             _save_ohlcv_batch(batch_data)
 
         logger.info(
-            f"Batch {batch_num} complete: {success_count} success, {error_count} errors"
+            f"Batch {batch_num} complete: {success_count} success, "
+            f"{error_count} errors, {rate_limit_count} rate limited"
         )
+
+        # Extra pause between batches if rate limits detected
+        if rate_limit_count > 0:
+            batch_pause = min(30, rate_limit_count * 5)
+            logger.info(f"Rate limits detected, pausing {batch_pause}s between batches")
+            time.sleep(batch_pause)
 
     elapsed = (datetime.now() - start_time).total_seconds() / 60
     logger.info(
         f"Daily OHLCV collection complete in {elapsed:.1f} min: "
-        f"{success_count} success, {error_count} failed, {total_rows} rows"
+        f"{success_count} success, {error_count} failed, "
+        f"{rate_limit_count} rate limited, {total_rows} rows"
     )
 
     return {
         "success": success_count,
         "failed": error_count,
+        "rate_limited": rate_limit_count,
         "total_rows": total_rows,
         "elapsed_minutes": round(elapsed, 1),
     }
