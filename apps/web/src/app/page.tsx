@@ -3,7 +3,7 @@ import { dehydrate, HydrationBoundary, QueryClient } from "@tanstack/react-query
 import { DashboardLayoutClient } from "@/components/layout/dashboard-layout-client"
 import {
   MarketIndices,
-  SectorPerformance,
+  SectorPerformanceSection,
   FundCertificates,
   VN30OverviewTable,
   StockTickerHeaderSkeleton,
@@ -101,12 +101,7 @@ export default async function Home({ searchParams }: HomeProps) {
 
             {/* Sector Performance & Fund Certificates */}
             <section className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
-              <div>
-                <h2 className="text-lg font-semibold text-foreground mb-4">
-                  Hiệu suất ngành
-                </h2>
-                <SectorPerformance />
-              </div>
+              <SectorPerformanceSection />
 
               <div>
                 <h2 className="text-lg font-semibold text-foreground mb-4">

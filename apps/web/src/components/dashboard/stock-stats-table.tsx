@@ -101,7 +101,7 @@ export function StockStatsTable({
 // Stats Row Component
 function StatsRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between px-5 py-3.5">
+    <div className="flex items-center justify-between px-5 py-4">
       <span className="text-sm text-muted-foreground">{label}</span>
       <span className="text-sm font-medium tabular-nums text-foreground text-right">{value}</span>
     </div>
