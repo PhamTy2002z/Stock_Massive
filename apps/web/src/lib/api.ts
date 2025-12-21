@@ -381,3 +381,62 @@ export interface VN30OverviewResponse {
 export async function fetchVN30Overview(): Promise<VN30OverviewResponse> {
   return fetchApi<VN30OverviewResponse>("/stocks/vn30-overview")
 }
+
+// Market Context Types
+export type MarketContextPeriod = "1M" | "3M" | "6M" | "1Y"
+
+export interface MarketContextChartDataPoint {
+  date: string
+  stock: number
+  vnindex: number
+  sector: number | null
+}
+
+export interface MarketContextMetrics {
+  beta_20d: number | null
+  beta_60d: number | null
+  correlation_20d: number | null
+  correlation_60d: number | null
+  rs_market_20d: number | null
+  rs_sector_20d: number | null
+}
+
+export interface MarketContextTopPeer {
+  symbol: string
+  change_pct: number
+}
+
+export interface MarketContextSector {
+  icb_code: string
+  icb_name: string
+  rank: number
+  total: number
+  top_peers: MarketContextTopPeer[]
+}
+
+export interface MarketContextPerformance {
+  stock_return: number
+  vnindex_return: number
+  sector_return: number | null
+  outperform_market: boolean
+  outperform_sector: boolean | null
+}
+
+export interface MarketContextResponse {
+  symbol: string
+  period: MarketContextPeriod
+  chart_data: MarketContextChartDataPoint[]
+  metrics: MarketContextMetrics
+  sector: MarketContextSector | null
+  performance: MarketContextPerformance
+  generated_at: string
+}
+
+export async function fetchMarketContext(
+  symbol: string,
+  period: MarketContextPeriod = "3M"
+): Promise<MarketContextResponse> {
+  return fetchApi<MarketContextResponse>(
+    `/stocks/${encodeURIComponent(symbol)}/market-context?period=${period}`
+  )
+}
