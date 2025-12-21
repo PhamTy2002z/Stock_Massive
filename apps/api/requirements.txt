@@ -14,6 +14,7 @@ greenlet>=3.0.0
 # Utils
 httpx>=0.25.0
 python-multipart>=0.0.6
+tenacity>=8.2.0
 
 # Cache & Rate Limiting
 upstash-redis>=1.0.0
@@ -22,6 +23,7 @@ upstash-ratelimit>=1.0.0
 # Stock Data
 vnstock>=3.0.0
 pandas>=2.0.0
+numpy>=1.24.0
 
 # Scheduler
 apscheduler>=4.0.0a6

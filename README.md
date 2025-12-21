@@ -64,7 +64,7 @@ Stock_Massive/
 
 All endpoints prefixed with `/api/v1/stocks`:
 
-### Market Data (6 endpoints)
+### Market Data (8 endpoints)
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/symbols` | GET | List all stock symbols |
@@ -72,7 +72,9 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `/symbols/search` | GET | Search symbols by ticker/name |
 | `/sector-performance` | GET | Sector performance (ICB Level 2) |
 | `/fund-certificates` | GET | Fund certificates data |
-| `/vn30-overview` | GET | VN30 stocks overview (NEW) |
+| `/vn30-overview` | GET | VN30 stocks overview |
+| `/market-context/trigger-eod` | POST | Manual EOD pipeline trigger |
+| `/market-context/backfill` | POST | Backfill historical market context |
 
 ### Price Data (7 endpoints)
 | Endpoint | Method | Description |

@@ -45,7 +45,7 @@ EOD Pipeline (15:30 ICT) → Precomputed Tables → API (< 100ms) → Frontend
 - Alembic migration
 - **File**: `phase-1-database.md`
 
-### Phase 2: EOD Pipeline (2 days)
+### Phase 2: EOD Pipeline ✅ DONE (2025-12-21)
 - Batch job for computing metrics (correlation, beta, RS, sector benchmarks)
 - APScheduler integration (15:30 ICT daily)
 - vnstock data fetching
