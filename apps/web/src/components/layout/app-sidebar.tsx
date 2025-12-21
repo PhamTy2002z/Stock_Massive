@@ -1,6 +1,8 @@
 "use client"
 
 import * as React from "react"
+import { usePathname } from "next/navigation"
+import Link from "next/link"
 import {
   BarChart3,
   Bookmark,
@@ -37,16 +39,16 @@ import {
 const data = {
   navMain: [
     {
-      title: "Dashboard",
+      title: "Overview",
       url: "/",
       icon: LayoutDashboard,
-      isActive: true,
     },
     {
       title: "Analytics",
       url: "#",
       icon: BarChart3,
       items: [
+        { title: "Deep Dive", url: "/analytics/deep-dive" },
         { title: "Reports", url: "#" },
         { title: "Insights", url: "#" },
         { title: "Alerts", url: "#" },
@@ -127,21 +129,42 @@ function NavMain({
 }: {
   items: typeof data.navMain
 }) {
+  const pathname = usePathname()
+
+  // Check if a path is active (exact match or starts with for sub-routes)
+  const isPathActive = (url: string) => {
+    if (url === "#") return false
+    if (url === "/") return pathname === "/"
+    return pathname.startsWith(url)
+  }
+
+  // Check if any sub-item is active (for auto-expanding parent)
+  const hasActiveSubItem = (subItems?: { url: string }[]) => {
+    return subItems?.some((sub) => isPathActive(sub.url)) ?? false
+  }
+
   return (
     <SidebarGroup>
       <SidebarGroupLabel>Navigation</SidebarGroupLabel>
       <SidebarMenu>
         {items.map((item) => {
           const hasSubItems = item.items && item.items.length > 0
+          const isActive = isPathActive(item.url)
+          const shouldExpand = hasActiveSubItem(item.items)
 
           if (!hasSubItems) {
             return (
               <SidebarMenuItem key={item.title}>
-                <SidebarMenuButton tooltip={item.title} isActive={item.isActive} asChild>
-                  <a href={item.url}>
+                <SidebarMenuButton
+                  tooltip={item.title}
+                  isActive={isActive}
+                  className={isActive ? "bg-orange-400 text-white font-medium hover:bg-orange-500 hover:text-white dark:bg-orange-500 dark:text-white dark:hover:bg-orange-600" : ""}
+                  asChild
+                >
+                  <Link href={item.url}>
                     {item.icon && <item.icon />}
                     <span>{item.title}</span>
-                  </a>
+                  </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             )
@@ -151,7 +174,7 @@ function NavMain({
             <Collapsible
               key={item.title}
               asChild
-              defaultOpen={item.isActive}
+              defaultOpen={shouldExpand}
               className="group/collapsible"
             >
               <SidebarMenuItem>
@@ -164,15 +187,22 @@ function NavMain({
                 </CollapsibleTrigger>
                 <CollapsibleContent>
                   <SidebarMenuSub>
-                    {item.items?.map((subItem) => (
-                      <SidebarMenuSubItem key={subItem.title}>
-                        <SidebarMenuSubButton asChild>
-                          <a href={subItem.url}>
-                            <span>{subItem.title}</span>
-                          </a>
-                        </SidebarMenuSubButton>
-                      </SidebarMenuSubItem>
-                    ))}
+                    {item.items?.map((subItem) => {
+                      const subIsActive = isPathActive(subItem.url)
+                      return (
+                        <SidebarMenuSubItem key={subItem.title}>
+                          <SidebarMenuSubButton
+                            isActive={subIsActive}
+                            className={subIsActive ? "bg-orange-400 text-white font-medium hover:bg-orange-500 hover:text-white dark:bg-orange-500 dark:text-white dark:hover:bg-orange-600" : ""}
+                            asChild
+                          >
+                            <Link href={subItem.url}>
+                              <span>{subItem.title}</span>
+                            </Link>
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                      )
+                    })}
                   </SidebarMenuSub>
                 </CollapsibleContent>
               </SidebarMenuItem>
