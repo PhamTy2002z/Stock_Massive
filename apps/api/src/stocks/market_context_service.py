@@ -15,9 +15,10 @@ from .market_context_repository import MarketContextRepository
 logger = logging.getLogger(__name__)
 
 # Pipeline configuration
-API_DELAY_SECONDS = 0.05  # 50ms delay between API calls to avoid rate limits
+API_DELAY_SECONDS = 0.3  # 300ms delay between API calls to avoid rate limits
 BATCH_COMMIT_SIZE = 100  # Commit every N symbols to avoid long transactions
 LOOKBACK_DAYS = 90  # Days of history for rolling metrics
+INITIAL_DELAY_SECONDS = 2  # Initial delay before starting to let rate limit reset
 
 
 class MarketContextService:
@@ -98,8 +99,15 @@ class MarketContextService:
         """Fetch OHLCV and compute daily returns for all symbols."""
         logger.info(f"Fetching OHLCV data for {target_date}")
 
-        listing = Listing()
-        all_symbols_df = listing.all_symbols()
+        # Initial delay to avoid rate limit issues
+        time.sleep(INITIAL_DELAY_SECONDS)
+
+        try:
+            listing = Listing()
+            all_symbols_df = listing.all_symbols()
+        except Exception as e:
+            logger.error(f"Failed to fetch symbol list (rate limit?): {e}")
+            return {"success_count": 0, "error_count": 0, "symbols_processed": 0, "error": str(e)}
 
         if all_symbols_df is None or all_symbols_df.empty:
             logger.error("Failed to fetch symbol list")
@@ -165,8 +173,14 @@ class MarketContextService:
         """Compute rolling correlation, beta, RS for all stocks vs VNINDEX."""
         logger.info(f"Computing rolling metrics for {target_date}")
 
-        listing = Listing()
-        all_symbols_df = listing.all_symbols()
+        time.sleep(INITIAL_DELAY_SECONDS)
+
+        try:
+            listing = Listing()
+            all_symbols_df = listing.all_symbols()
+        except Exception as e:
+            logger.error(f"Failed to fetch symbol list for metrics: {e}")
+            return {"success_count": 0, "error_count": 0, "symbols_processed": 0, "error": str(e)}
 
         if all_symbols_df is None or all_symbols_df.empty:
             return {"success_count": 0, "error_count": 0, "symbols_processed": 0}
@@ -258,11 +272,22 @@ class MarketContextService:
         """Compute market-cap weighted sector benchmarks."""
         logger.info(f"Computing sector benchmarks for {target_date}")
 
-        listing = Listing()
-        trading = Trading()
+        time.sleep(INITIAL_DELAY_SECONDS)
+
+        try:
+            listing = Listing()
+            trading = Trading()
+        except Exception as e:
+            logger.error(f"Failed to initialize vnstock for benchmarks: {e}")
+            return {"sectors_computed": 0, "error_count": 0, "error": str(e)}
 
         # Get symbols with ICB classification
-        symbols_df = listing.symbols_by_industries()
+        try:
+            symbols_df = listing.symbols_by_industries()
+        except Exception as e:
+            logger.error(f"Failed to fetch industries: {e}")
+            return {"sectors_computed": 0, "error_count": 0, "error": str(e)}
+
         if symbols_df is None or symbols_df.empty:
             return {"sectors_computed": 0, "error_count": 0}
 
@@ -360,8 +385,14 @@ class MarketContextService:
         """Compute stock rank within sector based on daily return."""
         logger.info(f"Computing sector ranks for {target_date}")
 
-        listing = Listing()
-        symbols_df = listing.symbols_by_industries()
+        time.sleep(INITIAL_DELAY_SECONDS)
+
+        try:
+            listing = Listing()
+            symbols_df = listing.symbols_by_industries()
+        except Exception as e:
+            logger.error(f"Failed to fetch industries for ranks: {e}")
+            return {"sectors_processed": 0, "stocks_ranked": 0, "error": str(e)}
 
         if symbols_df is None or symbols_df.empty or "icb_code2" not in symbols_df.columns:
             return {"sectors_processed": 0, "stocks_ranked": 0}
