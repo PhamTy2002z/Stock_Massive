@@ -1,7 +1,7 @@
 # Codebase Summary - Stock Massive
 
 Generated: 2025-12-21
-Total Files: 247 | Total Python: 40 | Total Components: 44
+Total Files: 256 | Total Python: 40 | Total TypeScript/TSX: 81 | Total Components: 45
 
 ## 1. Project Overview and Purpose
 
@@ -18,16 +18,17 @@ Stock Massive is a Vietnamese stock market data platform powered by the `vnstock
 ## 2. Tech Stack
 
 **Frontend:**
-*   **Framework**: Next.js 14.2.18 (App Router)
+*   **Framework**: Next.js 15.5.9 (App Router)
 *   **Language**: TypeScript
-*   **Styling**: TailwindCSS 3.4 + ShadCN/UI (44 Radix-based components)
-*   **Data Fetching**: TanStack Query v5.90
+*   **Styling**: TailwindCSS 3.4 + ShadCN/UI (45 Radix-based components)
+*   **Data Fetching**: TanStack Query v5.90 (5min staleTime, 10min gcTime)
 *   **Auth**: Supabase (Google OAuth scaffolded)
-*   **Charts**: Recharts (implemented), TradingView Lightweight Charts (planned)
+*   **Charts**: Recharts (sparklines), TradingView Lightweight Charts (planned)
 *   **State**: useState (local), URL params (shared), next-themes (theme)
 *   **Notifications**: Sonner
-*   **UI Components**: 19 primitives, 18 dashboard, 4 layout
-*   **Custom Hooks**: 9 total (data fetching + responsive)
+*   **UI Components**: 19 ShadCN primitives, 18 dashboard, 4 layout
+*   **Custom Hooks**: 10 total (data fetching + responsive)
+*   **Pages**: 8 total (home, login, register, analytics/deep-dive, charts, portfolio, watchlist)
 
 **Backend:**
 *   **Framework**: FastAPI 0.100+
@@ -97,19 +98,21 @@ Stock_Massive/
 **Current (Completed):**
 *   **Dashboard Layout**: Responsive sidebar, header, dark/light theme
 *   **Stock Detail Page**: Search, ticker header, stats, tabbed sections (Overview, Financials, Shareholders, Volume)
-*   **Market Indices**: VN-INDEX, VN30, HNX, UPCOM cards with sparklines (Recharts)
-*   **Stock Data API**: 27 endpoints via vnstock
+*   **Market Indices**: VN-INDEX, VN30, HNX, UPCOM cards with sparklines (Recharts), 1-min auto-refresh
+*   **VN30 Overview Table**: Real-time VN30 stocks with price, change, volume, market cap (cached 5min/1hr)
+*   **Stock Data API**: 24+ endpoints via vnstock + Fmarket API
 *   **Financial Data**: Income statements, balance sheets, cash flow (detailed)
 *   **Shareholders/Officers**: Major holders, management, insider deals
 *   **Volume Analysis**: 5-min bar aggregation, peak period analysis
 *   **Volume Anomaly Detection**: Backend API + frontend visualization with Redis caching
 *   **Sector Performance**: ICB Level 2 with sorting, top gainers/losers
-*   **VN30 Overview**: Real-time VN30 stocks with price, change, volume, market cap (cached 5min/1hr)
 *   **Fund Certificates**: 7-item display via Fmarket API
 *   **Intraday Collection**: Scheduled daily collection (15:30 ICT) + cleanup (16:00 ICT)
 *   **Auth Scaffold**: Login page UI with Supabase Google OAuth (actions.ts scaffolded)
 *   **Loading/Error States**: Consistent skeleton loaders and error handling
 *   **API Documentation**: Auto-generated OpenAPI/Swagger UI
+*   **Redis Caching**: Trading-hours-aware cache (Upstash) for 6 high-traffic endpoints
+*   **Rate Limiting**: Sliding window (100/60s standard, 20/60s heavy endpoints)
 
 **Planned (Roadmap):**
 *   **Authentication**: Complete Supabase integration (JWT, protected routes)
@@ -147,16 +150,19 @@ Stock_Massive/
 
 **Frontend (apps/web/):**
 *   `/src/app/layout.tsx`: Root layout with providers (Query, Theme, Supabase)
+*   `/src/app/page.tsx`: Home dashboard page
 *   `/src/app/(auth)/login/`: Login page with Google OAuth scaffold
 *   `/src/app/auth/callback/route.ts`: Supabase OAuth callback handler
+*   `/src/app/analytics/deep-dive/page.tsx`: Stock deep-dive analytics page (NEW)
 *   `/src/components/ui/`: 19 ShadCN/UI primitives (button, card, dialog, etc.)
 *   `/src/components/dashboard/`: 18 feature components (stock detail, market indices, sector performance, volume anomaly, vn30-overview-table)
 *   `/src/components/layout/`: 4 layout components (sidebar, header, breadcrumb, separator)
 *   `/src/lib/utils.ts`: Utility functions, including `cn` for Tailwind class merging
 *   `/src/lib/query-keys.ts`: Centralized TanStack Query key factory
-*   `/src/lib/api.ts`: API client configuration
+*   `/src/lib/api.ts`: Client-side API client configuration
+*   `/src/lib/api-server.ts`: Server-side fetch helpers (ISR 60s)
 *   `/src/lib/supabase/`: Supabase client setup (client, server, middleware)
-*   `/src/hooks/`: 9 custom hooks (use-stock-data, use-market-indices, use-responsive, use-vn30-overview, etc.)
+*   `/src/hooks/`: 10 custom hooks (use-stock-detail, use-market-indices, use-responsive, use-vn30-overview, etc.)
 
 **Backend (apps/api/):**
 *   `/src/main.py`: FastAPI app instance, CORS, routing setup
@@ -165,8 +171,8 @@ Stock_Massive/
 *   `/src/core/scheduler.py`: APScheduler configuration, job management
 *   `/src/core/redis.py`: Upstash Redis client setup
 *   `/src/core/cache.py`: TradingHoursCache class for time-sensitive caching
-*   `/src/core/rate_limit.py`: Redis-based rate limiting middleware
-*   `/src/stocks/router.py`: 27 API endpoint aggregation
+*   `/src/core/ratelimit.py`: Redis-based rate limiting middleware
+*   `/src/stocks/router.py`: 24+ API endpoint aggregation
 *   `/src/stocks/service.py`: vnstock library integration, business logic
 *   `/src/stocks/schemas/`: Pydantic models (price, market incl. VN30OverviewItem/Response, company, financial)
 *   `/src/stocks/models.py`: SQLAlchemy IntradayBar model
