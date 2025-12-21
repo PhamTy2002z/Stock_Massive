@@ -115,6 +115,10 @@ class StockService:
         """Delegate to market service."""
         return self.market.get_fund_certificates(fund_type)
 
+    def get_vn30_overview(self):
+        """Delegate to market service."""
+        return self.market.get_vn30_overview()
+
     # === Composite methods (cross-domain) ===
 
     def get_stock_detail(self, symbol: str) -> StockDetail:

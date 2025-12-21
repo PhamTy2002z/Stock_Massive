@@ -46,3 +46,25 @@ class FundCertificatesResponse(BaseModel):
     funds: list[FundCertificateItem]
     generated_at: datetime
     total_count: int
+
+
+# === VN30 Overview Schemas ===
+
+
+class VN30OverviewItem(BaseModel):
+    """VN30 stock overview item."""
+
+    symbol: str = Field(..., description="Stock symbol")
+    company_name: str = Field(..., description="Company name")
+    price: Optional[float] = Field(None, description="Current price (VND)")
+    change_pct: Optional[float] = Field(None, description="Daily change percentage")
+    volume: Optional[float] = Field(None, description="Trading volume")
+    market_cap: Optional[float] = Field(None, description="Market cap (billion VND)")
+
+
+class VN30OverviewResponse(BaseModel):
+    """Response for VN30 overview endpoint."""
+
+    stocks: list[VN30OverviewItem]
+    generated_at: datetime
+    total_count: int

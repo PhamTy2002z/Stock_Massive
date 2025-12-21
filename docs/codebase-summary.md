@@ -104,6 +104,7 @@ Stock_Massive/
 *   **Volume Analysis**: 5-min bar aggregation, peak period analysis
 *   **Volume Anomaly Detection**: Backend API + frontend visualization with Redis caching
 *   **Sector Performance**: ICB Level 2 with sorting, top gainers/losers
+*   **VN30 Overview**: Real-time VN30 stocks with price, change, volume, market cap (cached 5min/1hr)
 *   **Fund Certificates**: 7-item display via Fmarket API
 *   **Intraday Collection**: Scheduled daily collection (15:30 ICT) + cleanup (16:00 ICT)
 *   **Auth Scaffold**: Login page UI with Supabase Google OAuth (actions.ts scaffolded)
@@ -167,7 +168,7 @@ Stock_Massive/
 *   `/src/core/rate_limit.py`: Redis-based rate limiting middleware
 *   `/src/stocks/router.py`: 27 API endpoint aggregation
 *   `/src/stocks/service.py`: vnstock library integration, business logic
-*   `/src/stocks/schemas/`: Pydantic models (price, market, company, financial)
+*   `/src/stocks/schemas/`: Pydantic models (price, market incl. VN30OverviewItem/Response, company, financial)
 *   `/src/stocks/models.py`: SQLAlchemy IntradayBar model
 *   `/src/stocks/intraday_collector.py`: Intraday data collection, volume anomaly detection
 *   `/src/stocks/jobs.py`: Scheduled jobs (collection, cleanup)
