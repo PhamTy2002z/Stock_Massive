@@ -150,13 +150,13 @@ Stock_Massive/
 *   `/src/app/(auth)/login/`: Login page with Google OAuth scaffold
 *   `/src/app/auth/callback/route.ts`: Supabase OAuth callback handler
 *   `/src/components/ui/`: 19 ShadCN/UI primitives (button, card, dialog, etc.)
-*   `/src/components/dashboard/`: 18 feature components (stock detail, market indices, sector performance, volume anomaly)
+*   `/src/components/dashboard/`: 18 feature components (stock detail, market indices, sector performance, volume anomaly, vn30-overview-table)
 *   `/src/components/layout/`: 4 layout components (sidebar, header, breadcrumb, separator)
 *   `/src/lib/utils.ts`: Utility functions, including `cn` for Tailwind class merging
 *   `/src/lib/query-keys.ts`: Centralized TanStack Query key factory
 *   `/src/lib/api.ts`: API client configuration
 *   `/src/lib/supabase/`: Supabase client setup (client, server, middleware)
-*   `/src/hooks/`: 9 custom hooks (use-stock-data, use-market-indices, use-responsive, etc.)
+*   `/src/hooks/`: 9 custom hooks (use-stock-data, use-market-indices, use-responsive, use-vn30-overview, etc.)
 
 **Backend (apps/api/):**
 *   `/src/main.py`: FastAPI app instance, CORS, routing setup

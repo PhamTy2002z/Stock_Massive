@@ -192,6 +192,7 @@ RootLayout
             ├── DashboardHeader
             └── Main Content
                 ├── MarketIndices
+                ├── VN30OverviewTable
                 ├── StockSearchBar
                 └── Stock Detail Section
                     ├── StockTickerHeader

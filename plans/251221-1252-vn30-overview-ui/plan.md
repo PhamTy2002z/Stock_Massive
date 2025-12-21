@@ -1,9 +1,11 @@
 ---
-status: in-progress
+status: done
 priority: P2
 feature: VN30 Overview UI
 created: 2025-12-21
+completed: 2025-12-21
 estimated_hours: 6
+actual_hours: 4
 ---
 
 # VN30 Overview UI Implementation Plan
@@ -39,18 +41,19 @@ Create FastAPI endpoint `/api/v1/stocks/vn30-overview` that:
 - Testing: 30/30 VN30 stocks returned, sorted by market cap
 
 ### [Phase 02: Frontend Components](./phase-02-frontend-components.md)
-**Status**: Pending | **Priority**: P2 | **Est**: 3 hours
+**Status**: Done (2025-12-21) | **Priority**: P2 | **Est**: 3 hours | **Actual**: 2 hours
 
 Create React components and hooks:
 - Hook: `use-vn30-overview.ts` with React Query (1min auto-refresh)
 - Component: `vn30-overview-table.tsx` following ShareholdersTabContent pattern
 - Integration: Add to dashboard page with proper error/loading states
 
-**Deliverables**:
-- React Query hook with query key
-- Table component with color-coded changes (green/red)
-- Vietnamese locale formatting
-- Responsive design with horizontal scroll
+**Deliverables** (Completed):
+- API types: VN30OverviewItem, VN30OverviewResponse in api.ts
+- Query key: vn30Overview in query-keys.ts
+- Hook: use-vn30-overview.ts with 1min auto-refresh
+- Component: vn30-overview-table.tsx with pagination (10/20/30)
+- Integration: Added to page.tsx after MarketIndices section
 
 ## Success Criteria
 
@@ -110,5 +113,5 @@ Create React components and hooks:
 | Phase | Status | Est Hours | Actual | Completion |
 |-------|--------|-----------|--------|------------|
 | Phase 01: Backend API | Done | 3h | 2h | 100% |
-| Phase 02: Frontend Components | Pending | 3h | - | 0% |
-| **Total** | In Progress | 6h | 2h | **50%** |
+| Phase 02: Frontend Components | Done | 3h | 2h | 100% |
+| **Total** | **Done** | 6h | 4h | **100%** |
