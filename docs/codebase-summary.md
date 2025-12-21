@@ -177,7 +177,9 @@ Stock_Massive/
 *   `/src/stocks/schemas/`: Pydantic models (price, market incl. VN30OverviewItem/Response, company, financial)
 *   `/src/stocks/models.py`: SQLAlchemy IntradayBar model
 *   `/src/stocks/intraday_collector.py`: Intraday data collection, volume anomaly detection
-*   `/src/stocks/jobs.py`: Scheduled jobs (collection, cleanup)
+*   `/src/stocks/jobs.py`: Scheduled jobs (collection, cleanup, market context EOD)
+*   `/src/stocks/market_context_service.py`: EOD pipeline for computing market metrics (breadth, sector, volatility)
+*   `/src/stocks/market_context_router.py`: Manual trigger endpoints for EOD pipeline and backfill
 *   `/src/stocks/{market,price,company,financial}/`: Domain-specific routers and services
 *   `/alembic/`: Database migration scripts
 *   `/requirements.txt`: Python dependencies
