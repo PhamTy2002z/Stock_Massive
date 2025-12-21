@@ -23,7 +23,8 @@ services:
     container_name: stockmassive-api
     environment:
       DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-stockmassive}
-      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
     volumes:
       - ./apps/api/src:/code/src
     ports:
@@ -44,7 +45,7 @@ services:
       - ./apps/web/src:/app/src
       - ./apps/web/public:/app/public
       - ./apps/web/package.json:/app/package.json
-      - ./apps/web/package-lock.json:/app/package-lock.json
+      - ./apps/web/pnpm-lock.yaml:/app/pnpm-lock.yaml
     ports:
       - "3000:3000"
     depends_on:

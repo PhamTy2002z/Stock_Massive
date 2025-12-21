@@ -20,6 +20,8 @@ export function Sparkline({
   className,
   positive = true,
 }: SparklineProps) {
+  const gradientId = React.useId()
+
   if (!data || data.length < 2) {
     return null
   }
@@ -46,7 +48,6 @@ export function Sparkline({
   const areaPathD = `${pathD} L ${width - padding},${height - padding} L ${padding},${height - padding} Z`
 
   const strokeColor = positive ? "hsl(var(--chart-1))" : "hsl(var(--chart-2))"
-  const gradientId = React.useId()
 
   return (
     <svg

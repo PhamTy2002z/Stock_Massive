@@ -21,14 +21,6 @@ export interface MarketIndex {
   changePercent: number
 }
 
-// Index symbol to display name mapping
-const INDEX_NAMES: Record<string, string> = {
-  VNINDEX: "VN-INDEX",
-  VN30: "VN30",
-  HNXINDEX: "HNX-INDEX",
-  UPCOMINDEX: "UPCOM-INDEX",
-}
-
 export const MARKET_INDEX_SYMBOLS = ["VNINDEX", "VN30", "HNXINDEX", "UPCOMINDEX"]
 
 class ApiError extends Error {

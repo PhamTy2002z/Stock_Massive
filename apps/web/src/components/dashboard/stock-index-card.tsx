@@ -16,7 +16,6 @@ interface StockIndexCardProps {
 }
 
 export function StockIndexCard({
-  symbol,
   name,
   value,
   change,
