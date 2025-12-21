@@ -5,11 +5,12 @@ import { handleGoogleSignIn } from "./actions"
 import { useState } from "react"
 import { toast } from "sonner"
 import { useSearchParams } from "next/navigation"
+import { Loader2 } from "lucide-react"
 
 export default function LoginForm() {
   const [isLoading, setIsLoading] = useState(false)
   const searchParams = useSearchParams()
-  const callbackUrl = searchParams.get("callbackUrl")
+  const callbackUrl = searchParams.get("next") || searchParams.get("callbackUrl")
 
   async function onGoogleSignIn() {
     setIsLoading(true)
@@ -17,10 +18,11 @@ export default function LoginForm() {
       const result = await handleGoogleSignIn(callbackUrl || undefined)
       if (result?.error) {
         toast.error(result.error)
+        setIsLoading(false)
       }
+      // Don't reset loading on success - redirect will navigate away
     } catch {
       toast.error("Failed to sign in. Please try again.")
-    } finally {
       setIsLoading(false)
     }
   }
@@ -45,10 +47,10 @@ export default function LoginForm() {
             className="w-full bg-transparent border-gray-800 text-white hover:bg-gray-900 h-12 text-base"
           >
             {isLoading ? (
-              <div className="flex items-center gap-2">
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-400 border-t-white" />
-                <span>Signing in...</span>
-              </div>
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Signing in...
+              </>
             ) : (
               <>
                 <svg
