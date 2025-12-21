@@ -1,7 +1,7 @@
 # Codebase Summary - Stock Massive
 
 Generated: 2025-12-21
-Total Files: 256 | Total Python: 40 | Total TypeScript/TSX: 81 | Total Components: 45
+Total Files: 264 | Total Python: 40 | Total TypeScript/TSX: 89 | Total Components: 51
 
 ## 1. Project Overview and Purpose
 
@@ -26,8 +26,8 @@ Stock Massive is a Vietnamese stock market data platform powered by the `vnstock
 *   **Charts**: Recharts (sparklines), TradingView Lightweight Charts (planned)
 *   **State**: useState (local), URL params (shared), next-themes (theme)
 *   **Notifications**: Sonner
-*   **UI Components**: 19 ShadCN primitives, 18 dashboard, 4 layout
-*   **Custom Hooks**: 10 total (data fetching + responsive)
+*   **UI Components**: 20 ShadCN primitives, 24 dashboard, 4 layout
+*   **Custom Hooks**: 11 total (data fetching + responsive + use-market-context)
 *   **Pages**: 8 total (home, login, register, analytics/deep-dive, charts, portfolio, watchlist)
 
 **Backend:**
@@ -97,10 +97,11 @@ Stock_Massive/
 
 **Current (Completed):**
 *   **Dashboard Layout**: Responsive sidebar, header, dark/light theme
-*   **Stock Detail Page**: Search, ticker header, stats, tabbed sections (Overview, Financials, Shareholders, Volume)
+*   **Stock Detail Page**: Search, ticker header, stats, tabbed sections (Overview, Financials, Shareholders, Volume, Market)
+*   **Market Context Tab**: Relative performance chart, correlation/beta metrics, sector ranking, top peers (Phase 4)
 *   **Market Indices**: VN-INDEX, VN30, HNX, UPCOM cards with sparklines (Recharts), 1-min auto-refresh
 *   **VN30 Overview Table**: Real-time VN30 stocks with price, change, volume, market cap (cached 5min/1hr)
-*   **Stock Data API**: 24+ endpoints via vnstock + Fmarket API
+*   **Stock Data API**: 25+ endpoints via vnstock + Fmarket API
 *   **Financial Data**: Income statements, balance sheets, cash flow (detailed)
 *   **Shareholders/Officers**: Major holders, management, insider deals
 *   **Volume Analysis**: 5-min bar aggregation, peak period analysis
@@ -108,6 +109,7 @@ Stock_Massive/
 *   **Sector Performance**: ICB Level 2 with sorting, top gainers/losers
 *   **Fund Certificates**: 7-item display via Fmarket API
 *   **Intraday Collection**: Scheduled daily collection (15:30 ICT) + cleanup (16:00 ICT)
+*   **Market Context EOD Pipeline**: Daily computation of correlation, beta, sector ranking metrics (Phase 1-3)
 *   **Auth Scaffold**: Login page UI with Supabase Google OAuth (actions.ts scaffolded)
 *   **Loading/Error States**: Consistent skeleton loaders and error handling
 *   **API Documentation**: Auto-generated OpenAPI/Swagger UI
@@ -154,15 +156,24 @@ Stock_Massive/
 *   `/src/app/(auth)/login/`: Login page with Google OAuth scaffold
 *   `/src/app/auth/callback/route.ts`: Supabase OAuth callback handler
 *   `/src/app/analytics/deep-dive/page.tsx`: Stock deep-dive analytics page (NEW)
-*   `/src/components/ui/`: 19 ShadCN/UI primitives (button, card, dialog, etc.)
-*   `/src/components/dashboard/`: 18 feature components (stock detail, market indices, sector performance, volume anomaly, vn30-overview-table)
+*   `/src/components/ui/`: 20 ShadCN/UI primitives (button, card, dialog, badge, etc.)
+*   `/src/components/dashboard/`: 24 feature components (stock detail, market indices, sector performance, volume anomaly, vn30-overview-table, market-context-*)
 *   `/src/components/layout/`: 4 layout components (sidebar, header, breadcrumb, separator)
 *   `/src/lib/utils.ts`: Utility functions, including `cn` for Tailwind class merging
 *   `/src/lib/query-keys.ts`: Centralized TanStack Query key factory
-*   `/src/lib/api.ts`: Client-side API client configuration
+*   `/src/lib/api.ts`: Client-side API client configuration (incl. market context types/fetch)
 *   `/src/lib/api-server.ts`: Server-side fetch helpers (ISR 60s)
+*   `/src/lib/query-keys.ts`: Centralized query keys (marketContext added)
 *   `/src/lib/supabase/`: Supabase client setup (client, server, middleware)
-*   `/src/hooks/`: 10 custom hooks (use-stock-detail, use-market-indices, use-responsive, use-vn30-overview, etc.)
+*   `/src/hooks/use-market-context.ts`: Hook for market context data with period selection
+*   `/src/hooks/`: 11 custom hooks (use-stock-detail, use-market-indices, use-responsive, use-vn30-overview, use-market-context, etc.)
+*   `/src/components/dashboard/stock-detail-tabs.tsx`: Tab navigation with "market" tab (5 tabs total)
+*   `/src/components/dashboard/market-context-tab-content.tsx`: Main market context container with period selector, chart, metrics
+*   `/src/components/dashboard/market-context-relative-performance-chart.tsx`: Recharts-based normalized performance chart (stock vs VNINDEX vs sector)
+*   `/src/components/dashboard/market-context-correlation-card.tsx`: Displays beta and correlation metrics (20d/60d)
+*   `/src/components/dashboard/market-context-sector-card.tsx`: Sector rank, top peers performance
+*   `/src/components/dashboard/market-context-period-selector.tsx`: Period toggle (1M, 3M, 6M, 1Y)
+*   `/src/components/ui/badge.tsx`: ShadCN badge component for performance indicators
 
 **Backend (apps/api/):**
 *   `/src/main.py`: FastAPI app instance, CORS, routing setup
