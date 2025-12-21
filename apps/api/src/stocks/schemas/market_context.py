@@ -1,8 +1,75 @@
 """Pydantic schemas for market context feature."""
-from datetime import date as date_type
-from typing import Optional
+from datetime import date as date_type, datetime
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
+
+
+# ==================== API Response Schemas ====================
+
+
+class ChartDataPoint(BaseModel):
+    """Single point in normalized price chart."""
+
+    date: str = Field(..., description="Date in YYYY-MM-DD format")
+    stock: float = Field(..., description="Normalized stock price (base 100)")
+    vnindex: float = Field(..., description="Normalized VNINDEX (base 100)")
+    sector: Optional[float] = Field(None, description="Normalized sector benchmark (base 100)")
+
+
+class MarketMetrics(BaseModel):
+    """Market correlation and beta metrics."""
+
+    beta_20d: Optional[float] = Field(None, description="20-day beta vs VNINDEX")
+    beta_60d: Optional[float] = Field(None, description="60-day beta vs VNINDEX")
+    correlation_20d: Optional[float] = Field(None, description="20-day correlation vs VNINDEX")
+    correlation_60d: Optional[float] = Field(None, description="60-day correlation vs VNINDEX")
+    rs_market_20d: Optional[float] = Field(None, description="20-day relative strength vs market")
+    rs_sector_20d: Optional[float] = Field(None, description="20-day relative strength vs sector")
+
+
+class TopPeer(BaseModel):
+    """Top performing peer in sector."""
+
+    symbol: str
+    change_pct: float
+
+
+class SectorContext(BaseModel):
+    """Sector context information."""
+
+    icb_code: str = Field(..., description="ICB Level 2 code")
+    icb_name: str = Field(..., description="Sector name (Vietnamese)")
+    rank: int = Field(..., description="Stock rank within sector")
+    total: int = Field(..., description="Total stocks in sector")
+    top_peers: List[TopPeer] = Field(default_factory=list, description="Top 3 peers")
+
+
+class PerformanceSummary(BaseModel):
+    """Performance comparison summary."""
+
+    stock_return: float = Field(..., description="Stock return % over period")
+    vnindex_return: float = Field(..., description="VNINDEX return % over period")
+    sector_return: Optional[float] = Field(None, description="Sector return % over period")
+    outperform_market: bool = Field(..., description="Stock outperformed market")
+    outperform_sector: Optional[bool] = Field(None, description="Stock outperformed sector")
+
+
+class MarketContextResponse(BaseModel):
+    """Market context analysis response."""
+
+    symbol: str = Field(..., description="Stock ticker symbol")
+    period: Literal["1M", "3M", "6M", "1Y"] = Field(..., description="Analysis period")
+    chart_data: List[ChartDataPoint] = Field(..., description="Normalized price series")
+    metrics: MarketMetrics = Field(..., description="Current market metrics")
+    sector: Optional[SectorContext] = Field(None, description="Sector context (null if Unclassified)")
+    performance: PerformanceSummary = Field(..., description="Performance summary")
+    generated_at: str = Field(..., description="Response generation timestamp")
+
+    model_config = {"from_attributes": True}
+
+
+# ==================== Database Model Schemas ====================
 
 
 class StockDailyReturnSchema(BaseModel):

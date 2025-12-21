@@ -172,17 +172,21 @@ Stock_Massive/
 *   `/src/core/redis.py`: Upstash Redis client setup
 *   `/src/core/cache.py`: TradingHoursCache class for time-sensitive caching
 *   `/src/core/ratelimit.py`: Redis-based rate limiting middleware
-*   `/src/stocks/router.py`: 24+ API endpoint aggregation
+*   `/src/stocks/router.py`: 25+ API endpoint aggregation
 *   `/src/stocks/service.py`: vnstock library integration, business logic
 *   `/src/stocks/schemas/`: Pydantic models (price, market incl. VN30OverviewItem/Response, company, financial)
+*   `/src/stocks/schemas/market_context.py`: Schemas for market context API (ChartDataPoint, MarketMetrics, SectorContext, PerformanceSummary, MarketContextResponse)
 *   `/src/stocks/models.py`: SQLAlchemy IntradayBar model
 *   `/src/stocks/intraday_collector.py`: Intraday data collection, volume anomaly detection
 *   `/src/stocks/jobs.py`: Scheduled jobs (collection, cleanup, market context EOD)
 *   `/src/stocks/market_context_service.py`: EOD pipeline for computing market metrics (breadth, sector, volatility)
+*   `/src/stocks/market_context_api_service.py`: Service layer for market context API endpoint (normalization, metrics aggregation)
 *   `/src/stocks/market_context_router.py`: Manual trigger endpoints for EOD pipeline and backfill
 *   `/src/stocks/{market,price,company,financial}/`: Domain-specific routers and services
+*   `/src/stocks/price/router.py`: Price endpoints including market context analysis
 *   `/alembic/`: Database migration scripts
 *   `/requirements.txt`: Python dependencies
+*   `/tests/test_market_context_api.py`: Test suite for market context API endpoint
 
 ## 7. Development Setup Instructions
 

@@ -1,4 +1,4 @@
-"""Router for market context endpoints (manual triggers and data access)."""
+"""Router for market context endpoints (manual triggers)."""
 import logging
 from datetime import date, timedelta
 
