@@ -31,7 +31,7 @@ async_session_factory = async_sessionmaker(
     expire_on_commit=False,
 )
 
-# Sync engine for background jobs (market context pipeline)
+# Sync engine for Alembic migrations and sync database operations
 sync_engine = create_engine(
     settings.database_url,
     echo=settings.debug,
