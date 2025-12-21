@@ -2,14 +2,17 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+# Install pnpm
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
 # Copy package files
-COPY package.json package-lock.json* ./
+COPY package.json pnpm-lock.yaml ./
 
 # Install dependencies
-RUN npm install
+RUN pnpm install --frozen-lockfile
 
 # Copy application code
 COPY . .
 
-# Entrypoint script to sync packages on startup
-CMD sh -c "npm install && npm run dev"
+# Development mode with hot reload
+CMD ["pnpm", "dev"]
