@@ -1,12 +1,13 @@
 ---
 title: "Market & Sector Context"
 description: "Stock vs market/sector trend analysis for Deep Dive"
-status: in_progress
+status: completed
 priority: P2
 effort: 5-7 days
 branch: main
 tags: [deep-dive, analytics, market-context]
 created: 2025-12-21
+completed: 2025-12-21
 ---
 
 # Market & Sector Context Implementation Plan
@@ -57,7 +58,7 @@ EOD Pipeline (15:30 ICT) → Precomputed Tables → API (< 100ms) → Frontend
 - Response contract with chart data + metrics
 - **File**: `phase-3-backend-api.md`
 
-### Phase 4: Frontend Components (2-3 days)
+### Phase 4: Frontend Components ✅ DONE (2025-12-21)
 - New "Market Context" tab in Deep Dive
 - Relative performance chart (Recharts)
 - Correlation/sector cards

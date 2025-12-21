@@ -10,8 +10,9 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | Market Indices | ✅ Done | VN-INDEX, VN30, HNX, UPCOM cards (1min auto-refresh) |
 | VN30 Overview Table | ✅ Done | Real-time VN30 stocks with price, volume, market cap |
 | Sector Performance | ✅ Done | ICB Level 2 with sorting, top gainers/losers |
-| Stock Detail Page | ✅ Done | Search, ticker header, stats, tabs (Overview, Finance, Shareholders, Volume) |
-| Stock Data API | ✅ Done | 24+ endpoints via vnstock + Fmarket |
+| Stock Detail Page | ✅ Done | Search, ticker header, stats, tabs (Overview, Finance, Shareholders, Volume, Market) |
+| Market Context Analysis | ✅ Done | Correlation, beta, sector rank, relative performance chart (Phase 1-4) |
+| Stock Data API | ✅ Done | 25+ endpoints via vnstock + Fmarket |
 | Financial Data | ✅ Done | Income, balance sheet, cash flow (detailed) |
 | Shareholders/Officers | ✅ Done | Major holders, management, insider deals |
 | Volume Anomaly Detection | ✅ Done | Backend API + Frontend visualization |
@@ -76,7 +77,7 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `/market-context/trigger-eod` | POST | Manual EOD pipeline trigger |
 | `/market-context/backfill` | POST | Backfill historical market context |
 
-### Price Data (8 endpoints)
+### Price Data (9 endpoints)
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/{symbol}/history` | GET | Historical OHLCV data |
