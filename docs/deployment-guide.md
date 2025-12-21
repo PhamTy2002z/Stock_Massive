@@ -10,7 +10,7 @@
 
 ---
 
-## Quick Start (Docker)
+## Quick Start (Docker - Development)
 
 ### 1. Clone Repository
 
@@ -23,8 +23,8 @@ cd Stock_Massive
 
 ```bash
 # Copy environment templates
-cp apps/api/.env.example apps/api/.env
-cp apps/web/.env.example apps/web/.env
+cp .env.example .env
+# Edit .env with your values (especially DB_PASSWORD, AUTH_SECRET)
 ```
 
 ### 3. Start Services
@@ -33,12 +33,60 @@ cp apps/web/.env.example apps/web/.env
 docker-compose up -d
 ```
 
-### 4. Access Services
+### 4. Run Database Migrations
+
+```bash
+docker-compose exec api alembic upgrade head
+```
+
+### 5. Access Services
 
 - **Frontend**: http://localhost:3000
 - **Backend API**: http://localhost:8000
 - **API Docs**: http://localhost:8000/docs
 - **Database**: localhost:5432
+
+---
+
+## Production Deployment
+
+### 1. Environment Setup
+
+```bash
+# Copy and configure production environment
+cp .env.example .env
+
+# Generate secure AUTH_SECRET
+openssl rand -base64 32
+```
+
+**Required environment variables for production:**
+- `DB_PASSWORD` - Strong database password
+- `AUTH_SECRET` - Secure authentication secret
+- `CORS_ORIGINS` - Your production domain
+- `NEXT_PUBLIC_API_URL` - Your API domain
+
+### 2. Build and Deploy
+
+```bash
+# Build and start production containers
+docker-compose -f docker-compose.prod.yml up -d --build
+
+# Migrations run automatically via entrypoint script
+```
+
+### 3. Verify Deployment
+
+```bash
+# Check all services are running
+docker-compose -f docker-compose.prod.yml ps
+
+# Check API health
+curl http://localhost:8000/health
+
+# View logs
+docker-compose -f docker-compose.prod.yml logs -f
+```
 
 ---
 
