@@ -60,7 +60,7 @@ Stock_Massive/
 └── docs/                    # Documentation
 ```
 
-## API Endpoints (24+ Total)
+## API Endpoints (25+ Total)
 
 All endpoints prefixed with `/api/v1/stocks`:
 
@@ -76,7 +76,7 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `/market-context/trigger-eod` | POST | Manual EOD pipeline trigger |
 | `/market-context/backfill` | POST | Backfill historical market context |
 
-### Price Data (7 endpoints)
+### Price Data (8 endpoints)
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/{symbol}/history` | GET | Historical OHLCV data |
@@ -86,6 +86,7 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `/{symbol}/detail` | GET | Comprehensive stock detail |
 | `/{symbol}/volume-analysis` | GET | Volume pattern analysis |
 | `/{symbol}/volume-anomalies` | GET | Volume anomaly detection |
+| `/{symbol}/market-context` | GET | Market context analysis (correlation, beta, sector ranking) |
 | `/intraday/collect` | POST | Trigger intraday collection |
 
 ### Company Data (5 endpoints)

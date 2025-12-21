@@ -1,7 +1,7 @@
 ---
 title: "Market & Sector Context"
 description: "Stock vs market/sector trend analysis for Deep Dive"
-status: pending
+status: in_progress
 priority: P2
 effort: 5-7 days
 branch: main
@@ -51,7 +51,7 @@ EOD Pipeline (15:30 ICT) → Precomputed Tables → API (< 100ms) → Frontend
 - vnstock data fetching
 - **File**: `phase-2-eod-pipeline.md`
 
-### Phase 3: Backend API (1-2 days)
+### Phase 3: Backend API ✅ DONE (2025-12-21)
 - New endpoint: `GET /stocks/{symbol}/market-context?period=3M`
 - Read from precomputed tables
 - Response contract with chart data + metrics
