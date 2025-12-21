@@ -1,11 +1,22 @@
 import { createServerClient } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
 
-// Routes that require authentication
-const protectedRoutes = ["/"]
+// Public routes - accessible without authentication
+// All other routes are protected by default
+const publicRoutes = ["/login", "/register", "/auth/callback"]
 
-// Routes only for guests (redirect to / if logged in)
-const guestRoutes = ["/login", "/register"]
+// Guest-only routes - redirect to home if already authenticated
+const guestOnlyRoutes = ["/login", "/register"]
+
+/**
+ * Check if pathname matches any route in the list
+ * Supports exact matches and prefix matches (e.g., "/auth/callback" matches "/auth/callback?code=...")
+ */
+function matchesRoute(pathname: string, routes: string[]): boolean {
+  return routes.some(
+    (route) => pathname === route || pathname.startsWith(`${route}/`)
+  )
+}
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -36,19 +47,24 @@ export async function updateSession(request: NextRequest) {
   )
 
   // Refresh session if expired - required for Server Components
-  const { data: { user } } = await supabase.auth.getUser()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
 
   const pathname = request.nextUrl.pathname
 
-  // Protect routes - redirect to login if not authenticated
-  if (protectedRoutes.includes(pathname) && !user) {
+  const isPublicRoute = matchesRoute(pathname, publicRoutes)
+  const isGuestOnlyRoute = matchesRoute(pathname, guestOnlyRoutes)
+
+  // Protect all routes by default - redirect to login if not authenticated
+  if (!isPublicRoute && !user) {
     const loginUrl = new URL("/login", request.url)
-    loginUrl.searchParams.set("next", pathname)
+    loginUrl.searchParams.set("next", pathname + request.nextUrl.search)
     return NextResponse.redirect(loginUrl)
   }
 
-  // Guest routes - redirect to home if already authenticated
-  if (guestRoutes.includes(pathname) && user) {
+  // Guest-only routes - redirect to home if already authenticated
+  if (isGuestOnlyRoute && user) {
     return NextResponse.redirect(new URL("/", request.url))
   }
 
