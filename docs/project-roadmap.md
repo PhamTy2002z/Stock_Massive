@@ -2,32 +2,35 @@
 
 ## Current State (December 2025)
 
-### Completed
+### Completed (December 2025)
 
 - [x] Monorepo structure setup
-- [x] Next.js frontend with App Router
+- [x] Next.js 15.5.9 frontend with App Router
 - [x] Dashboard layout (sidebar, header, responsive)
 - [x] Dark/light theme support (next-themes)
-- [x] ShadCN/UI components (16 installed)
-- [x] Dashboard components (19 feature components)
+- [x] ShadCN/UI components (19 primitives, 18 dashboard, 4 layout)
 - [x] Stock detail page (search, header, stats, tabs)
-- [x] Market indices cards with sparklines
+- [x] Analytics deep-dive page (SSR + TanStack Query)
+- [x] Market indices cards with sparklines (1-min refresh)
+- [x] VN30 Overview Table (price, change, volume, mcap, 1-min refresh)
 - [x] FastAPI backend setup
-- [x] vnstock integration (27 endpoints)
+- [x] vnstock integration (24+ endpoints)
 - [x] Financial statements (income, balance, cash flow)
 - [x] Shareholders, officers, insider deals API
 - [x] Intraday data collection (5-min bars)
 - [x] Volume analysis endpoint
+- [x] Volume anomaly detection (API + frontend)
 - [x] APScheduler for background jobs
 - [x] Docker Compose configuration
 - [x] Backend test suite (30+ tests)
 - [x] Modern + Clean design system established
-- [x] Sector Performance (Full-stack complete, includes top gainers/losers)
+- [x] Sector Performance (ICB Level 2, top gainers/losers)
 - [x] Toast notifications (Sonner integration)
-- [x] Fund certificates endpoint (Adjusted display to 7 items)
-- [x] Volume Anomaly Detection (Backend API + Frontend visualization)
-- [x] Loading states and skeletons (completed)
-- [x] API documentation (OpenAPI/Swagger) (completed)
+- [x] Fund certificates endpoint (7 items display)
+- [x] Redis caching (Upstash, trading-hours-aware, 6 endpoints)
+- [x] Rate limiting (sliding window, 100/60s standard, 20/60s heavy)
+- [x] Loading states and skeletons
+- [x] API documentation (OpenAPI/Swagger)
 
 ### In Progress
 
@@ -238,21 +241,23 @@
 
 | Feature | Date | Notes |
 |---------|------|-------|
-| Toast Notifications | Dec 19, 2025 | Sonner integration on stock search |
-| Sector Performance | Dec 19, 2025 | Full-stack: API + hook + UI component, now includes top gainers/losers |
-| Fund Certificates | Dec 20, 2025 | New endpoint for fund data, adjusted display to 7 items |
-| Shareholders API | Dec 20, 2025 | Major holders endpoint |
-| Officers API | Dec 20, 2025 | Company management endpoint |
-| Insider Deals API | Dec 20, 2025 | Insider trading endpoint |
-| Volume Analysis | Dec 20, 2025 | Peak period analysis |
-| Volume Anomaly Detection (Backend API) | Dec 20, 2025 | New API for detailed anomaly detection |
-| Volume Anomaly Detection (Frontend Integration) | Dec 20, 2025 | Frontend integration of chart into stock detail page |
-| Intraday Collection | Dec 20, 2025 | 5-min bar aggregation |
-| Stock Detail Page | Dec 20, 2025 | Search, header, stats, tabs |
-| Finance Tab | Dec 20, 2025 | Income, balance, cash flow tables |
-| Shareholders Tab | Dec 20, 2025 | Holders, officers, insider deals |
-| Design System | Dec 20, 2025 | Modern + Clean established as standard |
-| Volume Anomaly Detection (On-Demand Collector) | Dec 20, 2025 | Auto-collect intraday data on endpoint request |
-| Custom Hooks | Dec 20, 2025 | 9 hooks for data fetching |
-| Extended Caching | Dec 20, 2025 | Caching for 4 high-traffic endpoints |
 | VN30 Overview (Frontend) | Dec 21, 2025 | Dashboard table with pagination, auto-refresh (1min) |
+| VN30 Overview (API) | Dec 21, 2025 | Backend endpoint with Redis caching (5min/1hr TTL) |
+| Analytics Deep-Dive Page | Dec 21, 2025 | SSR + TanStack Query integration |
+| Extended Caching | Dec 20, 2025 | 6 high-traffic endpoints with trading-hours-aware cache |
+| Rate Limiting | Dec 20, 2025 | Sliding window (100/60s standard, 20/60s heavy) |
+| Volume Anomaly (Frontend) | Dec 20, 2025 | Chart integration into stock detail page |
+| Volume Anomaly (On-Demand) | Dec 20, 2025 | Auto-collect intraday data on endpoint request |
+| Custom Hooks | Dec 20, 2025 | 10 hooks for data fetching |
+| Shareholders Tab | Dec 20, 2025 | Holders, officers, insider deals |
+| Finance Tab | Dec 20, 2025 | Income, balance, cash flow tables |
+| Stock Detail Page | Dec 20, 2025 | Search, header, stats, tabs |
+| Intraday Collection | Dec 20, 2025 | 5-min bar aggregation |
+| Volume Anomaly (Backend) | Dec 20, 2025 | API for detailed anomaly detection |
+| Volume Analysis | Dec 20, 2025 | Peak period analysis |
+| Officers API | Dec 20, 2025 | Company management endpoint |
+| Shareholders API | Dec 20, 2025 | Major holders endpoint |
+| Fund Certificates | Dec 20, 2025 | New endpoint, adjusted to 7 items |
+| Sector Performance | Dec 19, 2025 | Full-stack: API + hook + UI, top gainers/losers |
+| Toast Notifications | Dec 19, 2025 | Sonner integration on stock search |
+| Design System | Dec 20, 2025 | Modern + Clean established as standard |

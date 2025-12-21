@@ -15,28 +15,32 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 
 ---
 
-## Current Implementation Status (December 2025)
+## Current Implementation Status (December 2025 - Updated 2025-12-21)
 
 | Feature | Status | Details |
 |---------|--------|---------|
-| Dashboard Layout | Done | Responsive sidebar, header, theme toggle |
-| Stock Detail Page | Done | Search, ticker header, stats panel, tabs |
-| Market Indices | Done | VN-INDEX, VN30, HNX, UPCOM cards with sparklines |
-| Stock Data API | Done | 27 endpoints via vnstock |
-| Financial Data | Done | Income, balance sheet, cash flow (detailed) |
-| Shareholders/Officers | Done | Major holders, management, insider deals |
-| Volume Analysis | Done | 5-min bar aggregation, peak period analysis |
-| Intraday Collection | Done | Scheduled data collection (15:30 ICT) |
-| Database Models | Done | IntradayBar model with SQLAlchemy |
-| Sector Performance | Done | ICB Level 2 with sorting, auto-refresh (Now includes top gainers/losers) |
-| Toast Notifications | Done | Sonner integration for user feedback |
-| Volume Anomaly Detection | Done | New API endpoint and core logic, fully integrated with frontend visualization |
-| Volume Anomaly Detection Testing | Completed | All unit tests for core logic (46 tests) passed successfully |
-| Fund Certificates | Done | Adjusted display to 7 items |
-| Auth Pages | Scaffolded | Routes exist, logic pending |
-| Charts Page | Scaffolded | Route exists, not implemented |
-| Portfolio Page | Scaffolded | Route exists, not implemented |
-| Watchlist Page | Scaffolded | Route exists, not implemented |
+| Dashboard Layout | ✅ Done | Responsive sidebar, header, theme toggle |
+| Stock Detail Page | ✅ Done | Search, ticker header, stats panel, tabs |
+| Analytics Deep-Dive | ✅ Done | Dedicated analytics page with SSR + TanStack Query |
+| Market Indices | ✅ Done | VN-INDEX, VN30, HNX, UPCOM cards with sparklines, 1-min refresh |
+| VN30 Overview Table | ✅ Done | Real-time VN30 stocks (price, change, volume, mcap), 1-min refresh |
+| Stock Data API | ✅ Done | 24+ endpoints via vnstock + Fmarket |
+| Financial Data | ✅ Done | Income, balance sheet, cash flow (detailed) |
+| Shareholders/Officers | ✅ Done | Major holders, management, insider deals |
+| Volume Analysis | ✅ Done | 5-min bar aggregation, peak period analysis |
+| Intraday Collection | ✅ Done | Scheduled data collection (15:30 ICT) |
+| Database Models | ✅ Done | IntradayBar model with SQLAlchemy |
+| Sector Performance | ✅ Done | ICB Level 2 with sorting, auto-refresh, top gainers/losers |
+| Toast Notifications | ✅ Done | Sonner integration for user feedback |
+| Volume Anomaly Detection | ✅ Done | API endpoint + core logic, frontend visualization |
+| Volume Anomaly Testing | ✅ Done | All unit tests (46 tests) passed |
+| Fund Certificates | ✅ Done | 7-item display via Fmarket API |
+| Redis Caching | ✅ Done | Trading-hours-aware cache (6 endpoints) |
+| Rate Limiting | ✅ Done | Sliding window (100/60s standard, 20/60s heavy) |
+| Auth Pages | 🚧 Scaffolded | Routes exist, Supabase OAuth UI, logic pending |
+| Charts Page | 🚧 Scaffolded | Route exists, TradingView integration planned |
+| Portfolio Page | 🚧 Scaffolded | Route exists, not implemented |
+| Watchlist Page | 🚧 Scaffolded | Route exists, not implemented |
 
 ---
 
@@ -88,17 +92,20 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Monorepo | Simple workspace | Lower complexity, sufficient for single team |
-| Frontend | Next.js 14.2 App Router | Modern React, SSR support, excellent DX |
+| Frontend | Next.js 15.5.9 App Router | Modern React, SSR support, excellent DX |
 | UI Library | ShadCN/UI | Accessible, customizable, Radix-based |
 | Design Style | Modern + Clean | HSL colors, dark/light themes, consistent patterns |
 | Tables | TanStack Table | Headless, powerful sorting/filtering |
 | Charts | TradingView Lightweight | Industry standard, performant |
+| Data Fetching | TanStack Query v5 | Server state management, caching, background sync |
 | Backend | FastAPI | Fast, async, auto-docs, type-safe |
 | Data Source | vnstock >= 3.0.0 | Comprehensive Vietnam stock data |
 | ORM | SQLAlchemy 2.0 | Mature, async support, migrations |
 | Database | PostgreSQL 16 | Reliable, feature-rich, scalable |
 | Scheduler | APScheduler 4.0 | Background job scheduling |
-| **Volume Anomaly Detection Libraries** | **Pandas, Greenlet** | **Efficient data manipulation and asynchronous processing for anomaly detection** |
+| Caching | Upstash Redis | Trading-hours-aware TTL, serverless-friendly |
+| Rate Limiting | Redis sliding window | Efficient, distributed, granular control |
+| Volume Anomaly Libraries | Pandas, Greenlet | Efficient data manipulation, async processing |
 
 ---
 
