@@ -32,8 +32,4 @@ export const queryKeys = {
   // Search
   stockSearch: (query: string, limit: number) =>
     ["search", "stocks", query, limit] as const,
-
-  // Market Context
-  marketContext: (symbol: string, period: string) =>
-    ["market-context", symbol, period] as const,
 } as const

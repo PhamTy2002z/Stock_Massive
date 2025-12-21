@@ -24,7 +24,3 @@ export { VN30OverviewTable, VN30OverviewTableSkeleton } from "./vn30-overview-ta
 export { StockDetailClient } from "./stock-detail-client"
 export { VolumeAnomalyChart, VolumeAnomalyChartSkeleton } from "./volume-anomaly-chart"
 export { VolumeTabContent } from "./volume-tab-content"
-export {
-  MarketContextTabContent,
-  MarketContextTabSkeleton,
-} from "./market-context-tab-content"

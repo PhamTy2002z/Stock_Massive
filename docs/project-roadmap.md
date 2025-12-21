@@ -34,11 +34,6 @@
 
 ### In Progress
 
-- [ ] Market Context feature (Deep Dive analytics)
-  - [x] Database schema & models (Phase 1)
-  - [x] EOD pipeline for precomputed metrics (Phase 2)
-  - [x] Backend API endpoint (Phase 3)
-  - [ ] Frontend Market Context tab (Phase 4)
 - [ ] Frontend feature pages (charts, portfolio, watchlist)
 
 ---
@@ -246,9 +241,6 @@
 
 | Feature | Date | Notes |
 |---------|------|-------|
-| Market Context API (Phase 3) | Dec 21, 2025 | Backend endpoint for stock vs market/sector analysis |
-| Market Context EOD Pipeline | Dec 21, 2025 | Daily batch job computing correlation, beta, RS metrics |
-| Market Context Database | Dec 21, 2025 | 3 precomputed tables for analytics |
 | VN30 Overview (Frontend) | Dec 21, 2025 | Dashboard table with pagination, auto-refresh (1min) |
 | VN30 Overview (API) | Dec 21, 2025 | Backend endpoint with Redis caching (5min/1hr TTL) |
 | Analytics Deep-Dive Page | Dec 21, 2025 | SSR + TanStack Query integration |
