@@ -39,8 +39,24 @@ export function MarketContextTabContent({
     return <MarketContextTabSkeleton />
   }
 
-  // Error state
+  // Error state - show friendly message for missing data
   if (error) {
+    const isNoDataError = error.message?.includes("400") || error.message?.includes("No data")
+
+    if (isNoDataError) {
+      return (
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Đang cập nhật dữ liệu</AlertTitle>
+          <AlertDescription>
+            Dữ liệu ngữ cảnh thị trường cho mã {symbol} đang được tính toán.
+            Hệ thống chạy EOD pipeline hàng ngày lúc 15:30 ICT.
+            Vui lòng thử lại sau.
+          </AlertDescription>
+        </Alert>
+      )
+    }
+
     return (
       <Alert variant="destructive">
         <AlertCircle className="h-4 w-4" />
