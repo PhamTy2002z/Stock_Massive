@@ -1,8 +1,31 @@
 """SQLAlchemy models for stocks module."""
-from sqlalchemy import BigInteger, Column, DateTime, Index, Integer, Numeric, String, UniqueConstraint
+from sqlalchemy import BigInteger, Column, Date, DateTime, Index, Integer, Numeric, String, UniqueConstraint
 from sqlalchemy.sql import func
 
 from src.core.database import Base
+
+
+class StockDailyOHLCV(Base):
+    """Daily OHLCV data for stocks."""
+    __tablename__ = "stock_daily_ohlcv"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    symbol = Column(String(10), nullable=False, index=True)
+    trade_date = Column(Date, nullable=False)
+    open_price = Column(Numeric(12, 2))
+    high_price = Column(Numeric(12, 2))
+    low_price = Column(Numeric(12, 2))
+    close_price = Column(Numeric(12, 2))
+    volume = Column(BigInteger, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("symbol", "trade_date", name="uq_daily_symbol_date"),
+        Index("idx_daily_symbol_date", "symbol", "trade_date"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<StockDailyOHLCV {self.symbol} {self.trade_date}>"
 
 
 class StockIntradayBar(Base):

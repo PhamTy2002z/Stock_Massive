@@ -1,14 +1,21 @@
 """APScheduler setup for scheduled jobs."""
+import asyncio
 import logging
 
 from apscheduler import AsyncScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from src.core.config import get_settings
-from src.stocks.jobs import cleanup_old_data_job, collect_intraday_data_job
+from src.stocks.jobs import cleanup_old_data_job, collect_daily_ohlcv_job, collect_intraday_data_job
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+
+async def collect_daily_ohlcv_job_async():
+    """Async wrapper for sync collect_daily_ohlcv_job (runs in thread pool)."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, collect_daily_ohlcv_job)
 
 
 async def setup_scheduler(scheduler: AsyncScheduler) -> None:
@@ -43,3 +50,21 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
         id="data-cleanup-daily",
     )
     logger.info("Scheduled data cleanup at 16:00 ICT")
+
+    # Daily OHLCV collection at configured time (default 20:00 Vietnam time)
+    # Note: collect_daily_ohlcv_job is sync, use async wrapper
+    if settings.daily_ohlcv_enabled:
+        await scheduler.add_schedule(
+            collect_daily_ohlcv_job_async,
+            CronTrigger(
+                hour=settings.daily_ohlcv_hour,
+                minute=settings.daily_ohlcv_minute,
+                timezone="Asia/Ho_Chi_Minh",
+            ),
+            id="daily-ohlcv-collection",
+        )
+        logger.info(
+            f"Scheduled daily OHLCV collection at "
+            f"{settings.daily_ohlcv_hour}:{settings.daily_ohlcv_minute:02d} ICT "
+            f"(delay={settings.daily_ohlcv_delay}s, batch={settings.daily_ohlcv_batch_size})"
+        )
