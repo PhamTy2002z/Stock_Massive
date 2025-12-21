@@ -7,6 +7,7 @@ import { queryKeys } from "@/lib/query-keys"
 interface UseSectorPerformanceResult {
   data: SectorPerformanceResponse | null
   isLoading: boolean
+  isFetching: boolean
   error: Error | null
   refetch: () => void
   lastUpdated: Date | null
@@ -26,6 +27,7 @@ export function useSectorPerformance(): UseSectorPerformanceResult {
   return {
     data: query.data ?? null,
     isLoading: query.isLoading,
+    isFetching: query.isFetching,
     error: query.error,
     refetch: query.refetch,
     lastUpdated: query.dataUpdatedAt ? new Date(query.dataUpdatedAt) : null,

@@ -1,6 +1,6 @@
 "use client"
 
-import { useSearchParams, useRouter } from "next/navigation"
+import { useRouter } from "next/navigation"
 import { DashboardLayout } from "@/components/layout"
 
 interface DashboardLayoutClientProps {
@@ -8,13 +8,10 @@ interface DashboardLayoutClientProps {
 }
 
 export function DashboardLayoutClient({ children }: DashboardLayoutClientProps) {
-  const searchParams = useSearchParams()
   const router = useRouter()
 
   const handleStockSelect = (symbol: string) => {
-    const params = new URLSearchParams(searchParams.toString())
-    params.set("symbol", symbol)
-    router.push(`/?${params.toString()}`, { scroll: false })
+    router.push(`/analytics/deep-dive?symbol=${encodeURIComponent(symbol)}`)
   }
 
   return <DashboardLayout onStockSelect={handleStockSelect}>{children}</DashboardLayout>
