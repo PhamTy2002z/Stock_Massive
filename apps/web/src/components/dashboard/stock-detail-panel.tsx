@@ -57,9 +57,9 @@ export function StockDetailPanel({
 // Stat Card Component
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border bg-card p-3">
+    <div className="rounded-lg border bg-card px-4 py-3">
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 text-sm font-semibold tabular-nums text-foreground">
+      <p className="mt-1.5 text-sm font-semibold tabular-nums text-foreground">
         {value}
       </p>
     </div>

@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react"
 import { cn } from "@/lib/utils"
-import { TrendingUp, TrendingDown, ChevronLeft, ChevronRight } from "lucide-react"
+import { TrendingUp, TrendingDown, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import {
   Select,
   SelectContent,
@@ -50,13 +50,34 @@ function formatMarketCap(value: number | null): string {
   })} tỷ`
 }
 
+type SortDirection = "asc" | "desc" | null
+
 export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
   const [currentPage, setCurrentPage] = useState(1)
   const [rowsPerPage, setRowsPerPage] = useState(10)
+  const [sortDirection, setSortDirection] = useState<SortDirection>(null)
 
   const { data, isLoading, error } = useVN30Overview()
 
-  const stocks = useMemo(() => data?.stocks ?? [], [data?.stocks])
+  const stocks = useMemo(() => {
+    const rawStocks = data?.stocks ?? []
+    if (sortDirection === null) return rawStocks
+
+    return [...rawStocks].sort((a, b) => {
+      const aVal = a.change_pct ?? -Infinity
+      const bVal = b.change_pct ?? -Infinity
+      return sortDirection === "asc" ? aVal - bVal : bVal - aVal
+    })
+  }, [data?.stocks, sortDirection])
+
+  const toggleSort = () => {
+    setSortDirection((prev) => {
+      if (prev === null) return "desc"
+      if (prev === "desc") return "asc"
+      return null
+    })
+    setCurrentPage(1)
+  }
   const totalItems = stocks.length
   const totalPages = Math.max(1, Math.ceil(totalItems / rowsPerPage))
   const startIndex = (currentPage - 1) * rowsPerPage
@@ -113,7 +134,17 @@ export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
                 <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">Mã</th>
                 <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">Tên công ty</th>
                 <th className="py-3 px-4 text-right text-sm font-medium text-muted-foreground whitespace-nowrap">Giá</th>
-                <th className="py-3 px-4 text-right text-sm font-medium text-muted-foreground whitespace-nowrap">%</th>
+                <th className="py-3 px-4 text-right text-sm font-medium text-muted-foreground whitespace-nowrap">
+                  <button
+                    onClick={toggleSort}
+                    className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+                  >
+                    %
+                    {sortDirection === null && <ArrowUpDown className="h-3.5 w-3.5" />}
+                    {sortDirection === "desc" && <ArrowDown className="h-3.5 w-3.5" />}
+                    {sortDirection === "asc" && <ArrowUp className="h-3.5 w-3.5" />}
+                  </button>
+                </th>
                 <th className="py-3 px-4 text-right text-sm font-medium text-muted-foreground whitespace-nowrap">Khối lượng</th>
                 <th className="py-3 px-4 text-right text-sm font-medium text-muted-foreground whitespace-nowrap">Vốn hóa</th>
               </tr>

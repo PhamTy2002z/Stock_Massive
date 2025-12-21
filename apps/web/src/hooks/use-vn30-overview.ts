@@ -10,6 +10,6 @@ export function useVN30Overview() {
     queryFn: fetchVN30Overview,
     staleTime: 60 * 1000,        // 1 minute
     refetchInterval: 60 * 1000,  // Auto-refresh every 1 minute
-    refetchIntervalInBackground: false,  // Prevent unnecessary API calls when tab inactive
+    refetchIntervalInBackground: true,  // Keep data fresh even when tab inactive
   })
 }

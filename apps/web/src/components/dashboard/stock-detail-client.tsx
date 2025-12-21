@@ -90,7 +90,7 @@ export function StockDetailClient({ initialSymbol }: StockDetailClientProps) {
             />
 
             {activeTab === "overview" && (
-              <>
+              <div className="space-y-4">
                 <StockDetailPanel
                   volume={data.volume || 0}
                   exchange={data.exchange || "N/A"}
@@ -111,7 +111,7 @@ export function StockDetailClient({ initialSymbol }: StockDetailClientProps) {
                   pb={data.pb}
                   dividendYield={data.dividend_yield}
                 />
-              </>
+              </div>
             )}
 
             {activeTab === "finance" && <FinanceTabContent symbol={data.symbol} />}
@@ -122,7 +122,7 @@ export function StockDetailClient({ initialSymbol }: StockDetailClientProps) {
       </div>
 
       {/* Right: Company Info Sidebar */}
-      <div className="space-y-4">
+      <div className="space-y-4 lg:pt-6">
         {isLoading && <StockCompanyInfoSkeleton />}
         {!isLoading && !error && data && (
           <StockCompanyInfo

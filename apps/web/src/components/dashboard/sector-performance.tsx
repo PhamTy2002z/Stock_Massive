@@ -6,13 +6,46 @@ import { Spinner } from "@/components/ui/spinner"
 import { AlertCircle, RefreshCw, TrendingUp, TrendingDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-interface SectorPerformanceProps {
-  className?: string
-}
-
-export function SectorPerformance({ className }: SectorPerformanceProps) {
+/**
+ * Wrapper component with title and refresh button
+ */
+export function SectorPerformanceSection({ className }: { className?: string }) {
   const { data, isLoading, error, refetch } = useSectorPerformance()
 
+  return (
+    <div className={className}>
+      {/* Header with title and refresh button */}
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-semibold text-foreground">Hiệu suất ngành</h2>
+        <div className="flex items-center gap-2">
+          {isLoading && <Spinner className="h-4 w-4 text-muted-foreground" />}
+          <button
+            onClick={() => refetch()}
+            disabled={isLoading}
+            className="p-1.5 rounded-md hover:bg-muted transition-colors disabled:opacity-50"
+            title="Làm mới dữ liệu"
+            aria-label="Làm mới dữ liệu"
+          >
+            <RefreshCw className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+      <SectorPerformanceContent data={data} isLoading={isLoading} error={error} refetch={refetch} />
+    </div>
+  )
+}
+
+interface SectorPerformanceContentProps {
+  data: ReturnType<typeof useSectorPerformance>["data"]
+  isLoading: boolean
+  error: Error | null
+  refetch: () => void
+}
+
+/**
+ * Internal content component - renders the two cards
+ */
+function SectorPerformanceContent({ data, isLoading, error, refetch }: SectorPerformanceContentProps) {
   // Top 5 gainers: only positive change_pct, Top 5 losers: only negative change_pct
   const sortedSectors = data?.sectors ? [...data.sectors].sort((a, b) => b.change_pct - a.change_pct) : []
   const topGainers = sortedSectors.filter(s => s.change_pct > 0).slice(0, 5)
@@ -47,31 +80,17 @@ export function SectorPerformance({ className }: SectorPerformanceProps) {
   }
 
   return (
-    <div className={cn("grid grid-cols-1 md:grid-cols-2 gap-4", className)}>
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       {/* Top 5 Gainers */}
       <div className="rounded-xl border bg-card">
-        <div className="flex items-center justify-between p-4 border-b">
-          <div className="flex items-center gap-2">
-            <TrendingUp className="h-5 w-5 text-green-600 dark:text-green-400" />
-            <h3 className="font-semibold">
-              Top 5 ngành tăng
-              <span className="text-muted-foreground font-normal text-sm ml-1">
-                (Phiên {formatSessionDate(data.generated_at)})
-              </span>
-            </h3>
-          </div>
-          <div className="flex items-center gap-2">
-            {isLoading && <Spinner className="h-4 w-4 text-muted-foreground" />}
-            <button
-              onClick={refetch}
-              disabled={isLoading}
-              className="p-1.5 rounded-md hover:bg-muted transition-colors disabled:opacity-50"
-              title="Làm mới"
-              aria-label="Làm mới dữ liệu"
-            >
-              <RefreshCw className="h-4 w-4" />
-            </button>
-          </div>
+        <div className="flex items-center gap-2 p-4 border-b">
+          <TrendingUp className="h-5 w-5 text-green-600 dark:text-green-400" />
+          <h3 className="font-semibold">
+            Top 5 ngành tăng
+            <span className="text-muted-foreground font-normal text-sm ml-1">
+              (Phiên {formatSessionDate(data.generated_at)})
+            </span>
+          </h3>
         </div>
         <div className="divide-y">
           {topGainers.length > 0 ? (
@@ -88,16 +107,14 @@ export function SectorPerformance({ className }: SectorPerformanceProps) {
 
       {/* Top 5 Losers */}
       <div className="rounded-xl border bg-card">
-        <div className="flex items-center justify-between p-4 border-b">
-          <div className="flex items-center gap-2">
-            <TrendingDown className="h-5 w-5 text-red-600 dark:text-red-400" />
-            <h3 className="font-semibold">
-              Top 5 ngành giảm
-              <span className="text-muted-foreground font-normal text-sm ml-1">
-                (Phiên {formatSessionDate(data.generated_at)})
-              </span>
-            </h3>
-          </div>
+        <div className="flex items-center gap-2 p-4 border-b">
+          <TrendingDown className="h-5 w-5 text-red-600 dark:text-red-400" />
+          <h3 className="font-semibold">
+            Top 5 ngành giảm
+            <span className="text-muted-foreground font-normal text-sm ml-1">
+              (Phiên {formatSessionDate(data.generated_at)})
+            </span>
+          </h3>
         </div>
         <div className="divide-y">
           {topLosers.length > 0 ? (

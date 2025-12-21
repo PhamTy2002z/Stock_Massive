@@ -17,7 +17,7 @@ export function useSectorPerformance(): UseSectorPerformanceResult {
     queryKey: queryKeys.sectorPerformance,
     queryFn: fetchSectorPerformance,
     staleTime: 60 * 1000, // 1 minute
-    refetchInterval: 5 * 60 * 1000, // Auto-refresh every 5 minutes
+    refetchInterval: 60 * 1000, // Auto-refresh every 1 minute
     refetchIntervalInBackground: true, // Keep refreshing even when tab is not focused
     refetchOnWindowFocus: true, // Refresh when user returns to tab
     refetchOnMount: true, // Always fetch on component mount
