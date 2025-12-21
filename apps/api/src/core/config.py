@@ -51,6 +51,13 @@ class Settings(BaseSettings):
     intraday_symbols: str = "VCB,FPT,VNM,VIC,VHM"  # Comma-separated VN30 subset
     intraday_retention_days: int = 30
 
+    # Daily OHLCV Collector
+    daily_ohlcv_enabled: bool = True
+    daily_ohlcv_hour: int = 20  # 8 PM Vietnam time
+    daily_ohlcv_minute: int = 0
+    daily_ohlcv_delay: float = 1.5  # Delay between requests to avoid rate limit
+    daily_ohlcv_batch_size: int = 50  # Symbols per batch
+
     # Rate Limiting
     rate_limit_enabled: bool = True
     rate_limit_standard_max: int = 100  # requests per window
