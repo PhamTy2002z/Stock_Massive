@@ -20,6 +20,7 @@ import {
   FinanceTabContent,
   ShareholdersTabContent,
   VolumeTabContent,
+  MarketContextTabContent,
 } from "@/components/dashboard"
 import type { StockDetailTabValue } from "@/components/dashboard"
 
@@ -117,6 +118,7 @@ export function StockDetailClient({ initialSymbol }: StockDetailClientProps) {
             {activeTab === "finance" && <FinanceTabContent symbol={data.symbol} />}
             {activeTab === "shareholders" && <ShareholdersTabContent symbol={data.symbol} />}
             {activeTab === "volume" && <VolumeTabContent symbol={data.symbol} />}
+            {activeTab === "market" && <MarketContextTabContent symbol={data.symbol} />}
           </div>
         )}
       </div>
