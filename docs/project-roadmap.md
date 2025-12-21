@@ -255,3 +255,4 @@
 | Volume Anomaly Detection (On-Demand Collector) | Dec 20, 2025 | Auto-collect intraday data on endpoint request |
 | Custom Hooks | Dec 20, 2025 | 9 hooks for data fetching |
 | Extended Caching | Dec 20, 2025 | Caching for 4 high-traffic endpoints |
+| VN30 Overview (Frontend) | Dec 21, 2025 | Dashboard table with pagination, auto-refresh (1min) |

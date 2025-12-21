@@ -361,3 +361,23 @@ export async function fetchVolumeAnomalies(
     `/stocks/${encodeURIComponent(symbol)}/volume-anomalies?days=${days}`
   )
 }
+
+// VN30 Overview Types
+export interface VN30OverviewItem {
+  symbol: string
+  company_name: string
+  price: number | null
+  change_pct: number | null
+  volume: number | null
+  market_cap: number | null
+}
+
+export interface VN30OverviewResponse {
+  stocks: VN30OverviewItem[]
+  generated_at: string
+  total_count: number
+}
+
+export async function fetchVN30Overview(): Promise<VN30OverviewResponse> {
+  return fetchApi<VN30OverviewResponse>("/stocks/vn30-overview")
+}

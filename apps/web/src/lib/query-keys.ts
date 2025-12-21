@@ -7,6 +7,7 @@ export const queryKeys = {
   sectorPerformance: ["market", "sectorPerformance"] as const,
   fundCertificates: (fundType?: string) =>
     ["market", "fundCertificates", fundType] as const,
+  vn30Overview: ["market", "vn30Overview"] as const,
 
   // Stock detail
   stock: (symbol: string) => ["stock", symbol] as const,
