@@ -1,39 +1,44 @@
 # Codebase Summary - Stock Massive
 
+Generated: 2025-12-21
+Total Files: 247 | Total Python: 40 | Total Components: 44
+
 ## 1. Project Overview and Purpose
 
-Stock Massive is a Vietnamese stock market data platform powered by the `vnstock` library. Its primary purpose is to provide real-time data, charting, and analysis for the Vietnam stock market (HOSE, HNX, UPCOM).
+Stock Massive is a Vietnamese stock market data platform powered by the `vnstock` library. Provides real-time data, charting, and analysis for Vietnam stock market (HOSE, HNX, UPCOM).
 
 **Goals:**
-*   Display Vietnamese stock data with interactive charts.
-*   Provide sortable/filterable data tables for stock screening.
-*   Enable portfolio tracking and watchlist management (planned).
-*   Secure user authentication and data persistence (planned).
-*   Integrate `vnstock` library for comprehensive Vietnam market data.
-*   Implement and visualize advanced analytical features like Volume Anomaly Detection.
+*   Display Vietnamese stock data with interactive charts
+*   Provide sortable/filterable data tables for stock screening
+*   Enable portfolio tracking and watchlist management (planned)
+*   Secure user authentication via Supabase (scaffolded)
+*   Integrate `vnstock` library for comprehensive Vietnam market data
+*   Implement advanced analytical features (volume anomaly detection, sector performance)
 
 ## 2. Tech Stack
 
 **Frontend:**
-*   **Framework**: Next.js 14.2 (App Router)
-*   **Language**: TypeScript 5.x
-*   **Styling**: TailwindCSS 3.4, ShadCN/UI (Radix-based component library)
-*   **Data Fetching**: TanStack Query v5
-*   **Charting**: TradingView Lightweight Charts (planned for full integration)
-*   **State Management**: `useState` for local, URL search params for shared, `next-themes` for theme.
+*   **Framework**: Next.js 14.2.18 (App Router)
+*   **Language**: TypeScript
+*   **Styling**: TailwindCSS 3.4 + ShadCN/UI (44 Radix-based components)
+*   **Data Fetching**: TanStack Query v5.90
+*   **Auth**: Supabase (Google OAuth scaffolded)
+*   **Charts**: Recharts (implemented), TradingView Lightweight Charts (planned)
+*   **State**: useState (local), URL params (shared), next-themes (theme)
 *   **Notifications**: Sonner
+*   **UI Components**: 19 primitives, 18 dashboard, 4 layout
+*   **Custom Hooks**: 9 total (data fetching + responsive)
 
 **Backend:**
 *   **Framework**: FastAPI 0.100+
 *   **Language**: Python 3.11+
-*   **ORM**: SQLAlchemy 2.0
-*   **Migrations**: Alembic
-*   **Data Validation**: Pydantic 2.x
-*   **ASGI Server**: Uvicorn
-*   **Data Source**: `vnstock >= 3.0.0` (VCI source), Fmarket API (for fund data)
+*   **ORM**: SQLAlchemy 2.0 + Alembic
+*   **Validation**: Pydantic 2.x
+*   **Server**: Uvicorn
+*   **Data Source**: vnstock >= 3.0.0 (VCI), Fmarket API
 *   **Scheduler**: APScheduler 4.0
-*   **Volume Anomaly Libraries**: Pandas, Greenlet
-*   **Caching**: Redis (for extended caching, including `TradingHoursCache`, volume anomaly detection, market data)
+*   **Cache/Rate Limit**: Upstash Redis
+*   **Analytics**: Pandas, Greenlet
 
 **Database:**
 *   **Primary**: PostgreSQL 16
@@ -90,28 +95,28 @@ Stock_Massive/
 ## 4. Key Features and Functionality
 
 **Current (Completed):**
-*   **Dashboard Layout**: Responsive sidebar, header, dark/light theme toggle.
-*   **Stock Detail Page**: Comprehensive view with search, ticker header, stats panel, and tabbed sections.
-*   **Market Indices**: Cards displaying VN-INDEX, VN30, HNX, UPCOM with sparklines.
-*   **Stock Data API**: 27 endpoints via `vnstock` for various data types.
-*   **Financial Data**: Detailed income statements, balance sheets, and cash flow statements.
-*   **Shareholders/Officers**: Data on major holders, company management, and insider deals.
-*   **Volume Analysis**: 5-minute bar aggregation and peak period analysis.
-*   **Intraday Data Collection**: Scheduled daily collection of intraday data.
-*   **Volume Anomaly Detection**: Backend API and frontend visualization for detecting and displaying volume anomalies, with advanced Redis caching (trading-hours aware TTL, graceful degradation).
-*   **Sector Performance**: ICB Level 2 sector performance with sorting and top gainers/losers.
-*   **Fund Certificates**: Endpoint and display for fund certificates data.
-*   **Loading/Error States**: Consistent use of skeleton loaders and error handling across the frontend.
-*   **API Documentation**: Auto-generated OpenAPI/Swagger UI.
+*   **Dashboard Layout**: Responsive sidebar, header, dark/light theme
+*   **Stock Detail Page**: Search, ticker header, stats, tabbed sections (Overview, Financials, Shareholders, Volume)
+*   **Market Indices**: VN-INDEX, VN30, HNX, UPCOM cards with sparklines (Recharts)
+*   **Stock Data API**: 27 endpoints via vnstock
+*   **Financial Data**: Income statements, balance sheets, cash flow (detailed)
+*   **Shareholders/Officers**: Major holders, management, insider deals
+*   **Volume Analysis**: 5-min bar aggregation, peak period analysis
+*   **Volume Anomaly Detection**: Backend API + frontend visualization with Redis caching
+*   **Sector Performance**: ICB Level 2 with sorting, top gainers/losers
+*   **Fund Certificates**: 7-item display via Fmarket API
+*   **Intraday Collection**: Scheduled daily collection (15:30 ICT) + cleanup (16:00 ICT)
+*   **Auth Scaffold**: Login page UI with Supabase Google OAuth (actions.ts scaffolded)
+*   **Loading/Error States**: Consistent skeleton loaders and error handling
+*   **API Documentation**: Auto-generated OpenAPI/Swagger UI
 
 **Planned (Roadmap):**
-*   **Authentication System**: User registration, login (JWT), password hashing, token refresh, protected routes.
-*   **Stock Charts**: Integration of TradingView Lightweight Charts for candlestick, line, and area charts with time interval selection and volume overlay.
-*   **Stock List & Screening**: Data tables with sorting, filtering, and search functionality using TanStack Table.
-*   **Watchlist Management**: Create, delete, add/remove stocks from watchlists.
-*   **Portfolio Tracking**: Add positions, calculate P&L, track history.
-*   **Technical Analysis**: Implement indicators like SMA, EMA, RSI, MACD, Bollinger Bands.
-*   **Alerts & Notifications**: Price alerts, email/in-app notifications.
+*   **Authentication**: Complete Supabase integration (JWT, protected routes)
+*   **Stock Charts**: TradingView Lightweight Charts integration
+*   **Stock Screening**: TanStack Table with sorting/filtering
+*   **Watchlist/Portfolio**: CRUD operations, P&L tracking
+*   **Technical Analysis**: SMA, EMA, RSI, MACD, Bollinger Bands
+*   **Alerts**: Price alerts, email/in-app notifications
 
 ## 5. Architecture Patterns Used
 
@@ -139,25 +144,36 @@ Stock_Massive/
 
 ## 6. Important Files and Their Purposes
 
-*   `/apps/web/src/app/layout.tsx`: Root layout for the Next.js application, including providers.
-*   `/apps/web/src/components/ui/`: Contains ShadCN/UI components.
-*   `/apps/web/src/components/dashboard/`: Feature-specific UI components for the dashboard.
-*   `/apps/web/src/lib/utils.ts`: Utility functions, including `cn` for Tailwind class merging.
-*   `/apps/web/src/lib/query-keys.ts`: Centralized query key factory for TanStack Query.
-*   `/apps/api/src/main.py`: Main FastAPI application instance and routing setup.
-*   `/apps/api/src/core/config.py`: Application settings and environment variable loading.
-*   `/apps/api/src/core/database.py`: SQLAlchemy engine, session, and base model definitions.
-*   `/apps/api/src/core/scheduler.py`: APScheduler configuration and job management.
-*   `/apps/api/src/core/redis.py`: Redis client setup and utilities for caching.
-*   `/apps/api/src/core/cache.py`: Generic `TradingHoursCache` class for time-sensitive data caching.
-*   `/apps/api/src/stocks/router.py`: Aggregates all stock-related API routes.
-*   `/apps/api/src/stocks/service.py`: Central service for interacting with the `vnstock` library and implementing business logic.
-*   `/apps/api/src/stocks/schemas/`: Pydantic models for API request/response validation.
-*   `/apps/api/src/stocks/models.py`: SQLAlchemy declarative models for the PostgreSQL database.
-*   `/apps/api/src/stocks/intraday_collector.py`: Logic for collecting intraday data and detecting volume anomalies.
-*   `/alembic/env.py`: Alembic environment script for database migrations.
-*   `/docker-compose.yml`: Defines Docker services for web, api, and database.
-*   `/repomix-output.xml`: The generated compaction of the codebase for AI analysis.
+**Frontend (apps/web/):**
+*   `/src/app/layout.tsx`: Root layout with providers (Query, Theme, Supabase)
+*   `/src/app/(auth)/login/`: Login page with Google OAuth scaffold
+*   `/src/app/auth/callback/route.ts`: Supabase OAuth callback handler
+*   `/src/components/ui/`: 19 ShadCN/UI primitives (button, card, dialog, etc.)
+*   `/src/components/dashboard/`: 18 feature components (stock detail, market indices, sector performance, volume anomaly)
+*   `/src/components/layout/`: 4 layout components (sidebar, header, breadcrumb, separator)
+*   `/src/lib/utils.ts`: Utility functions, including `cn` for Tailwind class merging
+*   `/src/lib/query-keys.ts`: Centralized TanStack Query key factory
+*   `/src/lib/api.ts`: API client configuration
+*   `/src/lib/supabase/`: Supabase client setup (client, server, middleware)
+*   `/src/hooks/`: 9 custom hooks (use-stock-data, use-market-indices, use-responsive, etc.)
+
+**Backend (apps/api/):**
+*   `/src/main.py`: FastAPI app instance, CORS, routing setup
+*   `/src/core/config.py`: Settings, environment variables
+*   `/src/core/database.py`: SQLAlchemy engine, session, base model
+*   `/src/core/scheduler.py`: APScheduler configuration, job management
+*   `/src/core/redis.py`: Upstash Redis client setup
+*   `/src/core/cache.py`: TradingHoursCache class for time-sensitive caching
+*   `/src/core/rate_limit.py`: Redis-based rate limiting middleware
+*   `/src/stocks/router.py`: 27 API endpoint aggregation
+*   `/src/stocks/service.py`: vnstock library integration, business logic
+*   `/src/stocks/schemas/`: Pydantic models (price, market, company, financial)
+*   `/src/stocks/models.py`: SQLAlchemy IntradayBar model
+*   `/src/stocks/intraday_collector.py`: Intraday data collection, volume anomaly detection
+*   `/src/stocks/jobs.py`: Scheduled jobs (collection, cleanup)
+*   `/src/stocks/{market,price,company,financial}/`: Domain-specific routers and services
+*   `/alembic/`: Database migration scripts
+*   `/requirements.txt`: Python dependencies
 
 ## 7. Development Setup Instructions
 
