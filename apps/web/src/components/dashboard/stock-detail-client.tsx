@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect } from "react"
 import { toast } from "sonner"
 import { useStockDetail } from "@/hooks/use-stock-detail"
 import { getStockLoadingToastId, clearStockLoadingToast } from "./stock-search-bar"
@@ -30,24 +30,21 @@ interface StockDetailClientProps {
 export function StockDetailClient({ initialSymbol }: StockDetailClientProps) {
   const [activeTab, setActiveTab] = useState<StockDetailTabValue>("overview")
   const { data, isLoading, error, refetch } = useStockDetail(initialSymbol)
-  const prevSymbolRef = useRef<string | null>(null)
 
   // Update loading toast when data loads or errors
   useEffect(() => {
     const toastId = getStockLoadingToastId()
     if (!toastId) return
 
-    // Only update toast when symbol changes and loading completes
-    if (initialSymbol !== prevSymbolRef.current) {
-      prevSymbolRef.current = initialSymbol
-
-      if (!isLoading && data) {
+    // Dismiss toast when loading completes (success or error)
+    if (!isLoading) {
+      if (data) {
         toast.success(`${data.symbol} loaded`, {
           id: toastId,
           description: data.company_name || "Stock data ready",
         })
         clearStockLoadingToast()
-      } else if (!isLoading && error) {
+      } else if (error) {
         toast.error("Failed to load stock", {
           id: toastId,
           description: error.message || "Please try again",
@@ -55,7 +52,7 @@ export function StockDetailClient({ initialSymbol }: StockDetailClientProps) {
         clearStockLoadingToast()
       }
     }
-  }, [initialSymbol, isLoading, data, error])
+  }, [isLoading, data, error])
 
   return (
     <section className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
