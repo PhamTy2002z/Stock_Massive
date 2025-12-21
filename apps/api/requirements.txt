@@ -11,13 +11,9 @@ asyncpg>=0.28.0
 psycopg2-binary>=2.9.0
 greenlet>=3.0.0
 
-# Auth
-python-jose[cryptography]>=3.3.0
-passlib[bcrypt]>=1.7.0
-python-multipart>=0.0.6
-
 # Utils
 httpx>=0.25.0
+python-multipart>=0.0.6
 
 # Cache & Rate Limiting
 upstash-redis>=1.0.0

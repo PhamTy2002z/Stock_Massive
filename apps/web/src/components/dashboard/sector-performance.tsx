@@ -11,7 +11,7 @@ interface SectorPerformanceProps {
 }
 
 export function SectorPerformance({ className }: SectorPerformanceProps) {
-  const { data, isLoading, error, refetch, lastUpdated } = useSectorPerformance()
+  const { data, isLoading, error, refetch } = useSectorPerformance()
 
   // Top 5 gainers: only positive change_pct, Top 5 losers: only negative change_pct
   const sortedSectors = data?.sectors ? [...data.sectors].sort((a, b) => b.change_pct - a.change_pct) : []

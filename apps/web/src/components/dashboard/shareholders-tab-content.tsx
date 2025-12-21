@@ -43,8 +43,8 @@ export function ShareholdersTabContent({
 
   const { data, isLoading, error } = useShareholders(symbol)
 
-  // Calculate pagination
-  const shareholders = data?.shareholders ?? []
+  // Memoize shareholders to prevent useMemo dependency warning
+  const shareholders = useMemo(() => data?.shareholders ?? [], [data?.shareholders])
   const totalItems = shareholders.length
   const totalPages = Math.max(1, Math.ceil(totalItems / rowsPerPage))
   const startIndex = (currentPage - 1) * rowsPerPage

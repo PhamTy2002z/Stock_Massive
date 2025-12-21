@@ -22,10 +22,8 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "postgresql://postgres:postgres@localhost:5432/stockmassive"
 
-    # JWT
-    jwt_secret: str = "change-me-in-production"
-    jwt_algorithm: str = "HS256"
-    jwt_expire_minutes: int = 30
+    # CORS
+    cors_origins: str = "http://localhost:3000"  # Comma-separated origins
 
     # Vnstock
     vnstock_source: str = "VCI"  # Default data source (VCI is most reliable)

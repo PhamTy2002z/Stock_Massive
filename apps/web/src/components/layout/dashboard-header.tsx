@@ -29,14 +29,12 @@ interface DashboardHeaderProps {
 export function DashboardHeader({ onStockSelect }: DashboardHeaderProps) {
   const router = useRouter()
   const [user, setUser] = useState<SupabaseUser | null>(null)
-  const [loading, setLoading] = useState(true)
   const supabase = createClient()
 
   useEffect(() => {
     // Get initial user
     supabase.auth.getUser().then(({ data: { user } }) => {
       setUser(user)
-      setLoading(false)
     })
 
     // Listen for auth changes
