@@ -2,19 +2,16 @@
 
 import logging
 from datetime import date
-from typing import List, Literal
+from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
 
-from src.core.database import get_db, get_sync_db
+from src.core.database import get_db
 from src.core.ratelimit import standard_rate_limit, heavy_rate_limit
 from src.stocks.intraday_collector import IntradayCollector
 from src.core.cache import TradingHoursCache
 from src.stocks.price.cache import volume_anomaly_cache
-from src.stocks.market_context_api_service import MarketContextAPIService
-from src.stocks.schemas.market_context import MarketContextResponse
 from ..service import get_stock_service
 
 # Cache instances for endpoints
@@ -27,11 +24,6 @@ price_board_cache = TradingHoursCache(
     key_prefix="stock:price_board:",
     ttl_trading=15,
     ttl_off_hours=3600,
-)
-market_context_cache = TradingHoursCache(
-    key_prefix="market_context:",
-    ttl_trading=300,  # 5 minutes
-    ttl_off_hours=3600,  # 1 hour
 )
 from ..schemas.price import (
     StockPrice,
@@ -217,53 +209,3 @@ async def get_volume_anomalies(
     volume_anomaly_cache.set(cache_key, result)
 
     return VolumeAnomalyResponse(**result)
-
-
-def _get_sync_db():
-    """Dependency for sync database session."""
-    with get_sync_db() as db:
-        yield db
-
-
-@router.get(
-    "/{symbol}/market-context",
-    response_model=MarketContextResponse,
-    dependencies=[Depends(standard_rate_limit)],
-    summary="Get market context analysis",
-    description="""Analyzes if stock moves with or against market and sector trends.
-
-Returns:
-- Normalized price chart (stock vs VNINDEX vs sector, base 100)
-- Correlation and beta metrics (20D, 60D windows)
-- Sector rank and context (if classified)
-- Performance comparison summary
-
-Data sourced from precomputed EOD pipeline tables.""",
-)
-def get_market_context(
-    symbol: str = Path(..., description="Stock ticker symbol (e.g., VCB, FPT)"),
-    period: Literal["1M", "3M", "6M", "1Y"] = Query("3M", description="Analysis period"),
-    db: Session = Depends(_get_sync_db),
-) -> MarketContextResponse:
-    """Get market context analysis for stock."""
-    symbol = symbol.upper()
-    cache_key = f"{symbol}:{period}"
-
-    # Check cache
-    cached = market_context_cache.get(cache_key)
-    if cached is not None:
-        return MarketContextResponse(**cached)
-
-    try:
-        service = MarketContextAPIService(db)
-        result = service.get_market_context(symbol, period)
-
-        # Cache result
-        market_context_cache.set(cache_key, result.model_dump())
-
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logging.getLogger(__name__).error(f"Market context error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to fetch market context. Please try again later.")
