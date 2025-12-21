@@ -18,7 +18,7 @@ interface StockStatsTableProps {
   // Column 3: Fundamentals
   eps: number | null // EPS
   pe: number | null // P/E
-  beta: number | null // Beta
+  pb: number | null // P/B (Price-to-Book)
   dividendYield: number | null // Tỷ suất cổ tức (%)
 
   className?: string
@@ -63,7 +63,7 @@ export function StockStatsTable({
   avgVolume52Week,
   eps,
   pe,
-  beta,
+  pb,
   dividendYield,
   className,
 }: StockStatsTableProps) {
@@ -90,7 +90,7 @@ export function StockStatsTable({
         <div className="divide-y divide-border">
           <StatsRow label="EPS" value={eps !== null ? formatNumber(eps, 0) : "N/A"} />
           <StatsRow label="P/E" value={pe !== null ? formatNumber(pe, 2) : "N/A"} />
-          <StatsRow label="Beta" value={beta !== null ? formatNumber(beta, 2) : "N/A"} />
+          <StatsRow label="P/B" value={pb !== null ? formatNumber(pb, 2) : "N/A"} />
           <StatsRow label="Tỷ suất cổ tức" value={dividendYield !== null ? `${formatNumber(dividendYield, 1)}%` : "N/A"} />
         </div>
       </div>

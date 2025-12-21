@@ -108,7 +108,7 @@ export function StockDetailClient({ initialSymbol }: StockDetailClientProps) {
                   avgVolume52Week={data.avg_volume_52_week || 0}
                   eps={data.eps}
                   pe={data.pe}
-                  beta={data.beta}
+                  pb={data.pb}
                   dividendYield={data.dividend_yield}
                 />
               </>

@@ -216,21 +216,15 @@ class StockService:
                     "roe": safe_float(row.get("roe")),
                     "roa": safe_float(row.get("roa")),
                 })
+                # Dividend yield from ratio_summary (decimal -> percentage)
+                div_val = safe_float(row.get("dividend"))
+                if div_val is not None:
+                    result["dividend_yield"] = div_val * 100
 
         except Exception as e:
             logger.warning(f"Error fetching financial ratios for {symbol}: {e}")
 
-        # 4. Try to get Beta from Vietnamese ratio data
-        try:
-            finance = Finance(symbol=symbol, source=self.source)
-            ratio_df = finance.ratio(period="year", lang="vi", dropna=True)
-            if ratio_df is not None and not ratio_df.empty and "Beta" in ratio_df.columns:
-                beta_val = ratio_df["Beta"].iloc[0] if len(ratio_df) > 0 else None
-                result["beta"] = safe_float(beta_val)
-        except Exception:
-            pass
-
-        # 5. Get 52-week high/low from trading_stats
+        # 4. Get 52-week high/low from trading_stats
         try:
             stock = Vnstock().stock(symbol=symbol, source=self.source)
             trading_stats = stock.company.trading_stats()
@@ -259,7 +253,7 @@ class StockService:
         except Exception as e:
             logger.warning(f"Error fetching trading stats for {symbol}: {e}")
 
-        # 6. Calculate VN30 rank by market cap
+        # 5. Calculate VN30 rank by market cap
         try:
             result["vn30_rank"] = self._get_vn30_rank(symbol, result.get("market_cap"))
         except Exception as e:
