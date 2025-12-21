@@ -11,6 +11,7 @@ from ..schemas.company import StockSymbol
 from ..schemas.market import (
     SectorPerformanceResponse,
     FundCertificatesResponse,
+    VN30OverviewResponse,
 )
 from ..shared import StockServiceError
 
@@ -26,6 +27,11 @@ sector_performance_cache = TradingHoursCache(
     key_prefix="stock:sector:",
     ttl_trading=300,
     ttl_off_hours=3600,
+)
+vn30_overview_cache = TradingHoursCache(
+    key_prefix="stock:vn30:",
+    ttl_trading=300,      # 5 minutes during trading
+    ttl_off_hours=3600,   # 1 hour off-hours
 )
 
 
@@ -111,5 +117,28 @@ async def get_fund_certificates(
     try:
         service = get_stock_service()
         return service.get_fund_certificates(fund_type)
+    except StockServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/vn30-overview", response_model=VN30OverviewResponse, dependencies=[Depends(standard_rate_limit)])
+async def get_vn30_overview() -> VN30OverviewResponse:
+    """Get VN30 index stocks with real-time price data."""
+    cache_key = "overview"
+
+    # Check cache first
+    cached = vn30_overview_cache.get(cache_key)
+    if cached is not None:
+        return VN30OverviewResponse(**cached)
+
+    # Cache miss - fetch from service
+    try:
+        service = get_stock_service()
+        result = service.get_vn30_overview()
+
+        # Cache the result
+        vn30_overview_cache.set(cache_key, result.model_dump())
+
+        return result
     except StockServiceError as e:
         raise HTTPException(status_code=502, detail=str(e))

@@ -136,6 +136,7 @@ Stock_Massive/
 │       ├── balance-sheet-detailed # GET - Balance (detailed)
 │       └── cash-flow             # GET - Cash flow
 ├── sector-performance            # GET - Sector performance (ICB Level 2)
+├── vn30-overview                 # GET - VN30 stocks overview (price, change, volume, market_cap)
 └── fund-certificates             # GET - Fund certificates data
 ```
 
@@ -280,12 +281,12 @@ CREATE INDEX ix_intraday_bars_timestamp ON intraday_bars(timestamp);
 
 - **Redis Caching (Implemented)**:
     - **Generic Cache Class**: Introduced `TradingHoursCache` in `core/cache.py` for managing time-sensitive data.
-    - **Cache Instances**: Five cache instances are utilized for: `volume_anomaly`, `market_indices`, `price_board`, `symbols`, and `sector_performance`.
+    - **Cache Instances**: Six cache instances are utilized for: `volume_anomaly`, `market_indices`, `price_board`, `symbols`, `sector_performance`, and `vn30_overview`.
     - **Trading-Hours-Aware TTL**: Cache entries have a Time-To-Live (TTL) that is intelligent about Vietnam market trading hours (09:00-15:00), ensuring data freshness during active periods and longer persistence off-hours.
     - **Graceful Degradation**: The system is designed to handle Redis unavailability gracefully, ensuring continuous operation even if the cache service is down.
     - **Affected Endpoints**:
         - `apps/api/src/stocks/price/router.py`: Caches `market-indices` and `price-board`.
-        - `apps/api/src/stocks/market/router.py`: Caches `symbols` and `sector-performance`.
+        - `apps/api/src/stocks/market/router.py`: Caches `symbols`, `sector-performance`, and `vn30-overview`.
 
 ### WebSocket Support (Planned)
 

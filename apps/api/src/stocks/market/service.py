@@ -12,6 +12,8 @@ from ..schemas.market import (
     SectorPerformanceResponse,
     FundCertificateItem,
     FundCertificatesResponse,
+    VN30OverviewItem,
+    VN30OverviewResponse,
 )
 from ..shared import StockServiceError, safe_float
 
@@ -306,6 +308,91 @@ class MarketService:
         except Exception as e:
             logger.error(f"Error fetching fund certificates: {e}")
             raise StockServiceError(f"Failed to fetch fund certificates: {e}")
+
+    def get_vn30_overview(self) -> VN30OverviewResponse:
+        """Get VN30 index stocks with real-time price data."""
+        try:
+            listing = Listing()
+            trading = Trading()
+
+            # Step 1: Get VN30 symbols
+            vn30_symbols = listing.symbols_by_group("VN30")
+            if vn30_symbols is None or (hasattr(vn30_symbols, "empty") and vn30_symbols.empty):
+                return VN30OverviewResponse(
+                    stocks=[], generated_at=pd.Timestamp.now(), total_count=0
+                )
+
+            symbols_list = vn30_symbols.tolist() if hasattr(vn30_symbols, "tolist") else list(vn30_symbols)
+
+            # Step 2: Get price board data for all VN30 stocks (batch call)
+            price_df = trading.price_board(
+                symbols_list=symbols_list,
+                flatten_columns=True,
+                drop_levels=[0],
+            )
+
+            if price_df is None or price_df.empty:
+                return VN30OverviewResponse(
+                    stocks=[], generated_at=pd.Timestamp.now(), total_count=0
+                )
+
+            # Remove duplicate columns and symbols
+            price_df = price_df.loc[:, ~price_df.columns.duplicated()]
+            price_df = price_df.drop_duplicates(subset=["symbol"], keep="first")
+
+            # Step 3: Get company names (use all_symbols for efficiency)
+            all_symbols_df = listing.all_symbols()
+            company_names = {}
+            if all_symbols_df is not None and not all_symbols_df.empty:
+                for _, row in all_symbols_df.iterrows():
+                    symbol = row.get("symbol")
+                    name = row.get("organ_name") or row.get("organName")
+                    if symbol and name:
+                        company_names[symbol] = name
+
+            # Step 4: Build response items
+            stocks = []
+            for _, row in price_df.iterrows():
+                symbol = str(row.get("symbol", ""))
+                if not symbol:
+                    continue
+
+                # Extract price data
+                match_price = safe_float(row.get("match_price"))
+                ref_price = safe_float(row.get("ref_price"))
+
+                # Calculate change percentage
+                change_pct = None
+                if match_price and ref_price and ref_price > 0:
+                    change_pct = ((match_price - ref_price) / ref_price) * 100
+
+                # Calculate market cap (price * listed_share / 1e9 for billion VND)
+                market_cap = None
+                listed_share = safe_float(row.get("listed_share"))
+                if match_price and listed_share:
+                    market_cap = (match_price * listed_share) / 1e9
+
+                stocks.append(VN30OverviewItem(
+                    symbol=symbol,
+                    company_name=company_names.get(symbol, symbol),
+                    price=round(match_price, 2) if match_price else None,
+                    change_pct=round(change_pct, 2) if change_pct is not None else None,
+                    volume=safe_float(row.get("accumulated_volume")),
+                    market_cap=round(market_cap, 2) if market_cap else None,
+                ))
+
+            # Sort by market cap descending (largest first)
+            stocks.sort(key=lambda x: x.market_cap or 0, reverse=True)
+
+            return VN30OverviewResponse(
+                stocks=stocks,
+                generated_at=pd.Timestamp.now(),
+                total_count=len(stocks),
+            )
+
+        except Exception as e:
+            logger.error(f"Error fetching VN30 overview: {e}")
+            raise StockServiceError(f"Failed to fetch VN30 overview: {e}")
 
     # --- Converter methods ---
 
