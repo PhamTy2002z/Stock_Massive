@@ -8,7 +8,6 @@ import {
   Cell,
   ResponsiveContainer,
   Tooltip,
-  Legend,
 } from "recharts"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
@@ -144,41 +143,68 @@ export function VolumeSpikePieChart({ industries, className }: VolumeSpikePieCha
         <CardTitle className="text-base">Top 10 CP đột biến mạnh nhất</CardTitle>
       </CardHeader>
       <CardContent>
-        <ResponsiveContainer width="100%" height={300}>
-          <PieChart>
-            <Pie
-              data={topStocks}
-              dataKey="spike_ratio"
-              nameKey="symbol"
-              cx="50%"
-              cy="50%"
-              outerRadius={90}
-              innerRadius={40}
-              label={renderCustomLabel}
-              labelLine={false}
-            >
-              {topStocks.map((stock, index) => (
-                <Cell
-                  key={`cell-${index}`}
-                  fill={getPieColor(index)}
-                  onClick={() => handleSliceClick(stock.symbol)}
-                  className="cursor-pointer hover:opacity-80 transition-opacity outline-none focus:opacity-80"
-                  tabIndex={0}
-                  onKeyDown={(e) => e.key === "Enter" && handleSliceClick(stock.symbol)}
-                  aria-label={`${stock.symbol}: ${stock.spike_ratio.toFixed(1)}x`}
+        <div className="flex flex-col lg:flex-row items-center gap-6">
+          {/* Pie Chart - larger, takes more space */}
+          <div className="w-full lg:w-3/5 h-[280px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={topStocks}
+                  dataKey="spike_ratio"
+                  nameKey="symbol"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={115}
+                  innerRadius={50}
+                  label={renderCustomLabel}
+                  labelLine={false}
+                >
+                  {topStocks.map((stock, index) => (
+                    <Cell
+                      key={`cell-${index}`}
+                      fill={getPieColor(index)}
+                      onClick={() => handleSliceClick(stock.symbol)}
+                      className="cursor-pointer hover:opacity-80 transition-opacity outline-none focus:opacity-80"
+                      tabIndex={0}
+                      onKeyDown={(e) => e.key === "Enter" && handleSliceClick(stock.symbol)}
+                      aria-label={`${stock.symbol}: ${stock.spike_ratio.toFixed(1)}x`}
+                    />
+                  ))}
+                </Pie>
+                <Tooltip content={<CustomTooltip />} />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Legend as compact list - right side */}
+          <div className="w-full lg:w-2/5 space-y-1">
+            {topStocks.map((stock, index) => (
+              <button
+                key={stock.symbol}
+                onClick={() => handleSliceClick(stock.symbol)}
+                className="w-full flex items-center gap-2 px-2 py-1 rounded hover:bg-muted/50 transition-colors text-left"
+              >
+                <span
+                  className="w-2.5 h-2.5 rounded-sm flex-shrink-0"
+                  style={{ backgroundColor: getPieColor(index) }}
                 />
-              ))}
-            </Pie>
-            <Tooltip content={<CustomTooltip />} />
-            <Legend
-              verticalAlign="bottom"
-              height={36}
-              formatter={(value: string) => (
-                <span className="text-xs text-muted-foreground">{value}</span>
-              )}
-            />
-          </PieChart>
-        </ResponsiveContainer>
+                <span className="text-sm font-medium w-12 flex-shrink-0">{stock.symbol}</span>
+                <span className="text-xs text-muted-foreground truncate flex-1 min-w-0">
+                  {stock.company_name || "-"}
+                </span>
+                <span className="text-xs text-muted-foreground flex-shrink-0">{stock.spike_ratio.toFixed(1)}x</span>
+                <span className={cn(
+                  "text-xs w-14 text-right flex-shrink-0",
+                  stock.price_change_pct !== null && stock.price_change_pct >= 0
+                    ? "text-green-500"
+                    : "text-red-500"
+                )}>
+                  {formatPercent(stock.price_change_pct)}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
       </CardContent>
     </Card>
   )
