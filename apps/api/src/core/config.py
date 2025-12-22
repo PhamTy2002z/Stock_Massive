@@ -58,6 +58,12 @@ class Settings(BaseSettings):
     daily_ohlcv_delay: float = 1.5  # Delay between requests to avoid rate limit
     daily_ohlcv_batch_size: int = 50  # Symbols per batch
 
+    # Top Performers Job
+    top_performers_enabled: bool = True
+    top_performers_hour: int = 2  # 02:00 ICT (Sunday)
+    top_performers_minute: int = 0
+    top_performers_delay: float = 1.5  # seconds between API calls
+
     # Rate Limiting
     rate_limit_enabled: bool = True
     rate_limit_standard_max: int = 100  # requests per window
