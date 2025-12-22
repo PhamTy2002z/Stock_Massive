@@ -141,11 +141,19 @@ class TestSchedulerSetup:
             mock_settings.scheduler_enabled = True
             mock_settings.intraday_collect_hour = 15
             mock_settings.intraday_collect_minute = 30
+            # Daily OHLCV settings (required since scheduler.py added this schedule)
+            mock_settings.daily_ohlcv_enabled = True
+            mock_settings.daily_ohlcv_hour = 20
+            mock_settings.daily_ohlcv_minute = 0
+            # Top performers settings
+            mock_settings.top_performers_enabled = True
+            mock_settings.top_performers_hour = 2
+            mock_settings.top_performers_minute = 0
 
             await setup_scheduler(mock_scheduler)
 
-            # Should add 2 schedules: collection and cleanup
-            assert mock_scheduler.add_schedule.call_count == 2
+            # Should add 4 schedules: intraday collection, cleanup, daily_ohlcv, and top_performers
+            assert mock_scheduler.add_schedule.call_count == 4
 
     @pytest.mark.asyncio
     async def test_setup_scheduler_disabled(self):

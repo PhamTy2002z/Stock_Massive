@@ -156,7 +156,7 @@ class TestStockIntradayBarModel:
         await cleanup_test_data()
 
     @pytest.mark.asyncio
-    async def test_select_intraday_bar(self):
+    async def test_select_intraday_bar(self, cleanup_intraday_test_data):
         """Test selecting intraday bars."""
         # Setup
         async with engine.begin() as conn:
@@ -192,9 +192,6 @@ class TestStockIntradayBarModel:
             assert fetched_bar.symbol == "TEST"
             assert fetched_bar.volume == 1500000
             print("✓ Select intraday bar successful")
-
-        # Cleanup
-        await cleanup_test_data()
 
     @pytest.mark.asyncio
     async def test_update_intraday_bar(self):
@@ -245,7 +242,7 @@ class TestStockIntradayBarModel:
         await cleanup_test_data()
 
     @pytest.mark.asyncio
-    async def test_delete_intraday_bar(self):
+    async def test_delete_intraday_bar(self, cleanup_intraday_test_data):
         """Test deleting an intraday bar."""
         # Setup
         async with engine.begin() as conn:
@@ -286,9 +283,6 @@ class TestStockIntradayBarModel:
 
             assert deleted_bar is None
             print("✓ Delete intraday bar successful")
-
-        # Cleanup
-        await cleanup_test_data()
 
 
 class TestUniqueConstraint:
@@ -342,7 +336,7 @@ class TestUniqueConstraint:
         await cleanup_test_data()
 
     @pytest.mark.asyncio
-    async def test_unique_constraint_different_time(self):
+    async def test_unique_constraint_different_time(self, cleanup_intraday_test_data):
         """Test that same symbol with different bar_time is allowed."""
         # Setup
         async with engine.begin() as conn:
@@ -381,9 +375,6 @@ class TestUniqueConstraint:
             bars = result.scalars().all()
             assert len(bars) == 2
             print("✓ Different bar_time allowed for same symbol")
-
-        # Cleanup
-        await cleanup_test_data()
 
     @pytest.mark.asyncio
     async def test_unique_constraint_different_symbol(self):
