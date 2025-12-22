@@ -21,9 +21,9 @@
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
 │  │   Stocks    │  │  Scheduler  │  │   vnstock Library   │  │
 │  │   Module    │  │ (APScheduler)│  │   (VCI Source)      │  │
-│  │ (24+ endpts)│  │             │  │   + Fmarket API     │  │
-│  │ + Volume    │  │             │  │                     │  │
-│  │  Anomaly    │  │             │  │                     │  │
+│  │ (25+ endpts)│  │             │  │   + Fmarket API     │  │
+│  │ + Volume    │  │             │  │   + vnstock_wrapper │  │
+│  │  Anomaly    │  │             │  │    (rate limit)     │  │
 │  │ + Redis     │  │             │  │                     │  │
 │  │  Cache      │  │             │  │                     │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘  │
@@ -98,6 +98,14 @@ Stock_Massive/
 │       │   │   ├── jobs.py       # Scheduled jobs
 │       │   │   └── intraday_collector.py # Includes detect_volume_anomalies()
 │       │   ├── core/             # Config, database, scheduler
+│       │   │   ├── config.py     # Settings, environment variables
+│       │   │   ├── database.py   # SQLAlchemy engine, session
+│       │   │   ├── scheduler.py  # APScheduler setup
+│       │   │   ├── redis.py      # Upstash Redis client
+│       │   │   ├── cache.py      # Trading-hours-aware cache
+│       │   │   ├── ratelimit.py  # Rate limiting middleware
+│       │   │   ├── vnstock_wrapper.py # vnstock wrapper with rate limit protection
+│       │   │   └── dependencies.py # FastAPI dependencies
 │       │   └── main.py
 │       ├── alembic/              # DB migrations
 │       └── requirements.txt      # Now includes greenlet and pandas
@@ -216,6 +224,7 @@ RootLayout
 - **URL State**: Search params for stock symbol
 - **Server State**: TanStack Query v5 for data fetching, caching, and synchronization
 - **Theme State**: next-themes for dark/light mode
+- **Auto-Refresh**: Market indices update every 10s with loading indicators
 
 ### Data Fetching Layer (TanStack Query)
 
@@ -278,7 +287,7 @@ CREATE INDEX ix_intraday_bars_timestamp ON intraday_bars(timestamp);
 
 | Job | Schedule | Description |
 |-----|----------|-------------|
-| Intraday Collection | 15:30 ICT daily | Collect and aggregate tick data and perform volume anomaly detection |
+| Intraday Collection | 15:30 ICT daily | Collect and aggregate tick data, perform volume anomaly detection, with transaction rollback on failure |
 
 ---
 

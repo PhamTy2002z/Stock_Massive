@@ -2,12 +2,12 @@
 
 Vietnamese stock market data platform powered by **vnstock** library. Provides real-time data, charting, and analysis for Vietnam stock market (HOSE, HNX, UPCOM).
 
-## Current Status (Updated: 2025-12-21)
+## Current Status (Updated: 2025-12-22)
 
 | Component | Status | Notes |
 |-----------|--------|-------|
 | Dashboard Layout | ✅ Done | Sidebar, header, responsive |
-| Market Indices | ✅ Done | VN-INDEX, VN30, HNX, UPCOM cards (1min auto-refresh) |
+| Market Indices | ✅ Done | VN-INDEX, VN30, HNX, UPCOM cards (10s auto-refresh) |
 | VN30 Overview Table | ✅ Done | Real-time VN30 stocks with price, volume, market cap |
 | Sector Performance | ✅ Done | ICB Level 2 with sorting, top gainers/losers |
 | Stock Detail Page | ✅ Done | Search, ticker header, stats, tabs (Overview, Finance, Shareholders, Volume) |

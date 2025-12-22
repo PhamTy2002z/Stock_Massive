@@ -1,7 +1,7 @@
 # Codebase Summary - Stock Massive
 
-Generated: 2025-12-21
-Total Files: 264 | Total Python: 40 | Total TypeScript/TSX: 89 | Total Components: 51
+Generated: 2025-12-22
+Total Files: 254 | Total Python: 38 | Total TypeScript/TSX: 75 | Total Components: 52
 
 ## 1. Project Overview and Purpose
 
@@ -27,8 +27,8 @@ Stock Massive is a Vietnamese stock market data platform powered by the `vnstock
 *   **State**: useState (local), URL params (shared), next-themes (theme)
 *   **Notifications**: Sonner
 *   **UI Components**: 20 ShadCN primitives, 24 dashboard, 4 layout
-*   **Custom Hooks**: 10 total (data fetching + responsive)
-*   **Pages**: 8 total (home, login, register, analytics/deep-dive, charts, portfolio, watchlist)
+*   **Custom Hooks**: 12 total (data fetching + responsive)
+*   **Pages**: 8 total (home, login, register, analytics/deep-dive, charts, portfolio, watchlist, not-found)
 
 **Backend:**
 *   **Framework**: FastAPI 0.100+
@@ -81,6 +81,14 @@ Stock_Massive/
 │           │   ├── jobs.py      # Scheduled background tasks (APScheduler)
 │           │   └── intraday_collector.py # Intraday data collection and volume anomaly detection logic
 │           ├── core/            # Core configurations, database connection, scheduler setup
+│           │   ├── config.py    # Settings, environment variables
+│           │   ├── database.py  # SQLAlchemy engine, session
+│           │   ├── scheduler.py # APScheduler setup
+│           │   ├── redis.py     # Upstash Redis client
+│           │   ├── cache.py     # Trading-hours-aware cache
+│           │   ├── ratelimit.py # Rate limiting middleware
+│           │   ├── vnstock_wrapper.py # vnstock wrapper with rate limit protection
+│           │   └── dependencies.py # FastAPI dependencies
 │           └── main.py          # Main FastAPI application entry point
 │       ├── alembic/             # Database migration scripts
 │       └── requirements.txt     # Python dependencies
@@ -98,7 +106,7 @@ Stock_Massive/
 **Current (Completed):**
 *   **Dashboard Layout**: Responsive sidebar, header, dark/light theme
 *   **Stock Detail Page**: Search, ticker header, stats, tabbed sections (Overview, Financials, Shareholders, Volume)
-*   **Market Indices**: VN-INDEX, VN30, HNX, UPCOM cards with sparklines (Recharts), 1-min auto-refresh
+*   **Market Indices**: VN-INDEX, VN30, HNX, UPCOM cards with sparklines (Recharts), 10s auto-refresh
 *   **VN30 Overview Table**: Real-time VN30 stocks with price, change, volume, market cap (cached 5min/1hr)
 *   **Stock Data API**: 25+ endpoints via vnstock + Fmarket API
 *   **Financial Data**: Income statements, balance sheets, cash flow (detailed)
@@ -113,6 +121,7 @@ Stock_Massive/
 *   **API Documentation**: Auto-generated OpenAPI/Swagger UI
 *   **Redis Caching**: Trading-hours-aware cache (Upstash) for 6 high-traffic endpoints
 *   **Rate Limiting**: Sliding window (100/60s standard, 20/60s heavy endpoints)
+*   **Rate Limit Protection**: vnstock_wrapper.py for safe vnstock API calls
 
 **Planned (Roadmap):**
 *   **Authentication**: Complete Supabase integration (JWT, protected routes)
@@ -163,7 +172,7 @@ Stock_Massive/
 *   `/src/lib/api-server.ts`: Server-side fetch helpers (ISR 60s)
 *   `/src/lib/query-keys.ts`: Centralized query keys
 *   `/src/lib/supabase/`: Supabase client setup (client, server, middleware)
-*   `/src/hooks/`: 10 custom hooks (use-stock-detail, use-market-indices, use-responsive, use-vn30-overview, etc.)
+*   `/src/hooks/`: 12 custom hooks (use-stock-detail, use-market-indices, use-responsive, use-vn30-overview, use-mobile, use-balance-sheet, use-cash-flow, use-income-statement, use-shareholders, use-volume-analysis, use-sector-performance, use-fund-certificates)
 *   `/src/components/dashboard/stock-detail-tabs.tsx`: Tab navigation (4 tabs total)
 
 **Backend (apps/api/):**
@@ -174,6 +183,7 @@ Stock_Massive/
 *   `/src/core/redis.py`: Upstash Redis client setup
 *   `/src/core/cache.py`: TradingHoursCache class for time-sensitive caching
 *   `/src/core/ratelimit.py`: Redis-based rate limiting middleware
+*   `/src/core/vnstock_wrapper.py`: vnstock wrapper with rate limit protection
 *   `/src/stocks/router.py`: 25+ API endpoint aggregation
 *   `/src/stocks/service.py`: vnstock library integration, business logic
 *   `/src/stocks/schemas/`: Pydantic models (price, market incl. VN30OverviewItem/Response, company, financial)
