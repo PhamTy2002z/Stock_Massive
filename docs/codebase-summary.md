@@ -37,7 +37,7 @@ Stock Massive is a Vietnamese stock market data platform powered by the `vnstock
 *   **Validation**: Pydantic 2.x
 *   **Server**: Uvicorn
 *   **Data Source**: vnstock >= 3.0.0 (VCI), Fmarket API
-*   **Scheduler**: APScheduler 4.0
+*   **Scheduler**: APScheduler 4.0 (daily intraday collection, weekly top performers)
 *   **Cache/Rate Limit**: Upstash Redis
 *   **Analytics**: Pandas, Greenlet
 
@@ -77,9 +77,10 @@ Stock_Massive/
 │           │   ├── router.py    # HTTP endpoints for stock features
 │           │   ├── service.py   # Business logic, vnstock integration
 │           │   ├── schemas/     # Pydantic models for request/response validation
-│           │   ├── models.py    # SQLAlchemy models for database interaction
-│           │   ├── jobs.py      # Scheduled background tasks (APScheduler)
-│           │   └── intraday_collector.py # Intraday data collection and volume anomaly detection logic
+│           │   ├── models.py    # SQLAlchemy models for database interaction (IntradayBar, TopPerformer)
+│           │   ├── jobs.py      # Scheduled background tasks (intraday collection, top performers)
+│           │   ├── intraday_collector.py # Intraday data collection and volume anomaly detection logic
+│           │   └── top_performers_collector.py # Weekly top performers collection by net profit
 │           ├── core/            # Core configurations, database connection, scheduler setup
 │           │   ├── config.py    # Settings, environment variables
 │           │   ├── database.py  # SQLAlchemy engine, session
@@ -116,10 +117,12 @@ Stock_Massive/
 *   **Sector Performance**: ICB Level 2 with sorting, top gainers/losers
 *   **Fund Certificates**: 7-item display via Fmarket API
 *   **Intraday Collection**: Scheduled daily collection (15:30 ICT) + cleanup (16:00 ICT)
+*   **Top Performers**: Weekly scheduled job (Sun 02:00 ICT) collecting quarterly net profit rankings for HOSE+HNX symbols
+*   **Top Performers API**: GET /analytics/top-performers with filters (limit, exchange, year, quarter), trading-hours cache (1h/24h), auto-fallback to latest period
 *   **Auth Scaffold**: Login page UI with Supabase Google OAuth (actions.ts scaffolded)
 *   **Loading/Error States**: Consistent skeleton loaders and error handling
 *   **API Documentation**: Auto-generated OpenAPI/Swagger UI
-*   **Redis Caching**: Trading-hours-aware cache (Upstash) for 6 high-traffic endpoints
+*   **Redis Caching**: Trading-hours-aware cache (Upstash) for 7 high-traffic endpoints
 *   **Rate Limiting**: Sliding window (100/60s standard, 20/60s heavy endpoints)
 *   **Rate Limit Protection**: vnstock_wrapper.py for safe vnstock API calls
 
@@ -186,10 +189,15 @@ Stock_Massive/
 *   `/src/core/vnstock_wrapper.py`: vnstock wrapper with rate limit protection
 *   `/src/stocks/router.py`: 25+ API endpoint aggregation
 *   `/src/stocks/service.py`: vnstock library integration, business logic
-*   `/src/stocks/schemas/`: Pydantic models (price, market incl. VN30OverviewItem/Response, company, financial)
-*   `/src/stocks/models.py`: SQLAlchemy IntradayBar model
+*   `/src/stocks/schemas/`: Pydantic models (price, market incl. VN30OverviewItem/Response, company, financial, analytics)
+*   `/src/stocks/schemas/analytics.py`: Analytics schemas (TopPerformerItem, TopPerformersResponse)
+*   `/src/stocks/models.py`: SQLAlchemy models (IntradayBar, TopPerformer)
 *   `/src/stocks/intraday_collector.py`: Intraday data collection, volume anomaly detection
-*   `/src/stocks/jobs.py`: Scheduled jobs (collection, cleanup)
+*   `/src/stocks/top_performers_collector.py`: Weekly top performers collection with adaptive rate limiting
+*   `/src/stocks/jobs.py`: Scheduled jobs (intraday collection/cleanup, top performers weekly)
+*   `/src/stocks/analytics/`: Analytics module (service, router)
+*   `/src/stocks/analytics/service.py`: AnalyticsService with top performers query logic
+*   `/src/stocks/analytics/router.py`: Analytics endpoints with trading-hours cache
 *   `/src/stocks/{market,price,company,financial}/`: Domain-specific routers and services
 *   `/alembic/`: Database migration scripts
 *   `/requirements.txt`: Python dependencies

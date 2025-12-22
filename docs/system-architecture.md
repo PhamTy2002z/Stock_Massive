@@ -93,10 +93,16 @@ Stock_Massive/
 │       │   │   └── financial/    # Financials, ratios
 │       │   │   ├── router.py     # HTTP endpoints
 │       │   │   ├── service.py    # vnstock integration
-│       │   │   ├── schemas/      # Pydantic models (price.py now includes VolumeAnomalyLevel, VolumeTimeSlot, VolumeAnomalyResponse)
-│       │   │   ├── models.py     # SQLAlchemy models
-│       │   │   ├── jobs.py       # Scheduled jobs
-│       │   │   └── intraday_collector.py # Includes detect_volume_anomalies()
+│       │   │   ├── schemas/      # Pydantic models (price, market, company, financial, analytics)
+│       │   │   │   └── analytics.py # TopPerformerItem, TopPerformersResponse schemas
+│       │   │   ├── models.py     # SQLAlchemy models (IntradayBar, TopPerformer)
+│       │   │   ├── jobs.py       # Scheduled jobs (intraday collection/cleanup, top performers weekly)
+│       │   │   ├── intraday_collector.py # Includes detect_volume_anomalies()
+│       │   │   ├── top_performers_collector.py # Weekly top performers collection by net_profit
+│       │   │   └── analytics/    # Analytics domain module
+│       │   │       ├── __init__.py
+│       │   │       ├── service.py # AnalyticsService with get_top_performers()
+│       │   │       └── router.py  # Analytics endpoints (/top-performers)
 │       │   ├── core/             # Config, database, scheduler
 │       │   │   ├── config.py     # Settings, environment variables
 │       │   │   ├── database.py   # SQLAlchemy engine, session
@@ -149,6 +155,8 @@ Stock_Massive/
 │       ├── balance-sheet         # GET - Balance (simple)
 │       ├── balance-sheet-detailed # GET - Balance (detailed)
 │       └── cash-flow             # GET - Cash flow
+├── analytics/
+│   └── top-performers            # GET - Top companies by net profit (limit, exchange, year, quarter params)
 ├── sector-performance            # GET - Sector performance (ICB Level 2)
 ├── vn30-overview                 # GET - VN30 stocks overview (price, change, volume, market_cap)
 └── fund-certificates             # GET - Fund certificates data
@@ -272,6 +280,28 @@ CREATE INDEX ix_intraday_bars_symbol ON intraday_bars(symbol);
 CREATE INDEX ix_intraday_bars_timestamp ON intraday_bars(timestamp);
 ```
 
+### TopPerformer Table
+
+```sql
+CREATE TABLE top_performers (
+    id SERIAL PRIMARY KEY,
+    symbol VARCHAR(10) NOT NULL,
+    company_name VARCHAR(255),
+    exchange VARCHAR(10) NOT NULL,
+    year INTEGER NOT NULL,
+    quarter INTEGER NOT NULL,
+    net_profit FLOAT,
+    revenue FLOAT,
+    rank INTEGER NOT NULL,
+    collected_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE (symbol, year, quarter)
+);
+
+CREATE INDEX ix_top_performers_symbol ON top_performers(symbol);
+CREATE INDEX ix_top_performers_rank ON top_performers(rank);
+CREATE INDEX ix_top_performers_collected_at ON top_performers(collected_at);
+```
+
 ---
 
 ## Security Layers
@@ -288,6 +318,7 @@ CREATE INDEX ix_intraday_bars_timestamp ON intraday_bars(timestamp);
 | Job | Schedule | Description |
 |-----|----------|-------------|
 | Intraday Collection | 15:30 ICT daily | Collect and aggregate tick data, perform volume anomaly detection, with transaction rollback on failure |
+| Top Performers Collection | 02:00 ICT Sunday | Fetch quarterly income statements for HOSE+HNX symbols (~700-800), rank by net_profit, store top performers with adaptive rate limiting |
 
 ---
 
@@ -297,12 +328,13 @@ CREATE INDEX ix_intraday_bars_timestamp ON intraday_bars(timestamp);
 
 - **Redis Caching (Implemented)**:
     - **Generic Cache Class**: Introduced `TradingHoursCache` in `core/cache.py` for managing time-sensitive data.
-    - **Cache Instances**: Six cache instances are utilized for: `volume_anomaly`, `market_indices`, `price_board`, `symbols`, `sector_performance`, and `vn30_overview`.
+    - **Cache Instances**: Seven cache instances are utilized for: `volume_anomaly`, `market_indices`, `price_board`, `symbols`, `sector_performance`, `vn30_overview`, and `top_performers`.
     - **Trading-Hours-Aware TTL**: Cache entries have a Time-To-Live (TTL) that is intelligent about Vietnam market trading hours (09:00-15:00), ensuring data freshness during active periods and longer persistence off-hours.
     - **Graceful Degradation**: The system is designed to handle Redis unavailability gracefully, ensuring continuous operation even if the cache service is down.
     - **Affected Endpoints**:
         - `apps/api/src/stocks/price/router.py`: Caches `market-indices` and `price-board`.
         - `apps/api/src/stocks/market/router.py`: Caches `symbols`, `sector-performance`, and `vn30-overview`.
+        - `apps/api/src/stocks/analytics/router.py`: Caches `top-performers` (1h trading, 24h off-hours).
 
 ### WebSocket Support (Planned)
 
