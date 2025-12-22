@@ -14,6 +14,7 @@ from .market.router import router as market_router
 from .price.router import router as price_router
 from .company.router import router as company_router
 from .financial.router import router as financial_router
+from .analytics.router import router as analytics_router
 
 # Main router with prefix and tags
 router = APIRouter(prefix="/stocks", tags=["stocks"])
@@ -30,3 +31,6 @@ router.include_router(company_router)
 
 # 4. Financial router - matches /{symbol}/financials/*
 router.include_router(financial_router)
+
+# 5. Analytics router - matches /analytics/*
+router.include_router(analytics_router)

@@ -6,7 +6,12 @@ from apscheduler import AsyncScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from src.core.config import get_settings
-from src.stocks.jobs import cleanup_old_data_job, collect_daily_ohlcv_job, collect_intraday_data_job
+from src.stocks.jobs import (
+    cleanup_old_data_job,
+    collect_daily_ohlcv_job,
+    collect_intraday_data_job,
+    collect_top_performers_job,
+)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -67,4 +72,21 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
             f"Scheduled daily OHLCV collection at "
             f"{settings.daily_ohlcv_hour}:{settings.daily_ohlcv_minute:02d} ICT "
             f"(delay={settings.daily_ohlcv_delay}s, batch={settings.daily_ohlcv_batch_size})"
+        )
+
+    # Weekly top performers collection on Sunday at 02:00 ICT
+    if settings.top_performers_enabled:
+        await scheduler.add_schedule(
+            collect_top_performers_job,
+            CronTrigger(
+                hour=settings.top_performers_hour,
+                minute=settings.top_performers_minute,
+                day_of_week="sun",
+                timezone="Asia/Ho_Chi_Minh",
+            ),
+            id="collect-top-performers",
+        )
+        logger.info(
+            f"Scheduled top performers collection: Sunday "
+            f"{settings.top_performers_hour:02d}:{settings.top_performers_minute:02d} ICT"
         )
