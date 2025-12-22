@@ -7,9 +7,9 @@ export default function TopPerformersPage() {
       <div className="flex flex-col gap-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">Financial Statements</h1>
+            <h1 className="text-2xl font-bold">Báo Cáo Tài Chính</h1>
             <p className="text-sm text-muted-foreground">
-              Top 50 most profitable companies from HOSE &amp; HNX (quarterly)
+              Top 50 công ty có lợi nhuận cao nhất từ HOSE & HNX (theo quý)
             </p>
           </div>
         </div>
