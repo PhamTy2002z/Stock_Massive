@@ -25,7 +25,9 @@ export function useStockDetail(symbol: string | null): UseStockDetailResult {
       return fetchStockDetail(symbol)
     },
     enabled: isValidSymbol,
-    staleTime: 30 * 1000, // 30 seconds
+    staleTime: 10 * 1000, // 10 seconds
+    refetchInterval: 10 * 1000, // Auto-refresh every 10 seconds
+    refetchIntervalInBackground: true, // Keep refreshing even when tab is not focused
   })
 
   return {

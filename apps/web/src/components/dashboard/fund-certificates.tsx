@@ -10,18 +10,53 @@ interface FundCertificatesProps {
 }
 
 export function FundCertificates({ className }: FundCertificatesProps) {
-  const { data, isLoading, error, refetch } = useFundCertificates()
+  const { data, isLoading, isFetching, error, refetch } = useFundCertificates()
 
   // Get first 7 funds for display
   const funds = data?.funds?.slice(0, 7) ?? []
 
+  return (
+    <div className={className}>
+      {/* Header with title and refresh button */}
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-semibold text-foreground">Chứng chỉ quỹ</h2>
+        <button
+          onClick={() => refetch()}
+          disabled={isFetching}
+          className="p-1.5 rounded-md hover:bg-muted transition-colors disabled:opacity-50"
+          title="Làm mới dữ liệu"
+          aria-label="Làm mới dữ liệu"
+        >
+          <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
+        </button>
+      </div>
+      <FundCertificatesContent
+        data={data}
+        funds={funds}
+        isLoading={isLoading}
+        error={error}
+        refetch={refetch}
+      />
+    </div>
+  )
+}
+
+interface FundCertificatesContentProps {
+  data: ReturnType<typeof useFundCertificates>["data"]
+  funds: NonNullable<ReturnType<typeof useFundCertificates>["data"]>["funds"]
+  isLoading: boolean
+  error: Error | null
+  refetch: () => void
+}
+
+function FundCertificatesContent({ data, funds, isLoading, error, refetch }: FundCertificatesContentProps) {
   if (isLoading && !data) {
     return <FundCertificatesSkeleton />
   }
 
   if (error) {
     return (
-      <div className={cn("rounded-lg border bg-card p-6 text-center", className)}>
+      <div className="rounded-lg border bg-card p-6 text-center">
         <AlertCircle className="h-8 w-8 text-destructive mx-auto mb-2" />
         <p className="text-sm text-muted-foreground mb-3">{error.message}</p>
         <button
@@ -37,14 +72,14 @@ export function FundCertificates({ className }: FundCertificatesProps) {
 
   if (!data || funds.length === 0) {
     return (
-      <div className={cn("rounded-lg border bg-card p-6 text-center", className)}>
+      <div className="rounded-lg border bg-card p-6 text-center">
         <p className="text-sm text-muted-foreground">Không có dữ liệu chứng chỉ quỹ</p>
       </div>
     )
   }
 
   return (
-    <div className={cn("rounded-lg border bg-card overflow-hidden", className)}>
+    <div className="rounded-lg border bg-card overflow-hidden">
       {/* Table Header */}
       <div className="grid grid-cols-[1fr_auto_auto] gap-4 px-4 py-3 bg-muted/50 border-b text-xs font-medium text-muted-foreground">
         <span>Mã quỹ</span>

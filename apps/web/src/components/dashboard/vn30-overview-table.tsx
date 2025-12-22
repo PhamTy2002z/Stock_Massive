@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react"
 import { cn } from "@/lib/utils"
-import { TrendingUp, TrendingDown, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
+import { TrendingUp, TrendingDown, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, RefreshCw } from "lucide-react"
 import {
   Select,
   SelectContent,
@@ -57,7 +57,7 @@ export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
   const [rowsPerPage, setRowsPerPage] = useState(10)
   const [sortDirection, setSortDirection] = useState<SortDirection>(null)
 
-  const { data, isLoading, error } = useVN30Overview()
+  const { data, isLoading, isFetching, error, refetch } = useVN30Overview()
 
   const stocks = useMemo(() => {
     const rawStocks = data?.stocks ?? []
@@ -98,13 +98,40 @@ export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
     setCurrentPage(1)
   }
 
-  if (isLoading) {
-    return <VN30OverviewTableSkeleton className={className} />
+  if (isLoading && !data) {
+    return (
+      <div className={className}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-foreground">Tổng quan VN30</h2>
+          <button
+            disabled
+            className="p-1.5 rounded-md hover:bg-muted transition-colors disabled:opacity-50"
+            title="Làm mới dữ liệu"
+            aria-label="Làm mới dữ liệu"
+          >
+            <RefreshCw className="h-4 w-4" />
+          </button>
+        </div>
+        <VN30OverviewTableSkeleton />
+      </div>
+    )
   }
 
   if (error) {
     return (
       <div className={cn("space-y-4", className)}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-foreground">Tổng quan VN30</h2>
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="p-1.5 rounded-md hover:bg-muted transition-colors disabled:opacity-50"
+            title="Làm mới dữ liệu"
+            aria-label="Làm mới dữ liệu"
+          >
+            <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
+          </button>
+        </div>
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4">
           <p className="text-sm text-destructive">
             Không thể tải dữ liệu VN30: {error.message}
@@ -117,6 +144,18 @@ export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
   if (totalItems === 0) {
     return (
       <div className={cn("space-y-4", className)}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-foreground">Tổng quan VN30</h2>
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="p-1.5 rounded-md hover:bg-muted transition-colors disabled:opacity-50"
+            title="Làm mới dữ liệu"
+            aria-label="Làm mới dữ liệu"
+          >
+            <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
+          </button>
+        </div>
         <div className="rounded-lg border border-border/50 bg-card/50 p-8 text-center">
           <p className="text-sm text-muted-foreground">Không có dữ liệu VN30</p>
         </div>
@@ -126,6 +165,19 @@ export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
 
   return (
     <div className={cn("space-y-4", className)}>
+      {/* Header with title and refresh button */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-foreground">Tổng quan VN30</h2>
+        <button
+          onClick={() => refetch()}
+          disabled={isFetching}
+          className="p-1.5 rounded-md hover:bg-muted transition-colors disabled:opacity-50"
+          title="Làm mới dữ liệu"
+          aria-label="Làm mới dữ liệu"
+        >
+          <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
+        </button>
+      </div>
       <div className="rounded-lg border border-border/50 bg-card/50 overflow-hidden">
         <div className="overflow-x-auto scrollbar-thin">
           <table className="w-full min-w-[800px] border-collapse">

@@ -50,30 +50,18 @@ export default async function Home() {
           <div className="flex flex-col gap-6">
             {/* Market Indices Section */}
             <section>
-              <h2 className="text-lg font-semibold text-foreground mb-4">
-                Chỉ số thị trường
-              </h2>
               <MarketIndices />
             </section>
 
             {/* VN30 Overview Section */}
             <section>
-              <h2 className="text-lg font-semibold text-foreground mb-4">
-                Tổng quan VN30
-              </h2>
               <VN30OverviewTable />
             </section>
 
             {/* Sector Performance & Fund Certificates */}
             <section className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
               <SectorPerformanceSection />
-
-              <div>
-                <h2 className="text-lg font-semibold text-foreground mb-4">
-                  Chứng chỉ quỹ
-                </h2>
-                <FundCertificates />
-              </div>
+              <FundCertificates />
             </section>
           </div>
         </DashboardLayoutClient>
