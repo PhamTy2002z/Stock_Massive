@@ -9,6 +9,8 @@ import {
   ArrowUp,
   ArrowDown,
   RefreshCw,
+  Play,
+  Loader2,
 } from "lucide-react"
 import {
   Select,
@@ -18,7 +20,9 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useTopPerformers } from "@/hooks/use-top-performers"
+import { triggerTopPerformersCollection } from "@/lib/api"
 import type { TopPerformerItem } from "@/lib/api"
+import { toast } from "sonner"
 
 interface TopPerformersTableProps {
   className?: string
@@ -49,6 +53,28 @@ export function TopPerformersTable({ className }: TopPerformersTableProps) {
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc")
   const [currentPage, setCurrentPage] = useState(1)
   const [rowsPerPage, setRowsPerPage] = useState(10)
+  const [isCollecting, setIsCollecting] = useState(false)
+
+  const handleRunCollection = async () => {
+    setIsCollecting(true)
+    const toastId = toast.loading("Starting collection... This may take 10-30 minutes.")
+    try {
+      const result = await triggerTopPerformersCollection()
+      if (result.error) {
+        toast.error(`Collection failed: ${result.error}`, { id: toastId })
+      } else {
+        toast.success(
+          `Collection complete! ${result.success} records stored in ${result.elapsed_seconds.toFixed(0)}s`,
+          { id: toastId }
+        )
+        refetch()
+      }
+    } catch (err) {
+      toast.error(`Failed to start collection: ${err instanceof Error ? err.message : "Unknown error"}`, { id: toastId })
+    } finally {
+      setIsCollecting(false)
+    }
+  }
 
   const sortedData = useMemo(() => {
     if (!data?.data) return []
@@ -128,8 +154,32 @@ export function TopPerformersTable({ className }: TopPerformersTableProps) {
     return (
       <div className={cn("space-y-4", className)}>
         <div className="rounded-lg border border-border/50 bg-card/50 p-8 text-center">
-          <p className="text-sm text-muted-foreground">
-            No data available. Run the scheduled job first.
+          <p className="text-sm text-muted-foreground mb-4">
+            No data available. Run the scheduled job to collect data.
+          </p>
+          <button
+            onClick={handleRunCollection}
+            disabled={isCollecting}
+            className={cn(
+              "inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium",
+              "bg-primary text-primary-foreground hover:bg-primary/90",
+              "disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            )}
+          >
+            {isCollecting ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Collecting...
+              </>
+            ) : (
+              <>
+                <Play className="h-4 w-4" />
+                Run Collection Job
+              </>
+            )}
+          </button>
+          <p className="mt-3 text-xs text-muted-foreground">
+            Note: Collection takes 10-30 minutes to fetch all HOSE+HNX symbols.
           </p>
         </div>
       </div>
