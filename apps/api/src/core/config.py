@@ -55,14 +55,14 @@ class Settings(BaseSettings):
     daily_ohlcv_enabled: bool = True
     daily_ohlcv_hour: int = 20  # 8 PM Vietnam time
     daily_ohlcv_minute: int = 0
-    daily_ohlcv_delay: float = 1.5  # Delay between requests to avoid rate limit
+    daily_ohlcv_delay: float = 2.0  # Delay between requests to avoid rate limit
     daily_ohlcv_batch_size: int = 50  # Symbols per batch
 
     # Top Performers Job
     top_performers_enabled: bool = True
     top_performers_hour: int = 2  # 02:00 ICT (Sunday)
     top_performers_minute: int = 0
-    top_performers_delay: float = 1.5  # seconds between API calls
+    top_performers_delay: float = 2.0  # seconds between API calls
 
     # Rate Limiting
     rate_limit_enabled: bool = True
