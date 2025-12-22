@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import {
@@ -14,6 +14,7 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  ChevronsUpDown,
 } from "lucide-react"
 import {
   Select,
@@ -31,13 +32,20 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
+import { Button } from "@/components/ui/button"
 import { useVolumeSpikes } from "@/hooks/use-volume-spikes"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { VolumeSpikeChart, VolumeSpikeChartSkeleton } from "./volume-spike-chart"
-import { VolumeSpikePieChart, VolumeSpikePieChartSkeleton } from "./volume-spike-pie-chart"
+import { VolumeSpikePieChart } from "./volume-spike-pie-chart"
+import { VolumeSpikeTreemap } from "./volume-spike-treemap"
+import { VolumeSpikeComposedChart } from "./volume-spike-composed-chart"
 import type {
   IndustryVolumeSpikeGroup,
   VolumeSpikeAnomalyLevel,
 } from "@/lib/api"
+
+// Sort type for sector groups
+type SectorSortType = "spike_count" | "avg_spike_ratio" | "name"
 
 interface VolumeSpikeDashboardProps {
   className?: string
@@ -72,6 +80,92 @@ function formatPercent(value: number | null): string {
 
 function formatRatio(value: number): string {
   return `${value.toFixed(1)}x`
+}
+
+// Color indicator for sector headers based on avg_spike_ratio
+function getSectorHeaderColor(avgRatio: number): string {
+  if (avgRatio >= 3) return "border-l-4 border-l-red-500"
+  if (avgRatio >= 2) return "border-l-4 border-l-orange-500"
+  if (avgRatio >= 1.5) return "border-l-4 border-l-yellow-500"
+  return "border-l-4 border-l-muted"
+}
+
+// Sector Group Header Component with controls
+function SectorGroupHeader({
+  sectorCount,
+  sectorSort,
+  onSortChange,
+  selectedSector,
+  onSectorFilterChange,
+  allSectors,
+  expandAll,
+  onExpandAllToggle,
+}: {
+  sectorCount: number
+  sectorSort: SectorSortType
+  onSortChange: (value: SectorSortType) => void
+  selectedSector: string
+  onSectorFilterChange: (sector: string) => void
+  allSectors: { code: string; name: string }[]
+  expandAll: boolean
+  onExpandAllToggle: () => void
+}) {
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+      <div className="flex items-center gap-2">
+        <h2 className="text-lg font-semibold">Theo ngành ICB</h2>
+        <Badge variant="secondary" className="text-xs">
+          {sectorCount} ngành
+        </Badge>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {/* Sort Selector */}
+        <div className="flex items-center gap-2">
+          <Label className="text-xs text-muted-foreground whitespace-nowrap">Sắp xếp:</Label>
+          <Select value={sectorSort} onValueChange={(v) => onSortChange(v as SectorSortType)}>
+            <SelectTrigger className="w-[120px] h-8 text-xs bg-background">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="spike_count">Số CP</SelectItem>
+              <SelectItem value="avg_spike_ratio">Tỷ lệ TB</SelectItem>
+              <SelectItem value="name">Tên A-Z</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Sector Filter */}
+        <div className="flex items-center gap-2">
+          <Label className="text-xs text-muted-foreground whitespace-nowrap">Ngành:</Label>
+          <Select value={selectedSector} onValueChange={onSectorFilterChange}>
+            <SelectTrigger className="w-[140px] h-8 text-xs bg-background">
+              <SelectValue placeholder="Tất cả" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tất cả</SelectItem>
+              {allSectors.map((s) => (
+                <SelectItem key={s.code} value={s.code}>
+                  {s.name.length > 18 ? s.name.slice(0, 16) + "..." : s.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Expand All Toggle */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onExpandAllToggle}
+          className="h-8 text-xs gap-1"
+        >
+          <ChevronsUpDown className="h-3 w-3" />
+          {expandAll ? "Thu gọn" : "Mở rộng"}
+        </Button>
+      </div>
+    </div>
+  )
 }
 
 // Summary Cards Component
@@ -126,17 +220,20 @@ function SummaryCards({
 // Industry Spike Group Component
 function IndustrySpikeGroup({
   group,
-  defaultOpen = false,
+  isOpen,
+  onToggle,
 }: {
   group: IndustryVolumeSpikeGroup
-  defaultOpen?: boolean
+  isOpen: boolean
+  onToggle: () => void
 }) {
   const router = useRouter()
-  const [isOpen, setIsOpen] = useState(defaultOpen)
   const [sortField, setSortField] = useState<"spike_ratio" | "current_volume" | "price_change_pct">("spike_ratio")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
   const [page, setPage] = useState(1)
   const pageSize = 10
+
+  const headerColorClass = getSectorHeaderColor(group.avg_spike_ratio)
 
   const sortedStocks = useMemo(() => {
     return [...group.stocks].sort((a, b) => {
@@ -169,9 +266,12 @@ function IndustrySpikeGroup({
   }
 
   return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+    <Collapsible open={isOpen} onOpenChange={onToggle}>
       <CollapsibleTrigger className="w-full">
-        <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
+        <div className={cn(
+          "flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors",
+          headerColorClass
+        )}>
           <div className="flex items-center gap-3">
             <ChevronDown className={cn("h-4 w-4 transition-transform", isOpen && "rotate-180")} />
             <span className="font-medium">{group.icb_name}</span>
@@ -287,6 +387,12 @@ export function VolumeSpikeDashboard({ className }: VolumeSpikeDashboardProps) {
   const [exchange, setExchange] = useState<string>()
   const [includeUpcom, setIncludeUpcom] = useState(false)
 
+  // ICB Sector UI state
+  const [expandedSectors, setExpandedSectors] = useState<Set<string>>(new Set())
+  const [sectorSort, setSectorSort] = useState<SectorSortType>("spike_count")
+  const [selectedSector, setSelectedSector] = useState<string>("all")
+  const [expandAll, setExpandAll] = useState(false)
+
   const { data, isLoading, isFetching, error, refetch } = useVolumeSpikes({
     minRatio,
     exchange,
@@ -305,6 +411,70 @@ export function VolumeSpikeDashboard({ className }: VolumeSpikeDashboardProps) {
     )?.icb_name || ""
     return { avgRatio, topIndustry }
   }, [data])
+
+  // Sorted and filtered industries
+  const sortedIndustries = useMemo(() => {
+    if (!data?.industries) return []
+
+    let filtered = data.industries
+    if (selectedSector !== "all") {
+      filtered = filtered.filter((g) => g.icb_code === selectedSector)
+    }
+
+    return [...filtered].sort((a, b) => {
+      switch (sectorSort) {
+        case "spike_count":
+          return b.spike_count - a.spike_count
+        case "avg_spike_ratio":
+          return b.avg_spike_ratio - a.avg_spike_ratio
+        case "name":
+          return a.icb_name.localeCompare(b.icb_name, "vi")
+        default:
+          return 0
+      }
+    })
+  }, [data?.industries, sectorSort, selectedSector])
+
+  // All sectors for filter dropdown
+  const allSectors = useMemo(() => {
+    if (!data?.industries) return []
+    return data.industries
+      .map((g) => ({ code: g.icb_code, name: g.icb_name }))
+      .sort((a, b) => a.name.localeCompare(b.name, "vi"))
+  }, [data?.industries])
+
+  // Expand all toggle handler
+  const handleExpandAllToggle = () => {
+    if (expandAll) {
+      setExpandedSectors(new Set())
+    } else {
+      setExpandedSectors(new Set(sortedIndustries.map((g) => g.icb_code)))
+    }
+    setExpandAll(!expandAll)
+  }
+
+  // Individual sector toggle handler
+  const handleSectorToggle = (icbCode: string) => {
+    setExpandedSectors((prev) => {
+      const next = new Set(prev)
+      if (next.has(icbCode)) {
+        next.delete(icbCode)
+      } else {
+        next.add(icbCode)
+      }
+      return next
+    })
+  }
+
+  // Initialize first sector as expanded when data loads
+  useEffect(() => {
+    if (data?.industries?.length && expandedSectors.size === 0 && !expandAll) {
+      const firstCode = [...data.industries].sort((a, b) => b.spike_count - a.spike_count)[0]?.icb_code
+      if (firstCode) {
+        setExpandedSectors(new Set([firstCode]))
+      }
+    }
+  }, [data?.industries, expandedSectors.size, expandAll])
 
   if (isLoading && !data) {
     return <VolumeSpikeDashboardSkeleton className={className} />
@@ -391,27 +561,69 @@ export function VolumeSpikeDashboard({ className }: VolumeSpikeDashboardProps) {
         topIndustry={stats.topIndustry}
       />
 
-      {/* Charts - 2 column grid */}
+      {/* Charts with Tabs */}
       {data?.industries && data.industries.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <VolumeSpikeChart industries={data.industries} />
-          <VolumeSpikePieChart industries={data.industries} />
-        </div>
+        <Tabs defaultValue="bar" className="w-full">
+          <TabsList className="grid w-full grid-cols-3 md:grid-cols-4 lg:w-auto lg:inline-grid">
+            <TabsTrigger value="bar" className="text-xs sm:text-sm">
+              Cột ngang
+            </TabsTrigger>
+            <TabsTrigger value="pie" className="text-xs sm:text-sm">
+              Tròn
+            </TabsTrigger>
+            <TabsTrigger value="treemap" className="text-xs sm:text-sm hidden md:inline-flex">
+              Phân cấp
+            </TabsTrigger>
+            <TabsTrigger value="composed" className="text-xs sm:text-sm">
+              KL vs Giá
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="bar" className="mt-4">
+            <VolumeSpikeChart industries={data.industries} />
+          </TabsContent>
+
+          <TabsContent value="pie" className="mt-4">
+            <VolumeSpikePieChart industries={data.industries} />
+          </TabsContent>
+
+          <TabsContent value="treemap" className="mt-4">
+            <VolumeSpikeTreemap industries={data.industries} />
+          </TabsContent>
+
+          <TabsContent value="composed" className="mt-4">
+            <VolumeSpikeComposedChart industries={data.industries} />
+          </TabsContent>
+        </Tabs>
       )}
 
       {/* Industry Groups */}
       {data?.industries && data.industries.length > 0 ? (
         <div className="space-y-3">
-          <h2 className="text-lg font-semibold">Theo ngành ICB</h2>
-          {data.industries
-            .sort((a, b) => b.spike_count - a.spike_count)
-            .map((group, idx) => (
+          <SectorGroupHeader
+            sectorCount={sortedIndustries.length}
+            sectorSort={sectorSort}
+            onSortChange={setSectorSort}
+            selectedSector={selectedSector}
+            onSectorFilterChange={setSelectedSector}
+            allSectors={allSectors}
+            expandAll={expandAll}
+            onExpandAllToggle={handleExpandAllToggle}
+          />
+          {sortedIndustries.length > 0 ? (
+            sortedIndustries.map((group) => (
               <IndustrySpikeGroup
                 key={group.icb_code}
                 group={group}
-                defaultOpen={idx === 0}
+                isOpen={expandedSectors.has(group.icb_code)}
+                onToggle={() => handleSectorToggle(group.icb_code)}
               />
-            ))}
+            ))
+          ) : (
+            <div className="rounded-lg border border-border/50 bg-card/50 p-8 text-center">
+              <p className="text-muted-foreground">Không có ngành nào phù hợp với bộ lọc.</p>
+            </div>
+          )}
         </div>
       ) : (
         <div className="rounded-lg border border-border/50 bg-card/50 p-8 text-center">
@@ -451,9 +663,9 @@ export function VolumeSpikeDashboardSkeleton({ className }: { className?: string
           <div key={i} className="h-24 bg-muted animate-pulse rounded-lg" />
         ))}
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="space-y-2">
+        <div className="h-10 w-64 bg-muted animate-pulse rounded" />
         <VolumeSpikeChartSkeleton />
-        <VolumeSpikePieChartSkeleton />
       </div>
       <div className="space-y-3">
         <div className="h-6 w-32 bg-muted animate-pulse rounded" />
