@@ -381,3 +381,35 @@ export interface VN30OverviewResponse {
 export async function fetchVN30Overview(): Promise<VN30OverviewResponse> {
   return fetchApi<VN30OverviewResponse>("/stocks/vn30-overview")
 }
+
+// Top Performers Types
+export interface TopPerformerItem {
+  rank: number
+  symbol: string
+  company_name: string | null
+  exchange: string | null
+  net_profit: number | null
+  revenue: number | null
+  profit_margin: number | null
+  eps: number | null
+  year: number
+  quarter: number
+}
+
+export interface TopPerformersResponse {
+  period: string
+  updated_at: string | null
+  total: number
+  data: TopPerformerItem[]
+}
+
+export async function fetchTopPerformers(
+  limit: number = 50,
+  exchange?: string
+): Promise<TopPerformersResponse> {
+  const params = new URLSearchParams()
+  params.set("limit", limit.toString())
+  if (exchange) params.set("exchange", exchange)
+
+  return fetchApi<TopPerformersResponse>(`/stocks/analytics/top-performers?${params}`)
+}

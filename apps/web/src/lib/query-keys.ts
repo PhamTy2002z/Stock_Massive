@@ -32,4 +32,8 @@ export const queryKeys = {
   // Search
   stockSearch: (query: string, limit: number) =>
     ["search", "stocks", query, limit] as const,
+
+  // Analytics
+  topPerformers: (limit: number, exchange?: string) =>
+    ["analytics", "topPerformers", limit, exchange] as const,
 } as const

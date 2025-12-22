@@ -49,6 +49,7 @@ const data = {
       icon: BarChart3,
       items: [
         { title: "Deep Dive", url: "/analytics/deep-dive" },
+        { title: "Top Performers", url: "/analytics/top-performers" },
         { title: "Reports", url: "#" },
         { title: "Insights", url: "#" },
         { title: "Alerts", url: "#" },
