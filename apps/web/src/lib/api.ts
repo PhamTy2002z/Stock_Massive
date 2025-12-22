@@ -413,3 +413,82 @@ export async function fetchTopPerformers(
 
   return fetchApi<TopPerformersResponse>(`/stocks/analytics/top-performers?${params}`)
 }
+
+// Top Performers Collection Result
+export interface TopPerformersCollectionResult {
+  success: number
+  failed: number
+  rate_limited: number
+  total_symbols: number
+  elapsed_seconds: number
+  error: string | null
+}
+
+export async function triggerTopPerformersCollection(): Promise<TopPerformersCollectionResult> {
+  return fetchApi<TopPerformersCollectionResult>("/stocks/analytics/top-performers/collect", {
+    method: "POST",
+  })
+}
+
+// Volume Spike Types
+export type VolumeSpikeAnomalyLevel = "normal" | "elevated" | "high" | "very_high"
+
+export interface VolumeSpikeItem {
+  symbol: string
+  company_name: string | null
+  exchange: string | null
+  current_volume: number
+  avg_volume_20d: number
+  spike_ratio: number
+  price_change_pct: number | null
+  close_price: number | null
+  anomaly_level: VolumeSpikeAnomalyLevel
+  icb_code: string | null
+  icb_name: string | null
+}
+
+export interface IndustryVolumeSpikeGroup {
+  icb_code: string
+  icb_name: string
+  spike_count: number
+  avg_spike_ratio: number
+  stocks: VolumeSpikeItem[]
+}
+
+export interface VolumeSpikeMetadata {
+  calculation_time_ms: number
+  cache_hit: boolean
+  symbols_processed: number
+  symbols_with_spikes: number
+}
+
+export interface VolumeSpikeResponse {
+  trade_date: string
+  total_spikes: number
+  industries: IndustryVolumeSpikeGroup[]
+  metadata: VolumeSpikeMetadata
+}
+
+export interface VolumeSpikeParams {
+  targetDate?: string
+  minRatio?: number
+  exchange?: string
+  includeUpcom?: boolean
+  limit?: number
+}
+
+export async function fetchVolumeSpikes(
+  params: VolumeSpikeParams = {}
+): Promise<VolumeSpikeResponse> {
+  const searchParams = new URLSearchParams()
+  if (params.targetDate) searchParams.set("target_date", params.targetDate)
+  if (params.minRatio) searchParams.set("min_ratio", params.minRatio.toString())
+  if (params.exchange) searchParams.set("exchange", params.exchange)
+  if (params.includeUpcom !== undefined) searchParams.set("include_upcom", String(params.includeUpcom))
+  if (params.limit) searchParams.set("limit", params.limit.toString())
+
+  const queryString = searchParams.toString()
+  return fetchApi<VolumeSpikeResponse>(
+    `/stocks/analytics/volume-spikes${queryString ? `?${queryString}` : ""}`
+  )
+}
