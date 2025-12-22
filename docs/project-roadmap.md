@@ -8,13 +8,14 @@
 - [x] Next.js 15.5.9 frontend with App Router
 - [x] Dashboard layout (sidebar, header, responsive)
 - [x] Dark/light theme support (next-themes)
-- [x] ShadCN/UI components (19 primitives, 18 dashboard, 4 layout)
+- [x] ShadCN/UI components (20 primitives, 24 dashboard, 4 layout)
 - [x] Stock detail page (search, header, stats, tabs)
 - [x] Analytics deep-dive page (SSR + TanStack Query)
-- [x] Market indices cards with sparklines (1-min refresh)
+- [x] Market indices cards with sparklines (10s auto-refresh)
 - [x] VN30 Overview Table (price, change, volume, mcap, 1-min refresh)
 - [x] FastAPI backend setup
-- [x] vnstock integration (24+ endpoints)
+- [x] vnstock integration (25+ endpoints)
+- [x] vnstock wrapper with rate limit protection
 - [x] Financial statements (income, balance, cash flow)
 - [x] Shareholders, officers, insider deals API
 - [x] Intraday data collection (5-min bars)
@@ -22,13 +23,14 @@
 - [x] Volume anomaly detection (API + frontend)
 - [x] APScheduler for background jobs
 - [x] Docker Compose configuration
-- [x] Backend test suite (30+ tests)
+- [x] Backend test suite (46+ tests)
 - [x] Modern + Clean design system established
 - [x] Sector Performance (ICB Level 2, top gainers/losers)
 - [x] Toast notifications (Sonner integration)
 - [x] Fund certificates endpoint (7 items display)
 - [x] Redis caching (Upstash, trading-hours-aware, 6 endpoints)
 - [x] Rate limiting (sliding window, 100/60s standard, 20/60s heavy)
+- [x] Transaction rollback on intraday data failure
 - [x] Loading states and skeletons
 - [x] API documentation (OpenAPI/Swagger)
 
@@ -241,6 +243,9 @@
 
 | Feature | Date | Notes |
 |---------|------|-------|
+| 10s Auto-Refresh | Dec 22, 2025 | Market indices now refresh every 10s with loading indicators |
+| vnstock Wrapper | Dec 22, 2025 | Rate limit protection wrapper for vnstock API calls |
+| Transaction Rollback | Dec 22, 2025 | Added rollback on intraday data collection failures |
 | VN30 Overview (Frontend) | Dec 21, 2025 | Dashboard table with pagination, auto-refresh (1min) |
 | VN30 Overview (API) | Dec 21, 2025 | Backend endpoint with Redis caching (5min/1hr TTL) |
 | Analytics Deep-Dive Page | Dec 21, 2025 | SSR + TanStack Query integration |
@@ -248,7 +253,7 @@
 | Rate Limiting | Dec 20, 2025 | Sliding window (100/60s standard, 20/60s heavy) |
 | Volume Anomaly (Frontend) | Dec 20, 2025 | Chart integration into stock detail page |
 | Volume Anomaly (On-Demand) | Dec 20, 2025 | Auto-collect intraday data on endpoint request |
-| Custom Hooks | Dec 20, 2025 | 10 hooks for data fetching |
+| Custom Hooks | Dec 20, 2025 | 12 hooks for data fetching |
 | Shareholders Tab | Dec 20, 2025 | Holders, officers, insider deals |
 | Finance Tab | Dec 20, 2025 | Income, balance, cash flow tables |
 | Stock Detail Page | Dec 20, 2025 | Search, header, stats, tabs |
@@ -261,3 +266,7 @@
 | Sector Performance | Dec 19, 2025 | Full-stack: API + hook + UI, top gainers/losers |
 | Toast Notifications | Dec 19, 2025 | Sonner integration on stock search |
 | Design System | Dec 20, 2025 | Modern + Clean established as standard |
+
+### Notes on Reverted Features
+
+- **Market Context Feature** (Dec 21, 2025): Reverted due to vnstock API rate limits. Feature attempted to provide broader market context but exceeded rate limits in production.

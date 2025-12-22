@@ -15,16 +15,16 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 
 ---
 
-## Current Implementation Status (December 2025 - Updated 2025-12-21)
+## Current Implementation Status (December 2025 - Updated 2025-12-22)
 
 | Feature | Status | Details |
 |---------|--------|---------|
 | Dashboard Layout | ✅ Done | Responsive sidebar, header, theme toggle |
 | Stock Detail Page | ✅ Done | Search, ticker header, stats panel, tabs |
 | Analytics Deep-Dive | ✅ Done | Dedicated analytics page with SSR + TanStack Query |
-| Market Indices | ✅ Done | VN-INDEX, VN30, HNX, UPCOM cards with sparklines, 1-min refresh |
+| Market Indices | ✅ Done | VN-INDEX, VN30, HNX, UPCOM cards with sparklines, 10s auto-refresh |
 | VN30 Overview Table | ✅ Done | Real-time VN30 stocks (price, change, volume, mcap), 1-min refresh |
-| Stock Data API | ✅ Done | 24+ endpoints via vnstock + Fmarket |
+| Stock Data API | ✅ Done | 25+ endpoints via vnstock + Fmarket |
 | Financial Data | ✅ Done | Income, balance sheet, cash flow (detailed) |
 | Shareholders/Officers | ✅ Done | Major holders, management, insider deals |
 | Volume Analysis | ✅ Done | 5-min bar aggregation, peak period analysis |
@@ -100,6 +100,7 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | Data Fetching | TanStack Query v5 | Server state management, caching, background sync |
 | Backend | FastAPI | Fast, async, auto-docs, type-safe |
 | Data Source | vnstock >= 3.0.0 | Comprehensive Vietnam stock data |
+| Rate Limit Protection | vnstock_wrapper.py | Wraps vnstock calls with rate limit handling |
 | ORM | SQLAlchemy 2.0 | Mature, async support, migrations |
 | Database | PostgreSQL 16 | Reliable, feature-rich, scalable |
 | Scheduler | APScheduler 4.0 | Background job scheduling |
