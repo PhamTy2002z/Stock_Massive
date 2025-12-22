@@ -1,38 +1,52 @@
 "use client"
 
-import { useEffect, useState } from "react"
 import { StockIndexCard } from "./stock-index-card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { fetchMarketIndices, type MarketIndex } from "@/lib/api"
 import { AlertCircle, RefreshCw } from "lucide-react"
+import { cn } from "@/lib/utils"
+import { useMarketIndices } from "@/hooks/use-market-indices"
 
 interface MarketIndicesProps {
   className?: string
 }
 
 export function MarketIndices({ className }: MarketIndicesProps) {
-  const [indices, setIndices] = useState<MarketIndex[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const { data: indices, isLoading, isFetching, error, refetch } = useMarketIndices()
 
-  const loadData = async () => {
-    setIsLoading(true)
-    setError(null)
-    try {
-      const data = await fetchMarketIndices()
-      setIndices(data)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load market data")
-    } finally {
-      setIsLoading(false)
-    }
-  }
+  return (
+    <div className={className}>
+      {/* Header with title and refresh button */}
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-semibold text-foreground">Chỉ số thị trường</h2>
+        <button
+          onClick={() => refetch()}
+          disabled={isFetching}
+          className="p-1.5 rounded-md hover:bg-muted transition-colors disabled:opacity-50"
+          title="Làm mới dữ liệu"
+          aria-label="Làm mới dữ liệu"
+        >
+          <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
+        </button>
+      </div>
+      <MarketIndicesContent
+        indices={indices ?? []}
+        isLoading={isLoading}
+        error={error}
+        refetch={refetch}
+      />
+    </div>
+  )
+}
 
-  useEffect(() => {
-    loadData()
-  }, [])
+interface MarketIndicesContentProps {
+  indices: NonNullable<ReturnType<typeof useMarketIndices>["data"]>
+  isLoading: boolean
+  error: Error | null
+  refetch: () => void
+}
 
-  if (isLoading) {
+function MarketIndicesContent({ indices, isLoading, error, refetch }: MarketIndicesContentProps) {
+  if (isLoading && indices.length === 0) {
     return (
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[...Array(4)].map((_, i) => (
@@ -46,13 +60,13 @@ export function MarketIndices({ className }: MarketIndicesProps) {
     return (
       <div className="rounded-xl border bg-card p-6 text-center">
         <AlertCircle className="h-8 w-8 text-destructive mx-auto mb-2" />
-        <p className="text-sm text-muted-foreground mb-3">{error}</p>
+        <p className="text-sm text-muted-foreground mb-3">{error.message}</p>
         <button
-          onClick={loadData}
+          onClick={() => refetch()}
           className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
         >
           <RefreshCw className="h-4 w-4" />
-          Retry
+          Thử lại
         </button>
       </div>
     )
@@ -61,25 +75,23 @@ export function MarketIndices({ className }: MarketIndicesProps) {
   if (indices.length === 0) {
     return (
       <div className="rounded-xl border bg-card p-6 text-center">
-        <p className="text-sm text-muted-foreground">No market data available</p>
+        <p className="text-sm text-muted-foreground">Không có dữ liệu chỉ số</p>
       </div>
     )
   }
 
   return (
-    <div className={className}>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {indices.map((index) => (
-          <StockIndexCard
-            key={index.symbol}
-            symbol={index.symbol}
-            name={index.name}
-            value={index.value}
-            change={index.change}
-            changePercent={index.changePercent}
-          />
-        ))}
-      </div>
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {indices.map((index) => (
+        <StockIndexCard
+          key={index.symbol}
+          symbol={index.symbol}
+          name={index.name}
+          value={index.value}
+          change={index.change}
+          changePercent={index.changePercent}
+        />
+      ))}
     </div>
   )
 }

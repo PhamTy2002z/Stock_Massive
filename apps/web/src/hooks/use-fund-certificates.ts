@@ -5,10 +5,19 @@ import { fetchFundCertificates } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
 
 export function useFundCertificates(fundType?: string) {
-  return useQuery({
+  const query = useQuery({
     queryKey: queryKeys.fundCertificates(fundType),
     queryFn: () => fetchFundCertificates(fundType),
-    staleTime: 2 * 60 * 1000, // 2 minutes
-    refetchInterval: 5 * 60 * 1000, // Auto-refresh every 5 minutes
+    staleTime: 10 * 1000, // 10 seconds
+    refetchInterval: 10 * 1000, // Auto-refresh every 10 seconds
+    refetchIntervalInBackground: true, // Keep refreshing even when tab inactive
   })
+
+  return {
+    data: query.data,
+    isLoading: query.isLoading,
+    isFetching: query.isFetching,
+    error: query.error,
+    refetch: query.refetch,
+  }
 }
