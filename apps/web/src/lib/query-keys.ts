@@ -1,4 +1,4 @@
-import type { PeriodType, OfficerFilterType } from "./api"
+import type { PeriodType, OfficerFilterType, VolumeSpikeParams } from "./api"
 
 export const queryKeys = {
   // Market data
@@ -36,4 +36,6 @@ export const queryKeys = {
   // Analytics
   topPerformers: (limit: number, exchange?: string) =>
     ["analytics", "topPerformers", limit, exchange] as const,
+  volumeSpikes: (params: VolumeSpikeParams) =>
+    ["analytics", "volumeSpikes", params] as const,
 } as const

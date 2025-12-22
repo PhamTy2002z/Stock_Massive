@@ -49,7 +49,8 @@ const data = {
       icon: BarChart3,
       items: [
         { title: "Deep Dive", url: "/analytics/deep-dive" },
-        { title: "Top Performers", url: "/analytics/top-performers" },
+        { title: "Volume Spikes", url: "/analytics/volume-spikes" },
+        { title: "Financial Statements", url: "/analytics/financial-statements" },
         { title: "Reports", url: "#" },
         { title: "Insights", url: "#" },
         { title: "Alerts", url: "#" },
