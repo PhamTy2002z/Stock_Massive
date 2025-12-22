@@ -7,7 +7,7 @@ export default function TopPerformersPage() {
       <div className="flex flex-col gap-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">Top Performers</h1>
+            <h1 className="text-2xl font-bold">Financial Statements</h1>
             <p className="text-sm text-muted-foreground">
               Top 50 most profitable companies from HOSE &amp; HNX (quarterly)
             </p>

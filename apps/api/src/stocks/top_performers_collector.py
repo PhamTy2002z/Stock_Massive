@@ -5,9 +5,10 @@ import time
 from datetime import datetime
 from typing import Optional
 
+import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-from vnstock import Finance, Screener
+from vnstock import Finance, Listing
 
 from src.core.config import get_settings
 from src.core.vnstock_wrapper import (
@@ -38,10 +39,12 @@ class TopPerformersCollector:
 
         logger.info(f"Fetching financials for {len(symbols_data)} symbols")
 
-        # 2. Collect financial data
-        results = []
+        # 2. Collect financial data with incremental saving
+        batch_results = []
+        total_stored = 0
         failed = 0
         rate_limited = 0
+        batch_size = 100  # Save every 100 records
 
         for i, row in enumerate(symbols_data):
             symbol = row["symbol"]
@@ -54,7 +57,8 @@ class TopPerformersCollector:
                     data["symbol"] = symbol
                     data["exchange"] = exchange
                     data["company_name"] = company_name
-                    results.append(data)
+                    data["rank"] = 0  # Temporary, will update later
+                    batch_results.append(data)
                 else:
                     failed += 1
 
@@ -70,26 +74,34 @@ class TopPerformersCollector:
             if (i + 1) % 50 == 0:
                 logger.info(f"Progress: {i+1}/{len(symbols_data)} symbols processed")
 
+            # Save batch every 100 records to avoid data loss
+            if len(batch_results) >= batch_size:
+                stored = await self._store_batch(batch_results)
+                total_stored += stored
+                logger.info(f"Saved batch: {stored} records (total: {total_stored})")
+                batch_results = []
+
             # Delay between calls
             delay = get_adaptive_delay(self.base_delay)
             time.sleep(delay)
 
-        # 3. Rank by net_profit
-        results.sort(key=lambda x: x.get("net_profit") or 0, reverse=True)
-        for rank, item in enumerate(results, 1):
-            item["rank"] = rank
+        # 3. Save remaining batch
+        if batch_results:
+            stored = await self._store_batch(batch_results)
+            total_stored += stored
+            logger.info(f"Saved final batch: {stored} records")
 
-        # 4. Store in database
-        stored = await self._store_results(results)
+        # 4. Update ranks based on net_profit
+        await self._update_ranks()
 
         elapsed = time.time() - start_time
         logger.info(
-            f"Collection complete: {stored} stored, {failed} failed, "
+            f"Collection complete: {total_stored} stored, {failed} failed, "
             f"{rate_limited} rate limited in {elapsed:.1f}s"
         )
 
         return {
-            "success": stored,
+            "success": total_stored,
             "failed": failed,
             "rate_limited": rate_limited,
             "total_symbols": len(symbols_data),
@@ -97,12 +109,22 @@ class TopPerformersCollector:
         }
 
     def _get_symbols(self) -> list:
-        """Get HOSE+HNX symbols via Screener."""
+        """Get HOSE+HNX symbols via VCI Listing API."""
 
         def _fetch():
-            screener = Screener(source="tcbs")
-            df = screener.stock(params={"exchangeName": "HOSE,HNX"}, limit=1000)
-            return df.to_dict("records")
+            listing = Listing(source="VCI")
+            # Get both exchanges
+            hose = listing.symbols_by_exchange(exchange="HOSE")
+            hnx = listing.symbols_by_exchange(exchange="HNX")
+            # Combine and filter for stocks only (type=STOCK)
+            combined = pd.concat([hose, hnx], ignore_index=True)
+            stocks = combined[combined["type"] == "STOCK"]
+            # Rename columns to match expected format
+            stocks = stocks.rename(columns={
+                "organ_short_name": "short_name",
+                "organ_name": "organ_name"
+            })
+            return stocks.to_dict("records")
 
         try:
             return safe_vnstock_call(_fetch, max_retries=3) or []
@@ -126,9 +148,25 @@ class TopPerformersCollector:
             year = latest.get("yearReport") or datetime.now().year
             quarter = latest.get("lengthReport") or 4
 
-            net_profit = latest.get("postTaxProfit") or latest.get("Net profit")
-            revenue = latest.get("revenue") or latest.get("Net Revenue")
-            eps = latest.get("earningPerShare") or latest.get("EPS")
+            # VCI column names (may vary by symbol type: bank vs non-bank)
+            net_profit = (
+                latest.get("Net Profit For the Year") or
+                latest.get("Attributable to parent company") or
+                latest.get("Attribute to parent company (Bn. VND)") or
+                latest.get("postTaxProfit") or
+                latest.get("Net profit")
+            )
+            revenue = (
+                latest.get("Revenue (Bn. VND)") or
+                latest.get("Total operating revenue") or
+                latest.get("revenue") or
+                latest.get("Net Revenue")
+            )
+            eps = (
+                latest.get("EPS_basis") or
+                latest.get("earningPerShare") or
+                latest.get("EPS")
+            )
 
             profit_margin = None
             if net_profit and revenue and revenue != 0:
@@ -145,13 +183,13 @@ class TopPerformersCollector:
 
         return safe_vnstock_call(_fetch, max_retries=2, base_delay=2.0)
 
-    async def _store_results(self, results: list) -> int:
-        """Bulk upsert results to database."""
-        if not results:
+    async def _store_batch(self, batch: list) -> int:
+        """Store a batch of results to database with upsert."""
+        if not batch:
             return 0
 
         try:
-            for item in results:
+            for item in batch:
                 stmt = text("""
                     INSERT INTO top_performers
                     (symbol, company_name, exchange, year, quarter, net_profit,
@@ -166,15 +204,51 @@ class TopPerformersCollector:
                         revenue = EXCLUDED.revenue,
                         profit_margin = EXCLUDED.profit_margin,
                         eps = EXCLUDED.eps,
-                        rank = EXCLUDED.rank,
                         updated_at = NOW()
                 """)
                 await self.db.execute(stmt, item)
 
             await self.db.commit()
-            return len(results)
+            return len(batch)
 
         except Exception as e:
-            logger.error(f"Failed to store results: {e}")
+            logger.error(f"Failed to store batch: {e}")
             await self.db.rollback()
             return 0
+
+    async def _update_ranks(self) -> None:
+        """Update ranks based on net_profit for latest quarter."""
+        try:
+            # Get the latest year/quarter in the data
+            latest_period = await self.db.execute(text("""
+                SELECT year, quarter FROM top_performers
+                ORDER BY year DESC, quarter DESC
+                LIMIT 1
+            """))
+            row = latest_period.fetchone()
+            if not row:
+                return
+
+            year, quarter = row
+
+            # Update ranks for the latest quarter using window function
+            await self.db.execute(text("""
+                UPDATE top_performers tp
+                SET rank = ranked.new_rank
+                FROM (
+                    SELECT symbol, year, quarter,
+                           ROW_NUMBER() OVER (ORDER BY net_profit DESC NULLS LAST) as new_rank
+                    FROM top_performers
+                    WHERE year = :year AND quarter = :quarter
+                ) ranked
+                WHERE tp.symbol = ranked.symbol
+                  AND tp.year = ranked.year
+                  AND tp.quarter = ranked.quarter
+            """), {"year": year, "quarter": quarter})
+
+            await self.db.commit()
+            logger.info(f"Updated ranks for Q{quarter}-{year}")
+
+        except Exception as e:
+            logger.error(f"Failed to update ranks: {e}")
+            await self.db.rollback()

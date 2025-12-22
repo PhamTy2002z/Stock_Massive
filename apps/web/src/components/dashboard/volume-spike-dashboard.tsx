@@ -32,7 +32,8 @@ import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { useVolumeSpikes } from "@/hooks/use-volume-spikes"
-import { VolumeSpikeChart } from "./volume-spike-chart"
+import { VolumeSpikeChart, VolumeSpikeChartSkeleton } from "./volume-spike-chart"
+import { VolumeSpikePieChart, VolumeSpikePieChartSkeleton } from "./volume-spike-pie-chart"
 import type {
   IndustryVolumeSpikeGroup,
   VolumeSpikeAnomalyLevel,
@@ -390,9 +391,12 @@ export function VolumeSpikeDashboard({ className }: VolumeSpikeDashboardProps) {
         topIndustry={stats.topIndustry}
       />
 
-      {/* Chart */}
+      {/* Charts - 2 column grid */}
       {data?.industries && data.industries.length > 0 && (
-        <VolumeSpikeChart industries={data.industries} />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <VolumeSpikeChart industries={data.industries} />
+          <VolumeSpikePieChart industries={data.industries} />
+        </div>
       )}
 
       {/* Industry Groups */}
@@ -446,6 +450,10 @@ export function VolumeSpikeDashboardSkeleton({ className }: { className?: string
         {[...Array(3)].map((_, i) => (
           <div key={i} className="h-24 bg-muted animate-pulse rounded-lg" />
         ))}
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <VolumeSpikeChartSkeleton />
+        <VolumeSpikePieChartSkeleton />
       </div>
       <div className="space-y-3">
         <div className="h-6 w-32 bg-muted animate-pulse rounded" />

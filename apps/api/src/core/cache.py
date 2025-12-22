@@ -88,3 +88,26 @@ class TradingHoursCache:
             redis.delete(full_key)
         except Exception as e:
             logger.warning(f"Redis DELETE error for {key}: {e}")
+
+    def clear_prefix(self) -> int:
+        """Delete all cached data with this prefix. Returns count deleted."""
+        redis = get_redis()
+        if not redis:
+            return 0
+
+        try:
+            # Scan for all keys with this prefix and delete them
+            pattern = f"{self.key_prefix}*"
+            cursor = 0
+            deleted = 0
+            while True:
+                cursor, keys = redis.scan(cursor, match=pattern, count=100)
+                if keys:
+                    redis.delete(*keys)
+                    deleted += len(keys)
+                if cursor == 0:
+                    break
+            return deleted
+        except Exception as e:
+            logger.warning(f"Redis CLEAR error for {self.key_prefix}: {e}")
+            return 0
