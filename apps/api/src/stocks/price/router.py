@@ -199,7 +199,8 @@ async def get_volume_anomalies(
             await collector.save_bars(bars)
             await db.commit()
     except Exception as e:
-        # Log but continue - may have historical data
+        # Rollback failed transaction to allow subsequent queries
+        await db.rollback()
         logger.warning(f"Failed to collect intraday data for {symbol}: {e}")
 
     # Compute anomalies from DB (includes any newly collected data)
