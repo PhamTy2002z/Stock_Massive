@@ -69,3 +69,25 @@ All changes are non-breaking and easily reversible via git revert.
 - No API changes required
 - Compatible with current Next.js 15.5.9 + TanStack Query v5
 - Follows existing code standards (kebab-case, DRY/KISS)
+
+---
+
+## Validation Summary
+
+**Validated:** 2025-12-22
+**Questions asked:** 4
+
+### Confirmed Decisions
+1. **Polling interval:** Keep 10 seconds - optimal for professional traders
+2. **Trading hours optimization:** YES - disable polling outside 9:00-15:00 ICT
+3. **Chart lazy loading:** On tab click - load Recharts when user needs it
+4. **Implementation scope:** All 4 phases
+
+### Action Items
+- [ ] **NEW:** Add trading hours check to Phase 1 - disable polling outside 9:00-15:00 ICT
+  - Create `isTradingHours()` utility function
+  - Set `refetchInterval` to `false` when outside trading hours
+  - This is an enhancement to Phase 1, not a new phase
+
+### Implementation Ready
+Plan validated and ready for implementation. Proceed with all 4 phases.
