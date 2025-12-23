@@ -1,5 +1,7 @@
 # Project Roadmap - Stock Massive
 
+Updated: 2025-12-23
+
 ## Current State (December 2025)
 
 ### Completed (December 2025)
@@ -8,27 +10,31 @@
 - [x] Next.js 15.5.9 frontend with App Router
 - [x] Dashboard layout (sidebar, header, responsive)
 - [x] Dark/light theme support (next-themes)
-- [x] ShadCN/UI components (20 primitives, 24 dashboard, 4 layout)
+- [x] ShadCN/UI components (20 primitives, 27 dashboard, 4 layout, 2 providers)
 - [x] Stock detail page (search, header, stats, tabs)
 - [x] Analytics deep-dive page (SSR + TanStack Query)
+- [x] **Volume Spikes Dashboard** (treemap, pie chart, composed chart, tabs)
+- [x] **Financial Statements Page** (ranking table with filters)
 - [x] Market indices cards with sparklines (10s auto-refresh)
 - [x] VN30 Overview Table (price, change, volume, mcap, 1-min refresh)
 - [x] FastAPI backend setup
-- [x] vnstock integration (25+ endpoints)
+- [x] vnstock integration (30+ endpoints)
 - [x] vnstock wrapper with rate limit protection
 - [x] Financial statements (income, balance, cash flow)
 - [x] Shareholders, officers, insider deals API
 - [x] Intraday data collection (5-min bars)
 - [x] Volume analysis endpoint
 - [x] Volume anomaly detection (API + frontend)
+- [x] **Volume Spikes API** (aggregated across all stocks)
+- [x] **Financial Statements API** (top companies by net profit)
 - [x] APScheduler for background jobs
-- [x] Docker Compose configuration
-- [x] Backend test suite (46+ tests)
+- [x] Docker Compose configuration (dev + prod)
+- [x] Backend test suite (46+ tests in 7 files)
 - [x] Modern + Clean design system established
 - [x] Sector Performance (ICB Level 2, top gainers/losers)
 - [x] Toast notifications (Sonner integration)
 - [x] Fund certificates endpoint (7 items display)
-- [x] Redis caching (Upstash, trading-hours-aware, 6 endpoints)
+- [x] Redis caching (Upstash, trading-hours-aware, 7 endpoints)
 - [x] Rate limiting (sliding window, 100/60s standard, 20/60s heavy)
 - [x] Transaction rollback on intraday data failure
 - [x] Loading states and skeletons
@@ -80,6 +86,7 @@
 **Priority: High**
 
 - [x] IntradayBar model (completed)
+- [x] FinancialStatement model (completed)
 - [ ] User model
 - [ ] Watchlist model
 - [ ] Portfolio model
@@ -123,10 +130,10 @@
 
 **Priority: Medium**
 
-- [x] Redis integration
-- [x] Cache vnstock responses
+- [x] Redis integration (completed)
+- [x] Cache vnstock responses (completed)
 - [ ] Cache invalidation strategy
-- [x] Rate limiting
+- [x] Rate limiting (completed)
 
 ---
 
@@ -243,15 +250,17 @@
 
 | Feature | Date | Notes |
 |---------|------|-------|
-| Financial Statements API Endpoint | Dec 22, 2025 | Analytics router with GET endpoint, Pydantic schemas, service layer, Redis cache integration |
-| Financial Statements Batch Job | Dec 22, 2025 | Weekly scheduled job for HOSE+HNX quarterly financials ranking |
-| 10s Auto-Refresh | Dec 22, 2025 | Market indices now refresh every 10s with loading indicators |
+| Volume Spikes Dashboard (Frontend) | Dec 23, 2025 | Treemap, pie chart, composed chart, tabs visualization |
+| Rename Top Performers to Financial Statements | Dec 23, 2025 | UI/UX optimizations, Vietnamese translation |
+| Financial Statements API Endpoint | Dec 22, 2025 | Analytics router with filters (limit, exchange, year, quarter) |
+| Financial Statements Batch Job | Dec 22, 2025 | Weekly scheduled job for HOSE+HNX quarterly rankings |
+| 10s Auto-Refresh | Dec 22, 2025 | Market indices refresh every 10s with loading indicators |
 | vnstock Wrapper | Dec 22, 2025 | Rate limit protection wrapper for vnstock API calls |
 | Transaction Rollback | Dec 22, 2025 | Added rollback on intraday data collection failures |
 | VN30 Overview (Frontend) | Dec 21, 2025 | Dashboard table with pagination, auto-refresh (1min) |
 | VN30 Overview (API) | Dec 21, 2025 | Backend endpoint with Redis caching (5min/1hr TTL) |
 | Analytics Deep-Dive Page | Dec 21, 2025 | SSR + TanStack Query integration |
-| Extended Caching | Dec 20, 2025 | 6 high-traffic endpoints with trading-hours-aware cache |
+| Extended Caching | Dec 20, 2025 | 7 high-traffic endpoints with trading-hours-aware cache |
 | Rate Limiting | Dec 20, 2025 | Sliding window (100/60s standard, 20/60s heavy) |
 | Volume Anomaly (Frontend) | Dec 20, 2025 | Chart integration into stock detail page |
 | Volume Anomaly (On-Demand) | Dec 20, 2025 | Auto-collect intraday data on endpoint request |

@@ -1,5 +1,7 @@
 # Code Standards - Stock Massive
 
+Updated: 2025-12-23
+
 ## General Principles
 
 - **YAGNI**: Don't build features until needed
@@ -21,10 +23,10 @@
 
 ```
 components/
-├── ui/                    # ShadCN base components
-├── dashboard/             # Feature-specific components
-├── layout/                # Layout components
-└── providers/             # Context providers
+├── ui/                    # 20 ShadCN base components
+├── dashboard/             # 27 feature-specific components
+├── layout/                # 4 layout components
+└── providers/             # 2 context providers
 ```
 
 ### Component Structure
@@ -71,7 +73,7 @@ export function StockChart({ symbol, className }: Props) {
 
 - **Local State**: useState for component-level state
 - **URL State**: Search params for shareable state (stock symbol)
-- **Server State**: React Query for efficient data fetching, caching, and synchronization
+- **Server State**: TanStack Query v5.90 for data fetching, caching, synchronization
 - **Theme State**: next-themes provider
 - **Toast Notifications**: Sonner for user feedback
 
@@ -87,6 +89,14 @@ if (error) return <StockDetailError message={error.message} onRetry={refetch} />
 // Empty states
 if (!data) return <StockDetailEmpty />
 ```
+
+### Custom Hooks (12 total)
+
+- `use-stock-detail`, `use-market-indices`, `use-vn30-overview`
+- `use-sector-performance`, `use-fund-certificates`
+- `use-income-statement`, `use-balance-sheet`, `use-cash-flow`
+- `use-shareholders`, `use-volume-analysis`
+- `use-volume-spikes`, `use-financial-statements`
 
 ---
 
@@ -104,11 +114,12 @@ if (!data) return <StockDetailEmpty />
 ```python
 # router.py - HTTP endpoints
 # service.py - Business logic
-# repository.py - Data access
-# schemas.py - Pydantic models
+# repository.py - Data access (if needed)
+# schemas.py or schemas/ - Pydantic models
 # models.py - SQLAlchemy models
 # jobs.py - Scheduled tasks
-# intraday_collector.py - Intraday data collection and volume anomaly detection logic
+# intraday_collector.py - Intraday data collection + volume anomaly
+# financial_statements_collector.py - Weekly financial data collection
 ```
 
 ### Router Pattern
@@ -165,10 +176,20 @@ class StockDetail(BaseModel):
     model_config = {"from_attributes": True}
 ```
 
+### Schema Files (6 total)
+
+- `schemas/analytics.py` - FinancialStatementItem, VolumeSpikeItem
+- `schemas/common.py` - Shared types
+- `schemas/company.py` - Company, shareholders, officers
+- `schemas/financial.py` - Income, balance sheet, cash flow
+- `schemas/market.py` - VN30Overview, sectors, fund certificates
+- `schemas/price.py` - OHLCV, intraday, volume
+
 ### Best Practices
 
 - Type hints on all functions
-- Use `async` for I/O operations and `sync_to_async` for synchronous library calls (e.g., `vnstock`)
+- Use `async` for I/O operations
+- Use `sync_to_async` for synchronous library calls (e.g., vnstock)
 - Use dependency injection
 - Validate all inputs with Pydantic
 - Handle vnstock exceptions gracefully
@@ -198,9 +219,10 @@ type(scope): short description
 
 Examples:
 ```
-feat(stocks): add shareholders, officers, and insider deals API
-fix(docker): correct API URL and dependencies for Docker setup
-docs: add project plans and analysis reports
+feat(analytics): add volume spikes dashboard with treemap
+fix(api): correct rate limit handling in vnstock_wrapper
+refactor(frontend): rename top performers to financial statements
+docs: update project documentation for December 2025
 ```
 
 ---
@@ -213,7 +235,7 @@ docs: add project plans and analysis reports
 - Component: React Testing Library
 - E2E: Playwright (if needed)
 
-### Backend
+### Backend (7 test files, 46+ tests)
 
 - Unit: pytest
 - Integration: pytest + TestClient
@@ -235,18 +257,21 @@ def test_get_stock_detail():
 ### Endpoint Naming
 
 - Use plural nouns: `/stocks`, `/users`
-- Use kebab-case for multi-word: `/price-board`
+- Use kebab-case for multi-word: `/price-board`, `/volume-spikes`
 - Nest resources logically: `/stocks/{symbol}/financials/ratios`
+- Analytics under `/analytics/`: `/analytics/volume-spikes`, `/analytics/financial-statements`
 
 ### Query Parameters
 
 ```python
 # Use Query with validation
-@router.get("/symbols/search")
-async def search_symbols(
-    q: str = Query(..., min_length=1, description="Search query"),
-    limit: int = Query(20, ge=1, le=50, description="Max results"),
-) -> list[StockSymbol]:
+@router.get("/analytics/financial-statements")
+async def get_financial_statements(
+    limit: int = Query(50, ge=1, le=100, description="Max results"),
+    exchange: Optional[str] = Query(None, description="HOSE, HNX, or UPCOM"),
+    year: Optional[int] = Query(None, description="Fiscal year"),
+    quarter: Optional[int] = Query(None, ge=1, le=4, description="Quarter 1-4"),
+) -> FinancialStatementsResponse:
 ```
 
 ### Response Format
@@ -270,16 +295,6 @@ async def search_symbols(
 # 404 - Not found
 # 502 - External service error (vnstock)
 ```
-
-### Price Data
-| Endpoint | Purpose |
-|----------|---------|
-| `GET /{symbol}/history` | Historical OHLCV |
-| `GET /{symbol}/intraday` | Intraday ticks |
-| `GET /market-indices` | VN-INDEX, VN30, HNX, UPCOM |
-| `GET /price-board` | Real-time prices (multiple symbols) |
-| `GET /{symbol}/detail` | Comprehensive stock detail |
-| `GET /{symbol}/volume-anomalies` | Retrieve volume anomaly detection results |
 
 ---
 
@@ -308,11 +323,19 @@ class StockService:
         return [StockPrice(**row) for row in df.to_dict("records")]
 ```
 
+### Rate Limit Protection
+
+```python
+# core/vnstock_wrapper.py
+# Wraps vnstock calls with rate limit handling
+# Provides graceful degradation on rate limit errors
+```
+
 ### Data Source
 
 - Primary: VCI (Vietnam)
 - Always handle vnstock exceptions gracefully
-- Consider caching for frequently accessed data
+- Use Redis caching for frequently accessed data
 
 ---
 

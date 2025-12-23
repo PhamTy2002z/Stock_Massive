@@ -1,5 +1,9 @@
 # System Architecture - Stock Massive
 
+Updated: 2025-12-23
+
+> **Note**: Toàn bộ hệ thống chạy trong Docker containers. Database PostgreSQL cũng chạy trong Docker, không cần cài đặt local.
+
 ## High-Level Overview
 
 ```
@@ -11,19 +15,19 @@
 │                 Next.js Frontend (port 3000)                 │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
 │  │  ShadCN UI  │  │  Dashboard  │  │  TanStack Query v5  │  │
-│  │  (19 comp)  │  │  (18 comp)  │  │  + Theme Provider   │  │
-│  │             │  │  + VN30     │  │  + Sonner Toasts    │  │
+│  │  (20 comp)  │  │  (27 comp)  │  │  + Theme Provider   │  │
+│  │             │  │  + Charts   │  │  + Sonner Toasts    │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘  │
 └─────────────────────────────┬───────────────────────────────┘
                               │ REST API
 ┌─────────────────────────────▼───────────────────────────────┐
 │                 FastAPI Backend (port 8000)                  │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │   Stocks    │  │  Scheduler  │  │   vnstock Library   │  │
-│  │   Module    │  │ (APScheduler)│  │   (VCI Source)      │  │
-│  │ (25+ endpts)│  │             │  │   + Fmarket API     │  │
-│  │ + Volume    │  │             │  │   + vnstock_wrapper │  │
-│  │  Anomaly    │  │             │  │    (rate limit)     │  │
+│  │   Stocks    │  │  Analytics  │  │   vnstock Library   │  │
+│  │   Module    │  │   Module    │  │   (VCI Source)      │  │
+│  │ (30+ endpts)│  │ (2 endpts)  │  │   + Fmarket API     │  │
+│  │ + Volume    │  │ - vol spike │  │   + vnstock_wrapper │  │
+│  │  Anomaly    │  │ - financials│  │    (rate limit)     │  │
 │  │ + Redis     │  │             │  │                     │  │
 │  │  Cache      │  │             │  │                     │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘  │
@@ -56,7 +60,7 @@
   - Financial ratios
   - Stock indices (VN30, HNX30, etc.)
   - Shareholders, officers, insider deals
-  - **Volume Anomaly Data** (via new endpoint)
+  - Volume Anomaly Data
 
 ### Fmarket API Integration
 
@@ -71,56 +75,56 @@
 ```
 Stock_Massive/
 ├── apps/
-│   ├── web/                      # Next.js frontend
+│   ├── web/                      # Next.js frontend (75 files)
 │   │   ├── src/
-│   │   │   ├── app/              # App Router pages
+│   │   │   ├── app/              # App Router (5 pages)
+│   │   │   │   ├── (auth)/login/
+│   │   │   │   └── analytics/
+│   │   │   │       ├── deep-dive/
+│   │   │   │       ├── volume-spikes/
+│   │   │   │       └── financial-statements/
 │   │   │   ├── components/
-│   │   │   │   ├── ui/           # ShadCN components
-│   │   │   │   ├── dashboard/    # Feature components
-│   │   │   │   ├── layout/       # Layout components
-│   │   │   │   └── providers/    # Context providers
-│   │   │   ├── hooks/            # Custom hooks
-│   │   │   └── lib/              # Utilities
+│   │   │   │   ├── ui/           # 20 ShadCN components
+│   │   │   │   ├── dashboard/    # 27 feature components
+│   │   │   │   ├── layout/       # 4 layout components
+│   │   │   │   └── providers/    # 2 providers
+│   │   │   ├── hooks/            # 12 custom hooks
+│   │   │   └── lib/              # 4 utilities
 │   │   ├── public/
 │   │   └── package.json
 │   │
-│   └── api/                      # FastAPI backend
+│   └── api/                      # FastAPI backend (52 source + 4 migrations + 7 tests)
 │       ├── src/
 │       │   ├── stocks/           # Stocks module
+│       │   │   ├── analytics/    # Volume spikes, financial statements
+│       │   │   │   ├── router.py
+│       │   │   │   └── service.py
 │       │   │   ├── market/       # Symbols, sectors, fund certificates
-│       │   │   ├── price/        # History, intraday, indices, volume analysis
+│       │   │   ├── price/        # History, intraday, indices, volume
 │       │   │   ├── company/      # Company info
-│       │   │   └── financial/    # Financials, ratios
-│       │   │   ├── router.py     # HTTP endpoints
+│       │   │   ├── financial/    # Financials, ratios
+│       │   │   ├── router.py     # Main router aggregation
 │       │   │   ├── service.py    # vnstock integration
-│       │   │   ├── schemas/      # Pydantic models (price, market, company, financial, analytics)
-│       │   │   │   └── analytics.py # FinancialStatementItem, FinancialStatementsResponse schemas
-│       │   │   ├── models.py     # SQLAlchemy models (IntradayBar, FinancialStatement)
-│       │   │   ├── jobs.py       # Scheduled jobs (intraday collection/cleanup, financial statements weekly)
-│       │   │   ├── intraday_collector.py # Includes detect_volume_anomalies()
-│       │   │   ├── financial_statements_collector.py # Weekly financial statements collection by net_profit
-│       │   │   └── analytics/    # Analytics domain module
-│       │   │       ├── __init__.py
-│       │   │       ├── service.py # AnalyticsService with get_financial_statements()
-│       │   │       └── router.py  # Analytics endpoints (/financial-statements)
-│       │   ├── core/             # Config, database, scheduler
-│       │   │   ├── config.py     # Settings, environment variables
-│       │   │   ├── database.py   # SQLAlchemy engine, session
-│       │   │   ├── scheduler.py  # APScheduler setup
-│       │   │   ├── redis.py      # Upstash Redis client
-│       │   │   ├── cache.py      # Trading-hours-aware cache
-│       │   │   ├── ratelimit.py  # Rate limiting middleware
-│       │   │   ├── vnstock_wrapper.py # vnstock wrapper with rate limit protection
-│       │   │   └── dependencies.py # FastAPI dependencies
+│       │   │   ├── schemas/      # 6 Pydantic schema files
+│       │   │   ├── models.py     # IntradayBar, FinancialStatement
+│       │   │   ├── jobs.py       # Scheduled jobs
+│       │   │   ├── intraday_collector.py
+│       │   │   └── financial_statements_collector.py
+│       │   ├── core/             # 8 core config files
+│       │   │   ├── config.py, database.py, dependencies.py
+│       │   │   ├── cache.py, redis.py, ratelimit.py
+│       │   │   ├── scheduler.py, vnstock_wrapper.py
 │       │   └── main.py
-│       ├── alembic/              # DB migrations
-│       └── requirements.txt      # Now includes greenlet and pandas
+│       ├── alembic/              # 4 DB migrations
+│       ├── tests/                # 7 test files
+│       └── requirements.txt
 │
 ├── packages/                     # Shared code (placeholders)
 ├── docker/                       # Docker configs
-├── docs/                         # Documentation
+├── docs/                         # 9 documentation files
 ├── plans/                        # Plans and reports
-├── docker-compose.yml
+├── docker-compose.yml            # Dev config
+├── docker-compose.prod.yml       # Prod config
 └── README.md
 ```
 
@@ -138,6 +142,12 @@ Stock_Massive/
 ├── market-indices                # GET - VN-INDEX, VN30, HNX, UPCOM
 ├── price-board                   # GET - Real-time prices
 ├── intraday/collect              # POST - Trigger collection
+├── sector-performance            # GET - ICB Level 2
+├── vn30-overview                 # GET - VN30 stocks overview
+├── fund-certificates             # GET - Fund certificates
+├── analytics/
+│   ├── volume-spikes             # GET - Top volume spike stocks
+│   └── financial-statements      # GET - Top companies by net profit
 ├── {symbol}/
 │   ├── history                   # GET - OHLCV data
 │   ├── intraday                  # GET - Tick data
@@ -147,7 +157,7 @@ Stock_Massive/
 │   ├── officers                  # GET - Company officers
 │   ├── insider-deals             # GET - Insider trades
 │   ├── volume-analysis           # GET - Volume patterns
-│   ├── volume-anomalies          # GET - Volume anomaly detection results
+│   ├── volume-anomalies          # GET - Volume anomaly detection
 │   └── financials/
 │       ├── ratios                # GET - Financial ratios
 │       ├── income                # GET - Income (simple)
@@ -155,11 +165,6 @@ Stock_Massive/
 │       ├── balance-sheet         # GET - Balance (simple)
 │       ├── balance-sheet-detailed # GET - Balance (detailed)
 │       └── cash-flow             # GET - Cash flow
-├── analytics/
-│   └── financial-statements      # GET - Top companies by net profit (limit, exchange, year, quarter params)
-├── sector-performance            # GET - Sector performance (ICB Level 2)
-├── vn30-overview                 # GET - VN30 stocks overview (price, change, volume, market_cap)
-└── fund-certificates             # GET - Fund certificates data
 ```
 
 ### Backend Layers
@@ -187,6 +192,16 @@ Router (HTTP) → Service (Business Logic) → vnstock/Repository
 5. Frontend renders with stock-detail-* components
 ```
 
+### Volume Spikes Dashboard
+
+```
+1. User navigates to /analytics/volume-spikes
+2. Frontend calls /api/v1/stocks/analytics/volume-spikes
+3. AnalyticsService queries aggregated volume data
+4. Returns top volume spike stocks with metrics
+5. Frontend renders treemap, pie chart, composed chart
+```
+
 ### Intraday Data Collection
 
 ```
@@ -194,8 +209,18 @@ Router (HTTP) → Service (Business Logic) → vnstock/Repository
 2. IntradayCollector fetches tick data via vnstock
 3. Ticks aggregated to 5-minute OHLCV bars
 4. Bars upserted to PostgreSQL (IntradayBar model)
-5. Volume anomaly detection is performed on collected intraday data.
-6. Volume anomaly data is available via /volume-anomalies endpoint and visualized on the frontend.
+5. Volume anomaly detection performed on collected data
+6. Data available via /volume-anomalies endpoint
+```
+
+### Financial Statements Collection
+
+```
+1. Scheduler triggers at 02:00 ICT Sunday
+2. Collector fetches quarterly income statements for HOSE+HNX (~700-800 symbols)
+3. Data ranked by net_profit
+4. Stored in PostgreSQL (FinancialStatement model)
+5. Available via /analytics/financial-statements endpoint
 ```
 
 ---
@@ -216,21 +241,27 @@ RootLayout
                 ├── MarketIndices
                 ├── VN30OverviewTable
                 ├── StockSearchBar
-                └── Stock Detail Section
-                    ├── StockTickerHeader
-                    ├── StockDetailPanel
-                    └── StockDetailTabs
-                        ├── Overview Tab
-                        ├── Finance Tab
-                        ├── Shareholders Tab
-                        └── Volume Anomaly Tab
+                ├── Stock Detail Section
+                │   ├── StockTickerHeader
+                │   ├── StockDetailPanel
+                │   └── StockDetailTabs
+                │       ├── Overview Tab
+                │       ├── Finance Tab
+                │       ├── Shareholders Tab
+                │       └── Volume Anomaly Tab
+                └── Analytics Pages
+                    ├── VolumeSpikesDashboard
+                    │   ├── VolumeSpikePieChart
+                    │   ├── VolumeSpikeTreemap
+                    │   └── VolumeSpikeComposedChart
+                    └── FinancialStatementsTable
 ```
 
 ### State Management
 
 - **Local State**: useState for component-level state
 - **URL State**: Search params for stock symbol
-- **Server State**: TanStack Query v5 for data fetching, caching, and synchronization
+- **Server State**: TanStack Query v5.90 for data fetching, caching, synchronization
 - **Theme State**: next-themes for dark/light mode
 - **Auto-Refresh**: Market indices update every 10s with loading indicators
 
@@ -239,6 +270,7 @@ RootLayout
 - **QueryProvider**: Wraps app with QueryClient configuration
 - **Query Keys**: Centralized key factory at `lib/query-keys.ts`
 - **DevTools**: React Query DevTools enabled in development
+- **Hooks**: 12 custom hooks for data fetching
 
 ---
 
@@ -256,6 +288,7 @@ RootLayout
 - Hot-reload for development
 - Volume mounts for code changes
 - Network isolation between services
+- Separate prod config (docker-compose.prod.yml) with restart policies
 
 ---
 
@@ -317,24 +350,44 @@ CREATE INDEX ix_financial_statements_collected_at ON financial_statements(collec
 
 | Job | Schedule | Description |
 |-----|----------|-------------|
-| Intraday Collection | 15:30 ICT daily | Collect and aggregate tick data, perform volume anomaly detection, with transaction rollback on failure |
-| Financial Statements Collection | 02:00 ICT Sunday | Fetch quarterly income statements for HOSE+HNX symbols (~700-800), rank by net_profit, store financial statements with adaptive rate limiting |
+| Intraday Collection | 15:30 ICT daily | Collect tick data, aggregate to 5-min bars, volume anomaly detection |
+| Intraday Cleanup | 16:00 ICT daily | Clean up old intraday data |
+| Financial Statements | 02:00 ICT Sunday | Fetch quarterly income statements for HOSE+HNX (~700-800 symbols) |
+
+---
+
+## Caching Architecture
+
+### Redis Caching (Implemented)
+
+- **Generic Cache Class**: `TradingHoursCache` in `core/cache.py`
+- **Trading-Hours-Aware TTL**: Shorter TTL during market hours (09:00-15:00 ICT), longer off-hours
+- **Graceful Degradation**: System continues operation if Redis unavailable
+
+### Cached Endpoints (7 total)
+
+| Endpoint | Trading Hours TTL | Off-Hours TTL |
+|----------|-------------------|---------------|
+| `market-indices` | 5 min | 1 hour |
+| `price-board` | 5 min | 1 hour |
+| `symbols` | 1 hour | 24 hours |
+| `sector-performance` | 5 min | 1 hour |
+| `vn30-overview` | 5 min | 1 hour |
+| `volume-anomaly` | 5 min | 1 hour |
+| `financial-statements` | 1 hour | 24 hours |
+
+---
+
+## Rate Limiting
+
+- **Standard Endpoints**: 100 requests / 60 seconds
+- **Heavy Endpoints**: 20 requests / 60 seconds
+- **Implementation**: Redis sliding window algorithm
+- **vnstock Protection**: `vnstock_wrapper.py` for graceful rate limit handling
 
 ---
 
 ## Future Considerations
-
-### Caching Layer
-
-- **Redis Caching (Implemented)**:
-    - **Generic Cache Class**: Introduced `TradingHoursCache` in `core/cache.py` for managing time-sensitive data.
-    - **Cache Instances**: Seven cache instances are utilized for: `volume_anomaly`, `market_indices`, `price_board`, `symbols`, `sector_performance`, `vn30_overview`, and `financial_statements`.
-    - **Trading-Hours-Aware TTL**: Cache entries have a Time-To-Live (TTL) that is intelligent about Vietnam market trading hours (09:00-15:00), ensuring data freshness during active periods and longer persistence off-hours.
-    - **Graceful Degradation**: The system is designed to handle Redis unavailability gracefully, ensuring continuous operation even if the cache service is down.
-    - **Affected Endpoints**:
-        - `apps/api/src/stocks/price/router.py`: Caches `market-indices` and `price-board`.
-        - `apps/api/src/stocks/market/router.py`: Caches `symbols`, `sector-performance`, and `vn30-overview`.
-        - `apps/api/src/stocks/analytics/router.py`: Caches `financial-statements` (1h trading, 24h off-hours).
 
 ### WebSocket Support (Planned)
 
@@ -344,6 +397,6 @@ CREATE INDEX ix_financial_statements_collected_at ON financial_statements(collec
 
 ### Authentication (Planned)
 
-- JWT-based authentication
+- JWT-based authentication via Supabase
 - User registration/login
 - Protected routes
