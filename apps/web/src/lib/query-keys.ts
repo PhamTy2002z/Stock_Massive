@@ -34,8 +34,8 @@ export const queryKeys = {
     ["search", "stocks", query, limit] as const,
 
   // Analytics
-  topPerformers: (limit: number, exchange?: string) =>
-    ["analytics", "topPerformers", limit, exchange] as const,
+  financialStatements: (limit: number, exchange?: string) =>
+    ["analytics", "financialStatements", limit, exchange] as const,
   volumeSpikes: (params: VolumeSpikeParams) =>
     ["analytics", "volumeSpikes", params] as const,
 } as const

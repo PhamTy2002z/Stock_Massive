@@ -16,7 +16,7 @@ from src.core.vnstock_wrapper import (
 )
 from src.stocks.intraday_collector import IntradayCollector
 from src.stocks.models import StockDailyOHLCV, StockIntradayBar
-from src.stocks.top_performers_collector import TopPerformersCollector
+from src.stocks.financial_statements_collector import FinancialStatementsCollector
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -255,21 +255,21 @@ def _save_ohlcv_batch(batch_data: list) -> int:
     return rows_saved
 
 
-async def collect_top_performers_job() -> dict:
-    """Scheduled job to collect top performers data.
+async def collect_financial_statements_job() -> dict:
+    """Scheduled job to collect financial statements data.
 
     Runs weekly to fetch quarterly financials for HOSE+HNX symbols.
     Returns dict with success/failed counts.
     """
-    logger.info("Starting top performers collection job")
+    logger.info("Starting financial statements collection job")
 
     try:
         async with async_session_factory() as db:
-            collector = TopPerformersCollector(db)
+            collector = FinancialStatementsCollector(db)
             result = await collector.collect()
 
-        logger.info(f"Top performers job complete: {result}")
+        logger.info(f"Financial statements job complete: {result}")
         return result
     except Exception as e:
-        logger.error(f"Top performers collection job failed: {e}")
+        logger.error(f"Financial statements collection job failed: {e}")
         return {"success": 0, "failed": 0, "error": str(e)}

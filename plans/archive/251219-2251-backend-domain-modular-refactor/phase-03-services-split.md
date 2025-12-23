@@ -538,13 +538,13 @@ Keep as backup until Phase 5 verification.
 
 ## Success Criteria
 
-- [ ] 4 domain services created (price, company, financial, market)
-- [ ] Facade service delegates to domain services
-- [ ] All converters moved to `shared/converters.py`
-- [ ] Singleton pattern preserved
-- [ ] All method signatures unchanged
-- [ ] Router continues to work without changes
-- [ ] All tests pass
+- [x] 4 domain services created (price, company, financial, market)
+- [x] Facade service delegates to domain services
+- [x] All converters moved to `shared/converters.py`
+- [x] Singleton pattern preserved
+- [x] All method signatures unchanged
+- [x] Router continues to work without changes
+- [x] All tests pass
 
 ## Testing
 

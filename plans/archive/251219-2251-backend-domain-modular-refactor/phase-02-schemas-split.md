@@ -418,12 +418,12 @@ Keep as backup until Phase 5 verification complete.
 
 ## Success Criteria
 
-- [ ] `stocks/schemas/` module created with 6 files
-- [ ] All 33 schemas split correctly by domain
-- [ ] Re-exports in `__init__.py` complete
-- [ ] Router imports unchanged and functional
-- [ ] All tests pass
-- [ ] No breaking changes
+- [x] `stocks/schemas/` module created with 6 files
+- [x] All 33 schemas split correctly by domain
+- [x] Re-exports in `__init__.py` complete
+- [x] Router imports unchanged and functional
+- [x] All tests pass
+- [x] No breaking changes
 
 ## Testing
 

@@ -243,8 +243,8 @@
 
 | Feature | Date | Notes |
 |---------|------|-------|
-| Top Performers API Endpoint | Dec 22, 2025 | Analytics router with GET endpoint, Pydantic schemas, service layer, Redis cache integration |
-| Top Performers Batch Job | Dec 22, 2025 | Weekly scheduled job for HOSE+HNX quarterly financials ranking |
+| Financial Statements API Endpoint | Dec 22, 2025 | Analytics router with GET endpoint, Pydantic schemas, service layer, Redis cache integration |
+| Financial Statements Batch Job | Dec 22, 2025 | Weekly scheduled job for HOSE+HNX quarterly financials ranking |
 | 10s Auto-Refresh | Dec 22, 2025 | Market indices now refresh every 10s with loading indicators |
 | vnstock Wrapper | Dec 22, 2025 | Rate limit protection wrapper for vnstock API calls |
 | Transaction Rollback | Dec 22, 2025 | Added rollback on intraday data collection failures |

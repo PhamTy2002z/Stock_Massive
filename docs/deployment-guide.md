@@ -246,6 +246,7 @@ docker-compose exec db psql -U postgres -d stock_massive
 
 Current tables:
 - `intraday_bars` - 5-minute OHLCV bars for volume analysis
+- `financial_statements` - Quarterly financial data with profit rankings
 
 ---
 
@@ -256,6 +257,12 @@ Current tables:
 - **Schedule**: Daily at 15:30 ICT (after market close)
 - **Function**: Collects tick data, aggregates to 5-min bars
 - **Storage**: PostgreSQL `intraday_bars` table
+
+### Financial Statements Collection
+
+- **Schedule**: Weekly on Sunday at 02:00 ICT
+- **Function**: Fetches quarterly income statements, ranks by net profit
+- **Storage**: PostgreSQL `financial_statements` table
 
 To manually trigger collection:
 

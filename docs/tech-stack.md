@@ -7,12 +7,15 @@ Monorepo architecture for stock analysis platform with Next.js frontend, FastAPI
 
 | Technology | Version | Purpose |
 |------------|---------|---------|
-| Next.js | 14+ | React framework (App Router) |
-| TypeScript | 5.x | Type safety |
-| TailwindCSS | 3.x | Utility-first CSS |
+| Next.js | 15.5.9 | React framework (App Router) |
+| React | 18.3.1 | UI library |
+| TypeScript | 5.3 | Type safety |
+| TailwindCSS | 3.4 | Utility-first CSS |
 | ShadCN/UI | latest | Component library (Radix-based) |
-| TanStack Table | 8.x | Data tables with sorting/filtering |
-| TradingView | Lightweight Charts | Stock charting |
+| TanStack Query | 5.90 | Server state management, caching |
+| Recharts | 3.6 | Charts (sparklines, bar, pie, treemap) |
+| next-themes | 0.4.6 | Dark/light theme switching |
+| Sonner | 2.0.7 | Toast notifications |
 
 ## Backend Stack
 
@@ -20,10 +23,14 @@ Monorepo architecture for stock analysis platform with Next.js frontend, FastAPI
 |------------|---------|---------|
 | Python | 3.11+ | Runtime |
 | FastAPI | 0.100+ | API framework |
-| SQLAlchemy | 2.0 | ORM |
+| SQLAlchemy | 2.0 | ORM (async + sync) |
 | Alembic | latest | DB migrations |
 | Pydantic | 2.x | Data validation |
 | Uvicorn | latest | ASGI server |
+| APScheduler | 4.0 | Background job scheduling |
+| Upstash Redis | 1.0+ | Caching + rate limiting |
+| vnstock | 3.0+ | Vietnam stock data (VCI source) |
+| Pandas | 2.0+ | Data manipulation |
 
 ## Database
 
@@ -48,8 +55,9 @@ Monorepo architecture for stock analysis platform with Next.js frontend, FastAPI
 
 ### Frontend Architecture
 - **Pattern**: Feature-based component organization
-- **State**: React Query for server state, Zustand for client state (if needed)
+- **State**: TanStack Query v5 for server state (5min stale, 10min gc)
 - **Routing**: Next.js App Router with route groups
+- **SSR**: Server Components + HydrationBoundary pattern
 
 ### Backend Architecture
 - **Pattern**: Domain-driven with repository pattern

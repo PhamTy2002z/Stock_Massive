@@ -145,14 +145,14 @@ class TestSchedulerSetup:
             mock_settings.daily_ohlcv_enabled = True
             mock_settings.daily_ohlcv_hour = 20
             mock_settings.daily_ohlcv_minute = 0
-            # Top performers settings
-            mock_settings.top_performers_enabled = True
-            mock_settings.top_performers_hour = 2
-            mock_settings.top_performers_minute = 0
+            # Financial statements settings
+            mock_settings.financial_statements_enabled = True
+            mock_settings.financial_statements_hour = 2
+            mock_settings.financial_statements_minute = 0
 
             await setup_scheduler(mock_scheduler)
 
-            # Should add 4 schedules: intraday collection, cleanup, daily_ohlcv, and top_performers
+            # Should add 4 schedules: intraday collection, cleanup, daily_ohlcv, and financial_statements
             assert mock_scheduler.add_schedule.call_count == 4
 
     @pytest.mark.asyncio

@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, memo } from "react"
 import {
   Bar,
   XAxis,
@@ -58,7 +58,7 @@ function CustomTooltip({
   )
 }
 
-export function VolumeSpikeChart({ industries, className }: VolumeSpikeChartProps) {
+export const VolumeSpikeChart = memo(function VolumeSpikeChart({ industries, className }: VolumeSpikeChartProps) {
   const chartData = useMemo(() => {
     return industries
       .map((g) => ({
@@ -108,7 +108,7 @@ export function VolumeSpikeChart({ industries, className }: VolumeSpikeChartProp
       </CardContent>
     </Card>
   )
-}
+})
 
 export function VolumeSpikeChartSkeleton({ className }: { className?: string }) {
   return (

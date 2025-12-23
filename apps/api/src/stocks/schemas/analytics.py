@@ -7,8 +7,8 @@ from pydantic import BaseModel, Field
 from src.stocks.schemas.price import VolumeAnomalyLevel
 
 
-class TopPerformerItem(BaseModel):
-    """Single top performer entry."""
+class FinancialStatementItem(BaseModel):
+    """Single financial statement entry."""
     rank: int = Field(..., description="Ranking position")
     symbol: str = Field(..., description="Stock ticker")
     company_name: Optional[str] = Field(None, description="Company name")
@@ -23,16 +23,16 @@ class TopPerformerItem(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class TopPerformersResponse(BaseModel):
-    """Top performers list response."""
+class FinancialStatementsResponse(BaseModel):
+    """Financial statements list response."""
     period: str = Field(..., description="Period label e.g. 'Q4-2024'")
     updated_at: Optional[datetime] = Field(None, description="Last data update")
     total: int = Field(..., description="Total records available")
-    data: List[TopPerformerItem] = Field(..., description="Top performers list")
+    data: List[FinancialStatementItem] = Field(..., description="Financial statements list")
 
 
-class TopPerformersCollectionResult(BaseModel):
-    """Result of top performers collection job."""
+class FinancialStatementsCollectionResult(BaseModel):
+    """Result of financial statements collection job."""
     success: int = Field(..., description="Number of records successfully stored")
     failed: int = Field(..., description="Number of failed symbol fetches")
     rate_limited: int = Field(default=0, description="Number of rate-limited requests")

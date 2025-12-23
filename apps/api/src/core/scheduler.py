@@ -10,7 +10,7 @@ from src.stocks.jobs import (
     cleanup_old_data_job,
     collect_daily_ohlcv_job,
     collect_intraday_data_job,
-    collect_top_performers_job,
+    collect_financial_statements_job,
 )
 
 logger = logging.getLogger(__name__)
@@ -74,19 +74,19 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
             f"(delay={settings.daily_ohlcv_delay}s, batch={settings.daily_ohlcv_batch_size})"
         )
 
-    # Weekly top performers collection on Sunday at 02:00 ICT
-    if settings.top_performers_enabled:
+    # Weekly financial statements collection on Sunday at 02:00 ICT
+    if settings.financial_statements_enabled:
         await scheduler.add_schedule(
-            collect_top_performers_job,
+            collect_financial_statements_job,
             CronTrigger(
-                hour=settings.top_performers_hour,
-                minute=settings.top_performers_minute,
+                hour=settings.financial_statements_hour,
+                minute=settings.financial_statements_minute,
                 day_of_week="sun",
                 timezone="Asia/Ho_Chi_Minh",
             ),
-            id="collect-top-performers",
+            id="collect-financial-statements",
         )
         logger.info(
-            f"Scheduled top performers collection: Sunday "
-            f"{settings.top_performers_hour:02d}:{settings.top_performers_minute:02d} ICT"
+            f"Scheduled financial statements collection: Sunday "
+            f"{settings.financial_statements_hour:02d}:{settings.financial_statements_minute:02d} ICT"
         )

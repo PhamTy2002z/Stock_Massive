@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, memo } from "react"
 import { Treemap, ResponsiveContainer, Tooltip } from "recharts"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
@@ -123,7 +123,7 @@ function CustomTooltip({
   )
 }
 
-export function VolumeSpikeTreemap({ industries, className }: VolumeSpikeTreemapProps) {
+export const VolumeSpikeTreemap = memo(function VolumeSpikeTreemap({ industries, className }: VolumeSpikeTreemapProps) {
   const treemapData = useMemo(() => {
     if (!industries?.length) return []
     return industries.map((ind) => ({
@@ -158,7 +158,7 @@ export function VolumeSpikeTreemap({ industries, className }: VolumeSpikeTreemap
       </CardContent>
     </Card>
   )
-}
+})
 
 export function VolumeSpikeTreemapSkeleton({ className }: { className?: string }) {
   return (

@@ -53,9 +53,9 @@ class StockIntradayBar(Base):
         return f"<StockIntradayBar {self.symbol} {self.bar_time}>"
 
 
-class TopPerformer(Base):
-    """Top performing companies by quarterly financial metrics."""
-    __tablename__ = "top_performers"
+class FinancialStatement(Base):
+    """Financial statements - quarterly financial metrics for companies."""
+    __tablename__ = "financial_statements"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     symbol = Column(String(10), nullable=False, index=True)
@@ -72,10 +72,10 @@ class TopPerformer(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (
-        UniqueConstraint("symbol", "year", "quarter", name="uq_top_performers_symbol_period"),
-        Index("ix_top_performers_period", "year", "quarter"),
-        Index("ix_top_performers_exchange", "exchange"),
+        UniqueConstraint("symbol", "year", "quarter", name="uq_financial_statements_symbol_period"),
+        Index("ix_financial_statements_period", "year", "quarter"),
+        Index("ix_financial_statements_exchange", "exchange"),
     )
 
     def __repr__(self) -> str:
-        return f"<TopPerformer {self.symbol} Q{self.quarter}/{self.year}>"
+        return f"<FinancialStatement {self.symbol} Q{self.quarter}/{self.year}>"

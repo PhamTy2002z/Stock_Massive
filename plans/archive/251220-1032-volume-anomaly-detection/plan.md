@@ -1,7 +1,7 @@
 ---
 title: "Volume Anomaly Detection"
 description: "Detect unusual trading volume by time slot with bar chart visualization"
-status: ✅ completed
+**Status:** ✅ Completed
 effort: 8h
 priority: high
 branch: main

@@ -1,6 +1,6 @@
 # Phase 3: API Endpoints
 
-**Status:** Pending
+**Status:** ✅ Completed
 **Priority:** High
 
 ## Context
@@ -43,16 +43,21 @@ GET /api/v1/stocks/price-board          # Real-time price board
 
 ## Todo List
 
-- [ ] Create apps/api/src/stocks/router.py
-- [ ] Update apps/api/src/main.py to include router
-- [ ] Add query parameter validation
-- [ ] Test endpoints with curl/httpie
+- [x] Create apps/api/src/stocks/router.py
+- [x] Update apps/api/src/main.py to include router
+- [x] Add query parameter validation
+- [x] Test endpoints with curl/httpie
 
 ## Success Criteria
 
-- All endpoints return valid JSON
-- OpenAPI docs show all endpoints
-- Error responses follow consistent format
+- [x] All endpoints return valid JSON
+- [x] OpenAPI docs show all endpoints
+- [x] Error responses follow consistent format
+
+## Completion Notes
+- Routers modularized: `apps/api/src/stocks/{price,company,financial,market,analytics}/router.py`
+- Main router aggregates sub-routers: `apps/api/src/stocks/router.py`
+- Validators in `apps/api/src/stocks/shared/validators.py`
 
 ## Next Steps
 

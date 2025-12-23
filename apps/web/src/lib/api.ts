@@ -382,8 +382,8 @@ export async function fetchVN30Overview(): Promise<VN30OverviewResponse> {
   return fetchApi<VN30OverviewResponse>("/stocks/vn30-overview")
 }
 
-// Top Performers Types
-export interface TopPerformerItem {
+// Financial Statements Types
+export interface FinancialStatementItem {
   rank: number
   symbol: string
   company_name: string | null
@@ -396,26 +396,26 @@ export interface TopPerformerItem {
   quarter: number
 }
 
-export interface TopPerformersResponse {
+export interface FinancialStatementsResponse {
   period: string
   updated_at: string | null
   total: number
-  data: TopPerformerItem[]
+  data: FinancialStatementItem[]
 }
 
-export async function fetchTopPerformers(
+export async function fetchFinancialStatements(
   limit: number = 50,
   exchange?: string
-): Promise<TopPerformersResponse> {
+): Promise<FinancialStatementsResponse> {
   const params = new URLSearchParams()
   params.set("limit", limit.toString())
   if (exchange) params.set("exchange", exchange)
 
-  return fetchApi<TopPerformersResponse>(`/stocks/analytics/top-performers?${params}`)
+  return fetchApi<FinancialStatementsResponse>(`/stocks/analytics/financial-statements?${params}`)
 }
 
-// Top Performers Collection Result
-export interface TopPerformersCollectionResult {
+// Financial Statements Collection Result
+export interface FinancialStatementsCollectionResult {
   success: number
   failed: number
   rate_limited: number
@@ -424,8 +424,8 @@ export interface TopPerformersCollectionResult {
   error: string | null
 }
 
-export async function triggerTopPerformersCollection(): Promise<TopPerformersCollectionResult> {
-  return fetchApi<TopPerformersCollectionResult>("/stocks/analytics/top-performers/collect", {
+export async function triggerFinancialStatementsCollection(): Promise<FinancialStatementsCollectionResult> {
+  return fetchApi<FinancialStatementsCollectionResult>("/stocks/analytics/financial-statements/collect", {
     method: "POST",
   })
 }
@@ -475,6 +475,7 @@ export interface VolumeSpikeParams {
   exchange?: string
   includeUpcom?: boolean
   limit?: number
+  topProfitableOnly?: boolean
 }
 
 export async function fetchVolumeSpikes(
@@ -486,6 +487,7 @@ export async function fetchVolumeSpikes(
   if (params.exchange) searchParams.set("exchange", params.exchange)
   if (params.includeUpcom !== undefined) searchParams.set("include_upcom", String(params.includeUpcom))
   if (params.limit) searchParams.set("limit", params.limit.toString())
+  if (params.topProfitableOnly) searchParams.set("top_profitable_only", "true")
 
   const queryString = searchParams.toString()
   return fetchApi<VolumeSpikeResponse>(
