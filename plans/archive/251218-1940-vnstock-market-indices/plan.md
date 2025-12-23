@@ -2,7 +2,7 @@
 
 ## Overview
 - **Date**: 2024-12-18
-- **Status**: Draft
+- **Status**: ✅ Completed
 - **Priority**: High
 - **Description**: Integrate real market index data (VNINDEX, VN30, HNXINDEX, UPCOMINDEX) into dashboard "Chỉ số thị trường" section using vnstock library.
 
@@ -16,8 +16,8 @@
 
 | Phase | Name | Status | File |
 |-------|------|--------|------|
-| 01 | Backend API Endpoint | Pending | [phase-01-backend-api.md](./phase-01-backend-api.md) |
-| 02 | Frontend Integration | Pending | [phase-02-frontend-integration.md](./phase-02-frontend-integration.md) |
+| 01 | Backend API Endpoint | ✅ Completed | [phase-01-backend-api.md](./phase-01-backend-api.md) |
+| 02 | Frontend Integration | ✅ Completed | [phase-02-frontend-integration.md](./phase-02-frontend-integration.md) |
 
 ## Research
 - [Vnstock Index API](./research/researcher-01-vnstock-index-api.md)
@@ -30,8 +30,13 @@
 4. Server Component with client-side refresh for real-time feel
 
 ## Success Criteria
-- [ ] `/api/v1/indices` endpoint returns 4 indices with real data
-- [ ] Dashboard displays live market indices
-- [ ] Sparkline shows 10-day price trend
-- [ ] Loading skeleton shown during fetch
-- [ ] Error handling for API failures
+- [x] `/api/v1/indices` endpoint returns 4 indices with real data
+- [x] Dashboard displays live market indices
+- [x] Sparkline shows 10-day price trend
+- [x] Loading skeleton shown during fetch
+- [x] Error handling for API failures
+
+## Completion Notes
+- Backend endpoint implemented at `/stocks/market-indices` in `apps/api/src/stocks/price/router.py:76`
+- Frontend hook `useMarketIndices` in `apps/web/src/hooks/use-market-indices.ts`
+- API client function `fetchMarketIndices` in `apps/web/src/lib/api.ts:55`

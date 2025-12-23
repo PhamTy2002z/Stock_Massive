@@ -12,10 +12,10 @@ from sqlalchemy import select, func, desc, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from vnstock import Listing
 
-from src.stocks.models import TopPerformer, StockDailyOHLCV
+from src.stocks.models import FinancialStatement, StockDailyOHLCV
 from src.stocks.schemas.analytics import (
-    TopPerformerItem,
-    TopPerformersResponse,
+    FinancialStatementItem,
+    FinancialStatementsResponse,
     VolumeSpikeItem,
     IndustryVolumeSpikeGroup,
     VolumeSpikeMetadata,
@@ -24,6 +24,21 @@ from src.stocks.schemas.analytics import (
 from src.stocks.schemas.price import VolumeAnomalyLevel
 
 logger = logging.getLogger(__name__)
+
+# Exchange name mapping (UI name → DB name)
+EXCHANGE_ALIASES = {
+    "HOSE": "HSX",
+    "HSX": "HSX",
+    "HNX": "HNX",
+}
+
+
+def normalize_exchange(exchange: str | None) -> str | None:
+    """Normalize exchange name for database query."""
+    if not exchange:
+        return None
+    return EXCHANGE_ALIASES.get(exchange.upper(), exchange.upper())
+
 
 # Constants for volume spike calculation
 VOLUME_LOOKBACK_DAYS = 20
@@ -40,20 +55,22 @@ class AnalyticsService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get_top_performers(
+    async def get_financial_statements(
         self,
         limit: int = 50,
         exchange: Optional[str] = None,
         year: Optional[int] = None,
         quarter: Optional[int] = None,
-    ) -> TopPerformersResponse:
-        """Get top performers ranked by net profit."""
+    ) -> FinancialStatementsResponse:
+        """Get financial statements ranked by net profit."""
+        # Normalize exchange alias (HOSE → HSX)
+        normalized_exchange = normalize_exchange(exchange)
 
         # If no period specified, get latest available
         if year is None or quarter is None:
             latest = await self.db.execute(
-                select(TopPerformer.year, TopPerformer.quarter)
-                .order_by(desc(TopPerformer.year), desc(TopPerformer.quarter))
+                select(FinancialStatement.year, FinancialStatement.quarter)
+                .order_by(desc(FinancialStatement.year), desc(FinancialStatement.quarter))
                 .limit(1)
             )
             row = latest.first()
@@ -61,7 +78,7 @@ class AnalyticsService:
                 year, quarter = row.year, row.quarter
             else:
                 # No data yet
-                return TopPerformersResponse(
+                return FinancialStatementsResponse(
                     period="N/A",
                     updated_at=None,
                     total=0,
@@ -69,26 +86,26 @@ class AnalyticsService:
                 )
 
         # Build query
-        query = select(TopPerformer).where(
-            TopPerformer.year == year,
-            TopPerformer.quarter == quarter
+        query = select(FinancialStatement).where(
+            FinancialStatement.year == year,
+            FinancialStatement.quarter == quarter
         )
 
-        if exchange:
-            query = query.where(TopPerformer.exchange == exchange.upper())
+        if normalized_exchange:
+            query = query.where(FinancialStatement.exchange == normalized_exchange)
 
-        query = query.order_by(TopPerformer.rank.asc()).limit(limit)
+        query = query.order_by(FinancialStatement.rank.asc()).limit(limit)
 
         result = await self.db.execute(query)
         rows = result.scalars().all()
 
         # Get total count
-        count_query = select(func.count()).select_from(TopPerformer).where(
-            TopPerformer.year == year,
-            TopPerformer.quarter == quarter
+        count_query = select(func.count()).select_from(FinancialStatement).where(
+            FinancialStatement.year == year,
+            FinancialStatement.quarter == quarter
         )
-        if exchange:
-            count_query = count_query.where(TopPerformer.exchange == exchange.upper())
+        if normalized_exchange:
+            count_query = count_query.where(FinancialStatement.exchange == normalized_exchange)
         count_result = await self.db.execute(count_query)
         total = count_result.scalar() or 0
 
@@ -97,11 +114,11 @@ class AnalyticsService:
         if rows:
             updated_at = max(r.updated_at for r in rows if r.updated_at)
 
-        return TopPerformersResponse(
+        return FinancialStatementsResponse(
             period=f"Q{quarter}-{year}",
             updated_at=updated_at,
             total=total,
-            data=[TopPerformerItem.model_validate(r) for r in rows]
+            data=[FinancialStatementItem.model_validate(r) for r in rows]
         )
 
     async def get_volume_spikes(
@@ -111,6 +128,7 @@ class AnalyticsService:
         exchange: Optional[str] = None,
         include_upcom: bool = False,
         limit: int = 50,
+        top_profitable_only: bool = False,
     ) -> VolumeSpikeResponse:
         """Detect volume spikes grouped by ICB industry.
 
@@ -120,11 +138,21 @@ class AnalyticsService:
             exchange: Filter by exchange (HOSE/HNX)
             include_upcom: Include UPCOM stocks (default: False)
             limit: Max results per industry group
+            top_profitable_only: Only show Top 50 profitable companies
 
         Returns:
             VolumeSpikeResponse with stocks grouped by ICB Level 2
         """
         start_time = time.time()
+
+        # Get top 50 symbols if filter enabled
+        top_symbols: Optional[set[str]] = None
+        if top_profitable_only:
+            top_symbols = await self._get_top_profitable_symbols()
+            # If no financial data exists, return empty response immediately
+            if not top_symbols:
+                logger.info("Top 50 filter enabled but no financial data - returning empty")
+                return self._empty_response(target_date or date.today(), start_time)
 
         # 1. Get latest available date if not specified
         if target_date is None:
@@ -176,6 +204,10 @@ class AnalyticsService:
         # 6. Calculate volume spikes
         spike_items = []
         for symbol, data_list in symbol_data.items():
+            # Skip if not in top 50 (when filter enabled)
+            if top_symbols is not None and symbol not in top_symbols:
+                continue
+
             # Need at least 21 days of data (1 current + 20 for average)
             if len(data_list) < MIN_DATA_POINTS:
                 continue
@@ -364,6 +396,36 @@ class AnalyticsService:
         # Sort groups by spike count descending
         result.sort(key=lambda x: x.spike_count, reverse=True)
         return result
+
+    async def _get_top_profitable_symbols(self) -> set[str]:
+        """Get symbols of top 50 profitable companies from latest period."""
+        # Get latest period
+        latest = await self.db.execute(
+            select(FinancialStatement.year, FinancialStatement.quarter)
+            .order_by(desc(FinancialStatement.year), desc(FinancialStatement.quarter))
+            .limit(1)
+        )
+        row = latest.first()
+        if not row:
+            logger.warning("No financial statements found for top 50 filter")
+            return set()
+
+        year, quarter = row.year, row.quarter
+        logger.info(f"Top 50 filter: Using period Q{quarter}-{year}")
+
+        # Get top 50 symbols for this period (rank 1-50)
+        result = await self.db.execute(
+            select(FinancialStatement.symbol)
+            .where(
+                FinancialStatement.year == year,
+                FinancialStatement.quarter == quarter,
+                FinancialStatement.rank >= 1,
+                FinancialStatement.rank <= 50
+            )
+        )
+        symbols = {r.symbol for r in result.all()}
+        logger.info(f"Top 50 filter: Found {len(symbols)} symbols")
+        return symbols
 
     def _empty_response(self, target_date: date, start_time: float) -> VolumeSpikeResponse:
         """Return empty response when no data available."""

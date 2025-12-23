@@ -11,18 +11,18 @@ from src.core.database import get_db
 from src.core.ratelimit import heavy_rate_limit, standard_rate_limit
 from src.stocks.analytics.service import AnalyticsService
 from src.stocks.schemas.analytics import (
-    TopPerformersCollectionResult,
-    TopPerformersResponse,
+    FinancialStatementsCollectionResult,
+    FinancialStatementsResponse,
     VolumeSpikeResponse,
     VolumeSpikeMetadata,
 )
-from src.stocks.top_performers_collector import TopPerformersCollector
+from src.stocks.financial_statements_collector import FinancialStatementsCollector
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 # Cache instance with trading-hours-aware TTL
-top_performers_cache = TradingHoursCache(
-    key_prefix="stock:top_performers:",
+financial_statements_cache = TradingHoursCache(
+    key_prefix="stock:financial_statements:",
     ttl_trading=3600,      # 1 hour during trading
     ttl_off_hours=86400,   # 24 hours off-hours
 )
@@ -35,14 +35,14 @@ volume_spikes_cache = TradingHoursCache(
 )
 
 
-@router.get("/top-performers", response_model=TopPerformersResponse)
-async def get_top_performers(
+@router.get("/financial-statements", response_model=FinancialStatementsResponse)
+async def get_financial_statements(
     limit: int = Query(50, ge=1, le=100, description="Number of results"),
-    exchange: Optional[str] = Query(None, description="Filter by exchange: HOSE or HNX"),
+    exchange: Optional[str] = Query(None, pattern="^(HOSE|HSX|HNX)$", description="Filter by exchange: HOSE (or HSX) or HNX"),
     year: Optional[int] = Query(None, ge=2020, le=2030, description="Fiscal year"),
     quarter: Optional[int] = Query(None, ge=1, le=4, description="Fiscal quarter"),
     db: AsyncSession = Depends(get_db),
-) -> TopPerformersResponse:
+) -> FinancialStatementsResponse:
     """Get top performing companies by net profit.
 
     Returns ranked list of companies sorted by quarterly net profit.
@@ -52,13 +52,13 @@ async def get_top_performers(
     cache_key = f"{limit}:{exchange or 'all'}:{year or 'latest'}:{quarter or 'latest'}"
 
     # Try cache
-    cached = top_performers_cache.get(cache_key)
+    cached = financial_statements_cache.get(cache_key)
     if cached:
-        return TopPerformersResponse(**cached)
+        return FinancialStatementsResponse(**cached)
 
     # Query database
     service = AnalyticsService(db)
-    result = await service.get_top_performers(
+    result = await service.get_financial_statements(
         limit=limit,
         exchange=exchange,
         year=year,
@@ -66,33 +66,33 @@ async def get_top_performers(
     )
 
     # Cache result
-    top_performers_cache.set(cache_key, result.model_dump(mode='json'))
+    financial_statements_cache.set(cache_key, result.model_dump(mode='json'))
 
     return result
 
 
 @router.post(
-    "/top-performers/collect",
-    response_model=TopPerformersCollectionResult,
+    "/financial-statements/collect",
+    response_model=FinancialStatementsCollectionResult,
     dependencies=[Depends(heavy_rate_limit)],
 )
-async def collect_top_performers(
+async def collect_financial_statements(
     db: AsyncSession = Depends(get_db),
-) -> TopPerformersCollectionResult:
-    """Manually trigger top performers data collection.
+) -> FinancialStatementsCollectionResult:
+    """Manually trigger financial statements data collection.
 
     Fetches quarterly financials for all HOSE+HNX symbols and stores
     ranked data. This is a long-running operation (10-30 minutes).
 
     Note: Data is also collected automatically every Sunday at 02:00 ICT.
     """
-    collector = TopPerformersCollector(db)
+    collector = FinancialStatementsCollector(db)
     result = await collector.collect()
 
     # Clear cache after fresh collection
-    top_performers_cache.clear_prefix()
+    financial_statements_cache.clear_prefix()
 
-    return TopPerformersCollectionResult(**result)
+    return FinancialStatementsCollectionResult(**result)
 
 
 @router.get(
@@ -112,6 +112,9 @@ async def get_volume_spikes(
     ),
     include_upcom: bool = Query(False, description="Include UPCOM stocks"),
     limit: int = Query(50, ge=10, le=200, description="Max results per industry"),
+    top_profitable_only: bool = Query(
+        False, description="Only show Top 50 profitable companies"
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> VolumeSpikeResponse:
     """Detect volume spikes grouped by ICB industry.
@@ -127,7 +130,7 @@ async def get_volume_spikes(
     """
     # Build cache key
     date_str = target_date.isoformat() if target_date else "latest"
-    cache_key = f"{date_str}:{min_ratio}:{exchange or 'all'}:{include_upcom}:{limit}"
+    cache_key = f"{date_str}:{min_ratio}:{exchange or 'all'}:{include_upcom}:{limit}:{top_profitable_only}"
 
     # Try cache
     cached = volume_spikes_cache.get(cache_key)
@@ -144,9 +147,17 @@ async def get_volume_spikes(
         exchange=exchange,
         include_upcom=include_upcom,
         limit=limit,
+        top_profitable_only=top_profitable_only,
     )
 
     # Cache result
     volume_spikes_cache.set(cache_key, result.model_dump(mode="json"))
 
     return result
+
+
+@router.delete("/volume-spikes/cache", dependencies=[Depends(heavy_rate_limit)])
+async def clear_volume_spikes_cache() -> dict:
+    """Clear volume spikes cache. Use when data seems stale or after updates."""
+    deleted = volume_spikes_cache.clear_prefix()
+    return {"message": f"Cleared {deleted} cache entries"}

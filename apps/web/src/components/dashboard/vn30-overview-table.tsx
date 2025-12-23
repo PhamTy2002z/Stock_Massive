@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, memo, useCallback } from "react"
 import { cn } from "@/lib/utils"
 import { TrendingUp, TrendingDown, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, RefreshCw } from "lucide-react"
 import {
@@ -52,6 +52,59 @@ function formatMarketCap(value: number | null): string {
 
 type SortDirection = "asc" | "desc" | null
 
+// Memoized row component to prevent unnecessary re-renders
+interface VN30RowProps {
+  stock: {
+    symbol: string
+    company_name: string
+    price: number | null
+    change_pct: number | null
+    volume: number | null
+    market_cap: number | null
+  }
+}
+
+const VN30Row = memo(function VN30Row({ stock }: VN30RowProps) {
+  const isPositive = (stock.change_pct ?? 0) >= 0
+  const changeColor = isPositive
+    ? "text-green-500 dark:text-green-400"
+    : "text-red-500 dark:text-red-400"
+
+  return (
+    <tr className="border-b border-border/30 transition-colors hover:bg-muted/20">
+      <td className="py-3 px-4 text-sm font-semibold text-foreground">
+        {stock.symbol}
+      </td>
+      <td className="py-3 px-4 text-sm text-foreground/90">
+        {stock.company_name}
+      </td>
+      <td className="py-3 px-4 text-sm text-right tabular-nums font-medium text-foreground">
+        {formatPrice(stock.price)}
+      </td>
+      <td className="py-3 px-4 text-sm text-right tabular-nums">
+        <div className="flex items-center justify-end gap-1">
+          {stock.change_pct !== null && (
+            isPositive ? (
+              <TrendingUp className={cn("h-3.5 w-3.5", changeColor)} />
+            ) : (
+              <TrendingDown className={cn("h-3.5 w-3.5", changeColor)} />
+            )
+          )}
+          <span className={cn("font-medium", changeColor)}>
+            {formatPercent(stock.change_pct)}
+          </span>
+        </div>
+      </td>
+      <td className="py-3 px-4 text-sm text-right tabular-nums text-foreground/90">
+        {formatVolume(stock.volume)}
+      </td>
+      <td className="py-3 px-4 text-sm text-right tabular-nums text-foreground/90">
+        {formatMarketCap(stock.market_cap)}
+      </td>
+    </tr>
+  )
+})
+
 export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
   const [currentPage, setCurrentPage] = useState(1)
   const [rowsPerPage, setRowsPerPage] = useState(10)
@@ -70,14 +123,14 @@ export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
     })
   }, [data?.stocks, sortDirection])
 
-  const toggleSort = () => {
+  const toggleSort = useCallback(() => {
     setSortDirection((prev) => {
       if (prev === null) return "desc"
       if (prev === "desc") return "asc"
       return null
     })
     setCurrentPage(1)
-  }
+  }, [])
   const totalItems = stocks.length
   const totalPages = Math.max(1, Math.ceil(totalItems / rowsPerPage))
   const startIndex = (currentPage - 1) * rowsPerPage
@@ -87,16 +140,21 @@ export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
     return stocks.slice(startIndex, endIndex)
   }, [stocks, startIndex, endIndex])
 
-  const goToPage = (page: number) => {
-    if (page >= 1 && page <= totalPages) {
-      setCurrentPage(page)
-    }
-  }
+  const goToPage = useCallback((page: number) => {
+    setCurrentPage((curr) => {
+      if (page >= 1 && page <= totalPages) return page
+      return curr
+    })
+  }, [totalPages])
 
-  const handleRowsPerPageChange = (value: string) => {
+  const handleRowsPerPageChange = useCallback((value: string) => {
     setRowsPerPage(Number(value))
     setCurrentPage(1)
-  }
+  }, [])
+
+  const handleRefetch = useCallback(() => {
+    refetch()
+  }, [refetch])
 
   if (isLoading && !data) {
     return (
@@ -123,7 +181,7 @@ export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-foreground">Tổng quan VN30</h2>
           <button
-            onClick={() => refetch()}
+            onClick={handleRefetch}
             disabled={isFetching}
             className="p-1.5 rounded-md hover:bg-muted transition-colors disabled:opacity-50"
             title="Làm mới dữ liệu"
@@ -147,7 +205,7 @@ export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-foreground">Tổng quan VN30</h2>
           <button
-            onClick={() => refetch()}
+            onClick={handleRefetch}
             disabled={isFetching}
             className="p-1.5 rounded-md hover:bg-muted transition-colors disabled:opacity-50"
             title="Làm mới dữ liệu"
@@ -169,7 +227,7 @@ export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-foreground">Tổng quan VN30</h2>
         <button
-          onClick={() => refetch()}
+          onClick={handleRefetch}
           disabled={isFetching}
           className="p-1.5 rounded-md hover:bg-muted transition-colors disabled:opacity-50"
           title="Làm mới dữ liệu"
@@ -202,49 +260,9 @@ export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
               </tr>
             </thead>
             <tbody>
-              {currentData.map((stock) => {
-                const isPositive = (stock.change_pct ?? 0) >= 0
-                const changeColor = isPositive
-                  ? "text-green-500 dark:text-green-400"
-                  : "text-red-500 dark:text-red-400"
-
-                return (
-                  <tr
-                    key={stock.symbol}
-                    className="border-b border-border/30 transition-colors hover:bg-muted/20"
-                  >
-                    <td className="py-3 px-4 text-sm font-semibold text-foreground">
-                      {stock.symbol}
-                    </td>
-                    <td className="py-3 px-4 text-sm text-foreground/90">
-                      {stock.company_name}
-                    </td>
-                    <td className="py-3 px-4 text-sm text-right tabular-nums font-medium text-foreground">
-                      {formatPrice(stock.price)}
-                    </td>
-                    <td className="py-3 px-4 text-sm text-right tabular-nums">
-                      <div className="flex items-center justify-end gap-1">
-                        {stock.change_pct !== null && (
-                          isPositive ? (
-                            <TrendingUp className={cn("h-3.5 w-3.5", changeColor)} />
-                          ) : (
-                            <TrendingDown className={cn("h-3.5 w-3.5", changeColor)} />
-                          )
-                        )}
-                        <span className={cn("font-medium", changeColor)}>
-                          {formatPercent(stock.change_pct)}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="py-3 px-4 text-sm text-right tabular-nums text-foreground/90">
-                      {formatVolume(stock.volume)}
-                    </td>
-                    <td className="py-3 px-4 text-sm text-right tabular-nums text-foreground/90">
-                      {formatMarketCap(stock.market_cap)}
-                    </td>
-                  </tr>
-                )
-              })}
+              {currentData.map((stock) => (
+                <VN30Row key={stock.symbol} stock={stock} />
+              ))}
             </tbody>
           </table>
         </div>

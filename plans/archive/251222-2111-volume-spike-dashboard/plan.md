@@ -1,6 +1,6 @@
 ---
 feature: Volume Spike Dashboard by Industry
-status: pending
+status: completed
 priority: P2
 created: 2025-12-22
 owner: planner-agent
@@ -56,11 +56,11 @@ Dashboard in "Deep Dive" tab showing stocks with volume spikes (>1.5x 20-day avg
 - Filters: Date, threshold, exchange, UPCOM toggle
 
 ## Success Criteria
-- [ ] Backend returns volume spikes grouped by ICB Level 2 (<3s response)
-- [ ] Frontend displays collapsible industry groups with stock tables
-- [ ] Click stock symbol navigates to Deep Dive page
-- [ ] Cache reduces API load by 80% during trading hours
-- [ ] Handles 1,700+ symbols without timeout
+- [x] Backend returns volume spikes grouped by ICB Level 2 (<3s response)
+- [x] Frontend displays collapsible industry groups with stock tables
+- [x] Click stock symbol navigates to Deep Dive page
+- [x] Cache reduces API load by 80% during trading hours
+- [x] Handles 1,700+ symbols without timeout
 
 ## Risk Assessment
 | Risk | Impact | Mitigation |
@@ -92,10 +92,10 @@ Dashboard in "Deep Dive" tab showing stocks with volume spikes (>1.5x 20-day avg
 | MVP Filters | All 4: Threshold, Exchange, UPCOM toggle, Date picker |
 
 ### Action Items (Plan Updates Required)
-- [ ] Add Phase 0: Database schema + daily OHLCV collection job
-- [ ] Update Phase 1: Query from `daily_ohlcv` table instead of vnstock API
-- [ ] Update Phase 2: Page location is `/analytics/volume-spikes` (not tab in Deep Dive)
-- [ ] Update Phase 2: Chart shows spike count per industry (not individual stocks)
+- [x] Add Phase 0: Database schema + daily OHLCV collection job
+- [x] Update Phase 1: Query from `daily_ohlcv` table instead of vnstock API
+- [x] Update Phase 2: Page location is `/analytics/volume-spikes` (not tab in Deep Dive)
+- [x] Update Phase 2: Chart shows spike count per industry (not individual stocks)
 
 ## Next Steps
 1. Update phase documents with validated decisions

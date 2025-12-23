@@ -500,12 +500,12 @@ Keep as backup until Phase 5 verification.
 
 ## Success Criteria
 
-- [ ] 4 domain routers created
-- [ ] Main router aggregates sub-routers
-- [ ] All 27 endpoints accessible at same paths
-- [ ] OpenAPI docs show all endpoints under "stocks" tag
-- [ ] All tests pass
-- [ ] No breaking changes to API paths
+- [x] 4 domain routers created
+- [x] Main router aggregates sub-routers
+- [x] All 27 endpoints accessible at same paths
+- [x] OpenAPI docs show all endpoints under "stocks" tag
+- [x] All tests pass
+- [x] No breaking changes to API paths
 
 ## Testing
 

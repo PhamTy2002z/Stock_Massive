@@ -1,6 +1,6 @@
 "use client"
 
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, keepPreviousData } from "@tanstack/react-query"
 import { fetchStockDetail, type StockDetail } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
 
@@ -9,6 +9,8 @@ const SYMBOL_PATTERN = /^[A-Z0-9]{1,10}$/
 interface UseStockDetailResult {
   data: StockDetail | null
   isLoading: boolean
+  isFetching: boolean
+  isPlaceholderData: boolean
   error: Error | null
   refetch: () => void
 }
@@ -25,14 +27,17 @@ export function useStockDetail(symbol: string | null): UseStockDetailResult {
       return fetchStockDetail(symbol)
     },
     enabled: isValidSymbol,
-    staleTime: 10 * 1000, // 10 seconds
-    refetchInterval: 10 * 1000, // Auto-refresh every 10 seconds
-    refetchIntervalInBackground: true, // Keep refreshing even when tab is not focused
+    staleTime: 15 * 1000,
+    refetchInterval: 15 * 1000,
+    placeholderData: keepPreviousData,
+    refetchIntervalInBackground: false,
   })
 
   return {
     data: query.data ?? null,
     isLoading: query.isLoading,
+    isFetching: query.isFetching,
+    isPlaceholderData: query.isPlaceholderData,
     error: query.error,
     refetch: query.refetch,
   }

@@ -1,6 +1,6 @@
 # Phase 1: Core Setup & Configuration
 
-**Status:** Pending
+**Status:** ✅ Completed
 **Priority:** High
 
 ## Context
@@ -34,16 +34,16 @@ vnstock>=3.0.0
 
 ## Todo List
 
-- [ ] Add vnstock to requirements.txt
-- [ ] Create apps/api/src/core/config.py
-- [ ] Create apps/api/src/core/dependencies.py
-- [ ] Test import and basic vnstock functionality
+- [x] Add vnstock to requirements.txt
+- [x] Create apps/api/src/core/config.py
+- [x] Create apps/api/src/core/dependencies.py
+- [x] Test import and basic vnstock functionality
 
 ## Success Criteria
 
-- `from vnstock import Vnstock` works
-- Settings load from environment
-- No import errors on app startup
+- [x] `from vnstock import Vnstock` works
+- [x] Settings load from environment
+- [x] No import errors on app startup
 
 ## Risk Assessment
 

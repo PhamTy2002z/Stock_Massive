@@ -168,11 +168,11 @@ Files to update:
 
 ## Success Criteria
 
-- [ ] `stocks/shared/` module created with 3 files
-- [ ] All utilities extracted and functional
-- [ ] `service.py` imports from `shared/`
-- [ ] All tests pass without modification
-- [ ] No breaking changes to external imports
+- [x] `stocks/shared/` module created with 3 files
+- [x] All utilities extracted and functional
+- [x] `service.py` imports from `shared/`
+- [x] All tests pass without modification
+- [x] No breaking changes to external imports
 
 ## Testing
 

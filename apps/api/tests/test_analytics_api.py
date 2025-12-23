@@ -4,8 +4,8 @@ from datetime import datetime, date
 from unittest.mock import AsyncMock, patch, MagicMock
 
 from src.stocks.schemas.analytics import (
-    TopPerformerItem,
-    TopPerformersResponse,
+    FinancialStatementItem,
+    FinancialStatementsResponse,
     VolumeSpikeItem,
     IndustryVolumeSpikeGroup,
     VolumeSpikeMetadata,
@@ -14,18 +14,18 @@ from src.stocks.schemas.analytics import (
 from src.stocks.schemas.price import VolumeAnomalyLevel
 
 
-class TestTopPerformersAPI:
-    """Test cases for GET /api/v1/stocks/analytics/top-performers endpoint."""
+class TestFinancialStatementsAPI:
+    """Test cases for GET /api/v1/stocks/analytics/financial-statements endpoint."""
 
-    def test_get_top_performers_default_params(self, client):
-        """Test GET /analytics/top-performers with default parameters."""
+    def test_get_financial_statements_default_params(self, client):
+        """Test GET /analytics/financial-statements with default parameters."""
         # Mock the service to return a valid response
-        mock_response = TopPerformersResponse(
+        mock_response = FinancialStatementsResponse(
             period="Q4-2024",
             updated_at=datetime(2024, 12, 22, 10, 0, 0),
             total=100,
             data=[
-                TopPerformerItem(
+                FinancialStatementItem(
                     rank=1,
                     symbol="VCB",
                     company_name="Vietcombank",
@@ -37,7 +37,7 @@ class TestTopPerformersAPI:
                     year=2024,
                     quarter=4,
                 ),
-                TopPerformerItem(
+                FinancialStatementItem(
                     rank=2,
                     symbol="FPT",
                     company_name="FPT Corp",
@@ -54,13 +54,13 @@ class TestTopPerformersAPI:
 
         with patch("src.stocks.analytics.router.AnalyticsService") as mock_service_class:
             mock_service = AsyncMock()
-            mock_service.get_top_performers.return_value = mock_response
+            mock_service.get_financial_statements.return_value = mock_response
             mock_service_class.return_value = mock_service
 
             # Clear cache to avoid interference
-            with patch("src.stocks.analytics.router.top_performers_cache.get", return_value=None):
-                with patch("src.stocks.analytics.router.top_performers_cache.set"):
-                    response = client.get("/api/v1/stocks/analytics/top-performers")
+            with patch("src.stocks.analytics.router.financial_statements_cache.get", return_value=None):
+                with patch("src.stocks.analytics.router.financial_statements_cache.set"):
+                    response = client.get("/api/v1/stocks/analytics/financial-statements")
 
         assert response.status_code == 200
         data = response.json()
@@ -86,14 +86,14 @@ class TestTopPerformersAPI:
         assert data["data"][0]["year"] == 2024
         assert data["data"][0]["quarter"] == 4
 
-    def test_get_top_performers_with_limit(self, client):
-        """Test GET /analytics/top-performers with custom limit."""
-        mock_response = TopPerformersResponse(
+    def test_get_financial_statements_with_limit(self, client):
+        """Test GET /analytics/financial-statements with custom limit."""
+        mock_response = FinancialStatementsResponse(
             period="Q4-2024",
             updated_at=datetime(2024, 12, 22, 10, 0, 0),
             total=100,
             data=[
-                TopPerformerItem(
+                FinancialStatementItem(
                     rank=i,
                     symbol=f"SYM{i}",
                     company_name=f"Company {i}",
@@ -111,30 +111,30 @@ class TestTopPerformersAPI:
 
         with patch("src.stocks.analytics.router.AnalyticsService") as mock_service_class:
             mock_service = AsyncMock()
-            mock_service.get_top_performers.return_value = mock_response
+            mock_service.get_financial_statements.return_value = mock_response
             mock_service_class.return_value = mock_service
 
-            with patch("src.stocks.analytics.router.top_performers_cache.get", return_value=None):
-                with patch("src.stocks.analytics.router.top_performers_cache.set"):
-                    response = client.get("/api/v1/stocks/analytics/top-performers?limit=10")
+            with patch("src.stocks.analytics.router.financial_statements_cache.get", return_value=None):
+                with patch("src.stocks.analytics.router.financial_statements_cache.set"):
+                    response = client.get("/api/v1/stocks/analytics/financial-statements?limit=10")
 
         assert response.status_code == 200
         data = response.json()
         assert len(data["data"]) == 10
 
         # Verify service was called with correct limit
-        mock_service.get_top_performers.assert_called_once()
-        call_kwargs = mock_service.get_top_performers.call_args[1]
+        mock_service.get_financial_statements.assert_called_once()
+        call_kwargs = mock_service.get_financial_statements.call_args[1]
         assert call_kwargs["limit"] == 10
 
-    def test_get_top_performers_with_exchange_filter(self, client):
-        """Test GET /analytics/top-performers with exchange filter."""
-        mock_response = TopPerformersResponse(
+    def test_get_financial_statements_with_exchange_filter(self, client):
+        """Test GET /analytics/financial-statements with exchange filter."""
+        mock_response = FinancialStatementsResponse(
             period="Q4-2024",
             updated_at=datetime(2024, 12, 22, 10, 0, 0),
             total=50,
             data=[
-                TopPerformerItem(
+                FinancialStatementItem(
                     rank=1,
                     symbol="FPT",
                     company_name="FPT Corp",
@@ -151,12 +151,12 @@ class TestTopPerformersAPI:
 
         with patch("src.stocks.analytics.router.AnalyticsService") as mock_service_class:
             mock_service = AsyncMock()
-            mock_service.get_top_performers.return_value = mock_response
+            mock_service.get_financial_statements.return_value = mock_response
             mock_service_class.return_value = mock_service
 
-            with patch("src.stocks.analytics.router.top_performers_cache.get", return_value=None):
-                with patch("src.stocks.analytics.router.top_performers_cache.set"):
-                    response = client.get("/api/v1/stocks/analytics/top-performers?exchange=HOSE")
+            with patch("src.stocks.analytics.router.financial_statements_cache.get", return_value=None):
+                with patch("src.stocks.analytics.router.financial_statements_cache.set"):
+                    response = client.get("/api/v1/stocks/analytics/financial-statements?exchange=HOSE")
 
         assert response.status_code == 200
         data = response.json()
@@ -167,17 +167,17 @@ class TestTopPerformersAPI:
             assert item["exchange"] == "HOSE"
 
         # Verify service was called with exchange filter
-        call_kwargs = mock_service.get_top_performers.call_args[1]
+        call_kwargs = mock_service.get_financial_statements.call_args[1]
         assert call_kwargs["exchange"] == "HOSE"
 
-    def test_get_top_performers_with_period_filter(self, client):
-        """Test GET /analytics/top-performers with year and quarter filters."""
-        mock_response = TopPerformersResponse(
+    def test_get_financial_statements_with_period_filter(self, client):
+        """Test GET /analytics/financial-statements with year and quarter filters."""
+        mock_response = FinancialStatementsResponse(
             period="Q3-2024",
             updated_at=datetime(2024, 9, 30, 10, 0, 0),
             total=80,
             data=[
-                TopPerformerItem(
+                FinancialStatementItem(
                     rank=1,
                     symbol="VCB",
                     company_name="Vietcombank",
@@ -194,12 +194,12 @@ class TestTopPerformersAPI:
 
         with patch("src.stocks.analytics.router.AnalyticsService") as mock_service_class:
             mock_service = AsyncMock()
-            mock_service.get_top_performers.return_value = mock_response
+            mock_service.get_financial_statements.return_value = mock_response
             mock_service_class.return_value = mock_service
 
-            with patch("src.stocks.analytics.router.top_performers_cache.get", return_value=None):
-                with patch("src.stocks.analytics.router.top_performers_cache.set"):
-                    response = client.get("/api/v1/stocks/analytics/top-performers?year=2024&quarter=3")
+            with patch("src.stocks.analytics.router.financial_statements_cache.get", return_value=None):
+                with patch("src.stocks.analytics.router.financial_statements_cache.set"):
+                    response = client.get("/api/v1/stocks/analytics/financial-statements?year=2024&quarter=3")
 
         assert response.status_code == 200
         data = response.json()
@@ -211,13 +211,13 @@ class TestTopPerformersAPI:
             assert item["quarter"] == 3
 
         # Verify service was called with correct params
-        call_kwargs = mock_service.get_top_performers.call_args[1]
+        call_kwargs = mock_service.get_financial_statements.call_args[1]
         assert call_kwargs["year"] == 2024
         assert call_kwargs["quarter"] == 3
 
-    def test_get_top_performers_empty_database(self, client):
-        """Test GET /analytics/top-performers when database is empty."""
-        mock_response = TopPerformersResponse(
+    def test_get_financial_statements_empty_database(self, client):
+        """Test GET /analytics/financial-statements when database is empty."""
+        mock_response = FinancialStatementsResponse(
             period="N/A",
             updated_at=None,
             total=0,
@@ -226,12 +226,12 @@ class TestTopPerformersAPI:
 
         with patch("src.stocks.analytics.router.AnalyticsService") as mock_service_class:
             mock_service = AsyncMock()
-            mock_service.get_top_performers.return_value = mock_response
+            mock_service.get_financial_statements.return_value = mock_response
             mock_service_class.return_value = mock_service
 
-            with patch("src.stocks.analytics.router.top_performers_cache.get", return_value=None):
-                with patch("src.stocks.analytics.router.top_performers_cache.set"):
-                    response = client.get("/api/v1/stocks/analytics/top-performers")
+            with patch("src.stocks.analytics.router.financial_statements_cache.get", return_value=None):
+                with patch("src.stocks.analytics.router.financial_statements_cache.set"):
+                    response = client.get("/api/v1/stocks/analytics/financial-statements")
 
         assert response.status_code == 200
         data = response.json()
@@ -242,44 +242,91 @@ class TestTopPerformersAPI:
         assert data["total"] == 0
         assert data["data"] == []
 
-    def test_get_top_performers_limit_validation(self, client):
-        """Test GET /analytics/top-performers with invalid limit values."""
+    def test_get_financial_statements_limit_validation(self, client):
+        """Test GET /analytics/financial-statements with invalid limit values."""
         # Test limit < 1
-        response = client.get("/api/v1/stocks/analytics/top-performers?limit=0")
+        response = client.get("/api/v1/stocks/analytics/financial-statements?limit=0")
         assert response.status_code == 422  # Validation error
 
         # Test limit > 100
-        response = client.get("/api/v1/stocks/analytics/top-performers?limit=101")
+        response = client.get("/api/v1/stocks/analytics/financial-statements?limit=101")
         assert response.status_code == 422  # Validation error
 
-    def test_get_top_performers_year_validation(self, client):
-        """Test GET /analytics/top-performers with invalid year values."""
+    def test_get_financial_statements_year_validation(self, client):
+        """Test GET /analytics/financial-statements with invalid year values."""
         # Test year < 2020
-        response = client.get("/api/v1/stocks/analytics/top-performers?year=2019")
+        response = client.get("/api/v1/stocks/analytics/financial-statements?year=2019")
         assert response.status_code == 422  # Validation error
 
         # Test year > 2030
-        response = client.get("/api/v1/stocks/analytics/top-performers?year=2031")
+        response = client.get("/api/v1/stocks/analytics/financial-statements?year=2031")
         assert response.status_code == 422  # Validation error
 
-    def test_get_top_performers_quarter_validation(self, client):
-        """Test GET /analytics/top-performers with invalid quarter values."""
+    def test_get_financial_statements_quarter_validation(self, client):
+        """Test GET /analytics/financial-statements with invalid quarter values."""
         # Test quarter < 1
-        response = client.get("/api/v1/stocks/analytics/top-performers?quarter=0")
+        response = client.get("/api/v1/stocks/analytics/financial-statements?quarter=0")
         assert response.status_code == 422  # Validation error
 
         # Test quarter > 4
-        response = client.get("/api/v1/stocks/analytics/top-performers?quarter=5")
+        response = client.get("/api/v1/stocks/analytics/financial-statements?quarter=5")
         assert response.status_code == 422  # Validation error
 
-    def test_get_top_performers_combined_filters(self, client):
-        """Test GET /analytics/top-performers with multiple filters."""
-        mock_response = TopPerformersResponse(
+    def test_get_financial_statements_exchange_validation(self, client):
+        """Test GET /analytics/financial-statements with invalid exchange value."""
+        # Test invalid exchange
+        response = client.get("/api/v1/stocks/analytics/financial-statements?exchange=INVALID")
+        assert response.status_code == 422  # Validation error
+
+        # Test UPCOM not allowed
+        response = client.get("/api/v1/stocks/analytics/financial-statements?exchange=UPCOM")
+        assert response.status_code == 422  # Validation error
+
+    def test_get_financial_statements_hose_alias(self, client):
+        """Test that HOSE is accepted as exchange filter (maps to HSX internally)."""
+        mock_response = FinancialStatementsResponse(
+            period="Q4-2024",
+            updated_at=datetime(2024, 12, 22, 10, 0, 0),
+            total=50,
+            data=[
+                FinancialStatementItem(
+                    rank=1,
+                    symbol="VCB",
+                    company_name="Vietcombank",
+                    exchange="HSX",
+                    net_profit=15000000000000,
+                    revenue=50000000000000,
+                    profit_margin=30.0,
+                    eps=15000.0,
+                    year=2024,
+                    quarter=4,
+                ),
+            ],
+        )
+
+        with patch("src.stocks.analytics.router.AnalyticsService") as mock_service_class:
+            mock_service = AsyncMock()
+            mock_service.get_financial_statements.return_value = mock_response
+            mock_service_class.return_value = mock_service
+
+            with patch("src.stocks.analytics.router.financial_statements_cache.get", return_value=None):
+                with patch("src.stocks.analytics.router.financial_statements_cache.set"):
+                    response = client.get("/api/v1/stocks/analytics/financial-statements?exchange=HOSE")
+
+        assert response.status_code == 200
+
+        # Verify service was called with HOSE (service normalizes to HSX internally)
+        call_kwargs = mock_service.get_financial_statements.call_args[1]
+        assert call_kwargs["exchange"] == "HOSE"
+
+    def test_get_financial_statements_combined_filters(self, client):
+        """Test GET /analytics/financial-statements with multiple filters."""
+        mock_response = FinancialStatementsResponse(
             period="Q2-2024",
             updated_at=datetime(2024, 6, 30, 10, 0, 0),
             total=25,
             data=[
-                TopPerformerItem(
+                FinancialStatementItem(
                     rank=1,
                     symbol="FPT",
                     company_name="FPT Corp",
@@ -296,13 +343,13 @@ class TestTopPerformersAPI:
 
         with patch("src.stocks.analytics.router.AnalyticsService") as mock_service_class:
             mock_service = AsyncMock()
-            mock_service.get_top_performers.return_value = mock_response
+            mock_service.get_financial_statements.return_value = mock_response
             mock_service_class.return_value = mock_service
 
-            with patch("src.stocks.analytics.router.top_performers_cache.get", return_value=None):
-                with patch("src.stocks.analytics.router.top_performers_cache.set"):
+            with patch("src.stocks.analytics.router.financial_statements_cache.get", return_value=None):
+                with patch("src.stocks.analytics.router.financial_statements_cache.set"):
                     response = client.get(
-                        "/api/v1/stocks/analytics/top-performers"
+                        "/api/v1/stocks/analytics/financial-statements"
                         "?limit=20&exchange=HNX&year=2024&quarter=2"
                     )
 
@@ -310,13 +357,13 @@ class TestTopPerformersAPI:
         data = response.json()
 
         # Verify service called with all params
-        call_kwargs = mock_service.get_top_performers.call_args[1]
+        call_kwargs = mock_service.get_financial_statements.call_args[1]
         assert call_kwargs["limit"] == 20
         assert call_kwargs["exchange"] == "HNX"
         assert call_kwargs["year"] == 2024
         assert call_kwargs["quarter"] == 2
 
-    def test_get_top_performers_uses_cache(self, client):
+    def test_get_financial_statements_uses_cache(self, client):
         """Test that endpoint uses cache when available."""
         cached_data = {
             "period": "Q4-2024",
@@ -338,12 +385,12 @@ class TestTopPerformersAPI:
             ],
         }
 
-        with patch("src.stocks.analytics.router.top_performers_cache.get", return_value=cached_data):
+        with patch("src.stocks.analytics.router.financial_statements_cache.get", return_value=cached_data):
             with patch("src.stocks.analytics.router.AnalyticsService") as mock_service_class:
                 mock_service = AsyncMock()
                 mock_service_class.return_value = mock_service
 
-                response = client.get("/api/v1/stocks/analytics/top-performers")
+                response = client.get("/api/v1/stocks/analytics/financial-statements")
 
         assert response.status_code == 200
         data = response.json()
@@ -352,16 +399,16 @@ class TestTopPerformersAPI:
         assert data["data"][0]["symbol"] == "CACHED"
 
         # Service should NOT be called
-        mock_service.get_top_performers.assert_not_called()
+        mock_service.get_financial_statements.assert_not_called()
 
-    def test_get_top_performers_caches_result(self, client):
+    def test_get_financial_statements_caches_result(self, client):
         """Test that endpoint caches the result."""
-        mock_response = TopPerformersResponse(
+        mock_response = FinancialStatementsResponse(
             period="Q4-2024",
             updated_at=datetime(2024, 12, 22, 10, 0, 0),
             total=50,
             data=[
-                TopPerformerItem(
+                FinancialStatementItem(
                     rank=1,
                     symbol="VCB",
                     company_name="Vietcombank",
@@ -378,12 +425,12 @@ class TestTopPerformersAPI:
 
         with patch("src.stocks.analytics.router.AnalyticsService") as mock_service_class:
             mock_service = AsyncMock()
-            mock_service.get_top_performers.return_value = mock_response
+            mock_service.get_financial_statements.return_value = mock_response
             mock_service_class.return_value = mock_service
 
-            with patch("src.stocks.analytics.router.top_performers_cache.get", return_value=None):
-                with patch("src.stocks.analytics.router.top_performers_cache.set") as mock_cache_set:
-                    response = client.get("/api/v1/stocks/analytics/top-performers")
+            with patch("src.stocks.analytics.router.financial_statements_cache.get", return_value=None):
+                with patch("src.stocks.analytics.router.financial_statements_cache.set") as mock_cache_set:
+                    response = client.get("/api/v1/stocks/analytics/financial-statements")
 
         assert response.status_code == 200
 
@@ -395,9 +442,9 @@ class TestTopPerformersAPI:
         assert cached_data["period"] == "Q4-2024"
         assert cached_data["total"] == 50
 
-    def test_get_top_performers_cache_key_construction(self, client):
+    def test_get_financial_statements_cache_key_construction(self, client):
         """Test that cache key is built correctly with different params."""
-        mock_response = TopPerformersResponse(
+        mock_response = FinancialStatementsResponse(
             period="Q4-2024",
             updated_at=None,
             total=0,
@@ -406,13 +453,13 @@ class TestTopPerformersAPI:
 
         with patch("src.stocks.analytics.router.AnalyticsService") as mock_service_class:
             mock_service = AsyncMock()
-            mock_service.get_top_performers.return_value = mock_response
+            mock_service.get_financial_statements.return_value = mock_response
             mock_service_class.return_value = mock_service
 
-            with patch("src.stocks.analytics.router.top_performers_cache.get", return_value=None) as mock_cache_get:
-                with patch("src.stocks.analytics.router.top_performers_cache.set"):
+            with patch("src.stocks.analytics.router.financial_statements_cache.get", return_value=None) as mock_cache_get:
+                with patch("src.stocks.analytics.router.financial_statements_cache.set"):
                     # Test with all params
-                    client.get("/api/v1/stocks/analytics/top-performers?limit=25&exchange=HOSE&year=2024&quarter=3")
+                    client.get("/api/v1/stocks/analytics/financial-statements?limit=25&exchange=HOSE&year=2024&quarter=3")
 
                     # Verify cache key construction
                     cache_key = mock_cache_get.call_args[0][0]
@@ -421,14 +468,14 @@ class TestTopPerformersAPI:
                     assert "2024" in cache_key
                     assert "3" in cache_key
 
-    def test_get_top_performers_response_schema(self, client):
+    def test_get_financial_statements_response_schema(self, client):
         """Test that response matches expected schema exactly."""
-        mock_response = TopPerformersResponse(
+        mock_response = FinancialStatementsResponse(
             period="Q4-2024",
             updated_at=datetime(2024, 12, 22, 10, 0, 0),
             total=1,
             data=[
-                TopPerformerItem(
+                FinancialStatementItem(
                     rank=1,
                     symbol="VCB",
                     company_name="Vietcombank",
@@ -445,12 +492,12 @@ class TestTopPerformersAPI:
 
         with patch("src.stocks.analytics.router.AnalyticsService") as mock_service_class:
             mock_service = AsyncMock()
-            mock_service.get_top_performers.return_value = mock_response
+            mock_service.get_financial_statements.return_value = mock_response
             mock_service_class.return_value = mock_service
 
-            with patch("src.stocks.analytics.router.top_performers_cache.get", return_value=None):
-                with patch("src.stocks.analytics.router.top_performers_cache.set"):
-                    response = client.get("/api/v1/stocks/analytics/top-performers")
+            with patch("src.stocks.analytics.router.financial_statements_cache.get", return_value=None):
+                with patch("src.stocks.analytics.router.financial_statements_cache.set"):
+                    response = client.get("/api/v1/stocks/analytics/financial-statements")
 
         assert response.status_code == 200
         data = response.json()

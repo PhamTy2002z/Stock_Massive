@@ -1,7 +1,7 @@
 import { DashboardLayoutClient } from "@/components/layout/dashboard-layout-client"
-import { TopPerformersTable } from "@/components/dashboard/top-performers-table"
+import { FinancialStatementsTable } from "@/components/dashboard/financial-statements-table"
 
-export default function TopPerformersPage() {
+export default function FinancialStatementsPage() {
   return (
     <DashboardLayoutClient>
       <div className="flex flex-col gap-6">
@@ -9,11 +9,11 @@ export default function TopPerformersPage() {
           <div>
             <h1 className="text-2xl font-bold">Báo Cáo Tài Chính</h1>
             <p className="text-sm text-muted-foreground">
-              Top 50 công ty có lợi nhuận cao nhất từ HOSE & HNX (theo quý)
+              Top 50 công ty có lợi nhuận cao nhất từ HOSE &amp; HNX (theo quý)
             </p>
           </div>
         </div>
-        <TopPerformersTable />
+        <FinancialStatementsTable />
       </div>
     </DashboardLayoutClient>
   )

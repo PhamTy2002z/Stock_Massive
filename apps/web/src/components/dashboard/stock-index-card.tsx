@@ -1,5 +1,6 @@
 "use client"
 
+import { memo } from "react"
 import { Card } from "@/components/ui/card"
 import { Sparkline } from "@/components/ui/sparkline"
 import { cn } from "@/lib/utils"
@@ -15,7 +16,7 @@ interface StockIndexCardProps {
   className?: string
 }
 
-export function StockIndexCard({
+export const StockIndexCard = memo(function StockIndexCard({
   name,
   value,
   change,
@@ -95,4 +96,4 @@ export function StockIndexCard({
       </div>
     </Card>
   )
-}
+})

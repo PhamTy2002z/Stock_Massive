@@ -35,10 +35,13 @@ import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { useVolumeSpikes } from "@/hooks/use-volume-spikes"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { VolumeSpikeChart, VolumeSpikeChartSkeleton } from "./volume-spike-chart"
+import { VolumeSpikeChartSkeleton } from "./volume-spike-chart"
 import { VolumeSpikePieChart } from "./volume-spike-pie-chart"
-import { VolumeSpikeTreemap } from "./volume-spike-treemap"
-import { VolumeSpikeComposedChart } from "./volume-spike-composed-chart"
+import {
+  LazyVolumeSpikeChart,
+  LazyVolumeSpikeTreemap,
+  LazyVolumeSpikeComposedChart,
+} from "./charts-lazy"
 import type {
   IndustryVolumeSpikeGroup,
   VolumeSpikeAnomalyLevel,
@@ -383,6 +386,10 @@ function IndustrySpikeGroup({
 
 // Main Dashboard Component
 export function VolumeSpikeDashboard({ className }: VolumeSpikeDashboardProps) {
+  // Data source tab state (Top 50 LN or All)
+  const [dataSource, setDataSource] = useState<"top50" | "all">("top50")
+  const topProfitableOnly = dataSource === "top50"
+
   const [minRatio, setMinRatio] = useState(1.5)
   const [exchange, setExchange] = useState<string>()
   const [includeUpcom, setIncludeUpcom] = useState(false)
@@ -395,8 +402,9 @@ export function VolumeSpikeDashboard({ className }: VolumeSpikeDashboardProps) {
 
   const { data, isLoading, isFetching, error, refetch } = useVolumeSpikes({
     minRatio,
-    exchange,
-    includeUpcom,
+    exchange: topProfitableOnly ? undefined : exchange,
+    includeUpcom: topProfitableOnly ? false : includeUpcom,
+    topProfitableOnly,
   })
 
   // Calculate summary stats
@@ -500,9 +508,14 @@ export function VolumeSpikeDashboard({ className }: VolumeSpikeDashboardProps) {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold">Khối lượng đột biến</h1>
+          <h1 className="text-2xl font-bold">
+            {topProfitableOnly
+              ? "Khối lượng đột biến - Top 50 Lợi nhuận"
+              : "Khối lượng đột biến"}
+          </h1>
           <p className="text-sm text-muted-foreground">
             {data?.trade_date || "N/A"} • {data?.total_spikes || 0} cổ phiếu
+            {topProfitableOnly && " • Chỉ hiển thị CP từ 50 công ty có lợi nhuận cao nhất"}
           </p>
         </div>
         <button
@@ -514,6 +527,14 @@ export function VolumeSpikeDashboard({ className }: VolumeSpikeDashboardProps) {
           <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
         </button>
       </div>
+
+      {/* Data Source Tabs */}
+      <Tabs value={dataSource} onValueChange={(v) => setDataSource(v as "top50" | "all")}>
+        <TabsList>
+          <TabsTrigger value="top50">Top 50 LN</TabsTrigger>
+          <TabsTrigger value="all">Tất cả</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-4">
@@ -531,27 +552,32 @@ export function VolumeSpikeDashboard({ className }: VolumeSpikeDashboardProps) {
             </SelectContent>
           </Select>
         </div>
-        <div className="flex items-center gap-2">
-          <Label className="text-sm text-muted-foreground whitespace-nowrap">Sàn:</Label>
-          <Select value={exchange || "all"} onValueChange={(v) => setExchange(v === "all" ? undefined : v)}>
-            <SelectTrigger className="w-[100px] h-9 bg-background">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Tất cả</SelectItem>
-              <SelectItem value="HOSE">HOSE</SelectItem>
-              <SelectItem value="HNX">HNX</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex items-center gap-2">
-          <Checkbox
-            id="upcom"
-            checked={includeUpcom}
-            onCheckedChange={(checked) => setIncludeUpcom(checked === true)}
-          />
-          <Label htmlFor="upcom" className="text-sm cursor-pointer">UPCOM</Label>
-        </div>
+        {/* Exchange filter - only show in "all" mode */}
+        {!topProfitableOnly && (
+          <>
+            <div className="flex items-center gap-2">
+              <Label className="text-sm text-muted-foreground whitespace-nowrap">Sàn:</Label>
+              <Select value={exchange || "all"} onValueChange={(v) => setExchange(v === "all" ? undefined : v)}>
+                <SelectTrigger className="w-[100px] h-9 bg-background">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tất cả</SelectItem>
+                  <SelectItem value="HOSE">HOSE</SelectItem>
+                  <SelectItem value="HNX">HNX</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="upcom"
+                checked={includeUpcom}
+                onCheckedChange={(checked) => setIncludeUpcom(checked === true)}
+              />
+              <Label htmlFor="upcom" className="text-sm cursor-pointer">UPCOM</Label>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Summary Cards */}
@@ -580,7 +606,7 @@ export function VolumeSpikeDashboard({ className }: VolumeSpikeDashboardProps) {
           </TabsList>
 
           <TabsContent value="bar" className="mt-4">
-            <VolumeSpikeChart industries={data.industries} />
+            <LazyVolumeSpikeChart industries={data.industries} />
           </TabsContent>
 
           <TabsContent value="pie" className="mt-4">
@@ -588,11 +614,11 @@ export function VolumeSpikeDashboard({ className }: VolumeSpikeDashboardProps) {
           </TabsContent>
 
           <TabsContent value="treemap" className="mt-4">
-            <VolumeSpikeTreemap industries={data.industries} />
+            <LazyVolumeSpikeTreemap industries={data.industries} />
           </TabsContent>
 
           <TabsContent value="composed" className="mt-4">
-            <VolumeSpikeComposedChart industries={data.industries} />
+            <LazyVolumeSpikeComposedChart industries={data.industries} />
           </TabsContent>
         </Tabs>
       )}
@@ -627,7 +653,20 @@ export function VolumeSpikeDashboard({ className }: VolumeSpikeDashboardProps) {
         </div>
       ) : (
         <div className="rounded-lg border border-border/50 bg-card/50 p-8 text-center">
-          <p className="text-muted-foreground">Không có cổ phiếu nào đạt ngưỡng đột biến.</p>
+          <p className="text-muted-foreground">
+            {topProfitableOnly
+              ? "Không có cổ phiếu Top 50 nào đạt ngưỡng đột biến hôm nay."
+              : "Không có cổ phiếu nào đạt ngưỡng đột biến."}
+          </p>
+          {topProfitableOnly && (
+            <Button
+              variant="link"
+              className="mt-2"
+              onClick={() => setDataSource("all")}
+            >
+              Xem tab &quot;Tất cả&quot; để xem toàn bộ thị trường
+            </Button>
+          )}
         </div>
       )}
 
