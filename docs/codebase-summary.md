@@ -1,267 +1,245 @@
 # Codebase Summary - Stock Massive
 
 Generated: 2025-12-23
-Total Files: 254 | Total Python: 38 | Total TypeScript/TSX: 75 | Total Components: 52
+Total Files: ~130 source | Frontend: 75 | Backend: 52 source + 4 migrations + 7 tests
 
 ## 1. Project Overview and Purpose
 
 Stock Massive is a Vietnamese stock market data platform powered by the `vnstock` library. Provides real-time data, charting, and analysis for Vietnam stock market (HOSE, HNX, UPCOM).
 
 **Goals:**
-*   Display Vietnamese stock data with interactive charts
-*   Provide sortable/filterable data tables for stock screening
-*   Enable portfolio tracking and watchlist management (planned)
-*   Secure user authentication via Supabase (scaffolded)
-*   Integrate `vnstock` library for comprehensive Vietnam market data
-*   Implement advanced analytical features (volume anomaly detection, sector performance)
+* Display Vietnamese stock data with interactive charts
+* Provide sortable/filterable data tables for stock screening
+* Enable portfolio tracking and watchlist management (planned)
+* Secure user authentication via Supabase (scaffolded)
+* Integrate `vnstock` library for comprehensive Vietnam market data
+* Implement advanced analytical features (volume anomaly, volume spikes, financial statements)
 
 ## 2. Tech Stack
 
 **Frontend:**
-*   **Framework**: Next.js 15.5.9 (App Router)
-*   **Language**: TypeScript
-*   **Styling**: TailwindCSS 3.4 + ShadCN/UI (45 Radix-based components)
-*   **Data Fetching**: TanStack Query v5.90 (5min staleTime, 10min gcTime)
-*   **Auth**: Supabase (Google OAuth scaffolded)
-*   **Charts**: Recharts (sparklines), TradingView Lightweight Charts (planned)
-*   **State**: useState (local), URL params (shared), next-themes (theme)
-*   **Notifications**: Sonner
-*   **UI Components**: 20 ShadCN primitives, 24 dashboard, 4 layout
-*   **Custom Hooks**: 12 total (data fetching + responsive)
-*   **Pages**: 8 total (home, login, register, analytics/deep-dive, charts, portfolio, watchlist, not-found)
+* **Framework**: Next.js 15.5.9 (App Router)
+* **Language**: TypeScript 5.3.0
+* **Styling**: TailwindCSS 3.4 + ShadCN/UI (20 Radix-based components)
+* **Data Fetching**: TanStack Query v5.90.12 (5min staleTime, 10min gcTime)
+* **Auth**: Supabase 2.89.0 (Google OAuth scaffolded)
+* **Charts**: Recharts 3.6.0 (sparklines, treemap, pie, composed)
+* **State**: useState (local), URL params (shared), next-themes (theme)
+* **Notifications**: Sonner
+* **Icons**: Lucide React
+* **UI Components**: 20 ShadCN primitives, 27 dashboard, 4 layout, 2 providers
+* **Custom Hooks**: 12 total (data fetching + responsive)
+* **Pages**: 5 routes (home, login, analytics/deep-dive, analytics/volume-spikes, analytics/financial-statements)
 
 **Backend:**
-*   **Framework**: FastAPI 0.100+
-*   **Language**: Python 3.11+
-*   **ORM**: SQLAlchemy 2.0 + Alembic
-*   **Validation**: Pydantic 2.x
-*   **Server**: Uvicorn
-*   **Data Source**: vnstock >= 3.0.0 (VCI), Fmarket API
-*   **Scheduler**: APScheduler 4.0 (daily intraday collection, weekly top performers)
-*   **Cache/Rate Limit**: Upstash Redis
-*   **Analytics**: Pandas, Greenlet
+* **Framework**: FastAPI 0.100+
+* **Language**: Python 3.11+
+* **ORM**: SQLAlchemy 2.0 + Alembic (4 migrations)
+* **Validation**: Pydantic 2.x
+* **Server**: Uvicorn
+* **Data Source**: vnstock >= 3.0.0 (VCI), Fmarket API
+* **Scheduler**: APScheduler 4.0 (daily intraday collection, weekly financial statements)
+* **Cache/Rate Limit**: Upstash Redis
+* **Analytics**: Pandas, Greenlet
+* **Tests**: 7 test files (46+ tests)
 
 **Database:**
-*   **Primary**: PostgreSQL 16
+* **Primary**: PostgreSQL 16
 
 **DevOps:**
-*   **Containerization**: Docker
-*   **Orchestration (local)**: Docker Compose
-*   **Package Manager (Frontend)**: pnpm
-*   **Package Manager (Backend)**: pip/uv
+* **Containerization**: Docker
+* **Orchestration (local)**: Docker Compose (dev + prod configs)
+* **Package Manager (Frontend)**: pnpm
+* **Package Manager (Backend)**: pip/uv
 
 **Design:**
-*   Modern + Clean philosophy
-*   HSL color system with CSS variables
-*   Dark/light themes support
+* Modern + Clean philosophy
+* HSL color system with CSS variables
+* Dark/light themes support
 
-## 3. Directory Structure with Key Directories Explained
+## 3. Directory Structure
 
 ```
 Stock_Massive/
 ├── apps/
-│   ├── web/                     # Next.js frontend application (port 3000)
+│   ├── web/                     # Next.js frontend (port 3000) - 75 files
 │   │   └── src/
-│   │       ├── app/             # Next.js App Router pages and layouts
-│   │       ├── components/      # Reusable UI components (ui/, dashboard/, layout/, providers/)
-│   │       ├── hooks/           # Custom React hooks
-│   │       └── lib/             # Utility functions and configurations (e.g., query-keys.ts)
+│   │       ├── app/             # App Router (5 pages)
+│   │       │   ├── (auth)/login/       # Auth login page
+│   │       │   └── analytics/          # Analytics pages
+│   │       │       ├── deep-dive/      # Stock deep-dive
+│   │       │       ├── volume-spikes/  # Volume spike dashboard
+│   │       │       └── financial-statements/  # Financial rankings
+│   │       ├── components/
+│   │       │   ├── ui/          # 20 ShadCN components
+│   │       │   ├── dashboard/   # 27 feature components
+│   │       │   ├── layout/      # 4 layout components
+│   │       │   └── providers/   # 2 providers (query, theme)
+│   │       ├── hooks/           # 12 custom hooks
+│   │       └── lib/             # 4 utility files
 │   │
-│   └── api/                     # FastAPI backend application (port 8000)
+│   └── api/                     # FastAPI backend (port 8000) - 52 source files
 │       └── src/
-│           ├── stocks/          # Feature-based modules for stock data
-│           │   ├── market/      # Endpoints for symbols, sectors, fund certificates
-│           │   ├── price/       # Endpoints for history, intraday, indices, volume analysis
-│           │   ├── company/     # Endpoints for company info
-│           │   ├── financial/   # Endpoints for financials, ratios
-│           │   ├── router.py    # HTTP endpoints for stock features
-│           │   ├── service.py   # Business logic, vnstock integration
-│           │   ├── schemas/     # Pydantic models for request/response validation
-│           │   ├── models.py    # SQLAlchemy models for database interaction (IntradayBar, FinancialStatement)
-│           │   ├── jobs.py      # Scheduled background tasks (intraday collection, financial statements)
-│           │   ├── intraday_collector.py # Intraday data collection and volume anomaly detection logic
-│           │   └── financial_statements_collector.py # Weekly financial statements collection by net profit
-│           ├── core/            # Core configurations, database connection, scheduler setup
-│           │   ├── config.py    # Settings, environment variables
-│           │   ├── database.py  # SQLAlchemy engine, session
-│           │   ├── scheduler.py # APScheduler setup
-│           │   ├── redis.py     # Upstash Redis client
-│           │   ├── cache.py     # Trading-hours-aware cache
-│           │   ├── ratelimit.py # Rate limiting middleware
-│           │   ├── vnstock_wrapper.py # vnstock wrapper with rate limit protection
-│           │   └── dependencies.py # FastAPI dependencies
-│           └── main.py          # Main FastAPI application entry point
-│       ├── alembic/             # Database migration scripts
-│       └── requirements.txt     # Python dependencies
+│           ├── stocks/          # Feature-based modules
+│           │   ├── router.py    # Main aggregation router
+│           │   ├── service.py   # Core vnstock integration
+│           │   ├── models.py    # SQLAlchemy models
+│           │   ├── jobs.py      # Scheduled background tasks
+│           │   ├── intraday_collector.py    # Intraday data + volume anomaly
+│           │   ├── financial_statements_collector.py  # Weekly financial data
+│           │   ├── schemas/     # 6 Pydantic schema files
+│           │   ├── analytics/   # Volume spikes, financial statements
+│           │   ├── market/      # Symbols, sectors, fund certificates
+│           │   ├── price/       # History, intraday, indices, volume
+│           │   ├── company/     # Company info, shareholders, officers
+│           │   └── financial/   # Financials, ratios
+│           ├── core/            # 8 core configuration files
+│           │   ├── config.py, database.py, dependencies.py
+│           │   ├── cache.py, redis.py, ratelimit.py
+│           │   ├── scheduler.py, vnstock_wrapper.py
+│           └── main.py
+│       ├── alembic/             # 4 database migrations
+│       ├── tests/               # 7 test files
+│       └── requirements.txt
 │
-├── packages/                    # Placeholder for shared code/libraries (currently empty)
-├── docker/                      # Docker-related configurations (e.g., Dockerfiles for web/api)
-├── docs/                        # Project documentation (PDR, architecture, code standards, etc.)
+├── packages/                    # Shared code (placeholders)
+│   ├── config/                  # Empty
+│   └── types/                   # Empty
+├── docker/                      # Docker configs
+├── docs/                        # 9 documentation files
 ├── plans/                       # Project plans and reports
-├── docker-compose.yml           # Docker Compose configuration for local development
-└── README.md                    # Project README file
+├── docker-compose.yml           # Dev configuration
+├── docker-compose.prod.yml      # Prod configuration
+└── README.md
 ```
 
 ## 4. Key Features and Functionality
 
 **Current (Completed):**
-*   **Dashboard Layout**: Responsive sidebar, header, dark/light theme
-*   **Stock Detail Page**: Search, ticker header, stats, tabbed sections (Overview, Financials, Shareholders, Volume)
-*   **Market Indices**: VN-INDEX, VN30, HNX, UPCOM cards with sparklines (Recharts), 10s auto-refresh
-*   **VN30 Overview Table**: Real-time VN30 stocks with price, change, volume, market cap (cached 5min/1hr)
-*   **Stock Data API**: 25+ endpoints via vnstock + Fmarket API
-*   **Financial Data**: Income statements, balance sheets, cash flow (detailed)
-*   **Shareholders/Officers**: Major holders, management, insider deals
-*   **Volume Analysis**: 5-min bar aggregation, peak period analysis
-*   **Volume Anomaly Detection**: Backend API + frontend visualization with Redis caching
-*   **Sector Performance**: ICB Level 2 with sorting, top gainers/losers
-*   **Fund Certificates**: 7-item display via Fmarket API
-*   **Intraday Collection**: Scheduled daily collection (15:30 ICT) + cleanup (16:00 ICT)
-*   **Financial Statements**: Weekly scheduled job (Sun 02:00 ICT) collecting quarterly net profit rankings for HOSE+HNX symbols
-*   **Financial Statements API**: GET /analytics/financial-statements with filters (limit, exchange, year, quarter), trading-hours cache (1h/24h), auto-fallback to latest period
-*   **Auth Scaffold**: Login page UI with Supabase Google OAuth (actions.ts scaffolded)
-*   **Loading/Error States**: Consistent skeleton loaders and error handling
-*   **API Documentation**: Auto-generated OpenAPI/Swagger UI
-*   **Redis Caching**: Trading-hours-aware cache (Upstash) for 7 high-traffic endpoints
-*   **Rate Limiting**: Sliding window (100/60s standard, 20/60s heavy endpoints)
-*   **Rate Limit Protection**: vnstock_wrapper.py for safe vnstock API calls
+* **Dashboard Layout**: Responsive sidebar, header, dark/light theme
+* **Stock Detail Page**: Search, ticker header, stats, tabbed sections (Overview, Financials, Shareholders, Volume)
+* **Analytics Deep-Dive**: Dedicated stock analysis page with SSR
+* **Volume Spikes Dashboard**: Treemap, pie chart, composed chart, tabs visualization
+* **Financial Statements Page**: Ranking table with exchange/year/quarter filters
+* **Market Indices**: VN-INDEX, VN30, HNX, UPCOM cards with sparklines, 10s auto-refresh
+* **VN30 Overview Table**: Real-time VN30 stocks with price, change, volume, market cap
+* **Stock Data API**: 30+ endpoints via vnstock + Fmarket API
+* **Financial Data**: Income statements, balance sheets, cash flow (detailed)
+* **Shareholders/Officers**: Major holders, management, insider deals
+* **Volume Analysis**: 5-min bar aggregation, peak period analysis
+* **Volume Anomaly Detection**: Backend API + frontend visualization
+* **Volume Spikes API**: Aggregated spike detection across all stocks
+* **Sector Performance**: ICB Level 2 with sorting, top gainers/losers
+* **Fund Certificates**: 7-item display via Fmarket API
+* **Intraday Collection**: Scheduled daily (15:30 ICT) + cleanup (16:00 ICT)
+* **Financial Statements Job**: Weekly (Sun 02:00 ICT) for HOSE+HNX quarterly rankings
+* **Auth Scaffold**: Login page UI with Supabase Google OAuth
+* **Redis Caching**: Trading-hours-aware cache for 7 high-traffic endpoints
+* **Rate Limiting**: Sliding window (100/60s standard, 20/60s heavy)
+* **API Documentation**: Auto-generated OpenAPI/Swagger UI
 
 **Planned (Roadmap):**
-*   **Authentication**: Complete Supabase integration (JWT, protected routes)
-*   **Stock Charts**: TradingView Lightweight Charts integration
-*   **Stock Screening**: TanStack Table with sorting/filtering
-*   **Watchlist/Portfolio**: CRUD operations, P&L tracking
-*   **Technical Analysis**: SMA, EMA, RSI, MACD, Bollinger Bands
-*   **Alerts**: Price alerts, email/in-app notifications
+* **Authentication**: Complete Supabase integration (JWT, protected routes)
+* **Stock Charts**: TradingView Lightweight Charts integration
+* **Watchlist/Portfolio**: CRUD operations, P&L tracking
+* **Technical Analysis**: SMA, EMA, RSI, MACD
 
-## 5. Architecture Patterns Used
+## 5. Architecture Patterns
 
 **Overall:**
-*   **Monorepo Structure**: Simple workspace for frontend and backend applications, managed by pnpm.
-*   **Microservices-like (Logical Separation)**: Frontend (Next.js) and Backend (FastAPI) are distinct applications communicating via REST API, allowing for independent development and deployment.
-*   **Containerization**: Docker and Docker Compose for consistent development and deployment environments.
+* **Monorepo Structure**: Simple workspace managed by pnpm
+* **Microservices-like**: Frontend and Backend as distinct apps via REST API
+* **Containerization**: Docker and Docker Compose for dev/prod
 
 **Frontend (Next.js):**
-*   **Feature-based Component Organization**: Components are organized by feature or domain (e.g., `dashboard/`, `stocks/`).
-*   **Server Components First**: Prioritizes Next.js Server Components by default for performance, using `"use client"` only when interactive client-side features are needed.
-*   **Declarative UI**: Leverages React's declarative nature and ShadCN/UI for consistent and accessible UI elements.
-*   **Data Fetching Layer**: TanStack Query for efficient server state management, caching, and background re-fetching.
+* **Feature-based Organization**: Components organized by domain
+* **Server Components First**: `"use client"` only when needed
+* **Declarative UI**: React + ShadCN/UI for consistency
+* **Data Fetching Layer**: TanStack Query for server state
 
 **Backend (FastAPI):**
-*   **Domain-Driven with Repository Pattern**: Code is organized into modules based on business domains (e.g., `stocks/market`, `stocks/price`).
-*   **Layered Architecture**: Clear separation of concerns:
-    *   **Router**: Handles HTTP requests, defines API endpoints.
-    *   **Service**: Contains business logic, integrates with external libraries (vnstock) and data access.
-    *   **Repository**: Handles database interactions (using SQLAlchemy models).
-    *   **Schemas**: Pydantic models for request body validation and response serialization.
-*   **Asynchronous Programming**: FastAPI's native async/await support for high concurrency and non-blocking I/O operations.
-*   **Dependency Injection**: FastAPI's dependency injection system for managing reusable components like database sessions and services.
-*   **Scheduled Jobs**: APScheduler for background tasks such as intraday data collection.
+* **Domain-Driven**: Modules by business domain (market, price, company, financial, analytics)
+* **Layered Architecture**: Router -> Service -> Repository/vnstock
+* **Async/Await**: Native FastAPI async support
+* **Dependency Injection**: FastAPI DI for reusable components
+* **Scheduled Jobs**: APScheduler for background tasks
 
-## 6. Important Files and Their Purposes
+## 6. Important Files
 
 **Frontend (apps/web/):**
-*   `/src/app/layout.tsx`: Root layout with providers (Query, Theme, Supabase)
-*   `/src/app/page.tsx`: Home dashboard page
-*   `/src/app/(auth)/login/`: Login page with Google OAuth scaffold
-*   `/src/app/auth/callback/route.ts`: Supabase OAuth callback handler
-*   `/src/app/analytics/deep-dive/page.tsx`: Stock deep-dive analytics page (NEW)
-*   `/src/components/ui/`: 20 ShadCN/UI primitives (button, card, dialog, badge, etc.)
-*   `/src/components/dashboard/`: 18 feature components (stock detail, market indices, sector performance, volume anomaly, vn30-overview-table)
-*   `/src/components/layout/`: 4 layout components (sidebar, header, breadcrumb, separator)
-*   `/src/lib/utils.ts`: Utility functions, including `cn` for Tailwind class merging
-*   `/src/lib/query-keys.ts`: Centralized TanStack Query key factory
-*   `/src/lib/api.ts`: Client-side API client configuration
-*   `/src/lib/api-server.ts`: Server-side fetch helpers (ISR 60s)
-*   `/src/lib/query-keys.ts`: Centralized query keys
-*   `/src/lib/supabase/`: Supabase client setup (client, server, middleware)
-*   `/src/hooks/`: 12 custom hooks (use-stock-detail, use-market-indices, use-responsive, use-vn30-overview, use-mobile, use-balance-sheet, use-cash-flow, use-income-statement, use-shareholders, use-volume-analysis, use-sector-performance, use-fund-certificates)
-*   `/src/components/dashboard/stock-detail-tabs.tsx`: Tab navigation (4 tabs total)
+* `/src/app/layout.tsx`: Root layout with providers
+* `/src/app/page.tsx`: Home dashboard
+* `/src/app/analytics/volume-spikes/page.tsx`: Volume spike dashboard
+* `/src/app/analytics/financial-statements/page.tsx`: Financial rankings
+* `/src/components/ui/`: 20 ShadCN primitives
+* `/src/components/dashboard/`: 27 feature components
+  * `volume-spike-dashboard.tsx`, `volume-spike-chart.tsx`, `volume-spike-pie-chart.tsx`
+  * `volume-spike-composed-chart.tsx`, `volume-spike-treemap.tsx`
+  * `financial-statements-table.tsx`
+  * `stock-detail-panel.tsx`, `market-indices.tsx`, `vn30-overview-table.tsx`
+* `/src/hooks/`: 12 custom hooks (use-volume-spikes, use-financial-statements, etc.)
+* `/src/lib/api.ts`: Client API (500 LOC, all types)
+* `/src/lib/query-keys.ts`: Centralized query keys
 
 **Backend (apps/api/):**
-*   `/src/main.py`: FastAPI app instance, CORS, routing setup
-*   `/src/core/config.py`: Settings, environment variables
-*   `/src/core/database.py`: SQLAlchemy engine, session, base model
-*   `/src/core/scheduler.py`: APScheduler configuration, job management
-*   `/src/core/redis.py`: Upstash Redis client setup
-*   `/src/core/cache.py`: TradingHoursCache class for time-sensitive caching
-*   `/src/core/ratelimit.py`: Redis-based rate limiting middleware
-*   `/src/core/vnstock_wrapper.py`: vnstock wrapper with rate limit protection
-*   `/src/stocks/router.py`: 25+ API endpoint aggregation
-*   `/src/stocks/service.py`: vnstock library integration, business logic
-*   `/src/stocks/schemas/`: Pydantic models (price, market incl. VN30OverviewItem/Response, company, financial, analytics)
-*   `/src/stocks/schemas/analytics.py`: Analytics schemas (FinancialStatementItem, FinancialStatementsResponse)
-*   `/src/stocks/models.py`: SQLAlchemy models (IntradayBar, FinancialStatement)
-*   `/src/stocks/intraday_collector.py`: Intraday data collection, volume anomaly detection
-*   `/src/stocks/financial_statements_collector.py`: Weekly financial statements collection with adaptive rate limiting
-*   `/src/stocks/jobs.py`: Scheduled jobs (intraday collection/cleanup, financial statements weekly)
-*   `/src/stocks/analytics/`: Analytics module (service, router)
-*   `/src/stocks/analytics/service.py`: AnalyticsService with financial statements query logic
-*   `/src/stocks/analytics/router.py`: Analytics endpoints with trading-hours cache
-*   `/src/stocks/{market,price,company,financial}/`: Domain-specific routers and services
-*   `/alembic/`: Database migration scripts
-*   `/requirements.txt`: Python dependencies
+* `/src/main.py`: FastAPI app, CORS, routing
+* `/src/stocks/router.py`: Main router aggregation
+* `/src/stocks/analytics/router.py`: Volume spikes, financial statements endpoints
+* `/src/stocks/analytics/service.py`: Analytics business logic
+* `/src/stocks/models.py`: IntradayBar, FinancialStatement models
+* `/src/stocks/schemas/`: 6 schema files (analytics.py, common.py, company.py, financial.py, market.py, price.py)
+* `/src/core/cache.py`: TradingHoursCache class
+* `/src/core/vnstock_wrapper.py`: Rate limit protection wrapper
 
-## 7. Development Setup Instructions
+## 7. Development Setup
 
 **Prerequisites:**
-*   Node.js 18+
-*   Python 3.11+
-*   Docker & Docker Compose
-*   pnpm (for frontend)
+* Node.js 18+
+* Python 3.11+
+* Docker & Docker Compose
+* pnpm
 
 **Quick Start (Docker):**
-1.  `git clone <repo-url>`
-2.  `cd Stock_Massive`
-3.  `cp apps/api/.env.example apps/api/.env`
-4.  `cp apps/web/.env.example apps/web/.env`
-5.  `docker-compose up -d`
-    *   Frontend: `http://localhost:3000`
-    *   Backend API: `http://localhost:8000`
-    *   API Docs: `http://localhost:8000/docs`
+```bash
+git clone <repo-url>
+cd Stock_Massive
+docker-compose up -d
+```
+* Frontend: `http://localhost:3000`
+* Backend API: `http://localhost:8000`
+* API Docs: `http://localhost:8000/docs`
 
 **Manual Setup:**
-*   **Frontend (`apps/web`):**
-    1.  `cd apps/web`
-    2.  `pnpm install`
-    3.  `pnpm dev`
-*   **Backend (`apps/api`):**
-    1.  `cd apps/api`
-    2.  `python -m venv .venv`
-    3.  Activate virtual environment (e.g., `source .venv/bin/activate` for macOS/Linux)
-    4.  `pip install -r requirements.txt`
-    5.  `uvicorn src.main:app --reload --host 0.0.0.0 --port 8000`
+* **Frontend**: `cd apps/web && pnpm install && pnpm dev`
+* **Backend**: `cd apps/api && python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt && uvicorn src.main:app --reload`
 
 **Database Migrations:**
-*   `cd apps/api`
-*   `alembic revision --autogenerate -m "description"`
-*   `alembic upgrade head`
+```bash
+cd apps/api
+alembic revision --autogenerate -m "description"
+alembic upgrade head
+```
 
-## 8. Any Notable Conventions or Patterns
+## 8. Conventions and Patterns
 
 **Code Standards:**
-*   **DRY, KISS, YAGNI**: Principles guiding development (Don't Repeat Yourself, Keep It Simple, You Ain't Gonna Need It).
-*   **Frontend Naming**: `kebab-case.tsx` for components, `use-kebab-case.ts` for hooks.
-*   **Backend Naming**: `snake_case.py` for modules, `PascalCase` for classes, `snake_case` for functions/variables.
-*   **Type Hinting**: Extensive use of TypeScript for frontend and Python type hints for backend.
-*   **Consistent Error/Loading States**: Standardized patterns for displaying skeleton loaders and error messages.
+* **Principles**: DRY, KISS, YAGNI
+* **Frontend Naming**: `kebab-case.tsx` components, `use-kebab-case.ts` hooks
+* **Backend Naming**: `snake_case.py` modules, `PascalCase` classes
+* **Type Hinting**: TypeScript + Python type hints throughout
 
-**Design Guidelines (Modern + Clean):**
-*   **HSL Color System**: All colors defined using HSL CSS variables for easy theming.
-*   **Dark/Light Theme**: Full support implemented via `next-themes`.
-*   **ShadCN/UI**: Standard component library, strongly preferred over custom UI implementations.
-*   **Responsive Design**: Mobile-first approach.
-*   **Accessibility**: Focus on keyboard navigation, semantic HTML, ARIA labels, and color contrast.
-*   **Animation Patterns**: Purposeful animations for transitions and feedback.
+**Design Guidelines:**
+* HSL color system with CSS variables
+* Dark/light theme via next-themes
+* ShadCN/UI as standard component library
+* Mobile-first responsive design
 
 **Git Conventions:**
-*   **Branch Naming**: `feature/`, `fix/`, `refactor/` prefixes.
-*   **Commit Messages**: Conventional Commits (e.g., `feat(scope): description`).
+* Branch: `feature/`, `fix/`, `refactor/` prefixes
+* Commits: Conventional format (`feat(scope): description`)
 
 **API Design:**
-*   **RESTful Principles**: Plural nouns for collections, kebab-case for multi-word segments, logical nesting.
-*   **Versioning**: `/api/v1/` prefix.
-*   **JSON Responses**: Consistent JSON format with `snake_case` fields.
-*   **Query Parameters**: Validated using FastAPI's `Query` dependency.
-*   **Error Handling**: Standardized error response format and HTTP status codes.
-*   **Security**: CORS configuration, Pydantic input validation.
+* RESTful with `/api/v1/` prefix
+* JSON responses with snake_case fields
+* Pydantic validation
+* Standardized error responses

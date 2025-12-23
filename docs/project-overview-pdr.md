@@ -11,36 +11,38 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 3. Enable portfolio tracking and watchlist management
 4. Secure user authentication and data persistence
 5. Integrate vnstock library for comprehensive Vietnam market data
-6. Implement and visualize advanced analytical features like Volume Anomaly Detection
+6. Implement and visualize advanced analytical features (Volume Anomaly, Volume Spikes, Financial Statements)
 
 ---
 
-## Current Implementation Status (December 2025 - Updated 2025-12-22)
+## Current Implementation Status (Updated: 2025-12-23)
 
 | Feature | Status | Details |
 |---------|--------|---------|
-| Dashboard Layout | ✅ Done | Responsive sidebar, header, theme toggle |
-| Stock Detail Page | ✅ Done | Search, ticker header, stats panel, tabs |
-| Analytics Deep-Dive | ✅ Done | Dedicated analytics page with SSR + TanStack Query |
-| Market Indices | ✅ Done | VN-INDEX, VN30, HNX, UPCOM cards with sparklines, 10s auto-refresh |
-| VN30 Overview Table | ✅ Done | Real-time VN30 stocks (price, change, volume, mcap), 1-min refresh |
-| Stock Data API | ✅ Done | 25+ endpoints via vnstock + Fmarket |
-| Financial Data | ✅ Done | Income, balance sheet, cash flow (detailed) |
-| Shareholders/Officers | ✅ Done | Major holders, management, insider deals |
-| Volume Analysis | ✅ Done | 5-min bar aggregation, peak period analysis |
-| Intraday Collection | ✅ Done | Scheduled data collection (15:30 ICT) |
-| Database Models | ✅ Done | IntradayBar model with SQLAlchemy |
-| Sector Performance | ✅ Done | ICB Level 2 with sorting, auto-refresh, top gainers/losers |
-| Toast Notifications | ✅ Done | Sonner integration for user feedback |
-| Volume Anomaly Detection | ✅ Done | API endpoint + core logic, frontend visualization |
-| Volume Anomaly Testing | ✅ Done | All unit tests (46 tests) passed |
-| Fund Certificates | ✅ Done | 7-item display via Fmarket API |
-| Redis Caching | ✅ Done | Trading-hours-aware cache (6 endpoints) |
-| Rate Limiting | ✅ Done | Sliding window (100/60s standard, 20/60s heavy) |
-| Auth Pages | 🚧 Scaffolded | Routes exist, Supabase OAuth UI, logic pending |
-| Charts Page | 🚧 Scaffolded | Route exists, TradingView integration planned |
-| Portfolio Page | 🚧 Scaffolded | Route exists, not implemented |
-| Watchlist Page | 🚧 Scaffolded | Route exists, not implemented |
+| Dashboard Layout | Done | Responsive sidebar, header, theme toggle |
+| Stock Detail Page | Done | Search, ticker header, stats panel, tabs |
+| Analytics Deep-Dive | Done | Dedicated analytics page with SSR + TanStack Query |
+| Analytics Volume Spikes | Done | Volume spike dashboard with treemap, pie chart, composed chart, tabs |
+| Analytics Financial Statements | Done | Ranking table with filters (exchange, year, quarter) |
+| Market Indices | Done | VN-INDEX, VN30, HNX, UPCOM cards with sparklines, 10s auto-refresh |
+| VN30 Overview Table | Done | Real-time VN30 stocks (price, change, volume, mcap), 1-min refresh |
+| Stock Data API | Done | 30+ endpoints via vnstock + Fmarket |
+| Financial Data | Done | Income, balance sheet, cash flow (detailed) |
+| Shareholders/Officers | Done | Major holders, management, insider deals |
+| Volume Analysis | Done | 5-min bar aggregation, peak period analysis |
+| Volume Spikes API | Done | Aggregated volume spike detection across all stocks |
+| Intraday Collection | Done | Scheduled data collection (15:30 ICT) |
+| Database Models | Done | IntradayBar, FinancialStatement with SQLAlchemy |
+| Sector Performance | Done | ICB Level 2 with sorting, auto-refresh, top gainers/losers |
+| Toast Notifications | Done | Sonner integration for user feedback |
+| Volume Anomaly Detection | Done | API endpoint + core logic, frontend visualization |
+| Fund Certificates | Done | 7-item display via Fmarket API |
+| Redis Caching | Done | Trading-hours-aware cache (7 endpoints) |
+| Rate Limiting | Done | Sliding window (100/60s standard, 20/60s heavy) |
+| Auth Pages | Scaffolded | Routes exist, Supabase OAuth UI, logic pending |
+| Charts Page | Planned | Route exists, TradingView integration planned |
+| Portfolio Page | Planned | Route exists, not implemented |
+| Watchlist Page | Planned | Route exists, not implemented |
 
 ---
 
@@ -54,7 +56,9 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 - REST API via vnstock integration
 - Intraday data collection and storage
 - Volume pattern analysis
-- **Volume Anomaly Detection with API endpoint and Frontend Visualization**
+- Volume Anomaly Detection with API endpoint and Frontend Visualization
+- Volume Spikes Dashboard with multiple visualization types
+- Financial Statements ranking with filtering
 
 ### In Scope (Phase 2 - Planned)
 
@@ -74,8 +78,8 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
   - Price board (real-time)
   - Stock groups (VN30, HNX30, etc.)
   - Shareholders, officers, insider deals
-  - **Volume Anomaly Data**
-- **Fmarket API**: Used for `GET /fund-certificates` endpoint, providing detailed fund data.
+  - Volume Anomaly Data
+- **Fmarket API**: Used for `/fund-certificates` endpoint
 
 ### Out of Scope (Phase 1)
 
@@ -96,8 +100,8 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | UI Library | ShadCN/UI | Accessible, customizable, Radix-based |
 | Design Style | Modern + Clean | HSL colors, dark/light themes, consistent patterns |
 | Tables | TanStack Table | Headless, powerful sorting/filtering |
-| Charts | TradingView Lightweight | Industry standard, performant |
-| Data Fetching | TanStack Query v5 | Server state management, caching, background sync |
+| Charts | Recharts + TradingView | Sparklines now, full charts planned |
+| Data Fetching | TanStack Query v5.90 | Server state management, caching, background sync |
 | Backend | FastAPI | Fast, async, auto-docs, type-safe |
 | Data Source | vnstock >= 3.0.0 | Comprehensive Vietnam stock data |
 | Rate Limit Protection | vnstock_wrapper.py | Wraps vnstock calls with rate limit handling |
@@ -106,7 +110,7 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | Scheduler | APScheduler 4.0 | Background job scheduling |
 | Caching | Upstash Redis | Trading-hours-aware TTL, serverless-friendly |
 | Rate Limiting | Redis sliding window | Efficient, distributed, granular control |
-| Volume Anomaly Libraries | Pandas, Greenlet | Efficient data manipulation, async processing |
+| Analytics | Pandas, Greenlet | Efficient data manipulation, async processing |
 
 ---
 
@@ -131,7 +135,13 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `GET /market-indices` | VN-INDEX, VN30, HNX, UPCOM |
 | `GET /price-board` | Real-time prices (multiple symbols) |
 | `GET /{symbol}/detail` | Comprehensive stock detail |
-| `GET /{symbol}/volume-anomalies` | **Retrieve volume anomaly detection results** |
+| `GET /{symbol}/volume-anomalies` | Retrieve volume anomaly detection results |
+
+#### Analytics
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /analytics/volume-spikes` | Top volume spike stocks across market |
+| `GET /analytics/financial-statements` | Top companies by net profit (limit, exchange, year, quarter) |
 
 #### Company & Financials
 | Endpoint | Purpose |
@@ -141,7 +151,7 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `GET /{symbol}/financials/income` | Income statement (simple) |
 | `GET /{symbol}/financials/income-statement` | Income statement (detailed) |
 | `GET /{symbol}/financials/balance-sheet` | Balance sheet (simple) |
-| `GET /{symbol}/financial-statement-detailed` | Balance sheet (detailed) |
+| `GET /{symbol}/financials/balance-sheet-detailed` | Balance sheet (detailed) |
 | `GET /{symbol}/financials/cash-flow` | Cash flow statement |
 
 #### Shareholders & Analysis
@@ -154,6 +164,7 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `POST /intraday/collect` | Trigger intraday collection |
 | `GET /sector-performance` | Sector performance (ICB Level 2) |
 | `GET /fund-certificates` | Fund certificates data |
+| `GET /vn30-overview` | VN30 stocks overview |
 
 ---
 
@@ -161,12 +172,12 @@ All endpoints prefixed with `/api/v1/stocks`:
 
 | Risk | Mitigation |
 |------|------------|
-| vnstock API rate limits | Implement caching layer, request throttling |
+| vnstock API rate limits | Implement caching layer, request throttling, vnstock_wrapper |
 | Large dataset performance | Pagination, virtualization, lazy loading |
 | Security vulnerabilities | OWASP guidelines, input validation |
 | vnstock library changes | Pin version, monitor updates |
 | Data accuracy | Cross-validate with official sources |
-| Complexity of Volume Anomaly Detection | Modularize logic, extensive testing, clear schema definitions |
+| Complexity of Analytics | Modularize logic, extensive testing, clear schema definitions |
 
 ---
 
@@ -193,7 +204,9 @@ All endpoints prefixed with `/api/v1/stocks`:
 - [x] User can view sector performance (ICB Level 2)
 - [x] User receives toast notifications on actions
 - [x] API handles concurrent requests efficiently
-- [x] **API provides and Frontend visualizes volume anomaly detection results**
+- [x] API provides and Frontend visualizes volume anomaly detection results
+- [x] User can view volume spikes dashboard with multiple chart types
+- [x] User can view financial statements ranking with filters
 - [ ] User can view stock price charts
 - [ ] User can register and login
 - [ ] User can create watchlists

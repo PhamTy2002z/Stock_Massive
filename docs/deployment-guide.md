@@ -1,16 +1,15 @@
 # Deployment Guide - Stock Massive
 
+> **Note**: Project chạy hoàn toàn bằng Docker. Database PostgreSQL cũng chạy trong Docker container. Không cần cài đặt Node.js, Python, hay PostgreSQL trên máy local.
+
 ## Prerequisites
 
 - Docker 20.10+
 - Docker Compose 2.0+
-- Node.js 18+ (for local development)
-- Python 3.11+ (for local development)
-- pnpm (for frontend)
 
 ---
 
-## Quick Start (Docker - Development)
+## Quick Start (Development)
 
 ### 1. Clone Repository
 
@@ -124,122 +123,55 @@ docker-compose down -v
 
 ---
 
-## Local Development
-
-### Frontend (apps/web)
-
-```bash
-cd apps/web
-
-# Install dependencies
-pnpm install
-
-# Start development server
-pnpm dev
-
-# Build for production
-pnpm build
-
-# Start production server
-pnpm start
-
-# Lint code
-pnpm lint
-```
-
-### Backend (apps/api)
-
-```bash
-cd apps/api
-
-# Create virtual environment
-python -m venv .venv
-
-# Activate virtual environment
-source .venv/bin/activate  # Linux/macOS
-.venv\Scripts\activate     # Windows
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Start development server
-uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
-
-# Run tests
-pytest
-
-# Run tests with coverage
-pytest --cov=src
-```
-
----
-
 ## Environment Variables
 
-### Backend (apps/api/.env)
+Reference `.env.example` for all available variables. Key ones:
 
 ```env
-# Database
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/stock_massive
+# Database (Docker internal)
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/stock_massive
 
-# JWT (when auth is implemented)
+# API
 SECRET_KEY=your-secret-key-here
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-
-# CORS
 CORS_ORIGINS=http://localhost:3000
 
-# Scheduler
-SCHEDULER_ENABLED=true
-```
-
-### Frontend (apps/web/.env)
-
-```env
-# API URL
+# Frontend
 NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 ```
 
-### Docker Environment
-
-When running with Docker, the API URL should point to the Docker service name:
-
-```env
-# apps/web/.env for Docker
-NEXT_PUBLIC_API_URL=http://api:8000/api/v1
-```
-
 ---
 
-## Database Setup
+### Database Setup
 
-### Run Migrations
+Database PostgreSQL chạy trong Docker container, không cần cài đặt local.
+
+#### Run Migrations
 
 ```bash
-cd apps/api
+# Chạy migrations trong Docker container
+docker-compose exec api alembic upgrade head
 
-# Generate migration
-alembic revision --autogenerate -m "description"
-
-# Apply migrations
-alembic upgrade head
+# Generate migration mới
+docker-compose exec api alembic revision --autogenerate -m "description"
 
 # Rollback migration
-alembic downgrade -1
+docker-compose exec api alembic downgrade -1
 
-# View migration history
-alembic history
+# Xem migration history
+docker-compose exec api alembic history
 ```
 
-### Database Connection
+#### Database Connection
 
 ```bash
-# Connect via psql
-psql -h localhost -U postgres -d stock_massive
+# Kết nối database qua Docker
+docker-compose exec db psql -U postgres -d stockmassive
 
-# Via Docker
-docker-compose exec db psql -U postgres -d stock_massive
+# Backup database
+docker-compose exec db pg_dump -U postgres stockmassive > backup.sql
+
+# Restore database
+docker-compose exec -T db psql -U postgres stockmassive < backup.sql
 ```
 
 ### Database Schema
@@ -354,24 +286,21 @@ psql "postgresql://postgres:postgres@localhost:5432/stock_massive"
 **vnstock import errors**
 
 ```bash
-# Ensure vnstock is installed
-pip install vnstock>=3.0.0
+# Kiểm tra logs của API container
+docker-compose logs api
 
-# Check Python version (requires 3.11+)
-python --version
-
-# Reinstall vnstock
-pip uninstall vnstock
-pip install vnstock>=3.0.0
+# Rebuild API container
+docker-compose up -d --build api
 ```
 
 **Frontend build errors**
 
 ```bash
-# Clear cache and reinstall
-rm -rf node_modules .next
-pnpm install
-pnpm build
+# Rebuild web container
+docker-compose up -d --build web
+
+# Xem logs
+docker-compose logs web
 ```
 
 **API not responding**
@@ -457,11 +386,14 @@ docker-compose logs --tail=100 api
 ### Database Backup
 
 ```bash
-# Backup
-docker-compose exec db pg_dump -U postgres stock_massive > backup.sql
+# Backup database
+docker-compose exec db pg_dump -U postgres stockmassive > backup.sql
 
-# Restore
-docker-compose exec -T db psql -U postgres stock_massive < backup.sql
+# Backup với timestamp
+docker-compose exec db pg_dump -U postgres stockmassive > backup_$(date +%Y%m%d_%H%M%S).sql
+
+# Restore database
+docker-compose exec -T db psql -U postgres stockmassive < backup.sql
 ```
 
 ### Volume Backup
