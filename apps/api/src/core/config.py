@@ -53,7 +53,7 @@ class Settings(BaseSettings):
 
     # Daily OHLCV Collector
     daily_ohlcv_enabled: bool = True
-    daily_ohlcv_hour: int = 20  # 8 PM Vietnam time
+    daily_ohlcv_hour: int = 17  # 5 PM Vietnam time (after market close)
     daily_ohlcv_minute: int = 0
     daily_ohlcv_delay: float = 2.0  # Delay between requests to avoid rate limit
     daily_ohlcv_batch_size: int = 50  # Symbols per batch
