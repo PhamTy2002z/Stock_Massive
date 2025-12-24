@@ -12,7 +12,7 @@
 | Date | 2025-12-23 |
 | Priority | P2 |
 | Effort | 30min |
-| Status | completed |
+| Status | pending |
 
 **Goal:** Improve scrolling smoothness and prevent scroll-related jank.
 
@@ -188,10 +188,10 @@ Add this complete block to the end of `globals.css`:
 
 ## Success Criteria
 
-- [x] Smooth scrolling enabled globally
-- [x] Table horizontal scroll feels smooth on mobile
-- [x] No scroll "bounce" to parent containers
-- [x] CSS compiles without errors
+- [ ] Smooth scrolling enabled globally
+- [ ] Table horizontal scroll feels smooth on mobile
+- [ ] No scroll "bounce" to parent containers
+- [ ] CSS compiles without errors
 
 ---
 

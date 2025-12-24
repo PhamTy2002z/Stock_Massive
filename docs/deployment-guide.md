@@ -1,6 +1,6 @@
 # Deployment Guide - Stock Massive
 
-> **Note**: Project chạy hoàn toàn bằng Docker. Database PostgreSQL cũng chạy trong Docker container. Không cần cài đặt Node.js, Python, hay PostgreSQL trên máy local.
+> **Note**: Project chạy bằng Docker. Database sử dụng Supabase cloud PostgreSQL.
 
 ## Prerequisites
 
@@ -23,7 +23,7 @@ cd Stock_Massive
 ```bash
 # Copy environment templates
 cp .env.example .env
-# Edit .env with your values (especially DB_PASSWORD, AUTH_SECRET)
+# Edit .env with your Supabase DATABASE_URL and AUTH_SECRET
 ```
 
 ### 3. Start Services
@@ -43,7 +43,6 @@ docker-compose exec api alembic upgrade head
 - **Frontend**: http://localhost:3000
 - **Backend API**: http://localhost:8000
 - **API Docs**: http://localhost:8000/docs
-- **Database**: localhost:5432
 
 ---
 
@@ -60,7 +59,7 @@ openssl rand -base64 32
 ```
 
 **Required environment variables for production:**
-- `DB_PASSWORD` - Strong database password
+- `DATABASE_URL` - Supabase database connection (session pooler)
 - `AUTH_SECRET` - Secure authentication secret
 - `CORS_ORIGINS` - Your production domain
 - `NEXT_PUBLIC_API_URL` - Your API domain
@@ -95,9 +94,10 @@ docker-compose -f docker-compose.prod.yml logs -f
 
 | Service | Port | Image | Description |
 |---------|------|-------|-------------|
-| db | 5432 | postgres:16-alpine | PostgreSQL database |
 | api | 8000 | ./apps/api | FastAPI backend |
 | web | 3000 | ./apps/web | Next.js frontend |
+
+> **Note**: Database chạy trên Supabase cloud, không có trong Docker Compose.
 
 ### Service Commands
 
@@ -116,9 +116,6 @@ docker-compose down
 
 # Rebuild services
 docker-compose up -d --build
-
-# Remove volumes (reset database)
-docker-compose down -v
 ```
 
 ---
@@ -128,27 +125,57 @@ docker-compose down -v
 Reference `.env.example` for all available variables. Key ones:
 
 ```env
-# Database (Docker internal)
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/stock_massive
+# Database - Supabase (required)
+DATABASE_URL=postgresql+asyncpg://postgres.[project-ref]:[password]@aws-0-[region].pooler.supabase.com:5432/postgres?sslmode=require
+DATABASE_URL_DIRECT=postgresql://postgres:[password]@db.[project-ref].supabase.co:5432/postgres
 
 # API
-SECRET_KEY=your-secret-key-here
+AUTH_SECRET=your-secret-key-here
 CORS_ORIGINS=http://localhost:3000
 
 # Frontend
 NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+
+# Supabase (for auth)
+NEXT_PUBLIC_SUPABASE_URL=https://[project-ref].supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+```
+
+---
+
+## Supabase Database Connection
+
+### Configuration
+
+When using Supabase as database:
+
+1. **DATABASE_URL** - Async connection (asyncpg) for API endpoints
+2. **DATABASE_URL_DIRECT** - Sync connection (psycopg2) for Alembic migrations and background jobs
+
+### SSL Requirements
+
+Supabase requires SSL connections. The application automatically configures:
+- `sslmode=require` for async connections
+- SSL context for sync connections
+
+### Environment Setup
+
+```bash
+# .env for Supabase
+DATABASE_URL=postgresql+asyncpg://postgres:[PASSWORD]@db.[PROJECT].supabase.co:5432/postgres?sslmode=require
+DATABASE_URL_DIRECT=postgresql+psycopg2://postgres:[PASSWORD]@db.[PROJECT].supabase.co:5432/postgres?sslmode=require
 ```
 
 ---
 
 ### Database Setup
 
-Database PostgreSQL chạy trong Docker container, không cần cài đặt local.
+Database PostgreSQL chạy trên Supabase cloud.
 
 #### Run Migrations
 
 ```bash
-# Chạy migrations trong Docker container
+# Chạy migrations với DATABASE_URL_DIRECT (direct connection)
 docker-compose exec api alembic upgrade head
 
 # Generate migration mới
@@ -161,22 +188,19 @@ docker-compose exec api alembic downgrade -1
 docker-compose exec api alembic history
 ```
 
-#### Database Connection
+#### Database Connection (Supabase)
 
 ```bash
-# Kết nối database qua Docker
-docker-compose exec db psql -U postgres -d stockmassive
+# Kết nối qua psql (direct connection)
+psql "postgresql://postgres:[PASSWORD]@db.[project-ref].supabase.co:5432/postgres"
 
-# Backup database
-docker-compose exec db pg_dump -U postgres stockmassive > backup.sql
-
-# Restore database
-docker-compose exec -T db psql -U postgres stockmassive < backup.sql
+# Hoặc sử dụng Supabase Dashboard SQL Editor
 ```
 
 ### Database Schema
 
 Current tables:
+- `stock_daily_ohlcv` - Daily OHLCV data for all symbols
 - `intraday_bars` - 5-minute OHLCV bars for volume analysis
 - `financial_statements` - Quarterly financial data with profit rankings
 
@@ -190,11 +214,23 @@ Current tables:
 - **Function**: Collects tick data, aggregates to 5-min bars
 - **Storage**: PostgreSQL `intraday_bars` table
 
+### Daily OHLCV Collection
+
+- **Schedule**: Daily at 17:00 ICT
+- **Function**: Collects daily OHLCV data for all symbols
+- **Storage**: PostgreSQL `stock_daily_ohlcv` table
+
 ### Financial Statements Collection
 
 - **Schedule**: Weekly on Sunday at 02:00 ICT
 - **Function**: Fetches quarterly income statements, ranks by net profit
 - **Storage**: PostgreSQL `financial_statements` table
+
+### Job Status Monitoring
+
+- **Endpoint**: `GET /api/v1/jobs/status`
+- **Purpose**: Poll background job progress
+- **Implementation**: In-memory store with startup recovery
 
 To manually trigger collection:
 
@@ -273,14 +309,12 @@ taskkill /PID <PID> /F # Windows
 **Database connection failed**
 
 ```bash
-# Check if database is running
-docker-compose ps db
+# Check API logs for connection errors
+docker-compose logs api | grep -i database
 
-# Check database logs
-docker-compose logs db
-
-# Verify connection string
-psql "postgresql://postgres:postgres@localhost:5432/stock_massive"
+# Verify DATABASE_URL in .env is correct
+# Test connection with psql
+psql "$DATABASE_URL_DIRECT"
 ```
 
 **vnstock import errors**
@@ -326,10 +360,13 @@ curl -I http://localhost:8000/api/v1/stocks/symbols
 curl http://localhost:8000/health
 ```
 
-### Database Health
+### Database Health (Supabase)
 
 ```bash
-docker-compose exec db pg_isready -U postgres
+# Test connection
+psql "$DATABASE_URL_DIRECT" -c "SELECT 1"
+
+# Or check via Supabase Dashboard
 ```
 
 ### Full Stack Check
@@ -367,7 +404,6 @@ docker-compose logs -f
 # Specific service
 docker-compose logs -f api
 docker-compose logs -f web
-docker-compose logs -f db
 
 # Last 100 lines
 docker-compose logs --tail=100 api
@@ -377,31 +413,21 @@ docker-compose logs --tail=100 api
 
 - **API**: Console output (uvicorn)
 - **Web**: Console output (next dev)
-- **Database**: Docker logs
 
 ---
 
 ## Backup and Restore
 
-### Database Backup
+### Database Backup (Supabase)
+
+Supabase cung cấp automated backups. Để backup thủ công:
 
 ```bash
-# Backup database
-docker-compose exec db pg_dump -U postgres stockmassive > backup.sql
+# Backup qua psql
+pg_dump "$DATABASE_URL_DIRECT" > backup_$(date +%Y%m%d_%H%M%S).sql
 
-# Backup với timestamp
-docker-compose exec db pg_dump -U postgres stockmassive > backup_$(date +%Y%m%d_%H%M%S).sql
-
-# Restore database
-docker-compose exec -T db psql -U postgres stockmassive < backup.sql
+# Restore
+psql "$DATABASE_URL_DIRECT" < backup.sql
 ```
 
-### Volume Backup
-
-```bash
-# List volumes
-docker volume ls
-
-# Backup volume
-docker run --rm -v stock_massive_postgres_data:/data -v $(pwd):/backup alpine tar cvf /backup/postgres_backup.tar /data
-```
+Xem thêm: [Supabase Backups Documentation](https://supabase.com/docs/guides/platform/backups)

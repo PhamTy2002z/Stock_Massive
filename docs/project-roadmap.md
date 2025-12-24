@@ -1,6 +1,6 @@
 # Project Roadmap - Stock Massive
 
-Updated: 2025-12-23
+Updated: 2025-12-24
 
 ## Current State (December 2025)
 
@@ -23,13 +23,18 @@ Updated: 2025-12-23
 - [x] Financial statements (income, balance, cash flow)
 - [x] Shareholders, officers, insider deals API
 - [x] Intraday data collection (5-min bars)
+- [x] **Daily OHLCV collection** (17:00 ICT)
 - [x] Volume analysis endpoint
 - [x] Volume anomaly detection (API + frontend)
 - [x] **Volume Spikes API** (aggregated across all stocks)
 - [x] **Financial Statements API** (top companies by net profit)
 - [x] APScheduler for background jobs
+- [x] **Job Status API** (`/api/v1/jobs/status` for progress polling)
+- [x] **Startup Job Recovery** (non-blocking missed job recovery)
+- [x] **Supabase Migration** (PostgreSQL cloud with SSL, connection pooling)
+- [x] **Job Progress UI** (progress bar + notification panel)
 - [x] Docker Compose configuration (dev + prod)
-- [x] Backend test suite (46+ tests in 7 files)
+- [x] Backend test suite (17+ tests in 9 files)
 - [x] Modern + Clean design system established
 - [x] Sector Performance (ICB Level 2, top gainers/losers)
 - [x] Toast notifications (Sonner integration)
@@ -43,6 +48,7 @@ Updated: 2025-12-23
 ### In Progress
 
 - [ ] Frontend feature pages (charts, portfolio, watchlist)
+- [ ] Authentication system implementation
 
 ---
 
@@ -250,6 +256,12 @@ Updated: 2025-12-23
 
 | Feature | Date | Notes |
 |---------|------|-------|
+| Supabase Migration (Complete) | Dec 24, 2025 | DATABASE_URL_DIRECT, SSL config, connection pooling |
+| Job Progress UI | Dec 24, 2025 | Progress bar + notification panel in frontend |
+| Job Status API | Dec 24, 2025 | `/api/v1/jobs/status` for progress polling |
+| Startup Job Recovery | Dec 24, 2025 | Non-blocking missed job recovery on API startup |
+| Daily OHLCV Collection | Dec 24, 2025 | Scheduled job at 17:00 ICT |
+| Supabase Migration (Phase 1) | Dec 24, 2025 | DATABASE_URL_DIRECT, SSL config |
 | Volume Spikes Dashboard (Frontend) | Dec 23, 2025 | Treemap, pie chart, composed chart, tabs visualization |
 | Rename Top Performers to Financial Statements | Dec 23, 2025 | UI/UX optimizations, Vietnamese translation |
 | Financial Statements API Endpoint | Dec 22, 2025 | Analytics router with filters (limit, exchange, year, quarter) |

@@ -1,8 +1,8 @@
 # System Architecture - Stock Massive
 
-Updated: 2025-12-23
+Updated: 2025-12-24
 
-> **Note**: Toàn bộ hệ thống chạy trong Docker containers. Database PostgreSQL cũng chạy trong Docker, không cần cài đặt local.
+> **Note**: Toàn bộ hệ thống chạy trong Docker containers. Database sử dụng Supabase PostgreSQL cloud với SSL và connection pooling.
 
 ## High-Level Overview
 
@@ -36,9 +36,10 @@ Updated: 2025-12-23
            ▼                  ▼
 ┌──────────────────┐  ┌───────────────────────────────────────┐
 │   PostgreSQL     │  │        Vietnam Stock Exchange         │
-│   (port 5432)    │  │   (HOSE, HNX, UPCOM via vnstock)      │
-│                  │  │                                       │
-│ + Upstash Redis  │  └───────────────────────────────────────┘
+│   (Docker or     │  │   (HOSE, HNX, UPCOM via vnstock)      │
+│    Supabase)     │  │                                       │
+│                  │  └───────────────────────────────────────┘
+│ + Upstash Redis  │
 │  (Caching)       │
 └──────────────────┘
 ```
@@ -75,7 +76,7 @@ Updated: 2025-12-23
 ```
 Stock_Massive/
 ├── apps/
-│   ├── web/                      # Next.js frontend (75 files)
+│   ├── web/                      # Next.js frontend (80+ files)
 │   │   ├── src/
 │   │   │   ├── app/              # App Router (5 pages)
 │   │   │   │   ├── (auth)/login/
@@ -84,16 +85,16 @@ Stock_Massive/
 │   │   │   │       ├── volume-spikes/
 │   │   │   │       └── financial-statements/
 │   │   │   ├── components/
-│   │   │   │   ├── ui/           # 20 ShadCN components
+│   │   │   │   ├── ui/           # 21 ShadCN components (+ progress)
 │   │   │   │   ├── dashboard/    # 27 feature components
-│   │   │   │   ├── layout/       # 4 layout components
+│   │   │   │   ├── layout/       # 6 layout components (+ job-progress-bar, notification-panel)
 │   │   │   │   └── providers/    # 2 providers
-│   │   │   ├── hooks/            # 12 custom hooks
+│   │   │   ├── hooks/            # 14 custom hooks (+ use-jobs-status)
 │   │   │   └── lib/              # 4 utilities
 │   │   ├── public/
 │   │   └── package.json
 │   │
-│   └── api/                      # FastAPI backend (52 source + 4 migrations + 7 tests)
+│   └── api/                      # FastAPI backend (55+ source + 4 migrations + 9 tests)
 │       ├── src/
 │       │   ├── stocks/           # Stocks module
 │       │   │   ├── analytics/    # Volume spikes, financial statements
@@ -110,10 +111,11 @@ Stock_Massive/
 │       │   │   ├── jobs.py       # Scheduled jobs
 │       │   │   ├── intraday_collector.py
 │       │   │   └── financial_statements_collector.py
-│       │   ├── core/             # 8 core config files
+│       │   ├── core/             # 9 core config files
 │       │   │   ├── config.py, database.py, dependencies.py
 │       │   │   ├── cache.py, redis.py, ratelimit.py
 │       │   │   ├── scheduler.py, vnstock_wrapper.py
+│       │   │   └── job_status_store.py  # Job progress tracking
 │       │   └── main.py
 │       ├── alembic/              # 4 DB migrations
 │       ├── tests/                # 7 test files
@@ -280,7 +282,7 @@ RootLayout
 |---------|------|-------------|
 | web | 3000 | Next.js frontend |
 | api | 8000 | FastAPI backend |
-| db | 5432 | PostgreSQL 16 |
+| db | Supabase | PostgreSQL (cloud-hosted with SSL) |
 
 ### Docker Compose Features
 
@@ -289,10 +291,34 @@ RootLayout
 - Volume mounts for code changes
 - Network isolation between services
 - Separate prod config (docker-compose.prod.yml) with restart policies
+- Supabase cloud database (no local db container needed)
 
 ---
 
-## Database Schema
+## Database Schema (Supabase PostgreSQL)
+
+### Connection Configuration
+
+- **DATABASE_URL**: Async connection (asyncpg) via session pooler for API endpoints
+- **DATABASE_URL_DIRECT**: Sync connection (psycopg2) bypassing pooler for Alembic migrations
+- **SSL**: Auto-detected for Supabase URLs, required for cloud connections
+- **Connection Pooling**: pool_size=5, max_overflow=10
+
+### StockDailyOHLCV Table
+
+```sql
+CREATE TABLE stock_daily_ohlcv (
+    symbol VARCHAR(10) NOT NULL,
+    date DATE NOT NULL,
+    open FLOAT NOT NULL,
+    high FLOAT NOT NULL,
+    low FLOAT NOT NULL,
+    close FLOAT NOT NULL,
+    volume BIGINT NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (symbol, date)
+);
+```
 
 ### IntradayBar Table
 
@@ -352,7 +378,20 @@ CREATE INDEX ix_financial_statements_collected_at ON financial_statements(collec
 |-----|----------|-------------|
 | Intraday Collection | 15:30 ICT daily | Collect tick data, aggregate to 5-min bars, volume anomaly detection |
 | Intraday Cleanup | 16:00 ICT daily | Clean up old intraday data |
+| Daily OHLCV Collection | 17:00 ICT daily | Collect daily OHLCV data for all symbols |
 | Financial Statements | 02:00 ICT Sunday | Fetch quarterly income statements for HOSE+HNX (~700-800 symbols) |
+
+### Job Status API
+
+- **Endpoint**: `GET /api/v1/jobs/status`
+- **Purpose**: Poll background job progress
+- **Implementation**: In-memory store (`job_status_store.py`)
+
+### Startup Job Recovery
+
+- Checks for missed jobs on API startup
+- Runs missed jobs in background (non-blocking)
+- Prevents API startup blocking from synchronous jobs
 
 ---
 

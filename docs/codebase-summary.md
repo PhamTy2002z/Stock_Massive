@@ -1,7 +1,7 @@
 # Codebase Summary - Stock Massive
 
-Generated: 2025-12-23
-Total Files: ~130 source | Frontend: 75 | Backend: 52 source + 4 migrations + 7 tests
+Generated: 2025-12-24
+Total Files: ~140 source | Frontend: 80+ | Backend: 55+ source + 4 migrations + 17 tests
 
 ## 1. Project Overview and Purpose
 
@@ -20,15 +20,15 @@ Stock Massive is a Vietnamese stock market data platform powered by the `vnstock
 **Frontend:**
 * **Framework**: Next.js 15.5.9 (App Router)
 * **Language**: TypeScript 5.3.0
-* **Styling**: TailwindCSS 3.4 + ShadCN/UI (20 Radix-based components)
+* **Styling**: TailwindCSS 3.4 + ShadCN/UI (21 Radix-based components)
 * **Data Fetching**: TanStack Query v5.90.12 (5min staleTime, 10min gcTime)
 * **Auth**: Supabase 2.89.0 (Google OAuth scaffolded)
 * **Charts**: Recharts 3.6.0 (sparklines, treemap, pie, composed)
 * **State**: useState (local), URL params (shared), next-themes (theme)
 * **Notifications**: Sonner
 * **Icons**: Lucide React
-* **UI Components**: 20 ShadCN primitives, 27 dashboard, 4 layout, 2 providers
-* **Custom Hooks**: 12 total (data fetching + responsive)
+* **UI Components**: 21 ShadCN primitives, 27 dashboard, 6 layout, 2 providers
+* **Custom Hooks**: 14 total (data fetching + responsive + job status)
 * **Pages**: 5 routes (home, login, analytics/deep-dive, analytics/volume-spikes, analytics/financial-statements)
 
 **Backend:**
@@ -41,10 +41,10 @@ Stock Massive is a Vietnamese stock market data platform powered by the `vnstock
 * **Scheduler**: APScheduler 4.0 (daily intraday collection, weekly financial statements)
 * **Cache/Rate Limit**: Upstash Redis
 * **Analytics**: Pandas, Greenlet
-* **Tests**: 7 test files (46+ tests)
+* **Tests**: 9 test files (17+ tests)
 
 **Database:**
-* **Primary**: PostgreSQL 16
+* **Primary**: Supabase PostgreSQL (cloud-hosted with SSL, connection pooling)
 
 **DevOps:**
 * **Containerization**: Docker
@@ -62,7 +62,7 @@ Stock Massive is a Vietnamese stock market data platform powered by the `vnstock
 ```
 Stock_Massive/
 ├── apps/
-│   ├── web/                     # Next.js frontend (port 3000) - 75 files
+│   ├── web/                     # Next.js frontend (port 3000) - 80+ files
 │   │   └── src/
 │   │       ├── app/             # App Router (5 pages)
 │   │       │   ├── (auth)/login/       # Auth login page
@@ -71,14 +71,14 @@ Stock_Massive/
 │   │       │       ├── volume-spikes/  # Volume spike dashboard
 │   │       │       └── financial-statements/  # Financial rankings
 │   │       ├── components/
-│   │       │   ├── ui/          # 20 ShadCN components
+│   │       │   ├── ui/          # 21 ShadCN components (+ progress)
 │   │       │   ├── dashboard/   # 27 feature components
-│   │       │   ├── layout/      # 4 layout components
+│   │       │   ├── layout/      # 6 layout components (+ job-progress-bar, notification-panel)
 │   │       │   └── providers/   # 2 providers (query, theme)
-│   │       ├── hooks/           # 12 custom hooks
+│   │       ├── hooks/           # 14 custom hooks (+ use-jobs-status)
 │   │       └── lib/             # 4 utility files
 │   │
-│   └── api/                     # FastAPI backend (port 8000) - 52 source files
+│   └── api/                     # FastAPI backend (port 8000) - 55+ source files
 │       └── src/
 │           ├── stocks/          # Feature-based modules
 │           │   ├── router.py    # Main aggregation router
@@ -93,13 +93,14 @@ Stock_Massive/
 │           │   ├── price/       # History, intraday, indices, volume
 │           │   ├── company/     # Company info, shareholders, officers
 │           │   └── financial/   # Financials, ratios
-│           ├── core/            # 8 core configuration files
+│           ├── core/            # 9 core configuration files
 │           │   ├── config.py, database.py, dependencies.py
 │           │   ├── cache.py, redis.py, ratelimit.py
 │           │   ├── scheduler.py, vnstock_wrapper.py
+│           │   └── job_status_store.py  # Job progress tracking
 │           └── main.py
-│       ├── alembic/             # 4 database migrations
-│       ├── tests/               # 7 test files
+│       ├── alembic/             # 4 database migrations (Supabase-aware)
+│       ├── tests/               # 9 test files (17+ tests)
 │       └── requirements.txt
 │
 ├── packages/                    # Shared code (placeholders)
@@ -132,7 +133,12 @@ Stock_Massive/
 * **Sector Performance**: ICB Level 2 with sorting, top gainers/losers
 * **Fund Certificates**: 7-item display via Fmarket API
 * **Intraday Collection**: Scheduled daily (15:30 ICT) + cleanup (16:00 ICT)
+* **Daily OHLCV Collection**: Scheduled daily (17:00 ICT)
 * **Financial Statements Job**: Weekly (Sun 02:00 ICT) for HOSE+HNX quarterly rankings
+* **Job Status API**: `/api/v1/jobs/status` for progress polling
+* **Startup Job Recovery**: Non-blocking missed job recovery on API startup
+* **Supabase Migration**: PostgreSQL migrated to Supabase cloud (SSL, pooling)
+* **Job Progress UI**: Progress bar + notification panel in frontend
 * **Auth Scaffold**: Login page UI with Supabase Google OAuth
 * **Redis Caching**: Trading-hours-aware cache for 7 high-traffic endpoints
 * **Rate Limiting**: Sliding window (100/60s standard, 20/60s heavy)
@@ -171,14 +177,15 @@ Stock_Massive/
 * `/src/app/page.tsx`: Home dashboard
 * `/src/app/analytics/volume-spikes/page.tsx`: Volume spike dashboard
 * `/src/app/analytics/financial-statements/page.tsx`: Financial rankings
-* `/src/components/ui/`: 20 ShadCN primitives
+* `/src/components/ui/`: 21 ShadCN primitives (+ progress)
 * `/src/components/dashboard/`: 27 feature components
   * `volume-spike-dashboard.tsx`, `volume-spike-chart.tsx`, `volume-spike-pie-chart.tsx`
   * `volume-spike-composed-chart.tsx`, `volume-spike-treemap.tsx`
   * `financial-statements-table.tsx`
   * `stock-detail-panel.tsx`, `market-indices.tsx`, `vn30-overview-table.tsx`
-* `/src/hooks/`: 12 custom hooks (use-volume-spikes, use-financial-statements, etc.)
-* `/src/lib/api.ts`: Client API (500 LOC, all types)
+* `/src/components/layout/`: 6 layout components (+ job-progress-bar, notification-panel)
+* `/src/hooks/`: 14 custom hooks (use-volume-spikes, use-financial-statements, use-jobs-status, etc.)
+* `/src/lib/api.ts`: Client API (500+ LOC, all types)
 * `/src/lib/query-keys.ts`: Centralized query keys
 
 **Backend (apps/api/):**
@@ -186,10 +193,15 @@ Stock_Massive/
 * `/src/stocks/router.py`: Main router aggregation
 * `/src/stocks/analytics/router.py`: Volume spikes, financial statements endpoints
 * `/src/stocks/analytics/service.py`: Analytics business logic
-* `/src/stocks/models.py`: IntradayBar, FinancialStatement models
+* `/src/stocks/jobs_router.py`: Job status polling API
+* `/src/stocks/models.py`: StockDailyOHLCV, IntradayBar, FinancialStatement models
 * `/src/stocks/schemas/`: 6 schema files (analytics.py, common.py, company.py, financial.py, market.py, price.py)
+* `/src/core/config.py`: Pydantic settings with Supabase support
+* `/src/core/database.py`: SQLAlchemy async engine with SSL auto-detection
 * `/src/core/cache.py`: TradingHoursCache class
 * `/src/core/vnstock_wrapper.py`: Rate limit protection wrapper
+* `/src/core/job_status_store.py`: In-memory job progress tracking
+* `/alembic/env.py`: Alembic config with DATABASE_URL_DIRECT support
 
 ## 7. Development Setup
 

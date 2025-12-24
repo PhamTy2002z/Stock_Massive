@@ -1,13 +1,12 @@
 ---
 title: "UI/UX Performance Optimization"
 description: "Eliminate flicker, reduce polling, memoize components, smooth scrolling"
-status: completed
+status: pending
 priority: P1
 effort: 4h
 branch: main
 tags: [frontend, performance, ui-ux, tanstack-query]
 created: 2025-12-23
-completed: 2025-12-23
 ---
 
 # UI/UX Performance Optimization
@@ -25,11 +24,11 @@ completed: 2025-12-23
 
 | Phase | Description | Effort | Status |
 |-------|-------------|--------|--------|
-| [Phase 1](./phase-01-fix-flicker-tanstack-query.md) | Add `placeholderData: keepPreviousData` to all hooks | 1h | completed |
-| [Phase 2](./phase-02-optimize-polling-intervals.md) | Reduce polling intervals, disable background refetch | 30min | completed |
-| [Phase 3](./phase-03-component-memoization.md) | React.memo table rows + useCallback handlers | 1.5h | completed |
-| [Phase 4](./phase-04-css-smooth-scrolling.md) | Smooth scrolling + GPU acceleration CSS | 30min | completed |
-| [Phase 5](./phase-05-lazy-load-charts.md) | (Optional) Lazy load Recharts components | 30min | completed |
+| [Phase 1](./phase-01-fix-flicker-tanstack-query.md) | Add `placeholderData: keepPreviousData` to all hooks | 1h | pending |
+| [Phase 2](./phase-02-optimize-polling-intervals.md) | Reduce polling intervals, disable background refetch | 30min | pending |
+| [Phase 3](./phase-03-component-memoization.md) | React.memo table rows + useCallback handlers | 1.5h | pending |
+| [Phase 4](./phase-04-css-smooth-scrolling.md) | Smooth scrolling + GPU acceleration CSS | 30min | pending |
+| [Phase 5](./phase-05-lazy-load-charts.md) | (Optional) Lazy load Recharts components | 30min | pending |
 
 ## Files to Modify
 
@@ -54,24 +53,10 @@ completed: 2025-12-23
 
 ## Success Metrics
 
-- [x] No visible flicker when data refreshes
-- [x] Smooth scrolling in tables
-- [x] Network requests reduced 50%+
-- [x] React DevTools shows stable component identity
-
-## Completion Summary
-
-**All 5 phases completed on 2025-12-23.**
-
-| Phase | Code Review | Test Report |
-|-------|-------------|-------------|
-| Phase 1 | PASS | PASS |
-| Phase 2 | PASS | PASS |
-| Phase 3 | PASS | PASS |
-| Phase 4 | CONDITIONAL PASS* | PASS |
-| Phase 5 | APPROVED | PASS |
-
-*Phase 4 note: CSS utilities defined but not all actively used yet - YAGNI concern for future.
+- [ ] No visible flicker when data refreshes
+- [ ] Smooth scrolling in tables
+- [ ] Network requests reduced 50%+
+- [ ] React DevTools shows stable component identity
 
 ## Dependencies
 

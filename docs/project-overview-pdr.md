@@ -15,7 +15,7 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 
 ---
 
-## Current Implementation Status (Updated: 2025-12-23)
+## Current Implementation Status (Updated: 2025-12-24)
 
 | Feature | Status | Details |
 |---------|--------|---------|
@@ -32,13 +32,18 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | Volume Analysis | Done | 5-min bar aggregation, peak period analysis |
 | Volume Spikes API | Done | Aggregated volume spike detection across all stocks |
 | Intraday Collection | Done | Scheduled data collection (15:30 ICT) |
-| Database Models | Done | IntradayBar, FinancialStatement with SQLAlchemy |
+| Daily OHLCV Collection | Done | Scheduled daily (17:00 ICT) |
+| Database Models | Done | StockDailyOHLCV, IntradayBar, FinancialStatement with SQLAlchemy |
 | Sector Performance | Done | ICB Level 2 with sorting, auto-refresh, top gainers/losers |
 | Toast Notifications | Done | Sonner integration for user feedback |
 | Volume Anomaly Detection | Done | API endpoint + core logic, frontend visualization |
 | Fund Certificates | Done | 7-item display via Fmarket API |
 | Redis Caching | Done | Trading-hours-aware cache (7 endpoints) |
 | Rate Limiting | Done | Sliding window (100/60s standard, 20/60s heavy) |
+| Job Status API | Done | `/api/v1/jobs/status` for progress polling |
+| Startup Job Recovery | Done | Non-blocking missed job recovery on API startup |
+| Supabase Migration | Done | PostgreSQL migrated to Supabase cloud (SSL, pooling) |
+| Job Progress UI | Done | Progress bar + notification panel in frontend |
 | Auth Pages | Scaffolded | Routes exist, Supabase OAuth UI, logic pending |
 | Charts Page | Planned | Route exists, TradingView integration planned |
 | Portfolio Page | Planned | Route exists, not implemented |
@@ -106,7 +111,7 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | Data Source | vnstock >= 3.0.0 | Comprehensive Vietnam stock data |
 | Rate Limit Protection | vnstock_wrapper.py | Wraps vnstock calls with rate limit handling |
 | ORM | SQLAlchemy 2.0 | Mature, async support, migrations |
-| Database | PostgreSQL 16 | Reliable, feature-rich, scalable |
+| Database | Supabase PostgreSQL | Cloud-hosted, SSL, connection pooling, reliable |
 | Scheduler | APScheduler 4.0 | Background job scheduling |
 | Caching | Upstash Redis | Trading-hours-aware TTL, serverless-friendly |
 | Rate Limiting | Redis sliding window | Efficient, distributed, granular control |

@@ -12,7 +12,7 @@
 | Date | 2025-12-23 |
 | Priority | P2 |
 | Effort | 1.5h |
-| Status | completed |
+| Status | pending |
 
 **Goal:** Prevent unnecessary re-renders by memoizing table rows and chart components.
 
@@ -214,13 +214,13 @@ export const StockIndexCard = memo(function StockIndexCard({
 
 ## Success Criteria
 
-- [x] VN30 table rows wrapped in `React.memo`
-- [x] Financial statements rows wrapped in `React.memo`
-- [x] All chart components wrapped in `React.memo`
-- [x] Stock index cards wrapped in `React.memo`
-- [x] Inline handlers extracted to `useCallback`
-- [ ] React DevTools Profiler shows reduced re-renders (manual verification)
-- [x] No TypeScript errors
+- [ ] VN30 table rows wrapped in `React.memo`
+- [ ] Financial statements rows wrapped in `React.memo`
+- [ ] All chart components wrapped in `React.memo`
+- [ ] Stock index cards wrapped in `React.memo`
+- [ ] Inline handlers extracted to `useCallback`
+- [ ] React DevTools Profiler shows reduced re-renders
+- [ ] No TypeScript errors
 
 ---
 
