@@ -15,6 +15,10 @@ from ..schemas.company import (
     OfficersResponse,
     InsiderDealItem,
     InsiderDealsResponse,
+    NewsItem,
+    NewsResponse,
+    DividendItem,
+    DividendsResponse,
 )
 from ..shared import StockServiceError, validate_symbol, safe_float
 
@@ -197,3 +201,97 @@ class CompanyService:
             employees=row.get("no_employees"),
             established_year=row.get("established_year"),
         )
+
+    # --- News & Dividends methods ---
+
+    def get_company_news(self, symbol: str) -> NewsResponse:
+        """Get company news and announcements."""
+        symbol = validate_symbol(symbol)
+        try:
+            stock = Vnstock().stock(symbol=symbol, source=self.source)
+            df = stock.company.news()
+
+            if df is None or df.empty:
+                return NewsResponse(symbol=symbol, items=[], total_count=0)
+
+            items = []
+            for _, row in df.iterrows():
+                try:
+                    # Parse publish date
+                    pub_date = row.get("publish_date")
+                    if pub_date is not None and pd.notna(pub_date):
+                        if hasattr(pub_date, "strftime"):
+                            pub_date_str = pub_date.strftime("%Y-%m-%d %H:%M")
+                        else:
+                            pub_date_str = str(pub_date)
+                    else:
+                        pub_date_str = ""
+
+                    items.append(
+                        NewsItem(
+                            id=int(row.get("id", 0) or 0),
+                            title=str(row.get("title", "")),
+                            source=row.get("source"),
+                            published_at=pub_date_str,
+                            price=safe_float(row.get("price")),
+                            price_change_pct=safe_float(row.get("price_change_ratio")),
+                        )
+                    )
+                except Exception as e:
+                    logger.warning(f"Skipping news row due to error: {e}")
+                    continue
+
+            return NewsResponse(
+                symbol=symbol,
+                items=items,
+                total_count=len(items),
+            )
+        except Exception as e:
+            logger.error(f"Error fetching company news for {symbol}: {e}")
+            raise StockServiceError(f"Failed to fetch company news for {symbol}: {e}")
+
+    def get_company_dividends(self, symbol: str) -> DividendsResponse:
+        """Get dividend history for a stock."""
+        symbol = validate_symbol(symbol)
+        try:
+            stock = Vnstock().stock(symbol=symbol, source=self.source)
+            df = stock.company.dividends()
+
+            if df is None or df.empty:
+                return DividendsResponse(symbol=symbol, items=[], total_count=0)
+
+            items = []
+            for _, row in df.iterrows():
+                try:
+                    # Parse exercise date (format: DD/MM/YY)
+                    ex_date = row.get("exercise_date")
+                    if ex_date is not None:
+                        ex_date_str = str(ex_date)
+                    else:
+                        ex_date_str = ""
+
+                    # Get dividend percentage and convert to percentage format
+                    div_pct = safe_float(row.get("cash_dividend_percentage")) or 0
+                    # API returns decimal (0.181 = 18.1%), convert to percentage
+                    div_pct_display = div_pct * 100
+
+                    items.append(
+                        DividendItem(
+                            exercise_date=ex_date_str,
+                            year=int(row.get("cash_year", 0) or 0),
+                            dividend_pct=div_pct_display,
+                            method=str(row.get("issue_method", "cash")),
+                        )
+                    )
+                except Exception as e:
+                    logger.warning(f"Skipping dividend row due to error: {e}")
+                    continue
+
+            return DividendsResponse(
+                symbol=symbol,
+                items=items,
+                total_count=len(items),
+            )
+        except Exception as e:
+            logger.error(f"Error fetching company dividends for {symbol}: {e}")
+            raise StockServiceError(f"Failed to fetch company dividends for {symbol}: {e}")

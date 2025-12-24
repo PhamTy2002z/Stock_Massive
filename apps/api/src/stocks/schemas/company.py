@@ -140,3 +140,42 @@ class InsiderDealsResponse(BaseModel):
     symbol: str
     deals: list[InsiderDealItem]
     total_count: int
+
+
+# === News & Dividends Schemas ===
+
+
+class NewsItem(BaseModel):
+    """Company news item."""
+
+    id: int
+    title: str
+    source: Optional[str] = None
+    published_at: str
+    price: Optional[float] = None
+    price_change_pct: Optional[float] = None
+
+
+class NewsResponse(BaseModel):
+    """Response for company news endpoint."""
+
+    symbol: str
+    items: list[NewsItem]
+    total_count: int
+
+
+class DividendItem(BaseModel):
+    """Dividend history item."""
+
+    exercise_date: str
+    year: int
+    dividend_pct: float  # e.g., 18.1 for 18.1%
+    method: str  # 'cash' or 'share'
+
+
+class DividendsResponse(BaseModel):
+    """Response for dividends endpoint."""
+
+    symbol: str
+    items: list[DividendItem]
+    total_count: int
