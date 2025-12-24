@@ -94,8 +94,9 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
             f"{settings.financial_statements_hour:02d}:{settings.financial_statements_minute:02d} ICT"
         )
 
-    # Run startup checks for missed jobs
-    await run_startup_jobs()
+    # Run startup checks for missed jobs in background (non-blocking)
+    # This allows the server to start accepting requests immediately
+    asyncio.create_task(run_startup_jobs_with_delay())
 
 
 def _is_trading_day(d: date) -> bool:
@@ -188,6 +189,13 @@ async def _should_run_ohlcv_job() -> bool:
 
     # Run if less than 100 symbols have data (incomplete collection)
     return count < 100
+
+
+async def run_startup_jobs_with_delay() -> None:
+    """Run startup jobs after a short delay to allow server to fully start."""
+    # Wait for server to be ready and accepting requests
+    await asyncio.sleep(5)
+    await run_startup_jobs()
 
 
 async def run_startup_jobs() -> None:
