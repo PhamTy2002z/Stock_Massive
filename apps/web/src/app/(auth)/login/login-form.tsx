@@ -6,6 +6,8 @@ import { useState } from "react"
 import { toast } from "sonner"
 import { useSearchParams } from "next/navigation"
 import { Loader2 } from "lucide-react"
+import Image from "next/image"
+import Link from "next/link"
 
 export default function LoginForm() {
   const [isLoading, setIsLoading] = useState(false)
@@ -30,13 +32,23 @@ export default function LoginForm() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-black p-4">
       <div className="w-full max-w-[450px] space-y-6">
-        <div className="flex flex-col items-center space-y-2 text-center">
-          <h1 className="text-3xl font-bold tracking-tight text-white">
-            Sign in to Stock Massive
-          </h1>
-          <p className="text-base text-gray-400">
-            Navigate the volatility. Seize the opportunity.
-          </p>
+        <div className="flex flex-col items-center space-y-4 text-center">
+          <Image
+            src="/logo.png"
+            alt="Stock Massive Logo"
+            width={64}
+            height={64}
+            className="rounded-xl"
+            priority
+          />
+          <div className="space-y-2">
+            <h1 className="text-3xl font-bold tracking-tight text-white">
+              Sign in to Stock Massive
+            </h1>
+            <p className="text-base text-gray-400">
+              Navigate the volatility. Seize the opportunity.
+            </p>
+          </div>
         </div>
 
         <div className="space-y-4">
@@ -88,7 +100,21 @@ export default function LoginForm() {
 
         <div className="text-center">
           <p className="text-sm text-gray-500">
-            By signing in, you agree to our Terms of Service and Privacy Policy.
+            By signing in, you agree to our{" "}
+            <Link
+              href="/terms"
+              className="text-gray-400 underline underline-offset-2 hover:text-white transition-colors"
+            >
+              Terms of Service
+            </Link>{" "}
+            and{" "}
+            <Link
+              href="/privacy"
+              className="text-gray-400 underline underline-offset-2 hover:text-white transition-colors"
+            >
+              Privacy Policy
+            </Link>
+            .
           </p>
         </div>
       </div>
