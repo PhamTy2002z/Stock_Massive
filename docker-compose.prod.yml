@@ -4,26 +4,6 @@
 # Usage: docker-compose -f docker-compose.prod.yml up -d
 
 services:
-  db:
-    image: postgres:16-alpine
-    container_name: stockmassive-db
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
-      POSTGRES_DB: ${DB_NAME:-stockmassive}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - stockmassive-network
-
   api:
     build:
       context: ./apps/api
@@ -31,7 +11,8 @@ services:
     container_name: stockmassive-api
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@db:5432/${DB_NAME:-stockmassive}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      DATABASE_URL_DIRECT: ${DATABASE_URL_DIRECT:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-https://yourdomain.com}
       SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
       UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
@@ -39,9 +20,6 @@ services:
       AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required}
     ports:
       - "8000:8000"
-    depends_on:
-      db:
-        condition: service_healthy
     networks:
       - stockmassive-network
 
@@ -61,9 +39,6 @@ services:
       - api
     networks:
       - stockmassive-network
-
-volumes:
-  postgres_data:
 
 networks:
   stockmassive-network:

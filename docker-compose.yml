@@ -1,44 +1,25 @@
 services:
-  db:
-    image: postgres:16-alpine
-    container_name: stockmassive-db
-    environment:
-      POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
-      POSTGRES_DB: ${DB_NAME:-stockmassive}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - stockmassive-network
-
   api:
     build:
       context: ./apps/api
       dockerfile: Dockerfile
     container_name: stockmassive-api
     environment:
-      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-stockmassive}
+      DATABASE_URL: ${DATABASE_URL}  # From .env (Supabase)
+      DATABASE_URL_DIRECT: ${DATABASE_URL_DIRECT:-}  # For migrations
       AUTH_SECRET: ${AUTH_SECRET:-dev-secret-change-in-production}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
       UPSTASH_REDIS_REST_TOKEN: ${UPSTASH_REDIS_REST_TOKEN:-}
       SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
       DAILY_OHLCV_ENABLED: ${DAILY_OHLCV_ENABLED:-true}
+      DAILY_OHLCV_DELAY: ${DAILY_OHLCV_DELAY:-2.0}
+      DAILY_OHLCV_BATCH_SIZE: ${DAILY_OHLCV_BATCH_SIZE:-50}
     volumes:
       - ./apps/api/src:/code/src
       - ./apps/api/alembic:/code/alembic
     ports:
       - "8000:8000"
-    depends_on:
-      db:
-        condition: service_healthy
     networks:
       - stockmassive-network
 
@@ -59,9 +40,6 @@ services:
       - api
     networks:
       - stockmassive-network
-
-volumes:
-  postgres_data:
 
 networks:
   stockmassive-network:

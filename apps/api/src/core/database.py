@@ -10,10 +10,24 @@ from src.core.config import get_settings
 
 settings = get_settings()
 
-# Convert postgresql:// to postgresql+asyncpg://
+# Convert postgresql:// to postgresql+asyncpg:// and strip sslmode from URL
+# (asyncpg doesn't accept sslmode in URL, must use connect_args instead)
 DATABASE_URL = settings.database_url.replace(
     "postgresql://", "postgresql+asyncpg://"
 )
+
+# Strip sslmode from URL for asyncpg compatibility
+if "?sslmode=" in DATABASE_URL:
+    DATABASE_URL = DATABASE_URL.split("?sslmode=")[0]
+elif "&sslmode=" in DATABASE_URL:
+    # Handle sslmode in query params
+    import re
+    DATABASE_URL = re.sub(r"[&?]sslmode=[^&]*", "", DATABASE_URL)
+
+# SSL config for Supabase connections
+connect_args = {}
+if "supabase" in DATABASE_URL.lower() or "supabase" in settings.database_url.lower():
+    connect_args["ssl"] = "require"
 
 engine = create_async_engine(
     DATABASE_URL,
@@ -23,6 +37,7 @@ engine = create_async_engine(
     pool_pre_ping=True,
     pool_timeout=30,
     pool_recycle=3600,
+    connect_args=connect_args,
 )
 
 async_session_factory = async_sessionmaker(
@@ -32,6 +47,10 @@ async_session_factory = async_sessionmaker(
 )
 
 # Sync engine for Alembic migrations and sync database operations
+sync_connect_args = {}
+if "supabase" in settings.database_url.lower():
+    sync_connect_args["sslmode"] = "require"
+
 sync_engine = create_engine(
     settings.database_url,
     echo=settings.debug,
@@ -40,6 +59,7 @@ sync_engine = create_engine(
     pool_pre_ping=True,
     pool_timeout=30,
     pool_recycle=3600,
+    connect_args=sync_connect_args,
 )
 
 sync_session_factory = sessionmaker(

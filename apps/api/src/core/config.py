@@ -21,6 +21,7 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = "postgresql://postgres:postgres@localhost:5432/stockmassive"
+    database_url_direct: str = ""  # Direct connection for Alembic migrations (Supabase)
 
     # CORS
     cors_origins: str = "http://localhost:3000"  # Comma-separated origins
