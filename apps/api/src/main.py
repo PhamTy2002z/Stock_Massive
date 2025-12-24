@@ -11,6 +11,7 @@ from src.core.config import get_settings
 from src.core.database import engine
 from src.core.scheduler import setup_scheduler
 from src.stocks.router import router as stocks_router
+from src.stocks.jobs_router import router as jobs_router
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -50,6 +51,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(stocks_router, prefix="/api/v1")
+app.include_router(jobs_router, prefix="/api/v1")
 
 
 @app.exception_handler(Exception)

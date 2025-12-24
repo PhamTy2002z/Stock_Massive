@@ -14,6 +14,7 @@ from src.core.vnstock_wrapper import (
     get_all_symbols,
     get_stock_history,
 )
+from src.core.job_status_store import job_store
 from src.stocks.intraday_collector import IntradayCollector
 from src.stocks.models import StockDailyOHLCV, StockIntradayBar
 from src.stocks.financial_statements_collector import FinancialStatementsCollector
@@ -30,6 +31,7 @@ async def collect_intraday_data_job() -> dict:
     """
     symbols = [s.strip() for s in settings.intraday_symbols.split(",") if s.strip()]
     logger.info(f"Starting intraday collection for {len(symbols)} symbols: {symbols}")
+    job_store.start_job("intraday", "Thu thập Intraday", len(symbols))
 
     try:
         async with async_session_factory() as db:
@@ -40,9 +42,11 @@ async def collect_intraday_data_job() -> dict:
             f"Collection complete: {len(result['success'])} success, "
             f"{len(result['failed'])} failed, {result['total_bars']} bars"
         )
+        job_store.complete_job("intraday", result)
         return result
     except Exception as e:
         logger.error(f"Intraday collection job failed: {e}")
+        job_store.fail_job("intraday", str(e))
         return {"success": [], "failed": symbols, "total_bars": 0, "error": str(e)}
 
 
@@ -54,6 +58,7 @@ async def cleanup_old_data_job() -> int:
     """
     cutoff = datetime.now() - timedelta(days=settings.intraday_retention_days)
     logger.info(f"Cleaning up data older than {cutoff.date()}")
+    job_store.start_job("cleanup", "Dọn dẹp dữ liệu cũ", 1)
 
     try:
         async with async_session_factory() as db:
@@ -63,9 +68,11 @@ async def cleanup_old_data_job() -> int:
             deleted_count = result.rowcount
 
         logger.info(f"Deleted {deleted_count} old records")
+        job_store.complete_job("cleanup", {"deleted_count": deleted_count})
         return deleted_count
     except Exception as e:
         logger.error(f"Cleanup job failed: {e}")
+        job_store.fail_job("cleanup", str(e))
         return 0
 
 
@@ -89,7 +96,10 @@ def collect_daily_ohlcv_job() -> dict:
     all_symbols = get_all_symbols(max_retries=3, base_delay=5.0)
     if not all_symbols:
         logger.error("Failed to get symbol list (rate limited or error)")
+        job_store.fail_job("daily-ohlcv", "Failed to fetch symbols")
         return {"success": 0, "failed": 0, "total_rows": 0, "error": "Failed to fetch symbols"}
+
+    job_store.start_job("daily-ohlcv", "Thu thập OHLCV", len(all_symbols))
 
     logger.info(f"Found {len(all_symbols)} symbols to process")
 
@@ -155,6 +165,13 @@ def collect_daily_ohlcv_job() -> dict:
             f"{error_count} errors, {rate_limit_count} rate limited"
         )
 
+        # Update progress after each batch
+        job_store.update_progress(
+            "daily-ohlcv",
+            batch_idx + len(batch),
+            f"Batch {batch_num}/{total_batches}",
+        )
+
         # Extra pause between batches if rate limits detected
         if rate_limit_count > 0:
             batch_pause = min(30, rate_limit_count * 5)
@@ -168,13 +185,15 @@ def collect_daily_ohlcv_job() -> dict:
         f"{rate_limit_count} rate limited, {total_rows} rows"
     )
 
-    return {
+    result = {
         "success": success_count,
         "failed": error_count,
         "rate_limited": rate_limit_count,
         "total_rows": total_rows,
         "elapsed_minutes": round(elapsed, 1),
     }
+    job_store.complete_job("daily-ohlcv", result)
+    return result
 
 
 def _save_ohlcv_batch(batch_data: list) -> int:
@@ -262,6 +281,7 @@ async def collect_financial_statements_job() -> dict:
     Returns dict with success/failed counts.
     """
     logger.info("Starting financial statements collection job")
+    job_store.start_job("financial-statements", "Thu thập BCTC", 1)
 
     try:
         async with async_session_factory() as db:
@@ -269,7 +289,9 @@ async def collect_financial_statements_job() -> dict:
             result = await collector.collect()
 
         logger.info(f"Financial statements job complete: {result}")
+        job_store.complete_job("financial-statements", result)
         return result
     except Exception as e:
         logger.error(f"Financial statements collection job failed: {e}")
+        job_store.fail_job("financial-statements", str(e))
         return {"success": 0, "failed": 0, "error": str(e)}
