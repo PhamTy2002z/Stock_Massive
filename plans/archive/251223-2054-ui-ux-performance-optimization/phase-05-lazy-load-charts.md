@@ -12,7 +12,7 @@
 | Date | 2025-12-23 |
 | Priority | P3 |
 | Effort | 30min |
-| Status | completed |
+| Status | pending |
 
 **Goal:** Reduce initial bundle size by lazy loading Recharts components.
 
@@ -152,11 +152,11 @@ const VolumeSpikeChart = dynamic(
 
 ## Success Criteria
 
-- [x] Chart components load on demand
-- [x] Skeleton shown during chart load
-- [x] No SSR errors (charts render client-side only)
-- [x] Network tab shows chart chunk loaded separately
-- [x] TypeScript compiles without errors
+- [ ] Chart components load on demand
+- [ ] Skeleton shown during chart load
+- [ ] No SSR errors (charts render client-side only)
+- [ ] Network tab shows chart chunk loaded separately
+- [ ] TypeScript compiles without errors
 
 ---
 

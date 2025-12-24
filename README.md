@@ -2,7 +2,7 @@
 
 Vietnamese stock market data platform powered by **vnstock** library. Provides real-time data, charting, and analysis for Vietnam stock market (HOSE, HNX, UPCOM).
 
-## Current Status (Updated: 2025-12-23)
+## Current Status (Updated: 2025-12-24)
 
 | Component | Status | Notes |
 |-----------|--------|-------|
@@ -21,8 +21,12 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | Fund Certificates | Done | Display 7 items via Fmarket API |
 | Redis Caching | Done | Trading-hours-aware cache (Upstash Redis) |
 | Rate Limiting | Done | Sliding window (100/60s standard, 20/60s heavy) |
-| Database Models | Done | IntradayBar, FinancialStatement models |
+| Database Models | Done | StockDailyOHLCV, IntradayBar, FinancialStatement |
+| Job Status API | Done | `/api/v1/jobs/status` for progress polling |
+| Startup Job Recovery | Done | Non-blocking missed job recovery on API startup |
 | Auth Pages | Scaffolded | Login/register routes, Supabase OAuth UI |
+| Supabase Migration | Done | PostgreSQL migrated to Supabase cloud |
+| Job Progress UI | Done | Progress bar + notification panel |
 | Charts Page | Planned | TradingView Lightweight Charts |
 | Portfolio/Watchlist | Planned | CRUD operations, P&L tracking |
 
@@ -30,7 +34,7 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 
 - **Frontend**: Next.js 15.5.9, TypeScript 5.3.0, TailwindCSS 3.4, ShadCN/UI (Radix), TanStack Query 5.90, Recharts 3.6, Sonner
 - **Backend**: FastAPI, Python 3.11+, vnstock >= 3.0.0, SQLAlchemy 2.0, APScheduler 4.0, Pydantic 2
-- **Database**: PostgreSQL 16
+- **Database**: Supabase PostgreSQL (cloud-hosted with SSL)
 - **Caching**: Upstash Redis (trading-hours-aware TTL)
 - **DevOps**: Docker, Docker Compose, pnpm
 - **Design**: Modern + Clean (HSL color system, dark/light themes, next-themes)
@@ -40,22 +44,23 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 ```
 Stock_Massive/
 ├── apps/
-│   ├── web/                 # Next.js frontend (port 3000) - 75 files
+│   ├── web/                 # Next.js frontend (port 3000) - 80+ files
 │   │   └── src/
 │   │       ├── app/         # App Router pages (5 pages)
-│   │       ├── components/  # UI (20) + dashboard (27) + layout (4) + providers (2)
-│   │       ├── hooks/       # 12 custom hooks
+│   │       ├── components/  # UI (21) + dashboard (27) + layout (6) + providers (2)
+│   │       ├── hooks/       # 14 custom hooks
 │   │       └── lib/         # 4 utility files
 │   │
-│   └── api/                 # FastAPI backend (port 8000) - 52 source files
+│   └── api/                 # FastAPI backend (port 8000) - 55+ source files
 │       └── src/
 │           ├── stocks/      # Feature-based modules
 │           │   ├── analytics/  # Volume spikes, financial statements
 │           │   ├── market/     # Symbols, sectors, fund certificates
 │           │   ├── price/      # History, intraday, indices, volume
 │           │   ├── company/    # Company info, shareholders, officers
-│           │   └── financial/  # Financials, ratios
-│           ├── core/        # Config, database, scheduler, cache
+│           │   ├── financial/  # Financials, ratios
+│           │   └── jobs_router.py  # Job status API
+│           ├── core/        # Config, database, scheduler, cache, job_status_store
 │           └── main.py
 │
 ├── packages/                # Shared code (placeholders)
@@ -88,11 +93,12 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `/{symbol}/volume-analysis` | GET | Volume pattern analysis |
 | `/{symbol}/volume-anomalies` | GET | Volume anomaly detection |
 
-### Analytics (2 endpoints)
+### Analytics (3 endpoints)
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/analytics/volume-spikes` | GET | Top volume spike stocks |
 | `/analytics/financial-statements` | GET | Top companies by net profit |
+| `/api/v1/jobs/status` | GET | Poll background job progress |
 
 ### Company Data (4 endpoints)
 | Endpoint | Method | Description |
@@ -145,7 +151,7 @@ docker-compose exec api alembic upgrade head
 | Frontend | http://localhost:3000 | Next.js web app |
 | API | http://localhost:8000 | FastAPI backend |
 | API Docs | http://localhost:8000/docs | Swagger UI |
-| Database | localhost:5432 | PostgreSQL (Docker) |
+| Database | Supabase Cloud | PostgreSQL (cloud-hosted) |
 
 ### Docker Commands
 
@@ -164,14 +170,11 @@ docker-compose down
 # Rebuild sau khi thay đổi code
 docker-compose up -d --build
 
-# Database migrations
+# Database migrations (Supabase)
 docker-compose exec api alembic upgrade head
 
-# Truy cập database shell
-docker-compose exec db psql -U postgres -d stockmassive
-
-# Reset database (xóa data)
-docker-compose down -v
+# Truy cập Supabase database
+# Use Supabase Dashboard SQL Editor or psql with DATABASE_URL_DIRECT
 
 # Kiểm tra trạng thái services
 docker-compose ps

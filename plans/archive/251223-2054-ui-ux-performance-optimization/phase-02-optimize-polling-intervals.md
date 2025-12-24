@@ -12,7 +12,7 @@
 | Date | 2025-12-23 |
 | Priority | P1 |
 | Effort | 30min |
-| Status | completed |
+| Status | pending |
 
 **Goal:** Reduce network load by increasing polling intervals for less volatile data.
 
@@ -68,9 +68,9 @@ Already included in Phase 1 code. This phase is a documentation/verification che
 
 ## Success Criteria
 
-- [x] Network tab shows ~50% fewer requests per minute
-- [x] Dashboard data still updates regularly
-- [x] No visible staleness for user-focused data (indices, stock detail)
+- [ ] Network tab shows ~50% fewer requests per minute
+- [ ] Dashboard data still updates regularly
+- [ ] No visible staleness for user-focused data (indices, stock detail)
 
 ---
 

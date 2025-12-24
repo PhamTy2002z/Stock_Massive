@@ -12,7 +12,7 @@
 | Date | 2025-12-23 |
 | Priority | P1 |
 | Effort | 1h |
-| Status | completed |
+| Status | pending |
 
 **Goal:** Eliminate UI flicker during data refetch by keeping previous data visible while new data loads.
 
@@ -298,12 +298,12 @@ export function useFinancialStatements(limit: number = 50, exchange?: string) {
 
 ## Success Criteria
 
-- [x] All 7 hooks import `keepPreviousData` from `@tanstack/react-query`
-- [x] All hooks have `placeholderData: keepPreviousData`
-- [x] All hooks have `refetchIntervalInBackground: false`
-- [x] All hooks return `isPlaceholderData` flag
-- [x] No visible flicker when data auto-refreshes
-- [x] TypeScript compiles without errors
+- [ ] All 7 hooks import `keepPreviousData` from `@tanstack/react-query`
+- [ ] All hooks have `placeholderData: keepPreviousData`
+- [ ] All hooks have `refetchIntervalInBackground: false`
+- [ ] All hooks return `isPlaceholderData` flag
+- [ ] No visible flicker when data auto-refreshes
+- [ ] TypeScript compiles without errors
 
 ---
 

@@ -1,6 +1,6 @@
 # Code Standards - Stock Massive
 
-Updated: 2025-12-23
+Updated: 2025-12-24
 
 ## General Principles
 
@@ -23,9 +23,9 @@ Updated: 2025-12-23
 
 ```
 components/
-├── ui/                    # 20 ShadCN base components
+├── ui/                    # 21 ShadCN base components (+ progress)
 ├── dashboard/             # 27 feature-specific components
-├── layout/                # 4 layout components
+├── layout/                # 6 layout components (+ job-progress-bar, notification-panel)
 └── providers/             # 2 context providers
 ```
 
@@ -90,13 +90,14 @@ if (error) return <StockDetailError message={error.message} onRetry={refetch} />
 if (!data) return <StockDetailEmpty />
 ```
 
-### Custom Hooks (12 total)
+### Custom Hooks (14 total)
 
 - `use-stock-detail`, `use-market-indices`, `use-vn30-overview`
 - `use-sector-performance`, `use-fund-certificates`
 - `use-income-statement`, `use-balance-sheet`, `use-cash-flow`
 - `use-shareholders`, `use-volume-analysis`
 - `use-volume-spikes`, `use-financial-statements`
+- `use-jobs-status` (job progress polling)
 
 ---
 
@@ -118,6 +119,7 @@ if (!data) return <StockDetailEmpty />
 # schemas.py or schemas/ - Pydantic models
 # models.py - SQLAlchemy models
 # jobs.py - Scheduled tasks
+# jobs_router.py - Job status API endpoints
 # intraday_collector.py - Intraday data collection + volume anomaly
 # financial_statements_collector.py - Weekly financial data collection
 ```
@@ -235,7 +237,7 @@ docs: update project documentation for December 2025
 - Component: React Testing Library
 - E2E: Playwright (if needed)
 
-### Backend (7 test files, 46+ tests)
+### Backend (9 test files, 17+ tests)
 
 - Unit: pytest
 - Integration: pytest + TestClient
