@@ -494,3 +494,47 @@ export async function fetchVolumeSpikes(
     `/stocks/analytics/volume-spikes${queryString ? `?${queryString}` : ""}`
   )
 }
+
+// Job Status Types
+export type JobStatusType = "pending" | "running" | "completed" | "failed"
+
+export interface JobStatus {
+  jobId: string
+  displayName: string
+  status: JobStatusType
+  progress: number
+  totalItems: number
+  processedItems: number
+  message: string | null
+  startedAt: string | null
+  completedAt: string | null
+  elapsedSeconds: number | null
+}
+
+export async function fetchJobsStatus(): Promise<JobStatus[]> {
+  const data = await fetchApi<{
+    job_id: string
+    display_name: string
+    status: JobStatusType
+    progress: number
+    total_items: number
+    processed_items: number
+    message: string | null
+    started_at: string | null
+    completed_at: string | null
+    elapsed_seconds: number | null
+  }[]>("/jobs/status")
+
+  return data.map((item) => ({
+    jobId: item.job_id,
+    displayName: item.display_name,
+    status: item.status,
+    progress: item.progress,
+    totalItems: item.total_items,
+    processedItems: item.processed_items,
+    message: item.message,
+    startedAt: item.started_at,
+    completedAt: item.completed_at,
+    elapsedSeconds: item.elapsed_seconds,
+  }))
+}
