@@ -187,8 +187,8 @@ async def _should_run_ohlcv_job() -> bool:
         )
         count = result.scalar()
 
-    # Run if less than 100 symbols have data (incomplete collection)
-    return count < 100
+    # Run if less than 500 symbols have data (incomplete collection)
+    return count < 500
 
 
 async def run_startup_jobs_with_delay() -> None:
