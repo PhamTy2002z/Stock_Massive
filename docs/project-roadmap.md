@@ -1,10 +1,10 @@
 # Project Roadmap - Stock Massive
 
-Updated: 2025-12-24
+Updated: 2024-12-24
 
-## Current State (December 2025)
+## Current State (December 2024)
 
-### Completed (December 2025)
+### Completed (December 2024)
 
 - [x] Monorepo structure setup
 - [x] Next.js 15.5.9 frontend with App Router
@@ -252,44 +252,44 @@ Updated: 2025-12-24
 
 ---
 
-## Recently Completed (December 2025)
+## Recently Completed (December 2024)
 
 | Feature | Date | Notes |
 |---------|------|-------|
-| Supabase Migration (Complete) | Dec 24, 2025 | DATABASE_URL_DIRECT, SSL config, connection pooling |
-| Job Progress UI | Dec 24, 2025 | Progress bar + notification panel in frontend |
-| Job Status API | Dec 24, 2025 | `/api/v1/jobs/status` for progress polling |
-| Startup Job Recovery | Dec 24, 2025 | Non-blocking missed job recovery on API startup |
-| Daily OHLCV Collection | Dec 24, 2025 | Scheduled job at 17:00 ICT |
-| Supabase Migration (Phase 1) | Dec 24, 2025 | DATABASE_URL_DIRECT, SSL config |
-| Volume Spikes Dashboard (Frontend) | Dec 23, 2025 | Treemap, pie chart, composed chart, tabs visualization |
-| Rename Top Performers to Financial Statements | Dec 23, 2025 | UI/UX optimizations, Vietnamese translation |
-| Financial Statements API Endpoint | Dec 22, 2025 | Analytics router with filters (limit, exchange, year, quarter) |
-| Financial Statements Batch Job | Dec 22, 2025 | Weekly scheduled job for HOSE+HNX quarterly rankings |
-| 10s Auto-Refresh | Dec 22, 2025 | Market indices refresh every 10s with loading indicators |
-| vnstock Wrapper | Dec 22, 2025 | Rate limit protection wrapper for vnstock API calls |
-| Transaction Rollback | Dec 22, 2025 | Added rollback on intraday data collection failures |
-| VN30 Overview (Frontend) | Dec 21, 2025 | Dashboard table with pagination, auto-refresh (1min) |
-| VN30 Overview (API) | Dec 21, 2025 | Backend endpoint with Redis caching (5min/1hr TTL) |
-| Analytics Deep-Dive Page | Dec 21, 2025 | SSR + TanStack Query integration |
-| Extended Caching | Dec 20, 2025 | 7 high-traffic endpoints with trading-hours-aware cache |
-| Rate Limiting | Dec 20, 2025 | Sliding window (100/60s standard, 20/60s heavy) |
-| Volume Anomaly (Frontend) | Dec 20, 2025 | Chart integration into stock detail page |
-| Volume Anomaly (On-Demand) | Dec 20, 2025 | Auto-collect intraday data on endpoint request |
-| Custom Hooks | Dec 20, 2025 | 12 hooks for data fetching |
-| Shareholders Tab | Dec 20, 2025 | Holders, officers, insider deals |
-| Finance Tab | Dec 20, 2025 | Income, balance, cash flow tables |
-| Stock Detail Page | Dec 20, 2025 | Search, header, stats, tabs |
-| Intraday Collection | Dec 20, 2025 | 5-min bar aggregation |
-| Volume Anomaly (Backend) | Dec 20, 2025 | API for detailed anomaly detection |
-| Volume Analysis | Dec 20, 2025 | Peak period analysis |
-| Officers API | Dec 20, 2025 | Company management endpoint |
-| Shareholders API | Dec 20, 2025 | Major holders endpoint |
-| Fund Certificates | Dec 20, 2025 | New endpoint, adjusted to 7 items |
-| Sector Performance | Dec 19, 2025 | Full-stack: API + hook + UI, top gainers/losers |
-| Toast Notifications | Dec 19, 2025 | Sonner integration on stock search |
-| Design System | Dec 20, 2025 | Modern + Clean established as standard |
+| Supabase Migration (Complete) | Dec 24, 2024 | DATABASE_URL_DIRECT, SSL config, connection pooling |
+| Job Progress UI | Dec 24, 2024 | Progress bar + notification panel in frontend |
+| Job Status API | Dec 24, 2024 | `/api/v1/jobs/status` for progress polling |
+| Startup Job Recovery | Dec 24, 2024 | Non-blocking missed job recovery on API startup |
+| Daily OHLCV Collection | Dec 24, 2024 | Scheduled job at 17:00 ICT |
+| Supabase Migration (Phase 1) | Dec 24, 2024 | DATABASE_URL_DIRECT, SSL config |
+| Volume Spikes Dashboard (Frontend) | Dec 23, 2024 | Treemap, pie chart, composed chart, tabs visualization |
+| Rename Top Performers to Financial Statements | Dec 23, 2024 | UI/UX optimizations, Vietnamese translation |
+| Financial Statements API Endpoint | Dec 22, 2024 | Analytics router with filters (limit, exchange, year, quarter) |
+| Financial Statements Batch Job | Dec 22, 2024 | Weekly scheduled job for HOSE+HNX quarterly rankings |
+| 10s Auto-Refresh | Dec 22, 2024 | Market indices refresh every 10s with loading indicators |
+| vnstock Wrapper | Dec 22, 2024 | Rate limit protection wrapper for vnstock API calls |
+| Transaction Rollback | Dec 22, 2024 | Added rollback on intraday data collection failures |
+| VN30 Overview (Frontend) | Dec 21, 2024 | Dashboard table with pagination, auto-refresh (1min) |
+| VN30 Overview (API) | Dec 21, 2024 | Backend endpoint with Redis caching (5min/1hr TTL) |
+| Analytics Deep-Dive Page | Dec 21, 2024 | SSR + TanStack Query integration |
+| Extended Caching | Dec 20, 2024 | 7 high-traffic endpoints with trading-hours-aware cache |
+| Rate Limiting | Dec 20, 2024 | Sliding window (100/60s standard, 20/60s heavy) |
+| Volume Anomaly (Frontend) | Dec 20, 2024 | Chart integration into stock detail page |
+| Volume Anomaly (On-Demand) | Dec 20, 2024 | Auto-collect intraday data on endpoint request |
+| Custom Hooks | Dec 20, 2024 | 12 hooks for data fetching |
+| Shareholders Tab | Dec 20, 2024 | Holders, officers, insider deals |
+| Finance Tab | Dec 20, 2024 | Income, balance, cash flow tables |
+| Stock Detail Page | Dec 20, 2024 | Search, header, stats, tabs |
+| Intraday Collection | Dec 20, 2024 | 5-min bar aggregation |
+| Volume Anomaly (Backend) | Dec 20, 2024 | API for detailed anomaly detection |
+| Volume Analysis | Dec 20, 2024 | Peak period analysis |
+| Officers API | Dec 20, 2024 | Company management endpoint |
+| Shareholders API | Dec 20, 2024 | Major holders endpoint |
+| Fund Certificates | Dec 20, 2024 | New endpoint, adjusted to 7 items |
+| Sector Performance | Dec 19, 2024 | Full-stack: API + hook + UI, top gainers/losers |
+| Toast Notifications | Dec 19, 2024 | Sonner integration on stock search |
+| Design System | Dec 20, 2024 | Modern + Clean established as standard |
 
 ### Notes on Reverted Features
 
-- **Market Context Feature** (Dec 21, 2025): Reverted due to vnstock API rate limits. Feature attempted to provide broader market context but exceeded rate limits in production.
+- **Market Context Feature** (Dec 21, 2024): Reverted due to vnstock API rate limits. Feature attempted to provide broader market context but exceeded rate limits in production.
