@@ -1,6 +1,6 @@
 # System Architecture - Stock Massive
 
-Updated: 2025-12-24
+Updated: 2024-12-24
 
 > **Note**: Toàn bộ hệ thống chạy trong Docker containers. Database sử dụng Supabase PostgreSQL cloud với SSL và connection pooling.
 

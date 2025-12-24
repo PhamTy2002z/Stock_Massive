@@ -2,7 +2,7 @@
 
 Vietnamese stock market data platform powered by **vnstock** library. Provides real-time data, charting, and analysis for Vietnam stock market (HOSE, HNX, UPCOM).
 
-## Current Status (Updated: 2025-12-24)
+## Current Status (Updated: 2024-12-24)
 
 | Component | Status | Notes |
 |-----------|--------|-------|
