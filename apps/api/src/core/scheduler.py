@@ -22,8 +22,59 @@ VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
 async def collect_daily_ohlcv_job_async():
     """Async wrapper for sync collect_daily_ohlcv_job (runs in thread pool)."""
+    logger.info("Starting daily OHLCV collection job (async wrapper)")
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, collect_daily_ohlcv_job)
+    result = await loop.run_in_executor(None, collect_daily_ohlcv_job)
+    logger.info(f"Daily OHLCV collection completed: {result}")
+    return result
+
+
+async def collect_intraday_job_wrapper():
+    """Wrapper for intraday job with logging."""
+    logger.info("=== SCHEDULED JOB TRIGGERED: Intraday Collection ===")
+    try:
+        result = await collect_intraday_data_job()
+        logger.info(f"Intraday collection completed: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Intraday collection failed: {e}", exc_info=True)
+        raise
+
+
+async def cleanup_job_wrapper():
+    """Wrapper for cleanup job with logging."""
+    logger.info("=== SCHEDULED JOB TRIGGERED: Data Cleanup ===")
+    try:
+        result = await cleanup_old_data_job()
+        logger.info(f"Data cleanup completed: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Data cleanup failed: {e}", exc_info=True)
+        raise
+
+
+async def ohlcv_job_wrapper():
+    """Wrapper for OHLCV job with logging."""
+    logger.info("=== SCHEDULED JOB TRIGGERED: Daily OHLCV Collection ===")
+    try:
+        result = await collect_daily_ohlcv_job_async()
+        logger.info(f"Daily OHLCV completed: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Daily OHLCV failed: {e}", exc_info=True)
+        raise
+
+
+async def financial_statements_job_wrapper():
+    """Wrapper for financial statements job with logging."""
+    logger.info("=== SCHEDULED JOB TRIGGERED: Financial Statements Collection ===")
+    try:
+        result = await collect_financial_statements_job()
+        logger.info(f"Financial statements collection completed: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Financial statements collection failed: {e}", exc_info=True)
+        raise
 
 
 async def setup_scheduler(scheduler: AsyncScheduler) -> None:
@@ -36,9 +87,11 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
         logger.info("Scheduler disabled by config")
         return
 
+    logger.info("=== Setting up scheduled jobs ===")
+
     # Daily intraday collection at configured time (default 15:30 Vietnam time)
     await scheduler.add_schedule(
-        collect_intraday_data_job,
+        collect_intraday_job_wrapper,
         CronTrigger(
             hour=settings.intraday_collect_hour,
             minute=settings.intraday_collect_minute,
@@ -53,17 +106,16 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
 
     # Daily cleanup at 16:00 Vietnam time (30 min after collection)
     await scheduler.add_schedule(
-        cleanup_old_data_job,
+        cleanup_job_wrapper,
         CronTrigger(hour=16, minute=0, timezone="Asia/Ho_Chi_Minh"),
         id="data-cleanup-daily",
     )
     logger.info("Scheduled data cleanup at 16:00 ICT")
 
-    # Daily OHLCV collection at configured time (default 20:00 Vietnam time)
-    # Note: collect_daily_ohlcv_job is sync, use async wrapper
+    # Daily OHLCV collection at configured time (default 16:00 Vietnam time)
     if settings.daily_ohlcv_enabled:
         await scheduler.add_schedule(
-            collect_daily_ohlcv_job_async,
+            ohlcv_job_wrapper,
             CronTrigger(
                 hour=settings.daily_ohlcv_hour,
                 minute=settings.daily_ohlcv_minute,
@@ -80,7 +132,7 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
     # Weekly financial statements collection on Sunday at 02:00 ICT
     if settings.financial_statements_enabled:
         await scheduler.add_schedule(
-            collect_financial_statements_job,
+            financial_statements_job_wrapper,
             CronTrigger(
                 hour=settings.financial_statements_hour,
                 minute=settings.financial_statements_minute,
@@ -93,6 +145,8 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
             f"Scheduled financial statements collection: Sunday "
             f"{settings.financial_statements_hour:02d}:{settings.financial_statements_minute:02d} ICT"
         )
+
+    logger.info("=== Scheduler setup complete ===")
 
     # Run startup checks for missed jobs in background (non-blocking)
     # This allows the server to start accepting requests immediately
@@ -195,6 +249,7 @@ async def run_startup_jobs_with_delay() -> None:
     """Run startup jobs after a short delay to allow server to fully start."""
     # Wait for server to be ready and accepting requests
     await asyncio.sleep(5)
+    logger.info("=== Running startup job checks ===")
     await run_startup_jobs()
 
 
@@ -204,29 +259,40 @@ async def run_startup_jobs() -> None:
     Checks each job's conditions and runs if missed.
     """
     logger.info("Checking for missed scheduled jobs...")
+    now_vn = datetime.now(VN_TZ)
+    logger.info(f"Current time (Vietnam): {now_vn}")
 
     # Check and run intraday collection
-    if await _should_run_intraday_job():
+    should_run_intraday = await _should_run_intraday_job()
+    logger.info(f"Should run intraday job: {should_run_intraday}")
+    if should_run_intraday:
         logger.info("Running missed intraday collection job")
         try:
             await collect_intraday_data_job()
+            logger.info("Startup intraday job completed successfully")
         except Exception as e:
-            logger.error(f"Startup intraday job failed: {e}")
+            logger.error(f"Startup intraday job failed: {e}", exc_info=True)
 
     # Check and run cleanup
-    if await _should_run_cleanup_job():
+    should_run_cleanup = await _should_run_cleanup_job()
+    logger.info(f"Should run cleanup job: {should_run_cleanup}")
+    if should_run_cleanup:
         logger.info("Running missed cleanup job")
         try:
             await cleanup_old_data_job()
+            logger.info("Startup cleanup job completed successfully")
         except Exception as e:
-            logger.error(f"Startup cleanup job failed: {e}")
+            logger.error(f"Startup cleanup job failed: {e}", exc_info=True)
 
     # Check and run daily OHLCV collection
-    if await _should_run_ohlcv_job():
+    should_run_ohlcv = await _should_run_ohlcv_job()
+    logger.info(f"Should run OHLCV job: {should_run_ohlcv}")
+    if should_run_ohlcv:
         logger.info("Running missed daily OHLCV collection job")
         try:
             await collect_daily_ohlcv_job_async()
+            logger.info("Startup OHLCV job completed successfully")
         except Exception as e:
-            logger.error(f"Startup OHLCV job failed: {e}")
+            logger.error(f"Startup OHLCV job failed: {e}", exc_info=True)
 
-    logger.info("Startup job check complete")
+    logger.info("=== Startup job check complete ===")

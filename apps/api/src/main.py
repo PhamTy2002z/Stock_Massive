@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 import logging
+import sys
 from contextlib import asynccontextmanager
 
 from apscheduler import AsyncScheduler
@@ -13,6 +14,13 @@ from src.core.scheduler import setup_scheduler
 from src.stocks.router import router as stocks_router
 from src.stocks.jobs_router import router as jobs_router
 
+# Configure logging at module level - ensures INFO logs are visible
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
@@ -24,9 +32,18 @@ async def lifespan(app: FastAPI):
         async with AsyncScheduler() as scheduler:
             await setup_scheduler(scheduler)
             await scheduler.start_in_background()
-            logger.info("Scheduler started")
+
+            # Log scheduler state for visibility
+            schedules = await scheduler.get_schedules()
+            logger.info(f"Scheduler started with {len(schedules)} schedules")
+            for s in schedules:
+                logger.info(f"  Schedule: {s.id} -> next_fire={s.next_fire_time}")
+
+            # Store scheduler reference in app state for health checks
+            app.state.scheduler = scheduler
             yield
     else:
+        logger.info("Scheduler disabled by config")
         yield
     # Shutdown: dispose database engine
     await engine.dispose()
@@ -74,3 +91,26 @@ async def root():
 async def health():
     """Health check endpoint."""
     return {"status": "healthy"}
+
+
+@app.get("/scheduler/status")
+async def scheduler_status():
+    """Scheduler health check - shows registered schedules and their next fire times."""
+    if not hasattr(app.state, "scheduler"):
+        return {"enabled": False, "message": "Scheduler not initialized"}
+
+    scheduler = app.state.scheduler
+    schedules = await scheduler.get_schedules()
+
+    return {
+        "enabled": True,
+        "state": scheduler.state.name,
+        "schedule_count": len(schedules),
+        "schedules": [
+            {
+                "id": s.id,
+                "next_fire_time": s.next_fire_time.isoformat() if s.next_fire_time else None,
+            }
+            for s in schedules
+        ],
+    }
