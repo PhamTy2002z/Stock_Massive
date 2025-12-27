@@ -2,9 +2,9 @@
 
 import { useState } from "react"
 import { cn } from "@/lib/utils"
-import { BarChart3, Wallet, Users, Activity } from "lucide-react"
+import { BarChart3, Wallet, Users, Activity, TrendingUp } from "lucide-react"
 
-export type StockDetailTabValue = "overview" | "finance" | "shareholders" | "volume"
+export type StockDetailTabValue = "overview" | "finance" | "shareholders" | "volume" | "advanced"
 
 interface StockDetailTabsProps {
   value?: StockDetailTabValue
@@ -32,6 +32,11 @@ const tabs = [
     value: "volume" as const,
     label: "Khối Lượng",
     icon: Activity,
+  },
+  {
+    value: "advanced" as const,
+    label: "Nâng Cao",
+    icon: TrendingUp,
   },
 ]
 
@@ -105,7 +110,7 @@ export function StockDetailTabsSkeleton({ className }: { className?: string }) {
   return (
     <div className={cn("w-full", className)}>
       <div className="flex items-center gap-2 p-1 rounded-xl bg-muted/50 border border-border/50">
-        {[1, 2, 3, 4].map((i) => (
+        {[1, 2, 3, 4, 5].map((i) => (
           <div
             key={i}
             className="flex-1 h-10 rounded-lg bg-muted animate-pulse"
