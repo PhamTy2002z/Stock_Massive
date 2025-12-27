@@ -55,7 +55,7 @@ Advanced Tab (Lazy Load)
 
 ## Success Criteria
 - [x] 3 new backend endpoints returning valid data
-- [ ] 6 frontend hooks with loading/error states
+- [x] 6 frontend hooks with loading/error states
 - [ ] Advanced tab with 3 sub-tabs rendering correctly
 - [ ] P95 load time <1.5s per sub-tab
 - [ ] API tests passing

@@ -241,19 +241,30 @@ export function usePropTrading(symbol: string, days = 30) {
 ```
 
 ## Todo List
-- [ ] Create types/advanced.ts with response types
-- [ ] Add 6 API functions to lib/api.ts
-- [ ] Add query keys to lib/query-keys.ts
-- [ ] Create use-order-stats.ts hook
-- [ ] Create use-price-depth.ts hook
-- [ ] Create use-ratio-summary.ts hook
-- [ ] Create use-trading-stats.ts hook
-- [ ] Create use-foreign-trading.ts hook
-- [ ] Create use-prop-trading.ts hook
+- [x] Create types/advanced.ts with response types
+- [x] Add 6 API functions to lib/api.ts
+- [x] Add query keys to lib/query-keys.ts
+- [x] Create use-order-stats.ts hook
+- [x] Create use-price-depth.ts hook
+- [x] Create use-ratio-summary.ts hook
+- [x] Create use-trading-stats.ts hook
+- [x] Create use-foreign-trading.ts hook
+- [x] Create use-prop-trading.ts hook
 
 ## Success Criteria
-- [ ] All hooks return data, isLoading, error states
-- [ ] TypeScript types match backend responses
-- [ ] staleTime configured appropriately per endpoint
-- [ ] Hooks disabled when symbol is empty
-- [ ] price-depth has refetchInterval for real-time
+- [x] All hooks return data, isLoading, error states
+- [x] TypeScript types match backend responses
+- [x] staleTime configured appropriately per endpoint
+- [x] Hooks disabled when symbol is empty
+- [x] price-depth has refetchInterval for real-time
+
+## Completed
+**Date:** 2025-12-27
+
+**Achievements:**
+- 6 TypeScript types added to lib/api.ts
+- 6 API fetch functions with date range helpers
+- 6 query keys added to lib/query-keys.ts
+- 6 TanStack Query hooks with appropriate staleTime
+- usePriceDepth has 30s auto-refresh with refetchIntervalInBackground: false
+- All type checks and builds pass
