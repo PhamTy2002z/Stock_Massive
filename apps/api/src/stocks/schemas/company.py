@@ -179,3 +179,32 @@ class DividendsResponse(BaseModel):
     symbol: str
     items: list[DividendItem]
     total_count: int
+
+
+# === Advanced Deep Dive Schemas ===
+
+
+class RatioSummaryResponse(BaseModel):
+    """Financial ratios summary for advanced tab."""
+
+    symbol: str
+    pe: Optional[float] = None
+    pb: Optional[float] = None
+    ps: Optional[float] = None
+    roe: Optional[float] = None
+    roa: Optional[float] = None
+    roic: Optional[float] = None
+    current_ratio: Optional[float] = None
+    debt_to_equity: Optional[float] = None
+
+
+class TradingStatsResponse(BaseModel):
+    """Trading statistics for advanced tab."""
+
+    symbol: str
+    total_volume: Optional[int] = None
+    avg_volume: Optional[float] = None
+    total_value: Optional[float] = None
+    avg_value: Optional[float] = None
+    high_price: Optional[float] = None
+    low_price: Optional[float] = None

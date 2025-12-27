@@ -7,6 +7,30 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
+class PriceLevel(BaseModel):
+    """Single price level for bid/ask."""
+
+    price: float
+    volume: int
+
+
+class PriceDepthResponse(BaseModel):
+    """Price depth with bid/ask levels."""
+
+    symbol: str
+    bid_1: PriceLevel
+    bid_2: Optional[PriceLevel] = None
+    bid_3: Optional[PriceLevel] = None
+    ask_1: PriceLevel
+    ask_2: Optional[PriceLevel] = None
+    ask_3: Optional[PriceLevel] = None
+    total_bid_volume: int
+    total_ask_volume: int
+    spread: float
+    spread_percent: float
+    timestamp: datetime
+
+
 class VolumeAnomalyLevel(str, Enum):
     """Anomaly severity levels based on volume ratio thresholds."""
 

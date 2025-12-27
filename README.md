@@ -39,6 +39,23 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 - **DevOps**: Docker, Docker Compose, pnpm
 - **Design**: Modern + Clean (HSL color system, dark/light themes, next-themes)
 
+## Architecture
+
+### Frontend: Reusable UI Components
+- **Component-based**: ShadCN/UI + TailwindCSS làm nền tảng
+- **Composable**: Components nhỏ, tái sử dụng cao (Button, Card, Input, Dialog...)
+- **Consistent**: Design tokens thống nhất qua HSL color system
+- **Structure**: `components/ui/` (primitives) → `components/dashboard/` (features)
+
+### Backend: Feature-based Modular (Vertical Slice) + SoC
+- **Vertical Slice**: Mỗi feature chứa đầy đủ router, service, schema, models
+- **Separation of Concerns**: Tách biệt rõ ràng giữa các layer
+  - `routers/` - HTTP endpoints, request/response handling
+  - `services/` - Business logic, data processing
+  - `schemas/` - Pydantic models, validation
+  - `models/` - SQLAlchemy ORM entities
+- **Structure**: `stocks/{feature}/` (analytics, market, price, company, financial)
+
 ## Project Structure
 
 ```
@@ -107,6 +124,13 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `/{symbol}/shareholders` | GET | Major shareholders |
 | `/{symbol}/officers` | GET | Company officers |
 | `/{symbol}/insider-deals` | GET | Insider trading deals |
+
+### Advanced Analytics (3 endpoints)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/{symbol}/price-depth` | GET | Real-time bid/ask price depth |
+| `/{symbol}/ratio-summary` | GET | Financial ratios summary |
+| `/{symbol}/trading-stats` | GET | Trading volume statistics |
 
 ### Financial Data (6 endpoints)
 | Endpoint | Method | Description |
