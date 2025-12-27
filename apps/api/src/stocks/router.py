@@ -5,6 +5,7 @@ Path matching order is critical:
 - Price router: /market-indices, /price-board, /intraday/collect, /{symbol}/history, etc.
 - Company router: /{symbol}/company, /{symbol}/detail, /{symbol}/shareholders, etc.
 - Financial router: /{symbol}/financials/*
+- Trading router: /{symbol}/order-stats, /{symbol}/foreign-trading, /{symbol}/prop-trading
 """
 
 from fastapi import APIRouter
@@ -15,6 +16,7 @@ from .price.router import router as price_router
 from .company.router import router as company_router
 from .financial.router import router as financial_router
 from .analytics.router import router as analytics_router
+from .trading.router import router as trading_router
 
 # Main router with prefix and tags
 router = APIRouter(prefix="/stocks", tags=["stocks"])
@@ -34,3 +36,6 @@ router.include_router(financial_router)
 
 # 5. Analytics router - matches /analytics/*
 router.include_router(analytics_router)
+
+# 6. Trading router - matches /{symbol}/order-stats, /{symbol}/foreign-trading, /{symbol}/prop-trading
+router.include_router(trading_router)
