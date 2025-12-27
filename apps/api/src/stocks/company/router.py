@@ -2,7 +2,8 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from src.core.ratelimit import standard_rate_limit
+from src.core.ratelimit import standard_rate_limit, heavy_rate_limit
+from src.core.cache import TradingHoursCache
 from ..service import get_stock_service
 from ..schemas.company import (
     CompanyOverview,
@@ -10,8 +11,22 @@ from ..schemas.company import (
     ShareholdersResponse,
     OfficersResponse,
     InsiderDealsResponse,
+    RatioSummaryResponse,
+    TradingStatsResponse,
 )
 from ..shared import StockServiceError
+
+# Cache instances for advanced endpoints
+ratio_summary_cache = TradingHoursCache(
+    key_prefix="stock:ratio_summary:",
+    ttl_trading=300,
+    ttl_off_hours=3600,
+)
+trading_stats_cache = TradingHoursCache(
+    key_prefix="stock:trading_stats:",
+    ttl_trading=60,
+    ttl_off_hours=3600,
+)
 
 router = APIRouter()
 
@@ -68,5 +83,58 @@ async def get_insider_deals(symbol: str) -> InsiderDealsResponse:
     try:
         service = get_stock_service()
         return service.get_insider_deals(symbol)
+    except StockServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+# === Advanced Deep Dive endpoints ===
+
+
+@router.get("/{symbol}/ratio-summary", response_model=RatioSummaryResponse, dependencies=[Depends(heavy_rate_limit)])
+async def get_ratio_summary(symbol: str) -> RatioSummaryResponse:
+    """Get financial ratios summary for advanced tab.
+
+    Returns key financial ratios (PE, PB, ROE, ROA, etc.) for a stock.
+    """
+    cache_key = symbol.upper()
+
+    # Check cache first
+    cached = ratio_summary_cache.get(cache_key)
+    if cached is not None:
+        return RatioSummaryResponse(**cached)
+
+    try:
+        service = get_stock_service()
+        result = service.get_ratio_summary(symbol)
+
+        # Cache the result
+        ratio_summary_cache.set(cache_key, result.model_dump())
+
+        return result
+    except StockServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/{symbol}/trading-stats", response_model=TradingStatsResponse, dependencies=[Depends(heavy_rate_limit)])
+async def get_trading_stats(symbol: str) -> TradingStatsResponse:
+    """Get trading statistics for advanced tab.
+
+    Returns trading statistics including volume, value, and 52-week high/low.
+    """
+    cache_key = symbol.upper()
+
+    # Check cache first
+    cached = trading_stats_cache.get(cache_key)
+    if cached is not None:
+        return TradingStatsResponse(**cached)
+
+    try:
+        service = get_stock_service()
+        result = service.get_trading_stats(symbol)
+
+        # Cache the result
+        trading_stats_cache.set(cache_key, result.model_dump())
+
+        return result
     except StockServiceError as e:
         raise HTTPException(status_code=502, detail=str(e))

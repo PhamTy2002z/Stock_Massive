@@ -19,6 +19,8 @@ from ..schemas.company import (
     NewsResponse,
     DividendItem,
     DividendsResponse,
+    RatioSummaryResponse,
+    TradingStatsResponse,
 )
 from ..shared import StockServiceError, validate_symbol, safe_float
 
@@ -295,3 +297,67 @@ class CompanyService:
         except Exception as e:
             logger.error(f"Error fetching company dividends for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch company dividends for {symbol}: {e}")
+
+    # --- Advanced Deep Dive methods ---
+
+    def get_ratio_summary(self, symbol: str) -> RatioSummaryResponse:
+        """Get financial ratios summary for advanced tab."""
+        symbol = validate_symbol(symbol)
+        try:
+            stock = Vnstock().stock(symbol=symbol, source=self.source)
+            df = stock.company.ratio_summary()
+
+            if df is None or (isinstance(df, pd.DataFrame) and df.empty):
+                return RatioSummaryResponse(symbol=symbol.upper())
+
+            if isinstance(df, pd.DataFrame):
+                row = df.iloc[0].to_dict() if len(df) > 0 else {}
+            else:
+                row = df if isinstance(df, dict) else {}
+
+            return RatioSummaryResponse(
+                symbol=symbol.upper(),
+                pe=safe_float(row.get("pe") or row.get("price_to_earning")),
+                pb=safe_float(row.get("pb") or row.get("price_to_book")),
+                ps=safe_float(row.get("ps")),
+                roe=safe_float(row.get("roe")),
+                roa=safe_float(row.get("roa")),
+                roic=safe_float(row.get("roic")),
+                current_ratio=safe_float(row.get("current_ratio")),
+                debt_to_equity=safe_float(row.get("debt_to_equity") or row.get("de")),
+            )
+        except Exception as e:
+            logger.error(f"Error fetching ratio summary for {symbol}: {e}")
+            raise StockServiceError(f"Failed to get ratio summary for {symbol}: {e}")
+
+    def get_trading_stats(self, symbol: str) -> TradingStatsResponse:
+        """Get trading statistics for advanced tab."""
+        symbol = validate_symbol(symbol)
+        try:
+            stock = Vnstock().stock(symbol=symbol, source=self.source)
+            df = stock.company.trading_stats()
+
+            if df is None or (isinstance(df, pd.DataFrame) and df.empty):
+                return TradingStatsResponse(symbol=symbol.upper())
+
+            if isinstance(df, pd.DataFrame):
+                row = df.iloc[0].to_dict() if len(df) > 0 else {}
+            else:
+                row = df if isinstance(df, dict) else {}
+
+            # high_price_1y/low_price_1y are in VND, convert to thousands
+            high_1y = safe_float(row.get("high_price_1y"))
+            low_1y = safe_float(row.get("low_price_1y"))
+
+            return TradingStatsResponse(
+                symbol=symbol.upper(),
+                total_volume=int(row.get("total_volume") or row.get("total_match_volume") or 0) if row.get("total_volume") or row.get("total_match_volume") else None,
+                avg_volume=safe_float(row.get("avg_volume") or row.get("avg_match_volume_2w")),
+                total_value=safe_float(row.get("total_value") or row.get("total_match_value")),
+                avg_value=safe_float(row.get("avg_value")),
+                high_price=high_1y / 1000 if high_1y else None,
+                low_price=low_1y / 1000 if low_1y else None,
+            )
+        except Exception as e:
+            logger.error(f"Error fetching trading stats for {symbol}: {e}")
+            raise StockServiceError(f"Failed to get trading stats for {symbol}: {e}")
