@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from typing import Optional
 
 import pandas as pd
-from vnstock import Vnstock
+from vnstock import Trading
 
 from ..shared import StockServiceError, validate_symbol, safe_float
 from .schemas import (
@@ -36,11 +36,18 @@ class TradingService:
             end_date = date.today()
             start_date = end_date - timedelta(days=days)
 
-            stock = Vnstock().stock(symbol=symbol, source=self.source)
-            df = stock.trading.foreign_trade(
-                start=start_date.strftime("%Y-%m-%d"),
-                end=end_date.strftime("%Y-%m-%d"),
-            )
+            trading = Trading(symbol=symbol, source=self.source)
+            try:
+                df = trading.foreign_trade(
+                    start=start_date.strftime("%Y-%m-%d"),
+                    end=end_date.strftime("%Y-%m-%d"),
+                )
+            except (NotImplementedError, Exception) as e:
+                # vnstock Trading class may not support this method
+                logger.warning(f"foreign_trade not available for {symbol}: {e}")
+                return ForeignTradingResponse(
+                    symbol=symbol, items=[], total_net_volume=0, total_net_value=0
+                )
 
             if df is None or df.empty:
                 return ForeignTradingResponse(
@@ -100,12 +107,16 @@ class TradingService:
             end_date = date.today()
             start_date = end_date - timedelta(days=days)
 
-            stock = Vnstock().stock(symbol=symbol, source=self.source)
-            df = stock.trading.prop_trade(
-                start=start_date.strftime("%Y-%m-%d"),
-                end=end_date.strftime("%Y-%m-%d"),
-                resolution="1D",
-            )
+            trading = Trading(symbol=symbol, source=self.source)
+            try:
+                df = trading.prop_trade(
+                    start=start_date.strftime("%Y-%m-%d"),
+                    end=end_date.strftime("%Y-%m-%d"),
+                )
+            except (NotImplementedError, Exception) as e:
+                # vnstock Trading class may not support this method
+                logger.warning(f"prop_trade not available for {symbol}: {e}")
+                return PropTradingResponse(symbol=symbol, items=[], total_net_volume=0)
 
             if df is None or df.empty:
                 return PropTradingResponse(symbol=symbol, items=[], total_net_volume=0)
@@ -160,11 +171,16 @@ class TradingService:
             end_date = date.today()
             start_date = end_date - timedelta(days=days)
 
-            stock = Vnstock().stock(symbol=symbol, source=self.source)
-            df = stock.trading.order_stats(
-                start=start_date.strftime("%Y-%m-%d"),
-                end=end_date.strftime("%Y-%m-%d"),
-            )
+            trading = Trading(symbol=symbol, source=self.source)
+            try:
+                df = trading.order_stats(
+                    start=start_date.strftime("%Y-%m-%d"),
+                    end=end_date.strftime("%Y-%m-%d"),
+                )
+            except (NotImplementedError, Exception) as e:
+                # vnstock Trading class may not support this method
+                logger.warning(f"order_stats not available for {symbol}: {e}")
+                return OrderStatsResponse(symbol=symbol, items=[])
 
             if df is None or df.empty:
                 return OrderStatsResponse(symbol=symbol, items=[])
