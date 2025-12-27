@@ -511,6 +511,77 @@ export interface JobStatus {
   elapsedSeconds: number | null
 }
 
+// Advanced Tab Types - Price Depth
+export interface PriceLevel {
+  price: number
+  volume: number
+}
+
+export interface PriceDepthResponse {
+  symbol: string
+  bid_1: PriceLevel
+  bid_2: PriceLevel | null
+  bid_3: PriceLevel | null
+  ask_1: PriceLevel
+  ask_2: PriceLevel | null
+  ask_3: PriceLevel | null
+  total_bid_volume: number
+  total_ask_volume: number
+  spread: number
+  spread_percent: number
+  timestamp: string
+}
+
+// Advanced Tab Types - Ratio Summary
+export interface RatioSummaryResponse {
+  pe: number | null
+  pb: number | null
+  ps: number | null
+  roe: number | null
+  roa: number | null
+  roic: number | null
+  current_ratio: number | null
+  debt_to_equity: number | null
+}
+
+// Advanced Tab Types - Trading Stats
+export interface TradingStatsResponse {
+  total_volume: number | null
+  avg_volume: number | null
+  total_value: number | null
+  avg_value: number | null
+  high_price: number | null
+  low_price: number | null
+}
+
+// Advanced Tab Types - Order Stats
+export interface OrderStatsItem {
+  date: string
+  buy_order_count: number
+  sell_order_count: number
+  buy_order_volume: number
+  sell_order_volume: number
+}
+
+// Advanced Tab Types - Foreign Trading
+export interface ForeignTradingItem {
+  date: string
+  buy_volume: number
+  sell_volume: number
+  net_volume: number
+  buy_value: number
+  sell_value: number
+  net_value: number
+}
+
+// Advanced Tab Types - Prop Trading
+export interface PropTradingItem {
+  date: string
+  buy_volume: number
+  sell_volume: number
+  net_volume: number
+}
+
 export async function fetchJobsStatus(): Promise<JobStatus[]> {
   const data = await fetchApi<{
     job_id: string
@@ -537,4 +608,49 @@ export async function fetchJobsStatus(): Promise<JobStatus[]> {
     completedAt: item.completed_at,
     elapsedSeconds: item.elapsed_seconds,
   }))
+}
+
+// Advanced Tab API Functions
+
+function formatDateParam(date: Date): string {
+  return date.toISOString().split("T")[0]
+}
+
+function getDateRange(days: number): { start: string; end: string } {
+  const end = new Date()
+  const start = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+  return { start: formatDateParam(start), end: formatDateParam(end) }
+}
+
+export async function fetchOrderStats(symbol: string, days: number = 30): Promise<OrderStatsItem[]> {
+  const { start, end } = getDateRange(days)
+  return fetchApi<OrderStatsItem[]>(
+    `/stocks/${encodeURIComponent(symbol)}/order-stats?start=${start}&end=${end}`
+  )
+}
+
+export async function fetchPriceDepth(symbol: string): Promise<PriceDepthResponse> {
+  return fetchApi<PriceDepthResponse>(`/stocks/${encodeURIComponent(symbol)}/price-depth`)
+}
+
+export async function fetchRatioSummary(symbol: string): Promise<RatioSummaryResponse> {
+  return fetchApi<RatioSummaryResponse>(`/stocks/${encodeURIComponent(symbol)}/ratio-summary`)
+}
+
+export async function fetchTradingStats(symbol: string): Promise<TradingStatsResponse> {
+  return fetchApi<TradingStatsResponse>(`/stocks/${encodeURIComponent(symbol)}/trading-stats`)
+}
+
+export async function fetchForeignTrading(symbol: string, days: number = 30): Promise<ForeignTradingItem[]> {
+  const { start, end } = getDateRange(days)
+  return fetchApi<ForeignTradingItem[]>(
+    `/stocks/${encodeURIComponent(symbol)}/foreign-trading?start=${start}&end=${end}`
+  )
+}
+
+export async function fetchPropTrading(symbol: string, days: number = 30): Promise<PropTradingItem[]> {
+  const { start, end } = getDateRange(days)
+  return fetchApi<PropTradingItem[]>(
+    `/stocks/${encodeURIComponent(symbol)}/prop-trading?start=${start}&end=${end}`
+  )
 }
