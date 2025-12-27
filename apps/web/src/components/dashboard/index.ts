@@ -26,3 +26,4 @@ export { VolumeAnomalyChart, VolumeAnomalyChartSkeleton } from "./volume-anomaly
 export { VolumeTabContent } from "./volume-tab-content"
 export { VolumeSpikeDashboard, VolumeSpikeDashboardSkeleton } from "./volume-spike-dashboard"
 export { VolumeSpikeChart, VolumeSpikeChartSkeleton } from "./volume-spike-chart"
+export { AdvancedTab, AdvancedTabSkeleton } from "./advanced-tab"

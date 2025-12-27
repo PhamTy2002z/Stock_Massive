@@ -20,6 +20,7 @@ import {
   FinanceTabContent,
   ShareholdersTabContent,
   VolumeTabContent,
+  AdvancedTab,
 } from "@/components/dashboard"
 import type { StockDetailTabValue } from "@/components/dashboard"
 
@@ -114,6 +115,7 @@ export function StockDetailClient({ initialSymbol }: StockDetailClientProps) {
             {activeTab === "finance" && <FinanceTabContent symbol={data.symbol} />}
             {activeTab === "shareholders" && <ShareholdersTabContent symbol={data.symbol} />}
             {activeTab === "volume" && <VolumeTabContent symbol={data.symbol} />}
+            {activeTab === "advanced" && <AdvancedTab symbol={data.symbol} />}
           </div>
         )}
       </div>

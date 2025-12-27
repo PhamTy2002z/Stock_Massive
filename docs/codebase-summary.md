@@ -1,7 +1,7 @@
 # Codebase Summary - Stock Massive
 
 Generated: 2024-12-24
-Total Files: 399 analyzed | Frontend: 85+ TS/TSX | Backend: 55+ Python + 4 migrations + 17 tests
+Total Files: 399 analyzed | Frontend: 85+ TS/TSX | Backend: 55+ Python + 4 migrations + 18 tests
 
 ## 1. Project Overview and Purpose
 
@@ -41,7 +41,7 @@ Stock Massive is a Vietnamese stock market data platform powered by the `vnstock
 * **Scheduler**: APScheduler 4.0 (daily intraday collection, weekly financial statements)
 * **Cache/Rate Limit**: Upstash Redis (trading-hours-aware TTL)
 * **Analytics**: Pandas, Greenlet
-* **Tests**: 17 test files (coverage on critical paths)
+* **Tests**: 18 test files (coverage on critical paths, including advanced endpoints Phase 4)
 
 **Database:**
 * **Primary**: Supabase PostgreSQL (cloud-hosted with SSL, connection pooling)
@@ -130,7 +130,8 @@ Stock_Massive/
 │       │       ├── 60811b8fd9e3_create_stock_intraday_bars_table.py
 │       │       ├── 6948fc67_add_top_performers_table.py
 │       │       └── a1b2c3d4_rename_top_performers_to_financial_statements.py
-│       ├── tests/               # 17 test files
+│       ├── tests/               # 18 test files
+│       │   ├── test_advanced_endpoints.py     # 5 classes, 19 tests (Phase 4)
 │       │   ├── test_analytics_api.py
 │       │   ├── test_database_phase01.py
 │       │   ├── test_financial_statements_collector.py
@@ -272,6 +273,14 @@ Stock_Massive/
 * `/src/core/job_status_store.py`: In-memory job progress tracking
 * `/alembic/env.py`: Alembic config with DATABASE_URL_DIRECT support
 
+**Backend Tests (apps/api/tests/):**
+* `/test_advanced_endpoints.py`: Phase 4 integration tests (5 test classes, 19 tests)
+  * `TestAdvancedEndpointsRouter` - Endpoint success/error cases
+  * `TestAdvancedEndpointsService` - Service layer validation
+  * `TestAdvancedEndpointsErrorHandling` - Invalid symbols, null data, special chars
+  * `TestAdvancedEndpointsPerformance` - P95 <2s response time validation
+  * `TestAdvancedEndpointsCaching` - Cache behavior, data consistency
+
 ## 7. Development Setup
 
 **Prerequisites:**
@@ -366,6 +375,7 @@ alembic upgrade head
 
 ## 10. Recent Major Changes (December 2024)
 
+* **Advanced Endpoints Phase 4 Testing** (Dec 27): 19 integration tests covering price-depth, ratio-summary, trading-stats endpoints with error handling, performance, caching validation
 * **Supabase Migration** (Dec 24): Migrated from local PostgreSQL to Supabase cloud with SSL, connection pooling
 * **Job Progress UI** (Dec 24): Added progress bar and notification panel in frontend
 * **Job Status API** (Dec 24): `/api/v1/jobs/status` for polling background job progress
