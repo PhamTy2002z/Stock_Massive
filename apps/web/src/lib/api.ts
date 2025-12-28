@@ -723,3 +723,50 @@ export interface HealthScoreResponse {
 export async function fetchHealthScore(symbol: string): Promise<HealthScoreResponse> {
   return fetchApi<HealthScoreResponse>(`/stocks/${encodeURIComponent(symbol)}/health-score`)
 }
+
+// === Sector Peers Types (Phase 4 - Peer Comparison) ===
+
+export interface PeerMetrics {
+  symbol: string
+  company_name: string | null
+  roe: number | null
+  roa: number | null
+  pe: number | null
+  pb: number | null
+  market_cap: number | null
+}
+
+export interface SectorPeersResponse {
+  symbol: string
+  icb_code: string
+  icb_name: string
+  peers: PeerMetrics[]
+}
+
+export async function fetchSectorPeers(symbol: string, limit: number = 5): Promise<SectorPeersResponse> {
+  return fetchApi<SectorPeersResponse>(
+    `/stocks/analytics/sector-peers?symbol=${encodeURIComponent(symbol)}&limit=${limit}`
+  )
+}
+
+// === FCF Analysis Types (Phase 4 - FCF Waterfall) ===
+
+export interface FCFAnalysisResponse {
+  symbol: string
+  period: string
+  net_income: number | null
+  cfo: number | null
+  capex: number | null
+  fcf: number | null
+  fcf_margin: number | null
+  ccc: number | null
+  dso: number | null
+  dio: number | null
+  dpo: number | null
+  market_cap: number | null
+  fcf_yield: number | null
+}
+
+export async function fetchFCFAnalysis(symbol: string): Promise<FCFAnalysisResponse> {
+  return fetchApi<FCFAnalysisResponse>(`/stocks/${encodeURIComponent(symbol)}/fcf-analysis`)
+}

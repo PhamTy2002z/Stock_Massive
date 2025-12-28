@@ -29,3 +29,5 @@ export { VolumeSpikeChart, VolumeSpikeChartSkeleton } from "./volume-spike-chart
 export { AdvancedTab, AdvancedTabSkeleton } from "./advanced-tab"
 export { AdvancedSection, AdvancedSectionSkeleton } from "./advanced-section"
 export { HealthScoreCard, HealthScoreCardSkeleton, HealthRadarChart, ScoreBreakdown, FScoreIndicator } from "./financial-health"
+export { PeerComparisonCard, PeerComparisonCardSkeleton, PeerMetricsTable } from "./peer-comparison"
+export { FCFAnalysisCard, FCFAnalysisCardSkeleton, FCFWaterfall, CCCIndicator } from "./fcf-analysis"
