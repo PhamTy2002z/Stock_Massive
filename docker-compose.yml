@@ -30,6 +30,7 @@ services:
     container_name: stockmassive-web
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+      INTERNAL_API_URL: http://api:8000/api/v1
       WATCHPACK_POLLING: "true"
     volumes:
       - ./apps/web/src:/app/src
