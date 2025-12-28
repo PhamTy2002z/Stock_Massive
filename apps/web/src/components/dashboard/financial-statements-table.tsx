@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useMemo, memo, useCallback } from "react"
+import { FinancialDetailSheet } from "./financial-detail-sheet"
 import { cn } from "@/lib/utils"
 import {
   ChevronLeft,
@@ -51,11 +52,15 @@ function formatEps(value: number | null): string {
 // Memoized row component to prevent unnecessary re-renders
 interface FinancialRowProps {
   item: FinancialStatementItem
+  onRowClick: (item: FinancialStatementItem) => void
 }
 
-const FinancialRow = memo(function FinancialRow({ item }: FinancialRowProps) {
+const FinancialRow = memo(function FinancialRow({ item, onRowClick }: FinancialRowProps) {
   return (
-    <tr className="border-b border-border/30 transition-colors hover:bg-muted/20">
+    <tr
+      className="border-b border-border/30 transition-colors hover:bg-muted/20 cursor-pointer"
+      onClick={() => onRowClick(item)}
+    >
       <td className="py-3 px-4 text-sm font-medium text-foreground">
         {item.rank}
       </td>
@@ -111,6 +116,8 @@ export function FinancialStatementsTable({ className }: FinancialStatementsTable
   const [currentPage, setCurrentPage] = useState(1)
   const [rowsPerPage, setRowsPerPage] = useState(10)
   const [isCollecting, setIsCollecting] = useState(false)
+  const [selectedStock, setSelectedStock] = useState<FinancialStatementItem | null>(null)
+  const [sheetOpen, setSheetOpen] = useState(false)
 
   const handleRunCollection = async () => {
     setIsCollecting(true)
@@ -177,6 +184,11 @@ export function FinancialStatementsTable({ className }: FinancialStatementsTable
   const handleRefetch = useCallback(() => {
     refetch()
   }, [refetch])
+
+  const handleRowClick = useCallback((item: FinancialStatementItem) => {
+    setSelectedStock(item)
+    setSheetOpen(true)
+  }, [])
 
   const SortIcon = ({ field }: { field: SortField }) => {
     if (sortField !== field)
@@ -339,7 +351,7 @@ export function FinancialStatementsTable({ className }: FinancialStatementsTable
             </thead>
             <tbody>
               {paginatedData.map((item: FinancialStatementItem) => (
-                <FinancialRow key={item.symbol} item={item} />
+                <FinancialRow key={item.symbol} item={item} onRowClick={handleRowClick} />
               ))}
             </tbody>
           </table>
@@ -403,6 +415,13 @@ export function FinancialStatementsTable({ className }: FinancialStatementsTable
           </div>
         </div>
       </div>
+
+      {/* Financial Detail Sheet */}
+      <FinancialDetailSheet
+        stock={selectedStock}
+        open={sheetOpen}
+        onOpenChange={setSheetOpen}
+      />
     </div>
   )
 }

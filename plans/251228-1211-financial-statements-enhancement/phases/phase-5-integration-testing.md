@@ -398,21 +398,21 @@ test.describe("Financial Statements Page", () => {
 
 ## Todo
 
-- [ ] Create `useFinancialDetail` combined hook
-- [ ] Create `FinancialDetailSheet` component
-- [ ] Update `FinancialStatementsTable` with row click handler
-- [ ] Update page description text
+- [x] Create `useFinancialDetail` combined hook
+- [x] Create `FinancialDetailSheet` component
+- [x] Update `FinancialStatementsTable` with row click handler
+- [x] Update page description text
 - [ ] Write backend unit tests for all 4 endpoints
 - [ ] Write frontend E2E tests
 - [ ] Test responsive layout on mobile
-- [ ] Test loading and error states
+- [x] Test loading and error states
 
 ## Success Criteria
 
-- [ ] Row click opens Sheet with all 4 analysis cards
-- [ ] All cards load data independently
-- [ ] Sheet closes on X button or outside click
-- [ ] Responsive: Sheet full-width on mobile
+- [x] Row click opens Sheet with all 4 analysis cards
+- [x] All cards load data independently
+- [x] Sheet closes on X button or outside click
+- [x] Responsive: Sheet full-width on mobile
 - [ ] All backend tests pass
 - [ ] E2E tests pass
 

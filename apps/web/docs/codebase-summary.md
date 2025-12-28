@@ -69,7 +69,7 @@ apps/web/
 - `fetchVolumeSpikes(params)` - Volume spike analysis by industry
 - `fetchVolumeAnomalies(symbol, days)` - Intraday volume anomaly detection
 - `triggerFinancialStatementsCollection()` - Trigger data collection job
-- `fetchSectorPeers(symbol, limit)` - Sector peer metrics comparison (Phase 4)
+- `fetchSectorPeers(symbol, limit)` - Sector peer metrics with median/premium/discount (Phase 2)
 - `fetchFCFAnalysis(symbol)` - Free cash flow waterfall analysis (Phase 4)
 
 #### Advanced Tab (New)
@@ -136,9 +136,15 @@ apps/web/
 ### Financial Health Hooks (Phase 2)
 - `useHealthScore(symbol)` - Health score with dimensions and F-Score (5min stale time)
 
+### Trend Analysis Hooks (Phase 3)
+- `useTrendMetrics(symbol)` - Historical metrics for revenue, profit, margins, ROE, ROA, cash flow (5min stale)
+
 ### Peer Comparison & FCF Hooks (Phase 4)
-- `useSectorPeers(symbol, limit)` - Sector peer metrics comparison (10min stale time)
-- `useFCFAnalysis(symbol)` - Free Cash Flow analysis with waterfall metrics (5min stale time)
+- `useSectorPeers(symbol, limit)` - Sector peer metrics with median/premium/discount (10min stale)
+- `useFCFAnalysis(symbol)` - Free Cash Flow analysis with waterfall metrics (5min stale)
+
+### Integration Hooks (Phase 5)
+- `useFinancialDetail(symbol)` - Combined hook for parallel loading of health score, trend metrics, sector peers, and FCF analysis
 
 ## TypeScript Types
 
@@ -209,15 +215,20 @@ interface HealthScoreResponse {
   f_score_details: FScoreDetails
 }
 
-// Peer Comparison (Phase 4)
+// Peer Comparison (Phase 2)
 interface PeerMetrics {
   symbol, company_name: string | null
   roe, roa, pe, pb, market_cap: number | null
 }
 
+interface SectorMedian {
+  median_roe, median_roa, median_pe, median_pb: number | null
+}
+
 interface SectorPeersResponse {
   symbol, icb_code, icb_name: string
   peers: PeerMetrics[]
+  median: SectorMedian
 }
 
 // FCF Analysis (Phase 4)
@@ -261,14 +272,31 @@ queryKeys.priceDepth(symbol) => ["stock", symbol, "priceDepth"]
 - `ScoreBreakdown` - Detailed breakdown of dimension scores
 - `FScoreIndicator` - Piotroski F-Score indicator with 6-factor checklist
 
+### Sector Comparison Components (Phase 2)
+- `SectorSubTab` - Main container for sector comparison in Advanced tab
+- `SectorOverviewCard` - Sector metadata card with ICB code/name
+- `PeerComparisonTable` - Table showing peer metrics with median and premium/discount
+- `PremiumBadge` - Badge indicator for premium/discount percentage
+
 ### Peer Comparison Components (Phase 4)
 - `PeerComparisonCard` - Main container for peer comparison with sector context
 - `PeerMetricsTable` - Table showing peer metrics (ROE, ROA, PE, PB, Market Cap)
+
+### Trend Analysis Components (Phase 3)
+- `TrendChartsCard` - Main container for trend charts
+- `RevenueProfitChart` - Dual-axis chart for revenue and profit trends
+- `MarginTrendChart` - Line chart for profit margins over time
+- `RoeRoaChart` - ROE/ROA trend comparison
+- `CashFlowChart` - Operating cash flow trend visualization
 
 ### FCF Analysis Components (Phase 4)
 - `FCFAnalysisCard` - Main container for FCF analysis
 - `FCFWaterfall` - Waterfall chart showing Net Income → CFO → FCF breakdown
 - `CCCIndicator` - Cash Conversion Cycle indicator with DSO/DIO/DPO breakdown
+
+### Integration Components (Phase 5)
+- `FinancialDetailSheet` - Sheet overlay displaying all 4 analysis components (health, trends, peers, FCF)
+- `FinancialStatementsTable` - Updated with row click handler to open detail sheet
 
 ### UI Components (shadcn/ui)
 - Form controls: Button, Input, Select, Switch, Tabs
@@ -319,14 +347,34 @@ NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 - Created 4 new UI components: `HealthScoreCard`, `HealthRadarChart`, `ScoreBreakdown`, `FScoreIndicator`
 - Displays overall health score (0-100), 5-dimension radar chart, and Piotroski F-Score (0-9)
 
+### Trend Analysis Components (Phase 3 - Dec 28)
+- Added `TrendMetricsResponse` type to API layer
+- Added `fetchTrendMetrics()` API function
+- Added `useTrendMetrics()` hook (5min stale)
+- Created 5 new trend components: `TrendChartsCard`, `RevenueProfitChart`, `MarginTrendChart`, `RoeRoaChart`, `CashFlowChart`
+- Features: Revenue/profit trends, margin trends, profitability trends, cash flow trends
+
 ### Peer Comparison & FCF Analysis (Phase 4 - Dec 28)
-- Added `PeerMetrics`, `SectorPeersResponse`, `FCFAnalysisResponse` types to API layer
-- Added `fetchSectorPeers()`, `fetchFCFAnalysis()` API functions
-- Added 2 new hooks: `useSectorPeers()` (10min stale), `useFCFAnalysis()` (5min stale)
-- Created 5 new components:
-  - Peer Comparison: `PeerComparisonCard`, `PeerMetricsTable` (2 files)
-  - FCF Analysis: `FCFAnalysisCard`, `FCFWaterfall`, `CCCIndicator` (3 files)
-- Features: Sector peer benchmarking, FCF waterfall visualization, Cash Conversion Cycle analysis
+- Added `FCFAnalysisResponse` types to API layer
+- Added `fetchFCFAnalysis()` API function
+- Added `useFCFAnalysis()` hook (5min stale)
+- Created 3 new FCF components: `FCFAnalysisCard`, `FCFWaterfall`, `CCCIndicator`
+- Features: FCF waterfall visualization, Cash Conversion Cycle analysis
+
+### Integration & Testing (Phase 5 - Dec 28)
+- Added `useFinancialDetail()` combined hook for parallel data loading
+- Created `FinancialDetailSheet` component as sheet overlay
+- Updated `FinancialStatementsTable` with row click handler to open detail sheet
+- Integration: All 4 analysis sections (health, trends, peers, FCF) load in parallel when sheet opens
+
+### Sector Comparison Dashboard (Phase 2 - Dec 28)
+- Updated `SectorPeersResponse` with `median` field (`SectorMedian` type)
+- Updated `fetchSectorPeers()` API function with median calculations
+- Updated `useSectorPeers()` hook
+- Created 4 new components in `advanced-tab/`:
+  - Widgets: `PremiumBadge`, `SectorOverviewCard`, `PeerComparisonTable`
+  - SubTab: `SectorSubTab`
+- Features: Sector peer comparison with median benchmarking, premium/discount indicators
 
 ## Metrics
 - **Total Files**: 113
