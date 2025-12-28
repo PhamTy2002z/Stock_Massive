@@ -17,6 +17,7 @@ from .company.router import router as company_router
 from .financial.router import router as financial_router
 from .analytics.router import router as analytics_router
 from .trading.router import router as trading_router
+from .overview.router import router as overview_router
 
 # Main router with prefix and tags
 router = APIRouter(prefix="/stocks", tags=["stocks"])
@@ -39,3 +40,6 @@ router.include_router(analytics_router)
 
 # 6. Trading router - matches /{symbol}/order-stats, /{symbol}/foreign-trading, /{symbol}/prop-trading
 router.include_router(trading_router)
+
+# 7. Overview router - matches /market-overview
+router.include_router(overview_router)

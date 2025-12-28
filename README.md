@@ -76,6 +76,7 @@ Stock_Massive/
 │           │   ├── price/      # History, intraday, indices, volume
 │           │   ├── company/    # Company info, shareholders, officers
 │           │   ├── financial/  # Financials, ratios
+│           │   ├── overview/   # Market overview (breadth, movers, foreign flow)
 │           │   └── jobs_router.py  # Job status API
 │           ├── core/        # Config, database, scheduler, cache, job_status_store
 │           └── main.py
@@ -85,11 +86,11 @@ Stock_Massive/
 └── docs/                    # Documentation (9 files)
 ```
 
-## API Endpoints (30+ Total)
+## API Endpoints (31+ Total)
 
 All endpoints prefixed with `/api/v1/stocks`:
 
-### Market Data (7 endpoints)
+### Market Data (8 endpoints)
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/symbols` | GET | List all stock symbols |
@@ -99,6 +100,7 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `/fund-certificates` | GET | Fund certificates data |
 | `/vn30-overview` | GET | VN30 stocks overview |
 | `/market-indices` | GET | VN-INDEX, VN30, HNX, UPCOM |
+| `/market-overview` | GET | Aggregated market overview (breadth, top gainers/losers, foreign flow, top volume) |
 
 ### Price Data (6 endpoints)
 | Endpoint | Method | Description |

@@ -1862,3 +1862,248 @@ apps/web/src/
 - Null handling: Charts render gaps for missing data
 - Vietnamese labels for UI text
 
+
+---
+
+# Market Overview Module
+
+**Last Updated**: 2025-12-28
+**Status**: ✅ Implemented
+**Location**: `/apps/api/src/stocks/overview/`
+
+## Overview
+
+Market Overview module provides aggregated real-time market metrics endpoint for dashboard UX enhancement. Consolidates market breadth, top movers, foreign flow, and volume data in single API call.
+
+## Backend Components
+
+### 1. Schemas (`schemas.py`)
+
+**MarketBreadth**:
+```python
+{
+  "advances": int,      # stocks with price increase
+  "declines": int,      # stocks with price decrease  
+  "unchanged": int,     # stocks unchanged
+  "total": int          # total stocks calculated
+}
+```
+
+**TopMoverItem**:
+```python
+{
+  "symbol": str,
+  "price": float,       # current price VND
+  "change_pct": float,  # price change %
+  "volume": int | null
+}
+```
+
+**ForeignFlowItem**:
+```python
+{
+  "symbol": str,
+  "net_value": float    # net value VND
+}
+```
+
+**ForeignFlowData**:
+```python
+{
+  "net_buy": list[ForeignFlowItem],   # top 5 net buy
+  "net_sell": list[ForeignFlowItem],  # top 5 net sell
+  "total_net_value": float            # total net value
+}
+```
+
+**TopVolumeItem**:
+```python
+{
+  "symbol": str,
+  "price": float,
+  "volume": int,
+  "value": float        # trading value VND
+}
+```
+
+**MarketOverviewResponse**:
+```python
+{
+  "market_breadth": MarketBreadth,
+  "top_gainers": list[TopMoverItem],  # top 5
+  "top_losers": list[TopMoverItem],   # top 5
+  "foreign_flow": ForeignFlowData,
+  "top_volume": list[TopVolumeItem],  # top 5
+  "generated_at": datetime
+}
+```
+
+### 2. Service (`service.py`)
+
+**MarketOverviewService**:
+- Aggregates data from multiple VCI API calls
+- Sequential execution with 100ms delay (rate limit protection)
+- Graceful degradation: returns partial data on individual failures
+- Market breadth calculated from VN30 price board
+
+**Data Collection Flow**:
+1. Top gainers (VCI Top.gainer)
+2. Top losers (VCI Top.loser)
+3. Foreign buy (VCI Top.foreign_buy)
+4. Foreign sell (VCI Top.foreign_sell)
+5. Top volume (VCI Top.volume)
+6. Market breadth (vnstock Listing + Trading)
+
+**Rate Limiting**: 100ms delay between VCI calls (VCI_DELAY constant)
+
+**Error Handling**: 
+- Logs warnings on partial failures
+- Returns defaults for failed sections
+- Continues execution even if some APIs fail
+
+### 3. Router (`router.py`)
+
+**Endpoint**: `GET /api/v1/stocks/market-overview`
+
+**Cache Strategy**:
+- Trading hours: 10s TTL
+- Off-hours: 5min (300s) TTL
+- Key: `market_overview:aggregate`
+- Implementation: `TradingHoursCache`
+
+**Rate Limit**: Standard (100 requests/60s)
+
+**Flow**:
+1. Check cache → return if hit
+2. Fetch fresh data via `MarketOverviewService`
+3. Cache result as JSON
+4. Return response
+
+## Integration Points
+
+### Data Sources
+- **vnstock_data.Top** (VCI source):
+  - `gainer(index="VNINDEX", limit=5)`
+  - `loser(index="VNINDEX", limit=5)`
+  - `foreign_buy(date=today)`
+  - `foreign_sell(date=today)`
+  - `volume(index="VNINDEX", limit=5)`
+
+- **vnstock.Listing**:
+  - `symbols_by_group("VN30")` → for breadth calculation
+
+- **vnstock.Trading**:
+  - `price_board(symbols_list, ...)` → for breadth calculation
+
+### Router Registration
+
+In `src/stocks/router.py`:
+```python
+from .overview import router as overview_router
+router.include_router(overview_router)
+```
+
+## Files Structure
+
+```
+src/stocks/overview/
+├── __init__.py         # exports router
+├── schemas.py          # 5 schema classes
+├── service.py          # MarketOverviewService
+└── router.py           # endpoint + cache
+```
+
+## Technical Details
+
+**VCI Rate Limit Protection**:
+- Sequential API calls (not parallel)
+- 100ms `asyncio.sleep()` between calls
+- Prevents 429 Too Many Requests errors
+
+**Market Breadth Algorithm**:
+- Uses VN30 basket (30 stocks) for performance
+- Compares `match_price` vs `ref_price`:
+  - `match_price > ref_price` → advance
+  - `match_price < ref_price` → decline
+  - `match_price == ref_price` → unchanged
+
+**Foreign Flow Calculation**:
+- Top 5 net buy: highest positive net_value
+- Top 5 net sell: highest negative net_value (in absolute terms)
+- Total net value: sum of all buy + sell (sell values negative)
+
+## Cache Behavior
+
+**Trading Hours** (Mon-Fri 09:00-15:00):
+- TTL: 10s
+- Rationale: Fast updates during active trading
+
+**Off-Hours** (evenings, weekends):
+- TTL: 5min
+- Rationale: Data doesn't change, reduce API calls
+
+## Performance Characteristics
+
+**API Call Count**: 6 VCI calls + 1 vnstock call = ~7 external requests
+**Execution Time**: ~600-800ms (with rate limiting delays)
+**Cache Hit Rate**: Expected 90%+ during trading hours (multiple clients)
+
+## Error Scenarios
+
+**Graceful Degradation Examples**:
+- If top gainers fail → returns empty list, continues
+- If foreign flow fails → returns empty net_buy/net_sell
+- If market breadth fails → returns zeros (0/0/0/0)
+- Response always returns 200 OK with partial data
+
+**No 404 or 500**: Endpoint designed to always succeed with defaults
+
+## Usage Example
+
+**Request**:
+```http
+GET /api/v1/stocks/market-overview HTTP/1.1
+Host: api.example.com
+```
+
+**Response**:
+```json
+{
+  "market_breadth": {
+    "advances": 18,
+    "declines": 10,
+    "unchanged": 2,
+    "total": 30
+  },
+  "top_gainers": [
+    {"symbol": "VCB", "price": 105000, "change_pct": 3.5, "volume": 2500000},
+    ...
+  ],
+  "top_losers": [...],
+  "foreign_flow": {
+    "net_buy": [
+      {"symbol": "VNM", "net_value": 15000000000},
+      ...
+    ],
+    "net_sell": [...],
+    "total_net_value": 5000000000
+  },
+  "top_volume": [...],
+  "generated_at": "2025-12-28T14:30:00"
+}
+```
+
+## Dependencies
+
+- `vnstock >= 3.0.0`
+- `vnstock_data` (for VCI Top class)
+- `src.core.cache.TradingHoursCache`
+- `src.core.ratelimit.standard_rate_limit`
+- `src.stocks.shared.safe_float` (helper)
+
+## Future Enhancements
+
+- Add more exchanges (HNX, UPCOM) for breadth
+- Configurable limit (top N movers/volume)
+- Historical snapshots (store daily summaries)
+- WebSocket support for real-time updates
