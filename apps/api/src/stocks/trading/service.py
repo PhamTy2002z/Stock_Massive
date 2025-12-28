@@ -1,11 +1,11 @@
 """Trading domain service for foreign trading, proprietary trading, and order stats."""
 
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 import pandas as pd
-from vnstock import Trading
+from vnstock import Trading, Vnstock
 
 from ..shared import StockServiceError, validate_symbol, safe_float
 from .schemas import (
@@ -15,6 +15,8 @@ from .schemas import (
     PropTradingResponse,
     OrderStatsItem,
     OrderStatsResponse,
+    IntradayOrderStatsResponse,
+    ForeignSnapshotResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -215,6 +217,109 @@ class TradingService:
         except Exception as e:
             logger.error(f"Error fetching order stats for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch order stats for {symbol}: {e}")
+
+    def get_intraday_order_stats(self, symbol: str) -> IntradayOrderStatsResponse:
+        """Get current-day order stats from intraday tick data.
+
+        Uses quote.intraday() to aggregate buy/sell orders for today.
+        Only available during and after trading hours.
+        """
+        symbol = validate_symbol(symbol)
+        try:
+            stock = Vnstock().stock(symbol=symbol, source=self.source)
+            df = stock.quote.intraday(page_size=10000)
+
+            if df is None or df.empty:
+                return IntradayOrderStatsResponse(
+                    symbol=symbol,
+                    date=date.today().isoformat(),
+                    buy_orders=0,
+                    sell_orders=0,
+                    buy_volume=0,
+                    sell_volume=0,
+                    net_volume=0,
+                    ato_volume=0,
+                    atc_volume=0,
+                    last_updated=datetime.now().isoformat(),
+                )
+
+            # Aggregate by match_type
+            # match_type column contains: 'ATO', 'Buy', 'Sell', 'ATC'
+            buy_mask = df["match_type"] == "Buy"
+            sell_mask = df["match_type"] == "Sell"
+            ato_mask = df["match_type"] == "ATO"
+            atc_mask = df["match_type"] == "ATC"
+
+            buy_orders = int(buy_mask.sum())
+            sell_orders = int(sell_mask.sum())
+            buy_volume = int(df.loc[buy_mask, "volume"].sum()) if buy_mask.any() else 0
+            sell_volume = (
+                int(df.loc[sell_mask, "volume"].sum()) if sell_mask.any() else 0
+            )
+            ato_volume = int(df.loc[ato_mask, "volume"].sum()) if ato_mask.any() else 0
+            atc_volume = int(df.loc[atc_mask, "volume"].sum()) if atc_mask.any() else 0
+
+            return IntradayOrderStatsResponse(
+                symbol=symbol,
+                date=date.today().isoformat(),
+                buy_orders=buy_orders,
+                sell_orders=sell_orders,
+                buy_volume=buy_volume,
+                sell_volume=sell_volume,
+                net_volume=buy_volume - sell_volume,
+                ato_volume=ato_volume,
+                atc_volume=atc_volume,
+                last_updated=datetime.now().isoformat(),
+            )
+        except Exception as e:
+            logger.error(f"Error fetching intraday order stats for {symbol}: {e}")
+            raise StockServiceError(f"Failed to fetch intraday order stats: {e}")
+
+    def get_foreign_snapshot(self, symbol: str) -> ForeignSnapshotResponse:
+        """Get current foreign investor snapshot from trading_stats.
+
+        Uses company.trading_stats() to get foreign volume, room, ownership.
+        This is a snapshot (not historical data).
+        """
+        symbol = validate_symbol(symbol)
+        try:
+            stock = Vnstock().stock(symbol=symbol, source=self.source)
+            df = stock.company.trading_stats()
+
+            if df is None or df.empty:
+                return ForeignSnapshotResponse(
+                    symbol=symbol,
+                    foreign_volume=0,
+                    foreign_room=0,
+                    ownership_ratio=None,
+                    total_volume=0,
+                    avg_volume_2w=None,
+                    foreign_pct_of_volume=None,
+                    last_updated=datetime.now().isoformat(),
+                )
+
+            # Extract first row (should be single row)
+            row = df.iloc[0] if len(df) > 0 else {}
+
+            foreign_vol = int(row.get("foreign_volume", 0) or 0)
+            total_vol = int(row.get("total_volume", 0) or 0)
+
+            # Calculate foreign % of total volume
+            foreign_pct = (foreign_vol / total_vol * 100) if total_vol > 0 else None
+
+            return ForeignSnapshotResponse(
+                symbol=symbol,
+                foreign_volume=foreign_vol,
+                foreign_room=int(row.get("foreign_room", 0) or 0),
+                ownership_ratio=safe_float(row.get("current_holding_ratio")),
+                total_volume=total_vol,
+                avg_volume_2w=safe_float(row.get("avg_match_volume_2w")),
+                foreign_pct_of_volume=foreign_pct,
+                last_updated=datetime.now().isoformat(),
+            )
+        except Exception as e:
+            logger.error(f"Error fetching foreign snapshot for {symbol}: {e}")
+            raise StockServiceError(f"Failed to fetch foreign snapshot: {e}")
 
 
 # Singleton instance

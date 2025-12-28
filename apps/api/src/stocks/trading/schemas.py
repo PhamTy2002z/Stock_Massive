@@ -73,3 +73,37 @@ class OrderStatsResponse(BaseModel):
 
     symbol: str
     items: list[OrderStatsItem]
+
+
+# === Intraday Order Stats Schemas (Real-time from quote.intraday) ===
+
+
+class IntradayOrderStatsResponse(BaseModel):
+    """Current-day order statistics from intraday tick data."""
+
+    symbol: str
+    date: str  # Current trading date (YYYY-MM-DD)
+    buy_orders: int
+    sell_orders: int
+    buy_volume: int
+    sell_volume: int
+    net_volume: int
+    ato_volume: int  # Auction at open
+    atc_volume: int  # Auction at close
+    last_updated: str  # ISO timestamp
+
+
+# === Foreign Snapshot Schemas (from company.trading_stats) ===
+
+
+class ForeignSnapshotResponse(BaseModel):
+    """Snapshot of foreign investor activity from trading_stats."""
+
+    symbol: str
+    foreign_volume: int  # Today's foreign trading volume
+    foreign_room: int  # Remaining foreign ownership room
+    ownership_ratio: float | None  # Current foreign ownership (0-1)
+    total_volume: int  # Today's total trading volume
+    avg_volume_2w: float | None  # 2-week average volume
+    foreign_pct_of_volume: float | None  # Foreign volume as % of total
+    last_updated: str  # ISO timestamp
