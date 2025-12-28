@@ -78,6 +78,17 @@ function DepthBar({ level, type, maxVolume, rank }: DepthBarProps) {
 }
 
 export function PriceDepthChart({ data, isLoading }: PriceDepthChartProps) {
+  // useMemo must be called unconditionally (before any returns)
+  const bidLevels = useMemo(() => {
+    if (!data) return []
+    return [data.bid_1, data.bid_2, data.bid_3].filter(Boolean) as PriceLevel[]
+  }, [data])
+
+  const askLevels = useMemo(() => {
+    if (!data) return []
+    return [data.ask_1, data.ask_2, data.ask_3].filter(Boolean) as PriceLevel[]
+  }, [data])
+
   if (isLoading) return <PriceDepthChartSkeleton />
 
   if (!data) {
@@ -105,15 +116,6 @@ export function PriceDepthChart({ data, isLoading }: PriceDepthChartProps) {
       </div>
     )
   }
-
-  const bidLevels = useMemo(() =>
-    [data.bid_1, data.bid_2, data.bid_3].filter(Boolean) as PriceLevel[],
-    [data.bid_1, data.bid_2, data.bid_3]
-  )
-  const askLevels = useMemo(() =>
-    [data.ask_1, data.ask_2, data.ask_3].filter(Boolean) as PriceLevel[],
-    [data.ask_1, data.ask_2, data.ask_3]
-  )
 
   const allVolumes = [...bidLevels, ...askLevels].map((l) => l.volume)
   const maxVolume = Math.max(...allVolumes, 1)
