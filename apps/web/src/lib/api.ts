@@ -762,7 +762,7 @@ export async function fetchSectorPeers(
   limit: number = 10
 ): Promise<SectorPeersResponse> {
   return fetchApi<SectorPeersResponse>(
-    `/stocks/${encodeURIComponent(symbol)}/sector-peers?limit=${limit}`
+    `/stocks/analytics/sector-peers?symbol=${encodeURIComponent(symbol)}&limit=${limit}`
   )
 }
 
