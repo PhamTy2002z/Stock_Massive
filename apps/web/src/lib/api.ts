@@ -557,10 +557,12 @@ export interface TradingStatsResponse {
 // Advanced Tab Types - Order Stats
 export interface OrderStatsItem {
   date: string
-  buy_order_count: number
-  sell_order_count: number
-  buy_order_volume: number
-  sell_order_volume: number
+  buy_orders: number
+  sell_orders: number
+  buy_volume: number
+  sell_volume: number
+  avg_buy_order?: number
+  avg_sell_order?: number
 }
 
 // Advanced Tab Types - Foreign Trading
@@ -624,9 +626,10 @@ function getDateRange(days: number): { start: string; end: string } {
 
 export async function fetchOrderStats(symbol: string, days: number = 30): Promise<OrderStatsItem[]> {
   const { start, end } = getDateRange(days)
-  return fetchApi<OrderStatsItem[]>(
+  const response = await fetchApi<{ symbol: string; items: OrderStatsItem[] }>(
     `/stocks/${encodeURIComponent(symbol)}/order-stats?start=${start}&end=${end}`
   )
+  return response.items ?? []
 }
 
 export async function fetchPriceDepth(symbol: string): Promise<PriceDepthResponse> {
@@ -643,14 +646,52 @@ export async function fetchTradingStats(symbol: string): Promise<TradingStatsRes
 
 export async function fetchForeignTrading(symbol: string, days: number = 30): Promise<ForeignTradingItem[]> {
   const { start, end } = getDateRange(days)
-  return fetchApi<ForeignTradingItem[]>(
+  const response = await fetchApi<{ symbol: string; items: ForeignTradingItem[] }>(
     `/stocks/${encodeURIComponent(symbol)}/foreign-trading?start=${start}&end=${end}`
   )
+  return response.items ?? []
 }
 
 export async function fetchPropTrading(symbol: string, days: number = 30): Promise<PropTradingItem[]> {
   const { start, end } = getDateRange(days)
-  return fetchApi<PropTradingItem[]>(
+  const response = await fetchApi<{ symbol: string; items: PropTradingItem[] }>(
     `/stocks/${encodeURIComponent(symbol)}/prop-trading?start=${start}&end=${end}`
   )
+  return response.items ?? []
+}
+
+// === Intraday Order Stats Types (Phase 3 - Real-time current-day) ===
+
+export interface IntradayOrderStatsResponse {
+  symbol: string
+  date: string
+  buy_orders: number
+  sell_orders: number
+  buy_volume: number
+  sell_volume: number
+  net_volume: number
+  ato_volume: number
+  atc_volume: number
+  last_updated: string
+}
+
+export async function fetchIntradayOrderStats(symbol: string): Promise<IntradayOrderStatsResponse> {
+  return fetchApi<IntradayOrderStatsResponse>(`/stocks/${encodeURIComponent(symbol)}/intraday-order-stats`)
+}
+
+// === Foreign Snapshot Types (Phase 3 - Snapshot data) ===
+
+export interface ForeignSnapshotResponse {
+  symbol: string
+  foreign_volume: number
+  foreign_room: number
+  ownership_ratio: number | null
+  total_volume: number
+  avg_volume_2w: number | null
+  foreign_pct_of_volume: number | null
+  last_updated: string
+}
+
+export async function fetchForeignSnapshot(symbol: string): Promise<ForeignSnapshotResponse> {
+  return fetchApi<ForeignSnapshotResponse>(`/stocks/${encodeURIComponent(symbol)}/foreign-snapshot`)
 }

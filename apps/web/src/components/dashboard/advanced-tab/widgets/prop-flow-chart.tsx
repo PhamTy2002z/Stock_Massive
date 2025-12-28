@@ -38,10 +38,11 @@ export function PropFlowChart({ data, isLoading }: PropFlowChartProps) {
     return <PropFlowChartSkeleton />
   }
 
-  if (!data || data.length === 0) {
+  if (!data || !Array.isArray(data) || data.length === 0) {
     return (
-      <div className="text-center py-8 text-muted-foreground">
-        Không có dữ liệu giao dịch tự doanh
+      <div className="text-center py-12 text-muted-foreground">
+        <p className="text-sm">Dữ liệu giao dịch tự doanh chưa khả dụng</p>
+        <p className="text-xs mt-1 opacity-70">Tính năng đang được phát triển</p>
       </div>
     )
   }
@@ -92,8 +93,8 @@ export function PropFlowChart({ data, isLoading }: PropFlowChartProps) {
                 key={`cell-${index}`}
                 fill={
                   entry.net_volume >= 0
-                    ? "hsl(262 83% 58%)" // purple-500
-                    : "hsl(25 95% 53%)" // orange-500
+                    ? "hsl(142 76% 36%)" // green-600
+                    : "hsl(0 84% 60%)" // red-500
                 }
               />
             ))}
@@ -105,13 +106,13 @@ export function PropFlowChart({ data, isLoading }: PropFlowChartProps) {
       <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t border-border/50">
         <div className="text-center">
           <p className="text-xs text-muted-foreground">Tổng mua</p>
-          <p className="text-sm font-medium text-purple-600 dark:text-purple-400">
+          <p className="text-sm font-medium text-green-600 dark:text-green-400">
             {formatVolume(data.reduce((sum, d) => sum + d.buy_volume, 0))}
           </p>
         </div>
         <div className="text-center">
           <p className="text-xs text-muted-foreground">Tổng bán</p>
-          <p className="text-sm font-medium text-orange-600 dark:text-orange-400">
+          <p className="text-sm font-medium text-red-600 dark:text-red-400">
             {formatVolume(data.reduce((sum, d) => sum + d.sell_volume, 0))}
           </p>
         </div>
@@ -120,8 +121,8 @@ export function PropFlowChart({ data, isLoading }: PropFlowChartProps) {
           <p
             className={`text-sm font-medium ${
               data.reduce((sum, d) => sum + d.net_volume, 0) >= 0
-                ? "text-purple-600 dark:text-purple-400"
-                : "text-orange-600 dark:text-orange-400"
+                ? "text-green-600 dark:text-green-400"
+                : "text-red-600 dark:text-red-400"
             }`}
           >
             {formatVolume(data.reduce((sum, d) => sum + d.net_volume, 0))}

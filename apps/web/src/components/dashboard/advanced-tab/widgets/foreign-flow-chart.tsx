@@ -48,10 +48,11 @@ export function ForeignFlowChart({ data, isLoading }: ForeignFlowChartProps) {
     return <ForeignFlowChartSkeleton />
   }
 
-  if (!data || data.length === 0) {
+  if (!data || !Array.isArray(data) || data.length === 0) {
     return (
-      <div className="text-center py-8 text-muted-foreground">
-        Không có dữ liệu giao dịch nước ngoài
+      <div className="text-center py-12 text-muted-foreground">
+        <p className="text-sm">Dữ liệu giao dịch nước ngoài chưa khả dụng</p>
+        <p className="text-xs mt-1 opacity-70">Tính năng đang được phát triển</p>
       </div>
     )
   }
