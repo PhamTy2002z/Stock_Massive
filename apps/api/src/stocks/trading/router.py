@@ -10,6 +10,8 @@ from .schemas import (
     ForeignTradingResponse,
     PropTradingResponse,
     OrderStatsResponse,
+    IntradayOrderStatsResponse,
+    ForeignSnapshotResponse,
 )
 
 router = APIRouter()
@@ -31,6 +33,18 @@ order_stats_cache = TradingHoursCache(
     key_prefix="stock:orderstats:",
     ttl_trading=900,
     ttl_off_hours=3600,
+)
+
+intraday_order_stats_cache = TradingHoursCache(
+    key_prefix="stock:intraday_orderstats:",
+    ttl_trading=120,  # 2 min during trading (real-time data)
+    ttl_off_hours=1800,  # 30 min off-hours
+)
+
+foreign_snapshot_cache = TradingHoursCache(
+    key_prefix="stock:foreign_snapshot:",
+    ttl_trading=120,  # 2 min during trading (snapshot data)
+    ttl_off_hours=1800,  # 30 min off-hours
 )
 
 
@@ -110,6 +124,54 @@ async def get_order_stats(
         service = get_trading_service()
         result = service.get_order_stats(symbol, days)
         order_stats_cache.set(cache_key, result.model_dump())
+        return result
+    except StockServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get(
+    "/{symbol}/intraday-order-stats",
+    response_model=IntradayOrderStatsResponse,
+    dependencies=[Depends(standard_rate_limit)],
+)
+async def get_intraday_order_stats(symbol: str) -> IntradayOrderStatsResponse:
+    """Get current-day order statistics from intraday tick data.
+
+    Returns aggregated buy/sell order counts and volumes for today.
+    Only available during and after trading hours.
+    """
+    cached = intraday_order_stats_cache.get(symbol)
+    if cached:
+        return IntradayOrderStatsResponse(**cached)
+
+    try:
+        service = get_trading_service()
+        result = service.get_intraday_order_stats(symbol)
+        intraday_order_stats_cache.set(symbol, result.model_dump())
+        return result
+    except StockServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get(
+    "/{symbol}/foreign-snapshot",
+    response_model=ForeignSnapshotResponse,
+    dependencies=[Depends(standard_rate_limit)],
+)
+async def get_foreign_snapshot(symbol: str) -> ForeignSnapshotResponse:
+    """Get current foreign investor snapshot.
+
+    Returns foreign volume, ownership ratio, and remaining room.
+    This is a snapshot (not historical data).
+    """
+    cached = foreign_snapshot_cache.get(symbol)
+    if cached:
+        return ForeignSnapshotResponse(**cached)
+
+    try:
+        service = get_trading_service()
+        result = service.get_foreign_snapshot(symbol)
+        foreign_snapshot_cache.set(symbol, result.model_dump())
         return result
     except StockServiceError as e:
         raise HTTPException(status_code=502, detail=str(e))
