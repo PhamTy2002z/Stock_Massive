@@ -36,7 +36,7 @@ export function PeerComparisonCard({ symbol, className }: PeerComparisonCardProp
           <span className="text-sm font-normal text-muted-foreground">
             - {data.icb_name} (ICB: {data.icb_code})
           </span>
-          <span className="ml-auto text-primary font-bold">{data.symbol}</span>
+          <span className="ml-auto text-white font-bold">{data.symbol}</span>
         </CardTitle>
       </CardHeader>
       <CardContent>

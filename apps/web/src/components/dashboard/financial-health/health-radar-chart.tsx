@@ -15,19 +15,44 @@ const DIMENSION_LABELS: Record<string, string> = {
   valuation: "Định giá",
 }
 
-// Custom tick to adjust label positions
-function CustomTick({ x, y, payload }: { x: number; y: number; payload: { value: string } }) {
-  const label = payload.value
-  // Shift "Thanh khoản" to the right to avoid overlap
-  const offsetX = label === "Thanh khoản" ? 10 : 0
+// Custom tick with dynamic positioning based on angle
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function CustomTick(props: any) {
+  const { x = 0, y = 0, payload, cx = 0, cy = 0 } = props
+  const label = payload?.value ?? ""
+
+  // Calculate angle from center to determine optimal label position
+  const angle = Math.atan2(y - cy, x - cx)
+  const angleDeg = (angle * 180) / Math.PI
+
+  // Dynamic offset based on position - push labels outward
+  const offsetDistance = 12
+  const offsetX = Math.cos(angle) * offsetDistance
+  const offsetY = Math.sin(angle) * offsetDistance
+
+  // Determine text anchor based on angle
+  let textAnchor: "start" | "middle" | "end" = "middle"
+  if (angleDeg > 45 && angleDeg < 135) {
+    // Bottom
+    textAnchor = "middle"
+  } else if (angleDeg >= 135 || angleDeg <= -135) {
+    // Left side
+    textAnchor = "end"
+  } else if (angleDeg > -135 && angleDeg < -45) {
+    // Top
+    textAnchor = "middle"
+  } else {
+    // Right side
+    textAnchor = "start"
+  }
 
   return (
     <text
       x={x + offsetX}
-      y={y}
+      y={y + offsetY}
       fill="hsl(var(--muted-foreground))"
       fontSize={11}
-      textAnchor="middle"
+      textAnchor={textAnchor}
       dominantBaseline="central"
     >
       {label}
@@ -44,9 +69,9 @@ export function HealthRadarChart({ dimensions }: HealthRadarChartProps) {
 
   return (
     <ResponsiveContainer width="100%" height={280}>
-      <RadarChart data={data} margin={{ top: 30, right: 50, bottom: 30, left: 50 }}>
+      <RadarChart data={data} margin={{ top: 40, right: 80, bottom: 40, left: 60 }} outerRadius="65%">
         <PolarGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-        <PolarAngleAxis dataKey="dimension" tick={<CustomTick x={0} y={0} payload={{ value: "" }} />} />
+        <PolarAngleAxis dataKey="dimension" tick={(props) => <CustomTick {...props} />} />
         <Radar
           name="Score"
           dataKey="score"

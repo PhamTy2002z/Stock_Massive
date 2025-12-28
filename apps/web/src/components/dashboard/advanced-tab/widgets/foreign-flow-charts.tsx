@@ -18,14 +18,20 @@ interface ForeignFlowChartsProps {
   isLoading: boolean
 }
 
-// Color palette: Black, Grey, White accent
+// Color palette: Orange primary accent + muted semantic colors
 const COLORS = {
-  orange: "#FFFFFF",
-  orangeLight: "#E5E5E5",
-  orangeDim: "rgba(255, 255, 255, 0.15)",
+  // Primary accent - Muted Orange (foreign/highlight)
+  orange: "hsl(25 80% 55%)",        // Muted orange
+  orangeLight: "hsl(25 70% 62%)",   // Lighter orange
+  orangeDim: "hsla(25 80% 55% / 0.15)",
+  // Neutral - Grey (domestic/secondary)
   grey: "#6B7280",
   greyLight: "#9CA3AF",
   greyDark: "#374151",
+  // Semantic - Muted Green/Red for trends (dark mode friendly)
+  up: "hsl(152 45% 50%)",           // Muted teal-green
+  down: "hsl(4 55% 55%)",           // Muted coral-red
+  // White
   white: "#FFFFFF",
   muted: "rgba(255, 255, 255, 0.6)",
 }
@@ -105,25 +111,25 @@ function StatItem({
   return (
     <div className={cn(
       "flex items-center gap-3 p-3 rounded-lg transition-colors",
-      highlight ? "bg-white/10 border border-white/30" : "bg-muted/30"
+      highlight ? "bg-primary/10 border border-primary/30" : "bg-muted/30"
     )}>
       <div className={cn(
         "w-9 h-9 rounded-lg flex items-center justify-center shrink-0",
-        highlight ? "bg-white/20" : "bg-muted/50"
+        highlight ? "bg-primary/20" : "bg-muted/50"
       )}>
-        <Icon className={cn("h-4 w-4", highlight ? "text-white" : "text-muted-foreground")} />
+        <Icon className={cn("h-4 w-4", highlight ? "text-primary" : "text-muted-foreground")} />
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-xs text-muted-foreground truncate">{label}</p>
         <div className="flex items-center gap-1.5">
           <p className={cn(
             "text-sm font-semibold truncate",
-            highlight ? "text-white" : "text-foreground"
+            highlight ? "text-primary" : "text-foreground"
           )}>
             {value}
           </p>
-          {trend === "up" && <ArrowUpRight className="h-3.5 w-3.5 text-emerald-500 shrink-0" />}
-          {trend === "down" && <ArrowDownRight className="h-3.5 w-3.5 text-red-500 shrink-0" />}
+          {trend === "up" && <ArrowUpRight className="h-3.5 w-3.5 shrink-0" style={{ color: COLORS.up }} />}
+          {trend === "down" && <ArrowDownRight className="h-3.5 w-3.5 shrink-0" style={{ color: COLORS.down }} />}
         </div>
       </div>
     </div>
@@ -172,7 +178,7 @@ export function ForeignFlowCharts({ data, isLoading }: ForeignFlowChartsProps) {
             {/* Left: Radial Progress Charts */}
             <div>
               <h4 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
-                <span className="w-1 h-4 bg-white rounded-full" />
+                <span className="w-1 h-4 rounded-full" style={{ backgroundColor: COLORS.orange }} />
                 Tỷ lệ sở hữu & Giao dịch
               </h4>
               <div className="flex justify-around items-center py-2">
@@ -190,7 +196,7 @@ export function ForeignFlowCharts({ data, isLoading }: ForeignFlowChartsProps) {
             {/* Right: Volume Distribution Pie */}
             <div>
               <h4 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
-                <span className="w-1 h-4 bg-white rounded-full" />
+                <span className="w-1 h-4 rounded-full" style={{ backgroundColor: COLORS.orange }} />
                 Phân bổ Khối lượng
               </h4>
               <div className="flex items-center gap-4">
@@ -276,7 +282,7 @@ export function ForeignFlowCharts({ data, isLoading }: ForeignFlowChartsProps) {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="flex items-center justify-between p-3 rounded-lg bg-muted/20">
               <div className="flex items-center gap-2">
-                <BarChart3 className="h-4 w-4 text-white" />
+                <BarChart3 className="h-4 w-4" style={{ color: COLORS.orange }} />
                 <span className="text-sm text-muted-foreground">Room còn lại</span>
               </div>
               <span className="text-sm font-semibold text-foreground tabular-nums">

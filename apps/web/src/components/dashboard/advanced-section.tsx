@@ -19,20 +19,20 @@ interface AdvancedSectionProps {
 
 const subTabs = [
   {
-    value: "order-flow" as const,
-    label: "Order Flow",
-    icon: TrendingUp,
-    description: "Phân tích dòng lệnh mua/bán realtime",
-    color: "text-emerald-500",
-    bgColor: "bg-emerald-500/10",
-  },
-  {
     value: "technical" as const,
     label: "Technical",
     icon: BarChart3,
     description: "Chỉ số kỹ thuật & thống kê giao dịch",
     color: "text-blue-500",
     bgColor: "bg-blue-500/10",
+  },
+  {
+    value: "order-flow" as const,
+    label: "Order Flow",
+    icon: TrendingUp,
+    description: "Phân tích dòng lệnh mua/bán realtime",
+    color: "text-emerald-500",
+    bgColor: "bg-emerald-500/10",
   },
   {
     value: "money-flow" as const,
@@ -69,7 +69,7 @@ function SubtabSkeleton() {
 }
 
 export function AdvancedSection({ symbol, className }: AdvancedSectionProps) {
-  const [activeSubTab, setActiveSubTab] = useState<AdvancedSubTabValue>("order-flow")
+  const [activeSubTab, setActiveSubTab] = useState<AdvancedSubTabValue>("technical")
 
   return (
     <section className={cn("space-y-5", className)}>

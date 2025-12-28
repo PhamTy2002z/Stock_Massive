@@ -82,13 +82,13 @@ export function RatioSummaryCard({ data, isLoading }: RatioSummaryCardProps) {
       label: "Current Ratio",
       value: data?.current_ratio ?? null,
       description: "Khả năng thanh toán",
-      goodRange: { min: 1, max: 3 },
+      goodRange: { min: 1.5, max: 3 },
     },
     {
       label: "D/E",
       value: data?.debt_to_equity ?? null,
       description: "Debt to Equity",
-      goodRange: { max: 2 },
+      goodRange: { max: 1.5 },
     },
   ]
 

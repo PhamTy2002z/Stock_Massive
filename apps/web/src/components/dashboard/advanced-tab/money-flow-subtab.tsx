@@ -30,7 +30,7 @@ export default function MoneyFlowSubtab({ symbol }: MoneyFlowSubtabProps) {
       {/* Header with Refresh */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="w-1 h-5 bg-white rounded-full" />
+          <span className="w-1 h-5 bg-primary rounded-full" />
           <h3 className="text-sm font-semibold text-foreground">
             Dòng tiền NĐTNN
           </h3>
@@ -70,7 +70,7 @@ export default function MoneyFlowSubtab({ symbol }: MoneyFlowSubtabProps) {
 
       {/* Info about limitations */}
       <div className="flex items-start gap-3 p-4 rounded-lg bg-muted/20 border border-border/30">
-        <AlertCircle className="h-4 w-4 text-white shrink-0 mt-0.5" />
+        <AlertCircle className="h-4 w-4 text-primary shrink-0 mt-0.5" />
         <div className="text-sm">
           <p className="font-medium text-foreground mb-1.5">Giới hạn dữ liệu</p>
           <ul className="space-y-1 text-xs text-muted-foreground">
