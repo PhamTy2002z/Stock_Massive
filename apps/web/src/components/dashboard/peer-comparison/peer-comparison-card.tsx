@@ -31,7 +31,7 @@ export function PeerComparisonCard({ symbol, className }: PeerComparisonCardProp
     return (
       <Card className={className}>
         <CardContent className="flex items-center justify-center h-[250px] text-muted-foreground">
-          Chon mot co phieu de xem Peer Comparison
+          Chọn một cổ phiếu để xem Peer Comparison
         </CardContent>
       </Card>
     )
@@ -45,7 +45,7 @@ export function PeerComparisonCard({ symbol, className }: PeerComparisonCardProp
     return (
       <Card className={className}>
         <CardContent className="flex items-center justify-center h-[250px] text-destructive">
-          Khong the tai Peer Comparison
+          Không thể tải Peer Comparison
         </CardContent>
       </Card>
     )

@@ -8,18 +8,18 @@ interface FScoreIndicatorProps {
 }
 
 const FSCORE_LABELS: Record<keyof FScoreDetails, string> = {
-  positive_roa: "ROA duong",
-  positive_cfo: "Dong tien duong",
-  roa_improving: "ROA tang",
-  accrual_quality: "Chat luong loi nhuan",
-  leverage_decreasing: "Don bay giam",
-  liquidity_improving: "Thanh khoan tang",
+  positive_roa: "ROA dương",
+  positive_cfo: "Dòng tiền dương",
+  roa_improving: "ROA tăng",
+  accrual_quality: "Chất lượng lợi nhuận",
+  leverage_decreasing: "Đòn bẩy giảm",
+  liquidity_improving: "Thanh khoản tăng",
 }
 
 function getFScoreLabel(score: number): { text: string; color: string } {
-  if (score >= 7) return { text: "Manh", color: "text-[hsl(var(--accent-orange))]" }
-  if (score >= 4) return { text: "Trung binh", color: "text-yellow-500" }
-  return { text: "Yeu", color: "text-red-500" }
+  if (score >= 7) return { text: "Mạnh", color: "text-[hsl(var(--accent-orange))]" }
+  if (score >= 4) return { text: "Trung bình", color: "text-yellow-500" }
+  return { text: "Yếu", color: "text-red-500" }
 }
 
 export function FScoreIndicator({ score, details }: FScoreIndicatorProps) {

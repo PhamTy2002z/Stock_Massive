@@ -32,7 +32,7 @@ export function FCFAnalysisCard({ symbol, className }: FCFAnalysisCardProps) {
     return (
       <Card className={className}>
         <CardContent className="flex items-center justify-center h-[350px] text-muted-foreground">
-          Chon mot co phieu de xem FCF Analysis
+          Chọn một cổ phiếu để xem FCF Analysis
         </CardContent>
       </Card>
     )
@@ -46,7 +46,7 @@ export function FCFAnalysisCard({ symbol, className }: FCFAnalysisCardProps) {
     return (
       <Card className={className}>
         <CardContent className="flex items-center justify-center h-[350px] text-destructive">
-          Khong the tai FCF Analysis
+          Không thể tải FCF Analysis
         </CardContent>
       </Card>
     )
