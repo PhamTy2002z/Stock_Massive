@@ -45,3 +45,4 @@ postgres_data/
 # Database backups (share via cloud storage, not git)
 db-backup.sql
 *.sql.gz
+apps/web/temp/
