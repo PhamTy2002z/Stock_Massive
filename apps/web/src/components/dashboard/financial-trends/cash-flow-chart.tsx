@@ -33,9 +33,9 @@ export function CashFlowChart({ data }: CashFlowChartProps) {
   }))
 
   const labels: Record<string, string> = {
-    cfo: "Hoat dong KD",
-    cfi: "Hoat dong DT",
-    cff: "Hoat dong TC",
+    cfo: "HĐ kinh doanh",
+    cfi: "HĐ đầu tư",
+    cff: "HĐ tài chính",
   }
 
   return (
@@ -61,7 +61,13 @@ export function CashFlowChart({ data }: CashFlowChartProps) {
             labels[name as string] || name,
           ]}
         />
-        <Legend formatter={(value) => labels[value] || value} />
+        <Legend
+          formatter={(value) => (
+            <span style={{ color: "hsl(var(--foreground))", fontSize: 12 }}>{labels[value] || value}</span>
+          )}
+          wrapperStyle={{ paddingTop: 16 }}
+          iconSize={10}
+        />
         <ReferenceLine y={0} stroke="hsl(var(--foreground))" />
         <Bar dataKey="cfo" fill="hsl(var(--accent-orange))" radius={[4, 4, 0, 0]} />
         <Bar dataKey="cfi" fill="hsl(var(--muted-foreground))" radius={[4, 4, 0, 0]} />

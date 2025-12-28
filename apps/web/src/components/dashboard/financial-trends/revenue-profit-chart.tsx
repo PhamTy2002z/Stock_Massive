@@ -54,8 +54,8 @@ export function RevenueProfitChart({ data }: RevenueProfitChartProps) {
           formatter={(value, name) => {
             const labels: Record<string, string> = {
               revenue: "Doanh thu",
-              gross_profit: "LN gop",
-              net_profit: "LN rong",
+              gross_profit: "LN gộp",
+              net_profit: "LN ròng",
             }
             return [formatBillions(value as number), labels[name as string] || name]
           }}
@@ -64,31 +64,39 @@ export function RevenueProfitChart({ data }: RevenueProfitChartProps) {
           formatter={(value) => {
             const labels: Record<string, string> = {
               revenue: "Doanh thu",
-              gross_profit: "LN gop",
-              net_profit: "LN rong",
+              gross_profit: "LN gộp",
+              net_profit: "LN ròng",
             }
-            return labels[value] || value
+            return <span style={{ color: "hsl(var(--foreground))", fontSize: 12 }}>{labels[value] || value}</span>
           }}
+          wrapperStyle={{ paddingTop: 16 }}
+          iconSize={10}
         />
+        {/* Doanh thu first (largest) */}
         <Bar
           yAxisId="left"
           dataKey="revenue"
+          name="revenue"
           fill="hsl(var(--accent-orange))"
           radius={[4, 4, 0, 0]}
         />
+        {/* LN gộp second */}
         <Bar
           yAxisId="left"
           dataKey="gross_profit"
-          fill="hsl(var(--accent-orange) / 0.6)"
+          name="gross_profit"
+          fill="hsl(var(--primary))"
           radius={[4, 4, 0, 0]}
         />
+        {/* LN ròng as line */}
         <Line
           yAxisId="left"
           type="monotone"
           dataKey="net_profit"
-          stroke="hsl(var(--muted-foreground))"
+          name="net_profit"
+          stroke="hsl(var(--accent-green))"
           strokeWidth={2}
-          dot={{ fill: "hsl(var(--muted-foreground))", strokeWidth: 2 }}
+          dot={{ fill: "hsl(var(--accent-green))", strokeWidth: 2, r: 3 }}
         />
       </ComposedChart>
     </ResponsiveContainer>
