@@ -344,7 +344,7 @@ class TestHealthScoreEndpoint:
 
     def test_get_health_score_vnm(self, client):
         """Test health score for VNM symbol."""
-        response = client.get("/stocks/VNM/health-score")
+        response = client.get("/api/v1/stocks/VNM/health-score")
         assert response.status_code == 200
 
         data = response.json()
@@ -380,17 +380,17 @@ class TestHealthScoreEndpoint:
 
     def test_get_health_score_invalid_symbol(self, client):
         """Test health score with invalid symbol."""
-        response = client.get("/stocks/INVALID999/health-score")
+        response = client.get("/api/v1/stocks/INVALID999/health-score")
         assert response.status_code in [404, 502]
 
     def test_health_score_caching(self, client):
         """Test that health score is cached."""
         # First request
-        response1 = client.get("/stocks/VNM/health-score")
+        response1 = client.get("/api/v1/stocks/VNM/health-score")
         assert response1.status_code == 200
 
         # Second request should hit cache
-        response2 = client.get("/stocks/VNM/health-score")
+        response2 = client.get("/api/v1/stocks/VNM/health-score")
         assert response2.status_code == 200
         assert response1.json() == response2.json()
 
@@ -400,7 +400,7 @@ class TestTrendMetricsEndpoint:
 
     def test_get_trend_metrics_vnm(self, client):
         """Test trend metrics for VNM symbol."""
-        response = client.get("/stocks/VNM/trend-metrics?periods=8")
+        response = client.get("/api/v1/stocks/VNM/trend-metrics?periods=8")
         assert response.status_code == 200
 
         data = response.json()
@@ -426,7 +426,7 @@ class TestTrendMetricsEndpoint:
 
     def test_get_trend_metrics_custom_periods(self, client):
         """Test trend metrics with custom period count."""
-        response = client.get("/stocks/VNM/trend-metrics?periods=4")
+        response = client.get("/api/v1/stocks/VNM/trend-metrics?periods=4")
         assert response.status_code == 200
 
         data = response.json()
@@ -437,11 +437,11 @@ class TestTrendMetricsEndpoint:
     def test_trend_metrics_validation(self, client):
         """Test period validation."""
         # Too few periods
-        response = client.get("/stocks/VNM/trend-metrics?periods=2")
+        response = client.get("/api/v1/stocks/VNM/trend-metrics?periods=2")
         assert response.status_code == 422
 
         # Too many periods
-        response = client.get("/stocks/VNM/trend-metrics?periods=20")
+        response = client.get("/api/v1/stocks/VNM/trend-metrics?periods=20")
         assert response.status_code == 422
 
 
@@ -450,7 +450,7 @@ class TestFCFAnalysisEndpoint:
 
     def test_get_fcf_analysis_vnm(self, client):
         """Test FCF analysis for VNM symbol."""
-        response = client.get("/stocks/VNM/fcf-analysis")
+        response = client.get("/api/v1/stocks/VNM/fcf-analysis")
         assert response.status_code == 200
 
         data = response.json()
@@ -475,10 +475,10 @@ class TestFCFAnalysisEndpoint:
 
     def test_fcf_analysis_caching(self, client):
         """Test FCF analysis caching."""
-        response1 = client.get("/stocks/VNM/fcf-analysis")
+        response1 = client.get("/api/v1/stocks/VNM/fcf-analysis")
         assert response1.status_code == 200
 
-        response2 = client.get("/stocks/VNM/fcf-analysis")
+        response2 = client.get("/api/v1/stocks/VNM/fcf-analysis")
         assert response2.status_code == 200
         assert response1.json() == response2.json()
 
@@ -488,13 +488,13 @@ class TestSectorPeersEndpoint:
 
     def test_get_sector_peers(self, client):
         """Test sector peers comparison."""
-        response = client.get("/analytics/sector-peers?symbol=VNM&metric=roe")
+        response = client.get("/api/v1/stocks/analytics/sector-peers?symbol=VNM&limit=5")
         assert response.status_code == 200
 
         data = response.json()
         assert data["symbol"] == "VNM"
-        assert data["metric"] == "roe"
-        assert "sector" in data
+        assert "icb_code" in data
+        assert "icb_name" in data
         assert "peers" in data
         assert isinstance(data["peers"], list)
 
@@ -502,9 +502,9 @@ class TestSectorPeersEndpoint:
         if len(data["peers"]) > 0:
             peer = data["peers"][0]
             assert "symbol" in peer
-            assert "value" in peer
+            assert "company_name" in peer
 
-    def test_sector_peers_invalid_metric(self, client):
-        """Test invalid metric validation."""
-        response = client.get("/analytics/sector-peers?symbol=VNM&metric=invalid")
-        assert response.status_code == 422
+    def test_sector_peers_custom_limit(self, client):
+        """Test sector peers with custom limit."""
+        response = client.get("/api/v1/stocks/analytics/sector-peers?symbol=VNM&limit=10")
+        assert response.status_code == 200

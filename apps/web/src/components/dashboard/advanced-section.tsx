@@ -3,13 +3,14 @@
 import { lazy, Suspense, useState } from "react"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
-import { TrendingUp, BarChart3, Coins, ChevronRight, Sparkles } from "lucide-react"
+import { TrendingUp, BarChart3, Coins, Building2, ChevronRight, Sparkles } from "lucide-react"
 
 const OrderFlowSubtab = lazy(() => import("./advanced-tab/order-flow-subtab"))
 const TechnicalSubtab = lazy(() => import("./advanced-tab/technical-subtab"))
 const MoneyFlowSubtab = lazy(() => import("./advanced-tab/money-flow-subtab"))
+const SectorSubtab = lazy(() => import("./advanced-tab/sector-subtab"))
 
-type AdvancedSubTabValue = "order-flow" | "technical" | "money-flow"
+type AdvancedSubTabValue = "order-flow" | "technical" | "money-flow" | "sector"
 
 interface AdvancedSectionProps {
   symbol: string
@@ -40,6 +41,14 @@ const subTabs = [
     description: "Dòng tiền NĐTNN & Tự doanh",
     color: "text-amber-500",
     bgColor: "bg-amber-500/10",
+  },
+  {
+    value: "sector" as const,
+    label: "Sector",
+    icon: Building2,
+    description: "So sánh với công ty cùng ngành",
+    color: "text-purple-500",
+    bgColor: "bg-purple-500/10",
   },
 ]
 
@@ -80,7 +89,7 @@ export function AdvancedSection({ symbol, className }: AdvancedSectionProps) {
       </div>
 
       {/* Sub-tab Navigation - Card Style */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {subTabs.map((tab) => {
           const Icon = tab.icon
           const isActive = activeSubTab === tab.value
@@ -160,6 +169,11 @@ export function AdvancedSection({ symbol, className }: AdvancedSectionProps) {
             <MoneyFlowSubtab symbol={symbol} />
           </Suspense>
         )}
+        {activeSubTab === "sector" && (
+          <Suspense fallback={<SubtabSkeleton />}>
+            <SectorSubtab symbol={symbol} />
+          </Suspense>
+        )}
       </div>
     </section>
   )
@@ -178,8 +192,8 @@ export function AdvancedSectionSkeleton() {
       </div>
 
       {/* Tabs Skeleton */}
-      <div className="grid grid-cols-3 gap-3">
-        {[1, 2, 3].map((i) => (
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[1, 2, 3, 4].map((i) => (
           <Skeleton key={i} className="h-24 rounded-xl" />
         ))}
       </div>
