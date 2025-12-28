@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, memo } from "react"
+import { isEqual } from "lodash-es"
 import {
   Bar,
   XAxis,
@@ -18,6 +19,7 @@ import type { IndustryVolumeSpikeGroup } from "@/lib/api"
 interface VolumeSpikeChartProps {
   industries: IndustryVolumeSpikeGroup[]
   className?: string
+  isPlaceholderData?: boolean
 }
 
 // Color based on spike count intensity
@@ -58,7 +60,11 @@ function CustomTooltip({
   )
 }
 
-export const VolumeSpikeChart = memo(function VolumeSpikeChart({ industries, className }: VolumeSpikeChartProps) {
+export const VolumeSpikeChart = memo(function VolumeSpikeChart({
+  industries,
+  className,
+  isPlaceholderData = false,
+}: VolumeSpikeChartProps) {
   const chartData = useMemo(() => {
     return industries
       .map((g) => ({
@@ -98,7 +104,14 @@ export const VolumeSpikeChart = memo(function VolumeSpikeChart({ industries, cla
               width={120}
             />
             <Tooltip content={<CustomTooltip />} cursor={{ fill: "hsl(var(--muted) / 0.3)" }} />
-            <Bar dataKey="count" name="Số CP" radius={[0, 4, 4, 0]} maxBarSize={24}>
+            <Bar
+              dataKey="count"
+              name="Số CP"
+              radius={[0, 4, 4, 0]}
+              maxBarSize={24}
+              isAnimationActive={!isPlaceholderData}
+              animationDuration={300}
+            >
               {chartData.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={getBarColor(entry.count, maxCount)} />
               ))}
@@ -108,6 +121,9 @@ export const VolumeSpikeChart = memo(function VolumeSpikeChart({ industries, cla
       </CardContent>
     </Card>
   )
+}, (prevProps, nextProps) => {
+  return isEqual(prevProps.industries, nextProps.industries) &&
+    prevProps.isPlaceholderData === nextProps.isPlaceholderData
 })
 
 export function VolumeSpikeChartSkeleton({ className }: { className?: string }) {

@@ -1,4 +1,5 @@
 import { Skeleton } from "@/components/ui/skeleton"
+import { CardSkeleton, ChartSkeleton } from "@/components/ui/skeletons"
 
 export default function Loading() {
   return (
@@ -8,10 +9,10 @@ export default function Loading() {
         {Array(4)
           .fill(0)
           .map((_, i) => (
-            <Skeleton key={i} className="h-24" />
+            <CardSkeleton key={i} />
           ))}
       </div>
-      <Skeleton className="h-96" />
+      <ChartSkeleton height={384} />
     </div>
   )
 }

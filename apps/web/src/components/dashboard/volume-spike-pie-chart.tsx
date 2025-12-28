@@ -1,7 +1,8 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, memo } from "react"
 import { useRouter } from "next/navigation"
+import { isEqual } from "lodash-es"
 import {
   PieChart,
   Pie,
@@ -16,6 +17,7 @@ import type { IndustryVolumeSpikeGroup } from "@/lib/api"
 interface VolumeSpikePieChartProps {
   industries: IndustryVolumeSpikeGroup[]
   className?: string
+  isPlaceholderData?: boolean
 }
 
 // Distinct color palette for pie chart slices (10 colors)
@@ -111,7 +113,11 @@ function renderCustomLabel(props: any) {
   )
 }
 
-export function VolumeSpikePieChart({ industries, className }: VolumeSpikePieChartProps) {
+export const VolumeSpikePieChart = memo(function VolumeSpikePieChart({
+  industries,
+  className,
+  isPlaceholderData = false,
+}: VolumeSpikePieChartProps) {
   const router = useRouter()
 
   // Flatten all stocks, sort by spike_ratio, take top 10
@@ -158,6 +164,8 @@ export function VolumeSpikePieChart({ industries, className }: VolumeSpikePieCha
                   innerRadius={50}
                   label={renderCustomLabel}
                   labelLine={false}
+                  isAnimationActive={!isPlaceholderData}
+                  animationDuration={300}
                 >
                   {topStocks.map((stock, index) => (
                     <Cell
@@ -208,7 +216,10 @@ export function VolumeSpikePieChart({ industries, className }: VolumeSpikePieCha
       </CardContent>
     </Card>
   )
-}
+}, (prevProps, nextProps) => {
+  return isEqual(prevProps.industries, nextProps.industries) &&
+    prevProps.isPlaceholderData === nextProps.isPlaceholderData
+})
 
 export function VolumeSpikePieChartSkeleton({ className }: { className?: string }) {
   return (

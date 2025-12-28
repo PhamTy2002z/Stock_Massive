@@ -1,6 +1,7 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, memo } from "react"
+import { isEqual } from "lodash-es"
 import {
   ComposedChart,
   Bar,
@@ -20,6 +21,7 @@ import type { IndustryVolumeSpikeGroup, VolumeSpikeAnomalyLevel } from "@/lib/ap
 interface VolumeSpikeComposedChartProps {
   industries: IndustryVolumeSpikeGroup[]
   className?: string
+  isPlaceholderData?: boolean
 }
 
 // Color mapping for anomaly levels
@@ -73,9 +75,10 @@ function CustomTooltip({
   )
 }
 
-export function VolumeSpikeComposedChart({
+export const VolumeSpikeComposedChart = memo(function VolumeSpikeComposedChart({
   industries,
   className,
+  isPlaceholderData = false,
 }: VolumeSpikeComposedChartProps) {
   const chartData = useMemo(() => {
     if (!industries?.length) return []
@@ -140,7 +143,14 @@ export function VolumeSpikeComposedChart({
             />
             <Tooltip content={<CustomTooltip />} />
             <Legend wrapperStyle={{ fontSize: 12 }} />
-            <Bar yAxisId="left" dataKey="spike_ratio" name="Tỷ lệ KL" maxBarSize={28}>
+            <Bar
+              yAxisId="left"
+              dataKey="spike_ratio"
+              name="Tỷ lệ KL"
+              maxBarSize={28}
+              isAnimationActive={!isPlaceholderData}
+              animationDuration={300}
+            >
               {chartData.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={getBarColor(entry.anomaly_level)} />
               ))}
@@ -153,13 +163,18 @@ export function VolumeSpikeComposedChart({
               stroke="hsl(142 76% 36%)"
               strokeWidth={2}
               dot={{ r: 3 }}
+              isAnimationActive={!isPlaceholderData}
+              animationDuration={300}
             />
           </ComposedChart>
         </ResponsiveContainer>
       </CardContent>
     </Card>
   )
-}
+}, (prevProps, nextProps) => {
+  return isEqual(prevProps.industries, nextProps.industries) &&
+    prevProps.isPlaceholderData === nextProps.isPlaceholderData
+})
 
 export function VolumeSpikeComposedChartSkeleton({ className }: { className?: string }) {
   return (

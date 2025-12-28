@@ -1,0 +1,174 @@
+================================================================================
+STOCK TICKER ORANGE-TO-WHITE COLOR MIGRATION - SCOUT REPORT
+================================================================================
+
+TASK: Find all frontend files displaying stock ticker symbols with orange/amber 
+      colors and prepare for color change to white.
+
+STATUS: COMPLETE
+DATE: 2025-12-28
+LOCATION: apps/web/src (frontend React components)
+
+================================================================================
+KEY FINDINGS
+================================================================================
+
+TOTAL FILES IDENTIFIED: 19
+TOTAL COLOR REFERENCES: 30+
+
+BREAKDOWN BY CATEGORY:
+  1. Stock Symbol Display (3 files)
+  2. Financial Charts (8 files)
+  3. Indicators (5 files)
+  4. Advanced Analysis (2 files)
+  5. CSS Global Variables (1 file)
+
+TOTAL LINES TO MODIFY: ~30+
+
+================================================================================
+CRITICAL FILES (STOCK SYMBOL DISPLAY)
+================================================================================
+
+1. financial-detail-sheet.tsx (Line 35)
+   - Stock symbol header text color
+
+2. peer-metrics-table.tsx (Lines 68, 74)
+   - Target stock highlighting & symbol text color
+   - MOST VISIBLE - Peer comparison table
+
+3. health-score-card.tsx (Lines 55, 75)
+   - Stock symbol in health score card title
+   - High score numeric display
+
+================================================================================
+COLOR PATTERNS FOUND
+================================================================================
+
+PATTERN 1: CSS Variables (22 references)
+  Format: hsl(var(--accent-orange))
+  Files: 13
+  Action: Replace with hsl(0 0% 100%)
+
+PATTERN 2: Tailwind Classes (4 references)
+  Format: text-orange-500, text-amber-500, bg-orange-500, bg-amber-500
+  Files: 4
+  Action: Replace with text-white or bg-white variants
+
+PATTERN 3: Hex Colors (2 references)
+  Format: #F59E0B, #FBBF24
+  Files: 2
+  Action: Replace with #FFFFFF or #E8E8E8
+
+PATTERN 4: HSL Direct (4 references)
+  Format: hsl(25 95% 53%), hsl(32 98% 58%)
+  Files: 2
+  Action: Replace with hsl(0 0% 100%), hsl(0 0% 85%)
+
+================================================================================
+REPORT FILES GENERATED
+================================================================================
+
+1. scout-251228-1734-stock-ticker-orange-color-audit.md
+   - Comprehensive audit with all details
+   - Organized by file category
+   - Color replacement strategy included
+
+2. scout-251228-1734-color-replacement-checklist.md
+   - Implementation checklist with priorities
+   - Exact line numbers for each change
+   - Search & replace patterns for VSCode
+   - Verification steps
+
+3. scout-251228-1734-summary.txt (THIS FILE)
+   - Executive summary
+   - Quick reference guide
+
+================================================================================
+NEXT STEPS
+================================================================================
+
+1. SETUP CSS GLOBAL VARIABLES
+   - Add --accent-white to globals.css (root & dark sections)
+
+2. EXECUTE REPLACEMENTS (by priority)
+   PRIORITY 1: Stock symbol display files (3 files)
+   PRIORITY 2: Chart visualizations (5 files)
+   PRIORITY 3: Indicator components (5 files)
+   PRIORITY 4: Advanced analysis (2 files)
+   PRIORITY 5: Secondary UI components (2 files)
+   PRIORITY 6: Related indicators (2 files)
+
+3. TESTING
+   - Light theme appearance
+   - Dark theme contrast
+   - WCAG AA compliance
+   - Cross-browser testing
+   - Mobile responsiveness
+
+4. GIT COMMIT
+   - Organized by priority
+   - Clear commit messages
+   - Test results verification
+
+================================================================================
+FILE LOCATIONS (QUICK REFERENCE)
+================================================================================
+
+CRITICAL UPDATES:
+  apps/web/src/components/dashboard/financial-detail-sheet.tsx
+  apps/web/src/components/dashboard/peer-comparison/peer-metrics-table.tsx
+  apps/web/src/components/dashboard/financial-health/health-score-card.tsx
+
+CHARTS & VISUALIZATIONS:
+  apps/web/src/components/dashboard/financial-trends/cash-flow-chart.tsx
+  apps/web/src/components/dashboard/financial-trends/revenue-profit-chart.tsx
+  apps/web/src/components/dashboard/financial-trends/margin-trend-chart.tsx
+  apps/web/src/components/dashboard/financial-trends/roe-roa-chart.tsx
+  apps/web/src/components/dashboard/financial-health/health-radar-chart.tsx
+
+INDICATORS:
+  apps/web/src/components/dashboard/financial-health/score-breakdown.tsx
+  apps/web/src/components/dashboard/financial-health/f-score-indicator.tsx
+  apps/web/src/components/dashboard/fcf-analysis/ccc-indicator.tsx
+  apps/web/src/components/dashboard/fcf-analysis/fcf-analysis-card.tsx
+  apps/web/src/components/dashboard/fcf-analysis/fcf-waterfall.tsx
+
+ADVANCED ANALYSIS:
+  apps/web/src/components/dashboard/advanced-tab/widgets/order-flow-charts.tsx
+  apps/web/src/components/dashboard/advanced-tab/widgets/foreign-flow-charts.tsx
+  apps/web/src/components/dashboard/advanced-tab/money-flow-subtab.tsx
+  apps/web/src/components/dashboard/advanced-section.tsx
+
+RELATED:
+  apps/web/src/components/dashboard/volume-anomaly-chart.tsx
+  apps/web/src/components/dashboard/advanced-tab/widgets/price-depth-chart.tsx
+
+GLOBALS:
+  apps/web/src/app/globals.css
+
+================================================================================
+IMPORTANT NOTES
+================================================================================
+
+1. CSS VARIABLE NOT DEFINED
+   - The --accent-orange variable is referenced but not defined in globals.css
+   - Will need to create --accent-white definition
+
+2. MULTIPLE COLOR FORMATS
+   - Files use different color formats (variables, Tailwind, hex, HSL)
+   - Each requires different replacement strategy
+
+3. DARK MODE CONSIDERATION
+   - White color may need opacity adjustments for dark theme
+   - Test contrast in both light and dark modes
+
+4. CHART LIBRARIES
+   - Files use recharts library
+   - Some colors defined in component constants
+   - Requires both string and variable replacements
+
+5. STOCK SYMBOL PRIORITY
+   - Stock symbols appear in 3 critical files
+   - These should be updated first as they're most visible to users
+
+================================================================================

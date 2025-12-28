@@ -1,6 +1,7 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, memo } from "react"
+import { isEqual } from "lodash-es"
 import {
   Bar,
   Line,
@@ -22,6 +23,7 @@ interface VolumeAnomalyChartProps {
   daysAnalyzed: number
   latestDate: string | null
   className?: string
+  isPlaceholderData?: boolean
 }
 
 // Color mapping for anomaly levels
@@ -91,12 +93,13 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
   )
 }
 
-export function VolumeAnomalyChart({
+export const VolumeAnomalyChart = memo(function VolumeAnomalyChart({
   data,
   symbol,
   daysAnalyzed,
   latestDate,
   className,
+  isPlaceholderData = false,
 }: VolumeAnomalyChartProps) {
   // Calculate statistics
   const stats = useMemo(() => {
@@ -147,6 +150,8 @@ export function VolumeAnomalyChart({
               name="Khối lượng"
               radius={[2, 2, 0, 0]}
               maxBarSize={12}
+              isAnimationActive={!isPlaceholderData}
+              animationDuration={300}
             >
               {data.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={ANOMALY_COLORS[entry.anomaly_level]} />
@@ -160,6 +165,8 @@ export function VolumeAnomalyChart({
               strokeWidth={2}
               strokeDasharray="5 5"
               dot={false}
+              isAnimationActive={!isPlaceholderData}
+              animationDuration={300}
             />
           </ComposedChart>
         </ResponsiveContainer>
@@ -186,7 +193,11 @@ export function VolumeAnomalyChart({
       </CardContent>
     </Card>
   )
-}
+}, (prevProps, nextProps) => {
+  return isEqual(prevProps.data, nextProps.data) &&
+    prevProps.symbol === nextProps.symbol &&
+    prevProps.isPlaceholderData === nextProps.isPlaceholderData
+})
 
 // Loading skeleton
 export function VolumeAnomalyChartSkeleton({ className }: { className?: string }) {
