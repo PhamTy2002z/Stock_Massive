@@ -60,4 +60,12 @@ export const queryKeys = {
   // Financial Health
   healthScore: (symbol: string) =>
     [...queryKeys.stock(symbol), "healthScore"] as const,
+
+  // Trend Metrics (Phase 3)
+  trendMetrics: (symbol: string, periods: number = 8) =>
+    [...queryKeys.stock(symbol), "trendMetrics", periods] as const,
+
+  // Sector Peers (Phase 2 - Sector Comparison Dashboard)
+  sectorPeers: (symbol: string) =>
+    [...queryKeys.stock(symbol), "sectorPeers"] as const,
 } as const
