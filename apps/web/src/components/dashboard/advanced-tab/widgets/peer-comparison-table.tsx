@@ -102,7 +102,7 @@ export function PeerComparisonTable({
   )
 
   const handleRowClick = (symbol: string) => {
-    router.push(`/stocks/${symbol}`)
+    router.push(`/analytics/deep-dive?symbol=${symbol}`)
   }
 
   return (
@@ -127,7 +127,7 @@ export function PeerComparisonTable({
           <thead className="bg-muted/50 sticky top-0">
             <tr>
               {/* Frozen first column */}
-              <th className="sticky left-0 z-10 bg-muted/50 px-3 py-2 text-left font-medium min-w-[140px]">
+              <th className="sticky left-0 z-10 bg-muted/50 px-3 py-2 text-left font-medium min-w-[200px]">
                 Mã CP
               </th>
               <SortableHeader column="pe">P/E</SortableHeader>
@@ -149,7 +149,7 @@ export function PeerComparisonTable({
               >
                 {/* Frozen first column with sticky positioning */}
                 <td className={cn(
-                  "sticky left-0 z-10 px-3 py-2 min-w-[140px]",
+                  "sticky left-0 z-10 px-3 py-2 min-w-[200px]",
                   peer.symbol === targetSymbol ? "bg-primary/5" : "bg-background"
                 )}>
                   <div>
@@ -160,7 +160,7 @@ export function PeerComparisonTable({
                       {peer.symbol}
                     </span>
                     {peer.company_name && (
-                      <p className="text-xs text-muted-foreground truncate max-w-[120px]">
+                      <p className="text-xs text-muted-foreground leading-tight">
                         {peer.company_name}
                       </p>
                     )}

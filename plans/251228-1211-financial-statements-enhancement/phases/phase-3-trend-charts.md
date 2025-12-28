@@ -617,24 +617,24 @@ export * from "./financial-trends/cash-flow-chart"
 
 ## Todo
 
-- [ ] Add API types and `fetchTrendMetrics()` to api.ts
-- [ ] Create `useTrendMetrics` hook
-- [ ] Create `RevenueProfitChart` component
-- [ ] Create `MarginTrendChart` component
-- [ ] Create `RoeRoaChart` component
-- [ ] Create `CashFlowChart` component
-- [ ] Create `TrendChartsCard` container with tabs
-- [ ] Add skeleton loading states
-- [ ] Export from index.ts
+- [x] Add API types and `fetchTrendMetrics()` to api.ts
+- [x] Create `useTrendMetrics` hook
+- [x] Create `RevenueProfitChart` component
+- [x] Create `MarginTrendChart` component
+- [x] Create `RoeRoaChart` component
+- [x] Create `CashFlowChart` component
+- [x] Create `TrendChartsCard` container with tabs
+- [x] Add skeleton loading states
+- [x] Export from index.ts
 
 ## Success Criteria
 
-- [ ] All 4 chart types render correctly
-- [ ] 8 quarters of data displayed
-- [ ] Y-axis formatted with M/B suffixes
-- [ ] Tooltips show formatted values
-- [ ] Charts responsive on mobile
-- [ ] Smooth tab switching
+- [x] All 4 chart types render correctly
+- [x] 8 quarters of data displayed
+- [x] Y-axis formatted with M/B suffixes
+- [x] Tooltips show formatted values
+- [x] Charts responsive on mobile
+- [x] Smooth tab switching
 
 ## Risk Assessment
 

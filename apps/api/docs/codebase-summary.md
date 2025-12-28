@@ -1758,3 +1758,107 @@ class TestIntradayCollector:
     def test_aggregate_ticks_empty_list(self, collector):
         """Test aggregation with empty tick list."""
         bars = collector.aggregate_ticks_to_bars([])
+
+---
+
+# PHASE 3: Trend Charts - Financial Trends Components
+
+**Last Updated**: 2025-12-28
+**Status**: ✅ Implemented
+**Location**: `/apps/web/src/components/dashboard/financial-trends/`
+
+## Overview
+
+Phase 3 introduces financial trend visualization charts on frontend, displaying historical performance metrics across multiple quarters for selected stocks.
+
+## Frontend Components
+
+### 1. API Layer (`apps/web/src/lib/api.ts`)
+
+**TrendMetricsResponse Interface**:
+```typescript
+interface TrendMetricsResponse {
+  symbol: string
+  periods: string[]              // Quarter labels (e.g., "Q1/2024")
+  revenue: (number | null)[]     // Doanh thu
+  net_profit: (number | null)[]  // Loi nhuan sau thue
+  gross_profit: (number | null)[] // Loi nhuan gop
+  gross_margin: (number | null)[] // Bien loi nhuan gop (%)
+  net_margin: (number | null)[]   // Bien loi nhuan rong (%)
+  roe: (number | null)[]          // ROE (%)
+  roa: (number | null)[]          // ROA (%)
+  cfo: (number | null)[]          // Operating Cash Flow
+  cfi: (number | null)[]          // Investing Cash Flow
+  cff: (number | null)[]          // Financing Cash Flow
+}
+```
+
+**API Function**:
+- `fetchTrendMetrics(symbol: string, periods: number = 8)`
+- Endpoint: GET `/stocks/{symbol}/trend-metrics?periods={periods}`
+- Default: 8 quarters
+
+### 2. Data Hook (`apps/web/src/hooks/use-trend-metrics.ts`)
+
+**useTrendMetrics Hook**:
+- Parameters: `symbol: string | null`, `periods: number = 8`
+- Uses `@tanstack/react-query` for caching
+- Query key: `queryKeys.trendMetrics(symbol, periods)`
+- Stale time: 5 minutes
+- Retry: 2 attempts
+- Enabled: Only when symbol not null
+
+### 3. Chart Components
+
+#### TrendChartsCard (`trend-charts-card.tsx`)
+- Main container with tabbed interface
+- Tabs: Revenue/Profit, Margins, ROE/ROA, Cash Flow
+- Icons: TrendingUp, BarChart3, LineChart, Wallet
+- States: Empty, Loading (skeleton), Error, Success
+
+#### RevenueProfitChart (`revenue-profit-chart.tsx`)
+- Metrics: Revenue vs Net Profit
+- Y-axis: Billions (ty dong)
+- X-axis: Quarter periods
+
+#### MarginTrendChart (`margin-trend-chart.tsx`)
+- Metrics: Gross Margin vs Net Margin
+- Y-axis: Percentage (%)
+
+#### RoeRoaChart (`roe-roa-chart.tsx`)
+- Metrics: ROE vs ROA
+- Y-axis: Percentage (%)
+
+#### CashFlowChart (`cash-flow-chart.tsx`)
+- Metrics: Operating (CFO), Investing (CFI), Financing (CFF) Cash Flow
+- Y-axis: Billions
+- Colors: Green (CFO), Blue (CFI), Orange (CFF)
+
+## Files Added
+
+```
+apps/web/src/
+├── lib/api.ts                          # +TrendMetricsResponse, +fetchTrendMetrics
+├── hooks/use-trend-metrics.ts          # New hook
+└── components/dashboard/financial-trends/
+    ├── trend-charts-card.tsx           # Main container
+    ├── revenue-profit-chart.tsx        # Revenue/Profit chart
+    ├── margin-trend-chart.tsx          # Margins chart
+    ├── roe-roa-chart.tsx               # ROE/ROA chart
+    └── cash-flow-chart.tsx             # Cash flow chart
+```
+
+## Technical Stack
+
+- **Data Fetching**: `@tanstack/react-query`
+- **Icons**: `lucide-react`
+- **Charts**: `recharts` (assumed)
+- **UI**: Card, Tabs, Skeleton components
+
+## Integration
+
+- Backend endpoint: `/stocks/{symbol}/trend-metrics`
+- Query key factory: `queryKeys.trendMetrics()` in `@/lib/query-keys`
+- Null handling: Charts render gaps for missing data
+- Vietnamese labels for UI text
+
