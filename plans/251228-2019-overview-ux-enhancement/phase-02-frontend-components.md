@@ -10,7 +10,7 @@
 ## Overview
 
 - **Priority:** P2
-- **Status:** Pending
+- **Status:** Done
 - **Effort:** 3h
 - **Description:** Create 4 collapsible dashboard widgets and integrate with new API endpoint.
 

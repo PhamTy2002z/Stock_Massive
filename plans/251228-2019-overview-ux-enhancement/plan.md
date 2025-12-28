@@ -20,7 +20,7 @@ Enhance the Overview page with 4 new data widgets (Market Breadth, Top Movers, F
 | # | Phase | Status | Effort | Link |
 |---|-------|--------|--------|------|
 | 1 | Backend API | Done | 3h | [phase-01](./phase-01-backend-api.md) |
-| 2 | Frontend Components | Pending | 3h | [phase-02](./phase-02-frontend-components.md) |
+| 2 | Frontend Components | Done | 3h | [phase-02](./phase-02-frontend-components.md) |
 | 3 | Integration & Polish | Pending | 2h | [phase-03](./phase-03-integration-polish.md) |
 
 ## Dependencies

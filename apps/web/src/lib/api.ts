@@ -823,3 +823,50 @@ export async function fetchTrendMetrics(
     `/stocks/${encodeURIComponent(symbol)}/trend-metrics?periods=${periods}`
   )
 }
+
+// === Market Overview Types (Overview Page UX Enhancement) ===
+
+export interface MarketBreadth {
+  advances: number
+  declines: number
+  unchanged: number
+  total: number
+}
+
+export interface TopMoverItem {
+  symbol: string
+  price: number
+  change_pct: number
+  volume?: number
+}
+
+export interface ForeignFlowItem {
+  symbol: string
+  net_value: number
+}
+
+export interface ForeignFlowData {
+  net_buy: ForeignFlowItem[]
+  net_sell: ForeignFlowItem[]
+  total_net_value: number
+}
+
+export interface TopVolumeItem {
+  symbol: string
+  price: number
+  volume: number
+  value: number
+}
+
+export interface MarketOverviewResponse {
+  market_breadth: MarketBreadth
+  top_gainers: TopMoverItem[]
+  top_losers: TopMoverItem[]
+  foreign_flow: ForeignFlowData
+  top_volume: TopVolumeItem[]
+  generated_at: string
+}
+
+export async function fetchMarketOverview(): Promise<MarketOverviewResponse> {
+  return fetchApi<MarketOverviewResponse>("/stocks/market-overview")
+}

@@ -1,5 +1,5 @@
 import "server-only"
-import type { MarketIndex, SectorPerformanceResponse, StockDetail } from "./api"
+import type { MarketIndex, MarketOverviewResponse, SectorPerformanceResponse, StockDetail } from "./api"
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
 
@@ -36,4 +36,8 @@ export async function fetchSectorPerformanceServer(): Promise<SectorPerformanceR
 
 export async function fetchStockDetailServer(symbol: string): Promise<StockDetail> {
   return fetchApiServer<StockDetail>(`/stocks/${encodeURIComponent(symbol)}/detail`)
+}
+
+export async function fetchMarketOverviewServer(): Promise<MarketOverviewResponse> {
+  return fetchApiServer<MarketOverviewResponse>("/stocks/market-overview")
 }

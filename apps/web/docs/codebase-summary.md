@@ -47,6 +47,7 @@ apps/web/
 #### Market Data
 - `fetchPriceBoard(symbols)` - Real-time price board for multiple symbols
 - `fetchMarketIndices()` - Market indices (VNINDEX, VN30, HNXINDEX, UPCOMINDEX)
+- `fetchMarketOverview()` - Market overview (breadth, top gainers/losers, foreign flow, top volume)
 - `fetchSectorPerformance()` - Sector performance with top gainers/losers
 - `fetchFundCertificates(fundType?)` - Fund certificates data
 - `fetchVN30Overview()` - VN30 stocks overview
@@ -97,6 +98,7 @@ apps/web/
 
 ### Market Hooks
 - `useMarketIndices()` - Market indices with 30s stale time
+- `useMarketOverview()` - Market overview with 10s stale time and auto-refresh
 - `usePriceBoard(symbols)` - Price board for watchlist symbols (30s polling)
 - `useSectorPerformance()` - Sector performance (5min stale)
 - `useFundCertificates(fundType?)` - Fund certificates (5min stale)
@@ -148,6 +150,46 @@ apps/web/
 - `useFinancialDetail(symbol)` - Combined hook for parallel loading of health score, trend metrics, sector peers, and FCF analysis
 
 ## TypeScript Types
+
+### Market Overview Types
+```typescript
+// Market Breadth
+interface MarketBreadth {
+  advances: number
+  declines: number
+  unchanged: number
+  total: number
+}
+
+// Top Movers
+interface TopMoverItem {
+  symbol: string
+  change_pct: number
+}
+
+// Foreign Flow
+interface ForeignFlowData {
+  net_buy: Array<{ symbol: string; net_value: number }>
+  net_sell: Array<{ symbol: string; net_value: number }>
+  total_net_value: number
+}
+
+// Top Volume
+interface TopVolumeItem {
+  symbol: string
+  volume: number
+}
+
+// Market Overview Response
+interface MarketOverviewResponse {
+  market_breadth: MarketBreadth
+  top_gainers: TopMoverItem[]
+  top_losers: TopMoverItem[]
+  foreign_flow: ForeignFlowData
+  top_volume: TopVolumeItem[]
+  generated_at: string
+}
+```
 
 ### Advanced Tab Types (New)
 ```typescript
@@ -266,6 +308,12 @@ queryKeys.priceDepth(symbol) => ["stock", symbol, "priceDepth"]
 - `VolumeSpikesDashboard` - Industry-grouped volume spike analysis
 - `VolumeAnomalyChart` - Intraday volume anomaly visualization
 - `FinancialStatementsComposed` - Top companies financial comparison chart
+
+### Market Overview Components (Phase 2 - Frontend)
+- `CollapsibleSection` - Reusable collapsible section with localStorage persistence
+- `MarketBreadth` - Market breadth visualization (advances/declines/unchanged)
+- `TopMovers` - Top gainers and losers display
+- `ForeignFlow` - Foreign investor flow analysis (net buy/sell)
 
 ### Financial Health Components (Phase 2)
 - `HealthScoreCard` - Main health score card with overall score, radar chart, and F-Score
@@ -417,6 +465,19 @@ NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
   - `FinancialStatementsComposed`, `VolumeAnomalyChart`, `VolumeSpikesDashboard`, `FinancialStatementsTable`
 - All chart components now utilize `isPlaceholderData` for smooth data transitions during refetches
 - Benefits: Consistent loading UX, better perceived performance, reduced unnecessary re-renders
+
+### Market Overview Frontend Components (Phase 2 Step 2 - Dec 28)
+- Added `MarketOverviewResponse` and related types (`MarketBreadth`, `TopMoverItem`, `ForeignFlowData`, `TopVolumeItem`)
+- Added `fetchMarketOverview()` API function for market overview data
+- Added `useMarketOverview()` hook with 10s stale time and auto-refresh
+- Added `marketOverview` query key to centralized key management
+- Created 4 new dashboard components:
+  - `CollapsibleSection` - Reusable collapsible section with localStorage persistence
+  - `MarketBreadth` - Visual representation of market advances/declines/unchanged
+  - `TopMovers` - Top gainers and losers display with color-coded changes
+  - `ForeignFlow` - Foreign investor trading flow analysis
+- Features: Real-time market breadth, top movers tracking, foreign flow monitoring
+- Code Review: PASS (0 critical issues, SSR-safe, follows project patterns)
 
 ## Metrics
 - **Total Files**: 113
