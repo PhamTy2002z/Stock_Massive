@@ -1,6 +1,7 @@
 """Financial domain service for financial statements and ratios."""
 
 import logging
+import statistics
 from typing import Optional
 
 import pandas as pd
@@ -20,10 +21,12 @@ from ..schemas.financial import (
     TrendMetricsResponse,
     FCFAnalysisResponse,
     SectorPeersResponse,
+    SectorMedian,
     PeerMetrics,
 )
 from ..shared import StockServiceError, validate_symbol, safe_float
 from .health_scoring import build_health_score_response
+from .cache import sector_peers_cache
 
 logger = logging.getLogger(__name__)
 
@@ -798,18 +801,25 @@ class FinancialService:
     def get_sector_peers(
         self,
         symbol: str,
-        limit: int = 5,
+        limit: int = 10,
     ) -> SectorPeersResponse:
-        """Get sector peer companies for comparison.
+        """Get sector peer companies for comparison with median and premium/discount.
 
         Args:
             symbol: Target stock symbol
-            limit: Maximum number of peers to return
+            limit: Maximum number of peers to return (default: 10)
 
         Returns:
-            SectorPeersResponse with peer metrics
+            SectorPeersResponse with peer metrics, sector median, and premium/discount
         """
         symbol = validate_symbol(symbol)
+
+        # Check cache first
+        cache_key = f"{symbol}:{limit}"
+        cached = sector_peers_cache.get(cache_key)
+        if cached:
+            return SectorPeersResponse(**cached)
+
         try:
             listing = Listing()
 
@@ -844,42 +854,121 @@ class FinancialService:
                 top_symbols = [symbol] + top_symbols[:limit]
 
             # Get ratio data for each peer
-            peers = []
-            for peer_symbol in top_symbols[:limit + 1]:
+            peers_data = []
+            for peer_symbol in top_symbols[: limit + 1]:
                 try:
                     ratio_history = self.get_ratio_history(peer_symbol, periods=1)
                     ratios = ratio_history[0] if ratio_history else {}
 
                     peer_row = symbols_df[symbols_df["symbol"] == peer_symbol]
-                    company_name = peer_row.iloc[0].get("organ_name") if not peer_row.empty else None
+                    company_name = (
+                        peer_row.iloc[0].get("organ_name")
+                        if not peer_row.empty
+                        else None
+                    )
 
                     # Get market cap from ratio data
                     market_cap = safe_float(ratios.get("Market Capital (Bn. VND)"))
 
-                    peers.append(PeerMetrics(
-                        symbol=peer_symbol,
-                        company_name=company_name,
-                        roe=safe_float(ratios.get("ROE (%)") or ratios.get("roe")),
-                        roa=safe_float(ratios.get("ROA (%)") or ratios.get("roa")),
-                        pe=safe_float(ratios.get("P/E") or ratios.get("priceToEarning")),
-                        pb=safe_float(ratios.get("P/B") or ratios.get("priceToBook")),
-                        market_cap=market_cap,
-                    ))
+                    peers_data.append(
+                        {
+                            "symbol": peer_symbol,
+                            "company_name": company_name,
+                            "roe": safe_float(ratios.get("ROE (%)") or ratios.get("roe")),
+                            "roa": safe_float(ratios.get("ROA (%)") or ratios.get("roa")),
+                            "pe": safe_float(
+                                ratios.get("P/E") or ratios.get("priceToEarning")
+                            ),
+                            "pb": safe_float(
+                                ratios.get("P/B") or ratios.get("priceToBook")
+                            ),
+                            "market_cap": market_cap,
+                        }
+                    )
                 except Exception as e:
                     logger.warning(f"Could not fetch data for peer {peer_symbol}: {e}")
                     continue
 
-            return SectorPeersResponse(
+            # Calculate sector median
+            sector_median = self._calculate_sector_median(peers_data)
+
+            # Add premium/discount to each peer
+            for peer in peers_data:
+                peer["premium_pe"] = self._calculate_premium(
+                    peer.get("pe"), sector_median.pe
+                )
+                peer["premium_pb"] = self._calculate_premium(
+                    peer.get("pb"), sector_median.pb
+                )
+                peer["premium_roe"] = self._calculate_premium(
+                    peer.get("roe"), sector_median.roe
+                )
+                peer["premium_roa"] = self._calculate_premium(
+                    peer.get("roa"), sector_median.roa
+                )
+
+            # Find target stock and its premium
+            target = next((p for p in peers_data if p["symbol"] == symbol), None)
+            target_premium = {
+                "pe": target.get("premium_pe") if target else None,
+                "pb": target.get("premium_pb") if target else None,
+                "roe": target.get("premium_roe") if target else None,
+                "roa": target.get("premium_roa") if target else None,
+            }
+
+            # Build response
+            peers = [PeerMetrics(**p) for p in peers_data]
+            response = SectorPeersResponse(
                 symbol=symbol,
                 icb_code=icb_code,
                 icb_name=icb_name,
                 peers=peers,
+                sector_median=sector_median,
+                target_premium=target_premium,
             )
+
+            # Cache response
+            sector_peers_cache.set(cache_key, response.model_dump())
+
+            return response
         except StockServiceError:
             raise
         except Exception as e:
             logger.error(f"Error fetching sector peers for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch sector peers for {symbol}: {e}")
+
+    def _calculate_sector_median(self, peers: list[dict]) -> SectorMedian:
+        """Calculate median values for sector metrics.
+
+        Args:
+            peers: List of peer data dicts with pe, pb, roe, roa, market_cap
+
+        Returns:
+            SectorMedian with median values (None if insufficient data)
+        """
+        metrics = ["pe", "pb", "roe", "roa", "market_cap"]
+        medians = {}
+        for metric in metrics:
+            values = [p.get(metric) for p in peers if p.get(metric) is not None]
+            # Need at least 3 values for meaningful median
+            medians[metric] = statistics.median(values) if len(values) >= 3 else None
+        return SectorMedian(**medians)
+
+    def _calculate_premium(
+        self, value: Optional[float], median: Optional[float]
+    ) -> Optional[float]:
+        """Calculate premium/discount as percentage vs median.
+
+        Args:
+            value: The stock's metric value
+            median: The sector median value
+
+        Returns:
+            Percentage deviation from median (positive = premium, negative = discount)
+        """
+        if value is None or median is None or median == 0:
+            return None
+        return ((value - median) / abs(median)) * 100
 
     def _normalize_ratio_data(self, data: dict) -> dict:
         """Normalize ratio data to consistent keys (after MultiIndex flattening)."""
