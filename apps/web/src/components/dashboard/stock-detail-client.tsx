@@ -20,7 +20,8 @@ import {
   FinanceTabContent,
   ShareholdersTabContent,
   VolumeTabContent,
-  AdvancedTab,
+  AdvancedSection,
+  AdvancedSectionSkeleton,
 } from "@/components/dashboard"
 import type { StockDetailTabValue } from "@/components/dashboard"
 
@@ -56,6 +57,7 @@ export function StockDetailClient({ initialSymbol }: StockDetailClientProps) {
   }, [isLoading, data, error])
 
   return (
+    <>
     <section className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
       {/* Left: Main Content */}
       <div className="space-y-4">
@@ -115,7 +117,6 @@ export function StockDetailClient({ initialSymbol }: StockDetailClientProps) {
             {activeTab === "finance" && <FinanceTabContent symbol={data.symbol} />}
             {activeTab === "shareholders" && <ShareholdersTabContent symbol={data.symbol} />}
             {activeTab === "volume" && <VolumeTabContent symbol={data.symbol} />}
-            {activeTab === "advanced" && <AdvancedTab symbol={data.symbol} />}
           </div>
         )}
       </div>
@@ -136,5 +137,12 @@ export function StockDetailClient({ initialSymbol }: StockDetailClientProps) {
         )}
       </div>
     </section>
+
+    {/* Advanced Analysis Section - Below Stock Detail */}
+    {isLoading && <AdvancedSectionSkeleton />}
+    {!isLoading && !error && data && (
+      <AdvancedSection symbol={data.symbol} className="stock-detail-enter" />
+    )}
+  </>
   )
 }

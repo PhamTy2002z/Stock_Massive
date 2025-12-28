@@ -74,6 +74,19 @@ export function PriceDepthWidget({ data, isLoading }: PriceDepthWidgetProps) {
     )
   }
 
+  // Check if market is closed (all prices and volumes are 0)
+  const hasNoData = data.total_bid_volume === 0 && data.total_ask_volume === 0 &&
+    data.bid_1?.price === 0 && data.ask_1?.price === 0
+
+  if (hasNoData) {
+    return (
+      <div className="text-center py-8 text-muted-foreground">
+        <p className="text-sm">Không có dữ liệu sổ lệnh</p>
+        <p className="text-xs mt-1 opacity-70">Chỉ khả dụng trong giờ giao dịch</p>
+      </div>
+    )
+  }
+
   const bidLevels = [data.bid_1, data.bid_2, data.bid_3].filter(Boolean) as PriceLevel[]
   const askLevels = [data.ask_1, data.ask_2, data.ask_3].filter(Boolean) as PriceLevel[]
   const allVolumes = [...bidLevels, ...askLevels].map((l) => l.volume)

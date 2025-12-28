@@ -1,18 +1,25 @@
 "use client"
 
-import { useOrderStats } from "@/hooks/use-order-stats"
+import { useIntradayOrderStats } from "@/hooks/use-intraday-order-stats"
 import { usePriceDepth } from "@/hooks/use-price-depth"
-import { OrderStatsTable } from "./widgets/order-stats-table"
-import { PriceDepthWidget } from "./widgets/price-depth-widget"
-import { RefreshCw } from "lucide-react"
+import { OrderFlowCharts } from "./widgets/order-flow-charts"
+import { PriceDepthChart } from "./widgets/price-depth-chart"
+import { RefreshCw, Clock, Activity, BarChart3 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 interface OrderFlowSubtabProps {
   symbol: string
 }
 
+function formatSessionDate(dateStr: string | undefined): string {
+  if (!dateStr) return ""
+  const date = new Date(dateStr)
+  return date.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" })
+}
+
 export default function OrderFlowSubtab({ symbol }: OrderFlowSubtabProps) {
-  const orderStats = useOrderStats(symbol)
+  const orderStats = useIntradayOrderStats(symbol)
   const priceDepth = usePriceDepth(symbol)
 
   const handleRefresh = () => {
@@ -22,14 +29,18 @@ export default function OrderFlowSubtab({ symbol }: OrderFlowSubtabProps) {
 
   const isLoading = orderStats.isLoading || priceDepth.isLoading
   const hasError = orderStats.error || priceDepth.error
+  const sessionDate = formatSessionDate(orderStats.data?.date)
 
   return (
     <div className="space-y-6">
       {/* Header with Refresh */}
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium text-muted-foreground">
-          Dữ liệu 30 ngày gần nhất
-        </h3>
+        <div className="flex items-center gap-2">
+          <Clock className="h-4 w-4 text-muted-foreground" />
+          <h3 className="text-sm font-medium text-muted-foreground">
+            Dữ liệu giao dịch trong phiên {sessionDate && `(${sessionDate})`}
+          </h3>
+        </div>
         <Button
           variant="ghost"
           size="sm"
@@ -48,22 +59,29 @@ export default function OrderFlowSubtab({ symbol }: OrderFlowSubtabProps) {
         </div>
       )}
 
-      {/* Price Depth - Real-time */}
-      <section>
-        <div className="flex items-center gap-2 mb-4">
-          <h4 className="text-base font-semibold">Price Depth</h4>
-          <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-600 dark:text-green-400">
-            Real-time
-          </span>
-        </div>
-        <PriceDepthWidget data={priceDepth.data} isLoading={priceDepth.isLoading} />
-      </section>
+      {/* Content with tabs */}
+      <Tabs defaultValue="order-stats" className="w-full">
+        <TabsList className="grid w-full grid-cols-2 mb-4">
+          <TabsTrigger value="order-stats" className="gap-2">
+            <Activity className="h-4 w-4" />
+            <span className="hidden sm:inline">Order Stats</span>
+            <span className="sm:hidden">Stats</span>
+          </TabsTrigger>
+          <TabsTrigger value="price-depth" className="gap-2">
+            <BarChart3 className="h-4 w-4" />
+            <span className="hidden sm:inline">Price Depth</span>
+            <span className="sm:hidden">Depth</span>
+          </TabsTrigger>
+        </TabsList>
 
-      {/* Order Stats - Historical */}
-      <section>
-        <h4 className="text-base font-semibold mb-4">Order Stats (30D)</h4>
-        <OrderStatsTable data={orderStats.data} isLoading={orderStats.isLoading} />
-      </section>
+        <TabsContent value="order-stats" className="mt-0">
+          <OrderFlowCharts data={orderStats.data} isLoading={orderStats.isLoading} />
+        </TabsContent>
+
+        <TabsContent value="price-depth" className="mt-0">
+          <PriceDepthChart data={priceDepth.data} isLoading={priceDepth.isLoading} />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

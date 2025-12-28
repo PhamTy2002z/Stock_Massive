@@ -1,29 +1,48 @@
 "use client"
 
 import * as React from "react"
-import { usePathname } from "next/navigation"
+import { useEffect, useState } from "react"
+import { usePathname, useRouter } from "next/navigation"
 import Link from "next/link"
 import {
   BarChart3,
   Bookmark,
   ChevronRight,
+  ChevronsUpDown,
+  HelpCircle,
   LayoutDashboard,
   LineChart,
+  LogIn,
+  LogOut,
   PieChart,
+  Settings,
   Star,
   Table2,
   TrendingUp,
+  User,
   Wallet,
 } from "lucide-react"
+import type { User as SupabaseUser } from "@supabase/supabase-js"
 
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupLabel,
   SidebarHeader,
@@ -34,7 +53,9 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
   SidebarRail,
+  useSidebar,
 } from "@/components/ui/sidebar"
+import { createClient } from "@/utils/supabase/client"
 
 const data = {
   navMain: [
@@ -51,9 +72,6 @@ const data = {
         { title: "Deep Dive", url: "/analytics/deep-dive" },
         { title: "Financial Statements", url: "/analytics/financial-statements" },
         { title: "Volume Spikes", url: "/analytics/volume-spikes" },
-        { title: "Reports", url: "#" },
-        { title: "Insights", url: "#" },
-        { title: "Alerts", url: "#" },
       ],
     },
     {
@@ -114,9 +132,9 @@ function SidebarBrand() {
           <img
             src="/logo.png"
             alt="Stock Massive"
-            className="size-10 object-contain"
+            className="size-10 object-contain shrink-0 transition-transform duration-200"
           />
-          <div className="grid flex-1 text-left text-sm leading-tight">
+          <div className="grid flex-1 text-left text-sm leading-tight transition-[opacity,transform] duration-200 ease-sidebar group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:scale-95">
             <span className="truncate font-bold text-base">Stock Massive</span>
             <span className="truncate text-xs text-muted-foreground">Analytics Platform</span>
           </div>
@@ -222,7 +240,7 @@ function NavWatchlists({
   watchlists: typeof data.watchlists
 }) {
   return (
-    <SidebarGroup className="group-data-[collapsible=icon]:hidden">
+    <SidebarGroup className="transition-[opacity,transform] duration-200 ease-sidebar group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:scale-95 group-data-[collapsible=icon]:pointer-events-none">
       <SidebarGroupLabel>Watchlists</SidebarGroupLabel>
       <SidebarMenu>
         {watchlists.map((item) => (
@@ -246,6 +264,130 @@ function NavWatchlists({
   )
 }
 
+function SidebarUserSection() {
+  const router = useRouter()
+  const { isMobile } = useSidebar()
+  const [user, setUser] = useState<SupabaseUser | null>(null)
+  const supabase = createClient()
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setUser(user)
+    })
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null)
+    })
+
+    return () => subscription.unsubscribe()
+  }, [supabase.auth])
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut()
+    router.refresh()
+  }
+
+  const userName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || "User"
+  const userEmail = user?.email || ""
+  const userAvatar = user?.user_metadata?.avatar_url || ""
+  const userInitials = userName.slice(0, 2).toUpperCase()
+
+  if (!user) {
+    return (
+      <SidebarMenu>
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            size="lg"
+            tooltip="Sign in"
+            onClick={() => router.push("/login")}
+            className="cursor-pointer group-data-[collapsible=icon]:!w-full group-data-[collapsible=icon]:!h-10 group-data-[collapsible=icon]:!p-0 group-data-[collapsible=icon]:!gap-0 group-data-[collapsible=icon]:justify-center"
+          >
+            <div className="flex size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground shrink-0 group-data-[collapsible=icon]:mx-auto">
+              <LogIn className="size-4" />
+            </div>
+            <div className="grid flex-1 text-left text-sm leading-tight transition-[opacity,width] duration-200 ease-sidebar group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:w-0 group-data-[collapsible=icon]:overflow-hidden">
+              <span className="truncate font-semibold">Sign in</span>
+              <span className="truncate text-xs text-muted-foreground">Access your account</span>
+            </div>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      </SidebarMenu>
+    )
+  }
+
+  return (
+    <SidebarMenu>
+      <SidebarMenuItem>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <SidebarMenuButton
+              size="lg"
+              tooltip={userName}
+              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground group-data-[collapsible=icon]:!w-full group-data-[collapsible=icon]:!h-10 group-data-[collapsible=icon]:!p-0 group-data-[collapsible=icon]:!gap-0 group-data-[collapsible=icon]:justify-center"
+            >
+              <Avatar className="size-8 rounded-lg shrink-0 transition-transform duration-200 group-data-[collapsible=icon]:mx-auto">
+                <AvatarImage src={userAvatar} alt={userName} />
+                <AvatarFallback className="rounded-lg bg-primary text-primary-foreground font-medium text-sm">
+                  {userInitials}
+                </AvatarFallback>
+              </Avatar>
+              <div className="grid flex-1 text-left text-sm leading-tight transition-[opacity,width] duration-200 ease-sidebar group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:w-0 group-data-[collapsible=icon]:overflow-hidden">
+                <span className="truncate font-semibold">{userName}</span>
+                <span className="truncate text-xs text-muted-foreground">{userEmail}</span>
+              </div>
+              <ChevronsUpDown className="ml-auto size-4 shrink-0 transition-[opacity,width] duration-200 ease-sidebar group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:w-0" />
+            </SidebarMenuButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-lg"
+            side={isMobile ? "bottom" : "right"}
+            align="end"
+            sideOffset={4}
+          >
+            <DropdownMenuLabel className="p-0 font-normal">
+              <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
+                <Avatar className="size-8 rounded-lg">
+                  <AvatarImage src={userAvatar} alt={userName} />
+                  <AvatarFallback className="rounded-lg bg-primary text-primary-foreground font-medium text-sm">
+                    {userInitials}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="grid flex-1 text-left text-sm leading-tight">
+                  <span className="truncate font-semibold">{userName}</span>
+                  <span className="truncate text-xs text-muted-foreground">{userEmail}</span>
+                </div>
+              </div>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem>
+                <User className="mr-2 size-4" />
+                Profile
+              </DropdownMenuItem>
+              <DropdownMenuItem>
+                <Settings className="mr-2 size-4" />
+                Settings
+              </DropdownMenuItem>
+              <DropdownMenuItem>
+                <HelpCircle className="mr-2 size-4" />
+                Help & Support
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="text-red-500 hover:text-red-600 focus:text-red-600 cursor-pointer"
+              onClick={handleSignOut}
+            >
+              <LogOut className="mr-2 size-4" />
+              Sign out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </SidebarMenuItem>
+    </SidebarMenu>
+  )
+}
+
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -256,6 +398,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <NavMain items={data.navMain} />
         <NavWatchlists watchlists={data.watchlists} />
       </SidebarContent>
+      <SidebarFooter>
+        <SidebarUserSection />
+      </SidebarFooter>
       <SidebarRail />
     </Sidebar>
   )
