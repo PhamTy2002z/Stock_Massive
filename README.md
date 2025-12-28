@@ -42,14 +42,14 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 ## Architecture
 
 ### Frontend: Reusable UI Components
-- **Component-based**: ShadCN/UI + TailwindCSS làm nền tảng
-- **Composable**: Components nhỏ, tái sử dụng cao (Button, Card, Input, Dialog...)
-- **Consistent**: Design tokens thống nhất qua HSL color system
+- **Component-based**: ShadCN/UI + TailwindCSS as foundation
+- **Composable**: Small, highly reusable components (Button, Card, Input, Dialog...)
+- **Consistent**: Unified design tokens via HSL color system
 - **Structure**: `components/ui/` (primitives) → `components/dashboard/` (features)
 
 ### Backend: Feature-based Modular (Vertical Slice) + SoC
-- **Vertical Slice**: Mỗi feature chứa đầy đủ router, service, schema, models
-- **Separation of Concerns**: Tách biệt rõ ràng giữa các layer
+- **Vertical Slice**: Each feature contains complete router, service, schema, models
+- **Separation of Concerns**: Clear separation between layers
   - `routers/` - HTTP endpoints, request/response handling
   - `services/` - Business logic, data processing
   - `schemas/` - Pydantic models, validation
@@ -144,7 +144,7 @@ All endpoints prefixed with `/api/v1/stocks`:
 
 ## Getting Started
 
-> **Note**: Project chạy hoàn toàn bằng Docker. Không cần cài đặt Node.js, Python, hay PostgreSQL trên máy local.
+> **Note**: Project runs entirely with Docker. No need to install Node.js, Python, or PostgreSQL locally.
 
 ### Prerequisites
 - Docker 20.10+
@@ -157,14 +157,14 @@ All endpoints prefixed with `/api/v1/stocks`:
 git clone <repo-url>
 cd Stock_Massive
 
-# Copy và cấu hình environment
+# Copy and configure environment
 cp .env.example .env
-# Chỉnh sửa .env với các giá trị của bạn
+# Edit .env with your values
 
-# Khởi động tất cả services
+# Start all services
 docker-compose up -d
 
-# Chạy database migrations
+# Run database migrations
 docker-compose exec api alembic upgrade head
 ```
 
@@ -180,37 +180,37 @@ docker-compose exec api alembic upgrade head
 ### Docker Commands
 
 ```bash
-# Khởi động services
+# Start services
 docker-compose up -d
 
-# Xem logs
+# View logs
 docker-compose logs -f
-docker-compose logs -f api    # Chỉ API logs
-docker-compose logs -f web    # Chỉ Web logs
+docker-compose logs -f api    # API logs only
+docker-compose logs -f web    # Web logs only
 
-# Dừng services
+# Stop services
 docker-compose down
 
-# Rebuild sau khi thay đổi code
+# Rebuild after code changes
 docker-compose up -d --build
 
 # Database migrations (Supabase)
 docker-compose exec api alembic upgrade head
 
-# Truy cập Supabase database
+# Access Supabase database
 # Use Supabase Dashboard SQL Editor or psql with DATABASE_URL_DIRECT
 
-# Kiểm tra trạng thái services
+# Check services status
 docker-compose ps
 ```
 
 ### Production Deployment
 
 ```bash
-# Build và chạy production
+# Build and run production
 docker-compose -f docker-compose.prod.yml up -d --build
 
-# Xem logs production
+# View production logs
 docker-compose -f docker-compose.prod.yml logs -f
 ```
 
