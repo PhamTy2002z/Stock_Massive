@@ -56,4 +56,8 @@ export const queryKeys = {
     [...queryKeys.stock(symbol), "foreignTrading", days] as const,
   propTrading: (symbol: string, days: number) =>
     [...queryKeys.stock(symbol), "propTrading", days] as const,
+
+  // Financial Health
+  healthScore: (symbol: string) =>
+    [...queryKeys.stock(symbol), "healthScore"] as const,
 } as const

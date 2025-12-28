@@ -131,6 +131,15 @@ function StatItem({
 }
 
 export function ForeignFlowCharts({ data, isLoading }: ForeignFlowChartsProps) {
+  // useMemo must be called unconditionally (before any returns)
+  const volumePieData = useMemo(() => {
+    if (!data) return []
+    return [
+      { name: "NĐTNN", value: data.foreign_volume, color: COLORS.orange },
+      { name: "Trong nước", value: Math.max(0, data.total_volume - data.foreign_volume), color: COLORS.grey },
+    ]
+  }, [data])
+
   if (isLoading) return <ForeignFlowChartsSkeleton />
 
   if (!data) {
@@ -146,12 +155,6 @@ export function ForeignFlowCharts({ data, isLoading }: ForeignFlowChartsProps) {
 
   const foreignPct = data.foreign_pct_of_volume ?? 0
   const ownershipRatio = data.ownership_ratio ?? 0
-
-  // Pie data with grey/orange palette
-  const volumePieData = useMemo(() => [
-    { name: "NĐTNN", value: data.foreign_volume, color: COLORS.orange },
-    { name: "Trong nước", value: Math.max(0, data.total_volume - data.foreign_volume), color: COLORS.grey },
-  ], [data.foreign_volume, data.total_volume])
 
   // Volume comparison
   const volumeVsAvg = data.avg_volume_2w && data.avg_volume_2w > 0

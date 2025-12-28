@@ -695,3 +695,31 @@ export interface ForeignSnapshotResponse {
 export async function fetchForeignSnapshot(symbol: string): Promise<ForeignSnapshotResponse> {
   return fetchApi<ForeignSnapshotResponse>(`/stocks/${encodeURIComponent(symbol)}/foreign-snapshot`)
 }
+
+// === Health Score Types (Phase 2 - Financial Health Scorecard) ===
+
+export interface HealthScoreDimension {
+  score: number
+  metrics: Record<string, number | null>
+}
+
+export interface FScoreDetails {
+  positive_roa: boolean
+  positive_cfo: boolean
+  roa_improving: boolean
+  accrual_quality: boolean
+  leverage_decreasing: boolean
+  liquidity_improving: boolean
+}
+
+export interface HealthScoreResponse {
+  symbol: string
+  health_score: number
+  dimensions: Record<string, HealthScoreDimension>
+  f_score: number
+  f_score_details: FScoreDetails
+}
+
+export async function fetchHealthScore(symbol: string): Promise<HealthScoreResponse> {
+  return fetchApi<HealthScoreResponse>(`/stocks/${encodeURIComponent(symbol)}/health-score`)
+}

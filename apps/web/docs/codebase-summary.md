@@ -131,6 +131,9 @@ apps/web/
 - `useForeignTrading(symbol, days)` - Foreign trading (15min stale time)
 - `usePropTrading(symbol, days)` - Prop trading (15min stale time)
 
+### Financial Health Hooks (Phase 2)
+- `useHealthScore(symbol)` - Health score with dimensions and F-Score (5min stale time)
+
 ## TypeScript Types
 
 ### Advanced Tab Types (New)
@@ -180,6 +183,25 @@ interface PropTradingItem {
   date: string
   buy_volume, sell_volume, net_volume: number
 }
+
+// Health Score (Phase 2)
+interface HealthScoreDimension {
+  score: number
+  metrics: Record<string, number | null>
+}
+
+interface FScoreDetails {
+  positive_roa, positive_cfo, roa_improving: boolean
+  accrual_quality, leverage_decreasing, liquidity_improving: boolean
+}
+
+interface HealthScoreResponse {
+  symbol: string
+  health_score: number
+  dimensions: Record<string, HealthScoreDimension>
+  f_score: number
+  f_score_details: FScoreDetails
+}
 ```
 
 ## Caching Strategy
@@ -207,6 +229,12 @@ queryKeys.priceDepth(symbol) => ["stock", symbol, "priceDepth"]
 - `VolumeSpikesDashboard` - Industry-grouped volume spike analysis
 - `VolumeAnomalyChart` - Intraday volume anomaly visualization
 - `FinancialStatementsComposed` - Top companies financial comparison chart
+
+### Financial Health Components (Phase 2)
+- `HealthScoreCard` - Main health score card with overall score, radar chart, and F-Score
+- `HealthRadarChart` - Radar chart visualization for 5 financial dimensions
+- `ScoreBreakdown` - Detailed breakdown of dimension scores
+- `FScoreIndicator` - Piotroski F-Score indicator with 6-factor checklist
 
 ### UI Components (shadcn/ui)
 - Form controls: Button, Input, Select, Switch, Tabs
@@ -238,17 +266,24 @@ NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 - Centralized API types and fetch functions
 - Component-based architecture with shadcn/ui
 
-## Recent Updates (Phase 2: Frontend Hooks & API)
+## Recent Updates (Phase 2)
 
-### Added Advanced Tab API Layer
+### Advanced Tab API Layer (Dec 27)
 - 6 new TypeScript interfaces for Advanced tab data
 - 6 new API fetch functions with date range helpers
 - 6 new query keys following project conventions
 
-### Added Advanced Tab React Hooks
+### Advanced Tab React Hooks (Dec 27)
 - Real-time polling for price depth (30s auto-refresh)
 - Optimized caching for technical indicators (15min-1h stale)
 - Smart date range handling for historical data (30 days default)
+
+### Financial Health Scorecard (Dec 28)
+- Added `HealthScoreResponse`, `FScoreDetails`, `HealthScoreDimension` types
+- Added `fetchHealthScore()` API function
+- Added `useHealthScore()` hook with 5min stale time
+- Created 4 new UI components: `HealthScoreCard`, `HealthRadarChart`, `ScoreBreakdown`, `FScoreIndicator`
+- Displays overall health score (0-100), 5-dimension radar chart, and Piotroski F-Score (0-9)
 
 ## Metrics
 - **Total Files**: 113
@@ -263,5 +298,5 @@ NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 
 ---
 
-*Last updated: 2025-12-27*
+*Last updated: 2025-12-28*
 *Generated from: repomix-output.xml*
