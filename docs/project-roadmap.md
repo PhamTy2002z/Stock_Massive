@@ -1,6 +1,6 @@
 # Project Roadmap - Stock Massive
 
-Updated: 2024-12-24
+Updated: 2025-12-28
 
 ## Current State (December 2024)
 
@@ -15,6 +15,9 @@ Updated: 2024-12-24
 - [x] Analytics deep-dive page (SSR + TanStack Query)
 - [x] **Volume Spikes Dashboard** (treemap, pie chart, composed chart, tabs)
 - [x] **Financial Statements Page** (ranking table with filters)
+- [x] **Financial Health Scorecard** (5-dimension radar, Piotroski F-Score)
+- [x] **Peer Comparison** (top 5 sector peers with heatmap table)
+- [x] **FCF Analysis** (waterfall chart, CCC indicator with DSO/DIO/DPO)
 - [x] Market indices cards with sparklines (10s auto-refresh)
 - [x] VN30 Overview Table (price, change, volume, mcap, 1-min refresh)
 - [x] FastAPI backend setup
@@ -256,6 +259,9 @@ Updated: 2024-12-24
 
 | Feature | Date | Notes |
 |---------|------|-------|
+| Financial Health Enhancement (Phase 4) | Dec 28, 2025 | Peer Comparison, FCF Waterfall, CCC indicator với heatmap |
+| Financial Health Enhancement (Phase 2) | Dec 28, 2025 | Health Scorecard UI: Radar chart, F-Score, score breakdown |
+| Financial Health Enhancement (Phase 1) | Dec 28, 2025 | Backend APIs: health-score, trend-metrics, fcf-analysis, sector-peers |
 | Supabase Migration (Complete) | Dec 24, 2024 | DATABASE_URL_DIRECT, SSL config, connection pooling |
 | Job Progress UI | Dec 24, 2024 | Progress bar + notification panel in frontend |
 | Job Status API | Dec 24, 2024 | `/api/v1/jobs/status` for progress polling |

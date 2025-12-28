@@ -69,6 +69,8 @@ apps/web/
 - `fetchVolumeSpikes(params)` - Volume spike analysis by industry
 - `fetchVolumeAnomalies(symbol, days)` - Intraday volume anomaly detection
 - `triggerFinancialStatementsCollection()` - Trigger data collection job
+- `fetchSectorPeers(symbol, limit)` - Sector peer metrics comparison (Phase 4)
+- `fetchFCFAnalysis(symbol)` - Free cash flow waterfall analysis (Phase 4)
 
 #### Advanced Tab (New)
 **Order Flow Analysis**
@@ -133,6 +135,10 @@ apps/web/
 
 ### Financial Health Hooks (Phase 2)
 - `useHealthScore(symbol)` - Health score with dimensions and F-Score (5min stale time)
+
+### Peer Comparison & FCF Hooks (Phase 4)
+- `useSectorPeers(symbol, limit)` - Sector peer metrics comparison (10min stale time)
+- `useFCFAnalysis(symbol)` - Free Cash Flow analysis with waterfall metrics (5min stale time)
 
 ## TypeScript Types
 
@@ -202,6 +208,25 @@ interface HealthScoreResponse {
   f_score: number
   f_score_details: FScoreDetails
 }
+
+// Peer Comparison (Phase 4)
+interface PeerMetrics {
+  symbol, company_name: string | null
+  roe, roa, pe, pb, market_cap: number | null
+}
+
+interface SectorPeersResponse {
+  symbol, icb_code, icb_name: string
+  peers: PeerMetrics[]
+}
+
+// FCF Analysis (Phase 4)
+interface FCFAnalysisResponse {
+  symbol, period: string
+  net_income, cfo, capex, fcf: number | null
+  fcf_margin, ccc, dso, dio, dpo: number | null
+  market_cap, fcf_yield: number | null
+}
 ```
 
 ## Caching Strategy
@@ -235,6 +260,15 @@ queryKeys.priceDepth(symbol) => ["stock", symbol, "priceDepth"]
 - `HealthRadarChart` - Radar chart visualization for 5 financial dimensions
 - `ScoreBreakdown` - Detailed breakdown of dimension scores
 - `FScoreIndicator` - Piotroski F-Score indicator with 6-factor checklist
+
+### Peer Comparison Components (Phase 4)
+- `PeerComparisonCard` - Main container for peer comparison with sector context
+- `PeerMetricsTable` - Table showing peer metrics (ROE, ROA, PE, PB, Market Cap)
+
+### FCF Analysis Components (Phase 4)
+- `FCFAnalysisCard` - Main container for FCF analysis
+- `FCFWaterfall` - Waterfall chart showing Net Income → CFO → FCF breakdown
+- `CCCIndicator` - Cash Conversion Cycle indicator with DSO/DIO/DPO breakdown
 
 ### UI Components (shadcn/ui)
 - Form controls: Button, Input, Select, Switch, Tabs
@@ -284,6 +318,15 @@ NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 - Added `useHealthScore()` hook with 5min stale time
 - Created 4 new UI components: `HealthScoreCard`, `HealthRadarChart`, `ScoreBreakdown`, `FScoreIndicator`
 - Displays overall health score (0-100), 5-dimension radar chart, and Piotroski F-Score (0-9)
+
+### Peer Comparison & FCF Analysis (Phase 4 - Dec 28)
+- Added `PeerMetrics`, `SectorPeersResponse`, `FCFAnalysisResponse` types to API layer
+- Added `fetchSectorPeers()`, `fetchFCFAnalysis()` API functions
+- Added 2 new hooks: `useSectorPeers()` (10min stale), `useFCFAnalysis()` (5min stale)
+- Created 5 new components:
+  - Peer Comparison: `PeerComparisonCard`, `PeerMetricsTable` (2 files)
+  - FCF Analysis: `FCFAnalysisCard`, `FCFWaterfall`, `CCCIndicator` (3 files)
+- Features: Sector peer benchmarking, FCF waterfall visualization, Cash Conversion Cycle analysis
 
 ## Metrics
 - **Total Files**: 113

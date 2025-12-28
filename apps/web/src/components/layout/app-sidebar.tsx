@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useEffect, useState } from "react"
+import { useEffect, useId, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import Link from "next/link"
 import {
@@ -144,6 +144,56 @@ function SidebarBrand() {
   )
 }
 
+// Separate component for collapsible nav items to ensure stable IDs
+function CollapsibleNavItem({
+  item,
+  isPathActive,
+}: {
+  item: (typeof data.navMain)[0]
+  isPathActive: (url: string) => boolean
+}) {
+  const collapsibleId = useId()
+  const hasActiveSubItem = item.items?.some((sub) => isPathActive(sub.url)) ?? false
+
+  return (
+    <Collapsible
+      asChild
+      defaultOpen={hasActiveSubItem}
+      className="group/collapsible"
+    >
+      <SidebarMenuItem>
+        <CollapsibleTrigger asChild id={`trigger-${collapsibleId}`}>
+          <SidebarMenuButton tooltip={item.title}>
+            {item.icon && <item.icon />}
+            <span>{item.title}</span>
+            <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+          </SidebarMenuButton>
+        </CollapsibleTrigger>
+        <CollapsibleContent id={`content-${collapsibleId}`}>
+          <SidebarMenuSub>
+            {item.items?.map((subItem) => {
+              const subIsActive = isPathActive(subItem.url)
+              return (
+                <SidebarMenuSubItem key={subItem.title}>
+                  <SidebarMenuSubButton
+                    isActive={subIsActive}
+                    className={subIsActive ? "bg-orange-400 text-white font-medium hover:bg-orange-500 hover:text-white dark:bg-orange-500 dark:text-white dark:hover:bg-orange-600" : ""}
+                    asChild
+                  >
+                    <Link href={subItem.url}>
+                      <span>{subItem.title}</span>
+                    </Link>
+                  </SidebarMenuSubButton>
+                </SidebarMenuSubItem>
+              )
+            })}
+          </SidebarMenuSub>
+        </CollapsibleContent>
+      </SidebarMenuItem>
+    </Collapsible>
+  )
+}
+
 function NavMain({
   items,
 }: {
@@ -158,11 +208,6 @@ function NavMain({
     return pathname.startsWith(url)
   }
 
-  // Check if any sub-item is active (for auto-expanding parent)
-  const hasActiveSubItem = (subItems?: { url: string }[]) => {
-    return subItems?.some((sub) => isPathActive(sub.url)) ?? false
-  }
-
   return (
     <SidebarGroup>
       <SidebarGroupLabel>Navigation</SidebarGroupLabel>
@@ -170,7 +215,6 @@ function NavMain({
         {items.map((item) => {
           const hasSubItems = item.items && item.items.length > 0
           const isActive = isPathActive(item.url)
-          const shouldExpand = hasActiveSubItem(item.items)
 
           if (!hasSubItems) {
             return (
@@ -191,42 +235,11 @@ function NavMain({
           }
 
           return (
-            <Collapsible
+            <CollapsibleNavItem
               key={item.title}
-              asChild
-              defaultOpen={shouldExpand}
-              className="group/collapsible"
-            >
-              <SidebarMenuItem>
-                <CollapsibleTrigger asChild>
-                  <SidebarMenuButton tooltip={item.title}>
-                    {item.icon && <item.icon />}
-                    <span>{item.title}</span>
-                    <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
-                  </SidebarMenuButton>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <SidebarMenuSub>
-                    {item.items?.map((subItem) => {
-                      const subIsActive = isPathActive(subItem.url)
-                      return (
-                        <SidebarMenuSubItem key={subItem.title}>
-                          <SidebarMenuSubButton
-                            isActive={subIsActive}
-                            className={subIsActive ? "bg-orange-400 text-white font-medium hover:bg-orange-500 hover:text-white dark:bg-orange-500 dark:text-white dark:hover:bg-orange-600" : ""}
-                            asChild
-                          >
-                            <Link href={subItem.url}>
-                              <span>{subItem.title}</span>
-                            </Link>
-                          </SidebarMenuSubButton>
-                        </SidebarMenuSubItem>
-                      )
-                    })}
-                  </SidebarMenuSub>
-                </CollapsibleContent>
-              </SidebarMenuItem>
-            </Collapsible>
+              item={item}
+              isPathActive={isPathActive}
+            />
           )
         })}
       </SidebarMenu>

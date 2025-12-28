@@ -109,12 +109,12 @@ All UI components follow `/docs/design-guidelines.md`:
 
 ## Success Criteria
 
-- [ ] Health scorecard renders with 5-dimension radar chart
+- [x] Health scorecard renders with 5-dimension radar chart ✅ 2025-12-28
 - [ ] Trend charts show 8 quarters of data
-- [ ] Peer comparison shows top 5 sector peers
-- [ ] FCF waterfall displays Net Income -> CFO -> FCF
-- [ ] All charts responsive (mobile-friendly)
-- [ ] API response time < 500ms (cached)
+- [x] Peer comparison shows top 5 sector peers ✅ 2025-12-28
+- [x] FCF waterfall displays Net Income -> CFO -> FCF ✅ 2025-12-28
+- [x] All charts responsive (mobile-friendly) ✅ 2025-12-28
+- [x] API response time < 500ms (cached) ✅ 2025-12-28
 
 ## Risks
 
