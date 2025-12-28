@@ -109,3 +109,100 @@ class CashFlowResponse(BaseModel):
     periods: list[str]  # List of period labels (e.g., ["Q3/2025", "Q2/2025", ...])
     rows: list[CashFlowRow]
     unit: str = "VND"  # Currency unit
+
+
+# ==================== Health Score Schemas ====================
+
+
+class HealthScoreDimension(BaseModel):
+    """Score and metrics for a single health dimension."""
+
+    score: int = Field(..., ge=0, le=100)
+    metrics: dict[str, Optional[float]]
+
+
+class FScoreDetails(BaseModel):
+    """Piotroski F-Score breakdown (6 criteria)."""
+
+    positive_roa: bool
+    positive_cfo: bool
+    roa_improving: bool
+    accrual_quality: bool
+    leverage_decreasing: bool
+    liquidity_improving: bool
+
+
+class HealthScoreResponse(BaseModel):
+    """Financial health scorecard response."""
+
+    symbol: str
+    health_score: int = Field(..., ge=0, le=100)
+    dimensions: dict[str, HealthScoreDimension]
+    f_score: int = Field(..., ge=0, le=9)
+    f_score_details: FScoreDetails
+    period: Optional[str] = None  # e.g., "Q4/2024"
+
+
+# ==================== Trend Metrics Schemas ====================
+
+
+class TrendMetricsResponse(BaseModel):
+    """Trend metrics for charts (8 quarters of data)."""
+
+    symbol: str
+    periods: list[str]  # e.g., ["Q1/2023", "Q2/2023", ...]
+    revenue: list[Optional[float]]
+    net_profit: list[Optional[float]]
+    gross_profit: list[Optional[float]]
+    gross_margin: list[Optional[float]]
+    net_margin: list[Optional[float]]
+    roe: list[Optional[float]]
+    roa: list[Optional[float]]
+    cfo: list[Optional[float]]
+    cfi: list[Optional[float]]
+    cff: list[Optional[float]]
+
+
+# ==================== FCF Analysis Schemas ====================
+
+
+class FCFAnalysisResponse(BaseModel):
+    """Free Cash Flow analysis response."""
+
+    symbol: str
+    period: str  # e.g., "Q4/2024"
+    net_income: Optional[float] = None
+    cfo: Optional[float] = None
+    capex: Optional[float] = None
+    fcf: Optional[float] = None
+    fcf_margin: Optional[float] = None
+    ccc: Optional[float] = None  # Cash Conversion Cycle (null for banks)
+    dso: Optional[float] = None  # Days Sales Outstanding
+    dio: Optional[float] = None  # Days Inventory Outstanding
+    dpo: Optional[float] = None  # Days Payable Outstanding
+    market_cap: Optional[float] = None
+    fcf_yield: Optional[float] = None
+
+
+# ==================== Sector Peers Schemas ====================
+
+
+class PeerMetrics(BaseModel):
+    """Financial metrics for a peer company."""
+
+    symbol: str
+    company_name: Optional[str] = None
+    roe: Optional[float] = None
+    roa: Optional[float] = None
+    pe: Optional[float] = None
+    pb: Optional[float] = None
+    market_cap: Optional[float] = None
+
+
+class SectorPeersResponse(BaseModel):
+    """Sector peers comparison response."""
+
+    symbol: str
+    icb_code: str
+    icb_name: str
+    peers: list[PeerMetrics]

@@ -21,6 +21,13 @@ Create 4 trend analysis charts showing 8 quarters of historical data:
 - StackedBar for cash flow breakdown (CFO positive, CFI/CFF typically negative)
 - Use `ResponsiveContainer` with explicit height
 - Format Y-axis with M/B suffixes for large numbers
+- **Color per Design Guidelines:**
+  - Use `--accent-orange` for primary data series
+  - Use muted colors for secondary series
+  - Green/Red only for stock up/down indicators
+- **KPI Requirements (MANDATORY):**
+  - Show time range in card header
+  - Show Last Updated timestamp with Refresh button
 
 ## Requirements
 
@@ -208,16 +215,16 @@ export function RevenueProfitChart({ data }: RevenueProfitChartProps) {
         <Bar
           yAxisId="left"
           dataKey="revenue"
-          fill="#3b82f6"
+          fill="hsl(var(--accent-orange))"
           radius={[4, 4, 0, 0]}
         />
         <Line
           yAxisId="right"
           type="monotone"
           dataKey="net_profit"
-          stroke="#22c55e"
+          stroke="hsl(var(--muted-foreground))"
           strokeWidth={2}
-          dot={{ fill: "#22c55e", strokeWidth: 2 }}
+          dot={{ fill: "hsl(var(--muted-foreground))", strokeWidth: 2 }}
         />
       </ComposedChart>
     </ResponsiveContainer>
@@ -260,12 +267,12 @@ export function MarginTrendChart({ data }: MarginTrendChartProps) {
       <AreaChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
         <defs>
           <linearGradient id="grossMarginGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+            <stop offset="5%" stopColor="hsl(var(--accent-orange))" stopOpacity={0.3} />
+            <stop offset="95%" stopColor="hsl(var(--accent-orange))" stopOpacity={0} />
           </linearGradient>
           <linearGradient id="netMarginGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3} />
-            <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+            <stop offset="5%" stopColor="hsl(var(--muted-foreground))" stopOpacity={0.3} />
+            <stop offset="95%" stopColor="hsl(var(--muted-foreground))" stopOpacity={0} />
           </linearGradient>
         </defs>
         <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
@@ -296,14 +303,14 @@ export function MarginTrendChart({ data }: MarginTrendChartProps) {
         <Area
           type="monotone"
           dataKey="gross_margin"
-          stroke="#3b82f6"
+          stroke="hsl(var(--accent-orange))"
           fill="url(#grossMarginGradient)"
           strokeWidth={2}
         />
         <Area
           type="monotone"
           dataKey="net_margin"
-          stroke="#22c55e"
+          stroke="hsl(var(--muted-foreground))"
           fill="url(#netMarginGradient)"
           strokeWidth={2}
         />
@@ -375,17 +382,17 @@ export function RoeRoaChart({ data }: RoeRoaChartProps) {
           type="monotone"
           dataKey="roe"
           name="ROE"
-          stroke="#8b5cf6"
+          stroke="hsl(var(--accent-orange))"
           strokeWidth={2}
-          dot={{ fill: "#8b5cf6", strokeWidth: 2 }}
+          dot={{ fill: "hsl(var(--accent-orange))", strokeWidth: 2 }}
         />
         <Line
           type="monotone"
           dataKey="roa"
           name="ROA"
-          stroke="#f59e0b"
+          stroke="hsl(var(--muted-foreground))"
           strokeWidth={2}
-          dot={{ fill: "#f59e0b", strokeWidth: 2 }}
+          dot={{ fill: "hsl(var(--muted-foreground))", strokeWidth: 2 }}
         />
       </LineChart>
     </ResponsiveContainer>
@@ -470,9 +477,10 @@ export function CashFlowChart({ data }: CashFlowChartProps) {
           }}
         />
         <ReferenceLine y={0} stroke="hsl(var(--foreground))" />
-        <Bar dataKey="cfo" stackId="a" fill="#22c55e" radius={[4, 4, 0, 0]} />
-        <Bar dataKey="cfi" stackId="b" fill="#ef4444" radius={[4, 4, 0, 0]} />
-        <Bar dataKey="cff" stackId="c" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+        {/* Use orange accent for primary (CFO), muted for others */}
+        <Bar dataKey="cfo" stackId="a" fill="hsl(var(--accent-orange))" radius={[4, 4, 0, 0]} />
+        <Bar dataKey="cfi" stackId="b" fill="hsl(var(--muted-foreground))" radius={[4, 4, 0, 0]} />
+        <Bar dataKey="cff" stackId="c" fill="hsl(var(--border))" radius={[4, 4, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   )

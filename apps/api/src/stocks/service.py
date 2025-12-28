@@ -107,6 +107,22 @@ class StockService:
         """Delegate to financial service."""
         return self.financial.get_cash_flow_detailed(symbol, period, limit)
 
+    def get_health_score(self, symbol: str):
+        """Delegate to financial service - health score calculation."""
+        return self.financial.get_health_score(symbol)
+
+    def get_trend_metrics(self, symbol: str, periods: int = 8):
+        """Delegate to financial service - trend metrics for charts."""
+        return self.financial.get_trend_metrics(symbol, periods)
+
+    def get_fcf_analysis(self, symbol: str):
+        """Delegate to financial service - FCF analysis."""
+        return self.financial.get_fcf_analysis(symbol)
+
+    def get_sector_peers(self, symbol: str, limit: int = 5):
+        """Delegate to financial service - sector peer comparison."""
+        return self.financial.get_sector_peers(symbol, limit)
+
     # === Market domain delegates ===
 
     def list_symbols(self, exchange: Optional[str] = None):

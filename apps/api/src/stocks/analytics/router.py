@@ -16,7 +16,10 @@ from src.stocks.schemas.analytics import (
     VolumeSpikeResponse,
     VolumeSpikeMetadata,
 )
+from src.stocks.schemas.financial import SectorPeersResponse
 from src.stocks.financial_statements_collector import FinancialStatementsCollector
+from src.stocks.service import get_stock_service
+from src.stocks.shared import StockServiceError
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -161,3 +164,44 @@ async def clear_volume_spikes_cache() -> dict:
     """Clear volume spikes cache. Use when data seems stale or after updates."""
     deleted = volume_spikes_cache.clear_prefix()
     return {"message": f"Cleared {deleted} cache entries"}
+
+
+# ==================== Sector Peers Endpoint ====================
+
+sector_peers_cache = TradingHoursCache(
+    key_prefix="stock:sector_peers:",
+    ttl_trading=3600,      # 1 hour during trading
+    ttl_off_hours=86400,   # 24 hours off-hours
+)
+
+
+@router.get(
+    "/sector-peers",
+    response_model=SectorPeersResponse,
+    dependencies=[Depends(standard_rate_limit)],
+)
+async def get_sector_peers(
+    symbol: str = Query(..., description="Target stock symbol"),
+    limit: int = Query(5, ge=1, le=10, description="Number of peers"),
+) -> SectorPeersResponse:
+    """Get peer companies in the same ICB sector.
+
+    Returns top N companies in the same ICB Level 3 sector,
+    sorted by market capitalization, with key financial metrics.
+    """
+    cache_key = f"{symbol.upper()}:{limit}"
+    cached = sector_peers_cache.get(cache_key)
+    if cached:
+        return SectorPeersResponse(**cached)
+
+    try:
+        service = get_stock_service()
+        result = service.get_sector_peers(symbol, limit)
+
+        # Cache result
+        sector_peers_cache.set(cache_key, result.model_dump(mode="json"))
+
+        return result
+    except StockServiceError as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=502, detail=str(e))

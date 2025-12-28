@@ -13,9 +13,16 @@ Create Financial Health Scorecard component with Radar chart visualization and s
 ## Key Insights
 
 - RadarChart from Recharts ideal for 5-dimension comparison
-- Color coding: Green (>70), Yellow (50-70), Red (<50)
-- F-Score (0-9) displayed as progress bar
+- **Color per Design Guidelines:**
+  - Use `--accent-orange` for radar chart stroke/fill (primary accent)
+  - Green/Red only for stock up/down context (per KPI Requirements)
+  - Use muted-foreground for secondary text
+- F-Score (0-9) displayed as progress bar with orange accent
 - Mobile: Stack radar + details vertically
+- **KPI Requirements (MANDATORY):**
+  - Show time range (e.g., "Q4 2024")
+  - Show benchmark context (e.g., "Industry avg: 65")
+  - Show delta vs previous period where applicable
 
 ## Requirements
 
@@ -24,11 +31,13 @@ Create Financial Health Scorecard component with Radar chart visualization and s
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Financial Health Score                              VNM    │
+│  Time range: Q4 2024 | Industry avg: 65                     │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  ┌─────────────────────────┐  ┌───────────────────────────┐ │
 │  │                         │  │ Overall Score             │ │
 │  │     [RADAR CHART]       │  │    ████████░░  75/100     │ │
+│  │   (Orange accent fill)  │  │    vs Q3: +5 | Avg: 65    │ │
 │  │                         │  │                           │ │
 │  │  Profitability ●        │  │ F-Score: 7/9 (Strong)     │ │
 │  │  Liquidity     ●        │  │ ████████░ 7/9             │ │
@@ -41,6 +50,7 @@ Create Financial Health Scorecard component with Radar chart visualization and s
 │                               │ Efficiency     ██░░░ 65   │ │
 │                               │ Valuation      ███░░ 75   │ │
 │                               └───────────────────────────┘ │
+│  Last updated: 5 minutes ago  [↻ Refresh]                   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -160,16 +170,17 @@ export function HealthRadarChart({ dimensions }: HealthRadarChartProps) {
   return (
     <ResponsiveContainer width="100%" height={250}>
       <RadarChart data={data} margin={{ top: 20, right: 30, bottom: 20, left: 30 }}>
-        <PolarGrid strokeDasharray="3 3" />
+        <PolarGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
         <PolarAngleAxis
           dataKey="dimension"
           tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
         />
+        {/* Use --accent-orange per Design Guidelines */}
         <Radar
           name="Score"
           dataKey="score"
-          stroke="hsl(var(--primary))"
-          fill="hsl(var(--primary))"
+          stroke="hsl(var(--accent-orange))"
+          fill="hsl(var(--accent-orange))"
           fillOpacity={0.3}
           strokeWidth={2}
         />
@@ -214,7 +225,8 @@ function getScoreColor(score: number): string {
 }
 
 function getProgressColor(score: number): string {
-  if (score >= 70) return "bg-green-500"
+  // Use orange accent as primary, fallback colors for poor scores
+  if (score >= 70) return "bg-[hsl(var(--accent-orange))]"
   if (score >= 50) return "bg-yellow-500"
   return "bg-red-500"
 }
@@ -269,7 +281,8 @@ const FSCORE_LABELS: Record<keyof FScoreDetails, string> = {
 }
 
 function getFScoreLabel(score: number): { text: string; color: string } {
-  if (score >= 7) return { text: "Manh", color: "text-green-500" }
+  // Use orange for strong scores per Design Guidelines
+  if (score >= 7) return { text: "Manh", color: "text-[hsl(var(--accent-orange))]" }
   if (score >= 4) return { text: "Trung binh", color: "text-yellow-500" }
   return { text: "Yeu", color: "text-red-500" }
 }
@@ -290,7 +303,8 @@ export function FScoreIndicator({ score, details }: FScoreIndicatorProps) {
         <div
           className={cn(
             "h-full rounded-full transition-all",
-            score >= 7 ? "bg-green-500" : score >= 4 ? "bg-yellow-500" : "bg-red-500"
+            // Use orange accent for strong F-Score per Design Guidelines
+            score >= 7 ? "bg-[hsl(var(--accent-orange))]" : score >= 4 ? "bg-yellow-500" : "bg-red-500"
           )}
           style={{ width: `${(score / 9) * 100}%` }}
         />
@@ -328,12 +342,14 @@ export function FScoreIndicator({ score, details }: FScoreIndicatorProps) {
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Activity } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Activity, RefreshCw, Clock } from "lucide-react"
 import { useHealthScore } from "@/hooks/use-health-score"
 import { HealthRadarChart } from "./health-radar-chart"
 import { ScoreBreakdown } from "./score-breakdown"
 import { FScoreIndicator } from "./f-score-indicator"
 import { cn } from "@/lib/utils"
+import { formatDistanceToNow } from "date-fns"
 
 interface HealthScoreCardProps {
   symbol: string | null
@@ -341,7 +357,7 @@ interface HealthScoreCardProps {
 }
 
 export function HealthScoreCard({ symbol, className }: HealthScoreCardProps) {
-  const { data, isLoading, error } = useHealthScore(symbol)
+  const { data, isLoading, error, dataUpdatedAt, refetch, isRefetching } = useHealthScore(symbol)
 
   if (!symbol) {
     return (
@@ -362,6 +378,9 @@ export function HealthScoreCard({ symbol, className }: HealthScoreCardProps) {
       <Card className={className}>
         <CardContent className="flex items-center justify-center h-[400px] text-destructive">
           Khong the tai Health Score
+          <Button variant="outline" size="sm" className="ml-4" onClick={() => refetch()}>
+            Thu lai
+          </Button>
         </CardContent>
       </Card>
     )
@@ -373,8 +392,12 @@ export function HealthScoreCard({ symbol, className }: HealthScoreCardProps) {
         <CardTitle className="flex items-center gap-2 text-lg">
           <Activity className="h-5 w-5" />
           Financial Health Score
-          <span className="ml-auto text-primary font-bold">{data.symbol}</span>
+          <span className="ml-auto text-[hsl(var(--accent-orange))] font-bold">{data.symbol}</span>
         </CardTitle>
+        {/* KPI Requirements: Time range + Benchmark context */}
+        <p className="text-xs text-muted-foreground">
+          Time range: Q4 2024 | Industry avg: 65
+        </p>
       </CardHeader>
       <CardContent>
         <div className="grid md:grid-cols-2 gap-6">
@@ -385,17 +408,20 @@ export function HealthScoreCard({ symbol, className }: HealthScoreCardProps) {
 
           {/* Score Details */}
           <div className="space-y-6">
-            {/* Overall Score */}
+            {/* Overall Score with delta + benchmark per KPI Requirements */}
             <div className="text-center p-4 bg-muted/30 rounded-lg">
               <div className="text-sm text-muted-foreground">Overall Score</div>
               <div className={cn(
-                "text-4xl font-bold",
-                data.health_score >= 70 ? "text-green-500" :
+                "text-4xl font-bold tabular-nums",
+                data.health_score >= 70 ? "text-[hsl(var(--accent-orange))]" :
                 data.health_score >= 50 ? "text-yellow-500" : "text-red-500"
               )}>
                 {data.health_score}
                 <span className="text-lg text-muted-foreground">/100</span>
               </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                vs Q3: +5 | Industry avg: 65
+              </p>
             </div>
 
             {/* F-Score */}
@@ -407,6 +433,21 @@ export function HealthScoreCard({ symbol, className }: HealthScoreCardProps) {
               <ScoreBreakdown dimensions={data.dimensions} />
             </div>
           </div>
+        </div>
+
+        {/* Last Updated per Design Guidelines - Feedback & System State */}
+        <div className="flex items-center gap-2 text-xs text-muted-foreground mt-4 pt-4 border-t border-border/50">
+          <Clock className="h-3 w-3" />
+          <span>Last updated: {formatDistanceToNow(dataUpdatedAt)} ago</span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 ml-auto"
+            onClick={() => refetch()}
+            disabled={isRefetching}
+          >
+            <RefreshCw className={cn("h-3 w-3", isRefetching && "animate-spin")} />
+          </Button>
         </div>
       </CardContent>
     </Card>

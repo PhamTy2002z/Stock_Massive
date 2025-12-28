@@ -1,9 +1,10 @@
 """Financial domain service for financial statements and ratios."""
 
 import logging
+from typing import Optional
 
 import pandas as pd
-from vnstock import Finance
+from vnstock import Finance, Listing
 
 from ..schemas.financial import (
     FinancialRatio,
@@ -15,8 +16,14 @@ from ..schemas.financial import (
     BalanceSheetResponse,
     CashFlowRow,
     CashFlowResponse,
+    HealthScoreResponse,
+    TrendMetricsResponse,
+    FCFAnalysisResponse,
+    SectorPeersResponse,
+    PeerMetrics,
 )
 from ..shared import StockServiceError, validate_symbol, safe_float
+from .health_scoring import build_health_score_response
 
 logger = logging.getLogger(__name__)
 
@@ -488,3 +495,411 @@ class FinancialService:
             rows=rows,
             unit="Triệu VND",
         )
+
+    # ==================== New Methods for Health Score & Trends ====================
+
+    def _flatten_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Flatten MultiIndex columns from vnstock API.
+
+        Converts ('Meta', 'yearReport') -> 'yearReport'
+        Converts ('Chỉ tiêu...', 'ROE (%)') -> 'ROE (%)'
+        """
+        if df is None or df.empty:
+            return df
+
+        if isinstance(df.columns, pd.MultiIndex):
+            # Use the second level (actual field name)
+            df.columns = [col[1] if isinstance(col, tuple) else col for col in df.columns]
+        return df
+
+    def get_ratio_history(
+        self,
+        symbol: str,
+        periods: int = 8,
+    ) -> list[dict]:
+        """Get historical ratio data for trend analysis.
+
+        Args:
+            symbol: Stock symbol
+            periods: Number of quarters to fetch (default: 8)
+
+        Returns:
+            List of ratio dicts ordered by most recent first
+        """
+        symbol = validate_symbol(symbol)
+        try:
+            finance = Finance(symbol=symbol, source=self.source)
+            df = finance.ratio(period="quarter", lang="en", dropna=True)
+
+            if df is None or df.empty:
+                return []
+
+            # Flatten MultiIndex columns
+            df = self._flatten_columns(df)
+
+            # Take the most recent N periods
+            df = df.head(periods)
+            return df.to_dict("records")
+        except Exception as e:
+            logger.error(f"Error fetching ratio history for {symbol}: {e}")
+            return []
+
+    def get_income_history(
+        self,
+        symbol: str,
+        periods: int = 8,
+    ) -> list[dict]:
+        """Get historical income statement data.
+
+        Args:
+            symbol: Stock symbol
+            periods: Number of quarters to fetch (default: 8)
+
+        Returns:
+            List of income statement dicts ordered by most recent first
+        """
+        symbol = validate_symbol(symbol)
+        try:
+            finance = Finance(symbol=symbol, source=self.source)
+            df = finance.income_statement(period="quarter", lang="en", dropna=True)
+
+            if df is None or df.empty:
+                return []
+
+            df = self._flatten_columns(df)
+            df = df.head(periods)
+            return df.to_dict("records")
+        except Exception as e:
+            logger.error(f"Error fetching income history for {symbol}: {e}")
+            return []
+
+    def get_cash_flow_history(
+        self,
+        symbol: str,
+        periods: int = 8,
+    ) -> list[dict]:
+        """Get historical cash flow data.
+
+        Args:
+            symbol: Stock symbol
+            periods: Number of quarters to fetch (default: 8)
+
+        Returns:
+            List of cash flow dicts ordered by most recent first
+        """
+        symbol = validate_symbol(symbol)
+        try:
+            finance = Finance(symbol=symbol, source=self.source)
+            df = finance.cash_flow(period="quarter", lang="en", dropna=True)
+
+            if df is None or df.empty:
+                return []
+
+            df = self._flatten_columns(df)
+            df = df.head(periods)
+            return df.to_dict("records")
+        except Exception as e:
+            logger.error(f"Error fetching cash flow history for {symbol}: {e}")
+            return []
+
+    def get_health_score(self, symbol: str) -> HealthScoreResponse:
+        """Calculate financial health score for a stock.
+
+        Args:
+            symbol: Stock symbol
+
+        Returns:
+            HealthScoreResponse with scores and F-Score
+        """
+        symbol = validate_symbol(symbol)
+        try:
+            # Get ratio data (need at least 2 periods for F-Score)
+            ratio_history = self.get_ratio_history(symbol, periods=2)
+            if not ratio_history:
+                raise StockServiceError(f"No ratio data available for {symbol}")
+
+            current_ratio = self._normalize_ratio_data(ratio_history[0])
+            prior_ratio = self._normalize_ratio_data(ratio_history[1]) if len(ratio_history) > 1 else {}
+
+            # Get cash flow data for CFO
+            cf_history = self.get_cash_flow_history(symbol, periods=1)
+            cash_flow_data = self._normalize_cash_flow_data(cf_history[0]) if cf_history else {}
+
+            # Build period label
+            year = ratio_history[0].get("yearReport") or ratio_history[0].get("year")
+            quarter = ratio_history[0].get("lengthReport") or ratio_history[0].get("quarter")
+            period = f"Q{quarter}/{year}" if year and quarter else None
+
+            # Calculate health score
+            result = build_health_score_response(
+                symbol=symbol,
+                ratio_data=current_ratio,
+                prior_ratio_data=prior_ratio,
+                cash_flow_data=cash_flow_data,
+                period=period,
+            )
+
+            return HealthScoreResponse(**result)
+        except StockServiceError:
+            raise
+        except Exception as e:
+            logger.error(f"Error calculating health score for {symbol}: {e}")
+            raise StockServiceError(f"Failed to calculate health score for {symbol}: {e}")
+
+    def get_trend_metrics(
+        self,
+        symbol: str,
+        periods: int = 8,
+    ) -> TrendMetricsResponse:
+        """Get trend metrics for chart visualization.
+
+        Args:
+            symbol: Stock symbol
+            periods: Number of quarters (default: 8)
+
+        Returns:
+            TrendMetricsResponse with arrays of metrics
+        """
+        symbol = validate_symbol(symbol)
+        try:
+            # Get historical data
+            ratio_history = self.get_ratio_history(symbol, periods)
+            income_history = self.get_income_history(symbol, periods)
+            cf_history = self.get_cash_flow_history(symbol, periods)
+
+            # Reverse to show oldest first for charts
+            ratio_history = list(reversed(ratio_history))
+            income_history = list(reversed(income_history))
+            cf_history = list(reversed(cf_history))
+
+            # Build period labels
+            period_labels = []
+            for r in ratio_history:
+                year = r.get("yearReport") or r.get("year")
+                quarter = r.get("lengthReport") or r.get("quarter")
+                if year and quarter:
+                    period_labels.append(f"Q{int(quarter)}/{year}")
+                else:
+                    period_labels.append(str(year))
+
+            # Extract metrics (using exact vnstock English column names)
+            revenue = [safe_float(i.get("Net Sales") or i.get("Revenue (Bn. VND)")) for i in income_history]
+            net_profit = [safe_float(i.get("Net Profit For the Year") or i.get("Attributable to parent company")) for i in income_history]
+            gross_profit = [safe_float(i.get("Gross Profit")) for i in income_history]
+            gross_margin = [safe_float(r.get("Gross Profit Margin (%)")) for r in ratio_history]
+            net_margin = [safe_float(r.get("Net Profit Margin (%)")) for r in ratio_history]
+            roe = [safe_float(r.get("ROE (%)")) for r in ratio_history]
+            roa = [safe_float(r.get("ROA (%)")) for r in ratio_history]
+
+            # Cash flow metrics (exact vnstock English column names)
+            cfo = [safe_float(c.get("Net cash inflows/outflows from operating activities")) for c in cf_history]
+            cfi = [safe_float(c.get("Net Cash Flows from Investing Activities")) for c in cf_history]
+            cff = [safe_float(c.get("Cash flows from financial activities")) for c in cf_history]
+
+            return TrendMetricsResponse(
+                symbol=symbol,
+                periods=period_labels,
+                revenue=revenue,
+                net_profit=net_profit,
+                gross_profit=gross_profit,
+                gross_margin=gross_margin,
+                net_margin=net_margin,
+                roe=roe,
+                roa=roa,
+                cfo=cfo,
+                cfi=cfi,
+                cff=cff,
+            )
+        except Exception as e:
+            logger.error(f"Error fetching trend metrics for {symbol}: {e}")
+            raise StockServiceError(f"Failed to fetch trend metrics for {symbol}: {e}")
+
+    def get_fcf_analysis(self, symbol: str) -> FCFAnalysisResponse:
+        """Calculate Free Cash Flow analysis.
+
+        Args:
+            symbol: Stock symbol
+
+        Returns:
+            FCFAnalysisResponse with FCF, margins, and CCC
+        """
+        symbol = validate_symbol(symbol)
+        try:
+            # Get latest cash flow and income data
+            cf_history = self.get_cash_flow_history(symbol, periods=1)
+            income_history = self.get_income_history(symbol, periods=1)
+            ratio_history = self.get_ratio_history(symbol, periods=1)
+
+            if not cf_history:
+                raise StockServiceError(f"No cash flow data available for {symbol}")
+
+            cf = cf_history[0]
+            income = income_history[0] if income_history else {}
+            ratios = ratio_history[0] if ratio_history else {}
+
+            # Build period label
+            year = cf.get("yearReport")
+            quarter = cf.get("lengthReport")
+            period = f"Q{int(quarter)}/{year}" if year and quarter else str(year)
+
+            # Extract values (using exact vnstock English column names)
+            net_income = safe_float(income.get("Net Profit For the Year") or income.get("Attributable to parent company"))
+            cfo = safe_float(cf.get("Net cash inflows/outflows from operating activities"))
+            capex = safe_float(cf.get("Purchase of fixed assets"))
+            if capex and capex > 0:
+                capex = -capex  # CapEx should be negative
+
+            # Calculate FCF
+            fcf = None
+            if cfo is not None and capex is not None:
+                fcf = cfo + capex  # capex is negative
+
+            # FCF margin
+            revenue = safe_float(income.get("Net Sales") or income.get("Revenue (Bn. VND)"))
+            fcf_margin = None
+            if fcf is not None and revenue and revenue > 0:
+                fcf_margin = fcf / revenue
+
+            # Get market cap from ratio data (already has it)
+            market_cap = safe_float(ratios.get("Market Capital (Bn. VND)"))
+            fcf_yield = None
+            if market_cap and fcf:
+                fcf_yield = fcf / market_cap
+
+            # CCC components (may be null for banks) - exact column names
+            dso = safe_float(ratios.get("Days Sales Outstanding"))
+            dio = safe_float(ratios.get("Days Inventory Outstanding"))
+            dpo = safe_float(ratios.get("Days Payable Outstanding"))
+            ccc = None
+            if dso is not None and dio is not None and dpo is not None:
+                ccc = dso + dio - dpo
+
+            return FCFAnalysisResponse(
+                symbol=symbol,
+                period=period,
+                net_income=net_income,
+                cfo=cfo,
+                capex=capex,
+                fcf=fcf,
+                fcf_margin=fcf_margin,
+                ccc=ccc,
+                dso=dso,
+                dio=dio,
+                dpo=dpo,
+                market_cap=market_cap,
+                fcf_yield=fcf_yield,
+            )
+        except StockServiceError:
+            raise
+        except Exception as e:
+            logger.error(f"Error calculating FCF analysis for {symbol}: {e}")
+            raise StockServiceError(f"Failed to calculate FCF analysis for {symbol}: {e}")
+
+    def get_sector_peers(
+        self,
+        symbol: str,
+        limit: int = 5,
+    ) -> SectorPeersResponse:
+        """Get sector peer companies for comparison.
+
+        Args:
+            symbol: Target stock symbol
+            limit: Maximum number of peers to return
+
+        Returns:
+            SectorPeersResponse with peer metrics
+        """
+        symbol = validate_symbol(symbol)
+        try:
+            listing = Listing()
+
+            # Get symbols with industry data (symbols_by_industries has ICB codes)
+            symbols_df = listing.symbols_by_industries()
+            if symbols_df is None or symbols_df.empty:
+                raise StockServiceError("Could not fetch symbol list")
+
+            # Find target stock's ICB code (column is 'symbol', not 'ticker')
+            target_row = symbols_df[symbols_df["symbol"] == symbol]
+            if target_row.empty:
+                raise StockServiceError(f"Symbol {symbol} not found")
+
+            # Column names: icb_code3, icb_name3
+            icb_code = str(target_row.iloc[0].get("icb_code3") or "")
+            icb_name = str(target_row.iloc[0].get("icb_name3") or "Unknown")
+
+            if not icb_code:
+                raise StockServiceError(f"No ICB code found for {symbol}")
+
+            # Find peers in same sector
+            sector_stocks = symbols_df[symbols_df["icb_code3"] == icb_code].copy()
+
+            # Sort alphabetically since no market cap in this API
+            # Take top N including target
+            top_symbols = sector_stocks.head(limit + 5)["symbol"].tolist()
+            if symbol not in top_symbols:
+                top_symbols = [symbol] + top_symbols[:limit]
+            else:
+                # Ensure target is first
+                top_symbols.remove(symbol)
+                top_symbols = [symbol] + top_symbols[:limit]
+
+            # Get ratio data for each peer
+            peers = []
+            for peer_symbol in top_symbols[:limit + 1]:
+                try:
+                    ratio_history = self.get_ratio_history(peer_symbol, periods=1)
+                    ratios = ratio_history[0] if ratio_history else {}
+
+                    peer_row = symbols_df[symbols_df["symbol"] == peer_symbol]
+                    company_name = peer_row.iloc[0].get("organ_name") if not peer_row.empty else None
+
+                    # Get market cap from ratio data
+                    market_cap = safe_float(ratios.get("Market Capital (Bn. VND)"))
+
+                    peers.append(PeerMetrics(
+                        symbol=peer_symbol,
+                        company_name=company_name,
+                        roe=safe_float(ratios.get("ROE (%)") or ratios.get("roe")),
+                        roa=safe_float(ratios.get("ROA (%)") or ratios.get("roa")),
+                        pe=safe_float(ratios.get("P/E") or ratios.get("priceToEarning")),
+                        pb=safe_float(ratios.get("P/B") or ratios.get("priceToBook")),
+                        market_cap=market_cap,
+                    ))
+                except Exception as e:
+                    logger.warning(f"Could not fetch data for peer {peer_symbol}: {e}")
+                    continue
+
+            return SectorPeersResponse(
+                symbol=symbol,
+                icb_code=icb_code,
+                icb_name=icb_name,
+                peers=peers,
+            )
+        except StockServiceError:
+            raise
+        except Exception as e:
+            logger.error(f"Error fetching sector peers for {symbol}: {e}")
+            raise StockServiceError(f"Failed to fetch sector peers for {symbol}: {e}")
+
+    def _normalize_ratio_data(self, data: dict) -> dict:
+        """Normalize ratio data to consistent keys (after MultiIndex flattening)."""
+        return {
+            "roe": safe_float(data.get("ROE (%)") or data.get("roe")),
+            "roa": safe_float(data.get("ROA (%)") or data.get("roa")),
+            "net_margin": safe_float(data.get("Net Profit Margin (%)") or data.get("postTaxMargin")),
+            "gross_margin": safe_float(data.get("Gross Profit Margin (%)") or data.get("grossProfitMargin")),
+            "current_ratio": safe_float(data.get("Current Ratio") or data.get("currentPayment")),
+            "quick_ratio": safe_float(data.get("Quick Ratio") or data.get("quickPayment")),
+            "debt_to_equity": safe_float(data.get("Debt/Equity") or data.get("debtOnEquity")),
+            "pe": safe_float(data.get("P/E") or data.get("priceToEarning")),
+            "pb": safe_float(data.get("P/B") or data.get("priceToBook")),
+            "asset_turnover": safe_float(data.get("Asset Turnover") or data.get("assetTurnover")),
+        }
+
+    def _normalize_cash_flow_data(self, data: dict) -> dict:
+        """Normalize cash flow data to consistent keys (using exact vnstock column names)."""
+        cfo = safe_float(data.get("Net cash inflows/outflows from operating activities"))
+        return {
+            "cfo": cfo,
+            "net_cfo": cfo,
+        }
