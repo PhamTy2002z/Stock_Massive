@@ -3,8 +3,6 @@
 import { Search, Share2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { SidebarTrigger } from "@/components/ui/sidebar"
-import { Separator } from "@/components/ui/separator"
 import { StockSearchBar } from "@/components/dashboard"
 import { StockSymbol } from "@/lib/api"
 import { NotificationPanel } from "./notification-panel"
@@ -23,8 +21,6 @@ export function DashboardHeader({ onStockSelect }: DashboardHeaderProps) {
   return (
     <header className="sticky top-0 z-10 flex h-16 shrink-0 items-center justify-between border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-4 transition-all duration-200">
       <div className="flex items-center gap-3">
-        <SidebarTrigger className="-ml-1" />
-        <Separator orientation="vertical" className="h-6" />
         <div className="hidden md:block">
           <StockSearchBar
             onSelect={handleStockSelect}

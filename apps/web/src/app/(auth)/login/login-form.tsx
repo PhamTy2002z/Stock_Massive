@@ -30,7 +30,7 @@ export default function LoginForm() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-black p-4">
+    <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <div className="w-full max-w-[450px] space-y-6">
         <div className="flex flex-col items-center space-y-4 text-center">
           <Image
@@ -42,10 +42,10 @@ export default function LoginForm() {
             priority
           />
           <div className="space-y-2">
-            <h1 className="text-3xl font-bold tracking-tight text-white">
+            <h1 className="text-3xl font-bold tracking-tight text-foreground">
               Sign in to Stock Massive
             </h1>
-            <p className="text-base text-gray-400">
+            <p className="text-base text-muted-foreground">
               Navigate the volatility. Seize the opportunity.
             </p>
           </div>
@@ -56,7 +56,7 @@ export default function LoginForm() {
             onClick={onGoogleSignIn}
             disabled={isLoading}
             variant="outline"
-            className="w-full bg-transparent border-gray-800 text-white hover:bg-gray-900 h-12 text-base"
+            className="w-full bg-transparent border-border text-foreground hover:bg-accent h-12 text-base"
           >
             {isLoading ? (
               <>
@@ -99,18 +99,18 @@ export default function LoginForm() {
         </div>
 
         <div className="text-center">
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-muted-foreground">
             By signing in, you agree to our{" "}
             <Link
               href="/terms"
-              className="text-gray-400 underline underline-offset-2 hover:text-white transition-colors"
+              className="text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors"
             >
               Terms of Service
             </Link>{" "}
             and{" "}
             <Link
               href="/privacy"
-              className="text-gray-400 underline underline-offset-2 hover:text-white transition-colors"
+              className="text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors"
             >
               Privacy Policy
             </Link>
