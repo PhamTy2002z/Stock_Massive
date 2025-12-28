@@ -23,7 +23,7 @@ export function HealthScoreCard({ symbol, className }: HealthScoreCardProps) {
     return (
       <Card className={className}>
         <CardContent className="flex items-center justify-center h-[400px] text-muted-foreground">
-          Chon mot co phieu de xem Health Score
+          Chọn một cổ phiếu để xem Health Score
         </CardContent>
       </Card>
     )
@@ -37,9 +37,9 @@ export function HealthScoreCard({ symbol, className }: HealthScoreCardProps) {
     return (
       <Card className={className}>
         <CardContent className="flex items-center justify-center h-[400px] text-destructive">
-          Khong the tai Health Score
+          Không thể tải Health Score
           <Button variant="outline" size="sm" className="ml-4" onClick={() => refetch()}>
-            Thu lai
+            Thử lại
           </Button>
         </CardContent>
       </Card>
