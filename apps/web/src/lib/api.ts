@@ -1,4 +1,14 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
+// Server-side uses Docker internal network, client uses public URL
+const getApiBaseUrl = () => {
+  // Server-side: use internal Docker network URL if available
+  if (typeof window === "undefined") {
+    return process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
+  }
+  // Client-side: use public URL
+  return process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
+}
+
+const API_BASE_URL = getApiBaseUrl()
 
 export interface PriceBoardItem {
   symbol: string

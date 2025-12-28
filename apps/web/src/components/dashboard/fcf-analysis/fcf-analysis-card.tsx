@@ -35,7 +35,7 @@ export function FCFAnalysisCard({ symbol, className }: FCFAnalysisCardProps) {
           <Wallet className="h-5 w-5" />
           FCF Analysis
           <span className="text-sm font-normal text-muted-foreground">- {data.period}</span>
-          <span className="ml-auto text-primary font-bold">{data.symbol}</span>
+          <span className="ml-auto text-white font-bold">{data.symbol}</span>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">

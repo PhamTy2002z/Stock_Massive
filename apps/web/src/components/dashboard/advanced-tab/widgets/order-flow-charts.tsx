@@ -28,22 +28,26 @@ interface OrderFlowChartsProps {
   isLoading: boolean
 }
 
-// Design pattern: black, grey, white accent
+// Design pattern: Muted Green/Red - Bloomberg/FireAnt/TradingView style
 const COLORS = {
-  // Buy side - White accent
-  buy: "hsl(0 0% 100%)",         // Pure white
-  buyLight: "hsl(0 0% 90%)",     // Lighter white
-  // Sell side - Cool grey
-  sell: "hsl(0 0% 55%)",         // Neutral grey
-  sellLight: "hsl(0 0% 65%)",    // Lighter grey
-  // Session markers - Subtle variants
-  ato: "hsl(0 0% 100%)",         // White (consistent accent)
-  atc: "hsl(0 0% 70%)",          // Light grey
+  // Buy side - Muted emerald (professional trading UI)
+  buy: "hsl(158 40% 45%)",        // Muted emerald-green
+  buyLight: "hsl(158 35% 52%)",   // Lighter variant
+  // Sell side - Muted rose (low saturation for dark mode)
+  sell: "hsl(0 45% 50%)",         // Muted rose-red
+  sellLight: "hsl(0 40% 58%)",    // Lighter variant
+  // Session markers - Neutral tones
+  ato: "hsl(35 50% 55%)",         // Muted amber
+  atc: "hsl(220 12% 55%)",        // Slate grey
   // Neutral
-  neutral: "hsl(0 0% 50%)",
-  // Card backgrounds
-  cardBg: "hsl(0 0% 18%)",       // Dark card bg
-  cardBgHover: "hsl(0 0% 22%)",  // Hover state
+  neutral: "hsl(0 0% 45%)",
+  // Card styling - elevated dark
+  cardBg: "hsl(0 0% 13%)",        // Darker base
+  cardBorder: "hsl(0 0% 20%)",    // Softer border
+  cardElevated: "hsl(0 0% 15%)",  // Elevated card
+  // Text colors - readable
+  textMuted: "hsl(0 0% 60%)",     // Labels - readable
+  textDim: "hsl(0 0% 50%)",       // Secondary info
 }
 
 function formatNumber(value: number): string {
@@ -121,16 +125,16 @@ function RadialProgress({
         >
           {percentage.toFixed(1)}%
         </span>
-        <span className="text-[10px] text-white/70 font-medium">{label}</span>
+        <span className="text-[10px] font-medium" style={{ color: COLORS.textMuted }}>{label}</span>
         {secondaryLabel && (
-          <span className="text-[9px] text-white/50">{secondaryLabel}</span>
+          <span className="text-[9px]" style={{ color: COLORS.textDim }}>{secondaryLabel}</span>
         )}
       </div>
     </div>
   )
 }
 
-// Stats card - Clean dark theme
+// Stats card - Bloomberg/TradingView style with elevation
 function StatsCard({
   icon: Icon,
   label,
@@ -150,47 +154,48 @@ function StatsCard({
 }) {
   return (
     <div
-      className="group relative overflow-hidden rounded-xl p-4 transition-all duration-200 hover:scale-[1.02]"
+      className="group relative overflow-hidden rounded-xl p-4 transition-all duration-200 hover:translate-y-[-2px]"
       style={{
-        backgroundColor: "hsl(0 0% 16%)",
-        border: "1px solid hsl(0 0% 25%)",
+        backgroundColor: COLORS.cardElevated,
+        border: `1px solid ${COLORS.cardBorder}`,
+        boxShadow: "0 4px 12px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.2)",
       }}
     >
       {/* Accent line on top */}
       <div
-        className="absolute top-0 left-0 right-0 h-0.5"
+        className="absolute top-0 left-0 right-0 h-0.5 opacity-80"
         style={{ backgroundColor: color }}
       />
 
       <div className="flex items-start justify-between mb-3">
         <div
           className="p-2 rounded-lg transition-transform duration-200 group-hover:scale-110"
-          style={{ backgroundColor: `${color}15` }}
+          style={{ backgroundColor: `${color}12` }}
         >
           <Icon className="h-4 w-4" style={{ color }} />
         </div>
         {percentage !== undefined && (
           <span
-            className="text-xs font-semibold tabular-nums"
-            style={{ color: "hsl(0 0% 70%)" }}
+            className="text-xs font-medium tabular-nums"
+            style={{ color: COLORS.textMuted }}
           >
             {percentage.toFixed(1)}%
           </span>
         )}
       </div>
 
-      <p className="text-2xl font-bold tabular-nums mb-0.5" style={{ color }}>
+      <p className="text-2xl font-bold tabular-nums mb-1" style={{ color }}>
         {value}
       </p>
-      <p className="text-xs text-white/60">
+      <p className="text-xs" style={{ color: COLORS.textMuted }}>
         {label}
-        {subValue && <span className="ml-1 text-white/40">• {subValue}</span>}
+        {subValue && <span className="ml-1" style={{ color: COLORS.textDim }}>• {subValue}</span>}
       </p>
 
       {percentageLabel && (
-        <div className="mt-3 pt-3 border-t border-white/10">
+        <div className="mt-3 pt-3" style={{ borderTop: "1px solid hsl(0 0% 22%)" }}>
           <div className="flex justify-between items-center text-xs">
-            <span className="text-white/50">{percentageLabel}</span>
+            <span style={{ color: COLORS.textDim }}>{percentageLabel}</span>
             <span className="font-semibold tabular-nums" style={{ color }}>
               {percentage?.toFixed(1)}%
             </span>
@@ -201,7 +206,7 @@ function StatsCard({
   )
 }
 
-// Mini stat card for ATO/ATC - Clean dark theme
+// Mini stat card for ATO/ATC - Elevated dark theme
 function MiniStatCard({
   icon: Icon,
   label,
@@ -217,22 +222,23 @@ function MiniStatCard({
 }) {
   return (
     <div
-      className="group flex items-center gap-4 p-4 rounded-xl transition-all duration-200 hover:scale-[1.02]"
+      className="group flex items-center gap-4 p-4 rounded-xl transition-all duration-200 hover:translate-y-[-2px]"
       style={{
-        backgroundColor: "hsl(0 0% 14%)",
-        border: "1px solid hsl(0 0% 22%)",
+        backgroundColor: COLORS.cardBg,
+        border: `1px solid ${COLORS.cardBorder}`,
+        boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
       }}
     >
       <div
         className="p-2.5 rounded-lg transition-transform duration-200 group-hover:scale-110"
-        style={{ backgroundColor: `${color}15` }}
+        style={{ backgroundColor: `${color}12` }}
       >
         <Icon className="h-5 w-5" style={{ color }} />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-xs text-white/50 mb-0.5">{label}</p>
+        <p className="text-xs mb-0.5" style={{ color: COLORS.textMuted }}>{label}</p>
         <p className="text-xl font-bold tabular-nums" style={{ color }}>{value}</p>
-        <p className="text-[10px] text-white/40 mt-0.5">{description}</p>
+        <p className="text-[10px] mt-0.5" style={{ color: COLORS.textDim }}>{description}</p>
       </div>
     </div>
   )
@@ -272,12 +278,13 @@ export function OrderFlowCharts({ data, isLoading }: OrderFlowChartsProps) {
     <div className="space-y-6">
       {/* Section 1: Radial Charts + Buy/Sell Cards */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-        {/* Radial Charts - Dark theme */}
+        {/* Radial Charts - Elevated dark theme */}
         <div
           className="lg:col-span-2 rounded-xl p-5"
           style={{
-            backgroundColor: "hsl(0 0% 16%)",
-            border: "1px solid hsl(0 0% 25%)",
+            backgroundColor: COLORS.cardElevated,
+            border: `1px solid ${COLORS.cardBorder}`,
+            boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
           }}
         >
           <h4 className="text-sm font-semibold mb-4 flex items-center gap-2 text-white">
@@ -305,20 +312,20 @@ export function OrderFlowCharts({ data, isLoading }: OrderFlowChartsProps) {
             />
           </div>
           {/* Legend */}
-          <div className="flex justify-center gap-6 mt-4 pt-3 border-t border-white/10">
+          <div className="flex justify-center gap-6 mt-4 pt-3" style={{ borderTop: `1px solid ${COLORS.cardBorder}` }}>
             <div className="flex items-center gap-2">
               <span
                 className="w-2.5 h-2.5 rounded-full"
                 style={{ backgroundColor: COLORS.buy }}
               />
-              <span className="text-xs text-white/60">% Lệnh Mua</span>
+              <span className="text-xs" style={{ color: COLORS.textMuted }}>% Lệnh Mua</span>
             </div>
             <div className="flex items-center gap-2">
               <span
                 className="w-2.5 h-2.5 rounded-full"
                 style={{ backgroundColor: COLORS.buyLight }}
               />
-              <span className="text-xs text-white/60">% KL Mua</span>
+              <span className="text-xs" style={{ color: COLORS.textMuted }}>% KL Mua</span>
             </div>
           </div>
         </div>
@@ -346,21 +353,22 @@ export function OrderFlowCharts({ data, isLoading }: OrderFlowChartsProps) {
         </div>
       </div>
 
-      {/* Section 2: Volume Comparison Bar Chart - Dark theme */}
+      {/* Section 2: Volume Comparison Bar Chart - Elevated dark theme */}
       <div
         className="rounded-xl p-5"
         style={{
-          backgroundColor: "hsl(0 0% 16%)",
-          border: "1px solid hsl(0 0% 25%)",
+          backgroundColor: COLORS.cardElevated,
+          border: `1px solid ${COLORS.cardBorder}`,
+          boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
         }}
       >
         <div className="flex items-center justify-between mb-4">
           <h4 className="text-sm font-semibold text-white">So sánh Khối lượng</h4>
           <div
             className="flex items-center gap-2 px-3 py-1.5 rounded-full"
-            style={{ backgroundColor: "hsl(0 0% 22%)" }}
+            style={{ backgroundColor: COLORS.cardBorder }}
           >
-            <span className="text-xs text-white/50">KL Ròng:</span>
+            <span className="text-xs" style={{ color: COLORS.textDim }}>KL Ròng:</span>
             <span
               className="text-sm font-bold tabular-nums"
               style={{ color: netVolume >= 0 ? COLORS.buy : COLORS.sell }}
@@ -384,20 +392,21 @@ export function OrderFlowCharts({ data, isLoading }: OrderFlowChartsProps) {
                 tickLine={false}
               />
               <Tooltip
-                cursor={{ fill: 'hsl(0 0% 25%)' }}
+                cursor={{ fill: COLORS.cardBorder }}
                 content={({ active, payload }) => {
                   if (!active || !payload?.length) return null
                   const d = payload[0].payload
                   return (
                     <div
-                      className="rounded-lg px-3 py-2 shadow-xl"
+                      className="rounded-lg px-3 py-2"
                       style={{
-                        backgroundColor: "hsl(0 0% 12%)",
-                        border: "1px solid hsl(0 0% 30%)",
+                        backgroundColor: COLORS.cardBg,
+                        border: `1px solid ${COLORS.cardBorder}`,
+                        boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
                       }}
                     >
                       <p className="text-sm font-semibold text-white">{d.name}</p>
-                      <p className="text-xs text-white/60 mt-0.5">
+                      <p className="text-xs mt-0.5" style={{ color: COLORS.textMuted }}>
                         {formatVolume(d.value)} cổ phiếu
                       </p>
                     </div>
@@ -433,7 +442,7 @@ export function OrderFlowCharts({ data, isLoading }: OrderFlowChartsProps) {
           </div>
           <div
             className="h-2.5 rounded-full overflow-hidden flex"
-            style={{ backgroundColor: "hsl(0 0% 25%)" }}
+            style={{ backgroundColor: COLORS.cardBorder }}
           >
             <div
               className="transition-all duration-500 ease-out"
@@ -455,12 +464,13 @@ export function OrderFlowCharts({ data, isLoading }: OrderFlowChartsProps) {
 
       {/* Section 3: Net Volume + ATO/ATC */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Net Volume - Dark theme with orange accent */}
+        {/* Net Volume - Elevated dark theme */}
         <div
           className="md:col-span-1 rounded-xl p-5 text-center relative overflow-hidden"
           style={{
-            backgroundColor: "hsl(0 0% 12%)",
-            border: `1px solid ${netVolume >= 0 ? COLORS.buy : COLORS.sell}30`,
+            backgroundColor: COLORS.cardBg,
+            border: `1px solid ${COLORS.cardBorder}`,
+            boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
           }}
         >
           {/* Accent glow */}
@@ -471,7 +481,7 @@ export function OrderFlowCharts({ data, isLoading }: OrderFlowChartsProps) {
             }}
           />
 
-          <p className="text-sm text-white/50 mb-3 relative">Khối lượng Ròng</p>
+          <p className="text-sm mb-3 relative" style={{ color: COLORS.textMuted }}>Khối lượng Ròng</p>
           <p
             className="text-4xl font-bold tabular-nums mb-2 relative"
             style={{ color: netVolume >= 0 ? COLORS.buy : COLORS.sell }}
@@ -518,9 +528,9 @@ export function OrderFlowCharts({ data, isLoading }: OrderFlowChartsProps) {
         </div>
       </div>
 
-      {/* Session Footer - Dark theme */}
-      <div className="flex items-center justify-center gap-2 text-xs text-white/40">
-        <div className="h-px flex-1 bg-white/10" />
+      {/* Session Footer - Muted */}
+      <div className="flex items-center justify-center gap-2 text-xs" style={{ color: COLORS.textDim }}>
+        <div className="h-px flex-1" style={{ backgroundColor: COLORS.cardBorder }} />
         <span>
           Phiên {new Date(data.date).toLocaleDateString("vi-VN", {
             weekday: "long",
@@ -529,9 +539,9 @@ export function OrderFlowCharts({ data, isLoading }: OrderFlowChartsProps) {
             year: "numeric"
           })}
         </span>
-        <span className="text-white/20">•</span>
+        <span style={{ color: COLORS.cardBorder }}>•</span>
         <span>Cập nhật: {new Date(data.last_updated).toLocaleTimeString("vi-VN")}</span>
-        <div className="h-px flex-1 bg-white/10" />
+        <div className="h-px flex-1" style={{ backgroundColor: COLORS.cardBorder }} />
       </div>
     </div>
   )

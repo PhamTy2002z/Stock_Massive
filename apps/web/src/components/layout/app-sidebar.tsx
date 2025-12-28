@@ -167,16 +167,24 @@ function SidebarBrand() {
           </div>
           {/* Toggle button - visible only when expanded */}
           {!isCollapsed && (
-            <button
+            <div
+              role="button"
+              tabIndex={0}
               onClick={(e) => {
                 e.stopPropagation()
                 toggleSidebar()
               }}
-              className="ml-auto p-1.5 rounded-md hover:bg-sidebar-accent transition-colors"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.stopPropagation()
+                  toggleSidebar()
+                }
+              }}
+              className="ml-auto p-1.5 rounded-md hover:bg-sidebar-accent transition-colors cursor-pointer"
               aria-label="Close sidebar"
             >
               <PanelLeft className="size-4" />
-            </button>
+            </div>
           )}
         </SidebarMenuButton>
       </SidebarMenuItem>
