@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { QueryProvider } from "@/components/providers/query-provider";
+import { QueryErrorBoundary } from "@/components/providers/query-error-boundary";
 import { Toaster } from "@/components/ui/sonner";
 
 const inter = Inter({
@@ -34,7 +35,9 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <QueryProvider>
-            {children}
+            <QueryErrorBoundary>
+              {children}
+            </QueryErrorBoundary>
             <Toaster />
           </QueryProvider>
         </ThemeProvider>

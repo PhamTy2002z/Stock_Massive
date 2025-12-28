@@ -14,6 +14,7 @@ export function QueryProvider({ children }: { children: React.ReactNode }) {
             gcTime: 10 * 60 * 1000, // 10 minutes
             refetchOnWindowFocus: false,
             retry: 1,
+            throwOnError: true, // Enable error propagation to ErrorBoundary
           },
         },
       })
