@@ -39,8 +39,8 @@ const subTabs = [
     label: "Money Flow",
     icon: Coins,
     description: "Dòng tiền NĐTNN & Tự doanh",
-    color: "text-amber-500",
-    bgColor: "bg-amber-500/10",
+    color: "text-white",
+    bgColor: "bg-white/10",
   },
   {
     value: "sector" as const,

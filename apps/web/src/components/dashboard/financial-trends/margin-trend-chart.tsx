@@ -28,8 +28,8 @@ export function MarginTrendChart({ data }: MarginTrendChartProps) {
       <AreaChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
         <defs>
           <linearGradient id="grossMarginGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="hsl(var(--accent-orange))" stopOpacity={0.3} />
-            <stop offset="95%" stopColor="hsl(var(--accent-orange))" stopOpacity={0} />
+            <stop offset="5%" stopColor="hsl(0 0% 100%)" stopOpacity={0.3} />
+            <stop offset="95%" stopColor="hsl(0 0% 100%)" stopOpacity={0} />
           </linearGradient>
           <linearGradient id="netMarginGradient" x1="0" y1="0" x2="0" y2="1">
             <stop offset="5%" stopColor="hsl(var(--muted-foreground))" stopOpacity={0.3} />
@@ -64,7 +64,7 @@ export function MarginTrendChart({ data }: MarginTrendChartProps) {
         <Area
           type="monotone"
           dataKey="gross_margin"
-          stroke="hsl(var(--accent-orange))"
+          stroke="hsl(0 0% 100%)"
           fill="url(#grossMarginGradient)"
           strokeWidth={2}
         />

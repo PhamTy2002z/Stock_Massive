@@ -69,7 +69,7 @@ export function CashFlowChart({ data }: CashFlowChartProps) {
           iconSize={10}
         />
         <ReferenceLine y={0} stroke="hsl(var(--foreground))" />
-        <Bar dataKey="cfo" fill="hsl(var(--accent-orange))" radius={[4, 4, 0, 0]} />
+        <Bar dataKey="cfo" fill="hsl(0 0% 100%)" radius={[4, 4, 0, 0]} />
         <Bar dataKey="cfi" fill="hsl(var(--muted-foreground))" radius={[4, 4, 0, 0]} />
         <Bar dataKey="cff" fill="hsl(var(--border))" radius={[4, 4, 0, 0]} />
       </BarChart>

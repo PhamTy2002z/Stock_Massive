@@ -18,11 +18,11 @@ interface ForeignFlowChartsProps {
   isLoading: boolean
 }
 
-// Color palette: Black, Grey, White, Orange
+// Color palette: Black, Grey, White accent
 const COLORS = {
-  orange: "#F59E0B",
-  orangeLight: "#FBBF24",
-  orangeDim: "rgba(245, 158, 11, 0.15)",
+  orange: "#FFFFFF",
+  orangeLight: "#E5E5E5",
+  orangeDim: "rgba(255, 255, 255, 0.15)",
   grey: "#6B7280",
   greyLight: "#9CA3AF",
   greyDark: "#374151",
@@ -105,20 +105,20 @@ function StatItem({
   return (
     <div className={cn(
       "flex items-center gap-3 p-3 rounded-lg transition-colors",
-      highlight ? "bg-[rgba(245,158,11,0.1)] border border-orange-500/30" : "bg-muted/30"
+      highlight ? "bg-white/10 border border-white/30" : "bg-muted/30"
     )}>
       <div className={cn(
         "w-9 h-9 rounded-lg flex items-center justify-center shrink-0",
-        highlight ? "bg-orange-500/20" : "bg-muted/50"
+        highlight ? "bg-white/20" : "bg-muted/50"
       )}>
-        <Icon className={cn("h-4 w-4", highlight ? "text-orange-500" : "text-muted-foreground")} />
+        <Icon className={cn("h-4 w-4", highlight ? "text-white" : "text-muted-foreground")} />
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-xs text-muted-foreground truncate">{label}</p>
         <div className="flex items-center gap-1.5">
           <p className={cn(
             "text-sm font-semibold truncate",
-            highlight ? "text-orange-500" : "text-foreground"
+            highlight ? "text-white" : "text-foreground"
           )}>
             {value}
           </p>
@@ -172,7 +172,7 @@ export function ForeignFlowCharts({ data, isLoading }: ForeignFlowChartsProps) {
             {/* Left: Radial Progress Charts */}
             <div>
               <h4 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
-                <span className="w-1 h-4 bg-orange-500 rounded-full" />
+                <span className="w-1 h-4 bg-white rounded-full" />
                 Tỷ lệ sở hữu & Giao dịch
               </h4>
               <div className="flex justify-around items-center py-2">
@@ -190,7 +190,7 @@ export function ForeignFlowCharts({ data, isLoading }: ForeignFlowChartsProps) {
             {/* Right: Volume Distribution Pie */}
             <div>
               <h4 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
-                <span className="w-1 h-4 bg-orange-500 rounded-full" />
+                <span className="w-1 h-4 bg-white rounded-full" />
                 Phân bổ Khối lượng
               </h4>
               <div className="flex items-center gap-4">
@@ -276,7 +276,7 @@ export function ForeignFlowCharts({ data, isLoading }: ForeignFlowChartsProps) {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="flex items-center justify-between p-3 rounded-lg bg-muted/20">
               <div className="flex items-center gap-2">
-                <BarChart3 className="h-4 w-4 text-orange-500" />
+                <BarChart3 className="h-4 w-4 text-white" />
                 <span className="text-sm text-muted-foreground">Room còn lại</span>
               </div>
               <span className="text-sm font-semibold text-foreground tabular-nums">

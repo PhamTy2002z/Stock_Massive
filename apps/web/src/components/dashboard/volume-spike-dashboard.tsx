@@ -59,7 +59,7 @@ interface VolumeSpikeDashboardProps {
 const ANOMALY_COLORS: Record<VolumeSpikeAnomalyLevel, string> = {
   normal: "hsl(var(--muted-foreground))",
   elevated: "hsl(45 93% 47%)",
-  high: "hsl(25 95% 53%)",
+  high: "hsl(0 0% 100%)", // White (was Orange)
   very_high: "hsl(0 84% 60%)",
 }
 
@@ -89,7 +89,7 @@ function formatRatio(value: number): string {
 // Color indicator for sector headers based on avg_spike_ratio
 function getSectorHeaderColor(avgRatio: number): string {
   if (avgRatio >= 3) return "border-l-4 border-l-red-500"
-  if (avgRatio >= 2) return "border-l-4 border-l-orange-500"
+  if (avgRatio >= 2) return "border-l-4 border-l-white"
   if (avgRatio >= 1.5) return "border-l-4 border-l-yellow-500"
   return "border-l-4 border-l-muted"
 }
@@ -197,8 +197,8 @@ function SummaryCards({
       </Card>
       <Card className="bg-card/50 border-border/50">
         <CardContent className="p-4 flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-orange-500/10">
-            <Activity className="h-5 w-5 text-orange-500" />
+          <div className="p-2 rounded-lg bg-white/10">
+            <Activity className="h-5 w-5 text-white" />
           </div>
           <div>
             <p className="text-sm text-muted-foreground">Tỷ lệ TB</p>
@@ -319,7 +319,7 @@ function TopVolatilityTable({
                       "inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold",
                       stock.rank === 1 && "bg-yellow-500/20 text-yellow-600 dark:text-yellow-400",
                       stock.rank === 2 && "bg-gray-300/30 text-gray-600 dark:text-gray-400",
-                      stock.rank === 3 && "bg-orange-400/20 text-orange-600 dark:text-orange-400",
+                      stock.rank === 3 && "bg-white/20 text-white dark:text-white",
                       stock.rank > 3 && "text-muted-foreground"
                     )}>
                       {stock.rank}
@@ -567,7 +567,8 @@ export function VolumeSpikeDashboard({ className }: VolumeSpikeDashboardProps) {
   const [selectedSector, setSelectedSector] = useState<string>("all")
   const [expandAll, setExpandAll] = useState(false)
 
-  const { data, isLoading, isFetching, error, refetch } = useVolumeSpikes({
+  // data is ALWAYS defined with useSuspenseQuery - Suspense handles loading, ErrorBoundary handles errors
+  const { data, isFetching, refetch } = useVolumeSpikes({
     minRatio,
     exchange: topProfitableOnly ? undefined : exchange,
     includeUpcom: topProfitableOnly ? false : includeUpcom,
@@ -657,25 +658,7 @@ export function VolumeSpikeDashboard({ className }: VolumeSpikeDashboardProps) {
     }
   }, [data?.industries, expandedSectors.size, expandAll])
 
-  if (isLoading && !data) {
-    return <VolumeSpikeDashboardSkeleton className={className} />
-  }
-
-  if (error) {
-    return (
-      <div className={cn("space-y-4", className)}>
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4">
-          <p className="text-sm text-destructive">
-            Không thể tải dữ liệu: {error.message}
-          </p>
-          <button onClick={() => refetch()} className="mt-2 text-sm underline hover:no-underline">
-            Thử lại
-          </button>
-        </div>
-      </div>
-    )
-  }
-
+  // data is always defined with useSuspenseQuery
   return (
     <div className={cn("space-y-6", className)}>
       {/* Header */}

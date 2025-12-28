@@ -30,9 +30,9 @@ export function FCFWaterfall({ data }: FCFWaterfallProps) {
 
   const items = [
     { label: "Net Income", value: data.net_income, color: "bg-muted-foreground" },
-    { label: "CFO", value: data.cfo, color: "bg-[hsl(var(--accent-orange))]" },
+    { label: "CFO", value: data.cfo, color: "bg-white" },
     { label: "CapEx", value: data.capex, color: "bg-red-500" },
-    { label: "FCF", value: data.fcf, color: "bg-[hsl(var(--accent-orange))]" },
+    { label: "FCF", value: data.fcf, color: "bg-white" },
   ]
 
   return (

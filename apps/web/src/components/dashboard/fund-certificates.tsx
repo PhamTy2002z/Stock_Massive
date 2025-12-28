@@ -117,10 +117,10 @@ function FundRow({ symbol, fundType, nav, changePct }: FundRowProps) {
   return (
     <div
       className={cn(
-        "grid grid-cols-[1fr_auto_auto] gap-4 px-4 py-3 transition-colors border-l-2",
-        isPositive && "border-l-emerald-500 dark:border-l-emerald-400 bg-emerald-500/5 dark:bg-emerald-400/5 hover:bg-emerald-500/10 dark:hover:bg-emerald-400/10",
-        isNegative && "border-l-red-500 dark:border-l-red-400 bg-red-500/5 dark:bg-red-400/5 hover:bg-red-500/10 dark:hover:bg-red-400/10",
-        isNeutral && "border-l-transparent hover:bg-muted/30"
+        "grid grid-cols-[1fr_auto_auto] gap-4 px-4 py-3 transition-colors border-l-2 hover:bg-muted/30",
+        isPositive && "border-l-emerald-500 dark:border-l-emerald-400",
+        isNegative && "border-l-red-500 dark:border-l-red-400",
+        isNeutral && "border-l-transparent"
       )}
     >
       <div className="min-w-0">

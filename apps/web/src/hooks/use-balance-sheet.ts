@@ -1,31 +1,28 @@
 "use client"
 
-import { useQuery, keepPreviousData } from "@tanstack/react-query"
+import { useSuspenseQuery } from "@tanstack/react-query"
 import { fetchBalanceSheet, type PeriodType } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
 
+/**
+ * Hook for balance sheet - requires valid symbol.
+ * Consumer must validate symbol before rendering.
+ */
 export function useBalanceSheet(
-  symbol: string | null,
+  symbol: string,
   period: PeriodType = "quarter",
   limit: number = 4
 ) {
-  const query = useQuery({
-    queryKey: symbol ? queryKeys.balanceSheet(symbol, period, limit) : ["balance", "empty"],
-    queryFn: () => {
-      if (!symbol) throw new Error("Symbol required")
-      return fetchBalanceSheet(symbol, period, limit)
-    },
-    enabled: !!symbol,
+  const { data, isFetching, refetch } = useSuspenseQuery({
+    queryKey: queryKeys.balanceSheet(symbol, period, limit),
+    queryFn: () => fetchBalanceSheet(symbol, period, limit),
     staleTime: 5 * 60 * 1000, // 5 minutes
-    placeholderData: keepPreviousData,
   })
 
+  // data is ALWAYS defined with useSuspenseQuery
   return {
-    data: query.data ?? null,
-    isLoading: query.isLoading,
-    isFetching: query.isFetching,
-    isPlaceholderData: query.isPlaceholderData,
-    error: query.error,
-    refetch: query.refetch,
+    data,
+    isFetching,
+    refetch,
   }
 }

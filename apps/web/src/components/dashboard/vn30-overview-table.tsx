@@ -110,7 +110,8 @@ export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
   const [rowsPerPage, setRowsPerPage] = useState(10)
   const [sortDirection, setSortDirection] = useState<SortDirection>(null)
 
-  const { data, isLoading, isFetching, error, refetch } = useVN30Overview()
+  // data is ALWAYS defined with useSuspenseQuery - Suspense handles loading, ErrorBoundary handles errors
+  const { data, isFetching, refetch } = useVN30Overview()
 
   const stocks = useMemo(() => {
     const rawStocks = data?.stocks ?? []
@@ -156,49 +157,7 @@ export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
     refetch()
   }, [refetch])
 
-  if (isLoading && !data) {
-    return (
-      <div className={className}>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-foreground">Tổng quan VN30</h2>
-          <button
-            disabled
-            className="p-1.5 rounded-md hover:bg-muted transition-colors disabled:opacity-50"
-            title="Làm mới dữ liệu"
-            aria-label="Làm mới dữ liệu"
-          >
-            <RefreshCw className="h-4 w-4" />
-          </button>
-        </div>
-        <VN30OverviewTableSkeleton />
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className={cn("space-y-4", className)}>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-foreground">Tổng quan VN30</h2>
-          <button
-            onClick={handleRefetch}
-            disabled={isFetching}
-            className="p-1.5 rounded-md hover:bg-muted transition-colors disabled:opacity-50"
-            title="Làm mới dữ liệu"
-            aria-label="Làm mới dữ liệu"
-          >
-            <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
-          </button>
-        </div>
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4">
-          <p className="text-sm text-destructive">
-            Không thể tải dữ liệu VN30: {error.message}
-          </p>
-        </div>
-      </div>
-    )
-  }
-
+  // data is always defined with useSuspenseQuery
   if (totalItems === 0) {
     return (
       <div className={cn("space-y-4", className)}>

@@ -146,7 +146,7 @@ export function PriceDepthChart({ data, isLoading }: PriceDepthChartProps) {
             data.spread_percent < 0.5
               ? "bg-green-500/20 text-green-600"
               : data.spread_percent < 1
-                ? "bg-amber-500/20 text-amber-600"
+                ? "bg-white/20 text-white"
                 : "bg-red-500/20 text-red-600"
           )}>
             {data.spread_percent.toFixed(2)}%

@@ -17,7 +17,7 @@ export function CCCIndicator({ ccc, dso, dio, dpo }: CCCIndicatorProps) {
   }
 
   const getCCCColor = (days: number) => {
-    if (days <= 30) return "text-[hsl(var(--accent-orange))]"
+    if (days <= 30) return "text-white"
     if (days <= 60) return "text-yellow-500"
     return "text-red-500"
   }

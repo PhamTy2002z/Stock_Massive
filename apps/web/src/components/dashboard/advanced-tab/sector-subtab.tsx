@@ -3,43 +3,16 @@
 import { useSectorPeers } from "@/hooks/use-sector-peers"
 import { SectorOverviewCard } from "./widgets/sector-overview-card"
 import { PeerComparisonTable } from "./widgets/peer-comparison-table"
-import { RefreshCw, AlertCircle, Building2 } from "lucide-react"
+import { RefreshCw, Building2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 
 interface SectorSubtabProps {
   symbol: string
 }
 
-function SectorSubtabSkeleton() {
-  return (
-    <div className="space-y-6">
-      <Skeleton className="h-28 w-full" />
-      <Skeleton className="h-8 w-24" />
-      <Skeleton className="h-64 w-full" />
-    </div>
-  )
-}
-
 export default function SectorSubtab({ symbol }: SectorSubtabProps) {
-  const { data, isLoading, error, refetch, dataUpdatedAt } = useSectorPeers(symbol)
-
-  if (isLoading) return <SectorSubtabSkeleton />
-
-  if (error) {
-    return (
-      <div className="flex items-center gap-3 p-4 rounded-lg bg-destructive/10 border border-destructive/20">
-        <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
-        <p className="text-sm text-destructive">
-          Có lỗi khi tải dữ liệu. Vui lòng thử lại.
-        </p>
-        <Button variant="ghost" size="sm" onClick={() => refetch()}>
-          Thử lại
-        </Button>
-      </div>
-    )
-  }
+  const { data, isFetching, refetch, dataUpdatedAt } = useSectorPeers(symbol)
 
   if (!data || data.peers.length === 0) {
     return (
@@ -81,13 +54,13 @@ export default function SectorSubtab({ symbol }: SectorSubtabProps) {
             variant="ghost"
             size="sm"
             onClick={() => refetch()}
-            disabled={isLoading}
+            disabled={isFetching}
             className={cn(
               "h-8 gap-1.5 text-muted-foreground hover:text-foreground",
               "hover:bg-muted/50 transition-colors"
             )}
           >
-            <RefreshCw className={cn("h-3.5 w-3.5", isLoading && "animate-spin")} />
+            <RefreshCw className={cn("h-3.5 w-3.5", isFetching && "animate-spin")} />
             <span className="text-xs">Làm mới</span>
           </Button>
         </div>

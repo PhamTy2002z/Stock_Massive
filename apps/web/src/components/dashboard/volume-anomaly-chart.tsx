@@ -28,7 +28,7 @@ interface VolumeAnomalyChartProps {
 const ANOMALY_COLORS: Record<VolumeAnomalyLevel, string> = {
   normal: "hsl(var(--muted-foreground))",
   elevated: "hsl(45 93% 47%)", // Yellow
-  high: "hsl(25 95% 53%)", // Orange
+  high: "hsl(0 0% 100%)", // White (was Orange)
   very_high: "hsl(0 84% 60%)", // Red
 }
 
@@ -78,7 +78,7 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
               className={cn(
                 "font-medium",
                 data.anomaly_level === "very_high" && "text-red-500",
-                data.anomaly_level === "high" && "text-orange-500",
+                data.anomaly_level === "high" && "text-white",
                 data.anomaly_level === "elevated" && "text-yellow-500"
               )}
             >

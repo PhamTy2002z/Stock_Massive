@@ -8,7 +8,7 @@ import { FCFWaterfall } from "./fcf-waterfall"
 import { CCCIndicator } from "./ccc-indicator"
 
 interface FCFAnalysisCardProps {
-  symbol: string | null
+  symbol: string
   className?: string
 }
 
@@ -26,31 +26,7 @@ export function FCFAnalysisCardSkeleton({ className }: { className?: string }) {
 }
 
 export function FCFAnalysisCard({ symbol, className }: FCFAnalysisCardProps) {
-  const { data, isLoading, error } = useFCFAnalysis(symbol)
-
-  if (!symbol) {
-    return (
-      <Card className={className}>
-        <CardContent className="flex items-center justify-center h-[350px] text-muted-foreground">
-          Chọn một cổ phiếu để xem FCF Analysis
-        </CardContent>
-      </Card>
-    )
-  }
-
-  if (isLoading) {
-    return <FCFAnalysisCardSkeleton className={className} />
-  }
-
-  if (error || !data) {
-    return (
-      <Card className={className}>
-        <CardContent className="flex items-center justify-center h-[350px] text-destructive">
-          Không thể tải FCF Analysis
-        </CardContent>
-      </Card>
-    )
-  }
+  const { data } = useFCFAnalysis(symbol)
 
   return (
     <Card className={className}>
@@ -69,13 +45,13 @@ export function FCFAnalysisCard({ symbol, className }: FCFAnalysisCardProps) {
         <div className="grid grid-cols-2 gap-4 pt-4 border-t border-border/50">
           <div className="text-center">
             <div className="text-sm text-muted-foreground">FCF Margin</div>
-            <div className="text-xl font-bold text-[hsl(var(--accent-orange))]">
+            <div className="text-xl font-bold text-white">
               {data.fcf_margin ? `${(data.fcf_margin * 100).toFixed(1)}%` : "-"}
             </div>
           </div>
           <div className="text-center">
             <div className="text-sm text-muted-foreground">FCF Yield</div>
-            <div className="text-xl font-bold text-[hsl(var(--accent-orange))]">
+            <div className="text-xl font-bold text-white">
               {data.fcf_yield ? `${(data.fcf_yield * 100).toFixed(2)}%` : "-"}
             </div>
           </div>
