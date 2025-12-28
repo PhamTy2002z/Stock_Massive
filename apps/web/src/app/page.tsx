@@ -6,8 +6,21 @@ import {
   SectorPerformanceSection,
   FundCertificates,
   VN30OverviewTable,
+  CollapsibleSection,
+  MarketBreadth,
+  TopMovers,
+  ForeignFlow,
 } from "@/components/dashboard"
-import { fetchMarketIndicesServer, fetchSectorPerformanceServer } from "@/lib/api-server"
+import {
+  MarketBreadthSkeleton,
+  TopMoversSkeleton,
+  ForeignFlowSkeleton,
+} from "@/components/dashboard/market-overview-skeleton"
+import {
+  fetchMarketIndicesServer,
+  fetchSectorPerformanceServer,
+  fetchMarketOverviewServer,
+} from "@/lib/api-server"
 import { queryKeys } from "@/lib/query-keys"
 
 async function prefetchData() {
@@ -21,6 +34,10 @@ async function prefetchData() {
     queryClient.prefetchQuery({
       queryKey: queryKeys.sectorPerformance,
       queryFn: fetchSectorPerformanceServer,
+    }),
+    queryClient.prefetchQuery({
+      queryKey: queryKeys.marketOverview,
+      queryFn: fetchMarketOverviewServer,
     }),
   ])
 
@@ -51,6 +68,28 @@ export default async function Home() {
             {/* Market Indices Section */}
             <section>
               <MarketIndices />
+            </section>
+
+            {/* Market Breadth Section */}
+            <CollapsibleSection id="market-breadth" title="Độ rộng thị trường">
+              <Suspense fallback={<MarketBreadthSkeleton />}>
+                <MarketBreadth />
+              </Suspense>
+            </CollapsibleSection>
+
+            {/* Top Movers + Foreign Flow Grid */}
+            <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <CollapsibleSection id="top-movers" title="Top Biến động">
+                <Suspense fallback={<TopMoversSkeleton />}>
+                  <TopMovers />
+                </Suspense>
+              </CollapsibleSection>
+
+              <CollapsibleSection id="foreign-flow" title="Giao dịch NDNN">
+                <Suspense fallback={<ForeignFlowSkeleton />}>
+                  <ForeignFlow />
+                </Suspense>
+              </CollapsibleSection>
             </section>
 
             {/* VN30 Overview Section */}
