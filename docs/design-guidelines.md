@@ -22,39 +22,61 @@ Stock Massive follows a Modern + Clean design philosophy characterized by:
 
 ```css
 :root {
-  /* Primary Accent - Orange */
-  --accent-orange: 25 95% 53%;         /* #FF6B00 - CTAs, highlights, important indicators */
-
-  /* Base Colors */
-  --background: 210 20% 98%;           /* Off-white background */
-  --foreground: 222 47% 11%;           /* Dark blue-gray text */
+  /* Light Mode */
+  --background: 210 20% 98%;           /* #F9FAFB - Off-white background */
+  --foreground: 222 47% 11%;           /* #0F172A - Dark text */
 
   /* Cards & Surfaces */
-  --card: 0 0% 100%;                   /* Pure white cards */
+  --card: 0 0% 100%;                   /* #FFFFFF - Pure white cards */
   --card-foreground: 222 47% 11%;
 
-  /* Greys - UI Elements */
+  /* Primary Accent - Orange */
+  --primary: 25 95% 53%;               /* #F97316 - CTAs, highlights, important indicators */
+  --primary-foreground: 0 0% 100%;
+
+  /* Secondary & UI Elements */
+  --secondary: 210 40% 96%;            /* #F1F5F9 */
   --muted: 210 40% 96%;
   --muted-foreground: 215 16% 47%;
   --border: 214 32% 91%;
   --input: 214 32% 91%;
+
+  /* Destructive */
+  --destructive: 0 84% 60%;            /* Red */
 }
 
 .dark {
-  --accent-orange: 25 95% 53%;         /* Same orange in dark mode */
+  /* Dark Mode - Neutral Grays (NO blue tint) */
+  --background: 0 0% 11%;              /* #1B1B1B - Deep black-gray */
+  --foreground: 0 0% 100%;             /* #FFFFFF - Pure white text */
 
-  --background: 222 47% 6%;            /* Deep blue-black */
-  --foreground: 210 40% 98%;           /* Off-white text */
+  /* Cards & Surfaces */
+  --card: 0 0% 15%;                    /* #262626 */
+  --card-foreground: 0 0% 100%;
 
-  --card: 222 47% 8%;                  /* Slightly lighter cards */
-  --card-foreground: 210 40% 98%;
+  /* Primary Accent - Orange (same as light mode) */
+  --primary: 25 95% 53%;               /* #F97316 */
+  --primary-foreground: 0 0% 100%;
 
-  --muted: 217 33% 17%;
-  --muted-foreground: 215 20% 65%;
-  --border: 217 33% 17%;
-  --input: 217 33% 17%;
+  /* Secondary & UI Elements */
+  --secondary: 0 0% 8%;                /* #141414 */
+  --muted: 0 0% 8%;                    /* #141414 */
+  --muted-foreground: 0 0% 65%;        /* #A6A6A6 */
+  --accent: 0 0% 18%;                  /* #2E2E2E */
+  --border: 0 0% 20%;                  /* #333333 */
+
+  /* Sidebar */
+  --sidebar-background: 0 0% 8%;       /* #141414 */
+
+  /* Destructive */
+  --destructive: 0 84% 60%;            /* Red */
 }
 ```
+
+**Key Design Principles:**
+- Primary color is **ORANGE** (#F97316) - used for CTAs and highlights
+- Dark mode uses **neutral grays** (hue 0, saturation 0%) - NO blue tint
+- Sidebar active states use `bg-primary text-primary-foreground`
 
 ### Semantic Colors
 
@@ -84,7 +106,7 @@ Stock Massive follows a Modern + Clean design philosophy characterized by:
 
 ```tsx
 // Primary CTAs and highlights - Use Orange
-<Button className="bg-[hsl(var(--accent-orange))] hover:bg-[hsl(var(--accent-orange))]/90">
+<Button className="bg-primary hover:bg-primary/90 text-primary-foreground">
   Add to Watchlist
 </Button>
 
@@ -236,7 +258,7 @@ interface KPICardProps {
 <LineChart data={data}>
   <XAxis dataKey="date" />
   <YAxis />
-  <Line dataKey="price" stroke="hsl(var(--accent-orange))" />
+  <Line dataKey="price" stroke="hsl(var(--primary))" />
   <Tooltip />
 </LineChart>
 
@@ -244,7 +266,7 @@ interface KPICardProps {
 <BarChart data={data}>
   <XAxis dataKey="symbol" />
   <YAxis />
-  <Bar dataKey="volume" fill="hsl(var(--accent-orange))" />
+  <Bar dataKey="volume" fill="hsl(var(--primary))" />
   <Tooltip />
 </BarChart>
 
@@ -258,7 +280,7 @@ interface KPICardProps {
         <TableCell className="w-[200px]">
           <div className="h-2 rounded-full bg-muted">
             <div
-              className="h-full rounded-full bg-[hsl(var(--accent-orange))]"
+              className="h-full rounded-full bg-primary"
               style={{ width: `${(row.value / maxValue) * 100}%` }}
             />
           </div>
@@ -333,7 +355,7 @@ interface KPICardProps {
 ```tsx
 // KPI card - click to view details
 <Card
-  className="cursor-pointer hover:border-[hsl(var(--accent-orange))] transition-colors"
+  className="cursor-pointer hover:border-primary transition-colors"
   onClick={() => setShowDetails(true)}
 >
   <KPICard {...props} />
@@ -658,7 +680,7 @@ import { Button } from "@/components/ui/button"
 </Button>
 
 // CTA with orange accent
-<Button className="bg-[hsl(var(--accent-orange))] hover:bg-[hsl(var(--accent-orange))]/90">
+<Button className="bg-primary hover:bg-primary/90">
   Add to Watchlist
 </Button>
 ```

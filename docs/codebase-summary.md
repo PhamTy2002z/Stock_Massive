@@ -55,8 +55,8 @@ Stock Massive is a Vietnamese stock market data platform powered by the `vnstock
 
 **Design:**
 * Modern + Clean philosophy
-* HSL color system with CSS variables
-* Dark/light themes support
+* HSL color system with CSS variables (Orange #F97316 primary, neutral grays in dark mode)
+* Dark/light themes support (no blue tint)
 
 ## 3. Directory Structure
 
