@@ -14,9 +14,15 @@ Create Peer Comparison table with heatmap coloring and FCF Waterfall visualizati
 
 - Sector peers via ICB codes (icbCode3)
 - Top 5 peers by market cap in same sector
-- Heatmap coloring: Green (above avg), Red (below avg)
+- **Color per Design Guidelines:**
+  - Orange accent for target stock highlight
+  - Green/Red only for above/below average in heatmap
+  - Use muted-foreground for secondary text
 - FCF Waterfall: Net Income -> adjustments -> CFO -> CapEx -> FCF
-- CCC (Cash Conversion Cycle) may be NULL for banks - handle gracefully
+- CCC (Cash Conversion Cycle) may be NULL for banks - show "N/A - Không áp dụng"
+- **KPI Requirements (MANDATORY):**
+  - Show benchmark context (sector average)
+  - Show time range in card header
 
 ## Requirements
 
@@ -246,13 +252,14 @@ export function PeerMetricsTable({ peers, targetSymbol }: PeerMetricsTableProps)
               key={peer.symbol}
               className={cn(
                 "border-b border-border/30 hover:bg-muted/20",
-                peer.symbol === targetSymbol && "bg-primary/5"
+                // Use orange accent for target stock per Design Guidelines
+                peer.symbol === targetSymbol && "bg-[hsl(var(--accent-orange))]/10 border-[hsl(var(--accent-orange))]/30"
               )}
             >
               <td className="py-2 px-3">
                 <span className={cn(
                   "font-semibold",
-                  peer.symbol === targetSymbol && "text-primary"
+                  peer.symbol === targetSymbol && "text-[hsl(var(--accent-orange))]"
                 )}>
                   {peer.symbol}
                 </span>
@@ -397,10 +404,10 @@ export function FCFWaterfall({ data }: FCFWaterfallProps) {
   }
 
   const items = [
-    { label: "Net Income", value: data.net_income, color: "bg-blue-500" },
-    { label: "CFO", value: data.cfo, color: "bg-green-500" },
+    { label: "Net Income", value: data.net_income, color: "bg-muted-foreground" },
+    { label: "CFO", value: data.cfo, color: "bg-[hsl(var(--accent-orange))]" },
     { label: "CapEx", value: data.capex, color: "bg-red-500" },
-    { label: "FCF", value: data.fcf, color: "bg-purple-500" },
+    { label: "FCF", value: data.fcf, color: "bg-[hsl(var(--accent-orange))]" },
   ]
 
   return (
@@ -453,7 +460,8 @@ export function CCCIndicator({ ccc, dso, dio, dpo }: CCCIndicatorProps) {
   }
 
   const getCCCColor = (days: number) => {
-    if (days <= 30) return "text-green-500"
+    // Use orange for good (<=30), yellow for moderate, red for poor
+    if (days <= 30) return "text-[hsl(var(--accent-orange))]"
     if (days <= 60) return "text-yellow-500"
     return "text-red-500"
   }
@@ -558,13 +566,13 @@ export function FCFAnalysisCard({ symbol, className }: FCFAnalysisCardProps) {
         <div className="grid grid-cols-2 gap-4 pt-4 border-t border-border/50">
           <div className="text-center">
             <div className="text-sm text-muted-foreground">FCF Margin</div>
-            <div className="text-xl font-bold text-green-500">
+            <div className="text-xl font-bold text-[hsl(var(--accent-orange))]">
               {data.fcf_margin ? `${(data.fcf_margin * 100).toFixed(1)}%` : "-"}
             </div>
           </div>
           <div className="text-center">
             <div className="text-sm text-muted-foreground">FCF Yield</div>
-            <div className="text-xl font-bold text-blue-500">
+            <div className="text-xl font-bold text-[hsl(var(--accent-orange))]">
               {data.fcf_yield ? `${(data.fcf_yield * 100).toFixed(2)}%` : "-"}
             </div>
           </div>

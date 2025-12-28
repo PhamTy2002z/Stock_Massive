@@ -1,7 +1,7 @@
 ---
 title: "Financial Statements Enhancement"
 description: "Add health scorecard, trend charts, peer comparison, and FCF analysis to Financial Statements page"
-status: pending
+status: in-progress
 priority: P1
 effort: 16h
 branch: main
@@ -86,6 +86,20 @@ API Endpoints:
 | Trend periods | 8 quarters | Balance between data richness and API calls |
 | Peer selection | Top 5 by market cap in same ICB3 | Relevant, not overwhelming |
 | FCF calculation | CFO - CapEx | Standard definition, data available |
+| **Color palette** | **Orange accent per Design Guidelines** | **Consistent with project design system** |
+
+## Design Guidelines Compliance
+
+All UI components follow `/docs/design-guidelines.md`:
+
+| Guideline | Implementation |
+|-----------|----------------|
+| **Color**: Orange accent | Primary colors use `--accent-orange`, not hardcoded colors |
+| **KPI Requirements** | All cards show time range, benchmark, delta vs prior |
+| **Feedback State** | Last Updated timestamp + Refresh button |
+| **Loading State** | Skeleton loading mandatory |
+| **Error State** | Clear message + Retry button |
+| **Drill-down Pattern** | Row click opens Sheet with detail |
 
 ## Rate Limit Strategy
 
@@ -109,3 +123,19 @@ API Endpoints:
 | VCI rate limiting | Aggressive caching, 150ms delay between calls |
 | CCC null for banks | Handle gracefully, show "N/A" |
 | Large data payload | Limit to 8 quarters, compress responses |
+
+## Validation Summary
+
+**Validated:** 2025-12-28
+**Questions asked:** 6
+
+### Confirmed Decisions
+- **UI Pattern:** Sheet (slide-over) - Panel trượt từ phải khi click row
+- **Score Weights:** Default (Profitability 30%, Liquidity/Leverage 20%, Efficiency/Valuation 15%)
+- **Trend Periods:** 8 quarters - cân bằng data richness và performance
+- **Peer Count:** Top 5 công ty cùng ngành ICB3
+- **Bank CCC:** Show "N/A - Không áp dụng cho ngân hàng/tài chính"
+- **FCF Waterfall:** Simple (4 bars) - Net Income → CFO → CapEx → FCF
+
+### Action Items
+- [x] All decisions confirmed, no plan changes required

@@ -4,7 +4,8 @@ from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from src.core.ratelimit import heavy_rate_limit
+from src.core.cache import TradingHoursCache
+from src.core.ratelimit import heavy_rate_limit, standard_rate_limit
 from ..service import get_stock_service
 from ..schemas.financial import (
     FinancialRatio,
@@ -13,10 +14,32 @@ from ..schemas.financial import (
     BalanceSheetItem,
     BalanceSheetResponse,
     CashFlowResponse,
+    HealthScoreResponse,
+    TrendMetricsResponse,
+    FCFAnalysisResponse,
 )
 from ..shared import StockServiceError
 
 router = APIRouter()
+
+# Cache instances for new endpoints
+health_score_cache = TradingHoursCache(
+    key_prefix="stock:health_score:",
+    ttl_trading=3600,      # 1 hour during trading
+    ttl_off_hours=86400,   # 24 hours off-hours
+)
+
+trend_metrics_cache = TradingHoursCache(
+    key_prefix="stock:trend_metrics:",
+    ttl_trading=3600,
+    ttl_off_hours=86400,
+)
+
+fcf_analysis_cache = TradingHoursCache(
+    key_prefix="stock:fcf_analysis:",
+    ttl_trading=3600,
+    ttl_off_hours=86400,
+)
 
 
 @router.get("/{symbol}/financials/ratios", response_model=List[FinancialRatio], dependencies=[Depends(heavy_rate_limit)])
@@ -120,5 +143,107 @@ async def get_cash_flow_detailed(
     try:
         service = get_stock_service()
         return service.get_cash_flow_detailed(symbol, period, limit)
+    except StockServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+# ==================== New Endpoints for Health Score & Trends ====================
+
+
+@router.get(
+    "/{symbol}/health-score",
+    response_model=HealthScoreResponse,
+    dependencies=[Depends(standard_rate_limit)],
+)
+async def get_health_score(symbol: str) -> HealthScoreResponse:
+    """Get financial health scorecard for a stock.
+
+    Calculates a 0-100 health score based on 5 dimensions:
+    - Profitability (ROE, ROA, Net Margin)
+    - Liquidity (Current Ratio, Quick Ratio)
+    - Leverage (D/E)
+    - Efficiency (Asset Turnover)
+    - Valuation (P/E, P/B)
+
+    Also includes Piotroski F-Score (0-9) for fundamental strength.
+    """
+    # Try cache first
+    cached = health_score_cache.get(symbol.upper())
+    if cached:
+        return HealthScoreResponse(**cached)
+
+    try:
+        service = get_stock_service()
+        result = service.get_health_score(symbol)
+
+        # Cache result
+        health_score_cache.set(symbol.upper(), result.model_dump(mode="json"))
+
+        return result
+    except StockServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get(
+    "/{symbol}/trend-metrics",
+    response_model=TrendMetricsResponse,
+    dependencies=[Depends(standard_rate_limit)],
+)
+async def get_trend_metrics(
+    symbol: str,
+    periods: int = Query(8, ge=4, le=16, description="Number of quarters"),
+) -> TrendMetricsResponse:
+    """Get trend metrics for financial charts.
+
+    Returns arrays of metrics over N quarters for visualization:
+    - Revenue & Net Profit
+    - Gross/Net Margin
+    - ROE/ROA
+    - Cash Flow (CFO, CFI, CFF)
+    """
+    cache_key = f"{symbol.upper()}:{periods}"
+    cached = trend_metrics_cache.get(cache_key)
+    if cached:
+        return TrendMetricsResponse(**cached)
+
+    try:
+        service = get_stock_service()
+        result = service.get_trend_metrics(symbol, periods)
+
+        # Cache result
+        trend_metrics_cache.set(cache_key, result.model_dump(mode="json"))
+
+        return result
+    except StockServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get(
+    "/{symbol}/fcf-analysis",
+    response_model=FCFAnalysisResponse,
+    dependencies=[Depends(standard_rate_limit)],
+)
+async def get_fcf_analysis(symbol: str) -> FCFAnalysisResponse:
+    """Get Free Cash Flow analysis for a stock.
+
+    Returns:
+    - Net Income → CFO → CapEx → FCF waterfall
+    - FCF Margin and FCF Yield
+    - Cash Conversion Cycle (CCC = DSO + DIO - DPO)
+
+    Note: CCC will be null for banks/financial companies.
+    """
+    cached = fcf_analysis_cache.get(symbol.upper())
+    if cached:
+        return FCFAnalysisResponse(**cached)
+
+    try:
+        service = get_stock_service()
+        result = service.get_fcf_analysis(symbol)
+
+        # Cache result
+        fcf_analysis_cache.set(symbol.upper(), result.model_dump(mode="json"))
+
+        return result
     except StockServiceError as e:
         raise HTTPException(status_code=502, detail=str(e))
