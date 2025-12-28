@@ -1,11 +1,19 @@
+"use client"
+
 import { useQuery } from "@tanstack/react-query"
 import { fetchSectorPeers, type SectorPeersResponse } from "@/lib/api"
+import { queryKeys } from "@/lib/query-keys"
 
-export function useSectorPeers(symbol: string | null, limit: number = 5) {
+export function useSectorPeers(symbol: string | null, limit: number = 10) {
   return useQuery<SectorPeersResponse>({
-    queryKey: ["sector-peers", symbol, limit],
-    queryFn: () => fetchSectorPeers(symbol!, limit),
+    queryKey: symbol ? queryKeys.sectorPeers(symbol) : ["sectorPeers", "empty"],
+    queryFn: () => {
+      if (!symbol) throw new Error("Symbol required")
+      return fetchSectorPeers(symbol, limit)
+    },
     enabled: !!symbol,
-    staleTime: 1000 * 60 * 10, // 10 minutes
+    staleTime: 4 * 60 * 60 * 1000, // 4 hours per VCI rate limit strategy
+    gcTime: 24 * 60 * 60 * 1000, // 24 hours for off-hours cache
+    retry: 2,
   })
 }
