@@ -14,6 +14,7 @@ import {
   LineChart,
   LogIn,
   LogOut,
+  PanelLeft,
   PieChart,
   Settings,
   Star,
@@ -125,19 +126,58 @@ const data = {
 }
 
 function SidebarBrand() {
+  const { state, toggleSidebar } = useSidebar()
+  const isCollapsed = state === "collapsed"
+  const [isHovered, setIsHovered] = useState(false)
+
   return (
     <SidebarMenu>
       <SidebarMenuItem>
-        <SidebarMenuButton size="lg" className="cursor-default hover:bg-transparent">
-          <img
-            src="/logo.png"
-            alt="Stock Massive"
-            className="size-10 object-contain shrink-0 transition-transform duration-200"
-          />
+        <SidebarMenuButton
+          size="lg"
+          className={
+            isCollapsed
+              ? "cursor-pointer"
+              : "cursor-default hover:bg-transparent"
+          }
+          onClick={isCollapsed ? toggleSidebar : undefined}
+          onMouseEnter={() => setIsHovered(true)}
+          onMouseLeave={() => setIsHovered(false)}
+        >
+          {/* Icon container - keeps consistent sizing for centering */}
+          <div className="relative size-8 flex items-center justify-center shrink-0">
+            {/* Logo - visible when expanded OR when collapsed and not hovered */}
+            <img
+              src="/logo.png"
+              alt="Stock Massive"
+              className={`size-10 object-contain absolute transition-all duration-200 ${
+                isCollapsed && isHovered ? "opacity-0 scale-75" : "opacity-100 scale-100"
+              }`}
+            />
+            {/* Panel icon - visible only when collapsed and hovered */}
+            <PanelLeft
+              className={`size-5 absolute transition-all duration-200 ${
+                isCollapsed && isHovered ? "opacity-100 scale-100" : "opacity-0 scale-75"
+              }`}
+            />
+          </div>
           <div className="grid flex-1 text-left text-sm leading-tight transition-[opacity,transform] duration-200 ease-sidebar group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:scale-95">
             <span className="truncate font-bold text-base">Stock Massive</span>
             <span className="truncate text-xs text-muted-foreground">Analytics Platform</span>
           </div>
+          {/* Toggle button - visible only when expanded */}
+          {!isCollapsed && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                toggleSidebar()
+              }}
+              className="ml-auto p-1.5 rounded-md hover:bg-sidebar-accent transition-colors"
+              aria-label="Close sidebar"
+            >
+              <PanelLeft className="size-4" />
+            </button>
+          )}
         </SidebarMenuButton>
       </SidebarMenuItem>
     </SidebarMenu>
@@ -177,7 +217,7 @@ function CollapsibleNavItem({
                 <SidebarMenuSubItem key={subItem.title}>
                   <SidebarMenuSubButton
                     isActive={subIsActive}
-                    className={subIsActive ? "bg-orange-400 text-white font-medium hover:bg-orange-500 hover:text-white dark:bg-orange-500 dark:text-white dark:hover:bg-orange-600" : ""}
+                    className={subIsActive ? "bg-primary text-primary-foreground font-medium hover:bg-primary/90 hover:text-primary-foreground" : ""}
                     asChild
                   >
                     <Link href={subItem.url}>
@@ -222,7 +262,7 @@ function NavMain({
                 <SidebarMenuButton
                   tooltip={item.title}
                   isActive={isActive}
-                  className={isActive ? "bg-orange-400 text-white font-medium hover:bg-orange-500 hover:text-white dark:bg-orange-500 dark:text-white dark:hover:bg-orange-600" : ""}
+                  className={isActive ? "bg-primary text-primary-foreground font-medium hover:bg-primary/90 hover:text-primary-foreground" : ""}
                   asChild
                 >
                   <Link href={item.url}>
@@ -313,7 +353,7 @@ function SidebarUserSection() {
             size="lg"
             tooltip="Sign in"
             onClick={() => router.push("/login")}
-            className="cursor-pointer group-data-[collapsible=icon]:!w-full group-data-[collapsible=icon]:!h-10 group-data-[collapsible=icon]:!p-0 group-data-[collapsible=icon]:!gap-0 group-data-[collapsible=icon]:justify-center"
+            className="cursor-pointer group-data-[collapsible=icon]:!w-8 group-data-[collapsible=icon]:!h-8 group-data-[collapsible=icon]:!p-0 group-data-[collapsible=icon]:!gap-0 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:mb-2"
           >
             <div className="flex size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground shrink-0 group-data-[collapsible=icon]:mx-auto">
               <LogIn className="size-4" />
@@ -336,7 +376,7 @@ function SidebarUserSection() {
             <SidebarMenuButton
               size="lg"
               tooltip={userName}
-              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground group-data-[collapsible=icon]:!w-full group-data-[collapsible=icon]:!h-10 group-data-[collapsible=icon]:!p-0 group-data-[collapsible=icon]:!gap-0 group-data-[collapsible=icon]:justify-center"
+              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground group-data-[collapsible=icon]:!w-8 group-data-[collapsible=icon]:!h-8 group-data-[collapsible=icon]:!p-0 group-data-[collapsible=icon]:!gap-0 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:mb-2"
             >
               <Avatar className="size-8 rounded-lg shrink-0 transition-transform duration-200 group-data-[collapsible=icon]:mx-auto">
                 <AvatarImage src={userAvatar} alt={userName} />
@@ -388,7 +428,7 @@ function SidebarUserSection() {
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem
-              className="text-red-500 hover:text-red-600 focus:text-red-600 cursor-pointer"
+              className="text-destructive hover:text-destructive focus:text-destructive cursor-pointer"
               onClick={handleSignOut}
             >
               <LogOut className="mr-2 size-4" />
