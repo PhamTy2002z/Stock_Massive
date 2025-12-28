@@ -12,7 +12,7 @@
 | Attribute | Value |
 |-----------|-------|
 | Priority | P1 |
-| Status | Pending |
+| Status | Done (2025-12-28) |
 | Effort | 2.5h |
 | Description | Build Sector Comparison subtab với peer table, premium/discount badges |
 

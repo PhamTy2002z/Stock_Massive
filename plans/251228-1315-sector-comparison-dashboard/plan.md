@@ -23,7 +23,7 @@ Thêm chức năng so sánh cổ phiếu với peers cùng ngành ICB Level 3, h
 | # | Phase | Status | Effort | Link |
 |---|-------|--------|--------|------|
 | 1 | Backend Enhancement | Done (2025-12-28) | 2h | [phase-1](./phases/phase-1-backend-enhancement.md) |
-| 2 | Frontend UI Components | Pending | 2.5h | [phase-2](./phases/phase-2-frontend-components.md) |
+| 2 | Frontend UI Components | Done (2025-12-28) | 2.5h | [phase-2](./phases/phase-2-frontend-components.md) |
 | 3 | Integration & Testing | Pending | 1.5h | [phase-3](./phases/phase-3-integration-testing.md) |
 
 ## Dependencies
