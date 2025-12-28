@@ -1,5 +1,5 @@
 import { Skeleton } from "@/components/ui/skeleton"
-import { Card, CardContent, CardHeader } from "@/components/ui/card"
+import { CardSkeleton, ChartSkeleton } from "@/components/ui/skeletons"
 
 export default function Loading() {
   return (
@@ -12,24 +12,10 @@ export default function Loading() {
         {Array(3)
           .fill(0)
           .map((_, i) => (
-            <Card key={i}>
-              <CardHeader>
-                <Skeleton className="h-5 w-24" />
-              </CardHeader>
-              <CardContent>
-                <Skeleton className="h-8 w-16" />
-              </CardContent>
-            </Card>
+            <CardSkeleton key={i} />
           ))}
       </div>
-      <Card>
-        <CardHeader>
-          <Skeleton className="h-6 w-40" />
-        </CardHeader>
-        <CardContent>
-          <Skeleton className="h-96" />
-        </CardContent>
-      </Card>
+      <ChartSkeleton height={384} />
     </div>
   )
 }

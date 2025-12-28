@@ -1,4 +1,5 @@
 import { Skeleton } from "@/components/ui/skeleton"
+import { TableSkeleton } from "@/components/ui/skeletons"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 
 export default function Loading() {
@@ -14,12 +15,8 @@ export default function Loading() {
         <CardHeader>
           <Skeleton className="h-6 w-32" />
         </CardHeader>
-        <CardContent className="space-y-2">
-          {Array(10)
-            .fill(0)
-            .map((_, i) => (
-              <Skeleton key={i} className="h-12 w-full" />
-            ))}
+        <CardContent>
+          <TableSkeleton rows={10} columns={5} />
         </CardContent>
       </Card>
     </div>

@@ -305,6 +305,7 @@ queryKeys.priceDepth(symbol) => ["stock", symbol, "priceDepth"]
 - Layout: Sidebar, Separator, ScrollArea
 - Feedback: Toast, Alert, Skeleton, Loading Spinner
 - Error Handling: `ErrorFallback` - Reusable error display with compact/full variants, network error detection
+- Skeleton Library: `CardSkeleton`, `ChartSkeleton`, `TableSkeleton` - Reusable loading skeletons for common UI patterns
 
 ### Provider Components
 - `QueryProvider` - TanStack Query provider with default options (5min stale time, error propagation)
@@ -400,6 +401,22 @@ NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
   - `useShareholders`, `useHealthScore`, `useTrendMetrics`
 - All updated hooks now return `isPlaceholderData` and `isFetching` for visual hints during refetches
 - Benefits: No loading flickers, smooth skeleton/stale data transitions, clear global loading feedback
+
+### Loading UX Enhancement (Phase 3 - Dec 28)
+- Migrated all hooks to `useSuspenseQuery` for guaranteed data types (no undefined checks needed)
+- Updated hooks: `useMarketIndices`, `usePriceBoard`, `useSectorPerformance`, `useVN30Overview`, `useFundCertificates`, `useStockDetail`, `useIncomeStatement`, `useBalanceSheet`, `useCashFlow`, `useShareholders`, `useOfficers`, `useInsiderDeals`, `useFinancialStatements`, `useVolumeSpikes`, `useVolumeAnomalies`, `useOrderStats`, `usePriceDepth`, `useRatioSummary`, `useTradingStats`, `useForeignTrading`, `usePropTrading`, `useHealthScore`, `useTrendMetrics`, `useSectorPeers`, `useFCFAnalysis`, `useFinancialDetail`
+- All hooks now return guaranteed data (no null/undefined)
+- Components simplified with removed optional chaining and null checks
+- Enabled smooth transitions with `keepPreviousData` on relevant hooks
+
+### Loading UX Enhancement (Phase 4 - Dec 28)
+- Created skeleton component library: `CardSkeleton`, `ChartSkeleton`, `TableSkeleton` in `src/components/ui/skeletons/`
+- Updated all `loading.tsx` files to use skeleton library instead of generic spinners:
+  - `app/loading.tsx`, `app/dashboard/loading.tsx`, `app/dashboard/[symbol]/loading.tsx`, `app/volume-spikes/loading.tsx`
+- Optimized chart components with `React.memo()` for render efficiency:
+  - `FinancialStatementsComposed`, `VolumeAnomalyChart`, `VolumeSpikesDashboard`, `FinancialStatementsTable`
+- All chart components now utilize `isPlaceholderData` for smooth data transitions during refetches
+- Benefits: Consistent loading UX, better perceived performance, reduced unnecessary re-renders
 
 ## Metrics
 - **Total Files**: 113
