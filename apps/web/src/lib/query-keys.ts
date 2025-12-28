@@ -34,6 +34,8 @@ export const queryKeys = {
     ["search", "stocks", query, limit] as const,
 
   // Analytics
+  volumeAnalysis: (symbol: string, days: number = 20) =>
+    [...queryKeys.stock(symbol), "volumeAnalysis", days] as const,
   financialStatements: (limit: number, exchange?: string) =>
     ["analytics", "financialStatements", limit, exchange] as const,
   volumeSpikes: (params: VolumeSpikeParams) =>
