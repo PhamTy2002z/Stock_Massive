@@ -20,7 +20,8 @@ apps/web/
 │   ├── components/       # React components
 │   │   ├── dashboard/    # Dashboard-specific components
 │   │   ├── layout/       # Layout components (header, sidebar)
-│   │   └── ui/           # shadcn/ui components
+│   │   ├── providers/    # React providers (query, error boundary, theme)
+│   │   └── ui/           # shadcn/ui components + error fallback
 │   ├── hooks/            # React Query hooks
 │   ├── lib/              # API client, utilities, query keys
 │   └── styles/           # Global styles
@@ -106,19 +107,19 @@ apps/web/
 - `useStockDetail(symbol)` - Stock detail with 1min stale time
 
 ### Financial Hooks
-- `useIncomeStatement(symbol, period, limit)` - Income statement (1h stale)
-- `useBalanceSheet(symbol, period, limit)` - Balance sheet (1h stale)
-- `useCashFlow(symbol, period, limit)` - Cash flow (1h stale)
+- `useIncomeStatement(symbol, period, limit)` - Income statement (1h stale, keepPreviousData)
+- `useBalanceSheet(symbol, period, limit)` - Balance sheet (1h stale, keepPreviousData)
+- `useCashFlow(symbol, period, limit)` - Cash flow (1h stale, keepPreviousData)
 
 ### Ownership Hooks
-- `useShareholders(symbol)` - Shareholders (1h stale)
+- `useShareholders(symbol)` - Shareholders (1h stale, keepPreviousData)
 - `useOfficers(symbol, filterBy)` - Officers (1h stale)
 - `useInsiderDeals(symbol)` - Insider deals (1h stale)
 
 ### Analytics Hooks
 - `useFinancialStatements(limit, exchange?)` - Financial statements ranking (5min stale)
 - `useVolumeSpikes(params)` - Volume spike analysis (1min stale)
-- `useVolumeAnomalies(symbol, days)` - Volume anomaly detection (5min stale)
+- `useVolumeAnomalies(symbol, days)` - Volume anomaly detection (5min stale, keepPreviousData)
 
 ### Advanced Tab Hooks (New - Phase 2)
 **Order Flow**
@@ -134,10 +135,10 @@ apps/web/
 - `usePropTrading(symbol, days)` - Prop trading (15min stale time)
 
 ### Financial Health Hooks (Phase 2)
-- `useHealthScore(symbol)` - Health score with dimensions and F-Score (5min stale time)
+- `useHealthScore(symbol)` - Health score with dimensions and F-Score (5min stale, keepPreviousData)
 
 ### Trend Analysis Hooks (Phase 3)
-- `useTrendMetrics(symbol)` - Historical metrics for revenue, profit, margins, ROE, ROA, cash flow (5min stale)
+- `useTrendMetrics(symbol)` - Historical metrics for revenue, profit, margins, ROE, ROA, cash flow (5min stale, keepPreviousData)
 
 ### Peer Comparison & FCF Hooks (Phase 4)
 - `useSectorPeers(symbol, limit)` - Sector peer metrics with median/premium/discount (10min stale)
@@ -303,10 +304,17 @@ queryKeys.priceDepth(symbol) => ["stock", symbol, "priceDepth"]
 - Data display: Table, Card, Badge, Dialog, Sheet
 - Layout: Sidebar, Separator, ScrollArea
 - Feedback: Toast, Alert, Skeleton, Loading Spinner
+- Error Handling: `ErrorFallback` - Reusable error display with compact/full variants, network error detection
+
+### Provider Components
+- `QueryProvider` - TanStack Query provider with default options (5min stale time, error propagation)
+- `QueryErrorBoundary` - Error boundary wrapper combining React Error Boundary + Query Error Reset
+- `ThemeProvider` - Dark mode theme provider
 
 ### Layout Components
 - `Header` - Top navigation with market indices
 - `Sidebar` - Navigation menu with route management
+- `GlobalLoadingIndicator` - Global progress bar at top of viewport when any query fetching (Phase 2 UX Enhancement)
 
 ## Environment Variables
 ```bash
@@ -375,6 +383,23 @@ NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
   - Widgets: `PremiumBadge`, `SectorOverviewCard`, `PeerComparisonTable`
   - SubTab: `SectorSubTab`
 - Features: Sector peer comparison with median benchmarking, premium/discount indicators
+
+### Loading UX Enhancement (Phase 1 - Dec 28)
+- Added `react-error-boundary` dependency
+- Created `ErrorFallback` component with compact/full variants, network error detection
+- Created `QueryErrorBoundary` wrapper combining React Error Boundary + Query Error Reset Boundary
+- Updated `QueryProvider` with `throwOnError: true` for error propagation
+- Integrated error boundary at app layout level (`layout.tsx`)
+- Architecture: Global error handling for all React Query operations
+
+### Loading UX Enhancement (Phase 2 - Dec 28)
+- Added `GlobalLoadingIndicator` component - animated progress bar at top of viewport using `useIsFetching()`
+- Integrated in `layout.tsx` for global loading state visualization
+- Updated 7 hooks with `keepPreviousData` option for smooth data transitions:
+  - `useVolumeAnalysis`, `useIncomeStatement`, `useBalanceSheet`, `useCashFlow`
+  - `useShareholders`, `useHealthScore`, `useTrendMetrics`
+- All updated hooks now return `isPlaceholderData` and `isFetching` for visual hints during refetches
+- Benefits: No loading flickers, smooth skeleton/stale data transitions, clear global loading feedback
 
 ## Metrics
 - **Total Files**: 113
