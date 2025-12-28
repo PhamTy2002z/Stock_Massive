@@ -40,8 +40,8 @@ Enhance the existing Financial Statements page (`/analytics/financial-statements
 |-------|-------|--------|-------------|
 | 1 | [Backend APIs](phases/phase-1-backend-apis.md) | 5h | Health score, trend metrics, FCF, peer endpoints |
 | 2 | [Health Scorecard UI](phases/phase-2-health-scorecard-ui.md) | 3h | Radar chart + score breakdown card |
-| 3 | [Trend Charts](phases/phase-3-trend-charts.md) | 4h | 4 chart types: Revenue/Profit, Margins, ROE/ROA, Cash Flow |
-| 4 | [Peer Comparison & FCF](phases/phase-4-peer-fcf.md) | 3h | Sector peers table, FCF waterfall |
+| 3 | [Trend Charts](phases/phase-3-trend-charts.md) ✅ 2025-12-28 | 4h | 4 chart types: Revenue/Profit, Margins, ROE/ROA, Cash Flow |
+| 4 | [Peer Comparison & FCF](phases/phase-4-peer-fcf.md) ✅ 2025-12-28 | 3h | Sector peers table, FCF waterfall |
 | 5 | [Integration & Testing](phases/phase-5-integration-testing.md) | 1h | Page layout, E2E tests |
 
 ## Architecture
@@ -110,7 +110,7 @@ All UI components follow `/docs/design-guidelines.md`:
 ## Success Criteria
 
 - [x] Health scorecard renders with 5-dimension radar chart ✅ 2025-12-28
-- [ ] Trend charts show 8 quarters of data
+- [x] Trend charts show 8 quarters of data ✅ 2025-12-28
 - [x] Peer comparison shows top 5 sector peers ✅ 2025-12-28
 - [x] FCF waterfall displays Net Income -> CFO -> FCF ✅ 2025-12-28
 - [x] All charts responsive (mobile-friendly) ✅ 2025-12-28

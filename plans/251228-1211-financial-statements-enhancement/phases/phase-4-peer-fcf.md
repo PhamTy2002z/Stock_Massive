@@ -606,15 +606,15 @@ export * from "./fcf-analysis/ccc-indicator"
 
 ## Todo
 
-- [ ] Add API types for `SectorPeersResponse`, `FCFAnalysisResponse`
-- [ ] Add `fetchSectorPeers()`, `fetchFCFAnalysis()` to api.ts
-- [ ] Create `useSectorPeers`, `useFCFAnalysis` hooks
-- [ ] Create `PeerMetricsTable` with heatmap coloring
-- [ ] Create `PeerComparisonCard` container
-- [ ] Create `FCFWaterfall` visualization
-- [ ] Create `CCCIndicator` component
-- [ ] Create `FCFAnalysisCard` container
-- [ ] Export from index.ts
+- [x] Add API types for `SectorPeersResponse`, `FCFAnalysisResponse`
+- [x] Add `fetchSectorPeers()`, `fetchFCFAnalysis()` to api.ts
+- [x] Create `useSectorPeers`, `useFCFAnalysis` hooks
+- [x] Create `PeerMetricsTable` with heatmap coloring
+- [x] Create `PeerComparisonCard` container
+- [x] Create `FCFWaterfall` visualization
+- [x] Create `CCCIndicator` component
+- [x] Create `FCFAnalysisCard` container
+- [x] Export from index.ts
 
 ## Success Criteria
 

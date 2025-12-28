@@ -724,7 +724,15 @@ export async function fetchHealthScore(symbol: string): Promise<HealthScoreRespo
   return fetchApi<HealthScoreResponse>(`/stocks/${encodeURIComponent(symbol)}/health-score`)
 }
 
-// === Sector Peers Types (Phase 4 - Peer Comparison) ===
+// === Sector Peers Types (Phase 2 - Sector Comparison Dashboard) ===
+
+export interface SectorMedian {
+  pe: number | null
+  pb: number | null
+  roe: number | null
+  roa: number | null
+  market_cap: number | null
+}
 
 export interface PeerMetrics {
   symbol: string
@@ -734,6 +742,10 @@ export interface PeerMetrics {
   pe: number | null
   pb: number | null
   market_cap: number | null
+  premium_pe: number | null
+  premium_pb: number | null
+  premium_roe: number | null
+  premium_roa: number | null
 }
 
 export interface SectorPeersResponse {
@@ -741,11 +753,16 @@ export interface SectorPeersResponse {
   icb_code: string
   icb_name: string
   peers: PeerMetrics[]
+  sector_median: SectorMedian
+  target_premium: Record<string, number | null>
 }
 
-export async function fetchSectorPeers(symbol: string, limit: number = 5): Promise<SectorPeersResponse> {
+export async function fetchSectorPeers(
+  symbol: string,
+  limit: number = 10
+): Promise<SectorPeersResponse> {
   return fetchApi<SectorPeersResponse>(
-    `/stocks/analytics/sector-peers?symbol=${encodeURIComponent(symbol)}&limit=${limit}`
+    `/stocks/${encodeURIComponent(symbol)}/sector-peers?limit=${limit}`
   )
 }
 
@@ -769,4 +786,30 @@ export interface FCFAnalysisResponse {
 
 export async function fetchFCFAnalysis(symbol: string): Promise<FCFAnalysisResponse> {
   return fetchApi<FCFAnalysisResponse>(`/stocks/${encodeURIComponent(symbol)}/fcf-analysis`)
+}
+
+// === Trend Metrics Types (Phase 3 - Trend Charts) ===
+
+export interface TrendMetricsResponse {
+  symbol: string
+  periods: string[]
+  revenue: (number | null)[]
+  net_profit: (number | null)[]
+  gross_profit: (number | null)[]
+  gross_margin: (number | null)[]
+  net_margin: (number | null)[]
+  roe: (number | null)[]
+  roa: (number | null)[]
+  cfo: (number | null)[]
+  cfi: (number | null)[]
+  cff: (number | null)[]
+}
+
+export async function fetchTrendMetrics(
+  symbol: string,
+  periods: number = 8
+): Promise<TrendMetricsResponse> {
+  return fetchApi<TrendMetricsResponse>(
+    `/stocks/${encodeURIComponent(symbol)}/trend-metrics?periods=${periods}`
+  )
 }
