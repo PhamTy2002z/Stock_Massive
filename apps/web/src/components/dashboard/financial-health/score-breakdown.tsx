@@ -6,11 +6,11 @@ interface ScoreBreakdownProps {
 }
 
 const DIMENSION_CONFIG: Record<string, { label: string }> = {
-  profitability: { label: "Sinh loi" },
-  liquidity: { label: "Thanh khoan" },
-  leverage: { label: "Don bay" },
-  efficiency: { label: "Hieu qua" },
-  valuation: { label: "Dinh gia" },
+  profitability: { label: "Sinh lời" },
+  liquidity: { label: "Thanh khoản" },
+  leverage: { label: "Đòn bẩy" },
+  efficiency: { label: "Hiệu quả" },
+  valuation: { label: "Định giá" },
 }
 
 function getScoreColor(score: number): string {

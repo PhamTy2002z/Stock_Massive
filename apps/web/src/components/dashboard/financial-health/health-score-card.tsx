@@ -88,7 +88,7 @@ export function HealthScoreCard({ symbol, className }: HealthScoreCardProps) {
 
             {/* Dimension Breakdown */}
             <div>
-              <h4 className="text-sm font-medium mb-3">Dimension Breakdown</h4>
+              <h4 className="text-sm font-medium mb-3">Score Breakdown</h4>
               <ScoreBreakdown dimensions={data.dimensions} />
             </div>
           </div>

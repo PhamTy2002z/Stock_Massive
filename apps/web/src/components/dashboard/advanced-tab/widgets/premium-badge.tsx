@@ -8,27 +8,51 @@ interface PremiumBadgeProps {
 }
 
 /**
- * Color coding per design-guidelines.md:
- * - Premium (above median): --stock-up (green)
- * - Neutral (±5%): muted foreground (gray)
- * - Discount (below median): --stock-down (red)
+ * 5-tier color coding for better tracking:
+ * - Vượt trội (>30%): Bright green, high intensity
+ * - Tốt (+10% to +30%): Light green
+ * - Trung bình (±10%): Neutral gray
+ * - Kém (-10% to -30%): Light red
+ * - Rất kém (<-30%): Bright red, high intensity
  */
 const getPremiumStyles = (value: number) => {
-  if (value > 5) {
+  // Tier 1: Vượt trội (>30%)
+  if (value > 30) {
+    return {
+      bg: "bg-emerald-500/20",
+      text: "text-emerald-400",
+      border: "ring-1 ring-emerald-500/30",
+    }
+  }
+  // Tier 2: Tốt (+10% to +30%)
+  if (value > 10) {
     return {
       bg: "bg-[hsl(var(--stock-up))]/10",
       text: "text-[hsl(var(--stock-up))]",
+      border: "",
     }
   }
-  if (value >= -5) {
+  // Tier 3: Trung bình (±10%)
+  if (value >= -10) {
     return {
       bg: "bg-muted",
       text: "text-muted-foreground",
+      border: "",
     }
   }
+  // Tier 4: Kém (-10% to -30%)
+  if (value >= -30) {
+    return {
+      bg: "bg-[hsl(var(--stock-down))]/10",
+      text: "text-[hsl(var(--stock-down))]",
+      border: "",
+    }
+  }
+  // Tier 5: Rất kém (<-30%)
   return {
-    bg: "bg-[hsl(var(--stock-down))]/10",
-    text: "text-[hsl(var(--stock-down))]",
+    bg: "bg-red-500/20",
+    text: "text-red-400",
+    border: "ring-1 ring-red-500/30",
   }
 }
 
@@ -45,6 +69,7 @@ export function PremiumBadge({ value, className }: PremiumBadgeProps) {
         "inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold tabular-nums",
         styles.bg,
         styles.text,
+        styles.border,
         className
       )}
     >

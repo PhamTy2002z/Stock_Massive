@@ -8,11 +8,31 @@ interface HealthRadarChartProps {
 }
 
 const DIMENSION_LABELS: Record<string, string> = {
-  profitability: "Sinh loi",
-  liquidity: "Thanh khoan",
-  leverage: "Don bay",
-  efficiency: "Hieu qua",
-  valuation: "Dinh gia",
+  profitability: "Sinh lời",
+  liquidity: "Thanh khoản",
+  leverage: "Đòn bẩy",
+  efficiency: "Hiệu quả",
+  valuation: "Định giá",
+}
+
+// Custom tick to adjust label positions
+function CustomTick({ x, y, payload }: { x: number; y: number; payload: { value: string } }) {
+  const label = payload.value
+  // Shift "Thanh khoản" to the right to avoid overlap
+  const offsetX = label === "Thanh khoản" ? 10 : 0
+
+  return (
+    <text
+      x={x + offsetX}
+      y={y}
+      fill="hsl(var(--muted-foreground))"
+      fontSize={11}
+      textAnchor="middle"
+      dominantBaseline="central"
+    >
+      {label}
+    </text>
+  )
 }
 
 export function HealthRadarChart({ dimensions }: HealthRadarChartProps) {
@@ -23,13 +43,10 @@ export function HealthRadarChart({ dimensions }: HealthRadarChartProps) {
   }))
 
   return (
-    <ResponsiveContainer width="100%" height={250}>
-      <RadarChart data={data} margin={{ top: 20, right: 30, bottom: 20, left: 30 }}>
+    <ResponsiveContainer width="100%" height={280}>
+      <RadarChart data={data} margin={{ top: 30, right: 50, bottom: 30, left: 50 }}>
         <PolarGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-        <PolarAngleAxis
-          dataKey="dimension"
-          tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
-        />
+        <PolarAngleAxis dataKey="dimension" tick={<CustomTick x={0} y={0} payload={{ value: "" }} />} />
         <Radar
           name="Score"
           dataKey="score"
