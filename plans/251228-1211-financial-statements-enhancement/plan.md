@@ -1,7 +1,7 @@
 ---
 title: "Financial Statements Enhancement"
 description: "Add health scorecard, trend charts, peer comparison, and FCF analysis to Financial Statements page"
-status: in-progress
+status: completed
 priority: P1
 effort: 16h
 branch: main
@@ -42,7 +42,7 @@ Enhance the existing Financial Statements page (`/analytics/financial-statements
 | 2 | [Health Scorecard UI](phases/phase-2-health-scorecard-ui.md) | 3h | Radar chart + score breakdown card |
 | 3 | [Trend Charts](phases/phase-3-trend-charts.md) ✅ 2025-12-28 | 4h | 4 chart types: Revenue/Profit, Margins, ROE/ROA, Cash Flow |
 | 4 | [Peer Comparison & FCF](phases/phase-4-peer-fcf.md) ✅ 2025-12-28 | 3h | Sector peers table, FCF waterfall |
-| 5 | [Integration & Testing](phases/phase-5-integration-testing.md) | 1h | Page layout, E2E tests |
+| 5 | [Integration & Testing](phases/phase-5-integration-testing.md) ✅ 2025-12-28 | 1h | Page layout, E2E tests |
 
 ## Architecture
 

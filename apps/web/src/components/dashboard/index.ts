@@ -32,3 +32,4 @@ export { HealthScoreCard, HealthScoreCardSkeleton, HealthRadarChart, ScoreBreakd
 export { PeerComparisonCard, PeerComparisonCardSkeleton, PeerMetricsTable } from "./peer-comparison"
 export { FCFAnalysisCard, FCFAnalysisCardSkeleton, FCFWaterfall, CCCIndicator } from "./fcf-analysis"
 export { TrendChartsCard, TrendChartsCardSkeleton, RevenueProfitChart, MarginTrendChart, RoeRoaChart, CashFlowChart } from "./financial-trends"
+export { FinancialDetailSheet } from "./financial-detail-sheet"
