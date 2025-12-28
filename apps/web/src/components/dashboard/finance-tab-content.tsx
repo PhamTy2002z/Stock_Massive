@@ -231,22 +231,13 @@ export function FinanceTabContent({ symbol, className }: FinanceTabContentProps)
   const [periodType, setPeriodType] = useState<PeriodType>("quarter")
 
   // Fetch income statement data from API
-  const {
-    data: incomeData,
-    isLoading: incomeLoading,
-  } = useIncomeStatement(symbol, periodType, 4)
+  const { data: incomeData, isFetching: incomeFetching } = useIncomeStatement(symbol, periodType, 4)
 
   // Fetch balance sheet data from API
-  const {
-    data: balanceData,
-    isLoading: balanceLoading,
-  } = useBalanceSheet(symbol, periodType, 4)
+  const { data: balanceData, isFetching: balanceFetching } = useBalanceSheet(symbol, periodType, 4)
 
   // Fetch cash flow data from API
-  const {
-    data: cashFlowApiData,
-    isLoading: cashFlowLoading,
-  } = useCashFlow(symbol, periodType, 4)
+  const { data: cashFlowApiData, isFetching: cashFlowFetching } = useCashFlow(symbol, periodType, 4)
 
   // Get the appropriate data and periods based on active sub-tab
   const getTableData = () => {
@@ -254,27 +245,27 @@ export function FinanceTabContent({ symbol, className }: FinanceTabContentProps)
       case "income":
         // Use API data if available, otherwise fall back to mock
         if (incomeData && incomeData.rows.length > 0) {
-          return { data: incomeData.rows, periods: incomeData.periods, isLoading: incomeLoading }
+          return { data: incomeData.rows, periods: incomeData.periods, isFetching: incomeFetching }
         }
-        return { data: incomeStatementData, periods: mockQuarters, isLoading: incomeLoading }
+        return { data: incomeStatementData, periods: mockQuarters, isFetching: incomeFetching }
       case "balance":
         // Use API data if available, otherwise fall back to mock
         if (balanceData && balanceData.rows.length > 0) {
-          return { data: balanceData.rows, periods: balanceData.periods, isLoading: balanceLoading }
+          return { data: balanceData.rows, periods: balanceData.periods, isFetching: balanceFetching }
         }
-        return { data: balanceSheetData, periods: ["Q3/2025", "Q2/2025", "Q1/2025", "Q4/2024"], isLoading: balanceLoading }
+        return { data: balanceSheetData, periods: ["Q3/2025", "Q2/2025", "Q1/2025", "Q4/2024"], isFetching: balanceFetching }
       case "cashflow":
         // Use API data if available, otherwise fall back to mock
         if (cashFlowApiData && cashFlowApiData.rows.length > 0) {
-          return { data: cashFlowApiData.rows, periods: cashFlowApiData.periods, isLoading: cashFlowLoading }
+          return { data: cashFlowApiData.rows, periods: cashFlowApiData.periods, isFetching: cashFlowFetching }
         }
-        return { data: cashFlowData, periods: mockQuarters, isLoading: cashFlowLoading }
+        return { data: cashFlowData, periods: mockQuarters, isFetching: cashFlowFetching }
       default:
-        return { data: incomeStatementData, periods: mockQuarters, isLoading: false }
+        return { data: incomeStatementData, periods: mockQuarters, isFetching: false }
     }
   }
 
-  const { data, periods, isLoading } = getTableData()
+  const { data, periods, isFetching } = getTableData()
 
   return (
     <div className={cn("space-y-4", className)}>
@@ -324,7 +315,7 @@ export function FinanceTabContent({ symbol, className }: FinanceTabContentProps)
 
       {/* Financial Table */}
       <div className="rounded-lg border border-border/50 bg-card/50 overflow-hidden">
-        {isLoading ? (
+        {isFetching ? (
           <div className="p-4 space-y-3">
             {[...Array(10)].map((_, i) => (
               <div key={i} className="flex gap-4">

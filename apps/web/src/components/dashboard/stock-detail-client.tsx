@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { Suspense, useState, useEffect } from "react"
 import { toast } from "sonner"
 import { useStockDetail } from "@/hooks/use-stock-detail"
 import { getStockLoadingToastId, clearStockLoadingToast } from "./stock-search-bar"
@@ -13,7 +13,6 @@ import {
   StockDetailPanelSkeleton,
   StockStatsTableSkeleton,
   StockCompanyInfoSkeleton,
-  StockDetailError,
   StockDetailEmpty,
   StockDetailTabs,
   StockDetailTabsSkeleton,
@@ -29,52 +28,50 @@ interface StockDetailClientProps {
   initialSymbol: string | null
 }
 
-export function StockDetailClient({ initialSymbol }: StockDetailClientProps) {
-  const [activeTab, setActiveTab] = useState<StockDetailTabValue>("overview")
-  const { data, isLoading, error, refetch } = useStockDetail(initialSymbol)
+// Loading fallback for Suspense
+function StockDetailLoading() {
+  return (
+    <>
+      <section className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
+        <div className="space-y-4">
+          <StockTickerHeaderSkeleton />
+          <StockDetailTabsSkeleton className="mt-2" />
+          <StockDetailPanelSkeleton />
+          <StockStatsTableSkeleton />
+        </div>
+        <div className="space-y-4 lg:pt-6">
+          <StockCompanyInfoSkeleton />
+        </div>
+      </section>
+      <AdvancedSectionSkeleton />
+    </>
+  )
+}
 
-  // Update loading toast when data loads or errors
+// Inner component that uses the hook - only rendered when symbol is valid
+function StockDetailInner({ symbol }: { symbol: string }) {
+  const [activeTab, setActiveTab] = useState<StockDetailTabValue>("overview")
+  const { data } = useStockDetail(symbol)
+
+  // Update loading toast when data loads
   useEffect(() => {
     const toastId = getStockLoadingToastId()
     if (!toastId) return
 
-    // Dismiss toast when loading completes (success or error)
-    if (!isLoading) {
-      if (data) {
-        toast.success(`${data.symbol} loaded`, {
-          id: toastId,
-          description: data.company_name || "Stock data ready",
-        })
-        clearStockLoadingToast()
-      } else if (error) {
-        toast.error("Failed to load stock", {
-          id: toastId,
-          description: error.message || "Please try again",
-        })
-        clearStockLoadingToast()
-      }
+    if (data) {
+      toast.success(`${data.symbol} loaded`, {
+        id: toastId,
+        description: data.company_name || "Stock data ready",
+      })
+      clearStockLoadingToast()
     }
-  }, [isLoading, data, error])
+  }, [data])
 
   return (
     <>
-    <section className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
-      {/* Left: Main Content */}
-      <div className="space-y-4">
-        {error && <StockDetailError error={error} onRetry={refetch} />}
-
-        {isLoading && (
-          <>
-            <StockTickerHeaderSkeleton />
-            <StockDetailTabsSkeleton className="mt-2" />
-            <StockDetailPanelSkeleton />
-            <StockStatsTableSkeleton />
-          </>
-        )}
-
-        {!initialSymbol && !isLoading && !error && <StockDetailEmpty />}
-
-        {!isLoading && !error && data && (
+      <section className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
+        {/* Left: Main Content */}
+        <div className="space-y-4">
           <div className="stock-detail-enter">
             <StockTickerHeader
               symbol={data.symbol}
@@ -118,13 +115,10 @@ export function StockDetailClient({ initialSymbol }: StockDetailClientProps) {
             {activeTab === "shareholders" && <ShareholdersTabContent symbol={data.symbol} />}
             {activeTab === "volume" && <VolumeTabContent symbol={data.symbol} />}
           </div>
-        )}
-      </div>
+        </div>
 
-      {/* Right: Company Info Sidebar */}
-      <div className="space-y-4 lg:pt-6">
-        {isLoading && <StockCompanyInfoSkeleton />}
-        {!isLoading && !error && data && (
+        {/* Right: Company Info Sidebar */}
+        <div className="space-y-4 lg:pt-6">
           <StockCompanyInfo
             symbol={data.symbol}
             industry={data.industry || "N/A"}
@@ -134,15 +128,32 @@ export function StockDetailClient({ initialSymbol }: StockDetailClientProps) {
             vn30Rank={data.vn30_rank}
             description={data.description || "No description available."}
           />
-        )}
-      </div>
-    </section>
+        </div>
+      </section>
 
-    {/* Advanced Analysis Section - Below Stock Detail */}
-    {isLoading && <AdvancedSectionSkeleton />}
-    {!isLoading && !error && data && (
+      {/* Advanced Analysis Section - Below Stock Detail */}
       <AdvancedSection symbol={data.symbol} className="stock-detail-enter" />
-    )}
-  </>
+    </>
+  )
+}
+
+export function StockDetailClient({ initialSymbol }: StockDetailClientProps) {
+  // No symbol - show empty state
+  if (!initialSymbol) {
+    return (
+      <section className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
+        <div className="space-y-4">
+          <StockDetailEmpty />
+        </div>
+        <div className="space-y-4 lg:pt-6" />
+      </section>
+    )
+  }
+
+  // Valid symbol - render with Suspense
+  return (
+    <Suspense fallback={<StockDetailLoading />}>
+      <StockDetailInner symbol={initialSymbol} />
+    </Suspense>
   )
 }

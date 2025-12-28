@@ -110,7 +110,8 @@ const FinancialRow = memo(function FinancialRow({ item, onRowClick }: FinancialR
 export function FinancialStatementsTable({ className }: FinancialStatementsTableProps) {
   const [exchangeFilter, setExchangeFilter] = useState<ExchangeFilter>("all")
   const exchangeParam = exchangeFilter === "all" ? undefined : exchangeFilter
-  const { data, isLoading, isFetching, error, refetch } = useFinancialStatements(50, exchangeParam)
+  // data is ALWAYS defined with useSuspenseQuery - Suspense handles loading, ErrorBoundary handles errors
+  const { data, isFetching, refetch } = useFinancialStatements(50, exchangeParam)
   const [sortField, setSortField] = useState<SortField>("rank")
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc")
   const [currentPage, setCurrentPage] = useState(1)
@@ -198,32 +199,7 @@ export function FinancialStatementsTable({ className }: FinancialStatementsTable
     return <ArrowUpDown className="h-3.5 w-3.5 opacity-50" />
   }
 
-  if (isLoading && !data) {
-    return (
-      <div className={className}>
-        <FinancialStatementsTableSkeleton />
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className={cn("space-y-4", className)}>
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4">
-          <p className="text-sm text-destructive">
-            Failed to load financial statements: {error.message}
-          </p>
-          <button
-            onClick={handleRefetch}
-            className="mt-2 text-sm underline hover:no-underline"
-          >
-            Retry
-          </button>
-        </div>
-      </div>
-    )
-  }
-
+  // data is always defined with useSuspenseQuery
   if (totalItems === 0) {
     return (
       <div className={cn("space-y-4", className)}>

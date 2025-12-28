@@ -11,36 +11,12 @@ import { RoeRoaChart } from "./roe-roa-chart"
 import { CashFlowChart } from "./cash-flow-chart"
 
 interface TrendChartsCardProps {
-  symbol: string | null
+  symbol: string
   className?: string
 }
 
 export function TrendChartsCard({ symbol, className }: TrendChartsCardProps) {
-  const { data, isLoading, error } = useTrendMetrics(symbol)
-
-  if (!symbol) {
-    return (
-      <Card className={className}>
-        <CardContent className="flex items-center justify-center h-[400px] text-muted-foreground">
-          Chọn một cổ phiếu để xem Trend Charts
-        </CardContent>
-      </Card>
-    )
-  }
-
-  if (isLoading) {
-    return <TrendChartsCardSkeleton className={className} />
-  }
-
-  if (error || !data) {
-    return (
-      <Card className={className}>
-        <CardContent className="flex items-center justify-center h-[400px] text-destructive">
-          Không thể tải Trend Metrics. Vui lòng thử lại sau.
-        </CardContent>
-      </Card>
-    )
-  }
+  const { data } = useTrendMetrics(symbol)
 
   return (
     <Card className={className}>

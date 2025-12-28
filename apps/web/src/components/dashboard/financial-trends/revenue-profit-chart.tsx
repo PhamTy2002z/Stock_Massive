@@ -77,7 +77,7 @@ export function RevenueProfitChart({ data }: RevenueProfitChartProps) {
           yAxisId="left"
           dataKey="revenue"
           name="revenue"
-          fill="hsl(var(--accent-orange))"
+          fill="hsl(0 0% 100%)"
           radius={[4, 4, 0, 0]}
         />
         {/* LN gộp second */}

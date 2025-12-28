@@ -20,7 +20,7 @@ function getScoreColor(score: number): string {
 }
 
 function getProgressColor(score: number): string {
-  if (score >= 70) return "bg-[hsl(var(--accent-orange))]"
+  if (score >= 70) return "bg-white"
   if (score >= 50) return "bg-yellow-500"
   return "bg-red-500"
 }

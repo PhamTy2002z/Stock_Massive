@@ -50,8 +50,8 @@ export function HealthRadarChart({ dimensions }: HealthRadarChartProps) {
         <Radar
           name="Score"
           dataKey="score"
-          stroke="hsl(var(--accent-orange))"
-          fill="hsl(var(--accent-orange))"
+          stroke="hsl(0 0% 100%)"
+          fill="hsl(0 0% 100%)"
           fillOpacity={0.3}
           strokeWidth={2}
         />

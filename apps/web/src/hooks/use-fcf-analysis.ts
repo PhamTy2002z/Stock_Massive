@@ -1,11 +1,23 @@
-import { useQuery } from "@tanstack/react-query"
-import { fetchFCFAnalysis, type FCFAnalysisResponse } from "@/lib/api"
+"use client"
 
-export function useFCFAnalysis(symbol: string | null) {
-  return useQuery<FCFAnalysisResponse>({
-    queryKey: ["fcf-analysis", symbol],
-    queryFn: () => fetchFCFAnalysis(symbol!),
-    enabled: !!symbol,
-    staleTime: 1000 * 60 * 5, // 5 minutes
+import { useSuspenseQuery } from "@tanstack/react-query"
+import { fetchFCFAnalysis, type FCFAnalysisResponse } from "@/lib/api"
+import { queryKeys } from "@/lib/query-keys"
+
+/**
+ * Hook for FCF analysis - requires valid symbol.
+ * Consumer must validate symbol before rendering.
+ */
+export function useFCFAnalysis(symbol: string) {
+  const { data, isFetching, refetch } = useSuspenseQuery<FCFAnalysisResponse>({
+    queryKey: queryKeys.fcfAnalysis(symbol),
+    queryFn: () => fetchFCFAnalysis(symbol),
+    staleTime: 5 * 60 * 1000, // 5 minutes
   })
+
+  return {
+    data,
+    isFetching,
+    refetch,
+  }
 }

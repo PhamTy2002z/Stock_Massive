@@ -55,9 +55,9 @@ export function RoeRoaChart({ data }: RoeRoaChartProps) {
           type="monotone"
           dataKey="roe"
           name="ROE"
-          stroke="hsl(var(--accent-orange))"
+          stroke="hsl(0 0% 100%)"
           strokeWidth={2}
-          dot={{ fill: "hsl(var(--accent-orange))", strokeWidth: 2 }}
+          dot={{ fill: "hsl(0 0% 100%)", strokeWidth: 2 }}
           connectNulls
         />
         <Line

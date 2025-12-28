@@ -7,7 +7,7 @@ import { useSectorPeers } from "@/hooks/use-sector-peers"
 import { PeerMetricsTable } from "./peer-metrics-table"
 
 interface PeerComparisonCardProps {
-  symbol: string | null
+  symbol: string
   className?: string
 }
 
@@ -25,31 +25,7 @@ export function PeerComparisonCardSkeleton({ className }: { className?: string }
 }
 
 export function PeerComparisonCard({ symbol, className }: PeerComparisonCardProps) {
-  const { data, isLoading, error } = useSectorPeers(symbol)
-
-  if (!symbol) {
-    return (
-      <Card className={className}>
-        <CardContent className="flex items-center justify-center h-[250px] text-muted-foreground">
-          Chọn một cổ phiếu để xem Peer Comparison
-        </CardContent>
-      </Card>
-    )
-  }
-
-  if (isLoading) {
-    return <PeerComparisonCardSkeleton className={className} />
-  }
-
-  if (error || !data) {
-    return (
-      <Card className={className}>
-        <CardContent className="flex items-center justify-center h-[250px] text-destructive">
-          Không thể tải Peer Comparison
-        </CardContent>
-      </Card>
-    )
-  }
+  const { data } = useSectorPeers(symbol)
 
   return (
     <Card className={className}>

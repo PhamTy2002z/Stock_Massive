@@ -2,11 +2,11 @@
 
 import { useState } from "react"
 import { useVolumeAnalysis } from "@/hooks/use-volume-analysis"
-import { VolumeAnomalyChart, VolumeAnomalyChartSkeleton } from "./volume-anomaly-chart"
+import { VolumeAnomalyChart } from "./volume-anomaly-chart"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { AlertCircle, RefreshCw } from "lucide-react"
+import { RefreshCw } from "lucide-react"
 
 interface VolumeTabContentProps {
   symbol: string
@@ -14,33 +14,7 @@ interface VolumeTabContentProps {
 
 export function VolumeTabContent({ symbol }: VolumeTabContentProps) {
   const [days, setDays] = useState(20)
-  const { data, isLoading, error, refetch, isFetching } = useVolumeAnalysis(symbol, days)
-
-  if (error) {
-    return (
-      <Card className="border-destructive/50">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-destructive">
-            <AlertCircle className="h-5 w-5" />
-            Không thể tải dữ liệu khối lượng
-          </CardTitle>
-          <CardDescription>
-            {error instanceof Error ? error.message : "Đã xảy ra lỗi không mong muốn"}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Button onClick={() => refetch()} variant="outline" size="sm">
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Thử lại
-          </Button>
-        </CardContent>
-      </Card>
-    )
-  }
-
-  if (isLoading) {
-    return <VolumeAnomalyChartSkeleton />
-  }
+  const { data, refetch, isFetching } = useVolumeAnalysis(symbol, days)
 
   if (!data || data.time_slots.length === 0) {
     return (

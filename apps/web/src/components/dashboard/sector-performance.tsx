@@ -2,14 +2,15 @@
 
 import { useSectorPerformance } from "@/hooks/use-sector-performance"
 import { Skeleton } from "@/components/ui/skeleton"
-import { AlertCircle, RefreshCw, TrendingUp, TrendingDown } from "lucide-react"
+import { RefreshCw, TrendingUp, TrendingDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 /**
  * Wrapper component with title and refresh button
  */
 export function SectorPerformanceSection({ className }: { className?: string }) {
-  const { data, isLoading, isFetching, error, refetch } = useSectorPerformance()
+  // data is ALWAYS defined with useSuspenseQuery - Suspense handles loading, ErrorBoundary handles errors
+  const { data, isFetching, refetch } = useSectorPerformance()
 
   return (
     <div className={className}>
@@ -26,48 +27,25 @@ export function SectorPerformanceSection({ className }: { className?: string }) 
           <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
         </button>
       </div>
-      <SectorPerformanceContent data={data} isLoading={isLoading} error={error} refetch={refetch} />
+      <SectorPerformanceContent data={data} />
     </div>
   )
 }
 
 interface SectorPerformanceContentProps {
   data: ReturnType<typeof useSectorPerformance>["data"]
-  isLoading: boolean
-  error: Error | null
-  refetch: () => void
 }
 
 /**
  * Internal content component - renders the two cards
  */
-function SectorPerformanceContent({ data, isLoading, error, refetch }: SectorPerformanceContentProps) {
+function SectorPerformanceContent({ data }: SectorPerformanceContentProps) {
   // Top 5 gainers: only positive change_pct, Top 5 losers: only negative change_pct
-  const sortedSectors = data?.sectors ? [...data.sectors].sort((a, b) => b.change_pct - a.change_pct) : []
+  const sortedSectors = [...data.sectors].sort((a, b) => b.change_pct - a.change_pct)
   const topGainers = sortedSectors.filter(s => s.change_pct > 0).slice(0, 5)
   const topLosers = sortedSectors.filter(s => s.change_pct < 0).sort((a, b) => a.change_pct - b.change_pct).slice(0, 5)
 
-  if (isLoading && !data) {
-    return <SectorPerformanceSkeleton />
-  }
-
-  if (error) {
-    return (
-      <div className="rounded-xl border bg-card p-6 text-center">
-        <AlertCircle className="h-8 w-8 text-destructive mx-auto mb-2" />
-        <p className="text-sm text-muted-foreground mb-3">{error.message}</p>
-        <button
-          onClick={refetch}
-          className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
-        >
-          <RefreshCw className="h-4 w-4" />
-          Thử lại
-        </button>
-      </div>
-    )
-  }
-
-  if (!data || data.sectors.length === 0) {
+  if (data.sectors.length === 0) {
     return (
       <div className="rounded-xl border bg-card p-6 text-center">
         <p className="text-sm text-muted-foreground">Không có dữ liệu ngành</p>

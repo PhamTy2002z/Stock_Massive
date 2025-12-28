@@ -41,10 +41,10 @@ export function ShareholdersTabContent({
   const [currentPage, setCurrentPage] = useState(1)
   const [rowsPerPage, setRowsPerPage] = useState(10)
 
-  const { data, isLoading, error } = useShareholders(symbol)
+  const { data, isFetching } = useShareholders(symbol)
 
   // Memoize shareholders to prevent useMemo dependency warning
-  const shareholders = useMemo(() => data?.shareholders ?? [], [data?.shareholders])
+  const shareholders = useMemo(() => data.shareholders ?? [], [data.shareholders])
   const totalItems = shareholders.length
   const totalPages = Math.max(1, Math.ceil(totalItems / rowsPerPage))
   const startIndex = (currentPage - 1) * rowsPerPage
@@ -66,24 +66,6 @@ export function ShareholdersTabContent({
   const handleRowsPerPageChange = (value: string) => {
     setRowsPerPage(Number(value))
     setCurrentPage(1) // Reset to first page
-  }
-
-  // Show skeleton while loading
-  if (isLoading) {
-    return <ShareholdersTabContentSkeleton className={className} />
-  }
-
-  // Show error state
-  if (error) {
-    return (
-      <div className={cn("space-y-4", className)}>
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4">
-          <p className="text-sm text-destructive">
-            Không thể tải dữ liệu cổ đông: {error.message}
-          </p>
-        </div>
-      </div>
-    )
   }
 
   // Show empty state

@@ -28,16 +28,16 @@ interface OrderFlowChartsProps {
   isLoading: boolean
 }
 
-// Design pattern: black, grey, white, orange
+// Design pattern: black, grey, white accent
 const COLORS = {
-  // Buy side - Orange accent
-  buy: "hsl(25 95% 53%)",        // Vibrant orange
-  buyLight: "hsl(32 98% 58%)",   // Lighter orange
+  // Buy side - White accent
+  buy: "hsl(0 0% 100%)",         // Pure white
+  buyLight: "hsl(0 0% 90%)",     // Lighter white
   // Sell side - Cool grey
   sell: "hsl(0 0% 55%)",         // Neutral grey
   sellLight: "hsl(0 0% 65%)",    // Lighter grey
   // Session markers - Subtle variants
-  ato: "hsl(25 95% 53%)",        // Orange (consistent accent)
+  ato: "hsl(0 0% 100%)",         // White (consistent accent)
   atc: "hsl(0 0% 70%)",          // Light grey
   // Neutral
   neutral: "hsl(0 0% 50%)",
