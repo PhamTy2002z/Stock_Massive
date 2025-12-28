@@ -168,12 +168,6 @@ async def clear_volume_spikes_cache() -> dict:
 
 # ==================== Sector Peers Endpoint ====================
 
-sector_peers_cache = TradingHoursCache(
-    key_prefix="stock:sector_peers:",
-    ttl_trading=3600,      # 1 hour during trading
-    ttl_off_hours=86400,   # 24 hours off-hours
-)
-
 
 @router.get(
     "/sector-peers",
@@ -182,26 +176,18 @@ sector_peers_cache = TradingHoursCache(
 )
 async def get_sector_peers(
     symbol: str = Query(..., description="Target stock symbol"),
-    limit: int = Query(5, ge=1, le=10, description="Number of peers"),
+    limit: int = Query(10, ge=5, le=20, description="Number of peers (5-20)"),
 ) -> SectorPeersResponse:
-    """Get peer companies in the same ICB sector.
+    """Get peer companies in the same ICB sector with median and premium/discount.
 
     Returns top N companies in the same ICB Level 3 sector,
-    sorted by market capitalization, with key financial metrics.
+    sorted by market capitalization, with key financial metrics
+    and premium/discount vs sector median.
     """
-    cache_key = f"{symbol.upper()}:{limit}"
-    cached = sector_peers_cache.get(cache_key)
-    if cached:
-        return SectorPeersResponse(**cached)
-
     try:
         service = get_stock_service()
-        result = service.get_sector_peers(symbol, limit)
-
-        # Cache result
-        sector_peers_cache.set(cache_key, result.model_dump(mode="json"))
-
-        return result
+        # Service handles caching internally via sector_peers_cache
+        return service.get_sector_peers(symbol, limit)
     except StockServiceError as e:
         from fastapi import HTTPException
         raise HTTPException(status_code=502, detail=str(e))

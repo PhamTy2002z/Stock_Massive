@@ -11,7 +11,7 @@
 | Attribute | Value |
 |-----------|-------|
 | Priority | P1 |
-| Status | Pending |
+| Status | Done (2025-12-28) |
 | Effort | 2h |
 | Description | Enhance sector_peers endpoint với sector median, premium/discount metrics |
 

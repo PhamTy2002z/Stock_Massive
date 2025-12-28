@@ -187,6 +187,16 @@ class FCFAnalysisResponse(BaseModel):
 # ==================== Sector Peers Schemas ====================
 
 
+class SectorMedian(BaseModel):
+    """Sector median values for comparison."""
+
+    pe: Optional[float] = None
+    pb: Optional[float] = None
+    roe: Optional[float] = None
+    roa: Optional[float] = None
+    market_cap: Optional[float] = None
+
+
 class PeerMetrics(BaseModel):
     """Financial metrics for a peer company."""
 
@@ -197,6 +207,11 @@ class PeerMetrics(BaseModel):
     pe: Optional[float] = None
     pb: Optional[float] = None
     market_cap: Optional[float] = None
+    # Premium/discount vs sector median (%)
+    premium_pe: Optional[float] = None
+    premium_pb: Optional[float] = None
+    premium_roe: Optional[float] = None
+    premium_roa: Optional[float] = None
 
 
 class SectorPeersResponse(BaseModel):
@@ -206,3 +221,5 @@ class SectorPeersResponse(BaseModel):
     icb_code: str
     icb_name: str
     peers: list[PeerMetrics]
+    sector_median: Optional[SectorMedian] = None
+    target_premium: Optional[dict[str, Optional[float]]] = None
