@@ -75,6 +75,4 @@ export const queryKeys = {
   fcfAnalysis: (symbol: string) =>
     [...queryKeys.stock(symbol), "fcfAnalysis"] as const,
 
-  // Market Overview (Overview Page UX Enhancement)
-  marketOverview: ["market", "overview"] as const,
 } as const

@@ -479,18 +479,34 @@ NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 - Features: Real-time market breadth, top movers tracking, foreign flow monitoring
 - Code Review: PASS (0 critical issues, SSR-safe, follows project patterns)
 
+### Market Overview Integration & Polish (Phase 3 - Dec 28)
+- Added `fetchMarketOverviewServer()` in `api-server.ts` for SSR data fetching with 60s ISR revalidation
+- Created skeleton components library in `market-overview-skeleton.tsx`:
+  - `MarketBreadthSkeleton` - Skeleton for market breadth widget
+  - `TopMoversSkeleton` - Skeleton for top movers widget
+  - `ForeignFlowSkeleton` - Skeleton for foreign flow widget
+  - `MarketOverviewSkeleton` - Combined skeleton for all three widgets
+- Updated `page.tsx` (dashboard home) with Suspense boundaries:
+  - Prefetch `marketOverview` data alongside `marketIndices` and `sectorPerformance`
+  - Wrapped each widget in CollapsibleSection + Suspense with dedicated skeleton
+  - Granular loading states prevent layout shift and enable progressive rendering
+- Updated barrel exports in `components/dashboard/index.ts` for all skeleton components
+- Architecture: SSR + ISR (60s) + client-side Suspense for optimal performance
+- Benefits: No layout shift, smooth loading transitions, improved perceived performance
+- Code Review: PASS (0 critical issues, proper SSR/Suspense patterns, type-safe)
+
 ## Metrics
-- **Total Files**: 113
-- **Total Tokens**: 215,974
-- **Total Characters**: 652,901
+- **Total Files**: 204
+- **Total Tokens**: 337,558
+- **Total Characters**: 1,073,038
 - **Largest Files**:
-  1. tsconfig.tsbuildinfo (55.3% of tokens)
-  2. volume-spike-dashboard.tsx (4.1%)
-  3. finance-tab-content.tsx (4.0%)
-  4. ui/sidebar.tsx (2.8%)
-  5. lib/api.ts (1.9%)
+  1. tsconfig.tsbuildinfo (152,305 tokens, 45.1%)
+  2. volume-spike-dashboard.tsx (8,767 tokens, 2.6%)
+  3. finance-tab-content.tsx (8,520 tokens, 2.5%)
+  4. ui/sidebar.tsx (6,350 tokens, 1.9%)
+  5. lib/api.ts (5,615 tokens, 1.7%)
 
 ---
 
-*Last updated: 2025-12-28*
+*Last updated: 2025-12-28 21:16*
 *Generated from: repomix-output.xml*
