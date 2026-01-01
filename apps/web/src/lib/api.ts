@@ -824,3 +824,28 @@ export async function fetchTrendMetrics(
   )
 }
 
+// === Sector Historical Performance Types ===
+
+export type SectorHistoricalPeriod = "1W" | "2W" | "1M"
+
+export interface SectorHistoricalItem {
+  icb_code: string
+  icb_name: string
+  change_pct: number
+}
+
+export interface SectorHistoricalResponse {
+  period: string
+  top_gainers: SectorHistoricalItem[]
+  top_losers: SectorHistoricalItem[]
+  generated_at: string | null
+}
+
+export async function fetchSectorHistoricalPerformance(
+  period: SectorHistoricalPeriod = "1W"
+): Promise<SectorHistoricalResponse> {
+  return fetchApi<SectorHistoricalResponse>(
+    `/stocks/analytics/sector-historical?period=${period}`
+  )
+}
+

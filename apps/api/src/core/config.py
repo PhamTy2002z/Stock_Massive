@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     rate_limit_heavy_max: int = 20  # requests per window
     rate_limit_heavy_window: int = 60  # seconds
 
+    # Sector Historical Performance Job
+    sector_historical_enabled: bool = True
+    sector_historical_hour: int = 15  # 15:45 ICT (after sector-performance job at 15:30)
+    sector_historical_minute: int = 45
+    sector_historical_delay: float = 1.2  # seconds between API calls (~50 req/min)
+
 
 @lru_cache
 def get_settings() -> Settings:

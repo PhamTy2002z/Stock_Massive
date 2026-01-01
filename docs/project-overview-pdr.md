@@ -11,11 +11,11 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 3. Enable portfolio tracking and watchlist management
 4. Secure user authentication and data persistence
 5. Integrate vnstock library for comprehensive Vietnam market data
-6. Implement and visualize advanced analytical features (Volume Anomaly, Volume Spikes, Financial Statements)
+6. Implement and visualize advanced analytical features (Volume Anomaly, Volume Spikes, Financial Statements, Financial Health)
 
 ---
 
-## Current Implementation Status (Updated: 2024-12-24)
+## Current Implementation Status (Updated: 2025-12-30)
 
 | Feature | Status | Details |
 |---------|--------|---------|
@@ -25,9 +25,11 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | Analytics Volume Spikes | Done | Volume spike dashboard with treemap, pie chart, composed chart, tabs |
 | Analytics Financial Statements | Done | Ranking table with filters (exchange, year, quarter) |
 | Market Indices | Done | VN-INDEX, VN30, HNX, UPCOM cards with sparklines, 10s auto-refresh |
+| Market Overview | Done | Aggregated breadth, top movers, foreign flow, top volume |
 | VN30 Overview Table | Done | Real-time VN30 stocks (price, change, volume, mcap), 1-min refresh |
-| Stock Data API | Done | 30+ endpoints via vnstock + Fmarket |
-| Financial Data | Done | Income, balance sheet, cash flow (detailed) |
+| Stock Data API | Done | 40+ endpoints via vnstock + Fmarket |
+| Financial Data | Done | Income, balance sheet, cash flow, trend charts |
+| Financial Health | Done | Health scoring, Piotroski F-Score, peer comparison, FCF analysis |
 | Shareholders/Officers | Done | Major holders, management, insider deals |
 | Volume Analysis | Done | 5-min bar aggregation, peak period analysis |
 | Volume Spikes API | Done | Aggregated volume spike detection across all stocks |
@@ -138,6 +140,7 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `GET /{symbol}/history` | Historical OHLCV |
 | `GET /{symbol}/intraday` | Intraday ticks |
 | `GET /market-indices` | VN-INDEX, VN30, HNX, UPCOM |
+| `GET /market-overview` | Aggregated market overview (breadth, movers, foreign flow) |
 | `GET /price-board` | Real-time prices (multiple symbols) |
 | `GET /{symbol}/detail` | Comprehensive stock detail |
 | `GET /{symbol}/volume-anomalies` | Retrieve volume anomaly detection results |
@@ -158,6 +161,9 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `GET /{symbol}/financials/balance-sheet` | Balance sheet (simple) |
 | `GET /{symbol}/financials/balance-sheet-detailed` | Balance sheet (detailed) |
 | `GET /{symbol}/financials/cash-flow` | Cash flow statement |
+| `GET /{symbol}/financials/health-score` | Financial health scoring |
+| `GET /{symbol}/financials/trend-metrics` | Financial trend charts |
+| `GET /{symbol}/financials/sector-peers` | Top 5 sector peers comparison |
 
 #### Shareholders & Analysis
 | Endpoint | Purpose |
@@ -212,6 +218,8 @@ All endpoints prefixed with `/api/v1/stocks`:
 - [x] API provides and Frontend visualizes volume anomaly detection results
 - [x] User can view volume spikes dashboard with multiple chart types
 - [x] User can view financial statements ranking with filters
+- [x] User can view financial health scorecard with radar chart
+- [x] User can view peer comparison with heatmap
 - [ ] User can view stock price charts
 - [ ] User can register and login
 - [ ] User can create watchlists

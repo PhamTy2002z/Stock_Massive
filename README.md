@@ -2,20 +2,23 @@
 
 Vietnamese stock market data platform powered by **vnstock** library. Provides real-time data, charting, and analysis for Vietnam stock market (HOSE, HNX, UPCOM).
 
-## Current Status (Updated: 2024-12-24)
+## Current Status (Updated: 2025-12-30)
 
 | Component | Status | Notes |
 |-----------|--------|-------|
 | Dashboard Layout | Done | Sidebar, header, responsive |
 | Market Indices | Done | VN-INDEX, VN30, HNX, UPCOM cards (10s auto-refresh) |
+| Market Overview | Done | Breadth, top movers, foreign flow, top volume |
 | VN30 Overview Table | Done | Real-time VN30 stocks with price, volume, market cap |
 | Sector Performance | Done | ICB Level 2 with sorting, top gainers/losers |
+| Sector Historical | Done | Period-based returns (1D-1Y) with horizontal bar chart |
 | Stock Detail Page | Done | Search, ticker header, stats, tabs (Overview, Finance, Shareholders, Volume) |
 | Analytics Deep-Dive | Done | Dedicated stock analysis page |
 | Volume Spikes Dashboard | Done | Volume spike detection with treemap, pie chart, composed chart |
 | Financial Statements | Done | Ranking by net profit with filters (exchange, year, quarter) |
-| Stock Data API | Done | 30+ endpoints via vnstock + Fmarket |
-| Financial Data | Done | Income, balance sheet, cash flow (detailed) |
+| Financial Health | Done | Radar chart, Piotroski F-Score, peer comparison, FCF waterfall |
+| Stock Data API | Done | 40+ endpoints via vnstock + Fmarket |
+| Financial Data | Done | Income, balance sheet, cash flow, trend charts |
 | Shareholders/Officers | Done | Major holders, management, insider deals |
 | Volume Anomaly Detection | Done | Backend API + Frontend visualization |
 | Fund Certificates | Done | Display 7 items via Fmarket API |
@@ -61,32 +64,32 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 ```
 Stock_Massive/
 ├── apps/
-│   ├── web/                 # Next.js frontend (port 3000) - 80+ files
+│   ├── web/                 # Next.js frontend (port 3000)
 │   │   └── src/
-│   │       ├── app/         # App Router pages (5 pages)
-│   │       ├── components/  # UI (21) + dashboard (27) + layout (6) + providers (2)
-│   │       ├── hooks/       # 14 custom hooks
-│   │       └── lib/         # 4 utility files
+│   │       ├── app/         # App Router pages (5 routes)
+│   │       ├── components/  # UI (26) + dashboard (26) + layout (6) + providers (2)
+│   │       ├── hooks/       # 28 custom hooks
+│   │       └── lib/         # API client, utils
 │   │
-│   └── api/                 # FastAPI backend (port 8000) - 55+ source files
+│   └── api/                 # FastAPI backend (port 8000)
 │       └── src/
-│           ├── stocks/      # Feature-based modules
+│           ├── stocks/      # 6 domain routers (market, price, company, financial, analytics, trading)
 │           │   ├── analytics/  # Volume spikes, financial statements
 │           │   ├── market/     # Symbols, sectors, fund certificates
 │           │   ├── price/      # History, intraday, indices, volume
 │           │   ├── company/    # Company info, shareholders, officers
-│           │   ├── financial/  # Financials, ratios
-│           │   ├── overview/   # Market overview (breadth, movers, foreign flow)
-│           │   └── jobs_router.py  # Job status API
-│           ├── core/        # Config, database, scheduler, cache, job_status_store
+│           │   ├── financial/  # Financials, ratios, health scoring
+│           │   ├── trading/    # Price depth, trading stats
+│           │   └── overview/   # Market overview (breadth, movers, foreign flow)
+│           ├── core/        # Config, database, scheduler, cache
 │           └── main.py
 │
 ├── packages/                # Shared code (placeholders)
 ├── docker/                  # Docker configs
-└── docs/                    # Documentation (9 files)
+└── docs/                    # Documentation (10 files)
 ```
 
-## API Endpoints (31+ Total)
+## API Endpoints (40+ Total)
 
 All endpoints prefixed with `/api/v1/stocks`:
 
@@ -134,7 +137,7 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `/{symbol}/ratio-summary` | GET | Financial ratios summary |
 | `/{symbol}/trading-stats` | GET | Trading volume statistics |
 
-### Financial Data (6 endpoints)
+### Financial Data (9 endpoints)
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/{symbol}/financials/ratios` | GET | Financial ratios |
@@ -143,6 +146,9 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `/{symbol}/financials/balance-sheet` | GET | Balance sheet (simple) |
 | `/{symbol}/financials/balance-sheet-detailed` | GET | Balance sheet (detailed) |
 | `/{symbol}/financials/cash-flow` | GET | Cash flow statement |
+| `/{symbol}/financials/health-score` | GET | Financial health scoring |
+| `/{symbol}/financials/trend-metrics` | GET | Financial trend charts |
+| `/{symbol}/financials/sector-peers` | GET | Top 5 sector peers comparison |
 
 ## Getting Started
 
@@ -164,10 +170,10 @@ cp .env.example .env
 # Edit .env with your values
 
 # Start all services
-docker-compose up -d
+docker compose up -d
 
 # Run database migrations
-docker-compose exec api alembic upgrade head
+docker compose exec api alembic upgrade head
 ```
 
 ### Services
@@ -183,37 +189,37 @@ docker-compose exec api alembic upgrade head
 
 ```bash
 # Start services
-docker-compose up -d
+docker compose up -d
 
 # View logs
-docker-compose logs -f
-docker-compose logs -f api    # API logs only
-docker-compose logs -f web    # Web logs only
+docker compose logs -f
+docker compose logs -f api    # API logs only
+docker compose logs -f web    # Web logs only
 
 # Stop services
-docker-compose down
+docker compose down
 
 # Rebuild after code changes
-docker-compose up -d --build
+docker compose up -d --build
 
 # Database migrations (Supabase)
-docker-compose exec api alembic upgrade head
+docker compose exec api alembic upgrade head
 
 # Access Supabase database
 # Use Supabase Dashboard SQL Editor or psql with DATABASE_URL_DIRECT
 
 # Check services status
-docker-compose ps
+docker compose ps
 ```
 
 ### Production Deployment
 
 ```bash
 # Build and run production
-docker-compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml up -d --build
 
 # View production logs
-docker-compose -f docker-compose.prod.yml logs -f
+docker compose -f docker-compose.prod.yml logs -f
 ```
 
 ## Frontend Pages

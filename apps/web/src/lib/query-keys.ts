@@ -1,4 +1,4 @@
-import type { PeriodType, OfficerFilterType, VolumeSpikeParams } from "./api"
+import type { PeriodType, OfficerFilterType, VolumeSpikeParams, SectorHistoricalPeriod } from "./api"
 
 export const queryKeys = {
   // Market data
@@ -74,5 +74,9 @@ export const queryKeys = {
   // FCF Analysis
   fcfAnalysis: (symbol: string) =>
     [...queryKeys.stock(symbol), "fcfAnalysis"] as const,
+
+  // Sector Historical Performance
+  sectorHistoricalPerformance: (period: SectorHistoricalPeriod) =>
+    ["analytics", "sectorHistorical", period] as const,
 
 } as const

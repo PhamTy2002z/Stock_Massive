@@ -1,7 +1,7 @@
 """Market domain schemas."""
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -68,3 +68,25 @@ class VN30OverviewResponse(BaseModel):
     stocks: list[VN30OverviewItem]
     generated_at: datetime
     total_count: int
+
+
+# === Sector Historical Performance Schemas ===
+
+SectorHistoricalPeriod = Literal["1W", "2W", "1M"]
+
+
+class SectorHistoricalItem(BaseModel):
+    """Sector historical performance item."""
+
+    icb_code: str = Field(..., description="ICB Level 2 code")
+    icb_name: str = Field(..., description="Sector name (Vietnamese)")
+    change_pct: float = Field(..., description="Average change percentage")
+
+
+class SectorHistoricalResponse(BaseModel):
+    """Response for sector historical performance endpoint."""
+
+    period: str = Field(..., description="Period: 1W, 2W, or 1M")
+    top_gainers: list[SectorHistoricalItem] = Field(default_factory=list)
+    top_losers: list[SectorHistoricalItem] = Field(default_factory=list)
+    generated_at: Optional[str] = Field(None, description="When data was calculated")

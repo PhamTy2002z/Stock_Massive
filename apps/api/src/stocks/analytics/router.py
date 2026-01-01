@@ -20,8 +20,12 @@ from src.stocks.schemas.financial import SectorPeersResponse
 from src.stocks.financial_statements_collector import FinancialStatementsCollector
 from src.stocks.service import get_stock_service
 from src.stocks.shared import StockServiceError
+from src.stocks.analytics.sector_historical_router import router as sector_historical_router
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
+
+# Include sector historical router
+router.include_router(sector_historical_router, tags=["sector-historical"])
 
 # Cache instance with trading-hours-aware TTL
 financial_statements_cache = TradingHoursCache(

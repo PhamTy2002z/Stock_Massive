@@ -33,3 +33,4 @@ export { PeerComparisonCard, PeerComparisonCardSkeleton, PeerMetricsTable } from
 export { FCFAnalysisCard, FCFAnalysisCardSkeleton, FCFWaterfall, CCCIndicator } from "./fcf-analysis"
 export { TrendChartsCard, TrendChartsCardSkeleton, RevenueProfitChart, MarginTrendChart, RoeRoaChart, CashFlowChart } from "./financial-trends"
 export { FinancialDetailSheet } from "./financial-detail-sheet"
+export { SectorHistoricalPerformance, SectorHistoricalPerformanceSkeleton } from "./sector-historical-performance"

@@ -18,6 +18,7 @@ from src.core.job_status_store import job_store
 from src.stocks.intraday_collector import IntradayCollector
 from src.stocks.models import StockDailyOHLCV, StockIntradayBar
 from src.stocks.financial_statements_collector import FinancialStatementsCollector
+from src.stocks.analytics.sector_historical_service import SectorHistoricalService
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -295,3 +296,27 @@ async def collect_financial_statements_job() -> dict:
         logger.error(f"Financial statements collection job failed: {e}")
         job_store.fail_job("financial-statements", str(e))
         return {"success": 0, "failed": 0, "error": str(e)}
+
+
+def collect_sector_historical_job() -> dict:
+    """Daily job to calculate sector historical performance.
+
+    Calculates top 5 gaining and top 5 losing sectors over 1W/2W/1M periods.
+    Runs after market close (15:45 ICT) and caches results to Redis.
+
+    Returns:
+        Dict with results for each period or error
+    """
+    logger.info("Starting sector historical performance calculation")
+    job_store.start_job("sector-historical", "Tính hiệu suất ngành", 1)
+
+    try:
+        service = SectorHistoricalService()
+        result = service.calculate_all_periods()
+        logger.info(f"Sector historical calculation complete: {len(result)} periods")
+        job_store.complete_job("sector-historical", result)
+        return result
+    except Exception as e:
+        logger.error(f"Sector historical job failed: {e}")
+        job_store.fail_job("sector-historical", str(e))
+        return {"error": str(e)}
