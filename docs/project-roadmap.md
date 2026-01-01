@@ -1,16 +1,16 @@
 # Project Roadmap - Stock Massive
 
-Updated: 2025-12-28
+Updated: 2025-12-30
 
-## Current State (December 2024)
+## Current State (December 2025)
 
-### Completed (December 2024)
+### Completed (December 2024 - December 2025)
 
 - [x] Monorepo structure setup
 - [x] Next.js 15.5.9 frontend with App Router
 - [x] Dashboard layout (sidebar, header, responsive)
 - [x] Dark/light theme support (next-themes)
-- [x] ShadCN/UI components (20 primitives, 27 dashboard, 4 layout, 2 providers)
+- [x] ShadCN/UI components (26 primitives, 26 dashboard + 16 advanced-tab, 6 layout, 2 providers)
 - [x] Stock detail page (search, header, stats, tabs)
 - [x] Analytics deep-dive page (SSR + TanStack Query)
 - [x] **Volume Spikes Dashboard** (treemap, pie chart, composed chart, tabs)
@@ -18,12 +18,14 @@ Updated: 2025-12-28
 - [x] **Financial Health Scorecard** (5-dimension radar, Piotroski F-Score)
 - [x] **Peer Comparison** (top 5 sector peers with heatmap table)
 - [x] **FCF Analysis** (waterfall chart, CCC indicator with DSO/DIO/DPO)
+- [x] **Market Overview** (breadth, top movers, foreign flow, top volume)
 - [x] Market indices cards with sparklines (10s auto-refresh)
 - [x] VN30 Overview Table (price, change, volume, mcap, 1-min refresh)
 - [x] FastAPI backend setup
-- [x] vnstock integration (30+ endpoints)
+- [x] vnstock integration (40+ endpoints)
 - [x] vnstock wrapper with rate limit protection
 - [x] Financial statements (income, balance, cash flow)
+- [x] Financial health APIs (health-score, trend-metrics, sector-peers)
 - [x] Shareholders, officers, insider deals API
 - [x] Intraday data collection (5-min bars)
 - [x] **Daily OHLCV collection** (17:00 ICT)
@@ -37,9 +39,10 @@ Updated: 2025-12-28
 - [x] **Supabase Migration** (PostgreSQL cloud with SSL, connection pooling)
 - [x] **Job Progress UI** (progress bar + notification panel)
 - [x] Docker Compose configuration (dev + prod)
-- [x] Backend test suite (17+ tests in 9 files)
+- [x] Backend test suite (18+ tests in 18 files)
 - [x] Modern + Clean design system established
 - [x] Sector Performance (ICB Level 2, top gainers/losers)
+- [x] **Sector Historical Performance** (1W/2W/1M sector trends, horizontal bar chart)
 - [x] Toast notifications (Sonner integration)
 - [x] Fund certificates endpoint (7 items display)
 - [x] Redis caching (Upstash, trading-hours-aware, 7 endpoints)
@@ -255,46 +258,23 @@ Updated: 2025-12-28
 
 ---
 
-## Recently Completed (December 2024)
+## Recently Completed (December 2024 - December 2025)
 
 | Feature | Date | Notes |
 |---------|------|-------|
-| Financial Health Enhancement (Phase 4) | Dec 28, 2025 | Peer Comparison, FCF Waterfall, CCC indicator với heatmap |
+| Sector Historical Performance | Dec 30, 2025 | 1W/2W/1M sector trends with horizontal bar chart |
+| Market Overview Frontend | Dec 30, 2025 | Breadth, top movers, foreign flow, top volume components |
+| Market Overview API | Dec 30, 2025 | Aggregated market-overview endpoint |
+| Financial Health Enhancement (Phase 4) | Dec 28, 2025 | Peer Comparison, FCF Waterfall, CCC indicator with heatmap |
 | Financial Health Enhancement (Phase 2) | Dec 28, 2025 | Health Scorecard UI: Radar chart, F-Score, score breakdown |
 | Financial Health Enhancement (Phase 1) | Dec 28, 2025 | Backend APIs: health-score, trend-metrics, fcf-analysis, sector-peers |
 | Supabase Migration (Complete) | Dec 24, 2024 | DATABASE_URL_DIRECT, SSL config, connection pooling |
 | Job Progress UI | Dec 24, 2024 | Progress bar + notification panel in frontend |
 | Job Status API | Dec 24, 2024 | `/api/v1/jobs/status` for progress polling |
-| Startup Job Recovery | Dec 24, 2024 | Non-blocking missed job recovery on API startup |
-| Daily OHLCV Collection | Dec 24, 2024 | Scheduled job at 17:00 ICT |
-| Supabase Migration (Phase 1) | Dec 24, 2024 | DATABASE_URL_DIRECT, SSL config |
 | Volume Spikes Dashboard (Frontend) | Dec 23, 2024 | Treemap, pie chart, composed chart, tabs visualization |
-| Rename Top Performers to Financial Statements | Dec 23, 2024 | UI/UX optimizations, Vietnamese translation |
 | Financial Statements API Endpoint | Dec 22, 2024 | Analytics router with filters (limit, exchange, year, quarter) |
-| Financial Statements Batch Job | Dec 22, 2024 | Weekly scheduled job for HOSE+HNX quarterly rankings |
-| 10s Auto-Refresh | Dec 22, 2024 | Market indices refresh every 10s with loading indicators |
-| vnstock Wrapper | Dec 22, 2024 | Rate limit protection wrapper for vnstock API calls |
-| Transaction Rollback | Dec 22, 2024 | Added rollback on intraday data collection failures |
-| VN30 Overview (Frontend) | Dec 21, 2024 | Dashboard table with pagination, auto-refresh (1min) |
-| VN30 Overview (API) | Dec 21, 2024 | Backend endpoint with Redis caching (5min/1hr TTL) |
-| Analytics Deep-Dive Page | Dec 21, 2024 | SSR + TanStack Query integration |
-| Extended Caching | Dec 20, 2024 | 7 high-traffic endpoints with trading-hours-aware cache |
+| Redis Caching | Dec 20, 2024 | Trading-hours-aware cache for 7 high-traffic endpoints |
 | Rate Limiting | Dec 20, 2024 | Sliding window (100/60s standard, 20/60s heavy) |
-| Volume Anomaly (Frontend) | Dec 20, 2024 | Chart integration into stock detail page |
-| Volume Anomaly (On-Demand) | Dec 20, 2024 | Auto-collect intraday data on endpoint request |
-| Custom Hooks | Dec 20, 2024 | 12 hooks for data fetching |
-| Shareholders Tab | Dec 20, 2024 | Holders, officers, insider deals |
-| Finance Tab | Dec 20, 2024 | Income, balance, cash flow tables |
-| Stock Detail Page | Dec 20, 2024 | Search, header, stats, tabs |
-| Intraday Collection | Dec 20, 2024 | 5-min bar aggregation |
-| Volume Anomaly (Backend) | Dec 20, 2024 | API for detailed anomaly detection |
-| Volume Analysis | Dec 20, 2024 | Peak period analysis |
-| Officers API | Dec 20, 2024 | Company management endpoint |
-| Shareholders API | Dec 20, 2024 | Major holders endpoint |
-| Fund Certificates | Dec 20, 2024 | New endpoint, adjusted to 7 items |
-| Sector Performance | Dec 19, 2024 | Full-stack: API + hook + UI, top gainers/losers |
-| Toast Notifications | Dec 19, 2024 | Sonner integration on stock search |
-| Design System | Dec 20, 2024 | Modern + Clean established as standard |
 
 ### Notes on Reverted Features
 

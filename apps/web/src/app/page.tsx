@@ -6,6 +6,7 @@ import {
   SectorPerformanceSection,
   FundCertificates,
   VN30OverviewTable,
+  SectorHistoricalPerformance,
 } from "@/components/dashboard"
 import {
   fetchMarketIndicesServer,
@@ -59,6 +60,11 @@ export default async function Home() {
             {/* VN30 Overview Section */}
             <section>
               <VN30OverviewTable />
+            </section>
+
+            {/* Sector Historical Performance */}
+            <section>
+              <SectorHistoricalPerformance />
             </section>
 
             {/* Sector Performance & Fund Certificates */}

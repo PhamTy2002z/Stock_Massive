@@ -1,6 +1,6 @@
 # System Architecture - Stock Massive
 
-Updated: 2024-12-24
+Updated: 2025-12-30
 
 > **Note**: Toàn bộ hệ thống chạy trong Docker containers. Database sử dụng Supabase PostgreSQL cloud với SSL và connection pooling.
 
@@ -25,7 +25,7 @@ Updated: 2024-12-24
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
 │  │   Stocks    │  │  Analytics  │  │   vnstock Library   │  │
 │  │   Module    │  │   Module    │  │   (VCI Source)      │  │
-│  │ (30+ endpts)│  │ (2 endpts)  │  │   + Fmarket API     │  │
+│  │ (40+ endpts)│  │ (2 endpts)  │  │   + Fmarket API     │  │
 │  │ + Volume    │  │ - vol spike │  │   + vnstock_wrapper │  │
 │  │  Anomaly    │  │ - financials│  │    (rate limit)     │  │
 │  │ + Redis     │  │             │  │                     │  │
@@ -76,7 +76,7 @@ Updated: 2024-12-24
 ```
 Stock_Massive/
 ├── apps/
-│   ├── web/                      # Next.js frontend (80+ files)
+│   ├── web/                      # Next.js frontend (100+ files)
 │   │   ├── src/
 │   │   │   ├── app/              # App Router (5 pages)
 │   │   │   │   ├── (auth)/login/
@@ -85,16 +85,16 @@ Stock_Massive/
 │   │   │   │       ├── volume-spikes/
 │   │   │   │       └── financial-statements/
 │   │   │   ├── components/
-│   │   │   │   ├── ui/           # 21 ShadCN components (+ progress)
-│   │   │   │   ├── dashboard/    # 27 feature components
+│   │   │   │   ├── ui/           # 26 ShadCN components
+│   │   │   │   ├── dashboard/    # 26 feature components + 16 advanced-tab widgets
 │   │   │   │   ├── layout/       # 6 layout components (+ job-progress-bar, notification-panel)
 │   │   │   │   └── providers/    # 2 providers
-│   │   │   ├── hooks/            # 14 custom hooks (+ use-jobs-status)
-│   │   │   └── lib/              # 4 utilities
+│   │   │   ├── hooks/            # 28 custom hooks (+ use-jobs-status)
+│   │   │   └── lib/              # API client, utils
 │   │   ├── public/
 │   │   └── package.json
 │   │
-│   └── api/                      # FastAPI backend (55+ source + 4 migrations + 9 tests)
+│   └── api/                      # FastAPI backend (60+ source + 4 migrations + 18 tests)
 │       ├── src/
 │       │   ├── stocks/           # Stocks module
 │       │   │   ├── analytics/    # Volume spikes, financial statements
@@ -103,7 +103,9 @@ Stock_Massive/
 │       │   │   ├── market/       # Symbols, sectors, fund certificates
 │       │   │   ├── price/        # History, intraday, indices, volume
 │       │   │   ├── company/      # Company info
-│       │   │   ├── financial/    # Financials, ratios
+│       │   │   ├── financial/    # Financials, ratios, health scoring
+│       │   │   ├── trading/      # Price depth, trading stats
+│       │   │   ├── overview/     # Market overview (breadth, movers, foreign flow)
 │       │   │   ├── router.py     # Main router aggregation
 │       │   │   ├── service.py    # vnstock integration
 │       │   │   ├── schemas/      # 6 Pydantic schema files
@@ -118,12 +120,12 @@ Stock_Massive/
 │       │   │   └── job_status_store.py  # Job progress tracking
 │       │   └── main.py
 │       ├── alembic/              # 4 DB migrations
-│       ├── tests/                # 7 test files
+│       ├── tests/                # 18 test files
 │       └── requirements.txt
 │
 ├── packages/                     # Shared code (placeholders)
 ├── docker/                       # Docker configs
-├── docs/                         # 9 documentation files
+├── docs/                         # 10 documentation files
 ├── plans/                        # Plans and reports
 ├── docker-compose.yml            # Dev config
 ├── docker-compose.prod.yml       # Prod config
@@ -142,6 +144,7 @@ Stock_Massive/
 ├── symbols/group/{group}         # GET - By index group
 ├── symbols/search                # GET - Search symbols
 ├── market-indices                # GET - VN-INDEX, VN30, HNX, UPCOM
+├── market-overview               # GET - Aggregated market overview (breadth, movers, foreign flow)
 ├── price-board                   # GET - Real-time prices
 ├── intraday/collect              # POST - Trigger collection
 ├── sector-performance            # GET - ICB Level 2
@@ -149,7 +152,8 @@ Stock_Massive/
 ├── fund-certificates             # GET - Fund certificates
 ├── analytics/
 │   ├── volume-spikes             # GET - Top volume spike stocks
-│   └── financial-statements      # GET - Top companies by net profit
+│   ├── financial-statements      # GET - Top companies by net profit
+│   └── sector-historical         # GET - Sector historical performance (1D, 1W, 1M, 3M, 6M, 1Y)
 ├── {symbol}/
 │   ├── history                   # GET - OHLCV data
 │   ├── intraday                  # GET - Tick data
@@ -160,13 +164,19 @@ Stock_Massive/
 │   ├── insider-deals             # GET - Insider trades
 │   ├── volume-analysis           # GET - Volume patterns
 │   ├── volume-anomalies          # GET - Volume anomaly detection
+│   ├── price-depth               # GET - Bid/ask price depth
+│   ├── ratio-summary             # GET - Financial ratios summary
+│   ├── trading-stats             # GET - Trading volume statistics
 │   └── financials/
 │       ├── ratios                # GET - Financial ratios
 │       ├── income                # GET - Income (simple)
 │       ├── income-statement      # GET - Income (detailed)
 │       ├── balance-sheet         # GET - Balance (simple)
 │       ├── balance-sheet-detailed # GET - Balance (detailed)
-│       └── cash-flow             # GET - Cash flow
+│       ├── cash-flow             # GET - Cash flow
+│       ├── health-score          # GET - Financial health scoring
+│       ├── trend-metrics         # GET - Financial trend charts
+│       └── sector-peers          # GET - Top 5 sector peers
 ```
 
 ### Backend Layers
@@ -380,6 +390,7 @@ CREATE INDEX ix_financial_statements_collected_at ON financial_statements(collec
 | Intraday Cleanup | 16:00 ICT daily | Clean up old intraday data |
 | Daily OHLCV Collection | 17:00 ICT daily | Collect daily OHLCV data for all symbols |
 | Financial Statements | 02:00 ICT Sunday | Fetch quarterly income statements for HOSE+HNX (~700-800 symbols) |
+| Sector Historical Collection | Configurable | Collect sector historical performance data |
 
 ### Job Status API
 

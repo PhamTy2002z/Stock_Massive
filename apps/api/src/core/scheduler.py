@@ -13,6 +13,7 @@ from src.stocks.jobs import (
     collect_daily_ohlcv_job,
     collect_intraday_data_job,
     collect_financial_statements_job,
+    collect_sector_historical_job,
 )
 
 logger = logging.getLogger(__name__)
@@ -74,6 +75,19 @@ async def financial_statements_job_wrapper():
         return result
     except Exception as e:
         logger.error(f"Financial statements collection failed: {e}", exc_info=True)
+        raise
+
+
+async def sector_historical_job_wrapper():
+    """Async wrapper for sector historical job (runs in thread pool)."""
+    logger.info("=== SCHEDULED JOB TRIGGERED: Sector Historical Performance ===")
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, collect_sector_historical_job)
+        logger.info(f"Sector historical complete: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Sector historical failed: {e}", exc_info=True)
         raise
 
 
@@ -144,6 +158,22 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
         logger.info(
             f"Scheduled financial statements collection: Sunday "
             f"{settings.financial_statements_hour:02d}:{settings.financial_statements_minute:02d} ICT"
+        )
+
+    # Daily sector historical performance at 15:45 ICT (after sector-performance at 15:30)
+    if settings.sector_historical_enabled:
+        await scheduler.add_schedule(
+            sector_historical_job_wrapper,
+            CronTrigger(
+                hour=settings.sector_historical_hour,
+                minute=settings.sector_historical_minute,
+                timezone="Asia/Ho_Chi_Minh",
+            ),
+            id="sector-historical-daily",
+        )
+        logger.info(
+            f"Scheduled sector historical at "
+            f"{settings.sector_historical_hour}:{settings.sector_historical_minute:02d} ICT"
         )
 
     logger.info("=== Scheduler setup complete ===")
@@ -245,6 +275,30 @@ async def _should_run_ohlcv_job() -> bool:
     return count < 500
 
 
+def _should_run_sector_historical_job() -> bool:
+    """Check if sector historical job should run on startup.
+
+    Conditions:
+    - Job is enabled
+    - Current time is after scheduled time (15:45 ICT)
+    - Cache is empty (no data cached yet)
+    """
+    from src.stocks.analytics.sector_historical_service import sector_historical_cache
+
+    if not settings.sector_historical_enabled:
+        return False
+
+    if not _time_passed_today(settings.sector_historical_hour, settings.sector_historical_minute):
+        return False
+
+    # Check if any period has cached data
+    for period in ["1W", "2W", "1M"]:
+        if sector_historical_cache.get(period) is not None:
+            return False  # Cache exists, no need to run
+
+    return True
+
+
 async def run_startup_jobs_with_delay() -> None:
     """Run startup jobs after a short delay to allow server to fully start."""
     # Wait for server to be ready and accepting requests
@@ -294,5 +348,16 @@ async def run_startup_jobs() -> None:
             logger.info("Startup OHLCV job completed successfully")
         except Exception as e:
             logger.error(f"Startup OHLCV job failed: {e}", exc_info=True)
+
+    # Check and run sector historical job
+    should_run_sector_hist = _should_run_sector_historical_job()
+    logger.info(f"Should run sector historical job: {should_run_sector_hist}")
+    if should_run_sector_hist:
+        logger.info("Running missed sector historical job")
+        try:
+            await sector_historical_job_wrapper()
+            logger.info("Startup sector historical job completed successfully")
+        except Exception as e:
+            logger.error(f"Startup sector historical job failed: {e}", exc_info=True)
 
     logger.info("=== Startup job check complete ===")

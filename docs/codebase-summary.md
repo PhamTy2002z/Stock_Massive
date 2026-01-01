@@ -1,7 +1,7 @@
 # Codebase Summary - Stock Massive
 
-Generated: 2024-12-24
-Total Files: 399 analyzed | Frontend: 85+ TS/TSX | Backend: 55+ Python + 4 migrations + 18 tests
+Generated: 2025-12-30
+Total Files: 450+ analyzed | Frontend: 100+ TS/TSX | Backend: 60+ Python + 4 migrations + 18 tests
 
 ## 1. Project Overview and Purpose
 
@@ -13,22 +13,22 @@ Stock Massive is a Vietnamese stock market data platform powered by the `vnstock
 * Enable portfolio tracking and watchlist management (planned)
 * Secure user authentication via Supabase (scaffolded)
 * Integrate `vnstock` library for comprehensive Vietnam market data
-* Implement advanced analytical features (volume anomaly, volume spikes, financial statements)
+* Implement advanced analytical features (volume anomaly, volume spikes, financial statements, financial health)
 
 ## 2. Tech Stack
 
 **Frontend:**
 * **Framework**: Next.js 15.5.9 (App Router)
 * **Language**: TypeScript 5.3.0
-* **Styling**: TailwindCSS 3.4 + ShadCN/UI (22 Radix-based components)
+* **Styling**: TailwindCSS 3.4 + ShadCN/UI (26 Radix-based components)
 * **Data Fetching**: TanStack Query v5.90.12 (5min staleTime, 10min gcTime)
 * **Auth**: Supabase 2.89.0 (Google OAuth scaffolded)
-* **Charts**: Recharts 3.6.0 (sparklines, treemap, pie, composed)
+* **Charts**: Recharts 3.6.0 (sparklines, treemap, pie, composed, radar, waterfall)
 * **State**: useState (local), URL params (shared), next-themes (theme)
 * **Notifications**: Sonner
 * **Icons**: Lucide React
-* **UI Components**: 22 ShadCN primitives, 26 dashboard, 6 layout, 2 providers
-* **Custom Hooks**: 14 total (data fetching + responsive + job status)
+* **UI Components**: 26 ShadCN primitives, 26 dashboard + 16 advanced-tab widgets, 6 layout, 2 providers
+* **Custom Hooks**: 29 total (data fetching + responsive + job status)
 * **Pages**: 5 routes (home, login, analytics/deep-dive, analytics/volume-spikes, analytics/financial-statements)
 
 **Backend:**
@@ -96,9 +96,11 @@ Stock_Massive/
 │           │   │   ├── financial.py   # Income, balance sheet, cash flow
 │           │   │   ├── market.py      # VN30Overview, sectors, fund certificates
 │           │   │   └── price.py       # OHLCV, intraday, volume
-│           │   ├── analytics/   # Volume spikes, financial statements
+│           │   ├── analytics/   # Volume spikes, financial statements, sector historical
 │           │   │   ├── router.py
-│           │   │   └── service.py
+│           │   │   ├── service.py
+│           │   │   ├── sector_historical_router.py
+│           │   │   └── sector_historical_service.py
 │           │   ├── market/      # Symbols, sectors, fund certificates
 │           │   │   ├── router.py
 │           │   │   └── service.py
@@ -181,15 +183,20 @@ Stock_Massive/
 * **Analytics Deep-Dive**: Dedicated stock analysis page with SSR
 * **Volume Spikes Dashboard**: Treemap, pie chart, composed chart, tabs visualization
 * **Financial Statements Page**: Ranking table with exchange/year/quarter filters
+* **Market Overview**: Aggregated market breadth, top movers, foreign flow, top volume
+* **Financial Health Scorecard**: 5-dimension radar, Piotroski F-Score, score breakdown
+* **Peer Comparison**: Top 5 sector peers with heatmap table
+* **FCF Analysis**: Waterfall chart, CCC indicator with DSO/DIO/DPO
 * **Market Indices**: VN-INDEX, VN30, HNX, UPCOM cards with sparklines, 10s auto-refresh
 * **VN30 Overview Table**: Real-time VN30 stocks with price, change, volume, market cap
-* **Stock Data API**: 30+ REST endpoints via vnstock + Fmarket API
-* **Financial Data**: Income statements, balance sheets, cash flow (detailed)
+* **Stock Data API**: 40+ REST endpoints via vnstock + Fmarket API
+* **Financial Data**: Income statements, balance sheets, cash flow, trend charts
 * **Shareholders/Officers**: Major holders, management, insider deals
 * **Volume Analysis**: 5-min bar aggregation, peak period analysis
 * **Volume Anomaly Detection**: Backend API + frontend visualization in stock detail tabs
 * **Volume Spikes API**: Aggregated spike detection across all stocks
 * **Sector Performance**: ICB Level 2 with sorting, top gainers/losers
+* **Sector Historical Performance**: Period-based sector returns (1D, 1W, 1M, 3M, 6M, 1Y) with horizontal bar chart
 * **Fund Certificates**: 7-item display via Fmarket API
 * **Intraday Collection**: Scheduled daily (15:30 ICT) + cleanup (16:00 ICT)
 * **Daily OHLCV Collection**: Scheduled daily (17:00 ICT)
@@ -240,15 +247,17 @@ Stock_Massive/
 * `/src/app/analytics/volume-spikes/page.tsx`: Volume spike dashboard
 * `/src/app/analytics/financial-statements/page.tsx`: Financial rankings
 * `/src/components/ui/`: 22 ShadCN primitives (button, card, tabs, skeleton, progress, etc.)
-* `/src/components/dashboard/`: 26 feature components
+* `/src/components/dashboard/`: 27 feature components
   * `market-indices.tsx`, `stock-detail-panel.tsx`, `vn30-overview-table.tsx`
   * `volume-spike-dashboard.tsx`, `volume-spike-treemap.tsx`, `volume-spike-pie-chart.tsx`, `volume-spike-composed-chart.tsx`
   * `financial-statements-table.tsx`
+  * `sector-historical-performance.tsx` (horizontal bar chart for sector returns)
 * `/src/components/layout/`: 6 layout components
   * `app-sidebar.tsx`, `dashboard-header.tsx`, `job-progress-bar.tsx`, `notification-panel.tsx`
-* `/src/hooks/`: 14 custom hooks
+* `/src/hooks/`: 16 custom hooks
   * `use-stock-detail.ts`, `use-market-indices.ts`, `use-volume-spikes.ts`, `use-financial-statements.ts`
   * `use-jobs-status.ts` (job progress polling)
+  * `use-sector-historical-performance.ts` (sector historical data fetching)
 * `/src/lib/api.ts`: Client API (500+ LOC, all endpoints typed with Zod)
 * `/src/lib/query-keys.ts`: Centralized query keys for TanStack Query
 
@@ -257,6 +266,8 @@ Stock_Massive/
 * `/src/stocks/router.py`: Main router aggregation (30+ endpoints)
 * `/src/stocks/analytics/router.py`: Volume spikes, financial statements endpoints
 * `/src/stocks/analytics/service.py`: Analytics business logic
+* `/src/stocks/analytics/sector_historical_router.py`: Sector historical performance endpoint
+* `/src/stocks/analytics/sector_historical_service.py`: Sector historical business logic
 * `/src/stocks/jobs_router.py`: Job status polling API
 * `/src/stocks/models.py`: SQLAlchemy models (StockDailyOHLCV, IntradayBar, FinancialStatement)
 * `/src/stocks/schemas/`: 6 schema files
@@ -264,7 +275,7 @@ Stock_Massive/
   * `common.py` - Shared types
   * `company.py` - Company, shareholders, officers
   * `financial.py` - Income, balance sheet, cash flow
-  * `market.py` - VN30Overview, sectors, fund certificates
+  * `market.py` - VN30Overview, sectors, fund certificates, SectorHistoricalItem, SectorHistoricalResponse
   * `price.py` - OHLCV, intraday, volume
 * `/src/core/config.py`: Pydantic settings with Supabase support
 * `/src/core/database.py`: SQLAlchemy async engine with SSL auto-detection
@@ -373,9 +384,15 @@ alembic upgrade head
 5. Volume anomaly detection performed on collected data
 6. Data available via `/volume-anomalies` endpoint
 
-## 10. Recent Major Changes (December 2024)
+## 10. Recent Major Changes (December 2024 - December 2025)
 
-* **Advanced Endpoints Phase 4 Testing** (Dec 27): 19 integration tests covering price-depth, ratio-summary, trading-stats endpoints with error handling, performance, caching validation
+* **Sector Historical Performance** (Dec 30, 2025): Period-based sector returns with horizontal bar chart visualization
+* **Market Overview Frontend** (Dec 30, 2025): Market overview components with breadth, top movers, foreign flow
+* **Market Overview API** (Dec 30, 2025): Aggregated market-overview endpoint
+* **Financial Health Enhancement Phase 4** (Dec 28, 2025): Peer Comparison, FCF Waterfall, CCC indicator with heatmap
+* **Financial Health Enhancement Phase 2** (Dec 28, 2025): Health Scorecard UI: Radar chart, F-Score, score breakdown
+* **Financial Health Enhancement Phase 1** (Dec 28, 2025): Backend APIs: health-score, trend-metrics, fcf-analysis, sector-peers
+* **Advanced Endpoints Phase 4 Testing** (Dec 27): 19 integration tests covering price-depth, ratio-summary, trading-stats endpoints
 * **Supabase Migration** (Dec 24): Migrated from local PostgreSQL to Supabase cloud with SSL, connection pooling
 * **Job Progress UI** (Dec 24): Added progress bar and notification panel in frontend
 * **Job Status API** (Dec 24): `/api/v1/jobs/status` for polling background job progress
