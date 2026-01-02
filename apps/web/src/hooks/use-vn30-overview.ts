@@ -1,13 +1,14 @@
 "use client"
 
-import { useSuspenseQuery } from "@tanstack/react-query"
+import { useQuery, keepPreviousData } from "@tanstack/react-query"
 import { fetchVN30Overview } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
 
 export function useVN30Overview() {
-  const { data, isFetching, refetch } = useSuspenseQuery({
+  const query = useQuery({
     queryKey: queryKeys.vn30Overview,
     queryFn: fetchVN30Overview,
+    placeholderData: keepPreviousData,
     staleTime: 30 * 1000, // 30 seconds
     refetchInterval: 30 * 1000,
     refetchIntervalInBackground: false,
@@ -15,10 +16,11 @@ export function useVN30Overview() {
     refetchOnMount: true,
   })
 
-  // data is ALWAYS defined with useSuspenseQuery
   return {
-    data,
-    isFetching,
-    refetch,
+    data: query.data,
+    isPending: query.isPending,
+    isFetching: query.isFetching,
+    isPlaceholderData: query.isPlaceholderData,
+    refetch: query.refetch,
   }
 }

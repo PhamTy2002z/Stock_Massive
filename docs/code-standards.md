@@ -90,22 +90,61 @@ if (error) return <StockDetailError message={error.message} onRetry={refetch} />
 if (!data) return <StockDetailEmpty />
 ```
 
-### Smooth Tab/Filter Transitions
+### Smooth Loading Pattern (Dashboard Sections)
 
-Use `placeholderData: keepPreviousData` for query key changes (tabs, filters) to prevent skeleton flash:
+Use `useQuery` with `keepPreviousData` for smooth section loading without skeleton flash on refetch:
 
 ```tsx
-const { data, isPending } = useQuery({
-  queryKey: ['data', selectedTab],
-  queryFn: () => fetchData(selectedTab),
-  placeholderData: keepPreviousData,
-})
+// Hook pattern
+export function useMarketData() {
+  const query = useQuery({
+    queryKey: queryKeys.marketData,
+    queryFn: fetchMarketData,
+    placeholderData: keepPreviousData,
+    staleTime: 15 * 1000,
+    refetchInterval: 15 * 1000,
+  })
 
-// Show previous data with opacity fade while loading new data
-<div className={isPending ? 'opacity-60' : 'opacity-100'}>
-  {data && <Content data={data} />}
-</div>
+  return {
+    data: query.data,
+    isPending: query.isPending,        // true on first load only
+    isFetching: query.isFetching,      // true during any fetch
+    isPlaceholderData: query.isPlaceholderData,  // true when showing stale data
+    refetch: query.refetch,
+  }
+}
+
+// Component pattern
+function DashboardSection() {
+  const { data, isPending, isFetching, isPlaceholderData } = useMarketData()
+
+  // First load - show skeleton
+  if (isPending) return <SectionSkeleton />
+
+  return (
+    <div className="relative">
+      {/* 60% opacity during refetch */}
+      <div className={cn(
+        "transition-opacity duration-200",
+        isPlaceholderData && "opacity-60"
+      )}>
+        <Content data={data} />
+      </div>
+      {/* Loading spinner overlay in top-right */}
+      {isFetching && !isPending && (
+        <div className="absolute top-2 right-2 bg-background/80 backdrop-blur-sm rounded-full p-1.5">
+          <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground" />
+        </div>
+      )}
+    </div>
+  )
+}
 ```
+
+**Key states:**
+- `isPending`: First load (no cached data) - show skeleton
+- `isPlaceholderData`: Refetching with stale data - show 60% opacity
+- `isFetching && !isPending`: Background refetch - show spinner overlay
 
 ### Custom Hooks (28 total)
 

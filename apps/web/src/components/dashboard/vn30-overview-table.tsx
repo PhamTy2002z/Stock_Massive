@@ -110,9 +110,9 @@ export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
   const [rowsPerPage, setRowsPerPage] = useState(10)
   const [sortDirection, setSortDirection] = useState<SortDirection>(null)
 
-  // data is ALWAYS defined with useSuspenseQuery - Suspense handles loading, ErrorBoundary handles errors
-  const { data, isFetching, refetch } = useVN30Overview()
+  const { data, isPending, isFetching, isPlaceholderData, refetch } = useVN30Overview()
 
+  // All hooks must be called before any early returns
   const stocks = useMemo(() => {
     const rawStocks = data?.stocks ?? []
     if (sortDirection === null) return rawStocks
@@ -132,6 +132,7 @@ export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
     })
     setCurrentPage(1)
   }, [])
+
   const totalItems = stocks.length
   const totalPages = Math.max(1, Math.ceil(totalItems / rowsPerPage))
   const startIndex = (currentPage - 1) * rowsPerPage
@@ -157,7 +158,11 @@ export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
     refetch()
   }, [refetch])
 
-  // data is always defined with useSuspenseQuery
+  // First load - show skeleton (after all hooks)
+  if (isPending) {
+    return <VN30OverviewTableSkeleton className={className} />
+  }
+
   if (totalItems === 0) {
     return (
       <div className={cn("space-y-4", className)}>
@@ -195,88 +200,100 @@ export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
           <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
         </button>
       </div>
-      <div className="rounded-lg border border-border/50 bg-card/50 overflow-hidden">
-        <div className="overflow-x-auto scrollbar-thin">
-          <table className="w-full min-w-[800px] border-collapse">
-            <thead>
-              <tr className="border-b border-border/50 bg-muted/30">
-                <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">Mã</th>
-                <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">Tên công ty</th>
-                <th className="py-3 px-4 text-right text-sm font-medium text-muted-foreground whitespace-nowrap">Giá</th>
-                <th className="py-3 px-4 text-right text-sm font-medium text-muted-foreground whitespace-nowrap">
-                  <button
-                    onClick={toggleSort}
-                    className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
-                  >
-                    %
-                    {sortDirection === null && <ArrowUpDown className="h-3.5 w-3.5" />}
-                    {sortDirection === "desc" && <ArrowDown className="h-3.5 w-3.5" />}
-                    {sortDirection === "asc" && <ArrowUp className="h-3.5 w-3.5" />}
-                  </button>
-                </th>
-                <th className="py-3 px-4 text-right text-sm font-medium text-muted-foreground whitespace-nowrap">Khối lượng</th>
-                <th className="py-3 px-4 text-right text-sm font-medium text-muted-foreground whitespace-nowrap">Vốn hóa</th>
-              </tr>
-            </thead>
-            <tbody>
-              {currentData.map((stock) => (
-                <VN30Row key={stock.symbol} stock={stock} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="flex items-center justify-between px-4 py-3 border-t border-border/50 bg-muted/20">
-          <span className="text-sm text-muted-foreground">
-            {startIndex + 1}-{endIndex} trên {totalItems} cổ phiếu
-          </span>
-
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground whitespace-nowrap">Hàng mỗi trang</span>
-              <Select value={String(rowsPerPage)} onValueChange={handleRowsPerPageChange}>
-                <SelectTrigger className="w-[70px] h-8 text-sm bg-background border-border/50">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="10">10</SelectItem>
-                  <SelectItem value="20">20</SelectItem>
-                  <SelectItem value="30">30</SelectItem>
-                </SelectContent>
-              </Select>
+      <div className="relative">
+        <div className={cn(
+          "transition-opacity duration-200",
+          isPlaceholderData && "opacity-60"
+        )}>
+          <div className="rounded-lg border border-border/50 bg-card/50 overflow-hidden">
+            <div className="overflow-x-auto scrollbar-thin">
+              <table className="w-full min-w-[800px] border-collapse">
+                <thead>
+                  <tr className="border-b border-border/50 bg-muted/30">
+                    <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">Mã</th>
+                    <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">Tên công ty</th>
+                    <th className="py-3 px-4 text-right text-sm font-medium text-muted-foreground whitespace-nowrap">Giá</th>
+                    <th className="py-3 px-4 text-right text-sm font-medium text-muted-foreground whitespace-nowrap">
+                      <button
+                        onClick={toggleSort}
+                        className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+                      >
+                        %
+                        {sortDirection === null && <ArrowUpDown className="h-3.5 w-3.5" />}
+                        {sortDirection === "desc" && <ArrowDown className="h-3.5 w-3.5" />}
+                        {sortDirection === "asc" && <ArrowUp className="h-3.5 w-3.5" />}
+                      </button>
+                    </th>
+                    <th className="py-3 px-4 text-right text-sm font-medium text-muted-foreground whitespace-nowrap">Khối lượng</th>
+                    <th className="py-3 px-4 text-right text-sm font-medium text-muted-foreground whitespace-nowrap">Vốn hóa</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {currentData.map((stock) => (
+                    <VN30Row key={stock.symbol} stock={stock} />
+                  ))}
+                </tbody>
+              </table>
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => goToPage(currentPage - 1)}
-                disabled={currentPage === 1}
-                className={cn(
-                  "p-1.5 rounded-md transition-colors",
-                  "hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                )}
-                aria-label="Previous page"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-
-              <span className="text-sm text-muted-foreground whitespace-nowrap min-w-[80px] text-center">
-                Trang {currentPage}/{totalPages}
+            <div className="flex items-center justify-between px-4 py-3 border-t border-border/50 bg-muted/20">
+              <span className="text-sm text-muted-foreground">
+                {startIndex + 1}-{endIndex} trên {totalItems} cổ phiếu
               </span>
 
-              <button
-                onClick={() => goToPage(currentPage + 1)}
-                disabled={currentPage === totalPages}
-                className={cn(
-                  "p-1.5 rounded-md transition-colors",
-                  "hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                )}
-                aria-label="Next page"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </button>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground whitespace-nowrap">Hàng mỗi trang</span>
+                  <Select value={String(rowsPerPage)} onValueChange={handleRowsPerPageChange}>
+                    <SelectTrigger className="w-[70px] h-8 text-sm bg-background border-border/50">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="10">10</SelectItem>
+                      <SelectItem value="20">20</SelectItem>
+                      <SelectItem value="30">30</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => goToPage(currentPage - 1)}
+                    disabled={currentPage === 1}
+                    className={cn(
+                      "p-1.5 rounded-md transition-colors",
+                      "hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                    )}
+                    aria-label="Previous page"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+
+                  <span className="text-sm text-muted-foreground whitespace-nowrap min-w-[80px] text-center">
+                    Trang {currentPage}/{totalPages}
+                  </span>
+
+                  <button
+                    onClick={() => goToPage(currentPage + 1)}
+                    disabled={currentPage === totalPages}
+                    className={cn(
+                      "p-1.5 rounded-md transition-colors",
+                      "hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                    )}
+                    aria-label="Next page"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
+        {isFetching && !isPending && (
+          <div className="absolute top-2 right-2 bg-background/80 backdrop-blur-sm rounded-full p-1.5">
+            <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground" />
+          </div>
+        )}
       </div>
     </div>
   )

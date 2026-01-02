@@ -97,3 +97,21 @@ export const StockIndexCard = memo(function StockIndexCard({
     </Card>
   )
 })
+
+export function StockIndexCardSkeleton({ className }: { className?: string }) {
+  return (
+    <Card className={cn("p-5", className)}>
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1 min-w-0">
+          <div className="h-4 w-20 rounded bg-muted animate-pulse" />
+          <div className="h-7 w-28 rounded bg-muted animate-pulse mt-2" />
+          <div className="flex items-center gap-1.5 mt-2">
+            <div className="h-4 w-16 rounded bg-muted animate-pulse" />
+            <div className="h-4 w-14 rounded bg-muted animate-pulse" />
+          </div>
+        </div>
+        <div className="h-10 w-20 rounded bg-muted animate-pulse" />
+      </div>
+    </Card>
+  )
+}
