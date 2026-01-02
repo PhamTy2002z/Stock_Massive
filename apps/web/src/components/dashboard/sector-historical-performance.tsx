@@ -2,6 +2,7 @@
 
 import { useState, useMemo, memo } from "react"
 import { isEqual } from "lodash-es"
+import { RefreshCw } from "lucide-react"
 import {
   Bar,
   XAxis,
@@ -111,9 +112,11 @@ const SectorHistoricalChart = memo(
 )
 
 function PeriodContent({ period }: { period: SectorHistoricalPeriod }) {
-  const { data, isFetching } = useSectorHistoricalPerformance(period)
+  const { data, isPending, isFetching, isPlaceholderData } = useSectorHistoricalPerformance(period)
 
+  // useMemo must be called before any early returns (React hooks rules)
   const chartData = useMemo(() => {
+    if (!data) return []
     const gainers = data.top_gainers.map((item) => ({
       name: item.icb_name.length > 18 ? item.icb_name.slice(0, 16) + "..." : item.icb_name,
       value: item.change_pct,
@@ -124,11 +127,32 @@ function PeriodContent({ period }: { period: SectorHistoricalPeriod }) {
       value: item.change_pct,
       isGainer: false,
     }))
-    // Sort all by value descending (gainers at top)
     return [...gainers, ...losers].sort((a, b) => b.value - a.value)
   }, [data])
 
-  return <SectorHistoricalChart data={chartData} isPlaceholderData={isFetching} />
+  // First load only - show skeleton
+  if (isPending) {
+    return <div className="h-[280px] bg-muted animate-pulse rounded" />
+  }
+
+  return (
+    <div className="relative">
+      {/* Chart stays visible during tab switch with opacity fade */}
+      <div className={cn(
+        "transition-opacity duration-200",
+        isPlaceholderData && "opacity-60"
+      )}>
+        <SectorHistoricalChart data={chartData} isPlaceholderData={isPlaceholderData} />
+      </div>
+
+      {/* Subtle loading indicator during refetch */}
+      {isFetching && !isPending && (
+        <div className="absolute top-2 right-2 bg-background/80 backdrop-blur-sm rounded-full p-1.5">
+          <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground" />
+        </div>
+      )}
+    </div>
+  )
 }
 
 export function SectorHistoricalPerformance({ className }: { className?: string }) {
