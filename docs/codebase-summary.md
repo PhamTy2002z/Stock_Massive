@@ -1,7 +1,7 @@
 # Codebase Summary - Stock Massive
 
-Generated: 2025-12-30
-Total Files: 450+ analyzed | Frontend: 100+ TS/TSX | Backend: 60+ Python + 4 migrations + 18 tests
+Generated: 2026-01-02
+Total Files: 450+ analyzed | Frontend: 140+ TS/TSX | Backend: 53 Python + 4 migrations + 18 tests
 
 ## 1. Project Overview and Purpose
 
@@ -27,8 +27,8 @@ Stock Massive is a Vietnamese stock market data platform powered by the `vnstock
 * **State**: useState (local), URL params (shared), next-themes (theme)
 * **Notifications**: Sonner
 * **Icons**: Lucide React
-* **UI Components**: 26 ShadCN primitives, 26 dashboard + 16 advanced-tab widgets, 6 layout, 2 providers
-* **Custom Hooks**: 29 total (data fetching + responsive + job status)
+* **UI Components**: 25+ ShadCN primitives, 35+ dashboard widgets, 6 layout, 2 providers
+* **Custom Hooks**: 28 total (data fetching + responsive + job status)
 * **Pages**: 5 routes (home, login, analytics/deep-dive, analytics/volume-spikes, analytics/financial-statements)
 
 **Backend:**
@@ -63,7 +63,7 @@ Stock Massive is a Vietnamese stock market data platform powered by the `vnstock
 ```
 Stock_Massive/
 ├── apps/
-│   ├── web/                     # Next.js frontend (port 3000) - 85+ files
+│   ├── web/                     # Next.js frontend (port 3000) - 140+ files
 │   │   └── src/
 │   │       ├── app/             # App Router (5 pages)
 │   │       │   ├── (auth)/login/       # Auth login page (scaffolded)
@@ -72,14 +72,14 @@ Stock_Massive/
 │   │       │       ├── volume-spikes/  # Volume spike dashboard
 │   │       │       └── financial-statements/  # Financial rankings
 │   │       ├── components/
-│   │       │   ├── ui/          # 22 ShadCN components (button, card, tabs, progress, etc.)
-│   │       │   ├── dashboard/   # 26 feature components (market-indices, stock-detail-*, volume-spike-*, etc.)
+│   │       │   ├── ui/          # 25+ ShadCN components (button, card, tabs, progress, etc.)
+│   │       │   ├── dashboard/   # 35+ feature components (market-indices, stock-detail-*, volume-spike-*, etc.)
 │   │       │   ├── layout/      # 6 layout components (sidebar, header, job-progress-bar, notification-panel)
 │   │       │   └── providers/   # 2 providers (query, theme)
-│   │       ├── hooks/           # 14 custom hooks (use-stock-detail, use-volume-spikes, use-jobs-status, etc.)
+│   │       ├── hooks/           # 28 custom hooks (use-stock-detail, use-volume-spikes, use-jobs-status, etc.)
 │   │       └── lib/             # 4 utility files (api.ts, query-keys.ts, utils.ts, api-server.ts)
 │   │
-│   └── api/                     # FastAPI backend (port 8000) - 55+ source files
+│   └── api/                     # FastAPI backend (port 8000) - 53 source files
 │       └── src/
 │           ├── stocks/          # Feature-based modules
 │           │   ├── router.py    # Main aggregation router (30+ endpoints)
@@ -101,6 +101,7 @@ Stock_Massive/
 │           │   │   ├── service.py
 │           │   │   ├── sector_historical_router.py
 │           │   │   └── sector_historical_service.py
+│           │   ├── overview/    # Market overview (breadth, movers, foreign flow)
 │           │   ├── market/      # Symbols, sectors, fund certificates
 │           │   │   ├── router.py
 │           │   │   └── service.py
@@ -189,7 +190,8 @@ Stock_Massive/
 * **FCF Analysis**: Waterfall chart, CCC indicator with DSO/DIO/DPO
 * **Market Indices**: VN-INDEX, VN30, HNX, UPCOM cards with sparklines, 10s auto-refresh
 * **VN30 Overview Table**: Real-time VN30 stocks with price, change, volume, market cap
-* **Stock Data API**: 40+ REST endpoints via vnstock + Fmarket API
+* **Sector Historical Performance**: Period-based sector returns (1D, 1W, 1M, 3M, 6M, 1Y) with horizontal bar chart
+* **Stock Data API**: 43+ REST endpoints via vnstock + Fmarket API
 * **Financial Data**: Income statements, balance sheets, cash flow, trend charts
 * **Shareholders/Officers**: Major holders, management, insider deals
 * **Volume Analysis**: 5-min bar aggregation, peak period analysis
@@ -247,17 +249,19 @@ Stock_Massive/
 * `/src/app/analytics/volume-spikes/page.tsx`: Volume spike dashboard
 * `/src/app/analytics/financial-statements/page.tsx`: Financial rankings
 * `/src/components/ui/`: 22 ShadCN primitives (button, card, tabs, skeleton, progress, etc.)
-* `/src/components/dashboard/`: 27 feature components
+* `/src/components/dashboard/`: 35+ feature components
   * `market-indices.tsx`, `stock-detail-panel.tsx`, `vn30-overview-table.tsx`
   * `volume-spike-dashboard.tsx`, `volume-spike-treemap.tsx`, `volume-spike-pie-chart.tsx`, `volume-spike-composed-chart.tsx`
   * `financial-statements-table.tsx`
   * `sector-historical-performance.tsx` (horizontal bar chart for sector returns)
+  * `market-overview.tsx` (breadth, movers, foreign flow components)
 * `/src/components/layout/`: 6 layout components
   * `app-sidebar.tsx`, `dashboard-header.tsx`, `job-progress-bar.tsx`, `notification-panel.tsx`
-* `/src/hooks/`: 16 custom hooks
+* `/src/hooks/`: 28 custom hooks
   * `use-stock-detail.ts`, `use-market-indices.ts`, `use-volume-spikes.ts`, `use-financial-statements.ts`
   * `use-jobs-status.ts` (job progress polling)
   * `use-sector-historical-performance.ts` (sector historical data fetching)
+  * `use-market-overview.ts` (market overview data)
 * `/src/lib/api.ts`: Client API (500+ LOC, all endpoints typed with Zod)
 * `/src/lib/query-keys.ts`: Centralized query keys for TanStack Query
 
@@ -384,8 +388,10 @@ alembic upgrade head
 5. Volume anomaly detection performed on collected data
 6. Data available via `/volume-anomalies` endpoint
 
-## 10. Recent Major Changes (December 2024 - December 2025)
+## 10. Recent Major Changes (December 2024 - January 2026)
 
+* **Smooth Section Loading** (Jan 2, 2026): Dashboard sections use `keepPreviousData` pattern for smooth refetch (no skeleton flash)
+* **Documentation Update** (Jan 2, 2026): Comprehensive documentation refresh with accurate file counts and feature lists
 * **Sector Historical Performance** (Dec 30, 2025): Period-based sector returns with horizontal bar chart visualization
 * **Market Overview Frontend** (Dec 30, 2025): Market overview components with breadth, top movers, foreign flow
 * **Market Overview API** (Dec 30, 2025): Aggregated market-overview endpoint

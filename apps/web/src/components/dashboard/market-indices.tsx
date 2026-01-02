@@ -1,6 +1,6 @@
 "use client"
 
-import { StockIndexCard } from "./stock-index-card"
+import { StockIndexCard, StockIndexCardSkeleton } from "./stock-index-card"
 import { RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useMarketIndices } from "@/hooks/use-market-indices"
@@ -10,8 +10,12 @@ interface MarketIndicesProps {
 }
 
 export function MarketIndices({ className }: MarketIndicesProps) {
-  // data is ALWAYS defined with useSuspenseQuery - Suspense handles loading, ErrorBoundary handles errors
-  const { data: indices, isFetching, refetch } = useMarketIndices()
+  const { data: indices, isPending, isFetching, isPlaceholderData, refetch } = useMarketIndices()
+
+  // First load - show skeleton
+  if (isPending) {
+    return <MarketIndicesSkeleton className={className} />
+  }
 
   return (
     <div className={className}>
@@ -28,17 +32,29 @@ export function MarketIndices({ className }: MarketIndicesProps) {
           <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
         </button>
       </div>
-      <MarketIndicesContent indices={indices} />
+      <div className="relative">
+        <div className={cn(
+          "transition-opacity duration-200",
+          isPlaceholderData && "opacity-60"
+        )}>
+          <MarketIndicesContent indices={indices} />
+        </div>
+        {isFetching && !isPending && (
+          <div className="absolute top-2 right-2 bg-background/80 backdrop-blur-sm rounded-full p-1.5">
+            <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground" />
+          </div>
+        )}
+      </div>
     </div>
   )
 }
 
 interface MarketIndicesContentProps {
-  indices: NonNullable<ReturnType<typeof useMarketIndices>["data"]>
+  indices: ReturnType<typeof useMarketIndices>["data"]
 }
 
 function MarketIndicesContent({ indices }: MarketIndicesContentProps) {
-  if (indices.length === 0) {
+  if (!indices || indices.length === 0) {
     return (
       <div className="rounded-xl border bg-card p-6 text-center">
         <p className="text-sm text-muted-foreground">Không có dữ liệu chỉ số</p>
@@ -58,6 +74,22 @@ function MarketIndicesContent({ indices }: MarketIndicesContentProps) {
           changePercent={index.changePercent}
         />
       ))}
+    </div>
+  )
+}
+
+export function MarketIndicesSkeleton({ className }: { className?: string }) {
+  return (
+    <div className={className}>
+      <div className="flex items-center justify-between mb-4">
+        <div className="h-6 w-36 rounded bg-muted animate-pulse" />
+        <div className="h-8 w-8 rounded bg-muted animate-pulse" />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {[...Array(4)].map((_, i) => (
+          <StockIndexCardSkeleton key={i} />
+        ))}
+      </div>
     </div>
   )
 }

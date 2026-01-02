@@ -9,8 +9,20 @@ import { cn } from "@/lib/utils"
  * Wrapper component with title and refresh button
  */
 export function SectorPerformanceSection({ className }: { className?: string }) {
-  // data is ALWAYS defined with useSuspenseQuery - Suspense handles loading, ErrorBoundary handles errors
-  const { data, isFetching, refetch } = useSectorPerformance()
+  const { data, isPending, isFetching, isPlaceholderData, refetch } = useSectorPerformance()
+
+  // First load - show skeleton
+  if (isPending) {
+    return (
+      <div className={className}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="h-6 w-32 rounded bg-muted animate-pulse" />
+          <div className="h-8 w-8 rounded bg-muted animate-pulse" />
+        </div>
+        <SectorPerformanceSkeleton />
+      </div>
+    )
+  }
 
   return (
     <div className={className}>
@@ -27,7 +39,19 @@ export function SectorPerformanceSection({ className }: { className?: string }) 
           <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
         </button>
       </div>
-      <SectorPerformanceContent data={data} />
+      <div className="relative">
+        <div className={cn(
+          "transition-opacity duration-200",
+          isPlaceholderData && "opacity-60"
+        )}>
+          <SectorPerformanceContent data={data} />
+        </div>
+        {isFetching && !isPending && (
+          <div className="absolute top-2 right-2 bg-background/80 backdrop-blur-sm rounded-full p-1.5">
+            <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground" />
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -40,18 +64,18 @@ interface SectorPerformanceContentProps {
  * Internal content component - renders the two cards
  */
 function SectorPerformanceContent({ data }: SectorPerformanceContentProps) {
-  // Top 5 gainers: only positive change_pct, Top 5 losers: only negative change_pct
-  const sortedSectors = [...data.sectors].sort((a, b) => b.change_pct - a.change_pct)
-  const topGainers = sortedSectors.filter(s => s.change_pct > 0).slice(0, 5)
-  const topLosers = sortedSectors.filter(s => s.change_pct < 0).sort((a, b) => a.change_pct - b.change_pct).slice(0, 5)
-
-  if (data.sectors.length === 0) {
+  if (!data || data.sectors.length === 0) {
     return (
       <div className="rounded-xl border bg-card p-6 text-center">
         <p className="text-sm text-muted-foreground">Không có dữ liệu ngành</p>
       </div>
     )
   }
+
+  // Top 5 gainers: only positive change_pct, Top 5 losers: only negative change_pct
+  const sortedSectors = [...data.sectors].sort((a, b) => b.change_pct - a.change_pct)
+  const topGainers = sortedSectors.filter(s => s.change_pct > 0).slice(0, 5)
+  const topLosers = sortedSectors.filter(s => s.change_pct < 0).sort((a, b) => a.change_pct - b.change_pct).slice(0, 5)
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

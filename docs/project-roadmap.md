@@ -1,16 +1,19 @@
 # Project Roadmap - Stock Massive
 
-Updated: 2025-12-30
+Updated: 2026-01-02
 
-## Current State (December 2025)
+## Current State (January 2026)
 
-### Completed (December 2024 - December 2025)
+**Phase 1 MVP Progress: ~80% Complete**
+
+### Completed (December 2024 - January 2026)
 
 - [x] Monorepo structure setup
 - [x] Next.js 15.5.9 frontend with App Router
 - [x] Dashboard layout (sidebar, header, responsive)
 - [x] Dark/light theme support (next-themes)
-- [x] ShadCN/UI components (26 primitives, 26 dashboard + 16 advanced-tab, 6 layout, 2 providers)
+- [x] ShadCN/UI components (25+ primitives, 35+ dashboard widgets, 6 layout, 2 providers)
+- [x] Custom hooks (28 total for data fetching, responsive, job status)
 - [x] Stock detail page (search, header, stats, tabs)
 - [x] Analytics deep-dive page (SSR + TanStack Query)
 - [x] **Volume Spikes Dashboard** (treemap, pie chart, composed chart, tabs)
@@ -21,8 +24,9 @@ Updated: 2025-12-30
 - [x] **Market Overview** (breadth, top movers, foreign flow, top volume)
 - [x] Market indices cards with sparklines (10s auto-refresh)
 - [x] VN30 Overview Table (price, change, volume, mcap, 1-min refresh)
+- [x] **Sector Historical Performance** (1D, 1W, 1M, 3M, 6M, 1Y with horizontal bar chart)
 - [x] FastAPI backend setup
-- [x] vnstock integration (40+ endpoints)
+- [x] vnstock integration (43+ endpoints)
 - [x] vnstock wrapper with rate limit protection
 - [x] Financial statements (income, balance, cash flow)
 - [x] Financial health APIs (health-score, trend-metrics, sector-peers)
@@ -42,13 +46,14 @@ Updated: 2025-12-30
 - [x] Backend test suite (18+ tests in 18 files)
 - [x] Modern + Clean design system established
 - [x] Sector Performance (ICB Level 2, top gainers/losers)
-- [x] **Sector Historical Performance** (1W/2W/1M sector trends, horizontal bar chart)
+- [x] **Sector Historical Performance** (period-based sector returns with horizontal bar chart)
 - [x] Toast notifications (Sonner integration)
 - [x] Fund certificates endpoint (7 items display)
 - [x] Redis caching (Upstash, trading-hours-aware, 7 endpoints)
 - [x] Rate limiting (sliding window, 100/60s standard, 20/60s heavy)
 - [x] Transaction rollback on intraday data failure
 - [x] Loading states and skeletons
+- [x] **Smooth Section Loading** (keepPreviousData pattern for tab/filter transitions)
 - [x] API documentation (OpenAPI/Swagger)
 
 ### In Progress
@@ -258,11 +263,12 @@ Updated: 2025-12-30
 
 ---
 
-## Recently Completed (December 2024 - December 2025)
+## Recently Completed (December 2024 - January 2026)
 
 | Feature | Date | Notes |
 |---------|------|-------|
-| Sector Historical Performance | Dec 30, 2025 | 1W/2W/1M sector trends with horizontal bar chart |
+| Documentation Update | Jan 2, 2026 | Comprehensive documentation refresh with accurate file counts |
+| Sector Historical Performance | Dec 30, 2025 | Period-based sector returns (1D-1Y) with horizontal bar chart |
 | Market Overview Frontend | Dec 30, 2025 | Breadth, top movers, foreign flow, top volume components |
 | Market Overview API | Dec 30, 2025 | Aggregated market-overview endpoint |
 | Financial Health Enhancement (Phase 4) | Dec 28, 2025 | Peer Comparison, FCF Waterfall, CCC indicator with heatmap |
