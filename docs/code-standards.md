@@ -1,6 +1,6 @@
 # Code Standards - Stock Massive
 
-Updated: 2025-12-30
+Updated: 2026-01-02
 
 ## General Principles
 
@@ -23,9 +23,8 @@ Updated: 2025-12-30
 
 ```
 components/
-├── ui/                    # 26 ShadCN base components
-├── dashboard/             # 26 feature-specific components
-│   └── advanced-tab/      # 16 advanced tab widgets (health scorecard, peer comparison, FCF)
+├── ui/                    # 25+ ShadCN base components
+├── dashboard/             # 35+ feature-specific components
 ├── layout/                # 6 layout components (+ job-progress-bar, notification-panel)
 └── providers/             # 2 context providers
 ```
@@ -91,6 +90,23 @@ if (error) return <StockDetailError message={error.message} onRetry={refetch} />
 if (!data) return <StockDetailEmpty />
 ```
 
+### Smooth Tab/Filter Transitions
+
+Use `placeholderData: keepPreviousData` for query key changes (tabs, filters) to prevent skeleton flash:
+
+```tsx
+const { data, isPending } = useQuery({
+  queryKey: ['data', selectedTab],
+  queryFn: () => fetchData(selectedTab),
+  placeholderData: keepPreviousData,
+})
+
+// Show previous data with opacity fade while loading new data
+<div className={isPending ? 'opacity-60' : 'opacity-100'}>
+  {data && <Content data={data} />}
+</div>
+```
+
 ### Custom Hooks (28 total)
 
 - `use-stock-detail`, `use-market-indices`, `use-vn30-overview`
@@ -100,6 +116,7 @@ if (!data) return <StockDetailEmpty />
 - `use-volume-spikes`, `use-financial-statements`
 - `use-health-score`, `use-trend-metrics`, `use-sector-peers`, `use-fcf-analysis`
 - `use-jobs-status` (job progress polling)
+- `use-sector-historical-performance` (sector historical data)
 - Additional hooks for responsive, error boundaries, loading states
 
 ---
