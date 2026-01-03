@@ -15,9 +15,20 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 
 ---
 
-## Current Implementation Status (Updated: 2026-01-02)
+## Current Implementation Status (Updated: 2026-01-03)
 
-**Phase 1 MVP Progress: ~80% Complete**
+**Phase 1 MVP Progress: ~85% Complete**
+
+**Codebase Statistics:**
+- Frontend: 140+ files, 15,236 LOC (TypeScript/TSX)
+- Backend: 53 source files, 8,410 LOC (Python)
+- Total: ~23,646 LOC
+- API Endpoints: 43+
+- Custom Hooks: 28
+- Components: 60+ (25 UI + 35 dashboard)
+- Database Models: 3+
+- Test Files: 18
+- Docker Services: 2 (web, api)
 
 | Feature | Status | Details |
 |---------|--------|---------|
@@ -30,6 +41,8 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | Market Overview | Done | Aggregated breadth, top movers, foreign flow, top volume |
 | VN30 Overview Table | Done | Real-time VN30 stocks (price, change, volume, mcap), 1-min refresh |
 | Sector Historical Performance | Done | Period-based returns (1D, 1W, 1M, 3M, 6M, 1Y) with horizontal bar chart |
+| Smooth Loading Pattern | Done | keepPreviousData for tab/filter transitions, no skeleton flash |
+| Prefetch Optimization | Done | Adjacent tab prefetch on mount + hover-based prefetch (200ms delay) |
 | Stock Data API | Done | 43+ endpoints via vnstock + Fmarket |
 | Financial Data | Done | Income, balance sheet, cash flow, trend charts |
 | Financial Health | Done | Health scoring, Piotroski F-Score, peer comparison, FCF analysis |

@@ -1,6 +1,6 @@
 # Code Standards - Stock Massive
 
-Updated: 2026-01-02
+Updated: 2026-01-03
 
 ## General Principles
 
@@ -161,7 +161,9 @@ function DashboardSection() {
 - `use-health-score`, `use-trend-metrics`, `use-sector-peers`, `use-fcf-analysis`
 - `use-jobs-status` (job progress polling)
 - `use-sector-historical-performance` (sector historical data)
-- Additional hooks for responsive, error boundaries, loading states
+- `use-foreign-trading`, `use-foreign-snapshot`, `use-prop-trading`
+- `use-price-depth`, `use-trading-stats`, `use-order-stats`, `use-intraday-order-stats`
+- `use-ratio-summary`, `use-mobile`
 
 ---
 
