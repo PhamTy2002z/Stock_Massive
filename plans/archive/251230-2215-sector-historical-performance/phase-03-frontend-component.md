@@ -1,9 +1,113 @@
+# Phase 3: Frontend - Component & Hook
+
+## Overview
+
+| Field | Value |
+|-------|-------|
+| Priority | P1 |
+| Effort | 2h |
+| Status | DONE |
+| Dependencies | Phase 2 complete |
+
+## Files to Modify/Create
+
+| Action | File |
+|--------|------|
+| CREATE | `apps/web/src/hooks/use-sector-historical-performance.ts` |
+| CREATE | `apps/web/src/components/dashboard/sector-historical-performance.tsx` |
+| MODIFY | `apps/web/src/lib/api.ts` |
+| MODIFY | `apps/web/src/lib/query-keys.ts` |
+| MODIFY | `apps/web/src/components/dashboard/index.ts` |
+| MODIFY | `apps/web/src/app/page.tsx` |
+
+## Implementation Steps
+
+### Step 1: Add API Types & Function
+
+**File**: `apps/web/src/lib/api.ts` (MODIFY)
+
+```typescript
+// === Sector Historical Performance Types ===
+
+export type SectorHistoricalPeriod = "1W" | "2W" | "1M"
+
+export interface SectorHistoricalItem {
+  icb_code: string
+  icb_name: string
+  change_pct: number
+}
+
+export interface SectorHistoricalResponse {
+  period: string
+  top_gainers: SectorHistoricalItem[]
+  top_losers: SectorHistoricalItem[]
+  generated_at: string | null
+}
+
+export async function fetchSectorHistoricalPerformance(
+  period: SectorHistoricalPeriod = "1W"
+): Promise<SectorHistoricalResponse> {
+  return fetchApi<SectorHistoricalResponse>(
+    `/stocks/analytics/sector-historical?period=${period}`
+  )
+}
+```
+
+### Step 2: Add Query Key
+
+**File**: `apps/web/src/lib/query-keys.ts` (MODIFY)
+
+```typescript
+import type { SectorHistoricalPeriod } from "./api"
+
+export const queryKeys = {
+  // ... existing keys ...
+
+  // Sector Historical Performance
+  sectorHistoricalPerformance: (period: SectorHistoricalPeriod) =>
+    ["analytics", "sectorHistorical", period] as const,
+}
+```
+
+### Step 3: Create Hook
+
+**File**: `apps/web/src/hooks/use-sector-historical-performance.ts` (CREATE)
+
+```typescript
 "use client"
 
-import { useState, useMemo, memo, useEffect, useCallback, useRef } from "react"
+import { useSuspenseQuery } from "@tanstack/react-query"
+import {
+  fetchSectorHistoricalPerformance,
+  type SectorHistoricalPeriod,
+} from "@/lib/api"
+import { queryKeys } from "@/lib/query-keys"
+
+export function useSectorHistoricalPerformance(
+  period: SectorHistoricalPeriod = "1W"
+) {
+  const { data, isFetching, refetch } = useSuspenseQuery({
+    queryKey: queryKeys.sectorHistoricalPerformance(period),
+    queryFn: () => fetchSectorHistoricalPerformance(period),
+    staleTime: 5 * 60 * 1000, // 5 minutes (historical data)
+    refetchInterval: 10 * 60 * 1000, // 10 minutes
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
+  })
+
+  return { data, isFetching, refetch }
+}
+```
+
+### Step 4: Create Component
+
+**File**: `apps/web/src/components/dashboard/sector-historical-performance.tsx` (CREATE)
+
+```tsx
+"use client"
+
+import { useState, useMemo, memo } from "react"
 import { isEqual } from "lodash-es"
-import { RefreshCw } from "lucide-react"
-import { useQueryClient } from "@tanstack/react-query"
 import {
   Bar,
   XAxis,
@@ -16,35 +120,10 @@ import {
   ReferenceLine,
 } from "recharts"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import { useSectorHistoricalPerformance } from "@/hooks/use-sector-historical-performance"
-import { fetchSectorHistoricalPerformance, type SectorHistoricalPeriod } from "@/lib/api"
-import { queryKeys } from "@/lib/query-keys"
-
-const PERIODS: SectorHistoricalPeriod[] = ["1W", "2W", "1M"]
-const STALE_TIME = 5 * 60 * 1000 // 5 minutes - match hook staleTime
-
-// Prefetch adjacent periods on mount for instant tab switching
-function usePrefetchAdjacentPeriods(currentPeriod: SectorHistoricalPeriod) {
-  const queryClient = useQueryClient()
-
-  useEffect(() => {
-    const currentIndex = PERIODS.indexOf(currentPeriod)
-    const adjacentPeriods = [
-      PERIODS[currentIndex - 1],
-      PERIODS[currentIndex + 1],
-    ].filter(Boolean) as SectorHistoricalPeriod[]
-
-    adjacentPeriods.forEach((period) => {
-      queryClient.prefetchQuery({
-        queryKey: queryKeys.sectorHistoricalPerformance(period),
-        queryFn: () => fetchSectorHistoricalPerformance(period),
-        staleTime: STALE_TIME,
-      })
-    })
-  }, [currentPeriod, queryClient])
-}
+import type { SectorHistoricalPeriod, SectorHistoricalItem } from "@/lib/api"
 
 // Custom tooltip
 function CustomTooltip({
@@ -138,11 +217,9 @@ const SectorHistoricalChart = memo(
 )
 
 function PeriodContent({ period }: { period: SectorHistoricalPeriod }) {
-  const { data, isPending, isFetching, isPlaceholderData } = useSectorHistoricalPerformance(period)
+  const { data, isFetching } = useSectorHistoricalPerformance(period)
 
-  // useMemo must be called before any early returns (React hooks rules)
   const chartData = useMemo(() => {
-    if (!data) return []
     const gainers = data.top_gainers.map((item) => ({
       name: item.icb_name.length > 18 ? item.icb_name.slice(0, 16) + "..." : item.icb_name,
       value: item.change_pct,
@@ -153,64 +230,15 @@ function PeriodContent({ period }: { period: SectorHistoricalPeriod }) {
       value: item.change_pct,
       isGainer: false,
     }))
+    // Sort all by value descending (gainers at top)
     return [...gainers, ...losers].sort((a, b) => b.value - a.value)
   }, [data])
 
-  // First load only - show skeleton
-  if (isPending) {
-    return <div className="h-[280px] bg-muted animate-pulse rounded" />
-  }
-
-  return (
-    <div className="relative">
-      {/* Chart stays visible during tab switch with opacity fade */}
-      <div className={cn(
-        "transition-opacity duration-200",
-        isPlaceholderData && "opacity-60"
-      )}>
-        <SectorHistoricalChart data={chartData} isPlaceholderData={isPlaceholderData} />
-      </div>
-
-      {/* Subtle loading indicator during refetch */}
-      {isFetching && !isPending && (
-        <div className="absolute top-2 right-2 bg-background/80 backdrop-blur-sm rounded-full p-1.5">
-          <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground" />
-        </div>
-      )}
-    </div>
-  )
+  return <SectorHistoricalChart data={chartData} isPlaceholderData={isFetching} />
 }
 
 export function SectorHistoricalPerformance({ className }: { className?: string }) {
   const [period, setPeriod] = useState<SectorHistoricalPeriod>("1W")
-  const queryClient = useQueryClient()
-  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-
-  // Prefetch adjacent periods on mount/period change
-  usePrefetchAdjacentPeriods(period)
-
-  // Hover-based prefetch with 200ms delay (indicates user intent)
-  const prefetchPeriod = useCallback((targetPeriod: SectorHistoricalPeriod) => {
-    if (hoverTimeoutRef.current) {
-      clearTimeout(hoverTimeoutRef.current)
-    }
-    hoverTimeoutRef.current = setTimeout(() => {
-      queryClient.prefetchQuery({
-        queryKey: queryKeys.sectorHistoricalPerformance(targetPeriod),
-        queryFn: () => fetchSectorHistoricalPerformance(targetPeriod),
-        staleTime: STALE_TIME,
-      })
-    }, 200)
-  }, [queryClient])
-
-  // Cleanup timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (hoverTimeoutRef.current) {
-        clearTimeout(hoverTimeoutRef.current)
-      }
-    }
-  }, [])
 
   return (
     <Card className={cn("w-full", className)}>
@@ -219,27 +247,9 @@ export function SectorHistoricalPerformance({ className }: { className?: string 
           <CardTitle className="text-base">Hiệu suất ngành theo thời gian</CardTitle>
           <Tabs value={period} onValueChange={(v) => setPeriod(v as SectorHistoricalPeriod)}>
             <TabsList className="h-8">
-              <TabsTrigger
-                value="1W"
-                className="text-xs px-3"
-                onMouseEnter={() => prefetchPeriod("1W")}
-              >
-                1 Tuần
-              </TabsTrigger>
-              <TabsTrigger
-                value="2W"
-                className="text-xs px-3"
-                onMouseEnter={() => prefetchPeriod("2W")}
-              >
-                2 Tuần
-              </TabsTrigger>
-              <TabsTrigger
-                value="1M"
-                className="text-xs px-3"
-                onMouseEnter={() => prefetchPeriod("1M")}
-              >
-                1 Tháng
-              </TabsTrigger>
+              <TabsTrigger value="1W" className="text-xs px-3">1 Tuần</TabsTrigger>
+              <TabsTrigger value="2W" className="text-xs px-3">2 Tuần</TabsTrigger>
+              <TabsTrigger value="1M" className="text-xs px-3">1 Tháng</TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
@@ -266,3 +276,61 @@ export function SectorHistoricalPerformanceSkeleton({ className }: { className?:
     </Card>
   )
 }
+```
+
+### Step 5: Export from Index
+
+**File**: `apps/web/src/components/dashboard/index.ts` (MODIFY)
+
+```typescript
+export { SectorHistoricalPerformance, SectorHistoricalPerformanceSkeleton } from "./sector-historical-performance"
+```
+
+### Step 6: Integrate into Page
+
+**File**: `apps/web/src/app/page.tsx` (MODIFY)
+
+Add import:
+```tsx
+import {
+  MarketIndices,
+  SectorPerformanceSection,
+  FundCertificates,
+  VN30OverviewTable,
+  SectorHistoricalPerformance,  // ADD
+} from "@/components/dashboard"
+```
+
+Add section after VN30OverviewTable:
+```tsx
+{/* Sector Historical Performance */}
+<section>
+  <SectorHistoricalPerformance />
+</section>
+```
+
+## Todo List
+
+- [x] Add types and fetch function to `api.ts`
+- [x] Add query key to `query-keys.ts`
+- [x] Create `use-sector-historical-performance.ts` hook
+- [x] Create `sector-historical-performance.tsx` component
+- [x] Export from `dashboard/index.ts`
+- [x] Add section to `page.tsx`
+- [x] Verify Tabs component from shadcn exists
+
+## Success Criteria
+
+- Component renders horizontal bar chart
+- Tabs switch between 1W/2W/1M periods
+- Green bars for gainers, red for losers
+- Tooltip shows sector name + change %
+- Empty state when no data
+
+## Risks
+
+| Risk | Mitigation |
+|------|------------|
+| Tabs not installed | Run `npx shadcn@latest add tabs` |
+| Data not available | Show "Chưa có dữ liệu" message |
+| Long sector names | Truncate to 18 chars + "..." |

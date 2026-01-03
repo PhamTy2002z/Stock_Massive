@@ -117,7 +117,7 @@ function FundRow({ symbol, fundType, nav, changePct }: FundRowProps) {
   return (
     <div
       className={cn(
-        "grid grid-cols-[1fr_auto_auto] gap-4 px-4 py-3 transition-colors border-l-2 hover:bg-muted/30",
+        "grid grid-cols-[1fr_auto_auto] gap-4 px-4 py-3 transition-colors border-l-2 hover:bg-muted/30 items-center",
         isPositive && "border-l-emerald-500 dark:border-l-emerald-400",
         isNegative && "border-l-red-500 dark:border-l-red-400",
         isNeutral && "border-l-transparent"
@@ -127,10 +127,10 @@ function FundRow({ symbol, fundType, nav, changePct }: FundRowProps) {
         <span className="text-sm font-medium text-foreground truncate block">{symbol}</span>
         <span className="text-xs text-muted-foreground truncate block">{formatFundType(fundType)}</span>
       </div>
-      <span className="text-sm font-medium tabular-nums text-foreground text-right w-20">
+      <span className="text-sm font-medium tabular-nums text-foreground text-right w-20 self-center">
         {nav ? formatNav(nav) : "N/A"}
       </span>
-      <div className="flex items-center justify-end gap-1 w-16">
+      <div className="flex items-center justify-end gap-1 w-16 self-center">
         {isPositive && <TrendingUp className="h-3 w-3 text-emerald-500 dark:text-emerald-400" />}
         {isNegative && <TrendingDown className="h-3 w-3 text-red-500 dark:text-red-400" />}
         <span

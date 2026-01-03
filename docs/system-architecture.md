@@ -1,6 +1,6 @@
 # System Architecture - Stock Massive
 
-Updated: 2025-12-30
+Updated: 2026-01-02
 
 > **Note**: Toàn bộ hệ thống chạy trong Docker containers. Database sử dụng Supabase PostgreSQL cloud với SSL và connection pooling.
 
@@ -15,7 +15,7 @@ Updated: 2025-12-30
 │                 Next.js Frontend (port 3000)                 │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
 │  │  ShadCN UI  │  │  Dashboard  │  │  TanStack Query v5  │  │
-│  │  (20 comp)  │  │  (27 comp)  │  │  + Theme Provider   │  │
+│  │  (25+ comp) │  │  (35+ comp) │  │  + Theme Provider   │  │
 │  │             │  │  + Charts   │  │  + Sonner Toasts    │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘  │
 └─────────────────────────────┬───────────────────────────────┘
@@ -25,11 +25,11 @@ Updated: 2025-12-30
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
 │  │   Stocks    │  │  Analytics  │  │   vnstock Library   │  │
 │  │   Module    │  │   Module    │  │   (VCI Source)      │  │
-│  │ (40+ endpts)│  │ (2 endpts)  │  │   + Fmarket API     │  │
+│  │ (43+ endpts)│  │ (3 endpts)  │  │   + Fmarket API     │  │
 │  │ + Volume    │  │ - vol spike │  │   + vnstock_wrapper │  │
 │  │  Anomaly    │  │ - financials│  │    (rate limit)     │  │
-│  │ + Redis     │  │             │  │                     │  │
-│  │  Cache      │  │             │  │                     │  │
+│  │ + Redis     │  │ - sector    │  │                     │  │
+│  │  Cache      │  │  historical │  │                     │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘  │
 └──────────┬──────────────────┬───────────────────────────────┘
            │                  │
@@ -76,7 +76,7 @@ Updated: 2025-12-30
 ```
 Stock_Massive/
 ├── apps/
-│   ├── web/                      # Next.js frontend (100+ files)
+│   ├── web/                      # Next.js frontend (140+ files)
 │   │   ├── src/
 │   │   │   ├── app/              # App Router (5 pages)
 │   │   │   │   ├── (auth)/login/
@@ -85,16 +85,16 @@ Stock_Massive/
 │   │   │   │       ├── volume-spikes/
 │   │   │   │       └── financial-statements/
 │   │   │   ├── components/
-│   │   │   │   ├── ui/           # 26 ShadCN components
-│   │   │   │   ├── dashboard/    # 26 feature components + 16 advanced-tab widgets
+│   │   │   │   ├── ui/           # 25+ ShadCN components
+│   │   │   │   ├── dashboard/    # 35+ feature components
 │   │   │   │   ├── layout/       # 6 layout components (+ job-progress-bar, notification-panel)
 │   │   │   │   └── providers/    # 2 providers
-│   │   │   ├── hooks/            # 28 custom hooks (+ use-jobs-status)
+│   │   │   ├── hooks/            # 28 custom hooks (+ use-jobs-status, use-market-overview)
 │   │   │   └── lib/              # API client, utils
 │   │   ├── public/
 │   │   └── package.json
 │   │
-│   └── api/                      # FastAPI backend (60+ source + 4 migrations + 18 tests)
+│   └── api/                      # FastAPI backend (53 source + 4 migrations + 18 tests)
 │       ├── src/
 │       │   ├── stocks/           # Stocks module
 │       │   │   ├── analytics/    # Volume spikes, financial statements
@@ -106,6 +106,8 @@ Stock_Massive/
 │       │   │   ├── financial/    # Financials, ratios, health scoring
 │       │   │   ├── trading/      # Price depth, trading stats
 │       │   │   ├── overview/     # Market overview (breadth, movers, foreign flow)
+│       │   │   │   ├── router.py
+│       │   │   │   └── service.py
 │       │   │   ├── router.py     # Main router aggregation
 │       │   │   ├── service.py    # vnstock integration
 │       │   │   ├── schemas/      # 6 Pydantic schema files
@@ -282,7 +284,7 @@ RootLayout
 - **QueryProvider**: Wraps app with QueryClient configuration
 - **Query Keys**: Centralized key factory at `lib/query-keys.ts`
 - **DevTools**: React Query DevTools enabled in development
-- **Hooks**: 12 custom hooks for data fetching
+- **Hooks**: 28 custom hooks for data fetching
 
 ---
 
