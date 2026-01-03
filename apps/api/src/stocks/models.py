@@ -1,5 +1,5 @@
 """SQLAlchemy models for stocks module."""
-from sqlalchemy import BigInteger, Column, Date, DateTime, Float, Index, Integer, Numeric, String, UniqueConstraint
+from sqlalchemy import BigInteger, Column, Date, DateTime, Float, Index, Integer, Numeric, String, UniqueConstraint, text
 from sqlalchemy.sql import func
 
 from src.core.database import Base
