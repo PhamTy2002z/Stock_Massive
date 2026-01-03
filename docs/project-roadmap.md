@@ -1,10 +1,10 @@
 # Project Roadmap - Stock Massive
 
-Updated: 2026-01-02
+Updated: 2026-01-03
 
 ## Current State (January 2026)
 
-**Phase 1 MVP Progress: ~80% Complete**
+**Phase 1 MVP Progress: ~85% Complete**
 
 ### Completed (December 2024 - January 2026)
 
@@ -25,6 +25,8 @@ Updated: 2026-01-02
 - [x] Market indices cards with sparklines (10s auto-refresh)
 - [x] VN30 Overview Table (price, change, volume, mcap, 1-min refresh)
 - [x] **Sector Historical Performance** (1D, 1W, 1M, 3M, 6M, 1Y with horizontal bar chart)
+- [x] **Smooth Loading Pattern** (keepPreviousData for tab/filter transitions)
+- [x] **Prefetch Optimization** (adjacent tab prefetch on mount + hover-based prefetch)
 - [x] FastAPI backend setup
 - [x] vnstock integration (43+ endpoints)
 - [x] vnstock wrapper with rate limit protection
@@ -267,7 +269,9 @@ Updated: 2026-01-02
 
 | Feature | Date | Notes |
 |---------|------|-------|
-| Documentation Update | Jan 2, 2026 | Comprehensive documentation refresh with accurate file counts |
+| Prefetch Optimization | Jan 3, 2026 | Adjacent tab prefetch on mount + hover-based prefetch (200ms delay) for instant tab switching |
+| Smooth Section Loading | Jan 2, 2026 | Dashboard sections use keepPreviousData pattern for smooth refetch (no skeleton flash) |
+| Documentation Update | Jan 3, 2026 | Comprehensive documentation refresh with accurate file counts (140+ frontend, 53 backend), feature lists, and latest scout findings |
 | Sector Historical Performance | Dec 30, 2025 | Period-based sector returns (1D-1Y) with horizontal bar chart |
 | Market Overview Frontend | Dec 30, 2025 | Breadth, top movers, foreign flow, top volume components |
 | Market Overview API | Dec 30, 2025 | Aggregated market-overview endpoint |

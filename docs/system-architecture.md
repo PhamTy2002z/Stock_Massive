@@ -1,6 +1,6 @@
 # System Architecture - Stock Massive
 
-Updated: 2026-01-02
+Updated: 2026-01-03
 
 > **Note**: Toàn bộ hệ thống chạy trong Docker containers. Database sử dụng Supabase PostgreSQL cloud với SSL và connection pooling.
 
@@ -76,7 +76,7 @@ Updated: 2026-01-02
 ```
 Stock_Massive/
 ├── apps/
-│   ├── web/                      # Next.js frontend (140+ files)
+│   ├── web/                      # Next.js frontend (140+ files, 15,236 LOC)
 │   │   ├── src/
 │   │   │   ├── app/              # App Router (5 pages)
 │   │   │   │   ├── (auth)/login/
@@ -87,46 +87,47 @@ Stock_Massive/
 │   │   │   ├── components/
 │   │   │   │   ├── ui/           # 25+ ShadCN components
 │   │   │   │   ├── dashboard/    # 35+ feature components
-│   │   │   │   ├── layout/       # 6 layout components (+ job-progress-bar, notification-panel)
+│   │   │   │   ├── layout/       # 6 layout components
 │   │   │   │   └── providers/    # 2 providers
-│   │   │   ├── hooks/            # 28 custom hooks (+ use-jobs-status, use-market-overview)
+│   │   │   ├── hooks/            # 28 custom hooks
 │   │   │   └── lib/              # API client, utils
 │   │   ├── public/
 │   │   └── package.json
 │   │
-│   └── api/                      # FastAPI backend (53 source + 4 migrations + 18 tests)
+│   └── api/                      # FastAPI backend (53 source files, 8,410 LOC)
 │       ├── src/
-│       │   ├── stocks/           # Stocks module
-│       │   │   ├── analytics/    # Volume spikes, financial statements
+│       │   ├── stocks/           # 7 domain modules
+│       │   │   ├── analytics/    # Volume spikes, financial statements, sector historical
 │       │   │   │   ├── router.py
-│       │   │   │   └── service.py
+│       │   │   │   ├── service.py
+│       │   │   │   ├── sector_historical_router.py
+│       │   │   │   └── sector_historical_service.py
 │       │   │   ├── market/       # Symbols, sectors, fund certificates
 │       │   │   ├── price/        # History, intraday, indices, volume
-│       │   │   ├── company/      # Company info
+│       │   │   ├── company/      # Company info, shareholders, officers
 │       │   │   ├── financial/    # Financials, ratios, health scoring
 │       │   │   ├── trading/      # Price depth, trading stats
 │       │   │   ├── overview/     # Market overview (breadth, movers, foreign flow)
-│       │   │   │   ├── router.py
-│       │   │   │   └── service.py
-│       │   │   ├── router.py     # Main router aggregation
+│       │   │   ├── router.py     # Main router aggregation (43+ endpoints)
 │       │   │   ├── service.py    # vnstock integration
 │       │   │   ├── schemas/      # 6 Pydantic schema files
-│       │   │   ├── models.py     # IntradayBar, FinancialStatement
+│       │   │   ├── models.py     # StockDailyOHLCV, IntradayBar, FinancialStatement
 │       │   │   ├── jobs.py       # Scheduled jobs
+│       │   │   ├── jobs_router.py # Job status API
 │       │   │   ├── intraday_collector.py
 │       │   │   └── financial_statements_collector.py
 │       │   ├── core/             # 9 core config files
 │       │   │   ├── config.py, database.py, dependencies.py
 │       │   │   ├── cache.py, redis.py, ratelimit.py
 │       │   │   ├── scheduler.py, vnstock_wrapper.py
-│       │   │   └── job_status_store.py  # Job progress tracking
+│       │   │   └── job_status_store.py
 │       │   └── main.py
 │       ├── alembic/              # 4 DB migrations
 │       ├── tests/                # 18 test files
 │       └── requirements.txt
 │
-├── packages/                     # Shared code (placeholders)
-├── docker/                       # Docker configs
+├── packages/                     # Shared code (2 placeholders: config, types)
+├── docker/                       # Docker configs (4 Dockerfiles, 2 compose files)
 ├── docs/                         # 10 documentation files
 ├── plans/                        # Plans and reports
 ├── docker-compose.yml            # Dev config

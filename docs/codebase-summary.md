@@ -1,7 +1,8 @@
 # Codebase Summary - Stock Massive
 
-Generated: 2026-01-02
-Total Files: 450+ analyzed | Frontend: 140+ TS/TSX | Backend: 53 Python + 4 migrations + 18 tests
+Generated: 2026-01-03
+Total Files: 610+ analyzed | Frontend: 140+ TS/TSX | Backend: 53 Python + 4 migrations + 18 tests
+Code Statistics: ~23,646 total lines of code | ~50 Python source files | ~100+ TypeScript source files
 
 ## 1. Project Overview and Purpose
 
@@ -392,7 +393,7 @@ alembic upgrade head
 
 * **Prefetch Optimization** (Jan 3, 2026): Adjacent tab prefetch on mount + hover-based prefetch with 200ms delay for instant tab switching
 * **Smooth Section Loading** (Jan 2, 2026): Dashboard sections use `keepPreviousData` pattern for smooth refetch (no skeleton flash)
-* **Documentation Update** (Jan 2, 2026): Comprehensive documentation refresh with accurate file counts and feature lists
+* **Documentation Update** (Jan 3, 2026): Comprehensive documentation refresh with accurate file counts, feature lists, and latest scout findings
 * **Sector Historical Performance** (Dec 30, 2025): Period-based sector returns with horizontal bar chart visualization
 * **Market Overview Frontend** (Dec 30, 2025): Market overview components with breadth, top movers, foreign flow
 * **Market Overview API** (Dec 30, 2025): Aggregated market-overview endpoint

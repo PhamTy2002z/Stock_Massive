@@ -2,7 +2,7 @@
 
 Vietnamese stock market data platform powered by **vnstock** library. Provides real-time data, charting, and analysis for Vietnam stock market (HOSE, HNX, UPCOM).
 
-## Current Status (Updated: 2026-01-02)
+## Current Status (Updated: 2026-01-03)
 
 | Component | Status | Notes |
 |-----------|--------|-------|
@@ -11,7 +11,8 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | Market Overview | Done | Breadth, top movers, foreign flow, top volume |
 | VN30 Overview Table | Done | Real-time VN30 stocks with price, volume, market cap |
 | Sector Performance | Done | ICB Level 2 with sorting, top gainers/losers |
-| Sector Historical | Done | Period-based returns (1D-1Y) with horizontal bar chart |
+| Sector Historical | Done | Period-based returns (1D-1Y) with horizontal bar chart, prefetch optimization |
+| Smooth Loading | Done | keepPreviousData pattern for tab/filter transitions (no skeleton flash) |
 | Stock Detail Page | Done | Search, ticker header, stats, tabs (Overview, Finance, Shareholders, Volume) |
 | Analytics Deep-Dive | Done | Dedicated stock analysis page |
 | Volume Spikes Dashboard | Done | Volume spike detection with treemap, pie chart, composed chart |
@@ -31,8 +32,11 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | Auth Pages | Scaffolded | Login/register routes, Supabase OAuth UI |
 | Supabase Migration | Done | PostgreSQL migrated to Supabase cloud |
 | Job Progress UI | Done | Progress bar + notification panel |
-| Charts Page | Planned | TradingView Lightweight Charts |
+| Charts Page | Planned | TradingView Lightweight Charts integration |
 | Portfolio/Watchlist | Planned | CRUD operations, P&L tracking |
+| Frontend Tests | Planned | Vitest + React Testing Library |
+| E2E Tests | Planned | Playwright |
+| CI/CD Pipeline | Planned | Not yet configured |
 
 ## Tech Stack
 
@@ -65,14 +69,14 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 ```
 Stock_Massive/
 ├── apps/
-│   ├── web/                 # Next.js frontend (port 3000)
+│   ├── web/                 # Next.js frontend (port 3000) - 140+ files
 │   │   └── src/
 │   │       ├── app/         # App Router pages (5 routes)
 │   │       ├── components/  # UI (25+) + dashboard (35+) + layout (6) + providers (2)
 │   │       ├── hooks/       # 28 custom hooks
 │   │       └── lib/         # API client, utils
 │   │
-│   └── api/                 # FastAPI backend (port 8000)
+│   └── api/                 # FastAPI backend (port 8000) - 53 source files
 │       └── src/
 │           ├── stocks/      # 7 domain modules (analytics, market, price, company, financial, trading, overview)
 │           │   ├── analytics/  # Volume spikes, financial statements, sector historical
@@ -81,12 +85,16 @@ Stock_Massive/
 │           │   ├── company/    # Company info, shareholders, officers
 │           │   ├── financial/  # Financials, ratios, health scoring
 │           │   ├── trading/    # Price depth, trading stats
-│           │   └── overview/   # Market overview (breadth, movers, foreign flow)
-│           ├── core/        # Config, database, scheduler, cache
+│           │   ├── overview/   # Market overview (breadth, movers, foreign flow)
+│           │   ├── schemas/    # 6 Pydantic schema files
+│           │   ├── models.py   # SQLAlchemy ORM models
+│           │   ├── jobs.py     # Background job definitions
+│           │   └── intraday_collector.py, financial_statements_collector.py
+│           ├── core/        # 9 core config files (config, database, cache, scheduler, etc.)
 │           └── main.py
 │
-├── packages/                # Shared code (placeholders)
-├── docker/                  # Docker configs
+├── packages/                # Shared code (scaffolded but not used: config, types)
+├── docker/                  # Docker configs (4 Dockerfiles, 2 compose files)
 └── docs/                    # Documentation (10 files)
 ```
 
