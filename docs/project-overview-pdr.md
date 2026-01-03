@@ -15,7 +15,9 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 
 ---
 
-## Current Implementation Status (Updated: 2025-12-30)
+## Current Implementation Status (Updated: 2026-01-02)
+
+**Phase 1 MVP Progress: ~80% Complete**
 
 | Feature | Status | Details |
 |---------|--------|---------|
@@ -27,7 +29,8 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | Market Indices | Done | VN-INDEX, VN30, HNX, UPCOM cards with sparklines, 10s auto-refresh |
 | Market Overview | Done | Aggregated breadth, top movers, foreign flow, top volume |
 | VN30 Overview Table | Done | Real-time VN30 stocks (price, change, volume, mcap), 1-min refresh |
-| Stock Data API | Done | 40+ endpoints via vnstock + Fmarket |
+| Sector Historical Performance | Done | Period-based returns (1D, 1W, 1M, 3M, 6M, 1Y) with horizontal bar chart |
+| Stock Data API | Done | 43+ endpoints via vnstock + Fmarket |
 | Financial Data | Done | Income, balance sheet, cash flow, trend charts |
 | Financial Health | Done | Health scoring, Piotroski F-Score, peer comparison, FCF analysis |
 | Shareholders/Officers | Done | Major holders, management, insider deals |
@@ -66,6 +69,7 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 - Volume Anomaly Detection with API endpoint and Frontend Visualization
 - Volume Spikes Dashboard with multiple visualization types
 - Financial Statements ranking with filtering
+- Sector Historical Performance with period-based returns
 
 ### In Scope (Phase 2 - Planned)
 
@@ -150,6 +154,7 @@ All endpoints prefixed with `/api/v1/stocks`:
 |----------|---------|
 | `GET /analytics/volume-spikes` | Top volume spike stocks across market |
 | `GET /analytics/financial-statements` | Top companies by net profit (limit, exchange, year, quarter) |
+| `GET /analytics/sector-historical` | Sector historical performance (1D, 1W, 1M, 3M, 6M, 1Y) |
 
 #### Company & Financials
 | Endpoint | Purpose |

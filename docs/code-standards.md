@@ -146,6 +146,11 @@ function DashboardSection() {
 - `isPlaceholderData`: Refetching with stale data - show 60% opacity
 - `isFetching && !isPending`: Background refetch - show spinner overlay
 
+**Prefetch optimization (for tabbed sections):**
+- Use `usePrefetchAdjacentPeriods` hook to prefetch adjacent tabs on mount
+- Add hover-based prefetch with 200ms delay on tab triggers
+- Ensures instant tab switching by pre-warming query cache
+
 ### Custom Hooks (28 total)
 
 - `use-stock-detail`, `use-market-indices`, `use-vn30-overview`

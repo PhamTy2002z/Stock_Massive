@@ -2,7 +2,7 @@
 
 Vietnamese stock market data platform powered by **vnstock** library. Provides real-time data, charting, and analysis for Vietnam stock market (HOSE, HNX, UPCOM).
 
-## Current Status (Updated: 2025-12-30)
+## Current Status (Updated: 2026-01-02)
 
 | Component | Status | Notes |
 |-----------|--------|-------|
@@ -17,7 +17,8 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | Volume Spikes Dashboard | Done | Volume spike detection with treemap, pie chart, composed chart |
 | Financial Statements | Done | Ranking by net profit with filters (exchange, year, quarter) |
 | Financial Health | Done | Radar chart, Piotroski F-Score, peer comparison, FCF waterfall |
-| Stock Data API | Done | 40+ endpoints via vnstock + Fmarket |
+| Stock Data API | Done | 43+ endpoints via vnstock + Fmarket |
+| Sector Historical | Done | Period-based returns (1D-1Y) with horizontal bar chart |
 | Financial Data | Done | Income, balance sheet, cash flow, trend charts |
 | Shareholders/Officers | Done | Major holders, management, insider deals |
 | Volume Anomaly Detection | Done | Backend API + Frontend visualization |
@@ -67,14 +68,14 @@ Stock_Massive/
 │   ├── web/                 # Next.js frontend (port 3000)
 │   │   └── src/
 │   │       ├── app/         # App Router pages (5 routes)
-│   │       ├── components/  # UI (26) + dashboard (26) + layout (6) + providers (2)
+│   │       ├── components/  # UI (25+) + dashboard (35+) + layout (6) + providers (2)
 │   │       ├── hooks/       # 28 custom hooks
 │   │       └── lib/         # API client, utils
 │   │
 │   └── api/                 # FastAPI backend (port 8000)
 │       └── src/
-│           ├── stocks/      # 6 domain routers (market, price, company, financial, analytics, trading)
-│           │   ├── analytics/  # Volume spikes, financial statements
+│           ├── stocks/      # 7 domain modules (analytics, market, price, company, financial, trading, overview)
+│           │   ├── analytics/  # Volume spikes, financial statements, sector historical
 │           │   ├── market/     # Symbols, sectors, fund certificates
 │           │   ├── price/      # History, intraday, indices, volume
 │           │   ├── company/    # Company info, shareholders, officers
@@ -89,11 +90,11 @@ Stock_Massive/
 └── docs/                    # Documentation (10 files)
 ```
 
-## API Endpoints (40+ Total)
+## API Endpoints (43+ Total)
 
 All endpoints prefixed with `/api/v1/stocks`:
 
-### Market Data (8 endpoints)
+### Market Data (9 endpoints)
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/symbols` | GET | List all stock symbols |
@@ -104,6 +105,7 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `/vn30-overview` | GET | VN30 stocks overview |
 | `/market-indices` | GET | VN-INDEX, VN30, HNX, UPCOM |
 | `/market-overview` | GET | Aggregated market overview (breadth, top gainers/losers, foreign flow, top volume) |
+| `/analytics/sector-historical` | GET | Sector historical performance (1D, 1W, 1M, 3M, 6M, 1Y) |
 
 ### Price Data (6 endpoints)
 | Endpoint | Method | Description |
@@ -115,11 +117,12 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `/{symbol}/volume-analysis` | GET | Volume pattern analysis |
 | `/{symbol}/volume-anomalies` | GET | Volume anomaly detection |
 
-### Analytics (3 endpoints)
+### Analytics (4 endpoints)
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/analytics/volume-spikes` | GET | Top volume spike stocks |
 | `/analytics/financial-statements` | GET | Top companies by net profit |
+| `/analytics/sector-historical` | GET | Sector historical performance |
 | `/api/v1/jobs/status` | GET | Poll background job progress |
 
 ### Company Data (4 endpoints)

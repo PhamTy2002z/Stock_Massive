@@ -55,17 +55,17 @@ created: 2026-01-02
 ## Requirements
 
 ### Functional Requirements
-- [ ] Tab switching shows previous chart with opacity fade
-- [ ] First load shows skeleton (expected behavior)
-- [ ] Loading indicator visible during fetch without hiding content
-- [ ] Chart animation disabled during placeholder state
-- [ ] Manual refresh button works smoothly
+- [x] Tab switching shows previous chart with opacity fade
+- [x] First load shows skeleton (expected behavior)
+- [x] Loading indicator visible during fetch without hiding content
+- [x] Chart animation disabled during placeholder state
+- [x] Manual refresh button works smoothly
 
 ### Non-Functional Requirements
-- [ ] Transition duration: 200ms
-- [ ] Opacity during loading: 60%
-- [ ] No breaking changes to API
-- [ ] Maintain SSR compatibility
+- [x] Transition duration: 200ms
+- [x] Opacity during loading: 60%
+- [x] No breaking changes to API
+- [x] Maintain SSR compatibility
 
 ## Architecture Changes
 

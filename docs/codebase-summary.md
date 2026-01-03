@@ -390,6 +390,7 @@ alembic upgrade head
 
 ## 10. Recent Major Changes (December 2024 - January 2026)
 
+* **Prefetch Optimization** (Jan 3, 2026): Adjacent tab prefetch on mount + hover-based prefetch with 200ms delay for instant tab switching
 * **Smooth Section Loading** (Jan 2, 2026): Dashboard sections use `keepPreviousData` pattern for smooth refetch (no skeleton flash)
 * **Documentation Update** (Jan 2, 2026): Comprehensive documentation refresh with accurate file counts and feature lists
 * **Sector Historical Performance** (Dec 30, 2025): Period-based sector returns with horizontal bar chart visualization

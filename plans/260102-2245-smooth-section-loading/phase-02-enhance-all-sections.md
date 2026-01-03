@@ -50,18 +50,18 @@ Apply Phase 01 pattern to 3 remaining sections using `useSuspenseQuery`:
 ## Requirements
 
 ### Functional Requirements
-- [ ] All sections use `useQuery` with `keepPreviousData`
-- [ ] Consistent loading indicator pattern (top-right spinner)
-- [ ] Consistent opacity transition (60%, 200ms)
-- [ ] First load shows skeleton for each section
-- [ ] Manual refresh buttons work smoothly
-- [ ] Auto-refetch doesn't disrupt user
+- [x] All sections use `useQuery` with `keepPreviousData`
+- [x] Consistent loading indicator pattern (top-right spinner)
+- [x] Consistent opacity transition (60%, 200ms)
+- [x] First load shows skeleton for each section
+- [x] Manual refresh buttons work smoothly
+- [x] Auto-refetch doesn't disrupt user
 
 ### Non-Functional Requirements
-- [ ] No breaking changes to existing APIs
-- [ ] Maintain SSR compatibility
-- [ ] Type safety preserved
-- [ ] Performance not degraded
+- [x] No breaking changes to existing APIs
+- [x] Maintain SSR compatibility
+- [x] Type safety preserved
+- [x] Performance not degraded
 
 ## Architecture Changes
 
@@ -349,48 +349,48 @@ export function useSectorPerformance(): UseSectorPerformanceResult {
 
 ## Todo List
 
-- [ ] Update MarketIndices
-  - [ ] Migrate use-market-indices.ts hook
-  - [ ] Update MarketIndices component
-  - [ ] Test auto-refetch (15s interval)
-- [ ] Update VN30Overview
-  - [ ] Migrate use-vn30-overview.ts hook
-  - [ ] Update VN30OverviewTable component
-  - [ ] Test auto-refetch (30s interval)
-- [ ] Update SectorPerformance
-  - [ ] Migrate use-sector-performance.ts hook
-  - [ ] Update SectorPerformanceSection component
-  - [ ] Test auto-refetch (2min interval)
-- [ ] Integration testing
-  - [ ] Test all sections together
-  - [ ] Verify consistent UX across dashboard
-  - [ ] Test edge cases (slow network, errors)
-- [ ] Documentation
-  - [ ] Update code standards with pattern
-  - [ ] Add JSDoc comments to hooks
+- [x] Update MarketIndices
+  - [x] Migrate use-market-indices.ts hook
+  - [x] Update MarketIndices component
+  - [x] Test auto-refetch (15s interval)
+- [x] Update VN30Overview
+  - [x] Migrate use-vn30-overview.ts hook
+  - [x] Update VN30OverviewTable component
+  - [x] Test auto-refetch (30s interval)
+- [x] Update SectorPerformance
+  - [x] Migrate use-sector-performance.ts hook
+  - [x] Update SectorPerformanceSection component
+  - [x] Test auto-refetch (2min interval)
+- [x] Integration testing
+  - [x] Test all sections together
+  - [x] Verify consistent UX across dashboard
+  - [x] Test edge cases (slow network, errors)
+- [x] Documentation
+  - [x] Update code standards with pattern
+  - [x] Add JSDoc comments to hooks
 
 ## Success Criteria
 
 ### UX Validation
-- [ ] All sections show skeleton only on first load
-- [ ] All sections use 60% opacity during refetch
-- [ ] All sections have 200ms transition duration
-- [ ] All loading indicators in top-right corner
-- [ ] No content flash during auto-refetch
-- [ ] Manual refresh buttons work smoothly
+- [x] All sections show skeleton only on first load
+- [x] All sections use 60% opacity during refetch
+- [x] All sections have 200ms transition duration
+- [x] All loading indicators in top-right corner
+- [x] No content flash during auto-refetch
+- [x] Manual refresh buttons work smoothly
 
 ### Technical Validation
-- [ ] All hooks export isPending, isPlaceholderData
-- [ ] All components handle undefined data correctly
-- [ ] No TypeScript errors
-- [ ] No console warnings
-- [ ] Query cache working efficiently
+- [x] All hooks export isPending, isPlaceholderData
+- [x] All components handle undefined data correctly
+- [x] No TypeScript errors
+- [x] No console warnings
+- [x] Query cache working efficiently
 
 ### Performance Validation
-- [ ] Auto-refetch intervals respected
-- [ ] No unnecessary re-renders
-- [ ] Memory usage stable
-- [ ] Network requests optimized
+- [x] Auto-refetch intervals respected
+- [x] No unnecessary re-renders
+- [x] Memory usage stable
+- [x] Network requests optimized
 
 ## Risk Assessment
 
