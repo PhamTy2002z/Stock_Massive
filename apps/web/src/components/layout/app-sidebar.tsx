@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useEffect, useId, useState } from "react"
+import { useId, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import Link from "next/link"
 import {
@@ -23,8 +23,6 @@ import {
   User,
   Wallet,
 } from "lucide-react"
-import type { User as SupabaseUser } from "@supabase/supabase-js"
-
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
   Collapsible,
@@ -56,7 +54,7 @@ import {
   SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar"
-import { createClient } from "@/utils/supabase/client"
+import { useAuth } from "@/hooks/use-auth"
 
 const data = {
   navMain: [
@@ -328,29 +326,15 @@ function NavWatchlists({
 function SidebarUserSection() {
   const router = useRouter()
   const { isMobile } = useSidebar()
-  const [user, setUser] = useState<SupabaseUser | null>(null)
-  const supabase = createClient()
+  const { user, signOut } = useAuth()
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      setUser(user)
-    })
+  const handleSignOut = () => signOut()
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
-    })
-
-    return () => subscription.unsubscribe()
-  }, [supabase.auth])
-
-  const handleSignOut = async () => {
-    await supabase.auth.signOut()
-    router.refresh()
-  }
-
-  const userName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || "User"
+  // No avatar_url now that accounts are local rather than OAuth profiles —
+  // AvatarFallback carries the initials instead.
+  const userName = user?.full_name || user?.email?.split("@")[0] || "User"
   const userEmail = user?.email || ""
-  const userAvatar = user?.user_metadata?.avatar_url || ""
+  const userAvatar = ""
   const userInitials = userName.slice(0, 2).toUpperCase()
 
   if (!user) {
