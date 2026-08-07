@@ -14,6 +14,9 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     full_name = Column(String(255))
     is_active = Column(Boolean, nullable=False, server_default="true")
+    # Gates the operational endpoints (data collection, cache clearing, job
+    # triggers). Off by default: registration must never grant them.
+    is_admin = Column(Boolean, nullable=False, server_default="false")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
