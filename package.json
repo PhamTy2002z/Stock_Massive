@@ -10,7 +10,10 @@
     "logs": "docker compose logs -f",
     "logs:api": "docker compose logs -f api",
     "logs:web": "docker compose logs -f web",
+    "logs:db": "docker compose logs -f db",
     "db:shell": "docker compose exec db psql -U postgres -d stockmassive",
+    "db:migrate": "docker compose exec api alembic upgrade head",
+    "db:restore": "docker compose exec -T db psql -U postgres -d stockmassive -v ON_ERROR_STOP=1 < data_export.sql",
     "api:shell": "docker compose exec api bash",
     "web:shell": "docker compose exec web sh"
   }
