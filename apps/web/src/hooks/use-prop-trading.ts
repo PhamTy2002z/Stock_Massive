@@ -13,6 +13,10 @@ export function usePropTrading(symbol: string | null, days: number = 30) {
     },
     enabled: !!symbol,
     staleTime: 15 * 60 * 1000, // 15 minutes
-    retry: 2,
+    // These endpoints answer 501 when the data provider has no such capability
+    // (vnstock 4.x dropped several). That is a permanent, per-feature answer —
+    // not a page-level failure — so handle it in the component and don't retry.
+    throwOnError: false,
+    retry: false,
   })
 }

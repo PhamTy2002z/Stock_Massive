@@ -15,6 +15,10 @@ export function usePriceDepth(symbol: string | null) {
     staleTime: 30 * 1000, // 30 seconds - real-time
     refetchInterval: 30 * 1000, // Auto-refresh every 30s
     refetchIntervalInBackground: false, // Stop polling when tab inactive
-    retry: 2,
+    // These endpoints answer 501 when the data provider has no such capability
+    // (vnstock 4.x dropped several). That is a permanent, per-feature answer —
+    // not a page-level failure — so handle it in the component and don't retry.
+    throwOnError: false,
+    retry: false,
   })
 }

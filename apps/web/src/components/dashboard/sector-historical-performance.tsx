@@ -138,7 +138,8 @@ const SectorHistoricalChart = memo(
 )
 
 function PeriodContent({ period }: { period: SectorHistoricalPeriod }) {
-  const { data, isPending, isFetching, isPlaceholderData } = useSectorHistoricalPerformance(period)
+  const { data, error, isPending, isFetching, isPlaceholderData } =
+    useSectorHistoricalPerformance(period)
 
   // useMemo must be called before any early returns (React hooks rules)
   const chartData = useMemo(() => {
@@ -159,6 +160,19 @@ function PeriodContent({ period }: { period: SectorHistoricalPeriod }) {
   // First load only - show skeleton
   if (isPending) {
     return <div className="h-[280px] bg-muted animate-pulse rounded" />
+  }
+
+  // The API says *why* it has nothing (job not run yet, provider down). Show
+  // that here rather than letting it take down the whole homepage.
+  if (error) {
+    return (
+      <div className="flex h-[280px] flex-col items-center justify-center gap-2 px-6 text-center">
+        <p className="text-sm font-medium text-foreground">
+          Chưa có dữ liệu hiệu suất ngành
+        </p>
+        <p className="max-w-md text-sm text-muted-foreground">{error.message}</p>
+      </div>
+    )
   }
 
   return (
