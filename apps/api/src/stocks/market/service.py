@@ -4,7 +4,8 @@ import logging
 from typing import Optional
 
 import pandas as pd
-from vnstock import Listing, Trading, Vnstock
+from src.core.vnstock_client import Listing, Trading, Vnstock
+from src.core.vnstock_client import VnstockUnavailable, VnstockUnsupported
 
 from ..schemas.company import StockSymbol
 from ..schemas.market import (
@@ -32,19 +33,26 @@ class MarketService:
         try:
             listing = Listing()
 
-            if exchange:
-                symbols_series = listing.symbols_by_exchange(exchange.upper())
-                if symbols_series is None or (hasattr(symbols_series, "empty") and symbols_series.empty):
-                    return []
-                symbols_list = symbols_series.tolist() if hasattr(symbols_series, "tolist") else list(symbols_series)
-                return [StockSymbol(symbol=s, exchange=exchange.upper()) for s in symbols_list]
-
-            df = listing.all_symbols()
+            # vnstock 4.x returns a DataFrame here and takes no exchange
+            # argument; filtering happens on the `exchange` column. The previous
+            # `list(...)` over that DataFrame yielded its *column names*, so this
+            # endpoint was reporting "symbol", "organ_name", ... as tickers.
+            df = listing.symbols_by_exchange()
 
             if df is None or df.empty:
                 return []
 
+            if exchange:
+                wanted = exchange.upper()
+                df = df[df["exchange"].str.upper() == wanted]
+                if df.empty:
+                    return []
+
             return self._df_to_stock_symbols(df)
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching symbols: {e}")
             raise StockServiceError(f"Failed to fetch symbols: {e}")
@@ -59,6 +67,10 @@ class MarketService:
                 return []
 
             return symbols.tolist() if hasattr(symbols, "tolist") else list(symbols)
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching symbols for group {group}: {e}")
             raise StockServiceError(f"Failed to fetch symbols for group {group}: {e}")
@@ -84,6 +96,10 @@ class MarketService:
             filtered = df[mask].head(limit)
 
             return self._df_to_stock_symbols(filtered)
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error searching symbols for '{query}': {e}")
             raise StockServiceError(f"Failed to search symbols: {e}")
@@ -92,7 +108,9 @@ class MarketService:
         """Get market-cap weighted sector performance (ICB Level 2)."""
         try:
             listing = Listing()
-            trading = Trading()
+            # vnstock 4.x defaults Trading to KBS, whose price_board rejects
+            # drop_levels; 3.x defaulted to VCI. Pass the configured source.
+            trading = Trading(source=self.source)
 
             # Get all symbols with ICB classification (symbols_by_industries has ICB data)
             all_symbols_df = listing.symbols_by_industries()
@@ -120,6 +138,10 @@ class MarketService:
                         # Reset index to avoid reindexing errors during concat
                         batch_price_df = batch_price_df.reset_index(drop=True)
                         all_price_data.append(batch_price_df)
+                except (VnstockUnavailable, VnstockUnsupported):
+                    # Upstream quota/capability problems carry their own meaning;
+                    # don't flatten them into a generic service error.
+                    raise
                 except Exception as e:
                     logger.warning(f"Error fetching price batch {i}: {e}")
                     continue
@@ -236,6 +258,10 @@ class MarketService:
                 generated_at=session_date,
                 total_sectors=len(sectors),
             )
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching sector performance: {e}")
             raise StockServiceError(f"Failed to fetch sector performance: {e}")
@@ -290,6 +316,10 @@ class MarketService:
                         price=round(nav, 2) if nav else None,
                         change_pct=round(change_pct, 2) if change_pct is not None else None,
                     ))
+                except (VnstockUnavailable, VnstockUnsupported):
+                    # Upstream quota/capability problems carry their own meaning;
+                    # don't flatten them into a generic service error.
+                    raise
                 except Exception as e:
                     logger.warning(f"Skipping fund row due to error: {e}")
                     continue
@@ -303,6 +333,10 @@ class MarketService:
                 generated_at=pd.Timestamp.now(),
                 total_count=len(funds),
             )
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching fund certificates: {e}")
             raise StockServiceError(f"Failed to fetch fund certificates: {e}")
@@ -311,7 +345,9 @@ class MarketService:
         """Get VN30 index stocks with real-time price data."""
         try:
             listing = Listing()
-            trading = Trading()
+            # vnstock 4.x defaults Trading to KBS, whose price_board rejects
+            # drop_levels; 3.x defaulted to VCI. Pass the configured source.
+            trading = Trading(source=self.source)
 
             # Step 1: Get VN30 symbols
             vn30_symbols = listing.symbols_by_group("VN30")
@@ -388,6 +424,10 @@ class MarketService:
                 total_count=len(stocks),
             )
 
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching VN30 overview: {e}")
             raise StockServiceError(f"Failed to fetch VN30 overview: {e}")
@@ -407,6 +447,10 @@ class MarketService:
                         organ_type_code=row.get("organ_type_code"),
                     )
                 )
+            except (VnstockUnavailable, VnstockUnsupported):
+                # Upstream quota/capability problems carry their own meaning;
+                # don't flatten them into a generic service error.
+                raise
             except Exception as e:
                 logger.warning(f"Skipping symbol row due to error: {e}")
                 continue

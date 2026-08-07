@@ -5,7 +5,8 @@ import statistics
 from typing import Optional
 
 import pandas as pd
-from vnstock import Finance, Listing
+from src.core.vnstock_client import Finance, Listing
+from src.core.vnstock_client import VnstockUnavailable, VnstockUnsupported
 
 from ..schemas.financial import (
     FinancialRatio,
@@ -59,6 +60,10 @@ class FinancialService:
                 return []
 
             return self._df_to_financial_ratios(df, period)
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching ratios for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch ratios for {symbol}: {e}")
@@ -79,6 +84,10 @@ class FinancialService:
                 return []
 
             return self._df_to_income_statements(df, period)
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching income statement for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch income statement for {symbol}: {e}")
@@ -99,6 +108,10 @@ class FinancialService:
                 return IncomeStatementResponse(symbol=symbol, periods=[], rows=[])
 
             return self._df_to_income_statement_response(df, symbol, period, limit)
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching detailed income statement for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch income statement for {symbol}: {e}")
@@ -119,6 +132,10 @@ class FinancialService:
                 return []
 
             return self._df_to_balance_sheets(df, period)
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching balance sheet for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch balance sheet for {symbol}: {e}")
@@ -139,6 +156,10 @@ class FinancialService:
                 return BalanceSheetResponse(symbol=symbol, periods=[], rows=[])
 
             return self._df_to_balance_sheet_response(df, symbol, period, limit)
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching detailed balance sheet for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch balance sheet for {symbol}: {e}")
@@ -159,6 +180,10 @@ class FinancialService:
                 return CashFlowResponse(symbol=symbol, periods=[], rows=[])
 
             return self._df_to_cash_flow_response(df, symbol, period, limit)
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching detailed cash flow for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch cash flow for {symbol}: {e}")
@@ -195,6 +220,10 @@ class FinancialService:
                         beta=safe_float(row.get("beta") or row.get("Beta")),
                     )
                 )
+            except (VnstockUnavailable, VnstockUnsupported):
+                # Upstream quota/capability problems carry their own meaning;
+                # don't flatten them into a generic service error.
+                raise
             except Exception as e:
                 logger.warning(f"Skipping ratio row due to error: {e}")
                 continue
@@ -224,6 +253,10 @@ class FinancialService:
                         eps=safe_float(row.get("earningPerShare") or row.get("EPS")),
                     )
                 )
+            except (VnstockUnavailable, VnstockUnsupported):
+                # Upstream quota/capability problems carry their own meaning;
+                # don't flatten them into a generic service error.
+                raise
             except Exception as e:
                 logger.warning(f"Skipping income statement row due to error: {e}")
                 continue
@@ -330,6 +363,10 @@ class FinancialService:
                         retained_earnings=safe_float(row.get("unDistributedIncome") or row.get("Retained earnings")),
                     )
                 )
+            except (VnstockUnavailable, VnstockUnsupported):
+                # Upstream quota/capability problems carry their own meaning;
+                # don't flatten them into a generic service error.
+                raise
             except Exception as e:
                 logger.warning(f"Skipping balance sheet row due to error: {e}")
                 continue
@@ -548,6 +585,10 @@ class FinancialService:
             # Take the most recent N periods
             df = df.head(periods)
             return df.to_dict("records")
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching ratio history for {symbol}: {e}")
             return []
@@ -577,6 +618,10 @@ class FinancialService:
             df = self._flatten_columns(df)
             df = df.head(periods)
             return df.to_dict("records")
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching income history for {symbol}: {e}")
             return []
@@ -606,6 +651,10 @@ class FinancialService:
             df = self._flatten_columns(df)
             df = df.head(periods)
             return df.to_dict("records")
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching cash flow history for {symbol}: {e}")
             return []
@@ -649,6 +698,10 @@ class FinancialService:
 
             return HealthScoreResponse(**result)
         except StockServiceError:
+            raise
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
             raise
         except Exception as e:
             logger.error(f"Error calculating health score for {symbol}: {e}")
@@ -718,6 +771,10 @@ class FinancialService:
                 cfi=cfi,
                 cff=cff,
             )
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching trend metrics for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch trend metrics for {symbol}: {e}")
@@ -799,6 +856,10 @@ class FinancialService:
             )
         except StockServiceError:
             raise
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error calculating FCF analysis for {symbol}: {e}")
             raise StockServiceError(f"Failed to calculate FCF analysis for {symbol}: {e}")
@@ -875,6 +936,10 @@ class FinancialService:
                             "market_cap": market_cap,
                         }
                     )
+                except (VnstockUnavailable, VnstockUnsupported):
+                    # Upstream quota/capability problems carry their own meaning;
+                    # don't flatten them into a generic service error.
+                    raise
                 except Exception as e:
                     logger.warning(f"Could not fetch data for peer {peer_symbol}: {e}")
                     continue
@@ -922,6 +987,10 @@ class FinancialService:
 
             return response
         except StockServiceError:
+            raise
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
             raise
         except Exception as e:
             logger.error(f"Error fetching sector peers for {symbol}: {e}")

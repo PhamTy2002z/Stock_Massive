@@ -10,7 +10,8 @@ from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy import select, func, desc, and_
 from sqlalchemy.ext.asyncio import AsyncSession
-from vnstock import Listing
+from src.core.vnstock_client import Listing
+from src.core.vnstock_client import VnstockUnavailable, VnstockUnsupported
 
 from src.stocks.models import FinancialStatement, StockDailyOHLCV
 from src.stocks.shared import StockServiceError, fetch_industry_mapping
@@ -312,6 +313,10 @@ class AnalyticsService:
                 status_code=503,
                 detail="Industry classification service unavailable"
             )
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Unexpected error in ICB mapping: {e}", exc_info=True)
             raise HTTPException(
