@@ -142,13 +142,13 @@ class MarketService:
                     except Exception:
                         pass
 
-            # Ensure unique symbols in all_symbols_df before merge
-            # Select ICB columns that exist in the DataFrame
-            icb_cols = ["symbol"]
-            for col in ["icb_name2", "icb_name3", "icb_code2"]:
-                if col in all_symbols_df.columns:
-                    icb_cols.append(col)
-            symbols_for_merge = all_symbols_df[icb_cols].drop_duplicates(subset=["symbol"], keep="first")
+            # Ensure unique symbols before merge. vnstock 4.x names these
+            # industry_code / industry_name (3.x used icb_code2 / icb_name2).
+            symbols_for_merge = (
+                all_symbols_df[["symbol", "industry_code", "industry_name"]]
+                .drop_duplicates(subset=["symbol"], keep="first")
+                .rename(columns={"industry_code": "icb_code", "industry_name": "icb_name"})
+            )
 
             # Merge with symbol data
             merged = price_df.merge(
@@ -158,9 +158,7 @@ class MarketService:
             )
 
             # Calculate sector performance
-            sector_col = "icb_name2"  # ICB Level 2
-            if sector_col not in merged.columns:
-                return SectorPerformanceResponse(sectors=[], generated_at=pd.Timestamp.now(), total_sectors=0)
+            sector_col = "icb_name"
 
             sectors = []
 
@@ -208,8 +206,8 @@ class MarketService:
 
                 # Get ICB code if available
                 icb_code = ""
-                if "icb_code2" in group.columns:
-                    icb_code = str(group["icb_code2"].iloc[0]) if pd.notna(group["icb_code2"].iloc[0]) else ""
+                if "icb_code" in group.columns and pd.notna(group["icb_code"].iloc[0]):
+                    icb_code = str(group["icb_code"].iloc[0])
 
                 # Get top gainers and losers using argsort for robust indexing
                 changes_series = (valid_rows["match_price"] - valid_rows["ref_price"]) / valid_rows["ref_price"] * 100

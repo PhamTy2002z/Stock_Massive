@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from vnstock import Listing
 
 from src.stocks.models import FinancialStatement, StockDailyOHLCV
+from src.stocks.shared import StockServiceError, fetch_industry_mapping
 from src.stocks.schemas.analytics import (
     FinancialStatementItem,
     FinancialStatementsResponse,
@@ -297,53 +298,14 @@ class AnalyticsService:
             HTTPException: If ICB data unavailable from vnstock API
         """
         try:
-            listing = Listing()
-            df = listing.symbols_by_industries()
-            if df is None or df.empty:
-                logger.error("ICB mapping returned empty - vnstock API may be down")
-                raise HTTPException(
-                    status_code=503,
-                    detail="Industry classification data unavailable"
-                )
+            return fetch_industry_mapping(Listing())
 
-            mapping = {}
-            for _, row in df.iterrows():
-                symbol = str(row.get("symbol", "")).upper()
-                # Validate symbol format to prevent XSS
-                if not symbol or not SYMBOL_PATTERN.match(symbol):
-                    continue
-
-                # Sanitize and limit string lengths
-                icb_code_raw = row.get("icb_code2")
-                icb_code = str(icb_code_raw)[:4] if icb_code_raw else None
-
-                icb_name = row.get("icb_name2")
-                icb_name = str(icb_name)[:100] if icb_name else None
-
-                company_name = row.get("organ_name") or row.get("short_name")
-                company_name = str(company_name)[:255] if company_name else None
-
-                exchange = row.get("exchange", "")
-                exchange = str(exchange)[:10] if exchange else ""
-
-                mapping[symbol] = {
-                    "icb_code": icb_code,
-                    "icb_name": icb_name,
-                    "company_name": company_name,
-                    "exchange": exchange,
-                }
-
-            if not mapping:
-                logger.error("No valid ICB mappings found after processing")
-                raise HTTPException(
-                    status_code=503,
-                    detail="No valid industry classification data found"
-                )
-
-            return mapping
-
-        except HTTPException:
-            raise
+        except StockServiceError as e:
+            logger.error(f"ICB mapping unavailable: {e}")
+            raise HTTPException(
+                status_code=503,
+                detail="Industry classification data unavailable"
+            )
         except (ConnectionError, TimeoutError) as e:
             logger.error(f"Network error fetching ICB mapping: {e}")
             raise HTTPException(

@@ -24,7 +24,12 @@ from ..schemas.financial import (
     SectorMedian,
     PeerMetrics,
 )
-from ..shared import StockServiceError, validate_symbol, safe_float
+from ..shared import (
+    StockServiceError,
+    fetch_industry_mapping,
+    safe_float,
+    validate_symbol,
+)
 from .health_scoring import build_health_score_response
 from .cache import sector_peers_cache
 
@@ -821,37 +826,27 @@ class FinancialService:
             return SectorPeersResponse(**cached)
 
         try:
-            listing = Listing()
+            # vnstock 4.x exposes a single industry level (~25 sectors); the
+            # icb_code3 / icb_name3 columns this used to read no longer exist.
+            industry_map = fetch_industry_mapping(Listing())
 
-            # Get symbols with industry data (symbols_by_industries has ICB codes)
-            symbols_df = listing.symbols_by_industries()
-            if symbols_df is None or symbols_df.empty:
-                raise StockServiceError("Could not fetch symbol list")
-
-            # Find target stock's ICB code (column is 'symbol', not 'ticker')
-            target_row = symbols_df[symbols_df["symbol"] == symbol]
-            if target_row.empty:
+            target = industry_map.get(symbol)
+            if target is None:
                 raise StockServiceError(f"Symbol {symbol} not found")
 
-            # Column names: icb_code3, icb_name3
-            icb_code = str(target_row.iloc[0].get("icb_code3") or "")
-            icb_name = str(target_row.iloc[0].get("icb_name3") or "Unknown")
+            icb_code = target["icb_code"] or ""
+            icb_name = target["icb_name"] or "Unknown"
 
             if not icb_code:
                 raise StockServiceError(f"No ICB code found for {symbol}")
 
-            # Find peers in same sector
-            sector_stocks = symbols_df[symbols_df["icb_code3"] == icb_code].copy()
-
-            # Sort alphabetically since no market cap in this API
-            # Take top N including target
-            top_symbols = sector_stocks.head(limit + 5)["symbol"].tolist()
-            if symbol not in top_symbols:
-                top_symbols = [symbol] + top_symbols[:limit]
-            else:
-                # Ensure target is first
-                top_symbols.remove(symbol)
-                top_symbols = [symbol] + top_symbols[:limit]
+            # Peers in the same sector, alphabetical (this feed carries no market cap)
+            peers = sorted(
+                s
+                for s, info in industry_map.items()
+                if info["icb_code"] == icb_code and s != symbol
+            )
+            top_symbols = [symbol] + peers[:limit]
 
             # Get ratio data for each peer
             peers_data = []
@@ -860,12 +855,7 @@ class FinancialService:
                     ratio_history = self.get_ratio_history(peer_symbol, periods=1)
                     ratios = ratio_history[0] if ratio_history else {}
 
-                    peer_row = symbols_df[symbols_df["symbol"] == peer_symbol]
-                    company_name = (
-                        peer_row.iloc[0].get("organ_name")
-                        if not peer_row.empty
-                        else None
-                    )
+                    company_name = industry_map.get(peer_symbol, {}).get("company_name")
 
                     # Get market cap from ratio data
                     market_cap = safe_float(ratios.get("Market Capital (Bn. VND)"))
