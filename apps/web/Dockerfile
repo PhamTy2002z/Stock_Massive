@@ -3,7 +3,9 @@ FROM node:22-alpine
 WORKDIR /app
 
 # Install pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# Pinned, not @latest: pnpm 10 ignores the pnpm.overrides block in
+# package.json and enforces a release-age policy the lockfile fails.
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 
 # Copy package files
 COPY package.json pnpm-lock.yaml ./
