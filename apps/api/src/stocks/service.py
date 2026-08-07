@@ -223,7 +223,11 @@ class StockService:
                     result["exchange"] = row.get("exchange")
 
                 result.update({
-                    "industry": row.get("icb_name3") or row.get("icb_name2") or row.get("industry"),
+                    # vnstock 4.x overview carries `sector` (and icb_code_lv2/lv4)
+                    # instead of the 3.x icb_name3/icb_name2, so this used to be
+                    # null for every symbol. Read from the same payload rather
+                    # than adding upstream calls to a hot path.
+                    "industry": row.get("sector") or row.get("industry"),
                     "issue_share": safe_float(row.get("issue_share")),
                     "outstanding_shares": safe_float(row.get("outstanding_share")) or safe_float(row.get("issue_share")),
                     "description": row.get("company_profile") or row.get("description"),

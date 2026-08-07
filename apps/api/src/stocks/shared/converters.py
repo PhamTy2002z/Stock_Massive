@@ -22,3 +22,13 @@ def safe_float(value: Any) -> Optional[float]:
         return float(value)
     except (ValueError, TypeError):
         return None
+
+
+def safe_float_millions(value: Any) -> Optional[float]:
+    """Convert a raw VND figure to millions, or None when unusable.
+
+    Financial statements come through in plain VND; the UI labels its tables
+    "Triệu đồng", so the scaling belongs here rather than in each converter.
+    """
+    raw = safe_float(value)
+    return None if raw is None else raw / 1_000_000
