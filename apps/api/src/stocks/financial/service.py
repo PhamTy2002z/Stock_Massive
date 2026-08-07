@@ -231,53 +231,76 @@ class FinancialService:
                 continue
         return ratios
 
-    def _df_to_income_statements(self, df: pd.DataFrame, period: str) -> list[IncomeStatementItem]:
-        """Convert DataFrame to list of IncomeStatementItem."""
-        items = []
-        for row in df.to_dict("records"):
-            try:
-                year_report = row.get("yearReport") or row.get("year")
-                length_report = row.get("lengthReport") or row.get("quarter")
-
-                items.append(
-                    IncomeStatementItem(
-                        year=int(year_report) if year_report else None,
-                        quarter=int(length_report) if length_report and period == "quarter" else None,
-                        period_type=period,
-                        revenue=safe_float(row.get("revenue") or row.get("Net Revenue")),
-                        cost_of_goods_sold=safe_float(row.get("costOfGoodSold") or row.get("Cost of sales")),
-                        gross_profit=safe_float(row.get("grossProfit") or row.get("Gross profit")),
-                        operating_expense=safe_float(row.get("operationExpense")),
-                        operating_profit=safe_float(row.get("operationProfit") or row.get("Operating profit")),
-                        interest_expense=safe_float(row.get("interestExpense")),
-                        pre_tax_profit=safe_float(row.get("preTaxProfit") or row.get("Profit before tax")),
-                        net_profit=safe_float(row.get("postTaxProfit") or row.get("Net profit")),
-                        eps=safe_float(row.get("earningPerShare") or row.get("EPS")),
-                    )
-                )
-            except (VnstockUnavailable, VnstockUnsupported):
-                # Upstream quota/capability problems carry their own meaning;
-                # don't flatten them into a generic service error.
-                raise
-            except Exception as e:
-                logger.warning(f"Skipping income statement row due to error: {e}")
-                continue
-        return items
-
-    # --- Detailed statement conversion (vnstock 4.x layout) ---
+    # --- vnstock 4.x statement layout ---
     #
-    # 3.x returned one row per period with line items as columns. 4.x returns
-    # one row per line item (`item`, `item_en`, `item_id`) with periods as
-    # columns ("2026-Q2", "2025-Q4", ...). The old converters read the 3.x
-    # layout, which is why these endpoints answered `periods: ["None", ...]`
-    # with no rows at all.
-    #
-    # Every line item the source returns is emitted. The previous code matched
-    # against a hand-written list of Vietnamese labels, so anything vnstock
-    # renamed silently vanished from the table.
+    # 3.x returned one row per period with line items as columns; 4.x returns one
+    # row per line item (`item`, `item_en`, `item_id`) with periods as columns
+    # ("2026-Q2", "2025-Q4", ...). Every converter below reads that layout.
 
     _PERIOD_COLUMN = re.compile(r"^(?P<year>\d{4})(?:-Q(?P<quarter>[1-4]))?$")
     _META_COLUMNS = ("item", "item_en", "item_id")
+
+    # The two summary converters below used to read the 3.x column names, so
+    # they returned one object per *line item* with every field None — 25 rows
+    # of nulls that still answered 200, so nothing flagged them.
+
+    def _pivot_by_period(self, df: pd.DataFrame) -> list[tuple[str, Optional[int], Optional[int], dict]]:
+        """Regroup an item-per-row frame into one (column, year, quarter, {item_id: value}) per period."""
+        periods = []
+        for col in df.columns:
+            match = self._PERIOD_COLUMN.match(str(col))
+            if not match:
+                continue
+            year = int(match.group("year"))
+            quarter = int(match.group("quarter")) if match.group("quarter") else None
+            periods.append((col, year, quarter))
+
+        records = df.to_dict("records")
+        result = []
+        for col, year, quarter in periods:
+            values = {
+                str(record.get("item_id")): record.get(col)
+                for record in records
+                if record.get("item_id")
+            }
+            result.append((col, year, quarter, values))
+        return result
+
+    def _df_to_income_statements(self, df: pd.DataFrame, period: str) -> list[IncomeStatementItem]:
+        """Convert DataFrame to list of IncomeStatementItem, one per period."""
+        items = []
+        for _, year, quarter, values in self._pivot_by_period(df):
+            items.append(
+                IncomeStatementItem(
+                    year=year,
+                    quarter=quarter if period == "quarter" else None,
+                    period_type=period,
+                    revenue=safe_float(values.get("net_sales")),
+                    gross_profit=safe_float(values.get("gross_profit")),
+                    operating_profit=safe_float(values.get("operating_profit_loss")),
+                    net_income=safe_float(values.get("net_profit_loss_after_tax")),
+                    eps=safe_float(values.get("eps_basic_vnd")),
+                )
+            )
+        return items
+
+    def _df_to_balance_sheets(self, df: pd.DataFrame, period: str) -> list[BalanceSheetItem]:
+        """Convert DataFrame to list of BalanceSheetItem, one per period."""
+        items = []
+        for _, year, quarter, values in self._pivot_by_period(df):
+            items.append(
+                BalanceSheetItem(
+                    year=year,
+                    quarter=quarter if period == "quarter" else None,
+                    period_type=period,
+                    total_assets=safe_float(values.get("total_assets")),
+                    total_liabilities=safe_float(values.get("liabilities")),
+                    total_equity=safe_float(values.get("owners_equity")),
+                    cash=safe_float(values.get("cash_and_cash_equivalents")),
+                )
+            )
+        return items
+
 
     def _period_columns(self, df: pd.DataFrame, limit: int) -> list[tuple[str, str]]:
         """Return [(column, display label)] for the newest `limit` periods."""
