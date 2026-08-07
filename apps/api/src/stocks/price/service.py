@@ -236,23 +236,42 @@ class PriceService:
         items = []
         for row in df.to_dict("records"):
             try:
+                match_price = safe_float(row.get("match_price"))
+                ref_price = safe_float(row.get("ref_price") or row.get("refPrice"))
+                accumulated_volume = safe_float(row.get("accumulated_volume"))
+                accumulated_value = safe_float(row.get("accumulated_value"))
+
+                # vnstock 4.x stopped sending last_price/total_vol/total_val/
+                # change/change_pct, so every field a consumer of the older
+                # contract knew about came back null. They are all derivable
+                # from what it does send — fill them rather than ship a 200 with
+                # nothing usable in it.
+                change = row.get("change")
+                change = safe_float(change)
+                if change is None and match_price is not None and ref_price is not None:
+                    change = match_price - ref_price
+
+                change_pct = safe_float(row.get("change_pct") or row.get("changePct"))
+                if change_pct is None and change is not None and ref_price:
+                    change_pct = round(change / ref_price * 100, 2)
+
                 items.append(
                     PriceBoardItem(
                         symbol=str(row.get("symbol", row.get("ticker", ""))),
-                        match_price=safe_float(row.get("match_price")),
+                        match_price=match_price,
                         highest=safe_float(row.get("highest")),
                         lowest=safe_float(row.get("lowest")),
-                        accumulated_volume=int(row.get("accumulated_volume", 0)) if pd.notna(row.get("accumulated_volume")) else None,
-                        accumulated_value=safe_float(row.get("accumulated_value")),
+                        accumulated_volume=int(accumulated_volume) if accumulated_volume is not None else None,
+                        accumulated_value=accumulated_value,
                         ceiling=safe_float(row.get("ceiling")),
                         floor=safe_float(row.get("floor")),
-                        ref_price=safe_float(row.get("ref_price") or row.get("refPrice")),
-                        last_price=safe_float(row.get("last_price") or row.get("lastPrice")),
+                        ref_price=ref_price,
+                        last_price=safe_float(row.get("last_price") or row.get("lastPrice")) or match_price,
                         last_vol=safe_float(row.get("last_vol") or row.get("lastVol")),
-                        total_vol=safe_float(row.get("total_vol") or row.get("totalVol")),
-                        total_val=safe_float(row.get("total_val") or row.get("totalVal")),
-                        change=safe_float(row.get("change")),
-                        change_pct=safe_float(row.get("change_pct") or row.get("changePct")),
+                        total_vol=safe_float(row.get("total_vol") or row.get("totalVol")) or accumulated_volume,
+                        total_val=safe_float(row.get("total_val") or row.get("totalVal")) or accumulated_value,
+                        change=change,
+                        change_pct=change_pct,
                     )
                 )
             except (VnstockUnavailable, VnstockUnsupported):

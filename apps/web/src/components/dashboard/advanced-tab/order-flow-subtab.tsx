@@ -7,6 +7,7 @@ import { PriceDepthChart } from "./widgets/price-depth-chart"
 import { RefreshCw, Clock, Activity, BarChart3 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { DataErrorNotice } from "./data-error-notice"
 
 interface OrderFlowSubtabProps {
   symbol: string
@@ -53,11 +54,7 @@ export default function OrderFlowSubtab({ symbol }: OrderFlowSubtabProps) {
         </Button>
       </div>
 
-      {hasError && (
-        <div className="p-4 rounded-lg bg-destructive/10 text-destructive text-sm">
-          Có lỗi khi tải dữ liệu. Vui lòng thử lại.
-        </div>
-      )}
+      {hasError && <DataErrorNotice error={hasError} />}
 
       {/* Content with tabs */}
       <Tabs defaultValue="order-stats" className="w-full">
