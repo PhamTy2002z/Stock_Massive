@@ -3,12 +3,15 @@ import asyncio
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 
+from src.auth.dependencies import require_admin
 from src.core.job_status_store import job_store
 from src.core.ratelimit import heavy_rate_limit
-from src.auth.dependencies import require_admin
+
+# Must match the id jobs.py registers for this collector.
+OHLCV_JOB_ID = "daily-ohlcv"
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -69,6 +72,14 @@ def trigger_ohlcv_job(background_tasks: BackgroundTasks) -> dict:
     Check /jobs/status for progress.
     """
     from src.core.scheduler import collect_daily_ohlcv_job_async
+
+    # Refuse rather than stack a second run: this job writes to the same tables
+    # and spends the same upstream quota as the one already in flight.
+    if job_store.is_running(OHLCV_JOB_ID):
+        raise HTTPException(
+            status_code=409,
+            detail="Job thu thập OHLCV đang chạy. Theo dõi tiến độ tại /jobs/status.",
+        )
 
     background_tasks.add_task(collect_daily_ohlcv_job_async)
     return {"message": "OHLCV job triggered", "status": "started"}
