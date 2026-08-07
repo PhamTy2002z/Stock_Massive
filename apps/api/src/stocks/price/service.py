@@ -1,12 +1,13 @@
 """Price domain service for historical and real-time price data."""
 
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-from vnstock import Quote, Trading
+from src.core.vnstock_client import Quote, Trading
+from src.core.vnstock_client import VnstockUnavailable, VnstockUnsupported
 
 from ..schemas.price import (
     StockPrice,
@@ -20,6 +21,15 @@ from ..shared import StockServiceError, validate_symbol, safe_float
 
 logger = logging.getLogger(__name__)
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+
+# (symbol, display name). Shared with the router so it can tell a complete
+# board from a partial one before caching.
+MARKET_INDICES: list[tuple[str, str]] = [
+    ("VNINDEX", "VN-INDEX"),
+    ("VN30", "VN30"),
+    ("HNXINDEX", "HNX-INDEX"),
+    ("UPCOMINDEX", "UPCOM-INDEX"),
+]
 
 
 class PriceService:
@@ -50,6 +60,10 @@ class PriceService:
                 return []
 
             return self._df_to_stock_prices(df)
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching history for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch history for {symbol}: {e}")
@@ -65,6 +79,10 @@ class PriceService:
                 return []
 
             return self._df_to_intraday_ticks(df)
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching intraday for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch intraday for {symbol}: {e}")
@@ -72,7 +90,9 @@ class PriceService:
     def get_price_board(self, symbols: list[str]) -> list[PriceBoardItem]:
         """Get real-time price board for multiple symbols."""
         try:
-            trading = Trading()
+            # vnstock 4.x defaults Trading to KBS, whose price_board rejects
+            # drop_levels; 3.x defaulted to VCI. Pass the configured source.
+            trading = Trading(source=self.source)
             df = trading.price_board(
                 symbols_list=[s.upper() for s in symbols],
                 flatten_columns=True,
@@ -83,27 +103,33 @@ class PriceService:
                 return []
 
             return self._df_to_price_board(df)
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching price board: {e}")
             raise StockServiceError(f"Failed to fetch price board: {e}")
 
     def get_market_indices(self) -> list[MarketIndexItem]:
         """Get market indices data (VN-INDEX, VN30, HNX-INDEX, UPCOM-INDEX)."""
-        indices = [
-            ("VNINDEX", "VN-INDEX"),
-            ("VN30", "VN30"),
-            ("HNXINDEX", "HNX-INDEX"),
-            ("UPCOMINDEX", "UPCOM-INDEX"),
-        ]
+        indices = MARKET_INDICES
+
+        # Only the last two closes are needed. The window used to start at
+        # 2025-01-01, pulling ~18 months per index; that was slow enough that a
+        # single index could time out and get dropped, silently returning 3 of 4.
+        start = (date.today() - timedelta(days=30)).isoformat()
 
         results = []
+        missing = []
         for symbol, name in indices:
             try:
-                quote = Quote(symbol=symbol, source="VCI")
-                df = quote.history(start="2025-01-01", end=date.today().isoformat())
+                quote = Quote(symbol=symbol, source=self.source)
+                df = quote.history(start=start, end=date.today().isoformat())
 
                 if df is None or df.empty or len(df) < 1:
                     logger.warning(f"No data for index {symbol}")
+                    missing.append(symbol)
                     continue
 
                 latest = df.iloc[-1]
@@ -127,9 +153,19 @@ class PriceService:
                         change_pct=round(change_pct, 2),
                     )
                 )
+            except (VnstockUnavailable, VnstockUnsupported):
+                # Upstream quota/capability problems carry their own meaning;
+                # don't flatten them into a generic service error.
+                raise
             except Exception as e:
                 logger.warning(f"Error fetching index {symbol}: {e}")
+                missing.append(symbol)
                 continue
+
+        if missing:
+            # Surfaced so a partial board is visible in logs and can be kept out
+            # of the cache, rather than looking like the market only has 3 indices.
+            logger.error(f"Market indices incomplete, missing: {missing}")
 
         return results
 
@@ -156,6 +192,10 @@ class PriceService:
                         volume=int(row.get("volume", 0)) if pd.notna(row.get("volume")) else None,
                     )
                 )
+            except (VnstockUnavailable, VnstockUnsupported):
+                # Upstream quota/capability problems carry their own meaning;
+                # don't flatten them into a generic service error.
+                raise
             except Exception as e:
                 logger.warning(f"Skipping price row due to error: {e}")
                 continue
@@ -182,6 +222,10 @@ class PriceService:
                         match_type=row.get("match_type") or row.get("type"),
                     )
                 )
+            except (VnstockUnavailable, VnstockUnsupported):
+                # Upstream quota/capability problems carry their own meaning;
+                # don't flatten them into a generic service error.
+                raise
             except Exception as e:
                 logger.warning(f"Skipping intraday tick due to error: {e}")
                 continue
@@ -211,83 +255,25 @@ class PriceService:
                         change_pct=safe_float(row.get("change_pct") or row.get("changePct")),
                     )
                 )
+            except (VnstockUnavailable, VnstockUnsupported):
+                # Upstream quota/capability problems carry their own meaning;
+                # don't flatten them into a generic service error.
+                raise
             except Exception as e:
                 logger.warning(f"Skipping price board item due to error: {e}")
                 continue
         return items
 
     def get_price_depth(self, symbol: str) -> PriceDepthResponse:
-        """Get price depth (bid/ask levels) for a stock."""
-        symbol = validate_symbol(symbol)
-        try:
-            quote = Quote(symbol=symbol, source=self.source)
-            df = quote.price_depth()
+        """Price depth is not available from vnstock 4.x.
 
-            if df is None or (isinstance(df, pd.DataFrame) and df.empty):
-                raise StockServiceError(f"No price depth data for {symbol}")
+        Every provider Quote accepts (VCI, KBS, MSN) raises AttributeError for
+        price_depth, and TCBS is rejected as a Quote source. Declaring that
+        plainly beats leaking the AttributeError as a 502 that reads like a
+        bug on our side.
+        """
+        validate_symbol(symbol)
+        raise VnstockUnsupported(
+            "Nguồn dữ liệu hiện tại không hỗ trợ độ sâu giá (price depth)."
+        )
 
-            # Parse DataFrame - handle both single row and multi-row cases
-            if isinstance(df, pd.DataFrame) and len(df) > 0:
-                row = df.iloc[0].to_dict()
-            elif isinstance(df, dict):
-                row = df
-            else:
-                raise StockServiceError(f"Invalid price depth format for {symbol}")
-
-            # Try various column name patterns for bid levels
-            bid_1 = PriceLevel(
-                price=safe_float(row.get("bid_price_1") or row.get("bidPrice1") or row.get("bid1")) or 0,
-                volume=int(row.get("bid_volume_1") or row.get("bidVolume1") or row.get("bidVol1") or 0)
-            )
-            bid_2_price = safe_float(row.get("bid_price_2") or row.get("bidPrice2") or row.get("bid2"))
-            bid_2 = PriceLevel(
-                price=bid_2_price or 0,
-                volume=int(row.get("bid_volume_2") or row.get("bidVolume2") or row.get("bidVol2") or 0)
-            ) if bid_2_price else None
-            bid_3_price = safe_float(row.get("bid_price_3") or row.get("bidPrice3") or row.get("bid3"))
-            bid_3 = PriceLevel(
-                price=bid_3_price or 0,
-                volume=int(row.get("bid_volume_3") or row.get("bidVolume3") or row.get("bidVol3") or 0)
-            ) if bid_3_price else None
-
-            # Try various column name patterns for ask levels
-            ask_1 = PriceLevel(
-                price=safe_float(row.get("ask_price_1") or row.get("askPrice1") or row.get("ask1")) or 0,
-                volume=int(row.get("ask_volume_1") or row.get("askVolume1") or row.get("askVol1") or 0)
-            )
-            ask_2_price = safe_float(row.get("ask_price_2") or row.get("askPrice2") or row.get("ask2"))
-            ask_2 = PriceLevel(
-                price=ask_2_price or 0,
-                volume=int(row.get("ask_volume_2") or row.get("askVolume2") or row.get("askVol2") or 0)
-            ) if ask_2_price else None
-            ask_3_price = safe_float(row.get("ask_price_3") or row.get("askPrice3") or row.get("ask3"))
-            ask_3 = PriceLevel(
-                price=ask_3_price or 0,
-                volume=int(row.get("ask_volume_3") or row.get("askVolume3") or row.get("askVol3") or 0)
-            ) if ask_3_price else None
-
-            # Calculate totals and spread
-            total_bid = bid_1.volume + (bid_2.volume if bid_2 else 0) + (bid_3.volume if bid_3 else 0)
-            total_ask = ask_1.volume + (ask_2.volume if ask_2 else 0) + (ask_3.volume if ask_3 else 0)
-            spread = ask_1.price - bid_1.price
-            spread_pct = (spread / bid_1.price * 100) if bid_1.price > 0 else 0
-
-            return PriceDepthResponse(
-                symbol=symbol.upper(),
-                bid_1=bid_1,
-                bid_2=bid_2,
-                bid_3=bid_3,
-                ask_1=ask_1,
-                ask_2=ask_2,
-                ask_3=ask_3,
-                total_bid_volume=total_bid,
-                total_ask_volume=total_ask,
-                spread=round(spread, 2),
-                spread_percent=round(spread_pct, 4),
-                timestamp=datetime.now(VN_TZ)
-            )
-        except StockServiceError:
-            raise
-        except Exception as e:
-            logger.error(f"Error fetching price depth for {symbol}: {e}")
-            raise StockServiceError(f"Failed to get price depth for {symbol}: {e}")

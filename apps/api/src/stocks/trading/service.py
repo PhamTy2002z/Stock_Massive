@@ -5,7 +5,8 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 
 import pandas as pd
-from vnstock import Trading, Vnstock
+from src.core.vnstock_client import Trading, Vnstock
+from src.core.vnstock_client import VnstockUnavailable, VnstockUnsupported
 
 from ..shared import StockServiceError, validate_symbol, safe_float
 from .schemas import (
@@ -44,13 +45,11 @@ class TradingService:
                     start=start_date.strftime("%Y-%m-%d"),
                     end=end_date.strftime("%Y-%m-%d"),
                 )
-            except (NotImplementedError, Exception) as e:
-                # vnstock Trading class may not support this method
-                logger.warning(f"foreign_trade not available for {symbol}: {e}")
-                return ForeignTradingResponse(
-                    symbol=symbol, items=[], total_net_volume=0, total_net_value=0
-                )
-
+            except (VnstockUnavailable, VnstockUnsupported):
+                # The provider genuinely cannot serve this. Let it reach the
+                # client as 501/503 — returning an empty list here made an
+                # unsupported endpoint look healthy but permanently empty.
+                raise
             if df is None or df.empty:
                 return ForeignTradingResponse(
                     symbol=symbol, items=[], total_net_volume=0, total_net_value=0
@@ -88,6 +87,10 @@ class TradingService:
                     )
                     total_net_volume += net_vol
                     total_net_value += net_val
+                except (VnstockUnavailable, VnstockUnsupported):
+                    # Upstream quota/capability problems carry their own meaning;
+                    # don't flatten them into a generic service error.
+                    raise
                 except Exception as e:
                     logger.warning(f"Skipping foreign trading row due to error: {e}")
                     continue
@@ -98,6 +101,10 @@ class TradingService:
                 total_net_volume=total_net_volume,
                 total_net_value=total_net_value,
             )
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching foreign trading for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch foreign trading for {symbol}: {e}")
@@ -115,11 +122,11 @@ class TradingService:
                     start=start_date.strftime("%Y-%m-%d"),
                     end=end_date.strftime("%Y-%m-%d"),
                 )
-            except (NotImplementedError, Exception) as e:
-                # vnstock Trading class may not support this method
-                logger.warning(f"prop_trade not available for {symbol}: {e}")
-                return PropTradingResponse(symbol=symbol, items=[], total_net_volume=0)
-
+            except (VnstockUnavailable, VnstockUnsupported):
+                # The provider genuinely cannot serve this. Let it reach the
+                # client as 501/503 — returning an empty list here made an
+                # unsupported endpoint look healthy but permanently empty.
+                raise
             if df is None or df.empty:
                 return PropTradingResponse(symbol=symbol, items=[], total_net_volume=0)
 
@@ -153,6 +160,10 @@ class TradingService:
                         )
                     )
                     total_net_volume += net_vol
+                except (VnstockUnavailable, VnstockUnsupported):
+                    # Upstream quota/capability problems carry their own meaning;
+                    # don't flatten them into a generic service error.
+                    raise
                 except Exception as e:
                     logger.warning(f"Skipping prop trading row due to error: {e}")
                     continue
@@ -162,6 +173,10 @@ class TradingService:
                 items=items,
                 total_net_volume=total_net_volume,
             )
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching prop trading for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch prop trading for {symbol}: {e}")
@@ -179,11 +194,11 @@ class TradingService:
                     start=start_date.strftime("%Y-%m-%d"),
                     end=end_date.strftime("%Y-%m-%d"),
                 )
-            except (NotImplementedError, Exception) as e:
-                # vnstock Trading class may not support this method
-                logger.warning(f"order_stats not available for {symbol}: {e}")
-                return OrderStatsResponse(symbol=symbol, items=[])
-
+            except (VnstockUnavailable, VnstockUnsupported):
+                # The provider genuinely cannot serve this. Let it reach the
+                # client as 501/503 — returning an empty list here made an
+                # unsupported endpoint look healthy but permanently empty.
+                raise
             if df is None or df.empty:
                 return OrderStatsResponse(symbol=symbol, items=[])
 
@@ -209,11 +224,19 @@ class TradingService:
                             or 0,
                         )
                     )
+                except (VnstockUnavailable, VnstockUnsupported):
+                    # Upstream quota/capability problems carry their own meaning;
+                    # don't flatten them into a generic service error.
+                    raise
                 except Exception as e:
                     logger.warning(f"Skipping order stats row due to error: {e}")
                     continue
 
             return OrderStatsResponse(symbol=symbol, items=items)
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching order stats for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch order stats for {symbol}: {e}")
@@ -271,6 +294,10 @@ class TradingService:
                 atc_volume=atc_volume,
                 last_updated=datetime.now().isoformat(),
             )
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching intraday order stats for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch intraday order stats: {e}")
@@ -317,6 +344,10 @@ class TradingService:
                 foreign_pct_of_volume=foreign_pct,
                 last_updated=datetime.now().isoformat(),
             )
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching foreign snapshot for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch foreign snapshot: {e}")

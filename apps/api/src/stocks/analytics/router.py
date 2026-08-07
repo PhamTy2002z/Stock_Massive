@@ -21,6 +21,7 @@ from src.stocks.financial_statements_collector import FinancialStatementsCollect
 from src.stocks.service import get_stock_service
 from src.stocks.shared import StockServiceError
 from src.stocks.analytics.sector_historical_router import router as sector_historical_router
+from src.auth.dependencies import require_admin
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -81,7 +82,7 @@ async def get_financial_statements(
 @router.post(
     "/financial-statements/collect",
     response_model=FinancialStatementsCollectionResult,
-    dependencies=[Depends(heavy_rate_limit)],
+    dependencies=[Depends(heavy_rate_limit), Depends(require_admin)],
 )
 async def collect_financial_statements(
     db: AsyncSession = Depends(get_db),
@@ -163,8 +164,8 @@ async def get_volume_spikes(
     return result
 
 
-@router.delete("/volume-spikes/cache", dependencies=[Depends(heavy_rate_limit)])
-async def clear_volume_spikes_cache() -> dict:
+@router.delete("/volume-spikes/cache", dependencies=[Depends(heavy_rate_limit), Depends(require_admin)])
+def clear_volume_spikes_cache() -> dict:
     """Clear volume spikes cache. Use when data seems stale or after updates."""
     deleted = volume_spikes_cache.clear_prefix()
     return {"message": f"Cleared {deleted} cache entries"}
@@ -178,7 +179,7 @@ async def clear_volume_spikes_cache() -> dict:
     response_model=SectorPeersResponse,
     dependencies=[Depends(standard_rate_limit)],
 )
-async def get_sector_peers(
+def get_sector_peers(
     symbol: str = Query(..., description="Target stock symbol"),
     limit: int = Query(10, ge=5, le=20, description="Number of peers (5-20)"),
 ) -> SectorPeersResponse:

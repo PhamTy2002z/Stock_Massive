@@ -32,7 +32,7 @@ router = APIRouter()
 
 
 @router.get("/{symbol}/company", response_model=CompanyOverview, dependencies=[Depends(standard_rate_limit)])
-async def get_company_overview(symbol: str) -> CompanyOverview:
+def get_company_overview(symbol: str) -> CompanyOverview:
     """Get company overview information."""
     try:
         service = get_stock_service()
@@ -42,7 +42,7 @@ async def get_company_overview(symbol: str) -> CompanyOverview:
 
 
 @router.get("/{symbol}/detail", response_model=StockDetail, dependencies=[Depends(standard_rate_limit)])
-async def get_stock_detail(symbol: str) -> StockDetail:
+def get_stock_detail(symbol: str) -> StockDetail:
     """Get comprehensive stock detail data (composite endpoint)."""
     try:
         service = get_stock_service()
@@ -52,7 +52,7 @@ async def get_stock_detail(symbol: str) -> StockDetail:
 
 
 @router.get("/{symbol}/shareholders", response_model=ShareholdersResponse, dependencies=[Depends(standard_rate_limit)])
-async def get_shareholders(symbol: str) -> ShareholdersResponse:
+def get_shareholders(symbol: str) -> ShareholdersResponse:
     """Get major shareholders for a stock."""
     try:
         service = get_stock_service()
@@ -62,7 +62,7 @@ async def get_shareholders(symbol: str) -> ShareholdersResponse:
 
 
 @router.get("/{symbol}/officers", response_model=OfficersResponse, dependencies=[Depends(standard_rate_limit)])
-async def get_officers(
+def get_officers(
     symbol: str,
     filter_by: str = Query("working", description="Filter: working, resigned, all"),
 ) -> OfficersResponse:
@@ -78,7 +78,7 @@ async def get_officers(
 
 
 @router.get("/{symbol}/insider-deals", response_model=InsiderDealsResponse, dependencies=[Depends(standard_rate_limit)])
-async def get_insider_deals(symbol: str) -> InsiderDealsResponse:
+def get_insider_deals(symbol: str) -> InsiderDealsResponse:
     """Get insider trading deals for a stock."""
     try:
         service = get_stock_service()
@@ -91,7 +91,7 @@ async def get_insider_deals(symbol: str) -> InsiderDealsResponse:
 
 
 @router.get("/{symbol}/ratio-summary", response_model=RatioSummaryResponse, dependencies=[Depends(heavy_rate_limit)])
-async def get_ratio_summary(symbol: str) -> RatioSummaryResponse:
+def get_ratio_summary(symbol: str) -> RatioSummaryResponse:
     """Get financial ratios summary for advanced tab.
 
     Returns key financial ratios (PE, PB, ROE, ROA, etc.) for a stock.
@@ -116,7 +116,7 @@ async def get_ratio_summary(symbol: str) -> RatioSummaryResponse:
 
 
 @router.get("/{symbol}/trading-stats", response_model=TradingStatsResponse, dependencies=[Depends(heavy_rate_limit)])
-async def get_trading_stats(symbol: str) -> TradingStatsResponse:
+def get_trading_stats(symbol: str) -> TradingStatsResponse:
     """Get trading statistics for advanced tab.
 
     Returns trading statistics including volume, value, and 52-week high/low.

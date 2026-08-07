@@ -8,7 +8,8 @@ from typing import Optional
 import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-from vnstock import Finance, Listing
+from src.core.vnstock_client import Finance, Listing
+from src.core.vnstock_client import VnstockUnavailable, VnstockUnsupported
 
 from src.core.config import get_settings
 from src.core.vnstock_wrapper import (
@@ -66,6 +67,10 @@ class FinancialStatementsCollector:
                 rate_limited += 1
                 logger.warning(f"Rate limited on {symbol}, skipping")
 
+            except (VnstockUnavailable, VnstockUnsupported):
+                # Upstream quota/capability problems carry their own meaning;
+                # don't flatten them into a generic service error.
+                raise
             except Exception as e:
                 failed += 1
                 logger.debug(f"Error for {symbol}: {e}")
@@ -128,6 +133,10 @@ class FinancialStatementsCollector:
 
         try:
             return safe_vnstock_call(_fetch, max_retries=3) or []
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Failed to fetch symbols: {e}")
             return []
@@ -211,6 +220,10 @@ class FinancialStatementsCollector:
             await self.db.commit()
             return len(batch)
 
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Failed to store batch: {e}")
             await self.db.rollback()
@@ -249,6 +262,10 @@ class FinancialStatementsCollector:
             await self.db.commit()
             logger.info(f"Updated ranks for Q{quarter}-{year}")
 
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Failed to update ranks: {e}")
             await self.db.rollback()

@@ -3,10 +3,12 @@ import asyncio
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel
 
 from src.core.job_status_store import job_store
+from src.core.ratelimit import heavy_rate_limit
+from src.auth.dependencies import require_admin
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -27,7 +29,7 @@ class JobStatusResponse(BaseModel):
 
 
 @router.get("/status", response_model=list[JobStatusResponse])
-async def get_jobs_status() -> list[JobStatusResponse]:
+def get_jobs_status() -> list[JobStatusResponse]:
     """Get status of all jobs from today.
 
     Returns list of job statuses, empty if no jobs today.
@@ -59,8 +61,8 @@ async def get_jobs_status() -> list[JobStatusResponse]:
     ]
 
 
-@router.post("/trigger/ohlcv")
-async def trigger_ohlcv_job(background_tasks: BackgroundTasks) -> dict:
+@router.post("/trigger/ohlcv", dependencies=[Depends(heavy_rate_limit), Depends(require_admin)])
+def trigger_ohlcv_job(background_tasks: BackgroundTasks) -> dict:
     """Manually trigger OHLCV collection job.
 
     Runs in background, returns immediately.

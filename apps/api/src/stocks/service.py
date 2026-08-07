@@ -5,7 +5,8 @@ from datetime import date
 from typing import Optional
 
 import pandas as pd
-from vnstock import Vnstock, Finance, Trading
+from src.core.vnstock_client import Vnstock, Finance, Trading
+from src.core.vnstock_client import VnstockUnavailable, VnstockUnsupported
 
 from .price import PriceService
 from .company import CompanyService
@@ -162,7 +163,9 @@ class StockService:
 
         # 1. Get price board data
         try:
-            trading = Trading()
+            # vnstock 4.x defaults Trading to KBS, whose price_board rejects
+            # drop_levels; 3.x defaulted to VCI. Pass the configured source.
+            trading = Trading(source=self.source)
             price_df = trading.price_board(
                 symbols_list=[symbol],
                 flatten_columns=True,
@@ -193,6 +196,10 @@ class StockService:
                     result["change"] = round(change, 2)
                     result["change_pct"] = round(change_pct, 2)
 
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.warning(f"Error fetching price board for {symbol}: {e}")
 
@@ -229,6 +236,10 @@ class StockService:
                     market_cap = (result["price"] * 1000 * result["issue_share"]) / 1_000_000_000
                     result["market_cap"] = round(market_cap, 2)
 
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.warning(f"Error fetching company overview for {symbol}: {e}")
 
@@ -255,6 +266,10 @@ class StockService:
                 if div_val is not None:
                     result["dividend_yield"] = div_val * 100
 
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.warning(f"Error fetching financial ratios for {symbol}: {e}")
 
@@ -284,12 +299,20 @@ class StockService:
                 if avg_vol and pd.notna(avg_vol):
                     result["avg_volume_52_week"] = int(avg_vol)
 
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.warning(f"Error fetching trading stats for {symbol}: {e}")
 
         # 5. Calculate VN30 rank by market cap
         try:
             result["vn30_rank"] = self._get_vn30_rank(symbol, result.get("market_cap"))
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.warning(f"Error calculating VN30 rank for {symbol}: {e}")
 
@@ -309,7 +332,9 @@ class StockService:
 
         # Get price board for all VN30 symbols to calculate market caps
         try:
-            trading = Trading()
+            # vnstock 4.x defaults Trading to KBS, whose price_board rejects
+            # drop_levels; 3.x defaulted to VCI. Pass the configured source.
+            trading = Trading(source=self.source)
             price_df = trading.price_board(
                 symbols_list=vn30_symbols,
                 flatten_columns=True,
@@ -343,6 +368,10 @@ class StockService:
                     return rank
 
             return None
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.warning(f"Error fetching VN30 price board: {e}")
             return None

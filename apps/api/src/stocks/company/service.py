@@ -4,7 +4,8 @@ import logging
 from typing import Optional
 
 import pandas as pd
-from vnstock import Vnstock
+from src.core.vnstock_client import Company, Vnstock
+from src.core.vnstock_client import VnstockUnavailable, VnstockUnsupported
 
 from ..schemas.company import (
     CompanyOverview,
@@ -26,6 +27,9 @@ from ..shared import StockServiceError, validate_symbol, safe_float
 
 logger = logging.getLogger(__name__)
 
+# Only KBS implements Company.insider_trading in vnstock 4.x.
+INSIDER_TRADING_SOURCE = "KBS"
+
 
 class CompanyService:
     """Service for company-related data: overview, shareholders, officers, insider deals."""
@@ -45,6 +49,10 @@ class CompanyService:
                 return CompanyOverview(symbol=symbol.upper())
 
             return self._to_company_overview(symbol, overview)
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching company overview for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch company overview for {symbol}: {e}")
@@ -78,6 +86,10 @@ class CompanyService:
                         ownership_pct=float(row.get("share_own_percent", 0)) * 100,
                         update_date=update_date,
                     ))
+                except (VnstockUnavailable, VnstockUnsupported):
+                    # Upstream quota/capability problems carry their own meaning;
+                    # don't flatten them into a generic service error.
+                    raise
                 except Exception as e:
                     logger.warning(f"Skipping shareholder row due to error: {e}")
                     continue
@@ -87,6 +99,10 @@ class CompanyService:
                 shareholders=shareholders,
                 total_count=len(shareholders),
             )
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching shareholders for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch shareholders for {symbol}: {e}")
@@ -123,6 +139,10 @@ class CompanyService:
                         update_date=update_date,
                         status=row.get("type"),
                     ))
+                except (VnstockUnavailable, VnstockUnsupported):
+                    # Upstream quota/capability problems carry their own meaning;
+                    # don't flatten them into a generic service error.
+                    raise
                 except Exception as e:
                     logger.warning(f"Skipping officer row due to error: {e}")
                     continue
@@ -132,6 +152,10 @@ class CompanyService:
                 officers=officers,
                 total_count=len(officers),
             )
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching officers for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch officers for {symbol}: {e}")
@@ -140,8 +164,10 @@ class CompanyService:
         """Get insider trading deals for a stock."""
         symbol = validate_symbol(symbol)
         try:
-            stock = Vnstock().stock(symbol=symbol, source=self.source)
-            df = stock.company.insider_deals()
+            # vnstock 4.x renamed this to Company.insider_trading and only the
+            # KBS provider implements it — VCI raises NotImplementedError, and
+            # the legacy `stock.company.insider_deals` attribute is gone.
+            df = Company(symbol=symbol, source=INSIDER_TRADING_SOURCE).insider_trading()
 
             if df is None or df.empty:
                 return InsiderDealsResponse(symbol=symbol, deals=[], total_count=0)
@@ -168,6 +194,10 @@ class CompanyService:
                         announce_date=announce_date,
                         relation=row.get("deal_relation"),
                     ))
+                except (VnstockUnavailable, VnstockUnsupported):
+                    # Upstream quota/capability problems carry their own meaning;
+                    # don't flatten them into a generic service error.
+                    raise
                 except Exception as e:
                     logger.warning(f"Skipping insider deal row due to error: {e}")
                     continue
@@ -177,6 +207,10 @@ class CompanyService:
                 deals=deals,
                 total_count=len(deals),
             )
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching insider deals for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch insider deals for {symbol}: {e}")
@@ -239,6 +273,10 @@ class CompanyService:
                             price_change_pct=safe_float(row.get("price_change_ratio")),
                         )
                     )
+                except (VnstockUnavailable, VnstockUnsupported):
+                    # Upstream quota/capability problems carry their own meaning;
+                    # don't flatten them into a generic service error.
+                    raise
                 except Exception as e:
                     logger.warning(f"Skipping news row due to error: {e}")
                     continue
@@ -248,6 +286,10 @@ class CompanyService:
                 items=items,
                 total_count=len(items),
             )
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching company news for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch company news for {symbol}: {e}")
@@ -285,6 +327,10 @@ class CompanyService:
                             method=str(row.get("issue_method", "cash")),
                         )
                     )
+                except (VnstockUnavailable, VnstockUnsupported):
+                    # Upstream quota/capability problems carry their own meaning;
+                    # don't flatten them into a generic service error.
+                    raise
                 except Exception as e:
                     logger.warning(f"Skipping dividend row due to error: {e}")
                     continue
@@ -294,6 +340,10 @@ class CompanyService:
                 items=items,
                 total_count=len(items),
             )
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching company dividends for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch company dividends for {symbol}: {e}")
@@ -326,6 +376,10 @@ class CompanyService:
                 current_ratio=safe_float(row.get("current_ratio")),
                 debt_to_equity=safe_float(row.get("debt_to_equity") or row.get("de")),
             )
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching ratio summary for {symbol}: {e}")
             raise StockServiceError(f"Failed to get ratio summary for {symbol}: {e}")
@@ -358,6 +412,10 @@ class CompanyService:
                 high_price=high_1y / 1000 if high_1y else None,
                 low_price=low_1y / 1000 if low_1y else None,
             )
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching trading stats for {symbol}: {e}")
             raise StockServiceError(f"Failed to get trading stats for {symbol}: {e}")
