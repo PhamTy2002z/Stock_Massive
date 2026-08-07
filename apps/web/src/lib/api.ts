@@ -12,6 +12,13 @@ const API_BASE_URL = getApiBaseUrl()
 
 export interface PriceBoardItem {
   symbol: string
+  // Names vnstock 4.x uses. `last_price` / `total_vol` / `total_val` below are
+  // kept as aliases of these, derived server-side, so older callers still work.
+  match_price: number | null
+  highest: number | null
+  lowest: number | null
+  accumulated_volume: number | null
+  accumulated_value: number | null
   ceiling: number | null
   floor: number | null
   ref_price: number | null
@@ -639,20 +646,12 @@ export async function fetchJobsStatus(): Promise<JobStatus[]> {
 
 // Advanced Tab API Functions
 
-function formatDateParam(date: Date): string {
-  return date.toISOString().split("T")[0]
-}
-
-function getDateRange(days: number): { start: string; end: string } {
-  const end = new Date()
-  const start = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
-  return { start: formatDateParam(start), end: formatDateParam(end) }
-}
+// These endpoints take `days`; sending start/end meant FastAPI ignored both
+// and every request silently used the 30-day default.
 
 export async function fetchOrderStats(symbol: string, days: number = 30): Promise<OrderStatsItem[]> {
-  const { start, end } = getDateRange(days)
   const response = await fetchApi<{ symbol: string; items: OrderStatsItem[] }>(
-    `/stocks/${encodeURIComponent(symbol)}/order-stats?start=${start}&end=${end}`
+    `/stocks/${encodeURIComponent(symbol)}/order-stats?days=${days}`
   )
   return response.items ?? []
 }
@@ -670,17 +669,15 @@ export async function fetchTradingStats(symbol: string): Promise<TradingStatsRes
 }
 
 export async function fetchForeignTrading(symbol: string, days: number = 30): Promise<ForeignTradingItem[]> {
-  const { start, end } = getDateRange(days)
   const response = await fetchApi<{ symbol: string; items: ForeignTradingItem[] }>(
-    `/stocks/${encodeURIComponent(symbol)}/foreign-trading?start=${start}&end=${end}`
+    `/stocks/${encodeURIComponent(symbol)}/foreign-trading?days=${days}`
   )
   return response.items ?? []
 }
 
 export async function fetchPropTrading(symbol: string, days: number = 30): Promise<PropTradingItem[]> {
-  const { start, end } = getDateRange(days)
   const response = await fetchApi<{ symbol: string; items: PropTradingItem[] }>(
-    `/stocks/${encodeURIComponent(symbol)}/prop-trading?start=${start}&end=${end}`
+    `/stocks/${encodeURIComponent(symbol)}/prop-trading?days=${days}`
   )
   return response.items ?? []
 }

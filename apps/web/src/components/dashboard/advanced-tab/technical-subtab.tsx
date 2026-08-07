@@ -6,6 +6,7 @@ import { RatioSummaryCard } from "./widgets/ratio-summary-card"
 import { TradingStatsCard } from "./widgets/trading-stats-card"
 import { RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { DataErrorNotice } from "./data-error-notice"
 
 interface TechnicalSubtabProps {
   symbol: string
@@ -42,11 +43,7 @@ export default function TechnicalSubtab({ symbol }: TechnicalSubtabProps) {
         </Button>
       </div>
 
-      {hasError && (
-        <div className="p-4 rounded-lg bg-destructive/10 text-destructive text-sm">
-          Có lỗi khi tải dữ liệu. Vui lòng thử lại.
-        </div>
-      )}
+      {hasError && <DataErrorNotice error={hasError} />}
 
       {/* Cards Grid */}
       <div className="grid gap-6 md:grid-cols-2">
