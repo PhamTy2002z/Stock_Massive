@@ -9,7 +9,8 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 import pandas as pd
-from vnstock import Listing, Vnstock
+from src.core.vnstock_client import Listing, Vnstock
+from src.core.vnstock_client import VnstockUnavailable, VnstockUnsupported
 
 from src.core.cache import TradingHoursCache
 from src.core.config import get_settings
@@ -85,6 +86,10 @@ class SectorHistoricalService:
                 if df is not None and not df.empty:
                     stock_data[symbol] = df
                 time.sleep(self.delay)
+            except (VnstockUnavailable, VnstockUnsupported):
+                # Upstream quota/capability problems carry their own meaning;
+                # don't flatten them into a generic service error.
+                raise
             except Exception as e:
                 logger.debug(f"Error fetching {symbol}: {e}")
 
