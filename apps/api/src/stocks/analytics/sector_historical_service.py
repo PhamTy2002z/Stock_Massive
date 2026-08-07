@@ -13,6 +13,7 @@ from vnstock import Listing, Vnstock
 
 from src.core.cache import TradingHoursCache
 from src.core.config import get_settings
+from src.stocks.shared import StockServiceError, fetch_industry_mapping
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -54,17 +55,19 @@ class SectorHistoricalService:
         symbols = vn100_symbols.tolist() if hasattr(vn100_symbols, "tolist") else list(vn100_symbols)
         logger.info(f"Processing {len(symbols)} VN100 symbols")
 
-        # Get ICB mapping for all symbols
-        all_symbols_df = listing.symbols_by_industries()
-        icb_map = {}
-        if all_symbols_df is not None and not all_symbols_df.empty:
-            for _, row in all_symbols_df.iterrows():
-                s = row.get("symbol")
-                if s in symbols:
-                    icb_map[s] = {
-                        "icb_code": str(row.get("icb_code2", "")),
-                        "icb_name": str(row.get("icb_name2", "")),
-                    }
+        # Get ICB mapping, narrowed to the symbols we are about to price
+        try:
+            full_map = fetch_industry_mapping(listing)
+        except StockServiceError as exc:
+            logger.error(f"Failed to build ICB mapping: {exc}")
+            return {"error": "Industry classification data unavailable"}
+
+        wanted = set(symbols)
+        icb_map = {
+            s: {"icb_code": v["icb_code"] or "", "icb_name": v["icb_name"] or ""}
+            for s, v in full_map.items()
+            if s in wanted
+        }
 
         logger.info(f"ICB mapping available for {len(icb_map)} symbols")
 
