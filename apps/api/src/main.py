@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from src.auth.router import router as auth_router
 from src.core.config import get_settings
 from src.core.database import engine
 from src.core.scheduler import setup_scheduler
@@ -67,6 +68,7 @@ app.add_middleware(
 )
 
 # Include routers
+app.include_router(auth_router, prefix="/api/v1")
 app.include_router(stocks_router, prefix="/api/v1")
 app.include_router(jobs_router, prefix="/api/v1")
 
