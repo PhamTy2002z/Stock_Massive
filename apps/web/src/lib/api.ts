@@ -51,10 +51,25 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
   })
 
   if (!response.ok) {
-    throw new ApiError(response.status, `API error: ${response.statusText}`)
+    throw new ApiError(response.status, await readErrorDetail(response))
   }
 
   return response.json()
+}
+
+/**
+ * The API explains itself in `detail` — "this period has not been computed
+ * yet", "the provider does not support this". Falling back to statusText threw
+ * that away and showed the user a bare "Service Unavailable".
+ */
+async function readErrorDetail(response: Response): Promise<string> {
+  try {
+    const body = await response.json()
+    if (typeof body?.detail === "string" && body.detail) return body.detail
+  } catch {
+    // Non-JSON error body; fall through to the status line.
+  }
+  return `API error: ${response.statusText || response.status}`
 }
 
 export async function fetchPriceBoard(symbols: string[]): Promise<PriceBoardItem[]> {
