@@ -52,6 +52,33 @@ class JobStatusStore:
                 started_at=datetime.now(),
             )
 
+    def is_running(self, job_id: str) -> bool:
+        """Whether this job is currently in flight."""
+        with self._jobs_lock:
+            job = self._jobs.get(job_id)
+            return job is not None and job.status == "running"
+
+    def try_start_job(self, job_id: str, display_name: str, total_items: int = 0) -> bool:
+        """Start `job_id` unless it is already running.
+
+        Checked and set under one lock so two concurrent triggers cannot both
+        see "not running" and launch duplicate work — these jobs write to the
+        same tables and burn the same upstream quota.
+        """
+        with self._jobs_lock:
+            existing = self._jobs.get(job_id)
+            if existing is not None and existing.status == "running":
+                return False
+
+            self._jobs[job_id] = JobStatus(
+                job_id=job_id,
+                display_name=display_name,
+                status="running",
+                total_items=total_items,
+                started_at=datetime.now(),
+            )
+            return True
+
     def update_progress(
         self, job_id: str, processed: int, message: str = ""
     ) -> None:
