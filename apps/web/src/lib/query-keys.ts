@@ -1,6 +1,9 @@
 import type { PeriodType, OfficerFilterType, VolumeSpikeParams, SectorHistoricalPeriod } from "./api"
 
 export const queryKeys = {
+  // Auth
+  currentUser: ["auth", "currentUser"] as const,
+
   // Market data
   marketIndices: ["market", "indices"] as const,
   priceBoard: (symbols: string[]) => ["market", "priceBoard", symbols] as const,
