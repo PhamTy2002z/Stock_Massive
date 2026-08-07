@@ -131,9 +131,8 @@ class TestGetSectorPerformance:
         """Mock symbols_by_industries DataFrame with ICB classification."""
         return pd.DataFrame({
             'symbol': ['VCB', 'ACB', 'TCB', 'VNM', 'MSN', 'HPG', 'HSG'],
-            'icb_code2': ['8000', '8000', '8000', '5000', '5000', '2000', '2000'],
-            'icb_name2': ['Tai chinh', 'Tai chinh', 'Tai chinh', 'Hang tieu dung', 'Hang tieu dung', 'Vat lieu co ban', 'Vat lieu co ban'],
-            'icb_name3': ['Ngan hang', 'Ngan hang', 'Ngan hang', 'Thuc pham', 'Thuc pham', 'Thep', 'Thep'],
+            'industry_code': ['11', '11', '11', '19', '19', '21', '21'],
+            'industry_name': ['Ngan hang', 'Ngan hang', 'Ngan hang', 'Thuc pham - Do uong', 'Thuc pham - Do uong', 'Vat lieu xay dung', 'Vat lieu xay dung'],
         })
 
     @pytest.fixture
@@ -266,12 +265,11 @@ class TestGetSectorPerformance:
     @patch('src.stocks.market.service.Listing')
     @patch('src.stocks.market.service.Trading')
     def test_get_sector_performance_with_icb_columns(self, mock_trading_cls, mock_listing_cls, service):
-        """Test with icb_name2 column for sector grouping."""
+        """Test sector grouping off the industry_name column."""
         symbols_df = pd.DataFrame({
             'symbol': ['VCB', 'ACB'],
-            'icb_code2': ['8000', '8000'],
-            'icb_name2': ['Tai chinh', 'Tai chinh'],
-            'icb_name3': ['Ngan hang', 'Ngan hang'],
+            'industry_code': ['11', '11'],
+            'industry_name': ['Ngan hang', 'Ngan hang'],
         })
 
         mock_listing = MagicMock()
@@ -291,7 +289,8 @@ class TestGetSectorPerformance:
 
         assert isinstance(result, SectorPerformanceResponse)
         assert result.total_sectors == 1
-        assert result.sectors[0].icb_name == 'Tai chinh'
+        assert result.sectors[0].icb_name == 'Ngan hang'
+        assert result.sectors[0].icb_code == '11'
 
     @patch('src.stocks.market.service.Listing')
     @patch('src.stocks.market.service.Trading')
@@ -299,9 +298,8 @@ class TestGetSectorPerformance:
         """Test handling of NaN sector names - they should be skipped."""
         symbols_df = pd.DataFrame({
             'symbol': ['VCB', 'ACB', 'XXX'],
-            'icb_code2': ['8000', '8000', None],
-            'icb_name2': ['Tai chinh', 'Tai chinh', None],
-            'icb_name3': ['Ngan hang', 'Ngan hang', None],
+            'industry_code': ['11', '11', None],
+            'industry_name': ['Ngan hang', 'Ngan hang', None],
         })
 
         mock_listing = MagicMock()
@@ -339,9 +337,8 @@ class TestMarketCapWeightedCalculation:
         """Test change percentage calculation is accurate."""
         symbols_df = pd.DataFrame({
             'symbol': ['A', 'B'],
-            'icb_code2': ['1000', '1000'],
-            'icb_name2': ['Test Sector', 'Test Sector'],
-            'icb_name3': ['Test', 'Test'],
+            'industry_code': ['1000', '1000'],
+            'industry_name': ['Test Sector', 'Test Sector'],
         })
 
         mock_listing = MagicMock()
@@ -370,9 +367,8 @@ class TestMarketCapWeightedCalculation:
         """Test top gainers and losers are correctly sorted."""
         symbols_df = pd.DataFrame({
             'symbol': ['A', 'B', 'C', 'D', 'E'],
-            'icb_code2': ['1000'] * 5,
-            'icb_name2': ['Test'] * 5,
-            'icb_name3': ['Test'] * 5,
+            'industry_code': ['1000'] * 5,
+            'industry_name': ['Test'] * 5,
         })
 
         mock_listing = MagicMock()
@@ -401,9 +397,8 @@ class TestMarketCapWeightedCalculation:
         """Test handling of zero/missing accumulated_value."""
         symbols_df = pd.DataFrame({
             'symbol': ['A', 'B'],
-            'icb_code2': ['1000', '1000'],
-            'icb_name2': ['Test', 'Test'],
-            'icb_name3': ['Test', 'Test'],
+            'industry_code': ['1000', '1000'],
+            'industry_name': ['Test', 'Test'],
         })
 
         mock_listing = MagicMock()
@@ -431,9 +426,8 @@ class TestMarketCapWeightedCalculation:
         """Test total market cap is converted to billions."""
         symbols_df = pd.DataFrame({
             'symbol': ['A'],
-            'icb_code2': ['1000'],
-            'icb_name2': ['Test'],
-            'icb_name3': ['Test'],
+            'industry_code': ['1000'],
+            'industry_name': ['Test'],
         })
 
         mock_listing = MagicMock()
