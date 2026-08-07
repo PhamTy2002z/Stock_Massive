@@ -16,6 +16,8 @@ services:
       SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
       UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
       UPSTASH_REDIS_REST_TOKEN: ${UPSTASH_REDIS_REST_TOKEN:-}
+      # Read by vnstock; without it the quota is 20 req/min instead of 60
+      VNSTOCK_API_KEY: ${VNSTOCK_API_KEY:-}
       AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required}
     ports:
       - "8000:8000"
