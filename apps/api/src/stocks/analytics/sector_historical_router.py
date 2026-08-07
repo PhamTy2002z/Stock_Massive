@@ -12,6 +12,7 @@ from src.stocks.analytics.sector_historical_service import (
     SectorHistoricalService,
     sector_historical_cache,
 )
+from src.auth.dependencies import require_admin
 from src.stocks.schemas.market import (
     SectorHistoricalItem,
     SectorHistoricalPeriod,
@@ -59,7 +60,7 @@ async def get_sector_historical_performance(
 @router.post(
     "/sector-historical/refresh",
     response_model=dict,
-    dependencies=[Depends(heavy_rate_limit)],
+    dependencies=[Depends(heavy_rate_limit), Depends(require_admin)],
 )
 async def refresh_sector_historical() -> dict:
     """Manually trigger sector historical calculation.
