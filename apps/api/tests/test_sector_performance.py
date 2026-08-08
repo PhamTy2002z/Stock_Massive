@@ -423,7 +423,41 @@ class TestMarketCapWeightedCalculation:
     @patch('src.stocks.market.service.Listing')
     @patch('src.stocks.market.service.Trading')
     def test_total_market_cap_in_billions(self, mock_trading_cls, mock_listing_cls, service):
-        """Test total market cap is converted to billions."""
+        """Market cap is price times listed shares, reported in billions."""
+        symbols_df = pd.DataFrame({
+            'symbol': ['A'],
+            'industry_code': ['1000'],
+            'industry_name': ['Test'],
+        })
+
+        mock_listing = MagicMock()
+        mock_listing.symbols_by_industries.return_value = symbols_df
+        mock_listing_cls.return_value = mock_listing
+
+        mock_trading = MagicMock()
+        mock_trading.price_board.return_value = pd.DataFrame({
+            'symbol': ['A'],
+            'match_price': [100.0],
+            'ref_price': [100.0],
+            'listed_share': [1_500_000_000.0],  # 100 VND × 1.5e9 shares = 150 billion
+        })
+        mock_trading_cls.return_value = mock_trading
+
+        result = service.get_sector_performance()
+
+        assert result.sectors[0].total_market_cap == 150.0  # In billions
+
+    @patch('src.stocks.market.service.Listing')
+    @patch('src.stocks.market.service.Trading')
+    def test_market_cap_is_zero_when_listed_share_missing(
+        self, mock_trading_cls, mock_listing_cls, service
+    ):
+        """Turnover is not a stand-in for market cap, so report nothing instead.
+
+        accumulated_value is the day's trading value; substituting it inflates
+        the sector by roughly three orders of magnitude while still looking like
+        a believable number.
+        """
         symbols_df = pd.DataFrame({
             'symbol': ['A'],
             'industry_code': ['1000'],
@@ -439,13 +473,15 @@ class TestMarketCapWeightedCalculation:
             'symbol': ['A'],
             'match_price': [101.0],
             'ref_price': [100.0],
-            'accumulated_value': [150_000_000_000],  # 150 billion
+            'accumulated_value': [150_000_000_000],
         })
         mock_trading_cls.return_value = mock_trading
 
         result = service.get_sector_performance()
 
-        assert result.sectors[0].total_market_cap == 150.0  # In billions
+        assert result.sectors[0].total_market_cap == 0.0
+        # Change still reported, just unweighted
+        assert result.sectors[0].change_pct == 1.0
 
 
 # === Integration Test (Optional - requires network) ===

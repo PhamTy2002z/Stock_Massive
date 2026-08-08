@@ -204,28 +204,31 @@ class MarketService:
                 # Calculate change percentage for each stock
                 changes = (valid_rows["match_price"] - valid_rows["ref_price"]) / valid_rows["ref_price"] * 100
 
-                # Market-cap weighted average change
-                # Market cap = match_price * listed_share
+                # Market cap = match_price (VND) * listed_share (shares).
+                # Weight the sector change by it, and report the total in billions.
+                #
+                # There is deliberately no substitute when listed_share is absent:
+                # accumulated_value is the day's turnover, not the size of the
+                # companies, and the two differ by about three orders of
+                # magnitude — reporting one as the other reads as a plausible
+                # number while being wrong.
                 if "listed_share" in valid_rows.columns:
                     market_caps = valid_rows["match_price"] * valid_rows["listed_share"]
-                    total_cap = market_caps.sum()
-                    if total_cap > 0:
-                        avg_change = (changes * market_caps).sum() / total_cap
-                    else:
-                        avg_change = changes.mean()
+                    total_cap = float(market_caps.sum())
+                    avg_change = (
+                        (changes * market_caps).sum() / total_cap
+                        if total_cap > 0
+                        else changes.mean()
+                    )
+                    sector_market_cap = total_cap / 1e9
                 else:
-                    # Fallback to simple average if listed_share not available
+                    logger.warning(
+                        "price_board has no listed_share column; reporting sector "
+                        "'%s' with an unweighted change and no market cap",
+                        sector_name,
+                    )
                     avg_change = changes.mean()
-
-                # Calculate actual market cap (match_price * listed_share)
-                # listed_share is in shares, match_price is in VND
-                # Result in billion VND (tỷ đồng)
-                if "listed_share" in valid_rows.columns:
-                    # market_cap = price * shares / 1e9 (convert to billion VND)
-                    sector_market_cap = (valid_rows["match_price"] * valid_rows["listed_share"]).sum() / 1e9
-                else:
-                    # Fallback to accumulated_value (trading value in million VND)
-                    sector_market_cap = valid_rows["accumulated_value"].sum() / 1000 if "accumulated_value" in valid_rows.columns else 0
+                    sector_market_cap = 0.0
 
                 # Get ICB code if available
                 icb_code = ""
