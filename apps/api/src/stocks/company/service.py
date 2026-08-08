@@ -197,15 +197,16 @@ class CompanyService:
                     else:
                         announce_date = None
 
+                    # Field names must match InsiderDealItem: pydantic drops
+                    # unknown keywords, and `action`/`quantity` are required, so
+                    # a near-miss made every row fail validation and get skipped
+                    # — the endpoint always answered with an empty list.
                     deals.append(InsiderDealItem(
-                        id=row_id(row, f"{symbol}-deal-{i}"),
-                        name=str(row.get("deal_owner_name", "")),
-                        position=row.get("deal_position"),
-                        deal_type=row.get("deal_action"),
-                        shares=safe_float(row.get("deal_quantity")),
+                        announce_date=announce_date or "",
+                        action=str(row.get("deal_action") or ""),
+                        quantity=safe_float(row.get("deal_quantity")) or 0.0,
                         price=safe_float(row.get("deal_price")),
-                        announce_date=announce_date,
-                        relation=row.get("deal_relation"),
+                        ratio=safe_float(row.get("deal_ratio")),
                     ))
                 except (VnstockUnavailable, VnstockUnsupported):
                     # Upstream quota/capability problems carry their own meaning;
@@ -240,11 +241,10 @@ class CompanyService:
         return CompanyOverview(
             symbol=symbol.upper(),
             company_name=row.get("organ_name") or row.get("short_name"),
-            short_name=row.get("short_name"),
             exchange=row.get("exchange"),
-            industry=row.get("icb_name3") or row.get("icb_name2"),
-            issue_share=safe_float(row.get("issue_share")),
-            outstanding_share=safe_float(row.get("outstanding_share")),
+            # vnstock 4.x overview carries `sector`; keep the 3.x names as a
+            # fallback so older payloads still resolve.
+            industry=row.get("sector") or row.get("icb_name3") or row.get("icb_name2"),
             description=row.get("company_profile"),
             website=row.get("website"),
             employees=row.get("no_employees"),
