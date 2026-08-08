@@ -149,11 +149,16 @@ class TestSchedulerSetup:
             mock_settings.financial_statements_enabled = True
             mock_settings.financial_statements_hour = 2
             mock_settings.financial_statements_minute = 0
+            # Sector historical settings
+            mock_settings.sector_historical_enabled = True
+            mock_settings.sector_historical_hour = 15
+            mock_settings.sector_historical_minute = 45
 
             await setup_scheduler(mock_scheduler)
 
-            # Should add 4 schedules: intraday collection, cleanup, daily_ohlcv, and financial_statements
-            assert mock_scheduler.add_schedule.call_count == 4
+            # Should add 5 schedules: intraday collection, cleanup, daily_ohlcv,
+            # financial_statements, and sector_historical
+            assert mock_scheduler.add_schedule.call_count == 5
 
     @pytest.mark.asyncio
     async def test_setup_scheduler_disabled(self):

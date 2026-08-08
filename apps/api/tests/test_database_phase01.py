@@ -22,6 +22,18 @@ from src.main import app
 from src.stocks.models import StockIntradayBar
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def dispose_engine_between_tests():
+    """Drop pooled connections after each test.
+
+    The engine is a module-level singleton while every async test gets its own
+    event loop, so a connection opened by one test is unusable in the next one
+    ("attached to a different loop"). Disposing forces a fresh pool per test.
+    """
+    yield
+    await engine.dispose()
+
+
 class TestImports:
     """Test 1: Verify imports work correctly."""
 
