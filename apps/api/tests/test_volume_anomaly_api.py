@@ -11,7 +11,7 @@ TEST_SYMBOLS = ["VCB", "FPT", "VNM"]
 INVALID_SYMBOL = "INVALID123"
 
 
-def test_endpoint(symbol: str, days: int = 20) -> Dict[str, Any]:
+def check_endpoint(symbol: str, days: int = 20) -> Dict[str, Any]:
     """Test volume anomaly endpoint and measure response time."""
     url = f"{API_BASE_URL}/{symbol}/volume-anomalies?days={days}"
 
@@ -105,7 +105,7 @@ def main():
     print("-" * 80)
     for symbol in TEST_SYMBOLS:
         print(f"\nTesting {symbol}...")
-        result = test_endpoint(symbol)
+        result = check_endpoint(symbol)
         results.append(result)
 
         print(f"  Status: {result['status_code']}")
@@ -140,7 +140,7 @@ def main():
     # Test 4: Invalid symbol (should return 404)
     print(f"\n\nTesting invalid symbol: {INVALID_SYMBOL}")
     print("-" * 80)
-    result = test_endpoint(INVALID_SYMBOL)
+    result = check_endpoint(INVALID_SYMBOL)
     results.append(result)
 
     print(f"  Status: {result['status_code']}")
@@ -152,7 +152,7 @@ def main():
     # Test 5: Custom days parameter
     print(f"\n\nTesting custom days parameter (VCB with days=30)")
     print("-" * 80)
-    result = test_endpoint("VCB", days=30)
+    result = check_endpoint("VCB", days=30)
     results.append(result)
 
     print(f"  Status: {result['status_code']}")

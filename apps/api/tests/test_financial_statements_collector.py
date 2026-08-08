@@ -372,17 +372,22 @@ class TestSchedulerIntegration:
             mock_settings.financial_statements_enabled = True
             mock_settings.financial_statements_hour = 2
             mock_settings.financial_statements_minute = 0
+            mock_settings.sector_historical_enabled = True
+            mock_settings.sector_historical_hour = 15
+            mock_settings.sector_historical_minute = 45
 
             await setup_scheduler(mock_scheduler)
 
-            # Should add 4 schedules: intraday, cleanup, daily_ohlcv, financial_statements
-            assert mock_scheduler.add_schedule.call_count == 4
+            # Should add 5 schedules: intraday, cleanup, daily_ohlcv,
+            # financial_statements, sector_historical
+            assert mock_scheduler.add_schedule.call_count == 5
 
-            # Find the financial statements schedule call
+            # Find the financial statements schedule call. The scheduler registers
+            # a logging wrapper around the job, so match the wrapper's name.
             calls = mock_scheduler.add_schedule.call_args_list
             financial_statements_call = None
             for c in calls:
-                if len(c[0]) > 0 and c[0][0].__name__ == "collect_financial_statements_job":
+                if len(c[0]) > 0 and c[0][0].__name__ == "financial_statements_job_wrapper":
                     financial_statements_call = c
                     break
 
@@ -403,17 +408,20 @@ class TestSchedulerIntegration:
             mock_settings.daily_ohlcv_hour = 20
             mock_settings.daily_ohlcv_minute = 0
             mock_settings.financial_statements_enabled = False
+            mock_settings.sector_historical_enabled = True
+            mock_settings.sector_historical_hour = 15
+            mock_settings.sector_historical_minute = 45
 
             await setup_scheduler(mock_scheduler)
 
-            # Should add only 3 schedules (no financial_statements)
-            assert mock_scheduler.add_schedule.call_count == 3
+            # Should add only 4 schedules (no financial_statements)
+            assert mock_scheduler.add_schedule.call_count == 4
 
-            # Verify no call includes collect_financial_statements_job
+            # Verify no call registers the financial statements wrapper
             calls = mock_scheduler.add_schedule.call_args_list
             for c in calls:
                 if len(c[0]) > 0:
-                    assert c[0][0].__name__ != "collect_financial_statements_job"
+                    assert c[0][0].__name__ != "financial_statements_job_wrapper"
 
 
 class TestConfigSettings:
