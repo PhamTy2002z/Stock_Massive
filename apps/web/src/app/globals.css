@@ -64,13 +64,18 @@
     --chart-3: 25 95% 53%;
     --chart-4: 43 96% 56%;
     --chart-5: 262 83% 58%;
-    --sidebar-background: 0 0% 8%;
-    --sidebar-foreground: 0 0% 100%;
+    /* The sidebar sits one step *above* --background (11%), not below it. At 8%
+       it was the darkest surface on screen, so the expanded panel read as a hole
+       punched through the page instead of a panel floating over it. */
+    --sidebar-background: 0 0% 13%;
+    --sidebar-foreground: 0 0% 88%;
     --sidebar-primary: 25 95% 53%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 0 0% 11%;
+    /* Hover and active have to clear the new background, and the accent
+       foreground goes to full white so the selected item outranks the rest. */
+    --sidebar-accent: 0 0% 19%;
     --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 0 0% 15%;
+    --sidebar-border: 0 0% 22%;
     --sidebar-ring: 25 95% 53%;
   }
 }

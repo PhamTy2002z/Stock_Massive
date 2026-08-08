@@ -28,16 +28,17 @@ import {
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
 const SIDEBAR_WIDTH = "16rem"
-// Peek is deliberately narrower than the pinned width: it only has to fit the
-// longest nav label, and a narrow overlay covers less of the content it floats on.
-const SIDEBAR_WIDTH_PEEK = "11rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
+// How far down the viewport the sidebar starts. Layouts that put a full-width
+// bar above the sidebar override --sidebar-top with its height.
+const SIDEBAR_TOP = "0rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
-// Asymmetric on purpose: short in, so a deliberate hover feels immediate but a
-// mouse crossing the rail does not open it; long out, to forgive overshoot.
-const SIDEBAR_PEEK_IN_DELAY = 150
-const SIDEBAR_PEEK_OUT_DELAY = 300
+// No delay either way: the panel tracks the cursor, and with the animation at
+// 100ms both directions land well under the 200ms budget. Neither path goes
+// through setTimeout — see schedulePeek.
+const SIDEBAR_PEEK_IN_DELAY = 0
+const SIDEBAR_PEEK_OUT_DELAY = 0
 
 type SidebarMode = "rail" | "pinned"
 
@@ -160,13 +161,19 @@ const SidebarProvider = React.forwardRef<
       (next: boolean) => {
         clearPeekTimer()
         if (next && (!canHover || pointerDownRef.current)) return
-        peekTimerRef.current = setTimeout(
-          () => {
-            peekTimerRef.current = null
-            setIsPeeking(next)
-          },
-          next ? SIDEBAR_PEEK_IN_DELAY : SIDEBAR_PEEK_OUT_DELAY
-        )
+
+        const delay = next ? SIDEBAR_PEEK_IN_DELAY : SIDEBAR_PEEK_OUT_DELAY
+        // A zero delay must not go through setTimeout: deferring a tick is the
+        // difference between "attached to the cursor" and "slightly late".
+        if (delay === 0) {
+          setIsPeeking(next)
+          return
+        }
+
+        peekTimerRef.current = setTimeout(() => {
+          peekTimerRef.current = null
+          setIsPeeking(next)
+        }, delay)
       },
       [canHover, clearPeekTimer]
     )
@@ -182,15 +189,13 @@ const SidebarProvider = React.forwardRef<
       setIsPeeking(false)
     }, [clearPeekTimer])
 
-    // Helper to toggle the sidebar. On desktop this pins/unpins.
+    // Opens the mobile sheet. Desktop has no pin control, so there is nothing to
+    // toggle there — hover drives the rail, and a shortcut that silently pinned
+    // the sidebar open would leave no visible way back.
     const toggleSidebar = React.useCallback(() => {
-      if (isMobile) {
-        setOpenMobile((open) => !open)
-        return
-      }
-      endPeek()
-      setOpen((open) => !open)
-    }, [isMobile, setOpen, setOpenMobile, endPeek])
+      if (!isMobile) return
+      setOpenMobile((open) => !open)
+    }, [isMobile, setOpenMobile])
 
     // Adds a keyboard shortcut to toggle the sidebar.
     React.useEffect(() => {
@@ -264,8 +269,8 @@ const SidebarProvider = React.forwardRef<
             style={
               {
                 "--sidebar-width": SIDEBAR_WIDTH,
-                "--sidebar-width-peek": SIDEBAR_WIDTH_PEEK,
                 "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
+                "--sidebar-top": SIDEBAR_TOP,
                 ...style,
               } as React.CSSProperties
             }
@@ -385,7 +390,7 @@ const Sidebar = React.forwardRef<
         ref={ref}
         className={cn(
           "group peer hidden text-sidebar-foreground md:block",
-          "shrink-0 transition-[width] duration-200 ease-sidebar will-change-[width]",
+          "shrink-0 transition-[width] duration-100 ease-sidebar will-change-[width]",
           // Width tracks `mode`, never `state`. This is what freezes the content
           // layout during a peek: charts never re-measure on a stray mouse move.
           mode === "pinned" ? "w-[--sidebar-width]" : "w-[--sidebar-width-icon]",
@@ -401,7 +406,7 @@ const Sidebar = React.forwardRef<
         {/* This is what handles the sidebar gap on desktop */}
         <div
           className={cn(
-            "relative h-svh w-full bg-transparent",
+            "relative h-[calc(100svh-var(--sidebar-top))] w-full bg-transparent",
             "group-data-[side=right]:rotate-180"
           )}
         />
@@ -411,14 +416,14 @@ const Sidebar = React.forwardRef<
           onFocusCapture={handleFocusCapture}
           onBlurCapture={handleBlurCapture}
           className={cn(
-            "fixed inset-y-0 hidden h-svh md:flex flex-col",
-            "transition-[left,right,width] duration-200 ease-sidebar will-change-[width,left,right]",
+            "fixed bottom-0 top-[--sidebar-top] hidden md:flex flex-col",
+            "transition-[left,right,width] duration-100 ease-sidebar will-change-[width,left,right]",
             "overflow-hidden",
-            mode === "pinned"
+            // Peek opens to the full sidebar width — same as pinned. Only the
+            // layout spacer stays at rail width, which is what keeps content still.
+            mode === "pinned" || isPeeking
               ? "w-[--sidebar-width]"
-              : isPeeking
-                ? "w-[--sidebar-width-peek]"
-                : "w-[--sidebar-width-icon]",
+              : "w-[--sidebar-width-icon]",
             // A peeked panel floats above the content. No backdrop, no scroll lock:
             // it should read as "glancing at the nav", not as a modal.
             isPeeking && mode === "rail" ? "z-30 shadow-xl" : "z-10",
@@ -520,7 +525,7 @@ const SidebarInset = React.forwardRef<
     <main
       ref={ref}
       className={cn(
-        "relative flex min-h-svh flex-1 flex-col bg-background overflow-hidden",
+        "relative flex min-h-[calc(100svh-var(--sidebar-top))] flex-1 flex-col bg-background overflow-hidden",
         // Inset variant specific styles
         "peer-data-[variant=inset]:min-h-[calc(100svh-theme(spacing.4))] md:peer-data-[variant=inset]:m-2 md:peer-data-[state=collapsed]:peer-data-[variant=inset]:ml-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow",
         className
@@ -659,7 +664,7 @@ const SidebarGroupAction = React.forwardRef<
       ref={ref}
       data-sidebar="group-action"
       className={cn(
-        "absolute right-3 top-3.5 flex aspect-square w-5 items-center justify-center rounded-md p-0 text-sidebar-foreground outline-none ring-sidebar-ring transition-[opacity,transform] duration-200 ease-sidebar hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
+        "absolute right-3 top-3.5 flex aspect-square w-5 items-center justify-center rounded-md p-0 text-sidebar-foreground outline-none ring-sidebar-ring transition-[opacity,transform] duration-100 ease-sidebar hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
         // Increases the hit area of the button on mobile.
         "after:absolute after:-inset-2 after:md:hidden",
         "group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:scale-95 group-data-[collapsible=icon]:pointer-events-none",
@@ -711,7 +716,7 @@ const SidebarMenuItem = React.forwardRef<
 SidebarMenuItem.displayName = "SidebarMenuItem"
 
 const sidebarMenuButtonVariants = cva(
-  "peer/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm outline-none ring-sidebar-ring transition-all duration-200 ease-sidebar hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 group-has-[[data-sidebar=menu-action]]/menu-item:pr-8 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground data-[state=open]:hover:bg-sidebar-accent data-[state=open]:hover:text-sidebar-accent-foreground [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:transition-transform [&>svg]:duration-200",
+  "peer/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm outline-none ring-sidebar-ring transition-all duration-100 ease-sidebar hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 group-has-[[data-sidebar=menu-action]]/menu-item:pr-8 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground data-[state=open]:hover:bg-sidebar-accent data-[state=open]:hover:text-sidebar-accent-foreground [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:transition-transform [&>svg]:duration-200",
   {
     variants: {
       variant: {
@@ -805,7 +810,7 @@ const SidebarMenuAction = React.forwardRef<
       ref={ref}
       data-sidebar="menu-action"
       className={cn(
-        "absolute right-1 top-1.5 flex aspect-square w-5 items-center justify-center rounded-md p-0 text-sidebar-foreground outline-none ring-sidebar-ring transition-[opacity,transform] duration-200 ease-sidebar hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 peer-hover/menu-button:text-sidebar-accent-foreground [&>svg]:size-4 [&>svg]:shrink-0",
+        "absolute right-1 top-1.5 flex aspect-square w-5 items-center justify-center rounded-md p-0 text-sidebar-foreground outline-none ring-sidebar-ring transition-[opacity,transform] duration-100 ease-sidebar hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 peer-hover/menu-button:text-sidebar-accent-foreground [&>svg]:size-4 [&>svg]:shrink-0",
         // Increases the hit area of the button on mobile.
         "after:absolute after:-inset-2 after:md:hidden",
         "peer-data-[size=sm]/menu-button:top-1",
@@ -830,7 +835,7 @@ const SidebarMenuBadge = React.forwardRef<
     ref={ref}
     data-sidebar="menu-badge"
     className={cn(
-      "pointer-events-none absolute right-1 flex h-5 min-w-5 select-none items-center justify-center rounded-md px-1 text-xs font-medium tabular-nums text-sidebar-foreground transition-[opacity,transform] duration-200 ease-sidebar",
+      "pointer-events-none absolute right-1 flex h-5 min-w-5 select-none items-center justify-center rounded-md px-1 text-xs font-medium tabular-nums text-sidebar-foreground transition-[opacity,transform] duration-100 ease-sidebar",
       "peer-hover/menu-button:text-sidebar-accent-foreground peer-data-[active=true]/menu-button:text-sidebar-accent-foreground",
       "peer-data-[size=sm]/menu-button:top-1",
       "peer-data-[size=default]/menu-button:top-1.5",
@@ -892,7 +897,7 @@ const SidebarMenuSub = React.forwardRef<
     data-sidebar="menu-sub"
     className={cn(
       "mx-3.5 flex min-w-0 translate-x-px flex-col gap-1 border-l border-sidebar-border px-2.5 py-0.5",
-      "transition-[opacity,max-height,transform] duration-200 ease-sidebar origin-top",
+      "transition-[opacity,max-height,transform] duration-100 ease-sidebar origin-top",
       "group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:max-h-0 group-data-[collapsible=icon]:scale-y-0 group-data-[collapsible=icon]:pointer-events-none",
       className
     )}
@@ -925,7 +930,7 @@ const SidebarMenuSubButton = React.forwardRef<
       data-active={isActive}
       className={cn(
         "flex h-7 min-w-0 -translate-x-px items-center gap-2 overflow-hidden rounded-md px-2 text-sidebar-foreground outline-none ring-sidebar-ring hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-accent-foreground",
-        "transition-[opacity,transform] duration-200 ease-sidebar",
+        "transition-[opacity,transform] duration-100 ease-sidebar",
         "data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground",
         "group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:scale-95 group-data-[collapsible=icon]:pointer-events-none",
         size === "sm" && "text-xs",
