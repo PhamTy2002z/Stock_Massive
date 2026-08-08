@@ -28,18 +28,32 @@ import {
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
 const SIDEBAR_WIDTH = "16rem"
+// Peek is deliberately narrower than the pinned width: it only has to fit the
+// longest nav label, and a narrow overlay covers less of the content it floats on.
+const SIDEBAR_WIDTH_PEEK = "11rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
+// Asymmetric on purpose: short in, so a deliberate hover feels immediate but a
+// mouse crossing the rail does not open it; long out, to forgive overshoot.
+const SIDEBAR_PEEK_IN_DELAY = 150
+const SIDEBAR_PEEK_OUT_DELAY = 300
+
+type SidebarMode = "rail" | "pinned"
 
 type SidebarContextProps = {
   state: "expanded" | "collapsed"
+  mode: SidebarMode
+  isPeeking: boolean
   open: boolean
   setOpen: (open: boolean) => void
   openMobile: boolean
   setOpenMobile: (open: boolean) => void
   isMobile: boolean
   toggleSidebar: () => void
+  schedulePeek: (next: boolean) => void
+  startPeek: () => void
+  endPeek: () => void
 }
 
 const SidebarContext = React.createContext<SidebarContextProps | null>(null)
@@ -89,18 +103,94 @@ const SidebarProvider = React.forwardRef<
           _setOpen(openState)
         }
 
-        // This sets the cookie to keep the sidebar state.
-        document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
+        // Only the pinned/rail choice is persisted. Peek is transient by design.
+        document.cookie = `${SIDEBAR_COOKIE_NAME}=${
+          openState ? "pinned" : "rail"
+        }; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
       },
       [setOpenProp, open]
     )
 
-    // Helper to toggle the sidebar.
+    // Transient hover/focus expansion. Never persisted, never pushes layout.
+    const [isPeeking, setIsPeeking] = React.useState(false)
+    const peekTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+    const pointerDownRef = React.useRef(false)
+    const [canHover, setCanHover] = React.useState(false)
+
+    const clearPeekTimer = React.useCallback(() => {
+      if (peekTimerRef.current) {
+        clearTimeout(peekTimerRef.current)
+        peekTimerRef.current = null
+      }
+    }, [])
+
+    // Hover-expand is a pointer affordance only. Touch devices tap the rail.
+    React.useEffect(() => {
+      const mql = window.matchMedia("(hover: hover) and (pointer: fine)")
+      const update = () => setCanHover(mql.matches)
+      update()
+      mql.addEventListener("change", update)
+      return () => mql.removeEventListener("change", update)
+    }, [])
+
+    // A held pointer button means the user is dragging or brushing a chart range.
+    // Expanding mid-gesture is the worst failure mode of this pattern, so suppress it.
+    React.useEffect(() => {
+      const onDown = () => {
+        pointerDownRef.current = true
+        clearPeekTimer()
+      }
+      const onUp = () => {
+        pointerDownRef.current = false
+      }
+
+      window.addEventListener("pointerdown", onDown, true)
+      window.addEventListener("pointerup", onUp, true)
+      window.addEventListener("pointercancel", onUp, true)
+      return () => {
+        window.removeEventListener("pointerdown", onDown, true)
+        window.removeEventListener("pointerup", onUp, true)
+        window.removeEventListener("pointercancel", onUp, true)
+      }
+    }, [clearPeekTimer])
+
+    React.useEffect(() => clearPeekTimer, [clearPeekTimer])
+
+    const schedulePeek = React.useCallback(
+      (next: boolean) => {
+        clearPeekTimer()
+        if (next && (!canHover || pointerDownRef.current)) return
+        peekTimerRef.current = setTimeout(
+          () => {
+            peekTimerRef.current = null
+            setIsPeeking(next)
+          },
+          next ? SIDEBAR_PEEK_IN_DELAY : SIDEBAR_PEEK_OUT_DELAY
+        )
+      },
+      [canHover, clearPeekTimer]
+    )
+
+    // Keyboard focus expands immediately — a delay there reads as an unresponsive app.
+    const startPeek = React.useCallback(() => {
+      clearPeekTimer()
+      setIsPeeking(true)
+    }, [clearPeekTimer])
+
+    const endPeek = React.useCallback(() => {
+      clearPeekTimer()
+      setIsPeeking(false)
+    }, [clearPeekTimer])
+
+    // Helper to toggle the sidebar. On desktop this pins/unpins.
     const toggleSidebar = React.useCallback(() => {
-      return isMobile
-        ? setOpenMobile((open) => !open)
-        : setOpen((open) => !open)
-    }, [isMobile, setOpen, setOpenMobile])
+      if (isMobile) {
+        setOpenMobile((open) => !open)
+        return
+      }
+      endPeek()
+      setOpen((open) => !open)
+    }, [isMobile, setOpen, setOpenMobile, endPeek])
 
     // Adds a keyboard shortcut to toggle the sidebar.
     React.useEffect(() => {
@@ -118,21 +208,52 @@ const SidebarProvider = React.forwardRef<
       return () => window.removeEventListener("keydown", handleKeyDown)
     }, [toggleSidebar])
 
+    // Escape collapses a peeked panel without touching the pinned preference.
+    React.useEffect(() => {
+      if (!isPeeking) return
+      const handleEscape = (event: KeyboardEvent) => {
+        if (event.key === "Escape") endPeek()
+      }
+      window.addEventListener("keydown", handleEscape)
+      return () => window.removeEventListener("keydown", handleEscape)
+    }, [isPeeking, endPeek])
+
+    const mode: SidebarMode = open ? "pinned" : "rail"
+
     // We add a state so that we can do data-state="expanded" or "collapsed".
     // This makes it easier to style the sidebar with Tailwind classes.
-    const state = open ? "expanded" : "collapsed"
+    // A peeked rail counts as expanded so labels fade in inside the overlay.
+    const state = open || isPeeking ? "expanded" : "collapsed"
 
     const contextValue = React.useMemo<SidebarContextProps>(
       () => ({
         state,
+        mode,
+        isPeeking,
         open,
         setOpen,
         isMobile,
         openMobile,
         setOpenMobile,
         toggleSidebar,
+        schedulePeek,
+        startPeek,
+        endPeek,
       }),
-      [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar]
+      [
+        state,
+        mode,
+        isPeeking,
+        open,
+        setOpen,
+        isMobile,
+        openMobile,
+        setOpenMobile,
+        toggleSidebar,
+        schedulePeek,
+        startPeek,
+        endPeek,
+      ]
     )
 
     return (
@@ -143,6 +264,7 @@ const SidebarProvider = React.forwardRef<
             style={
               {
                 "--sidebar-width": SIDEBAR_WIDTH,
+                "--sidebar-width-peek": SIDEBAR_WIDTH_PEEK,
                 "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
                 ...style,
               } as React.CSSProperties
@@ -182,7 +304,42 @@ const Sidebar = React.forwardRef<
     },
     ref
   ) => {
-    const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
+    const {
+      isMobile,
+      state,
+      mode,
+      isPeeking,
+      openMobile,
+      setOpenMobile,
+      schedulePeek,
+      startPeek,
+      endPeek,
+    } = useSidebar()
+
+    // Hover-expand only makes sense for the icon rail. Pinned and offcanvas opt out.
+    const peekEnabled = collapsible === "icon" && mode === "rail"
+
+    const handleMouseEnter = React.useCallback(() => {
+      if (peekEnabled) schedulePeek(true)
+    }, [peekEnabled, schedulePeek])
+
+    const handleMouseLeave = React.useCallback(() => {
+      if (peekEnabled) schedulePeek(false)
+    }, [peekEnabled, schedulePeek])
+
+    const handleFocusCapture = React.useCallback(() => {
+      if (peekEnabled) startPeek()
+    }, [peekEnabled, startPeek])
+
+    const handleBlurCapture = React.useCallback(
+      (event: React.FocusEvent<HTMLDivElement>) => {
+        if (!peekEnabled) return
+        // Ignore focus moves that stay inside the panel.
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+        endPeek()
+      },
+      [peekEnabled, endPeek]
+    )
 
     if (collapsible === "none") {
       return (
@@ -228,11 +385,15 @@ const Sidebar = React.forwardRef<
         ref={ref}
         className={cn(
           "group peer hidden text-sidebar-foreground md:block",
-          "shrink-0 transition-[width] duration-300 ease-sidebar will-change-[width]",
-          state === "expanded" ? "w-[--sidebar-width]" : "w-[--sidebar-width-icon]",
-          collapsible === "offcanvas" && state === "collapsed" && "w-0"
+          "shrink-0 transition-[width] duration-200 ease-sidebar will-change-[width]",
+          // Width tracks `mode`, never `state`. This is what freezes the content
+          // layout during a peek: charts never re-measure on a stray mouse move.
+          mode === "pinned" ? "w-[--sidebar-width]" : "w-[--sidebar-width-icon]",
+          collapsible === "offcanvas" && mode === "rail" && "w-0"
         )}
         data-state={state}
+        data-mode={mode}
+        data-peek={isPeeking ? "true" : "false"}
         data-collapsible={state === "collapsed" ? collapsible : ""}
         data-variant={variant}
         data-side={side}
@@ -245,19 +406,30 @@ const Sidebar = React.forwardRef<
           )}
         />
         <div
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+          onFocusCapture={handleFocusCapture}
+          onBlurCapture={handleBlurCapture}
           className={cn(
-            "fixed inset-y-0 z-10 hidden h-svh md:flex flex-col",
-            "transition-[left,right,width] duration-300 ease-sidebar will-change-[width,left,right]",
+            "fixed inset-y-0 hidden h-svh md:flex flex-col",
+            "transition-[left,right,width] duration-200 ease-sidebar will-change-[width,left,right]",
             "overflow-hidden",
-            state === "expanded" ? "w-[--sidebar-width]" : "w-[--sidebar-width-icon]",
+            mode === "pinned"
+              ? "w-[--sidebar-width]"
+              : isPeeking
+                ? "w-[--sidebar-width-peek]"
+                : "w-[--sidebar-width-icon]",
+            // A peeked panel floats above the content. No backdrop, no scroll lock:
+            // it should read as "glancing at the nav", not as a modal.
+            isPeeking && mode === "rail" ? "z-30 shadow-xl" : "z-10",
             side === "left"
               ? cn(
                   "left-0",
-                  collapsible === "offcanvas" && state === "collapsed" && "left-[calc(var(--sidebar-width)*-1)]"
+                  collapsible === "offcanvas" && mode === "rail" && "left-[calc(var(--sidebar-width)*-1)]"
                 )
               : cn(
                   "right-0",
-                  collapsible === "offcanvas" && state === "collapsed" && "right-[calc(var(--sidebar-width)*-1)]"
+                  collapsible === "offcanvas" && mode === "rail" && "right-[calc(var(--sidebar-width)*-1)]"
                 ),
             // Adjust the padding for floating and inset variants.
             variant === "floating" || variant === "inset"
