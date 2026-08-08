@@ -12,7 +12,7 @@ from src.core.ratelimit import standard_rate_limit, heavy_rate_limit
 from src.stocks.intraday_collector import IntradayCollector
 from src.core.cache import TradingHoursCache
 from src.stocks.price.cache import volume_anomaly_cache
-from .service import get_price_service
+from .service import get_price_service, MARKET_INDICES
 from ..schemas.price import (
     StockPrice,
     IntradayTick,
@@ -23,6 +23,8 @@ from ..schemas.price import (
     VolumeAnomalyResponse,
     PriceDepthResponse,
 )
+from ..shared import StockServiceError
+from src.auth.dependencies import require_admin
 
 # Cache instances for endpoints
 market_indices_cache = TradingHoursCache(
@@ -45,7 +47,7 @@ router = APIRouter()
 
 
 @router.get("/{symbol}/history", response_model=List[StockPrice], dependencies=[Depends(standard_rate_limit)])
-async def get_history(
+def get_history(
     symbol: str,
     start: date = Query(..., description="Start date (YYYY-MM-DD)"),
     end: date = Query(default_factory=date.today, description="End date (YYYY-MM-DD)"),
@@ -63,7 +65,7 @@ async def get_history(
 
 
 @router.get("/{symbol}/intraday", response_model=List[IntradayTick], dependencies=[Depends(standard_rate_limit)])
-async def get_intraday(
+def get_intraday(
     symbol: str,
     page_size: int = Query(10000, ge=100, le=50000, description="Number of ticks to fetch"),
 ) -> List[IntradayTick]:
@@ -73,7 +75,7 @@ async def get_intraday(
 
 
 @router.get("/market-indices", response_model=List[MarketIndexItem], dependencies=[Depends(standard_rate_limit)])
-async def get_market_indices() -> List[MarketIndexItem]:
+def get_market_indices() -> List[MarketIndexItem]:
     """Get market indices data (VN-INDEX, VN30, HNX-INDEX, UPCOM-INDEX)."""
     cache_key = "all"
 
@@ -86,14 +88,17 @@ async def get_market_indices() -> List[MarketIndexItem]:
     service = get_price_service()
     result = service.get_market_indices()
 
-    # Cache the result (serialize to dict)
-    market_indices_cache.set(cache_key, [item.model_dump() for item in result])
+    # Only cache a complete board. A partial fetch (one index timing out)
+    # would otherwise be pinned for the whole TTL and read as "the market
+    # has three indices".
+    if len(result) == len(MARKET_INDICES):
+        market_indices_cache.set(cache_key, [item.model_dump() for item in result])
 
     return result
 
 
 @router.get("/price-board", response_model=List[PriceBoardItem], dependencies=[Depends(standard_rate_limit)])
-async def get_price_board(
+def get_price_board(
     symbols: str = Query(..., description="Comma-separated list of symbols (e.g., VCB,ACB,TCB)"),
 ) -> List[PriceBoardItem]:
     """Get real-time price board for multiple stocks."""
@@ -117,13 +122,15 @@ async def get_price_board(
     service = get_price_service()
     result = service.get_price_board(symbol_list)
 
-    # Cache the result
-    price_board_cache.set(cache_key, [item.model_dump() for item in result])
+    # Never cache an empty board — an upstream hiccup would otherwise be
+    # served as "these symbols have no prices" for the whole TTL.
+    if result:
+        price_board_cache.set(cache_key, [item.model_dump() for item in result])
 
     return result
 
 
-@router.post("/intraday/collect", response_model=IntradayCollectionResult, dependencies=[Depends(heavy_rate_limit)])
+@router.post("/intraday/collect", response_model=IntradayCollectionResult, dependencies=[Depends(heavy_rate_limit), Depends(require_admin)])
 async def collect_intraday_data(
     symbols: list[str] = Query(
         default=["VCB", "FPT", "VNM"],
@@ -206,7 +213,7 @@ async def get_volume_anomalies(
 
 
 @router.get("/{symbol}/price-depth", response_model=PriceDepthResponse, dependencies=[Depends(heavy_rate_limit)])
-async def get_price_depth(symbol: str) -> PriceDepthResponse:
+def get_price_depth(symbol: str) -> PriceDepthResponse:
     """Get price depth (bid/ask levels) for a stock.
 
     Returns 3 levels of bid/ask prices and volumes with spread calculation.

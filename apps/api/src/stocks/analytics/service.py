@@ -9,11 +9,13 @@ from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy import select, func, desc, and_
 from sqlalchemy.ext.asyncio import AsyncSession
-from vnstock import Listing
+from src.core.vnstock_client import Listing
+from src.core.vnstock_client import VnstockUnavailable, VnstockUnsupported
 
 from src.core.cache import TradingHoursCache
 from src.stocks.financial_statements_collector import FinancialStatementsCollector
 from src.stocks.models import FinancialStatement, StockDailyOHLCV
+from src.stocks.shared import StockServiceError, fetch_industry_mapping
 from src.stocks.schemas.analytics import (
     FinancialStatementItem,
     FinancialStatementsResponse,
@@ -343,60 +345,26 @@ class AnalyticsService:
             HTTPException: If ICB data unavailable from vnstock API
         """
         try:
-            listing = Listing()
-            df = listing.symbols_by_industries()
-            if df is None or df.empty:
-                logger.error("ICB mapping returned empty - vnstock API may be down")
-                raise HTTPException(
-                    status_code=503,
-                    detail="Industry classification data unavailable"
-                )
-
-            mapping = {}
-            for _, row in df.iterrows():
-                # Validate symbol format to prevent XSS
-                try:
-                    symbol = validate_symbol(str(row.get("symbol", "")))
-                except StockServiceError:
-                    continue
-
-                # Sanitize and limit string lengths
-                icb_code_raw = row.get("icb_code2")
-                icb_code = str(icb_code_raw)[:4] if icb_code_raw else None
-
-                icb_name = row.get("icb_name2")
-                icb_name = str(icb_name)[:100] if icb_name else None
-
-                company_name = row.get("organ_name") or row.get("short_name")
-                company_name = str(company_name)[:255] if company_name else None
-
-                exchange = row.get("exchange", "")
-                exchange = str(exchange)[:10] if exchange else ""
-
-                mapping[symbol] = {
-                    "icb_code": icb_code,
-                    "icb_name": icb_name,
-                    "company_name": company_name,
-                    "exchange": exchange,
-                }
-
-            if not mapping:
-                logger.error("No valid ICB mappings found after processing")
-                raise HTTPException(
-                    status_code=503,
-                    detail="No valid industry classification data found"
-                )
-
-            return mapping
+            return fetch_industry_mapping(Listing())
 
         except HTTPException:
             raise
+        except StockServiceError as e:
+            logger.error(f"ICB mapping unavailable: {e}")
+            raise HTTPException(
+                status_code=503,
+                detail="Industry classification data unavailable"
+            )
         except (ConnectionError, TimeoutError) as e:
             logger.error(f"Network error fetching ICB mapping: {e}")
             raise HTTPException(
                 status_code=503,
                 detail="Industry classification service unavailable"
             )
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Unexpected error in ICB mapping: {e}", exc_info=True)
             raise HTTPException(

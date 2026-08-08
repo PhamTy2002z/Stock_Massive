@@ -10,6 +10,14 @@ interface QueryErrorBoundaryProps {
   className?: string
 }
 
+/**
+ * JS lets you throw anything, so react-error-boundary hands back `unknown`.
+ * ErrorFallback reads `.message`, so give it a real Error either way.
+ */
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error))
+}
+
 export function QueryErrorBoundary({
   children,
   compact,
@@ -22,7 +30,7 @@ export function QueryErrorBoundary({
           onReset={reset}
           fallbackRender={({ error, resetErrorBoundary }) => (
             <ErrorFallback
-              error={error}
+              error={toError(error)}
               resetErrorBoundary={resetErrorBoundary}
               compact={compact}
               className={className}

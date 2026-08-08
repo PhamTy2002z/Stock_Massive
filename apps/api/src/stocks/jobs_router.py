@@ -3,11 +3,16 @@ import asyncio
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 
+from src.auth.dependencies import require_admin
 from src.core.job_status_store import job_store
+from src.core.ratelimit import heavy_rate_limit
 from src.stocks.schemas.common import MessageResponse
+
+# Must match the id jobs.py registers for this collector.
+OHLCV_JOB_ID = "daily-ohlcv"
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -28,7 +33,7 @@ class JobStatusResponse(BaseModel):
 
 
 @router.get("/status", response_model=list[JobStatusResponse])
-async def get_jobs_status() -> list[JobStatusResponse]:
+def get_jobs_status() -> list[JobStatusResponse]:
     """Get status of all jobs from today.
 
     Returns list of job statuses, empty if no jobs today.
@@ -60,7 +65,11 @@ async def get_jobs_status() -> list[JobStatusResponse]:
     ]
 
 
-@router.post("/trigger/ohlcv", response_model=MessageResponse)
+@router.post(
+    "/trigger/ohlcv",
+    response_model=MessageResponse,
+    dependencies=[Depends(heavy_rate_limit), Depends(require_admin)],
+)
 async def trigger_ohlcv_job(background_tasks: BackgroundTasks) -> MessageResponse:
     """Manually trigger OHLCV collection job.
 
@@ -68,6 +77,14 @@ async def trigger_ohlcv_job(background_tasks: BackgroundTasks) -> MessageRespons
     Check /jobs/status for progress.
     """
     from src.core.scheduler import collect_daily_ohlcv_job_async
+
+    # Refuse rather than stack a second run: this job writes to the same tables
+    # and spends the same upstream quota as the one already in flight.
+    if job_store.is_running(OHLCV_JOB_ID):
+        raise HTTPException(
+            status_code=409,
+            detail="Job thu thập OHLCV đang chạy. Theo dõi tiến độ tại /jobs/status.",
+        )
 
     background_tasks.add_task(collect_daily_ohlcv_job_async)
     return MessageResponse(message="OHLCV job triggered", status="started")

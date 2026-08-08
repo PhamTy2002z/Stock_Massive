@@ -41,6 +41,21 @@ class TestPasswordHashing:
         """Schemas cap input here because bcrypt ignores bytes past 72."""
         assert MAX_PASSWORD_BYTES == 72
 
+    def test_accepts_password_at_the_byte_limit(self):
+        at_limit = "a" * MAX_PASSWORD_BYTES
+        assert verify_password(at_limit, hash_password(at_limit))
+
+    def test_verify_rejects_malformed_hash_instead_of_raising(self):
+        """A corrupt hash in the column must read as a failed login, not a 500."""
+        assert not verify_password("any-password", "not-a-bcrypt-hash")
+
+    def test_verifies_hash_produced_by_passlib(self):
+        """Hashes written before the passlib removal must still authenticate."""
+        # $2b$ bcrypt hash of "sup3r-secret-pw", generated via passlib 1.7.4.
+        legacy = "$2b$12$mK9QdZ6dVpHH0M5EqhBagux4agM2fiS/eocrmOqOwIgq0RxJldGHi"
+        assert verify_password("sup3r-secret-pw", legacy)
+        assert not verify_password("wrong-password", legacy)
+
 
 class TestAccessToken:
     """Access token minting and validation."""
