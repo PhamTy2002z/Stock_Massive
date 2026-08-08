@@ -3,6 +3,11 @@ from datetime import date, timedelta
 
 import pytest
 
+# Every test in this module calls the live vnstock API — there are no mocks.
+# They go red on upstream throttling rather than on anything in this repo,
+# so they sit out the default run. Run them with: pytest -m network
+pytestmark = pytest.mark.network
+
 
 class TestStocksRouter:
     """Test cases for stocks API endpoints."""
