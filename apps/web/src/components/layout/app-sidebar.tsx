@@ -74,7 +74,7 @@ function SidebarBrand() {
                 className="size-10 object-contain"
               />
             </div>
-            <div className="grid flex-1 text-left text-sm leading-tight transition-[opacity,transform] duration-200 ease-sidebar group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:scale-95">
+            <div className="grid flex-1 text-left text-sm leading-tight transition-[opacity,transform] duration-100 ease-sidebar group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:scale-95">
               <span className="truncate font-bold text-base">Stock Massive</span>
               <span className="truncate text-xs text-muted-foreground">
                 Analytics Platform
@@ -156,7 +156,7 @@ function SidebarUserSection() {
             <div className="flex size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground shrink-0 group-data-[collapsible=icon]:mx-auto">
               <LogIn className="size-4" />
             </div>
-            <div className="grid flex-1 text-left text-sm leading-tight transition-[opacity,width] duration-200 ease-sidebar group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:w-0 group-data-[collapsible=icon]:overflow-hidden">
+            <div className="grid flex-1 text-left text-sm leading-tight transition-[opacity,width] duration-100 ease-sidebar group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:w-0 group-data-[collapsible=icon]:overflow-hidden">
               <span className="truncate font-semibold">Sign in</span>
               <span className="truncate text-xs text-muted-foreground">Access your account</span>
             </div>
@@ -182,11 +182,11 @@ function SidebarUserSection() {
                   {userInitials}
                 </AvatarFallback>
               </Avatar>
-              <div className="grid flex-1 text-left text-sm leading-tight transition-[opacity,width] duration-200 ease-sidebar group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:w-0 group-data-[collapsible=icon]:overflow-hidden">
+              <div className="grid flex-1 text-left text-sm leading-tight transition-[opacity,width] duration-100 ease-sidebar group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:w-0 group-data-[collapsible=icon]:overflow-hidden">
                 <span className="truncate font-semibold">{userName}</span>
                 <span className="truncate text-xs text-muted-foreground">{userEmail}</span>
               </div>
-              <ChevronsUpDown className="ml-auto size-4 shrink-0 transition-[opacity,width] duration-200 ease-sidebar group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:w-0" />
+              <ChevronsUpDown className="ml-auto size-4 shrink-0 transition-[opacity,width] duration-100 ease-sidebar group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:w-0" />
             </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
