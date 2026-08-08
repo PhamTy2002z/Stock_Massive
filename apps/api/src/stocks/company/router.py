@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.core.ratelimit import standard_rate_limit, heavy_rate_limit
 from src.core.cache import TradingHoursCache
-from ..service import get_stock_service
+from .service import get_company_service
 from ..schemas.company import (
     CompanyOverview,
     StockDetail,
@@ -33,21 +33,21 @@ router = APIRouter()
 @router.get("/{symbol}/company", response_model=CompanyOverview, dependencies=[Depends(standard_rate_limit)])
 async def get_company_overview(symbol: str) -> CompanyOverview:
     """Get company overview information."""
-    service = get_stock_service()
+    service = get_company_service()
     return service.get_company_overview(symbol)
 
 
 @router.get("/{symbol}/detail", response_model=StockDetail, dependencies=[Depends(standard_rate_limit)])
 async def get_stock_detail(symbol: str) -> StockDetail:
     """Get comprehensive stock detail data (composite endpoint)."""
-    service = get_stock_service()
+    service = get_company_service()
     return service.get_stock_detail(symbol)
 
 
 @router.get("/{symbol}/shareholders", response_model=ShareholdersResponse, dependencies=[Depends(standard_rate_limit)])
 async def get_shareholders(symbol: str) -> ShareholdersResponse:
     """Get major shareholders for a stock."""
-    service = get_stock_service()
+    service = get_company_service()
     return service.get_shareholders(symbol)
 
 
@@ -60,14 +60,14 @@ async def get_officers(
     if filter_by not in ("working", "resigned", "all"):
         raise HTTPException(status_code=400, detail="Invalid filter_by. Use 'working', 'resigned', or 'all'")
 
-    service = get_stock_service()
+    service = get_company_service()
     return service.get_officers(symbol, filter_by)
 
 
 @router.get("/{symbol}/insider-deals", response_model=InsiderDealsResponse, dependencies=[Depends(standard_rate_limit)])
 async def get_insider_deals(symbol: str) -> InsiderDealsResponse:
     """Get insider trading deals for a stock."""
-    service = get_stock_service()
+    service = get_company_service()
     return service.get_insider_deals(symbol)
 
 
@@ -87,7 +87,7 @@ async def get_ratio_summary(symbol: str) -> RatioSummaryResponse:
     if cached is not None:
         return RatioSummaryResponse(**cached)
 
-    service = get_stock_service()
+    service = get_company_service()
     result = service.get_ratio_summary(symbol)
 
     # Cache the result
@@ -109,7 +109,7 @@ async def get_trading_stats(symbol: str) -> TradingStatsResponse:
     if cached is not None:
         return TradingStatsResponse(**cached)
 
-    service = get_stock_service()
+    service = get_company_service()
     result = service.get_trading_stats(symbol)
 
     # Cache the result

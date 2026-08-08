@@ -6,10 +6,15 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.cache import TradingHoursCache
 from src.core.database import get_db
 from src.core.ratelimit import heavy_rate_limit, standard_rate_limit
-from src.stocks.analytics.service import AnalyticsService
+from src.stocks.analytics.service import (
+    AnalyticsService,
+    build_financial_statements_cache_key,
+    build_volume_spikes_cache_key,
+    financial_statements_cache,
+    volume_spikes_cache,
+)
 from src.stocks.schemas.analytics import (
     FinancialStatementsCollectionResult,
     FinancialStatementsResponse,
@@ -17,28 +22,13 @@ from src.stocks.schemas.analytics import (
     VolumeSpikeMetadata,
 )
 from src.stocks.schemas.financial import SectorPeersResponse
-from src.stocks.financial_statements_collector import FinancialStatementsCollector
-from src.stocks.service import get_stock_service
+from src.stocks.financial import get_financial_service
 from src.stocks.analytics.sector_historical_router import router as sector_historical_router
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 # Include sector historical router
 router.include_router(sector_historical_router, tags=["sector-historical"])
-
-# Cache instance with trading-hours-aware TTL
-financial_statements_cache = TradingHoursCache(
-    key_prefix="stock:financial_statements:",
-    ttl_trading=3600,      # 1 hour during trading
-    ttl_off_hours=86400,   # 24 hours off-hours
-)
-
-# Volume spikes cache: 5min trading, 1hr off-hours
-volume_spikes_cache = TradingHoursCache(
-    key_prefix="stock:volume_spikes:",
-    ttl_trading=300,       # 5 min during trading
-    ttl_off_hours=3600,    # 1 hour off-hours
-)
 
 
 @router.get("/financial-statements", response_model=FinancialStatementsResponse)
@@ -55,7 +45,7 @@ async def get_financial_statements(
     Data is updated weekly via scheduled batch job.
     """
     # Build cache key
-    cache_key = f"{limit}:{exchange or 'all'}:{year or 'latest'}:{quarter or 'latest'}"
+    cache_key = build_financial_statements_cache_key(limit, exchange, year, quarter)
 
     # Try cache
     cached = financial_statements_cache.get(cache_key)
@@ -92,12 +82,8 @@ async def collect_financial_statements(
 
     Note: Data is also collected automatically every Sunday at 02:00 ICT.
     """
-    collector = FinancialStatementsCollector(db)
-    result = await collector.collect()
-
-    # Clear cache after fresh collection
-    financial_statements_cache.clear_prefix()
-
+    service = AnalyticsService(db)
+    result = await service.collect_financial_statements()
     return FinancialStatementsCollectionResult(**result)
 
 
@@ -135,8 +121,9 @@ async def get_volume_spikes(
     - **limit**: Maximum stocks per industry group
     """
     # Build cache key
-    date_str = target_date.isoformat() if target_date else "latest"
-    cache_key = f"{date_str}:{min_ratio}:{exchange or 'all'}:{include_upcom}:{limit}:{top_profitable_only}"
+    cache_key = build_volume_spikes_cache_key(
+        target_date, min_ratio, exchange, include_upcom, limit, top_profitable_only
+    )
 
     # Try cache
     cached = volume_spikes_cache.get(cache_key)
@@ -187,6 +174,6 @@ async def get_sector_peers(
     sorted by market capitalization, with key financial metrics
     and premium/discount vs sector median.
     """
-    service = get_stock_service()
+    service = get_financial_service()
     # Service handles caching internally via sector_peers_cache
     return service.get_sector_peers(symbol, limit)

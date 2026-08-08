@@ -3,6 +3,7 @@
 import { useQuery, keepPreviousData } from "@tanstack/react-query"
 import { fetchSectorPerformance, type SectorPerformanceResponse } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
+import { STALE_TIME, REFETCH_INTERVAL } from "@/lib/query-config"
 
 interface UseSectorPerformanceResult {
   data: SectorPerformanceResponse | undefined
@@ -18,8 +19,8 @@ export function useSectorPerformance(): UseSectorPerformanceResult {
     queryKey: queryKeys.sectorPerformance,
     queryFn: fetchSectorPerformance,
     placeholderData: keepPreviousData,
-    staleTime: 60 * 1000,
-    refetchInterval: 120 * 1000, // 2 minutes
+    staleTime: STALE_TIME.FREQUENT,
+    refetchInterval: REFETCH_INTERVAL.FREQUENT,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
     refetchOnMount: true,

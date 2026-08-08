@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.core.cache import TradingHoursCache
 from src.core.ratelimit import heavy_rate_limit, standard_rate_limit
-from ..service import get_stock_service
+from .service import get_financial_service
 from ..schemas.financial import (
     FinancialRatio,
     IncomeStatementItem,
@@ -54,7 +54,7 @@ async def get_financial_ratios(
     if lang not in ("en", "vi"):
         raise HTTPException(status_code=400, detail="Invalid language. Use 'en' or 'vi'")
 
-    service = get_stock_service()
+    service = get_financial_service()
     return service.get_financial_ratios(symbol, period, lang)
 
 
@@ -68,7 +68,7 @@ async def get_income_statement(
     if period not in ("year", "quarter"):
         raise HTTPException(status_code=400, detail="Invalid period. Use 'year' or 'quarter'")
 
-    service = get_stock_service()
+    service = get_financial_service()
     return service.get_income_statement(symbol, period, lang)
 
 
@@ -82,7 +82,7 @@ async def get_income_statement_detailed(
     if period not in ("year", "quarter"):
         raise HTTPException(status_code=400, detail="Invalid period. Use 'year' or 'quarter'")
 
-    service = get_stock_service()
+    service = get_financial_service()
     return service.get_income_statement_detailed(symbol, period, limit)
 
 
@@ -96,7 +96,7 @@ async def get_balance_sheet(
     if period not in ("year", "quarter"):
         raise HTTPException(status_code=400, detail="Invalid period. Use 'year' or 'quarter'")
 
-    service = get_stock_service()
+    service = get_financial_service()
     return service.get_balance_sheet(symbol, period, lang)
 
 
@@ -110,7 +110,7 @@ async def get_balance_sheet_detailed(
     if period not in ("year", "quarter"):
         raise HTTPException(status_code=400, detail="Invalid period. Use 'year' or 'quarter'")
 
-    service = get_stock_service()
+    service = get_financial_service()
     return service.get_balance_sheet_detailed(symbol, period, limit)
 
 
@@ -124,7 +124,7 @@ async def get_cash_flow_detailed(
     if period not in ("year", "quarter"):
         raise HTTPException(status_code=400, detail="Invalid period. Use 'year' or 'quarter'")
 
-    service = get_stock_service()
+    service = get_financial_service()
     return service.get_cash_flow_detailed(symbol, period, limit)
 
 
@@ -153,7 +153,7 @@ async def get_health_score(symbol: str) -> HealthScoreResponse:
     if cached:
         return HealthScoreResponse(**cached)
 
-    service = get_stock_service()
+    service = get_financial_service()
     result = service.get_health_score(symbol)
 
     # Cache result
@@ -184,7 +184,7 @@ async def get_trend_metrics(
     if cached:
         return TrendMetricsResponse(**cached)
 
-    service = get_stock_service()
+    service = get_financial_service()
     result = service.get_trend_metrics(symbol, periods)
 
     # Cache result
@@ -212,7 +212,7 @@ async def get_fcf_analysis(symbol: str) -> FCFAnalysisResponse:
     if cached:
         return FCFAnalysisResponse(**cached)
 
-    service = get_stock_service()
+    service = get_financial_service()
     result = service.get_fcf_analysis(symbol)
 
     # Cache result

@@ -1,6 +1,7 @@
 """Price domain service for historical and real-time price data."""
 
 import logging
+from functools import lru_cache
 from datetime import date, datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -291,3 +292,9 @@ class PriceService:
         except Exception as e:
             logger.error(f"Error fetching price depth for {symbol}: {e}")
             raise StockServiceError(f"Failed to get price depth for {symbol}: {e}")
+
+
+@lru_cache(maxsize=1)
+def get_price_service(source: str = "VCI") -> PriceService:
+    """Get or create price service instance (thread-safe singleton)."""
+    return PriceService(source=source)

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.core.cache import TradingHoursCache
 from src.core.ratelimit import standard_rate_limit
-from ..service import get_stock_service
+from .service import get_market_service
 from ..schemas.company import StockSymbol
 from ..schemas.market import (
     SectorPerformanceResponse,
@@ -47,7 +47,7 @@ async def list_symbols(
         return [StockSymbol(**item) for item in cached]
 
     # Cache miss - fetch from service
-    service = get_stock_service()
+    service = get_market_service()
     result = service.list_symbols(exchange=exchange)
 
     # Cache the result
@@ -59,7 +59,7 @@ async def list_symbols(
 @router.get("/symbols/group/{group}", response_model=List[str], dependencies=[Depends(standard_rate_limit)])
 async def list_symbols_by_group(group: str) -> List[str]:
     """List symbols by group (e.g., VN30, HNX30, VN100)."""
-    service = get_stock_service()
+    service = get_market_service()
     return service.list_symbols_by_group(group)
 
 
@@ -69,7 +69,7 @@ async def search_symbols(
     limit: int = Query(20, ge=1, le=50, description="Maximum results to return"),
 ) -> List[StockSymbol]:
     """Search stock symbols by ticker or company name."""
-    service = get_stock_service()
+    service = get_market_service()
     return service.search_symbols(q, limit)
 
 
@@ -84,7 +84,7 @@ async def get_sector_performance() -> SectorPerformanceResponse:
         return SectorPerformanceResponse(**cached)
 
     # Cache miss - fetch from service
-    service = get_stock_service()
+    service = get_market_service()
     result = service.get_sector_performance()
 
     # Cache the result
@@ -101,7 +101,7 @@ async def get_fund_certificates(
     if fund_type and fund_type.upper() not in ("STOCK", "BOND", "BALANCED"):
         raise HTTPException(status_code=400, detail="Invalid fund_type. Use STOCK, BOND, or BALANCED")
 
-    service = get_stock_service()
+    service = get_market_service()
     return service.get_fund_certificates(fund_type)
 
 
@@ -116,7 +116,7 @@ async def get_vn30_overview() -> VN30OverviewResponse:
         return VN30OverviewResponse(**cached)
 
     # Cache miss - fetch from service
-    service = get_stock_service()
+    service = get_market_service()
     result = service.get_vn30_overview()
 
     # Cache the result

@@ -1,4 +1,5 @@
 """Async database configuration using SQLAlchemy 2.0."""
+import re
 from contextlib import contextmanager
 from typing import AsyncGenerator, Generator
 
@@ -21,7 +22,6 @@ if "?sslmode=" in DATABASE_URL:
     DATABASE_URL = DATABASE_URL.split("?sslmode=")[0]
 elif "&sslmode=" in DATABASE_URL:
     # Handle sslmode in query params
-    import re
     DATABASE_URL = re.sub(r"[&?]sslmode=[^&]*", "", DATABASE_URL)
 
 engine = create_async_engine(
