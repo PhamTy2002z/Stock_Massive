@@ -386,10 +386,12 @@ const Sidebar = React.forwardRef<
         className={cn(
           "group peer hidden text-sidebar-foreground md:block",
           "shrink-0 transition-[width] duration-150 ease-sidebar will-change-[width]",
-          // Width tracks `mode`, never `state`. This is what freezes the content
-          // layout during a peek: charts never re-measure on a stray mouse move.
-          mode === "pinned" ? "w-[--sidebar-width]" : "w-[--sidebar-width-icon]",
-          collapsible === "offcanvas" && mode === "rail" && "w-0"
+          // Push, not overlay: the spacer widens with the panel so content
+          // reflows instead of being covered. The cost is that anything
+          // measuring its own width — Recharts ResponsiveContainer — re-measures
+          // on every hover.
+          state === "expanded" ? "w-[--sidebar-width]" : "w-[--sidebar-width-icon]",
+          collapsible === "offcanvas" && state === "collapsed" && "w-0"
         )}
         data-state={state}
         data-mode={mode}
@@ -411,25 +413,18 @@ const Sidebar = React.forwardRef<
           onFocusCapture={handleFocusCapture}
           onBlurCapture={handleBlurCapture}
           className={cn(
-            "fixed inset-y-0 hidden h-svh md:flex flex-col",
+            "fixed inset-y-0 z-10 hidden h-svh md:flex flex-col",
             "transition-[left,right,width] duration-150 ease-sidebar will-change-[width,left,right]",
             "overflow-hidden",
-            // Peek opens to the full sidebar width — same as pinned. Only the
-            // layout spacer stays at rail width, which is what keeps content still.
-            mode === "pinned" || isPeeking
-              ? "w-[--sidebar-width]"
-              : "w-[--sidebar-width-icon]",
-            // A peeked panel floats above the content. No backdrop, no scroll lock:
-            // it should read as "glancing at the nav", not as a modal.
-            isPeeking && mode === "rail" ? "z-30 shadow-xl" : "z-10",
+            state === "expanded" ? "w-[--sidebar-width]" : "w-[--sidebar-width-icon]",
             side === "left"
               ? cn(
                   "left-0",
-                  collapsible === "offcanvas" && mode === "rail" && "left-[calc(var(--sidebar-width)*-1)]"
+                  collapsible === "offcanvas" && state === "collapsed" && "left-[calc(var(--sidebar-width)*-1)]"
                 )
               : cn(
                   "right-0",
-                  collapsible === "offcanvas" && mode === "rail" && "right-[calc(var(--sidebar-width)*-1)]"
+                  collapsible === "offcanvas" && state === "collapsed" && "right-[calc(var(--sidebar-width)*-1)]"
                 ),
             // Adjust the padding for floating and inset variants.
             variant === "floating" || variant === "inset"
