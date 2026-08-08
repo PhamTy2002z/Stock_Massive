@@ -29,8 +29,8 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | Database Models | Done | StockDailyOHLCV, IntradayBar, FinancialStatement |
 | Job Status API | Done | `/api/v1/jobs/status` for progress polling |
 | Startup Job Recovery | Done | Non-blocking missed job recovery on API startup |
-| Auth Pages | Scaffolded | Login/register routes, Supabase OAuth UI |
-| Supabase Migration | Done | PostgreSQL migrated to Supabase cloud |
+| Authentication | Done | Self-hosted JWT + bcrypt, refresh-token rotation with reuse detection |
+| Auth Pages | Done | Email/password login + register, httpOnly cookie sessions |
 | Job Progress UI | Done | Progress bar + notification panel |
 | Charts Page | Planned | TradingView Lightweight Charts integration |
 | Portfolio/Watchlist | Planned | CRUD operations, P&L tracking |
@@ -41,8 +41,8 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 ## Tech Stack
 
 - **Frontend**: Next.js 15.5.9, TypeScript 5.3.0, TailwindCSS 3.4, ShadCN/UI (Radix), TanStack Query 5.90, Recharts 3.6, Sonner
-- **Backend**: FastAPI, Python 3.11+, vnstock >= 3.0.0, SQLAlchemy 2.0, APScheduler 4.0, Pydantic 2
-- **Database**: Supabase PostgreSQL (cloud-hosted with SSL)
+- **Backend**: FastAPI, Python 3.11+, vnstock >= 3.0.0, SQLAlchemy 2.0, APScheduler 4.0, Pydantic 2, passlib[bcrypt], PyJWT
+- **Database**: PostgreSQL 16 (self-hosted via Docker; any Postgres works via `DATABASE_URL`)
 - **Caching**: Upstash Redis (trading-hours-aware TTL)
 - **DevOps**: Docker, Docker Compose, pnpm
 - **Design**: Modern + Clean (HSL color system, dark/light themes, next-themes)
@@ -98,7 +98,22 @@ Stock_Massive/
 └── docs/                    # Documentation (10 files)
 ```
 
-## API Endpoints (43+ Total)
+## API Endpoints
+
+### Auth (5 endpoints)
+
+Prefixed with `/api/v1/auth`. Access tokens are short-lived; refresh tokens are
+opaque, stored hashed, and rotated on every use.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/register` | POST | Create an account, returns a token pair |
+| `/login` | POST | Exchange credentials for a token pair |
+| `/refresh` | POST | Rotate a refresh token |
+| `/logout` | POST | Revoke a refresh token |
+| `/me` | GET | Current user (requires `Authorization: Bearer`) |
+
+## Stock Endpoints (43+ Total)
 
 All endpoints prefixed with `/api/v1/stocks`:
 
@@ -180,11 +195,11 @@ cd Stock_Massive
 cp .env.example .env
 # Edit .env with your values
 
-# Start all services
+# Start all services (api applies migrations on startup)
 docker compose up -d
 
-# Run database migrations
-docker compose exec api alembic upgrade head
+# Optional: load the bundled data snapshot into the fresh database
+pnpm db:restore
 ```
 
 ### Services
@@ -194,7 +209,7 @@ docker compose exec api alembic upgrade head
 | Frontend | http://localhost:3000 | Next.js web app |
 | API | http://localhost:8000 | FastAPI backend |
 | API Docs | http://localhost:8000/docs | Swagger UI |
-| Database | Supabase Cloud | PostgreSQL (cloud-hosted) |
+| Database | localhost:5432 | PostgreSQL 16 (docker compose service `db`) |
 
 ### Docker Commands
 
@@ -213,11 +228,14 @@ docker compose down
 # Rebuild after code changes
 docker compose up -d --build
 
-# Database migrations (Supabase)
-docker compose exec api alembic upgrade head
+# Database migrations (also run automatically on api startup)
+pnpm db:migrate
 
-# Access Supabase database
-# Use Supabase Dashboard SQL Editor or psql with DATABASE_URL_DIRECT
+# Open a psql shell on the database
+pnpm db:shell
+
+# Restore the bundled data snapshot into an empty database
+pnpm db:restore
 
 # Check services status
 docker compose ps
@@ -238,7 +256,8 @@ docker compose -f docker-compose.prod.yml logs -f
 | Route | Description |
 |-------|-------------|
 | `/` | Dashboard with market indices, VN30 overview, sector performance |
-| `/login` | Auth login page (scaffolded) |
+| `/login` | Email/password sign in |
+| `/register` | Account creation |
 | `/analytics/deep-dive` | Stock deep-dive analysis |
 | `/analytics/volume-spikes` | Volume spike detection dashboard |
 | `/analytics/financial-statements` | Financial statements ranking |

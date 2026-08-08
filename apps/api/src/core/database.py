@@ -1,7 +1,7 @@
 """Async database configuration using SQLAlchemy 2.0."""
-import re
 from contextlib import contextmanager
 from typing import AsyncGenerator, Generator
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -11,18 +11,27 @@ from src.core.config import get_settings
 
 settings = get_settings()
 
-# Convert postgresql:// to postgresql+asyncpg:// and strip sslmode from URL
-# (asyncpg doesn't accept sslmode in URL, must use connect_args instead)
-DATABASE_URL = settings.database_url.replace(
-    "postgresql://", "postgresql+asyncpg://"
-)
+# asyncpg rejects `sslmode` in the URL and takes an `ssl` connect_arg instead.
+# Any managed Postgres (Neon, RDS, ...) signals TLS the same way, so read the
+# requirement off the URL rather than matching on a provider hostname.
+_SSL_REQUIRED_MODES = {"require", "verify-ca", "verify-full"}
 
-# Strip sslmode from URL for asyncpg compatibility
-if "?sslmode=" in DATABASE_URL:
-    DATABASE_URL = DATABASE_URL.split("?sslmode=")[0]
-elif "&sslmode=" in DATABASE_URL:
-    # Handle sslmode in query params
-    DATABASE_URL = re.sub(r"[&?]sslmode=[^&]*", "", DATABASE_URL)
+
+def to_asyncpg_url(url: str) -> str:
+    """Rewrite a libpq URL for the asyncpg driver, dropping `sslmode`."""
+    parts = urlsplit(url.replace("postgresql://", "postgresql+asyncpg://"))
+    query = [(k, v) for k, v in parse_qsl(parts.query) if k != "sslmode"]
+    return urlunsplit(parts._replace(query=urlencode(query)))
+
+
+def asyncpg_connect_args(url: str) -> dict:
+    """Return asyncpg connect_args carrying the URL's TLS requirement, if any."""
+    sslmode = dict(parse_qsl(urlsplit(url).query)).get("sslmode", "").lower()
+    return {"ssl": "require"} if sslmode in _SSL_REQUIRED_MODES else {}
+
+
+DATABASE_URL = to_asyncpg_url(settings.database_url)
+connect_args = asyncpg_connect_args(settings.database_url)
 
 engine = create_async_engine(
     DATABASE_URL,
@@ -32,6 +41,7 @@ engine = create_async_engine(
     pool_pre_ping=True,
     pool_timeout=30,
     pool_recycle=3600,
+    connect_args=connect_args,
 )
 
 async_session_factory = async_sessionmaker(
@@ -40,7 +50,8 @@ async_session_factory = async_sessionmaker(
     expire_on_commit=False,
 )
 
-# Sync engine for Alembic migrations and sync database operations
+# Sync engine for Alembic migrations and sync database operations.
+# psycopg2 reads `sslmode` straight from the URL, so no connect_args needed.
 sync_engine = create_engine(
     settings.database_url,
     echo=settings.debug,

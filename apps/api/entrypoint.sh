@@ -2,7 +2,7 @@
 # Don't use set -e to allow graceful handling of migration failures
 
 # Extract database host from DATABASE_URL
-# Supports both local docker (db:5432) and remote (supabase, etc.)
+# Supports both local docker (db:5432) and remote managed Postgres
 if [ -n "$DATABASE_URL" ]; then
     # Parse host from DATABASE_URL (format: postgresql://user:pass@host:port/dbname)
     DB_HOST=$(echo "$DATABASE_URL" | sed -n 's|.*@\([^:/]*\).*|\1|p')

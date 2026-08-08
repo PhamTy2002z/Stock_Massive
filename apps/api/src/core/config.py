@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "postgresql://postgres:postgres@localhost:5432/stockmassive"
 
+    # Auth (JWT)
+    auth_secret: str = "dev-secret-change-in-production"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 15
+    refresh_token_expire_days: int = 30
+
     # CORS
     cors_origins: str = "http://localhost:3000"  # Comma-separated origins
 

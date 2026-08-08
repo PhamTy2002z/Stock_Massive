@@ -12,7 +12,6 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
-      DATABASE_URL_DIRECT: ${DATABASE_URL_DIRECT:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
       UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
@@ -29,8 +28,6 @@ services:
       dockerfile: Dockerfile.prod
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://api.yourdomain.com/api/v1}
-        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
-        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
     container_name: stockmassive-web
     restart: unless-stopped
     ports:
