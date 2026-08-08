@@ -21,6 +21,7 @@ from src.stocks.schemas.analytics import (
     VolumeSpikeResponse,
     VolumeSpikeMetadata,
 )
+from src.stocks.schemas.common import MessageResponse
 from src.stocks.schemas.financial import SectorPeersResponse
 from src.stocks.financial import get_financial_service
 from src.stocks.analytics.sector_historical_router import router as sector_historical_router
@@ -149,11 +150,16 @@ async def get_volume_spikes(
     return result
 
 
-@router.delete("/volume-spikes/cache", dependencies=[Depends(heavy_rate_limit)])
-async def clear_volume_spikes_cache() -> dict:
+@router.delete(
+    "/volume-spikes/cache",
+    response_model=MessageResponse,
+    response_model_exclude_none=True,
+    dependencies=[Depends(heavy_rate_limit)],
+)
+async def clear_volume_spikes_cache() -> MessageResponse:
     """Clear volume spikes cache. Use when data seems stale or after updates."""
     deleted = volume_spikes_cache.clear_prefix()
-    return {"message": f"Cleared {deleted} cache entries"}
+    return MessageResponse(message=f"Cleared {deleted} cache entries")
 
 
 # ==================== Sector Peers Endpoint ====================

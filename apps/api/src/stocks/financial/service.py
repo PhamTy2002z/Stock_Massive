@@ -173,22 +173,17 @@ class FinancialService:
                     FinancialRatio(
                         year=int(year_report) if year_report else None,
                         quarter=int(length_report) if length_report and period == "quarter" else None,
-                        period_type=period,
-                        price_to_earning=safe_float(row.get("priceToEarning") or row.get("P/E")),
-                        price_to_book=safe_float(row.get("priceToBook") or row.get("P/B")),
                         roe=safe_float(row.get("roe") or row.get("ROE")),
                         roa=safe_float(row.get("roa") or row.get("ROA")),
-                        eps=safe_float(row.get("earningPerShare") or row.get("EPS")),
-                        book_value_per_share=safe_float(row.get("bookValuePerShare") or row.get("BVPS")),
-                        dividend_yield=safe_float(row.get("dividend") or row.get("Dividend yield")),
+                        gross_margin=safe_float(row.get("grossProfitMargin") or row.get("Gross margin")),
+                        net_margin=safe_float(row.get("postTaxMargin") or row.get("Net margin")),
+                        pe=safe_float(row.get("priceToEarning") or row.get("P/E")),
+                        pb=safe_float(row.get("priceToBook") or row.get("P/B")),
+                        ps=safe_float(row.get("priceToSale") or row.get("P/S")),
                         current_ratio=safe_float(row.get("currentPayment") or row.get("Current ratio")),
                         quick_ratio=safe_float(row.get("quickPayment") or row.get("Quick ratio")),
                         debt_to_equity=safe_float(row.get("debtOnEquity") or row.get("D/E")),
-                        debt_to_asset=safe_float(row.get("debtOnAsset") or row.get("D/A")),
-                        gross_margin=safe_float(row.get("grossProfitMargin") or row.get("Gross margin")),
-                        operating_margin=safe_float(row.get("operatingProfitMargin") or row.get("Operating margin")),
-                        net_margin=safe_float(row.get("postTaxMargin") or row.get("Net margin")),
-                        beta=safe_float(row.get("beta") or row.get("Beta")),
+                        debt_to_assets=safe_float(row.get("debtOnAsset") or row.get("D/A")),
                     )
                 )
             except Exception as e:
@@ -208,15 +203,10 @@ class FinancialService:
                     IncomeStatementItem(
                         year=int(year_report) if year_report else None,
                         quarter=int(length_report) if length_report and period == "quarter" else None,
-                        period_type=period,
                         revenue=safe_float(row.get("revenue") or row.get("Net Revenue")),
-                        cost_of_goods_sold=safe_float(row.get("costOfGoodSold") or row.get("Cost of sales")),
                         gross_profit=safe_float(row.get("grossProfit") or row.get("Gross profit")),
-                        operating_expense=safe_float(row.get("operationExpense")),
                         operating_profit=safe_float(row.get("operationProfit") or row.get("Operating profit")),
-                        interest_expense=safe_float(row.get("interestExpense")),
-                        pre_tax_profit=safe_float(row.get("preTaxProfit") or row.get("Profit before tax")),
-                        net_profit=safe_float(row.get("postTaxProfit") or row.get("Net profit")),
+                        net_income=safe_float(row.get("postTaxProfit") or row.get("Net profit")),
                         eps=safe_float(row.get("earningPerShare") or row.get("EPS")),
                     )
                 )
@@ -225,21 +215,34 @@ class FinancialService:
                 continue
         return items
 
+    def _period_labels(self, df: pd.DataFrame, period: str) -> list[str]:
+        """Build period labels ("Q2/2025" or "2025") for statement tables.
+
+        iterrows() coerces an all-numeric row to float, so year/quarter are cast
+        back to int — otherwise labels render as "Q2/2025.0".
+        """
+        labels = []
+        for _, row in df.iterrows():
+            # Vietnamese columns first (lang="vi"), then English fallbacks
+            year = row.get("Năm") or row.get("yearReport") or row.get("year")
+            quarter = row.get("Kỳ") or row.get("lengthReport") or row.get("quarter")
+            try:
+                year_label = str(int(year))
+            except (TypeError, ValueError):
+                year_label = str(year)
+            if period == "quarter" and quarter:
+                labels.append(f"Q{int(quarter)}/{year_label}")
+            else:
+                labels.append(year_label)
+        return labels
+
     def _df_to_income_statement_response(
         self, df: pd.DataFrame, symbol: str, period: str, limit: int
     ) -> IncomeStatementResponse:
         """Convert DataFrame to IncomeStatementResponse for detailed view."""
         df = df.head(limit)
 
-        periods = []
-        for _, row in df.iterrows():
-            # Vietnamese columns first (lang="vi"), then English fallbacks
-            year = row.get("Năm") or row.get("yearReport") or row.get("year")
-            quarter = row.get("Kỳ") or row.get("lengthReport") or row.get("quarter")
-            if period == "quarter" and quarter:
-                periods.append(f"Q{int(quarter)}/{year}")
-            else:
-                periods.append(str(year))
+        periods = self._period_labels(df, period)
 
         # row_mappings: (id, label, column_names, level, is_summary)
         # level: 0=root, 1=child, 2=sub-child
@@ -314,16 +317,10 @@ class FinancialService:
                     BalanceSheetItem(
                         year=int(year_report) if year_report else None,
                         quarter=int(length_report) if length_report and period == "quarter" else None,
-                        period_type=period,
                         total_assets=safe_float(row.get("asset") or row.get("Total assets")),
-                        current_assets=safe_float(row.get("shortAsset") or row.get("Current assets")),
-                        fixed_assets=safe_float(row.get("fixedAsset") or row.get("Fixed assets")),
                         total_liabilities=safe_float(row.get("debt") or row.get("Total liabilities")),
-                        current_liabilities=safe_float(row.get("shortDebt") or row.get("Current liabilities")),
-                        long_term_liabilities=safe_float(row.get("longDebt") or row.get("Long-term liabilities")),
-                        equity=safe_float(row.get("equity") or row.get("Total equity")),
-                        charter_capital=safe_float(row.get("capital") or row.get("Charter capital")),
-                        retained_earnings=safe_float(row.get("unDistributedIncome") or row.get("Retained earnings")),
+                        total_equity=safe_float(row.get("equity") or row.get("Total equity")),
+                        cash=safe_float(row.get("cash") or row.get("Cash and cash equivalents")),
                     )
                 )
             except Exception as e:
@@ -337,15 +334,7 @@ class FinancialService:
         """Convert DataFrame to BalanceSheetResponse for detailed view."""
         df = df.head(limit)
 
-        periods = []
-        for _, row in df.iterrows():
-            # Vietnamese columns first (lang="vi"), then English fallbacks
-            year = row.get("Năm") or row.get("yearReport") or row.get("year")
-            quarter = row.get("Kỳ") or row.get("lengthReport") or row.get("quarter")
-            if period == "quarter" and quarter:
-                periods.append(f"Q{int(quarter)}/{year}")
-            else:
-                periods.append(str(year))
+        periods = self._period_labels(df, period)
 
         # row_mappings: (id, label, column_names, level, is_summary)
         # column_names: vnstock Vietnamese column names (exact match required)
@@ -418,15 +407,7 @@ class FinancialService:
         """Convert DataFrame to CashFlowResponse for detailed view."""
         df = df.head(limit)
 
-        periods = []
-        for _, row in df.iterrows():
-            # Vietnamese columns first (lang="vi"), then English fallbacks
-            year = row.get("Năm") or row.get("yearReport") or row.get("year")
-            quarter = row.get("Kỳ") or row.get("lengthReport") or row.get("quarter")
-            if period == "quarter" and quarter:
-                periods.append(f"Q{int(quarter)}/{year}")
-            else:
-                periods.append(str(year))
+        periods = self._period_labels(df, period)
 
         row_mappings = [
             ("net_profit", "Lợi nhuận trước thuế", ["Lợi nhuận trước thuế"], 0, True),
