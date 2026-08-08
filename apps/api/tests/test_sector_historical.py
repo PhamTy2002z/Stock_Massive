@@ -13,6 +13,11 @@ from src.stocks.analytics.sector_historical_service import (
     SectorHistoricalService,
 )
 
+# Every test in this module calls the live vnstock API — there are no mocks.
+# They go red on upstream throttling rather than on anything in this repo,
+# so they sit out the default run. Run them with: pytest -m network
+pytestmark = pytest.mark.network
+
 
 class TestSectorHistoricalConfig:
     """Test PERIODS configuration."""
