@@ -1,8 +1,5 @@
 """Schemas module with backward compatibility re-exports."""
 
-# Common
-from .common import ErrorResponse, HistoryParams
-
 # Price domain
 from .price import (
     StockPrice,
@@ -54,9 +51,6 @@ from .market import (
 )
 
 __all__ = [
-    # Common
-    "ErrorResponse",
-    "HistoryParams",
     # Price
     "StockPrice",
     "IntradayTick",

@@ -25,10 +25,9 @@ config = context.config
 settings = get_settings()
 
 # Get database URL for migrations
-# Prefer direct connection for Supabase (bypasses connection pooler)
 def get_migration_url() -> str:
     """Get database URL for migrations."""
-    url = settings.database_url_direct or settings.database_url
+    url = settings.database_url
     # Replace driver prefix
     url = url.replace("postgresql://", "postgresql+asyncpg://")
     # Remove sslmode from URL (asyncpg uses connect_args instead)
@@ -71,22 +70,12 @@ def do_run_migrations(connection: Connection) -> None:
         context.run_migrations()
 
 
-# SSL config for Supabase connections (asyncpg driver)
-def get_connect_args() -> dict:
-    """Get SSL connect args for Supabase."""
-    url_to_check = settings.database_url_direct or settings.database_url
-    if "supabase" in url_to_check.lower():
-        return {"ssl": "require"}
-    return {}
-
-
 async def run_async_migrations() -> None:
     """Run migrations in 'online' mode with async engine."""
     connectable = async_engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
-        connect_args=get_connect_args(),
     )
 
     async with connectable.connect() as connection:

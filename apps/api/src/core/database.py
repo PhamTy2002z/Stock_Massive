@@ -24,11 +24,6 @@ elif "&sslmode=" in DATABASE_URL:
     import re
     DATABASE_URL = re.sub(r"[&?]sslmode=[^&]*", "", DATABASE_URL)
 
-# SSL config for Supabase connections
-connect_args = {}
-if "supabase" in DATABASE_URL.lower() or "supabase" in settings.database_url.lower():
-    connect_args["ssl"] = "require"
-
 engine = create_async_engine(
     DATABASE_URL,
     echo=settings.debug,
@@ -37,7 +32,6 @@ engine = create_async_engine(
     pool_pre_ping=True,
     pool_timeout=30,
     pool_recycle=3600,
-    connect_args=connect_args,
 )
 
 async_session_factory = async_sessionmaker(
@@ -47,10 +41,6 @@ async_session_factory = async_sessionmaker(
 )
 
 # Sync engine for Alembic migrations and sync database operations
-sync_connect_args = {}
-if "supabase" in settings.database_url.lower():
-    sync_connect_args["sslmode"] = "require"
-
 sync_engine = create_engine(
     settings.database_url,
     echo=settings.debug,
@@ -59,7 +49,6 @@ sync_engine = create_engine(
     pool_pre_ping=True,
     pool_timeout=30,
     pool_recycle=3600,
-    connect_args=sync_connect_args,
 )
 
 sync_session_factory = sessionmaker(
