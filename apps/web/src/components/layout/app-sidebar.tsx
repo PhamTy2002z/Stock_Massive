@@ -14,8 +14,6 @@ import {
   LogIn,
   LogOut,
   Map,
-  Pin,
-  PinOff,
   Settings,
   User,
 } from "lucide-react"
@@ -129,31 +127,6 @@ function NavMain() {
         </React.Fragment>
       ))}
     </>
-  )
-}
-
-function SidebarPinToggle() {
-  const { mode, toggleSidebar, isMobile } = useSidebar()
-
-  if (isMobile) return null
-
-  const isPinned = mode === "pinned"
-
-  return (
-    <SidebarMenu>
-      <SidebarMenuItem>
-        <SidebarMenuButton
-          tooltip={isPinned ? "Bỏ ghim menu (⌘B)" : "Ghim menu mở (⌘B)"}
-          onClick={toggleSidebar}
-          aria-pressed={isPinned}
-          aria-label={isPinned ? "Bỏ ghim menu" : "Ghim menu mở"}
-          className="text-sidebar-foreground/70"
-        >
-          {isPinned ? <PinOff /> : <Pin />}
-          <span>{isPinned ? "Bỏ ghim menu" : "Ghim menu"}</span>
-        </SidebarMenuButton>
-      </SidebarMenuItem>
-    </SidebarMenu>
   )
 }
 
@@ -277,7 +250,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <NavMain />
       </SidebarContent>
       <SidebarFooter>
-        <SidebarPinToggle />
         <SidebarUserSection />
       </SidebarFooter>
     </Sidebar>

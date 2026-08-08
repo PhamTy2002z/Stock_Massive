@@ -28,16 +28,13 @@ import {
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
 const SIDEBAR_WIDTH = "16rem"
-// Peek is deliberately narrower than the pinned width: it only has to fit the
-// longest nav label, and a narrow overlay covers less of the content it floats on.
-const SIDEBAR_WIDTH_PEEK = "11rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
-// Asymmetric on purpose: short in, so a deliberate hover feels immediate but a
-// mouse crossing the rail does not open it; long out, to forgive overshoot.
-const SIDEBAR_PEEK_IN_DELAY = 150
-const SIDEBAR_PEEK_OUT_DELAY = 300
+// Open on contact — no in-delay, the panel should feel attached to the cursor.
+// The out-delay stays, to forgive overshoot when reaching for an item.
+const SIDEBAR_PEEK_IN_DELAY = 0
+const SIDEBAR_PEEK_OUT_DELAY = 200
 
 type SidebarMode = "rail" | "pinned"
 
@@ -160,13 +157,19 @@ const SidebarProvider = React.forwardRef<
       (next: boolean) => {
         clearPeekTimer()
         if (next && (!canHover || pointerDownRef.current)) return
-        peekTimerRef.current = setTimeout(
-          () => {
-            peekTimerRef.current = null
-            setIsPeeking(next)
-          },
-          next ? SIDEBAR_PEEK_IN_DELAY : SIDEBAR_PEEK_OUT_DELAY
-        )
+
+        const delay = next ? SIDEBAR_PEEK_IN_DELAY : SIDEBAR_PEEK_OUT_DELAY
+        // A zero delay must not go through setTimeout: deferring a tick is the
+        // difference between "attached to the cursor" and "slightly late".
+        if (delay === 0) {
+          setIsPeeking(next)
+          return
+        }
+
+        peekTimerRef.current = setTimeout(() => {
+          peekTimerRef.current = null
+          setIsPeeking(next)
+        }, delay)
       },
       [canHover, clearPeekTimer]
     )
@@ -182,15 +185,13 @@ const SidebarProvider = React.forwardRef<
       setIsPeeking(false)
     }, [clearPeekTimer])
 
-    // Helper to toggle the sidebar. On desktop this pins/unpins.
+    // Opens the mobile sheet. Desktop has no pin control, so there is nothing to
+    // toggle there — hover drives the rail, and a shortcut that silently pinned
+    // the sidebar open would leave no visible way back.
     const toggleSidebar = React.useCallback(() => {
-      if (isMobile) {
-        setOpenMobile((open) => !open)
-        return
-      }
-      endPeek()
-      setOpen((open) => !open)
-    }, [isMobile, setOpen, setOpenMobile, endPeek])
+      if (!isMobile) return
+      setOpenMobile((open) => !open)
+    }, [isMobile, setOpenMobile])
 
     // Adds a keyboard shortcut to toggle the sidebar.
     React.useEffect(() => {
@@ -264,7 +265,6 @@ const SidebarProvider = React.forwardRef<
             style={
               {
                 "--sidebar-width": SIDEBAR_WIDTH,
-                "--sidebar-width-peek": SIDEBAR_WIDTH_PEEK,
                 "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
                 ...style,
               } as React.CSSProperties
@@ -385,7 +385,7 @@ const Sidebar = React.forwardRef<
         ref={ref}
         className={cn(
           "group peer hidden text-sidebar-foreground md:block",
-          "shrink-0 transition-[width] duration-200 ease-sidebar will-change-[width]",
+          "shrink-0 transition-[width] duration-150 ease-sidebar will-change-[width]",
           // Width tracks `mode`, never `state`. This is what freezes the content
           // layout during a peek: charts never re-measure on a stray mouse move.
           mode === "pinned" ? "w-[--sidebar-width]" : "w-[--sidebar-width-icon]",
@@ -412,13 +412,13 @@ const Sidebar = React.forwardRef<
           onBlurCapture={handleBlurCapture}
           className={cn(
             "fixed inset-y-0 hidden h-svh md:flex flex-col",
-            "transition-[left,right,width] duration-200 ease-sidebar will-change-[width,left,right]",
+            "transition-[left,right,width] duration-150 ease-sidebar will-change-[width,left,right]",
             "overflow-hidden",
-            mode === "pinned"
+            // Peek opens to the full sidebar width — same as pinned. Only the
+            // layout spacer stays at rail width, which is what keeps content still.
+            mode === "pinned" || isPeeking
               ? "w-[--sidebar-width]"
-              : isPeeking
-                ? "w-[--sidebar-width-peek]"
-                : "w-[--sidebar-width-icon]",
+              : "w-[--sidebar-width-icon]",
             // A peeked panel floats above the content. No backdrop, no scroll lock:
             // it should read as "glancing at the nav", not as a modal.
             isPeeking && mode === "rail" ? "z-30 shadow-xl" : "z-10",
