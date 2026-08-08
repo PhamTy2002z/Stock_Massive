@@ -8,7 +8,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from src.core.config import get_settings
-from src.core.database import Base
+from src.core.database import Base, asyncpg_connect_args, to_asyncpg_url
 
 # Import models to register with Base.metadata (bypass stocks __init__.py to avoid vnstock import)
 import importlib.util
@@ -21,25 +21,15 @@ models = importlib.util.module_from_spec(spec)
 sys.modules["stocks_models"] = models
 spec.loader.exec_module(models)
 
+# src.auth has no heavy imports, so a plain import is enough here
+from src.auth.models import RefreshToken, User  # noqa: E402,F401
+
 config = context.config
 settings = get_settings()
 
-# Get database URL for migrations
-def get_migration_url() -> str:
-    """Get database URL for migrations."""
-    url = settings.database_url
-    # Replace driver prefix
-    url = url.replace("postgresql://", "postgresql+asyncpg://")
-    # Remove sslmode from URL (asyncpg uses connect_args instead)
-    if "?sslmode=" in url:
-        url = url.split("?sslmode=")[0]
-    elif "&sslmode=" in url:
-        url = url.replace("&sslmode=require", "")
-    return url
-
 # Set sqlalchemy.url from settings
 # Escape % for configparser (% is interpolation character)
-database_url = get_migration_url().replace("%", "%%")
+database_url = to_asyncpg_url(settings.database_url).replace("%", "%%")
 config.set_main_option("sqlalchemy.url", database_url)
 
 if config.config_file_name is not None:
@@ -76,6 +66,7 @@ async def run_async_migrations() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=asyncpg_connect_args(settings.database_url),
     )
 
     async with connectable.connect() as connection:

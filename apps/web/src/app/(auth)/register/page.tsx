@@ -2,17 +2,17 @@ import { Metadata } from "next"
 import { Suspense } from "react"
 
 import AuthFormFallback from "../auth-form-fallback"
-import LoginForm from "./login-form"
+import RegisterForm from "./register-form"
 
 export const metadata: Metadata = {
-  title: "Login - Stock Massive",
-  description: "Sign in to your Stock Massive account",
+  title: "Create account - Stock Massive",
+  description: "Create your Stock Massive account",
 }
 
-export default function LoginPage() {
+export default function RegisterPage() {
   return (
     <Suspense fallback={<AuthFormFallback />}>
-      <LoginForm />
+      <RegisterForm />
     </Suspense>
   )
 }
