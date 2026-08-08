@@ -201,26 +201,24 @@ class FinancialService:
                 year_report = row.get("yearReport") or row.get("year")
                 length_report = row.get("lengthReport") or (4 if period == "year" else row.get("quarter"))
 
+                # Keyword names must match FinancialRatio exactly: pydantic drops
+                # unknown keywords without complaining, so a near-miss like
+                # `price_to_earning` for `pe` serves null for every ratio while
+                # the endpoint still answers 200.
                 ratios.append(
                     FinancialRatio(
                         year=int(year_report) if year_report else None,
                         quarter=int(length_report) if length_report and period == "quarter" else None,
-                        period_type=period,
-                        price_to_earning=safe_float(row.get("priceToEarning") or row.get("P/E")),
-                        price_to_book=safe_float(row.get("priceToBook") or row.get("P/B")),
+                        pe=safe_float(row.get("priceToEarning") or row.get("P/E")),
+                        pb=safe_float(row.get("priceToBook") or row.get("P/B")),
                         roe=safe_float(row.get("roe") or row.get("ROE")),
                         roa=safe_float(row.get("roa") or row.get("ROA")),
-                        eps=safe_float(row.get("earningPerShare") or row.get("EPS")),
-                        book_value_per_share=safe_float(row.get("bookValuePerShare") or row.get("BVPS")),
-                        dividend_yield=safe_float(row.get("dividend") or row.get("Dividend yield")),
                         current_ratio=safe_float(row.get("currentPayment") or row.get("Current ratio")),
                         quick_ratio=safe_float(row.get("quickPayment") or row.get("Quick ratio")),
                         debt_to_equity=safe_float(row.get("debtOnEquity") or row.get("D/E")),
-                        debt_to_asset=safe_float(row.get("debtOnAsset") or row.get("D/A")),
+                        debt_to_assets=safe_float(row.get("debtOnAsset") or row.get("D/A")),
                         gross_margin=safe_float(row.get("grossProfitMargin") or row.get("Gross margin")),
-                        operating_margin=safe_float(row.get("operatingProfitMargin") or row.get("Operating margin")),
                         net_margin=safe_float(row.get("postTaxMargin") or row.get("Net margin")),
-                        beta=safe_float(row.get("beta") or row.get("Beta")),
                     )
                 )
             except (VnstockUnavailable, VnstockUnsupported):
@@ -275,7 +273,6 @@ class FinancialService:
                 IncomeStatementItem(
                     year=year,
                     quarter=quarter if period == "quarter" else None,
-                    period_type=period,
                     revenue=safe_float(values.get("net_sales")),
                     gross_profit=safe_float(values.get("gross_profit")),
                     operating_profit=safe_float(values.get("operating_profit_loss")),
@@ -293,7 +290,6 @@ class FinancialService:
                 BalanceSheetItem(
                     year=year,
                     quarter=quarter if period == "quarter" else None,
-                    period_type=period,
                     total_assets=safe_float(values.get("total_assets")),
                     total_liabilities=safe_float(values.get("liabilities")),
                     total_equity=safe_float(values.get("owners_equity")),
