@@ -5,8 +5,10 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from .common import StrictModel
 
-class SectorPerformanceItem(BaseModel):
+
+class SectorPerformanceItem(StrictModel):
     """Sector performance data."""
 
     icb_code: str = Field(..., description="ICB Level 2 code")
@@ -18,7 +20,7 @@ class SectorPerformanceItem(BaseModel):
     top_losers: list[str] = Field(default_factory=list, description="Top 3 losing symbols")
 
 
-class SectorPerformanceResponse(BaseModel):
+class SectorPerformanceResponse(StrictModel):
     """Response for sector performance endpoint."""
 
     sectors: list[SectorPerformanceItem]
@@ -29,7 +31,7 @@ class SectorPerformanceResponse(BaseModel):
 # === Fund Certificates Schemas ===
 
 
-class FundCertificateItem(BaseModel):
+class FundCertificateItem(StrictModel):
     """Fund certificate (ETF/Open-end fund) data."""
 
     symbol: str = Field(..., description="Fund symbol (e.g., E1VFVN30, FUEVFVND)")
@@ -40,7 +42,7 @@ class FundCertificateItem(BaseModel):
     change_pct: Optional[float] = Field(None, description="Daily change percentage")
 
 
-class FundCertificatesResponse(BaseModel):
+class FundCertificatesResponse(StrictModel):
     """Response for fund certificates endpoint."""
 
     funds: list[FundCertificateItem]
@@ -51,7 +53,7 @@ class FundCertificatesResponse(BaseModel):
 # === VN30 Overview Schemas ===
 
 
-class VN30OverviewItem(BaseModel):
+class VN30OverviewItem(StrictModel):
     """VN30 stock overview item."""
 
     symbol: str = Field(..., description="Stock symbol")
@@ -62,7 +64,7 @@ class VN30OverviewItem(BaseModel):
     market_cap: Optional[float] = Field(None, description="Market cap (billion VND)")
 
 
-class VN30OverviewResponse(BaseModel):
+class VN30OverviewResponse(StrictModel):
     """Response for VN30 overview endpoint."""
 
     stocks: list[VN30OverviewItem]
@@ -75,7 +77,7 @@ class VN30OverviewResponse(BaseModel):
 SectorHistoricalPeriod = Literal["1W", "2W", "1M"]
 
 
-class SectorHistoricalItem(BaseModel):
+class SectorHistoricalItem(StrictModel):
     """Sector historical performance item."""
 
     icb_code: str = Field(..., description="ICB Level 2 code")
@@ -83,7 +85,7 @@ class SectorHistoricalItem(BaseModel):
     change_pct: float = Field(..., description="Average change percentage")
 
 
-class SectorHistoricalResponse(BaseModel):
+class SectorHistoricalResponse(StrictModel):
     """Response for sector historical performance endpoint."""
 
     period: str = Field(..., description="Period: 1W, 2W, or 1M")

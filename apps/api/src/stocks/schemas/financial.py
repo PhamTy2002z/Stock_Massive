@@ -4,8 +4,10 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from .common import StrictModel
 
-class FinancialRatio(BaseModel):
+
+class FinancialRatio(StrictModel):
     """Financial ratio data."""
 
     year: Optional[int] = None
@@ -28,7 +30,7 @@ class FinancialRatio(BaseModel):
     debt_to_assets: Optional[float] = None
 
 
-class IncomeStatementItem(BaseModel):
+class IncomeStatementItem(StrictModel):
     """Income statement line item - simplified summary."""
 
     year: Optional[int] = None
@@ -40,7 +42,7 @@ class IncomeStatementItem(BaseModel):
     eps: Optional[float] = None
 
 
-class IncomeStatementRow(BaseModel):
+class IncomeStatementRow(StrictModel):
     """Detailed income statement row for financial table display."""
 
     id: str  # Unique identifier for the row
@@ -51,7 +53,7 @@ class IncomeStatementRow(BaseModel):
     is_summary: bool = False  # Bold summary rows
 
 
-class IncomeStatementResponse(BaseModel):
+class IncomeStatementResponse(StrictModel):
     """Response for detailed income statement endpoint."""
 
     symbol: str
@@ -60,7 +62,7 @@ class IncomeStatementResponse(BaseModel):
     unit: str = "VND"  # Currency unit
 
 
-class BalanceSheetItem(BaseModel):
+class BalanceSheetItem(StrictModel):
     """Balance sheet line item."""
 
     year: Optional[int] = None
@@ -71,7 +73,7 @@ class BalanceSheetItem(BaseModel):
     cash: Optional[float] = None
 
 
-class BalanceSheetRow(BaseModel):
+class BalanceSheetRow(StrictModel):
     """Detailed balance sheet row for financial table display."""
 
     id: str  # Unique identifier for the row
@@ -82,7 +84,7 @@ class BalanceSheetRow(BaseModel):
     is_summary: bool = False  # Bold summary rows
 
 
-class BalanceSheetResponse(BaseModel):
+class BalanceSheetResponse(StrictModel):
     """Response for detailed balance sheet endpoint."""
 
     symbol: str
@@ -91,7 +93,7 @@ class BalanceSheetResponse(BaseModel):
     unit: str = "VND"  # Currency unit
 
 
-class CashFlowRow(BaseModel):
+class CashFlowRow(StrictModel):
     """Detailed cash flow row for financial table display."""
 
     id: str  # Unique identifier for the row
@@ -102,7 +104,7 @@ class CashFlowRow(BaseModel):
     is_summary: bool = False  # Bold summary rows
 
 
-class CashFlowResponse(BaseModel):
+class CashFlowResponse(StrictModel):
     """Response for detailed cash flow endpoint."""
 
     symbol: str
@@ -114,14 +116,14 @@ class CashFlowResponse(BaseModel):
 # ==================== Health Score Schemas ====================
 
 
-class HealthScoreDimension(BaseModel):
+class HealthScoreDimension(StrictModel):
     """Score and metrics for a single health dimension."""
 
     score: int = Field(..., ge=0, le=100)
     metrics: dict[str, Optional[float]]
 
 
-class FScoreDetails(BaseModel):
+class FScoreDetails(StrictModel):
     """Piotroski F-Score breakdown (6 criteria)."""
 
     positive_roa: bool
@@ -132,7 +134,7 @@ class FScoreDetails(BaseModel):
     liquidity_improving: bool
 
 
-class HealthScoreResponse(BaseModel):
+class HealthScoreResponse(StrictModel):
     """Financial health scorecard response."""
 
     symbol: str
@@ -146,7 +148,7 @@ class HealthScoreResponse(BaseModel):
 # ==================== Trend Metrics Schemas ====================
 
 
-class TrendMetricsResponse(BaseModel):
+class TrendMetricsResponse(StrictModel):
     """Trend metrics for charts (8 quarters of data)."""
 
     symbol: str
@@ -166,7 +168,7 @@ class TrendMetricsResponse(BaseModel):
 # ==================== FCF Analysis Schemas ====================
 
 
-class FCFAnalysisResponse(BaseModel):
+class FCFAnalysisResponse(StrictModel):
     """Free Cash Flow analysis response."""
 
     symbol: str
@@ -187,7 +189,7 @@ class FCFAnalysisResponse(BaseModel):
 # ==================== Sector Peers Schemas ====================
 
 
-class SectorMedian(BaseModel):
+class SectorMedian(StrictModel):
     """Sector median values for comparison."""
 
     pe: Optional[float] = None
@@ -197,7 +199,7 @@ class SectorMedian(BaseModel):
     market_cap: Optional[float] = None
 
 
-class PeerMetrics(BaseModel):
+class PeerMetrics(StrictModel):
     """Financial metrics for a peer company."""
 
     symbol: str
@@ -214,7 +216,7 @@ class PeerMetrics(BaseModel):
     premium_roa: Optional[float] = None
 
 
-class SectorPeersResponse(BaseModel):
+class SectorPeersResponse(StrictModel):
     """Sector peers comparison response."""
 
     symbol: str
