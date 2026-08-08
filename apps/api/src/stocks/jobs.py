@@ -48,7 +48,14 @@ async def collect_intraday_data_job() -> dict:
     except Exception as e:
         logger.error(f"Intraday collection job failed: {e}")
         job_store.fail_job("intraday", str(e))
-        return {"success": [], "failed": symbols, "total_bars": 0, "error": str(e)}
+        # Same shape as the success path: IntradayCollectionResult declares no
+        # top-level `error`, and `failed` holds {symbol, error} entries. The
+        # reason is already recorded on the job above.
+        return {
+            "success": [],
+            "failed": [{"symbol": s, "error": str(e)} for s in symbols],
+            "total_bars": 0,
+        }
 
 
 async def cleanup_old_data_job() -> int:
