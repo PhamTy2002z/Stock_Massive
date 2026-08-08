@@ -41,7 +41,7 @@ export function ShareholdersTabContent({
   const [currentPage, setCurrentPage] = useState(1)
   const [rowsPerPage, setRowsPerPage] = useState(10)
 
-  const { data, isFetching } = useShareholders(symbol)
+  const { data } = useShareholders(symbol)
 
   // Memoize shareholders to prevent useMemo dependency warning
   const shareholders = useMemo(() => data.shareholders ?? [], [data.shareholders])
