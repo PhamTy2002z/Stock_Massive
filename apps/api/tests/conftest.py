@@ -40,17 +40,14 @@ def valid_symbols():
 async def cleanup_intraday_test_data():
     """Fixture to clean up test data after async tests."""
     yield  # Run test first
-    # Cleanup after test
-    try:
-        from src.core.database import async_session_factory
-        from src.stocks.models import StockIntradayBar
-        async with async_session_factory() as session:
-            result = await session.execute(
-                select(StockIntradayBar).where(StockIntradayBar.symbol.in_(["TEST", "UNIQ"]))
-            )
-            test_records = result.scalars().all()
-            for record in test_records:
-                await session.delete(record)
-            await session.commit()
-    except Exception:
-        pass  # Ignore cleanup errors
+    from src.core.database import async_session_factory
+    from src.stocks.models import StockIntradayBar
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(StockIntradayBar).where(StockIntradayBar.symbol.in_(["TEST", "UNIQ"]))
+        )
+        test_records = result.scalars().all()
+        for record in test_records:
+            await session.delete(record)
+        await session.commit()

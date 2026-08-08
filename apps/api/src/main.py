@@ -14,6 +14,7 @@ from src.core.database import engine
 from src.core.scheduler import setup_scheduler
 from src.stocks.router import router as stocks_router
 from src.stocks.jobs_router import router as jobs_router
+from src.stocks.shared import StockServiceError
 
 # Configure logging at module level - ensures INFO logs are visible
 logging.basicConfig(
@@ -71,6 +72,15 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(stocks_router, prefix="/api/v1")
 app.include_router(jobs_router, prefix="/api/v1")
+
+
+@app.exception_handler(StockServiceError)
+async def stock_service_error_handler(request: Request, exc: StockServiceError):
+    """Map upstream stock service failures to HTTP 502."""
+    return JSONResponse(
+        status_code=502,
+        content={"detail": str(exc)},
+    )
 
 
 @app.exception_handler(Exception)

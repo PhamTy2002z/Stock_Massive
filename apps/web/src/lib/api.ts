@@ -1,5 +1,5 @@
 // Server-side uses Docker internal network, client uses public URL
-const getApiBaseUrl = () => {
+export const getApiBaseUrl = () => {
   // Server-side: use internal Docker network URL if available
   if (typeof window === "undefined") {
     return process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
@@ -62,11 +62,15 @@ export async function fetchPriceBoard(symbols: string[]): Promise<PriceBoardItem
   return fetchApi<PriceBoardItem[]>(`/stocks/price-board?symbols=${encodeURIComponent(symbolsParam)}`)
 }
 
-export async function fetchMarketIndices(): Promise<MarketIndex[]> {
-  const data = await fetchApi<{ symbol: string; name: string; value: number; change: number; change_pct: number }[]>(
-    "/stocks/market-indices"
-  )
+export interface MarketIndexRaw {
+  symbol: string
+  name: string
+  value: number
+  change: number
+  change_pct: number
+}
 
+export function mapMarketIndices(data: MarketIndexRaw[]): MarketIndex[] {
   return data.map((item) => ({
     symbol: item.symbol,
     name: item.name,
@@ -74,6 +78,11 @@ export async function fetchMarketIndices(): Promise<MarketIndex[]> {
     change: item.change,
     changePercent: item.change_pct,
   }))
+}
+
+export async function fetchMarketIndices(): Promise<MarketIndex[]> {
+  const data = await fetchApi<MarketIndexRaw[]>("/stocks/market-indices")
+  return mapMarketIndices(data)
 }
 
 export interface StockSymbol {

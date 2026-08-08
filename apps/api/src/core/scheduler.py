@@ -30,65 +30,67 @@ async def collect_daily_ohlcv_job_async():
     return result
 
 
-async def collect_intraday_job_wrapper():
-    """Wrapper for intraday job with logging."""
-    logger.info("=== SCHEDULED JOB TRIGGERED: Intraday Collection ===")
-    try:
-        result = await collect_intraday_data_job()
-        logger.info(f"Intraday collection completed: {result}")
-        return result
-    except Exception as e:
-        logger.error(f"Intraday collection failed: {e}", exc_info=True)
-        raise
+def make_job_wrapper(job_name: str, job, done_msg: str, fail_msg: str):
+    """Create an async job wrapper with standard trigger/success/failure logging.
+
+    Args:
+        job_name: Display name used in the "SCHEDULED JOB TRIGGERED" log line
+        job: Async callable to execute
+        done_msg: Log message prefix on success
+        fail_msg: Log message prefix on failure
+
+    Returns:
+        Async wrapper function suitable for scheduler registration
+    """
+    async def wrapper():
+        logger.info(f"=== SCHEDULED JOB TRIGGERED: {job_name} ===")
+        try:
+            result = await job()
+            logger.info(f"{done_msg}: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"{fail_msg}: {e}", exc_info=True)
+            raise
+
+    return wrapper
 
 
-async def cleanup_job_wrapper():
-    """Wrapper for cleanup job with logging."""
-    logger.info("=== SCHEDULED JOB TRIGGERED: Data Cleanup ===")
-    try:
-        result = await cleanup_old_data_job()
-        logger.info(f"Data cleanup completed: {result}")
-        return result
-    except Exception as e:
-        logger.error(f"Data cleanup failed: {e}", exc_info=True)
-        raise
+async def _run_sector_historical_job_async():
+    """Run sync sector historical job in thread pool."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, collect_sector_historical_job)
 
 
-async def ohlcv_job_wrapper():
-    """Wrapper for OHLCV job with logging."""
-    logger.info("=== SCHEDULED JOB TRIGGERED: Daily OHLCV Collection ===")
-    try:
-        result = await collect_daily_ohlcv_job_async()
-        logger.info(f"Daily OHLCV completed: {result}")
-        return result
-    except Exception as e:
-        logger.error(f"Daily OHLCV failed: {e}", exc_info=True)
-        raise
-
-
-async def financial_statements_job_wrapper():
-    """Wrapper for financial statements job with logging."""
-    logger.info("=== SCHEDULED JOB TRIGGERED: Financial Statements Collection ===")
-    try:
-        result = await collect_financial_statements_job()
-        logger.info(f"Financial statements collection completed: {result}")
-        return result
-    except Exception as e:
-        logger.error(f"Financial statements collection failed: {e}", exc_info=True)
-        raise
-
-
-async def sector_historical_job_wrapper():
-    """Async wrapper for sector historical job (runs in thread pool)."""
-    logger.info("=== SCHEDULED JOB TRIGGERED: Sector Historical Performance ===")
-    try:
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, collect_sector_historical_job)
-        logger.info(f"Sector historical complete: {result}")
-        return result
-    except Exception as e:
-        logger.error(f"Sector historical failed: {e}", exc_info=True)
-        raise
+collect_intraday_job_wrapper = make_job_wrapper(
+    "Intraday Collection",
+    collect_intraday_data_job,
+    "Intraday collection completed",
+    "Intraday collection failed",
+)
+cleanup_job_wrapper = make_job_wrapper(
+    "Data Cleanup",
+    cleanup_old_data_job,
+    "Data cleanup completed",
+    "Data cleanup failed",
+)
+ohlcv_job_wrapper = make_job_wrapper(
+    "Daily OHLCV Collection",
+    collect_daily_ohlcv_job_async,
+    "Daily OHLCV completed",
+    "Daily OHLCV failed",
+)
+financial_statements_job_wrapper = make_job_wrapper(
+    "Financial Statements Collection",
+    collect_financial_statements_job,
+    "Financial statements collection completed",
+    "Financial statements collection failed",
+)
+sector_historical_job_wrapper = make_job_wrapper(
+    "Sector Historical Performance",
+    _run_sector_historical_job_async,
+    "Sector historical complete",
+    "Sector historical failed",
+)
 
 
 async def setup_scheduler(scheduler: AsyncScheduler) -> None:

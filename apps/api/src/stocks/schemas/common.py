@@ -1,20 +1,12 @@
-"""Common schemas shared across domains."""
+"""Schemas shared across stock domains."""
 
-from datetime import date
+from typing import Optional
 
-from pydantic import BaseModel, Field
-
-
-class HistoryParams(BaseModel):
-    """Query parameters for history endpoint."""
-
-    start: date = Field(..., description="Start date (YYYY-MM-DD)")
-    end: date = Field(..., description="End date (YYYY-MM-DD)")
-    interval: str = Field("1D", description="Interval: 1D, 1W, 1M")
+from pydantic import BaseModel
 
 
-class ErrorResponse(BaseModel):
-    """Standard error response."""
+class MessageResponse(BaseModel):
+    """Generic acknowledgement returned by action endpoints."""
 
-    detail: str
-    code: str = "error"
+    message: str
+    status: Optional[str] = None

@@ -12,6 +12,7 @@ import {
 } from "recharts"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
+import { formatPercent } from "@/lib/format"
 import type { IndustryVolumeSpikeGroup } from "@/lib/api"
 
 interface VolumeSpikePieChartProps {
@@ -40,11 +41,6 @@ function getPieColor(index: number): string {
 }
 
 // Format helpers
-function formatPercent(value: number | null): string {
-  if (value === null) return "-"
-  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`
-}
-
 // Custom tooltip component
 interface TooltipPayload {
   symbol: string

@@ -6,6 +6,7 @@ import {
   type SectorHistoricalPeriod,
 } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
+import { STALE_TIME } from "@/lib/query-config"
 
 export function useSectorHistoricalPerformance(
   period: SectorHistoricalPeriod = "1W"
@@ -14,7 +15,7 @@ export function useSectorHistoricalPerformance(
     queryKey: queryKeys.sectorHistoricalPerformance(period),
     queryFn: () => fetchSectorHistoricalPerformance(period),
     placeholderData: keepPreviousData,
-    staleTime: 5 * 60 * 1000, // 5 minutes (historical data)
+    staleTime: STALE_TIME.STATIC, // historical data
     refetchInterval: 10 * 60 * 1000, // 10 minutes
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
