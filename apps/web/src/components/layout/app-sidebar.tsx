@@ -104,14 +104,13 @@ function NavMain() {
                 const isActive = isPathActive(item.url)
                 return (
                   <SidebarMenuItem key={item.title}>
+                    {/* Active styling comes from the button's own
+                        data-[active=true] variant. The orange bg-primary
+                        override that used to be here never won the cascade
+                        against it, so it only made the intent unreadable. */}
                     <SidebarMenuButton
                       tooltip={item.title}
                       isActive={isActive}
-                      className={
-                        isActive
-                          ? "bg-primary text-primary-foreground font-medium hover:bg-primary/90 hover:text-primary-foreground"
-                          : ""
-                      }
                       asChild
                     >
                       <Link href={item.url} aria-label={item.title}>
