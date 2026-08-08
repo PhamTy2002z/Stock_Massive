@@ -4,10 +4,12 @@ from datetime import date, datetime
 from typing import Optional, List
 from pydantic import BaseModel, Field
 
+from .common import StrictModel
+
 from src.stocks.schemas.price import VolumeAnomalyLevel
 
 
-class FinancialStatementItem(BaseModel):
+class FinancialStatementItem(StrictModel):
     """Single financial statement entry."""
     rank: int = Field(..., description="Ranking position")
     symbol: str = Field(..., description="Stock ticker")
@@ -23,7 +25,7 @@ class FinancialStatementItem(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class FinancialStatementsResponse(BaseModel):
+class FinancialStatementsResponse(StrictModel):
     """Financial statements list response."""
     period: str = Field(..., description="Period label e.g. 'Q4-2024'")
     updated_at: Optional[datetime] = Field(None, description="Last data update")
@@ -31,7 +33,7 @@ class FinancialStatementsResponse(BaseModel):
     data: List[FinancialStatementItem] = Field(..., description="Financial statements list")
 
 
-class FinancialStatementsCollectionResult(BaseModel):
+class FinancialStatementsCollectionResult(StrictModel):
     """Result of financial statements collection job."""
     success: int = Field(..., description="Number of records successfully stored")
     failed: int = Field(..., description="Number of failed symbol fetches")
@@ -44,7 +46,7 @@ class FinancialStatementsCollectionResult(BaseModel):
 # === Volume Spike Detection Schemas ===
 
 
-class VolumeSpikeItem(BaseModel):
+class VolumeSpikeItem(StrictModel):
     """Single stock with volume spike."""
     symbol: str = Field(..., description="Stock ticker")
     company_name: Optional[str] = Field(None, description="Company name")
@@ -59,7 +61,7 @@ class VolumeSpikeItem(BaseModel):
     icb_name: Optional[str] = Field(None, description="ICB Level 2 name")
 
 
-class IndustryVolumeSpikeGroup(BaseModel):
+class IndustryVolumeSpikeGroup(StrictModel):
     """Volume spikes grouped by ICB industry."""
     icb_code: str = Field(..., description="ICB Level 2 code")
     icb_name: str = Field(..., description="Industry name (Vietnamese)")
@@ -68,7 +70,7 @@ class IndustryVolumeSpikeGroup(BaseModel):
     stocks: List[VolumeSpikeItem] = Field(default_factory=list, description="Stocks in group")
 
 
-class VolumeSpikeMetadata(BaseModel):
+class VolumeSpikeMetadata(StrictModel):
     """Metadata for volume spike response."""
     calculation_time_ms: int = Field(..., description="Calculation time in milliseconds")
     cache_hit: bool = Field(default=False, description="Whether result was cached")
@@ -76,7 +78,7 @@ class VolumeSpikeMetadata(BaseModel):
     symbols_with_spikes: int = Field(default=0, description="Symbols meeting threshold")
 
 
-class VolumeSpikeResponse(BaseModel):
+class VolumeSpikeResponse(StrictModel):
     """Response for volume spikes endpoint."""
     trade_date: date = Field(..., description="Trading date analyzed")
     total_spikes: int = Field(..., description="Total stocks with volume spikes")

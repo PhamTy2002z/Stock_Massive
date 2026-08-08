@@ -4,8 +4,10 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+from .common import StrictModel
 
-class CompanyOverview(BaseModel):
+
+class CompanyOverview(StrictModel):
     """Company overview information."""
 
     symbol: str
@@ -18,7 +20,7 @@ class CompanyOverview(BaseModel):
     description: Optional[str] = None
 
 
-class StockSymbol(BaseModel):
+class StockSymbol(StrictModel):
     """Stock symbol listing."""
 
     symbol: str
@@ -27,7 +29,7 @@ class StockSymbol(BaseModel):
     organ_type_code: Optional[str] = None
 
 
-class StockDetail(BaseModel):
+class StockDetail(StrictModel):
     """Comprehensive stock detail data combining price, company, and financial info."""
 
     # Basic Info
@@ -85,7 +87,7 @@ class StockDetail(BaseModel):
 # === Shareholders Schemas ===
 
 
-class ShareholderItem(BaseModel):
+class ShareholderItem(StrictModel):
     """Major shareholder data."""
 
     id: str
@@ -95,7 +97,7 @@ class ShareholderItem(BaseModel):
     update_date: Optional[str] = None
 
 
-class ShareholdersResponse(BaseModel):
+class ShareholdersResponse(StrictModel):
     """Response for shareholders endpoint."""
 
     symbol: str
@@ -103,7 +105,7 @@ class ShareholdersResponse(BaseModel):
     total_count: int
 
 
-class OfficerItem(BaseModel):
+class OfficerItem(StrictModel):
     """Company officer/insider data."""
 
     id: str
@@ -116,7 +118,7 @@ class OfficerItem(BaseModel):
     status: Optional[str] = None  # working/resigned
 
 
-class OfficersResponse(BaseModel):
+class OfficersResponse(StrictModel):
     """Response for officers endpoint."""
 
     symbol: str
@@ -124,7 +126,7 @@ class OfficersResponse(BaseModel):
     total_count: int
 
 
-class InsiderDealItem(BaseModel):
+class InsiderDealItem(StrictModel):
     """Insider trading deal data."""
 
     announce_date: str
@@ -134,7 +136,7 @@ class InsiderDealItem(BaseModel):
     ratio: Optional[float] = None
 
 
-class InsiderDealsResponse(BaseModel):
+class InsiderDealsResponse(StrictModel):
     """Response for insider deals endpoint."""
 
     symbol: str
@@ -145,7 +147,7 @@ class InsiderDealsResponse(BaseModel):
 # === News & Dividends Schemas ===
 
 
-class NewsItem(BaseModel):
+class NewsItem(StrictModel):
     """Company news item."""
 
     id: int
@@ -156,7 +158,7 @@ class NewsItem(BaseModel):
     price_change_pct: Optional[float] = None
 
 
-class NewsResponse(BaseModel):
+class NewsResponse(StrictModel):
     """Response for company news endpoint."""
 
     symbol: str
@@ -164,7 +166,7 @@ class NewsResponse(BaseModel):
     total_count: int
 
 
-class DividendItem(BaseModel):
+class DividendItem(StrictModel):
     """Dividend history item."""
 
     exercise_date: str
@@ -173,7 +175,7 @@ class DividendItem(BaseModel):
     method: str  # 'cash' or 'share'
 
 
-class DividendsResponse(BaseModel):
+class DividendsResponse(StrictModel):
     """Response for dividends endpoint."""
 
     symbol: str
@@ -184,7 +186,7 @@ class DividendsResponse(BaseModel):
 # === Advanced Deep Dive Schemas ===
 
 
-class RatioSummaryResponse(BaseModel):
+class RatioSummaryResponse(StrictModel):
     """Financial ratios summary for advanced tab."""
 
     symbol: str
@@ -198,7 +200,7 @@ class RatioSummaryResponse(BaseModel):
     debt_to_equity: Optional[float] = None
 
 
-class TradingStatsResponse(BaseModel):
+class TradingStatsResponse(StrictModel):
     """Trading statistics for advanced tab."""
 
     symbol: str

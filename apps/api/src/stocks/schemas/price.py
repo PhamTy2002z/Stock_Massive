@@ -6,15 +6,17 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from .common import StrictModel
 
-class PriceLevel(BaseModel):
+
+class PriceLevel(StrictModel):
     """Single price level for bid/ask."""
 
     price: float
     volume: int
 
 
-class PriceDepthResponse(BaseModel):
+class PriceDepthResponse(StrictModel):
     """Price depth with bid/ask levels."""
 
     symbol: str
@@ -40,7 +42,7 @@ class VolumeAnomalyLevel(str, Enum):
     VERY_HIGH = "very_high"  # >3x
 
 
-class StockPrice(BaseModel):
+class StockPrice(StrictModel):
     """Historical OHLCV price data."""
 
     time: date
@@ -51,7 +53,7 @@ class StockPrice(BaseModel):
     volume: int
 
 
-class IntradayTick(BaseModel):
+class IntradayTick(StrictModel):
     """Intraday tick data."""
 
     time: datetime
@@ -62,7 +64,7 @@ class IntradayTick(BaseModel):
     match_type: str
 
 
-class PriceBoardItem(BaseModel):
+class PriceBoardItem(StrictModel):
     """Price board data for a single stock."""
 
     symbol: str
@@ -84,7 +86,7 @@ class PriceBoardItem(BaseModel):
     change_pct: Optional[float] = None
 
 
-class MarketIndexItem(BaseModel):
+class MarketIndexItem(StrictModel):
     """Market index data (VN-INDEX, VN30, etc.)."""
 
     symbol: str
@@ -97,7 +99,7 @@ class MarketIndexItem(BaseModel):
 # === Intraday Bar Schemas ===
 
 
-class IntradayBarCreate(BaseModel):
+class IntradayBarCreate(StrictModel):
     """Schema for creating intraday bar records."""
 
     symbol: str
@@ -121,7 +123,7 @@ class IntradayBar(IntradayBarCreate):
         from_attributes = True
 
 
-class IntradayCollectionResult(BaseModel):
+class IntradayCollectionResult(StrictModel):
     """Result of intraday data collection operation."""
 
     success: list[str] = Field(default_factory=list)
@@ -132,7 +134,7 @@ class IntradayCollectionResult(BaseModel):
 # === Volume Analysis Schemas ===
 
 
-class VolumeTimePeriod(BaseModel):
+class VolumeTimePeriod(StrictModel):
     """Volume data for a specific time period within trading session."""
 
     hour: int
@@ -143,7 +145,7 @@ class VolumeTimePeriod(BaseModel):
     sample_count: int
 
 
-class VolumeAnalysisResponse(BaseModel):
+class VolumeAnalysisResponse(StrictModel):
     """Response for volume analysis endpoint."""
 
     symbol: str
@@ -156,7 +158,7 @@ class VolumeAnalysisResponse(BaseModel):
 # === Volume Anomaly Detection Schemas ===
 
 
-class VolumeTimeSlot(BaseModel):
+class VolumeTimeSlot(StrictModel):
     """Volume data for a single 5-minute time slot with anomaly detection."""
 
     hour: int
@@ -169,7 +171,7 @@ class VolumeTimeSlot(BaseModel):
     sample_count: int  # Number of days in baseline
 
 
-class VolumeAnomalyResponse(BaseModel):
+class VolumeAnomalyResponse(StrictModel):
     """Response for volume anomaly detection endpoint."""
 
     symbol: str
