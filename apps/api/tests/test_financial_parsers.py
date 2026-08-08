@@ -83,39 +83,62 @@ class TestDfToFinancialRatios:
 
 
 class TestDfToIncomeStatements:
-    def test_maps_camel_case_columns(self, service):
-        df = pd.DataFrame([{
-            "yearReport": 2025, "lengthReport": 2,
-            "revenue": 1_000.0, "costOfGoodSold": 600.0, "grossProfit": 400.0,
-            "operationProfit": 250.0, "preTaxProfit": 240.0, "postTaxProfit": 190.0,
-            "earningPerShare": 3200,
-        }])
+    """vnstock 4.x returns one row per line item, with periods as columns."""
 
-        item = service._df_to_income_statements(df, "quarter")[0]
+    def test_builds_one_item_per_quarter_column(self, service):
+        df = pd.DataFrame([
+            {"item": "Doanh thu thuần", "item_id": "net_sales", "2025-Q2": 1_000.0, "2025-Q1": 900.0},
+            {"item": "Lãi gộp", "item_id": "gross_profit", "2025-Q2": 400.0, "2025-Q1": 350.0},
+            {"item": "LN thuần HĐKD", "item_id": "operating_profit_loss", "2025-Q2": 250.0, "2025-Q1": 200.0},
+            {"item": "LNST", "item_id": "net_profit_loss_after_tax", "2025-Q2": 190.0, "2025-Q1": 150.0},
+            {"item": "EPS", "item_id": "eps_basic_vnd", "2025-Q2": 3200.0, "2025-Q1": 2800.0},
+        ])
 
-        assert (item.year, item.quarter) == (2025, 2)
-        assert item.revenue == 1_000.0
-        assert item.gross_profit == 400.0
-        assert item.operating_profit == 250.0
-        assert item.net_income == 190.0
-        assert item.eps == 3200.0
+        items = service._df_to_income_statements(df, "quarter")
 
-    def test_maps_display_name_columns(self, service):
-        df = pd.DataFrame([{"year": 2024, "Net Revenue": 900.0, "Net profit": 100.0}])
+        assert [(i.year, i.quarter) for i in items] == [(2025, 2), (2025, 1)]
+        first = items[0]
+        assert first.revenue == 1_000.0
+        assert first.gross_profit == 400.0
+        assert first.operating_profit == 250.0
+        assert first.net_income == 190.0
+        assert first.eps == 3200.0
+
+    def test_year_columns_leave_quarter_unset(self, service):
+        df = pd.DataFrame([
+            {"item": "Doanh thu thuần", "item_id": "net_sales", "2024": 900.0},
+            {"item": "LNST", "item_id": "net_profit_loss_after_tax", "2024": 100.0},
+        ])
 
         item = service._df_to_income_statements(df, "year")[0]
 
+        assert item.year == 2024
+        assert item.quarter is None
         assert item.revenue == 900.0
         assert item.net_income == 100.0
-        assert item.quarter is None
+
+    def test_unknown_item_ids_leave_fields_none(self, service):
+        df = pd.DataFrame([{"item": "Chỉ tiêu lạ", "item_id": "not_a_known_id", "2024": 5.0}])
+
+        item = service._df_to_income_statements(df, "year")[0]
+
+        assert item.year == 2024
+        assert item.revenue is None
+
+    def test_frame_without_period_columns_yields_no_items(self, service):
+        df = pd.DataFrame([{"item": "Doanh thu thuần", "item_id": "net_sales"}])
+
+        assert service._df_to_income_statements(df, "year") == []
 
 
 class TestDfToBalanceSheets:
-    def test_maps_camel_case_columns(self, service):
-        df = pd.DataFrame([{
-            "yearReport": 2025, "lengthReport": 4,
-            "asset": 2_000.0, "debt": 1_200.0, "equity": 800.0, "cash": 150.0,
-        }])
+    def test_maps_item_ids_to_balance_fields(self, service):
+        df = pd.DataFrame([
+            {"item": "Tổng tài sản", "item_id": "total_assets", "2025-Q4": 2_000.0},
+            {"item": "Nợ phải trả", "item_id": "liabilities", "2025-Q4": 1_200.0},
+            {"item": "Vốn chủ sở hữu", "item_id": "owners_equity", "2025-Q4": 800.0},
+            {"item": "Tiền", "item_id": "cash_and_cash_equivalents", "2025-Q4": 150.0},
+        ])
 
         item = service._df_to_balance_sheets(df, "quarter")[0]
 
@@ -127,21 +150,27 @@ class TestDfToBalanceSheets:
         # Balance sheet identity holds for the mapped fields
         assert item.total_assets == item.total_liabilities + item.total_equity
 
-    def test_maps_display_name_columns(self, service):
-        df = pd.DataFrame([{"year": 2024, "Total assets": 500.0, "Total equity": 200.0}])
+    def test_year_columns_leave_quarter_unset(self, service):
+        df = pd.DataFrame([
+            {"item": "Tổng tài sản", "item_id": "total_assets", "2024": 500.0},
+            {"item": "Vốn chủ sở hữu", "item_id": "owners_equity", "2024": 200.0},
+        ])
 
         item = service._df_to_balance_sheets(df, "year")[0]
 
+        assert item.quarter is None
         assert item.total_assets == 500.0
         assert item.total_equity == 200.0
 
 
 class TestDfToIncomeStatementResponse:
     def test_builds_quarter_labels_and_scales_to_millions(self, service):
-        df = pd.DataFrame([
-            {"Năm": 2025, "Kỳ": 2, "Doanh thu thuần": 5_000_000_000.0, "Lãi gộp": 2_000_000_000.0},
-            {"Năm": 2025, "Kỳ": 1, "Doanh thu thuần": 4_000_000_000.0, "Lãi gộp": 1_500_000_000.0},
-        ])
+        df = pd.DataFrame([{
+            "item": "Doanh thu thuần",
+            "item_id": "net_revenue",
+            "2025-Q2": 5_000_000_000.0,
+            "2025-Q1": 4_000_000_000.0,
+        }])
 
         response = service._df_to_income_statement_response(df, "VCB", "quarter", limit=4)
 
@@ -152,30 +181,46 @@ class TestDfToIncomeStatementResponse:
         assert net_revenue.values["Q1/2025"] == 4_000.0
 
     def test_year_period_labels_are_bare_years(self, service):
-        df = pd.DataFrame([{"Năm": 2025, "Doanh thu thuần": 1_000_000.0}])
+        df = pd.DataFrame([{"item": "Doanh thu thuần", "item_id": "net_revenue", "2025": 1_000_000.0}])
 
         response = service._df_to_income_statement_response(df, "VCB", "year", limit=4)
 
         assert response.periods == ["2025"]
 
     def test_limit_truncates_periods(self, service):
-        df = pd.DataFrame([{"Năm": y, "Doanh thu thuần": 1_000_000.0} for y in (2025, 2024, 2023)])
+        df = pd.DataFrame([{
+            "item": "Doanh thu thuần", "item_id": "net_revenue",
+            "2025": 1_000_000.0, "2024": 900_000.0, "2023": 800_000.0,
+        }])
 
         response = service._df_to_income_statement_response(df, "VCB", "year", limit=2)
 
         assert response.periods == ["2025", "2024"]
 
     def test_rows_with_no_data_are_dropped(self, service):
-        df = pd.DataFrame([{"Năm": 2025, "Doanh thu thuần": 1_000_000.0}])
+        df = pd.DataFrame([
+            {"item": "Doanh thu thuần", "item_id": "net_revenue", "2025": 1_000_000.0},
+            {"item": "Chỉ tiêu rỗng", "item_id": "empty_row", "2025": None},
+        ])
 
         response = service._df_to_income_statement_response(df, "VCB", "year", limit=4)
 
         assert {r.id for r in response.rows} == {"net_revenue"}
 
-    def test_falls_back_to_alternate_column_label(self, service):
-        df = pd.DataFrame([{"Năm": 2025, "Chi phí quản lý DN": 2_000_000.0}])
+    def test_repeated_item_ids_are_disambiguated(self, service):
+        df = pd.DataFrame([
+            {"item": "Đầu tư ngắn hạn", "item_id": "short_term_investments", "2025": 1_000_000.0},
+            {"item": "Đầu tư ngắn hạn (chi tiết)", "item_id": "short_term_investments", "2025": 2_000_000.0},
+        ])
 
         response = service._df_to_income_statement_response(df, "VCB", "year", limit=4)
 
-        admin = next(r for r in response.rows if r.id == "admin_expense")
-        assert admin.values["2025"] == 2.0
+        assert [r.id for r in response.rows] == ["short_term_investments", "short_term_investments_2"]
+
+    def test_falls_back_to_item_en_when_vietnamese_label_missing(self, service):
+        df = pd.DataFrame([{"item": "", "item_en": "Net revenue", "item_id": "net_revenue", "2025": 2_000_000.0}])
+
+        response = service._df_to_income_statement_response(df, "VCB", "year", limit=4)
+
+        assert response.rows[0].label == "Net revenue"
+        assert response.rows[0].values["2025"] == 2.0
