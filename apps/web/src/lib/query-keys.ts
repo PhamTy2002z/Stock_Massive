@@ -56,6 +56,10 @@ export const queryKeys = {
   // Advanced Tab - Money Flow
   foreignTrading: (symbol: string, days: number) =>
     [...queryKeys.stock(symbol), "foreignTrading", days] as const,
+  foreignSnapshot: (symbol: string) =>
+    [...queryKeys.stock(symbol), "foreignSnapshot"] as const,
+  intradayOrderStats: (symbol: string) =>
+    [...queryKeys.stock(symbol), "intradayOrderStats"] as const,
   propTrading: (symbol: string, days: number) =>
     [...queryKeys.stock(symbol), "propTrading", days] as const,
 
@@ -78,5 +82,8 @@ export const queryKeys = {
   // Sector Historical Performance
   sectorHistoricalPerformance: (period: SectorHistoricalPeriod) =>
     ["analytics", "sectorHistorical", period] as const,
+
+  // Background jobs (global, not symbol-scoped)
+  jobsStatus: ["jobs", "status"] as const,
 
 } as const

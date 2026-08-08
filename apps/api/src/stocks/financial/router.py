@@ -18,7 +18,6 @@ from ..schemas.financial import (
     TrendMetricsResponse,
     FCFAnalysisResponse,
 )
-from ..shared import StockServiceError
 
 router = APIRouter()
 
@@ -55,11 +54,8 @@ async def get_financial_ratios(
     if lang not in ("en", "vi"):
         raise HTTPException(status_code=400, detail="Invalid language. Use 'en' or 'vi'")
 
-    try:
-        service = get_stock_service()
-        return service.get_financial_ratios(symbol, period, lang)
-    except StockServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    service = get_stock_service()
+    return service.get_financial_ratios(symbol, period, lang)
 
 
 @router.get("/{symbol}/financials/income", response_model=List[IncomeStatementItem], dependencies=[Depends(heavy_rate_limit)])
@@ -72,11 +68,8 @@ async def get_income_statement(
     if period not in ("year", "quarter"):
         raise HTTPException(status_code=400, detail="Invalid period. Use 'year' or 'quarter'")
 
-    try:
-        service = get_stock_service()
-        return service.get_income_statement(symbol, period, lang)
-    except StockServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    service = get_stock_service()
+    return service.get_income_statement(symbol, period, lang)
 
 
 @router.get("/{symbol}/financials/income-statement", response_model=IncomeStatementResponse, dependencies=[Depends(heavy_rate_limit)])
@@ -89,11 +82,8 @@ async def get_income_statement_detailed(
     if period not in ("year", "quarter"):
         raise HTTPException(status_code=400, detail="Invalid period. Use 'year' or 'quarter'")
 
-    try:
-        service = get_stock_service()
-        return service.get_income_statement_detailed(symbol, period, limit)
-    except StockServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    service = get_stock_service()
+    return service.get_income_statement_detailed(symbol, period, limit)
 
 
 @router.get("/{symbol}/financials/balance-sheet", response_model=List[BalanceSheetItem], dependencies=[Depends(heavy_rate_limit)])
@@ -106,11 +96,8 @@ async def get_balance_sheet(
     if period not in ("year", "quarter"):
         raise HTTPException(status_code=400, detail="Invalid period. Use 'year' or 'quarter'")
 
-    try:
-        service = get_stock_service()
-        return service.get_balance_sheet(symbol, period, lang)
-    except StockServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    service = get_stock_service()
+    return service.get_balance_sheet(symbol, period, lang)
 
 
 @router.get("/{symbol}/financials/balance-sheet-detailed", response_model=BalanceSheetResponse, dependencies=[Depends(heavy_rate_limit)])
@@ -123,11 +110,8 @@ async def get_balance_sheet_detailed(
     if period not in ("year", "quarter"):
         raise HTTPException(status_code=400, detail="Invalid period. Use 'year' or 'quarter'")
 
-    try:
-        service = get_stock_service()
-        return service.get_balance_sheet_detailed(symbol, period, limit)
-    except StockServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    service = get_stock_service()
+    return service.get_balance_sheet_detailed(symbol, period, limit)
 
 
 @router.get("/{symbol}/financials/cash-flow", response_model=CashFlowResponse, dependencies=[Depends(heavy_rate_limit)])
@@ -140,11 +124,8 @@ async def get_cash_flow_detailed(
     if period not in ("year", "quarter"):
         raise HTTPException(status_code=400, detail="Invalid period. Use 'year' or 'quarter'")
 
-    try:
-        service = get_stock_service()
-        return service.get_cash_flow_detailed(symbol, period, limit)
-    except StockServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    service = get_stock_service()
+    return service.get_cash_flow_detailed(symbol, period, limit)
 
 
 # ==================== New Endpoints for Health Score & Trends ====================
@@ -172,16 +153,13 @@ async def get_health_score(symbol: str) -> HealthScoreResponse:
     if cached:
         return HealthScoreResponse(**cached)
 
-    try:
-        service = get_stock_service()
-        result = service.get_health_score(symbol)
+    service = get_stock_service()
+    result = service.get_health_score(symbol)
 
-        # Cache result
-        health_score_cache.set(symbol.upper(), result.model_dump(mode="json"))
+    # Cache result
+    health_score_cache.set(symbol.upper(), result.model_dump(mode="json"))
 
-        return result
-    except StockServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    return result
 
 
 @router.get(
@@ -206,16 +184,13 @@ async def get_trend_metrics(
     if cached:
         return TrendMetricsResponse(**cached)
 
-    try:
-        service = get_stock_service()
-        result = service.get_trend_metrics(symbol, periods)
+    service = get_stock_service()
+    result = service.get_trend_metrics(symbol, periods)
 
-        # Cache result
-        trend_metrics_cache.set(cache_key, result.model_dump(mode="json"))
+    # Cache result
+    trend_metrics_cache.set(cache_key, result.model_dump(mode="json"))
 
-        return result
-    except StockServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    return result
 
 
 @router.get(
@@ -237,13 +212,10 @@ async def get_fcf_analysis(symbol: str) -> FCFAnalysisResponse:
     if cached:
         return FCFAnalysisResponse(**cached)
 
-    try:
-        service = get_stock_service()
-        result = service.get_fcf_analysis(symbol)
+    service = get_stock_service()
+    result = service.get_fcf_analysis(symbol)
 
-        # Cache result
-        fcf_analysis_cache.set(symbol.upper(), result.model_dump(mode="json"))
+    # Cache result
+    fcf_analysis_cache.set(symbol.upper(), result.model_dump(mode="json"))
 
-        return result
-    except StockServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    return result

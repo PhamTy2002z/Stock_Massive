@@ -19,7 +19,6 @@ from src.stocks.schemas.analytics import (
 from src.stocks.schemas.financial import SectorPeersResponse
 from src.stocks.financial_statements_collector import FinancialStatementsCollector
 from src.stocks.service import get_stock_service
-from src.stocks.shared import StockServiceError
 from src.stocks.analytics.sector_historical_router import router as sector_historical_router
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -188,10 +187,6 @@ async def get_sector_peers(
     sorted by market capitalization, with key financial metrics
     and premium/discount vs sector median.
     """
-    try:
-        service = get_stock_service()
-        # Service handles caching internally via sector_peers_cache
-        return service.get_sector_peers(symbol, limit)
-    except StockServiceError as e:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=502, detail=str(e))
+    service = get_stock_service()
+    # Service handles caching internally via sector_peers_cache
+    return service.get_sector_peers(symbol, limit)

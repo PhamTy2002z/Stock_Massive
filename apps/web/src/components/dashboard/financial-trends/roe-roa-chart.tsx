@@ -12,6 +12,7 @@ import {
   ReferenceLine,
 } from "recharts"
 import type { TrendMetricsResponse } from "@/lib/api"
+import { CHART_GRID_PROPS, CHART_TOOLTIP_STYLE } from "@/lib/chart-theme"
 
 interface RoeRoaChartProps {
   data: TrendMetricsResponse
@@ -27,7 +28,7 @@ export function RoeRoaChart({ data }: RoeRoaChartProps) {
   return (
     <ResponsiveContainer width="100%" height={300}>
       <LineChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+        <CartesianGrid {...CHART_GRID_PROPS} />
         <XAxis
           dataKey="period"
           tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
@@ -37,11 +38,7 @@ export function RoeRoaChart({ data }: RoeRoaChartProps) {
           tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
         />
         <Tooltip
-          contentStyle={{
-            backgroundColor: "hsl(var(--card))",
-            border: "1px solid hsl(var(--border))",
-            borderRadius: "8px",
-          }}
+          contentStyle={CHART_TOOLTIP_STYLE}
           formatter={(value) => [`${(value as number)?.toFixed(1)}%`]}
         />
         <Legend />

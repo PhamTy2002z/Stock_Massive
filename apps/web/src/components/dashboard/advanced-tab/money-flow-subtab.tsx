@@ -5,15 +5,10 @@ import { ForeignFlowCharts } from "./widgets/foreign-flow-charts"
 import { RefreshCw, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { formatSessionDate } from "@/lib/format"
 
 interface MoneyFlowSubtabProps {
   symbol: string
-}
-
-function formatSessionDate(dateStr: string | undefined): string {
-  if (!dateStr) return ""
-  const date = new Date(dateStr)
-  return date.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" })
 }
 
 export default function MoneyFlowSubtab({ symbol }: MoneyFlowSubtabProps) {

@@ -11,6 +11,7 @@ import {
   ResponsiveContainer,
 } from "recharts"
 import type { TrendMetricsResponse } from "@/lib/api"
+import { CHART_GRID_PROPS, CHART_TOOLTIP_STYLE } from "@/lib/chart-theme"
 
 interface MarginTrendChartProps {
   data: TrendMetricsResponse
@@ -36,7 +37,7 @@ export function MarginTrendChart({ data }: MarginTrendChartProps) {
             <stop offset="95%" stopColor="hsl(var(--muted-foreground))" stopOpacity={0} />
           </linearGradient>
         </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+        <CartesianGrid {...CHART_GRID_PROPS} />
         <XAxis
           dataKey="period"
           tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
@@ -46,11 +47,7 @@ export function MarginTrendChart({ data }: MarginTrendChartProps) {
           tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
         />
         <Tooltip
-          contentStyle={{
-            backgroundColor: "hsl(var(--card))",
-            border: "1px solid hsl(var(--border))",
-            borderRadius: "8px",
-          }}
+          contentStyle={CHART_TOOLTIP_STYLE}
           formatter={(value, name) => [
             `${(value as number)?.toFixed(1)}%`,
             name === "gross_margin" ? "Biên LN gộp" : "Biên LN ròng",

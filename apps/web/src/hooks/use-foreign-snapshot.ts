@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query"
 import { fetchForeignSnapshot } from "@/lib/api"
+import { queryKeys } from "@/lib/query-keys"
 
 export function useForeignSnapshot(symbol: string) {
   return useQuery({
-    queryKey: ["foreignSnapshot", symbol],
+    queryKey: queryKeys.foreignSnapshot(symbol),
     queryFn: () => fetchForeignSnapshot(symbol),
     enabled: !!symbol,
     staleTime: 60_000, // 1 minute

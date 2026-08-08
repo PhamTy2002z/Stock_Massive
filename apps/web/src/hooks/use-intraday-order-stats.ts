@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query"
 import { fetchIntradayOrderStats } from "@/lib/api"
+import { queryKeys } from "@/lib/query-keys"
 
 export function useIntradayOrderStats(symbol: string) {
   return useQuery({
-    queryKey: ["intradayOrderStats", symbol],
+    queryKey: queryKeys.intradayOrderStats(symbol),
     queryFn: () => fetchIntradayOrderStats(symbol),
     enabled: !!symbol,
     staleTime: 60_000, // 1 minute - short for real-time data
