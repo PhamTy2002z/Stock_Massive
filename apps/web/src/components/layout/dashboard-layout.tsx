@@ -11,8 +11,10 @@ interface DashboardLayoutProps {
 }
 
 export function DashboardLayout({ children, onStockSelect }: DashboardLayoutProps) {
+  // Rail is the only desktop mode: there is no pin control, so the sidebar must
+  // not start pinned open.
   return (
-    <SidebarProvider>
+    <SidebarProvider defaultOpen={false}>
       <AppSidebar />
       <SidebarInset>
         <DashboardHeader onStockSelect={onStockSelect} />
