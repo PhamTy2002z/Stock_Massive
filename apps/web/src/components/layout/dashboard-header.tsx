@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { StockSearchBar } from "@/components/dashboard"
 import { StockSymbol } from "@/lib/api"
 import { NotificationPanel } from "./notification-panel"
+import { UserMenu } from "./user-menu"
 
 interface DashboardHeaderProps {
   onStockSelect?: (symbol: string) => void
@@ -44,7 +45,7 @@ export function DashboardHeader({ onStockSelect }: DashboardHeaderProps) {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 pr-3">
+      <div className="flex items-center gap-1 pr-2">
         {/* Mobile search button */}
         <Button variant="ghost" size="icon" className="md:hidden">
           <Search className="h-5 w-5" />
@@ -59,6 +60,12 @@ export function DashboardHeader({ onStockSelect }: DashboardHeaderProps) {
 
         {/* Notifications - Job Status Panel */}
         <NotificationPanel />
+
+        {/* Separates the account block from the icon actions, so the two lines
+            of user text read as their own group rather than a fourth button. */}
+        <div className="mx-1 h-6 w-px bg-sidebar-border" />
+
+        <UserMenu />
       </div>
     </header>
   )
