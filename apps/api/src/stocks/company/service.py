@@ -31,6 +31,16 @@ logger = logging.getLogger(__name__)
 INSIDER_TRADING_SOURCE = "KBS"
 
 
+def row_id(row: pd.Series, fallback: str) -> str:
+    """Stable row id: vnstock 4.x dropped the `id` column, so fall back to a
+    deterministic per-row value instead of returning "" for every row."""
+    raw = row.get("id")
+    if raw is None or (not isinstance(raw, str) and pd.isna(raw)):
+        return fallback
+    text = str(raw).strip()
+    return text if text and text.lower() != "nan" else fallback
+
+
 class CompanyService:
     """Service for company-related data: overview, shareholders, officers, insider deals."""
 
@@ -68,7 +78,7 @@ class CompanyService:
                 return ShareholdersResponse(symbol=symbol, shareholders=[], total_count=0)
 
             shareholders = []
-            for _, row in df.iterrows():
+            for i, (_, row) in enumerate(df.iterrows()):
                 try:
                     update_date = row.get("update_date")
                     if update_date is not None and pd.notna(update_date):
@@ -80,7 +90,7 @@ class CompanyService:
                         update_date = None
 
                     shareholders.append(ShareholderItem(
-                        id=str(row.get("id", "")),
+                        id=row_id(row, f"{symbol}-shareholder-{i}"),
                         name=str(row.get("share_holder", "")),
                         shares=float(row.get("quantity", 0)),
                         ownership_pct=float(row.get("share_own_percent", 0)) * 100,
@@ -118,7 +128,7 @@ class CompanyService:
                 return OfficersResponse(symbol=symbol, officers=[], total_count=0)
 
             officers = []
-            for _, row in df.iterrows():
+            for i, (_, row) in enumerate(df.iterrows()):
                 try:
                     update_date = row.get("update_date")
                     if update_date is not None and pd.notna(update_date):
@@ -130,7 +140,7 @@ class CompanyService:
                         update_date = None
 
                     officers.append(OfficerItem(
-                        id=str(row.get("id", "")),
+                        id=row_id(row, f"{symbol}-officer-{i}"),
                         name=str(row.get("officer_name", "")),
                         position=str(row.get("officer_position", "")),
                         position_short=row.get("position_short_name"),
@@ -173,7 +183,7 @@ class CompanyService:
                 return InsiderDealsResponse(symbol=symbol, deals=[], total_count=0)
 
             deals = []
-            for _, row in df.iterrows():
+            for i, (_, row) in enumerate(df.iterrows()):
                 try:
                     announce_date = row.get("deal_announce_date")
                     if announce_date is not None and pd.notna(announce_date):
@@ -185,7 +195,7 @@ class CompanyService:
                         announce_date = None
 
                     deals.append(InsiderDealItem(
-                        id=str(row.get("id", "")),
+                        id=row_id(row, f"{symbol}-deal-{i}"),
                         name=str(row.get("deal_owner_name", "")),
                         position=row.get("deal_position"),
                         deal_type=row.get("deal_action"),

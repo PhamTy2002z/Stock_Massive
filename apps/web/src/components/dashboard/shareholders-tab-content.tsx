@@ -112,9 +112,9 @@ export function ShareholdersTabContent({
               </tr>
             </thead>
             <tbody>
-              {currentData.map((shareholder) => (
+              {currentData.map((shareholder, index) => (
                 <tr
-                  key={shareholder.id}
+                  key={shareholder.id || `${shareholder.name}-${startIndex + index}`}
                   className="border-b border-border/30 transition-colors hover:bg-muted/20"
                 >
                   <td className="py-3 px-4 text-sm font-medium text-foreground">
