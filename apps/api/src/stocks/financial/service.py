@@ -1,6 +1,7 @@
 """Financial domain service for financial statements and ratios."""
 
 import logging
+from functools import lru_cache
 import statistics
 from typing import Optional
 
@@ -992,3 +993,9 @@ class FinancialService:
             "cfo": cfo,
             "net_cfo": cfo,
         }
+
+
+@lru_cache(maxsize=1)
+def get_financial_service(source: str = "VCI") -> FinancialService:
+    """Get or create financial service instance (thread-safe singleton)."""
+    return FinancialService(source=source)

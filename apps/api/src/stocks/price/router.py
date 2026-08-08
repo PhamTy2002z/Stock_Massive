@@ -12,7 +12,17 @@ from src.core.ratelimit import standard_rate_limit, heavy_rate_limit
 from src.stocks.intraday_collector import IntradayCollector
 from src.core.cache import TradingHoursCache
 from src.stocks.price.cache import volume_anomaly_cache
-from ..service import get_stock_service
+from .service import get_price_service
+from ..schemas.price import (
+    StockPrice,
+    IntradayTick,
+    PriceBoardItem,
+    MarketIndexItem,
+    IntradayCollectionResult,
+    VolumeAnalysisResponse,
+    VolumeAnomalyResponse,
+    PriceDepthResponse,
+)
 
 # Cache instances for endpoints
 market_indices_cache = TradingHoursCache(
@@ -29,16 +39,6 @@ price_depth_cache = TradingHoursCache(
     key_prefix="stock:price_depth:",
     ttl_trading=30,
     ttl_off_hours=300,
-)
-from ..schemas.price import (
-    StockPrice,
-    IntradayTick,
-    PriceBoardItem,
-    MarketIndexItem,
-    IntradayCollectionResult,
-    VolumeAnalysisResponse,
-    VolumeAnomalyResponse,
-    PriceDepthResponse,
 )
 
 router = APIRouter()
@@ -58,7 +58,7 @@ async def get_history(
     if start > end:
         raise HTTPException(status_code=400, detail="Start date must be before end date")
 
-    service = get_stock_service()
+    service = get_price_service()
     return service.get_history(symbol, start, end, interval)
 
 
@@ -68,7 +68,7 @@ async def get_intraday(
     page_size: int = Query(10000, ge=100, le=50000, description="Number of ticks to fetch"),
 ) -> List[IntradayTick]:
     """Get intraday tick data for a stock."""
-    service = get_stock_service()
+    service = get_price_service()
     return service.get_intraday(symbol, page_size)
 
 
@@ -83,7 +83,7 @@ async def get_market_indices() -> List[MarketIndexItem]:
         return [MarketIndexItem(**item) for item in cached]
 
     # Cache miss - fetch from service
-    service = get_stock_service()
+    service = get_price_service()
     result = service.get_market_indices()
 
     # Cache the result (serialize to dict)
@@ -114,7 +114,7 @@ async def get_price_board(
         return [PriceBoardItem(**item) for item in cached]
 
     # Cache miss - fetch from service
-    service = get_stock_service()
+    service = get_price_service()
     result = service.get_price_board(symbol_list)
 
     # Cache the result
@@ -219,7 +219,7 @@ async def get_price_depth(symbol: str) -> PriceDepthResponse:
     if cached is not None:
         return PriceDepthResponse(**cached)
 
-    service = get_stock_service()
+    service = get_price_service()
     result = service.get_price_depth(symbol)
 
     # Cache the result

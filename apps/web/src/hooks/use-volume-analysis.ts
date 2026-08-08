@@ -3,6 +3,7 @@
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { fetchVolumeAnomalies, type VolumeAnomalyResponse } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
+import { STALE_TIME } from "@/lib/query-config"
 
 /**
  * Hook for volume analysis - requires valid symbol.
@@ -13,7 +14,7 @@ export function useVolumeAnalysis(symbol: string, days: number = 20) {
     useSuspenseQuery<VolumeAnomalyResponse>({
       queryKey: queryKeys.volumeAnalysis(symbol, days),
       queryFn: () => fetchVolumeAnomalies(symbol, days),
-      staleTime: 5 * 60 * 1000, // 5 minutes
+      staleTime: STALE_TIME.STATIC,
     })
 
   // data is ALWAYS defined with useSuspenseQuery

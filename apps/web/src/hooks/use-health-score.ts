@@ -3,6 +3,7 @@
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { fetchHealthScore, type HealthScoreResponse } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
+import { STALE_TIME } from "@/lib/query-config"
 
 /**
  * Hook for health score - requires valid symbol.
@@ -13,7 +14,7 @@ export function useHealthScore(symbol: string) {
     useSuspenseQuery<HealthScoreResponse>({
       queryKey: queryKeys.healthScore(symbol),
       queryFn: () => fetchHealthScore(symbol),
-      staleTime: 5 * 60 * 1000, // 5 minutes
+      staleTime: STALE_TIME.STATIC,
     })
 
   // data is ALWAYS defined with useSuspenseQuery

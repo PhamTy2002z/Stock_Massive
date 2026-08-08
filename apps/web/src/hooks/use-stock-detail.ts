@@ -3,6 +3,7 @@
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { fetchStockDetail, type StockDetail } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
+import { STALE_TIME, REFETCH_INTERVAL } from "@/lib/query-config"
 
 /**
  * Hook for stock detail - requires valid symbol.
@@ -12,8 +13,8 @@ export function useStockDetail(symbol: string) {
   const { data, isFetching, refetch } = useSuspenseQuery<StockDetail>({
     queryKey: queryKeys.stockDetail(symbol),
     queryFn: () => fetchStockDetail(symbol),
-    staleTime: 15 * 1000,
-    refetchInterval: 15 * 1000,
+    staleTime: STALE_TIME.REALTIME,
+    refetchInterval: REFETCH_INTERVAL.REALTIME,
     refetchIntervalInBackground: false,
   })
 
