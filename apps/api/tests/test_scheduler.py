@@ -44,7 +44,10 @@ class TestCollectIntradayDataJob:
             result = await collect_intraday_data_job()
 
             assert len(result["success"]) == 0
-            assert "error" in result
+            # Same shape as the success path — the reason rides on each failed
+            # entry, not a top-level key IntradayCollectionResult cannot hold.
+            assert result["total_bars"] == 0
+            assert all("symbol" in f and "error" in f for f in result["failed"])
 
     @pytest.mark.asyncio
     async def test_collect_intraday_data_job_partial_failure(self):
