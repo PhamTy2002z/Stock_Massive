@@ -2,8 +2,11 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Install pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# Pin pnpm to the version that generated pnpm-lock.yaml. `pnpm@latest` now
+# resolves to pnpm 11, which needs a newer Node than this image ships and
+# crashes with ERR_UNKNOWN_BUILTIN_MODULE.
+ARG PNPM_VERSION=9.15.9
+RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
 
 # Copy package files
 COPY package.json pnpm-lock.yaml ./
