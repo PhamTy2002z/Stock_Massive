@@ -32,7 +32,6 @@ import {
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
-  SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -60,32 +59,6 @@ const navGroups: NavItem[][] = [
   ],
   [{ title: "Workspaces", url: "/workspaces", icon: LayoutGrid }],
 ]
-
-function SidebarBrand() {
-  return (
-    <SidebarMenu>
-      <SidebarMenuItem>
-        <SidebarMenuButton size="lg" tooltip="Stock Massive" asChild>
-          <Link href="/">
-            <div className="relative size-8 flex items-center justify-center shrink-0">
-              <img
-                src="/logo.png"
-                alt="Stock Massive"
-                className="size-10 object-contain"
-              />
-            </div>
-            <div className="grid flex-1 text-left text-sm leading-tight transition-[opacity,transform] duration-100 ease-sidebar group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:scale-95">
-              <span className="truncate font-bold text-base">Stock Massive</span>
-              <span className="truncate text-xs text-muted-foreground">
-                Analytics Platform
-              </span>
-            </div>
-          </Link>
-        </SidebarMenuButton>
-      </SidebarMenuItem>
-    </SidebarMenu>
-  )
-}
 
 function NavMain() {
   const pathname = usePathname()
@@ -240,12 +213,11 @@ function SidebarUserSection() {
 }
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+  // No SidebarHeader: the logo lives in the full-width bar above, so the rail
+  // opens straight onto navigation.
   return (
     <Sidebar collapsible="icon" {...props}>
-      <SidebarHeader>
-        <SidebarBrand />
-      </SidebarHeader>
-      <SidebarContent>
+      <SidebarContent className="pt-2">
         <NavMain />
       </SidebarContent>
       <SidebarFooter>

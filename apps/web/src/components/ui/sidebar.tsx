@@ -30,6 +30,9 @@ const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
 const SIDEBAR_WIDTH = "16rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
+// How far down the viewport the sidebar starts. Layouts that put a full-width
+// bar above the sidebar override --sidebar-top with its height.
+const SIDEBAR_TOP = "0rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
 // No delay either way: the panel tracks the cursor, and with the animation at
 // 100ms both directions land well under the 200ms budget. Neither path goes
@@ -267,6 +270,7 @@ const SidebarProvider = React.forwardRef<
               {
                 "--sidebar-width": SIDEBAR_WIDTH,
                 "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
+                "--sidebar-top": SIDEBAR_TOP,
                 ...style,
               } as React.CSSProperties
             }
@@ -402,7 +406,7 @@ const Sidebar = React.forwardRef<
         {/* This is what handles the sidebar gap on desktop */}
         <div
           className={cn(
-            "relative h-svh w-full bg-transparent",
+            "relative h-[calc(100svh-var(--sidebar-top))] w-full bg-transparent",
             "group-data-[side=right]:rotate-180"
           )}
         />
@@ -412,7 +416,7 @@ const Sidebar = React.forwardRef<
           onFocusCapture={handleFocusCapture}
           onBlurCapture={handleBlurCapture}
           className={cn(
-            "fixed inset-y-0 hidden h-svh md:flex flex-col",
+            "fixed bottom-0 top-[--sidebar-top] hidden md:flex flex-col",
             "transition-[left,right,width] duration-100 ease-sidebar will-change-[width,left,right]",
             "overflow-hidden",
             // Peek opens to the full sidebar width — same as pinned. Only the
@@ -521,7 +525,7 @@ const SidebarInset = React.forwardRef<
     <main
       ref={ref}
       className={cn(
-        "relative flex min-h-svh flex-1 flex-col bg-background overflow-hidden",
+        "relative flex min-h-[calc(100svh-var(--sidebar-top))] flex-1 flex-col bg-background overflow-hidden",
         // Inset variant specific styles
         "peer-data-[variant=inset]:min-h-[calc(100svh-theme(spacing.4))] md:peer-data-[variant=inset]:m-2 md:peer-data-[state=collapsed]:peer-data-[variant=inset]:ml-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow",
         className
