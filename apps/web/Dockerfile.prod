@@ -3,13 +3,19 @@
 # ========================================
 # Multi-stage build for optimized Next.js production image
 
+# Pin pnpm to the version that generated pnpm-lock.yaml. `pnpm@latest` now
+# resolves to pnpm 11, which needs a newer Node than these images ship and
+# crashes with ERR_UNKNOWN_BUILTIN_MODULE.
+ARG PNPM_VERSION=9.15.9
+
 # Stage 1: Dependencies
 FROM node:20-alpine AS deps
 
 WORKDIR /app
 
 # Install pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+ARG PNPM_VERSION
+RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
 
 # Copy package files
 COPY package.json pnpm-lock.yaml ./
@@ -23,7 +29,8 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Install pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+ARG PNPM_VERSION
+RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
 
 # Copy deps from previous stage
 COPY --from=deps /app/node_modules ./node_modules
