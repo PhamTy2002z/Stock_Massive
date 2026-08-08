@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { fetchPriceDepth, type PriceDepthResponse } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
+import { STALE_TIME, REFETCH_INTERVAL } from "@/lib/query-config"
 
 export function usePriceDepth(symbol: string | null) {
   return useQuery<PriceDepthResponse>({
@@ -12,8 +13,8 @@ export function usePriceDepth(symbol: string | null) {
       return fetchPriceDepth(symbol)
     },
     enabled: !!symbol,
-    staleTime: 30 * 1000, // 30 seconds - real-time
-    refetchInterval: 30 * 1000, // Auto-refresh every 30s
+    staleTime: STALE_TIME.FAST, // real-time
+    refetchInterval: REFETCH_INTERVAL.FAST,
     refetchIntervalInBackground: false, // Stop polling when tab inactive
     retry: 2,
   })

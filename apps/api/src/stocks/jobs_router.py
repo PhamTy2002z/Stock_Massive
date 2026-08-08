@@ -7,6 +7,7 @@ from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
 
 from src.core.job_status_store import job_store
+from src.stocks.schemas.common import MessageResponse
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -59,8 +60,8 @@ async def get_jobs_status() -> list[JobStatusResponse]:
     ]
 
 
-@router.post("/trigger/ohlcv")
-async def trigger_ohlcv_job(background_tasks: BackgroundTasks) -> dict:
+@router.post("/trigger/ohlcv", response_model=MessageResponse)
+async def trigger_ohlcv_job(background_tasks: BackgroundTasks) -> MessageResponse:
     """Manually trigger OHLCV collection job.
 
     Runs in background, returns immediately.
@@ -69,4 +70,4 @@ async def trigger_ohlcv_job(background_tasks: BackgroundTasks) -> dict:
     from src.core.scheduler import collect_daily_ohlcv_job_async
 
     background_tasks.add_task(collect_daily_ohlcv_job_async)
-    return {"message": "OHLCV job triggered", "status": "started"}
+    return MessageResponse(message="OHLCV job triggered", status="started")

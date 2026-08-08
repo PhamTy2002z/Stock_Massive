@@ -7,15 +7,10 @@ import { PriceDepthChart } from "./widgets/price-depth-chart"
 import { RefreshCw, Clock, Activity, BarChart3 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { formatSessionDate } from "@/lib/format"
 
 interface OrderFlowSubtabProps {
   symbol: string
-}
-
-function formatSessionDate(dateStr: string | undefined): string {
-  if (!dateStr) return ""
-  const date = new Date(dateStr)
-  return date.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" })
 }
 
 export default function OrderFlowSubtab({ symbol }: OrderFlowSubtabProps) {

@@ -1,7 +1,6 @@
 """Analytics domain service."""
 
 import logging
-import re
 import time
 from collections import defaultdict
 from datetime import date, timedelta
@@ -12,6 +11,8 @@ from sqlalchemy import select, func, desc, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from vnstock import Listing
 
+from src.core.cache import TradingHoursCache
+from src.stocks.financial_statements_collector import FinancialStatementsCollector
 from src.stocks.models import FinancialStatement, StockDailyOHLCV
 from src.stocks.schemas.analytics import (
     FinancialStatementItem,
@@ -22,6 +23,7 @@ from src.stocks.schemas.analytics import (
     VolumeSpikeResponse,
 )
 from src.stocks.schemas.price import VolumeAnomalyLevel
+from src.stocks.shared import StockServiceError, validate_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +47,42 @@ VOLUME_LOOKBACK_DAYS = 20
 VOLUME_BUFFER_DAYS = 30  # Extra days for weekends/holidays
 MIN_DATA_POINTS = VOLUME_LOOKBACK_DAYS + 1  # Current + 20 prior
 
-# Validation patterns
-SYMBOL_PATTERN = re.compile(r'^[A-Z0-9]{2,10}$')
+# Cache instance with trading-hours-aware TTL
+financial_statements_cache = TradingHoursCache(
+    key_prefix="stock:financial_statements:",
+    ttl_trading=3600,      # 1 hour during trading
+    ttl_off_hours=86400,   # 24 hours off-hours
+)
+
+# Volume spikes cache: 5min trading, 1hr off-hours
+volume_spikes_cache = TradingHoursCache(
+    key_prefix="stock:volume_spikes:",
+    ttl_trading=300,       # 5 min during trading
+    ttl_off_hours=3600,    # 1 hour off-hours
+)
+
+
+def build_financial_statements_cache_key(
+    limit: int,
+    exchange: Optional[str],
+    year: Optional[int],
+    quarter: Optional[int],
+) -> str:
+    """Build cache key for financial statements rankings."""
+    return f"{limit}:{exchange or 'all'}:{year or 'latest'}:{quarter or 'latest'}"
+
+
+def build_volume_spikes_cache_key(
+    target_date: Optional[date],
+    min_ratio: float,
+    exchange: Optional[str],
+    include_upcom: bool,
+    limit: int,
+    top_profitable_only: bool,
+) -> str:
+    """Build cache key for volume spikes detection."""
+    date_str = target_date.isoformat() if target_date else "latest"
+    return f"{date_str}:{min_ratio}:{exchange or 'all'}:{include_upcom}:{limit}:{top_profitable_only}"
 
 
 class AnalyticsService:
@@ -54,6 +90,16 @@ class AnalyticsService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    async def collect_financial_statements(self) -> dict:
+        """Run financial statements collection and invalidate cached rankings."""
+        collector = FinancialStatementsCollector(self.db)
+        result = await collector.collect()
+
+        # Clear cache after fresh collection
+        financial_statements_cache.clear_prefix()
+
+        return result
 
     async def get_financial_statements(
         self,
@@ -308,9 +354,10 @@ class AnalyticsService:
 
             mapping = {}
             for _, row in df.iterrows():
-                symbol = str(row.get("symbol", "")).upper()
                 # Validate symbol format to prevent XSS
-                if not symbol or not SYMBOL_PATTERN.match(symbol):
+                try:
+                    symbol = validate_symbol(str(row.get("symbol", "")))
+                except StockServiceError:
                     continue
 
                 # Sanitize and limit string lengths

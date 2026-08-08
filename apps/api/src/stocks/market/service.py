@@ -1,6 +1,7 @@
 """Market domain service for listings and market-wide data."""
 
 import logging
+from functools import lru_cache
 from typing import Optional
 
 import pandas as pd
@@ -413,3 +414,9 @@ class MarketService:
                 logger.warning(f"Skipping symbol row due to error: {e}")
                 continue
         return symbols
+
+
+@lru_cache(maxsize=1)
+def get_market_service(source: str = "VCI") -> MarketService:
+    """Get or create market service instance (thread-safe singleton)."""
+    return MarketService(source=source)
