@@ -3,6 +3,10 @@
 # ========================================
 # Usage: docker-compose -f docker-compose.prod.yml up -d
 
+# Pin the project name so image/network names stay stable no matter which
+# directory compose is invoked from.
+name: stockmassive
+
 services:
   api:
     build:
