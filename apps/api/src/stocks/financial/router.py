@@ -42,7 +42,7 @@ fcf_analysis_cache = TradingHoursCache(
 
 
 @router.get("/{symbol}/financials/ratios", response_model=List[FinancialRatio], dependencies=[Depends(heavy_rate_limit)])
-async def get_financial_ratios(
+def get_financial_ratios(
     symbol: str,
     period: str = Query("year", description="Period: year or quarter"),
     lang: str = Query("en", description="Language: en or vi"),
@@ -59,7 +59,7 @@ async def get_financial_ratios(
 
 
 @router.get("/{symbol}/financials/income", response_model=List[IncomeStatementItem], dependencies=[Depends(heavy_rate_limit)])
-async def get_income_statement(
+def get_income_statement(
     symbol: str,
     period: str = Query("year", description="Period: year or quarter"),
     lang: str = Query("en", description="Language: en or vi"),
@@ -73,7 +73,7 @@ async def get_income_statement(
 
 
 @router.get("/{symbol}/financials/income-statement", response_model=IncomeStatementResponse, dependencies=[Depends(heavy_rate_limit)])
-async def get_income_statement_detailed(
+def get_income_statement_detailed(
     symbol: str,
     period: str = Query("quarter", description="Period: year or quarter"),
     limit: int = Query(4, ge=1, le=12, description="Number of periods to return"),
@@ -87,7 +87,7 @@ async def get_income_statement_detailed(
 
 
 @router.get("/{symbol}/financials/balance-sheet", response_model=List[BalanceSheetItem], dependencies=[Depends(heavy_rate_limit)])
-async def get_balance_sheet(
+def get_balance_sheet(
     symbol: str,
     period: str = Query("year", description="Period: year or quarter"),
     lang: str = Query("en", description="Language: en or vi"),
@@ -101,7 +101,7 @@ async def get_balance_sheet(
 
 
 @router.get("/{symbol}/financials/balance-sheet-detailed", response_model=BalanceSheetResponse, dependencies=[Depends(heavy_rate_limit)])
-async def get_balance_sheet_detailed(
+def get_balance_sheet_detailed(
     symbol: str,
     period: str = Query("quarter", description="Period: year or quarter"),
     limit: int = Query(4, ge=1, le=12, description="Number of periods to return"),
@@ -115,7 +115,7 @@ async def get_balance_sheet_detailed(
 
 
 @router.get("/{symbol}/financials/cash-flow", response_model=CashFlowResponse, dependencies=[Depends(heavy_rate_limit)])
-async def get_cash_flow_detailed(
+def get_cash_flow_detailed(
     symbol: str,
     period: str = Query("quarter", description="Period: year or quarter"),
     limit: int = Query(4, ge=1, le=12, description="Number of periods to return"),
@@ -136,7 +136,7 @@ async def get_cash_flow_detailed(
     response_model=HealthScoreResponse,
     dependencies=[Depends(standard_rate_limit)],
 )
-async def get_health_score(symbol: str) -> HealthScoreResponse:
+def get_health_score(symbol: str) -> HealthScoreResponse:
     """Get financial health scorecard for a stock.
 
     Calculates a 0-100 health score based on 5 dimensions:
@@ -167,7 +167,7 @@ async def get_health_score(symbol: str) -> HealthScoreResponse:
     response_model=TrendMetricsResponse,
     dependencies=[Depends(standard_rate_limit)],
 )
-async def get_trend_metrics(
+def get_trend_metrics(
     symbol: str,
     periods: int = Query(8, ge=4, le=16, description="Number of quarters"),
 ) -> TrendMetricsResponse:
@@ -198,7 +198,7 @@ async def get_trend_metrics(
     response_model=FCFAnalysisResponse,
     dependencies=[Depends(standard_rate_limit)],
 )
-async def get_fcf_analysis(symbol: str) -> FCFAnalysisResponse:
+def get_fcf_analysis(symbol: str) -> FCFAnalysisResponse:
     """Get Free Cash Flow analysis for a stock.
 
     Returns:

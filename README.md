@@ -41,7 +41,7 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 ## Tech Stack
 
 - **Frontend**: Next.js 15.5.9, TypeScript 5.3.0, TailwindCSS 3.4, ShadCN/UI (Radix), TanStack Query 5.90, Recharts 3.6, Sonner
-- **Backend**: FastAPI, Python 3.11+, vnstock >= 3.0.0, SQLAlchemy 2.0, APScheduler 4.0, Pydantic 2, passlib[bcrypt], PyJWT
+- **Backend**: FastAPI, Python 3.11+, vnstock 4.x, SQLAlchemy 2.0, APScheduler 4.0, Pydantic 2, bcrypt, PyJWT
 - **Database**: PostgreSQL 16 (self-hosted via Docker; any Postgres works via `DATABASE_URL`)
 - **Caching**: Upstash Redis (trading-hours-aware TTL)
 - **DevOps**: Docker, Docker Compose, pnpm

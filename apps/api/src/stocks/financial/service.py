@@ -1,12 +1,14 @@
 """Financial domain service for financial statements and ratios."""
 
 import logging
+import re
 from functools import lru_cache
 import statistics
 from typing import Optional
 
 import pandas as pd
-from vnstock import Finance, Listing
+from src.core.vnstock_client import Finance, Listing
+from src.core.vnstock_client import VnstockUnavailable, VnstockUnsupported
 
 from ..schemas.financial import (
     FinancialRatio,
@@ -25,7 +27,13 @@ from ..schemas.financial import (
     SectorMedian,
     PeerMetrics,
 )
-from ..shared import StockServiceError, validate_symbol, safe_float
+from ..shared import (
+    safe_float_millions,
+    StockServiceError,
+    fetch_industry_mapping,
+    safe_float,
+    validate_symbol,
+)
 from .health_scoring import build_health_score_response
 from .cache import sector_peers_cache
 
@@ -55,6 +63,10 @@ class FinancialService:
                 return []
 
             return self._df_to_financial_ratios(df, period)
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching ratios for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch ratios for {symbol}: {e}")
@@ -75,6 +87,10 @@ class FinancialService:
                 return []
 
             return self._df_to_income_statements(df, period)
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching income statement for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch income statement for {symbol}: {e}")
@@ -95,6 +111,10 @@ class FinancialService:
                 return IncomeStatementResponse(symbol=symbol, periods=[], rows=[])
 
             return self._df_to_income_statement_response(df, symbol, period, limit)
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching detailed income statement for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch income statement for {symbol}: {e}")
@@ -115,6 +135,10 @@ class FinancialService:
                 return []
 
             return self._df_to_balance_sheets(df, period)
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching balance sheet for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch balance sheet for {symbol}: {e}")
@@ -135,6 +159,10 @@ class FinancialService:
                 return BalanceSheetResponse(symbol=symbol, periods=[], rows=[])
 
             return self._df_to_balance_sheet_response(df, symbol, period, limit)
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching detailed balance sheet for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch balance sheet for {symbol}: {e}")
@@ -155,6 +183,10 @@ class FinancialService:
                 return CashFlowResponse(symbol=symbol, periods=[], rows=[])
 
             return self._df_to_cash_flow_response(df, symbol, period, limit)
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching detailed cash flow for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch cash flow for {symbol}: {e}")
@@ -173,231 +205,163 @@ class FinancialService:
                     FinancialRatio(
                         year=int(year_report) if year_report else None,
                         quarter=int(length_report) if length_report and period == "quarter" else None,
+                        period_type=period,
+                        price_to_earning=safe_float(row.get("priceToEarning") or row.get("P/E")),
+                        price_to_book=safe_float(row.get("priceToBook") or row.get("P/B")),
                         roe=safe_float(row.get("roe") or row.get("ROE")),
                         roa=safe_float(row.get("roa") or row.get("ROA")),
-                        gross_margin=safe_float(row.get("grossProfitMargin") or row.get("Gross margin")),
-                        net_margin=safe_float(row.get("postTaxMargin") or row.get("Net margin")),
-                        pe=safe_float(row.get("priceToEarning") or row.get("P/E")),
-                        pb=safe_float(row.get("priceToBook") or row.get("P/B")),
-                        ps=safe_float(row.get("priceToSale") or row.get("P/S")),
+                        eps=safe_float(row.get("earningPerShare") or row.get("EPS")),
+                        book_value_per_share=safe_float(row.get("bookValuePerShare") or row.get("BVPS")),
+                        dividend_yield=safe_float(row.get("dividend") or row.get("Dividend yield")),
                         current_ratio=safe_float(row.get("currentPayment") or row.get("Current ratio")),
                         quick_ratio=safe_float(row.get("quickPayment") or row.get("Quick ratio")),
                         debt_to_equity=safe_float(row.get("debtOnEquity") or row.get("D/E")),
-                        debt_to_assets=safe_float(row.get("debtOnAsset") or row.get("D/A")),
+                        debt_to_asset=safe_float(row.get("debtOnAsset") or row.get("D/A")),
+                        gross_margin=safe_float(row.get("grossProfitMargin") or row.get("Gross margin")),
+                        operating_margin=safe_float(row.get("operatingProfitMargin") or row.get("Operating margin")),
+                        net_margin=safe_float(row.get("postTaxMargin") or row.get("Net margin")),
+                        beta=safe_float(row.get("beta") or row.get("Beta")),
                     )
                 )
+            except (VnstockUnavailable, VnstockUnsupported):
+                # Upstream quota/capability problems carry their own meaning;
+                # don't flatten them into a generic service error.
+                raise
             except Exception as e:
                 logger.warning(f"Skipping ratio row due to error: {e}")
                 continue
         return ratios
 
-    def _df_to_income_statements(self, df: pd.DataFrame, period: str) -> list[IncomeStatementItem]:
-        """Convert DataFrame to list of IncomeStatementItem."""
-        items = []
-        for row in df.to_dict("records"):
-            try:
-                year_report = row.get("yearReport") or row.get("year")
-                length_report = row.get("lengthReport") or row.get("quarter")
+    # --- vnstock 4.x statement layout ---
+    #
+    # 3.x returned one row per period with line items as columns; 4.x returns one
+    # row per line item (`item`, `item_en`, `item_id`) with periods as columns
+    # ("2026-Q2", "2025-Q4", ...). Every converter below reads that layout.
 
-                items.append(
-                    IncomeStatementItem(
-                        year=int(year_report) if year_report else None,
-                        quarter=int(length_report) if length_report and period == "quarter" else None,
-                        revenue=safe_float(row.get("revenue") or row.get("Net Revenue")),
-                        gross_profit=safe_float(row.get("grossProfit") or row.get("Gross profit")),
-                        operating_profit=safe_float(row.get("operationProfit") or row.get("Operating profit")),
-                        net_income=safe_float(row.get("postTaxProfit") or row.get("Net profit")),
-                        eps=safe_float(row.get("earningPerShare") or row.get("EPS")),
-                    )
-                )
-            except Exception as e:
-                logger.warning(f"Skipping income statement row due to error: {e}")
+    _PERIOD_COLUMN = re.compile(r"^(?P<year>\d{4})(?:-Q(?P<quarter>[1-4]))?$")
+    _META_COLUMNS = ("item", "item_en", "item_id")
+
+    # The two summary converters below used to read the 3.x column names, so
+    # they returned one object per *line item* with every field None — 25 rows
+    # of nulls that still answered 200, so nothing flagged them.
+
+    def _pivot_by_period(self, df: pd.DataFrame) -> list[tuple[str, Optional[int], Optional[int], dict]]:
+        """Regroup an item-per-row frame into one (column, year, quarter, {item_id: value}) per period."""
+        periods = []
+        for col in df.columns:
+            match = self._PERIOD_COLUMN.match(str(col))
+            if not match:
                 continue
+            year = int(match.group("year"))
+            quarter = int(match.group("quarter")) if match.group("quarter") else None
+            periods.append((col, year, quarter))
+
+        records = df.to_dict("records")
+        result = []
+        for col, year, quarter in periods:
+            values = {
+                str(record.get("item_id")): record.get(col)
+                for record in records
+                if record.get("item_id")
+            }
+            result.append((col, year, quarter, values))
+        return result
+
+    def _df_to_income_statements(self, df: pd.DataFrame, period: str) -> list[IncomeStatementItem]:
+        """Convert DataFrame to list of IncomeStatementItem, one per period."""
+        items = []
+        for _, year, quarter, values in self._pivot_by_period(df):
+            items.append(
+                IncomeStatementItem(
+                    year=year,
+                    quarter=quarter if period == "quarter" else None,
+                    period_type=period,
+                    revenue=safe_float(values.get("net_sales")),
+                    gross_profit=safe_float(values.get("gross_profit")),
+                    operating_profit=safe_float(values.get("operating_profit_loss")),
+                    net_income=safe_float(values.get("net_profit_loss_after_tax")),
+                    eps=safe_float(values.get("eps_basic_vnd")),
+                )
+            )
         return items
 
-    def _period_labels(self, df: pd.DataFrame, period: str) -> list[str]:
-        """Build period labels ("Q2/2025" or "2025") for statement tables.
+    def _df_to_balance_sheets(self, df: pd.DataFrame, period: str) -> list[BalanceSheetItem]:
+        """Convert DataFrame to list of BalanceSheetItem, one per period."""
+        items = []
+        for _, year, quarter, values in self._pivot_by_period(df):
+            items.append(
+                BalanceSheetItem(
+                    year=year,
+                    quarter=quarter if period == "quarter" else None,
+                    period_type=period,
+                    total_assets=safe_float(values.get("total_assets")),
+                    total_liabilities=safe_float(values.get("liabilities")),
+                    total_equity=safe_float(values.get("owners_equity")),
+                    cash=safe_float(values.get("cash_and_cash_equivalents")),
+                )
+            )
+        return items
 
-        iterrows() coerces an all-numeric row to float, so year/quarter are cast
-        back to int — otherwise labels render as "Q2/2025.0".
-        """
-        labels = []
-        for _, row in df.iterrows():
-            # Vietnamese columns first (lang="vi"), then English fallbacks
-            year = row.get("Năm") or row.get("yearReport") or row.get("year")
-            quarter = row.get("Kỳ") or row.get("lengthReport") or row.get("quarter")
-            try:
-                year_label = str(int(year))
-            except (TypeError, ValueError):
-                year_label = str(year)
-            if period == "quarter" and quarter:
-                labels.append(f"Q{int(quarter)}/{year_label}")
-            else:
-                labels.append(year_label)
-        return labels
+
+    def _period_columns(self, df: pd.DataFrame, limit: int) -> list[tuple[str, str]]:
+        """Return [(column, display label)] for the newest `limit` periods."""
+        found = []
+        for col in df.columns:
+            match = self._PERIOD_COLUMN.match(str(col))
+            if not match:
+                continue
+            year, quarter = match.group("year"), match.group("quarter")
+            found.append((col, f"Q{quarter}/{year}" if quarter else year))
+        return found[:limit]
+
+    def _statement_rows(self, df: pd.DataFrame, columns: list[tuple[str, str]]) -> list[dict]:
+        """Build one row dict per line item, values in millions of VND."""
+        rows = []
+        seen_ids: dict[str, int] = {}
+
+        for record in df.to_dict("records"):
+            label = str(record.get("item") or record.get("item_en") or "").strip()
+            if not label:
+                continue
+
+            # Balance sheets repeat some item_ids (e.g. short_term_investments
+            # appears at two depths), so disambiguate rather than collide.
+            base_id = str(record.get("item_id") or label)
+            seen_ids[base_id] = seen_ids.get(base_id, 0) + 1
+            row_id = base_id if seen_ids[base_id] == 1 else f"{base_id}_{seen_ids[base_id]}"
+
+            values: dict[str, Optional[float]] = {}
+            for col, period_label in columns:
+                values[period_label] = safe_float_millions(record.get(col))
+
+            if any(v is not None for v in values.values()):
+                rows.append({"id": row_id, "label": label, "values": values})
+
+        return rows
 
     def _df_to_income_statement_response(
         self, df: pd.DataFrame, symbol: str, period: str, limit: int
     ) -> IncomeStatementResponse:
         """Convert DataFrame to IncomeStatementResponse for detailed view."""
-        df = df.head(limit)
-
-        periods = self._period_labels(df, period)
-
-        # row_mappings: (id, label, column_names, level, is_summary)
-        # level: 0=root, 1=child, 2=sub-child
-        # column_names: vnstock Vietnamese column names (exact match required)
-        row_mappings = [
-            ("gross_revenue", "Doanh thu bán hàng và cung cấp dịch vụ", ["Doanh thu bán hàng và cung cấp dịch vụ"], 0, True),
-            ("revenue_deductions", "Các khoản giảm trừ doanh thu", ["Các khoản giảm trừ doanh thu"], 1, False),
-            ("net_revenue", "Doanh thu thuần", ["Doanh thu thuần"], 0, True),
-            ("cogs", "Giá vốn hàng bán", ["Giá vốn hàng bán"], 1, False),
-            ("gross_profit", "Lãi gộp", ["Lãi gộp"], 0, True),
-            ("selling_expense", "Chi phí bán hàng", ["Chi phí bán hàng"], 1, False),
-            ("admin_expense", "Chi phí quản lý doanh nghiệp", ["Chi phí quản lý DN", "Chi phí quản lý doanh nghiệp"], 1, False),
-            ("financial_income", "Thu nhập tài chính", ["Thu nhập tài chính"], 1, False),
-            ("financial_expense", "Chi phí tài chính", ["Chi phí tài chính"], 1, False),
-            ("interest_expense", "Chi phí tiền lãi vay", ["Chi phí tiền lãi vay"], 2, False),
-            ("operating_profit", "Lãi/Lỗ từ hoạt động kinh doanh", ["Lãi/Lỗ từ hoạt động kinh doanh"], 0, True),
-            ("other_income", "Thu nhập khác", ["Thu nhập khác"], 1, False),
-            ("other_expense", "Thu nhập/Chi phí khác", ["Thu nhập/Chi phí khác"], 1, False),
-            ("other_profit", "Lợi nhuận khác", ["Lợi nhuận khác"], 1, False),
-            ("pre_tax_profit", "Lợi nhuận trước thuế", ["LN trước thuế", "Lợi nhuận trước thuế"], 0, True),
-            ("tax_expense", "Chi phí thuế TNDN", ["Chi phí thuế TNDN hiện hành", "Chi phí thuế TNDN"], 1, False),
-            ("net_profit", "Lợi nhuận thuần", ["Lợi nhuận thuần"], 0, True),
-            ("parent_profit", "Cổ đông của Công ty mẹ", ["Cổ đông của Công ty mẹ"], 1, False),
-            ("minority_profit", "Cổ đông thiểu số", ["Cổ đông thiểu số"], 1, False),
-        ]
-
-        rows = []
-        for row_id, label, col_names, level, is_summary in row_mappings:
-            values = {}
-            for i, period_label in enumerate(periods):
-                if i < len(df):
-                    row_data = df.iloc[i]
-                    val = None
-                    for col_name in col_names:
-                        if col_name in df.columns:
-                            val = row_data.get(col_name)
-                            if val is not None and not pd.isna(val):
-                                break
-                    if val is not None and not pd.isna(val):
-                        values[period_label] = float(val) / 1_000_000
-                    else:
-                        values[period_label] = None
-                else:
-                    values[period_label] = None
-
-            if any(v is not None for v in values.values()):
-                rows.append(IncomeStatementRow(
-                    id=row_id,
-                    label=label,
-                    values=values,
-                    level=level,
-                    is_header=level == 0 and is_summary,
-                    is_summary=is_summary,
-                ))
-
+        columns = self._period_columns(df, limit)
+        rows = self._statement_rows(df, columns)
         return IncomeStatementResponse(
             symbol=symbol,
-            periods=periods,
-            rows=rows,
+            periods=[label for _, label in columns],
+            rows=[IncomeStatementRow(**row) for row in rows],
             unit="Triệu VND",
         )
-
-    def _df_to_balance_sheets(self, df: pd.DataFrame, period: str) -> list[BalanceSheetItem]:
-        """Convert DataFrame to list of BalanceSheetItem."""
-        items = []
-        for row in df.to_dict("records"):
-            try:
-                year_report = row.get("yearReport") or row.get("year")
-                length_report = row.get("lengthReport") or row.get("quarter")
-
-                items.append(
-                    BalanceSheetItem(
-                        year=int(year_report) if year_report else None,
-                        quarter=int(length_report) if length_report and period == "quarter" else None,
-                        total_assets=safe_float(row.get("asset") or row.get("Total assets")),
-                        total_liabilities=safe_float(row.get("debt") or row.get("Total liabilities")),
-                        total_equity=safe_float(row.get("equity") or row.get("Total equity")),
-                        cash=safe_float(row.get("cash") or row.get("Cash and cash equivalents")),
-                    )
-                )
-            except Exception as e:
-                logger.warning(f"Skipping balance sheet row due to error: {e}")
-                continue
-        return items
 
     def _df_to_balance_sheet_response(
         self, df: pd.DataFrame, symbol: str, period: str, limit: int
     ) -> BalanceSheetResponse:
         """Convert DataFrame to BalanceSheetResponse for detailed view."""
-        df = df.head(limit)
-
-        periods = self._period_labels(df, period)
-
-        # row_mappings: (id, label, column_names, level, is_summary)
-        # column_names: vnstock Vietnamese column names (exact match required)
-        row_mappings = [
-            ("current_assets", "TÀI SẢN NGẮN HẠN", ["TÀI SẢN NGẮN HẠN (đồng)", "Tài sản ngắn hạn"], 0, True),
-            ("cash", "Tiền và tương đương tiền", ["Tiền và tương đương tiền (đồng)", "Tiền và các khoản tương đương tiền"], 1, False),
-            ("short_invest", "Giá trị thuần đầu tư ngắn hạn", ["Giá trị thuần đầu tư ngắn hạn (đồng)", "Đầu tư tài chính ngắn hạn"], 1, False),
-            ("receivables", "Các khoản phải thu ngắn hạn", ["Các khoản phải thu ngắn hạn (đồng)"], 1, False),
-            ("inventory", "Hàng tồn kho ròng", ["Hàng tồn kho ròng", "Hàng tồn kho, ròng (đồng)"], 1, False),
-            ("other_current", "Tài sản lưu động khác", ["Tài sản lưu động khác", "Tài sản lưu động khác (đồng)"], 1, False),
-            ("long_assets", "TÀI SẢN DÀI HẠN", ["TÀI SẢN DÀI HẠN (đồng)", "Tài sản dài hạn"], 0, True),
-            ("long_receivables", "Phải thu về cho vay dài hạn", ["Phải thu về cho vay dài hạn (đồng)", "Phải thu dài hạn (đồng)"], 1, False),
-            ("fixed_assets", "Tài sản cố định", ["Tài sản cố định (đồng)"], 1, False),
-            ("invest_assets", "Giá trị ròng tài sản đầu tư", ["Giá trị ròng tài sản đầu tư"], 1, False),
-            ("long_invest", "Đầu tư dài hạn", ["Đầu tư dài hạn (đồng)"], 1, False),
-            ("goodwill", "Lợi thế thương mại", ["Lợi thế thương mại", "Lợi thế thương mại (đồng)"], 1, False),
-            ("other_long", "Tài sản dài hạn khác", ["Tài sản dài hạn khác", "Tài sản dài hạn khác (đồng)"], 1, False),
-            ("total_assets", "TỔNG CỘNG TÀI SẢN", ["TỔNG CỘNG TÀI SẢN (đồng)"], 0, True),
-            ("liabilities", "NỢ PHẢI TRẢ", ["NỢ PHẢI TRẢ (đồng)", "Nợ phải trả"], 0, True),
-            ("short_debt", "Nợ ngắn hạn", ["Nợ ngắn hạn (đồng)"], 1, False),
-            ("long_debt", "Nợ dài hạn", ["Nợ dài hạn (đồng)"], 1, False),
-            ("equity", "VỐN CHỦ SỞ HỮU", ["VỐN CHỦ SỞ HỮU (đồng)", "Vốn chủ sở hữu"], 0, True),
-            ("capital_fund", "Vốn và các quỹ", ["Vốn và các quỹ (đồng)"], 1, False),
-            ("owner_capital", "Vốn góp của chủ sở hữu", ["Vốn góp của chủ sở hữu (đồng)"], 1, False),
-            ("retained", "Lãi chưa phân phối", ["Lãi chưa phân phối (đồng)"], 1, False),
-            ("state_fund", "Vốn Ngân sách nhà nước và quỹ khác", ["Vốn Ngân sách nhà nước và quỹ khác"], 1, False),
-            ("minority", "LỢI ÍCH CỦA CỔ ĐÔNG THIỂU SỐ", ["LỢI ÍCH CỦA CỔ ĐÔNG THIỂU SỐ"], 0, True),
-            ("total_capital", "TỔNG CỘNG NGUỒN VỐN", ["TỔNG CỘNG NGUỒN VỐN (đồng)"], 0, True),
-        ]
-
-        rows = []
-        for row_id, label, col_names, level, is_summary in row_mappings:
-            values = {}
-            for i, period_label in enumerate(periods):
-                if i < len(df):
-                    row_data = df.iloc[i]
-                    val = None
-                    for col_name in col_names:
-                        if col_name in df.columns:
-                            val = row_data.get(col_name)
-                            if val is not None and not pd.isna(val):
-                                break
-                    if val is not None and not pd.isna(val):
-                        values[period_label] = float(val) / 1_000_000
-                    else:
-                        values[period_label] = None
-                else:
-                    values[period_label] = None
-
-            if any(v is not None for v in values.values()):
-                rows.append(BalanceSheetRow(
-                    id=row_id,
-                    label=label,
-                    values=values,
-                    level=level,
-                    is_header=level == 0 and is_summary,
-                    is_summary=is_summary,
-                ))
-
+        columns = self._period_columns(df, limit)
+        rows = self._statement_rows(df, columns)
         return BalanceSheetResponse(
             symbol=symbol,
-            periods=periods,
-            rows=rows,
+            periods=[label for _, label in columns],
+            rows=[BalanceSheetRow(**row) for row in rows],
             unit="Triệu VND",
         )
 
@@ -405,83 +369,15 @@ class FinancialService:
         self, df: pd.DataFrame, symbol: str, period: str, limit: int
     ) -> CashFlowResponse:
         """Convert DataFrame to CashFlowResponse for detailed view."""
-        df = df.head(limit)
-
-        periods = self._period_labels(df, period)
-
-        row_mappings = [
-            ("net_profit", "Lợi nhuận trước thuế", ["Lợi nhuận trước thuế"], 0, True),
-            ("depreciation", "Khấu hao TSCĐ", ["Khấu hao TSCĐ"], 1, False),
-            ("provisions", "Các khoản dự phòng", ["Các khoản dự phòng"], 1, False),
-            ("fx_gain_loss", "Lãi/lỗ chênh lệch tỷ giá", ["Lãi/lỗ chênh lệch tỷ giá hối đoái chưa thực hiện"], 1, False),
-            ("interest_income", "Lãi/lỗ từ hoạt động đầu tư", ["Lãi/lỗ từ hoạt động đầu tư"], 1, False),
-            ("interest_expense", "Chi phí lãi vay", ["Chi phí lãi vay"], 1, False),
-            ("receivables_change", "Tăng/giảm các khoản phải thu", ["Tăng/giảm các khoản phải thu"], 1, False),
-            ("inventory_change", "Tăng/giảm hàng tồn kho", ["Tăng/giảm hàng tồn kho"], 1, False),
-            ("payables_change", "Tăng/giảm các khoản phải trả", ["Tăng/giảm các khoản phải trả"], 1, False),
-            ("prepaid_change", "Tăng/giảm chi phí trả trước", ["Tăng/giảm chi phí trả trước"], 1, False),
-            ("interest_paid", "Tiền lãi vay đã trả", ["Tiền lãi vay đã trả"], 1, False),
-            ("tax_paid", "Tiền thu nhập doanh nghiệp đã trả", ["Tiền thu nhập doanh nghiệp đã trả"], 1, False),
-            ("other_cfo_in", "Tiền thu khác từ các hoạt động kinh doanh", ["Tiền thu khác từ các hoạt động kinh doanh"], 1, False),
-            ("other_cfo_out", "Tiền chi khác từ các hoạt động kinh doanh", ["Tiền chi khác từ các hoạt động kinh doanh"], 1, False),
-            ("net_cfo", "Lưu chuyển tiền tệ ròng từ các hoạt động SXKD", ["Lưu chuyển tiền tệ ròng từ các hoạt động SXKD"], 0, True),
-            ("capex", "Mua sắm TSCĐ", ["Mua sắm TSCĐ"], 1, False),
-            ("asset_sale", "Tiền thu được từ thanh lý tài sản cố định", ["Tiền thu được từ thanh lý tài sản cố định"], 1, False),
-            ("loan_collect", "Tiền thu hồi cho vay", ["Tiền thu hồi cho vay, bán lại các công cụ nợ của đơn vị khác (đồng)"], 1, False),
-            ("invest_other", "Đầu tư vào các doanh nghiệp khác", ["Đầu tư vào các doanh nghiệp khác"], 1, False),
-            ("invest_sale", "Tiền thu từ việc bán các khoản đầu tư", ["Tiền thu từ việc bán các khoản đầu tư vào doanh nghiệp khác"], 1, False),
-            ("dividend_received", "Tiền thu cổ tức và lợi nhuận được chia", ["Tiền thu cổ tức và lợi nhuận được chia"], 1, False),
-            ("net_cfi", "Lưu chuyển từ hoạt động đầu tư", ["Lưu chuyển từ hoạt động đầu tư"], 0, True),
-            ("equity_issue", "Tăng vốn cổ phần", ["Tăng vốn cổ phần từ góp vốn và/hoặc phát hành cổ phiếu"], 1, False),
-            ("equity_buyback", "Chi trả cho việc mua lại cổ phiếu", ["Chi trả cho việc mua lại, trả cổ phiếu"], 1, False),
-            ("borrow_receive", "Tiền thu được các khoản đi vay", ["Tiền thu được các khoản đi vay"], 1, False),
-            ("borrow_repay", "Tiền trả các khoản đi vay", ["Tiền trả các khoản đi vay"], 1, False),
-            ("lease_payment", "Tiền thanh toán vốn gốc đi thuê tài chính", ["Tiền thanh toán vốn gốc đi thuê tài chính"], 1, False),
-            ("dividend_paid", "Cổ tức đã trả", ["Cổ tức đã trả"], 1, False),
-            ("net_cff", "Lưu chuyển tiền từ hoạt động tài chính", ["Lưu chuyển tiền từ hoạt động tài chính"], 0, True),
-            ("net_change", "Lưu chuyển tiền thuần trong kỳ", ["Lưu chuyển tiền thuần trong kỳ"], 0, True),
-            ("cash_begin", "Tiền và tương đương tiền", ["Tiền và tương đương tiền"], 1, False),
-            ("fx_effect", "Ảnh hưởng của chênh lệch tỷ giá", ["Ảnh hưởng của chênh lệch tỷ giá"], 1, False),
-            ("cash_end", "Tiền và tương đương tiền cuối kỳ", ["Tiền và tương đương tiền cuối kỳ"], 0, True),
-        ]
-
-        rows = []
-        for row_id, label, col_names, level, is_summary in row_mappings:
-            values = {}
-            for i, period_label in enumerate(periods):
-                if i < len(df):
-                    row_data = df.iloc[i]
-                    val = None
-                    for col_name in col_names:
-                        if col_name in df.columns:
-                            val = row_data.get(col_name)
-                            if val is not None and not pd.isna(val):
-                                break
-                    if val is not None and not pd.isna(val):
-                        values[period_label] = float(val) / 1_000_000
-                    else:
-                        values[period_label] = None
-                else:
-                    values[period_label] = None
-
-            if any(v is not None for v in values.values()):
-                rows.append(CashFlowRow(
-                    id=row_id,
-                    label=label,
-                    values=values,
-                    level=level,
-                    is_header=level == 0 and is_summary,
-                    is_summary=is_summary,
-                ))
-
+        columns = self._period_columns(df, limit)
+        rows = self._statement_rows(df, columns)
         return CashFlowResponse(
             symbol=symbol,
-            periods=periods,
-            rows=rows,
+            periods=[label for _, label in columns],
+            rows=[CashFlowRow(**row) for row in rows],
             unit="Triệu VND",
         )
 
-    # ==================== New Methods for Health Score & Trends ====================
 
     def _flatten_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         """Flatten MultiIndex columns from vnstock API.
@@ -525,6 +421,10 @@ class FinancialService:
             # Take the most recent N periods
             df = df.head(periods)
             return df.to_dict("records")
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching ratio history for {symbol}: {e}")
             return []
@@ -554,6 +454,10 @@ class FinancialService:
             df = self._flatten_columns(df)
             df = df.head(periods)
             return df.to_dict("records")
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching income history for {symbol}: {e}")
             return []
@@ -583,6 +487,10 @@ class FinancialService:
             df = self._flatten_columns(df)
             df = df.head(periods)
             return df.to_dict("records")
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching cash flow history for {symbol}: {e}")
             return []
@@ -626,6 +534,10 @@ class FinancialService:
 
             return HealthScoreResponse(**result)
         except StockServiceError:
+            raise
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
             raise
         except Exception as e:
             logger.error(f"Error calculating health score for {symbol}: {e}")
@@ -695,6 +607,10 @@ class FinancialService:
                 cfi=cfi,
                 cff=cff,
             )
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error fetching trend metrics for {symbol}: {e}")
             raise StockServiceError(f"Failed to fetch trend metrics for {symbol}: {e}")
@@ -776,6 +692,10 @@ class FinancialService:
             )
         except StockServiceError:
             raise
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
+            raise
         except Exception as e:
             logger.error(f"Error calculating FCF analysis for {symbol}: {e}")
             raise StockServiceError(f"Failed to calculate FCF analysis for {symbol}: {e}")
@@ -803,37 +723,27 @@ class FinancialService:
             return SectorPeersResponse(**cached)
 
         try:
-            listing = Listing()
+            # vnstock 4.x exposes a single industry level (~25 sectors); the
+            # icb_code3 / icb_name3 columns this used to read no longer exist.
+            industry_map = fetch_industry_mapping(Listing())
 
-            # Get symbols with industry data (symbols_by_industries has ICB codes)
-            symbols_df = listing.symbols_by_industries()
-            if symbols_df is None or symbols_df.empty:
-                raise StockServiceError("Could not fetch symbol list")
-
-            # Find target stock's ICB code (column is 'symbol', not 'ticker')
-            target_row = symbols_df[symbols_df["symbol"] == symbol]
-            if target_row.empty:
+            target = industry_map.get(symbol)
+            if target is None:
                 raise StockServiceError(f"Symbol {symbol} not found")
 
-            # Column names: icb_code3, icb_name3
-            icb_code = str(target_row.iloc[0].get("icb_code3") or "")
-            icb_name = str(target_row.iloc[0].get("icb_name3") or "Unknown")
+            icb_code = target["icb_code"] or ""
+            icb_name = target["icb_name"] or "Unknown"
 
             if not icb_code:
                 raise StockServiceError(f"No ICB code found for {symbol}")
 
-            # Find peers in same sector
-            sector_stocks = symbols_df[symbols_df["icb_code3"] == icb_code].copy()
-
-            # Sort alphabetically since no market cap in this API
-            # Take top N including target
-            top_symbols = sector_stocks.head(limit + 5)["symbol"].tolist()
-            if symbol not in top_symbols:
-                top_symbols = [symbol] + top_symbols[:limit]
-            else:
-                # Ensure target is first
-                top_symbols.remove(symbol)
-                top_symbols = [symbol] + top_symbols[:limit]
+            # Peers in the same sector, alphabetical (this feed carries no market cap)
+            peers = sorted(
+                s
+                for s, info in industry_map.items()
+                if info["icb_code"] == icb_code and s != symbol
+            )
+            top_symbols = [symbol] + peers[:limit]
 
             # Get ratio data for each peer
             peers_data = []
@@ -842,12 +752,7 @@ class FinancialService:
                     ratio_history = self.get_ratio_history(peer_symbol, periods=1)
                     ratios = ratio_history[0] if ratio_history else {}
 
-                    peer_row = symbols_df[symbols_df["symbol"] == peer_symbol]
-                    company_name = (
-                        peer_row.iloc[0].get("organ_name")
-                        if not peer_row.empty
-                        else None
-                    )
+                    company_name = industry_map.get(peer_symbol, {}).get("company_name")
 
                     # Get market cap from ratio data
                     market_cap = safe_float(ratios.get("Market Capital (Bn. VND)"))
@@ -867,6 +772,10 @@ class FinancialService:
                             "market_cap": market_cap,
                         }
                     )
+                except (VnstockUnavailable, VnstockUnsupported):
+                    # Upstream quota/capability problems carry their own meaning;
+                    # don't flatten them into a generic service error.
+                    raise
                 except Exception as e:
                     logger.warning(f"Could not fetch data for peer {peer_symbol}: {e}")
                     continue
@@ -914,6 +823,10 @@ class FinancialService:
 
             return response
         except StockServiceError:
+            raise
+        except (VnstockUnavailable, VnstockUnsupported):
+            # Upstream quota/capability problems carry their own meaning;
+            # don't flatten them into a generic service error.
             raise
         except Exception as e:
             logger.error(f"Error fetching sector peers for {symbol}: {e}")

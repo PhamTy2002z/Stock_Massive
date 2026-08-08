@@ -19,10 +19,17 @@ export function useSectorHistoricalPerformance(
     refetchInterval: 10 * 60 * 1000, // 10 minutes
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
+    // One dashboard block among many. The API answers 503 with a reason while
+    // its nightly job has not produced this period yet; bubbling that to the
+    // page-level error boundary replaced the whole homepage section with a red
+    // error card. Handle it inline instead.
+    throwOnError: false,
+    retry: false,
   })
 
   return {
     data: query.data,
+    error: query.error,
     isPending: query.isPending,
     isFetching: query.isFetching,
     isPlaceholderData: query.isPlaceholderData,

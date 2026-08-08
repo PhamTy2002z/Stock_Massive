@@ -1,10 +1,10 @@
-FROM node:20-alpine
+FROM node:22-alpine
 
 WORKDIR /app
 
-# Pin pnpm to the version that generated pnpm-lock.yaml. `pnpm@latest` now
-# resolves to pnpm 11, which needs a newer Node than this image ships and
-# crashes with ERR_UNKNOWN_BUILTIN_MODULE.
+# Install pnpm
+# Pinned, not @latest: pnpm 10 ignores the pnpm.overrides block in
+# package.json and enforces a release-age policy the lockfile fails.
 ARG PNPM_VERSION=9.15.9
 RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
 

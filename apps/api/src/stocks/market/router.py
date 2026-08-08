@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from src.core.cache import TradingHoursCache
 from src.core.ratelimit import standard_rate_limit
 from .service import get_market_service
+from ..shared import StockServiceError
 from ..schemas.company import StockSymbol
 from ..schemas.market import (
     SectorPerformanceResponse,
@@ -34,47 +35,80 @@ vn30_overview_cache = TradingHoursCache(
 )
 
 
-@router.get("/symbols", response_model=List[StockSymbol], dependencies=[Depends(standard_rate_limit)])
-async def list_symbols(
-    exchange: Optional[str] = Query(None, description="Filter by exchange: HOSE, HNX, UPCOM"),
-) -> List[StockSymbol]:
-    """List all available stock symbols."""
+def _cached_symbols(exchange: Optional[str] = None) -> List[StockSymbol]:
+    """Symbol listing, served from cache when possible.
+
+    Shared with /symbols/search: the listing changes rarely, and searching used
+    to hit vnstock live on every keystroke — so the header search box hung
+    whenever upstream was slow.
+    """
     cache_key = exchange or "all"
 
-    # Check cache first
     cached = symbols_cache.get(cache_key)
     if cached is not None:
         return [StockSymbol(**item) for item in cached]
 
     # Cache miss - fetch from service
-    service = get_market_service()
-    result = service.list_symbols(exchange=exchange)
+    result = get_market_service().list_symbols(exchange=exchange)
 
-    # Cache the result
-    symbols_cache.set(cache_key, [item.model_dump() for item in result])
+    # Never cache an empty listing; an upstream failure would otherwise read
+    # as "this exchange has no symbols" until the TTL expires.
+    if result:
+        symbols_cache.set(cache_key, [item.model_dump() for item in result])
 
     return result
 
 
+@router.get("/symbols", response_model=List[StockSymbol], dependencies=[Depends(standard_rate_limit)])
+def list_symbols(
+    exchange: Optional[str] = Query(None, description="Filter by exchange: HOSE, HNX, UPCOM"),
+) -> List[StockSymbol]:
+    """List all available stock symbols."""
+    try:
+        return _cached_symbols(exchange)
+    except StockServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 @router.get("/symbols/group/{group}", response_model=List[str], dependencies=[Depends(standard_rate_limit)])
-async def list_symbols_by_group(group: str) -> List[str]:
+def list_symbols_by_group(group: str) -> List[str]:
     """List symbols by group (e.g., VN30, HNX30, VN100)."""
     service = get_market_service()
     return service.list_symbols_by_group(group)
 
 
 @router.get("/symbols/search", response_model=List[StockSymbol], dependencies=[Depends(standard_rate_limit)])
-async def search_symbols(
+def search_symbols(
     q: str = Query(..., min_length=1, description="Search query (symbol or company name)"),
     limit: int = Query(20, ge=1, le=50, description="Maximum results to return"),
 ) -> List[StockSymbol]:
     """Search stock symbols by ticker or company name."""
-    service = get_market_service()
-    return service.search_symbols(q, limit)
+    needle = q.strip().upper()
+    if not needle:
+        return []
+
+    try:
+        symbols = _cached_symbols()
+    except StockServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    # Ticker matches first — typing "VCB" should not rank companies whose name
+    # merely contains it above the ticker itself.
+    starts, contains = [], []
+    for item in symbols:
+        ticker = item.symbol.upper()
+        if ticker.startswith(needle):
+            starts.append(item)
+        elif needle in ticker or (item.organ_name and needle in item.organ_name.upper()):
+            contains.append(item)
+        if len(starts) >= limit:
+            break
+
+    return (starts + contains)[:limit]
 
 
 @router.get("/sector-performance", response_model=SectorPerformanceResponse, dependencies=[Depends(standard_rate_limit)])
-async def get_sector_performance() -> SectorPerformanceResponse:
+def get_sector_performance() -> SectorPerformanceResponse:
     """Get market-cap weighted sector performance (ICB Level 2)."""
     cache_key = "performance"
 
@@ -87,14 +121,16 @@ async def get_sector_performance() -> SectorPerformanceResponse:
     service = get_market_service()
     result = service.get_sector_performance()
 
-    # Cache the result
-    sector_performance_cache.set(cache_key, result.model_dump())
+    # Only cache a real answer. An upstream hiccup yields an empty list, and
+    # caching that pins a blank dashboard in place for the whole TTL.
+    if result.sectors:
+        sector_performance_cache.set(cache_key, result.model_dump())
 
     return result
 
 
 @router.get("/fund-certificates", response_model=FundCertificatesResponse, dependencies=[Depends(standard_rate_limit)])
-async def get_fund_certificates(
+def get_fund_certificates(
     fund_type: Optional[str] = Query(None, description="Filter by type: STOCK, BOND, BALANCED"),
 ) -> FundCertificatesResponse:
     """Get fund certificates (ETFs and open-end funds)."""
@@ -106,7 +142,7 @@ async def get_fund_certificates(
 
 
 @router.get("/vn30-overview", response_model=VN30OverviewResponse, dependencies=[Depends(standard_rate_limit)])
-async def get_vn30_overview() -> VN30OverviewResponse:
+def get_vn30_overview() -> VN30OverviewResponse:
     """Get VN30 index stocks with real-time price data."""
     cache_key = "overview"
 
@@ -119,7 +155,8 @@ async def get_vn30_overview() -> VN30OverviewResponse:
     service = get_market_service()
     result = service.get_vn30_overview()
 
-    # Cache the result
-    vn30_overview_cache.set(cache_key, result.model_dump())
+    # See sector-performance above: never cache an empty result.
+    if result.stocks:
+        vn30_overview_cache.set(cache_key, result.model_dump())
 
     return result

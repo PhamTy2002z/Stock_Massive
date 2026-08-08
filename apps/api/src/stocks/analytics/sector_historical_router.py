@@ -5,13 +5,14 @@ Data is pre-computed daily at 15:45 ICT and cached for 24h.
 """
 import asyncio
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.core.ratelimit import heavy_rate_limit, standard_rate_limit
 from src.stocks.analytics.sector_historical_service import (
     SectorHistoricalService,
     sector_historical_cache,
 )
+from src.auth.dependencies import require_admin
 from src.stocks.schemas.market import (
     SectorHistoricalItem,
     SectorHistoricalPeriod,
@@ -47,19 +48,24 @@ async def get_sector_historical_performance(
             generated_at=cached.get("generated_at"),
         )
 
-    # Cache miss - return empty (job hasn't run yet)
-    return SectorHistoricalResponse(
-        period=period,
-        top_gainers=[],
-        top_losers=[],
-        generated_at=None,
+    # Cache miss means the daily job has not produced this period yet. Returning
+    # an empty 200 made that indistinguishable from "no sector moved", which is
+    # why the homepage block sat on "Chưa có dữ liệu" with nothing to act on.
+    raise HTTPException(
+        status_code=503,
+        detail=(
+            f"Hiệu suất ngành kỳ {period} chưa được tính. "
+            "Dữ liệu do job nền tạo hàng ngày lúc 15:45 ICT; "
+            "quản trị viên có thể chạy sớm bằng POST /analytics/sector-historical/refresh."
+        ),
+        headers={"Retry-After": "3600"},
     )
 
 
 @router.post(
     "/sector-historical/refresh",
     response_model=dict,
-    dependencies=[Depends(heavy_rate_limit)],
+    dependencies=[Depends(heavy_rate_limit), Depends(require_admin)],
 )
 async def refresh_sector_historical() -> dict:
     """Manually trigger sector historical calculation.

@@ -7,14 +7,12 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import bcrypt
 import jwt
-from passlib.context import CryptContext
 
 from src.core.config import get_settings
 
 settings = get_settings()
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # bcrypt silently truncates at 72 bytes; reject longer input instead of
 # accepting a password whose tail is ignored at both signup and login.
@@ -26,13 +24,23 @@ class TokenError(Exception):
 
 
 def hash_password(password: str) -> str:
-    """Hash a plaintext password with bcrypt."""
-    return pwd_context.hash(password)
+    """Hash a plaintext password with bcrypt.
+
+    Calls bcrypt directly rather than through passlib: passlib's last release
+    was 2020 and it does not support bcrypt 5.x, so depending on it would pin
+    this project to an unmaintained pair of libraries.
+    """
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
 def verify_password(password: str, hashed_password: str) -> bool:
     """Check a plaintext password against its bcrypt hash."""
-    return pwd_context.verify(password, hashed_password)
+    try:
+        return bcrypt.checkpw(password.encode(), hashed_password.encode())
+    except ValueError:
+        # Malformed or non-bcrypt hash in the column — treat as a failed login
+        # rather than a 500.
+        return False
 
 
 def create_access_token(user_id: int) -> str:

@@ -12,6 +12,7 @@ from src.auth.router import router as auth_router
 from src.core.config import get_settings
 from src.core.database import engine
 from src.core.scheduler import setup_scheduler
+from src.core.vnstock_client import VnstockUnavailable, VnstockUnsupported
 from src.stocks.router import router as stocks_router
 from src.stocks.jobs_router import router as jobs_router
 from src.stocks.shared import StockServiceError
@@ -81,6 +82,25 @@ async def stock_service_error_handler(request: Request, exc: StockServiceError):
         status_code=502,
         content={"detail": str(exc)},
     )
+
+
+@app.exception_handler(VnstockUnavailable)
+async def vnstock_unavailable_handler(request: Request, exc: VnstockUnavailable):
+    """Upstream quota exhausted — a retryable condition, not a server fault."""
+    logger.warning(f"vnstock unavailable on {request.url.path}: {exc}")
+    return JSONResponse(
+        status_code=503,
+        content={"detail": str(exc)},
+        headers={"Retry-After": "60"},
+    )
+
+
+@app.exception_handler(VnstockUnsupported)
+async def vnstock_unsupported_handler(request: Request, exc: VnstockUnsupported):
+    """The provider has no such capability. Say so instead of returning empty."""
+    logger.info(f"vnstock unsupported on {request.url.path}: {exc}")
+    return JSONResponse(status_code=501, content={"detail": str(exc)})
+
 
 
 @app.exception_handler(Exception)

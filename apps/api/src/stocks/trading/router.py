@@ -52,7 +52,7 @@ foreign_snapshot_cache = TradingHoursCache(
     response_model=ForeignTradingResponse,
     dependencies=[Depends(standard_rate_limit)],
 )
-async def get_foreign_trading(
+def get_foreign_trading(
     symbol: str,
     days: int = Query(30, ge=1, le=365, description="Number of days to fetch"),
 ) -> ForeignTradingResponse:
@@ -76,7 +76,7 @@ async def get_foreign_trading(
     response_model=PropTradingResponse,
     dependencies=[Depends(standard_rate_limit)],
 )
-async def get_prop_trading(
+def get_prop_trading(
     symbol: str,
     days: int = Query(30, ge=1, le=365, description="Number of days to fetch"),
 ) -> PropTradingResponse:
@@ -100,7 +100,7 @@ async def get_prop_trading(
     response_model=OrderStatsResponse,
     dependencies=[Depends(standard_rate_limit)],
 )
-async def get_order_stats(
+def get_order_stats(
     symbol: str,
     days: int = Query(30, ge=1, le=365, description="Number of days to fetch"),
 ) -> OrderStatsResponse:
@@ -124,7 +124,7 @@ async def get_order_stats(
     response_model=IntradayOrderStatsResponse,
     dependencies=[Depends(standard_rate_limit)],
 )
-async def get_intraday_order_stats(symbol: str) -> IntradayOrderStatsResponse:
+def get_intraday_order_stats(symbol: str) -> IntradayOrderStatsResponse:
     """Get current-day order statistics from intraday tick data.
 
     Returns aggregated buy/sell order counts and volumes for today.
@@ -145,7 +145,7 @@ async def get_intraday_order_stats(symbol: str) -> IntradayOrderStatsResponse:
     response_model=ForeignSnapshotResponse,
     dependencies=[Depends(standard_rate_limit)],
 )
-async def get_foreign_snapshot(symbol: str) -> ForeignSnapshotResponse:
+def get_foreign_snapshot(symbol: str) -> ForeignSnapshotResponse:
     """Get current foreign investor snapshot.
 
     Returns foreign volume, ownership ratio, and remaining room.

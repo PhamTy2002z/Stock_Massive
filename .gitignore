@@ -50,5 +50,8 @@ apps/web/temp/
 # Codebase snapshots (regenerate with repomix, don't commit)
 repomix-output.xml
 
+# Dropped into apps/api by the vnstock package on install, not ours
+apps/api/AGENTS.md
+
 # Local scratch (venvs, throwaway scripts)
 .scratch/

@@ -55,7 +55,9 @@ export default function MoneyFlowSubtab({ symbol }: MoneyFlowSubtabProps) {
         <div className="flex items-center gap-3 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
           <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
           <p className="text-sm text-red-400">
-            Có lỗi khi tải dữ liệu. Vui lòng thử lại.
+            {foreign.error instanceof Error && foreign.error.message
+              ? foreign.error.message
+              : "Có lỗi khi tải dữ liệu. Vui lòng thử lại."}
           </p>
         </div>
       )}
