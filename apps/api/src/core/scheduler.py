@@ -30,10 +30,11 @@ async def collect_daily_ohlcv_job_async():
     return result
 
 
-def make_job_wrapper(job_name: str, job, done_msg: str, fail_msg: str):
+def make_job_wrapper(ref_name: str, job_name: str, job, done_msg: str, fail_msg: str):
     """Create an async job wrapper with standard trigger/success/failure logging.
 
     Args:
+        ref_name: Module-level name the result is bound to
         job_name: Display name used in the "SCHEDULED JOB TRIGGERED" log line
         job: Async callable to execute
         done_msg: Log message prefix on success
@@ -52,6 +53,11 @@ def make_job_wrapper(job_name: str, job, done_msg: str, fail_msg: str):
             logger.error(f"{fail_msg}: {e}", exc_info=True)
             raise
 
+    # APScheduler serialises a job as "module:qualname" and refuses any name
+    # containing "<locals>". Each wrapper is bound to a module-level name below,
+    # so point the reference at that name rather than at the closure.
+    wrapper.__name__ = ref_name
+    wrapper.__qualname__ = ref_name
     return wrapper
 
 
@@ -62,30 +68,35 @@ async def _run_sector_historical_job_async():
 
 
 collect_intraday_job_wrapper = make_job_wrapper(
+    "collect_intraday_job_wrapper",
     "Intraday Collection",
     collect_intraday_data_job,
     "Intraday collection completed",
     "Intraday collection failed",
 )
 cleanup_job_wrapper = make_job_wrapper(
+    "cleanup_job_wrapper",
     "Data Cleanup",
     cleanup_old_data_job,
     "Data cleanup completed",
     "Data cleanup failed",
 )
 ohlcv_job_wrapper = make_job_wrapper(
+    "ohlcv_job_wrapper",
     "Daily OHLCV Collection",
     collect_daily_ohlcv_job_async,
     "Daily OHLCV completed",
     "Daily OHLCV failed",
 )
 financial_statements_job_wrapper = make_job_wrapper(
+    "financial_statements_job_wrapper",
     "Financial Statements Collection",
     collect_financial_statements_job,
     "Financial statements collection completed",
     "Financial statements collection failed",
 )
 sector_historical_job_wrapper = make_job_wrapper(
+    "sector_historical_job_wrapper",
     "Sector Historical Performance",
     _run_sector_historical_job_async,
     "Sector historical complete",
