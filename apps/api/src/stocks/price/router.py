@@ -40,7 +40,6 @@ from ..schemas.price import (
     VolumeAnomalyResponse,
     PriceDepthResponse,
 )
-from ..shared import StockServiceError
 
 router = APIRouter()
 
@@ -59,11 +58,8 @@ async def get_history(
     if start > end:
         raise HTTPException(status_code=400, detail="Start date must be before end date")
 
-    try:
-        service = get_stock_service()
-        return service.get_history(symbol, start, end, interval)
-    except StockServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    service = get_stock_service()
+    return service.get_history(symbol, start, end, interval)
 
 
 @router.get("/{symbol}/intraday", response_model=List[IntradayTick], dependencies=[Depends(standard_rate_limit)])
@@ -72,11 +68,8 @@ async def get_intraday(
     page_size: int = Query(10000, ge=100, le=50000, description="Number of ticks to fetch"),
 ) -> List[IntradayTick]:
     """Get intraday tick data for a stock."""
-    try:
-        service = get_stock_service()
-        return service.get_intraday(symbol, page_size)
-    except StockServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    service = get_stock_service()
+    return service.get_intraday(symbol, page_size)
 
 
 @router.get("/market-indices", response_model=List[MarketIndexItem], dependencies=[Depends(standard_rate_limit)])
@@ -90,16 +83,13 @@ async def get_market_indices() -> List[MarketIndexItem]:
         return [MarketIndexItem(**item) for item in cached]
 
     # Cache miss - fetch from service
-    try:
-        service = get_stock_service()
-        result = service.get_market_indices()
+    service = get_stock_service()
+    result = service.get_market_indices()
 
-        # Cache the result (serialize to dict)
-        market_indices_cache.set(cache_key, [item.model_dump() for item in result])
+    # Cache the result (serialize to dict)
+    market_indices_cache.set(cache_key, [item.model_dump() for item in result])
 
-        return result
-    except StockServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    return result
 
 
 @router.get("/price-board", response_model=List[PriceBoardItem], dependencies=[Depends(standard_rate_limit)])
@@ -124,16 +114,13 @@ async def get_price_board(
         return [PriceBoardItem(**item) for item in cached]
 
     # Cache miss - fetch from service
-    try:
-        service = get_stock_service()
-        result = service.get_price_board(symbol_list)
+    service = get_stock_service()
+    result = service.get_price_board(symbol_list)
 
-        # Cache the result
-        price_board_cache.set(cache_key, [item.model_dump() for item in result])
+    # Cache the result
+    price_board_cache.set(cache_key, [item.model_dump() for item in result])
 
-        return result
-    except StockServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    return result
 
 
 @router.post("/intraday/collect", response_model=IntradayCollectionResult, dependencies=[Depends(heavy_rate_limit)])
@@ -232,13 +219,10 @@ async def get_price_depth(symbol: str) -> PriceDepthResponse:
     if cached is not None:
         return PriceDepthResponse(**cached)
 
-    try:
-        service = get_stock_service()
-        result = service.get_price_depth(symbol)
+    service = get_stock_service()
+    result = service.get_price_depth(symbol)
 
-        # Cache the result
-        price_depth_cache.set(cache_key, result.model_dump())
+    # Cache the result
+    price_depth_cache.set(cache_key, result.model_dump())
 
-        return result
-    except StockServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    return result

@@ -1,10 +1,9 @@
 """Trading domain router for money flow endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 
 from src.core.ratelimit import standard_rate_limit
 from src.core.cache import TradingHoursCache
-from ..shared import StockServiceError
 from .service import get_trading_service
 from .schemas import (
     ForeignTradingResponse,
@@ -66,13 +65,10 @@ async def get_foreign_trading(
     if cached:
         return ForeignTradingResponse(**cached)
 
-    try:
-        service = get_trading_service()
-        result = service.get_foreign_trading(symbol, days)
-        foreign_cache.set(cache_key, result.model_dump())
-        return result
-    except StockServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    service = get_trading_service()
+    result = service.get_foreign_trading(symbol, days)
+    foreign_cache.set(cache_key, result.model_dump())
+    return result
 
 
 @router.get(
@@ -93,13 +89,10 @@ async def get_prop_trading(
     if cached:
         return PropTradingResponse(**cached)
 
-    try:
-        service = get_trading_service()
-        result = service.get_prop_trading(symbol, days)
-        prop_cache.set(cache_key, result.model_dump())
-        return result
-    except StockServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    service = get_trading_service()
+    result = service.get_prop_trading(symbol, days)
+    prop_cache.set(cache_key, result.model_dump())
+    return result
 
 
 @router.get(
@@ -120,13 +113,10 @@ async def get_order_stats(
     if cached:
         return OrderStatsResponse(**cached)
 
-    try:
-        service = get_trading_service()
-        result = service.get_order_stats(symbol, days)
-        order_stats_cache.set(cache_key, result.model_dump())
-        return result
-    except StockServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    service = get_trading_service()
+    result = service.get_order_stats(symbol, days)
+    order_stats_cache.set(cache_key, result.model_dump())
+    return result
 
 
 @router.get(
@@ -144,13 +134,10 @@ async def get_intraday_order_stats(symbol: str) -> IntradayOrderStatsResponse:
     if cached:
         return IntradayOrderStatsResponse(**cached)
 
-    try:
-        service = get_trading_service()
-        result = service.get_intraday_order_stats(symbol)
-        intraday_order_stats_cache.set(symbol, result.model_dump())
-        return result
-    except StockServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    service = get_trading_service()
+    result = service.get_intraday_order_stats(symbol)
+    intraday_order_stats_cache.set(symbol, result.model_dump())
+    return result
 
 
 @router.get(
@@ -168,10 +155,7 @@ async def get_foreign_snapshot(symbol: str) -> ForeignSnapshotResponse:
     if cached:
         return ForeignSnapshotResponse(**cached)
 
-    try:
-        service = get_trading_service()
-        result = service.get_foreign_snapshot(symbol)
-        foreign_snapshot_cache.set(symbol, result.model_dump())
-        return result
-    except StockServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    service = get_trading_service()
+    result = service.get_foreign_snapshot(symbol)
+    foreign_snapshot_cache.set(symbol, result.model_dump())
+    return result

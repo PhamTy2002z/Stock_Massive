@@ -2,6 +2,7 @@
 
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, Radar, Tooltip } from "recharts"
 import type { HealthScoreDimension } from "@/lib/api"
+import { CHART_TOOLTIP_STYLE } from "@/lib/chart-theme"
 
 interface HealthRadarChartProps {
   dimensions: Record<string, HealthScoreDimension>
@@ -81,11 +82,7 @@ export function HealthRadarChart({ dimensions }: HealthRadarChartProps) {
           strokeWidth={2}
         />
         <Tooltip
-          contentStyle={{
-            backgroundColor: "hsl(var(--card))",
-            border: "1px solid hsl(var(--border))",
-            borderRadius: "8px",
-          }}
+          contentStyle={CHART_TOOLTIP_STYLE}
           formatter={(value) => [`${value}/100`, "Score"]}
         />
       </RadarChart>

@@ -1,7 +1,6 @@
 """Analytics domain service."""
 
 import logging
-import re
 import time
 from collections import defaultdict
 from datetime import date, timedelta
@@ -22,6 +21,7 @@ from src.stocks.schemas.analytics import (
     VolumeSpikeResponse,
 )
 from src.stocks.schemas.price import VolumeAnomalyLevel
+from src.stocks.shared import StockServiceError, validate_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -44,9 +44,6 @@ def normalize_exchange(exchange: str | None) -> str | None:
 VOLUME_LOOKBACK_DAYS = 20
 VOLUME_BUFFER_DAYS = 30  # Extra days for weekends/holidays
 MIN_DATA_POINTS = VOLUME_LOOKBACK_DAYS + 1  # Current + 20 prior
-
-# Validation patterns
-SYMBOL_PATTERN = re.compile(r'^[A-Z0-9]{2,10}$')
 
 
 class AnalyticsService:
@@ -308,9 +305,10 @@ class AnalyticsService:
 
             mapping = {}
             for _, row in df.iterrows():
-                symbol = str(row.get("symbol", "")).upper()
                 # Validate symbol format to prevent XSS
-                if not symbol or not SYMBOL_PATTERN.match(symbol):
+                try:
+                    symbol = validate_symbol(str(row.get("symbol", "")))
+                except StockServiceError:
                     continue
 
                 # Sanitize and limit string lengths

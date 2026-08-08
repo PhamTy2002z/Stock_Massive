@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
+import { formatPercent } from "@/lib/format"
 import {
   RefreshCw,
   ChevronDown,
@@ -75,11 +76,6 @@ function formatVolume(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
   if (value >= 1_000) return `${(value / 1_000).toFixed(0)}K`
   return value.toLocaleString("vi-VN")
-}
-
-function formatPercent(value: number | null): string {
-  if (value === null) return "-"
-  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`
 }
 
 function formatRatio(value: number): string {

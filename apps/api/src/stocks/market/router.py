@@ -13,7 +13,6 @@ from ..schemas.market import (
     FundCertificatesResponse,
     VN30OverviewResponse,
 )
-from ..shared import StockServiceError
 
 router = APIRouter()
 
@@ -48,26 +47,20 @@ async def list_symbols(
         return [StockSymbol(**item) for item in cached]
 
     # Cache miss - fetch from service
-    try:
-        service = get_stock_service()
-        result = service.list_symbols(exchange=exchange)
+    service = get_stock_service()
+    result = service.list_symbols(exchange=exchange)
 
-        # Cache the result
-        symbols_cache.set(cache_key, [item.model_dump() for item in result])
+    # Cache the result
+    symbols_cache.set(cache_key, [item.model_dump() for item in result])
 
-        return result
-    except StockServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    return result
 
 
 @router.get("/symbols/group/{group}", response_model=List[str], dependencies=[Depends(standard_rate_limit)])
 async def list_symbols_by_group(group: str) -> List[str]:
     """List symbols by group (e.g., VN30, HNX30, VN100)."""
-    try:
-        service = get_stock_service()
-        return service.list_symbols_by_group(group)
-    except StockServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    service = get_stock_service()
+    return service.list_symbols_by_group(group)
 
 
 @router.get("/symbols/search", response_model=List[StockSymbol], dependencies=[Depends(standard_rate_limit)])
@@ -76,11 +69,8 @@ async def search_symbols(
     limit: int = Query(20, ge=1, le=50, description="Maximum results to return"),
 ) -> List[StockSymbol]:
     """Search stock symbols by ticker or company name."""
-    try:
-        service = get_stock_service()
-        return service.search_symbols(q, limit)
-    except StockServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    service = get_stock_service()
+    return service.search_symbols(q, limit)
 
 
 @router.get("/sector-performance", response_model=SectorPerformanceResponse, dependencies=[Depends(standard_rate_limit)])
@@ -94,16 +84,13 @@ async def get_sector_performance() -> SectorPerformanceResponse:
         return SectorPerformanceResponse(**cached)
 
     # Cache miss - fetch from service
-    try:
-        service = get_stock_service()
-        result = service.get_sector_performance()
+    service = get_stock_service()
+    result = service.get_sector_performance()
 
-        # Cache the result
-        sector_performance_cache.set(cache_key, result.model_dump())
+    # Cache the result
+    sector_performance_cache.set(cache_key, result.model_dump())
 
-        return result
-    except StockServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    return result
 
 
 @router.get("/fund-certificates", response_model=FundCertificatesResponse, dependencies=[Depends(standard_rate_limit)])
@@ -114,11 +101,8 @@ async def get_fund_certificates(
     if fund_type and fund_type.upper() not in ("STOCK", "BOND", "BALANCED"):
         raise HTTPException(status_code=400, detail="Invalid fund_type. Use STOCK, BOND, or BALANCED")
 
-    try:
-        service = get_stock_service()
-        return service.get_fund_certificates(fund_type)
-    except StockServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    service = get_stock_service()
+    return service.get_fund_certificates(fund_type)
 
 
 @router.get("/vn30-overview", response_model=VN30OverviewResponse, dependencies=[Depends(standard_rate_limit)])
@@ -132,13 +116,10 @@ async def get_vn30_overview() -> VN30OverviewResponse:
         return VN30OverviewResponse(**cached)
 
     # Cache miss - fetch from service
-    try:
-        service = get_stock_service()
-        result = service.get_vn30_overview()
+    service = get_stock_service()
+    result = service.get_vn30_overview()
 
-        # Cache the result
-        vn30_overview_cache.set(cache_key, result.model_dump())
+    # Cache the result
+    vn30_overview_cache.set(cache_key, result.model_dump())
 
-        return result
-    except StockServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    return result

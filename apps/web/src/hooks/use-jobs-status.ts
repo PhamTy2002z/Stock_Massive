@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query"
 import { fetchJobsStatus, JobStatus } from "@/lib/api"
+import { queryKeys } from "@/lib/query-keys"
 
 export function useJobsStatus() {
   return useQuery({
-    queryKey: ["jobs-status"],
+    queryKey: queryKeys.jobsStatus,
     queryFn: fetchJobsStatus,
     refetchInterval: (query) => {
       // Poll every 10s if any job is running, 60s otherwise

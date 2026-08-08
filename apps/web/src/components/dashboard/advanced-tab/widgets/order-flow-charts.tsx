@@ -13,6 +13,7 @@ import {
 // Card/CardContent removed - using custom dark styled divs
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
+import { formatVolume } from "@/lib/format"
 import type { IntradayOrderStatsResponse } from "@/lib/api"
 import {
   TrendingUp,
@@ -51,12 +52,6 @@ const COLORS = {
 }
 
 function formatNumber(value: number): string {
-  return value.toLocaleString("vi-VN")
-}
-
-function formatVolume(value: number): string {
-  if (value >= 1000000) return `${(value / 1000000).toFixed(2)}M`
-  if (value >= 1000) return `${(value / 1000).toFixed(1)}K`
   return value.toLocaleString("vi-VN")
 }
 

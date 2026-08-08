@@ -3,6 +3,7 @@
 import { useState, useMemo, memo, useCallback } from "react"
 import { FinancialDetailSheet } from "./financial-detail-sheet"
 import { cn } from "@/lib/utils"
+import { formatPercent } from "@/lib/format"
 import {
   ChevronLeft,
   ChevronRight,
@@ -37,11 +38,6 @@ function formatProfit(value: number | null): string {
   if (value === null) return "-"
   const billions = value / 1_000_000_000
   return `${billions.toLocaleString("vi-VN", { maximumFractionDigits: 1 })} tỷ`
-}
-
-function formatPercent(value: number | null): string {
-  if (value === null) return "-"
-  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`
 }
 
 function formatEps(value: number | null): string {
