@@ -10,6 +10,7 @@ interface StockRangeCardsProps {
   low52Week: number | null
   high52Week: number | null
   volume: number | null
+  /** Million VND, the unit /detail reports it in. */
   tradingValue: number | null
   avgVolume52Week: number | null
   className?: string
@@ -30,9 +31,9 @@ function formatShares(value: number): string {
   return whole(value)
 }
 
-/** Trading value arrives in đồng; traders read it in tỷ. */
-function formatValue(value: number): string {
-  const billions = value / 1_000_000_000
+/** Trading value arrives in triệu đồng; traders read it in tỷ. */
+function formatValue(valueInMillions: number): string {
+  const billions = valueInMillions / 1_000
   if (billions >= 1_000) return `${decimal(billions / 1_000, 2)} nghìn tỷ`
   return `${whole(billions)} tỷ`
 }

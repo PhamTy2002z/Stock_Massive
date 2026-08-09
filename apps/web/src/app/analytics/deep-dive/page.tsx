@@ -35,17 +35,17 @@ async function prefetchData(symbol: string) {
 function DeepDiveSkeleton() {
   return (
     <div className="flex flex-col gap-6">
-      <section className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_280px] gap-4">
+      <div className="-mx-6 -mt-6 border-b border-border px-6 pt-5">
+        <StockTickerHeaderSkeleton />
+        <StockDetailTabsSkeleton className="mt-3.5" />
+      </div>
+      <section className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
         <div className="space-y-4">
-          <StockTickerHeaderSkeleton />
-          <StockDetailTabsSkeleton className="mt-2" />
           <StockPriceChartSkeleton />
           <StockRangeCardsSkeleton />
           <StockValuationVsSectorSkeleton />
         </div>
-        <div className="space-y-4">
-          <StockProfileSidebarSkeleton />
-        </div>
+        <StockProfileSidebarSkeleton />
       </section>
     </div>
   )

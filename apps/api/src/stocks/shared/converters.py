@@ -34,6 +34,19 @@ def safe_float_millions(value: Any) -> Optional[float]:
     return None if raw is None else raw / 1_000_000
 
 
+def quote_price_vnd(value: Any) -> Optional[float]:
+    """Convert a VCI quote price (thousands of VND) to plain VND.
+
+    The price board quotes plain VND (59700) while quote history and intraday
+    ticks quote thousands (59.7). Left as-is, the two disagree inside a single
+    response: the deep-dive chart drew its line against a reference price a
+    thousand times larger, and the 52-week range read as 52–78 next to a
+    current price of 59.700.
+    """
+    price = safe_float(value)
+    return None if price is None else price * 1_000
+
+
 def market_cap_billions(price_vnd: Any, shares: Any) -> Optional[float]:
     """Calculate market capitalization in billion VND.
 

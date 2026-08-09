@@ -16,7 +16,7 @@ from ..schemas.price import (
     PriceBoardItem,
     MarketIndexItem,
 )
-from ..shared import StockServiceError, validate_symbol, safe_float
+from ..shared import StockServiceError, validate_symbol, quote_price_vnd, safe_float
 
 logger = logging.getLogger(__name__)
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
@@ -184,10 +184,12 @@ class PriceService:
                 prices.append(
                     StockPrice(
                         time=time_str,
-                        open=safe_float(row.get("open")),
-                        high=safe_float(row.get("high")),
-                        low=safe_float(row.get("low")),
-                        close=safe_float(row.get("close")),
+                        # Quote history arrives in thousands of VND; the rest of
+                        # the API speaks plain VND.
+                        open=quote_price_vnd(row.get("open")),
+                        high=quote_price_vnd(row.get("high")),
+                        low=quote_price_vnd(row.get("low")),
+                        close=quote_price_vnd(row.get("close")),
                         volume=int(row.get("volume", 0)) if pd.notna(row.get("volume")) else None,
                     )
                 )
@@ -214,7 +216,7 @@ class PriceService:
                 ticks.append(
                     IntradayTick(
                         time=time_str,
-                        price=safe_float(row.get("price")),
+                        price=quote_price_vnd(row.get("price")),
                         volume=int(row.get("volume", 0)) if pd.notna(row.get("volume")) else None,
                         accumulated_vol=int(row.get("accumulated_vol", 0)) if pd.notna(row.get("accumulated_vol")) else None,
                         accumulated_val=int(row.get("accumulated_val", 0)) if pd.notna(row.get("accumulated_val")) else None,

@@ -144,9 +144,11 @@ export interface StockDetail {
 
   // Volume & Value
   volume: number | null
+  /** Million VND — every price field above is plain VND. */
   trading_value: number | null
 
   // Market Cap & Shares
+  /** Billion VND. */
   market_cap: number | null
   outstanding_shares: number | null
   issue_share: number | null
