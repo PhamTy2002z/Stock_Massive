@@ -3,14 +3,13 @@
 import { lazy, Suspense, useState } from "react"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
-import { TrendingUp, BarChart3, Coins, Building2 } from "lucide-react"
+import { TrendingUp, BarChart3, Building2 } from "lucide-react"
 
 const OrderFlowSubtab = lazy(() => import("./order-flow-subtab"))
 const TechnicalSubtab = lazy(() => import("./technical-subtab"))
-const MoneyFlowSubtab = lazy(() => import("./money-flow-subtab"))
 const SectorSubtab = lazy(() => import("./sector-subtab"))
 
-type AdvancedSubTabValue = "order-flow" | "technical" | "money-flow" | "sector"
+type AdvancedSubTabValue = "order-flow" | "technical" | "sector"
 
 interface AdvancedTabProps {
   symbol: string
@@ -28,12 +27,6 @@ const subTabs = [
     label: "Technical",
     icon: BarChart3,
     description: "Chỉ số kỹ thuật",
-  },
-  {
-    value: "money-flow" as const,
-    label: "Money Flow",
-    icon: Coins,
-    description: "Dòng tiền NĐTNN & Tự doanh",
   },
   {
     value: "sector" as const,
@@ -116,11 +109,6 @@ export function AdvancedTab({ symbol }: AdvancedTabProps) {
             <TechnicalSubtab symbol={symbol} />
           </Suspense>
         )}
-        {activeSubTab === "money-flow" && (
-          <Suspense fallback={<SubtabSkeleton />}>
-            <MoneyFlowSubtab symbol={symbol} />
-          </Suspense>
-        )}
         {activeSubTab === "sector" && (
           <Suspense fallback={<SubtabSkeleton />}>
             <SectorSubtab symbol={symbol} />
@@ -136,7 +124,7 @@ export function AdvancedTabSkeleton() {
     <div className="space-y-4">
       {/* Sub-tab Navigation Skeleton */}
       <div className="flex items-center gap-1 p-1 rounded-lg bg-muted/50 border border-border/50">
-        {[1, 2, 3, 4].map((i) => (
+        {[1, 2, 3].map((i) => (
           <Skeleton key={i} className="flex-1 h-9 rounded-md" />
         ))}
       </div>
