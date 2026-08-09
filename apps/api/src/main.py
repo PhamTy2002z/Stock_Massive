@@ -17,6 +17,7 @@ from src.core.vnstock_client import VnstockUnavailable, VnstockUnsupported
 from src.stocks.router import router as stocks_router
 from src.stocks.jobs_router import router as jobs_router
 from src.stocks.shared import StockServiceError
+from src.stocks.universe import get_universe
 
 # Configure logging at module level - ensures INFO logs are visible
 logging.basicConfig(
@@ -32,6 +33,12 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan - startup and shutdown."""
+    # Before anything else starts: a Universe that cannot be honoured is a
+    # configuration mistake, and the operator should meet it here rather than
+    # hours later inside a collector run nobody is watching.
+    universe = get_universe()
+    logger.info(f"Universe declares {len(universe)} symbols")
+
     if settings.scheduler_enabled:
         async with AsyncScheduler() as scheduler:
             await setup_scheduler(scheduler)
