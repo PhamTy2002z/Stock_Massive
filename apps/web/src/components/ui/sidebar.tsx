@@ -52,6 +52,7 @@ type SidebarContextProps = {
   openMobile: boolean
   setOpenMobile: (open: boolean) => void
   isMobile: boolean
+  canHover: boolean
   toggleSidebar: () => void
   schedulePeek: (next: boolean) => void
   startPeek: () => void
@@ -239,6 +240,7 @@ const SidebarProvider = React.forwardRef<
         open,
         setOpen,
         isMobile,
+        canHover,
         openMobile,
         setOpenMobile,
         toggleSidebar,
@@ -253,6 +255,7 @@ const SidebarProvider = React.forwardRef<
         open,
         setOpen,
         isMobile,
+        canHover,
         openMobile,
         setOpenMobile,
         toggleSidebar,
@@ -761,7 +764,7 @@ const SidebarMenuButton = React.forwardRef<
     ref
   ) => {
     const Comp = asChild ? Slot : "button"
-    const { isMobile, state } = useSidebar()
+    const { isMobile, state, mode, canHover } = useSidebar()
 
     const button = (
       <Comp
@@ -774,7 +777,13 @@ const SidebarMenuButton = React.forwardRef<
       />
     )
 
-    if (!tooltip) {
+    // On a hover-capable rail the same mouseenter that would open the tooltip
+    // also starts the peek. The tooltip wins the race by its zero delay, so it
+    // paints for the ~120ms before the panel opens and then disappears — read as
+    // a flash, not a label. The expanded panel shows the real text anyway.
+    const railPeeksOnHover = canHover && mode === "rail"
+
+    if (!tooltip || railPeeksOnHover) {
       return button
     }
 
