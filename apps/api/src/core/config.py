@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     # Vnstock
     vnstock_source: str = "VCI"  # Default data source (VCI is most reliable)
 
+    # FiinQuant — Main Source cho market và valuation, xem docs/adr/0002
+    fiinquant_username: str = ""
+    fiinquant_password: str = ""
+
     # Upstash Redis (supports both naming conventions)
     upstash_redis_url: str = ""
     upstash_redis_token: str = ""

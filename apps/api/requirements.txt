@@ -32,6 +32,9 @@ upstash-ratelimit>=1.0.0
 vnstock>=4.0.0,<5.0.0
 # FiinQuantX is distributed from the provider's signed GitHub release, not PyPI.
 fiinquantx @ https://github.com/fiinquant/fiinquantx/releases/download/0.1.67/fiinquantx-0.1.67-py3-none-any.whl#sha256=92d8f1dc44717e2d895176668a811c8f3940a4cd74de2da8738572ed626276eb
+# Imported directly: FiinQuantX hides SSL failures behind empty frames, so the
+# provider points SSL_CERT_FILE at this bundle before opening a session.
+certifi>=2024.2.2
 pandas>=2.0.0,<3.0.0
 numpy>=1.24.0,<3.0.0
 
