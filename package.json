@@ -3,18 +3,22 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "docker compose up --build",
-    "dev:detach": "docker compose up --build -d",
+    "dev": "docker compose up --build -d && pnpm dev:web",
+    "dev:api": "docker compose up --build",
+    "dev:api:detach": "docker compose up --build -d",
+    "dev:web": "pnpm --dir apps/web dev",
+    "dev:web:install": "pnpm --dir apps/web install",
+    "build:web": "pnpm --dir apps/web build",
+    "start:web": "pnpm --dir apps/web start",
+    "dev:full": "docker compose --profile full up --build",
     "stop": "docker compose down",
     "stop:clean": "docker compose down -v",
     "logs": "docker compose logs -f",
     "logs:api": "docker compose logs -f api",
-    "logs:web": "docker compose logs -f web",
     "logs:db": "docker compose logs -f db",
     "db:shell": "docker compose exec db psql -U postgres -d stockmassive",
     "db:migrate": "docker compose exec api alembic upgrade head",
     "db:restore": "docker compose exec -T db psql -U postgres -d stockmassive -v ON_ERROR_STOP=1 < data_export.sql",
-    "api:shell": "docker compose exec api bash",
-    "web:shell": "docker compose exec web sh"
+    "api:shell": "docker compose exec api bash"
   }
 }

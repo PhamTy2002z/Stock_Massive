@@ -1,7 +1,7 @@
 # Codebase Summary - Stock Massive
 
-Generated: 2026-01-03
-Total Files: 610+ analyzed | Frontend: 140+ TS/TSX | Backend: 53 Python + 4 migrations + 18 tests
+Generated: 2026-08-09
+Total Files: 610+ analyzed | Frontend: 140+ TS/TSX | Backend: 53 Python + 6 migrations + 26 tests
 Code Statistics: ~23,646 total lines of code | ~50 Python source files | ~100+ TypeScript source files
 
 ## 1. Project Overview and Purpose
@@ -12,7 +12,7 @@ Stock Massive is a Vietnamese stock market data platform powered by the `vnstock
 * Display Vietnamese stock data with interactive charts
 * Provide sortable/filterable data tables for stock screening
 * Enable portfolio tracking and watchlist management (planned)
-* Secure user authentication via Supabase (scaffolded)
+* Secure user authentication (self-hosted JWT + bcrypt, refresh-token rotation)
 * Integrate `vnstock` library for comprehensive Vietnam market data
 * Implement advanced analytical features (volume anomaly, volume spikes, financial statements, financial health)
 
@@ -23,7 +23,7 @@ Stock Massive is a Vietnamese stock market data platform powered by the `vnstock
 * **Language**: TypeScript 5.3.0
 * **Styling**: TailwindCSS 3.4 + ShadCN/UI (26 Radix-based components)
 * **Data Fetching**: TanStack Query v5.90.12 (5min staleTime, 10min gcTime)
-* **Auth**: Supabase 2.89.0 (Google OAuth scaffolded)
+* **Auth**: httpOnly cookie sessions against the app's own `/api/v1/auth` endpoints
 * **Charts**: Recharts 3.6.0 (sparklines, treemap, pie, composed, radar, waterfall)
 * **State**: useState (local), URL params (shared), next-themes (theme)
 * **Notifications**: Sonner
@@ -35,22 +35,24 @@ Stock Massive is a Vietnamese stock market data platform powered by the `vnstock
 **Backend:**
 * **Framework**: FastAPI 0.100+
 * **Language**: Python 3.11+
-* **ORM**: SQLAlchemy 2.0 + Alembic (4 migrations)
+* **ORM**: SQLAlchemy 2.0 + Alembic (6 migrations)
 * **Validation**: Pydantic 2.x
 * **Server**: Uvicorn
-* **Data Source**: vnstock >= 3.0.0 (VCI), Fmarket API
+* **Data Source**: vnstock 4.x (VCI), Fmarket API
 * **Scheduler**: APScheduler 4.0 (daily intraday collection, weekly financial statements)
 * **Cache/Rate Limit**: Upstash Redis (trading-hours-aware TTL)
 * **Analytics**: Pandas, Greenlet
-* **Tests**: 18 test files (coverage on critical paths, including advanced endpoints Phase 4)
+* **Auth**: bcrypt + PyJWT (self-hosted), refresh tokens hashed and rotated
+* **Tests**: 26 test files (coverage on critical paths, including advanced endpoints Phase 4)
 
 **Database:**
-* **Primary**: Supabase PostgreSQL (cloud-hosted with SSL, connection pooling)
-* **Connection**: DATABASE_URL (async via pooler), DATABASE_URL_DIRECT (sync direct)
+* **Primary**: PostgreSQL 16 — container `db` in dev, external/managed Postgres in prod
+* **Connection**: single `DATABASE_URL`; append `?sslmode=require` for managed hosts
 
 **DevOps:**
 * **Containerization**: Docker
-* **Orchestration (local)**: Docker Compose (dev + prod configs)
+* **Dev**: Docker Compose runs `db` + `api`; frontend runs on the host (`next dev`, port 3000)
+* **Prod**: Docker Compose runs `api` + `web`; `db` is opt-in via profile `db`
 * **Package Manager (Frontend)**: pnpm
 * **Package Manager (Backend)**: pip/uv
 
@@ -62,12 +64,12 @@ Stock Massive is a Vietnamese stock market data platform powered by the `vnstock
 ## 3. Directory Structure
 
 ```
-Stock_Massive/
+stock-massive/
 ├── apps/
-│   ├── web/                     # Next.js frontend (port 3000) - 140+ files
+│   ├── web/                     # Next.js frontend (port 3000, host in dev) - 140+ files
 │   │   └── src/
 │   │       ├── app/             # App Router (5 pages)
-│   │       │   ├── (auth)/login/       # Auth login page (scaffolded)
+│   │       │   ├── (auth)/login/       # Email/password login + register
 │   │       │   └── analytics/          # Analytics pages
 │   │       │       ├── deep-dive/      # Stock deep-dive analysis
 │   │       │       ├── volume-spikes/  # Volume spike dashboard
@@ -117,7 +119,7 @@ Stock_Massive/
 │           │       ├── router.py
 │           │       └── service.py
 │           ├── core/            # 9 core configuration files
-│           │   ├── config.py         # Pydantic settings with Supabase support
+│           │   ├── config.py         # Pydantic settings (env-driven)
 │           │   ├── database.py       # SQLAlchemy async engine (SSL auto-detection)
 │           │   ├── dependencies.py   # FastAPI dependencies
 │           │   ├── cache.py          # TradingHoursCache class
@@ -127,14 +129,16 @@ Stock_Massive/
 │           │   ├── vnstock_wrapper.py # Rate limit protection wrapper
 │           │   └── job_status_store.py  # Job progress tracking
 │           └── main.py
-│       ├── alembic/             # 4 database migrations (Supabase-aware)
-│       │   ├── env.py           # DATABASE_URL_DIRECT support
+│       ├── alembic/             # 6 database migrations
+│       │   ├── env.py           # Reads DATABASE_URL
 │       │   └── versions/
 │       │       ├── d945d0cac5ec_add_stock_daily_ohlcv_table.py
 │       │       ├── 60811b8fd9e3_create_stock_intraday_bars_table.py
 │       │       ├── 6948fc67_add_top_performers_table.py
-│       │       └── a1b2c3d4_rename_top_performers_to_financial_statements.py
-│       ├── tests/               # 18 test files
+│       │       ├── a1b2c3d4_rename_top_performers_to_financial_statements.py
+│       │       ├── 402fb4577ace_add_users_and_refresh_tokens_tables.py
+│       │       └── 0399ab15140e_add_is_admin_to_users.py
+│       ├── tests/               # 26 test files
 │       │   ├── test_advanced_endpoints.py     # 5 classes, 19 tests (Phase 4)
 │       │   ├── test_analytics_api.py
 │       │   ├── test_database_phase01.py
@@ -153,11 +157,8 @@ Stock_Massive/
 │       │   └── test_volume_anomaly_detection.py
 │       └── requirements.txt
 │
-├── packages/                    # Shared code (placeholders)
-│   ├── config/                  # Empty (.gitkeep)
-│   └── types/                   # Empty (.gitkeep)
-├── docker/                      # Docker configs (placeholder)
-├── docs/                        # 9 documentation files
+├── docker/                      # Placeholder (.gitkeep)
+├── docs/                        # Documentation
 │   ├── project-overview-pdr.md
 │   ├── code-standards.md
 │   ├── codebase-summary.md
@@ -172,8 +173,8 @@ Stock_Massive/
 ├── plans/                       # Project plans and reports
 │   ├── 251224-2358-deep-dive-improvements/
 │   └── archive/                 # 15+ completed plan folders
-├── docker-compose.yml           # Dev configuration
-├── docker-compose.prod.yml      # Prod configuration
+├── docker-compose.yml           # Dev: db + api (web behind profile `full`)
+├── docker-compose.prod.yml      # Prod: api + web (db behind profile `db`)
 └── README.md
 ```
 
@@ -202,19 +203,17 @@ Stock_Massive/
 * **Sector Historical Performance**: Period-based sector returns (1D, 1W, 1M, 3M, 6M, 1Y) with horizontal bar chart
 * **Fund Certificates**: 7-item display via Fmarket API
 * **Intraday Collection**: Scheduled daily (15:30 ICT) + cleanup (16:00 ICT)
-* **Daily OHLCV Collection**: Scheduled daily (17:00 ICT)
+* **Daily OHLCV Collection**: Scheduled daily (16:00 ICT)
 * **Financial Statements Job**: Weekly (Sun 02:00 ICT) for HOSE+HNX quarterly rankings
 * **Job Status API**: `/api/v1/jobs/status` for progress polling
 * **Startup Job Recovery**: Non-blocking missed job recovery on API startup
-* **Supabase Migration**: PostgreSQL migrated to Supabase cloud (SSL, pooling)
 * **Job Progress UI**: Progress bar + notification panel in frontend
-* **Auth Scaffold**: Login page UI with Supabase Google OAuth (logic pending)
+* **Authentication**: Self-hosted JWT + bcrypt, refresh-token rotation with reuse detection, httpOnly cookie sessions
 * **Redis Caching**: Trading-hours-aware cache for 7 high-traffic endpoints
 * **Rate Limiting**: Sliding window (100/60s standard, 20/60s heavy)
 * **API Documentation**: Auto-generated OpenAPI/Swagger UI
 
 **Planned (Roadmap):**
-* **Authentication**: Complete Supabase integration (JWT, protected routes)
 * **Stock Charts**: TradingView Lightweight Charts integration
 * **Watchlist/Portfolio**: CRUD operations, P&L tracking
 * **Technical Analysis**: SMA, EMA, RSI, MACD indicators
@@ -282,12 +281,12 @@ Stock_Massive/
   * `financial.py` - Income, balance sheet, cash flow
   * `market.py` - VN30Overview, sectors, fund certificates, SectorHistoricalItem, SectorHistoricalResponse
   * `price.py` - OHLCV, intraday, volume
-* `/src/core/config.py`: Pydantic settings with Supabase support
+* `/src/core/config.py`: Pydantic settings (all values env-driven)
 * `/src/core/database.py`: SQLAlchemy async engine with SSL auto-detection
 * `/src/core/cache.py`: TradingHoursCache class (trading-hours-aware TTL)
 * `/src/core/vnstock_wrapper.py`: Rate limit protection wrapper
 * `/src/core/job_status_store.py`: In-memory job progress tracking
-* `/alembic/env.py`: Alembic config with DATABASE_URL_DIRECT support
+* `/alembic/env.py`: Alembic config reading `DATABASE_URL` via app settings
 
 **Backend Tests (apps/api/tests/):**
 * `/test_advanced_endpoints.py`: Phase 4 integration tests (5 test classes, 19 tests)
@@ -300,31 +299,37 @@ Stock_Massive/
 ## 7. Development Setup
 
 **Prerequisites:**
-* Docker 20.10+
-* Docker Compose 2.0+
-* (Optional) Node.js 18+, Python 3.11+, pnpm
+* Docker 20.10+ and Docker Compose v2 (backend + database)
+* Node.js 20+ and pnpm 9+ (frontend, runs on the host)
 
-**Quick Start (Docker):**
+**Quick Start:**
 ```bash
 git clone <repo-url>
-cd Stock_Massive
+cd stock-massive
 
-# Copy and configure environment
-cp .env.example .env
-# Edit .env with Supabase DATABASE_URL
+# Configure environment
+cp .env.example .env                          # containers: db + api
+cp apps/web/.env.example apps/web/.env.local  # host: frontend
+# Set AUTH_SECRET in .env: openssl rand -base64 32
 
-# Start all services
-docker-compose up -d
+# 1. Backend + database in Docker (migrations run on api startup)
+docker compose up -d --build
 
-# Run migrations
-docker-compose exec api alembic upgrade head
+# 2. Frontend on the host
+pnpm dev:web:install   # first run only
+pnpm dev:web
 ```
 
-* Frontend: `http://localhost:3000`
-* Backend API: `http://localhost:8000`
+* Frontend: `http://localhost:3000` (host, `next dev`)
+* Backend API: `http://localhost:8000` (container `api`)
 * API Docs: `http://localhost:8000/docs`
 
-**Manual Setup (Local Development):**
+**Notes:**
+* The frontend is deliberately not containerised in dev — `next dev` on the host
+  gets native file watching. Opt in with `docker compose --profile full up` if needed.
+* `pnpm build:web` needs the API running: some analytics pages fetch during prerender.
+
+**Manual Setup (unsupported, outside Docker):**
 * **Frontend**: `cd apps/web && pnpm install && pnpm dev`
 * **Backend**: `cd apps/api && python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt && uvicorn src.main:app --reload`
 
@@ -385,7 +390,7 @@ alembic upgrade head
 1. APScheduler triggers at 15:30 ICT daily
 2. `IntradayCollector` fetches tick data for all HOSE/HNX symbols via vnstock
 3. Ticks aggregated to 5-minute OHLCV bars
-4. Bars upserted to Supabase PostgreSQL (`intraday_bars` table)
+4. Bars upserted to PostgreSQL (`stock_intraday_bars` table)
 5. Volume anomaly detection performed on collected data
 6. Data available via `/volume-anomalies` endpoint
 
@@ -401,7 +406,7 @@ alembic upgrade head
 * **Financial Health Enhancement Phase 2** (Dec 28, 2025): Health Scorecard UI: Radar chart, F-Score, score breakdown
 * **Financial Health Enhancement Phase 1** (Dec 28, 2025): Backend APIs: health-score, trend-metrics, fcf-analysis, sector-peers
 * **Advanced Endpoints Phase 4 Testing** (Dec 27): 19 integration tests covering price-depth, ratio-summary, trading-stats endpoints
-* **Supabase Migration** (Dec 24): Migrated from local PostgreSQL to Supabase cloud with SSL, connection pooling
+* **Supabase Migration** (Dec 24): Moved to Supabase cloud — since reverted; the app now uses a Docker `db` container in dev and any Postgres via `DATABASE_URL`
 * **Job Progress UI** (Dec 24): Added progress bar and notification panel in frontend
 * **Job Status API** (Dec 24): `/api/v1/jobs/status` for polling background job progress
 * **Startup Job Recovery** (Dec 24): Non-blocking missed job recovery on API startup
@@ -434,7 +439,7 @@ alembic upgrade head
 
 * **Frontend**: HTTPS, CSP headers, XSS protection
 * **API**: CORS configuration, input validation via Pydantic
-* **Database**: SSL connections (Supabase), parameterized queries
+* **Database**: SSL auto-detected for managed hosts, parameterized queries
 * **Infrastructure**: Docker network isolation
 * **Secrets**: Environment variables, no hardcoded credentials
 * **Rate Limiting**: Protects against abuse
