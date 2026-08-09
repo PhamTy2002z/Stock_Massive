@@ -14,16 +14,15 @@ fundamental pays two requests per symbol and paces itself to the allowance.
 from __future__ import annotations
 
 import logging
+import os
 import re
-import time
 from collections.abc import Callable, Sequence
 from datetime import date, datetime, timezone
-from time import monotonic
+from time import monotonic, sleep
 from typing import Any
 
 import pandas as pd
 from pydantic import ValidationError
-from zoneinfo import ZoneInfo
 
 from src.core.config import get_settings
 from src.core.vnstock_client import (
@@ -41,16 +40,27 @@ from .contracts import (
     ShareType,
     SnapshotMetadata,
 )
-from ..shared import validate_symbol
+from .normalize import (
+    VN_TZ,
+    lower_cased_columns,
+    missing_fields,
+    normalized_symbols,
+    optional_float,
+    optional_int,
+)
 
 logger = logging.getLogger(__name__)
 
-VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
-
-# Measured allowances, not documented ones: the free tier is cut off at 20
-# requests a minute and an API key lifts that to 60.
+# The allowances vnstock's own quota layer grants: its guest tier is cut off at
+# 20 requests a minute and an API key lifts that to 60.
 QUOTA_WITHOUT_API_KEY = 20
 QUOTA_WITH_API_KEY = 60
+
+# The same environment variable vnstock's quota layer reads to decide the tier.
+# Deliberately not a pydantic setting: settings also load from a .env file
+# without reaching the environment, and a key vnstock never sees would triple
+# the pace this adapter runs at while the account stayed on the guest tier.
+API_KEY_ENV_VAR = "VNSTOCK_API_KEY"
 
 # The flattened VCI price board carries all of reference in one row per symbol.
 # ``current_room`` is the room still available, not the holding — measured
@@ -90,7 +100,7 @@ class VnstockReadFailed(VnstockProviderError):
 
 
 def quota_per_minute(api_key: str) -> int:
-    """Return the request allowance the configured credentials actually have."""
+    """Return the request allowance these credentials actually have."""
     return QUOTA_WITH_API_KEY if api_key else QUOTA_WITHOUT_API_KEY
 
 
@@ -106,7 +116,7 @@ class RequestPacer:
         self,
         calls_per_minute: int,
         clock: Callable[[], float] = monotonic,
-        sleep: Callable[[float], None] = time.sleep,
+        sleep: Callable[[float], None] = sleep,
     ) -> None:
         if calls_per_minute < 1:
             raise ValueError("the request allowance must be at least one per minute")
@@ -128,6 +138,28 @@ class RequestPacer:
         self._last_call = now
 
 
+_process_pacer: RequestPacer | None = None
+
+
+def process_pacer() -> RequestPacer:
+    """Return the one pacer every adapter shares by default.
+
+    The allowance belongs to the account, not to an adapter. Two adapters each
+    pacing themselves would run a cycle that reads both capabilities at twice
+    the allowance and be cut off halfway through — and vnstock answers an
+    exhausted quota by calling ``sys.exit()``, taking the collector with it.
+
+    Built once, from the environment vnstock's own quota layer reads, so the
+    pace this adapter keeps and the tier vnstock grants cannot disagree.
+    """
+    global _process_pacer
+    if _process_pacer is None:
+        _process_pacer = RequestPacer(
+            quota_per_minute(os.environ.get(API_KEY_ENV_VAR, ""))
+        )
+    return _process_pacer
+
+
 def _default_trading_factory(source: str) -> Any:
     return Trading(source=source)
 
@@ -147,21 +179,9 @@ class VnstockProviderBase:
         pacer: RequestPacer | None = None,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ) -> None:
-        settings = get_settings()
-        self._vnstock_source = vnstock_source or settings.vnstock_source
-        self._pacer = pacer or RequestPacer(
-            quota_per_minute(settings.vnstock_api_key)
-        )
+        self._vnstock_source = vnstock_source or get_settings().vnstock_source
+        self._pacer = pacer or process_pacer()
         self._now = now
-
-    @staticmethod
-    def _batch(symbols: Sequence[str]) -> tuple[str, ...]:
-        """Normalize and deduplicate, refusing a malformed symbol up front.
-
-        A bad symbol is a caller's mistake, so it is raised before any request
-        is spent on it rather than discovered in a response.
-        """
-        return tuple(dict.fromkeys(validate_symbol(symbol) for symbol in symbols))
 
     def _paced(self, call: Callable[[], Any], message: str) -> Any:
         """Run one upstream read within the allowance, keeping its text out of ours.
@@ -189,6 +209,14 @@ class VnstockReferenceProvider(VnstockProviderBase):
     A malformed board is an error. A board that simply has no row for a symbol
     is not — a delisted or freshly listed ticker is normal, and it never costs
     the rest of the batch its snapshots.
+
+    Only a listed count is produced, never an outstanding one. This is a limit
+    of the source rather than of the adapter, measured: ``ratio_summary`` still
+    answers with 2018 share counts, and ``overview``'s ``issue_share`` is the
+    same number the board already gives as ``listed_share``. Since an
+    outstanding count differs from a listed one by treasury shares, inferring
+    it would put a wrong figure behind a right-looking name — so the gap is
+    left visible instead, and ``canonical_shares()`` falls through to listed.
     """
 
     def __init__(
@@ -202,7 +230,7 @@ class VnstockReferenceProvider(VnstockProviderBase):
         self._trading_factory = trading_factory
 
     def fetch_reference(self, symbols: Sequence[str]) -> Sequence[ReferenceSnapshot]:
-        normalized = self._batch(symbols)
+        normalized = normalized_symbols(symbols)
         if not normalized:
             return ()
 
@@ -260,11 +288,20 @@ class VnstockReferenceProvider(VnstockProviderBase):
             and current_room > total_room
         ):
             # A room larger than the room it sits inside is what a unit slip
-            # between the two looks like. Stored as a warning it would become a
-            # plausible ownership figure nobody re-checks.
-            raise VnstockProviderError(
-                f"vnstock reports a foreign room for {symbol} larger than its total room"
+            # between the two looks like, and the contract refuses it outright —
+            # nothing here downgrades that to a figure stored with a caveat.
+            #
+            # What it is not is a reason to lose the other ninety-nine symbols:
+            # the response is well formed and every other row in it is fine, so
+            # this one is dropped loudly and the batch carries on.
+            logger.error(
+                "Dropping %s: vnstock reports a current foreign room (%s) larger "
+                "than its total room (%s)",
+                symbol,
+                current_room,
+                total_room,
             )
+            return None
 
         # The count is recorded as listed because that is what VCI publishes.
         # Nothing relabels it as outstanding: the two differ by treasury shares,
@@ -322,7 +359,7 @@ class VnstockFundamentalProvider(VnstockProviderBase):
         self,
         symbols: Sequence[str],
     ) -> Sequence[FundamentalSnapshot]:
-        normalized = self._batch(symbols)
+        normalized = normalized_symbols(symbols)
         observed_at = self._now()
         snapshots: list[FundamentalSnapshot] = []
 
@@ -456,7 +493,8 @@ def _statement_periods(
     return sorted(periods, reverse=True)
 
 
-def _item(frame: pd.DataFrame, item_id: str, column: str) -> float | None:
+def _statement_value(frame: pd.DataFrame, item_id: str, column: str) -> float | None:
+    """Read one statement line for one period, or None if it is not there."""
     rows = frame[frame["item_id"].astype(str) == item_id]
     if rows.empty or column not in frame.columns:
         return None
@@ -477,7 +515,7 @@ def _trailing_net_income(
         return None
 
     quarters = [
-        _item(income, INCOME_ITEM_PARENT_PROFIT, column)
+        _statement_value(income, INCOME_ITEM_PARENT_PROFIT, column)
         for _, column in periods[:TRAILING_QUARTERS]
     ]
     if any(value is None for value in quarters):
@@ -494,10 +532,10 @@ def _parent_equity(balance: pd.DataFrame, column: str) -> float | None:
     separately. Left in, this would credit the parent with equity it does not
     own.
     """
-    equity = _item(balance, BALANCE_ITEM_OWNERS_EQUITY, column)
+    equity = _statement_value(balance, BALANCE_ITEM_OWNERS_EQUITY, column)
     if equity is None:
         return None
-    minority = _item(balance, BALANCE_ITEM_MINORITY_INTERESTS, column)
+    minority = _statement_value(balance, BALANCE_ITEM_MINORITY_INTERESTS, column)
     return equity - minority if minority is not None else equity
 
 

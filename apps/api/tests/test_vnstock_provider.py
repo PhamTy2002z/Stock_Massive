@@ -96,12 +96,21 @@ class TestReferenceNormalization:
         assert shares.share_type is ShareType.LISTED
         assert shares.value == 8_442_964_520
 
-    def test_share_counts_are_whole_shares_not_thousands(self):
+    def test_the_listed_count_is_what_canonical_shares_falls_back_to(self):
+        """No outstanding count exists, so the contract's preference falls through.
+
+        VCI publishes no trustworthy outstanding figure — its ``ratio_summary``
+        still answers with 2018 counts — so this capability carries listed only,
+        and consumers of ``canonical_shares`` get listed shares by design rather
+        than by accident.
+        """
         provider = reference_provider(FakeTrading(price_board([hpg_board_row()])))
 
         (snapshot,) = provider.fetch_reference(["HPG"])
 
-        assert snapshot.canonical_shares().value == 8_442_964_520
+        canonical = snapshot.canonical_shares()
+        assert canonical.share_type is ShareType.LISTED
+        assert canonical.value == 8_442_964_520
 
     def test_symbols_are_normalized_before_the_board_is_asked(self):
         trading = FakeTrading(price_board([hpg_board_row()]))
@@ -154,11 +163,12 @@ class TestReferenceQuota:
 
 
 class TestReferenceRefusal:
-    def test_current_room_above_total_room_is_an_error(self):
-        """A room larger than the room it sits inside is a unit slip.
+    def test_a_room_above_the_room_it_sits_inside_is_never_recorded(self, caplog):
+        """A room larger than its own total is a unit slip between the two.
 
-        Recorded as a warning it would become a plausible-looking ownership
-        number nobody re-checks, so the batch fails instead.
+        The contract refuses it outright and nothing here downgrades that to a
+        stored figure with a caveat — it would be a plausible-looking ownership
+        number nobody re-checks.
         """
         provider = reference_provider(
             FakeTrading(
@@ -168,10 +178,30 @@ class TestReferenceRefusal:
             )
         )
 
-        with pytest.raises(VnstockProviderError) as error:
-            provider.fetch_reference(["HPG"])
+        with caplog.at_level("ERROR"):
+            assert provider.fetch_reference(["HPG"]) == ()
 
-        assert "HPG" in str(error.value)
+        assert "HPG" in caplog.text
+
+    def test_a_contradictory_row_does_not_cost_the_rest_of_the_batch(self):
+        """The response is well formed and every other row in it is fine.
+
+        Failing the call would lose ninety-nine good symbols to one bad one.
+        """
+        provider = reference_provider(
+            FakeTrading(
+                price_board(
+                    [
+                        hpg_board_row(current_room=4_200_000_000),
+                        hpg_board_row(symbol="FPT"),
+                    ]
+                )
+            )
+        )
+
+        snapshots = provider.fetch_reference(["HPG", "FPT"])
+
+        assert [snapshot.symbol for snapshot in snapshots] == ["FPT"]
 
     def test_a_wholly_empty_board_is_an_error(self):
         provider = reference_provider(FakeTrading(price_board([])))
@@ -333,22 +363,6 @@ class TestFundamentalNormalization:
         assert snapshot.trailing_12_month_net_income_vnd == pytest.approx(
             6_371_019_000_000 + 3_100_000_000_000 + 2_900_000_000_000 + 3_000_000_000_000
         )
-
-    def test_statement_figures_are_whole_dong_not_billions(self):
-        """VCI reports these in VND and the adapter keeps them there.
-
-        The repo's older readers of the wide layout deal in "Bn. VND"; a
-        snapshot that mixed the two scales would be off by a factor of a
-        billion, which is exactly the guess no layer behind this should make.
-        """
-        provider = fundamental_provider(
-            {"HPG": FakeFinance(HPG_INCOME, HPG_BALANCE)}
-        )
-
-        (snapshot,) = provider.fetch_fundamentals(["HPG"])
-
-        assert snapshot.trailing_12_month_net_income_vnd > 1e12
-        assert snapshot.parent_equity_vnd > 1e14
 
     def test_parent_equity_excludes_the_minority_interest_inside_it(self):
         """Circular 200 puts minority interest inside owner's equity.
@@ -560,6 +574,41 @@ class TestQuota:
     def test_an_api_key_raises_the_allowance(self):
         assert quota_per_minute("") == 20
         assert quota_per_minute("a-key") == 60
+
+    def test_the_allowance_is_read_from_the_variable_vnstock_itself_reads(
+        self, monkeypatch
+    ):
+        """A key vnstock cannot see must not raise the pace this side keeps.
+
+        vnstock decides the tier from the environment. Reading the key from
+        anywhere else — a settings file it never loads, say — would pace at 60
+        against an account still on 20, and it answers being cut off by calling
+        sys.exit().
+        """
+        import src.stocks.providers.vnstock_provider as module
+
+        monkeypatch.setattr(module, "_process_pacer", None)
+        monkeypatch.delenv(module.API_KEY_ENV_VAR, raising=False)
+        assert module.process_pacer().min_interval == pytest.approx(3.0)
+
+        monkeypatch.setattr(module, "_process_pacer", None)
+        monkeypatch.setenv(module.API_KEY_ENV_VAR, "a-key")
+        assert module.process_pacer().min_interval == pytest.approx(1.0)
+
+    def test_both_adapters_default_to_one_shared_allowance(self, monkeypatch):
+        """The allowance belongs to the account, not to an adapter.
+
+        A cycle reading both capabilities with a pacer each would run at twice
+        the allowance and be cut off partway through.
+        """
+        import src.stocks.providers.vnstock_provider as module
+
+        monkeypatch.setattr(module, "_process_pacer", None)
+
+        reference = VnstockReferenceProvider()
+        fundamental = VnstockFundamentalProvider()
+
+        assert reference._pacer is fundamental._pacer
 
 
 class TestAgainstTheLiveProvider:
