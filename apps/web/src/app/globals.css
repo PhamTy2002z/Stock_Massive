@@ -126,15 +126,18 @@
     backface-visibility: hidden;
   }
 
-  /* Smooth icon-only mode transition */
-  [data-collapsible="icon"] [data-sidebar="menu-button"] span:last-child {
-    transition: opacity 150ms ease-out;
+  /* The label has to carry its fade-in transition unconditionally: the collapsed
+     selector below stops matching the instant the panel expands, so a transition
+     declared there only ever applies on the way out and the text snaps in.
+     The short delay lets the width lead and the text follow it. */
+  [data-sidebar="menu-button"] span:last-child {
+    transition: opacity 150ms ease-out 60ms;
   }
 
   [data-state="collapsed"][data-collapsible="icon"] [data-sidebar="menu-button"] span:last-child {
     opacity: 0;
     visibility: hidden;
-    transition: opacity 100ms ease-in, visibility 0ms 100ms;
+    transition: opacity 90ms ease-in, visibility 0ms 90ms;
   }
 
   /* Stock detail transitions */
