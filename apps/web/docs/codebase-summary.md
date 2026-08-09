@@ -77,7 +77,6 @@ apps/web/
 #### Advanced Tab (New)
 **Order Flow Analysis**
 - `fetchOrderStats(symbol, days)` - Buy/sell order statistics (30 days default)
-- `fetchPriceDepth(symbol)` - Real-time bid/ask price depth (3 levels)
 
 **Technical Indicators**
 - `fetchRatioSummary(symbol)` - Financial ratios (PE, PB, PS, ROE, ROA, ROIC, Current Ratio, D/E)
@@ -126,7 +125,6 @@ apps/web/
 ### Advanced Tab Hooks (New - Phase 2)
 **Order Flow**
 - `useOrderStats(symbol, days)` - Order statistics (5min stale time)
-- `usePriceDepth(symbol)` - Price depth with **30s real-time polling** (auto-refresh, stops when inactive)
 
 **Technical**
 - `useRatioSummary(symbol)` - Ratio summary (1h stale time)
@@ -193,19 +191,6 @@ interface MarketOverviewResponse {
 
 ### Advanced Tab Types (New)
 ```typescript
-// Price Depth
-interface PriceLevel { price: number; volume: number }
-interface PriceDepthResponse {
-  symbol: string
-  bid_1/2/3: PriceLevel
-  ask_1/2/3: PriceLevel
-  total_bid_volume: number
-  total_ask_volume: number
-  spread: number
-  spread_percent: number
-  timestamp: string
-}
-
 // Ratio Summary
 interface RatioSummaryResponse {
   pe, pb, ps, roe, roa, roic: number | null
@@ -286,7 +271,7 @@ interface FCFAnalysisResponse {
 ## Caching Strategy
 
 ### Stale Times
-- **Real-time (30s)**: Price board, market indices, price depth (with auto-polling)
+- **Real-time (30s)**: Price board, market indices
 - **Near real-time (1min)**: Stock detail, volume spikes
 - **Short-term (5min)**: Order stats, sector performance, analytics
 - **Medium-term (15min)**: Trading stats, foreign/prop trading
@@ -296,7 +281,6 @@ interface FCFAnalysisResponse {
 ```typescript
 queryKeys.stock(symbol) => ["stock", symbol]
 queryKeys.orderStats(symbol, days) => ["stock", symbol, "orderStats", days]
-queryKeys.priceDepth(symbol) => ["stock", symbol, "priceDepth"]
 ```
 
 ## Components
@@ -388,12 +372,11 @@ NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 ## Recent Updates (Phase 2)
 
 ### Advanced Tab API Layer (Dec 27)
-- 6 new TypeScript interfaces for Advanced tab data
-- 6 new API fetch functions with date range helpers
-- 6 new query keys following project conventions
+- 5 TypeScript interfaces for Advanced tab data
+- 5 API fetch functions with date range helpers
+- 5 query keys following project conventions
 
 ### Advanced Tab React Hooks (Dec 27)
-- Real-time polling for price depth (30s auto-refresh)
 - Optimized caching for technical indicators (15min-1h stale)
 - Smart date range handling for historical data (30 days default)
 
@@ -452,7 +435,7 @@ NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 
 ### Loading UX Enhancement (Phase 3 - Dec 28)
 - Migrated all hooks to `useSuspenseQuery` for guaranteed data types (no undefined checks needed)
-- Updated hooks: `useMarketIndices`, `usePriceBoard`, `useSectorPerformance`, `useVN30Overview`, `useFundCertificates`, `useStockDetail`, `useIncomeStatement`, `useBalanceSheet`, `useCashFlow`, `useShareholders`, `useOfficers`, `useInsiderDeals`, `useFinancialStatements`, `useVolumeSpikes`, `useVolumeAnomalies`, `useOrderStats`, `usePriceDepth`, `useRatioSummary`, `useTradingStats`, `useForeignTrading`, `usePropTrading`, `useHealthScore`, `useTrendMetrics`, `useSectorPeers`, `useFCFAnalysis`, `useFinancialDetail`
+- Updated hooks: `useMarketIndices`, `usePriceBoard`, `useSectorPerformance`, `useVN30Overview`, `useFundCertificates`, `useStockDetail`, `useIncomeStatement`, `useBalanceSheet`, `useCashFlow`, `useShareholders`, `useOfficers`, `useInsiderDeals`, `useFinancialStatements`, `useVolumeSpikes`, `useVolumeAnomalies`, `useOrderStats`, `useRatioSummary`, `useTradingStats`, `useForeignTrading`, `usePropTrading`, `useHealthScore`, `useTrendMetrics`, `useSectorPeers`, `useFCFAnalysis`, `useFinancialDetail`
 - All hooks now return guaranteed data (no null/undefined)
 - Components simplified with removed optional chaining and null checks
 - Enabled smooth transitions with `keepPreviousData` on relevant hooks

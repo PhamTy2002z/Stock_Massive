@@ -8,7 +8,7 @@
 export const STALE_TIME = {
   /** 15s - realtime market data (indices, stock detail) */
   REALTIME: 15 * 1000,
-  /** 30s - near-realtime data (price depth, VN30 overview) */
+  /** 30s - near-realtime data (VN30 overview) */
   FAST: 30 * 1000,
   /** 1 min - frequently updated data (sector performance, foreign flow, funds) */
   FREQUENT: 60 * 1000,

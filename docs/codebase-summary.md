@@ -400,7 +400,6 @@ alembic upgrade head
 * **Financial Health Enhancement Phase 4** (Dec 28, 2025): Peer Comparison, FCF Waterfall, CCC indicator with heatmap
 * **Financial Health Enhancement Phase 2** (Dec 28, 2025): Health Scorecard UI: Radar chart, F-Score, score breakdown
 * **Financial Health Enhancement Phase 1** (Dec 28, 2025): Backend APIs: health-score, trend-metrics, fcf-analysis, sector-peers
-* **Advanced Endpoints Phase 4 Testing** (Dec 27): 19 integration tests covering price-depth, ratio-summary, trading-stats endpoints
 * **Supabase Migration** (Dec 24): Migrated from local PostgreSQL to Supabase cloud with SSL, connection pooling
 * **Job Progress UI** (Dec 24): Added progress bar and notification panel in frontend
 * **Job Status API** (Dec 24): `/api/v1/jobs/status` for polling background job progress

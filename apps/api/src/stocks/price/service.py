@@ -15,8 +15,6 @@ from ..schemas.price import (
     IntradayTick,
     PriceBoardItem,
     MarketIndexItem,
-    PriceLevel,
-    PriceDepthResponse,
 )
 from ..shared import StockServiceError, validate_symbol, safe_float
 
@@ -283,20 +281,6 @@ class PriceService:
                 logger.warning(f"Skipping price board item due to error: {e}")
                 continue
         return items
-
-    def get_price_depth(self, symbol: str) -> PriceDepthResponse:
-        """Price depth is not available from vnstock 4.x.
-
-        Every provider Quote accepts (VCI, KBS, MSN) raises AttributeError for
-        price_depth, and TCBS is rejected as a Quote source. Declaring that
-        plainly beats leaking the AttributeError as a 502 that reads like a
-        bug on our side.
-        """
-        validate_symbol(symbol)
-        raise VnstockUnsupported(
-            "Nguồn dữ liệu hiện tại không hỗ trợ độ sâu giá (price depth)."
-        )
-
 
 @lru_cache(maxsize=1)
 def get_price_service(source: str = "VCI") -> PriceService:

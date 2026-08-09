@@ -89,7 +89,7 @@ Stock_Massive/
 │   │   │   │   ├── dashboard/    # 35+ feature components
 │   │   │   │   ├── layout/       # 6 layout components
 │   │   │   │   └── providers/    # 2 providers
-│   │   │   ├── hooks/            # 28 custom hooks
+│   │   │   ├── hooks/            # 27 custom hooks
 │   │   │   └── lib/              # API client, utils
 │   │   ├── public/
 │   │   └── package.json
@@ -106,7 +106,7 @@ Stock_Massive/
 │       │   │   ├── price/        # History, intraday, indices, volume
 │       │   │   ├── company/      # Company info, shareholders, officers
 │       │   │   ├── financial/    # Financials, ratios, health scoring
-│       │   │   ├── trading/      # Price depth, trading stats
+│       │   │   ├── trading/      # Order flow and foreign trading stats
 │       │   │   ├── overview/     # Market overview (breadth, movers, foreign flow)
 │       │   │   ├── router.py     # Main router aggregation (43+ endpoints)
 │       │   │   ├── service.py    # vnstock integration
@@ -167,7 +167,6 @@ Stock_Massive/
 │   ├── insider-deals             # GET - Insider trades
 │   ├── volume-analysis           # GET - Volume patterns
 │   ├── volume-anomalies          # GET - Volume anomaly detection
-│   ├── price-depth               # GET - Bid/ask price depth
 │   ├── ratio-summary             # GET - Financial ratios summary
 │   ├── trading-stats             # GET - Trading volume statistics
 │   └── financials/
@@ -285,7 +284,7 @@ RootLayout
 - **QueryProvider**: Wraps app with QueryClient configuration
 - **Query Keys**: Centralized key factory at `lib/query-keys.ts`
 - **DevTools**: React Query DevTools enabled in development
-- **Hooks**: 28 custom hooks for data fetching
+- **Hooks**: 27 custom hooks for data fetching
 
 ---
 

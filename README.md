@@ -73,7 +73,7 @@ Stock_Massive/
 │   │   └── src/
 │   │       ├── app/         # App Router pages (5 routes)
 │   │       ├── components/  # UI (25+) + dashboard (35+) + layout (6) + providers (2)
-│   │       ├── hooks/       # 28 custom hooks
+│   │       ├── hooks/       # 27 custom hooks
 │   │       └── lib/         # API client, utils
 │   │
 │   └── api/                 # FastAPI backend (port 8000) - 53 source files
@@ -84,7 +84,7 @@ Stock_Massive/
 │           │   ├── price/      # History, intraday, indices, volume
 │           │   ├── company/    # Company info, shareholders, officers
 │           │   ├── financial/  # Financials, ratios, health scoring
-│           │   ├── trading/    # Price depth, trading stats
+│           │   ├── trading/    # Order flow and foreign trading stats
 │           │   ├── overview/   # Market overview (breadth, movers, foreign flow)
 │           │   ├── schemas/    # 6 Pydantic schema files
 │           │   ├── models.py   # SQLAlchemy ORM models
@@ -156,10 +156,9 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `/{symbol}/officers` | GET | Company officers |
 | `/{symbol}/insider-deals` | GET | Insider trading deals |
 
-### Advanced Analytics (3 endpoints)
+### Advanced Analytics (2 endpoints)
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/{symbol}/price-depth` | GET | Real-time bid/ask price depth |
 | `/{symbol}/ratio-summary` | GET | Financial ratios summary |
 | `/{symbol}/trading-stats` | GET | Trading volume statistics |
 

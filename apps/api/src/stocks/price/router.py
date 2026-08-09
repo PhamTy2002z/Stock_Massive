@@ -21,7 +21,6 @@ from ..schemas.price import (
     IntradayCollectionResult,
     VolumeAnalysisResponse,
     VolumeAnomalyResponse,
-    PriceDepthResponse,
 )
 from ..shared import StockServiceError
 from src.auth.dependencies import require_admin
@@ -37,12 +36,6 @@ price_board_cache = TradingHoursCache(
     ttl_trading=15,
     ttl_off_hours=3600,
 )
-price_depth_cache = TradingHoursCache(
-    key_prefix="stock:price_depth:",
-    ttl_trading=30,
-    ttl_off_hours=300,
-)
-
 router = APIRouter()
 
 
@@ -210,26 +203,3 @@ async def get_volume_anomalies(
     volume_anomaly_cache.set(cache_key, result)
 
     return VolumeAnomalyResponse(**result)
-
-
-@router.get("/{symbol}/price-depth", response_model=PriceDepthResponse, dependencies=[Depends(heavy_rate_limit)])
-def get_price_depth(symbol: str) -> PriceDepthResponse:
-    """Get price depth (bid/ask levels) for a stock.
-
-    Returns 3 levels of bid/ask prices and volumes with spread calculation.
-    Uses heavy rate limit due to real-time data requirements.
-    """
-    cache_key = symbol.upper()
-
-    # Check cache first
-    cached = price_depth_cache.get(cache_key)
-    if cached is not None:
-        return PriceDepthResponse(**cached)
-
-    service = get_price_service()
-    result = service.get_price_depth(symbol)
-
-    # Cache the result
-    price_depth_cache.set(cache_key, result.model_dump())
-
-    return result
