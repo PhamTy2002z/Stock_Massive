@@ -1,23 +1,16 @@
-/**
- * Suspense fallback for the auth pages.
- *
- * AuthForm reads search params, which suspends on first render; this keeps the
- * page from collapsing to blank while that resolves.
- */
 export default function AuthFormFallback() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <div className="w-full max-w-[450px] space-y-6">
-        <div className="flex flex-col items-center space-y-2 text-center">
-          <div className="h-8 w-48 animate-pulse rounded bg-muted" />
-          <div className="h-4 w-64 animate-pulse rounded bg-muted" />
-        </div>
-        <div className="space-y-4">
-          <div className="h-12 w-full animate-pulse rounded bg-muted" />
-          <div className="h-12 w-full animate-pulse rounded bg-muted" />
-          <div className="h-12 w-full animate-pulse rounded bg-muted" />
+    <div className="grid min-h-dvh bg-white lg:grid-cols-2">
+      <div className="flex min-h-dvh items-center justify-center px-6 sm:px-14">
+        <div className="w-full max-w-[392px] space-y-5">
+          <div className="h-11 w-56 animate-pulse rounded-lg bg-[#eef0f3]" />
+          <div className="h-5 w-80 max-w-full animate-pulse rounded bg-[#eef0f3]" />
+          <div className="h-12 w-full animate-pulse rounded-xl bg-[#eef0f3]" />
+          <div className="h-12 w-full animate-pulse rounded-xl bg-[#eef0f3]" />
+          <div className="h-12 w-full animate-pulse rounded-full bg-[#ff6500]/40" />
         </div>
       </div>
+      <div className="hidden min-h-dvh bg-auth-background lg:block" />
     </div>
   )
 }
