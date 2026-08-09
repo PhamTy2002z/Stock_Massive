@@ -1,6 +1,6 @@
 """Tests for PostgreSQL/Redis last-known-good snapshot behavior."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine, func, select
@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from src.stocks.models import ProviderSnapshot
 from src.stocks.providers import (
     Capability,
+    FundamentalSnapshot,
     MarketSnapshot,
     ProviderSource,
     SnapshotMetadata,
@@ -139,6 +140,68 @@ def test_save_rejects_a_snapshot_that_does_not_match_its_capability():
         store = SnapshotStore(session, redis=None)
         with pytest.raises(TypeError, match="valuation"):
             store.save(Capability.VALUATION, market_snapshot(observed_at))
+
+
+def test_cover_source_snapshots_are_readable_only_when_asked_for_by_name():
+    engine = create_engine("sqlite://")
+    ProviderSnapshot.__table__.create(engine)
+    observed_at = datetime.now(timezone.utc)
+    backfilled = MarketSnapshot(
+        symbol="VCB",
+        metadata=SnapshotMetadata(
+            source=ProviderSource.VNSTOCK,
+            effective_at=observed_at,
+            observed_at=observed_at,
+        ),
+        last_price=58_000,
+    )
+
+    with Session(engine) as session:
+        store = SnapshotStore(session, redis=MemoryRedis())
+        store.save(Capability.MARKET, backfilled)
+        session.commit()
+
+        # The main source holds nothing, and the store must not quietly serve
+        # the cover source in its place: docs/adr/0002 rejected dynamic
+        # fallback because the two sources disagree on units.
+        assert store.latest(Capability.MARKET, "VCB") is None
+
+        from_cover = store.latest(
+            Capability.MARKET,
+            "VCB",
+            source=ProviderSource.VNSTOCK,
+        )
+
+    assert from_cover is not None
+    assert from_cover.snapshot.last_price == 58_000
+
+
+def test_store_rejects_a_source_that_does_not_own_the_capability():
+    engine = create_engine("sqlite://")
+    ProviderSnapshot.__table__.create(engine)
+    observed_at = datetime.now(timezone.utc)
+    misattributed = FundamentalSnapshot(
+        symbol="VCB",
+        metadata=SnapshotMetadata(
+            source=ProviderSource.FIINQUANT,
+            effective_at=observed_at,
+            observed_at=observed_at,
+        ),
+        period_end=date(2026, 6, 30),
+    )
+
+    with Session(engine) as session:
+        store = SnapshotStore(session, redis=None)
+
+        with pytest.raises(ValueError, match="does not own"):
+            store.latest(
+                Capability.FUNDAMENTAL,
+                "VCB",
+                source=ProviderSource.FIINQUANT,
+            )
+
+        with pytest.raises(ValueError, match="does not own"):
+            store.save(Capability.FUNDAMENTAL, misattributed)
 
 
 def test_latest_never_calls_a_secondary_provider_on_cache_miss():

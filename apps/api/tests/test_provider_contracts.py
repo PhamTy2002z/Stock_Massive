@@ -10,13 +10,17 @@ from src.stocks.providers import (
     FundamentalSnapshot,
     MarketSnapshot,
     PriceUnit,
-    PRIMARY_SOURCE_BY_CAPABILITY,
     ProviderSource,
     ReferenceSnapshot,
     ShareCount,
     ShareType,
+    SOURCE_OWNERSHIP_BY_CAPABILITY,
     SnapshotMetadata,
+    SourceOwnership,
     ValuationSnapshot,
+    cover_source,
+    main_source,
+    owns_capability,
 )
 
 
@@ -150,13 +154,68 @@ def test_fundamental_snapshot_no_longer_carries_valuation_ratios():
         )
 
 
-def test_capability_registry_matches_the_measured_source_split():
-    assert PRIMARY_SOURCE_BY_CAPABILITY == {
-        Capability.MARKET: ProviderSource.FIINQUANT,
-        Capability.VALUATION: ProviderSource.FIINQUANT,
-        Capability.REFERENCE: ProviderSource.VNSTOCK,
-        Capability.FUNDAMENTAL: ProviderSource.VNSTOCK,
+def test_market_snapshot_keeps_foreign_net_flow_within_gross_flow():
+    balanced = MarketSnapshot(
+        symbol="HPG",
+        metadata=metadata(ProviderSource.FIINQUANT),
+        foreign_buy_value_vnd=19_800_000_000,
+        foreign_sell_value_vnd=8_800_000_000,
+        foreign_net_value_vnd=11_000_000_000,
+    )
+    assert balanced.foreign_net_value_vnd == 11_000_000_000
+
+    # Net below gross is normal: put-through deals and rounding move the
+    # reported net away from buy minus sell without breaking the bound.
+    MarketSnapshot(
+        symbol="HPG",
+        metadata=metadata(ProviderSource.FIINQUANT),
+        foreign_buy_value_vnd=19_800_000_000,
+        foreign_sell_value_vnd=8_800_000_000,
+        foreign_net_value_vnd=-1_000_000_000,
+    )
+
+    with pytest.raises(ValidationError, match="cannot exceed"):
+        MarketSnapshot(
+            symbol="HPG",
+            metadata=metadata(ProviderSource.FIINQUANT),
+            foreign_buy_value_vnd=19_800_000,
+            foreign_sell_value_vnd=8_800_000,
+            foreign_net_value_vnd=11_000_000_000,
+        )
+
+
+def test_source_ownership_matches_the_measured_main_cover_table():
+    assert SOURCE_OWNERSHIP_BY_CAPABILITY == {
+        Capability.MARKET: SourceOwnership(
+            main=ProviderSource.FIINQUANT,
+            cover=ProviderSource.VNSTOCK,
+        ),
+        Capability.VALUATION: SourceOwnership(
+            main=ProviderSource.FIINQUANT,
+            cover=ProviderSource.VNSTOCK,
+        ),
+        Capability.REFERENCE: SourceOwnership(main=ProviderSource.VNSTOCK),
+        Capability.FUNDAMENTAL: SourceOwnership(main=ProviderSource.VNSTOCK),
     }
+
+    assert main_source(Capability.VALUATION) is ProviderSource.FIINQUANT
+    assert cover_source(Capability.VALUATION) is ProviderSource.VNSTOCK
+    assert cover_source(Capability.FUNDAMENTAL) is None
+
+
+def test_source_ownership_answers_which_sources_may_own_a_capability():
+    assert owns_capability(Capability.MARKET, ProviderSource.FIINQUANT)
+    assert owns_capability(Capability.MARKET, ProviderSource.VNSTOCK)
+    assert owns_capability(Capability.FUNDAMENTAL, ProviderSource.VNSTOCK)
+    assert not owns_capability(Capability.FUNDAMENTAL, ProviderSource.FIINQUANT)
+
+
+def test_source_ownership_rejects_a_capability_owning_the_same_source_twice():
+    with pytest.raises(ValidationError, match="cover source must differ"):
+        SourceOwnership(
+            main=ProviderSource.VNSTOCK,
+            cover=ProviderSource.VNSTOCK,
+        )
 
 
 def test_snapshot_metadata_requires_aware_ordered_timestamps():
