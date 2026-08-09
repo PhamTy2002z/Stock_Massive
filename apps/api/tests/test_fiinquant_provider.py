@@ -35,7 +35,12 @@ class FakeEvent:
 
 
 def daily_candles() -> pd.DataFrame:
-    """Two sessions for HPG, with the duplicate live row the provider emits."""
+    """Two sessions for HPG, with the duplicate live row the provider emits.
+
+    The midnight row holds the consolidated session — its volume and value are
+    the ones measured to match ``get_overview`` — while the row stamped mid
+    session is the live one the adapter must not prefer.
+    """
     return pd.DataFrame(
         [
             {
@@ -59,21 +64,6 @@ def daily_candles() -> pd.DataFrame:
                 "open": 22_350,
                 "high": 22_600,
                 "low": 21_950,
-                "close": 21_950,
-                "volume": 27_000_000,
-                "value": 600_000_000_000,
-                "bu": 8_000_000,
-                "sd": 17_000_000,
-                "fb": 100_000_000_000,
-                "fs": 65_000_000_000,
-                "fn": 35_000_000_000,
-            },
-            {
-                "ticker": "HPG",
-                "timestamp": "2026-08-07 14:46",
-                "open": 22_350,
-                "high": 22_600,
-                "low": 21_950,
                 "close": 22_000,
                 "volume": 28_003_806,
                 "value": 621_432_544_300,
@@ -82,6 +72,21 @@ def daily_candles() -> pd.DataFrame:
                 "fb": 111_382_916_000,
                 "fs": 69_002_320_650,
                 "fn": 42_380_595_350,
+            },
+            {
+                "ticker": "HPG",
+                "timestamp": "2026-08-07 14:46",
+                "open": 22_350,
+                "high": 22_600,
+                "low": 21_950,
+                "close": 21_900,
+                "volume": 500_000,
+                "value": 11_000_000_000,
+                "bu": 100_000,
+                "sd": 200_000,
+                "fb": 1_000_000_000,
+                "fs": 900_000_000,
+                "fn": 100_000_000,
             },
         ]
     )
@@ -131,6 +136,7 @@ def make_provider(
     candles: pd.DataFrame | None = None,
     overview: pd.DataFrame | None = None,
     ceiling_floor: pd.DataFrame | None = None,
+    circuit_breaker: ProviderCircuitBreaker | None = None,
 ) -> tuple[FiinQuantMarketProvider, Mock]:
     client = Mock()
     client.Fetch_Trading_Data.return_value = FakeEvent(
@@ -148,9 +154,19 @@ def make_provider(
         "configured-user",
         "configured-password",
         session_factory=lambda _username, _password: client,
+        circuit_breaker=circuit_breaker,
         now=lambda: NOW,
     )
     return provider, client
+
+
+def assert_no_credentials(error: BaseException) -> None:
+    """Walk the whole chain: __cause__ reaches the logs as readily as the text."""
+    current: BaseException | None = error
+    while current is not None:
+        assert "configured-user" not in str(current)
+        assert "configured-password" not in str(current)
+        current = current.__cause__ or current.__context__
 
 
 def test_fetch_market_builds_a_whole_session_from_three_calls():
@@ -189,6 +205,57 @@ def test_reference_price_and_change_come_from_the_previous_session():
     # 2026-08-07 has two rows; the session before it closed at 21_850.
     assert snapshot.reference_price == 21_850
     assert snapshot.change_pct == pytest.approx((22_000 - 21_850) / 21_850 * 100)
+
+
+def test_the_live_row_never_displaces_the_consolidated_session_bar():
+    provider, _client = make_provider()
+
+    snapshot = provider.fetch_market(["HPG"])[0]
+
+    # The 14:46 row carries a part-session volume; taking it would understate
+    # the day by an order of magnitude.
+    assert snapshot.volume == 28_003_806
+    assert snapshot.last_price == 22_000
+
+
+def test_statistics_from_an_older_session_are_left_off_rather_than_stamped_on():
+    stale = overview_frame().iloc[0:1]  # 2026-08-06 only
+    provider, _client = make_provider(overview=stale)
+
+    snapshot = provider.fetch_market(["HPG"])[0]
+
+    assert snapshot.market_cap_vnd is None
+    assert snapshot.ceiling_price == 23_350
+
+
+def test_one_unusable_symbol_does_not_cost_the_batch_its_snapshots():
+    halted = pd.DataFrame(
+        [
+            {
+                "ticker": "VCB",
+                "timestamp": "2026-08-07 00:00",
+                "open": 0,
+                "high": 0,
+                "low": 0,
+                "close": 0,
+                "volume": 0,
+                "value": 0,
+                "bu": 0,
+                "sd": 0,
+                "fb": 0,
+                "fs": 0,
+                "fn": 0,
+            }
+        ]
+    )
+    provider, _client = make_provider(
+        candles=pd.concat([daily_candles(), halted], ignore_index=True)
+    )
+
+    snapshots = provider.fetch_market(["HPG", "VCB"])
+
+    assert [snapshot.symbol for snapshot in snapshots] == ["HPG"]
+    assert snapshots[0].volume == 28_003_806
 
 
 def test_fetch_market_asks_for_every_symbol_in_one_batched_call():
@@ -280,8 +347,7 @@ def test_provider_wraps_login_failure_without_secret_text():
 
     with pytest.raises(FiinQuantProviderError, match="login failed") as raised:
         provider.fetch_market(["VCB"])
-    assert "configured-password" not in str(raised.value)
-    assert "configured-user" not in str(raised.value)
+    assert_no_credentials(raised.value)
 
 
 def test_upstream_failure_text_never_reaches_the_caller():
@@ -292,8 +358,7 @@ def test_upstream_failure_text_never_reaches_the_caller():
 
     with pytest.raises(FiinQuantProviderError) as raised:
         provider.fetch_market(["HPG"])
-    assert "configured-password" not in str(raised.value)
-    assert "configured-user" not in str(raised.value)
+    assert_no_credentials(raised.value)
 
 
 def test_circuit_opens_after_repeated_failures_and_recovers_after_cooldown():
@@ -303,8 +368,7 @@ def test_circuit_opens_after_repeated_failures_and_recovers_after_cooldown():
         cooldown_seconds=30,
         clock=lambda: current[0],
     )
-    provider, client = make_provider()
-    provider._circuit = breaker
+    provider, client = make_provider(circuit_breaker=breaker)
     client.Fetch_Trading_Data.side_effect = RuntimeError("gateway timeout")
 
     for _ in range(2):
