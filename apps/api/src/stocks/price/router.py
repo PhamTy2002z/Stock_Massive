@@ -12,7 +12,7 @@ from src.core.ratelimit import standard_rate_limit, heavy_rate_limit
 from src.stocks.intraday_collector import IntradayCollector
 from src.core.cache import TradingHoursCache
 from src.stocks.price.cache import volume_anomaly_cache
-from .service import get_price_service, MARKET_INDICES
+from .service import get_price_service, HISTORY_INTERVALS, MARKET_INDICES
 from ..schemas.price import (
     StockPrice,
     IntradayTick,
@@ -44,11 +44,14 @@ def get_history(
     symbol: str,
     start: date = Query(..., description="Start date (YYYY-MM-DD)"),
     end: date = Query(default_factory=date.today, description="End date (YYYY-MM-DD)"),
-    interval: str = Query("1D", description="Interval: 1D, 1W, 1M"),
+    interval: str = Query("1D", description="Interval: 1m, 5m, 15m, 30m, 1H, 1D, 1W, 1M"),
 ) -> List[StockPrice]:
     """Get historical OHLCV data for a stock."""
-    if interval not in ("1D", "1W", "1M"):
-        raise HTTPException(status_code=400, detail="Invalid interval. Use 1D, 1W, or 1M")
+    if interval not in HISTORY_INTERVALS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid interval. Use one of: {', '.join(HISTORY_INTERVALS)}",
+        )
 
     if start > end:
         raise HTTPException(status_code=400, detail="Start date must be before end date")
