@@ -1,12 +1,63 @@
 """Unit tests for TradingHoursCache (generic and specific instances)."""
 import json
+import threading
+import time
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
 
-from src.core.cache import TradingHoursCache
+from src.core.cache import CacheRefreshUnavailable, TradingHoursCache
+
+
+class ThreadSafeRedis:
+    """Minimal Redis double with NX, expiry, and compare-and-mutate scripts."""
+
+    def __init__(self):
+        self.values = {}
+        self.expires_at = {}
+        self.lock = threading.Lock()
+
+    def _purge(self, key):
+        if self.expires_at.get(key, float("inf")) <= time.monotonic():
+            self.values.pop(key, None)
+            self.expires_at.pop(key, None)
+
+    def get(self, key):
+        with self.lock:
+            self._purge(key)
+            return self.values.get(key)
+
+    def set(self, key, value, nx=False, ex=None, **_kwargs):
+        with self.lock:
+            self._purge(key)
+            if nx and key in self.values:
+                return None
+            self.values[key] = value
+            if ex is not None:
+                self.expires_at[key] = time.monotonic() + ex
+            return True
+
+    def delete(self, *keys):
+        with self.lock:
+            for key in keys:
+                self.values.pop(key, None)
+                self.expires_at.pop(key, None)
+
+    def eval(self, script, keys=None, args=None):
+        key = keys[0]
+        token = args[0]
+        with self.lock:
+            self._purge(key)
+            if self.values.get(key) != token:
+                return 0
+            if "DEL" in script:
+                self.values.pop(key, None)
+                self.expires_at.pop(key, None)
+                return 1
+            self.expires_at[key] = time.monotonic() + int(args[1])
+            return 1
 
 
 class TestTradingHoursDetection:
@@ -218,11 +269,205 @@ class TestCacheOperations:
             mock_redis.get.assert_called_with("test:mykey")
 
             cache.set("mykey", {"test": "data"})
-            args = mock_redis.set.call_args[0]
-            assert args[0] == "test:mykey"
+            assert any(
+                call.args[0] == "test:mykey"
+                for call in mock_redis.set.call_args_list
+            )
 
             cache.delete("mykey")
             mock_redis.delete.assert_called_with("test:mykey")
+
+
+class TestCacheRefreshCoalescing:
+    """Test last-known-good and single-flight behavior."""
+
+    @pytest.fixture
+    def cache(self):
+        return TradingHoursCache(
+            key_prefix="test:",
+            ttl_trading=60,
+            ttl_off_hours=3600,
+            stale_ttl=86400,
+        )
+
+    def test_get_or_load_populates_fresh_and_stale_values(self, cache):
+        redis = MagicMock()
+        redis.get.side_effect = [None, None]
+        redis.set.side_effect = ["owned-lock-token", True, True]
+
+        with (
+            patch("src.core.cache.get_redis", return_value=redis),
+            patch("src.core.cache.token_hex", return_value="owned-lock-token"),
+        ):
+            result = cache.get_or_load("VCB", lambda: {"price": 59700})
+
+        assert result == {"price": 59700}
+        redis.set.assert_any_call(
+            "test:VCB:refresh-lock", "owned-lock-token", nx=True, ex=30
+        )
+        redis.set.assert_any_call(
+            "test:VCB:stale", json.dumps(result, default=str), ex=86400
+        )
+        redis.eval.assert_called_once()
+
+    def test_get_or_load_serves_stale_when_refresh_fails(self, cache):
+        redis = MagicMock()
+        redis.get.side_effect = [
+            None,
+            None,
+            json.dumps({"price": 59000}),
+        ]
+        redis.set.return_value = "owned-lock-token"
+
+        with (
+            patch("src.core.cache.get_redis", return_value=redis),
+            patch("src.core.cache.token_hex", return_value="owned-lock-token"),
+        ):
+            result = cache.get_or_load(
+                "VCB",
+                lambda: (_ for _ in ()).throw(RuntimeError("upstream unavailable")),
+            )
+
+        assert result == {"price": 59000}
+
+    def test_repeated_request_calls_loader_once(self, cache):
+        redis = MagicMock()
+        redis.get.side_effect = [
+            None,
+            None,
+            json.dumps({"price": 59700}),
+        ]
+        redis.set.side_effect = ["owned-lock-token", True, True]
+        loader = MagicMock(return_value={"price": 59700})
+
+        with (
+            patch("src.core.cache.get_redis", return_value=redis),
+            patch("src.core.cache.token_hex", return_value="owned-lock-token"),
+        ):
+            first = cache.get_or_load("VCB", loader)
+            second = cache.get_or_load("VCB", loader)
+
+        assert first == second == {"price": 59700}
+        loader.assert_called_once_with()
+
+    def test_follower_uses_stale_without_calling_loader(self, cache):
+        redis = MagicMock()
+        redis.get.side_effect = [None, None, json.dumps({"price": 59000})]
+        redis.set.return_value = None
+        loader = MagicMock()
+
+        with patch("src.core.cache.get_redis", return_value=redis):
+            result = cache.get_or_load("VCB", loader)
+
+        assert result == {"price": 59000}
+        loader.assert_not_called()
+
+    def test_recent_failure_suppresses_duplicate_loader_call(self, cache):
+        redis = MagicMock()
+        redis.get.side_effect = [None, "1", None]
+        loader = MagicMock()
+
+        with patch("src.core.cache.get_redis", return_value=redis):
+            with pytest.raises(CacheRefreshUnavailable):
+                cache.get_or_load("VCB", loader)
+
+        loader.assert_not_called()
+
+    def test_concurrent_cold_failure_calls_loader_once(self, cache):
+        redis = ThreadSafeRedis()
+        loader_calls = 0
+        loader_lock = threading.Lock()
+        errors = []
+
+        def loader():
+            nonlocal loader_calls
+            with loader_lock:
+                loader_calls += 1
+            time.sleep(0.1)
+            raise RuntimeError("upstream unavailable")
+
+        def request():
+            try:
+                cache.get_or_load(
+                    "VCB",
+                    loader,
+                    wait_timeout=1,
+                    suppress_failure=lambda _exc: True,
+                )
+            except Exception as exc:
+                errors.append(exc)
+
+        with patch("src.core.cache.get_redis", return_value=redis):
+            threads = [threading.Thread(target=request) for _ in range(5)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+        assert loader_calls == 1
+        assert len(errors) == 5
+        assert sum(isinstance(error, RuntimeError) for error in errors) == 5
+
+    def test_lock_heartbeat_prevents_second_owner(self, cache):
+        redis = ThreadSafeRedis()
+        loader_calls = 0
+        results = []
+        errors = []
+
+        def loader():
+            nonlocal loader_calls
+            loader_calls += 1
+            time.sleep(1.25)
+            return {"price": 59700}
+
+        def request():
+            try:
+                results.append(
+                    cache.get_or_load(
+                        "VCB",
+                        loader,
+                        lock_ttl=1,
+                        wait_timeout=0.2,
+                    )
+                )
+            except Exception as exc:
+                errors.append(exc)
+
+        with patch("src.core.cache.get_redis", return_value=redis):
+            first = threading.Thread(target=request)
+            second = threading.Thread(target=request)
+            first.start()
+            time.sleep(0.2)
+            second.start()
+            first.join()
+            second.join()
+
+            results.append(
+                cache.get_or_load(
+                    "VCB",
+                    loader,
+                    lock_ttl=1,
+                    wait_timeout=0.2,
+                )
+            )
+
+        assert loader_calls == 1
+        assert results == [{"price": 59700}, {"price": 59700}]
+        assert len(errors) == 1
+        assert isinstance(errors[0], CacheRefreshUnavailable)
+
+    def test_non_retryable_failure_does_not_write_cooldown_marker(self, cache):
+        redis = ThreadSafeRedis()
+
+        with patch("src.core.cache.get_redis", return_value=redis):
+            with pytest.raises(ValueError, match="invalid input"):
+                cache.get_or_load(
+                    "BAD",
+                    lambda: (_ for _ in ()).throw(ValueError("invalid input")),
+                    suppress_failure=lambda _exc: False,
+                )
+
+        assert redis.get("test:BAD:refresh-failed") is None
 
 
 class TestCacheInstances:
