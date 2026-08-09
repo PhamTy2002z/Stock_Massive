@@ -2,7 +2,7 @@
 
 Vietnamese stock market data platform powered by **vnstock** library. Provides real-time data, charting, and analysis for Vietnam stock market (HOSE, HNX, UPCOM).
 
-## Current Status (Updated: 2026-01-03)
+## Current Status (Updated: 2026-08-09)
 
 | Component | Status | Notes |
 |-----------|--------|-------|
@@ -30,6 +30,7 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | Job Status API | Done | `/api/v1/jobs/status` for progress polling |
 | Startup Job Recovery | Done | Non-blocking missed job recovery on API startup |
 | Authentication | Done | Self-hosted JWT + bcrypt, refresh-token rotation with reuse detection |
+| Dev Runtime Split | Done | Backend + database in Docker; frontend runs on the host (port 3000) |
 | Auth Pages | Done | Email/password login + register, httpOnly cookie sessions |
 | Job Progress UI | Done | Progress bar + notification panel |
 | Charts Page | Planned | TradingView Lightweight Charts integration |
@@ -44,7 +45,7 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 - **Backend**: FastAPI, Python 3.11+, vnstock 4.x, SQLAlchemy 2.0, APScheduler 4.0, Pydantic 2, bcrypt, PyJWT
 - **Database**: PostgreSQL 16 (self-hosted via Docker; any Postgres works via `DATABASE_URL`)
 - **Caching**: Upstash Redis (trading-hours-aware TTL)
-- **DevOps**: Docker, Docker Compose, pnpm
+- **DevOps**: Docker Compose (backend + database in dev, everything in prod), pnpm (frontend on the host in dev)
 - **Design**: Modern + Clean (HSL color system, dark/light themes, next-themes)
 
 ## Architecture
@@ -67,16 +68,16 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 ## Project Structure
 
 ```
-Stock_Massive/
+stock-massive/
 ├── apps/
-│   ├── web/                 # Next.js frontend (port 3000) - 140+ files
+│   ├── web/                 # Next.js frontend (port 3000, runs on the host in dev) - 140+ files
 │   │   └── src/
 │   │       ├── app/         # App Router pages (5 routes)
 │   │       ├── components/  # UI (25+) + dashboard (35+) + layout (6) + providers (2)
 │   │       ├── hooks/       # 27 custom hooks
 │   │       └── lib/         # API client, utils
 │   │
-│   └── api/                 # FastAPI backend (port 8000) - 53 source files
+│   └── api/                 # FastAPI backend (port 8000, always in Docker) - 53 source files
 │       └── src/
 │           ├── stocks/      # 7 domain modules (analytics, market, price, company, financial, trading, overview)
 │           │   ├── analytics/  # Volume spikes, financial statements, sector historical
@@ -93,9 +94,9 @@ Stock_Massive/
 │           ├── core/        # 9 core config files (config, database, cache, scheduler, etc.)
 │           └── main.py
 │
-├── packages/                # Shared code (scaffolded but not used: config, types)
-├── docker/                  # Docker configs (4 Dockerfiles, 2 compose files)
-└── docs/                    # Documentation (10 files)
+├── docker-compose.yml       # Dev: db + api (web behind the `full` profile)
+├── docker-compose.prod.yml  # Prod: api + web (db behind the `db` profile)
+└── docs/                    # Documentation
 ```
 
 ## API Endpoints
@@ -177,78 +178,90 @@ All endpoints prefixed with `/api/v1/stocks`:
 
 ## Getting Started
 
-> **Note**: Project runs entirely with Docker. No need to install Node.js, Python, or PostgreSQL locally.
+> **Development setup**: the backend and database run in Docker; the frontend
+> runs directly on your machine on port 3000. Next.js gets native file watching
+> that way, which is much faster than a bind mount inside a container.
 
 ### Prerequisites
-- Docker 20.10+
-- Docker Compose 2.0+
+- Docker 20.10+ and Docker Compose v2
+- Node.js 20+ and pnpm 9+ (for the frontend)
 
 ### Quick Start
 
 ```bash
 # Clone repository
 git clone <repo-url>
-cd Stock_Massive
+cd stock-massive
 
-# Copy and configure environment
-cp .env.example .env
-# Edit .env with your values
+# Configure environment
+cp .env.example .env                        # containers: db + api
+cp apps/web/.env.example apps/web/.env.local # host: frontend
+# Set AUTH_SECRET in .env — generate with: openssl rand -base64 32
 
-# Start all services (api applies migrations on startup)
-docker compose up -d
+# 1. Backend + database in Docker (api applies migrations on startup)
+docker compose up -d --build
+
+# 2. Frontend on your machine
+pnpm dev:web:install    # first run only
+pnpm dev:web
 
 # Optional: load the bundled data snapshot into the fresh database
 pnpm db:restore
 ```
 
+`pnpm dev` does both steps in one go: starts the backend detached, then the
+frontend in the foreground.
+
 ### Services
 
-| Service | URL | Description |
-|---------|-----|-------------|
-| Frontend | http://localhost:3000 | Next.js web app |
-| API | http://localhost:8000 | FastAPI backend |
-| API Docs | http://localhost:8000/docs | Swagger UI |
-| Database | localhost:5432 | PostgreSQL 16 (docker compose service `db`) |
+| Service | URL | Runs in |
+|---------|-----|---------|
+| Frontend | http://localhost:3000 | Host (`next dev`) |
+| API | http://localhost:8000 | Container `api` |
+| API Docs | http://localhost:8000/docs | Container `api` |
+| Database | localhost:5432 | Container `db` (PostgreSQL 16) |
 
-### Docker Commands
+### Common Commands
 
 ```bash
-# Start services
-docker compose up -d
+# Backend (Docker)
+pnpm dev:api            # start db + api in the foreground
+pnpm dev:api:detach     # same, detached
+pnpm logs:api           # follow API logs
+pnpm stop               # docker compose down
+pnpm stop:clean         # down -v — also drops the database volume
 
-# View logs
-docker compose logs -f
-docker compose logs -f api    # API logs only
-docker compose logs -f web    # Web logs only
+# Frontend (host)
+pnpm dev:web            # next dev on port 3000
+pnpm build:web          # next build — requires the API to be running
+pnpm start:web          # serve the production build
 
-# Stop services
-docker compose down
+# Database
+pnpm db:migrate         # alembic upgrade head (also runs on api startup)
+pnpm db:shell           # psql into the db container
+pnpm db:restore         # load data_export.sql
 
-# Rebuild after code changes
-docker compose up -d --build
-
-# Database migrations (also run automatically on api startup)
-pnpm db:migrate
-
-# Open a psql shell on the database
-pnpm db:shell
-
-# Restore the bundled data snapshot into an empty database
-pnpm db:restore
-
-# Check services status
-docker compose ps
+# Optional: run the frontend in Docker too
+pnpm dev:full           # docker compose --profile full up
 ```
+
+> `pnpm build:web` fails with `fetch failed` / `ECONNREFUSED` when the API is
+> down — some analytics pages fetch during prerender. Start the backend first.
 
 ### Production Deployment
 
+Production runs **both** apps in Docker (`stockmassive-api`, `stockmassive-web`).
+
 ```bash
-# Build and run production
 docker compose -f docker-compose.prod.yml up -d --build
 
-# View production logs
-docker compose -f docker-compose.prod.yml logs -f
+# Self-host Postgres on the same machine as well:
+docker compose -f docker-compose.prod.yml --profile db up -d --build
 ```
+
+`DATABASE_URL` and `AUTH_SECRET` are required. See the
+[Deployment Guide](docs/deployment-guide.md) and
+[VPS Deployment Guide](docs/vps-deployment-guide.md).
 
 ## Frontend Pages
 
@@ -269,6 +282,7 @@ docker compose -f docker-compose.prod.yml logs -f
 - [Design Guidelines](docs/design-guidelines.md)
 - [Codebase Summary](docs/codebase-summary.md)
 - [Project Roadmap](docs/project-roadmap.md)
+- [Tech Stack](docs/tech-stack.md)
 - [Deployment Guide](docs/deployment-guide.md)
 - [VPS Deployment Guide](docs/vps-deployment-guide.md)
 

@@ -1,13 +1,40 @@
 # ========================================
 # Stock Massive - Production Docker Compose
 # ========================================
-# Usage: docker-compose -f docker-compose.prod.yml up -d
+# Usage: docker compose -f docker-compose.prod.yml up -d
+#
+# By default only api + web run here and DATABASE_URL must point at a Postgres
+# you manage elsewhere. To self-host Postgres on the same machine, add the `db`
+# profile: `docker compose -f docker-compose.prod.yml --profile db up -d`.
 
 # Pin the project name so image/network names stay stable no matter which
 # directory compose is invoked from.
 name: stockmassive
 
 services:
+  # Opt-in self-hosted Postgres. Only started with `--profile db`; without it,
+  # DATABASE_URL is expected to point at an external/managed Postgres.
+  db:
+    profiles: ["db"]
+    image: postgres:16-alpine
+    container_name: stockmassive-db
+    restart: unless-stopped
+    environment:
+      # Set both in .env before using this profile — the defaults are dev-only
+      # and must never reach a public host.
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-stockmassive}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-stockmassive}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - stockmassive-network
+
   api:
     build:
       context: ./apps/api
@@ -42,6 +69,9 @@ services:
       - api
     networks:
       - stockmassive-network
+
+volumes:
+  postgres_data:
 
 networks:
   stockmassive-network:

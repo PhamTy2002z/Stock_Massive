@@ -42,10 +42,10 @@ Updated: 2026-01-03
 - [x] APScheduler for background jobs
 - [x] **Job Status API** (`/api/v1/jobs/status` for progress polling)
 - [x] **Startup Job Recovery** (non-blocking missed job recovery)
-- [x] **Supabase Migration** (PostgreSQL cloud with SSL, connection pooling)
+- [x] **Database via `DATABASE_URL`** (Docker `db` in dev, any Postgres in prod)
 - [x] **Job Progress UI** (progress bar + notification panel)
-- [x] Docker Compose configuration (dev + prod)
-- [x] Backend test suite (18+ tests in 18 files)
+- [x] Docker Compose configuration (dev: db + api, frontend on host; prod: api + web)
+- [x] Backend test suite (26 test files)
 - [x] Modern + Clean design system established
 - [x] Sector Performance (ICB Level 2, top gainers/losers)
 - [x] **Sector Historical Performance** (period-based sector returns with horizontal bar chart)
@@ -278,7 +278,7 @@ Updated: 2026-01-03
 | Financial Health Enhancement (Phase 4) | Dec 28, 2025 | Peer Comparison, FCF Waterfall, CCC indicator with heatmap |
 | Financial Health Enhancement (Phase 2) | Dec 28, 2025 | Health Scorecard UI: Radar chart, F-Score, score breakdown |
 | Financial Health Enhancement (Phase 1) | Dec 28, 2025 | Backend APIs: health-score, trend-metrics, fcf-analysis, sector-peers |
-| Supabase Migration (Complete) | Dec 24, 2024 | DATABASE_URL_DIRECT, SSL config, connection pooling |
+| Supabase Migration (later reverted) | Dec 24, 2024 | Moved to cloud Postgres; now a single `DATABASE_URL` with SSL auto-detection |
 | Job Progress UI | Dec 24, 2024 | Progress bar + notification panel in frontend |
 | Job Status API | Dec 24, 2024 | `/api/v1/jobs/status` for progress polling |
 | Volume Spikes Dashboard (Frontend) | Dec 23, 2024 | Treemap, pie chart, composed chart, tabs visualization |

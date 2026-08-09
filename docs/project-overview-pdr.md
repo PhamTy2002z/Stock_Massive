@@ -28,7 +28,7 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 - Components: 60+ (25 UI + 35 dashboard)
 - Database Models: 3+
 - Test Files: 18
-- Docker Services: 2 (web, api)
+- Docker Services: dev 2 (db, api) — frontend runs on the host; prod 2 (api, web)
 
 | Feature | Status | Details |
 |---------|--------|---------|
@@ -60,9 +60,8 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | Rate Limiting | Done | Sliding window (100/60s standard, 20/60s heavy) |
 | Job Status API | Done | `/api/v1/jobs/status` for progress polling |
 | Startup Job Recovery | Done | Non-blocking missed job recovery on API startup |
-| Supabase Migration | Done | PostgreSQL migrated to Supabase cloud (SSL, pooling) |
 | Job Progress UI | Done | Progress bar + notification panel in frontend |
-| Auth Pages | Scaffolded | Routes exist, Supabase OAuth UI, logic pending |
+| Authentication | Done | Self-hosted JWT + bcrypt, refresh-token rotation, httpOnly cookie sessions |
 | Charts Page | Planned | Route exists, TradingView integration planned |
 | Portfolio Page | Planned | Route exists, not implemented |
 | Watchlist Page | Planned | Route exists, not implemented |
@@ -127,10 +126,10 @@ Vietnamese stock market data platform powered by **vnstock** library. Provides r
 | Charts | Recharts + TradingView | Sparklines now, full charts planned |
 | Data Fetching | TanStack Query v5.90 | Server state management, caching, background sync |
 | Backend | FastAPI | Fast, async, auto-docs, type-safe |
-| Data Source | vnstock >= 3.0.0 | Comprehensive Vietnam stock data |
+| Data Source | vnstock 4.x | Comprehensive Vietnam stock data |
 | Rate Limit Protection | vnstock_wrapper.py | Wraps vnstock calls with rate limit handling |
 | ORM | SQLAlchemy 2.0 | Mature, async support, migrations |
-| Database | Supabase PostgreSQL | Cloud-hosted, SSL, connection pooling, reliable |
+| Database | PostgreSQL 16 | Docker `db` in dev; any Postgres via `DATABASE_URL` in prod |
 | Scheduler | APScheduler 4.0 | Background job scheduling |
 | Caching | Upstash Redis | Trading-hours-aware TTL, serverless-friendly |
 | Rate Limiting | Redis sliding window | Efficient, distributed, granular control |
