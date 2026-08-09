@@ -40,10 +40,9 @@ export function StockDetailTabs({
     <div
       role="tablist"
       aria-label="Nội dung chi tiết cổ phiếu"
-      className={cn(
-        "flex items-center gap-[22px] overflow-x-auto border-b border-border",
-        className
-      )}
+      /* No rule of its own: the tab row sits on the hairline its container
+         already draws, so the active marker lands on that same line. */
+      className={cn("flex items-center gap-[22px] overflow-x-auto", className)}
     >
       {tabs.map((tab) => {
         const isActive = value === tab.value
@@ -75,7 +74,7 @@ export function StockDetailTabs({
 // Skeleton for loading state
 export function StockDetailTabsSkeleton({ className }: { className?: string }) {
   return (
-    <div className={cn("flex items-center gap-[22px] border-b border-border", className)}>
+    <div className={cn("flex items-center gap-[22px]", className)}>
       {[64, 60, 56, 48, 72].map((width) => (
         <div
           key={width}

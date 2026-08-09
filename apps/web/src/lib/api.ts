@@ -144,9 +144,11 @@ export interface StockDetail {
 
   // Volume & Value
   volume: number | null
+  /** Million VND — every price field above is plain VND. */
   trading_value: number | null
 
   // Market Cap & Shares
+  /** Billion VND. */
   market_cap: number | null
   outstanding_shares: number | null
   issue_share: number | null
@@ -776,7 +778,7 @@ export interface StockPricePoint {
 }
 
 /** Intervals the history endpoint accepts. Anything finer is served by /intraday. */
-export type HistoryInterval = "1D" | "1W" | "1M"
+export type HistoryInterval = "1m" | "5m" | "15m" | "30m" | "1H" | "1D" | "1W" | "1M"
 
 export async function fetchStockHistory(
   symbol: string,

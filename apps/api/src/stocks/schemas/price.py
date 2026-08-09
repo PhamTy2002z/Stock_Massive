@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 from enum import Enum
-from typing import Optional
+from typing import Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -19,9 +19,13 @@ class VolumeAnomalyLevel(str, Enum):
 
 
 class StockPrice(StrictModel):
-    """Historical OHLCV price data."""
+    """Historical OHLCV price data.
 
-    time: date
+    ``time`` is a plain date for session bars and a timestamp for intraday
+    intervals — a 5-minute series collapses onto one label without the clock.
+    """
+
+    time: Union[datetime, date]
     open: float
     high: float
     low: float

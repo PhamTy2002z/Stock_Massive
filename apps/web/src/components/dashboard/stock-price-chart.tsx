@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useId, useState } from "react"
 import { usePriceHistory, type PriceRange } from "@/hooks/use-price-history"
 import type { StockPricePoint } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -17,6 +17,9 @@ const ranges: PriceRange[] = ["1D", "5D", "1M", "6M", "1N", "5N"]
 const VIEW_W = 800
 const VIEW_H = 200
 const VOL_H = 40
+
+/** A short series must not turn into a few slabs the width of the card. */
+const MAX_BAR_W = 16
 
 /** Six evenly spaced ticks across the series, first and last included. */
 function axisLabels(points: StockPricePoint[]): string[] {
@@ -59,7 +62,7 @@ function Chip({
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         isActive
           ? "border-2 border-interactive-strong px-3 py-[5px] font-medium"
-          : "border border-border text-muted-foreground hover:text-foreground"
+          : "border border-border hover:bg-muted"
       )}
     >
       {label}
@@ -117,6 +120,9 @@ function Message({ children }: { children: React.ReactNode }) {
 export function StockPriceChart({ symbol, refPrice, className }: StockPriceChartProps) {
   const [range, setRange] = useState<PriceRange>("1D")
   const { data, isLoading, isError, error } = usePriceHistory(symbol, range)
+  // Two charts on one page would otherwise share a mask and blank each other.
+  // The colons React generates are not safe inside url(#…).
+  const maskId = `price-reveal-${useId().replace(/:/g, "")}`
 
   if (isLoading) {
     return (
@@ -166,7 +172,9 @@ export function StockPriceChart({ symbol, refPrice, className }: StockPriceChart
   const fill = isUp ? "hsl(var(--positive) / 0.08)" : "hsl(var(--negative) / 0.08)"
 
   const maxVolume = Math.max(...points.map((p) => p.volume), 1)
-  const barWidth = Math.max(1, (VIEW_W / points.length) * 0.7)
+  const barWidth = Math.min(MAX_BAR_W, Math.max(1, (VIEW_W / points.length) * 0.7))
+  // Intraday buckets are minutes; every other range is one bar per session.
+  const volumeLabel = range === "1D" ? "Khối lượng theo phút" : "Khối lượng theo phiên"
 
   return (
     <Frame range={range} onRangeChange={setRange} className={className}>
@@ -193,16 +201,31 @@ export function StockPriceChart({ symbol, refPrice, className }: StockPriceChart
               vectorEffect="non-scaling-stroke"
             />
           )}
-          <path d={area} fill={fill} />
-          <path
-            d={line}
-            fill="none"
-            stroke={stroke}
-            strokeWidth="1.75"
-            strokeLinejoin="round"
-            strokeLinecap="round"
-            vectorEffect="non-scaling-stroke"
-          />
+          <defs>
+            <mask id={maskId}>
+              <rect
+                key={range}
+                x="0"
+                y="-10"
+                width={VIEW_W}
+                height={VIEW_H + 20}
+                fill="#fff"
+                className="price-line-reveal"
+              />
+            </mask>
+          </defs>
+          <g mask={`url(#${maskId})`}>
+            <path d={area} fill={fill} />
+            <path
+              d={line}
+              fill="none"
+              stroke={stroke}
+              strokeWidth="1.75"
+              strokeLinejoin="round"
+              strokeLinecap="round"
+              vectorEffect="non-scaling-stroke"
+            />
+          </g>
         </svg>
         {refPrice !== null && refPrice !== undefined && (
           <span
@@ -222,7 +245,7 @@ export function StockPriceChart({ symbol, refPrice, className }: StockPriceChart
 
       <div className="mt-3 flex flex-wrap items-center gap-2.5 border-t border-[hsl(var(--hairline))] pt-3">
         <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
-          Khối lượng
+          {volumeLabel}
         </span>
         <svg
           viewBox={`0 0 ${VIEW_W} ${VOL_H}`}
