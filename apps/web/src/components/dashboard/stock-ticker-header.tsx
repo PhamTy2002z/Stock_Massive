@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { Bell, RefreshCw, Star, TrendingDown, TrendingUp } from "lucide-react"
+import { formatVietnamTime, getMarketSession } from "@/lib/market-session"
 import { cn } from "@/lib/utils"
 
 interface StockTickerHeaderProps {
@@ -17,16 +18,13 @@ interface StockTickerHeaderProps {
   /** Wired to the detail query's refetch; the icon spins while it is in flight. */
   onRefresh?: () => void
   isRefreshing?: boolean
+  /** When the quote was last read, stamped beside the session phase. */
+  updatedAt?: number
   className?: string
 }
 
-const priceFormat = new Intl.NumberFormat("vi-VN", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-})
-
-/** Limit prices are whole đồng — decimals on them are noise, not precision. */
-const limitFormat = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 })
+/** Board prices are whole đồng — decimals on them are noise, not precision. */
+const priceFormat = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 })
 
 function LimitPrice({
   label,
@@ -42,7 +40,38 @@ function LimitPrice({
   return (
     <span className="font-normal text-muted-foreground">
       {label}{" "}
-      <span className={cn("font-semibold", className)}>{limitFormat.format(value)}</span>
+      <span className={cn("font-semibold", className)}>{priceFormat.format(value)}</span>
+    </span>
+  )
+}
+
+/**
+ * Which phase of the session the board is in, and when this quote was read.
+ *
+ * Rendered only after mount: the phase comes from the clock, and a server-
+ * rendered one would be stale by the time it reached the browser.
+ */
+function SessionBadge({ updatedAt }: { updatedAt?: number }) {
+  const [session, setSession] = useState<ReturnType<typeof getMarketSession> | null>(null)
+
+  useEffect(() => {
+    setSession(getMarketSession())
+    const timer = setInterval(() => setSession(getMarketSession()), 30_000)
+    return () => clearInterval(timer)
+  }, [])
+
+  if (!session) return null
+
+  return (
+    <span className="flex items-center gap-1.5 rounded-full border border-[hsl(var(--hairline))] bg-card px-2.5 py-[3px] text-[12px] font-normal tracking-[-0.12px] text-muted-foreground">
+      <span
+        className={cn(
+          "size-1.5 rounded-full",
+          session.isLive ? "animate-pulse bg-positive" : "bg-border"
+        )}
+      />
+      {session.label}
+      {updatedAt ? ` · ${formatVietnamTime(updatedAt)}` : ""}
     </span>
   )
 }
@@ -58,6 +87,7 @@ export function StockTickerHeader({
   refPrice,
   onRefresh,
   isRefreshing = false,
+  updatedAt,
   className,
 }: StockTickerHeaderProps) {
   const [priceFlash, setPriceFlash] = useState(false)
@@ -82,7 +112,7 @@ export function StockTickerHeader({
   const formattedPercent = `${isPositive ? "+" : ""}${changePercent.toFixed(2).replace(".", ",")}%`
 
   return (
-    <div className={cn("flex flex-wrap items-start justify-between gap-6 py-4", className)}>
+    <div className={cn("flex flex-wrap items-start justify-between gap-6", className)}>
       {/* Identity: ticker leads, company name is support text, limits sit under both */}
       <div className="flex min-w-0 flex-col gap-2.5">
         <div className="flex min-w-0 items-baseline gap-3">
@@ -96,6 +126,7 @@ export function StockTickerHeader({
         </div>
 
         <div className="flex flex-wrap items-center gap-3.5 text-[13px] font-semibold leading-[1.29] tracking-[-0.208px] tabular-nums">
+          <SessionBadge updatedAt={updatedAt} />
           {/* Ceiling purple / reference yellow / floor cyan — the board colours
               Vietnamese traders already read, kept off the up-down green-red. */}
           <LimitPrice label="Trần" value={ceiling} className="text-[#7c3fae]" />
@@ -104,7 +135,9 @@ export function StockTickerHeader({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-start gap-5">
+      {/* Price leads, the actions that operate on it sit under it — so the
+          eye lands on the number before the controls. */}
+      <div className="flex shrink-0 flex-col items-end gap-3">
         <div className="flex flex-col items-end gap-0.5">
           <span
             className={cn(

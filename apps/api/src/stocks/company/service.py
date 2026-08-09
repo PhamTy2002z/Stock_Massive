@@ -27,6 +27,7 @@ from ..schemas.company import (
 from ..shared import (
     StockServiceError,
     market_cap_billions,
+    quote_price_vnd,
     safe_float,
     validate_symbol,
 )
@@ -524,7 +525,13 @@ class CompanyService:
 
         # 4. Calculate 52-week metrics from the supported vnstock 4 OHLCV API.
         try:
-            result.update(self._get_52_week_metrics(symbol))
+            metrics = self._get_52_week_metrics(symbol)
+            session_open = metrics.pop("session_open", None)
+            result.update(metrics)
+            # The price board carries no open, so the daily bar fills it in —
+            # never overriding an open the board did supply.
+            if result.get("open_price") is None and session_open is not None:
+                result["open_price"] = session_open
         except Exception as e:
             logger.warning(f"Error fetching 52-week metrics for {symbol}: {e}")
 
@@ -537,13 +544,20 @@ class CompanyService:
         return StockDetail(**result)
 
     def _get_52_week_metrics(self, symbol: str) -> dict:
-        """Calculate true 52-week range and average volume from daily bars."""
+        """Calculate true 52-week range and average volume from daily bars.
+
+        Also carries the latest bar's open, because the price board has no open
+        column — without it the intraday-range card has nothing to anchor the
+        session against.
+        """
         frame = Market().equity(symbol).ohlcv(count=260, source=self.source)
         if frame is None or frame.empty:
             return {}
 
-        high = safe_float(pd.to_numeric(frame["high"], errors="coerce").max())
-        low = safe_float(pd.to_numeric(frame["low"], errors="coerce").min())
+        # OHLCV quotes thousands of VND, the price board plain VND. Both land in
+        # the same StockDetail, so they have to agree.
+        high = quote_price_vnd(pd.to_numeric(frame["high"], errors="coerce").max())
+        low = quote_price_vnd(pd.to_numeric(frame["low"], errors="coerce").min())
         average_volume = safe_float(
             pd.to_numeric(frame["volume"], errors="coerce").mean()
         )
@@ -553,6 +567,7 @@ class CompanyService:
             "avg_volume_52_week": (
                 int(round(average_volume)) if average_volume is not None else None
             ),
+            "session_open": quote_price_vnd(frame["open"].iloc[-1]),
         }
 
     def _get_vn30_rank(self, symbol: str, current_market_cap: Optional[float] = None) -> Optional[int]:
