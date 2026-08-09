@@ -6,7 +6,7 @@ exercised without touching the network.
 """
 
 import os
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from unittest.mock import Mock
 
 import certifi
@@ -17,6 +17,7 @@ from src.stocks.providers.fiinquant import (
     FiinQuantCircuitOpen,
     FiinQuantMarketProvider,
     FiinQuantProviderError,
+    FiinQuantValuationProvider,
     ProviderCircuitBreaker,
     ensure_ca_bundle,
 )
@@ -381,6 +382,217 @@ def test_circuit_opens_after_repeated_failures_and_recovers_after_cooldown():
     current[0] = 130.0
     client.Fetch_Trading_Data.side_effect = None
     assert provider.fetch_market(["HPG"])[0].symbol == "HPG"
+
+
+def valuation_frame() -> pd.DataFrame:
+    """Two sessions of ratios for two symbols, the shape measured on the free tier.
+
+    ``get_stock_valuation`` returns one row per symbol per session, so a window
+    of N sessions across M symbols comes back as N * M rows in one frame.
+    """
+    return pd.DataFrame(
+        [
+            {
+                "ticker": "HPG",
+                "timestamp": "2026-08-06 00:00",
+                "pe": 12.86,
+                "pb": 1.61,
+            },
+            {
+                "ticker": "VCB",
+                "timestamp": "2026-08-06 00:00",
+                "pe": 13.13639165,
+                "pb": 2.01789326,
+            },
+            {
+                "ticker": "HPG",
+                "timestamp": "2026-08-07 00:00",
+                "pe": 12.94,
+                "pb": 1.62,
+            },
+            {
+                "ticker": "VCB",
+                "timestamp": "2026-08-07 00:00",
+                "pe": 13.21,
+                "pb": 2.03,
+            },
+        ]
+    )
+
+
+# The window the adapter is asked for; every valuation test names one, because
+# the adapter has no default to fall through to.
+WINDOW_START = date(2026, 8, 6)
+WINDOW_END = date(2026, 8, 7)
+
+
+def make_valuation_provider(
+    valuation: pd.DataFrame | None = None,
+    circuit_breaker: ProviderCircuitBreaker | None = None,
+) -> tuple[FiinQuantValuationProvider, Mock]:
+    client = Mock()
+    depth = Mock()
+    depth.get_stock_valuation.return_value = (
+        valuation_frame() if valuation is None else valuation
+    )
+    client.MarketDepth.return_value = depth
+    provider = FiinQuantValuationProvider(
+        "configured-user",
+        "configured-password",
+        session_factory=lambda _username, _password: client,
+        circuit_breaker=circuit_breaker,
+        now=lambda: NOW,
+    )
+    return provider, client
+
+
+def test_fetch_valuation_yields_one_snapshot_per_session():
+    provider, _client = make_valuation_provider()
+
+    snapshots = provider.fetch_valuation(["hpg"], WINDOW_START, WINDOW_END)
+
+    assert [snapshot.symbol for snapshot in snapshots] == ["HPG", "HPG"]
+    assert [snapshot.provider_pe for snapshot in snapshots] == [12.86, 12.94]
+    assert [snapshot.provider_pb for snapshot in snapshots] == [1.61, 1.62]
+    # effective_at is the session the ratios describe, not the moment collected.
+    assert [
+        snapshot.metadata.effective_at.date() for snapshot in snapshots
+    ] == [date(2026, 8, 6), date(2026, 8, 7)]
+    assert all(
+        snapshot.metadata.effective_at.utcoffset() is not None
+        for snapshot in snapshots
+    )
+    assert all(snapshot.metadata.observed_at == NOW for snapshot in snapshots)
+
+
+def test_fetch_valuation_asks_for_every_symbol_in_one_batched_call():
+    provider, client = make_valuation_provider()
+
+    snapshots = provider.fetch_valuation(["HPG", "VCB"], WINDOW_START, WINDOW_END)
+
+    assert client.MarketDepth.return_value.get_stock_valuation.call_count == 1
+    call = client.MarketDepth.return_value.get_stock_valuation.call_args.kwargs
+    assert call["tickers"] == ["HPG", "VCB"]
+    assert {snapshot.symbol for snapshot in snapshots} == {"HPG", "VCB"}
+
+
+def test_the_window_reaching_the_provider_is_the_one_the_caller_named():
+    provider, client = make_valuation_provider()
+
+    provider.fetch_valuation(
+        ["HPG"],
+        from_date=date(2026, 1, 2),
+        to_date=date(2026, 3, 4),
+    )
+
+    call = client.MarketDepth.return_value.get_stock_valuation.call_args.kwargs
+    assert call["from_date"] == "2026-01-02"
+    assert call["to_date"] == "2026-03-04"
+
+
+def test_a_backwards_window_is_refused_before_the_provider_is_called():
+    provider, client = make_valuation_provider()
+
+    with pytest.raises(ValueError, match="from_date"):
+        provider.fetch_valuation(
+            ["HPG"],
+            from_date=date(2026, 3, 4),
+            to_date=date(2026, 1, 2),
+        )
+    client.MarketDepth.assert_not_called()
+
+
+def test_symbols_without_valuation_data_are_skipped_not_faked():
+    provider, _client = make_valuation_provider()
+
+    snapshots = provider.fetch_valuation(["HPG", "FPT"], WINDOW_START, WINDOW_END)
+
+    assert {snapshot.symbol for snapshot in snapshots} == {"HPG"}
+
+
+def test_a_session_carrying_neither_ratio_is_dropped_without_costing_the_rest():
+    blank = valuation_frame()
+    blank.loc[blank["timestamp"] == "2026-08-06 00:00", ["pe", "pb"]] = None
+    provider, _client = make_valuation_provider(valuation=blank)
+
+    snapshots = provider.fetch_valuation(["HPG", "VCB"], WINDOW_START, WINDOW_END)
+
+    assert [
+        (snapshot.symbol, snapshot.metadata.effective_at.date())
+        for snapshot in snapshots
+    ] == [("HPG", date(2026, 8, 7)), ("VCB", date(2026, 8, 7))]
+
+
+def test_a_session_carrying_one_ratio_keeps_it_rather_than_dropping_both():
+    partial = valuation_frame()
+    partial.loc[partial["ticker"] == "HPG", "pb"] = None
+    provider, _client = make_valuation_provider(valuation=partial)
+
+    snapshots = provider.fetch_valuation(["HPG"], WINDOW_START, WINDOW_END)
+
+    assert [snapshot.provider_pe for snapshot in snapshots] == [12.86, 12.94]
+    assert [snapshot.provider_pb for snapshot in snapshots] == [None, None]
+
+
+def test_a_valuation_response_missing_a_ratio_column_is_an_error_not_a_gap():
+    provider, _client = make_valuation_provider(
+        valuation=valuation_frame().drop(columns=["pb"])
+    )
+
+    with pytest.raises(FiinQuantProviderError, match="missing fields: pb"):
+        provider.fetch_valuation(["HPG"], WINDOW_START, WINDOW_END)
+
+
+def test_an_empty_valuation_response_is_reported_rather_than_read_as_no_ratios():
+    provider, _client = make_valuation_provider(valuation=pd.DataFrame())
+
+    with pytest.raises(FiinQuantProviderError, match="no valuation data"):
+        provider.fetch_valuation(["HPG"], WINDOW_START, WINDOW_END)
+
+
+def test_fetch_valuation_enforces_the_measured_batch_ceiling():
+    provider, _client = make_valuation_provider()
+
+    with pytest.raises(ValueError, match="100 symbols"):
+        provider.fetch_valuation(
+            [f"S{i:03d}" for i in range(101)],
+            WINDOW_START,
+            WINDOW_END,
+        )
+
+
+def test_invalid_symbol_is_rejected_before_the_valuation_call():
+    provider, client = make_valuation_provider()
+
+    with pytest.raises(StockServiceError, match="Invalid symbol format"):
+        provider.fetch_valuation(["VCB;DROP"], WINDOW_START, WINDOW_END)
+    client.MarketDepth.assert_not_called()
+
+
+def test_valuation_upstream_failure_text_never_reaches_the_caller():
+    provider, client = make_valuation_provider()
+    client.MarketDepth.return_value.get_stock_valuation.side_effect = RuntimeError(
+        "auth failed for configured-user:configured-password"
+    )
+
+    with pytest.raises(FiinQuantProviderError) as raised:
+        provider.fetch_valuation(["HPG"], WINDOW_START, WINDOW_END)
+    assert_no_credentials(raised.value)
+
+
+def test_valuation_circuit_opens_after_repeated_failures():
+    breaker = ProviderCircuitBreaker(failure_threshold=2, clock=lambda: 100.0)
+    provider, client = make_valuation_provider(circuit_breaker=breaker)
+    client.MarketDepth.return_value.get_stock_valuation.side_effect = RuntimeError(
+        "gateway timeout"
+    )
+
+    for _ in range(2):
+        with pytest.raises(FiinQuantProviderError):
+            provider.fetch_valuation(["HPG"], WINDOW_START, WINDOW_END)
+
+    with pytest.raises(FiinQuantCircuitOpen):
+        provider.fetch_valuation(["HPG"], WINDOW_START, WINDOW_END)
 
 
 def test_ensure_ca_bundle_sets_certifi_when_unset(monkeypatch):

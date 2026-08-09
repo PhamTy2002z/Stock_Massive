@@ -1,4 +1,8 @@
-"""FiinQuant hot-market adapter for the bounded internal universe."""
+"""FiinQuant adapters for the bounded internal universe.
+
+One adapter per capability — market and valuation — over a shared login,
+circuit breaker and error-hygiene rule.
+"""
 
 from __future__ import annotations
 
@@ -17,6 +21,7 @@ from .contracts import (
     MarketSnapshot,
     ProviderSource,
     SnapshotMetadata,
+    ValuationSnapshot,
 )
 from ..shared import validate_symbol
 
@@ -52,6 +57,9 @@ HISTORY_LOOKBACK_DAYS = 30
 
 OVERVIEW_FIELDS = ("ticker", "timestamp", "marketcap")
 CEILING_FLOOR_FIELDS = ("ticker", "timestamp", "ceilingprice", "floorprice")
+
+# Valuation arrives as its own daily series: one row per symbol per session.
+VALUATION_FIELDS = ("ticker", "timestamp", "pe", "pb")
 
 
 class FiinQuantProviderError(RuntimeError):
@@ -138,17 +146,12 @@ def _default_session_factory(username: str, password: str) -> Any:
     return FiinSession(username=username, password=password).login()
 
 
-class FiinQuantMarketProvider:
-    """Turn one batched end-of-day read into one MarketSnapshot per symbol.
+class FiinQuantProviderBase:
+    """Session handling, circuit protection and error hygiene shared by adapters.
 
-    A session is assembled from three calls: daily candles carry price, volume,
-    value and both flow pairs; ``get_overview`` carries market cap; and
-    ``get_ceilingfloor`` carries the day's permitted band.
-
-    A malformed response from any of the three is an error, because a snapshot
-    missing money fields is worse than no snapshot. A well-formed response that
-    simply has no row for a symbol is not: that symbol keeps whatever the other
-    calls gave it, and one unusable symbol never costs the rest of the batch.
+    Each capability gets its own adapter because each reads a different set of
+    provider calls, but they all sit behind the same login and the same rule
+    that no upstream text is ever repeated back to the caller.
     """
 
     source = ProviderSource.FIINQUANT
@@ -170,56 +173,26 @@ class FiinQuantMarketProvider:
         self._now = now
         self._session: Any | None = None
 
-    def fetch_market(self, symbols: Sequence[str]) -> Sequence[MarketSnapshot]:
+    @staticmethod
+    def _batch(symbols: Sequence[str]) -> tuple[str, ...]:
         normalized = tuple(dict.fromkeys(validate_symbol(symbol) for symbol in symbols))
-        if not normalized:
-            return ()
         if len(normalized) > MAX_BATCH_SYMBOLS:
             raise ValueError(f"a FiinQuant batch is limited to {MAX_BATCH_SYMBOLS} symbols")
+        return normalized
 
+    def _protected(self, call: Callable[[], Any], message: str) -> Any:
+        """Run one upstream round trip under the breaker, counting its outcome."""
+        # Outside the try: an open circuit is the breaker working, not a fresh
+        # failure, and counting it would keep the cooldown from ever expiring.
         self._circuit.allow()
         try:
-            snapshots = self._guarded(
-                lambda: self._fetch_batch(normalized),
-                "FiinQuant market fetch failed",
-            )
-        except FiinQuantCircuitOpen:
-            raise
+            result = self._guarded(call, message)
         except FiinQuantProviderError:
             self._circuit.record_failure()
             raise
 
         self._circuit.record_success()
-        return snapshots
-
-    def _fetch_batch(self, symbols: Sequence[str]) -> tuple[MarketSnapshot, ...]:
-        session = self._get_session()
-        tickers = list(symbols)
-        from_date = str(
-            self._now().astimezone(VN_TZ).date() - timedelta(days=HISTORY_LOOKBACK_DAYS)
-        )
-
-        candles = session.Fetch_Trading_Data(
-            realtime=False,
-            tickers=tickers,
-            # A list, not a tuple: the library indexes into this argument.
-            fields=MARKET_FIELDS,
-            adjusted=False,
-            by="1d",
-            from_date=from_date,
-        ).get_data()
-        price_statistics = session.PriceStatistics()
-        overview = price_statistics.get_overview(
-            tickers=tickers,
-            time_filter="Daily",
-            from_date=from_date,
-        )
-        ceiling_floor = price_statistics.get_ceilingfloor(
-            tickers=tickers,
-            from_date=from_date,
-        )
-
-        return self._normalize(candles, overview, ceiling_floor, symbols)
+        return result
 
     def _get_session(self) -> Any:
         if self._session is None:
@@ -247,6 +220,59 @@ class FiinQuantMarketProvider:
             failure = type(exc).__name__
         raise FiinQuantProviderError(f"{message} ({failure})")
 
+    def _today(self) -> date:
+        return self._now().astimezone(VN_TZ).date()
+
+
+class FiinQuantMarketProvider(FiinQuantProviderBase):
+    """Turn one batched end-of-day read into one MarketSnapshot per symbol.
+
+    A session is assembled from three calls: daily candles carry price, volume,
+    value and both flow pairs; ``get_overview`` carries market cap; and
+    ``get_ceilingfloor`` carries the day's permitted band.
+
+    A malformed response from any of the three is an error, because a snapshot
+    missing money fields is worse than no snapshot. A well-formed response that
+    simply has no row for a symbol is not: that symbol keeps whatever the other
+    calls gave it, and one unusable symbol never costs the rest of the batch.
+    """
+
+    def fetch_market(self, symbols: Sequence[str]) -> Sequence[MarketSnapshot]:
+        normalized = self._batch(symbols)
+        if not normalized:
+            return ()
+        return self._protected(
+            lambda: self._fetch_batch(normalized),
+            "FiinQuant market fetch failed",
+        )
+
+    def _fetch_batch(self, symbols: Sequence[str]) -> tuple[MarketSnapshot, ...]:
+        session = self._get_session()
+        tickers = list(symbols)
+        from_date = str(self._today() - timedelta(days=HISTORY_LOOKBACK_DAYS))
+
+        candles = session.Fetch_Trading_Data(
+            realtime=False,
+            tickers=tickers,
+            # A list, not a tuple: the library indexes into this argument.
+            fields=MARKET_FIELDS,
+            adjusted=False,
+            by="1d",
+            from_date=from_date,
+        ).get_data()
+        price_statistics = session.PriceStatistics()
+        overview = price_statistics.get_overview(
+            tickers=tickers,
+            time_filter="Daily",
+            from_date=from_date,
+        )
+        ceiling_floor = price_statistics.get_ceilingfloor(
+            tickers=tickers,
+            from_date=from_date,
+        )
+
+        return self._normalize(candles, overview, ceiling_floor, symbols)
+
     def _normalize(
         self,
         candles: pd.DataFrame,
@@ -254,12 +280,7 @@ class FiinQuantMarketProvider:
         ceiling_floor: pd.DataFrame,
         requested_symbols: Sequence[str],
     ) -> tuple[MarketSnapshot, ...]:
-        if candles is None or getattr(candles, "empty", True):
-            # This is the documented silent-failure signature of the library:
-            # a rejected certificate comes back as an empty frame, not an error.
-            raise FiinQuantProviderError(
-                "FiinQuant returned no market data for any requested symbol"
-            )
+        _require_populated(candles, "market")
 
         sessions = _prepare(
             candles,
@@ -301,6 +322,95 @@ class FiinQuantMarketProvider:
             snapshots.append(snapshot)
 
         return tuple(snapshots)
+
+
+class FiinQuantValuationProvider(FiinQuantProviderBase):
+    """Turn one batched read of the ratio series into a snapshot per session.
+
+    ``get_stock_valuation`` answers with one row per symbol per session, so a
+    single call covers the whole requested window for the whole batch. The
+    window is required rather than defaulted: the collector asks for the session
+    that just closed and a backfill asks for a stretch of history, and a default
+    would quietly hand one of them the other's window.
+
+    A malformed response is an error, but a session the provider has no ratios
+    for is not — an unvalued symbol is a normal thing in this market, and it
+    never costs the rest of the batch its snapshots.
+    """
+
+    def fetch_valuation(
+        self,
+        symbols: Sequence[str],
+        from_date: date,
+        to_date: date,
+    ) -> Sequence[ValuationSnapshot]:
+        if from_date > to_date:
+            raise ValueError("from_date cannot be later than to_date")
+        normalized = self._batch(symbols)
+        if not normalized:
+            return ()
+
+        return self._protected(
+            lambda: self._fetch_ratio_series(normalized, from_date, to_date),
+            "FiinQuant valuation fetch failed",
+        )
+
+    def _fetch_ratio_series(
+        self,
+        symbols: Sequence[str],
+        from_date: date,
+        to_date: date,
+    ) -> tuple[ValuationSnapshot, ...]:
+        session = self._get_session()
+        ratios = session.MarketDepth().get_stock_valuation(
+            tickers=list(symbols),
+            from_date=str(from_date),
+            to_date=str(to_date),
+        )
+        return self._to_snapshots(ratios, symbols)
+
+    def _to_snapshots(
+        self,
+        ratios: pd.DataFrame,
+        requested_symbols: Sequence[str],
+    ) -> tuple[ValuationSnapshot, ...]:
+        _require_populated(ratios, "valuation")
+
+        sessions = _prepare(ratios, VALUATION_FIELDS, requested_symbols)
+        observed_at = self._now()
+        snapshots: list[ValuationSnapshot] = []
+
+        for symbol in requested_symbols:
+            for _, row in sessions[sessions["ticker"] == symbol].iterrows():
+                snapshot = _build_valuation_snapshot(
+                    symbol=symbol,
+                    source=self.source,
+                    observed_at=observed_at,
+                    row=row,
+                )
+                if snapshot is None:
+                    continue
+                snapshots.append(snapshot)
+
+        return tuple(snapshots)
+
+
+def _require_populated(frame: pd.DataFrame | None, label: str) -> None:
+    """Refuse a wholly empty response instead of reading it as an empty market.
+
+    This is the documented silent-failure signature of the library: a rejected
+    certificate comes back as an empty frame, not an error. Treating it as "no
+    data" would make a broken connection indistinguishable from a quiet day.
+
+    The cost is accepted deliberately: a batch where genuinely every symbol is
+    unknown to the provider also raises. Per-symbol gaps are the normal case and
+    are handled inside a well-formed frame, so a frame with nothing in it at all
+    is far more likely to be the connection than the market.
+    """
+    if frame is None or getattr(frame, "empty", True):
+        raise FiinQuantProviderError(
+            f"FiinQuant returned no {label} data for any requested symbol"
+        )
 
 
 def _prepare(
@@ -380,6 +490,40 @@ def _build_snapshot(
         )
     except ValidationError as exc:
         logger.warning("Skipping unusable FiinQuant row for %s: %s", symbol, exc)
+        return None
+
+
+def _build_valuation_snapshot(
+    symbol: str,
+    source: ProviderSource,
+    observed_at: datetime,
+    row: pd.Series,
+) -> ValuationSnapshot | None:
+    """Assemble one session's ratios, or None when the session carries neither.
+
+    The provider dates a row for every session it knows about, ratios or not, so
+    a row with both blank is a symbol it does not value rather than a broken
+    response. Recording it would store a date and nothing else. One ratio
+    present is still worth keeping: the other is a genuine gap, not a guess.
+    """
+    provider_pe = _optional_float(row.get("pe"))
+    provider_pb = _optional_float(row.get("pb"))
+    if provider_pe is None and provider_pb is None:
+        return None
+
+    try:
+        return ValuationSnapshot(
+            symbol=symbol,
+            metadata=SnapshotMetadata(
+                source=source,
+                effective_at=_as_aware(row["timestamp"]),
+                observed_at=observed_at,
+            ),
+            provider_pe=provider_pe,
+            provider_pb=provider_pb,
+        )
+    except ValidationError as exc:
+        logger.warning("Skipping unusable FiinQuant valuation row for %s: %s", symbol, exc)
         return None
 
 
