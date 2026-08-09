@@ -55,3 +55,6 @@ apps/api/AGENTS.md
 
 # Local scratch (venvs, throwaway scripts)
 .scratch/
+
+# Feature worktrees live here; each is its own checkout
+.claude/worktrees/
