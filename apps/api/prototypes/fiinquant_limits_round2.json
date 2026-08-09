@@ -1,0 +1,140 @@
+{
+  "Nguồn danh sách mã để dò trần": {
+    "count": 110,
+    "sample": [
+      "ACB",
+      "ANV",
+      "ASM",
+      "BAF",
+      "BCG",
+      "BCM",
+      "BID",
+      "BMP",
+      "BSI",
+      "BSR",
+      "BVH",
+      "BWE"
+    ]
+  },
+  "1. Trần số mã cho dữ liệu lịch sử (realtime=False)": {
+    "33 mã": 33,
+    "50 mã": 50,
+    "100 mã": 100,
+    "110 mã": 110
+  },
+  "2. Độ sâu lịch sử ngày": {
+    "xin 2 năm": {
+      "rows": 498,
+      "oldest": "2024-08-09 00:00"
+    },
+    "xin 3 năm": {
+      "rows": 747,
+      "oldest": "2023-08-10 00:00"
+    },
+    "xin 4 năm": {
+      "rows": 100,
+      "oldest": "2026-03-19 00:00"
+    },
+    "xin 5 năm": {
+      "rows": 1247,
+      "oldest": "2021-08-10 00:00"
+    },
+    "xin 10 năm": "rỗng"
+  },
+  "3. Giá điều chỉnh so với giá khớp": {
+    "adjusted=True": [
+      21850.0,
+      22000.0,
+      22000.0
+    ],
+    "adjusted=False": [
+      21850.0,
+      22000.0,
+      22000.0
+    ]
+  },
+  "4. Reference data qua PriceStatistics": {
+    "get_foreign": "rỗng",
+    "get_freefloat": {
+      "rows": 8,
+      "columns": [
+        "Ticker",
+        "Timestamp",
+        "FreeFloat",
+        "FreeFloatRate",
+        "OutstandingShare"
+      ],
+      "first_row": {
+        "Ticker": "HPG",
+        "Timestamp": "2026-08-07 14:46",
+        "FreeFloat": "nan",
+        "FreeFloatRate": "nan",
+        "OutstandingShare": "nan"
+      }
+    },
+    "get_ceilingfloor": {
+      "rows": 8,
+      "columns": [
+        "Ticker",
+        "Timestamp",
+        "CeilingPrice",
+        "FloorPrice"
+      ],
+      "first_row": {
+        "Ticker": "HPG",
+        "Timestamp": "2026-08-07 14:46",
+        "CeilingPrice": "23350.0",
+        "FloorPrice": "20350.0"
+      }
+    },
+    "get_overview": {
+      "rows": 7,
+      "columns": [
+        "ticker",
+        "timestamp",
+        "totalMatchVolume",
+        "totalMatchValue",
+        "totalDealVolume",
+        "totalDealValue",
+        "percentPriceChange",
+        "marketCap"
+      ],
+      "first_row": {
+        "ticker": "HPG",
+        "timestamp": "2026-08-07 00:00",
+        "totalMatchVolume": "13044079.0",
+        "totalMatchValue": "287684908850.0",
+        "totalDealVolume": "200000.0",
+        "totalDealValue": "4070000000.0",
+        "percentPriceChange": "0.006864988558352492",
+        "marketCap": "185745219440000.0"
+      }
+    },
+    "get_value_by_investor": "rỗng"
+  },
+  "5. Báo cáo tài chính": {
+    "2024 Q4 hợp nhất đã kiểm toán": "rỗng",
+    "2024 Q4 chưa kiểm toán": "rỗng",
+    "2024 cả năm": "rỗng",
+    "2025 Q2 chưa kiểm toán": "rỗng",
+    "full 2024": "rỗng",
+    "get_ratios": "rỗng"
+  },
+  "6. Vốn hoá và định giá theo ngành/chỉ số": {
+    "BasicInfor": "LỖI PermissionError: Error 403 with url https://apigw.fiingroup.vn/FXPJ/MasterData/GetOrganizationsByGroupCodeAndIcbCode: You do not have permission to access this API.",
+    "GetDataPoint": "LỖI TypeError: FiinSession.GetDataPoint() got an unexpected keyword argument 'tickers'",
+    "sector_valuation": {
+      "rows": 0,
+      "columns": []
+    },
+    "index_valuation": {
+      "rows": 7,
+      "columns": [
+        "ticker",
+        "timestamp",
+        "pe",
+        "pb"
+      ]
+    }
+  }
+}
