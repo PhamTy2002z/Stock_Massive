@@ -4,9 +4,10 @@ import { DashboardLayoutClient } from "@/components/layout/dashboard-layout-clie
 import {
   StockTickerHeaderSkeleton,
   StockDetailTabsSkeleton,
-  StockDetailPanelSkeleton,
-  StockStatsTableSkeleton,
-  StockCompanyInfoSkeleton,
+  StockPriceChartSkeleton,
+  StockRangeCardsSkeleton,
+  StockValuationVsSectorSkeleton,
+  StockProfileSidebarSkeleton,
   StockDetailClient,
 } from "@/components/dashboard"
 import { fetchStockDetailServer } from "@/lib/api-server"
@@ -34,15 +35,16 @@ async function prefetchData(symbol: string) {
 function DeepDiveSkeleton() {
   return (
     <div className="flex flex-col gap-6">
-      <section className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
+      <section className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_280px] gap-4">
         <div className="space-y-4">
           <StockTickerHeaderSkeleton />
           <StockDetailTabsSkeleton className="mt-2" />
-          <StockDetailPanelSkeleton />
-          <StockStatsTableSkeleton />
+          <StockPriceChartSkeleton />
+          <StockRangeCardsSkeleton />
+          <StockValuationVsSectorSkeleton />
         </div>
         <div className="space-y-4">
-          <StockCompanyInfoSkeleton />
+          <StockProfileSidebarSkeleton />
         </div>
       </section>
     </div>

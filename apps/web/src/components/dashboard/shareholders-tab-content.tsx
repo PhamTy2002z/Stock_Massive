@@ -1,37 +1,112 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useMemo, useState } from "react"
 import { cn } from "@/lib/utils"
 import { ChevronLeft, ChevronRight } from "lucide-react"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { useShareholders } from "@/hooks/use-shareholders"
+import type { ShareholderItem } from "@/lib/api"
 
 interface ShareholdersTabContentProps {
   symbol?: string
   className?: string
 }
 
-// Format shares - convert to millions with "triệu" unit
-function formatShares(value: number): string {
+const ROWS_PER_PAGE = 10
+
+/** A disclosure older than this reads as history, not as current ownership. */
+const STALE_AFTER_DAYS = 365
+
+const shareFormat = (value: number) => {
   const millions = value / 1_000_000
-  return `${millions.toLocaleString("de-DE", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })} triệu`
+  if (millions >= 1_000) {
+    return `${(millions / 1_000).toLocaleString("vi-VN", { maximumFractionDigits: 2 })} tỷ CP`
+  }
+  return `${millions.toLocaleString("vi-VN", { maximumFractionDigits: 2 })} triệu CP`
 }
 
-// Format percentage
-function formatPercent(value: number): string {
-  return `${value.toLocaleString("de-DE", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}%`
+const percentFormat = (value: number) =>
+  value < 0.01
+    ? "<0,01%"
+    : `${value.toLocaleString("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`
+
+function isStale(date: string | null): boolean {
+  if (!date) return false
+  const parsed = new Date(date)
+  if (Number.isNaN(parsed.getTime())) return false
+  return Date.now() - parsed.getTime() > STALE_AFTER_DAYS * 24 * 60 * 60 * 1000
+}
+
+function Card({
+  children,
+  className,
+}: {
+  children: React.ReactNode
+  className?: string
+}) {
+  return (
+    <div className={cn("min-w-0 rounded-[18px] border border-border bg-card p-[18px]", className)}>
+      {children}
+    </div>
+  )
+}
+
+/**
+ * Ownership as one bar: the named holders that clear 1%, then everything else.
+ *
+ * The design splits this by holder category (state / foreign / other), but the
+ * shareholders endpoint returns no category field. Grouping by disclosed size is
+ * the same question answered with data that actually exists, rather than a
+ * classification guessed from names.
+ */
+function OwnershipBreakdown({ shareholders }: { shareholders: ShareholderItem[] }) {
+  const named = shareholders.filter((s) => s.ownership_pct >= 1).slice(0, 5)
+  const namedTotal = named.reduce((sum, s) => sum + s.ownership_pct, 0)
+  const others = Math.max(0, 100 - namedTotal)
+
+  const tones = [
+    "bg-foreground",
+    "bg-interactive",
+    "bg-[hsl(var(--positive))]",
+    "bg-[#7c3fae]",
+    "bg-[#cf7a1a]",
+  ]
+
+  return (
+    <Card>
+      <div className="flex flex-wrap items-baseline justify-between gap-4">
+        <span className="text-[17px] font-semibold leading-[1.24] tracking-[-0.374px]">
+          Cơ cấu sở hữu
+        </span>
+        <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+          {named.length} cổ đông công bố trên 1%
+        </span>
+      </div>
+
+      <div className="mt-3.5 flex h-2.5 gap-[3px]">
+        {named.map((holder, i) => (
+          <span
+            key={holder.id || holder.name}
+            style={{ flex: holder.ownership_pct }}
+            className={cn("rounded-full", tones[i % tones.length])}
+          />
+        ))}
+        <span style={{ flex: others }} className="rounded-full bg-border" />
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-[13px] leading-[1.43] tracking-[-0.208px] tabular-nums">
+        {named.map((holder, i) => (
+          <span key={holder.id || holder.name} className="flex items-center gap-[7px]">
+            <span className={cn("size-2 rounded-full", tones[i % tones.length])} />
+            {holder.name} {percentFormat(holder.ownership_pct)}
+          </span>
+        ))}
+        <span className="flex items-center gap-[7px] text-muted-foreground">
+          <span className="size-2 rounded-full bg-border" />
+          Khác {percentFormat(others)}
+        </span>
+      </div>
+    </Card>
+  )
 }
 
 export function ShareholdersTabContent({
@@ -39,164 +114,113 @@ export function ShareholdersTabContent({
   className,
 }: ShareholdersTabContentProps) {
   const [currentPage, setCurrentPage] = useState(1)
-  const [rowsPerPage, setRowsPerPage] = useState(10)
-
   const { data } = useShareholders(symbol)
 
-  // Memoize shareholders to prevent useMemo dependency warning
   const shareholders = useMemo(() => data.shareholders ?? [], [data.shareholders])
   const totalItems = shareholders.length
-  const totalPages = Math.max(1, Math.ceil(totalItems / rowsPerPage))
-  const startIndex = (currentPage - 1) * rowsPerPage
-  const endIndex = Math.min(startIndex + rowsPerPage, totalItems)
+  const totalPages = Math.max(1, Math.ceil(totalItems / ROWS_PER_PAGE))
+  const startIndex = (currentPage - 1) * ROWS_PER_PAGE
+  const endIndex = Math.min(startIndex + ROWS_PER_PAGE, totalItems)
+  const currentData = shareholders.slice(startIndex, endIndex)
 
-  // Get current page data
-  const currentData = useMemo(() => {
-    return shareholders.slice(startIndex, endIndex)
-  }, [shareholders, startIndex, endIndex])
-
-  // Handle page change
   const goToPage = (page: number) => {
-    if (page >= 1 && page <= totalPages) {
-      setCurrentPage(page)
-    }
+    if (page >= 1 && page <= totalPages) setCurrentPage(page)
   }
 
-  // Handle rows per page change
-  const handleRowsPerPageChange = (value: string) => {
-    setRowsPerPage(Number(value))
-    setCurrentPage(1) // Reset to first page
-  }
-
-  // Show empty state
   if (totalItems === 0) {
     return (
-      <div className={cn("space-y-4", className)}>
-        <h3 className="text-sm text-muted-foreground">
-          Danh sách cổ đông lớn của {symbol}
-        </h3>
-        <div className="rounded-lg border border-border/50 bg-card/50 p-8 text-center">
-          <p className="text-sm text-muted-foreground">
-            Không có dữ liệu cổ đông cho mã {symbol}
-          </p>
-        </div>
-      </div>
+      <Card className={className}>
+        <p className="py-6 text-center text-[15px] leading-[1.47] tracking-[-0.374px] text-muted-foreground">
+          Không có dữ liệu cổ đông cho mã {symbol}
+        </p>
+      </Card>
     )
   }
 
-  return (
-    <div className={cn("space-y-4", className)}>
-      {/* Title */}
-      <h3 className="text-sm text-muted-foreground">
-        Danh sách cổ đông lớn của {symbol}
-      </h3>
+  const columns = "minmax(200px,1.6fr) 132px 92px 132px"
 
-      {/* Table */}
-      <div className="rounded-lg border border-border/50 bg-card/50 overflow-hidden">
-        <div className="overflow-x-auto scrollbar-thin">
-          <table className="w-full min-w-[600px] border-collapse">
-            <thead>
-              <tr className="border-b border-border/50 bg-muted/30">
-                <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">
-                  Cổ đông
-                </th>
-                <th className="py-3 px-4 text-right text-sm font-medium text-muted-foreground whitespace-nowrap">
-                  Số lượng
-                </th>
-                <th className="py-3 px-4 text-right text-sm font-medium text-muted-foreground whitespace-nowrap">
-                  Tỷ lệ sở hữu
-                </th>
-                <th className="py-3 px-4 text-right text-sm font-medium text-muted-foreground whitespace-nowrap">
-                  Ngày cập nhật
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {currentData.map((shareholder, index) => (
-                <tr
-                  key={shareholder.id || `${shareholder.name}-${startIndex + index}`}
-                  className="border-b border-border/30 transition-colors hover:bg-muted/20"
-                >
-                  <td className="py-3 px-4 text-sm font-medium text-foreground">
-                    {shareholder.name}
-                  </td>
-                  <td className="py-3 px-4 text-sm text-right tabular-nums text-foreground/90">
-                    {formatShares(shareholder.shares)}
-                  </td>
-                  <td className="py-3 px-4 text-sm text-right tabular-nums text-foreground/90">
-                    {formatPercent(shareholder.ownership_pct)}
-                  </td>
-                  <td className="py-3 px-4 text-sm text-right tabular-nums text-muted-foreground">
-                    {shareholder.update_date ?? "-"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+  return (
+    <div className={cn("flex min-w-0 flex-col gap-4", className)}>
+      <OwnershipBreakdown shareholders={shareholders} />
+
+      <Card className="overflow-x-auto py-2">
+        <div
+          style={{ gridTemplateColumns: columns }}
+          className="grid min-w-[620px] items-center gap-3.5 py-3.5 text-[13px] font-semibold leading-[1.29] tracking-[-0.208px] text-muted-foreground"
+        >
+          <span>Cổ đông</span>
+          <span className="text-right">Số lượng</span>
+          <span className="text-right">Tỷ lệ</span>
+          <span className="text-right">Cập nhật</span>
         </div>
 
-        {/* Pagination Footer */}
-        <div className="flex items-center justify-between px-4 py-3 border-t border-border/50 bg-muted/20">
-          {/* Items info */}
-          <span className="text-sm text-muted-foreground">
-            {startIndex + 1}-{endIndex} trên {totalItems} cổ đông
+        {currentData.map((shareholder, index) => {
+          const stale = isStale(shareholder.update_date)
+
+          return (
+            <div
+              key={shareholder.id || `${shareholder.name}-${startIndex + index}`}
+              style={{ gridTemplateColumns: columns }}
+              className="grid min-w-[620px] items-center gap-3.5 border-t border-[hsl(var(--hairline))] py-[11px]"
+            >
+              <span className="truncate text-[15px] leading-[1.47] tracking-[-0.374px]">
+                {shareholder.name}
+              </span>
+              <span className="text-right text-[15px] leading-[1.47] tracking-[-0.374px] tabular-nums">
+                {shareFormat(shareholder.shares)}
+              </span>
+              <span
+                className={cn(
+                  "text-right text-[15px] leading-[1.47] tracking-[-0.374px] tabular-nums",
+                  shareholder.ownership_pct < 0.01 && "text-muted-foreground"
+                )}
+              >
+                {percentFormat(shareholder.ownership_pct)}
+              </span>
+              {/* A stale disclosure is flagged in amber rather than hidden: the
+                  number is still the latest one filed, just not recent. */}
+              <span
+                className={cn(
+                  "text-right text-[13px] leading-[1.43] tracking-[-0.208px] tabular-nums",
+                  stale ? "text-[#cf7a1a]" : "text-muted-foreground"
+                )}
+              >
+                {shareholder.update_date ?? "—"}
+                {stale ? " · cũ" : ""}
+              </span>
+            </div>
+          )
+        })}
+
+        <div className="mt-1.5 flex min-w-[620px] flex-wrap items-center justify-between gap-6 border-t border-[hsl(var(--hairline))] pt-4">
+          <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+            {startIndex + 1}–{endIndex} trên {totalItems} cổ đông
           </span>
-
-          {/* Right side controls */}
-          <div className="flex items-center gap-4">
-            {/* Rows per page */}
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground whitespace-nowrap">
-                Hàng mỗi trang
-              </span>
-              <Select
-                value={String(rowsPerPage)}
-                onValueChange={handleRowsPerPageChange}
-              >
-                <SelectTrigger className="w-[70px] h-8 text-sm bg-background border-border/50">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="10">10</SelectItem>
-                  <SelectItem value="20">20</SelectItem>
-                  <SelectItem value="50">50</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Page navigation */}
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => goToPage(currentPage - 1)}
-                disabled={currentPage === 1}
-                className={cn(
-                  "p-1.5 rounded-md transition-colors",
-                  "hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                )}
-                aria-label="Previous page"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-
-              <span className="text-sm text-muted-foreground whitespace-nowrap min-w-[80px] text-center">
-                Trang {currentPage}/{totalPages}
-              </span>
-
-              <button
-                onClick={() => goToPage(currentPage + 1)}
-                disabled={currentPage === totalPages}
-                className={cn(
-                  "p-1.5 rounded-md transition-colors",
-                  "hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                )}
-                aria-label="Next page"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
+          <div className="flex items-center gap-3.5">
+            <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+              Trang {currentPage}/{totalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => goToPage(currentPage - 1)}
+              disabled={currentPage === 1}
+              aria-label="Trang trước"
+              className="flex size-9 items-center justify-center rounded-full border border-[hsl(var(--hairline))] bg-muted/40 text-muted-foreground transition-transform duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => goToPage(currentPage + 1)}
+              disabled={currentPage === totalPages}
+              aria-label="Trang sau"
+              className="flex size-9 items-center justify-center rounded-full bg-interactive text-white transition-transform duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <ChevronRight className="size-4" />
+            </button>
           </div>
         </div>
-      </div>
+      </Card>
     </div>
   )
 }
@@ -204,29 +228,14 @@ export function ShareholdersTabContent({
 // Skeleton for loading state
 export function ShareholdersTabContentSkeleton({ className }: { className?: string }) {
   return (
-    <div className={cn("space-y-4", className)}>
-      {/* Title skeleton */}
-      <div className="h-5 w-64 rounded bg-muted animate-pulse" />
-
-      {/* Table skeleton */}
-      <div className="rounded-lg border border-border/50 bg-card/50 p-4 space-y-3">
-        {/* Header */}
-        <div className="flex gap-4 pb-2 border-b border-border/30">
-          <div className="h-4 w-32 rounded bg-muted animate-pulse" />
-          <div className="h-4 w-20 rounded bg-muted animate-pulse ml-auto" />
-          <div className="h-4 w-24 rounded bg-muted animate-pulse" />
-          <div className="h-4 w-24 rounded bg-muted animate-pulse" />
-        </div>
-        {/* Rows */}
-        {[...Array(10)].map((_, i) => (
-          <div key={i} className="flex gap-4">
-            <div className="h-4 w-48 rounded bg-muted animate-pulse" />
-            <div className="h-4 w-20 rounded bg-muted animate-pulse ml-auto" />
-            <div className="h-4 w-16 rounded bg-muted animate-pulse" />
-            <div className="h-4 w-24 rounded bg-muted animate-pulse" />
-          </div>
-        ))}
-      </div>
+    <div className={cn("flex min-w-0 flex-col gap-4", className)}>
+      <div className="h-[148px] animate-pulse rounded-[18px] border border-border bg-card" />
+      <div
+        className={cn(
+          "h-[520px] animate-pulse rounded-[18px] border border-border bg-card",
+          className
+        )}
+      />
     </div>
   )
 }

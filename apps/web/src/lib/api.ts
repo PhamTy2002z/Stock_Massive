@@ -650,6 +650,7 @@ export async function fetchHealthScore(symbol: string): Promise<HealthScoreRespo
 export interface SectorMedian {
   pe: number | null
   pb: number | null
+  ps: number | null
   roe: number | null
   roa: number | null
   market_cap: number | null
@@ -662,9 +663,11 @@ export interface PeerMetrics {
   roa: number | null
   pe: number | null
   pb: number | null
+  ps: number | null
   market_cap: number | null
   premium_pe: number | null
   premium_pb: number | null
+  premium_ps: number | null
   premium_roe: number | null
   premium_roa: number | null
 }
@@ -757,5 +760,50 @@ export async function fetchSectorHistoricalPerformance(
 ): Promise<SectorHistoricalResponse> {
   return fetchApi<SectorHistoricalResponse>(
     `/stocks/analytics/sector-historical?period=${period}`
+  )
+}
+
+
+// === Price History (Phase 5 - Deep dive price chart) ===
+
+export interface StockPricePoint {
+  time: string
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+}
+
+/** Intervals the history endpoint accepts. Anything finer is served by /intraday. */
+export type HistoryInterval = "1D" | "1W" | "1M"
+
+export async function fetchStockHistory(
+  symbol: string,
+  start: string,
+  end: string,
+  interval: HistoryInterval
+): Promise<StockPricePoint[]> {
+  const params = new URLSearchParams({ start, end, interval })
+  return fetchApi<StockPricePoint[]>(
+    `/stocks/${encodeURIComponent(symbol)}/history?${params.toString()}`
+  )
+}
+
+export interface IntradayTick {
+  time: string
+  price: number
+  volume: number
+  accumulated_vol: number | null
+  accumulated_val: number | null
+  match_type: string | null
+}
+
+export async function fetchIntradayTicks(
+  symbol: string,
+  pageSize: number = 10000
+): Promise<IntradayTick[]> {
+  return fetchApi<IntradayTick[]>(
+    `/stocks/${encodeURIComponent(symbol)}/intraday?page_size=${pageSize}`
   )
 }

@@ -63,6 +63,8 @@ export const queryKeys = {
   // Sector Peers (Phase 2 - Sector Comparison Dashboard)
   sectorPeers: (symbol: string) =>
     [...queryKeys.stock(symbol), "sectorPeers"] as const,
+  priceHistory: (symbol: string, range: string) =>
+    [...queryKeys.stock(symbol), "priceHistory", range] as const,
 
   // FCF Analysis
   fcfAnalysis: (symbol: string) =>
