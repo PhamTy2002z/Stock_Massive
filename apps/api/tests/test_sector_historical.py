@@ -13,12 +13,6 @@ from src.stocks.analytics.sector_historical_service import (
     SectorHistoricalService,
 )
 
-# Every test in this module calls the live vnstock API — there are no mocks.
-# They go red on upstream throttling rather than on anything in this repo,
-# so they sit out the default run. Run them with: pytest -m network
-pytestmark = pytest.mark.network
-
-
 class TestSectorHistoricalConfig:
     """Test PERIODS configuration."""
 
@@ -42,6 +36,7 @@ class TestSectorHistoricalAPI:
         """Create test client."""
         return TestClient(app)
 
+    @pytest.mark.network
     def test_get_endpoint_response_structure(self, client):
         """Verify GET /sector-historical returns valid structure."""
         response = client.get("/api/v1/stocks/analytics/sector-historical?period=1W")
@@ -62,6 +57,7 @@ class TestSectorHistoricalAPI:
         assert isinstance(data["top_gainers"], list)
         assert isinstance(data["top_losers"], list)
 
+    @pytest.mark.network
     def test_get_endpoint_all_periods(self, client):
         """Verify endpoint works for all periods."""
         for period in ["1W", "2W", "1M"]:
@@ -70,6 +66,7 @@ class TestSectorHistoricalAPI:
             data = response.json()
             assert data["period"] == period
 
+    @pytest.mark.network
     def test_response_item_structure(self, client):
         """Verify item structure if data exists (may be empty)."""
         response = client.get("/api/v1/stocks/analytics/sector-historical?period=1W")
