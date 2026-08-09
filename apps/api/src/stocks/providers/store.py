@@ -16,10 +16,12 @@ from .contracts import (
     Capability,
     FundamentalSnapshot,
     MarketSnapshot,
-    PRIMARY_SOURCE_BY_CAPABILITY,
     ProviderSource,
     ReferenceSnapshot,
     SymbolSnapshot,
+    ValuationSnapshot,
+    main_source,
+    owns_capability,
 )
 
 logger = logging.getLogger(__name__)
@@ -27,12 +29,14 @@ _DEFAULT_REDIS = object()
 
 SNAPSHOT_MODEL_BY_CAPABILITY = {
     Capability.MARKET: MarketSnapshot,
+    Capability.VALUATION: ValuationSnapshot,
     Capability.REFERENCE: ReferenceSnapshot,
     Capability.FUNDAMENTAL: FundamentalSnapshot,
 }
 
 MAX_AGE_SECONDS = {
     Capability.MARKET: 300,
+    Capability.VALUATION: 24 * 60 * 60,
     Capability.REFERENCE: 7 * 24 * 60 * 60,
     Capability.FUNDAMENTAL: 24 * 60 * 60,
 }
@@ -60,12 +64,30 @@ class SnapshotStore:
     ) -> str:
         return f"stock:snapshot:{capability.value}:{source.value}:{symbol.upper()}"
 
+    @staticmethod
+    def _require_owning_source(
+        capability: Capability,
+        source: ProviderSource,
+    ) -> ProviderSource:
+        """Reject a source the Main/Cover table does not grant this capability.
+
+        Without this the store answers a misrouted read with ``None``, which is
+        indistinguishable from a capability that simply has not been collected
+        yet.
+        """
+        if not owns_capability(capability, source):
+            raise ValueError(
+                f"{source.value} does not own the {capability.value} capability"
+            )
+        return source
+
     def save(self, capability: Capability, snapshot: SymbolSnapshot) -> None:
         """Idempotently persist one observed snapshot and refresh Redis."""
         if not isinstance(snapshot, SNAPSHOT_MODEL_BY_CAPABILITY[capability]):
             raise TypeError(f"snapshot does not match {capability.value} capability")
 
         metadata = snapshot.metadata
+        self._require_owning_source(capability, metadata.source)
         existing = self.session.execute(
             select(ProviderSnapshot).where(
                 ProviderSnapshot.capability == capability.value,
@@ -102,8 +124,16 @@ class SnapshotStore:
         source: ProviderSource | None = None,
         now: datetime | None = None,
     ) -> SnapshotRead | None:
-        """Read Redis first, then PostgreSQL without calling an upstream."""
-        source = source or PRIMARY_SOURCE_BY_CAPABILITY[capability]
+        """Read Redis first, then PostgreSQL without calling an upstream.
+
+        Defaults to the main source and stays there. A caller wanting what the
+        cover source backfilled must name that source, because the two disagree
+        on units and a silent swap would go unnoticed (``docs/adr/0002``).
+        """
+        source = self._require_owning_source(
+            capability,
+            source or main_source(capability),
+        )
         cache_key = self._cache_key(capability, symbol, source)
         snapshot = self._read_cache(capability, cache_key)
 

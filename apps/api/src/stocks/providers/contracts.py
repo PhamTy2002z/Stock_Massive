@@ -27,17 +27,9 @@ class Capability(str, Enum):
     """Data classes with independent provider ownership."""
 
     MARKET = "market"
+    VALUATION = "valuation"
     REFERENCE = "reference"
     FUNDAMENTAL = "fundamental"
-
-
-PRIMARY_SOURCE_BY_CAPABILITY: Mapping[Capability, ProviderSource] = MappingProxyType(
-    {
-        Capability.MARKET: ProviderSource.FIINQUANT,
-        Capability.REFERENCE: ProviderSource.VNSTOCK,
-        Capability.FUNDAMENTAL: ProviderSource.VNSTOCK,
-    }
-)
 
 
 class PriceUnit(str, Enum):
@@ -58,6 +50,60 @@ class InternalSnapshot(StrictModel):
     """Immutable base for records crossing a provider boundary."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class SourceOwnership(InternalSnapshot):
+    """One row of the Main/Cover table measured in ``docs/adr/0002``.
+
+    ``main`` serves the capability. ``cover`` serves only the part the main
+    source cannot reach — outside the Universe, or deeper history than it is
+    granted — and is never a runtime fallback: the two sources disagree on
+    units, so silently swapping them would produce wrong numbers that look
+    right. Readers ask for the cover source by name or not at all.
+    """
+
+    main: ProviderSource
+    cover: ProviderSource | None = None
+
+    @model_validator(mode="after")
+    def validate_distinct_sources(self) -> "SourceOwnership":
+        if self.cover is not None and self.cover is self.main:
+            raise ValueError("cover source must differ from the main source")
+        return self
+
+    def owns(self, source: ProviderSource) -> bool:
+        return source is self.main or source is self.cover
+
+
+SOURCE_OWNERSHIP_BY_CAPABILITY: Mapping[Capability, SourceOwnership] = MappingProxyType(
+    {
+        Capability.MARKET: SourceOwnership(
+            main=ProviderSource.FIINQUANT,
+            cover=ProviderSource.VNSTOCK,
+        ),
+        Capability.VALUATION: SourceOwnership(
+            main=ProviderSource.FIINQUANT,
+            cover=ProviderSource.VNSTOCK,
+        ),
+        Capability.REFERENCE: SourceOwnership(main=ProviderSource.VNSTOCK),
+        Capability.FUNDAMENTAL: SourceOwnership(main=ProviderSource.VNSTOCK),
+    }
+)
+
+
+def main_source(capability: Capability) -> ProviderSource:
+    """Return the source that serves this capability by default."""
+    return SOURCE_OWNERSHIP_BY_CAPABILITY[capability].main
+
+
+def cover_source(capability: Capability) -> ProviderSource | None:
+    """Return the source covering what the main source cannot reach, if any."""
+    return SOURCE_OWNERSHIP_BY_CAPABILITY[capability].cover
+
+
+def owns_capability(capability: Capability, source: ProviderSource) -> bool:
+    """Report whether this source is allowed to carry this capability at all."""
+    return SOURCE_OWNERSHIP_BY_CAPABILITY[capability].owns(source)
 
 
 class SnapshotMetadata(InternalSnapshot):
@@ -98,7 +144,16 @@ class SymbolSnapshot(InternalSnapshot):
 
 
 class MarketSnapshot(SymbolSnapshot):
-    """Source-neutral hot market fields written by the FiinQuant collector."""
+    """Source-neutral hot market fields written by the collector.
+
+    Every ``*_price`` and ``*_vnd`` field is denominated in ``price_unit``.
+    Traded quantity is named ``*_volume`` and traded money ``*_value_vnd``, and
+    no field carries both words: the provider reports active buy/sell as
+    quantity but foreign buy/sell as money, so mixing the two silently changes
+    the unit. ``market_cap_vnd`` is money but not traded, so it stays outside
+    that pair; it is reported by the provider rather than derived from
+    ``ReferenceSnapshot.canonical_shares()``.
+    """
 
     price_unit: PriceUnit = PriceUnit.VND
     last_price: float | None = Field(default=None, gt=0)
@@ -106,10 +161,40 @@ class MarketSnapshot(SymbolSnapshot):
     open_price: float | None = Field(default=None, gt=0)
     high_price: float | None = Field(default=None, gt=0)
     low_price: float | None = Field(default=None, gt=0)
+    ceiling_price: float | None = Field(default=None, gt=0)
+    floor_price: float | None = Field(default=None, gt=0)
     change_pct: float | None = None
     volume: int | None = Field(default=None, ge=0)
+    total_value_vnd: float | None = Field(default=None, ge=0)
+    active_buy_volume: int | None = Field(default=None, ge=0)
+    active_sell_volume: int | None = Field(default=None, ge=0)
     foreign_buy_volume: int | None = Field(default=None, ge=0)
     foreign_sell_volume: int | None = Field(default=None, ge=0)
+    foreign_buy_value_vnd: float | None = Field(default=None, ge=0)
+    foreign_sell_value_vnd: float | None = Field(default=None, ge=0)
+    foreign_net_value_vnd: float | None = None
+    market_cap_vnd: float | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_foreign_flow(self) -> "MarketSnapshot":
+        """Bound the net foreign flow by the gross flow it is drawn from.
+
+        The provider reports the net directly, so it is not recomputed here:
+        put-through deals and rounding legitimately move it away from buy minus
+        sell. What can never happen is a net larger than the gross, which is
+        what a unit slip between the three fields looks like.
+        """
+        if (
+            self.foreign_net_value_vnd is not None
+            and self.foreign_buy_value_vnd is not None
+            and self.foreign_sell_value_vnd is not None
+            and abs(self.foreign_net_value_vnd)
+            > self.foreign_buy_value_vnd + self.foreign_sell_value_vnd
+        ):
+            raise ValueError(
+                "foreign net value cannot exceed foreign buy plus sell value"
+            )
+        return self
 
 
 class ShareCount(InternalSnapshot):
@@ -152,14 +237,23 @@ class ReferenceSnapshot(SymbolSnapshot):
         return None
 
 
+class ValuationSnapshot(SymbolSnapshot):
+    """Ratios as published upstream, kept apart from statement-derived numbers.
+
+    These arrive already computed from the ``valuation`` main source, so they
+    are stored as reported rather than recomputed from ``FundamentalSnapshot``.
+    """
+
+    provider_pe: float | None = None
+    provider_pb: float | None = None
+
+
 class FundamentalSnapshot(SymbolSnapshot):
-    """Inputs used for app-owned valuation history."""
+    """Financial-statement inputs used for app-owned valuation history."""
 
     period_end: date
     trailing_12_month_net_income_vnd: float | None = None
     parent_equity_vnd: float | None = None
-    provider_pe: float | None = None
-    provider_pb: float | None = None
 
 
 class MarketDataProvider(Protocol):
@@ -168,6 +262,14 @@ class MarketDataProvider(Protocol):
     source: ProviderSource
 
     def fetch_market(self, symbols: Sequence[str]) -> Sequence[MarketSnapshot]: ...
+
+
+class ValuationDataProvider(Protocol):
+    """Collect provider-published valuation ratios for a bounded universe."""
+
+    source: ProviderSource
+
+    def fetch_valuation(self, symbols: Sequence[str]) -> Sequence[ValuationSnapshot]: ...
 
 
 class ReferenceDataProvider(Protocol):
