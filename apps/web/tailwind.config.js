@@ -24,7 +24,7 @@ module.exports = {
 			'auth-tape': 'auth-tape 24s linear infinite',
 		},
   		transitionTimingFunction: {
-  			'sidebar': 'cubic-bezier(0.22, 0.8, 0.3, 1)',
+  			'sidebar': 'cubic-bezier(0.32, 0.72, 0, 1)',
   		},
   		borderRadius: {
   			lg: 'var(--radius)',

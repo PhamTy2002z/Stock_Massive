@@ -35,11 +35,15 @@ const SIDEBAR_WIDTH_ICON = "3.75rem"
 // bar above the sidebar override --sidebar-top with its height.
 const SIDEBAR_TOP = "0rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
-// Opening now reflows the content beside the rail, so it waits for hover intent:
-// a cursor crossing the rail on its way elsewhere must not move the whole page.
+// Opening reflows the content beside the rail, so it still waits for hover
+// intent — but the intent is read from approaching the rail, not from landing on
+// it, so the panel is already moving by the time the cursor reaches an icon.
+// A cursor that crosses the zone faster than the delay cancels on the way out.
 // Closing stays immediate — leaving is always deliberate.
-const SIDEBAR_PEEK_IN_DELAY = 120
+const SIDEBAR_PEEK_IN_DELAY = 70
 const SIDEBAR_PEEK_OUT_DELAY = 0
+// How far outside the rail counts as approaching it, in px.
+const SIDEBAR_PEEK_APPROACH = 32
 
 type SidebarMode = "rail" | "pinned"
 
@@ -117,6 +121,11 @@ const SidebarProvider = React.forwardRef<
     // Transient hover/focus expansion. Never persisted, never pushes layout.
     const [isPeeking, setIsPeeking] = React.useState(false)
     const peekTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+    // What the pending timer is about to set. A repeated request for the same
+    // target must not restart the countdown, or a pointer that keeps moving
+    // inside the approach zone would push the opening back on every event and
+    // the panel would only open once the cursor stopped.
+    const pendingPeekRef = React.useRef<boolean | null>(null)
     const pointerDownRef = React.useRef(false)
     const [canHover, setCanHover] = React.useState(false)
 
@@ -125,6 +134,7 @@ const SidebarProvider = React.forwardRef<
         clearTimeout(peekTimerRef.current)
         peekTimerRef.current = null
       }
+      pendingPeekRef.current = null
     }, [])
 
     // Hover-expand is a pointer affordance only. Touch devices tap the rail.
@@ -161,6 +171,7 @@ const SidebarProvider = React.forwardRef<
 
     const schedulePeek = React.useCallback(
       (next: boolean) => {
+        if (peekTimerRef.current && pendingPeekRef.current === next) return
         clearPeekTimer()
         if (next && (!canHover || pointerDownRef.current)) return
 
@@ -172,8 +183,10 @@ const SidebarProvider = React.forwardRef<
           return
         }
 
+        pendingPeekRef.current = next
         peekTimerRef.current = setTimeout(() => {
           peekTimerRef.current = null
+          pendingPeekRef.current = null
           setIsPeeking(next)
         }, delay)
       },
@@ -328,6 +341,46 @@ const Sidebar = React.forwardRef<
     // Hover-expand only makes sense for the icon rail. Pinned and offcanvas opt out.
     const peekEnabled = collapsible === "icon" && mode === "rail"
 
+    const panelRef = React.useRef<HTMLDivElement | null>(null)
+    const insideApproachRef = React.useRef(false)
+
+    // Reading intent from the pointer rather than from the panel's own
+    // mouseenter buys the animation a head start: crossing into the band beside
+    // the rail already schedules the open, so the width is settling as the
+    // cursor arrives. A pointer listener does this without an overlay element,
+    // which would otherwise sit over the content and swallow clicks along the
+    // rail's edge. It runs only while collapsed and bails on the first
+    // coordinate check, so the cost outside the band is one comparison.
+    React.useEffect(() => {
+      if (!peekEnabled || isPeeking) return
+
+      insideApproachRef.current = false
+
+      const handlePointerMove = (event: PointerEvent) => {
+        const panel = panelRef.current
+        if (!panel) return
+
+        const rect = panel.getBoundingClientRect()
+        const withinBand =
+          event.clientY >= rect.top &&
+          event.clientY <= rect.bottom &&
+          (side === "left"
+            ? event.clientX <= rect.right + SIDEBAR_PEEK_APPROACH
+            : event.clientX >= rect.left - SIDEBAR_PEEK_APPROACH)
+
+        if (withinBand === insideApproachRef.current) return
+        insideApproachRef.current = withinBand
+        // Leaving the band before the delay elapses cancels the pending open,
+        // so a cursor merely passing by never moves the layout.
+        if (withinBand) schedulePeek(true)
+        else endPeek()
+      }
+
+      window.addEventListener("pointermove", handlePointerMove, { passive: true })
+      return () =>
+        window.removeEventListener("pointermove", handlePointerMove)
+    }, [peekEnabled, isPeeking, side, schedulePeek, endPeek])
+
     const handleMouseEnter = React.useCallback(() => {
       if (peekEnabled) schedulePeek(true)
     }, [peekEnabled, schedulePeek])
@@ -417,6 +470,7 @@ const Sidebar = React.forwardRef<
           )}
         />
         <div
+          ref={panelRef}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
           onFocusCapture={handleFocusCapture}
