@@ -22,6 +22,7 @@ export function useMarketIndices() {
     isPending: query.isPending,
     isFetching: query.isFetching,
     isPlaceholderData: query.isPlaceholderData,
+    dataUpdatedAt: query.dataUpdatedAt,
     refetch: query.refetch,
   }
 }
