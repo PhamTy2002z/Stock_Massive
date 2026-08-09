@@ -28,9 +28,15 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
+        {/* forcedTheme, not just defaultTheme: next-themes persists the chosen
+            theme in localStorage, so every browser that ever loaded the old
+            dark build keeps rendering dark no matter what the default says —
+            and the app ships no theme switcher to escape with. The v3 design is
+            light; drop forcedTheme if a switcher is ever added. */}
         <ThemeProvider
           attribute="class"
-          defaultTheme="dark"
+          defaultTheme="light"
+          forcedTheme="light"
           enableSystem={false}
           disableTransitionOnChange
         >

@@ -27,17 +27,18 @@ import {
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
-const SIDEBAR_WIDTH = "16rem"
+// 224px expanded / 60px rail — the rail metrics the design system specifies.
+const SIDEBAR_WIDTH = "14rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
-const SIDEBAR_WIDTH_ICON = "3rem"
+const SIDEBAR_WIDTH_ICON = "3.75rem"
 // How far down the viewport the sidebar starts. Layouts that put a full-width
 // bar above the sidebar override --sidebar-top with its height.
 const SIDEBAR_TOP = "0rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
-// No delay either way: the panel tracks the cursor, and with the animation at
-// 100ms both directions land well under the 200ms budget. Neither path goes
-// through setTimeout — see schedulePeek.
-const SIDEBAR_PEEK_IN_DELAY = 0
+// Opening now reflows the content beside the rail, so it waits for hover intent:
+// a cursor crossing the rail on its way elsewhere must not move the whole page.
+// Closing stays immediate — leaving is always deliberate.
+const SIDEBAR_PEEK_IN_DELAY = 120
 const SIDEBAR_PEEK_OUT_DELAY = 0
 
 type SidebarMode = "rail" | "pinned"
@@ -390,10 +391,12 @@ const Sidebar = React.forwardRef<
         ref={ref}
         className={cn(
           "group peer hidden text-sidebar-foreground md:block",
-          "shrink-0 transition-[width] duration-100 ease-sidebar will-change-[width]",
-          // Width tracks `mode`, never `state`. This is what freezes the content
-          // layout during a peek: charts never re-measure on a stray mouse move.
-          mode === "pinned" ? "w-[--sidebar-width]" : "w-[--sidebar-width-icon]",
+          "shrink-0 transition-[width] duration-[220ms] ease-sidebar will-change-[width]",
+          // Width tracks the peek as well as the mode, so hovering the rail
+          // reflows the content beside it instead of floating over it.
+          mode === "pinned" || isPeeking
+            ? "w-[--sidebar-width]"
+            : "w-[--sidebar-width-icon]",
           collapsible === "offcanvas" && mode === "rail" && "w-0"
         )}
         data-state={state}
@@ -417,16 +420,16 @@ const Sidebar = React.forwardRef<
           onBlurCapture={handleBlurCapture}
           className={cn(
             "fixed bottom-0 top-[--sidebar-top] hidden md:flex flex-col",
-            "transition-[left,right,width] duration-100 ease-sidebar will-change-[width,left,right]",
+            "transition-[left,right,width] duration-[220ms] ease-sidebar will-change-[width,left,right]",
             "overflow-hidden",
-            // Peek opens to the full sidebar width — same as pinned. Only the
-            // layout spacer stays at rail width, which is what keeps content still.
+            // Peek opens to the full sidebar width — same as pinned, and the
+            // spacer above matches it so the two animate as one edge.
             mode === "pinned" || isPeeking
               ? "w-[--sidebar-width]"
               : "w-[--sidebar-width-icon]",
-            // A peeked panel floats above the content. No backdrop, no scroll lock:
-            // it should read as "glancing at the nav", not as a modal.
-            isPeeking && mode === "rail" ? "z-30 shadow-xl" : "z-10",
+            // The panel now pushes rather than floats, so it needs no elevation
+            // over the content — only over the page background.
+            "z-10",
             side === "left"
               ? cn(
                   "left-0",
@@ -716,7 +719,7 @@ const SidebarMenuItem = React.forwardRef<
 SidebarMenuItem.displayName = "SidebarMenuItem"
 
 const sidebarMenuButtonVariants = cva(
-  "peer/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm outline-none ring-sidebar-ring transition-all duration-100 ease-sidebar hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 group-has-[[data-sidebar=menu-action]]/menu-item:pr-8 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground data-[state=open]:hover:bg-sidebar-accent data-[state=open]:hover:text-sidebar-accent-foreground [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:transition-transform [&>svg]:duration-200",
+  "peer/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm outline-none ring-sidebar-ring transition-all duration-[180ms] ease-sidebar hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 group-has-[[data-sidebar=menu-action]]/menu-item:pr-8 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground data-[state=open]:hover:bg-sidebar-accent data-[state=open]:hover:text-sidebar-accent-foreground [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:transition-transform [&>svg]:duration-200",
   {
     variants: {
       variant: {

@@ -10,6 +10,12 @@ interface SparklineProps {
   strokeWidth?: number
   className?: string
   positive?: boolean
+  /**
+   * Let the SVG stretch to its container instead of keeping the width/height
+   * ratio. width/height then act as the coordinate system only, so the caller
+   * can size the sparkline with CSS.
+   */
+  stretch?: boolean
 }
 
 export function Sparkline({
@@ -19,6 +25,7 @@ export function Sparkline({
   strokeWidth = 1.5,
   className,
   positive = true,
+  stretch = false,
 }: SparklineProps) {
   const gradientId = React.useId()
 
@@ -54,6 +61,7 @@ export function Sparkline({
       width={width}
       height={height}
       viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio={stretch ? "none" : undefined}
       className={cn("overflow-visible", className)}
     >
       <defs>
@@ -83,6 +91,8 @@ export function Sparkline({
         strokeWidth={strokeWidth}
         strokeLinecap="round"
         strokeLinejoin="round"
+        // Without this the non-uniform stretch would smear the line weight.
+        vectorEffect={stretch ? "non-scaling-stroke" : undefined}
       />
     </svg>
   )

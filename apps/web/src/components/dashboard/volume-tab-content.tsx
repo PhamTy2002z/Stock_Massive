@@ -3,89 +3,199 @@
 import { useState } from "react"
 import { useVolumeAnalysis } from "@/hooks/use-volume-analysis"
 import { VolumeAnomalyChart } from "./volume-anomaly-chart"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { RefreshCw } from "lucide-react"
+import { cn } from "@/lib/utils"
+import type { VolumeTimeSlot } from "@/lib/api"
 
 interface VolumeTabContentProps {
   symbol: string
 }
 
+const baselines = [10, 20, 60]
+
+const legend = [
+  { color: "bg-[#c7c7cc]", label: "Bình thường" },
+  { color: "bg-[#7a5c00]", label: "Tăng cao 1,5–2×" },
+  { color: "bg-[#cf7a1a]", label: "Cao 2–3×" },
+  { color: "bg-negative", label: "Rất cao >3×" },
+]
+
+const compact = (value: number) =>
+  value >= 1_000_000
+    ? `${(value / 1_000_000).toLocaleString("vi-VN", { maximumFractionDigits: 2 })}M`
+    : `${(value / 1_000).toLocaleString("vi-VN", { maximumFractionDigits: 1 })}K`
+
+const ratio = (value: number) =>
+  `${value.toLocaleString("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}×`
+
+function Chip({
+  label,
+  isActive,
+  onClick,
+}: {
+  label: string
+  isActive: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={isActive}
+      className={cn(
+        "rounded-full text-[13px] leading-[1.29] tracking-[-0.208px]",
+        "transition-transform duration-150 active:scale-95",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        isActive
+          ? "border-2 border-interactive-strong px-[13px] py-1.5 font-semibold"
+          : "border border-border px-3.5 py-[7px] text-muted-foreground hover:text-foreground"
+      )}
+    >
+      {label}
+    </button>
+  )
+}
+
+function Stat({
+  label,
+  value,
+  meta,
+  tone,
+}: {
+  label: string
+  value: string
+  meta: string
+  tone?: "negative"
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <span className="text-[13px] font-semibold leading-[1.29] tracking-[-0.208px] text-muted-foreground">
+        {label}
+      </span>
+      <span
+        className={cn(
+          "text-2xl font-semibold leading-[1.2] tracking-[-0.374px] tabular-nums",
+          tone === "negative" && "text-negative"
+        )}
+      >
+        {value}
+      </span>
+      <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+        {meta}
+      </span>
+    </div>
+  )
+}
+
+/** Slots the analysis flagged as anything above normal. */
+const flaggedSlots = (slots: VolumeTimeSlot[]) =>
+  slots.filter((s) => s.anomaly_level !== "normal")
+
 export function VolumeTabContent({ symbol }: VolumeTabContentProps) {
   const [days, setDays] = useState(20)
   const { data, refetch, isFetching } = useVolumeAnalysis(symbol, days)
 
-  if (!data || data.time_slots.length === 0) {
+  const slots = data?.time_slots ?? []
+
+  if (slots.length === 0) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Chưa có dữ liệu khối lượng</CardTitle>
-          <CardDescription>
-            Dữ liệu khối lượng trong ngày chưa được thu thập cho {symbol}.
-          </CardDescription>
-        </CardHeader>
-      </Card>
+      <div className="min-w-0 rounded-[18px] border border-border bg-card p-[18px]">
+        <div className="text-[17px] font-semibold leading-[1.24] tracking-[-0.374px]">
+          Chưa có dữ liệu khối lượng
+        </div>
+        <p className="mt-1 text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+          Dữ liệu khối lượng trong ngày chưa được thu thập cho {symbol}.
+        </p>
+      </div>
     )
   }
 
-  return (
-    <div className="space-y-4">
-      {/* Controls */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">Baseline:</span>
-          <Select value={days.toString()} onValueChange={(v) => setDays(parseInt(v))}>
-            <SelectTrigger className="w-28">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="10">10 ngày</SelectItem>
-              <SelectItem value="20">20 ngày</SelectItem>
-              <SelectItem value="30">30 ngày</SelectItem>
-              <SelectItem value="60">60 ngày</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+  const peak = slots.reduce((best, slot) =>
+    slot.current_volume > best.current_volume ? slot : best
+  )
+  const flagged = flaggedSlots(slots)
+  const severe = flagged.filter((s) => s.anomaly_level === "very_high")
+  const baseline = slots.reduce((sum, s) => sum + s.avg_volume, 0) / slots.length
 
-        <Button
-          onClick={() => refetch()}
-          variant="outline"
-          size="sm"
-          disabled={isFetching}
-        >
-          <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? "animate-spin" : ""}`} />
-          Làm mới
-        </Button>
+  return (
+    <div className="min-w-0 rounded-[18px] border border-border bg-card p-[18px]">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="text-[17px] font-semibold leading-[1.24] tracking-[-0.374px]">
+            Bất thường khối lượng
+          </div>
+          <div className="mt-1 text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+            Nến 5 phút · so với trung bình cùng khung giờ {days} phiên
+            {data?.latest_date ? ` · phiên ${data.latest_date}` : ""}
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {baselines.map((value) => (
+            <Chip
+              key={value}
+              label={`${value} phiên`}
+              isActive={days === value}
+              onClick={() => setDays(value)}
+            />
+          ))}
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            disabled={isFetching}
+            title="Làm mới"
+            className="flex size-9 items-center justify-center rounded-full text-interactive transition-[background-color,transform] duration-150 hover:bg-muted active:scale-95 disabled:cursor-progress"
+          >
+            <RefreshCw className={cn("size-4", isFetching && "animate-spin")} />
+            <span className="sr-only">Làm mới dữ liệu khối lượng</span>
+          </button>
+        </div>
       </div>
 
-      {/* Chart */}
-      <VolumeAnomalyChart
-        data={data.time_slots}
-        symbol={data.symbol}
-        daysAnalyzed={data.days_analyzed}
-        latestDate={data.latest_date}
-      />
+      <div className="mt-4">
+        <VolumeAnomalyChart
+          data={slots}
+          symbol={data!.symbol}
+          daysAnalyzed={data!.days_analyzed}
+          latestDate={data!.latest_date}
+        />
+      </div>
 
-      {/* Info Card */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Về phát hiện bất thường khối lượng</CardTitle>
-        </CardHeader>
-        <CardContent className="text-sm text-muted-foreground space-y-2">
-          <p>
-            Biểu đồ so sánh khối lượng mỗi 5 phút với trung bình {days} ngày để phát hiện hoạt động giao dịch bất thường.
-          </p>
-          <ul className="list-disc list-inside space-y-1 ml-2">
-            <li><strong>Tăng cao (1.5x-2x):</strong> Cao hơn trung bình vừa phải</li>
-            <li><strong>Cao (2x-3x):</strong> Cao hơn trung bình đáng kể</li>
-            <li><strong>Rất cao (&gt;3x):</strong> Đột biến khối lượng bất thường</li>
-          </ul>
-          <p className="text-xs mt-3">
-            Nguồn dữ liệu: Dữ liệu intraday thu thập hàng ngày. Cập nhật: {data.latest_date || "N/A"}
-          </p>
-        </CardContent>
-      </Card>
+      <div className="mt-3.5 flex flex-wrap gap-4 border-t border-[hsl(var(--hairline))] pt-3.5 text-[13px] leading-[1.43] tracking-[-0.208px]">
+        {legend.map((item) => (
+          <span key={item.label} className="flex items-center gap-[7px]">
+            <span className={cn("size-2 rounded-sm", item.color)} />
+            {item.label}
+          </span>
+        ))}
+        <span className="flex items-center gap-[7px] text-interactive">
+          <span className="h-0 w-3.5 border-t-2 border-dashed border-interactive" />
+          Trung bình {days} phiên
+        </span>
+      </div>
+
+      <div className="mt-3.5 grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3.5 border-t border-[hsl(var(--hairline))] pt-3.5">
+        <Stat
+          label="Cao nhất trong phiên"
+          value={compact(peak.current_volume)}
+          meta={`${peak.time_label} · ${ratio(peak.volume_ratio)} trung bình`}
+          tone="negative"
+        />
+        <Stat
+          label="Bất thường phát hiện"
+          value={String(flagged.length)}
+          meta={
+            flagged.length
+              ? `${severe.length} nến vượt 3× · còn lại 1,5–3×`
+              : "Không có nến vượt ngưỡng"
+          }
+          tone={flagged.length ? "negative" : undefined}
+        />
+        <Stat
+          label="Trung bình 5 phút"
+          value={compact(baseline)}
+          meta={`Baseline ${days} phiên`}
+        />
+      </div>
     </div>
   )
 }

@@ -14,10 +14,9 @@ interface DashboardHeaderProps {
 }
 
 /**
- * Full-width bar above the sidebar. The logo cell is exactly one rail wide so
- * the mark sits directly above the nav icons, the way Supabase anchors theirs.
- * Kept in sync by hand with SIDEBAR_WIDTH_ICON: --sidebar-width-icon is scoped
- * to SidebarProvider, which lives below this bar.
+ * Full-width bar above the sidebar: 64px, white, one hairline underneath.
+ * The mark and wordmark lead, search sits immediately beside them rather than
+ * floating in the middle, and the account block anchors the right edge.
  */
 export function DashboardHeader({ onStockSelect }: DashboardHeaderProps) {
   const handleStockSelect = (stock: StockSymbol) => {
@@ -27,43 +26,43 @@ export function DashboardHeader({ onStockSelect }: DashboardHeaderProps) {
   }
 
   return (
-    <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center border-b border-sidebar-border bg-sidebar">
+    <header className="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-5 border-b border-border bg-card px-5">
       <Link
         href="/"
         aria-label="Stock Massive"
-        className="flex h-full w-12 shrink-0 items-center justify-center"
+        className="flex shrink-0 items-center gap-[9px]"
       >
-        <img src="/logo.png" alt="Stock Massive" className="size-7 object-contain" />
+        <img src="/logo.png" alt="" className="size-[22px] object-contain" />
+        <span className="text-[15px] font-semibold leading-[1.24] tracking-[-0.374px]">
+          Stock Massive
+        </span>
       </Link>
 
-      <div className="flex flex-1 items-center gap-3 pl-3">
-        <div className="hidden md:block">
-          <StockSearchBar
-            onSelect={handleStockSelect}
-            placeholder="Search stocks, markets..."
-          />
-        </div>
+      {/* Grows with the header up to the design's 420px ceiling. */}
+      <div className="hidden max-w-[420px] flex-1 md:block">
+        <StockSearchBar
+          onSelect={handleStockSelect}
+          placeholder="Tìm mã, ngành, chỉ số"
+        />
       </div>
 
-      <div className="flex items-center gap-1 pr-2">
+      <div className="flex-1" />
+
+      <div className="flex items-center gap-1.5">
         {/* Mobile search button */}
-        <Button variant="ghost" size="icon" className="md:hidden">
-          <Search className="h-5 w-5" />
-          <span className="sr-only">Search</span>
+        <Button variant="ghost" size="icon" className="size-9 rounded-full md:hidden">
+          <Search className="size-[17px]" />
+          <span className="sr-only">Tìm kiếm</span>
         </Button>
 
         {/* Share */}
-        <Button variant="ghost" size="icon">
-          <Share2 className="h-5 w-5" />
-          <span className="sr-only">Share</span>
+        <Button variant="ghost" size="icon" className="size-9 rounded-full">
+          <Share2 className="size-[17px]" />
+          <span className="sr-only">Chia sẻ</span>
         </Button>
 
         {/* Notifications - Job Status Panel */}
         <NotificationPanel />
-
-        {/* Separates the account block from the icon actions, so the two lines
-            of user text read as their own group rather than a fourth button. */}
-        <div className="mx-1 h-6 w-px bg-sidebar-border" />
 
         <UserMenu />
       </div>
