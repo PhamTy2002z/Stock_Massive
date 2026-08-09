@@ -1,8 +1,10 @@
 """Tests for FiinQuant normalization and collector protection."""
 
+import os
 from datetime import datetime, timezone
 from unittest.mock import Mock
 
+import certifi
 import pandas as pd
 import pytest
 
@@ -11,6 +13,7 @@ from src.stocks.providers.fiinquant import (
     FiinQuantMarketProvider,
     FiinQuantProviderError,
     ProviderCircuitBreaker,
+    ensure_ca_bundle,
 )
 from src.stocks.shared import StockServiceError
 
@@ -133,3 +136,19 @@ def test_circuit_breaker_opens_and_recovers_after_cooldown():
     current[0] = 130.0
     breaker.allow()
     assert breaker.failure_count == 0
+
+
+def test_ensure_ca_bundle_sets_certifi_when_unset(monkeypatch):
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+
+    bundle = ensure_ca_bundle()
+
+    assert bundle == certifi.where()
+    assert os.environ["SSL_CERT_FILE"] == certifi.where()
+
+
+def test_ensure_ca_bundle_keeps_an_operator_supplied_bundle(monkeypatch):
+    monkeypatch.setenv("SSL_CERT_FILE", "/etc/ssl/company-ca.pem")
+
+    assert ensure_ca_bundle() == "/etc/ssl/company-ca.pem"
+    assert os.environ["SSL_CERT_FILE"] == "/etc/ssl/company-ca.pem"
