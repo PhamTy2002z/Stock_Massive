@@ -7,7 +7,7 @@ module.exports = {
   theme: {
   	extend: {
   		transitionTimingFunction: {
-  			'sidebar': 'cubic-bezier(0.4, 0, 0.2, 1)',
+  			'sidebar': 'cubic-bezier(0.22, 0.8, 0.3, 1)',
   		},
   		borderRadius: {
   			lg: 'var(--radius)',
@@ -17,6 +17,13 @@ module.exports = {
   		colors: {
   			background: 'hsl(var(--background))',
   			foreground: 'hsl(var(--foreground))',
+  			positive: 'hsl(var(--positive))',
+  			negative: 'hsl(var(--negative))',
+  			hairline: 'hsl(var(--hairline))',
+  			interactive: {
+  				DEFAULT: 'hsl(var(--interactive))',
+  				strong: 'hsl(var(--interactive-strong))'
+  			},
   			card: {
   				DEFAULT: 'hsl(var(--card))',
   				foreground: 'hsl(var(--card-foreground))'
