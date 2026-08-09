@@ -10,9 +10,9 @@ interface DashboardLayoutProps {
   onStockSelect?: (symbol: string) => void
 }
 
-// Matches the header's h-14. The sidebar starts below the bar rather than
+// Matches the header's h-16. The sidebar starts below the bar rather than
 // beside it, so it needs to know how much of the viewport is already spoken for.
-const HEADER_HEIGHT = "3.5rem"
+const HEADER_HEIGHT = "4rem"
 
 export function DashboardLayout({ children, onStockSelect }: DashboardLayoutProps) {
   return (

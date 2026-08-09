@@ -6,21 +6,22 @@ import { useStockDetail } from "@/hooks/use-stock-detail"
 import { getStockLoadingToastId, clearStockLoadingToast } from "./stock-search-bar"
 import {
   StockTickerHeader,
-  StockDetailPanel,
-  StockStatsTable,
-  StockCompanyInfo,
+  StockRangeCards,
+  StockRangeCardsSkeleton,
+  StockPriceChart,
+  StockPriceChartSkeleton,
+  StockValuationVsSector,
+  StockValuationVsSectorSkeleton,
+  StockProfileSidebar,
+  StockProfileSidebarSkeleton,
   StockTickerHeaderSkeleton,
-  StockDetailPanelSkeleton,
-  StockStatsTableSkeleton,
-  StockCompanyInfoSkeleton,
   StockDetailEmpty,
   StockDetailTabs,
   StockDetailTabsSkeleton,
   FinanceTabContent,
   ShareholdersTabContent,
   VolumeTabContent,
-  AdvancedSection,
-  AdvancedSectionSkeleton,
+  OrderFlowTabContent,
 } from "@/components/dashboard"
 import type { StockDetailTabValue } from "@/components/dashboard"
 
@@ -32,18 +33,18 @@ interface StockDetailClientProps {
 function StockDetailLoading() {
   return (
     <>
-      <section className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
+      <section className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_280px] gap-4">
         <div className="space-y-4">
           <StockTickerHeaderSkeleton />
           <StockDetailTabsSkeleton className="mt-2" />
-          <StockDetailPanelSkeleton />
-          <StockStatsTableSkeleton />
+          <StockPriceChartSkeleton />
+          <StockRangeCardsSkeleton />
+          <StockValuationVsSectorSkeleton />
         </div>
-        <div className="space-y-4 lg:pt-6">
-          <StockCompanyInfoSkeleton />
+        <div className="lg:pt-6">
+          <StockProfileSidebarSkeleton />
         </div>
       </section>
-      <AdvancedSectionSkeleton />
     </>
   )
 }
@@ -51,7 +52,7 @@ function StockDetailLoading() {
 // Inner component that uses the hook - only rendered when symbol is valid
 function StockDetailInner({ symbol }: { symbol: string }) {
   const [activeTab, setActiveTab] = useState<StockDetailTabValue>("overview")
-  const { data } = useStockDetail(symbol)
+  const { data, isFetching, refetch } = useStockDetail(symbol)
 
   // Update loading toast when data loads
   useEffect(() => {
@@ -69,7 +70,7 @@ function StockDetailInner({ symbol }: { symbol: string }) {
 
   return (
     <>
-      <section className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
+      <section className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_280px] gap-4">
         {/* Left: Main Content */}
         <div className="space-y-4">
           <div className="stock-detail-enter">
@@ -79,6 +80,11 @@ function StockDetailInner({ symbol }: { symbol: string }) {
               price={data.price || 0}
               change={data.change || 0}
               changePercent={data.change_pct || 0}
+              ceiling={data.ceiling}
+              floor={data.floor}
+              refPrice={data.ref_price}
+              onRefresh={() => void refetch()}
+              isRefreshing={isFetching}
             />
             <StockDetailTabs
               value={activeTab}
@@ -88,28 +94,25 @@ function StockDetailInner({ symbol }: { symbol: string }) {
 
             {activeTab === "overview" && (
               <div className="space-y-4">
-                <StockDetailPanel
-                  volume={data.volume || 0}
-                  exchange={data.exchange || "N/A"}
-                  marketCap={data.market_cap || 0}
-                  industry={data.industry || "N/A"}
-                />
-                <StockStatsTable
-                  openPrice={data.open_price || data.ref_price || 0}
-                  highPrice={data.high_price || 0}
-                  lowPrice={data.low_price || 0}
-                  tradingVolume={data.volume || 0}
-                  marketCap={data.market_cap || 0}
-                  high52Week={data.high_52_week}
+                <StockPriceChart symbol={data.symbol} refPrice={data.ref_price} />
+                <StockRangeCards
+                  price={data.price}
+                  openPrice={data.open_price}
+                  lowPrice={data.low_price}
+                  highPrice={data.high_price}
                   low52Week={data.low_52_week}
+                  high52Week={data.high_52_week}
+                  volume={data.volume}
+                  tradingValue={data.trading_value}
                   avgVolume52Week={data.avg_volume_52_week}
-                  eps={data.eps}
-                  pe={data.pe}
-                  pb={data.pb}
-                  dividendYield={data.dividend_yield}
                 />
+                <Suspense fallback={<StockValuationVsSectorSkeleton />}>
+                  <StockValuationVsSector symbol={data.symbol} />
+                </Suspense>
               </div>
             )}
+
+            {activeTab === "orderflow" && <OrderFlowTabContent symbol={data.symbol} />}
 
             {activeTab === "finance" && <FinanceTabContent symbol={data.symbol} />}
             {activeTab === "shareholders" && <ShareholdersTabContent symbol={data.symbol} />}
@@ -117,22 +120,13 @@ function StockDetailInner({ symbol }: { symbol: string }) {
           </div>
         </div>
 
-        {/* Right: Company Info Sidebar */}
-        <div className="space-y-4 lg:pt-6">
-          <StockCompanyInfo
-            symbol={data.symbol}
-            industry={data.industry || "N/A"}
-            marketCap={data.market_cap || 0}
-            outstandingShares={(data.outstanding_shares || 0) / 1_000_000_000}
-            exchange={data.exchange}
-            vn30Rank={data.vn30_rank}
-            description={data.description || "No description available."}
-          />
+        {/* Right: reference column — profile and sector peers */}
+        <div className="lg:pt-6">
+          <Suspense fallback={<StockProfileSidebarSkeleton />}>
+            <StockProfileSidebar stock={data} />
+          </Suspense>
         </div>
       </section>
-
-      {/* Advanced Analysis Section - Below Stock Detail */}
-      <AdvancedSection symbol={data.symbol} className="stock-detail-enter" />
     </>
   )
 }
@@ -141,7 +135,7 @@ export function StockDetailClient({ initialSymbol }: StockDetailClientProps) {
   // No symbol - show empty state
   if (!initialSymbol) {
     return (
-      <section className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
+      <section className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_280px] gap-4">
         <div className="space-y-4">
           <StockDetailEmpty />
         </div>

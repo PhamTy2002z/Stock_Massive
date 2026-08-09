@@ -21,10 +21,13 @@ export function NotificationPanel() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative">
-          <Bell className="h-5 w-5" />
+        <Button variant="ghost" size="icon" className="relative size-9 rounded-full">
+          <Bell className="size-[17px]" />
+          <span className="sr-only">Thông báo</span>
           {hasActivity && (
-            <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-primary" />
+            // Ringed in the header's own colour so the dot stays legible where
+            // it overlaps the bell's stroke.
+            <span className="absolute right-2 top-[7px] size-[7px] rounded-full border-[1.5px] border-card bg-[hsl(var(--interactive))]" />
           )}
         </Button>
       </DropdownMenuTrigger>
