@@ -24,8 +24,7 @@ Nguồn sự thật cho lệnh: `package.json` ở root, `apps/api/Makefile`, `a
 
 - **Nhánh** — `develop` là nhánh tích hợp; mọi tính năng/sửa lỗi tách nhánh riêng từ `develop`, làm trong git worktree, rồi merge ngược về `develop`. `main` được protected và chỉ nhận merge từ `develop`.
 - **Cổng kiểm tra trước khi báo xong** — backend: `make test` tại `apps/api`. Frontend: `pnpm type-check`, `pnpm lint`, `pnpm test`, `pnpm build` tại `apps/web`. Phần nào không chạy được thì nêu rõ phần đó.
-- **Commit** — Conventional Commits, mô tả thay đổi kỹ thuật. Giữ ngoài index: secrets, `.env`, dữ liệu nhạy cảm, file sinh tự động.
-- **`data_export.sql`** (8,7 MB ở root) — giữ nguyên cho đến khi dữ liệu được khôi phục và đối soát xong.
+- **Commit** — Conventional Commits, mô tả thay đổi kỹ thuật. Giữ ngoài index: secrets, `.env`, dữ liệu nhạy cảm, dump database, file sinh tự động.
 
 `apps/api/AGENTS.md` do vnstock tự sinh (hướng dẫn dựng môi trường vnstock), không phải quy ước của repo này.
 
