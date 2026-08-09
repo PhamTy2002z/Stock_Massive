@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from time import monotonic
@@ -66,7 +67,28 @@ class ProviderCircuitBreaker:
             self.opened_at = self.clock()
 
 
+def ensure_ca_bundle() -> str | None:
+    """Point the default SSL context at certifi before FiinQuantX opens a session.
+
+    FiinQuantX swallows ``CERTIFICATE_VERIFY_FAILED`` and returns an empty frame
+    instead of raising, so a missing CA bundle looks exactly like a market with
+    no data. Setting the variable up front turns that silent failure into a
+    working connection.
+    """
+    existing = os.environ.get("SSL_CERT_FILE")
+    if existing:
+        return existing
+    try:
+        import certifi
+    except ImportError:  # pragma: no cover - certifi ships with requests
+        return None
+    bundle = certifi.where()
+    os.environ["SSL_CERT_FILE"] = bundle
+    return bundle
+
+
 def _default_session_factory(username: str, password: str) -> Any:
+    ensure_ca_bundle()
     try:
         from FiinQuantX import FiinSession
     except ImportError as exc:  # pragma: no cover - exercised in built image
