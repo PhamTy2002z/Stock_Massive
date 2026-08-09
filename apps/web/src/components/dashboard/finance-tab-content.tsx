@@ -2,13 +2,6 @@
 
 import { useState } from "react"
 import { cn } from "@/lib/utils"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { useIncomeStatement } from "@/hooks/use-income-statement"
 import { useBalanceSheet } from "@/hooks/use-balance-sheet"
 import { useCashFlow } from "@/hooks/use-cash-flow"
@@ -30,108 +23,121 @@ const subTabs = [
   { value: "cashflow" as const, label: "Lưu chuyển tiền tệ" },
 ]
 
-// Income Statement data structure
-interface FinancialRow {
-  id: string
-  label: string
-  values: Record<string, number | null>
-  level?: number // Indentation level (0 = root, 1 = child, etc.)
-  isHeader?: boolean // Bold section headers
-  isSummary?: boolean // Bold summary rows
-}
+type ApiRow = IncomeStatementRow | BalanceSheetRow | CashFlowRow
 
+/**
+ * Three distinct states, three distinct glyphs: `—` for "not published",
+ * `0,0` for a real zero, and a leading minus for negatives. Accounting
+ * parentheses read as a footnote to anyone outside finance, and they made a
+ * loss indistinguishable from an annotation at a glance.
+ */
+function formatFinancialValue(value: number | null | undefined): {
+  text: string
+  tone: "empty" | "zero" | "negative" | "normal"
+} {
+  if (value === null || value === undefined) return { text: "—", tone: "empty" }
+  if (value === 0) return { text: "0,0", tone: "zero" }
 
-// Format number with Vietnamese locale
-function formatFinancialValue(value: number | null): string {
-  if (value === null || value === undefined) return "-"
-
-  // Handle negative numbers with parentheses
-  const isNegative = value < 0
-  const absValue = Math.abs(value)
-
-  // Format with dots as thousand separators and comma for decimal
-  const formatted = absValue.toLocaleString("de-DE", {
+  const formatted = Math.abs(value).toLocaleString("vi-VN", {
     minimumFractionDigits: 1,
     maximumFractionDigits: 1,
   })
 
-  return isNegative ? `(${formatted})` : formatted
+  return value < 0
+    ? { text: `−${formatted}`, tone: "negative" }
+    : { text: formatted, tone: "normal" }
 }
 
-// Financial Data Table Component - supports legacy FinancialRow and API response rows
-function FinancialTable({
-  data,
-  periods,
+/** A row nobody has published a single figure for. */
+const isEmptyRow = (row: ApiRow, periods: string[]) =>
+  periods.every((p) => row.values[p] === null || row.values[p] === undefined)
+
+function Pill({
+  label,
+  isActive,
+  onClick,
 }: {
-  data: (FinancialRow | IncomeStatementRow | BalanceSheetRow | CashFlowRow)[]
-  periods: string[]
+  label: string
+  isActive: boolean
+  onClick: () => void
 }) {
   return (
-    <div className="w-full overflow-x-auto scrollbar-thin">
-      <table className="w-full min-w-[600px] border-collapse">
-        <thead>
-          <tr className="border-b border-border/50">
-            <th className="sticky left-0 z-10 bg-background py-3 px-4 text-left text-sm font-medium text-muted-foreground min-w-[280px]">
-              Chỉ tiêu
-            </th>
-            {periods.map((period) => (
-              <th
-                key={period}
-                className="py-3 px-3 text-right text-sm font-medium text-muted-foreground whitespace-nowrap min-w-[110px]"
-              >
-                {period}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((row) => {
-            // Handle both legacy format (isHeader/isSummary) and API format (is_header/is_summary)
-            const rowAny = row as unknown as Record<string, unknown>
-            const isHeader = rowAny.isHeader ?? rowAny.is_header ?? false
-            const isSummary = rowAny.isSummary ?? rowAny.is_summary ?? false
-            const level = (row.level as number) || 0
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={isActive}
+      className={cn(
+        "rounded-full text-[13px] leading-[1.29] tracking-[-0.208px]",
+        "transition-transform duration-150 active:scale-95",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        isActive
+          ? "border-2 border-interactive-strong px-[13px] py-1.5 font-semibold"
+          : "border border-border px-3.5 py-[7px] text-muted-foreground hover:text-foreground"
+      )}
+    >
+      {label}
+    </button>
+  )
+}
 
-            return (
-              <tr
-                key={row.id}
-                className={cn(
-                  "border-b border-border/30 transition-colors hover:bg-muted/30",
-                  isHeader && "bg-muted/20"
-                )}
-              >
-                <td
+function FinancialTable({ data, periods }: { data: ApiRow[]; periods: string[] }) {
+  const columns = `minmax(240px,1.6fr) repeat(${periods.length},minmax(104px,1fr))`
+
+  return (
+    <div className="mt-1.5 overflow-x-auto">
+      <div
+        style={{ gridTemplateColumns: columns }}
+        className="grid min-w-[680px] items-center gap-3.5 py-3 text-[13px] font-semibold leading-[1.29] tracking-[-0.208px] text-muted-foreground"
+      >
+        <span>Chỉ tiêu</span>
+        {periods.map((period) => (
+          <span key={period} className="text-right">
+            {period}
+          </span>
+        ))}
+      </div>
+
+      {data.map((row, index) => {
+        const rowAny = row as unknown as Record<string, unknown>
+        const isStrong = Boolean(rowAny.is_header ?? rowAny.is_summary ?? false)
+
+        return (
+          <div
+            key={row.id}
+            style={{ gridTemplateColumns: columns }}
+            className={cn(
+              "grid min-w-[680px] items-center gap-3.5 border-t border-[hsl(var(--hairline))] py-[11px]",
+              index % 2 === 1 && "bg-muted/40"
+            )}
+          >
+            <span
+              style={{ paddingLeft: row.level ? `${row.level * 16}px` : undefined }}
+              className={cn(
+                "text-[15px] leading-[1.47] tracking-[-0.374px]",
+                isStrong && "font-semibold"
+              )}
+            >
+              {row.label}
+            </span>
+            {periods.map((period) => {
+              const { text, tone } = formatFinancialValue(row.values[period])
+              return (
+                <span
+                  key={period}
                   className={cn(
-                    "sticky left-0 z-10 bg-background py-2.5 px-4 text-sm",
-                    isSummary || isHeader
-                      ? "font-semibold text-foreground"
-                      : "text-foreground/90",
-                    isHeader && "bg-muted/20 uppercase text-xs tracking-wide"
+                    "text-right text-[15px] leading-[1.47] tracking-[-0.374px] tabular-nums",
+                    isStrong && "font-semibold",
+                    tone === "negative" && "text-negative",
+                    (tone === "empty" || tone === "zero") && "text-muted-foreground"
                   )}
-                  style={{
-                    paddingLeft: level ? `${16 + level * 16}px` : "16px",
-                  }}
                 >
-                  {row.label}
-                </td>
-                {periods.map((period) => (
-                  <td
-                    key={period}
-                    className={cn(
-                      "py-2.5 px-3 text-right text-sm tabular-nums whitespace-nowrap",
-                      isSummary || isHeader
-                        ? "font-semibold text-foreground"
-                        : "text-foreground/90"
-                    )}
-                  >
-                    {formatFinancialValue(row.values[period])}
-                  </td>
-                ))}
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
+                  {text}
+                </span>
+              )
+            })}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -139,14 +145,10 @@ function FinancialTable({
 export function FinanceTabContent({ symbol, className }: FinanceTabContentProps) {
   const [activeSubTab, setActiveSubTab] = useState<FinanceSubTab>("income")
   const [periodType, setPeriodType] = useState<PeriodType>("quarter")
+  const [hideEmpty, setHideEmpty] = useState(true)
 
-  // Fetch income statement data from API
   const { data: incomeData, isFetching: incomeFetching } = useIncomeStatement(symbol, periodType, 4)
-
-  // Fetch balance sheet data from API
   const { data: balanceData, isFetching: balanceFetching } = useBalanceSheet(symbol, periodType, 4)
-
-  // Fetch cash flow data from API
   const { data: cashFlowApiData, isFetching: cashFlowFetching } = useCashFlow(symbol, periodType, 4)
 
   // Whatever the API returned for the active sub-tab — no substitutes.
@@ -155,91 +157,97 @@ export function FinanceTabContent({ symbol, className }: FinanceTabContentProps)
   const getTableData = () => {
     switch (activeSubTab) {
       case "balance":
-        return { data: balanceData?.rows ?? [], periods: balanceData?.periods ?? [], isFetching: balanceFetching }
+        return { response: balanceData, isFetching: balanceFetching }
       case "cashflow":
-        return { data: cashFlowApiData?.rows ?? [], periods: cashFlowApiData?.periods ?? [], isFetching: cashFlowFetching }
+        return { response: cashFlowApiData, isFetching: cashFlowFetching }
       case "income":
       default:
-        return { data: incomeData?.rows ?? [], periods: incomeData?.periods ?? [], isFetching: incomeFetching }
+        return { response: incomeData, isFetching: incomeFetching }
     }
   }
 
-  const { data, periods, isFetching } = getTableData()
-  const hasData = data.length > 0 && periods.length > 0
+  const { response, isFetching } = getTableData()
+  const allRows: ApiRow[] = response?.rows ?? []
+  const periods = response?.periods ?? []
+  const rows = hideEmpty ? allRows.filter((row) => !isEmptyRow(row, periods)) : allRows
+  const hiddenCount = allRows.length - rows.length
+  const hasData = rows.length > 0 && periods.length > 0
 
   return (
-    <div className={cn("space-y-4", className)}>
-      {/* Sub-tabs and Controls Row */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        {/* Sub-tabs */}
-        <div className="flex items-center gap-1 p-1 rounded-lg bg-muted/50 border border-border/50">
+    <div className={cn("min-w-0 rounded-[18px] border border-border bg-card p-[18px]", className)}>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex flex-wrap gap-2">
           {subTabs.map((tab) => (
-            <button
+            <Pill
               key={tab.value}
+              label={tab.label}
+              isActive={activeSubTab === tab.value}
               onClick={() => setActiveSubTab(tab.value)}
-              className={cn(
-                "px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-200",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                activeSubTab === tab.value
-                  ? "bg-background text-foreground shadow-sm border border-border/80"
-                  : "text-muted-foreground hover:text-foreground hover:bg-background/50"
-              )}
-            >
-              {tab.label}
-            </button>
+            />
           ))}
         </div>
 
-        {/* Right side controls */}
-        <div className="flex items-center gap-3">
-          {/* Unit indicator */}
-          <span className="text-xs text-muted-foreground">
-            ĐVT: Triệu đồng
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+            Đơn vị: {response?.unit ?? "—"}
           </span>
-
-          {/* Period selector */}
-          <Select
-            value={periodType}
-            onValueChange={(value: PeriodType) => setPeriodType(value)}
-          >
-            <SelectTrigger className="w-[100px] h-8 text-sm bg-muted/50 border-border/50">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="quarter">Quý</SelectItem>
-              <SelectItem value="year">Năm</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="flex gap-1.5">
+            <Pill
+              label="Quý"
+              isActive={periodType === "quarter"}
+              onClick={() => setPeriodType("quarter")}
+            />
+            <Pill
+              label="Năm"
+              isActive={periodType === "year"}
+              onClick={() => setPeriodType("year")}
+            />
+          </div>
         </div>
       </div>
 
-      {/* Financial Table */}
-      <div className="rounded-lg border border-border/50 bg-card/50 overflow-hidden">
-        {isFetching ? (
-          <div className="p-4 space-y-3">
-            {[...Array(10)].map((_, i) => (
-              <div key={i} className="flex gap-4">
-                <div className="h-4 w-48 rounded bg-muted animate-pulse" />
-                <div className="h-4 w-20 rounded bg-muted animate-pulse ml-auto" />
-                <div className="h-4 w-20 rounded bg-muted animate-pulse" />
-                <div className="h-4 w-20 rounded bg-muted animate-pulse" />
-                <div className="h-4 w-20 rounded bg-muted animate-pulse" />
-              </div>
-            ))}
-          </div>
-        ) : hasData ? (
-          <FinancialTable data={data} periods={periods} />
-        ) : (
-          <div className="p-8 text-center">
-            <p className="text-sm font-medium text-foreground">
-              Chưa có dữ liệu báo cáo tài chính cho {symbol}
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Nguồn dữ liệu không trả về kỳ báo cáo nào cho lựa chọn hiện tại.
-            </p>
-          </div>
-        )}
+      <div className="mt-3.5 flex flex-wrap items-center justify-between gap-4 border-t border-[hsl(var(--hairline))] pt-3.5">
+        <label className="flex cursor-pointer select-none items-center gap-2 text-[13px] leading-[1.43] tracking-[-0.208px]">
+          <input
+            type="checkbox"
+            checked={hideEmpty}
+            onChange={(event) => setHideEmpty(event.target.checked)}
+            className="size-[15px] cursor-pointer accent-[hsl(var(--interactive))]"
+          />
+          Ẩn dòng chưa công bố
+        </label>
+        <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+          {hiddenCount > 0
+            ? `${hiddenCount} dòng chưa công bố đang được ẩn`
+            : `Hiển thị tất cả ${allRows.length} dòng`}
+        </span>
       </div>
+
+      {isFetching ? (
+        <div className="mt-3 space-y-3">
+          {[...Array(10)].map((_, i) => (
+            <div key={i} className="h-4 animate-pulse rounded bg-muted" />
+          ))}
+        </div>
+      ) : hasData ? (
+        <>
+          <FinancialTable data={rows} periods={periods} />
+          <div className="mt-3.5 flex flex-wrap gap-4 border-t border-[hsl(var(--hairline))] pt-3.5 text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+            <span>— chưa công bố</span>
+            <span>0,0 giá trị bằng không thực tế</span>
+            <span>Số âm hiển thị dấu trừ thay vì ngoặc đơn</span>
+          </div>
+        </>
+      ) : (
+        <div className="py-8 text-center">
+          <p className="text-[15px] leading-[1.47] tracking-[-0.374px]">
+            Chưa có dữ liệu báo cáo tài chính cho {symbol}
+          </p>
+          <p className="mt-1 text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+            Nguồn dữ liệu không trả về kỳ báo cáo nào cho lựa chọn hiện tại.
+          </p>
+        </div>
+      )}
     </div>
   )
 }
@@ -247,32 +255,11 @@ export function FinanceTabContent({ symbol, className }: FinanceTabContentProps)
 // Skeleton for loading state
 export function FinanceTabContentSkeleton({ className }: { className?: string }) {
   return (
-    <div className={cn("space-y-4", className)}>
-      {/* Sub-tabs skeleton */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-1 p-1 rounded-lg bg-muted/50 border border-border/50">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-8 w-28 rounded-md bg-muted animate-pulse" />
-          ))}
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="h-4 w-24 rounded bg-muted animate-pulse" />
-          <div className="h-8 w-[100px] rounded bg-muted animate-pulse" />
-        </div>
-      </div>
-
-      {/* Table skeleton */}
-      <div className="rounded-lg border border-border/50 bg-card/50 p-4 space-y-3">
-        {[...Array(10)].map((_, i) => (
-          <div key={i} className="flex gap-4">
-            <div className="h-4 w-48 rounded bg-muted animate-pulse" />
-            <div className="h-4 w-20 rounded bg-muted animate-pulse ml-auto" />
-            <div className="h-4 w-20 rounded bg-muted animate-pulse" />
-            <div className="h-4 w-20 rounded bg-muted animate-pulse" />
-            <div className="h-4 w-20 rounded bg-muted animate-pulse" />
-          </div>
-        ))}
-      </div>
-    </div>
+    <div
+      className={cn(
+        "h-[520px] min-w-0 animate-pulse rounded-[18px] border border-border bg-card",
+        className
+      )}
+    />
   )
 }

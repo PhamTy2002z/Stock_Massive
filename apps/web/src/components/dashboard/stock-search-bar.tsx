@@ -116,7 +116,10 @@ export function StockSearchBar({
   return (
     <div ref={containerRef} className={`relative ${className}`}>
       <div className="relative">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Search className="absolute left-4 top-1/2 h-[15px] w-[15px] -translate-y-1/2 text-muted-foreground" />
+        {/* Search pill, per the design system: 40px tall, page-grey until focus,
+            then white so the field reads as the active surface. Width comes from
+            the parent so the bar can flex with the header. */}
         <Input
           ref={inputRef}
           type="text"
@@ -125,7 +128,7 @@ export function StockSearchBar({
           onKeyDown={handleKeyDown}
           onFocus={() => results.length > 0 && setIsOpen(true)}
           placeholder={placeholder}
-          className="h-9 w-64 pl-9 lg:w-80 bg-muted/50 border-transparent focus:border-primary/50 focus-visible:ring-0 focus-visible:ring-offset-0 transition-colors duration-200"
+          className="h-10 w-full rounded-full border-border bg-secondary pl-10 pr-[18px] text-[15px] tracking-[-0.374px] transition-colors duration-200 focus:bg-card focus-visible:ring-2 focus-visible:ring-[hsl(var(--interactive-strong))] focus-visible:ring-offset-0"
         />
         {isLoading && (
           <Spinner className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -133,7 +136,7 @@ export function StockSearchBar({
       </div>
 
       {isOpen && results.length > 0 && (
-        <div className="absolute top-full left-0 right-0 mt-1 max-h-80 overflow-auto rounded-md border bg-popover shadow-lg z-50">
+        <div className="absolute top-full left-0 right-0 mt-2 max-h-80 overflow-auto rounded-2xl border bg-popover shadow-lg z-50">
           {results.map((item, index) => (
             <button
               key={item.symbol}
