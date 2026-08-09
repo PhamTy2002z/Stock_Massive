@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     upstash_redis_token: str = ""
     upstash_redis_rest_url: str = ""  # Alternative name from Upstash dashboard
     upstash_redis_rest_token: str = ""  # Alternative name from Upstash dashboard
+    cache_redis_url: str = ""  # Standard Redis URL for local/self-hosted deployments
 
     @property
     def redis_url(self) -> str:
@@ -58,7 +59,10 @@ class Settings(BaseSettings):
     intraday_retention_days: int = 30
 
     # Daily OHLCV Collector
-    daily_ohlcv_enabled: bool = True
+    # Disabled by default: the full-market job exhausts vnstock Guest quota and
+    # competes with interactive dashboard requests. Hybrid collectors own this
+    # refresh path instead.
+    daily_ohlcv_enabled: bool = False
     daily_ohlcv_hour: int = 16  # 4 PM Vietnam time (after market close)
     daily_ohlcv_minute: int = 0
     daily_ohlcv_delay: float = 2.0  # Delay between requests to avoid rate limit
@@ -78,7 +82,9 @@ class Settings(BaseSettings):
     rate_limit_heavy_window: int = 60  # seconds
 
     # Sector Historical Performance Job
-    sector_historical_enabled: bool = True
+    # Disabled until a persisted cache exists; otherwise every restart after
+    # 15:45 retries a broad vnstock scan and starves interactive requests.
+    sector_historical_enabled: bool = False
     sector_historical_hour: int = 15  # 15:45 ICT (after sector-performance job at 15:30)
     sector_historical_minute: int = 45
     sector_historical_delay: float = 1.2  # seconds between API calls (~50 req/min)

@@ -2,7 +2,7 @@
 
 from .exceptions import StockServiceError
 from .validators import validate_symbol, SYMBOL_PATTERN
-from .converters import safe_float, safe_float_millions
+from .converters import market_cap_billions, safe_float, safe_float_millions
 from .industries import fetch_industry_mapping
 
 __all__ = [
@@ -11,5 +11,6 @@ __all__ = [
     "SYMBOL_PATTERN",
     "safe_float",
     "safe_float_millions",
+    "market_cap_billions",
     "fetch_industry_mapping",
 ]
