@@ -22,6 +22,14 @@ from .contracts import (
     owns_capability,
 )
 from .store import SnapshotRead, SnapshotStore
+from .vnstock_provider import (
+    RequestPacer,
+    VnstockFundamentalProvider,
+    VnstockProviderError,
+    VnstockReadFailed,
+    VnstockReferenceProvider,
+    quota_per_minute,
+)
 
 __all__ = [
     "Capability",
@@ -33,6 +41,7 @@ __all__ = [
     "ProviderSource",
     "ReferenceDataProvider",
     "ReferenceSnapshot",
+    "RequestPacer",
     "SOURCE_OWNERSHIP_BY_CAPABILITY",
     "ShareCount",
     "ShareType",
@@ -42,7 +51,12 @@ __all__ = [
     "SourceOwnership",
     "ValuationDataProvider",
     "ValuationSnapshot",
+    "VnstockFundamentalProvider",
+    "VnstockProviderError",
+    "VnstockReadFailed",
+    "VnstockReferenceProvider",
     "cover_source",
     "main_source",
     "owns_capability",
+    "quota_per_minute",
 ]
