@@ -42,9 +42,12 @@ htmlcov/
 # Docker
 postgres_data/
 
-# Database backups (share via cloud storage, not git)
-db-backup.sql
+# Database dumps and exports (share via cloud storage, not git).
+# A SQL file that genuinely belongs in the repo goes in with `git add -f`.
+*.sql
 *.sql.gz
+*.dump
+*.dump.gz
 apps/web/temp/
 
 # Codebase snapshots (regenerate with repomix, don't commit)
