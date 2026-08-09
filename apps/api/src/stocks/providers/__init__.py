@@ -22,14 +22,10 @@ from .contracts import (
     owns_capability,
 )
 from .store import SnapshotRead, SnapshotStore
-from .vnstock_provider import (
-    RequestPacer,
-    VnstockFundamentalProvider,
-    VnstockProviderError,
-    VnstockReadFailed,
-    VnstockReferenceProvider,
-    quota_per_minute,
-)
+
+# Adapters are deliberately absent: importing one pulls in its provider library,
+# and this package is what the contracts are imported from. Reach for an adapter
+# by its own module, the way the collector and its tests do.
 
 __all__ = [
     "Capability",
@@ -41,7 +37,6 @@ __all__ = [
     "ProviderSource",
     "ReferenceDataProvider",
     "ReferenceSnapshot",
-    "RequestPacer",
     "SOURCE_OWNERSHIP_BY_CAPABILITY",
     "ShareCount",
     "ShareType",
@@ -51,12 +46,7 @@ __all__ = [
     "SourceOwnership",
     "ValuationDataProvider",
     "ValuationSnapshot",
-    "VnstockFundamentalProvider",
-    "VnstockProviderError",
-    "VnstockReadFailed",
-    "VnstockReferenceProvider",
     "cover_source",
     "main_source",
     "owns_capability",
-    "quota_per_minute",
 ]

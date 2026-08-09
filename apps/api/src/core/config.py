@@ -33,8 +33,10 @@ class Settings(BaseSettings):
 
     # Vnstock
     vnstock_source: str = "VCI"  # Default data source (VCI is most reliable)
-    # Quota là 20 request/phút khi thiếu key, 60 khi có — adapter tự giãn nhịp theo.
-    vnstock_api_key: str = ""
+    # VNSTOCK_API_KEY cố ý không khai ở đây: vnstock đọc thẳng từ os.environ để
+    # quyết định tier (20 request/phút khi không thấy, 60 khi thấy). Khai lại
+    # thành setting sẽ đọc được cả từ .env — nơi vnstock không nhìn tới — nên hai
+    # bên có thể lệch nhau. Xem API_KEY_ENV_VAR ở providers/vnstock_provider.py.
 
     # FiinQuant — Main Source cho market và valuation, xem docs/adr/0002
     fiinquant_username: str = ""
