@@ -156,6 +156,28 @@
     }
   }
 
+  /* Reveals the price line left to right, so the chart reads as time passing
+     rather than appearing all at once. Masked, so the fill travels with it. */
+  .price-line-reveal {
+    transform-origin: 0 0;
+    animation: priceLineWipe 1.2s cubic-bezier(0.3, 0.7, 0.3, 1) 0.15s both;
+  }
+
+  @keyframes priceLineWipe {
+    from {
+      transform: scaleX(0);
+    }
+    to {
+      transform: scaleX(1);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .price-line-reveal {
+      animation: none;
+    }
+  }
+
   /* Custom thin scrollbar for financial tables */
   .scrollbar-thin {
     scrollbar-width: thin;

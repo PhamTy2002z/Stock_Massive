@@ -30,7 +30,12 @@ class StockSymbol(StrictModel):
 
 
 class StockDetail(StrictModel):
-    """Comprehensive stock detail data combining price, company, and financial info."""
+    """Comprehensive stock detail data combining price, company, and financial info.
+
+    Units, since the upstream providers disagree and the payload mixes them:
+    every price field is plain VND, ``trading_value`` is millions of VND, and
+    ``market_cap`` is billions of VND.
+    """
 
     # Basic Info
     symbol: str
@@ -53,10 +58,10 @@ class StockDetail(StrictModel):
 
     # Volume & Value
     volume: Optional[int] = None
-    trading_value: Optional[float] = None
+    trading_value: Optional[float] = None  # Million VND
 
     # Market Cap & Shares
-    market_cap: Optional[float] = None
+    market_cap: Optional[float] = None  # Billion VND
     outstanding_shares: Optional[float] = None
     issue_share: Optional[float] = None
 

@@ -4,16 +4,15 @@ import { Skeleton } from "@/components/ui/skeleton"
 
 export function StockTickerHeaderSkeleton() {
   return (
-    <div className="py-4">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <Skeleton className="h-7 w-64" />
-          <Skeleton className="mt-2 h-4 w-20" />
-        </div>
-        <div className="text-right shrink-0">
-          <Skeleton className="h-8 w-24" />
-          <Skeleton className="mt-2 h-4 w-32" />
-        </div>
+    <div className="flex items-start justify-between gap-4">
+      <div className="min-w-0 flex-1">
+        <Skeleton className="h-7 w-64" />
+        <Skeleton className="mt-2.5 h-4 w-56" />
+      </div>
+      <div className="shrink-0 text-right">
+        <Skeleton className="ml-auto h-10 w-32" />
+        <Skeleton className="ml-auto mt-1 h-4 w-28" />
+        <Skeleton className="ml-auto mt-3 h-9 w-52" />
       </div>
     </div>
   )

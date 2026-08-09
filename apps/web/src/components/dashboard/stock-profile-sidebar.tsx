@@ -16,9 +16,8 @@ const decimal = (value: number, digits = 2) =>
     maximumFractionDigits: digits,
   })
 
-/** Market cap arrives in đồng; the board quotes it in tỷ. */
-function formatMarketCap(value: number): string {
-  const billions = value / 1_000_000_000
+/** Market cap already arrives in tỷ — the unit the board itself quotes. */
+function formatMarketCap(billions: number): string {
   if (billions >= 1_000_000) return `${decimal(billions / 1_000_000)} triệu tỷ`
   return `${Math.round(billions).toLocaleString("vi-VN")} tỷ`
 }

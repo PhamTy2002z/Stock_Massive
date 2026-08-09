@@ -16,13 +16,21 @@ from ..schemas.price import (
     PriceBoardItem,
     MarketIndexItem,
 )
-from ..shared import StockServiceError, validate_symbol, safe_float
+from ..shared import StockServiceError, validate_symbol, quote_price_vnd, safe_float
 
 logger = logging.getLogger(__name__)
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
 # (symbol, display name). Shared with the router so it can tell a complete
 # board from a partial one before caching.
+# Bar sizes that carry a time of day. Anything else is one bar per session, and
+# only these need their timestamps kept past the date.
+INTRADAY_INTERVALS = frozenset({"1m", "5m", "15m", "30m", "1H"})
+
+# Session bars first, then the daily-and-longer sizes, so a rejection message
+# lists them in the order a caller would think about them.
+HISTORY_INTERVALS: tuple[str, ...] = ("1m", "5m", "15m", "30m", "1H", "1D", "1W", "1M")
+
 MARKET_INDICES: list[tuple[str, str]] = [
     ("VNINDEX", "VN-INDEX"),
     ("VN30", "VN30"),
@@ -45,8 +53,14 @@ class PriceService:
         end: date,
         interval: str = "1D",
     ) -> list[StockPrice]:
-        """Get historical OHLCV data for a stock."""
+        """Get historical OHLCV data for a stock.
+
+        Intraday intervals are served by the same upstream call; it answers them
+        with a fixed lookback window rather than the requested one, so the frame
+        is trimmed to [start, end] here and the endpoint keeps its contract.
+        """
         symbol = validate_symbol(symbol)
+        intraday = interval in INTRADAY_INTERVALS
         try:
             quote = Quote(symbol=symbol, source=self.source)
             df = quote.history(
@@ -58,7 +72,13 @@ class PriceService:
             if df is None or df.empty:
                 return []
 
-            return self._df_to_stock_prices(df)
+            if intraday:
+                bar_dates = pd.to_datetime(df["time"], errors="coerce").dt.date
+                df = df[(bar_dates >= start) & (bar_dates <= end)]
+                if df.empty:
+                    return []
+
+            return self._df_to_stock_prices(df, intraday=intraday)
         except (VnstockUnavailable, VnstockUnsupported):
             # Upstream quota/capability problems carry their own meaning;
             # don't flatten them into a generic service error.
@@ -170,24 +190,37 @@ class PriceService:
 
     # --- Converter methods ---
 
-    def _df_to_stock_prices(self, df: pd.DataFrame) -> list[StockPrice]:
+    def _df_to_stock_prices(
+        self, df: pd.DataFrame, intraday: bool = False
+    ) -> list[StockPrice]:
         """Convert DataFrame to list of StockPrice."""
+        # Intraday timestamps keep their time of day; a date alone would collapse
+        # a whole session onto one label.
+        time_format = "%Y-%m-%dT%H:%M:%S" if intraday else "%Y-%m-%d"
         prices = []
         for row in df.to_dict("records"):
             try:
+                # Minutes with no matches come back as an all-NaN bar. That is a
+                # gap in the session, not a price of zero — leave it out.
+                close = quote_price_vnd(row.get("close"))
+                if close is None:
+                    continue
+
                 time_val = row.get("time")
                 if hasattr(time_val, "strftime"):
-                    time_str = time_val.strftime("%Y-%m-%d")
+                    time_str = time_val.strftime(time_format)
                 else:
                     time_str = str(time_val) if time_val else None
 
                 prices.append(
                     StockPrice(
                         time=time_str,
-                        open=safe_float(row.get("open")),
-                        high=safe_float(row.get("high")),
-                        low=safe_float(row.get("low")),
-                        close=safe_float(row.get("close")),
+                        # Quote history arrives in thousands of VND; the rest of
+                        # the API speaks plain VND.
+                        open=quote_price_vnd(row.get("open")),
+                        high=quote_price_vnd(row.get("high")),
+                        low=quote_price_vnd(row.get("low")),
+                        close=close,
                         volume=int(row.get("volume", 0)) if pd.notna(row.get("volume")) else None,
                     )
                 )
@@ -214,7 +247,7 @@ class PriceService:
                 ticks.append(
                     IntradayTick(
                         time=time_str,
-                        price=safe_float(row.get("price")),
+                        price=quote_price_vnd(row.get("price")),
                         volume=int(row.get("volume", 0)) if pd.notna(row.get("volume")) else None,
                         accumulated_vol=int(row.get("accumulated_vol", 0)) if pd.notna(row.get("accumulated_vol")) else None,
                         accumulated_val=int(row.get("accumulated_val", 0)) if pd.notna(row.get("accumulated_val")) else None,

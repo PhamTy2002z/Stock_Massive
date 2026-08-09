@@ -10,7 +10,7 @@ import { STALE_TIME, REFETCH_INTERVAL } from "@/lib/query-config"
  * Consumer must validate symbol before rendering.
  */
 export function useStockDetail(symbol: string) {
-  const { data, isFetching, refetch } = useSuspenseQuery<StockDetail>({
+  const { data, dataUpdatedAt, isFetching, refetch } = useSuspenseQuery<StockDetail>({
     queryKey: queryKeys.stockDetail(symbol),
     queryFn: () => fetchStockDetail(symbol),
     staleTime: STALE_TIME.REALTIME,
@@ -21,6 +21,7 @@ export function useStockDetail(symbol: string) {
   // data is ALWAYS defined with useSuspenseQuery
   return {
     data,
+    dataUpdatedAt,
     isFetching,
     refetch,
   }

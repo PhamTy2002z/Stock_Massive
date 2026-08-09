@@ -188,6 +188,7 @@ class TestFiftyTwoWeekMetrics:
     def test_uses_vnstock_4_ohlcv_daily_bars(self, service):
         frame = pd.DataFrame(
             {
+                "open": [69.0, 77.0, 59.0],
                 "high": [70.5, 78.2, 75.0],
                 "low": [60.0, 62.5, 52.6],
                 "volume": [1_000_000, 2_000_000, 3_000_001],
@@ -202,10 +203,13 @@ class TestFiftyTwoWeekMetrics:
 
         market.return_value.equity.assert_called_once_with("VCB")
         equity.ohlcv.assert_called_once_with(count=260, source="VCI")
+        # OHLCV quotes thousands of VND; the price board in the same payload
+        # quotes plain VND, so the range has to be scaled to match it.
         assert result == {
-            "high_52_week": 78.2,
-            "low_52_week": 52.6,
+            "high_52_week": 78_200.0,
+            "low_52_week": 52_600.0,
             "avg_volume_52_week": 2_000_000,
+            "session_open": 59_000.0,
         }
 
     def test_empty_ohlcv_does_not_invent_zeroes(self, service):
@@ -214,6 +218,36 @@ class TestFiftyTwoWeekMetrics:
 
         with patch("src.stocks.company.service.Market", market):
             assert service._get_52_week_metrics("VCB") == {}
+
+    @patch("src.stocks.company.service.Trading")
+    def test_daily_bar_supplies_the_open_the_price_board_omits(
+        self, trading_cls, service
+    ):
+        """The price board has no open column, so the card had nothing to show."""
+        trading_cls.return_value.price_board.return_value = pd.DataFrame(
+            [{"symbol": "VCB", "match_price": 59_700.0, "ref_price": 59_000.0}]
+        )
+        vnstock = _mock_company(
+            overview=pd.DataFrame(),
+            ratio_summary=pd.DataFrame(),
+        )
+        metrics = {
+            "high_52_week": 78_150.0,
+            "low_52_week": 52_600.0,
+            "avg_volume_52_week": 7_361_833,
+            "session_open": 59_000.0,
+        }
+
+        with (
+            patch("src.stocks.company.service.Vnstock", return_value=vnstock),
+            patch.object(service, "_get_52_week_metrics", return_value=metrics),
+            patch.object(service, "_get_vn30_rank", return_value=None),
+        ):
+            result = service.get_stock_detail("VCB")
+
+        assert result.open_price == 59_000.0
+        assert result.high_52_week == 78_150.0
+        assert result.low_52_week == 52_600.0
 
 
 class TestShareholders:

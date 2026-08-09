@@ -29,21 +29,35 @@ interface StockDetailClientProps {
   initialSymbol: string | null
 }
 
+/**
+ * The identity bar and its tabs, pinned under the app header.
+ *
+ * Negative margins undo the page padding so the blur runs edge to edge, the
+ * way a toolbar does — the content below scrolls under it rather than past it.
+ */
+function StickyBar({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="sticky top-0 z-20 -mx-6 -mt-6 border-b border-border bg-background/80 px-6 pt-5 backdrop-blur-xl backdrop-saturate-150">
+      {children}
+    </div>
+  )
+}
+
 // Loading fallback for Suspense
 function StockDetailLoading() {
   return (
     <>
-      <section className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_280px] gap-4">
+      <StickyBar>
+        <StockTickerHeaderSkeleton />
+        <StockDetailTabsSkeleton className="mt-3.5" />
+      </StickyBar>
+      <section className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
         <div className="space-y-4">
-          <StockTickerHeaderSkeleton />
-          <StockDetailTabsSkeleton className="mt-2" />
           <StockPriceChartSkeleton />
           <StockRangeCardsSkeleton />
           <StockValuationVsSectorSkeleton />
         </div>
-        <div className="lg:pt-6">
-          <StockProfileSidebarSkeleton />
-        </div>
+        <StockProfileSidebarSkeleton />
       </section>
     </>
   )
@@ -52,7 +66,7 @@ function StockDetailLoading() {
 // Inner component that uses the hook - only rendered when symbol is valid
 function StockDetailInner({ symbol }: { symbol: string }) {
   const [activeTab, setActiveTab] = useState<StockDetailTabValue>("overview")
-  const { data, isFetching, refetch } = useStockDetail(symbol)
+  const { data, dataUpdatedAt, isFetching, refetch } = useStockDetail(symbol)
 
   // Update loading toast when data loads
   useEffect(() => {
@@ -70,28 +84,27 @@ function StockDetailInner({ symbol }: { symbol: string }) {
 
   return (
     <>
-      <section className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_280px] gap-4">
+      <StickyBar>
+        <StockTickerHeader
+          symbol={data.symbol}
+          companyName={data.company_name || data.symbol}
+          price={data.price || 0}
+          change={data.change || 0}
+          changePercent={data.change_pct || 0}
+          ceiling={data.ceiling}
+          floor={data.floor}
+          refPrice={data.ref_price}
+          onRefresh={() => void refetch()}
+          isRefreshing={isFetching}
+          updatedAt={dataUpdatedAt}
+        />
+        <StockDetailTabs value={activeTab} onChange={setActiveTab} className="mt-3.5" />
+      </StickyBar>
+
+      <section className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
         {/* Left: Main Content */}
         <div className="space-y-4">
           <div className="stock-detail-enter">
-            <StockTickerHeader
-              symbol={data.symbol}
-              companyName={data.company_name || data.symbol}
-              price={data.price || 0}
-              change={data.change || 0}
-              changePercent={data.change_pct || 0}
-              ceiling={data.ceiling}
-              floor={data.floor}
-              refPrice={data.ref_price}
-              onRefresh={() => void refetch()}
-              isRefreshing={isFetching}
-            />
-            <StockDetailTabs
-              value={activeTab}
-              onChange={setActiveTab}
-              className="mt-2 mb-4"
-            />
-
             {activeTab === "overview" && (
               <div className="space-y-4">
                 <StockPriceChart symbol={data.symbol} refPrice={data.ref_price} />
@@ -121,11 +134,9 @@ function StockDetailInner({ symbol }: { symbol: string }) {
         </div>
 
         {/* Right: reference column — profile and sector peers */}
-        <div className="lg:pt-6">
-          <Suspense fallback={<StockProfileSidebarSkeleton />}>
-            <StockProfileSidebar stock={data} />
-          </Suspense>
-        </div>
+        <Suspense fallback={<StockProfileSidebarSkeleton />}>
+          <StockProfileSidebar stock={data} />
+        </Suspense>
       </section>
     </>
   )
@@ -135,11 +146,11 @@ export function StockDetailClient({ initialSymbol }: StockDetailClientProps) {
   // No symbol - show empty state
   if (!initialSymbol) {
     return (
-      <section className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_280px] gap-4">
+      <section className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
         <div className="space-y-4">
           <StockDetailEmpty />
         </div>
-        <div className="space-y-4 lg:pt-6" />
+        <div className="space-y-4" />
       </section>
     )
   }
