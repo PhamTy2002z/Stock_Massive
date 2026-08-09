@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable, Sequence
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from time import monotonic
 from typing import Any
 
@@ -19,8 +19,34 @@ from .contracts import (
 from ..shared import validate_symbol
 
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
-MAX_FREE_SYMBOLS = 33
-MARKET_FIELDS = ["open", "high", "low", "close", "volume"]
+
+# The published free-tier ceiling of 33 symbols applies to the realtime stream
+# only: historical calls were measured good at 110 symbols in one request. The
+# bound here is the largest batch the collector is allowed to commit to.
+MAX_BATCH_SYMBOLS = 100
+
+# Everything the free tier returns for a daily bar. bu/sd are quantities while
+# fb/fs/fn are money — see MarketSnapshot for why the two never share a name.
+MARKET_FIELDS = [
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "value",
+    "bu",
+    "sd",
+    "fb",
+    "fs",
+    "fn",
+]
+
+# Two sessions are needed for the reference price, and a holiday weekend can
+# push the previous one back several calendar days.
+HISTORY_LOOKBACK_DAYS = 10
+
+OVERVIEW_FIELDS = ("ticker", "timestamp", "marketcap")
+CEILING_FLOOR_FIELDS = ("ticker", "timestamp", "ceilingprice", "floorprice")
 
 
 class FiinQuantProviderError(RuntimeError):
@@ -67,22 +93,33 @@ class ProviderCircuitBreaker:
             self.opened_at = self.clock()
 
 
-def ensure_ca_bundle() -> str | None:
+def ensure_ca_bundle() -> str:
     """Point the default SSL context at certifi before FiinQuantX opens a session.
 
     FiinQuantX swallows ``CERTIFICATE_VERIFY_FAILED`` and returns an empty frame
     instead of raising, so a missing CA bundle looks exactly like a market with
-    no data. Setting the variable up front turns that silent failure into a
-    working connection.
+    no data. Every way of ending up without a usable bundle is raised here
+    instead, because a diagnosable error beats a market that appears closed.
     """
     existing = os.environ.get("SSL_CERT_FILE")
     if existing:
+        if not os.path.isfile(existing):
+            raise FiinQuantProviderError(
+                f"SSL_CERT_FILE points at a CA bundle that does not exist: {existing}"
+            )
         return existing
     try:
         import certifi
-    except ImportError:  # pragma: no cover - certifi ships with requests
-        return None
+    except ImportError as exc:  # pragma: no cover - certifi ships with requests
+        raise FiinQuantProviderError(
+            "no CA bundle available: certifi is not installed and "
+            "SSL_CERT_FILE is unset"
+        ) from exc
     bundle = certifi.where()
+    if not os.path.isfile(bundle):  # pragma: no cover - broken certifi install
+        raise FiinQuantProviderError(
+            f"certifi reported a CA bundle that does not exist: {bundle}"
+        )
     os.environ["SSL_CERT_FILE"] = bundle
     return bundle
 
@@ -97,7 +134,14 @@ def _default_session_factory(username: str, password: str) -> Any:
 
 
 class FiinQuantMarketProvider:
-    """Fetch and normalize the latest two one-minute candles per symbol."""
+    """Turn one batched end-of-day read into one MarketSnapshot per symbol.
+
+    A session is assembled from three calls: daily candles carry price, volume,
+    value and both flow pairs; ``get_overview`` carries market cap; and
+    ``get_ceilingfloor`` carries the day's permitted band. Only the candles are
+    load-bearing — a symbol absent from the statistics keeps its market fields
+    and leaves the statistics ones empty.
+    """
 
     source = ProviderSource.FIINQUANT
 
@@ -122,22 +166,12 @@ class FiinQuantMarketProvider:
         normalized = tuple(dict.fromkeys(validate_symbol(symbol) for symbol in symbols))
         if not normalized:
             return ()
-        if len(normalized) > MAX_FREE_SYMBOLS:
-            raise ValueError(f"FiinQuant free universe is limited to {MAX_FREE_SYMBOLS} symbols")
+        if len(normalized) > MAX_BATCH_SYMBOLS:
+            raise ValueError(f"a FiinQuant batch is limited to {MAX_BATCH_SYMBOLS} symbols")
 
         self._circuit.allow()
         try:
-            client = self._get_client()
-            frame = client.Fetch_Trading_Data(
-                realtime=False,
-                tickers=list(normalized),
-                fields=MARKET_FIELDS,
-                adjusted=False,
-                by="1m",
-                period=2,
-                lasted=True,
-            ).get_data()
-            snapshots = self._normalize_frame(frame, normalized)
+            snapshots = self._fetch_batch(normalized)
         except FiinQuantCircuitOpen:
             raise
         except FiinQuantProviderError:
@@ -145,10 +179,42 @@ class FiinQuantMarketProvider:
             raise
         except Exception as exc:
             self._circuit.record_failure()
-            raise FiinQuantProviderError("FiinQuant market fetch failed") from exc
+            # The upstream message is dropped, not wrapped: it has been seen to
+            # echo the credentials back.
+            raise FiinQuantProviderError(
+                f"FiinQuant market fetch failed ({type(exc).__name__})"
+            ) from None
 
         self._circuit.record_success()
         return snapshots
+
+    def _fetch_batch(self, symbols: Sequence[str]) -> tuple[MarketSnapshot, ...]:
+        client = self._get_client()
+        tickers = list(symbols)
+        from_date = str(
+            self._now().astimezone(VN_TZ).date() - timedelta(days=HISTORY_LOOKBACK_DAYS)
+        )
+
+        candles = client.Fetch_Trading_Data(
+            realtime=False,
+            tickers=tickers,
+            fields=MARKET_FIELDS,
+            adjusted=False,
+            by="1d",
+            from_date=from_date,
+        ).get_data()
+        statistics = client.PriceStatistics()
+        overview = statistics.get_overview(
+            tickers=tickers,
+            time_filter="Daily",
+            from_date=from_date,
+        )
+        ceiling_floor = statistics.get_ceilingfloor(
+            tickers=tickers,
+            from_date=from_date,
+        )
+
+        return self._normalize(candles, overview, ceiling_floor, symbols)
 
     def _get_client(self) -> Any:
         if self._client is None:
@@ -158,55 +224,54 @@ class FiinQuantMarketProvider:
                 raise FiinQuantProviderError("FiinQuant login failed") from exc
         return self._client
 
-    def _normalize_frame(
+    def _normalize(
         self,
-        frame: pd.DataFrame,
+        candles: pd.DataFrame,
+        overview: pd.DataFrame,
+        ceiling_floor: pd.DataFrame,
         requested_symbols: Sequence[str],
     ) -> tuple[MarketSnapshot, ...]:
-        if frame is None or frame.empty:
-            return ()
-
-        columns = {str(column).lower(): column for column in frame.columns}
-        required = {"ticker", "timestamp", "close"}
-        missing = required - columns.keys()
-        if missing:
+        if candles is None or getattr(candles, "empty", True):
+            # This is the documented silent-failure signature of the library:
+            # a rejected certificate comes back as an empty frame, not an error.
             raise FiinQuantProviderError(
-                f"FiinQuant response is missing fields: {', '.join(sorted(missing))}"
+                "FiinQuant returned no market data for any requested symbol"
             )
 
-        working = frame.rename(columns={value: key for key, value in columns.items()}).copy()
-        working["ticker"] = working["ticker"].astype(str).str.upper()
-        working = working[working["ticker"].isin(requested_symbols)]
+        sessions = _prepare(
+            candles,
+            ("ticker", "timestamp", *MARKET_FIELDS),
+            requested_symbols,
+        )
+        market_cap = _latest_row_by_symbol(
+            _prepare(overview, OVERVIEW_FIELDS, requested_symbols)
+        )
+        band = _latest_row_by_symbol(
+            _prepare(ceiling_floor, CEILING_FLOOR_FIELDS, requested_symbols)
+        )
+
         observed_at = self._now()
         snapshots: list[MarketSnapshot] = []
 
         for symbol in requested_symbols:
-            rows = working[working["ticker"] == symbol].copy()
-            if rows.empty:
+            latest, previous = _last_two_sessions(sessions, symbol)
+            if latest is None:
                 continue
-            rows["timestamp"] = pd.to_datetime(rows["timestamp"], errors="coerce")
-            rows = rows.dropna(subset=["timestamp", "close"]).sort_values("timestamp")
-            if rows.empty:
-                continue
-
-            latest = rows.iloc[-1]
-            previous_close = rows.iloc[-2]["close"] if len(rows) > 1 else None
-            effective_at = latest["timestamp"].to_pydatetime()
-            if effective_at.tzinfo is None:
-                effective_at = effective_at.replace(tzinfo=VN_TZ)
 
             close = _optional_float(latest.get("close"))
-            reference = _optional_float(previous_close)
+            reference = _optional_float(previous.get("close")) if previous is not None else None
             change_pct = None
             if close is not None and reference not in (None, 0):
                 change_pct = (close - reference) / reference * 100
 
+            statistics = market_cap.get(symbol)
+            limits = band.get(symbol)
             snapshots.append(
                 MarketSnapshot(
                     symbol=symbol,
                     metadata=SnapshotMetadata(
                         source=self.source,
-                        effective_at=effective_at,
+                        effective_at=_as_aware(latest["timestamp"]),
                         observed_at=observed_at,
                     ),
                     last_price=close,
@@ -214,12 +279,95 @@ class FiinQuantMarketProvider:
                     open_price=_optional_float(latest.get("open")),
                     high_price=_optional_float(latest.get("high")),
                     low_price=_optional_float(latest.get("low")),
+                    ceiling_price=_optional_float(
+                        limits.get("ceilingprice") if limits is not None else None
+                    ),
+                    floor_price=_optional_float(
+                        limits.get("floorprice") if limits is not None else None
+                    ),
                     change_pct=change_pct,
                     volume=_optional_int(latest.get("volume")),
+                    total_value_vnd=_optional_float(latest.get("value")),
+                    active_buy_volume=_optional_int(latest.get("bu")),
+                    active_sell_volume=_optional_int(latest.get("sd")),
+                    foreign_buy_value_vnd=_optional_float(latest.get("fb")),
+                    foreign_sell_value_vnd=_optional_float(latest.get("fs")),
+                    foreign_net_value_vnd=_optional_float(latest.get("fn")),
+                    market_cap_vnd=_optional_float(
+                        statistics.get("marketcap") if statistics is not None else None
+                    ),
                 )
             )
 
         return tuple(snapshots)
+
+
+def _prepare(
+    frame: pd.DataFrame | None,
+    required_fields: Sequence[str],
+    requested_symbols: Sequence[str],
+) -> pd.DataFrame:
+    """Lower-case the columns, prove the fields arrived, keep the asked-for rows.
+
+    The two ``PriceStatistics`` calls disagree on capitalization with each other
+    and with the candle frame, so case is normalized before anything is read.
+    """
+    if frame is None or getattr(frame, "empty", True):
+        return pd.DataFrame(columns=list(required_fields))
+
+    columns = {str(column).lower(): column for column in frame.columns}
+    missing = set(required_fields) - columns.keys()
+    if missing:
+        raise FiinQuantProviderError(
+            f"FiinQuant response is missing fields: {', '.join(sorted(missing))}"
+        )
+
+    working = frame.rename(columns={value: key for key, value in columns.items()}).copy()
+    working = working[list(required_fields)]
+    working["ticker"] = working["ticker"].astype(str).str.upper()
+    working["timestamp"] = pd.to_datetime(working["timestamp"], errors="coerce")
+    working = working.dropna(subset=["timestamp"])
+    return working[working["ticker"].isin(list(requested_symbols))].sort_values("timestamp")
+
+
+def _latest_row_by_symbol(frame: pd.DataFrame) -> dict[str, pd.Series]:
+    """Keep only the most recent row per symbol, which is the current session."""
+    if frame.empty:
+        return {}
+    return {
+        str(symbol): rows.iloc[-1]
+        for symbol, rows in frame.groupby("ticker", sort=False)
+    }
+
+
+def _last_two_sessions(
+    frame: pd.DataFrame,
+    symbol: str,
+) -> tuple[pd.Series | None, pd.Series | None]:
+    """Return this session and the one before it, collapsing same-day rows.
+
+    Asked for daily bars during a session, the provider returns both a bar
+    stamped midnight and a live bar stamped now. Grouping by calendar date and
+    keeping the newest row per date leaves one row per session, so the previous
+    session is a real previous day rather than the same day seen twice.
+    """
+    if frame.empty:
+        return None, None
+    rows = frame[(frame["ticker"] == symbol) & frame["close"].notna()]
+    if rows.empty:
+        return None, None
+    sessions = [
+        day_rows.iloc[-1]
+        for _, day_rows in rows.groupby(rows["timestamp"].dt.date, sort=True)
+    ]
+    return sessions[-1], sessions[-2] if len(sessions) > 1 else None
+
+
+def _as_aware(value: Any) -> datetime:
+    moment = value.to_pydatetime() if hasattr(value, "to_pydatetime") else value
+    if moment.tzinfo is None:
+        return moment.replace(tzinfo=VN_TZ)
+    return moment
 
 
 def _optional_float(value: Any) -> float | None:
