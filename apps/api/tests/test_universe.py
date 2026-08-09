@@ -2,7 +2,7 @@
 
 The cap is a safety valve for the collector, so every way of declaring a list
 that would break it has to fail while the operator is still looking at the
-console rather than hours later inside a job.
+console rather than hours later inside a collector run.
 """
 
 import pytest

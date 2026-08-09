@@ -15,7 +15,6 @@ from typing import Any
 
 import pandas as pd
 from pydantic import ValidationError
-from zoneinfo import ZoneInfo
 
 from .contracts import (
     MarketSnapshot,
@@ -23,11 +22,16 @@ from .contracts import (
     SnapshotMetadata,
     ValuationSnapshot,
 )
-from ..shared import validate_symbol
+from .normalize import (
+    VN_TZ,
+    lower_cased_columns,
+    missing_fields,
+    normalized_symbols,
+    optional_float,
+    optional_int,
+)
 
 logger = logging.getLogger(__name__)
-
-VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
 # The published free-tier ceiling of 33 symbols applies to the realtime stream
 # only: historical calls were measured good at 110 symbols in one request. The
@@ -175,7 +179,7 @@ class FiinQuantProviderBase:
 
     @staticmethod
     def _batch(symbols: Sequence[str]) -> tuple[str, ...]:
-        normalized = tuple(dict.fromkeys(validate_symbol(symbol) for symbol in symbols))
+        normalized = normalized_symbols(symbols)
         if len(normalized) > MAX_BATCH_SYMBOLS:
             raise ValueError(f"a FiinQuant batch is limited to {MAX_BATCH_SYMBOLS} symbols")
         return normalized
@@ -426,15 +430,14 @@ def _prepare(
     if frame is None or getattr(frame, "empty", True):
         return pd.DataFrame(columns=list(required_fields))
 
-    columns = {str(column).lower(): column for column in frame.columns}
-    missing = set(required_fields) - columns.keys()
+    working = lower_cased_columns(frame)
+    missing = missing_fields(working, required_fields)
     if missing:
         raise FiinQuantProviderError(
-            f"FiinQuant response is missing fields: {', '.join(sorted(missing))}"
+            f"FiinQuant response is missing fields: {', '.join(missing)}"
         )
 
-    working = frame.rename(columns={value: key for key, value in columns.items()}).copy()
-    working = working[list(required_fields)]
+    working = working[list(required_fields)].copy()
     working["ticker"] = working["ticker"].astype(str).str.upper()
     working["timestamp"] = pd.to_datetime(working["timestamp"], errors="coerce")
     working = working.dropna(subset=["timestamp"])
@@ -457,8 +460,8 @@ def _build_snapshot(
     broken response, so it is dropped here rather than raised — otherwise a
     single halted ticker would cost the whole batch its snapshots.
     """
-    close = _optional_float(latest.get("close"))
-    reference = _optional_float(previous.get("close")) if previous is not None else None
+    close = optional_float(latest.get("close"))
+    reference = optional_float(previous.get("close")) if previous is not None else None
     change_pct = None
     if close is not None and reference not in (None, 0):
         change_pct = (close - reference) / reference * 100
@@ -473,19 +476,19 @@ def _build_snapshot(
             ),
             last_price=close,
             reference_price=reference,
-            open_price=_optional_float(latest.get("open")),
-            high_price=_optional_float(latest.get("high")),
-            low_price=_optional_float(latest.get("low")),
+            open_price=optional_float(latest.get("open")),
+            high_price=optional_float(latest.get("high")),
+            low_price=optional_float(latest.get("low")),
             ceiling_price=_cell(band, "ceilingprice"),
             floor_price=_cell(band, "floorprice"),
             change_pct=change_pct,
-            volume=_optional_int(latest.get("volume")),
-            total_value_vnd=_optional_float(latest.get("value")),
-            active_buy_volume=_optional_int(latest.get("bu")),
-            active_sell_volume=_optional_int(latest.get("sd")),
-            foreign_buy_value_vnd=_optional_float(latest.get("fb")),
-            foreign_sell_value_vnd=_optional_float(latest.get("fs")),
-            foreign_net_value_vnd=_optional_float(latest.get("fn")),
+            volume=optional_int(latest.get("volume")),
+            total_value_vnd=optional_float(latest.get("value")),
+            active_buy_volume=optional_int(latest.get("bu")),
+            active_sell_volume=optional_int(latest.get("sd")),
+            foreign_buy_value_vnd=optional_float(latest.get("fb")),
+            foreign_sell_value_vnd=optional_float(latest.get("fs")),
+            foreign_net_value_vnd=optional_float(latest.get("fn")),
             market_cap_vnd=_cell(overview, "marketcap"),
         )
     except ValidationError as exc:
@@ -506,8 +509,8 @@ def _build_valuation_snapshot(
     response. Recording it would store a date and nothing else. One ratio
     present is still worth keeping: the other is a genuine gap, not a guess.
     """
-    provider_pe = _optional_float(row.get("pe"))
-    provider_pb = _optional_float(row.get("pb"))
+    provider_pe = optional_float(row.get("pe"))
+    provider_pb = optional_float(row.get("pb"))
     if provider_pe is None and provider_pb is None:
         return None
 
@@ -530,7 +533,7 @@ def _build_valuation_snapshot(
 def _cell(row: pd.Series | None, field: str) -> float | None:
     if row is None:
         return None
-    return _optional_float(row.get(field))
+    return optional_float(row.get(field))
 
 
 def _session_row_by_symbol(frame: pd.DataFrame, label: str) -> dict[str, pd.Series]:
@@ -590,14 +593,3 @@ def _as_aware(value: Any) -> datetime:
         return moment.replace(tzinfo=VN_TZ)
     return moment
 
-
-def _optional_float(value: Any) -> float | None:
-    if value is None or pd.isna(value):
-        return None
-    return float(value)
-
-
-def _optional_int(value: Any) -> int | None:
-    if value is None or pd.isna(value):
-        return None
-    return int(value)
