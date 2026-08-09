@@ -16,6 +16,7 @@ from src.stocks.providers import (
     ShareCount,
     ShareType,
     SnapshotMetadata,
+    ValuationSnapshot,
 )
 
 
@@ -56,9 +57,103 @@ def test_market_snapshot_normalizes_symbol_and_locks_vnd_unit():
         )
 
 
-def test_capability_registry_keeps_hot_and_scheduled_owners_separate():
+def test_market_snapshot_separates_volume_fields_from_value_fields():
+    snapshot = MarketSnapshot(
+        symbol="HPG",
+        metadata=metadata(ProviderSource.FIINQUANT),
+        last_price=22_000,
+        volume=12_000_000,
+        total_value_vnd=264_000_000_000,
+        active_buy_volume=7_000_000,
+        active_sell_volume=5_000_000,
+        foreign_buy_volume=900_000,
+        foreign_sell_volume=400_000,
+        foreign_buy_value_vnd=19_800_000_000,
+        foreign_sell_value_vnd=8_800_000_000,
+        foreign_net_value_vnd=11_000_000_000,
+        ceiling_price=23_500,
+        floor_price=20_500,
+        market_cap_vnd=140_000_000_000_000,
+    )
+
+    assert snapshot.price_unit is PriceUnit.VND
+    assert snapshot.active_buy_volume == 7_000_000
+    assert snapshot.foreign_buy_value_vnd == 19_800_000_000
+    assert snapshot.market_cap_vnd == 140_000_000_000_000
+
+    volume_fields = {name for name in MarketSnapshot.model_fields if "volume" in name}
+    value_fields = {name for name in MarketSnapshot.model_fields if name.endswith("_value_vnd")}
+    assert volume_fields.isdisjoint(value_fields)
+    assert value_fields == {
+        "total_value_vnd",
+        "foreign_buy_value_vnd",
+        "foreign_sell_value_vnd",
+        "foreign_net_value_vnd",
+    }
+
+
+def test_market_snapshot_allows_negative_foreign_net_value_only():
+    outflow = MarketSnapshot(
+        symbol="HPG",
+        metadata=metadata(ProviderSource.FIINQUANT),
+        foreign_net_value_vnd=-11_000_000_000,
+    )
+    assert outflow.foreign_net_value_vnd == -11_000_000_000
+
+    for field in ("total_value_vnd", "foreign_buy_value_vnd", "foreign_sell_value_vnd"):
+        with pytest.raises(ValidationError):
+            MarketSnapshot(
+                symbol="HPG",
+                metadata=metadata(ProviderSource.FIINQUANT),
+                **{field: -1},
+            )
+
+    for field in ("ceiling_price", "floor_price"):
+        with pytest.raises(ValidationError):
+            MarketSnapshot(
+                symbol="HPG",
+                metadata=metadata(ProviderSource.FIINQUANT),
+                **{field: 0},
+            )
+
+
+def test_valuation_snapshot_carries_ratios_without_statement_inputs():
+    snapshot = ValuationSnapshot(
+        symbol="hpg",
+        metadata=metadata(ProviderSource.FIINQUANT),
+        provider_pe=12.5,
+        provider_pb=1.8,
+    )
+
+    assert snapshot.symbol == "HPG"
+    assert snapshot.provider_pe == 12.5
+    assert snapshot.provider_pb == 1.8
+
+    with pytest.raises(ValidationError):
+        ValuationSnapshot(
+            symbol="HPG",
+            metadata=metadata(ProviderSource.FIINQUANT),
+            trailing_12_month_net_income_vnd=1_000,
+        )
+
+
+def test_fundamental_snapshot_no_longer_carries_valuation_ratios():
+    assert "provider_pe" not in FundamentalSnapshot.model_fields
+    assert "provider_pb" not in FundamentalSnapshot.model_fields
+
+    with pytest.raises(ValidationError):
+        FundamentalSnapshot(
+            symbol="FPT",
+            metadata=metadata(),
+            period_end=date(2026, 6, 30),
+            provider_pe=12.5,
+        )
+
+
+def test_capability_registry_matches_the_measured_source_split():
     assert PRIMARY_SOURCE_BY_CAPABILITY == {
         Capability.MARKET: ProviderSource.FIINQUANT,
+        Capability.VALUATION: ProviderSource.FIINQUANT,
         Capability.REFERENCE: ProviderSource.VNSTOCK,
         Capability.FUNDAMENTAL: ProviderSource.VNSTOCK,
     }
@@ -124,6 +219,6 @@ def test_fundamental_snapshot_is_internal_and_strict():
             symbol="FPT",
             metadata=metadata(),
             period_end=date(2026, 6, 30),
-            provider_pe=12.5,
+            trailing_12_month_net_income_vnd=1_000,
             unknown_provider_field=1,
         )

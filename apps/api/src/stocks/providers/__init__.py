@@ -14,6 +14,8 @@ from .contracts import (
     ShareCount,
     ShareType,
     SnapshotMetadata,
+    ValuationDataProvider,
+    ValuationSnapshot,
 )
 from .store import SnapshotRead, SnapshotStore
 
@@ -33,4 +35,6 @@ __all__ = [
     "SnapshotMetadata",
     "SnapshotRead",
     "SnapshotStore",
+    "ValuationDataProvider",
+    "ValuationSnapshot",
 ]

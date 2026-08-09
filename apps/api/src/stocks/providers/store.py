@@ -20,6 +20,7 @@ from .contracts import (
     ProviderSource,
     ReferenceSnapshot,
     SymbolSnapshot,
+    ValuationSnapshot,
 )
 
 logger = logging.getLogger(__name__)
@@ -27,12 +28,14 @@ _DEFAULT_REDIS = object()
 
 SNAPSHOT_MODEL_BY_CAPABILITY = {
     Capability.MARKET: MarketSnapshot,
+    Capability.VALUATION: ValuationSnapshot,
     Capability.REFERENCE: ReferenceSnapshot,
     Capability.FUNDAMENTAL: FundamentalSnapshot,
 }
 
 MAX_AGE_SECONDS = {
     Capability.MARKET: 300,
+    Capability.VALUATION: 24 * 60 * 60,
     Capability.REFERENCE: 7 * 24 * 60 * 60,
     Capability.FUNDAMENTAL: 24 * 60 * 60,
 }
