@@ -24,7 +24,12 @@ from ..schemas.company import (
     DividendsResponse,
     RatioSummaryResponse,
 )
-from ..shared import StockServiceError, validate_symbol, safe_float
+from ..shared import (
+    StockServiceError,
+    market_cap_billions,
+    safe_float,
+    validate_symbol,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -405,6 +410,7 @@ class CompanyService:
         """
         symbol = validate_symbol(symbol)
         result: dict = {"symbol": symbol.upper()}
+        listed_shares: Optional[float] = None
 
         # 1. Get price board data
         try:
@@ -419,6 +425,7 @@ class CompanyService:
 
             if price_df is not None and not price_df.empty:
                 row = price_df.iloc[0]
+                listed_shares = safe_float(row.get("listed_share"))
                 result.update({
                     "price": safe_float(row.get("match_price")),
                     "ceiling": safe_float(row.get("ceiling")),
@@ -477,8 +484,13 @@ class CompanyService:
                     "established_year": row.get("established_year"),
                 })
 
-                if result.get("price") and result.get("issue_share"):
-                    market_cap = (result["price"] * 1000 * result["issue_share"]) / 1_000_000_000
+                outstanding_shares = safe_float(row.get("outstanding_share"))
+                issue_shares = safe_float(row.get("issue_share"))
+                market_cap = market_cap_billions(
+                    result.get("price"),
+                    outstanding_shares or listed_shares or issue_shares,
+                )
+                if market_cap is not None:
                     result["market_cap"] = round(market_cap, 2)
 
         except Exception as e:

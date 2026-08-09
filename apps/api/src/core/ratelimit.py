@@ -1,15 +1,48 @@
-"""Rate limiting using Upstash Redis with sliding window algorithm."""
+"""Redis-backed fixed-window API rate limiting."""
+from dataclasses import dataclass
 import logging
 import time
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import HTTPException, Request, Response
-from upstash_ratelimit import Ratelimit, SlidingWindow
 
 from src.core.redis import get_redis
 from src.core.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class RateLimitResult:
+    allowed: bool
+    limit: int
+    remaining: int
+    reset: int
+
+
+class RedisFixedWindowLimiter:
+    """Small limiter compatible with both redis-py and Upstash clients."""
+
+    def __init__(self, redis: Any, max_requests: int, window: int, prefix: str):
+        self.redis = redis
+        self.max_requests = max_requests
+        self.window = window
+        self.prefix = prefix
+
+    def limit(self, identifier: str) -> RateLimitResult:
+        now = int(time.time())
+        bucket = now // self.window
+        reset = (bucket + 1) * self.window
+        key = f"{self.prefix}:{identifier}:{bucket}"
+        current = int(self.redis.incr(key))
+        if current == 1:
+            self.redis.expire(key, self.window + 1)
+        return RateLimitResult(
+            allowed=current <= self.max_requests,
+            limit=self.max_requests,
+            remaining=max(0, self.max_requests - current),
+            reset=reset,
+        )
 
 
 class RateLimiter:
@@ -25,9 +58,9 @@ class RateLimiter:
         self.max_requests = max_requests
         self.window = window
         self.prefix = prefix
-        self._limiter: Optional[Ratelimit] = None
+        self._limiter: Optional[RedisFixedWindowLimiter] = None
 
-    def _get_limiter(self) -> Optional[Ratelimit]:
+    def _get_limiter(self) -> Optional[RedisFixedWindowLimiter]:
         """Get or create rate limiter instance."""
         if self._limiter is not None:
             return self._limiter
@@ -42,12 +75,10 @@ class RateLimiter:
             return None
 
         try:
-            self._limiter = Ratelimit(
+            self._limiter = RedisFixedWindowLimiter(
                 redis=redis,
-                limiter=SlidingWindow(
-                    max_requests=self.max_requests,
-                    window=self.window,
-                ),
+                max_requests=self.max_requests,
+                window=self.window,
                 prefix=f"stock_massive:ratelimit:{self.prefix}",
             )
             return self._limiter

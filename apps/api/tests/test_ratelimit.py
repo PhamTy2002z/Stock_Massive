@@ -2,10 +2,13 @@
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from fastapi import Request, Response, HTTPException
-from upstash_ratelimit import Ratelimit
-from upstash_ratelimit.limiter import Response as RatelimitResponse
 
-from src.core.ratelimit import RateLimiter, standard_rate_limit, heavy_rate_limit
+from src.core.ratelimit import (
+    RateLimiter,
+    RedisFixedWindowLimiter,
+    heavy_rate_limit,
+    standard_rate_limit,
+)
 from src.core.config import Settings
 
 
@@ -96,7 +99,7 @@ class TestRateLimiterRedisIntegration:
     def test_get_limiter_successful_initialization(
         self, mock_redis, mock_settings
     ):
-        """Test successful rate limiter initialization (NOTE: Currently fails due to bug in implementation - window should be int not string)."""
+        """A configured Redis client enables rate limiting."""
         mock_settings.return_value = Settings(rate_limit_enabled=True)
         mock_redis_instance = Mock()
         mock_redis.return_value = mock_redis_instance
@@ -104,16 +107,14 @@ class TestRateLimiterRedisIntegration:
         limiter = RateLimiter(max_requests=100, window=60, prefix="test")
         result = limiter._get_limiter()
 
-        # Due to bug (window=f"{self.window}s" should be window=self.window, unit="s")
-        # this returns None with error logged
-        assert result is None
+        assert isinstance(result, RedisFixedWindowLimiter)
 
     @patch("src.core.ratelimit.get_settings")
     @patch("src.core.ratelimit.get_redis")
     def test_get_limiter_caching(
         self, mock_redis, mock_settings
     ):
-        """Test that limiter instance is cached (NOTE: Currently returns None due to bug)."""
+        """Test that limiter instance is cached."""
         mock_settings.return_value = Settings(rate_limit_enabled=True)
         mock_redis.return_value = Mock()
 
@@ -124,20 +125,18 @@ class TestRateLimiterRedisIntegration:
         # Second call
         result2 = limiter._get_limiter()
 
-        # Both should be None due to initialization bug
-        assert result1 is None
-        assert result2 is None
+        assert result1 is result2
 
     @patch("src.core.ratelimit.get_settings")
     @patch("src.core.ratelimit.get_redis")
-    @patch("src.core.ratelimit.Ratelimit")
+    @patch("src.core.ratelimit.RedisFixedWindowLimiter")
     def test_get_limiter_handles_initialization_error(
-        self, mock_ratelimit_class, mock_redis, mock_settings
+        self, mock_limiter_class, mock_redis, mock_settings
     ):
         """Test graceful handling of rate limiter initialization errors."""
         mock_settings.return_value = Settings(rate_limit_enabled=True)
         mock_redis.return_value = Mock()
-        mock_ratelimit_class.side_effect = Exception("Redis connection failed")
+        mock_limiter_class.side_effect = Exception("Redis connection failed")
 
         limiter = RateLimiter(max_requests=100, window=60, prefix="test")
         result = limiter._get_limiter()
@@ -253,9 +252,11 @@ class TestRateLimitingBehavior:
     async def test_call_allows_request_within_limit(
         self, mock_redis, mock_settings
     ):
-        """Test that requests are allowed when rate limiter init fails (graceful degradation)."""
+        """Test that requests inside the fixed window are allowed."""
         mock_settings.return_value = Settings(rate_limit_enabled=True)
-        mock_redis.return_value = Mock()
+        redis = Mock()
+        redis.incr.return_value = 1
+        mock_redis.return_value = redis
 
         request = Mock(spec=Request)
         request.headers.get.return_value = None
@@ -265,8 +266,9 @@ class TestRateLimitingBehavior:
         response.headers = {}
 
         limiter = RateLimiter(max_requests=100, window=60, prefix="test")
-        # Should not raise exception (graceful degradation due to init bug)
         await limiter(request, response)
+        assert response.headers["X-RateLimit-Remaining"] == "99"
+        redis.expire.assert_called_once()
 
     @pytest.mark.asyncio
     @patch("src.core.ratelimit.get_settings")
@@ -274,9 +276,11 @@ class TestRateLimitingBehavior:
     async def test_call_blocks_request_when_limit_exceeded(
         self, mock_redis, mock_settings
     ):
-        """Test graceful degradation when rate limiter cannot initialize."""
+        """Test requests over the fixed-window limit are blocked."""
         mock_settings.return_value = Settings(rate_limit_enabled=True)
-        mock_redis.return_value = Mock()
+        redis = Mock()
+        redis.incr.return_value = 101
+        mock_redis.return_value = redis
 
         request = Mock(spec=Request)
         request.headers.get.return_value = None
@@ -287,26 +291,21 @@ class TestRateLimitingBehavior:
 
         limiter = RateLimiter(max_requests=100, window=60, prefix="test")
 
-        # Due to init bug, limiter gracefully degrades and allows request
-        await limiter(request, response)
+        with pytest.raises(HTTPException) as exc_info:
+            await limiter(request, response)
+        assert exc_info.value.status_code == 429
 
     @pytest.mark.asyncio
     @patch("src.core.ratelimit.get_settings")
     @patch("src.core.ratelimit.get_redis")
-    @patch("src.core.ratelimit.Ratelimit")
     async def test_call_handles_rate_limit_check_error(
-        self, mock_ratelimit_class, mock_redis, mock_settings
+        self, mock_redis, mock_settings
     ):
         """Test graceful handling of rate limit check errors."""
         mock_settings.return_value = Settings(rate_limit_enabled=True)
-        mock_redis.return_value = Mock()
-
-        # Mock rate limit error
-        mock_ratelimit_instance = Mock(spec=Ratelimit)
-        mock_ratelimit_instance.limit.side_effect = Exception(
-            "Redis timeout"
-        )
-        mock_ratelimit_class.return_value = mock_ratelimit_instance
+        redis = Mock()
+        redis.incr.side_effect = Exception("Redis timeout")
+        mock_redis.return_value = redis
 
         request = Mock(spec=Request)
         request.headers.get.return_value = None

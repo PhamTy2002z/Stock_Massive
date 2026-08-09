@@ -114,6 +114,76 @@ class TestCompanyOverview:
                 service.get_company_overview("VCB")
 
 
+class TestStockDetail:
+    @patch("src.stocks.company.service.Trading")
+    def test_market_cap_uses_vnd_price_and_outstanding_shares(
+        self, trading_cls, service
+    ):
+        """vnstock 4 price-board prices are VND, not thousands of VND."""
+        trading_cls.return_value.price_board.return_value = pd.DataFrame(
+            [
+                {
+                    "symbol": "VCB",
+                    "match_price": 59_700.0,
+                    "ref_price": 59_000.0,
+                    "listed_share": 8_500_000_000,
+                }
+            ]
+        )
+        overview = pd.DataFrame(
+            [
+                {
+                    "issue_share": 8_900_000_000,
+                    "outstanding_share": 8_355_675_094,
+                }
+            ]
+        )
+        vnstock = _mock_company(
+            overview=overview,
+            ratio_summary=pd.DataFrame(),
+        )
+
+        with (
+            patch("src.stocks.company.service.Vnstock", return_value=vnstock),
+            patch.object(service, "_get_52_week_metrics", return_value={}),
+            patch.object(service, "_get_vn30_rank", return_value=None),
+        ):
+            result = service.get_stock_detail("VCB")
+
+        assert result.outstanding_shares == 8_355_675_094
+        assert result.market_cap == round(
+            59_700.0 * 8_355_675_094 / 1_000_000_000,
+            2,
+        )
+
+    @patch("src.stocks.company.service.Trading")
+    def test_market_cap_falls_back_to_listed_before_issued_shares(
+        self, trading_cls, service
+    ):
+        trading_cls.return_value.price_board.return_value = pd.DataFrame(
+            [
+                {
+                    "symbol": "AAA",
+                    "match_price": 10_000.0,
+                    "listed_share": 1_500_000_000,
+                }
+            ]
+        )
+        vnstock = _mock_company(
+            overview=pd.DataFrame([{"issue_share": 2_000_000_000}]),
+            ratio_summary=pd.DataFrame(),
+        )
+
+        with (
+            patch("src.stocks.company.service.Vnstock", return_value=vnstock),
+            patch.object(service, "_get_52_week_metrics", return_value={}),
+            patch.object(service, "_get_vn30_rank", return_value=None),
+        ):
+            result = service.get_stock_detail("AAA")
+
+        assert result.market_cap == 15_000.0
+
+
 class TestFiftyTwoWeekMetrics:
     def test_uses_vnstock_4_ohlcv_daily_bars(self, service):
         frame = pd.DataFrame(
