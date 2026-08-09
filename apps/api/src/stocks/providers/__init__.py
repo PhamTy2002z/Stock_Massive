@@ -23,6 +23,10 @@ from .contracts import (
 )
 from .store import SnapshotRead, SnapshotStore
 
+# Adapters are deliberately absent: importing one pulls in its provider library,
+# and this package is what the contracts are imported from. Reach for an adapter
+# by its own module, the way the collector and its tests do.
+
 __all__ = [
     "Capability",
     "FundamentalDataProvider",
