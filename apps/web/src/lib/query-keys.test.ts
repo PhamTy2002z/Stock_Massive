@@ -9,7 +9,6 @@ describe("queryKeys", () => {
       queryKeys.incomeStatement("VCB", "quarter", 8),
       queryKeys.balanceSheet("VCB", "year", 5),
       queryKeys.cashFlow("VCB", "quarter", 8),
-      queryKeys.foreignSnapshot("VCB"),
       queryKeys.intradayOrderStats("VCB"),
       queryKeys.healthScore("VCB"),
     ]

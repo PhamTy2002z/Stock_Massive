@@ -215,11 +215,13 @@ export function IntradayOrderStats({ data, isLoading }: IntradayOrderStatsProps)
       <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground pt-2">
         <div className="h-px flex-1 bg-border/50" />
         <span>
-          {new Date(data.date).toLocaleDateString("vi-VN", {
-            weekday: "short",
-            day: "2-digit",
-            month: "2-digit"
-          })}
+          {data.date
+            ? new Date(data.date).toLocaleDateString("vi-VN", {
+                weekday: "short",
+                day: "2-digit",
+                month: "2-digit",
+              })
+            : "Không có dữ liệu phiên"}
         </span>
         <span className="text-muted-foreground/50">•</span>
         <span>{new Date(data.last_updated).toLocaleTimeString("vi-VN")}</span>

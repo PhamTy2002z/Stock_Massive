@@ -527,12 +527,14 @@ export function OrderFlowCharts({ data, isLoading }: OrderFlowChartsProps) {
       <div className="flex items-center justify-center gap-2 text-xs" style={{ color: COLORS.textDim }}>
         <div className="h-px flex-1" style={{ backgroundColor: COLORS.cardBorder }} />
         <span>
-          Phiên {new Date(data.date).toLocaleDateString("vi-VN", {
-            weekday: "long",
-            day: "2-digit",
-            month: "2-digit",
-            year: "numeric"
-          })}
+          {data.date
+            ? `Phiên ${new Date(data.date).toLocaleDateString("vi-VN", {
+                weekday: "long",
+                day: "2-digit",
+                month: "2-digit",
+                year: "numeric",
+              })}`
+            : "Không có dữ liệu phiên"}
         </span>
         <span style={{ color: COLORS.cardBorder }}>•</span>
         <span>Cập nhật: {new Date(data.last_updated).toLocaleTimeString("vi-VN")}</span>

@@ -5,7 +5,7 @@ from functools import lru_cache
 from typing import Optional
 
 import pandas as pd
-from src.core.vnstock_client import Company, Trading, Vnstock
+from src.core.vnstock_client import Company, Market, Trading, Vnstock
 from src.core.vnstock_client import VnstockUnavailable, VnstockUnsupported
 
 from ..market import MarketService
@@ -23,7 +23,6 @@ from ..schemas.company import (
     DividendItem,
     DividendsResponse,
     RatioSummaryResponse,
-    TradingStatsResponse,
 )
 from ..shared import StockServiceError, validate_symbol, safe_float
 
@@ -397,42 +396,6 @@ class CompanyService:
             logger.error(f"Error fetching ratio summary for {symbol}: {e}")
             raise StockServiceError(f"Failed to get ratio summary for {symbol}: {e}")
 
-    def get_trading_stats(self, symbol: str) -> TradingStatsResponse:
-        """Get trading statistics for advanced tab."""
-        symbol = validate_symbol(symbol)
-        try:
-            stock = Vnstock().stock(symbol=symbol, source=self.source)
-            df = stock.company.trading_stats()
-
-            if df is None or (isinstance(df, pd.DataFrame) and df.empty):
-                return TradingStatsResponse(symbol=symbol.upper())
-
-            if isinstance(df, pd.DataFrame):
-                row = df.iloc[0].to_dict() if len(df) > 0 else {}
-            else:
-                row = df if isinstance(df, dict) else {}
-
-            # high_price_1y/low_price_1y are in VND, convert to thousands
-            high_1y = safe_float(row.get("high_price_1y"))
-            low_1y = safe_float(row.get("low_price_1y"))
-
-            return TradingStatsResponse(
-                symbol=symbol.upper(),
-                total_volume=int(row.get("total_volume") or row.get("total_match_volume") or 0) if row.get("total_volume") or row.get("total_match_volume") else None,
-                avg_volume=safe_float(row.get("avg_volume") or row.get("avg_match_volume_2w")),
-                total_value=safe_float(row.get("total_value") or row.get("total_match_value")),
-                avg_value=safe_float(row.get("avg_value")),
-                high_price=high_1y / 1000 if high_1y else None,
-                low_price=low_1y / 1000 if low_1y else None,
-            )
-        except (VnstockUnavailable, VnstockUnsupported):
-            # Upstream quota/capability problems carry their own meaning;
-            # don't flatten them into a generic service error.
-            raise
-        except Exception as e:
-            logger.error(f"Error fetching trading stats for {symbol}: {e}")
-            raise StockServiceError(f"Failed to get trading stats for {symbol}: {e}")
-
     # --- Composite stock detail ---
 
     def get_stock_detail(self, symbol: str) -> StockDetail:
@@ -547,34 +510,11 @@ class CompanyService:
         except Exception as e:
             logger.warning(f"Error fetching financial ratios for {symbol}: {e}")
 
-        # 4. Get 52-week high/low from trading_stats
+        # 4. Calculate 52-week metrics from the supported vnstock 4 OHLCV API.
         try:
-            stock = Vnstock().stock(symbol=symbol, source=self.source)
-            trading_stats = stock.company.trading_stats()
-
-            if trading_stats is not None and not (isinstance(trading_stats, pd.DataFrame) and trading_stats.empty):
-                if isinstance(trading_stats, pd.DataFrame):
-                    row = trading_stats.iloc[0].to_dict() if len(trading_stats) > 0 else {}
-                else:
-                    row = trading_stats if isinstance(trading_stats, dict) else {}
-
-                # high_price_1y and low_price_1y are in VND (not thousands)
-                high_1y = safe_float(row.get("high_price_1y"))
-                low_1y = safe_float(row.get("low_price_1y"))
-
-                # Convert from VND to thousands (matching price display format)
-                if high_1y:
-                    result["high_52_week"] = high_1y / 1000
-                if low_1y:
-                    result["low_52_week"] = low_1y / 1000
-
-                # avg_match_volume_2w as proxy for avg volume
-                avg_vol = row.get("avg_match_volume_2w")
-                if avg_vol and pd.notna(avg_vol):
-                    result["avg_volume_52_week"] = int(avg_vol)
-
+            result.update(self._get_52_week_metrics(symbol))
         except Exception as e:
-            logger.warning(f"Error fetching trading stats for {symbol}: {e}")
+            logger.warning(f"Error fetching 52-week metrics for {symbol}: {e}")
 
         # 5. Calculate VN30 rank by market cap
         try:
@@ -583,6 +523,25 @@ class CompanyService:
             logger.warning(f"Error calculating VN30 rank for {symbol}: {e}")
 
         return StockDetail(**result)
+
+    def _get_52_week_metrics(self, symbol: str) -> dict:
+        """Calculate true 52-week range and average volume from daily bars."""
+        frame = Market().equity(symbol).ohlcv(count=260, source=self.source)
+        if frame is None or frame.empty:
+            return {}
+
+        high = safe_float(pd.to_numeric(frame["high"], errors="coerce").max())
+        low = safe_float(pd.to_numeric(frame["low"], errors="coerce").min())
+        average_volume = safe_float(
+            pd.to_numeric(frame["volume"], errors="coerce").mean()
+        )
+        return {
+            "high_52_week": high,
+            "low_52_week": low,
+            "avg_volume_52_week": (
+                int(round(average_volume)) if average_volume is not None else None
+            ),
+        }
 
     def _get_vn30_rank(self, symbol: str, current_market_cap: Optional[float] = None) -> Optional[int]:
         """Calculate VN30 rank by market cap for a symbol.

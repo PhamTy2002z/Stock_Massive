@@ -100,9 +100,9 @@ function StockDetailInner({ symbol }: { symbol: string }) {
                   lowPrice={data.low_price || 0}
                   tradingVolume={data.volume || 0}
                   marketCap={data.market_cap || 0}
-                  high52Week={data.high_52_week || 0}
-                  low52Week={data.low_52_week || 0}
-                  avgVolume52Week={data.avg_volume_52_week || 0}
+                  high52Week={data.high_52_week}
+                  low52Week={data.low_52_week}
+                  avgVolume52Week={data.avg_volume_52_week}
                   eps={data.eps}
                   pe={data.pe}
                   pb={data.pb}

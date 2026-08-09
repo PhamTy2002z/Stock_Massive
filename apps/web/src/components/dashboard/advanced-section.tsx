@@ -3,14 +3,13 @@
 import { lazy, Suspense, useState } from "react"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
-import { TrendingUp, BarChart3, Coins, Building2, ChevronRight, Sparkles } from "lucide-react"
+import { TrendingUp, BarChart3, Building2, ChevronRight, Sparkles } from "lucide-react"
 
 const OrderFlowSubtab = lazy(() => import("./advanced-tab/order-flow-subtab"))
 const TechnicalSubtab = lazy(() => import("./advanced-tab/technical-subtab"))
-const MoneyFlowSubtab = lazy(() => import("./advanced-tab/money-flow-subtab"))
 const SectorSubtab = lazy(() => import("./advanced-tab/sector-subtab"))
 
-type AdvancedSubTabValue = "order-flow" | "technical" | "money-flow" | "sector"
+type AdvancedSubTabValue = "order-flow" | "technical" | "sector"
 
 interface AdvancedSectionProps {
   symbol: string
@@ -30,17 +29,9 @@ const subTabs = [
     value: "order-flow" as const,
     label: "Order Flow",
     icon: TrendingUp,
-    description: "Phân tích dòng lệnh mua/bán realtime",
+    description: "Phân tích dòng lệnh mua/bán theo phiên",
     color: "text-emerald-500",
     bgColor: "bg-emerald-500/10",
-  },
-  {
-    value: "money-flow" as const,
-    label: "Money Flow",
-    icon: Coins,
-    description: "Dòng tiền NĐTNN & Tự doanh",
-    color: "text-white",
-    bgColor: "bg-white/10",
   },
   {
     value: "sector" as const,
@@ -83,13 +74,13 @@ export function AdvancedSection({ symbol, className }: AdvancedSectionProps) {
             Phân Tích Nâng Cao
           </h2>
           <p className="text-sm text-muted-foreground">
-            Order flow, chỉ số kỹ thuật & dòng tiền
+            Order flow, chỉ số kỹ thuật & so sánh ngành
           </p>
         </div>
       </div>
 
       {/* Sub-tab Navigation - Card Style */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         {subTabs.map((tab) => {
           const Icon = tab.icon
           const isActive = activeSubTab === tab.value
@@ -162,11 +153,6 @@ export function AdvancedSection({ symbol, className }: AdvancedSectionProps) {
         {activeSubTab === "technical" && (
           <Suspense fallback={<SubtabSkeleton />}>
             <TechnicalSubtab symbol={symbol} />
-          </Suspense>
-        )}
-        {activeSubTab === "money-flow" && (
-          <Suspense fallback={<SubtabSkeleton />}>
-            <MoneyFlowSubtab symbol={symbol} />
           </Suspense>
         )}
         {activeSubTab === "sector" && (

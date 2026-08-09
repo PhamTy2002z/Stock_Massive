@@ -74,17 +74,12 @@ apps/web/
 - `fetchSectorPeers(symbol, limit)` - Sector peer metrics with median/premium/discount (Phase 2)
 - `fetchFCFAnalysis(symbol)` - Free cash flow waterfall analysis (Phase 4)
 
-#### Advanced Tab (New)
+#### Advanced Tab
 **Order Flow Analysis**
-- `fetchOrderStats(symbol, days)` - Buy/sell order statistics (30 days default)
+- `fetchIntradayOrderStats(symbol)` - Latest-session buy/sell order statistics
 
 **Technical Indicators**
 - `fetchRatioSummary(symbol)` - Financial ratios (PE, PB, PS, ROE, ROA, ROIC, Current Ratio, D/E)
-- `fetchTradingStats(symbol)` - Trading statistics (volume, value, high/low)
-
-**Money Flow Analysis**
-- `fetchForeignTrading(symbol, days)` - Foreign investor trading (30 days default)
-- `fetchPropTrading(symbol, days)` - Proprietary trading data (30 days default)
 
 **Helper Functions**
 - `formatDateParam(date)` - Convert Date to YYYY-MM-DD
@@ -122,17 +117,12 @@ apps/web/
 - `useVolumeSpikes(params)` - Volume spike analysis (1min stale)
 - `useVolumeAnomalies(symbol, days)` - Volume anomaly detection (5min stale, keepPreviousData)
 
-### Advanced Tab Hooks (New - Phase 2)
+### Advanced Tab Hooks
 **Order Flow**
-- `useOrderStats(symbol, days)` - Order statistics (5min stale time)
+- `useIntradayOrderStats(symbol)` - Latest-session order statistics
 
 **Technical**
 - `useRatioSummary(symbol)` - Ratio summary (1h stale time)
-- `useTradingStats(symbol)` - Trading stats (15min stale time)
-
-**Money Flow**
-- `useForeignTrading(symbol, days)` - Foreign trading (15min stale time)
-- `usePropTrading(symbol, days)` - Prop trading (15min stale time)
 
 ### Financial Health Hooks (Phase 2)
 - `useHealthScore(symbol)` - Health score with dimensions and F-Score (5min stale, keepPreviousData)
@@ -189,7 +179,7 @@ interface MarketOverviewResponse {
 }
 ```
 
-### Advanced Tab Types (New)
+### Advanced Tab Types
 ```typescript
 // Ratio Summary
 interface RatioSummaryResponse {
@@ -197,31 +187,12 @@ interface RatioSummaryResponse {
   current_ratio, debt_to_equity: number | null
 }
 
-// Trading Stats
-interface TradingStatsResponse {
-  total_volume, avg_volume: number | null
-  total_value, avg_value: number | null
-  high_price, low_price: number | null
-}
-
-// Order Stats
-interface OrderStatsItem {
-  date: string
-  buy_order_count, sell_order_count: number
-  buy_order_volume, sell_order_volume: number
-}
-
-// Foreign Trading
-interface ForeignTradingItem {
-  date: string
+// Intraday Order Stats
+interface IntradayOrderStatsResponse {
+  symbol, date, last_updated: string
+  buy_orders, sell_orders: number
   buy_volume, sell_volume, net_volume: number
-  buy_value, sell_value, net_value: number
-}
-
-// Prop Trading
-interface PropTradingItem {
-  date: string
-  buy_volume, sell_volume, net_volume: number
+  ato_volume, atc_volume: number
 }
 
 // Health Score (Phase 2)
@@ -273,14 +244,13 @@ interface FCFAnalysisResponse {
 ### Stale Times
 - **Real-time (30s)**: Price board, market indices
 - **Near real-time (1min)**: Stock detail, volume spikes
-- **Short-term (5min)**: Order stats, sector performance, analytics
-- **Medium-term (15min)**: Trading stats, foreign/prop trading
+- **Short-term (2-5min)**: Intraday order stats, sector performance, analytics
 - **Long-term (1h)**: Financial statements, ratios, ownership data
 
 ### Query Keys Pattern
 ```typescript
 queryKeys.stock(symbol) => ["stock", symbol]
-queryKeys.orderStats(symbol, days) => ["stock", symbol, "orderStats", days]
+queryKeys.intradayOrderStats(symbol) => ["stock", symbol, "intradayOrderStats"]
 ```
 
 ## Components
@@ -435,7 +405,7 @@ NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 
 ### Loading UX Enhancement (Phase 3 - Dec 28)
 - Migrated all hooks to `useSuspenseQuery` for guaranteed data types (no undefined checks needed)
-- Updated hooks: `useMarketIndices`, `usePriceBoard`, `useSectorPerformance`, `useVN30Overview`, `useFundCertificates`, `useStockDetail`, `useIncomeStatement`, `useBalanceSheet`, `useCashFlow`, `useShareholders`, `useOfficers`, `useInsiderDeals`, `useFinancialStatements`, `useVolumeSpikes`, `useVolumeAnomalies`, `useOrderStats`, `useRatioSummary`, `useTradingStats`, `useForeignTrading`, `usePropTrading`, `useHealthScore`, `useTrendMetrics`, `useSectorPeers`, `useFCFAnalysis`, `useFinancialDetail`
+- Updated hooks include `useMarketIndices`, `useSectorPerformance`, `useVN30Overview`, `useFundCertificates`, `useStockDetail`, financial statement hooks, `useVolumeSpikes`, `useRatioSummary`, `useIntradayOrderStats`, `useHealthScore`, `useTrendMetrics`, `useSectorPeers`, `useFCFAnalysis`, and `useFinancialDetail`
 - All hooks now return guaranteed data (no null/undefined)
 - Components simplified with removed optional chaining and null checks
 - Enabled smooth transitions with `keepPreviousData` on relevant hooks

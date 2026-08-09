@@ -44,24 +44,13 @@ export const queryKeys = {
   volumeSpikes: (params: VolumeSpikeParams) =>
     ["analytics", "volumeSpikes", params] as const,
 
-  // Advanced Tab - Order Flow
-  orderStats: (symbol: string, days: number) =>
-    [...queryKeys.stock(symbol), "orderStats", days] as const,
   // Advanced Tab - Technical
   ratioSummary: (symbol: string) =>
     [...queryKeys.stock(symbol), "ratioSummary"] as const,
-  tradingStats: (symbol: string) =>
-    [...queryKeys.stock(symbol), "tradingStats"] as const,
 
-  // Advanced Tab - Money Flow
-  foreignTrading: (symbol: string, days: number) =>
-    [...queryKeys.stock(symbol), "foreignTrading", days] as const,
-  foreignSnapshot: (symbol: string) =>
-    [...queryKeys.stock(symbol), "foreignSnapshot"] as const,
+  // Advanced Tab - Order Flow
   intradayOrderStats: (symbol: string) =>
     [...queryKeys.stock(symbol), "intradayOrderStats"] as const,
-  propTrading: (symbol: string, days: number) =>
-    [...queryKeys.stock(symbol), "propTrading", days] as const,
 
   // Financial Health
   healthScore: (symbol: string) =>

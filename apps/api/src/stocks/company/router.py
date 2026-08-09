@@ -12,7 +12,6 @@ from ..schemas.company import (
     OfficersResponse,
     InsiderDealsResponse,
     RatioSummaryResponse,
-    TradingStatsResponse,
 )
 
 # Cache instances for advanced endpoints
@@ -21,12 +20,6 @@ ratio_summary_cache = TradingHoursCache(
     ttl_trading=300,
     ttl_off_hours=3600,
 )
-trading_stats_cache = TradingHoursCache(
-    key_prefix="stock:trading_stats:",
-    ttl_trading=60,
-    ttl_off_hours=3600,
-)
-
 router = APIRouter()
 
 
@@ -92,27 +85,5 @@ def get_ratio_summary(symbol: str) -> RatioSummaryResponse:
 
     # Cache the result
     ratio_summary_cache.set(cache_key, result.model_dump())
-
-    return result
-
-
-@router.get("/{symbol}/trading-stats", response_model=TradingStatsResponse, dependencies=[Depends(heavy_rate_limit)])
-def get_trading_stats(symbol: str) -> TradingStatsResponse:
-    """Get trading statistics for advanced tab.
-
-    Returns trading statistics including volume, value, and 52-week high/low.
-    """
-    cache_key = symbol.upper()
-
-    # Check cache first
-    cached = trading_stats_cache.get(cache_key)
-    if cached is not None:
-        return TradingStatsResponse(**cached)
-
-    service = get_company_service()
-    result = service.get_trading_stats(symbol)
-
-    # Cache the result
-    trading_stats_cache.set(cache_key, result.model_dump())
 
     return result
