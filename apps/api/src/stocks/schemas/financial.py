@@ -194,6 +194,9 @@ class SectorMedian(StrictModel):
 
     pe: Optional[float] = None
     pb: Optional[float] = None
+    # Only reported for non-financial companies; revenue multiples say nothing
+    # about a bank, so the source omits it there.
+    ps: Optional[float] = None
     roe: Optional[float] = None
     roa: Optional[float] = None
     market_cap: Optional[float] = None
@@ -208,10 +211,12 @@ class PeerMetrics(StrictModel):
     roa: Optional[float] = None
     pe: Optional[float] = None
     pb: Optional[float] = None
+    ps: Optional[float] = None
     market_cap: Optional[float] = None
     # Premium/discount vs sector median (%)
     premium_pe: Optional[float] = None
     premium_pb: Optional[float] = None
+    premium_ps: Optional[float] = None
     premium_roe: Optional[float] = None
     premium_roa: Optional[float] = None
 

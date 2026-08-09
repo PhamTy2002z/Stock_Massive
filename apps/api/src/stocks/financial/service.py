@@ -35,9 +35,23 @@ from ..shared import (
     validate_symbol,
 )
 from .health_scoring import build_health_score_response
-from .cache import sector_peers_cache
+from .ratio_frame import is_wide_ratio_frame, wide_ratio_frame_to_records
+from .cache import (
+    RATIO_HISTORY_EMPTY_TTL,
+    SECTOR_PEERS_PARTIAL_TTL,
+    ratio_history_cache,
+    sector_peers_cache,
+)
 
 logger = logging.getLogger(__name__)
+
+# Target plus at least two peers, so a sector median describes the sector rather
+# than the target itself.
+MIN_PEERS_FOR_MEDIAN = 3
+
+# The default VCI feed still answers ratio queries with 2018 quarters; KBS is
+# the source that returns the current reporting period.
+RATIO_SOURCE = "KBS"
 
 
 class FinancialService:
@@ -401,22 +415,38 @@ class FinancialService:
             periods: Number of quarters to fetch (default: 8)
 
         Returns:
-            List of ratio dicts ordered by most recent first
+            List of ratio dicts ordered by most recent first, each keyed by the
+            provider's metric ids (`pe_ratio`, `roe_trailling`, ...).
         """
         symbol = validate_symbol(symbol)
+        cache_key = f"{symbol}:{periods}"
+        cached = ratio_history_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         try:
-            finance = Finance(symbol=symbol, source=self.source)
+            finance = Finance(symbol=symbol, source=RATIO_SOURCE)
             df = finance.ratio(period="quarter", lang="en", dropna=True)
 
             if df is None or df.empty:
+                ratio_history_cache.set(cache_key, [], ttl=RATIO_HISTORY_EMPTY_TTL)
                 return []
 
             # Flatten MultiIndex columns
             df = self._flatten_columns(df)
 
-            # Take the most recent N periods
-            df = df.head(periods)
-            return df.to_dict("records")
+            if is_wide_ratio_frame(df):
+                records = wide_ratio_frame_to_records(df, periods)
+            else:
+                # A period-per-row frame is already in the shape callers want.
+                records = df.head(periods).to_dict("records")
+
+            if not records:
+                ratio_history_cache.set(cache_key, [], ttl=RATIO_HISTORY_EMPTY_TTL)
+                return []
+
+            ratio_history_cache.set(cache_key, records)
+            return records
         except (VnstockUnavailable, VnstockUnsupported):
             # Upstream quota/capability problems carry their own meaning;
             # don't flatten them into a generic service error.
@@ -579,10 +609,10 @@ class FinancialService:
             revenue = [safe_float(i.get("Net Sales") or i.get("Revenue (Bn. VND)")) for i in income_history]
             net_profit = [safe_float(i.get("Net Profit For the Year") or i.get("Attributable to parent company")) for i in income_history]
             gross_profit = [safe_float(i.get("Gross Profit")) for i in income_history]
-            gross_margin = [safe_float(r.get("Gross Profit Margin (%)")) for r in ratio_history]
-            net_margin = [safe_float(r.get("Net Profit Margin (%)")) for r in ratio_history]
-            roe = [safe_float(r.get("ROE (%)")) for r in ratio_history]
-            roa = [safe_float(r.get("ROA (%)")) for r in ratio_history]
+            gross_margin = [self._normalize_ratio_data(r)["gross_margin"] for r in ratio_history]
+            net_margin = [self._normalize_ratio_data(r)["net_margin"] for r in ratio_history]
+            roe = [self._normalize_ratio_data(r)["roe"] for r in ratio_history]
+            roa = [self._normalize_ratio_data(r)["roa"] for r in ratio_history]
 
             # Cash flow metrics (exact vnstock English column names)
             cfo = [safe_float(c.get("Net cash inflows/outflows from operating activities")) for c in cf_history]
@@ -743,35 +773,53 @@ class FinancialService:
 
             # Get ratio data for each peer
             peers_data = []
+            exhausted_upstream = False
             for peer_symbol in top_symbols[: limit + 1]:
                 try:
                     ratio_history = self.get_ratio_history(peer_symbol, periods=1)
                     ratios = ratio_history[0] if ratio_history else {}
 
                     company_name = industry_map.get(peer_symbol, {}).get("company_name")
-
-                    # Get market cap from ratio data
-                    market_cap = safe_float(ratios.get("Market Capital (Bn. VND)"))
+                    normalized = self._normalize_ratio_data(ratios)
 
                     peers_data.append(
                         {
                             "symbol": peer_symbol,
                             "company_name": company_name,
-                            "roe": safe_float(ratios.get("ROE (%)") or ratios.get("roe")),
-                            "roa": safe_float(ratios.get("ROA (%)") or ratios.get("roa")),
-                            "pe": safe_float(
-                                ratios.get("P/E") or ratios.get("priceToEarning")
+                            "roe": normalized["roe"],
+                            "roa": normalized["roa"],
+                            "pe": normalized["pe"],
+                            "pb": normalized["pb"],
+                            "ps": normalized["ps"],
+                            # The ratio feed carries no market cap; the field
+                            # stays in the contract but is only filled when a
+                            # source that reports it is wired in.
+                            "market_cap": safe_float(
+                                ratios.get("Market Capital (Bn. VND)")
                             ),
-                            "pb": safe_float(
-                                ratios.get("P/B") or ratios.get("priceToBook")
-                            ),
-                            "market_cap": market_cap,
                         }
                     )
                 except (VnstockUnavailable, VnstockUnsupported):
-                    # Upstream quota/capability problems carry their own meaning;
-                    # don't flatten them into a generic service error.
-                    raise
+                    # The target symbol has no substitute, so its failure is the
+                    # whole request's failure. A peer is different: comparing
+                    # against fewer peers still answers the question, and
+                    # aborting here would discard every symbol already fetched
+                    # and send the next request back through the same fan-out.
+                    #
+                    # A median needs peers to mean anything: with the target
+                    # alone it would equal the target and report a 0% premium
+                    # against itself, so too small a sample still fails.
+                    if peer_symbol == symbol or len(peers_data) < MIN_PEERS_FOR_MEDIAN:
+                        raise
+                    logger.warning(
+                        "Upstream exhausted at peer %s; building %s sector "
+                        "comparison from %d symbol(s)",
+                        peer_symbol,
+                        symbol,
+                        len(peers_data),
+                    )
+                    exhausted_upstream = True
+                    break
                 except Exception as e:
                     logger.warning(f"Could not fetch data for peer {peer_symbol}: {e}")
                     continue
@@ -787,6 +835,9 @@ class FinancialService:
                 peer["premium_pb"] = self._calculate_premium(
                     peer.get("pb"), sector_median.pb
                 )
+                peer["premium_ps"] = self._calculate_premium(
+                    peer.get("ps"), sector_median.ps
+                )
                 peer["premium_roe"] = self._calculate_premium(
                     peer.get("roe"), sector_median.roe
                 )
@@ -799,6 +850,7 @@ class FinancialService:
             target_premium = {
                 "pe": target.get("premium_pe") if target else None,
                 "pb": target.get("premium_pb") if target else None,
+                "ps": target.get("premium_ps") if target else None,
                 "roe": target.get("premium_roe") if target else None,
                 "roa": target.get("premium_roa") if target else None,
             }
@@ -815,7 +867,11 @@ class FinancialService:
             )
 
             # Cache response
-            sector_peers_cache.set(cache_key, response.model_dump())
+            sector_peers_cache.set(
+                cache_key,
+                response.model_dump(),
+                ttl=SECTOR_PEERS_PARTIAL_TTL if exhausted_upstream else None,
+            )
 
             return response
         except StockServiceError:
@@ -837,7 +893,7 @@ class FinancialService:
         Returns:
             SectorMedian with median values (None if insufficient data)
         """
-        metrics = ["pe", "pb", "roe", "roa", "market_cap"]
+        metrics = ["pe", "pb", "ps", "roe", "roa", "market_cap"]
         medians = {}
         for metric in metrics:
             values = [p.get(metric) for p in peers if p.get(metric) is not None]
@@ -862,18 +918,42 @@ class FinancialService:
         return ((value - median) / abs(median)) * 100
 
     def _normalize_ratio_data(self, data: dict) -> dict:
-        """Normalize ratio data to consistent keys (after MultiIndex flattening)."""
+        """Normalize one ratio record to consistent keys.
+
+        Each metric lists the provider metric ids first, then the older display
+        labels, so a record from either frame shape resolves the same way.
+        """
+        def pick(*keys: str) -> Optional[float]:
+            for key in keys:
+                value = safe_float(data.get(key))
+                if value is not None:
+                    return value
+            return None
+
         return {
-            "roe": safe_float(data.get("ROE (%)") or data.get("roe")),
-            "roa": safe_float(data.get("ROA (%)") or data.get("roa")),
-            "net_margin": safe_float(data.get("Net Profit Margin (%)") or data.get("postTaxMargin")),
-            "gross_margin": safe_float(data.get("Gross Profit Margin (%)") or data.get("grossProfitMargin")),
-            "current_ratio": safe_float(data.get("Current Ratio") or data.get("currentPayment")),
-            "quick_ratio": safe_float(data.get("Quick Ratio") or data.get("quickPayment")),
-            "debt_to_equity": safe_float(data.get("Debt/Equity") or data.get("debtOnEquity")),
-            "pe": safe_float(data.get("P/E") or data.get("priceToEarning")),
-            "pb": safe_float(data.get("P/B") or data.get("priceToBook")),
-            "asset_turnover": safe_float(data.get("Asset Turnover") or data.get("assetTurnover")),
+            # The trailing figures cover four quarters; a single quarter's ROE
+            # would read as roughly a quarter of the company's real return.
+            "roe": pick("roe_trailling", "ROE (%)", "roe"),
+            "roa": pick("roa_trailling", "ROA (%)", "roa"),
+            "net_margin": pick(
+                "net_margin", "Net Profit Margin (%)", "postTaxMargin"
+            ),
+            "gross_margin": pick(
+                "gross_margin", "Gross Profit Margin (%)", "grossProfitMargin"
+            ),
+            "current_ratio": pick(
+                "short_term_ratio", "Current Ratio", "currentPayment"
+            ),
+            "quick_ratio": pick("quick_ratio", "Quick Ratio", "quickPayment"),
+            "debt_to_equity": pick(
+                "debt_to_equity", "Debt/Equity", "debtOnEquity"
+            ),
+            "pe": pick("pe_ratio", "P/E", "priceToEarning"),
+            "pb": pick("pb_ratio", "P/B", "priceToBook"),
+            "ps": pick("ps_ratio", "P/S", "priceToSales"),
+            "asset_turnover": pick(
+                "total_asset_turnover", "Asset Turnover", "assetTurnover"
+            ),
         }
 
     def _normalize_cash_flow_data(self, data: dict) -> dict:

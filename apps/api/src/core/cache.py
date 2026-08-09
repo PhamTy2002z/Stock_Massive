@@ -102,15 +102,20 @@ class TradingHoursCache:
             logger.warning(f"Redis stale GET error for {key}: {e}")
             return None
 
-    def set(self, key: str, value: Any) -> None:
-        """Store data in Upstash Redis with dynamic TTL."""
+    def set(self, key: str, value: Any, ttl: int | None = None) -> None:
+        """Store data in Upstash Redis.
+
+        Args:
+            ttl: Overrides the trading-hours TTL. Use it for values that are
+                known to be incomplete and should be replaced sooner.
+        """
         redis = get_redis()
         if not redis:
             return
 
         try:
             full_key = f"{self.key_prefix}{key}"
-            ttl = self._get_ttl()
+            ttl = ttl if ttl is not None else self._get_ttl()
             payload = json.dumps(value, default=str)
             redis.set(full_key, payload, ex=ttl)
             if self.stale_ttl is not None:
