@@ -4,7 +4,7 @@ import Image from "next/image"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { useState } from "react"
-import { Loader2 } from "lucide-react"
+import { Eye, EyeOff, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
 import type { AuthActionResult } from "./actions"
+import MarketShowcase from "./market-showcase"
 
 interface AuthFormProps {
   mode: "login" | "register"
@@ -20,31 +21,28 @@ interface AuthFormProps {
 
 const COPY = {
   login: {
-    title: "Sign in to Stock Massive",
-    submit: "Sign in",
-    pending: "Signing in...",
-    footerText: "Don't have an account?",
+    title: "Đăng nhập",
+    description: "Truy cập bảng phân tích chứng khoán Việt Nam của bạn.",
+    submit: "Đăng nhập",
+    pending: "Đang đăng nhập...",
+    footerText: "Chưa có tài khoản?",
     footerHref: "/register",
-    footerLink: "Create one",
+    footerLink: "Đăng ký",
   },
   register: {
-    title: "Create your account",
-    submit: "Create account",
-    pending: "Creating account...",
-    footerText: "Already have an account?",
+    title: "Tạo tài khoản",
+    description: "Bắt đầu theo dõi và phân tích thị trường chứng khoán Việt Nam.",
+    submit: "Tạo tài khoản",
+    pending: "Đang tạo tài khoản...",
+    footerText: "Đã có tài khoản?",
     footerHref: "/login",
-    footerLink: "Sign in",
+    footerLink: "Đăng nhập",
   },
 } as const
 
-/**
- * Shared email/password form for both login and register.
- *
- * On success the server action redirects, so loading state is deliberately left
- * on — clearing it would flash an idle button during navigation.
- */
 export default function AuthForm({ mode, action }: AuthFormProps) {
   const [isLoading, setIsLoading] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
   const searchParams = useSearchParams()
   const next = searchParams.get("next") || searchParams.get("callbackUrl") || undefined
 
@@ -60,119 +58,127 @@ export default function AuthForm({ mode, action }: AuthFormProps) {
         setIsLoading(false)
       }
     } catch {
-      toast.error("Something went wrong. Please try again.")
+      toast.error("Đã có lỗi xảy ra. Vui lòng thử lại.")
       setIsLoading(false)
     }
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <div className="w-full max-w-[450px] space-y-6">
-        <div className="flex flex-col items-center space-y-4 text-center">
-          <Image
-            src="/logo.png"
-            alt="Stock Massive Logo"
-            width={64}
-            height={64}
-            className="rounded-xl"
-            priority
-          />
-          <div className="space-y-2">
-            <h1 className="text-3xl font-bold tracking-tight text-foreground">
-              {copy.title}
-            </h1>
-            <p className="text-base text-muted-foreground">
-              Navigate the volatility. Seize the opportunity.
+    <main className="grid min-h-dvh bg-white lg:grid-cols-2">
+      <section className="relative flex min-h-dvh flex-col bg-white px-6 py-8 text-auth-ink sm:px-14 sm:py-10 lg:px-14">
+        <Link
+          href="/"
+          className="flex w-fit items-center gap-3 rounded-md font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-auth-orange focus-visible:ring-offset-4"
+        >
+          <Image src="/logo.png" alt="" width={30} height={26} className="h-7 w-8 object-contain" priority />
+          <span>Stock Massive</span>
+        </Link>
+
+        <div className="my-auto flex justify-center py-12">
+          <div className="w-full max-w-[392px] animate-auth-up">
+            <header className="mb-6">
+              <h1 className="text-[40px] font-bold leading-[1.12] tracking-[-0.04em] text-auth-ink">
+                {copy.title}
+              </h1>
+              <p className="mt-2 max-w-[370px] text-base leading-6 text-auth-muted">
+                {copy.description}
+              </p>
+            </header>
+
+            <form action={onSubmit} className="space-y-4">
+              {isRegister && (
+                <div className="space-y-2">
+                  <Label htmlFor="full_name" className="text-sm font-semibold text-auth-ink">
+                    Họ và tên
+                  </Label>
+                  <Input
+                    id="full_name"
+                    name="full_name"
+                    type="text"
+                    autoComplete="name"
+                    placeholder="Nguyễn Văn A"
+                    className="h-12 rounded-xl border-auth-border bg-white px-4 text-base text-auth-ink shadow-none placeholder:text-[#a5abb5] focus-visible:ring-auth-orange md:text-base"
+                  />
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label htmlFor="email" className="text-sm font-semibold text-auth-ink">
+                  Email
+                </Label>
+                <Input
+                  id="email"
+                  name="email"
+                  type="email"
+                  required
+                  autoComplete="email"
+                  placeholder="you@example.com"
+                  className="h-12 rounded-xl border-auth-border bg-white px-4 text-base text-auth-ink shadow-none placeholder:text-[#a5abb5] focus-visible:ring-auth-orange md:text-base"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="password" className="text-sm font-semibold text-auth-ink">
+                  Mật khẩu
+                </Label>
+                <div className="relative">
+                  <Input
+                    id="password"
+                    name="password"
+                    type={showPassword ? "text" : "password"}
+                    required
+                    minLength={isRegister ? 8 : undefined}
+                    autoComplete={isRegister ? "new-password" : "current-password"}
+                    placeholder={isRegister ? "Tối thiểu 8 ký tự" : "Nhập mật khẩu"}
+                    className="h-12 rounded-xl border-auth-border bg-white px-4 pr-12 text-base text-auth-ink shadow-none placeholder:text-[#a5abb5] focus-visible:ring-auth-orange md:text-base"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((visible) => !visible)}
+                    aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+                    className="absolute inset-y-0 right-1 flex w-11 items-center justify-center rounded-lg text-[#858d98] transition-colors hover:text-auth-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-auth-orange"
+                  >
+                    {showPassword ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+                  </button>
+                </div>
+              </div>
+
+              <Button
+                type="submit"
+                disabled={isLoading}
+                className="h-12 w-full rounded-full bg-auth-orange text-base font-semibold text-white shadow-none transition-colors hover:bg-[#e95d00] focus-visible:ring-2 focus-visible:ring-auth-orange focus-visible:ring-offset-2 active:bg-[#d95500]"
+              >
+                {isLoading && <Loader2 className="animate-spin" aria-hidden="true" />}
+                {isLoading ? copy.pending : copy.submit}
+              </Button>
+            </form>
+
+            <p className="mt-6 text-center text-base text-auth-muted">
+              {copy.footerText}{" "}
+              <Link
+                href={copy.footerHref}
+                className="font-semibold text-auth-orange transition-colors hover:text-[#d95500] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-auth-orange focus-visible:ring-offset-2"
+              >
+                {copy.footerLink}
+              </Link>
             </p>
           </div>
         </div>
 
-        <form action={onSubmit} className="space-y-4">
-          {isRegister && (
-            <div className="space-y-2">
-              <Label htmlFor="full_name">Name</Label>
-              <Input
-                id="full_name"
-                name="full_name"
-                type="text"
-                autoComplete="name"
-                placeholder="Your name"
-                className="h-12"
-              />
-            </div>
-          )}
-
-          <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
-            <Input
-              id="email"
-              name="email"
-              type="email"
-              required
-              autoComplete="email"
-              placeholder="you@example.com"
-              className="h-12"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="password">Password</Label>
-            <Input
-              id="password"
-              name="password"
-              type="password"
-              required
-              minLength={isRegister ? 8 : undefined}
-              autoComplete={isRegister ? "new-password" : "current-password"}
-              placeholder={isRegister ? "At least 8 characters" : "Your password"}
-              className="h-12"
-            />
-          </div>
-
-          <Button type="submit" disabled={isLoading} className="w-full h-12 text-base">
-            {isLoading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                {copy.pending}
-              </>
-            ) : (
-              copy.submit
-            )}
-          </Button>
-        </form>
-
-        <div className="text-center">
-          <p className="text-sm text-muted-foreground">
-            {copy.footerText}{" "}
-            <Link
-              href={copy.footerHref}
-              className="text-foreground underline underline-offset-2 hover:text-primary transition-colors"
-            >
-              {copy.footerLink}
+        <footer className="flex items-center justify-between text-sm text-[#767e8a]">
+          <span>© 2026 Stock Massive</span>
+          <nav aria-label="Liên kết pháp lý" className="flex gap-6">
+            <Link href="/terms" className="hover:text-auth-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-auth-orange">
+              Điều khoản
             </Link>
-          </p>
-        </div>
-
-        <div className="text-center">
-          <p className="text-sm text-muted-foreground">
-            By continuing, you agree to our{" "}
-            <Link
-              href="/terms"
-              className="text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors"
-            >
-              Terms of Service
-            </Link>{" "}
-            and{" "}
-            <Link
-              href="/privacy"
-              className="text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors"
-            >
-              Privacy Policy
+            <Link href="/privacy" className="hover:text-auth-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-auth-orange">
+              Bảo mật
             </Link>
-            .
-          </p>
-        </div>
-      </div>
-    </div>
+          </nav>
+        </footer>
+      </section>
+
+      <MarketShowcase />
+    </main>
   )
 }

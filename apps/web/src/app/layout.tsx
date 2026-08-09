@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { QueryProvider } from "@/components/providers/query-provider";
@@ -9,6 +9,11 @@ import { Toaster } from "@/components/ui/sonner";
 const inter = Inter({
   subsets: ["latin"],
   variable: "--font-inter",
+});
+
+const jetBrainsMono = JetBrains_Mono({
+  subsets: ["latin", "vietnamese"],
+  variable: "--font-jetbrains-mono",
 });
 
 export const metadata: Metadata = {
@@ -26,8 +31,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={inter.className}>
+    <html lang="vi" suppressHydrationWarning>
+      <body className={`${inter.className} ${jetBrainsMono.variable}`}>
         {/* forcedTheme, not just defaultTheme: next-themes persists the chosen
             theme in localStorage, so every browser that ever loaded the old
             dark build keeps rendering dark no matter what the default says —

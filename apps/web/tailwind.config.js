@@ -6,6 +6,23 @@ module.exports = {
   ],
   theme: {
   	extend: {
+		fontFamily: {
+			mono: ['var(--font-jetbrains-mono)', 'ui-monospace', 'monospace'],
+		},
+		keyframes: {
+			'auth-up': {
+				'0%': { opacity: '0', transform: 'translateY(12px)' },
+				'100%': { opacity: '1', transform: 'translateY(0)' },
+			},
+			'auth-tape': {
+				'0%': { transform: 'translateX(0)' },
+				'100%': { transform: 'translateX(-50%)' },
+			},
+		},
+		animation: {
+			'auth-up': 'auth-up 400ms ease-out both',
+			'auth-tape': 'auth-tape 24s linear infinite',
+		},
   		transitionTimingFunction: {
   			'sidebar': 'cubic-bezier(0.22, 0.8, 0.3, 1)',
   		},
@@ -15,6 +32,17 @@ module.exports = {
   			sm: 'calc(var(--radius) - 4px)'
   		},
   		colors: {
+			auth: {
+				background: '#141619',
+				surface: '#1f2225',
+				'surface-muted': '#181b1e',
+				ink: '#0b0d0f',
+				muted: '#596273',
+				border: '#d8dde4',
+				orange: '#ff6500',
+				up: '#00bd7a',
+				down: '#f02237',
+			},
   			background: 'hsl(var(--background))',
   			foreground: 'hsl(var(--foreground))',
   			positive: 'hsl(var(--positive))',
