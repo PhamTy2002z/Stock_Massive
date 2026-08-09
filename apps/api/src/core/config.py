@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     fiinquant_username: str = ""
     fiinquant_password: str = ""
 
+    # Universe — tập mã được thu thập và phục vụ, trần 100 mã (src/stocks/universe.py).
+    # Rỗng là hợp lệ: ứng dụng chạy được và Collector không có gì để làm.
+    universe_symbols: str = ""  # Comma-separated
+
     # Upstash Redis (supports both naming conventions)
     upstash_redis_url: str = ""
     upstash_redis_token: str = ""
