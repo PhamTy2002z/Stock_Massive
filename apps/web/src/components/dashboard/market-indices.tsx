@@ -20,16 +20,18 @@ export function MarketIndices({ className }: MarketIndicesProps) {
   return (
     <div className={className}>
       {/* Header with title and refresh button */}
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-foreground">Chỉ số thị trường</h2>
+      <div className="flex items-center justify-between gap-4 mb-3.5">
+        <h2 className="text-2xl font-semibold leading-tight tracking-[-0.374px] text-foreground">
+          Chỉ số thị trường
+        </h2>
         <button
           onClick={() => refetch()}
           disabled={isFetching}
-          className="p-1.5 rounded-md hover:bg-muted transition-colors disabled:opacity-50"
+          className="flex h-9 w-9 items-center justify-center rounded-full text-interactive transition-colors hover:bg-accent active:scale-95 disabled:opacity-50"
           title="Làm mới dữ liệu"
           aria-label="Làm mới dữ liệu"
         >
-          <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
+          <RefreshCw className={cn("h-[18px] w-[18px]", isFetching && "animate-spin")} />
         </button>
       </div>
       <div className="relative">
@@ -81,11 +83,11 @@ function MarketIndicesContent({ indices }: MarketIndicesContentProps) {
 export function MarketIndicesSkeleton({ className }: { className?: string }) {
   return (
     <div className={className}>
-      <div className="flex items-center justify-between mb-4">
-        <div className="h-6 w-36 rounded bg-muted animate-pulse" />
-        <div className="h-8 w-8 rounded bg-muted animate-pulse" />
+      <div className="flex items-center justify-between mb-3.5">
+        <div className="h-7 w-44 rounded bg-muted animate-pulse" />
+        <div className="h-9 w-9 rounded-full bg-muted animate-pulse" />
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(210px,1fr))] gap-3.5">
         {[...Array(4)].map((_, i) => (
           <StockIndexCardSkeleton key={i} />
         ))}

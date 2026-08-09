@@ -51,19 +51,23 @@ export function UserMenu() {
         <button
           type="button"
           aria-label={`Account menu for ${userName}`}
-          className="flex h-10 items-center gap-2 rounded-md px-1.5 outline-none ring-sidebar-ring transition-colors hover:bg-sidebar-accent focus-visible:ring-2 data-[state=open]:bg-sidebar-accent"
+          className="flex items-center gap-2.5 rounded-full border border-[hsl(var(--hairline))] bg-muted/60 py-1 pl-1 pr-3 outline-none ring-sidebar-ring transition-colors hover:bg-sidebar-accent focus-visible:ring-2 data-[state=open]:bg-sidebar-accent"
         >
-          <Avatar className="size-8 rounded-lg shrink-0">
+          <Avatar className="size-8 shrink-0 rounded-full">
             <AvatarImage src={userAvatar} alt={userName} />
-            <AvatarFallback className="rounded-lg bg-primary text-primary-foreground font-medium text-sm">
+            <AvatarFallback className="rounded-full bg-foreground text-background text-[13px] font-semibold tracking-[-0.208px]">
               {userInitials}
             </AvatarFallback>
           </Avatar>
-          <div className="hidden min-w-0 max-w-44 grid-flow-row text-left leading-tight md:grid">
-            <span className="truncate text-sm font-semibold">{userName}</span>
-            <span className="truncate text-xs text-muted-foreground">{userEmail}</span>
+          <div className="hidden min-w-0 max-w-44 grid-flow-row text-left md:grid">
+            <span className="truncate text-[13px] font-semibold leading-[1.29] tracking-[-0.208px]">
+              {userName}
+            </span>
+            <span className="truncate text-[11px] leading-[1.3] tracking-[-0.11px] text-muted-foreground">
+              {userEmail}
+            </span>
           </div>
-          <ChevronsUpDown className="hidden size-4 shrink-0 text-muted-foreground md:block" />
+          <ChevronsUpDown className="hidden size-[13px] shrink-0 text-muted-foreground md:block" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent className="min-w-56 rounded-lg" side="bottom" align="end" sideOffset={6}>
