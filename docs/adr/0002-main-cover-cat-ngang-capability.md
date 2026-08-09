@@ -20,7 +20,8 @@ Lịch sử được nạp nền **một lần** từ vnstock cho phần sâu h�
 
 ## Consequences
 
-- `PRIMARY_SOURCE_BY_CAPABILITY` trong `providers/contracts.py` phải viết lại: bảng hiện tại gán `market` cho FiinQuant và cả `reference` lẫn `fundamental` cho vnstock, không khớp với năng lực đo được.
+- `PRIMARY_SOURCE_BY_CAPABILITY` trong `providers/contracts.py` phải viết lại: bảng hiện tại gán `market` cho FiinQuant và cả `reference` lẫn `fundamental` cho vnstock, không khớp với năng lực đo được. Đã thay bằng `SOURCE_OWNERSHIP_BY_CAPABILITY` — mang cả Main lẫn Cover và bỏ từ "primary" mà `CONTEXT.md` liệt vào `_Avoid_`.
+- Cover Source chỉ đọc được khi người gọi nêu tên nguồn. `SnapshotStore.latest()` mặc định ở Main Source và không tự rơi sang Cover, đúng với phương án fallback động đã bị loại ở trên.
 - `FundamentalSnapshot` đang gộp `provider_pe`/`provider_pb` chung với lợi nhuận và vốn chủ. Hai nửa này giờ đến từ hai nguồn khác nhau nên phải tách thành hai snapshot riêng.
 - Một mã trong Universe cần lấy từ **cả hai** nhà cung cấp mỗi chu kỳ, không phải một. Collector phải chịu được việc một nguồn hỏng mà nguồn kia vẫn ghi được.
 - Nếu sau này nâng gói FiinQuant, báo cáo tài chính và reference có thể chuyển về FiinQuant; ADR này sẽ cần xem lại chứ không tự đúng.
