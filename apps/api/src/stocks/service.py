@@ -69,10 +69,6 @@ class StockService:
         """Delegate to company service."""
         return self.company.get_ratio_summary(symbol)
 
-    def get_trading_stats(self, symbol: str):
-        """Delegate to company service."""
-        return self.company.get_trading_stats(symbol)
-
     # === Financial domain delegates ===
 
     def get_financial_ratios(self, symbol: str, period: str = "year", lang: str = "en"):

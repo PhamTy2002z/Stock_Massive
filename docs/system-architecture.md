@@ -168,7 +168,7 @@ Stock_Massive/
 │   ├── volume-analysis           # GET - Volume patterns
 │   ├── volume-anomalies          # GET - Volume anomaly detection
 │   ├── ratio-summary             # GET - Financial ratios summary
-│   ├── trading-stats             # GET - Trading volume statistics
+│   ├── intraday-order-stats      # GET - Latest-session buy/sell order flow
 │   └── financials/
 │       ├── ratios                # GET - Financial ratios
 │       ├── income                # GET - Income (simple)

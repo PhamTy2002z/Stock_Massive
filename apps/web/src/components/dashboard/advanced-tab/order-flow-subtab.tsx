@@ -18,7 +18,7 @@ export default function OrderFlowSubtab({ symbol }: OrderFlowSubtabProps) {
     orderStats.refetch()
   }
 
-  const sessionDate = formatSessionDate(orderStats.data?.date)
+  const sessionDate = formatSessionDate(orderStats.data?.date ?? undefined)
 
   return (
     <div className="space-y-6">

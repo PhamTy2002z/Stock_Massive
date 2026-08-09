@@ -160,7 +160,7 @@ All endpoints prefixed with `/api/v1/stocks`:
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/{symbol}/ratio-summary` | GET | Financial ratios summary |
-| `/{symbol}/trading-stats` | GET | Trading volume statistics |
+| `/{symbol}/intraday-order-stats` | GET | Latest-session buy/sell order flow |
 
 ### Financial Data (9 endpoints)
 | Endpoint | Method | Description |

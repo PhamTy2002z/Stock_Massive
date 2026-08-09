@@ -161,8 +161,7 @@ function DashboardSection() {
 - `use-health-score`, `use-trend-metrics`, `use-sector-peers`, `use-fcf-analysis`
 - `use-jobs-status` (job progress polling)
 - `use-sector-historical-performance` (sector historical data)
-- `use-foreign-trading`, `use-foreign-snapshot`, `use-prop-trading`
-- `use-trading-stats`, `use-order-stats`, `use-intraday-order-stats`
+- `use-intraday-order-stats`
 - `use-ratio-summary`, `use-mobile`
 
 ---

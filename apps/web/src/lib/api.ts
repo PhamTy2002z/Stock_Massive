@@ -564,46 +564,6 @@ export interface RatioSummaryResponse {
   debt_to_equity: number | null
 }
 
-// Advanced Tab Types - Trading Stats
-export interface TradingStatsResponse {
-  total_volume: number | null
-  avg_volume: number | null
-  total_value: number | null
-  avg_value: number | null
-  high_price: number | null
-  low_price: number | null
-}
-
-// Advanced Tab Types - Order Stats
-export interface OrderStatsItem {
-  date: string
-  buy_orders: number
-  sell_orders: number
-  buy_volume: number
-  sell_volume: number
-  avg_buy_order?: number
-  avg_sell_order?: number
-}
-
-// Advanced Tab Types - Foreign Trading
-export interface ForeignTradingItem {
-  date: string
-  buy_volume: number
-  sell_volume: number
-  net_volume: number
-  buy_value: number
-  sell_value: number
-  net_value: number
-}
-
-// Advanced Tab Types - Prop Trading
-export interface PropTradingItem {
-  date: string
-  buy_volume: number
-  sell_volume: number
-  net_volume: number
-}
-
 export async function fetchJobsStatus(): Promise<JobStatus[]> {
   const data = await fetchApi<{
     job_id: string
@@ -634,43 +594,15 @@ export async function fetchJobsStatus(): Promise<JobStatus[]> {
 
 // Advanced Tab API Functions
 
-// These endpoints take `days`; sending start/end meant FastAPI ignored both
-// and every request silently used the 30-day default.
-
-export async function fetchOrderStats(symbol: string, days: number = 30): Promise<OrderStatsItem[]> {
-  const response = await fetchApi<{ symbol: string; items: OrderStatsItem[] }>(
-    `/stocks/${encodeURIComponent(symbol)}/order-stats?days=${days}`
-  )
-  return response.items ?? []
-}
-
 export async function fetchRatioSummary(symbol: string): Promise<RatioSummaryResponse> {
   return fetchApi<RatioSummaryResponse>(`/stocks/${encodeURIComponent(symbol)}/ratio-summary`)
-}
-
-export async function fetchTradingStats(symbol: string): Promise<TradingStatsResponse> {
-  return fetchApi<TradingStatsResponse>(`/stocks/${encodeURIComponent(symbol)}/trading-stats`)
-}
-
-export async function fetchForeignTrading(symbol: string, days: number = 30): Promise<ForeignTradingItem[]> {
-  const response = await fetchApi<{ symbol: string; items: ForeignTradingItem[] }>(
-    `/stocks/${encodeURIComponent(symbol)}/foreign-trading?days=${days}`
-  )
-  return response.items ?? []
-}
-
-export async function fetchPropTrading(symbol: string, days: number = 30): Promise<PropTradingItem[]> {
-  const response = await fetchApi<{ symbol: string; items: PropTradingItem[] }>(
-    `/stocks/${encodeURIComponent(symbol)}/prop-trading?days=${days}`
-  )
-  return response.items ?? []
 }
 
 // === Intraday Order Stats Types (Phase 3 - Real-time current-day) ===
 
 export interface IntradayOrderStatsResponse {
   symbol: string
-  date: string
+  date: string | null
   buy_orders: number
   sell_orders: number
   buy_volume: number
@@ -683,23 +615,6 @@ export interface IntradayOrderStatsResponse {
 
 export async function fetchIntradayOrderStats(symbol: string): Promise<IntradayOrderStatsResponse> {
   return fetchApi<IntradayOrderStatsResponse>(`/stocks/${encodeURIComponent(symbol)}/intraday-order-stats`)
-}
-
-// === Foreign Snapshot Types (Phase 3 - Snapshot data) ===
-
-export interface ForeignSnapshotResponse {
-  symbol: string
-  foreign_volume: number
-  foreign_room: number
-  ownership_ratio: number | null
-  total_volume: number
-  avg_volume_2w: number | null
-  foreign_pct_of_volume: number | null
-  last_updated: string
-}
-
-export async function fetchForeignSnapshot(symbol: string): Promise<ForeignSnapshotResponse> {
-  return fetchApi<ForeignSnapshotResponse>(`/stocks/${encodeURIComponent(symbol)}/foreign-snapshot`)
 }
 
 // === Health Score Types (Phase 2 - Financial Health Scorecard) ===

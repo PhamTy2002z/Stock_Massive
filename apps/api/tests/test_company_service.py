@@ -38,7 +38,6 @@ class TestSymbolValidation:
             ("get_shareholders", ()),
             ("get_officers", ()),
             ("get_ratio_summary", ()),
-            ("get_trading_stats", ()),
         ],
     )
     def test_invalid_symbol_raises(self, service, method, args):
@@ -113,6 +112,38 @@ class TestCompanyOverview:
         with patch("src.stocks.company.service.Vnstock", return_value=vnstock):
             with pytest.raises(StockServiceError, match="Failed to fetch company overview"):
                 service.get_company_overview("VCB")
+
+
+class TestFiftyTwoWeekMetrics:
+    def test_uses_vnstock_4_ohlcv_daily_bars(self, service):
+        frame = pd.DataFrame(
+            {
+                "high": [70.5, 78.2, 75.0],
+                "low": [60.0, 62.5, 52.6],
+                "volume": [1_000_000, 2_000_000, 3_000_001],
+            }
+        )
+        market = MagicMock()
+        equity = market.return_value.equity.return_value
+        equity.ohlcv.return_value = frame
+
+        with patch("src.stocks.company.service.Market", market):
+            result = service._get_52_week_metrics("VCB")
+
+        market.return_value.equity.assert_called_once_with("VCB")
+        equity.ohlcv.assert_called_once_with(count=260, source="VCI")
+        assert result == {
+            "high_52_week": 78.2,
+            "low_52_week": 52.6,
+            "avg_volume_52_week": 2_000_000,
+        }
+
+    def test_empty_ohlcv_does_not_invent_zeroes(self, service):
+        market = MagicMock()
+        market.return_value.equity.return_value.ohlcv.return_value = pd.DataFrame()
+
+        with patch("src.stocks.company.service.Market", market):
+            assert service._get_52_week_metrics("VCB") == {}
 
 
 class TestShareholders:
@@ -210,29 +241,3 @@ class TestRatioSummary:
 
         assert result.symbol == "VCB"
         assert result.pe is None
-
-
-class TestTradingStats:
-    def test_converts_yearly_high_low_to_thousands(self, service):
-        df = pd.DataFrame([{"total_volume": 1_500_000, "avg_volume": 900_000.5,
-                            "total_value": 3.2e11, "avg_value": 1.1e10,
-                            "high_price_1y": 98_500, "low_price_1y": 74_000}])
-
-        with patch("src.stocks.company.service.Vnstock", return_value=_mock_company(trading_stats=df)):
-            result = service.get_trading_stats("VCB")
-
-        assert result.total_volume == 1_500_000
-        assert result.high_price == pytest.approx(98.5)
-        assert result.low_price == pytest.approx(74.0)
-
-    def test_falls_back_to_match_field_names(self, service):
-        df = pd.DataFrame([{"total_match_volume": 2_000_000, "avg_match_volume_2w": 1_000_000,
-                            "total_match_value": 5.0e11}])
-
-        with patch("src.stocks.company.service.Vnstock", return_value=_mock_company(trading_stats=df)):
-            result = service.get_trading_stats("VCB")
-
-        assert result.total_volume == 2_000_000
-        assert result.avg_volume == 1_000_000.0
-        assert result.total_value == 5.0e11
-        assert result.high_price is None

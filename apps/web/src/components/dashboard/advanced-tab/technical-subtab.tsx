@@ -1,9 +1,7 @@
 "use client"
 
 import { useRatioSummary } from "@/hooks/use-ratio-summary"
-import { useTradingStats } from "@/hooks/use-trading-stats"
 import { RatioSummaryCard } from "./widgets/ratio-summary-card"
-import { TradingStatsCard } from "./widgets/trading-stats-card"
 import { RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { DataErrorNotice } from "./data-error-notice"
@@ -14,15 +12,12 @@ interface TechnicalSubtabProps {
 
 export default function TechnicalSubtab({ symbol }: TechnicalSubtabProps) {
   const ratios = useRatioSummary(symbol)
-  const stats = useTradingStats(symbol)
 
   const handleRefresh = () => {
     ratios.refetch()
-    stats.refetch()
   }
 
-  const isLoading = ratios.isLoading || stats.isLoading
-  const hasError = ratios.error || stats.error
+  const isLoading = ratios.isLoading
 
   return (
     <div className="space-y-6">
@@ -43,13 +38,9 @@ export default function TechnicalSubtab({ symbol }: TechnicalSubtabProps) {
         </Button>
       </div>
 
-      {hasError && <DataErrorNotice error={hasError} />}
+      {ratios.error && <DataErrorNotice error={ratios.error} />}
 
-      {/* Cards Grid */}
-      <div className="grid gap-6 md:grid-cols-2">
-        <RatioSummaryCard data={ratios.data} isLoading={ratios.isLoading} />
-        <TradingStatsCard data={stats.data} isLoading={stats.isLoading} />
-      </div>
+      <RatioSummaryCard data={ratios.data} isLoading={ratios.isLoading} />
     </div>
   )
 }

@@ -1,8 +1,21 @@
 """Regression tests for stock endpoints removed with upstream capabilities."""
 
+import pytest
 
-def test_price_depth_endpoint_is_not_exposed(client):
-    """vnstock removed VCI price-depth support, so the API must not advertise it."""
-    response = client.get("/api/v1/stocks/VCB/price-depth")
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "price-depth",
+        "trading-stats",
+        "foreign-trading",
+        "prop-trading",
+        "order-stats",
+        "foreign-snapshot",
+    ],
+)
+def test_unsupported_stock_endpoint_is_not_exposed(client, path):
+    """Unsupported vnstock capabilities must not remain in the public API."""
+    response = client.get(f"/api/v1/stocks/VCB/{path}")
 
     assert response.status_code == 404

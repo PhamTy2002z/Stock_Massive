@@ -198,15 +198,3 @@ class RatioSummaryResponse(StrictModel):
     roic: Optional[float] = None
     current_ratio: Optional[float] = None
     debt_to_equity: Optional[float] = None
-
-
-class TradingStatsResponse(StrictModel):
-    """Trading statistics for advanced tab."""
-
-    symbol: str
-    total_volume: Optional[int] = None
-    avg_volume: Optional[float] = None
-    total_value: Optional[float] = None
-    avg_value: Optional[float] = None
-    high_price: Optional[float] = None
-    low_price: Optional[float] = None

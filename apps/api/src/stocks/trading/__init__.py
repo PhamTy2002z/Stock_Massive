@@ -1,4 +1,4 @@
-"""Trading domain module for foreign trading, proprietary trading, and order stats."""
+"""Trading domain module for supported intraday order statistics."""
 
 from .service import TradingService, get_trading_service
 

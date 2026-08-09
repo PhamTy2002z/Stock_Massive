@@ -147,12 +147,14 @@ Trading = _guarded_class(_vnstock.Trading, "Trading")
 Quote = _guarded_class(_vnstock.Quote, "Quote")
 Company = _guarded_class(_vnstock.Company, "Company")
 Finance = _guarded_class(_vnstock.Finance, "Finance")
+Market = _guarded_class(_vnstock.Market, "Market")
 Vnstock = _guarded_class(_vnstock.Vnstock, "Vnstock")
 
 __all__ = [
     "Company",
     "Finance",
     "Listing",
+    "Market",
     "Quote",
     "Trading",
     "Vnstock",

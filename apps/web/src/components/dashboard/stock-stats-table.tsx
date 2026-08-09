@@ -11,9 +11,9 @@ interface StockStatsTableProps {
 
   // Column 2: 52-week & market cap
   marketCap: number // Vốn hoá (billion VND)
-  high52Week: number // Cao 52T
-  low52Week: number // Thấp 52T
-  avgVolume52Week: number // KLBQ 52T (shares)
+  high52Week: number | null // Cao 52T
+  low52Week: number | null // Thấp 52T
+  avgVolume52Week: number | null // KLBQ 52T (shares)
 
   // Column 3: Fundamentals
   eps: number | null // EPS
@@ -42,7 +42,8 @@ function formatMarketCap(value: number): string {
 }
 
 // Format volume (millions)
-function formatVolume(value: number): string {
+function formatVolume(value: number | null): string {
+  if (value === null || value === undefined) return "N/A"
   if (value >= 1000000) {
     return `${formatNumber(value / 1000000, 1)} triệu`
   }
