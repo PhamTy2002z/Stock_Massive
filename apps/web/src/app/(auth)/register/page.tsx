@@ -5,8 +5,8 @@ import AuthFormFallback from "../auth-form-fallback"
 import RegisterForm from "./register-form"
 
 export const metadata: Metadata = {
-  title: "Create account - Stock Massive",
-  description: "Create your Stock Massive account",
+  title: "Tạo tài khoản - Stock Massive",
+  description: "Tạo tài khoản Stock Massive",
 }
 
 export default function RegisterPage() {

@@ -5,8 +5,8 @@ import AuthFormFallback from "../auth-form-fallback"
 import LoginForm from "./login-form"
 
 export const metadata: Metadata = {
-  title: "Login - Stock Massive",
-  description: "Sign in to your Stock Massive account",
+  title: "Đăng nhập - Stock Massive",
+  description: "Đăng nhập vào tài khoản Stock Massive",
 }
 
 export default function LoginPage() {
