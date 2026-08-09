@@ -473,7 +473,11 @@ class TestMarketCapWeightedCalculation:
             'symbol': ['A'],
             'match_price': [101.0],
             'ref_price': [100.0],
-            'accumulated_value': [150_000_000_000],
+            # vnstock reports accumulated_value in million VND, so 150_000 of
+            # them is 150 billion. Checked against a live price board: VCB
+            # traded 6,522,200 shares at 59,700 VND (389.4 billion) and the
+            # field came back as 392,536.84.
+            'accumulated_value': [150_000],
         })
         mock_trading_cls.return_value = mock_trading
 
