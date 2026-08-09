@@ -47,9 +47,6 @@ export const queryKeys = {
   // Advanced Tab - Order Flow
   orderStats: (symbol: string, days: number) =>
     [...queryKeys.stock(symbol), "orderStats", days] as const,
-  priceDepth: (symbol: string) =>
-    [...queryKeys.stock(symbol), "priceDepth"] as const,
-
   // Advanced Tab - Technical
   ratioSummary: (symbol: string) =>
     [...queryKeys.stock(symbol), "ratioSummary"] as const,

@@ -552,27 +552,6 @@ export interface JobStatus {
   elapsedSeconds: number | null
 }
 
-// Advanced Tab Types - Price Depth
-export interface PriceLevel {
-  price: number
-  volume: number
-}
-
-export interface PriceDepthResponse {
-  symbol: string
-  bid_1: PriceLevel
-  bid_2: PriceLevel | null
-  bid_3: PriceLevel | null
-  ask_1: PriceLevel
-  ask_2: PriceLevel | null
-  ask_3: PriceLevel | null
-  total_bid_volume: number
-  total_ask_volume: number
-  spread: number
-  spread_percent: number
-  timestamp: string
-}
-
 // Advanced Tab Types - Ratio Summary
 export interface RatioSummaryResponse {
   pe: number | null
@@ -663,10 +642,6 @@ export async function fetchOrderStats(symbol: string, days: number = 30): Promis
     `/stocks/${encodeURIComponent(symbol)}/order-stats?days=${days}`
   )
   return response.items ?? []
-}
-
-export async function fetchPriceDepth(symbol: string): Promise<PriceDepthResponse> {
-  return fetchApi<PriceDepthResponse>(`/stocks/${encodeURIComponent(symbol)}/price-depth`)
 }
 
 export async function fetchRatioSummary(symbol: string): Promise<RatioSummaryResponse> {
@@ -869,4 +844,3 @@ export async function fetchSectorHistoricalPerformance(
     `/stocks/analytics/sector-historical?period=${period}`
   )
 }
-

@@ -151,7 +151,7 @@ function DashboardSection() {
 - Add hover-based prefetch with 200ms delay on tab triggers
 - Ensures instant tab switching by pre-warming query cache
 
-### Custom Hooks (28 total)
+### Custom Hooks (27 total)
 
 - `use-stock-detail`, `use-market-indices`, `use-vn30-overview`
 - `use-sector-performance`, `use-fund-certificates`, `use-market-overview`
@@ -162,7 +162,7 @@ function DashboardSection() {
 - `use-jobs-status` (job progress polling)
 - `use-sector-historical-performance` (sector historical data)
 - `use-foreign-trading`, `use-foreign-snapshot`, `use-prop-trading`
-- `use-price-depth`, `use-trading-stats`, `use-order-stats`, `use-intraday-order-stats`
+- `use-trading-stats`, `use-order-stats`, `use-intraday-order-stats`
 - `use-ratio-summary`, `use-mobile`
 
 ---
