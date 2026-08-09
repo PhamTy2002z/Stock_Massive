@@ -1,6 +1,10 @@
 # Pin the project name so image/network names stay stable no matter which
 # directory (repo root or a git worktree) compose is invoked from.
 # Override per-worktree with COMPOSE_PROJECT_NAME to run several stacks at once.
+#
+# Development runs the backend only: `docker compose up -d` starts db + api.
+# The frontend runs on the host with `pnpm dev:web` (see README).
+# To containerise the frontend as well: `docker compose --profile full up -d`.
 name: stockmassive
 
 services:
@@ -51,7 +55,11 @@ services:
     networks:
       - stockmassive-network
 
+  # Opt-in only. The default dev flow runs the frontend on the host so Next.js
+  # gets native file watching and fast rebuilds; start this with
+  # `docker compose --profile full up -d` when a container is genuinely needed.
   web:
+    profiles: ["full"]
     build:
       context: ./apps/web
       dockerfile: Dockerfile

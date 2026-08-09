@@ -1,8 +1,12 @@
 # System Architecture - Stock Massive
 
-Updated: 2026-01-03
+Updated: 2026-08-09
 
-> **Note**: Toàn bộ hệ thống chạy trong Docker containers. Database sử dụng Supabase PostgreSQL cloud với SSL và connection pooling.
+> **Runtime layout**: ở development, backend (`api`) và database (`db`) chạy
+> trong Docker Compose, còn frontend chạy trực tiếp trên máy dev qua `next dev`
+> (port 3000). Ở production cả `api` và `web` đều là container riêng; database là
+> Postgres bên ngoài qua `DATABASE_URL`, hoặc container `db` opt-in bằng profile
+> `db`. Chi tiết: [Deployment Guide](deployment-guide.md).
 
 ## High-Level Overview
 
@@ -36,8 +40,8 @@ Updated: 2026-01-03
            ▼                  ▼
 ┌──────────────────┐  ┌───────────────────────────────────────┐
 │   PostgreSQL     │  │        Vietnam Stock Exchange         │
-│   (Docker or     │  │   (HOSE, HNX, UPCOM via vnstock)      │
-│    Supabase)     │  │                                       │
+│  (Docker `db` or │  │   (HOSE, HNX, UPCOM via vnstock)      │
+│   external URL)  │  │                                       │
 │                  │  └───────────────────────────────────────┘
 │ + Upstash Redis  │
 │  (Caching)       │
@@ -50,7 +54,7 @@ Updated: 2026-01-03
 
 ### vnstock Integration
 
-- **Library**: vnstock >= 3.0.0
+- **Library**: vnstock 4.x
 - **Source**: VCI (Vietnam)
 - **Data Types**:
   - Historical OHLCV (daily, weekly, monthly)
@@ -74,7 +78,7 @@ Updated: 2026-01-03
 ## Directory Structure
 
 ```
-Stock_Massive/
+stock-massive/
 ├── apps/
 │   ├── web/                      # Next.js frontend (140+ files, 15,236 LOC)
 │   │   ├── src/
@@ -122,16 +126,14 @@ Stock_Massive/
 │       │   │   ├── scheduler.py, vnstock_wrapper.py
 │       │   │   └── job_status_store.py
 │       │   └── main.py
-│       ├── alembic/              # 4 DB migrations
-│       ├── tests/                # 18 test files
+│       ├── alembic/              # 6 DB migrations
+│       ├── tests/                # 26 test files
 │       └── requirements.txt
 │
-├── packages/                     # Shared code (2 placeholders: config, types)
-├── docker/                       # Docker configs (4 Dockerfiles, 2 compose files)
-├── docs/                         # 10 documentation files
+├── docs/                         # Documentation
 ├── plans/                        # Plans and reports
-├── docker-compose.yml            # Dev config
-├── docker-compose.prod.yml       # Prod config
+├── docker-compose.yml            # Dev: db + api (web behind profile `full`)
+├── docker-compose.prod.yml       # Prod: api + web (db behind profile `db`)
 └── README.md
 ```
 
@@ -291,31 +293,45 @@ RootLayout
 
 ## Docker Services
 
-| Service | Port | Description |
-|---------|------|-------------|
-| web | 3000 | Next.js frontend |
-| api | 8000 | FastAPI backend |
-| db | Supabase | PostgreSQL (cloud-hosted with SSL) |
+### `docker-compose.yml` (development)
+
+| Service | Port | Started by default | Description |
+|---------|------|--------------------|-------------|
+| db | 5432 | Yes | PostgreSQL 16, named volume `postgres_data` |
+| api | 8000 | Yes | FastAPI backend, code bind-mounted |
+| web | 3000 | No — profile `full` | Next.js in a container (opt-in) |
+
+Frontend mặc định chạy trên host bằng `pnpm dev:web`, không phải trong container.
+
+### `docker-compose.prod.yml` (production)
+
+| Service | Container | Port | Started by default |
+|---------|-----------|------|--------------------|
+| api | `stockmassive-api` | 8000 | Yes |
+| web | `stockmassive-web` | 3000 | Yes |
+| db | `stockmassive-db` | — | No — profile `db` |
 
 ### Docker Compose Features
 
-- Health checks for all services
-- Hot-reload for development
-- Volume mounts for code changes
-- Network isolation between services
-- Separate prod config (docker-compose.prod.yml) with restart policies
-- Supabase cloud database (no local db container needed)
+- Health check + `depends_on: service_healthy` giữa `db` và `api`
+- `entrypoint.sh` của `api` chờ database rồi chạy `alembic upgrade head`
+- Bind mount `apps/api/src` và `apps/api/alembic` cho hot-reload backend
+- Network isolation (`stockmassive-network`)
+- Prod config có `restart: unless-stopped` và `container_name` cố định
+- `COMPOSE_PROJECT_NAME` cho phép chạy nhiều stack song song (worktree)
 
 ---
 
-## Database Schema (Supabase PostgreSQL)
+## Database Schema (PostgreSQL)
 
 ### Connection Configuration
 
-- **DATABASE_URL**: Async connection (asyncpg) via session pooler for API endpoints
-- **DATABASE_URL_DIRECT**: Sync connection (psycopg2) bypassing pooler for Alembic migrations
-- **SSL**: Auto-detected for Supabase URLs, required for cloud connections
+- **DATABASE_URL**: single connection string; the app converts it to asyncpg for
+  runtime queries and for Alembic (`apps/api/alembic/env.py`)
+- **SSL**: auto-detected from the URL (`sslmode=require` for managed hosts)
 - **Connection Pooling**: pool_size=5, max_overflow=10
+- **Dev**: container `db` (`postgresql://postgres:postgres@db:5432/stockmassive`)
+- **Prod**: external/managed Postgres, or the opt-in `db` profile
 
 ### StockDailyOHLCV Table
 
@@ -448,8 +464,9 @@ CREATE INDEX ix_financial_statements_collected_at ON financial_statements(collec
 - Portfolio value streaming
 - Alert notifications
 
-### Authentication (Planned)
+### Authentication (Implemented)
 
-- JWT-based authentication via Supabase
-- User registration/login
-- Protected routes
+- Self-hosted JWT (PyJWT) + bcrypt password hashing
+- Refresh tokens stored hashed, rotated on every use, reuse detected and revoked
+- Endpoints: `/api/v1/auth/{register,login,refresh,logout,me}`
+- Frontend keeps sessions in httpOnly cookies

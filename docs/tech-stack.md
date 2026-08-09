@@ -28,30 +28,41 @@ Monorepo architecture for stock analysis platform with Next.js frontend, FastAPI
 | Pydantic | 2.x | Data validation |
 | Uvicorn | latest | ASGI server |
 | APScheduler | 4.0 | Background job scheduling |
+| bcrypt + PyJWT | 4.0+ / 2.8+ | Self-hosted auth (password hashing, JWT) |
 | Upstash Redis | 1.0+ | Caching + rate limiting |
-| vnstock | 3.0+ | Vietnam stock data (VCI source) |
+| vnstock | 4.x | Vietnam stock data (VCI source) |
 | Pandas | 2.0+ | Data manipulation |
 
 ## Database
 
 | Technology | Version | Purpose |
 |------------|---------|---------|
-| PostgreSQL | 16 | Primary database |
+| PostgreSQL | 16 | Primary database — container `db` in dev, any Postgres via `DATABASE_URL` in prod |
 
 ## DevOps
 
 | Technology | Purpose |
 |------------|---------|
 | Docker | Containerization |
-| Docker Compose | Local orchestration |
-| pnpm | Package manager (frontend) |
+| Docker Compose | Dev: `db` + `api`. Prod: `api` + `web` |
+| pnpm | Package manager, and the dev runtime for the frontend on the host |
 | uv/pip | Package manager (backend) |
+
+**Dev runtime split**: backend and database run in Docker; the frontend runs
+directly on the developer machine (`pnpm dev:web`, port 3000) for native file
+watching. See [Deployment Guide](deployment-guide.md).
 
 ## Architecture Decisions
 
 ### Monorepo Structure
-- **Choice**: Simple workspace with pnpm
+- **Choice**: Simple workspace with pnpm; `apps/web` has its own lockfile
 - **Rationale**: Lower complexity, sufficient for single team, easy Docker integration
+
+### Dev Runtime Split
+- **Choice**: Backend + database in Docker, frontend on the host
+- **Rationale**: Next.js file watching in a bind-mounted container needs polling
+  and rebuilds slowly; the backend benefits from a reproducible container with
+  its Postgres and automatic migrations
 
 ### Frontend Architecture
 - **Pattern**: Feature-based component organization
@@ -65,7 +76,7 @@ Monorepo architecture for stock analysis platform with Next.js frontend, FastAPI
 - **API Versioning**: URL prefix (`/api/v1/`)
 
 ### Security
-- JWT authentication with refresh tokens
+- Self-hosted JWT auth with hashed, rotating refresh tokens (reuse detection)
 - CORS configured for specific origins
 - Input validation via Pydantic
 - Rate limiting middleware
