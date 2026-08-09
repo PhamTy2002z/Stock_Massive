@@ -11,12 +11,6 @@ from src.stocks.financial.health_scoring import (
     DIMENSION_WEIGHTS,
 )
 
-# Every test in this module calls the live vnstock API — there are no mocks.
-# They go red on upstream throttling rather than on anything in this repo,
-# so they sit out the default run. Run them with: pytest -m network
-pytestmark = pytest.mark.network
-
-
 # ==================== Unit Tests for health_scoring.py ====================
 
 
@@ -347,6 +341,7 @@ class TestBuildHealthScoreResponse:
 class TestHealthScoreEndpoint:
     """Test GET /{symbol}/health-score endpoint."""
 
+    @pytest.mark.network
     def test_get_health_score_vnm(self, client):
         """Test health score for VNM symbol."""
         response = client.get("/api/v1/stocks/VNM/health-score")
@@ -383,11 +378,13 @@ class TestHealthScoreEndpoint:
             assert key in f_details
             assert isinstance(f_details[key], bool)
 
+    @pytest.mark.network
     def test_get_health_score_invalid_symbol(self, client):
         """Test health score with invalid symbol."""
         response = client.get("/api/v1/stocks/INVALID999/health-score")
         assert response.status_code in [404, 502]
 
+    @pytest.mark.network
     def test_health_score_caching(self, client):
         """Test that health score is cached."""
         # First request
@@ -403,6 +400,7 @@ class TestHealthScoreEndpoint:
 class TestTrendMetricsEndpoint:
     """Test GET /{symbol}/trend-metrics endpoint."""
 
+    @pytest.mark.network
     def test_get_trend_metrics_vnm(self, client):
         """Test trend metrics for VNM symbol."""
         response = client.get("/api/v1/stocks/VNM/trend-metrics?periods=8")
@@ -429,6 +427,7 @@ class TestTrendMetricsEndpoint:
             assert arr in data
             assert isinstance(data[arr], list)
 
+    @pytest.mark.network
     def test_get_trend_metrics_custom_periods(self, client):
         """Test trend metrics with custom period count."""
         response = client.get("/api/v1/stocks/VNM/trend-metrics?periods=4")
@@ -453,6 +452,7 @@ class TestTrendMetricsEndpoint:
 class TestFCFAnalysisEndpoint:
     """Test GET /{symbol}/fcf-analysis endpoint."""
 
+    @pytest.mark.network
     def test_get_fcf_analysis_vnm(self, client):
         """Test FCF analysis for VNM symbol."""
         response = client.get("/api/v1/stocks/VNM/fcf-analysis")
@@ -478,6 +478,7 @@ class TestFCFAnalysisEndpoint:
             assert "dio" in data
             assert "dpo" in data
 
+    @pytest.mark.network
     def test_fcf_analysis_caching(self, client):
         """Test FCF analysis caching."""
         response1 = client.get("/api/v1/stocks/VNM/fcf-analysis")
@@ -491,6 +492,7 @@ class TestFCFAnalysisEndpoint:
 class TestSectorPeersEndpoint:
     """Test GET /analytics/sector-peers endpoint."""
 
+    @pytest.mark.network
     def test_get_sector_peers(self, client):
         """Test sector peers comparison."""
         response = client.get("/api/v1/stocks/analytics/sector-peers?symbol=VNM&limit=5")
@@ -509,6 +511,7 @@ class TestSectorPeersEndpoint:
             assert "symbol" in peer
             assert "company_name" in peer
 
+    @pytest.mark.network
     def test_sector_peers_custom_limit(self, client):
         """Test sector peers with custom limit."""
         response = client.get("/api/v1/stocks/analytics/sector-peers?symbol=VNM&limit=10")

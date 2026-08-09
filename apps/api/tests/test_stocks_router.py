@@ -3,12 +3,6 @@ from datetime import date, timedelta
 
 import pytest
 
-# Every test in this module calls the live vnstock API — there are no mocks.
-# They go red on upstream throttling rather than on anything in this repo,
-# so they sit out the default run. Run them with: pytest -m network
-pytestmark = pytest.mark.network
-
-
 class TestStocksRouter:
     """Test cases for stocks API endpoints."""
 
@@ -18,6 +12,7 @@ class TestStocksRouter:
         assert response.status_code == 200
         assert response.json()["status"] == "healthy"
 
+    @pytest.mark.network
     def test_list_symbols(self, client):
         """Test GET /api/v1/stocks/symbols."""
         response = client.get("/api/v1/stocks/symbols")
@@ -29,6 +24,7 @@ class TestStocksRouter:
         # Validate schema
         assert "symbol" in data[0]
 
+    @pytest.mark.network
     def test_list_symbols_by_exchange(self, client):
         """Test GET /api/v1/stocks/symbols with exchange filter."""
         response = client.get("/api/v1/stocks/symbols?exchange=HOSE")
@@ -41,6 +37,7 @@ class TestStocksRouter:
         data = response.json()
         assert isinstance(data, list)
 
+    @pytest.mark.network
     def test_list_symbols_by_group(self, client):
         """Test GET /api/v1/stocks/symbols/group/{group}."""
         response = client.get("/api/v1/stocks/symbols/group/VN30")
@@ -50,6 +47,7 @@ class TestStocksRouter:
         assert isinstance(data, list)
         assert len(data) == 30
 
+    @pytest.mark.network
     def test_get_history(self, client, valid_symbol):
         """Test GET /api/v1/stocks/{symbol}/history."""
         end = date.today()
@@ -103,6 +101,7 @@ class TestStocksRouter:
         assert response.status_code == 400
         assert "Start date must be before end date" in response.json()["detail"]
 
+    @pytest.mark.network
     def test_get_company_overview(self, client, valid_symbol):
         """Test GET /api/v1/stocks/{symbol}/company."""
         response = client.get(f"/api/v1/stocks/{valid_symbol}/company")
@@ -112,6 +111,7 @@ class TestStocksRouter:
         assert "symbol" in data
         assert data["symbol"] == valid_symbol
 
+    @pytest.mark.network
     def test_get_financial_ratios(self, client, valid_symbol):
         """Test GET /api/v1/stocks/{symbol}/financials/ratios."""
         response = client.get(f"/api/v1/stocks/{valid_symbol}/financials/ratios")
@@ -121,6 +121,7 @@ class TestStocksRouter:
         assert isinstance(data, list)
         assert len(data) > 0
 
+    @pytest.mark.network
     def test_get_financial_ratios_quarterly(self, client, valid_symbol):
         """Test GET /api/v1/stocks/{symbol}/financials/ratios with quarter period."""
         response = client.get(
@@ -142,6 +143,7 @@ class TestStocksRouter:
         assert response.status_code == 400
         assert "Invalid period" in response.json()["detail"]
 
+    @pytest.mark.network
     def test_get_income_statement(self, client, valid_symbol):
         """Test GET /api/v1/stocks/{symbol}/financials/income."""
         response = client.get(f"/api/v1/stocks/{valid_symbol}/financials/income")
@@ -150,6 +152,7 @@ class TestStocksRouter:
         data = response.json()
         assert isinstance(data, list)
 
+    @pytest.mark.network
     def test_get_balance_sheet(self, client, valid_symbol):
         """Test GET /api/v1/stocks/{symbol}/financials/balance-sheet."""
         response = client.get(f"/api/v1/stocks/{valid_symbol}/financials/balance-sheet")
@@ -158,6 +161,7 @@ class TestStocksRouter:
         data = response.json()
         assert isinstance(data, list)
 
+    @pytest.mark.network
     def test_get_price_board(self, client, valid_symbols):
         """Test GET /api/v1/stocks/price-board."""
         symbols_str = ",".join(valid_symbols)
