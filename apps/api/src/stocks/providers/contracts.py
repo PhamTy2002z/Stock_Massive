@@ -27,6 +27,7 @@ class Capability(str, Enum):
     """Data classes with independent provider ownership."""
 
     MARKET = "market"
+    VALUATION = "valuation"
     REFERENCE = "reference"
     FUNDAMENTAL = "fundamental"
 
@@ -34,6 +35,7 @@ class Capability(str, Enum):
 PRIMARY_SOURCE_BY_CAPABILITY: Mapping[Capability, ProviderSource] = MappingProxyType(
     {
         Capability.MARKET: ProviderSource.FIINQUANT,
+        Capability.VALUATION: ProviderSource.FIINQUANT,
         Capability.REFERENCE: ProviderSource.VNSTOCK,
         Capability.FUNDAMENTAL: ProviderSource.VNSTOCK,
     }
@@ -98,7 +100,16 @@ class SymbolSnapshot(InternalSnapshot):
 
 
 class MarketSnapshot(SymbolSnapshot):
-    """Source-neutral hot market fields written by the FiinQuant collector."""
+    """Source-neutral hot market fields written by the collector.
+
+    Every ``*_price`` and ``*_vnd`` field is denominated in ``price_unit``.
+    Traded quantity is named ``*_volume`` and traded money ``*_value_vnd``, and
+    no field carries both words: the provider reports active buy/sell as
+    quantity but foreign buy/sell as money, so mixing the two silently changes
+    the unit. ``market_cap_vnd`` is money but not traded, so it stays outside
+    that pair; it is reported by the provider rather than derived from
+    ``ReferenceSnapshot.canonical_shares()``.
+    """
 
     price_unit: PriceUnit = PriceUnit.VND
     last_price: float | None = Field(default=None, gt=0)
@@ -106,10 +117,19 @@ class MarketSnapshot(SymbolSnapshot):
     open_price: float | None = Field(default=None, gt=0)
     high_price: float | None = Field(default=None, gt=0)
     low_price: float | None = Field(default=None, gt=0)
+    ceiling_price: float | None = Field(default=None, gt=0)
+    floor_price: float | None = Field(default=None, gt=0)
     change_pct: float | None = None
     volume: int | None = Field(default=None, ge=0)
+    total_value_vnd: float | None = Field(default=None, ge=0)
+    active_buy_volume: int | None = Field(default=None, ge=0)
+    active_sell_volume: int | None = Field(default=None, ge=0)
     foreign_buy_volume: int | None = Field(default=None, ge=0)
     foreign_sell_volume: int | None = Field(default=None, ge=0)
+    foreign_buy_value_vnd: float | None = Field(default=None, ge=0)
+    foreign_sell_value_vnd: float | None = Field(default=None, ge=0)
+    foreign_net_value_vnd: float | None = None
+    market_cap_vnd: float | None = Field(default=None, ge=0)
 
 
 class ShareCount(InternalSnapshot):
@@ -152,14 +172,23 @@ class ReferenceSnapshot(SymbolSnapshot):
         return None
 
 
+class ValuationSnapshot(SymbolSnapshot):
+    """Ratios as published upstream, kept apart from statement-derived numbers.
+
+    These arrive already computed from the ``valuation`` main source, so they
+    are stored as reported rather than recomputed from ``FundamentalSnapshot``.
+    """
+
+    provider_pe: float | None = None
+    provider_pb: float | None = None
+
+
 class FundamentalSnapshot(SymbolSnapshot):
-    """Inputs used for app-owned valuation history."""
+    """Financial-statement inputs used for app-owned valuation history."""
 
     period_end: date
     trailing_12_month_net_income_vnd: float | None = None
     parent_equity_vnd: float | None = None
-    provider_pe: float | None = None
-    provider_pb: float | None = None
 
 
 class MarketDataProvider(Protocol):
@@ -168,6 +197,14 @@ class MarketDataProvider(Protocol):
     source: ProviderSource
 
     def fetch_market(self, symbols: Sequence[str]) -> Sequence[MarketSnapshot]: ...
+
+
+class ValuationDataProvider(Protocol):
+    """Collect provider-published valuation ratios for a bounded universe."""
+
+    source: ProviderSource
+
+    def fetch_valuation(self, symbols: Sequence[str]) -> Sequence[ValuationSnapshot]: ...
 
 
 class ReferenceDataProvider(Protocol):
