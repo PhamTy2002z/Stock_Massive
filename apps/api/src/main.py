@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from src.auth.router import router as auth_router
 from src.core.config import get_settings
+from src.core.cache import CacheRefreshUnavailable
 from src.core.database import engine
 from src.core.scheduler import setup_scheduler
 from src.core.vnstock_client import VnstockUnavailable, VnstockUnsupported
@@ -100,6 +101,20 @@ async def vnstock_unsupported_handler(request: Request, exc: VnstockUnsupported)
     """The provider has no such capability. Say so instead of returning empty."""
     logger.info(f"vnstock unsupported on {request.url.path}: {exc}")
     return JSONResponse(status_code=501, content={"detail": str(exc)})
+
+
+@app.exception_handler(CacheRefreshUnavailable)
+async def cache_refresh_unavailable_handler(
+    request: Request,
+    exc: CacheRefreshUnavailable,
+):
+    """Suppress duplicate cold-miss retries while an upstream is unavailable."""
+    logger.warning("cache refresh suppressed on %s", request.url.path)
+    return JSONResponse(
+        status_code=503,
+        content={"detail": str(exc)},
+        headers={"Retry-After": "15"},
+    )
 
 
 

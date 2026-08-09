@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.core.cache import TradingHoursCache
 from src.core.ratelimit import heavy_rate_limit, standard_rate_limit
+from src.core.vnstock_client import VnstockUnavailable
 from .service import get_financial_service
 from ..schemas.financial import (
     FinancialRatio,
@@ -18,10 +19,19 @@ from ..schemas.financial import (
     TrendMetricsResponse,
     FCFAnalysisResponse,
 )
+from ..shared import validate_symbol
 
 router = APIRouter()
 
-# Cache instances for new endpoints
+# Provider-backed statements change slowly and should never fan out on UI load.
+financial_response_cache = TradingHoursCache(
+    key_prefix="stock:financial_response:",
+    ttl_trading=3600,
+    ttl_off_hours=86400,
+    stale_ttl=7 * 86400,
+)
+
+# Cache instances for derived endpoints
 health_score_cache = TradingHoursCache(
     key_prefix="stock:health_score:",
     ttl_trading=3600,      # 1 hour during trading
@@ -41,6 +51,24 @@ fcf_analysis_cache = TradingHoursCache(
 )
 
 
+def _cached_model(key: str, model, loader):
+    payload = financial_response_cache.get_or_load(
+        key,
+        lambda: loader().model_dump(mode="json"),
+        suppress_failure=lambda exc: isinstance(exc, VnstockUnavailable),
+    )
+    return model.model_validate(payload)
+
+
+def _cached_list(key: str, model, loader):
+    payload = financial_response_cache.get_or_load(
+        key,
+        lambda: [item.model_dump(mode="json") for item in loader()],
+        suppress_failure=lambda exc: isinstance(exc, VnstockUnavailable),
+    )
+    return [model.model_validate(item) for item in payload]
+
+
 @router.get("/{symbol}/financials/ratios", response_model=List[FinancialRatio], dependencies=[Depends(heavy_rate_limit)])
 def get_financial_ratios(
     symbol: str,
@@ -54,8 +82,13 @@ def get_financial_ratios(
     if lang not in ("en", "vi"):
         raise HTTPException(status_code=400, detail="Invalid language. Use 'en' or 'vi'")
 
+    symbol = validate_symbol(symbol)
     service = get_financial_service()
-    return service.get_financial_ratios(symbol, period, lang)
+    return _cached_list(
+        f"ratios:{symbol.upper()}:{period}:{lang}",
+        FinancialRatio,
+        lambda: service.get_financial_ratios(symbol, period, lang),
+    )
 
 
 @router.get("/{symbol}/financials/income", response_model=List[IncomeStatementItem], dependencies=[Depends(heavy_rate_limit)])
@@ -68,8 +101,13 @@ def get_income_statement(
     if period not in ("year", "quarter"):
         raise HTTPException(status_code=400, detail="Invalid period. Use 'year' or 'quarter'")
 
+    symbol = validate_symbol(symbol)
     service = get_financial_service()
-    return service.get_income_statement(symbol, period, lang)
+    return _cached_list(
+        f"income:{symbol.upper()}:{period}:{lang}",
+        IncomeStatementItem,
+        lambda: service.get_income_statement(symbol, period, lang),
+    )
 
 
 @router.get("/{symbol}/financials/income-statement", response_model=IncomeStatementResponse, dependencies=[Depends(heavy_rate_limit)])
@@ -82,8 +120,13 @@ def get_income_statement_detailed(
     if period not in ("year", "quarter"):
         raise HTTPException(status_code=400, detail="Invalid period. Use 'year' or 'quarter'")
 
+    symbol = validate_symbol(symbol)
     service = get_financial_service()
-    return service.get_income_statement_detailed(symbol, period, limit)
+    return _cached_model(
+        f"income-statement:{symbol.upper()}:{period}:{limit}",
+        IncomeStatementResponse,
+        lambda: service.get_income_statement_detailed(symbol, period, limit),
+    )
 
 
 @router.get("/{symbol}/financials/balance-sheet", response_model=List[BalanceSheetItem], dependencies=[Depends(heavy_rate_limit)])
@@ -96,8 +139,13 @@ def get_balance_sheet(
     if period not in ("year", "quarter"):
         raise HTTPException(status_code=400, detail="Invalid period. Use 'year' or 'quarter'")
 
+    symbol = validate_symbol(symbol)
     service = get_financial_service()
-    return service.get_balance_sheet(symbol, period, lang)
+    return _cached_list(
+        f"balance-sheet:{symbol.upper()}:{period}:{lang}",
+        BalanceSheetItem,
+        lambda: service.get_balance_sheet(symbol, period, lang),
+    )
 
 
 @router.get("/{symbol}/financials/balance-sheet-detailed", response_model=BalanceSheetResponse, dependencies=[Depends(heavy_rate_limit)])
@@ -110,8 +158,13 @@ def get_balance_sheet_detailed(
     if period not in ("year", "quarter"):
         raise HTTPException(status_code=400, detail="Invalid period. Use 'year' or 'quarter'")
 
+    symbol = validate_symbol(symbol)
     service = get_financial_service()
-    return service.get_balance_sheet_detailed(symbol, period, limit)
+    return _cached_model(
+        f"balance-sheet-detailed:{symbol.upper()}:{period}:{limit}",
+        BalanceSheetResponse,
+        lambda: service.get_balance_sheet_detailed(symbol, period, limit),
+    )
 
 
 @router.get("/{symbol}/financials/cash-flow", response_model=CashFlowResponse, dependencies=[Depends(heavy_rate_limit)])
@@ -124,8 +177,13 @@ def get_cash_flow_detailed(
     if period not in ("year", "quarter"):
         raise HTTPException(status_code=400, detail="Invalid period. Use 'year' or 'quarter'")
 
+    symbol = validate_symbol(symbol)
     service = get_financial_service()
-    return service.get_cash_flow_detailed(symbol, period, limit)
+    return _cached_model(
+        f"cash-flow:{symbol.upper()}:{period}:{limit}",
+        CashFlowResponse,
+        lambda: service.get_cash_flow_detailed(symbol, period, limit),
+    )
 
 
 # ==================== New Endpoints for Health Score & Trends ====================

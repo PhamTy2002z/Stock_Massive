@@ -6,8 +6,10 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.cache import TradingHoursCache
 from src.core.database import get_db
 from src.core.ratelimit import heavy_rate_limit, standard_rate_limit
+from src.core.vnstock_client import VnstockUnavailable
 from src.stocks.analytics.service import (
     AnalyticsService,
     build_financial_statements_cache_key,
@@ -24,10 +26,18 @@ from src.stocks.schemas.analytics import (
 from src.stocks.schemas.common import MessageResponse
 from src.stocks.schemas.financial import SectorPeersResponse
 from src.stocks.financial import get_financial_service
+from src.stocks.shared import validate_symbol
 from src.stocks.analytics.sector_historical_router import router as sector_historical_router
 from src.auth.dependencies import require_admin
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
+
+sector_peers_response_cache = TradingHoursCache(
+    key_prefix="stock:sector_peers_response:",
+    ttl_trading=4 * 3600,
+    ttl_off_hours=86400,
+    stale_ttl=7 * 86400,
+)
 
 # Include sector historical router
 router.include_router(sector_historical_router, tags=["sector-historical"])
@@ -181,6 +191,12 @@ def get_sector_peers(
     sorted by market capitalization, with key financial metrics
     and premium/discount vs sector median.
     """
+    symbol = validate_symbol(symbol)
     service = get_financial_service()
-    # Service handles caching internally via sector_peers_cache
-    return service.get_sector_peers(symbol, limit)
+    cache_key = f"{symbol}:{limit}"
+    payload = sector_peers_response_cache.get_or_load(
+        cache_key,
+        lambda: service.get_sector_peers(symbol, limit).model_dump(mode="json"),
+        suppress_failure=lambda exc: isinstance(exc, VnstockUnavailable),
+    )
+    return SectorPeersResponse.model_validate(payload)
