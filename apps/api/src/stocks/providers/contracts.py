@@ -265,11 +265,22 @@ class MarketDataProvider(Protocol):
 
 
 class ValuationDataProvider(Protocol):
-    """Collect provider-published valuation ratios for a bounded universe."""
+    """Collect provider-published valuation ratios for a bounded universe.
+
+    Ratios are a daily series rather than a single current value, so the window
+    is required rather than defaulted: a collector asks for the session that
+    just closed while a backfill asks for a stretch of history, and a default
+    would quietly hand one of them the other's window.
+    """
 
     source: ProviderSource
 
-    def fetch_valuation(self, symbols: Sequence[str]) -> Sequence[ValuationSnapshot]: ...
+    def fetch_valuation(
+        self,
+        symbols: Sequence[str],
+        from_date: date,
+        to_date: date,
+    ) -> Sequence[ValuationSnapshot]: ...
 
 
 class ReferenceDataProvider(Protocol):
