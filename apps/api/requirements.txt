@@ -22,6 +22,7 @@ python-multipart>=0.0.6
 tenacity>=8.2.0
 
 # Cache & Rate Limiting
+redis>=5.0.0,<9.0.0
 upstash-redis>=1.0.0
 upstash-ratelimit>=1.0.0
 
@@ -29,6 +30,8 @@ upstash-ratelimit>=1.0.0
 # Pinned to 4.x: 3.x -> 4.x renamed the industry columns this app reads
 # (icb_code2/icb_name2 -> industry_code/industry_name), which failed silently.
 vnstock>=4.0.0,<5.0.0
+# FiinQuantX is distributed from the provider's signed GitHub release, not PyPI.
+fiinquantx @ https://github.com/fiinquant/fiinquantx/releases/download/0.1.67/fiinquantx-0.1.67-py3-none-any.whl#sha256=92d8f1dc44717e2d895176668a811c8f3940a4cd74de2da8738572ed626276eb
 pandas>=2.0.0,<3.0.0
 numpy>=1.24.0,<3.0.0
 

@@ -8,6 +8,19 @@
 name: stockmassive
 
 services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - stockmassive-network
+
   db:
     image: postgres:16-alpine
     environment:
@@ -37,12 +50,15 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
       UPSTASH_REDIS_REST_TOKEN: ${UPSTASH_REDIS_REST_TOKEN:-}
+      CACHE_REDIS_URL: ${CACHE_REDIS_URL:-redis://redis:6379/0}
       # Read by vnstock; without it the quota is 20 req/min instead of 60
       VNSTOCK_API_KEY: ${VNSTOCK_API_KEY:-}
       SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
-      DAILY_OHLCV_ENABLED: ${DAILY_OHLCV_ENABLED:-true}
+      # Full-market OHLCV exhausts the vnstock Guest quota and starves the UI.
+      DAILY_OHLCV_ENABLED: ${DAILY_OHLCV_ENABLED:-false}
       DAILY_OHLCV_DELAY: ${DAILY_OHLCV_DELAY:-2.0}
       DAILY_OHLCV_BATCH_SIZE: ${DAILY_OHLCV_BATCH_SIZE:-50}
+      SECTOR_HISTORICAL_ENABLED: ${SECTOR_HISTORICAL_ENABLED:-false}
     volumes:
       - ./apps/api/src:/code/src
       - ./apps/api/alembic:/code/alembic
@@ -51,6 +67,8 @@ services:
       - "${API_PORT:-8000}:8000"
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - stockmassive-network
@@ -81,6 +99,7 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
 
 networks:
   stockmassive-network:

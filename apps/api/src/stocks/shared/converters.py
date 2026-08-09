@@ -32,3 +32,17 @@ def safe_float_millions(value: Any) -> Optional[float]:
     """
     raw = safe_float(value)
     return None if raw is None else raw / 1_000_000
+
+
+def market_cap_billions(price_vnd: Any, shares: Any) -> Optional[float]:
+    """Calculate market capitalization in billion VND.
+
+    vnstock 4 price-board prices are plain VND and share counts are individual
+    shares. Normalize those units once so provider integrations cannot apply a
+    legacy thousands-of-VND multiplier.
+    """
+    price = safe_float(price_vnd)
+    share_count = safe_float(shares)
+    if price is None or share_count is None or price <= 0 or share_count <= 0:
+        return None
+    return price * share_count / 1_000_000_000
