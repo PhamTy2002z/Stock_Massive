@@ -191,6 +191,8 @@ class TestConfigSettings:
         assert settings.intraday_collect_minute == 30
         assert settings.intraday_retention_days == 30
         assert "VCB" in settings.intraday_symbols
+        assert settings.daily_ohlcv_enabled is False
+        assert settings.sector_historical_enabled is False
 
     def test_scheduler_symbols_parsing(self):
         """Test parsing of comma-separated symbols."""
