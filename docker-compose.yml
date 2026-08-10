@@ -53,6 +53,16 @@ services:
       CACHE_REDIS_URL: ${CACHE_REDIS_URL:-redis://redis:6379/0}
       # Read by vnstock; without it the quota is 20 req/min instead of 60
       VNSTOCK_API_KEY: ${VNSTOCK_API_KEY:-}
+      # The Collector is the only path that logs into FiinQuant. Left unpassed,
+      # the container starts perfectly well and collects nothing — the same
+      # silent-empty failure mode the CA bundle fix exists to prevent.
+      FIINQUANT_USERNAME: ${FIINQUANT_USERNAME:-}
+      FIINQUANT_PASSWORD: ${FIINQUANT_PASSWORD:-}
+      # The symbols the system commits to collecting and serving. Empty is a
+      # legitimate Universe — the app runs and the Collector has nothing to do.
+      UNIVERSE_SYMBOLS: ${UNIVERSE_SYMBOLS:-}
+      COLLECTOR_ENABLED: ${COLLECTOR_ENABLED:-true}
+      BACKFILL_ENABLED: ${BACKFILL_ENABLED:-false}
       SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
       # Full-market OHLCV exhausts the vnstock Guest quota and starves the UI.
       DAILY_OHLCV_ENABLED: ${DAILY_OHLCV_ENABLED:-false}
