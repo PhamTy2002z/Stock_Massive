@@ -15,6 +15,7 @@ export const queryKeys = {
   // Stock detail
   stock: (symbol: string) => ["stock", symbol] as const,
   stockDetail: (symbol: string) => [...queryKeys.stock(symbol), "detail"] as const,
+  symbolSnapshot: (symbol: string) => [...queryKeys.stock(symbol), "snapshot"] as const,
 
   // Financials
   incomeStatement: (symbol: string, period: PeriodType, limit: number) =>

@@ -14,6 +14,8 @@ import {
   StockValuationVsSectorSkeleton,
   StockProfileSidebar,
   StockProfileSidebarSkeleton,
+  StockSnapshotPanel,
+  StockSnapshotPanelSkeleton,
   StockTickerHeaderSkeleton,
   StockDetailEmpty,
   StockDetailTabs,
@@ -121,6 +123,12 @@ function StockDetailInner({ symbol }: { symbol: string }) {
                 />
                 <Suspense fallback={<StockValuationVsSectorSkeleton />}>
                   <StockValuationVsSector symbol={data.symbol} />
+                </Suspense>
+                {/* Last, because it is the only block that dates its numbers:
+                    read after the live figures above, it says which session
+                    this system actually holds for the symbol. */}
+                <Suspense fallback={<StockSnapshotPanelSkeleton />}>
+                  <StockSnapshotPanel symbol={data.symbol} />
                 </Suspense>
               </div>
             )}

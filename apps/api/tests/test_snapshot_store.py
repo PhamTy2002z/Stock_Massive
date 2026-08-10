@@ -76,13 +76,13 @@ def test_save_is_idempotent_and_refreshes_redis():
     assert redis.values
 
 
-def test_a_session_recollected_with_fuller_numbers_revises_the_row():
-    """One session is one row, whatever the provider had filled in when.
+def test_a_session_recollected_with_fuller_numbers_revises_its_snapshot():
+    """One session is one Snapshot, whatever the provider had filled in when.
 
     FiinQuant publishes the session that just closed before its active buy/sell
     split, so the next cycle re-reads the same session with more in it. Keyed by
-    the session that write revises the row; keyed by anything finer — the tick
-    the bar was stamped at, say — the fuller numbers would land beside the
+    the session that write revises the Snapshot; keyed by anything finer — the
+    tick the bar was stamped at, say — the fuller numbers would land beside the
     partial ones, and a reader taking the newest session would get the partial
     bar because its stamp is later in the day.
     """
