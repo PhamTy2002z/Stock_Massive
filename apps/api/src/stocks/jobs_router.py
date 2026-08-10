@@ -9,6 +9,8 @@ from pydantic import BaseModel
 from src.auth.dependencies import require_admin
 from src.core.job_status_store import job_store
 from src.core.ratelimit import heavy_rate_limit
+from src.core.config import get_settings
+from src.stocks.collector_schedule import COLLECTOR_JOB_ID
 from src.stocks.schemas.common import MessageResponse
 
 # Must match the id jobs.py registers for this collector.
@@ -63,6 +65,70 @@ def get_jobs_status() -> list[JobStatusResponse]:
         )
         for s in statuses
     ]
+
+
+class CollectorRunResponse(BaseModel):
+    """The last collection cycle, in the terms an operator judges it by."""
+
+    status: Literal["pending", "running", "completed", "failed"]
+    started_at: str | None
+    completed_at: str | None
+    result: dict | None
+    error: str | None
+
+
+@router.get("/collector", response_model=CollectorRunResponse)
+def get_collector_run() -> CollectorRunResponse:
+    """Report the last collection cycle, whenever it ran.
+
+    A cycle that has never run is a 404 rather than an invented empty one, so
+    a fresh deployment reads differently from a collector that ran and wrote
+    nothing.
+    """
+    status = job_store.get_status(COLLECTOR_JOB_ID)
+    if status is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Chưa có chu kỳ thu thập nào chạy trong tiến trình này.",
+        )
+    return CollectorRunResponse(
+        status=status.status,
+        started_at=status.started_at.isoformat() if status.started_at else None,
+        completed_at=status.completed_at.isoformat() if status.completed_at else None,
+        result=status.result,
+        error=status.error,
+    )
+
+
+@router.post(
+    "/trigger/collector",
+    response_model=MessageResponse,
+    dependencies=[Depends(heavy_rate_limit), Depends(require_admin)],
+)
+async def trigger_collector_job(background_tasks: BackgroundTasks) -> MessageResponse:
+    """Run one collection cycle now, whatever the calendar says.
+
+    Filling a gap after a bad day is what this is for, so it does not wait for
+    the next trading day the scheduled run would. It does respect the
+    configuration switch: an operator who turned the collector off turned off
+    every path that reaches a Provider Source, not just the scheduled one.
+    """
+    from src.stocks.collector_schedule import collect_universe_snapshots
+
+    if not get_settings().collector_enabled:
+        raise HTTPException(
+            status_code=409,
+            detail="Collector đang tắt trong cấu hình (COLLECTOR_ENABLED).",
+        )
+
+    if job_store.is_running(COLLECTOR_JOB_ID):
+        raise HTTPException(
+            status_code=409,
+            detail="Chu kỳ thu thập đang chạy. Theo dõi tại /jobs/collector.",
+        )
+
+    background_tasks.add_task(collect_universe_snapshots, force=True)
+    return MessageResponse(message="Collection cycle triggered", status="started")
 
 
 @router.post(

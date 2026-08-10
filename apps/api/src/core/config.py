@@ -86,6 +86,17 @@ class Settings(BaseSettings):
     financial_statements_minute: int = 0
     financial_statements_delay: float = 2.0  # seconds between API calls
 
+    # Collector — chu kỳ thu thập Snapshot cho Universe (src/stocks/collector.py).
+    # Bật mặc định: Universe rỗng thì chu kỳ không làm gì, và với Universe đã khai
+    # thì đây là đường duy nhất dữ liệu chảy vào SnapshotStore. Chạy sau khi thị
+    # trường đóng cửa lúc 15:00. Đặt 16:15 để không đụng khung giờ của các job
+    # sẵn có (intraday 15:30, sector historical 15:45, cleanup và OHLCV 16:00):
+    # tiến trình chỉ có một worker, và hai job gọi ra nhà cung cấp cùng lúc là
+    # hai job tranh nhau đúng một kết nối FiinQuant.
+    collector_enabled: bool = True
+    collector_hour: int = 16
+    collector_minute: int = 15
+
     # Rate Limiting
     rate_limit_enabled: bool = True
     rate_limit_standard_max: int = 100  # requests per window
