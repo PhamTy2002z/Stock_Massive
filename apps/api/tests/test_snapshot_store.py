@@ -335,3 +335,144 @@ def test_latest_never_calls_a_secondary_provider_on_cache_miss():
         )
 
     assert result is None
+
+
+def market_session(
+    session_day: date,
+    source: ProviderSource,
+    observed_at: datetime,
+    last_price: float,
+    symbol: str = "VCB",
+) -> MarketSnapshot:
+    return MarketSnapshot(
+        symbol=symbol,
+        metadata=SnapshotMetadata(
+            source=source,
+            effective_at=datetime(
+                session_day.year, session_day.month, session_day.day, tzinfo=timezone.utc
+            ),
+            observed_at=observed_at,
+        ),
+        last_price=last_price,
+        volume=1_000,
+    )
+
+
+def series_store(sessions: list[MarketSnapshot]) -> tuple[SnapshotStore, Session]:
+    engine = create_engine("sqlite://")
+    ProviderSnapshot.__table__.create(engine)
+    session = Session(engine)
+    store = SnapshotStore(session, redis=MemoryRedis())
+    for snapshot in sessions:
+        store.save(Capability.MARKET, snapshot)
+    session.commit()
+    return store, session
+
+
+NOW = datetime(2026, 8, 10, 12, tzinfo=timezone.utc)
+
+
+def test_series_stitches_the_cover_source_onto_the_main_one():
+    """History is two sources end to end, and the seam has to stay visible.
+
+    Backfill loads the deep years from the Cover Source and the Collector
+    writes the recent ones from the Main Source. A reader asking for a decade
+    wants one series, but it must be able to see which provider stands behind
+    any given session — the two are normalized to the same unit, not measured
+    the same way.
+    """
+    store, session = series_store(
+        [
+            market_session(date(2019, 3, 1), ProviderSource.VNSTOCK, NOW, 30_000),
+            market_session(date(2026, 8, 7), ProviderSource.FIINQUANT, NOW, 59_700),
+            market_session(date(2026, 8, 10), ProviderSource.FIINQUANT, NOW, 60_300),
+        ]
+    )
+    with session:
+        result = store.series(Capability.MARKET, "vcb", now=NOW)
+
+    assert [snapshot.metadata.effective_at.date() for snapshot in result.snapshots] == [
+        date(2019, 3, 1),
+        date(2026, 8, 7),
+        date(2026, 8, 10),
+    ]
+    assert [snapshot.metadata.source for snapshot in result.snapshots] == [
+        ProviderSource.VNSTOCK,
+        ProviderSource.FIINQUANT,
+        ProviderSource.FIINQUANT,
+    ]
+
+
+def test_series_judges_staleness_on_the_newest_session_alone():
+    """A decade of history is old by definition; only its end can be stale."""
+    store, session = series_store(
+        [
+            market_session(date(2019, 3, 1), ProviderSource.VNSTOCK, NOW, 30_000),
+            market_session(date(2026, 8, 10), ProviderSource.FIINQUANT, NOW, 60_300),
+        ]
+    )
+    with session:
+        result = store.series(Capability.MARKET, "VCB", now=NOW)
+
+    assert result.stale is False
+    assert result.age_seconds == 12 * 3600
+
+
+def test_series_prefers_the_main_source_where_both_cover_a_session():
+    """The backfill window and the daily cycle overlap; one session is one point.
+
+    Returning both would draw the same day twice, and picking by write order
+    would let a backfill run after a collection replace a richer session with a
+    quote history's version of it.
+    """
+    store, session = series_store(
+        [
+            market_session(date(2026, 8, 7), ProviderSource.VNSTOCK, NOW, 59_000),
+            market_session(date(2026, 8, 7), ProviderSource.FIINQUANT, NOW, 59_700),
+        ]
+    )
+    with session:
+        result = store.series(Capability.MARKET, "VCB", now=NOW)
+
+    assert len(result.snapshots) == 1
+    assert result.snapshots[0].metadata.source is ProviderSource.FIINQUANT
+    assert result.snapshots[0].last_price == 59_700
+
+
+def test_series_keeps_to_the_window_it_was_asked_for():
+    store, session = series_store(
+        [
+            market_session(date(2026, 8, 5), ProviderSource.FIINQUANT, NOW, 58_000),
+            market_session(date(2026, 8, 7), ProviderSource.FIINQUANT, NOW, 59_700),
+            market_session(date(2026, 8, 10), ProviderSource.FIINQUANT, NOW, 60_300),
+        ]
+    )
+    with session:
+        result = store.series(
+            Capability.MARKET,
+            "VCB",
+            start=date(2026, 8, 6),
+            end=date(2026, 8, 7),
+            now=NOW,
+        )
+
+    assert [snapshot.last_price for snapshot in result.snapshots] == [59_700]
+
+
+def test_a_window_with_no_sessions_in_it_is_empty_rather_than_missing():
+    """A shut week is a normal answer, and not the same as an unknown symbol."""
+    store, session = series_store(
+        [market_session(date(2026, 8, 10), ProviderSource.FIINQUANT, NOW, 60_300)]
+    )
+    with session:
+        result = store.series(
+            Capability.MARKET,
+            "VCB",
+            start=date(2026, 1, 1),
+            end=date(2026, 1, 3),
+            now=NOW,
+        )
+
+    assert result.snapshots == ()
+    assert result.age_seconds is None
+    assert result.stale is False

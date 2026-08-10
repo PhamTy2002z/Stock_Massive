@@ -2,8 +2,11 @@
 
 import { useQuery } from "@tanstack/react-query"
 import {
+  fetchMarketSeries,
   fetchStockHistory,
   type HistoryInterval,
+  type MarketBar,
+  type SessionInterval,
   type StockPricePoint,
 } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
@@ -30,6 +33,30 @@ const rangeConfig: Record<PriceRange, { days: number; interval: HistoryInterval 
 
 const isoDate = (date: Date) => date.toISOString().slice(0, 10)
 
+/** Whether a range is made of whole sessions, which is all the store holds. */
+const isSessionInterval = (interval: HistoryInterval): interval is SessionInterval =>
+  interval === "1D" || interval === "1W" || interval === "1M"
+
+/**
+ * A stored bar in the shape the chart already draws.
+ *
+ * The store answers with nulls where it holds nothing; a candle needs four
+ * numbers, so a bar missing any of them is dropped rather than drawn at zero.
+ */
+function toPricePoint(bar: MarketBar): StockPricePoint | null {
+  const { open_price, high_price, low_price, close_price } = bar
+  if (open_price === null || high_price === null || low_price === null) return null
+  if (close_price === null) return null
+  return {
+    time: bar.effective_at,
+    open: open_price,
+    high: high_price,
+    low: low_price,
+    close: close_price,
+    volume: bar.volume ?? 0,
+  }
+}
+
 /**
  * The most recent session in the series.
  *
@@ -45,9 +72,16 @@ function lastSession(points: StockPricePoint[]): StockPricePoint[] {
 /**
  * Price history for the deep-dive chart.
  *
- * Deliberately not polled: /history goes straight to the upstream provider on a
- * cache miss, and a chart that refetches on a timer is what exhausts the quota
- * everything else on the page shares.
+ * Whole-session ranges come from the store, which holds them for every symbol
+ * the Collector covers — no provider call, and the same sessions the rest of
+ * the page is dated by. A symbol outside the Universe has nothing stored, and
+ * the store says so with a 404 rather than an empty chart; that falls back to
+ * the frozen provider-backed route, which is also the only path for the intraday
+ * range, since the store holds one bar per session and no finer.
+ *
+ * Deliberately not polled: the fallback goes straight to the upstream provider
+ * on a cache miss, and a chart that refetches on a timer is what exhausts the
+ * quota everything else on the page shares.
  */
 export function usePriceHistory(symbol: string, range: PriceRange) {
   return useQuery<StockPricePoint[]>({
@@ -57,6 +91,16 @@ export function usePriceHistory(symbol: string, range: PriceRange) {
       const end = new Date()
       const start = new Date(end)
       start.setDate(start.getDate() - days)
+
+      if (isSessionInterval(interval)) {
+        const stored = await fetchMarketSeries(
+          symbol,
+          isoDate(start),
+          isoDate(end),
+          interval
+        )
+        if (stored !== null) return stored.points.map(toPricePoint).filter(Boolean) as StockPricePoint[]
+      }
 
       const points = await fetchStockHistory(symbol, isoDate(start), isoDate(end), interval)
       return range === "1D" ? lastSession(points) : points

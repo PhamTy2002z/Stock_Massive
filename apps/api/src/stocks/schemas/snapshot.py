@@ -118,3 +118,55 @@ class SymbolSnapshotResponse(StrictModel):
     valuation: ValuationSection | None = None
     reference: ReferenceSection | None = None
     fundamental: FundamentalSection | None = None
+
+
+class SeriesPoint(StrictModel):
+    """One session in a series, with the source that answered for it.
+
+    The source travels per point rather than per series because history is two
+    providers end to end — the Cover Source loaded the deep years, the Main
+    Source writes each session as it closes — and a reader comparing a 2019 bar
+    with last week's is comparing two measurements, not one.
+    """
+
+    effective_at: datetime
+    source: str
+
+
+class MarketBar(SeriesPoint):
+    """One bar. Aggregated bars carry the source of the sessions they span."""
+
+    open_price: float | None = None
+    high_price: float | None = None
+    low_price: float | None = None
+    close_price: float | None = None
+    volume: int | None = None
+    total_value_vnd: float | None = None
+
+
+class ValuationPoint(SeriesPoint):
+    provider_pe: float | None = None
+    provider_pb: float | None = None
+
+
+class SeriesResponse(StrictModel):
+    """A stretch of sessions, dated the same way a snapshot is.
+
+    ``age_seconds`` and ``stale`` describe the newest session only. The rest of
+    the series is old by definition, and a flag per point would turn a healthy
+    decade into a decade of warnings. ``age_seconds`` is null for a window the
+    store holds no sessions in, which is what a shut week looks like.
+    """
+
+    symbol: str
+    age_seconds: int | None = None
+    stale: bool = False
+
+
+class MarketSeriesResponse(SeriesResponse):
+    interval: str
+    points: list[MarketBar] = []
+
+
+class ValuationSeriesResponse(SeriesResponse):
+    points: list[ValuationPoint] = []

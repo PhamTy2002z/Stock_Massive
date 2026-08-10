@@ -309,6 +309,74 @@ class FiinQuantMarketProvider(FiinQuantProviderBase):
             "FiinQuant market fetch failed",
         )
 
+    def fetch_market_history(
+        self,
+        symbol: str,
+        from_date: date,
+        to_date: date,
+    ) -> Sequence[MarketSnapshot]:
+        """Read every session in a window, for the one-time history load.
+
+        ``fetch_market`` answers with the session that just closed; this answers
+        with all of them, which is what a multi-year chart is made of. The frame
+        and the normalization are the same — only how much of it is kept differs.
+
+        The two ``PriceStatistics`` calls are not made. They answer for one
+        session, and a load that stamped today's market cap or price band onto a
+        session from 2019 would be inventing figures that look measured.
+        """
+        if from_date > to_date:
+            raise ValueError("from_date cannot be later than to_date")
+        normalized = self._batch([symbol])
+        if not normalized:
+            return ()
+
+        return self._protected(
+            lambda: self._fetch_history(normalized[0], from_date, to_date),
+            "FiinQuant market history fetch failed",
+        )
+
+    def _fetch_history(
+        self,
+        symbol: str,
+        from_date: date,
+        to_date: date,
+    ) -> tuple[MarketSnapshot, ...]:
+        candles = self._get_session().Fetch_Trading_Data(
+            realtime=False,
+            tickers=[symbol],
+            fields=MARKET_FIELDS,
+            adjusted=False,
+            by="1d",
+            from_date=str(from_date),
+            to_date=str(to_date),
+        ).get_data()
+
+        _require_populated(candles, "market history")
+        sessions = _prepare(candles, ("ticker", "timestamp", *MARKET_FIELDS), (symbol,))
+        observed_at = self._now()
+
+        snapshots: list[MarketSnapshot] = []
+        previous: pd.Series | None = None
+        for session in _one_row_per_session(sessions, symbol):
+            snapshot = _build_snapshot(
+                symbol=symbol,
+                source=self.source,
+                observed_at=observed_at,
+                latest=session,
+                previous=previous,
+                overview=None,
+                band=None,
+            )
+            # A session the contract refuses is skipped, but it still stands as
+            # the reference for the next one: the market moved from that close
+            # whether or not this system could store it.
+            previous = session
+            if snapshot is not None:
+                snapshots.append(snapshot)
+
+        return tuple(snapshots)
+
     def _fetch_batch(self, symbols: Sequence[str]) -> tuple[MarketSnapshot, ...]:
         session = self._get_session()
         tickers = list(symbols)
@@ -642,17 +710,14 @@ def _row_for_date(row: pd.Series | None, session_date: date) -> pd.Series | None
     return row
 
 
-def _last_two_sessions(
-    frame: pd.DataFrame,
-    symbol: str,
-) -> tuple[pd.Series | None, pd.Series | None]:
-    """Return this session and the one before it, collapsing same-day rows.
+def _one_row_per_session(frame: pd.DataFrame, symbol: str) -> list[pd.Series]:
+    """This symbol's sessions, oldest first, one row each.
 
     The provider can return two rows for the current session: the consolidated
     bar stamped midnight, plus a live one stamped at the last tick. The midnight
     row is the one whose volume and value were measured to match
     ``get_overview`` exactly, so it is preferred wherever a date has both. That
-    also leaves one row per date, so the previous session is a real previous day
+    also leaves one row per date, so a previous session is a real previous day
     rather than today seen twice.
 
     Hours after the close the live row can still be the only one there — the
@@ -660,17 +725,25 @@ def _last_two_sessions(
     traded and why an unpublished bu/sd is read as a gap.
     """
     if frame.empty:
-        return None, None
+        return []
     rows = frame[(frame["ticker"] == symbol) & frame["close"].notna()]
     if rows.empty:
-        return None, None
-
-    sessions = [
+        return []
+    return [
         _consolidated_bar(day_rows)
         for _, day_rows in rows.groupby(rows["timestamp"].dt.date, sort=True)
     ]
-    previous = sessions[-2] if len(sessions) > 1 else None
-    return sessions[-1], previous
+
+
+def _last_two_sessions(
+    frame: pd.DataFrame,
+    symbol: str,
+) -> tuple[pd.Series | None, pd.Series | None]:
+    """Return this session and the one before it, for the daily read."""
+    sessions = _one_row_per_session(frame, symbol)
+    if not sessions:
+        return None, None
+    return sessions[-1], (sessions[-2] if len(sessions) > 1 else None)
 
 
 def _consolidated_bar(day_rows: pd.DataFrame) -> pd.Series:
