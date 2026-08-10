@@ -34,16 +34,36 @@ SNAPSHOT_MODEL_BY_CAPABILITY = {
     Capability.FUNDAMENTAL: FundamentalSnapshot,
 }
 
+# How long a snapshot stands before the serving path calls it old.
+#
+# The collector runs once a session, so the shortest honest threshold is longer
+# than the longest ordinary gap between two runs: a Friday close is still the
+# latest close on Monday, and a public holiday stretches that further. Four days
+# clears a long weekend and still raises the flag once the collector has missed
+# several sessions on end. Anything tighter — the 300 seconds this held while
+# requests went straight to a live feed — would flag every evening the app is
+# used, and a warning that is always on is one nobody reads.
+EOD_MAX_AGE_SECONDS = 4 * 24 * 60 * 60
+
 MAX_AGE_SECONDS = {
-    Capability.MARKET: 300,
-    Capability.VALUATION: 24 * 60 * 60,
+    Capability.MARKET: EOD_MAX_AGE_SECONDS,
+    Capability.VALUATION: EOD_MAX_AGE_SECONDS,
+    # Ownership and share counts change on corporate actions, not on sessions,
+    # so this one keeps its own, slower threshold.
     Capability.REFERENCE: 7 * 24 * 60 * 60,
-    Capability.FUNDAMENTAL: 24 * 60 * 60,
+    Capability.FUNDAMENTAL: EOD_MAX_AGE_SECONDS,
 }
 
 
 @dataclass(frozen=True)
 class SnapshotRead:
+    """A stored snapshot together with how old the data in it is.
+
+    ``age_seconds`` counts from ``effective_at`` — the moment the data speaks
+    about — so it answers "how old is this number", not "how long ago did a job
+    run".
+    """
+
     snapshot: SymbolSnapshot
     stale: bool
     age_seconds: int
@@ -154,7 +174,13 @@ class SnapshotStore:
                     ProviderSnapshot.symbol == symbol.upper(),
                     ProviderSnapshot.source == source.value,
                 )
-                .order_by(ProviderSnapshot.observed_at.desc())
+                # Newest session first, not newest write: a re-run over an
+                # older session writes a later observed_at, and ordering by
+                # that would hand the reader last week's close.
+                .order_by(
+                    ProviderSnapshot.effective_at.desc(),
+                    ProviderSnapshot.observed_at.desc(),
+                )
                 .limit(1)
             ).scalar_one_or_none()
             if row is None:
@@ -162,9 +188,13 @@ class SnapshotStore:
             snapshot = SNAPSHOT_MODEL_BY_CAPABILITY[capability].model_validate(row.payload)
             self._cache_snapshot(capability, snapshot)
 
+        # Age belongs to the data, not to the job that fetched it. Measured
+        # from observed_at, a collector re-reading a week-old session would
+        # report it as seconds old and switch the stale flag off on precisely
+        # the day it is needed.
         current = now or datetime.now(timezone.utc)
-        observed_at = snapshot.metadata.observed_at
-        age_seconds = max(0, int((current - observed_at).total_seconds()))
+        effective_at = snapshot.metadata.effective_at
+        age_seconds = max(0, int((current - effective_at).total_seconds()))
         return SnapshotRead(
             snapshot=snapshot,
             stale=age_seconds > MAX_AGE_SECONDS[capability],

@@ -1,0 +1,120 @@
+"""Public shape of what the store holds for one symbol.
+
+These are REST response models, deliberately separate from the ingestion
+contracts in ``src.stocks.providers.contracts``: the wire shape is a promise to
+the interface, and it must not move every time a provider's normalized form
+does.
+
+The separation costs something. A section is built by dumping a snapshot into
+the model here, and these models forbid unknown fields, so a field added to an
+ingestion contract and forgotten here raises while a request is being served —
+a 500 rather than a quietly missing number. ``test_snapshot_serving`` compares
+the two field-by-field so the mismatch is caught in the suite instead.
+"""
+
+from datetime import date, datetime
+
+from .common import StrictModel
+
+
+class SnapshotSection(StrictModel):
+    """Where one part of the answer came from, and how old it is.
+
+    Age travels with the data rather than beside it, because a caller holding a
+    figure without its age has no way to ask later.
+    """
+
+    source: str
+    effective_at: datetime
+    observed_at: datetime
+    age_seconds: int
+    stale: bool
+
+
+class MarketData(StrictModel):
+    """The traded session, in VND, as the collector normalized it."""
+
+    price_unit: str
+    last_price: float | None = None
+    reference_price: float | None = None
+    open_price: float | None = None
+    high_price: float | None = None
+    low_price: float | None = None
+    ceiling_price: float | None = None
+    floor_price: float | None = None
+    change_pct: float | None = None
+    volume: int | None = None
+    total_value_vnd: float | None = None
+    active_buy_volume: int | None = None
+    active_sell_volume: int | None = None
+    foreign_buy_volume: int | None = None
+    foreign_sell_volume: int | None = None
+    foreign_buy_value_vnd: float | None = None
+    foreign_sell_value_vnd: float | None = None
+    foreign_net_value_vnd: float | None = None
+    market_cap_vnd: float | None = None
+
+
+class MarketSection(SnapshotSection):
+    data: MarketData
+
+
+class ValuationData(StrictModel):
+    """Ratios as the provider published them, not recomputed here."""
+
+    provider_pe: float | None = None
+    provider_pb: float | None = None
+
+
+class ValuationSection(SnapshotSection):
+    data: ValuationData
+
+
+class ShareCountItem(StrictModel):
+    """A share count that keeps saying which count it is.
+
+    Outstanding, listed and issued are different numbers, and a response that
+    dropped the distinction would invite someone to divide by the wrong one.
+    """
+
+    share_type: str
+    value: int
+
+
+class ReferenceData(StrictModel):
+    """Ownership structure — slow-changing, and never inferred from price."""
+
+    shares: list[ShareCountItem] = []
+    current_foreign_room: int | None = None
+    total_foreign_room: int | None = None
+
+
+class ReferenceSection(SnapshotSection):
+    data: ReferenceData
+
+
+class FundamentalData(StrictModel):
+    """Statement inputs, dated by the period they close rather than by run."""
+
+    period_end: date
+    trailing_12_month_net_income_vnd: float | None = None
+    parent_equity_vnd: float | None = None
+
+
+class FundamentalSection(SnapshotSection):
+    data: FundamentalData
+
+
+class SymbolSnapshotResponse(StrictModel):
+    """Everything the store holds for one symbol, part by part.
+
+    A part the store has nothing for is ``null`` rather than absent: the symbol
+    is watched either way, and the interface needs to tell "not collected yet"
+    apart from "this symbol is not ours".
+    """
+
+    symbol: str
+    market: MarketSection | None = None
+    valuation: ValuationSection | None = None
+    reference: ReferenceSection | None = None
+    fundamental: FundamentalSection | None = None
