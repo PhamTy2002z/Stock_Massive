@@ -839,3 +839,103 @@ export async function fetchIntradayTicks(
     `/stocks/${encodeURIComponent(symbol)}/intraday?page_size=${pageSize}`
   )
 }
+
+
+// === Snapshot serving ===
+//
+// The one route that answers from the store instead of from a provider. Every
+// figure arrives with the Provider Source behind it and the age of the session
+// it describes, because a number shown without its age invites the reader to
+// assume it is current.
+
+/** Where one part of the answer came from, and how old the data in it is. */
+export interface SnapshotSectionMeta {
+  source: string
+  /** The session this describes, not the moment it was fetched. */
+  effective_at: string
+  observed_at: string
+  age_seconds: number
+  stale: boolean
+}
+
+export interface SnapshotSection<TData> extends SnapshotSectionMeta {
+  data: TData
+}
+
+export interface MarketSnapshotData {
+  price_unit: string
+  last_price: number | null
+  reference_price: number | null
+  open_price: number | null
+  high_price: number | null
+  low_price: number | null
+  ceiling_price: number | null
+  floor_price: number | null
+  change_pct: number | null
+  volume: number | null
+  total_value_vnd: number | null
+  active_buy_volume: number | null
+  active_sell_volume: number | null
+  foreign_buy_volume: number | null
+  foreign_sell_volume: number | null
+  foreign_buy_value_vnd: number | null
+  foreign_sell_value_vnd: number | null
+  foreign_net_value_vnd: number | null
+  market_cap_vnd: number | null
+}
+
+export interface ValuationSnapshotData {
+  provider_pe: number | null
+  provider_pb: number | null
+}
+
+/** Outstanding, listed and issued are different numbers; the type travels with the count. */
+export interface ShareCountItem {
+  share_type: string
+  value: number
+}
+
+export interface ReferenceSnapshotData {
+  shares: ShareCountItem[]
+  current_foreign_room: number | null
+  total_foreign_room: number | null
+}
+
+export interface FundamentalSnapshotData {
+  period_end: string
+  trailing_12_month_net_income_vnd: number | null
+  parent_equity_vnd: number | null
+}
+
+/**
+ * Everything the store holds for one symbol, part by part.
+ *
+ * A part with nothing collected yet is `null` rather than absent, which is how
+ * "not collected" stays distinguishable from "not a capability".
+ */
+export interface SymbolSnapshot {
+  symbol: string
+  market: SnapshotSection<MarketSnapshotData> | null
+  valuation: SnapshotSection<ValuationSnapshotData> | null
+  reference: SnapshotSection<ReferenceSnapshotData> | null
+  fundamental: SnapshotSection<FundamentalSnapshotData> | null
+}
+
+/**
+ * What the collector holds for one symbol, or `null` when it holds nothing.
+ *
+ * A 404 from this route is an answer about the Universe rather than a failure:
+ * the symbol is one this system has not been asked to follow, and the UI says
+ * exactly that. A malformed symbol still throws — the caller validated it
+ * before asking, so a 422 is a bug on this side, not a fact about the market.
+ */
+export async function fetchSymbolSnapshot(symbol: string): Promise<SymbolSnapshot | null> {
+  try {
+    return await fetchApi<SymbolSnapshot>(
+      `/stocks/${encodeURIComponent(symbol)}/snapshot`
+    )
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return null
+    throw error
+  }
+}
