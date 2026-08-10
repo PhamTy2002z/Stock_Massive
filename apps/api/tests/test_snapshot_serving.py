@@ -109,15 +109,22 @@ def reference_snapshot(observed_at: datetime = OBSERVED_AT) -> ReferenceSnapshot
     )
 
 
-def fundamental_snapshot(observed_at: datetime = OBSERVED_AT) -> FundamentalSnapshot:
+def fundamental_snapshot(
+    observed_at: datetime = OBSERVED_AT,
+    period_end: date | None = None,
+) -> FundamentalSnapshot:
+    # effective_at follows the period end, the way the vnstock adapter dates a
+    # statement: the data speaks about the quarter, not about the day it was
+    # fetched.
+    closed = period_end or observed_at.date()
     return FundamentalSnapshot(
         symbol="VCB",
         metadata=SnapshotMetadata(
             source=ProviderSource.VNSTOCK,
-            effective_at=observed_at,
+            effective_at=datetime.combine(closed, datetime.min.time(), tzinfo=timezone.utc),
             observed_at=observed_at,
         ),
-        period_end=date(2026, 6, 30),
+        period_end=closed,
         trailing_12_month_net_income_vnd=33_000_000_000_000,
         parent_equity_vnd=190_000_000_000_000,
     )
@@ -174,7 +181,11 @@ class TestASymbolTheSystemWatches:
         write(engine, Capability.MARKET, market_snapshot())
         write(engine, Capability.VALUATION, valuation_snapshot())
         write(engine, Capability.REFERENCE, reference_snapshot())
-        write(engine, Capability.FUNDAMENTAL, fundamental_snapshot())
+        write(
+            engine,
+            Capability.FUNDAMENTAL,
+            fundamental_snapshot(period_end=date(2026, 6, 30)),
+        )
 
         body = serve(engine, "VCB").json()
 
@@ -267,15 +278,50 @@ class TestHowOldTheDataIs:
         """Once the collector has been down through several sessions, the
         number on screen is no longer the market and says so."""
         engine = database()
-        observed_at = datetime.now(timezone.utc) - timedelta(days=6)
+        observed_at = datetime.now(timezone.utc) - timedelta(days=10)
         write(engine, Capability.MARKET, market_snapshot(observed_at=observed_at))
         write(engine, Capability.VALUATION, valuation_snapshot(observed_at))
-        write(engine, Capability.FUNDAMENTAL, fundamental_snapshot(observed_at))
+        write(engine, Capability.REFERENCE, reference_snapshot(observed_at))
 
         body = serve(engine, "VCB").json()
 
+        # Statements are deliberately absent here: they run on a quarterly
+        # clock and are judged by their own threshold, two tests below.
         assert body["market"]["stale"] is True
         assert body["valuation"]["stale"] is True
+        assert body["reference"]["stale"] is True
+
+    def test_the_latest_quarter_is_not_old_news_six_weeks_after_it_closed(self):
+        """Statements are dated by the period they close, not by collection.
+
+        A company reporting on time still leaves its most recent statement
+        weeks old — that is the fastest this data can ever be. Judging it by
+        the session cadence marks every healthy symbol stale.
+        """
+        engine = database()
+        now = datetime.now(timezone.utc)
+        write(
+            engine,
+            Capability.FUNDAMENTAL,
+            fundamental_snapshot(observed_at=now, period_end=(now - timedelta(days=42)).date()),
+        )
+
+        body = serve(engine, "VCB").json()
+
+        assert body["fundamental"]["stale"] is False
+
+    def test_a_company_that_has_not_reported_in_a_year_is_flagged(self):
+        """Two quarters past due is a real gap, and it says so."""
+        engine = database()
+        now = datetime.now(timezone.utc)
+        write(
+            engine,
+            Capability.FUNDAMENTAL,
+            fundamental_snapshot(observed_at=now, period_end=(now - timedelta(days=400)).date()),
+        )
+
+        body = serve(engine, "VCB").json()
+
         assert body["fundamental"]["stale"] is True
 
     def test_age_counts_from_the_session_not_from_the_run_that_fetched_it(self):
@@ -290,12 +336,12 @@ class TestHowOldTheDataIs:
         write(
             engine,
             Capability.MARKET,
-            market_snapshot(observed_at=now, effective_at=now - timedelta(days=6)),
+            market_snapshot(observed_at=now, effective_at=now - timedelta(days=10)),
         )
 
         body = serve(engine, "VCB").json()
 
-        assert body["market"]["age_seconds"] >= 6 * 24 * 60 * 60
+        assert body["market"]["age_seconds"] >= 10 * 24 * 60 * 60
         assert body["market"]["stale"] is True
 
 
