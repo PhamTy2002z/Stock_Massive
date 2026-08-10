@@ -13,6 +13,19 @@ Vì P/E, P/B thuộc FiinQuant còn báo cáo tài chính thuộc vnstock, ta **
 
 Lịch sử được nạp nền **một lần** từ vnstock cho phần sâu hơn khả năng của FiinQuant, sau đó FiinQuant nối tiếp mỗi ngày. Mối nối được ghi lại qua `Snapshot.metadata.source`.
 
+### Nhịp công bố của chuỗi `market` (đo 2026-08-10)
+
+Bốn lời gọi của FiinQuant không cùng nhịp, và độ lệch đủ lớn để đọc nhầm thành "thiếu dữ liệu". Đo tối thứ Hai 10/08, sau khi thị trường đã đóng nhiều giờ:
+
+- `Fetch_Trading_Data(realtime=False, by="1d")` lúc 21:48 vẫn dừng ở phiên trước (07/08); tới 22:47 mới có phiên 10/08, và có dưới dạng **một dòng stamp theo tick cuối** (`2026-08-10 14:46`) chứ không phải nửa đêm như các phiên đã chốt. `bu`/`sd` của dòng đó bằng 0 dù khối lượng khớp hàng triệu cổ phiếu.
+- `get_stock_valuation` đã có phiên 10/08, stamp nửa đêm.
+- `get_ceilingfloor` đã có phiên 10/08, stamp theo tick.
+- `get_overview` vẫn trễ một phiên, nên vốn hoá của phiên vừa đóng là `null`.
+
+Hệ quả cho adapter: `effective_at` của `market` lấy theo **đầu ngày phiên giờ VN**, để một phiên là một Snapshot dù provider ghi hai lần (live rồi consolidated) — `SnapshotStore` khoá theo `effective_at` và đọc theo `effective_at` mới nhất, nên stamp theo tick sẽ khiến dòng dở dang che mất dòng đã chốt suốt phần còn lại của ngày hôm sau. `bu`/`sd` bằng 0 khi có khối lượng khớp thì đọc là **chưa công bố**, không phải bằng 0.
+
+Đây cũng là lý do thật của ngưỡng bảy ngày ở `SESSION_MAX_AGE_SECONDS`: một chu kỳ chạy trước lúc provider nối phiên sẽ lấy được phiên trước đó — hợp lệ chứ không phải hỏng.
+
 ## Considered Options
 
 - **Fallback động giữa hai nguồn cho cùng một Capability.** Bị loại: hai nguồn lệch đơn vị — FiinQuant trả giá bằng VND (HPG 22.000), còn payload hiện tại của hệ thống trộn VND, triệu VND và tỷ VND tuỳ trường. Rơi nguồn giữa chừng sẽ tạo biểu đồ sai mà không ai phát hiện, và với một công cụ phân tích thì đó nguy hiểm hơn là thiếu dữ liệu.
