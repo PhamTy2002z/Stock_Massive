@@ -397,6 +397,10 @@ class Backfill:
 
         written = 0
         covered_through = state.covered_through if state is not None else None
+        # Why the walk found nothing, if it found nothing. A symbol that never
+        # answered is a failure to report; one that answered eventually had a
+        # listing date, not a fault.
+        nothing_yet: str | None = None
 
         for segment in segments:
             for asked_from, _covered_from, chunk_end in self._window.chunks(
@@ -420,6 +424,25 @@ class Backfill:
                         )
                 except Exception as exc:
                     reason = f"{type(exc).__name__}: {exc}"
+                    if covered_through is None:
+                        # Nothing has loaded for this symbol yet, and the most
+                        # likely reason a window that old cannot be answered is
+                        # that the company had not listed in it — vnstock raises
+                        # for such a window rather than answering with no
+                        # sessions, so a walk that stopped here would never load
+                        # the years the symbol does have.
+                        #
+                        # The cursor stays where it is, so nothing is skipped
+                        # over: if this was an outage rather than a listing
+                        # date, the next run asks these years again.
+                        logger.info(
+                            "Backfill found no history for %s through %s: %s",
+                            symbol,
+                            chunk_end,
+                            reason,
+                        )
+                        nothing_yet = reason
+                        continue
                     logger.warning("Backfill for %s stopped: %s", symbol, reason)
                     self._state.record(
                         symbol, "failed", covered_through=covered_through, reason=reason
@@ -440,6 +463,16 @@ class Backfill:
             # The next segment picks up the day after this one ended, never
             # before: one cursor covers both only because they run in order.
             start = max(start, segment.ends + timedelta(days=1))
+
+        # A walk that asked for every window it could and came away with
+        # nothing is a symbol that could not be loaded, whatever the windows
+        # said one at a time.
+        if covered_through is None and nothing_yet is not None:
+            self._state.record(symbol, "failed", reason=nothing_yet)
+            self._state.commit()
+            return written, SymbolProgress(
+                symbol=symbol, status="failed", reason=nothing_yet
+            )
 
         # Nothing left to ask for, either because the walk reached the boundary
         # or because it never had a stretch to walk: a symbol whose history is
