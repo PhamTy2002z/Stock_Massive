@@ -8,6 +8,8 @@ from apscheduler.triggers.cron import CronTrigger
 from zoneinfo import ZoneInfo
 
 from src.core.config import get_settings
+from src.core.trading_calendar import is_trading_day
+from src.stocks.collector_schedule import collect_universe_snapshots
 from src.stocks.jobs import (
     cleanup_old_data_job,
     collect_daily_ohlcv_job,
@@ -94,6 +96,13 @@ financial_statements_job_wrapper = make_job_wrapper(
     collect_financial_statements_job,
     "Financial statements collection completed",
     "Financial statements collection failed",
+)
+universe_snapshots_job_wrapper = make_job_wrapper(
+    "universe_snapshots_job_wrapper",
+    "Universe Snapshot Collection",
+    collect_universe_snapshots,
+    "Universe collection cycle completed",
+    "Universe collection cycle failed",
 )
 sector_historical_job_wrapper = make_job_wrapper(
     "sector_historical_job_wrapper",
@@ -189,17 +198,27 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
             f"{settings.sector_historical_hour}:{settings.sector_historical_minute:02d} ICT"
         )
 
+    # The collection cycle for the Universe, after the session closes.
+    if settings.collector_enabled:
+        await scheduler.add_schedule(
+            universe_snapshots_job_wrapper,
+            CronTrigger(
+                hour=settings.collector_hour,
+                minute=settings.collector_minute,
+                timezone="Asia/Ho_Chi_Minh",
+            ),
+            id="universe-snapshots",
+        )
+        logger.info(
+            f"Scheduled the Universe collection cycle at "
+            f"{settings.collector_hour}:{settings.collector_minute:02d} ICT"
+        )
+
     logger.info("=== Scheduler setup complete ===")
 
     # Run startup checks for missed jobs in background (non-blocking)
     # This allows the server to start accepting requests immediately
     asyncio.create_task(run_startup_jobs_with_delay())
-
-
-def _is_trading_day(d: date) -> bool:
-    """Check if date is a trading day (Mon-Fri, excluding holidays)."""
-    # Simple check: weekday only (0=Mon, 4=Fri)
-    return d.weekday() < 5
 
 
 def _time_passed_today(hour: int, minute: int) -> bool:
@@ -223,7 +242,7 @@ async def _should_run_intraday_job() -> bool:
 
     today = date.today()
 
-    if not _is_trading_day(today):
+    if not is_trading_day(today):
         return False
 
     if not _time_passed_today(settings.intraday_collect_hour, settings.intraday_collect_minute):
@@ -269,7 +288,7 @@ async def _should_run_ohlcv_job() -> bool:
 
     today = date.today()
 
-    if not _is_trading_day(today):
+    if not is_trading_day(today):
         return False
 
     if not _time_passed_today(settings.daily_ohlcv_hour, settings.daily_ohlcv_minute):
