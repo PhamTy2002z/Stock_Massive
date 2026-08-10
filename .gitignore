@@ -18,6 +18,8 @@ build/
 .env
 .env.local
 .env.*.local
+# Timestamped copies made before editing .env carry the same secrets
+.env.bak*
 
 # IDE
 .idea/
