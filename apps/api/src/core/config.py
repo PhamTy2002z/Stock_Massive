@@ -97,6 +97,22 @@ class Settings(BaseSettings):
     collector_hour: int = 16
     collector_minute: int = 15
 
+    # Backfill — nạp lịch sử sâu một lần cho mỗi mã (src/stocks/backfill.py).
+    # Tắt mặc định như các job nặng khác: đây là thứ tiêu hạn mức vnstock nhiều
+    # nhất trong hệ thống, nên bật là một quyết định của người vận hành. Chạy
+    # sau chu kỳ thu thập; trần số mã mỗi lần chạy để không tiêu hết hạn mức mà
+    # chu kỳ hằng ngày cũng đang dùng.
+    backfill_enabled: bool = False
+    backfill_hour: int = 17
+    backfill_minute: int = 0
+    backfill_symbols_per_run: int = 5
+    # Độ sâu lịch sử cần nạp, và mốc mà Main Source đã với tới (đo thực tế:
+    # FiinQuant free trả ~5 năm nến ngày). Khai bằng cấu hình vì cả hai đều là
+    # lựa chọn sản phẩm chứ không phải giới hạn kỹ thuật, và vì hạ mốc dưới
+    # xuống là cách đóng khoảng lịch sử mà hiện chưa nguồn nào nạp.
+    backfill_depth_days: int = 10 * 365
+    backfill_main_source_days: int = 5 * 365
+
     # Rate Limiting
     rate_limit_enabled: bool = True
     rate_limit_standard_max: int = 100  # requests per window

@@ -9,8 +9,18 @@ from pydantic import BaseModel
 from src.auth.dependencies import require_admin
 from src.core.job_status_store import job_store
 from src.core.ratelimit import heavy_rate_limit
+from sqlalchemy.orm import Session
+
 from src.core.config import get_settings
-from src.stocks.collector_schedule import COLLECTOR_JOB_ID
+from src.core.database import get_sync_session
+from src.stocks.backfill import BackfillStateStore, BackfillStatus
+from src.stocks.collector_schedule import (
+    BACKFILL_JOB_ID,
+    COLLECTOR_JOB_ID,
+    backfill_universe_history,
+    collect_universe_snapshots,
+)
+from src.stocks.universe import get_universe
 from src.stocks.schemas.common import MessageResponse
 
 # Must match the id jobs.py registers for this collector.
@@ -113,8 +123,6 @@ async def trigger_collector_job(background_tasks: BackgroundTasks) -> MessageRes
     configuration switch: an operator who turned the collector off turned off
     every path that reaches a Provider Source, not just the scheduled one.
     """
-    from src.stocks.collector_schedule import collect_universe_snapshots
-
     if not get_settings().collector_enabled:
         raise HTTPException(
             status_code=409,
@@ -129,6 +137,65 @@ async def trigger_collector_job(background_tasks: BackgroundTasks) -> MessageRes
 
     background_tasks.add_task(collect_universe_snapshots, force=True)
     return MessageResponse(message="Collection cycle triggered", status="started")
+
+
+class SymbolBackfillResponse(BaseModel):
+    """Where one symbol's one-time history load stands."""
+
+    symbol: str
+    status: BackfillStatus
+    covered_through: str | None
+    last_error: str | None
+
+
+@router.get("/backfill", response_model=list[SymbolBackfillResponse])
+def get_backfill_progress(
+    db: Session = Depends(get_sync_session),
+) -> list[SymbolBackfillResponse]:
+    """Report where every Universe symbol's history load stands.
+
+    Read from the durable state rather than from the last run, because a load
+    spans many runs and the interesting question spans all of them. Driven by
+    the Universe rather than by the state table, so a symbol that has not
+    started yet is reported as pending instead of going missing.
+    """
+    recorded = {state.symbol: state for state in BackfillStateStore(db).all()}
+    return [
+        SymbolBackfillResponse(
+            symbol=symbol,
+            status=recorded[symbol].status if symbol in recorded else "pending",
+            covered_through=(
+                recorded[symbol].covered_through.isoformat()
+                if symbol in recorded and recorded[symbol].covered_through
+                else None
+            ),
+            last_error=recorded[symbol].last_error if symbol in recorded else None,
+        )
+        for symbol in get_universe()
+    ]
+
+
+@router.post(
+    "/trigger/backfill",
+    response_model=MessageResponse,
+    dependencies=[Depends(heavy_rate_limit), Depends(require_admin)],
+)
+async def trigger_backfill_job(background_tasks: BackgroundTasks) -> MessageResponse:
+    """Run one pass of the history load now."""
+    if not get_settings().backfill_enabled:
+        raise HTTPException(
+            status_code=409,
+            detail="Backfill đang tắt trong cấu hình (BACKFILL_ENABLED).",
+        )
+
+    if job_store.is_running(BACKFILL_JOB_ID):
+        raise HTTPException(
+            status_code=409,
+            detail="Lần nạp lịch sử đang chạy. Theo dõi tại /jobs/backfill.",
+        )
+
+    background_tasks.add_task(backfill_universe_history)
+    return MessageResponse(message="History backfill triggered", status="started")
 
 
 @router.post(

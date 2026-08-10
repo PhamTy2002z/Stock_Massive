@@ -81,6 +81,34 @@ class FinancialStatement(Base):
         return f"<FinancialStatement {self.symbol} Q{self.quarter}/{self.year}>"
 
 
+class SymbolBackfill(Base):
+    """How far the one-time history load has got for one symbol.
+
+    Durable because the load is the most expensive thing this system asks of
+    vnstock and must happen once. Held in the database rather than in memory so
+    a restart mid-load resumes where it stopped instead of starting the whole
+    stretch of history again — and so a symbol dropped from the Universe and
+    added back only fetches what it is still missing.
+    """
+
+    __tablename__ = "symbol_backfills"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String(20), nullable=False, unique=True)
+    status = Column(String(16), nullable=False)
+    # The newest session already loaded. The next run starts the day after it.
+    covered_through = Column(Date, nullable=True)
+    last_error = Column(String(500), nullable=True)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    def __repr__(self) -> str:
+        return f"<SymbolBackfill {self.symbol} {self.status} through {self.covered_through}>"
+
+
 class ProviderSnapshot(Base):
     """Append-only normalized provider data used for last-known-good reads."""
 

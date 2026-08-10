@@ -21,7 +21,9 @@ from src.stocks.providers.normalize import VN_TZ
 from src.stocks.providers.vnstock_provider import (
     RequestPacer,
     VnstockFundamentalProvider,
+    VnstockMarketHistoryProvider,
     VnstockProviderError,
+    VnstockReadFailed,
     VnstockReferenceProvider,
     quota_per_minute,
 )
@@ -59,6 +61,146 @@ class FakeTrading:
         if isinstance(self.frame, Exception):
             raise self.frame
         return self.frame
+
+
+class FakeQuote:
+    """Stands in for ``Quote(symbol=..., source=...)``, recording its windows."""
+
+    def __init__(self, frame: pd.DataFrame | Exception):
+        self.frame = frame
+        self.windows: list[tuple[str, str, str]] = []
+
+    def history(self, start, end, interval="1D", **kwargs):
+        self.windows.append((start, end, interval))
+        if isinstance(self.frame, Exception):
+            raise self.frame
+        return self.frame
+
+
+def history_frame(rows: list[dict]) -> pd.DataFrame:
+    """The columns a VCI quote history comes back with, prices in thousands."""
+    return pd.DataFrame(rows)
+
+
+def hpg_history() -> pd.DataFrame:
+    return history_frame(
+        [
+            {
+                "time": "2018-03-01",
+                "open": 21.9,
+                "high": 22.1,
+                "low": 21.8,
+                "close": 21.85,
+                "volume": 20_000_000,
+            },
+            {
+                "time": "2018-03-02",
+                "open": 22.35,
+                "high": 22.6,
+                "low": 21.95,
+                "close": 22.0,
+                "volume": 28_003_806,
+            },
+        ]
+    )
+
+
+def history_provider(quote: FakeQuote) -> VnstockMarketHistoryProvider:
+    return VnstockMarketHistoryProvider(
+        quote_factory=lambda symbol, source: quote,
+        pacer=RequestPacer(quota_per_minute(""), sleep=lambda seconds: None),
+        now=lambda: NOW,
+    )
+
+
+class TestMarketHistoryNormalization:
+    def test_a_session_becomes_a_market_snapshot_in_plain_vnd(self):
+        """Quote history quotes thousands of VND while the price board quotes
+        plain VND. Normalizing here is what keeps a chart drawn across the two
+        sources from stepping by a factor of a thousand at the seam."""
+        provider = history_provider(FakeQuote(hpg_history()))
+
+        snapshots = provider.fetch_market_history(
+            "hpg", date(2018, 3, 1), date(2018, 3, 2)
+        )
+
+        assert [snapshot.symbol for snapshot in snapshots] == ["HPG", "HPG"]
+        latest = snapshots[-1]
+        assert latest.open_price == 22_350
+        assert latest.high_price == 22_600
+        assert latest.low_price == 21_950
+        assert latest.last_price == 22_000
+        assert latest.volume == 28_003_806
+        assert latest.metadata.source is ProviderSource.VNSTOCK
+
+    def test_a_session_is_dated_by_the_session_rather_than_by_the_read(self):
+        provider = history_provider(FakeQuote(hpg_history()))
+
+        snapshots = provider.fetch_market_history(
+            "HPG", date(2018, 3, 1), date(2018, 3, 2)
+        )
+
+        assert snapshots[0].metadata.effective_at == datetime(
+            2018, 3, 1, tzinfo=VN_TZ
+        )
+        assert snapshots[0].metadata.observed_at == NOW
+
+    def test_the_change_is_measured_against_the_session_before_it(self):
+        """Only where that session is in the same answer. The first row of a
+        window has no predecessor here, and inventing one from the row itself
+        would report every chunk boundary as a flat day."""
+        provider = history_provider(FakeQuote(hpg_history()))
+
+        first, second = provider.fetch_market_history(
+            "HPG", date(2018, 3, 1), date(2018, 3, 2)
+        )
+
+        assert first.reference_price is None
+        assert first.change_pct is None
+        assert second.reference_price == 21_850
+        assert second.change_pct == pytest.approx(0.686, abs=0.001)
+
+    def test_a_session_with_no_close_is_left_out_rather_than_zeroed(self):
+        provider = history_provider(
+            FakeQuote(
+                history_frame(
+                    [
+                        {
+                            "time": "2018-03-01",
+                            "open": None,
+                            "high": None,
+                            "low": None,
+                            "close": None,
+                            "volume": 0,
+                        }
+                    ]
+                )
+            )
+        )
+
+        assert provider.fetch_market_history("HPG", date(2018, 3, 1), date(2018, 3, 1)) == ()
+
+    def test_an_empty_history_is_a_symbol_with_no_sessions_not_an_error(self):
+        """A window before a company listed is genuinely empty, and a backfill
+        walks straight through those years."""
+        provider = history_provider(FakeQuote(history_frame([])))
+
+        assert provider.fetch_market_history("HPG", date(2001, 1, 1), date(2001, 12, 31)) == ()
+
+    def test_a_backwards_window_is_refused_before_the_provider_is_called(self):
+        quote = FakeQuote(hpg_history())
+        provider = history_provider(quote)
+
+        with pytest.raises(ValueError):
+            provider.fetch_market_history("HPG", date(2018, 3, 2), date(2018, 3, 1))
+        assert quote.windows == []
+
+    def test_upstream_failure_text_never_reaches_the_caller(self):
+        provider = history_provider(FakeQuote(RuntimeError("VCI said no")))
+
+        with pytest.raises(VnstockReadFailed) as raised:
+            provider.fetch_market_history("HPG", date(2018, 3, 1), date(2018, 3, 2))
+        assert "VCI said no" not in str(raised.value)
 
 
 def reference_provider(trading: FakeTrading) -> VnstockReferenceProvider:
