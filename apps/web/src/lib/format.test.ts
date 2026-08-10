@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { formatBillions, formatPercent, formatSessionDate, formatVolume } from "./format"
+import {
+  formatBillions,
+  formatDataAge,
+  formatPercent,
+  formatSessionDate,
+  formatVolume,
+} from "./format"
 
 describe("formatVolume", () => {
   it("uses M suffix from 1 million", () => {
@@ -46,6 +52,25 @@ describe("formatBillions", () => {
 
   it("falls back to locale digits below 1 million", () => {
     expect(formatBillions(1234)).toBe((1234).toLocaleString())
+  })
+})
+
+describe("formatDataAge", () => {
+  it("names the coarsest unit that still says something", () => {
+    expect(formatDataAge(30)).toBe("dưới 1 phút")
+    expect(formatDataAge(90)).toBe("1 phút")
+    expect(formatDataAge(82_779)).toBe("22 giờ")
+    expect(formatDataAge(8 * 86_400)).toBe("8 ngày")
+  })
+
+  it("rounds down, so freshly written data is never aged up", () => {
+    // A session read the following evening: one session old, not two days.
+    expect(formatDataAge(47 * 3600)).toBe("1 ngày")
+    expect(formatDataAge(3599)).toBe("59 phút")
+  })
+
+  it("reads a clock-skewed negative age as brand new", () => {
+    expect(formatDataAge(-5)).toBe("dưới 1 phút")
   })
 })
 
