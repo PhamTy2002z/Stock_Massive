@@ -16,6 +16,18 @@ from ..schemas.common import StrictModel
 from ..shared import StockServiceError, validate_symbol
 
 
+class BatchTooLarge(Exception):
+    """The provider refused a batch for its size rather than its contents.
+
+    Raised by an adapter when the gateway gives up on a request — measured as a
+    504 — so the caller knows the same symbols asked for in smaller batches may
+    well succeed. It says nothing about the provider's health, which is why it
+    is a type of its own rather than one more provider error: a caller that
+    cannot tell the two apart either gives up on data it could have had, or
+    retries a genuine outage in halves.
+    """
+
+
 class ProviderSource(str, Enum):
     """Upstream sources approved for the internal VN30 pilot."""
 
