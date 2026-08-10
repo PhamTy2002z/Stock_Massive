@@ -124,11 +124,6 @@ class JobStatusStore:
         with self._jobs_lock:
             return self._jobs.get(job_id)
 
-    def forget(self, job_id: str) -> None:
-        """Drop this job's record entirely."""
-        with self._jobs_lock:
-            self._jobs.pop(job_id, None)
-
     def get_all_statuses(self) -> list[JobStatus]:
         """Get all job statuses from today only."""
         today = datetime.now().date()
