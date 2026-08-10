@@ -14,7 +14,11 @@ import pytest
 from src.core.config import Settings
 from src.core.job_status_store import job_store
 from src.stocks.collector import CollectionSummary, SymbolFailure
-from src.stocks.collector_job import COLLECTOR_JOB_ID, run_collection_cycle
+from src.stocks.collector_schedule import (
+    COLLECTOR_JOB_ID,
+    collect_universe_snapshots,
+    run_collection_cycle,
+)
 from src.stocks.providers import Capability
 
 TRADING_DAY = date(2026, 8, 7)  # a Friday
@@ -23,9 +27,9 @@ CLOSED_DAY = date(2026, 8, 8)  # the Saturday after it
 
 @pytest.fixture(autouse=True)
 def forget_previous_runs():
-    job_store.forget(COLLECTOR_JOB_ID)
+    job_store.cleanup_old(max_age_hours=0)
     yield
-    job_store.forget(COLLECTOR_JOB_ID)
+    job_store.cleanup_old(max_age_hours=0)
 
 
 def summary(written: int = 8) -> CollectionSummary:
@@ -79,21 +83,17 @@ class RecordingCycle:
 class TestTradingDayGate:
     @pytest.mark.asyncio
     async def test_a_closed_exchange_is_not_worth_a_cycle(self):
-        from src.core.scheduler import collect_universe_snapshots_job_async
-
         cycle = RecordingCycle()
 
-        await collect_universe_snapshots_job_async(cycle=cycle, today=CLOSED_DAY)
+        await collect_universe_snapshots(cycle=cycle, today=CLOSED_DAY)
 
         assert cycle.runs == 0
 
     @pytest.mark.asyncio
     async def test_a_trading_day_runs_the_cycle(self):
-        from src.core.scheduler import collect_universe_snapshots_job_async
-
         cycle = RecordingCycle()
 
-        await collect_universe_snapshots_job_async(cycle=cycle, today=TRADING_DAY)
+        await collect_universe_snapshots(cycle=cycle, today=TRADING_DAY)
 
         assert cycle.runs == 1
 
@@ -101,11 +101,9 @@ class TestTradingDayGate:
     async def test_an_on_demand_run_ignores_the_calendar(self):
         """Filling a gap after a bad day is exactly what this is for, and the
         day it is asked for is rarely the day the data is missing from."""
-        from src.core.scheduler import collect_universe_snapshots_job_async
-
         cycle = RecordingCycle()
 
-        await collect_universe_snapshots_job_async(
+        await collect_universe_snapshots(
             force=True, cycle=cycle, today=CLOSED_DAY
         )
 
@@ -117,11 +115,9 @@ class TestEventLoop:
     async def test_the_synchronous_cycle_runs_off_the_event_loop(self):
         """The cycle is synchronous and can take minutes. Run on the loop it
         would stop the API answering anything at all for that whole window."""
-        from src.core.scheduler import collect_universe_snapshots_job_async
-
         cycle = RecordingCycle()
 
-        await collect_universe_snapshots_job_async(cycle=cycle, today=TRADING_DAY)
+        await collect_universe_snapshots(cycle=cycle, today=TRADING_DAY)
 
         assert cycle.threads != [threading.get_ident()]
 
@@ -136,7 +132,7 @@ class TestOverlappingRuns:
         result = run_collection_cycle(cycle=cycle)
 
         assert cycle.runs == 0
-        assert result["skipped"] is True
+        assert result.status == "skipped"
 
 
 class TestScheduling:
@@ -149,7 +145,9 @@ class TestScheduling:
             await setup_scheduler(scheduler)
 
         trigger = one_schedule(scheduler, "universe-snapshots")
-        assert (trigger.hour, trigger.minute) == (15, 30)
+        # Well after the 15:00 close, and out of the way of the jobs that were
+        # already scheduled: one worker, and one FiinQuant connection to share.
+        assert (trigger.hour, trigger.minute) == (16, 15)
 
     @pytest.mark.asyncio
     async def test_the_cycle_can_be_turned_off_by_configuration(self):
@@ -206,6 +204,27 @@ class TestTheOperatorsRoute:
 
         assert response.status_code == 409
 
+    def test_a_trigger_is_refused_while_the_collector_is_switched_off(self):
+        """Turning the collector off turns off every path that reaches a
+        Provider Source, not only the scheduled one."""
+        from fastapi.testclient import TestClient
+
+        from src.auth.dependencies import require_admin
+        from src.main import app
+
+        app.dependency_overrides[require_admin] = lambda: None
+        try:
+            with patch(
+                "src.stocks.jobs_router.get_settings",
+                return_value=Settings(collector_enabled=False),
+            ):
+                response = TestClient(app).post("/api/v1/jobs/trigger/collector")
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 409
+        assert "COLLECTOR_ENABLED" in response.json()["detail"]
+
 
 class TestLastRunIsVisible:
     def test_a_finished_run_reports_when_it_ran_and_what_it_wrote(self):
@@ -228,6 +247,18 @@ class TestLastRunIsVisible:
             }
         ]
 
+    def test_a_failed_cycle_reads_differently_from_one_that_wrote_nothing(self):
+        """A cycle that failed on its first call and one that ran cleanly over
+        an empty Universe both write nothing. A reader that cannot tell them
+        apart reports a broken collector as a healthy one — including the
+        scheduler's own log line."""
+        failed = run_collection_cycle(cycle=RecordingCycle(error=RuntimeError("down")))
+        job_store.cleanup_old(max_age_hours=0)
+        empty = run_collection_cycle(cycle=RecordingCycle(result=summary(written=0)))
+
+        assert (failed.status, empty.status) == ("failed", "completed")
+        assert failed.snapshots_written == empty.snapshots_written == 0
+
     def test_a_failed_run_reports_the_reason_without_raising(self):
         """A scheduled job that raises takes the scheduler's thread with it.
         The reason belongs on the run's record, where someone can read it."""
@@ -236,7 +267,7 @@ class TestLastRunIsVisible:
         result = run_collection_cycle(cycle=cycle)
         status = job_store.get_status(COLLECTOR_JOB_ID)
 
-        assert result["snapshots_written"] == 0
+        assert result.status == "failed"
         assert status is not None
         assert status.status == "failed"
         assert "SSLError" in status.error

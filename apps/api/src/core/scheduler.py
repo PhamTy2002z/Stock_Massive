@@ -8,6 +8,8 @@ from apscheduler.triggers.cron import CronTrigger
 from zoneinfo import ZoneInfo
 
 from src.core.config import get_settings
+from src.core.trading_calendar import is_trading_day
+from src.stocks.collector_schedule import collect_universe_snapshots
 from src.stocks.jobs import (
     cleanup_old_data_job,
     collect_daily_ohlcv_job,
@@ -28,39 +30,6 @@ async def collect_daily_ohlcv_job_async():
     result = await loop.run_in_executor(None, collect_daily_ohlcv_job)
     logger.info(f"Daily OHLCV collection completed: {result}")
     return result
-
-
-async def collect_universe_snapshots_job_async(
-    force: bool = False,
-    cycle=None,
-    today: date | None = None,
-) -> dict:
-    """Run one collection cycle for the Universe, off the event loop.
-
-    The cycle is synchronous — the store is, and FiinQuantX is — and can run
-    for minutes. On the loop it would stop the API answering anything at all
-    for that whole window, so it goes to a thread.
-
-    A closed exchange is not worth a cycle, but an on-demand run ignores the
-    calendar: filling a gap after a bad day is what it is for, and the day it
-    is asked for is rarely the day the data is missing from.
-    """
-    from src.stocks.collector_job import run_collection_cycle
-
-    day = today or datetime.now(VN_TZ).date()
-    if not force and not _is_trading_day(day):
-        logger.info("Skipping the collection cycle: %s is not a trading day", day)
-        return {
-            "skipped": True,
-            "snapshots_written": 0,
-            "succeeded": [],
-            "failures": [],
-            "missing": [],
-        }
-
-    if cycle is None:
-        return await asyncio.to_thread(run_collection_cycle)
-    return await asyncio.to_thread(run_collection_cycle, cycle)
 
 
 def make_job_wrapper(ref_name: str, job_name: str, job, done_msg: str, fail_msg: str):
@@ -131,7 +100,7 @@ financial_statements_job_wrapper = make_job_wrapper(
 universe_snapshots_job_wrapper = make_job_wrapper(
     "universe_snapshots_job_wrapper",
     "Universe Snapshot Collection",
-    collect_universe_snapshots_job_async,
+    collect_universe_snapshots,
     "Universe collection cycle completed",
     "Universe collection cycle failed",
 )
@@ -252,12 +221,6 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
     asyncio.create_task(run_startup_jobs_with_delay())
 
 
-def _is_trading_day(d: date) -> bool:
-    """Check if date is a trading day (Mon-Fri, excluding holidays)."""
-    # Simple check: weekday only (0=Mon, 4=Fri)
-    return d.weekday() < 5
-
-
 def _time_passed_today(hour: int, minute: int) -> bool:
     """Check if specified time has passed today in Vietnam timezone."""
     now = datetime.now(VN_TZ)
@@ -279,7 +242,7 @@ async def _should_run_intraday_job() -> bool:
 
     today = date.today()
 
-    if not _is_trading_day(today):
+    if not is_trading_day(today):
         return False
 
     if not _time_passed_today(settings.intraday_collect_hour, settings.intraday_collect_minute):
@@ -325,7 +288,7 @@ async def _should_run_ohlcv_job() -> bool:
 
     today = date.today()
 
-    if not _is_trading_day(today):
+    if not is_trading_day(today):
         return False
 
     if not _time_passed_today(settings.daily_ohlcv_hour, settings.daily_ohlcv_minute):
