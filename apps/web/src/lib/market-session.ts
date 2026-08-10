@@ -75,15 +75,18 @@ export function getMarketSession(now: Date = new Date()): MarketSession {
 }
 
 /**
- * Calendar date in Vietnam, for naming the session a figure belongs to.
+ * Calendar date in Vietnam: the day a session traded or a period closed.
  *
- * The API dates a session at midnight in Vietnam. Formatted in the viewer's own
- * zone, anywhere west of UTC+7 would render that instant as the day before and
- * name the wrong session — so the session's own zone is the only correct one to
- * read it in, whoever is looking.
+ * The API dates both at midnight in Vietnam. Formatted in the viewer's own zone,
+ * anywhere west of UTC+7 would render that instant as the day before and name
+ * the wrong day — so the market's own zone is the only correct one to read it
+ * in, whoever is looking.
  */
-export function formatVietnamDate(value: string | Date | number): string {
-  const moment = typeof value === "string" || typeof value === "number" ? new Date(value) : value
+export function formatVietnamDate(
+  value: string | Date | number | null | undefined
+): string {
+  if (value === null || value === undefined || value === "") return ""
+  const moment = value instanceof Date ? value : new Date(value)
   if (Number.isNaN(moment.getTime())) return ""
   return new Intl.DateTimeFormat("vi-VN", {
     timeZone: VN_TIME_ZONE,

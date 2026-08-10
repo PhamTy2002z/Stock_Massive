@@ -20,25 +20,28 @@ export function formatBillions(value: number): string {
   return value.toLocaleString()
 }
 
+/** Age units from coarsest down, so the first that fits is the one to name. */
+const AGE_UNITS = [
+  { seconds: 86_400, label: "ngày" },
+  { seconds: 3_600, label: "giờ" },
+  { seconds: 60, label: "phút" },
+] as const
+
 /**
  * How old a stored figure is, in the coarsest unit that still says something.
  *
  * The API reports age in seconds from the session the data describes, so an
  * evening read of the session that just closed is already tens of thousands of
- * seconds old — a number no reader can weigh. Rounding down is deliberate: "1
- * ngày" for 47 hours understates nothing the reader cares about, while rounding
- * up would age data the collector has just written.
+ * seconds old — a number no reader can weigh. The remainder is not dropped
+ * silently: "1 ngày" for 47 hours would make the data look half its age, so a
+ * partial unit is said out loud as "hơn". Rounding up instead would age data
+ * the collector has only just written.
  */
 export function formatDataAge(ageSeconds: number): string {
-  const seconds = Math.max(0, ageSeconds)
-  if (seconds < 60) return "dưới 1 phút"
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} phút`
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)} giờ`
-  return `${Math.floor(seconds / 86400)} ngày`
-}
-
-export function formatSessionDate(dateStr: string | undefined): string {
-  if (!dateStr) return ""
-  const date = new Date(dateStr)
-  return date.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" })
+  const seconds = Math.max(0, Math.floor(ageSeconds))
+  const unit = AGE_UNITS.find((candidate) => seconds >= candidate.seconds)
+  if (!unit) return "dưới 1 phút"
+  const count = Math.floor(seconds / unit.seconds)
+  const prefix = seconds % unit.seconds === 0 ? "" : "hơn "
+  return `${prefix}${count} ${unit.label}`
 }
