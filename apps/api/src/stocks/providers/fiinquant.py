@@ -17,6 +17,7 @@ import pandas as pd
 from pydantic import ValidationError
 
 from .contracts import (
+    BatchTooLarge,
     MarketSnapshot,
     ProviderSource,
     SnapshotMetadata,
@@ -66,12 +67,47 @@ CEILING_FLOOR_FIELDS = ("ticker", "timestamp", "ceilingprice", "floorprice")
 VALUATION_FIELDS = ("ticker", "timestamp", "pe", "pb")
 
 
+GATEWAY_TIMEOUT_STATUS = 504
+
+# What a 504 looks like once it has been through a layer that kept only the
+# text. The word "gateway" has to be there as well as the code: a message that
+# merely contains those three digits is some other failure, and reading it as an
+# oversized batch would have the caller retrying an outage in halves. The
+# provider's text is read here and nowhere else — it is never repeated back.
+GATEWAY_TIMEOUT_MARKERS = ("504", "time-out", "timeout")
+
+
 class FiinQuantProviderError(RuntimeError):
     """Safe provider error that never contains account credentials."""
 
 
 class FiinQuantCircuitOpen(FiinQuantProviderError):
     """Raised while calls are paused after repeated provider failures."""
+
+
+class FiinQuantBatchTooLarge(FiinQuantProviderError, BatchTooLarge):
+    """The gateway gave up on this request; the same symbols may fit in halves.
+
+    Both parents on purpose: a caller that only knows this provider still
+    catches it as one of its errors, while the collector catches the neutral
+    ``BatchTooLarge`` without having to know which provider it came from.
+
+    It still counts against the circuit breaker. Halving survives that because
+    a batch that succeeds resets the count, and a gateway that keeps timing out
+    however small the batch gets is an outage — which is exactly when the caller
+    should stop rather than retry a hundred symbols one at a time.
+    """
+
+
+def _is_gateway_timeout(exc: BaseException) -> bool:
+    """Recognise a 504 from the status code, or from the text if that is all there is."""
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status == GATEWAY_TIMEOUT_STATUS:
+        return True
+    text = str(exc).lower()
+    return "gateway" in text and any(
+        marker in text for marker in GATEWAY_TIMEOUT_MARKERS
+    )
 
 
 class ProviderCircuitBreaker:
@@ -150,6 +186,25 @@ def _default_session_factory(username: str, password: str) -> Any:
     return FiinSession(username=username, password=password).login()
 
 
+def shared_session_factory(
+    factory: Callable[[str, str], Any] = _default_session_factory,
+) -> Callable[[str, str], Any]:
+    """Return a factory that logs in once and hands the same session to everyone.
+
+    The free tier grants a single concurrent connection, so two adapters each
+    logging in for themselves is one of them being disconnected mid-cycle. Every
+    adapter built for one account shares one of these.
+    """
+    session: list[Any] = []
+
+    def login(username: str, password: str) -> Any:
+        if not session:
+            session.append(factory(username, password))
+        return session[0]
+
+    return login
+
+
 class FiinQuantProviderBase:
     """Session handling, circuit protection and error hygiene shared by adapters.
 
@@ -216,12 +271,16 @@ class FiinQuantProviderBase:
         survives.
         """
         failure: str | None = None
+        oversized = False
         try:
             return call()
         except FiinQuantProviderError:
             raise
         except Exception as exc:
             failure = type(exc).__name__
+            oversized = _is_gateway_timeout(exc)
+        if oversized:
+            raise FiinQuantBatchTooLarge(f"{message} (gateway timeout)")
         raise FiinQuantProviderError(f"{message} ({failure})")
 
     def _today(self) -> date:

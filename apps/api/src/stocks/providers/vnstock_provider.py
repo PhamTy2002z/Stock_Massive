@@ -256,13 +256,14 @@ class VnstockReferenceProvider(VnstockProviderBase):
 
         rows = _rows_by_symbol(board, REFERENCE_FIELDS, requested_symbols)
         observed_at = self._now()
+        effective_at = _session_start(observed_at)
         snapshots: list[ReferenceSnapshot] = []
 
         for symbol in requested_symbols:
             row = rows.get(symbol)
             if row is None:
                 continue
-            snapshot = self._build(symbol, row, observed_at)
+            snapshot = self._build(symbol, row, effective_at, observed_at)
             if snapshot is not None:
                 snapshots.append(snapshot)
 
@@ -272,6 +273,7 @@ class VnstockReferenceProvider(VnstockProviderBase):
         self,
         symbol: str,
         row: pd.Series,
+        effective_at: datetime,
         observed_at: datetime,
     ) -> ReferenceSnapshot | None:
         listed = _optional_int(row.get("listed_share"))
@@ -318,9 +320,11 @@ class VnstockReferenceProvider(VnstockProviderBase):
                 symbol=symbol,
                 metadata=SnapshotMetadata(
                     source=self.source,
-                    # The board describes the position as of the read; it
-                    # carries no period of its own to date it by.
-                    effective_at=observed_at,
+                    # The board carries no period of its own, so it is dated by
+                    # the session it was read in. Dating it by the minute would
+                    # make each re-run of a cycle a fresh Snapshot of facts that
+                    # have not changed — and these facts change over months.
+                    effective_at=effective_at,
                     observed_at=observed_at,
                 ),
                 shares=shares,
@@ -431,6 +435,15 @@ class VnstockFundamentalProvider(VnstockProviderBase):
         except ValidationError as exc:
             logger.warning("Skipping unusable vnstock statements for %s: %s", symbol, exc)
             return None
+
+
+def _session_start(observed_at: datetime) -> datetime:
+    """Return midnight of the Vietnamese trading day this read happened on."""
+    return datetime.combine(
+        observed_at.astimezone(VN_TZ).date(),
+        datetime.min.time(),
+        tzinfo=VN_TZ,
+    )
 
 
 def _rows_by_symbol(

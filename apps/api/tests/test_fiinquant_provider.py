@@ -13,6 +13,7 @@ import certifi
 import pandas as pd
 import pytest
 
+from src.stocks.providers.contracts import BatchTooLarge
 from src.stocks.providers.fiinquant import (
     FiinQuantCircuitOpen,
     FiinQuantMarketProvider,
@@ -20,6 +21,7 @@ from src.stocks.providers.fiinquant import (
     FiinQuantValuationProvider,
     ProviderCircuitBreaker,
     ensure_ca_bundle,
+    shared_session_factory,
 )
 from src.stocks.shared import StockServiceError
 
@@ -362,6 +364,97 @@ def test_upstream_failure_text_never_reaches_the_caller():
     assert_no_credentials(raised.value)
 
 
+class GatewayTimeout(Exception):
+    """A 504 the way requests raises it, with the response still attached."""
+
+    def __init__(self):
+        super().__init__("504 Server Error: Gateway Time-out for url: /Trading_Data")
+        self.response = Mock(status_code=504)
+
+
+def test_a_gateway_timeout_is_reported_as_a_batch_the_caller_can_split():
+    """A 504 says the request was too big, not that FiinQuant is down. The
+    caller can only act on that — halving and retrying — if it is told apart
+    from every other provider failure."""
+    provider, client = make_provider()
+    client.Fetch_Trading_Data.side_effect = GatewayTimeout()
+
+    with pytest.raises(BatchTooLarge) as raised:
+        provider.fetch_market(["HPG", "VCB"])
+    assert_no_credentials(raised.value)
+
+
+def test_a_gateway_timeout_recognised_only_by_its_text_is_still_splittable():
+    """Not every layer between here and the gateway keeps the response object."""
+    provider, client = make_provider()
+    client.Fetch_Trading_Data.side_effect = RuntimeError(
+        "504 Gateway Time-out"
+    )
+
+    with pytest.raises(BatchTooLarge):
+        provider.fetch_market(["HPG", "VCB"])
+
+
+def test_an_error_that_merely_mentions_504_is_not_treated_as_an_oversized_batch():
+    """Splitting a batch is only the right answer to a gateway giving up on its
+    size. Reading any message with those digits in it as a 504 would send the
+    caller retrying a real outage in halves, with the breaker never opening."""
+    provider, client = make_provider()
+    client.Fetch_Trading_Data.side_effect = RuntimeError(
+        "quota exhausted: 504 of 500 calls used today"
+    )
+
+    with pytest.raises(FiinQuantProviderError) as raised:
+        provider.fetch_market(["HPG"])
+    assert not isinstance(raised.value, BatchTooLarge)
+
+
+def test_a_gateway_that_keeps_timing_out_still_opens_the_circuit():
+    """Halving has a floor, and past it a 504 stops being about the batch. The
+    breaker has to reach it, or a gateway that is down turns a hundred symbols
+    into a retry storm."""
+    breaker = ProviderCircuitBreaker(failure_threshold=2, cooldown_seconds=30)
+    provider, client = make_provider(circuit_breaker=breaker)
+    client.Fetch_Trading_Data.side_effect = GatewayTimeout()
+
+    for _ in range(2):
+        with pytest.raises(BatchTooLarge):
+            provider.fetch_market(["HPG"])
+
+    with pytest.raises(FiinQuantCircuitOpen):
+        provider.fetch_market(["HPG"])
+
+
+def test_one_login_is_shared_by_every_adapter_on_the_account():
+    """The free tier grants a single concurrent connection, so two adapters
+    logging in separately is one of them being kicked off."""
+    logins = []
+    client = Mock()
+    client.Fetch_Trading_Data.return_value = FakeEvent(daily_candles())
+    statistics = Mock()
+    statistics.get_overview.return_value = overview_frame()
+    statistics.get_ceilingfloor.return_value = ceiling_floor_frame()
+    client.PriceStatistics.return_value = statistics
+    client.MarketDepth.return_value.get_stock_valuation.return_value = valuation_frame()
+
+    def count_login(username, password):
+        logins.append(username)
+        return client
+
+    factory = shared_session_factory(count_login)
+    market = FiinQuantMarketProvider(
+        "user", "password", session_factory=factory, now=lambda: NOW
+    )
+    valuation = FiinQuantValuationProvider(
+        "user", "password", session_factory=factory, now=lambda: NOW
+    )
+
+    market.fetch_market(["HPG"])
+    valuation.fetch_valuation(["HPG"], date(2026, 8, 6), date(2026, 8, 7))
+
+    assert len(logins) == 1
+
+
 def test_circuit_opens_after_repeated_failures_and_recovers_after_cooldown():
     current = [100.0]
     breaker = ProviderCircuitBreaker(
@@ -370,7 +463,9 @@ def test_circuit_opens_after_repeated_failures_and_recovers_after_cooldown():
         clock=lambda: current[0],
     )
     provider, client = make_provider(circuit_breaker=breaker)
-    client.Fetch_Trading_Data.side_effect = RuntimeError("gateway timeout")
+    # Deliberately not a 504: that one is the batch being too large, which the
+    # breaker leaves alone so the caller can halve and retry.
+    client.Fetch_Trading_Data.side_effect = RuntimeError("connection reset by peer")
 
     for _ in range(2):
         with pytest.raises(FiinQuantProviderError):
@@ -584,7 +679,7 @@ def test_valuation_circuit_opens_after_repeated_failures():
     breaker = ProviderCircuitBreaker(failure_threshold=2, clock=lambda: 100.0)
     provider, client = make_valuation_provider(circuit_breaker=breaker)
     client.MarketDepth.return_value.get_stock_valuation.side_effect = RuntimeError(
-        "gateway timeout"
+        "connection reset by peer"
     )
 
     for _ in range(2):

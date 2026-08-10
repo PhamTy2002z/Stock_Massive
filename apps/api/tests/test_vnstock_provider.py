@@ -17,6 +17,7 @@ from src.stocks.providers.contracts import (
     ShareType,
     main_source,
 )
+from src.stocks.providers.normalize import VN_TZ
 from src.stocks.providers.vnstock_provider import (
     RequestPacer,
     VnstockFundamentalProvider,
@@ -79,6 +80,20 @@ class TestReferenceNormalization:
         assert snapshot.total_foreign_room == 4_137_052_614
         assert snapshot.metadata.source is ProviderSource.VNSTOCK
         assert snapshot.metadata.observed_at == NOW
+
+    def test_the_board_is_dated_by_the_session_it_was_read_in(self):
+        """The board carries no period of its own, so the session it was read in
+        is the only honest date for it. Stamping it with the minute instead
+        would make every re-run of a cycle a fresh Snapshot of facts that have
+        not changed — and re-running after a bad day is the operator's normal
+        repair, not an event worth a second Snapshot."""
+        provider = reference_provider(FakeTrading(price_board([hpg_board_row()])))
+
+        (snapshot,) = provider.fetch_reference(["HPG"])
+
+        assert snapshot.metadata.effective_at == datetime(
+            2026, 8, 7, 0, 0, tzinfo=VN_TZ
+        )
 
     def test_the_share_count_keeps_the_meaning_the_provider_gave_it(self):
         """VCI publishes a listed count, so it is stored as listed.
