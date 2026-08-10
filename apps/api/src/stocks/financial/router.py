@@ -1,4 +1,13 @@
-"""Financial domain router for financial-related endpoints."""
+"""Financial domain router for financial-related endpoints.
+
+Frozen: these call vnstock inside the user's request. `FundamentalSnapshot`
+holds a period end, trailing twelve-month net income and parent equity — the
+inputs a health score needs — while these endpoints return whole statements.
+Serving them from the store would mean widening the ingestion contract to the
+shape of six statement endpoints and migrating what is already stored. Declined
+in #27 for now: statements move quarterly, so the quota they cost is small, and
+`/{symbol}/snapshot` already carries the figures that are collected.
+"""
 
 from typing import List
 

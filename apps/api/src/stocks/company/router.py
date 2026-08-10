@@ -1,4 +1,14 @@
-"""Company domain router for company-related endpoints."""
+"""Company domain router for company-related endpoints.
+
+Frozen: every endpoint here calls vnstock inside the user's request. Nothing in
+`providers/contracts.py` carries a company profile, its officers, its
+shareholders or its insider deals — `ReferenceSnapshot` holds share counts and
+foreign room and nothing else — so serving these from the store would mean a
+fifth `Capability` and an `Adapter` behind it. That was weighed in #27 and
+declined: the data changes on corporate actions rather than per session, so it
+costs little quota, and the pipeline's promise is about the figures a reader
+refreshes daily. Reopen the decision if this data ever needs a data age.
+"""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
