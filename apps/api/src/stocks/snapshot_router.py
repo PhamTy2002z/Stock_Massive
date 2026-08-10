@@ -72,10 +72,13 @@ def get_symbol_snapshot(
             detail=f"Mã chứng khoán không hợp lệ: {symbol}",
         ) from exc
 
+    # Worded as what this system did or did not do, never as a claim about the
+    # symbol itself: with no provider in the request path, nothing here knows
+    # whether an unknown ticker is listed, delisted or a typo.
     if not get_universe().contains(canonical):
         raise HTTPException(
             status_code=404,
-            detail=f"Mã {canonical} chưa nằm trong danh sách theo dõi của hệ thống.",
+            detail=f"Hệ thống chưa thu thập dữ liệu cho mã {canonical}.",
         )
 
     store = SnapshotStore(db)

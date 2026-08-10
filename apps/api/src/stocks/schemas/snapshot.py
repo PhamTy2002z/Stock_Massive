@@ -3,9 +3,13 @@
 These are REST response models, deliberately separate from the ingestion
 contracts in ``src.stocks.providers.contracts``: the wire shape is a promise to
 the interface, and it must not move every time a provider's normalized form
-does. The two are kept in step by construction — a section is built by dumping
-the snapshot and validating it here, so a field added upstream and forgotten
-here fails loudly at build time instead of vanishing from the response.
+does.
+
+The separation costs something. A section is built by dumping a snapshot into
+the model here, and these models forbid unknown fields, so a field added to an
+ingestion contract and forgotten here raises while a request is being served —
+a 500 rather than a quietly missing number. ``test_snapshot_serving`` compares
+the two field-by-field so the mismatch is caught in the suite instead.
 """
 
 from datetime import date, datetime

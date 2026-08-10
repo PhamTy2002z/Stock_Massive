@@ -236,6 +236,47 @@ def test_a_rejected_save_leaves_the_session_usable_for_the_next_one():
         assert store.latest(Capability.MARKET, "VCB") is not None
 
 
+def test_latest_returns_the_newest_session_not_the_newest_write():
+    """A re-run over an older session must not displace the current one.
+
+    Ordering by observed_at would: the second write is the later one, and the
+    reader would be handed last week's close as though the market had moved
+    backwards.
+    """
+    engine = create_engine("sqlite://")
+    ProviderSnapshot.__table__.create(engine)
+    now = datetime.now(timezone.utc)
+    current = MarketSnapshot(
+        symbol="VCB",
+        metadata=SnapshotMetadata(
+            source=ProviderSource.FIINQUANT,
+            effective_at=now - timedelta(hours=6),
+            observed_at=now - timedelta(hours=5),
+        ),
+        last_price=59_700,
+    )
+    older_session_fetched_later = MarketSnapshot(
+        symbol="VCB",
+        metadata=SnapshotMetadata(
+            source=ProviderSource.FIINQUANT,
+            effective_at=now - timedelta(days=7),
+            observed_at=now,
+        ),
+        last_price=51_000,
+    )
+
+    with Session(engine) as session:
+        store = SnapshotStore(session, redis=None)
+        store.save(Capability.MARKET, current)
+        store.save(Capability.MARKET, older_session_fetched_later)
+        session.commit()
+
+        result = store.latest(Capability.MARKET, "VCB")
+
+    assert result is not None
+    assert result.snapshot.last_price == 59_700
+
+
 def test_latest_never_calls_a_secondary_provider_on_cache_miss():
     engine = create_engine("sqlite://")
     ProviderSnapshot.__table__.create(engine)

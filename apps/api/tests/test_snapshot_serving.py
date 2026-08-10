@@ -28,6 +28,12 @@ from src.stocks.providers import (
     SnapshotStore,
     ValuationSnapshot,
 )
+from src.stocks.schemas.snapshot import (
+    FundamentalData,
+    MarketData,
+    ReferenceData,
+    ValuationData,
+)
 from src.stocks.universe import Universe
 
 OBSERVED_AT = datetime(2026, 8, 10, 8, 30, tzinfo=timezone.utc)
@@ -61,14 +67,14 @@ def database():
 
 
 def market_snapshot(
-    symbol: str = "VCB",
     observed_at: datetime = OBSERVED_AT,
+    effective_at: datetime | None = None,
 ) -> MarketSnapshot:
     return MarketSnapshot(
-        symbol=symbol,
+        symbol="VCB",
         metadata=SnapshotMetadata(
             source=ProviderSource.FIINQUANT,
-            effective_at=observed_at - timedelta(minutes=30),
+            effective_at=effective_at or observed_at - timedelta(minutes=30),
             observed_at=observed_at,
         ),
         last_price=59_700,
@@ -216,6 +222,27 @@ class TestASymbolTheSystemWatches:
         assert response.json()["market"]["data"]["last_price"] == 59_700
 
 
+class TestTheWireShapeAgainstWhatIsCollected:
+    def test_every_collected_field_has_somewhere_to_land(self):
+        """A field added upstream and forgotten here would 500 every request.
+
+        The response models forbid unknown fields on purpose — a number that
+        silently disappeared from the wire is worse than a loud failure — so
+        the drift is caught here rather than in production.
+        """
+        pairs = (
+            (MarketSnapshot, MarketData),
+            (ValuationSnapshot, ValuationData),
+            (ReferenceSnapshot, ReferenceData),
+            (FundamentalSnapshot, FundamentalData),
+        )
+
+        for collected, served in pairs:
+            assert set(collected.model_fields) - {"symbol", "metadata"} == set(
+                served.model_fields
+            ), f"{collected.__name__} and {served.__name__} have drifted apart"
+
+
 class TestHowOldTheDataIs:
     def test_a_long_weekend_does_not_make_the_last_session_stale(self):
         """Friday's close is still the latest close on Monday morning.
@@ -251,6 +278,26 @@ class TestHowOldTheDataIs:
         assert body["valuation"]["stale"] is True
         assert body["fundamental"]["stale"] is True
 
+    def test_age_counts_from_the_session_not_from_the_run_that_fetched_it(self):
+        """Re-reading an old session must not make it look like today's.
+
+        Age is a property of the data, not of the job. Measured from the run,
+        a collector re-fetching a week-old session would reset the age to zero
+        and switch the warning off on exactly the day it is needed.
+        """
+        engine = database()
+        now = datetime.now(timezone.utc)
+        write(
+            engine,
+            Capability.MARKET,
+            market_snapshot(observed_at=now, effective_at=now - timedelta(days=6)),
+        )
+
+        body = serve(engine, "VCB").json()
+
+        assert body["market"]["age_seconds"] >= 6 * 24 * 60 * 60
+        assert body["market"]["stale"] is True
+
 
 class TestASymbolTheSystemDoesNotWatch:
     def test_a_symbol_outside_the_universe_is_refused_in_so_many_words(self):
@@ -263,7 +310,7 @@ class TestASymbolTheSystemDoesNotWatch:
 
         assert response.status_code == 404
         assert "SSI" in response.json()["detail"]
-        assert "theo dõi" in response.json()["detail"]
+        assert "chưa thu thập" in response.json()["detail"]
 
     def test_text_that_is_not_a_symbol_is_told_apart_from_one_we_skip(self):
         """A typo and an untracked company are different problems.

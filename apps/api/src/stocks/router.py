@@ -2,6 +2,7 @@
 
 Path matching order is critical:
 - Market router first: /symbols, /symbols/*, /sector-performance, /fund-certificates
+- Snapshot router: /{symbol}/snapshot, served from the store rather than upstream
 - Price router: /market-indices, /price-board, /intraday/collect, /{symbol}/history, etc.
 - Company router: /{symbol}/company, /{symbol}/detail, /{symbol}/shareholders, etc.
 - Financial router: /{symbol}/financials/*
@@ -32,14 +33,14 @@ router.include_router(snapshot_router)
 # 3. Price router - matches /market-indices, /price-board, /intraday/collect, /{symbol}/*
 router.include_router(price_router)
 
-# 3. Company router - matches /{symbol}/company, /{symbol}/detail, etc.
+# 4. Company router - matches /{symbol}/company, /{symbol}/detail, etc.
 router.include_router(company_router)
 
-# 4. Financial router - matches /{symbol}/financials/*
+# 5. Financial router - matches /{symbol}/financials/*
 router.include_router(financial_router)
 
-# 5. Analytics router - matches /analytics/*
+# 6. Analytics router - matches /analytics/*
 router.include_router(analytics_router)
 
-# 6. Trading router - matches /{symbol}/intraday-order-stats
+# 7. Trading router - matches /{symbol}/intraday-order-stats
 router.include_router(trading_router)
