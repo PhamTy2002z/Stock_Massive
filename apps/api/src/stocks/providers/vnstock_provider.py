@@ -32,6 +32,7 @@ from src.core.vnstock_client import (
     VnstockUnavailable,
     VnstockUnsupported,
 )
+from src.stocks.shared.converters import quote_price_vnd
 
 from .contracts import (
     FundamentalSnapshot,
@@ -172,17 +173,6 @@ def _default_trading_factory(source: str) -> Any:
 
 def _default_quote_factory(symbol: str, source: str) -> Any:
     return Quote(symbol=symbol, source=source)
-
-
-def _quote_price_vnd(value: Any) -> float | None:
-    """Turn a quote price in thousands of VND into plain VND.
-
-    The price board quotes plain VND while quote history quotes thousands. The
-    two disagree by a factor of a thousand, and the unit is settled here so no
-    layer behind the adapter has to know which call a number came from.
-    """
-    price = _optional_float(value)
-    return None if price is None else price * 1_000
 
 
 def _default_finance_factory(symbol: str, source: str) -> Any:
@@ -433,7 +423,7 @@ class VnstockMarketHistoryProvider(VnstockProviderBase):
         previous_close: float | None = None
 
         for _, row in sessions.iterrows():
-            close = _quote_price_vnd(row.get("close"))
+            close = quote_price_vnd(row.get("close"))
             session_day = pd.to_datetime(row.get("time"), errors="coerce")
             if close is None or pd.isna(session_day):
                 # An all-blank row is a gap in the series rather than a session
@@ -482,9 +472,9 @@ class VnstockMarketHistoryProvider(VnstockProviderBase):
                 # first row of a window has no predecessor here, and taking the
                 # row's own open would report every chunk boundary as flat.
                 reference_price=previous_close,
-                open_price=_quote_price_vnd(row.get("open")),
-                high_price=_quote_price_vnd(row.get("high")),
-                low_price=_quote_price_vnd(row.get("low")),
+                open_price=quote_price_vnd(row.get("open")),
+                high_price=quote_price_vnd(row.get("high")),
+                low_price=quote_price_vnd(row.get("low")),
                 change_pct=change_pct,
                 volume=_optional_int(row.get("volume")),
             )

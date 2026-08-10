@@ -6,14 +6,16 @@ what gets fetched, what does not get fetched twice, and what survives a
 restart.
 """
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from src.stocks.backfill import Backfill, BackfillStateStore
+from src.stocks.backfill import Backfill, BackfillStateStore, HistoryWindow
 from src.stocks.models import ProviderSnapshot, SymbolBackfill
 from src.stocks.providers import (
     Capability,
@@ -33,9 +35,18 @@ DEPTH_DAYS = 90
 MAIN_SOURCE_DAYS = 30
 CHUNK_DAYS = 30
 
+# A request reaches back before the chunk it covers, so the adapter can measure
+# its first session against the one before it.
+OVERLAP_DAYS = 7
+
 # Where the Main Source takes over, and where the load therefore stops.
 BOUNDARY = date(2026, 7, 11)
 FIRST_SESSION = date(2026, 5, 12)
+
+
+def asked(covered_from: date, covered_to: date) -> tuple[date, date]:
+    """The window a chunk covering these days actually requests."""
+    return covered_from - timedelta(days=OVERLAP_DAYS), covered_to
 
 
 def history_snapshot(symbol: str, session_day: date) -> MarketSnapshot:
@@ -53,16 +64,27 @@ def history_snapshot(symbol: str, session_day: date) -> MarketSnapshot:
     )
 
 
+class KilledMidLoad(BaseException):
+    """Stands in for the process going away part-way through a run.
+
+    A BaseException on purpose: it sails past the per-symbol handling the same
+    way a real kill would, so what is left behind is what a restart would find.
+    """
+
+
 class FakeHistory:
     """Answers every window with one session dated at its last day."""
 
     source = ProviderSource.VNSTOCK
 
-    def __init__(self, broken: set[str] | None = None):
+    def __init__(self, broken: set[str] | None = None, die_after: int | None = None):
         self.windows: list[tuple[str, date, date]] = []
         self.broken = broken or set()
+        self.die_after = die_after
 
     def fetch_market_history(self, symbol, from_date, to_date):
+        if self.die_after is not None and len(self.windows) >= self.die_after:
+            raise KilledMidLoad()
         self.windows.append((symbol, from_date, to_date))
         if symbol in self.broken:
             raise RuntimeError(f"vnstock market history fetch failed for {symbol}")
@@ -90,9 +112,11 @@ def backfill(engine, symbols=("HPG",), history=None, **overrides) -> Backfill:
     session = Session(engine)
     settings = {
         "now": lambda: NOW,
-        "depth_days": DEPTH_DAYS,
-        "main_source_days": MAIN_SOURCE_DAYS,
-        "chunk_days": CHUNK_DAYS,
+        "window": HistoryWindow(
+            depth_days=DEPTH_DAYS,
+            main_source_days=MAIN_SOURCE_DAYS,
+            chunk_days=CHUNK_DAYS,
+        ),
     }
     settings.update(overrides)
     return Backfill(
@@ -112,9 +136,9 @@ class TestFirstLoad:
         summary = backfill(engine, history=history).run()
 
         assert history.windows_for("HPG") == [
-            (FIRST_SESSION, date(2026, 6, 10)),
-            (date(2026, 6, 11), date(2026, 7, 10)),
-            (date(2026, 7, 11), BOUNDARY),
+            asked(FIRST_SESSION, date(2026, 6, 10)),
+            asked(date(2026, 6, 11), date(2026, 7, 10)),
+            asked(date(2026, 7, 11), BOUNDARY),
         ]
         assert summary.completed == ("HPG",)
         assert summary.snapshots_written == 3
@@ -139,6 +163,56 @@ class TestFirstLoad:
         assert from_main is None
 
 
+class TestTheSeamBetweenSources:
+    def test_overlapping_chunks_leave_one_snapshot_per_session(self):
+        """Each request reaches back before the chunk it covers, so sessions
+        arrive twice. Twice-written must still mean once-stored."""
+        engine = database()
+
+        backfill(engine).run()
+        backfill(engine, symbols=("HPG",)).run()
+
+        with Session(engine) as session:
+            rows = session.scalar(select(func.count()).select_from(ProviderSnapshot))
+            sessions = session.scalars(
+                select(ProviderSnapshot.effective_at).distinct()
+            ).all()
+
+        assert rows == len(sessions)
+
+    def test_the_same_session_from_both_sources_is_two_answerable_snapshots(self):
+        """The two disagree on how much of a session they describe, so neither
+        overwrites the other — and each stays traceable to what produced it."""
+        engine = database()
+        backfill(engine).run()
+
+        with Session(engine) as session:
+            store = SnapshotStore(session, redis=None)
+            store.save(
+                Capability.MARKET,
+                MarketSnapshot(
+                    symbol="HPG",
+                    metadata=SnapshotMetadata(
+                        source=ProviderSource.FIINQUANT,
+                        effective_at=datetime.combine(
+                            BOUNDARY, datetime.min.time(), tzinfo=VN_TZ
+                        ),
+                        observed_at=NOW,
+                    ),
+                    last_price=22_000,
+                ),
+            )
+            session.commit()
+
+            from_main = store.latest(Capability.MARKET, "HPG")
+            from_cover = store.latest(
+                Capability.MARKET, "HPG", source=ProviderSource.VNSTOCK
+            )
+
+        assert from_main is not None and from_main.snapshot.last_price == 22_000
+        assert from_cover is not None and from_cover.snapshot.last_price == 21_850
+
+
 class TestRunningAgain:
     def test_a_loaded_symbol_is_never_loaded_again(self):
         """This is the most expensive thing asked of vnstock in the whole
@@ -157,19 +231,21 @@ class TestRunningAgain:
         """A restart mid-load must not mean paying for the whole stretch of
         history a second time."""
         engine = database()
-        backfill(engine, history=FakeHistory(), symbols_per_run=1, chunk_limit=1).run()
+        with pytest.raises(KilledMidLoad):
+            backfill(engine, history=FakeHistory(die_after=1)).run()
 
         history = FakeHistory()
         backfill(engine, history=history).run()
 
         assert history.windows_for("HPG") == [
-            (date(2026, 6, 11), date(2026, 7, 10)),
-            (date(2026, 7, 11), BOUNDARY),
+            asked(date(2026, 6, 11), date(2026, 7, 10)),
+            asked(date(2026, 7, 11), BOUNDARY),
         ]
 
     def test_a_symbol_dropped_and_added_back_only_fetches_what_it_is_missing(self):
         engine = database()
-        backfill(engine, symbols=("HPG",), chunk_limit=1).run()
+        with pytest.raises(KilledMidLoad):
+            backfill(engine, symbols=("HPG",), history=FakeHistory(die_after=1)).run()
 
         # The Universe changes underneath: HPG leaves, VCB arrives, HPG returns.
         backfill(engine, symbols=("VCB",)).run()
@@ -178,8 +254,8 @@ class TestRunningAgain:
 
         assert history.windows_for("VCB") == []
         assert history.windows_for("HPG") == [
-            (date(2026, 6, 11), date(2026, 7, 10)),
-            (date(2026, 7, 11), BOUNDARY),
+            asked(date(2026, 6, 11), date(2026, 7, 10)),
+            asked(date(2026, 7, 11), BOUNDARY),
         ]
 
 
@@ -188,7 +264,8 @@ class TestDurableState:
         """Held in the database rather than in memory, so nothing about the
         process staying up is load-bearing."""
         engine = database()
-        backfill(engine, chunk_limit=1).run()
+        with pytest.raises(KilledMidLoad):
+            backfill(engine, history=FakeHistory(die_after=1)).run()
 
         with Session(engine) as session:
             (state,) = BackfillStateStore(session).all()
@@ -251,7 +328,11 @@ class TestTheOperatorsRoute:
         session = Session(engine)
         app.dependency_overrides[get_sync_session] = lambda: session
         try:
-            body = TestClient(app).get("/api/v1/jobs/backfill").json()
+            with patch(
+                "src.stocks.jobs_router.get_universe",
+                return_value=Universe(symbols=("HPG", "VCB", "FPT")),
+            ):
+                body = TestClient(app).get("/api/v1/jobs/backfill").json()
         finally:
             app.dependency_overrides.clear()
             session.close()
@@ -261,13 +342,13 @@ class TestTheOperatorsRoute:
         assert by_symbol["HPG"]["covered_through"] == BOUNDARY.isoformat()
         assert by_symbol["VCB"]["status"] == "failed"
         assert "VCB" in by_symbol["VCB"]["last_error"]
+        # A symbol the load has not reached is reported rather than missing.
+        assert by_symbol["FPT"]["status"] == "pending"
 
     @pytest.mark.asyncio
     async def test_the_load_is_scheduled_after_the_days_cycle(self):
         """The two share one vnstock allowance, and the daily cycle is the one
         users are waiting on that evening."""
-        from unittest.mock import AsyncMock, patch
-
         from src.core.config import Settings
         from src.core.scheduler import setup_scheduler
 
@@ -279,6 +360,7 @@ class TestTheOperatorsRoute:
                 daily_ohlcv_enabled=False,
                 financial_statements_enabled=False,
                 sector_historical_enabled=False,
+                backfill_enabled=True,
             ),
         ):
             await setup_scheduler(scheduler)
@@ -309,7 +391,15 @@ class TestNothingToDo:
         engine = database()
         history = FakeHistory()
 
-        summary = backfill(engine, history=history, depth_days=MAIN_SOURCE_DAYS - 1).run()
+        summary = backfill(
+            engine,
+            history=history,
+            window=HistoryWindow(
+                depth_days=MAIN_SOURCE_DAYS - 1,
+                main_source_days=MAIN_SOURCE_DAYS,
+                chunk_days=CHUNK_DAYS,
+            ),
+        ).run()
 
         assert history.windows == []
         assert summary.completed == ("HPG",)
