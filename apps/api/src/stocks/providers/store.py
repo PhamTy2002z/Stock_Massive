@@ -34,11 +34,24 @@ SNAPSHOT_MODEL_BY_CAPABILITY = {
     Capability.FUNDAMENTAL: FundamentalSnapshot,
 }
 
+# How long a snapshot stands before the serving path calls it old.
+#
+# The collector runs once a session, so the shortest honest threshold is longer
+# than the longest ordinary gap between two runs: a Friday close is still the
+# latest close on Monday, and a public holiday stretches that further. Four days
+# clears a long weekend and still raises the flag once the collector has missed
+# several sessions on end. Anything tighter — the 300 seconds this held while
+# requests went straight to a live feed — would flag every evening the app is
+# used, and a warning that is always on is one nobody reads.
+EOD_MAX_AGE_SECONDS = 4 * 24 * 60 * 60
+
 MAX_AGE_SECONDS = {
-    Capability.MARKET: 300,
-    Capability.VALUATION: 24 * 60 * 60,
+    Capability.MARKET: EOD_MAX_AGE_SECONDS,
+    Capability.VALUATION: EOD_MAX_AGE_SECONDS,
+    # Ownership and share counts change on corporate actions, not on sessions,
+    # so this one keeps its own, slower threshold.
     Capability.REFERENCE: 7 * 24 * 60 * 60,
-    Capability.FUNDAMENTAL: 24 * 60 * 60,
+    Capability.FUNDAMENTAL: EOD_MAX_AGE_SECONDS,
 }
 
 

@@ -75,7 +75,9 @@ def test_save_is_idempotent_and_refreshes_redis():
 def test_latest_falls_back_to_database_when_redis_is_unavailable():
     engine = create_engine("sqlite://")
     ProviderSnapshot.__table__.create(engine)
-    observed_at = datetime.now(timezone.utc) - timedelta(minutes=6)
+    # Old enough to have missed several sessions, which is what the market
+    # threshold measures now that collection runs once a session.
+    observed_at = datetime.now(timezone.utc) - timedelta(days=5)
 
     with Session(engine) as session:
         SnapshotStore(session, redis=None).save(
@@ -92,7 +94,7 @@ def test_latest_falls_back_to_database_when_redis_is_unavailable():
     assert result is not None
     assert result.snapshot.last_price == 59_700
     assert result.stale is True
-    assert result.age_seconds >= 360
+    assert result.age_seconds >= 5 * 24 * 60 * 60
 
 
 def test_valuation_snapshots_round_trip_under_their_own_capability():

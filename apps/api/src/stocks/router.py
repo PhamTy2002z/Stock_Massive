@@ -17,6 +17,7 @@ from .company.router import router as company_router
 from .financial.router import router as financial_router
 from .analytics.router import router as analytics_router
 from .trading.router import router as trading_router
+from .snapshot_router import router as snapshot_router
 
 # Main router with prefix and tags
 router = APIRouter(prefix="/stocks", tags=["stocks"])
@@ -25,7 +26,10 @@ router = APIRouter(prefix="/stocks", tags=["stocks"])
 # 1. Market router first - matches /symbols, /sector-performance, /fund-certificates
 router.include_router(market_router)
 
-# 2. Price router - matches /market-indices, /price-board, /intraday/collect, /{symbol}/*
+# 2. Snapshot router - matches /{symbol}/snapshot, the store-backed serving path
+router.include_router(snapshot_router)
+
+# 3. Price router - matches /market-indices, /price-board, /intraday/collect, /{symbol}/*
 router.include_router(price_router)
 
 # 3. Company router - matches /{symbol}/company, /{symbol}/detail, etc.
