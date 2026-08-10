@@ -40,12 +40,14 @@ _DAY = 24 * 60 * 60
 # from effective_at, so each threshold has to match how often that kind of data
 # can possibly change — not how often the collector runs.
 #
-# A session series is fresh daily, but the newest close is Friday's all weekend
-# and the market adapter publishes a session behind the ratio series, so an
-# ordinary Monday evening already sits three days out. Seven days absorbs that
-# plus a public holiday, and still flags a collector that has been down a week.
-# It cannot survive Tet, when nine days of no sessions read as stale — the
-# alternative is a threshold so wide it stops meaning anything.
+# A session series is fresh daily, but the newest close is Friday's all weekend,
+# and FiinQuant appends the session that just closed to the daily series late in
+# the evening: a cycle that runs before it lands comes away with the session
+# before, which is legitimate rather than broken. An ordinary Monday evening can
+# therefore sit three days out. Seven days absorbs that plus a public holiday,
+# and still flags a collector that has been down a week. It cannot survive Tet,
+# when nine days of no sessions read as stale — the alternative is a threshold so
+# wide it stops meaning anything.
 #
 # Statements move on a completely different clock: a company reporting on time
 # still leaves its latest quarter weeks old, which is the fastest this data can

@@ -23,6 +23,7 @@ from src.stocks.providers.fiinquant import (
     ensure_ca_bundle,
     shared_session_factory,
 )
+from src.stocks.providers.normalize import VN_TZ
 from src.stocks.shared import StockServiceError
 
 
@@ -117,6 +118,50 @@ def overview_frame() -> pd.DataFrame:
                 "totalDealValue": 4_070_000_000,
                 "percentPriceChange": 0.006864988558352492,
                 "marketCap": 185_745_219_440_000,
+            },
+        ]
+    )
+
+
+def live_only_candles() -> pd.DataFrame:
+    """The evening of a session the provider has not consolidated yet.
+
+    Measured against the live free tier on 2026-08-10, hours after the close:
+    the sessions before it carry a midnight stamp, while the one that just
+    closed arrives as a single row stamped at its last tick, with ``bu`` and
+    ``sd`` still zero against millions of matched shares.
+    """
+    return pd.DataFrame(
+        [
+            {
+                "ticker": "HPG",
+                "timestamp": "2026-08-06 00:00",
+                "open": 21_900,
+                "high": 22_100,
+                "low": 21_800,
+                "close": 21_850,
+                "volume": 20_000_000,
+                "value": 437_000_000_000,
+                "bu": 6_000_000,
+                "sd": 9_000_000,
+                "fb": 80_000_000_000,
+                "fs": 60_000_000_000,
+                "fn": 20_000_000_000,
+            },
+            {
+                "ticker": "HPG",
+                "timestamp": "2026-08-07 14:46",
+                "open": 22_350,
+                "high": 22_600,
+                "low": 21_950,
+                "close": 22_000,
+                "volume": 13_044_079,
+                "value": 287_684_908_850,
+                "bu": 0,
+                "sd": 0,
+                "fb": 111_382_916_000,
+                "fs": 69_002_320_650,
+                "fn": 42_380_595_350,
             },
         ]
     )
@@ -219,6 +264,47 @@ def test_the_live_row_never_displaces_the_consolidated_session_bar():
     # the day by an order of magnitude.
     assert snapshot.volume == 28_003_806
     assert snapshot.last_price == 22_000
+
+
+def test_a_session_is_dated_by_the_day_it_traded_not_by_the_tick_it_was_read_at():
+    """Both frames describe 2026-08-07, so both must be stamped 2026-08-07.
+
+    The tick stamp would put a Monday close at 14:46 and the Friday before it at
+    midnight, so two snapshots of consecutive sessions would be a session and a
+    fraction apart. Every other capability dates a session by its own day; the
+    market one has to agree or "which session is this" has no answer.
+    """
+    session_start = datetime(2026, 8, 7, tzinfo=VN_TZ)
+
+    consolidated, _client = make_provider()
+    assert consolidated.fetch_market(["HPG"])[0].metadata.effective_at == session_start
+
+    live_only, _client = make_provider(candles=live_only_candles())
+    assert live_only.fetch_market(["HPG"])[0].metadata.effective_at == session_start
+
+
+def test_active_flow_the_provider_has_not_published_yet_reads_as_missing():
+    provider, _client = make_provider(candles=live_only_candles())
+
+    snapshot = provider.fetch_market(["HPG"])[0]
+
+    # Zeroes here would say nobody bought or sold actively all session — a claim
+    # about the market made out of the provider's publishing clock.
+    assert snapshot.active_buy_volume is None
+    assert snapshot.active_sell_volume is None
+    # Everything the row does carry is kept: the gap is bu/sd, not the session.
+    assert snapshot.volume == 13_044_079
+    assert snapshot.last_price == 22_000
+    assert snapshot.foreign_net_value_vnd == 42_380_595_350
+
+
+def test_a_consolidated_session_keeps_the_flow_it_actually_reports():
+    provider, _client = make_provider()
+
+    snapshot = provider.fetch_market(["HPG"])[0]
+
+    assert snapshot.active_buy_volume == 8_727_000
+    assert snapshot.active_sell_volume == 17_403_100
 
 
 def test_statistics_from_an_older_session_are_left_off_rather_than_stamped_on():
