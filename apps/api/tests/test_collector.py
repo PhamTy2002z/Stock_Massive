@@ -278,13 +278,36 @@ class TestIsolation:
 
         assert store.latest(Capability.MARKET, "VCB") is not None
         assert store.latest(Capability.MARKET, "HPG") is None
+        assert summary.failures == ()
         assert [
-            (failure.symbol, failure.capability) for failure in summary.failures
+            (missing.symbol, missing.capability) for missing in summary.missing
         ] == [("HPG", Capability.MARKET)]
+
+    def test_a_snapshot_the_database_refuses_does_not_end_the_cycle(self):
+        """A rejected write leaves a SQLAlchemy session unusable until it is
+        rolled back, so one refused snapshot could otherwise take every later
+        write in the cycle with it — every capability, every other symbol."""
+        engine = create_engine("sqlite://")
+        ProviderSnapshot.__table__.create(engine)
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "CREATE TRIGGER reject_halted BEFORE INSERT ON provider_snapshots "
+                "WHEN NEW.symbol = 'HPG' "
+                "BEGIN SELECT RAISE(ABORT, 'symbol is halted'); END"
+            )
+        store = SnapshotStore(Session(engine), redis=None)
+
+        summary = collector(store).run()
+
+        for capability in Capability:
+            assert store.latest(capability, "VCB") is not None
+            assert store.latest(capability, "HPG") is None
+        assert summary.succeeded == ("VCB",)
+        assert {failure.symbol for failure in summary.failures} == {"HPG"}
 
 
 class TestRunningAgain:
-    def test_a_second_run_in_the_same_session_adds_no_second_record(self):
+    def test_a_second_run_in_the_same_session_adds_no_second_snapshot(self):
         """Re-running after a partial failure is the operator's normal repair.
         It must cost nothing but the calls it makes."""
         store = snapshot_store()

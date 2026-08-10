@@ -70,9 +70,11 @@ VALUATION_FIELDS = ("ticker", "timestamp", "pe", "pb")
 GATEWAY_TIMEOUT_STATUS = 504
 
 # What a 504 looks like once it has been through a layer that kept only the
-# text. Matched case-insensitively against the upstream message, which is read
-# here and nowhere else — it is never repeated back to the caller.
-GATEWAY_TIMEOUT_MARKERS = ("504", "gateway time-out", "gateway timeout")
+# text. The word "gateway" has to be there as well as the code: a message that
+# merely contains those three digits is some other failure, and reading it as an
+# oversized batch would have the caller retrying an outage in halves. The
+# provider's text is read here and nowhere else — it is never repeated back.
+GATEWAY_TIMEOUT_MARKERS = ("504", "time-out", "timeout")
 
 
 class FiinQuantProviderError(RuntimeError):
@@ -89,6 +91,11 @@ class FiinQuantBatchTooLarge(FiinQuantProviderError, BatchTooLarge):
     Both parents on purpose: a caller that only knows this provider still
     catches it as one of its errors, while the collector catches the neutral
     ``BatchTooLarge`` without having to know which provider it came from.
+
+    It still counts against the circuit breaker. Halving survives that because
+    a batch that succeeds resets the count, and a gateway that keeps timing out
+    however small the batch gets is an outage — which is exactly when the caller
+    should stop rather than retry a hundred symbols one at a time.
     """
 
 
@@ -98,7 +105,9 @@ def _is_gateway_timeout(exc: BaseException) -> bool:
     if status == GATEWAY_TIMEOUT_STATUS:
         return True
     text = str(exc).lower()
-    return any(marker in text for marker in GATEWAY_TIMEOUT_MARKERS)
+    return "gateway" in text and any(
+        marker in text for marker in GATEWAY_TIMEOUT_MARKERS
+    )
 
 
 class ProviderCircuitBreaker:
@@ -237,11 +246,6 @@ class FiinQuantProviderBase:
         self._circuit.allow()
         try:
             result = self._guarded(call, message)
-        except FiinQuantBatchTooLarge:
-            # An oversized batch is this caller's doing, not the provider's. The
-            # answer is to halve and retry, which a breaker counting each 504 as
-            # an outage would cut short before the smaller batches were tried.
-            raise
         except FiinQuantProviderError:
             self._circuit.record_failure()
             raise

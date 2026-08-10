@@ -82,39 +82,48 @@ class SnapshotStore:
         return source
 
     def save(self, capability: Capability, snapshot: SymbolSnapshot) -> None:
-        """Idempotently persist one observed snapshot and refresh Redis."""
+        """Idempotently persist one observed snapshot and refresh Redis.
+
+        The write takes a savepoint of its own so that a snapshot the database
+        refuses costs only itself. A failed flush otherwise leaves the session
+        unusable until someone rolls it back, which would turn one halted
+        symbol into a whole collection cycle's worth of lost writes.
+        """
         if not isinstance(snapshot, SNAPSHOT_MODEL_BY_CAPABILITY[capability]):
             raise TypeError(f"snapshot does not match {capability.value} capability")
 
         metadata = snapshot.metadata
         self._require_owning_source(capability, metadata.source)
-        existing = self.session.execute(
-            select(ProviderSnapshot).where(
-                ProviderSnapshot.capability == capability.value,
-                ProviderSnapshot.symbol == snapshot.symbol,
-                ProviderSnapshot.source == metadata.source.value,
-                ProviderSnapshot.effective_at == metadata.effective_at,
-                ProviderSnapshot.schema_version == metadata.schema_version,
-            )
-        ).scalar_one_or_none()
 
-        payload = snapshot.model_dump(mode="json")
-        if existing is None:
-            self.session.add(
-                ProviderSnapshot(
-                    capability=capability.value,
-                    symbol=snapshot.symbol,
-                    source=metadata.source.value,
-                    effective_at=metadata.effective_at,
-                    observed_at=metadata.observed_at,
-                    schema_version=metadata.schema_version,
-                    payload=payload,
+        with self.session.begin_nested():
+            existing = self.session.execute(
+                select(ProviderSnapshot).where(
+                    ProviderSnapshot.capability == capability.value,
+                    ProviderSnapshot.symbol == snapshot.symbol,
+                    ProviderSnapshot.source == metadata.source.value,
+                    ProviderSnapshot.effective_at == metadata.effective_at,
+                    ProviderSnapshot.schema_version == metadata.schema_version,
                 )
-            )
-        else:
-            existing.observed_at = metadata.observed_at
-            existing.payload = payload
-        self.session.flush()
+            ).scalar_one_or_none()
+
+            payload = snapshot.model_dump(mode="json")
+            if existing is None:
+                self.session.add(
+                    ProviderSnapshot(
+                        capability=capability.value,
+                        symbol=snapshot.symbol,
+                        source=metadata.source.value,
+                        effective_at=metadata.effective_at,
+                        observed_at=metadata.observed_at,
+                        schema_version=metadata.schema_version,
+                        payload=payload,
+                    )
+                )
+            else:
+                existing.observed_at = metadata.observed_at
+                existing.payload = payload
+            self.session.flush()
+
         self._cache_snapshot(capability, snapshot)
 
     def latest(

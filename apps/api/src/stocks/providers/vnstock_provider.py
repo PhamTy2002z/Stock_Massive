@@ -322,7 +322,7 @@ class VnstockReferenceProvider(VnstockProviderBase):
                     source=self.source,
                     # The board carries no period of its own, so it is dated by
                     # the session it was read in. Dating it by the minute would
-                    # make each re-run of a cycle a fresh record of facts that
+                    # make each re-run of a cycle a fresh Snapshot of facts that
                     # have not changed — and these facts change over months.
                     effective_at=effective_at,
                     observed_at=observed_at,

@@ -395,19 +395,34 @@ def test_a_gateway_timeout_recognised_only_by_its_text_is_still_splittable():
         provider.fetch_market(["HPG", "VCB"])
 
 
-def test_an_oversized_batch_does_not_count_against_the_circuit():
-    """Halving a batch would trip a breaker that counted each 504 as an outage,
-    and the cycle would give up on data smaller batches would have returned."""
+def test_an_error_that_merely_mentions_504_is_not_treated_as_an_oversized_batch():
+    """Splitting a batch is only the right answer to a gateway giving up on its
+    size. Reading any message with those digits in it as a 504 would send the
+    caller retrying a real outage in halves, with the breaker never opening."""
+    provider, client = make_provider()
+    client.Fetch_Trading_Data.side_effect = RuntimeError(
+        "quota exhausted: 504 of 500 calls used today"
+    )
+
+    with pytest.raises(FiinQuantProviderError) as raised:
+        provider.fetch_market(["HPG"])
+    assert not isinstance(raised.value, BatchTooLarge)
+
+
+def test_a_gateway_that_keeps_timing_out_still_opens_the_circuit():
+    """Halving has a floor, and past it a 504 stops being about the batch. The
+    breaker has to reach it, or a gateway that is down turns a hundred symbols
+    into a retry storm."""
     breaker = ProviderCircuitBreaker(failure_threshold=2, cooldown_seconds=30)
     provider, client = make_provider(circuit_breaker=breaker)
     client.Fetch_Trading_Data.side_effect = GatewayTimeout()
 
-    for _ in range(3):
+    for _ in range(2):
         with pytest.raises(BatchTooLarge):
             provider.fetch_market(["HPG"])
 
-    client.Fetch_Trading_Data.side_effect = None
-    assert provider.fetch_market(["HPG"])[0].symbol == "HPG"
+    with pytest.raises(FiinQuantCircuitOpen):
+        provider.fetch_market(["HPG"])
 
 
 def test_one_login_is_shared_by_every_adapter_on_the_account():
