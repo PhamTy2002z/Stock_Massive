@@ -156,6 +156,9 @@ class TestSchedulerSetup:
             mock_settings.sector_historical_enabled = True
             mock_settings.sector_historical_hour = 15
             mock_settings.sector_historical_minute = 45
+            # The Universe collection cycle owns its own schedule; these
+            # tests are about the jobs that were here before it.
+            mock_settings.collector_enabled = False
 
             await setup_scheduler(mock_scheduler)
 
