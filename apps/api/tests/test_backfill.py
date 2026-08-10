@@ -549,6 +549,27 @@ class TestTheMainSourceWindow:
             )
         assert len(series.snapshots) == 1
 
+    def test_a_loaded_symbol_is_not_asked_again_the_next_day(self):
+        """The one-time load stays one-time. Every session after the walk is
+        the Collector's, and re-fetching them daily would be a second cycle
+        writing what the first already wrote."""
+        engine = database()
+        backfill(engine, history=FakeHistory(), main_history=FakeMainHistory()).run()
+
+        tomorrow = NOW + timedelta(days=1)
+        cover, main = FakeHistory(), FakeMainHistory()
+        summary = backfill(
+            engine,
+            history=cover,
+            main_history=main,
+            now=lambda: tomorrow,
+        ).run()
+
+        assert cover.windows == []
+        assert main.windows == []
+        assert summary.snapshots_written == 0
+        assert summary.completed == ("HPG",)
+
     def test_the_ratio_series_is_not_asked_of_the_cover_stretch(self):
         """vnstock owns no ratio series, and the deep years are its stretch."""
         engine = database()
