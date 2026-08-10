@@ -37,14 +37,18 @@ class FailedRedis:
         raise ConnectionError("redis unavailable")
 
 
+def snapshot_metadata(effective_at: datetime, observed_at: datetime) -> SnapshotMetadata:
+    return SnapshotMetadata(
+        source=ProviderSource.FIINQUANT,
+        effective_at=effective_at,
+        observed_at=observed_at,
+    )
+
+
 def market_snapshot(observed_at: datetime, symbol: str = "VCB") -> MarketSnapshot:
     return MarketSnapshot(
         symbol=symbol,
-        metadata=SnapshotMetadata(
-            source=ProviderSource.FIINQUANT,
-            effective_at=observed_at,
-            observed_at=observed_at,
-        ),
+        metadata=snapshot_metadata(observed_at, observed_at),
         last_price=59_700,
         volume=1_000,
     )
@@ -70,6 +74,49 @@ def test_save_is_idempotent_and_refreshes_redis():
     assert result.snapshot == snapshot
     assert result.stale is False
     assert redis.values
+
+
+def test_a_session_recollected_with_fuller_numbers_revises_the_row():
+    """One session is one row, whatever the provider had filled in when.
+
+    FiinQuant publishes the session that just closed before its active buy/sell
+    split, so the next cycle re-reads the same session with more in it. Keyed by
+    the session that write revises the row; keyed by anything finer — the tick
+    the bar was stamped at, say — the fuller numbers would land beside the
+    partial ones, and a reader taking the newest session would get the partial
+    bar because its stamp is later in the day.
+    """
+    engine = create_engine("sqlite://")
+    ProviderSnapshot.__table__.create(engine)
+    session_start = datetime(2026, 8, 10, tzinfo=timezone.utc)
+
+    with Session(engine) as session:
+        store = SnapshotStore(session, redis=MemoryRedis())
+        partial = market_snapshot(session_start).model_copy(
+            update={"metadata": snapshot_metadata(session_start, session_start)}
+        )
+        store.save(Capability.MARKET, partial)
+        store.save(
+            Capability.MARKET,
+            partial.model_copy(
+                update={
+                    "metadata": snapshot_metadata(
+                        session_start,
+                        session_start + timedelta(hours=9),
+                    ),
+                    "active_buy_volume": 8_727_000,
+                    "active_sell_volume": 17_403_100,
+                }
+            ),
+        )
+        session.commit()
+
+        count = session.scalar(select(func.count()).select_from(ProviderSnapshot))
+        result = store.latest(Capability.MARKET, "VCB")
+
+    assert count == 1
+    assert result is not None
+    assert result.snapshot.active_buy_volume == 8_727_000
 
 
 def test_latest_falls_back_to_database_when_redis_is_unavailable():
