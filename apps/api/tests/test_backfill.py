@@ -23,6 +23,7 @@ from src.stocks.providers import (
     ProviderSource,
     SnapshotMetadata,
     SnapshotStore,
+    ValuationSnapshot,
 )
 from src.stocks.providers.normalize import VN_TZ
 from src.stocks.universe import Universe
@@ -62,6 +63,67 @@ def history_snapshot(symbol: str, session_day: date) -> MarketSnapshot:
         last_price=21_850,
         volume=20_000_000,
     )
+
+
+def main_session(symbol: str, session_day: date) -> MarketSnapshot:
+    return MarketSnapshot(
+        symbol=symbol,
+        metadata=SnapshotMetadata(
+            source=ProviderSource.FIINQUANT,
+            effective_at=datetime.combine(
+                session_day, datetime.min.time(), tzinfo=VN_TZ
+            ),
+            observed_at=NOW,
+        ),
+        last_price=22_000,
+        volume=28_000_000,
+    )
+
+
+def valuation_session(symbol: str, session_day: date) -> ValuationSnapshot:
+    return ValuationSnapshot(
+        symbol=symbol,
+        metadata=SnapshotMetadata(
+            source=ProviderSource.FIINQUANT,
+            effective_at=datetime.combine(
+                session_day, datetime.min.time(), tzinfo=VN_TZ
+            ),
+            observed_at=NOW,
+        ),
+        provider_pe=12.86,
+        provider_pb=1.61,
+    )
+
+
+class FakeMainHistory:
+    """The Main Source answering for its own window, one session per request."""
+
+    source = ProviderSource.FIINQUANT
+
+    def __init__(self, broken: set[str] | None = None):
+        self.windows: list[tuple[str, date, date]] = []
+        self.broken = broken or set()
+
+    def fetch_market_history(self, symbol, from_date, to_date):
+        self.windows.append((symbol, from_date, to_date))
+        if symbol in self.broken:
+            raise RuntimeError(f"FiinQuant market history fetch failed for {symbol}")
+        return (main_session(symbol, to_date),)
+
+    def windows_for(self, symbol: str) -> list[tuple[date, date]]:
+        return [(start, end) for asked, start, end in self.windows if asked == symbol]
+
+
+class FakeValuationHistory:
+    def __init__(self, broken: set[str] | None = None):
+        self.windows: list[tuple[tuple[str, ...], date, date]] = []
+        self.broken = broken or set()
+
+    def fetch_valuation(self, symbols, from_date, to_date):
+        self.windows.append((tuple(symbols), from_date, to_date))
+        if set(symbols) & self.broken:
+            raise RuntimeError("FiinQuant valuation fetch failed")
+        return tuple(valuation_session(symbol, to_date) for symbol in symbols)
 
 
 class KilledMidLoad(BaseException):
@@ -403,3 +465,95 @@ class TestNothingToDo:
 
         assert history.windows == []
         assert summary.completed == ("HPG",)
+
+
+# Where the Main Source's own window begins, and where the load now ends.
+MAIN_SEGMENT_START = date(2026, 7, 12)
+TODAY = date(2026, 8, 10)
+
+
+class TestTheMainSourceWindow:
+    """The stretch the Main Source is granted but nothing had ever fetched.
+
+    Backfill loaded only what was deeper than the Main Source's reach, and the
+    daily cycle writes one session at a time from today — so between them sat
+    five years no read would ever cover, and a chart drawn from the store had a
+    hole in exactly the range a reader looks at most.
+    """
+
+    def test_each_stretch_is_asked_of_the_source_that_reaches_it(self):
+        engine = database()
+        cover, main = FakeHistory(), FakeMainHistory()
+
+        summary = backfill(engine, history=cover, main_history=main).run()
+
+        assert cover.windows_for("HPG") == [
+            asked(FIRST_SESSION, date(2026, 6, 10)),
+            asked(date(2026, 6, 11), date(2026, 7, 10)),
+            asked(date(2026, 7, 11), BOUNDARY),
+        ]
+        assert main.windows_for("HPG") == [asked(MAIN_SEGMENT_START, TODAY)]
+        assert summary.completed == ("HPG",)
+
+    def test_each_session_keeps_the_source_that_answered_for_it(self):
+        engine = database()
+
+        backfill(engine, history=FakeHistory(), main_history=FakeMainHistory()).run()
+
+        with Session(engine) as session:
+            series = SnapshotStore(session, redis=None).series(
+                Capability.MARKET, "HPG", now=NOW
+            )
+
+        sources = [snapshot.metadata.source for snapshot in series.snapshots]
+        assert sources[0] is ProviderSource.VNSTOCK
+        assert sources[-1] is ProviderSource.FIINQUANT
+
+    def test_without_a_main_source_the_load_still_stops_where_it_always_did(self):
+        """A development environment has no FiinQuant account and must not sit
+        forever half-loaded waiting for a window nothing can fetch."""
+        engine = database()
+
+        summary = backfill(engine, history=FakeHistory()).run()
+
+        assert summary.completed == ("HPG",)
+
+    def test_the_main_window_is_loaded_once_an_account_appears(self):
+        """A symbol completed without an account is owed the window again."""
+        engine = database()
+        backfill(engine, history=FakeHistory()).run()
+
+        main = FakeMainHistory()
+        summary = backfill(engine, history=FakeHistory(), main_history=main).run()
+
+        assert main.windows_for("HPG") == [asked(MAIN_SEGMENT_START, TODAY)]
+        assert summary.completed == ("HPG",)
+
+    def test_the_ratio_series_is_loaded_across_the_same_window(self):
+        """Story 7 of #6 wants P/E and P/B over time, and the Collector's weekly
+        look-back only ever builds that going forward."""
+        engine = database()
+        valuation = FakeValuationHistory()
+
+        backfill(
+            engine,
+            history=FakeHistory(),
+            main_history=FakeMainHistory(),
+            valuation_history=valuation,
+        ).run()
+
+        assert valuation.windows == [(("HPG",), *asked(MAIN_SEGMENT_START, TODAY))]
+        with Session(engine) as session:
+            series = SnapshotStore(session, redis=None).series(
+                Capability.VALUATION, "HPG", now=NOW
+            )
+        assert len(series.snapshots) == 1
+
+    def test_the_ratio_series_is_not_asked_of_the_cover_stretch(self):
+        """vnstock owns no ratio series, and the deep years are its stretch."""
+        engine = database()
+        valuation = FakeValuationHistory()
+
+        backfill(engine, history=FakeHistory(), valuation_history=valuation).run()
+
+        assert valuation.windows == []

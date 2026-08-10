@@ -3,7 +3,7 @@
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -20,9 +20,11 @@ from .contracts import (
     ReferenceSnapshot,
     SymbolSnapshot,
     ValuationSnapshot,
+    cover_source,
     main_source,
     owns_capability,
 )
+from .normalize import VN_TZ
 
 logger = logging.getLogger(__name__)
 _DEFAULT_REDIS = object()
@@ -65,6 +67,34 @@ MAX_AGE_SECONDS = {
     # late filing: past that, a report really is missing.
     Capability.FUNDAMENTAL: STATEMENT_MAX_AGE_SECONDS,
 }
+
+
+def _day_starts(day: date, after: int = 0) -> datetime:
+    """Midnight in Vietnam on a session day, which is how sessions are dated.
+
+    A window asked for as calendar dates has to be read in the market's own
+    zone: built in UTC, "from 2026-08-10" would start seven hours into the
+    session and drop it.
+    """
+    return datetime.combine(day + timedelta(days=after), time.min, tzinfo=VN_TZ)
+
+
+@dataclass(frozen=True)
+class SnapshotSeries:
+    """A stretch of sessions for one capability, oldest first.
+
+    Age and staleness are judged on the newest session alone. Every session
+    before it is old by definition — that is what history is — so carrying a
+    flag per point would turn a healthy decade into a decade of warnings, and
+    the reader would learn to ignore the one that matters.
+
+    An empty series is a real answer: a window the exchange was shut for holds
+    no sessions, which is not the same as a symbol nothing is held for.
+    """
+
+    snapshots: tuple[SymbolSnapshot, ...]
+    stale: bool
+    age_seconds: int | None
 
 
 @dataclass(frozen=True)
@@ -209,6 +239,80 @@ class SnapshotStore:
         age_seconds = max(0, int((current - effective_at).total_seconds()))
         return SnapshotRead(
             snapshot=snapshot,
+            stale=age_seconds > MAX_AGE_SECONDS[capability],
+            age_seconds=age_seconds,
+        )
+
+    def series(
+        self,
+        capability: Capability,
+        symbol: str,
+        start: date | None = None,
+        end: date | None = None,
+        now: datetime | None = None,
+    ) -> SnapshotSeries:
+        """Read a stretch of sessions, oldest first, without calling upstream.
+
+        Unlike ``latest``, this spans both sources that own the capability.
+        History is written by two of them — the Cover Source loaded the deep
+        years once, the Main Source writes each session as it closes — and a
+        reader asking for a decade wants the decade, not the half of it one
+        provider happens to have. ADR 0002 bars swapping sources *silently*;
+        here every session carries the source that produced it, so the seam is
+        on the wire rather than hidden behind it.
+
+        Redis is not consulted. It holds the current view of one session, and
+        filling it with ranges would evict exactly that.
+        """
+        sources = [
+            source.value
+            for source in (main_source(capability), cover_source(capability))
+            if source is not None
+        ]
+        conditions = [
+            ProviderSnapshot.capability == capability.value,
+            ProviderSnapshot.symbol == symbol.upper(),
+            ProviderSnapshot.source.in_(sources),
+        ]
+        if start is not None:
+            conditions.append(ProviderSnapshot.effective_at >= _day_starts(start))
+        if end is not None:
+            conditions.append(ProviderSnapshot.effective_at < _day_starts(end, after=1))
+
+        rows = self.session.execute(
+            select(ProviderSnapshot)
+            .where(*conditions)
+            .order_by(
+                ProviderSnapshot.effective_at.asc(),
+                ProviderSnapshot.observed_at.asc(),
+            )
+        ).scalars()
+
+        model = SNAPSHOT_MODEL_BY_CAPABILITY[capability]
+        main = main_source(capability).value
+        # One session is one point. The backfill window and the daily cycle
+        # overlap, so a session can arrive from both; the Main Source wins
+        # because it answers with a richer session than a quote history carries.
+        # Picking by write order instead would let a late backfill run replace
+        # a collected session with the thinner version of it.
+        by_session: dict[datetime, ProviderSnapshot] = {}
+        for row in rows:
+            held = by_session.get(row.effective_at)
+            if held is None or row.source == main or held.source != main:
+                by_session[row.effective_at] = row
+
+        snapshots = tuple(
+            model.model_validate(row.payload)
+            for _, row in sorted(by_session.items(), key=lambda item: item[0])
+        )
+        if not snapshots:
+            return SnapshotSeries(snapshots=(), stale=False, age_seconds=None)
+
+        current = now or datetime.now(timezone.utc)
+        newest = snapshots[-1].metadata.effective_at
+        age_seconds = max(0, int((current - newest).total_seconds()))
+        return SnapshotSeries(
+            snapshots=snapshots,
             stale=age_seconds > MAX_AGE_SECONDS[capability],
             age_seconds=age_seconds,
         )

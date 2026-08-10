@@ -16,6 +16,8 @@ import {
   StockProfileSidebarSkeleton,
   StockSnapshotPanel,
   StockSnapshotPanelSkeleton,
+  StockValuationHistory,
+  StockValuationHistorySkeleton,
   StockTickerHeaderSkeleton,
   StockDetailEmpty,
   StockDetailTabs,
@@ -123,6 +125,9 @@ function StockDetailInner({ symbol }: { symbol: string }) {
                 />
                 <Suspense fallback={<StockValuationVsSectorSkeleton />}>
                   <StockValuationVsSector symbol={data.symbol} />
+                </Suspense>
+                <Suspense fallback={<StockValuationHistorySkeleton />}>
+                  <StockValuationHistory symbol={data.symbol} />
                 </Suspense>
                 {/* Last, because it is the only block that dates its numbers:
                     read after the live figures above, it says which session

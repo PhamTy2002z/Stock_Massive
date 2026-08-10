@@ -318,6 +318,54 @@ def test_a_consolidated_session_keeps_the_flow_it_actually_reports():
     assert snapshot.active_sell_volume == 17_403_100
 
 
+def test_fetch_market_history_yields_every_session_in_the_window():
+    """The one-time load of the Main Source's own window, session by session.
+
+    ``fetch_market`` answers with the session that just closed; a decade of
+    chart needs every session the provider will give. The two share the frame
+    and the normalization, and differ only in how much of it they keep.
+    """
+    provider, client = make_provider()
+
+    snapshots = provider.fetch_market_history("hpg", date(2026, 8, 1), date(2026, 8, 7))
+
+    assert [snapshot.metadata.effective_at for snapshot in snapshots] == [
+        datetime(2026, 8, 6, tzinfo=VN_TZ),
+        datetime(2026, 8, 7, tzinfo=VN_TZ),
+    ]
+    assert [snapshot.last_price for snapshot in snapshots] == [21_850, 22_000]
+    # Measured against the session before it, exactly as the daily read does.
+    assert snapshots[1].reference_price == 21_850
+    call = client.Fetch_Trading_Data.call_args.kwargs
+    assert call["from_date"] == "2026-08-01"
+    assert call["to_date"] == "2026-08-07"
+
+
+def test_market_history_leaves_out_the_statistics_it_cannot_date():
+    """Market cap and the price band are read for one session, not a decade.
+
+    ``get_overview`` and ``get_ceilingfloor`` are not asked at all here: a
+    historical load that stamped today's market cap onto 2019 would be worse
+    than leaving the field empty, and the calls cost quota to no purpose.
+    """
+    provider, client = make_provider()
+
+    snapshots = provider.fetch_market_history("HPG", date(2026, 8, 1), date(2026, 8, 7))
+
+    assert all(snapshot.market_cap_vnd is None for snapshot in snapshots)
+    assert all(snapshot.ceiling_price is None for snapshot in snapshots)
+    client.PriceStatistics.assert_not_called()
+
+
+def test_market_history_refuses_a_backwards_window_before_calling_out():
+    provider, client = make_provider()
+
+    with pytest.raises(ValueError, match="from_date cannot be later"):
+        provider.fetch_market_history("HPG", date(2026, 8, 7), date(2026, 8, 1))
+
+    client.Fetch_Trading_Data.assert_not_called()
+
+
 def test_statistics_from_an_older_session_are_left_off_rather_than_stamped_on():
     stale = overview_frame().iloc[0:1]  # 2026-08-06 only
     provider, _client = make_provider(overview=stale)
