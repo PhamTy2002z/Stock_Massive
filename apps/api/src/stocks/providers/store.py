@@ -34,24 +34,34 @@ SNAPSHOT_MODEL_BY_CAPABILITY = {
     Capability.FUNDAMENTAL: FundamentalSnapshot,
 }
 
-# How long a snapshot stands before the serving path calls it old.
+_DAY = 24 * 60 * 60
+
+# How old the data may be before the serving path calls it old. Age is measured
+# from effective_at, so each threshold has to match how often that kind of data
+# can possibly change — not how often the collector runs.
 #
-# The collector runs once a session, so the shortest honest threshold is longer
-# than the longest ordinary gap between two runs: a Friday close is still the
-# latest close on Monday, and a public holiday stretches that further. Four days
-# clears a long weekend and still raises the flag once the collector has missed
-# several sessions on end. Anything tighter — the 300 seconds this held while
-# requests went straight to a live feed — would flag every evening the app is
-# used, and a warning that is always on is one nobody reads.
-EOD_MAX_AGE_SECONDS = 4 * 24 * 60 * 60
+# A session series is fresh daily, but the newest close is Friday's all weekend
+# and the market adapter publishes a session behind the ratio series, so an
+# ordinary Monday evening already sits three days out. Seven days absorbs that
+# plus a public holiday, and still flags a collector that has been down a week.
+# It cannot survive Tet, when nine days of no sessions read as stale — the
+# alternative is a threshold so wide it stops meaning anything.
+#
+# Statements move on a completely different clock: a company reporting on time
+# still leaves its latest quarter weeks old, which is the fastest this data can
+# ever be. Judging it by the session cadence marked every healthy symbol stale.
+SESSION_MAX_AGE_SECONDS = 7 * _DAY
+STATEMENT_MAX_AGE_SECONDS = 150 * _DAY
 
 MAX_AGE_SECONDS = {
-    Capability.MARKET: EOD_MAX_AGE_SECONDS,
-    Capability.VALUATION: EOD_MAX_AGE_SECONDS,
-    # Ownership and share counts change on corporate actions, not on sessions,
-    # so this one keeps its own, slower threshold.
-    Capability.REFERENCE: 7 * 24 * 60 * 60,
-    Capability.FUNDAMENTAL: EOD_MAX_AGE_SECONDS,
+    Capability.MARKET: SESSION_MAX_AGE_SECONDS,
+    Capability.VALUATION: SESSION_MAX_AGE_SECONDS,
+    # Ownership and share counts change on corporate actions, but the adapter
+    # dates them by the day it read them, so they age on the session clock.
+    Capability.REFERENCE: SESSION_MAX_AGE_SECONDS,
+    # One quarter plus the weeks a company has to publish it, plus room for a
+    # late filing: past that, a report really is missing.
+    Capability.FUNDAMENTAL: STATEMENT_MAX_AGE_SECONDS,
 }
 
 
