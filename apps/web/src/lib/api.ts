@@ -1,3 +1,9 @@
+import {
+  ApiUnavailableError,
+  connectionStatus,
+  isRetryableStatus,
+} from "./connection-status"
+
 // Server-side uses Docker internal network, client uses public URL
 export const getApiBaseUrl = () => {
   // Server-side: use internal Docker network URL if available
@@ -47,15 +53,39 @@ class ApiError extends Error {
   }
 }
 
+/**
+ * One request, with the difference between "wrong" and "not yet" preserved.
+ *
+ * A refused request and an unreachable API used to arrive at the UI as the
+ * same thrown value, so a container restarting for two seconds surfaced as
+ * `TypeError: Failed to fetch` in the user's face. Silence now reports itself
+ * to `connectionStatus`, which the page veils on, and any answer at all —
+ * including a 404 — is proof the API is back.
+ */
 async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers,
-    },
-  })
+  let response: Response
+  try {
+    response = await fetch(url, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  } catch (cause) {
+    // fetch only rejects when the request never completed: no server, no
+    // network, request aborted. There is no status to read.
+    connectionStatus.reportWaiting()
+    throw new ApiUnavailableError(undefined, undefined, { cause })
+  }
+
+  if (isRetryableStatus(response.status)) {
+    connectionStatus.reportWaiting()
+    throw new ApiUnavailableError(await readErrorDetail(response), response.status)
+  }
+
+  connectionStatus.reportReady()
 
   if (!response.ok) {
     throw new ApiError(response.status, await readErrorDetail(response))
