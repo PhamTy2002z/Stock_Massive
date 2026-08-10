@@ -1,6 +1,7 @@
 """Internal contracts for normalized stock data providers."""
 
 from .contracts import (
+    BatchTooLarge,
     Capability,
     FundamentalDataProvider,
     FundamentalSnapshot,
@@ -15,6 +16,7 @@ from .contracts import (
     ShareType,
     SnapshotMetadata,
     SourceOwnership,
+    SymbolSnapshot,
     ValuationDataProvider,
     ValuationSnapshot,
     cover_source,
@@ -28,6 +30,7 @@ from .store import SnapshotRead, SnapshotStore
 # by its own module, the way the collector and its tests do.
 
 __all__ = [
+    "BatchTooLarge",
     "Capability",
     "FundamentalDataProvider",
     "FundamentalSnapshot",
@@ -44,6 +47,7 @@ __all__ = [
     "SnapshotRead",
     "SnapshotStore",
     "SourceOwnership",
+    "SymbolSnapshot",
     "ValuationDataProvider",
     "ValuationSnapshot",
     "cover_source",
