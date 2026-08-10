@@ -251,7 +251,7 @@ class SnapshotStore:
         end: date | None = None,
         now: datetime | None = None,
     ) -> SnapshotSeries:
-        """Read a stretch of sessions, oldest first, without calling upstream.
+        """Read a stretch of sessions, oldest first, touching no Provider Source.
 
         Unlike ``latest``, this spans both sources that own the capability.
         History is written by two of them — the Cover Source loaded the deep
@@ -298,7 +298,10 @@ class SnapshotStore:
         by_session: dict[datetime, ProviderSnapshot] = {}
         for row in rows:
             held = by_session.get(row.effective_at)
-            if held is None or row.source == main or held.source != main:
+            # Take this row unless a Main Source row is already holding the
+            # session. Rows arrive oldest-written first, so among two from the
+            # same source the later write wins by being seen last.
+            if held is None or held.source != main:
                 by_session[row.effective_at] = row
 
         snapshots = tuple(

@@ -14,7 +14,9 @@ Quyết định phạm vi nằm ở #27.
 
 Cả ba từ chối mã ngoài Universe bằng 404 với cùng một câu, và từ chối chuỗi ký tự không phải mã bằng 422 — hai lỗi khác nhau, người dùng đi sửa hai chỗ khác nhau.
 
-Tuổi dữ liệu tính từ `effective_at` (phiên mà số liệu nói về), không phải từ lúc job chạy. Với chuỗi, chỉ phiên mới nhất được đánh giá cũ hay không: phần còn lại của lịch sử cũ theo định nghĩa.
+Chuỗi đọc **cả hai nguồn** sở hữu Capability và mỗi điểm mang `source` của chính nó — lịch sử vốn là hai nguồn nối nhau, và mối nối phải nhìn thấy được chứ không bị giấu. Luật và giới hạn của nó ở [ADR 0002](adr/0002-main-cover-cat-ngang-capability.md).
+
+Tuổi dữ liệu tính từ `effective_at` (phiên mà số liệu nói về), không phải từ lúc `Collector` chạy. Với chuỗi, chỉ phiên mới nhất được đánh giá cũ hay không: phần còn lại của lịch sử cũ theo định nghĩa.
 
 ## Đóng băng — vẫn gọi provider trong request
 

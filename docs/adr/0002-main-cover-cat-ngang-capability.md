@@ -26,6 +26,16 @@ Hệ quả cho adapter: `effective_at` của `market` lấy theo **đầu ngày 
 
 Đây cũng là lý do thật của ngưỡng bảy ngày ở `SESSION_MAX_AGE_SECONDS`: một chu kỳ chạy trước lúc provider nối phiên sẽ lấy được phiên trước đó — hợp lệ chứ không phải hỏng.
 
+### Đọc một phiên và đọc một chuỗi là hai luật khác nhau
+
+Bổ sung khi làm #27. Luật "không tự rơi sang Cover Source" ở trên viết cho `SnapshotStore.latest()` — đọc **một** phiên, trả **một** con số. Ở đó lẫn nguồn là nguy hiểm: người đọc thấy một giá và không có cách nào biết nó vừa đổi nguồn.
+
+`SnapshotStore.series()` đọc một dải phiên và **đọc cả hai nguồn sở hữu Capability đó**. Không phải nới lỏng luật cũ mà là một tình huống khác: lịch sử vốn dĩ là hai nguồn nối nhau — `Backfill` nạp phần sâu từ Cover Source, `Collector` ghi tiếp mỗi phiên từ Main Source — nên hỏi một nguồn là hỏi một nửa. Điều khiến việc này an toàn: **mỗi điểm mang `source` của chính nó ra tới wire**, đúng như đoạn "mối nối được ghi lại qua `Snapshot.metadata.source`" ở trên. Người đọc so một phiên 2019 với phiên tuần trước biết mình đang so hai phép đo.
+
+Rủi ro còn lại không phải đơn vị — cả hai `Adapter` đã chuẩn hoá về VND — mà là **trường một nguồn không điền**. `VnstockMarketHistoryProvider` không có `total_value_vnd`, FiinQuant có. Một bar tuần bắc qua mối nối mà cộng phần có sẽ báo giá trị vài phiên thành giá trị cả tuần: một con số nhỏ hơn nhưng trông như tổng, đúng kiểu sai âm thầm mà phương án fallback động bị loại vì nó. Nên phép gộp **từ chối tổng thiếu**: thiếu một phiên thì trường đó là `null`, không phải một tổng nhỏ hơn.
+
+Nếu sau này có thêm trường mà một nguồn không điền, luật vẫn đứng nguyên chỗ đó và không phải sửa gì.
+
 ## Considered Options
 
 - **Fallback động giữa hai nguồn cho cùng một Capability.** Bị loại: hai nguồn lệch đơn vị — FiinQuant trả giá bằng VND (HPG 22.000), còn payload hiện tại của hệ thống trộn VND, triệu VND và tỷ VND tuỳ trường. Rơi nguồn giữa chừng sẽ tạo biểu đồ sai mà không ai phát hiện, và với một công cụ phân tích thì đó nguy hiểm hơn là thiếu dữ liệu.

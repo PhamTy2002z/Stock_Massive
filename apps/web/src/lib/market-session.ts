@@ -96,6 +96,20 @@ export function formatVietnamDate(
   }).format(moment)
 }
 
+/**
+ * The last `days` calendar days, as the ISO dates a series window is asked in.
+ *
+ * Calendar days rather than sessions: the caller does not know which of them
+ * the exchange was open for, and the store answers with the ones it holds.
+ */
+export function recentWindow(days: number): { start: string; end: string } {
+  const end = new Date()
+  const start = new Date(end)
+  start.setDate(start.getDate() - days)
+  const iso = (date: Date) => date.toISOString().slice(0, 10)
+  return { start: iso(start), end: iso(end) }
+}
+
 /** Clock time in Vietnam, for stamping when a quote was last read. */
 export function formatVietnamTime(value: Date | number): string {
   return new Intl.DateTimeFormat("vi-VN", {

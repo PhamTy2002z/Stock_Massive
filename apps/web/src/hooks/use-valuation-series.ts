@@ -2,10 +2,9 @@
 
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { fetchValuationSeries, type ValuationSeries } from "@/lib/api"
+import { recentWindow } from "@/lib/market-session"
 import { queryKeys } from "@/lib/query-keys"
 import { STALE_TIME } from "@/lib/query-config"
-
-const isoDate = (date: Date) => date.toISOString().slice(0, 10)
 
 /**
  * P/E and P/B session by session, or `null` for a symbol outside the Universe.
@@ -18,10 +17,8 @@ export function useValuationSeries(symbol: string, days: number) {
   return useSuspenseQuery<ValuationSeries | null>({
     queryKey: queryKeys.valuationSeries(symbol, days),
     queryFn: () => {
-      const end = new Date()
-      const start = new Date(end)
-      start.setDate(start.getDate() - days)
-      return fetchValuationSeries(symbol, isoDate(start), isoDate(end))
+      const { start, end } = recentWindow(days)
+      return fetchValuationSeries(symbol, start, end)
     },
     staleTime: STALE_TIME.STATIC,
   })

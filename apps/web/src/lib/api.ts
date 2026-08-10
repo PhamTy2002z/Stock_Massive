@@ -930,10 +930,19 @@ export interface SymbolSnapshot {
  * before asking, so a 422 is a bug on this side, not a fact about the market.
  */
 export async function fetchSymbolSnapshot(symbol: string): Promise<SymbolSnapshot | null> {
+  return fetchWatched<SymbolSnapshot>(`/stocks/${encodeURIComponent(symbol)}/snapshot`)
+}
+
+/**
+ * A store-backed request whose 404 means "this symbol is not watched".
+ *
+ * Every route that reads the store refuses an untracked symbol the same way, so
+ * reading that refusal belongs in one place. Other statuses still throw: a 422
+ * is a malformed symbol, which the caller validated before asking.
+ */
+async function fetchWatched<T>(endpoint: string): Promise<T | null> {
   try {
-    return await fetchApi<SymbolSnapshot>(
-      `/stocks/${encodeURIComponent(symbol)}/snapshot`
-    )
+    return await fetchApi<T>(endpoint)
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) return null
     throw error
@@ -1001,14 +1010,9 @@ export async function fetchMarketSeries(
   interval: SessionInterval
 ): Promise<MarketSeries | null> {
   const query = seriesQuery(start, end, { interval })
-  try {
-    return await fetchApi<MarketSeries>(
-      `/stocks/${encodeURIComponent(symbol)}/series/market?${query}`
-    )
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 404) return null
-    throw error
-  }
+  return fetchWatched<MarketSeries>(
+    `/stocks/${encodeURIComponent(symbol)}/series/market?${query}`
+  )
 }
 
 /** P/E and P/B session by session, or `null` for a symbol outside the Universe. */
@@ -1017,12 +1021,7 @@ export async function fetchValuationSeries(
   start: string,
   end: string
 ): Promise<ValuationSeries | null> {
-  try {
-    return await fetchApi<ValuationSeries>(
-      `/stocks/${encodeURIComponent(symbol)}/series/valuation?${seriesQuery(start, end)}`
-    )
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 404) return null
-    throw error
-  }
+  return fetchWatched<ValuationSeries>(
+    `/stocks/${encodeURIComponent(symbol)}/series/valuation?${seriesQuery(start, end)}`
+  )
 }
