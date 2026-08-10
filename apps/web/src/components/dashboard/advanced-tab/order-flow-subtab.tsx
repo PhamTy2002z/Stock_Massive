@@ -4,7 +4,7 @@ import { useIntradayOrderStats } from "@/hooks/use-intraday-order-stats"
 import { OrderFlowCharts } from "./widgets/order-flow-charts"
 import { RefreshCw, Clock } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { formatSessionDate } from "@/lib/format"
+import { formatVietnamDate } from "@/lib/market-session"
 import { DataErrorNotice } from "./data-error-notice"
 
 interface OrderFlowSubtabProps {
@@ -18,7 +18,7 @@ export default function OrderFlowSubtab({ symbol }: OrderFlowSubtabProps) {
     orderStats.refetch()
   }
 
-  const sessionDate = formatSessionDate(orderStats.data?.date ?? undefined)
+  const sessionDate = formatVietnamDate(orderStats.data?.date)
 
   return (
     <div className="space-y-6">

@@ -525,7 +525,8 @@ def _build_snapshot(
     if close is not None and reference not in (None, 0):
         change_pct = (close - reference) / reference * 100
 
-    active_buy, active_sell = _active_flow(latest)
+    volume = optional_int(latest.get("volume"))
+    active_buy, active_sell = _active_flow(latest, volume)
 
     try:
         return MarketSnapshot(
@@ -543,7 +544,7 @@ def _build_snapshot(
             ceiling_price=_cell(band, "ceilingprice"),
             floor_price=_cell(band, "floorprice"),
             change_pct=change_pct,
-            volume=optional_int(latest.get("volume")),
+            volume=volume,
             total_value_vnd=optional_float(latest.get("value")),
             active_buy_volume=active_buy,
             active_sell_volume=active_sell,
@@ -580,7 +581,7 @@ def _build_valuation_snapshot(
             symbol=symbol,
             metadata=SnapshotMetadata(
                 source=source,
-                effective_at=_as_aware(row["timestamp"]),
+                effective_at=_session_start(row["timestamp"]),
                 observed_at=observed_at,
             ),
             provider_pe=provider_pe,
@@ -591,19 +592,27 @@ def _build_valuation_snapshot(
         return None
 
 
-def _active_flow(latest: pd.Series) -> tuple[int | None, int | None]:
+def _active_flow(
+    latest: pd.Series,
+    volume: int | None,
+) -> tuple[int | None, int | None]:
     """Read bu/sd, or report them absent when the provider has not split them yet.
 
     The session that just closed reaches the daily series before its active
     buy/sell decomposition does: both come back as exactly 0 against millions of
     matched shares. Stored as zeros they say nobody bought or sold actively all
     session, which is a claim about the market invented out of the provider's
-    publishing clock. A session that genuinely matched nothing keeps its zeros,
-    because there the pair is the honest answer rather than a gap.
+    publishing clock.
+
+    Both at once is the whole rule, and deliberately so. A session that matched
+    nothing keeps its zeros, since there the pair is the answer rather than a
+    gap. A lone zero keeps it too: no measurement distinguishes it from a symbol
+    nobody bought actively that day, and blanking it would invent a gap as
+    readily as the zeros invent a figure.
     """
     active_buy = optional_int(latest.get("bu"))
     active_sell = optional_int(latest.get("sd"))
-    if active_buy == 0 and active_sell == 0 and optional_int(latest.get("volume")):
+    if active_buy == 0 and active_sell == 0 and volume:
         return None, None
     return active_buy, active_sell
 
