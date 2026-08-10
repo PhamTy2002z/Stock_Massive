@@ -298,6 +298,17 @@ def test_active_flow_the_provider_has_not_published_yet_reads_as_missing():
     assert snapshot.foreign_net_value_vnd == 42_380_595_350
 
 
+def test_a_lone_zero_is_kept_because_nothing_tells_it_from_a_quiet_side():
+    one_sided = live_only_candles()
+    one_sided.loc[one_sided.index[-1], "sd"] = 2_000_000
+    provider, _client = make_provider(candles=one_sided)
+
+    snapshot = provider.fetch_market(["HPG"])[0]
+
+    assert snapshot.active_buy_volume == 0
+    assert snapshot.active_sell_volume == 2_000_000
+
+
 def test_a_consolidated_session_keeps_the_flow_it_actually_reports():
     provider, _client = make_provider()
 
@@ -644,6 +655,26 @@ def test_fetch_valuation_yields_one_snapshot_per_session():
         for snapshot in snapshots
     )
     assert all(snapshot.metadata.observed_at == NOW for snapshot in snapshots)
+
+
+def test_a_ratio_row_stamped_mid_session_is_dated_by_its_session_too():
+    """The ratio series is measured at midnight, but nothing guarantees it.
+
+    The market series stamps the session that just closed at its last tick, and
+    a ratio row arriving the same way would date one day's market and valuation
+    an afternoon apart — then leave a second row behind once the consolidated
+    one lands. Both capabilities answer "which session" the same way.
+    """
+    intraday = valuation_frame()
+    intraday["timestamp"] = intraday["timestamp"].str.replace("00:00", "14:46")
+    provider, _client = make_valuation_provider(valuation=intraday)
+
+    snapshots = provider.fetch_valuation(["HPG"], WINDOW_START, WINDOW_END)
+
+    assert [snapshot.metadata.effective_at for snapshot in snapshots] == [
+        datetime(2026, 8, 6, tzinfo=VN_TZ),
+        datetime(2026, 8, 7, tzinfo=VN_TZ),
+    ]
 
 
 def test_fetch_valuation_asks_for_every_symbol_in_one_batched_call():
