@@ -84,9 +84,9 @@ class TestReferenceNormalization:
     def test_the_board_is_dated_by_the_session_it_was_read_in(self):
         """The board carries no period of its own, so the session it was read in
         is the only honest date for it. Stamping it with the minute instead
-        would make every re-run of a cycle a fresh record of facts that have not
-        changed — and re-running after a bad day is the operator's normal
-        repair, not an event worth a second row."""
+        would make every re-run of a cycle a fresh Snapshot of facts that have
+        not changed — and re-running after a bad day is the operator's normal
+        repair, not an event worth a second Snapshot."""
         provider = reference_provider(FakeTrading(price_board([hpg_board_row()])))
 
         (snapshot,) = provider.fetch_reference(["HPG"])

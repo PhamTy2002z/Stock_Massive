@@ -48,7 +48,7 @@ VALUATION_LOOKBACK_DAYS = 7
 
 @dataclass(frozen=True)
 class SymbolFailure:
-    """One symbol the cycle could not write one capability for, and why."""
+    """One symbol whose read or write went wrong for one capability, and why."""
 
     symbol: str
     capability: Capability
@@ -56,18 +56,35 @@ class SymbolFailure:
 
 
 @dataclass(frozen=True)
+class MissingSnapshot:
+    """One symbol a well-formed answer simply carried no data for.
+
+    Kept apart from a failure on purpose: a company with no financial report
+    filed yet, or a symbol the provider publishes no ratios for, is a normal
+    state of this market. Counting it as a failure would leave a healthy cycle
+    reporting failures every day, which is how an operator learns to ignore
+    the number.
+    """
+
+    symbol: str
+    capability: Capability
+
+
+@dataclass(frozen=True)
 class CollectionSummary:
     """What one cycle did, in the terms an operator judges it by.
 
     ``succeeded`` holds the symbols that came away with at least one snapshot,
-    and ``failures`` one entry per symbol and capability that did not — so a
-    symbol can appear in both, which is exactly the half-collected state worth
-    seeing rather than rounding to healthy or broken.
+    ``failures`` the reads and writes that went wrong, and ``missing`` the
+    capabilities a symbol simply had no data for. A symbol can appear in more
+    than one of the three: that is the half-collected state worth seeing rather
+    than rounding to healthy or broken.
     """
 
     snapshots_written: int
     succeeded: tuple[str, ...]
     failures: tuple[SymbolFailure, ...]
+    missing: tuple[MissingSnapshot, ...] = ()
 
 
 class Collector:
@@ -107,37 +124,45 @@ class Collector:
         written = 0
         succeeded: set[str] = set()
         failures: list[SymbolFailure] = []
+        missing: list[MissingSnapshot] = []
 
         for capability, fetch in self._readers():
-            snapshots, unread = self._read(capability, fetch, symbols, failures)
-            stored: set[str] = set()
+            snapshots, accounted = self._read(capability, fetch, symbols, failures)
 
             for snapshot in snapshots:
+                accounted.add(snapshot.symbol)
                 try:
                     self._store.save(capability, snapshot)
                 except Exception as exc:
-                    # One rejected snapshot is one symbol's problem. Letting it
+                    # One refused snapshot is one symbol's problem. Letting it
                     # out would end the cycle for every capability still to come.
-                    self._record(failures, (snapshot.symbol,), capability, exc)
-                    unread.add(snapshot.symbol)
+                    self._blame(failures, (snapshot.symbol,), capability, exc)
                     continue
                 written += 1
-                stored.add(snapshot.symbol)
                 succeeded.add(snapshot.symbol)
 
-            self._record_unanswered(failures, capability, symbols, stored | unread)
+            # Silence is the state an operator cannot see on their own: the
+            # cycle looks healthy while one symbol quietly stops being collected.
+            missing.extend(
+                MissingSnapshot(symbol=symbol, capability=capability)
+                for symbol in symbols
+                if symbol not in accounted
+            )
 
         summary = CollectionSummary(
             snapshots_written=written,
             succeeded=tuple(symbol for symbol in symbols if symbol in succeeded),
             failures=tuple(failures),
+            missing=tuple(missing),
         )
         logger.info(
-            "Collector cycle wrote %d snapshots for %d of %d symbols, %d failures",
+            "Collector cycle wrote %d snapshots for %d of %d symbols, "
+            "%d failures, %d capabilities with no data",
             summary.snapshots_written,
             len(summary.succeeded),
             len(symbols),
             len(summary.failures),
+            len(summary.missing),
         )
         return summary
 
@@ -150,73 +175,47 @@ class Collector:
     ) -> tuple[list[SymbolSnapshot], set[str]]:
         """Read one capability for the whole Universe, batch by batch.
 
-        Returns what came back and the symbols whose read did not, so a symbol
-        already accounted for by a failed call is not reported a second time as
-        one the provider simply had nothing for.
+        Returns what came back and the symbols already accounted for by a call
+        that failed, so those are not reported a second time as symbols the
+        provider simply had nothing for.
 
         A batch the gateway gives up on is halved and put back at the front of
         the queue, so its symbols are still tried in the order the Universe
         declared them rather than drifting to the end of the cycle.
         """
         collected: list[SymbolSnapshot] = []
-        unread: set[str] = set()
+        accounted: set[str] = set()
         pending = deque(self._batches(symbols))
 
         while pending:
             batch = pending.popleft()
             try:
                 collected.extend(fetch(batch))
-            except BatchTooLarge as exc:
-                if len(batch) > MIN_BATCH_SIZE:
+            except Exception as exc:
+                if isinstance(exc, BatchTooLarge) and len(batch) > MIN_BATCH_SIZE:
                     middle = len(batch) // 2
                     pending.appendleft(batch[middle:])
                     pending.appendleft(batch[:middle])
                     continue
-                self._record(failures, batch, capability, exc)
-                unread.update(batch)
-            except Exception as exc:
                 # One source failing is not the other sources failing: each
                 # capability has an owner of its own (docs/adr/0002), and losing
                 # valuation must not also lose price.
-                self._record(failures, batch, capability, exc)
-                unread.update(batch)
+                self._blame(failures, batch, capability, exc)
+                accounted.update(batch)
 
-        return collected, unread
+        return collected, accounted
 
-    def _record_unanswered(
-        self,
-        failures: list[SymbolFailure],
-        capability: Capability,
-        symbols: Sequence[str],
-        accounted: set[str],
-    ) -> None:
-        """Report the symbols a well-formed answer simply had nothing in it for.
-
-        Silence is the failure mode an operator cannot see on their own: the
-        cycle looks healthy while one delisted or unvalued symbol quietly stops
-        being collected.
-        """
-        failures.extend(
-            SymbolFailure(
-                symbol=symbol,
-                capability=capability,
-                reason=f"the provider returned no {capability.value} data",
-            )
-            for symbol in symbols
-            if symbol not in accounted
-        )
-
-    def _record(
+    def _blame(
         self,
         failures: list[SymbolFailure],
         symbols: Sequence[str],
         capability: Capability,
         exc: Exception,
     ) -> None:
-        """Attribute one read's failure to every symbol that read was for."""
+        """Attribute one failed call to every symbol that call was for."""
         reason = str(exc)
         logger.warning(
-            "Collector could not read %s for %s: %s",
+            "Collector could not collect %s for %s: %s",
             capability.value,
             ", ".join(symbols),
             reason,
@@ -233,19 +232,27 @@ class Collector:
         if self._market is not None:
             yield Capability.MARKET, self._market.fetch_market
         if self._valuation is not None:
-            session_date = self._now().astimezone(VN_TZ).date()
-            yield (
-                Capability.VALUATION,
-                lambda batch: self._valuation.fetch_valuation(
-                    batch,
-                    session_date - timedelta(days=VALUATION_LOOKBACK_DAYS),
-                    session_date,
-                ),
-            )
+            yield Capability.VALUATION, self._fetch_valuation
         if self._reference is not None:
             yield Capability.REFERENCE, self._reference.fetch_reference
         if self._fundamental is not None:
             yield Capability.FUNDAMENTAL, self._fundamental.fetch_fundamentals
+
+    def _fetch_valuation(self, batch: Sequence[str]) -> Sequence[SymbolSnapshot]:
+        """Ask for the sessions that have closed since a cycle last succeeded.
+
+        The contract has the collector asking for the session that just closed
+        while a backfill asks for a stretch of history, and this stays on the
+        collector's side of that line: it reaches back a week only because a
+        cycle cannot assume it ran yesterday. The window is one call either way,
+        and sessions already held collapse in the store.
+        """
+        session_date = self._now().astimezone(VN_TZ).date()
+        return self._valuation.fetch_valuation(
+            batch,
+            session_date - timedelta(days=VALUATION_LOOKBACK_DAYS),
+            session_date,
+        )
 
     def _batches(self, symbols: Sequence[str]) -> Iterator[tuple[str, ...]]:
         for start in range(0, len(symbols), self._batch_size):
@@ -287,14 +294,19 @@ def build_collector(
         # One login and one breaker across both adapters: the free tier grants a
         # single concurrent connection, and the health being tracked belongs to
         # the account rather than to either capability.
-        credentials = (settings.fiinquant_username, settings.fiinquant_password)
         session_factory = shared_session_factory()
         breaker = ProviderCircuitBreaker()
         market = FiinQuantMarketProvider(
-            *credentials, session_factory=session_factory, circuit_breaker=breaker
+            username=settings.fiinquant_username,
+            password=settings.fiinquant_password,
+            session_factory=session_factory,
+            circuit_breaker=breaker,
         )
         valuation = FiinQuantValuationProvider(
-            *credentials, session_factory=session_factory, circuit_breaker=breaker
+            username=settings.fiinquant_username,
+            password=settings.fiinquant_password,
+            session_factory=session_factory,
+            circuit_breaker=breaker,
         )
     else:
         logger.warning(
@@ -310,3 +322,38 @@ def build_collector(
         reference=VnstockReferenceProvider(vnstock_source=settings.vnstock_source),
         fundamental=VnstockFundamentalProvider(vnstock_source=settings.vnstock_source),
     )
+
+
+def run_cycle(
+    settings: Settings | None = None,
+    universe: Universe | None = None,
+) -> CollectionSummary:
+    """Run one cycle against the configured account and commit what it wrote.
+
+    This is the whole pipeline in one call: an operator running it by hand ends
+    up with Snapshots in PostgreSQL for the Universe, which is the only proof
+    that the collection path is alive end to end.
+
+    Synchronous throughout. The store is synchronous and FiinQuantX is a
+    synchronous library, so a caller on an event loop hands this to a thread
+    rather than the other way round.
+    """
+    from src.core.database import get_sync_db
+
+    with get_sync_db() as session:
+        return build_collector(
+            SnapshotStore(session), settings=settings, universe=universe
+        ).run()
+
+
+if __name__ == "__main__":  # pragma: no cover - the manual entry point
+    logging.basicConfig(level=logging.INFO)
+    summary = run_cycle()
+    print(
+        f"{summary.snapshots_written} snapshots, "
+        f"{len(summary.succeeded)} symbols collected, "
+        f"{len(summary.failures)} failures, "
+        f"{len(summary.missing)} capabilities with no data"
+    )
+    for failure in summary.failures:
+        print(f"  {failure.symbol} {failure.capability.value}: {failure.reason}")

@@ -37,9 +37,9 @@ class FailedRedis:
         raise ConnectionError("redis unavailable")
 
 
-def market_snapshot(observed_at: datetime) -> MarketSnapshot:
+def market_snapshot(observed_at: datetime, symbol: str = "VCB") -> MarketSnapshot:
     return MarketSnapshot(
-        symbol="VCB",
+        symbol=symbol,
         metadata=SnapshotMetadata(
             source=ProviderSource.FIINQUANT,
             effective_at=observed_at,
@@ -202,6 +202,36 @@ def test_store_rejects_a_source_that_does_not_own_the_capability():
 
         with pytest.raises(ValueError, match="does not own"):
             store.save(Capability.FUNDAMENTAL, misattributed)
+
+
+def test_a_rejected_save_leaves_the_session_usable_for_the_next_one():
+    """One snapshot the database refuses must not end the whole write.
+
+    A failed flush leaves a SQLAlchemy session unusable until it is rolled
+    back, so without a savepoint here the first rejected snapshot would take
+    every later one in the same transaction with it — a collector cycle losing
+    ninety-nine symbols because of one.
+    """
+    engine = create_engine("sqlite://")
+    ProviderSnapshot.__table__.create(engine)
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "CREATE TRIGGER reject_halted BEFORE INSERT ON provider_snapshots "
+            "WHEN NEW.symbol = 'HALT' "
+            "BEGIN SELECT RAISE(ABORT, 'symbol is halted'); END"
+        )
+    observed_at = datetime.now(timezone.utc)
+
+    with Session(engine) as session:
+        store = SnapshotStore(session, redis=None)
+
+        with pytest.raises(Exception):
+            store.save(Capability.MARKET, market_snapshot(observed_at, symbol="HALT"))
+
+        store.save(Capability.MARKET, market_snapshot(observed_at))
+        session.commit()
+
+        assert store.latest(Capability.MARKET, "VCB") is not None
 
 
 def test_latest_never_calls_a_secondary_provider_on_cache_miss():
