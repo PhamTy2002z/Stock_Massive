@@ -97,6 +97,14 @@ class Settings(BaseSettings):
     collector_hour: int = 16
     collector_minute: int = 15
 
+    # Backfill — nạp lịch sử sâu một lần cho mỗi mã (src/stocks/backfill.py).
+    # Chạy sau chu kỳ thu thập; trần số mã mỗi lần chạy để không tiêu hết hạn
+    # mức vnstock mà chu kỳ hằng ngày cũng đang dùng.
+    backfill_enabled: bool = True
+    backfill_hour: int = 17
+    backfill_minute: int = 0
+    backfill_symbols_per_run: int = 5
+
     # Rate Limiting
     rate_limit_enabled: bool = True
     rate_limit_standard_max: int = 100  # requests per window

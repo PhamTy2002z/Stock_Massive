@@ -9,7 +9,10 @@ from zoneinfo import ZoneInfo
 
 from src.core.config import get_settings
 from src.core.trading_calendar import is_trading_day
-from src.stocks.collector_schedule import collect_universe_snapshots
+from src.stocks.collector_schedule import (
+    backfill_universe_history,
+    collect_universe_snapshots,
+)
 from src.stocks.jobs import (
     cleanup_old_data_job,
     collect_daily_ohlcv_job,
@@ -103,6 +106,13 @@ universe_snapshots_job_wrapper = make_job_wrapper(
     collect_universe_snapshots,
     "Universe collection cycle completed",
     "Universe collection cycle failed",
+)
+universe_backfill_job_wrapper = make_job_wrapper(
+    "universe_backfill_job_wrapper",
+    "Universe History Backfill",
+    backfill_universe_history,
+    "Universe history backfill completed",
+    "Universe history backfill failed",
 )
 sector_historical_job_wrapper = make_job_wrapper(
     "sector_historical_job_wrapper",
@@ -212,6 +222,23 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
         logger.info(
             f"Scheduled the Universe collection cycle at "
             f"{settings.collector_hour}:{settings.collector_minute:02d} ICT"
+        )
+
+    # The one-time history load, after the day's cycle has had its turn at the
+    # allowance the two of them share.
+    if settings.backfill_enabled:
+        await scheduler.add_schedule(
+            universe_backfill_job_wrapper,
+            CronTrigger(
+                hour=settings.backfill_hour,
+                minute=settings.backfill_minute,
+                timezone="Asia/Ho_Chi_Minh",
+            ),
+            id="universe-backfill",
+        )
+        logger.info(
+            f"Scheduled the Universe history backfill at "
+            f"{settings.backfill_hour}:{settings.backfill_minute:02d} ICT"
         )
 
     logger.info("=== Scheduler setup complete ===")

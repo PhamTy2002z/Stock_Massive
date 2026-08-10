@@ -9,8 +9,12 @@ from pydantic import BaseModel
 from src.auth.dependencies import require_admin
 from src.core.job_status_store import job_store
 from src.core.ratelimit import heavy_rate_limit
+from sqlalchemy.orm import Session
+
 from src.core.config import get_settings
-from src.stocks.collector_schedule import COLLECTOR_JOB_ID
+from src.core.database import get_sync_session
+from src.stocks.backfill import BackfillStateStore
+from src.stocks.collector_schedule import BACKFILL_JOB_ID, COLLECTOR_JOB_ID
 from src.stocks.schemas.common import MessageResponse
 
 # Must match the id jobs.py registers for this collector.
@@ -129,6 +133,60 @@ async def trigger_collector_job(background_tasks: BackgroundTasks) -> MessageRes
 
     background_tasks.add_task(collect_universe_snapshots, force=True)
     return MessageResponse(message="Collection cycle triggered", status="started")
+
+
+class SymbolBackfillResponse(BaseModel):
+    """Where one symbol's one-time history load stands."""
+
+    symbol: str
+    status: Literal["in_progress", "completed", "failed"]
+    covered_through: str | None
+    last_error: str | None
+
+
+@router.get("/backfill", response_model=list[SymbolBackfillResponse])
+def get_backfill_progress(db: Session = Depends(get_sync_session)) -> list[SymbolBackfillResponse]:
+    """Report which symbols are loaded, which are part-way, and which failed.
+
+    Read from the durable state rather than from the last run, because a load
+    spans many runs and the interesting question spans all of them.
+    """
+    return [
+        SymbolBackfillResponse(
+            symbol=state.symbol,
+            status=state.status,
+            covered_through=(
+                state.covered_through.isoformat() if state.covered_through else None
+            ),
+            last_error=state.last_error,
+        )
+        for state in BackfillStateStore(db).all()
+    ]
+
+
+@router.post(
+    "/trigger/backfill",
+    response_model=MessageResponse,
+    dependencies=[Depends(heavy_rate_limit), Depends(require_admin)],
+)
+async def trigger_backfill_job(background_tasks: BackgroundTasks) -> MessageResponse:
+    """Run one pass of the history load now."""
+    from src.stocks.collector_schedule import backfill_universe_history
+
+    if not get_settings().backfill_enabled:
+        raise HTTPException(
+            status_code=409,
+            detail="Backfill đang tắt trong cấu hình (BACKFILL_ENABLED).",
+        )
+
+    if job_store.is_running(BACKFILL_JOB_ID):
+        raise HTTPException(
+            status_code=409,
+            detail="Lần nạp lịch sử đang chạy. Theo dõi tại /jobs/backfill.",
+        )
+
+    background_tasks.add_task(backfill_universe_history)
+    return MessageResponse(message="History backfill triggered", status="started")
 
 
 @router.post(

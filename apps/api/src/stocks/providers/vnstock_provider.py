@@ -27,6 +27,7 @@ from pydantic import ValidationError
 from src.core.config import get_settings
 from src.core.vnstock_client import (
     Finance,
+    Quote,
     Trading,
     VnstockUnavailable,
     VnstockUnsupported,
@@ -34,6 +35,7 @@ from src.core.vnstock_client import (
 
 from .contracts import (
     FundamentalSnapshot,
+    MarketSnapshot,
     ProviderSource,
     ReferenceSnapshot,
     ShareCount,
@@ -76,6 +78,10 @@ BALANCE_ITEM_OWNERS_EQUITY = "owners_equity"
 BALANCE_ITEM_MINORITY_INTERESTS = "minority_interests"
 
 TRAILING_QUARTERS = 4
+
+# What a quote history answers with, and the interval that asks for sessions.
+HISTORY_FIELDS = ("time", "open", "high", "low", "close", "volume")
+HISTORY_INTERVAL = "1D"
 
 # Statement periods arrive as column headers, one per quarter.
 PERIOD_PATTERN = re.compile(r"^(\d{4})-Q([1-4])$")
@@ -162,6 +168,21 @@ def process_pacer() -> RequestPacer:
 
 def _default_trading_factory(source: str) -> Any:
     return Trading(source=source)
+
+
+def _default_quote_factory(symbol: str, source: str) -> Any:
+    return Quote(symbol=symbol, source=source)
+
+
+def _quote_price_vnd(value: Any) -> float | None:
+    """Turn a quote price in thousands of VND into plain VND.
+
+    The price board quotes plain VND while quote history quotes thousands. The
+    two disagree by a factor of a thousand, and the unit is settled here so no
+    layer behind the adapter has to know which call a number came from.
+    """
+    price = _optional_float(value)
+    return None if price is None else price * 1_000
 
 
 def _default_finance_factory(symbol: str, source: str) -> Any:
@@ -333,6 +354,142 @@ class VnstockReferenceProvider(VnstockProviderBase):
             )
         except ValidationError as exc:
             logger.warning("Skipping unusable vnstock reference row for %s: %s", symbol, exc)
+            return None
+
+
+class VnstockMarketHistoryProvider(VnstockProviderBase):
+    """Turn one symbol's quote history into a MarketSnapshot per session.
+
+    This is the Cover Source for `market` (``docs/adr/0002``): the stretch of
+    history that reaches back further than the Main Source is granted. It is
+    never the daily read — those two disagree on how much of a session they
+    describe, and the daily one is richer.
+
+    Prices arrive here in thousands of VND, unlike the price board's plain VND.
+    Normalizing at the adapter is what keeps a chart drawn across both sources
+    from stepping by a factor of a thousand at the seam.
+
+    Only what a quote history carries is filled in: money traded, the flow
+    pairs, the permitted band and market cap are not in this answer, and are
+    left empty rather than guessed at.
+    """
+
+    def __init__(
+        self,
+        vnstock_source: str | None = None,
+        pacer: RequestPacer | None = None,
+        now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        quote_factory: Callable[[str, str], Any] = _default_quote_factory,
+    ) -> None:
+        super().__init__(vnstock_source=vnstock_source, pacer=pacer, now=now)
+        self._quote_factory = quote_factory
+
+    def fetch_market_history(
+        self,
+        symbol: str,
+        from_date: date,
+        to_date: date,
+    ) -> Sequence[MarketSnapshot]:
+        if from_date > to_date:
+            raise ValueError("from_date cannot be later than to_date")
+        (normalized,) = normalized_symbols([symbol])
+
+        quote = self._quote_factory(normalized, self._vnstock_source)
+        frame = self._paced(
+            lambda: quote.history(
+                start=from_date.strftime("%Y-%m-%d"),
+                end=to_date.strftime("%Y-%m-%d"),
+                interval=HISTORY_INTERVAL,
+            ),
+            f"vnstock market history fetch failed for {normalized}",
+        )
+        return self._to_snapshots(frame, normalized)
+
+    def _to_snapshots(
+        self,
+        frame: pd.DataFrame | None,
+        symbol: str,
+    ) -> tuple[MarketSnapshot, ...]:
+        """Read a whole window in one pass, oldest session first.
+
+        An empty window is a symbol with no sessions in it, not a failure: a
+        backfill walks straight through the years before a company listed.
+        This differs from the price board, where an empty answer means the
+        request itself did not work.
+        """
+        if frame is None or getattr(frame, "empty", True):
+            return ()
+
+        sessions = lower_cased_columns(frame)
+        missing = missing_fields(sessions, HISTORY_FIELDS)
+        if missing:
+            raise VnstockProviderError(
+                f"vnstock history is missing fields: {', '.join(missing)}"
+            )
+
+        sessions = sessions.sort_values("time")
+        observed_at = self._now()
+        snapshots: list[MarketSnapshot] = []
+        previous_close: float | None = None
+
+        for _, row in sessions.iterrows():
+            close = _quote_price_vnd(row.get("close"))
+            session_day = pd.to_datetime(row.get("time"), errors="coerce")
+            if close is None or pd.isna(session_day):
+                # An all-blank row is a gap in the series rather than a session
+                # priced at zero, and the contract refuses a zero price anyway.
+                continue
+
+            snapshot = self._build(
+                symbol=symbol,
+                row=row,
+                close=close,
+                previous_close=previous_close,
+                effective_at=datetime.combine(
+                    session_day.date(), datetime.min.time(), tzinfo=VN_TZ
+                ),
+                observed_at=observed_at,
+            )
+            previous_close = close
+            if snapshot is not None:
+                snapshots.append(snapshot)
+
+        return tuple(snapshots)
+
+    def _build(
+        self,
+        symbol: str,
+        row: pd.Series,
+        close: float,
+        previous_close: float | None,
+        effective_at: datetime,
+        observed_at: datetime,
+    ) -> MarketSnapshot | None:
+        change_pct = None
+        if previous_close:
+            change_pct = (close - previous_close) / previous_close * 100
+
+        try:
+            return MarketSnapshot(
+                symbol=symbol,
+                metadata=SnapshotMetadata(
+                    source=self.source,
+                    effective_at=effective_at,
+                    observed_at=observed_at,
+                ),
+                last_price=close,
+                # Only where the previous session is in this same answer. The
+                # first row of a window has no predecessor here, and taking the
+                # row's own open would report every chunk boundary as flat.
+                reference_price=previous_close,
+                open_price=_quote_price_vnd(row.get("open")),
+                high_price=_quote_price_vnd(row.get("high")),
+                low_price=_quote_price_vnd(row.get("low")),
+                change_pct=change_pct,
+                volume=_optional_int(row.get("volume")),
+            )
+        except ValidationError as exc:
+            logger.warning("Skipping unusable vnstock history row for %s: %s", symbol, exc)
             return None
 
 

@@ -17,6 +17,7 @@ from typing import Literal
 from src.core.job_status_store import job_store
 from src.core.trading_calendar import is_trading_day
 
+from .backfill import BackfillSummary, run_backfill
 from .collector import CollectionSummary, run_cycle
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,9 @@ VN_TZ_NAME = "Asia/Ho_Chi_Minh"
 # tracked run, not this system's word for the Collector.
 COLLECTOR_JOB_ID = "universe-snapshots"
 COLLECTOR_JOB_NAME = "Thu thập Snapshot cho Universe"
+
+BACKFILL_JOB_ID = "universe-backfill"
+BACKFILL_JOB_NAME = "Nạp lịch sử cho Universe"
 
 
 @dataclass(frozen=True)
@@ -129,3 +133,47 @@ async def collect_universe_snapshots(
         return CycleOutcome(status="skipped")
 
     return await asyncio.to_thread(run_collection_cycle, cycle)
+
+
+def run_history_backfill(
+    pass_: Callable[[], BackfillSummary] = run_backfill,
+) -> dict:
+    """Run one pass of the history load, at most one at a time.
+
+    Never raises, for the same reason the cycle does not: a scheduled run that
+    throws takes the scheduler's thread with it.
+    """
+    if not job_store.try_start_job(BACKFILL_JOB_ID, BACKFILL_JOB_NAME):
+        logger.info("A history load is already running; leaving it to finish")
+        return {"status": "skipped"}
+
+    try:
+        summary = pass_()
+    except Exception as exc:
+        reason = f"{type(exc).__name__}: {exc}"
+        logger.error("History load failed: %s", reason, exc_info=True)
+        job_store.fail_job(BACKFILL_JOB_ID, reason)
+        return {"status": "failed", "error": reason}
+
+    result = {
+        "status": "completed",
+        "snapshots_written": summary.snapshots_written,
+        "completed": list(summary.completed),
+        "in_progress": list(summary.in_progress),
+        "failed": [
+            {"symbol": item.symbol, "reason": item.reason} for item in summary.failed
+        ],
+    }
+    job_store.complete_job(BACKFILL_JOB_ID, result)
+    return result
+
+
+async def backfill_universe_history(
+    pass_: Callable[[], BackfillSummary] = run_backfill,
+) -> dict:
+    """Run one pass of the history load off the event loop.
+
+    No trading-day gate: this loads sessions that closed years ago, and the day
+    it runs on says nothing about whether they exist.
+    """
+    return await asyncio.to_thread(run_history_backfill, pass_)

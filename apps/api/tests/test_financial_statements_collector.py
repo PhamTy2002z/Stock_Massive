@@ -4,6 +4,7 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch, call
 import pandas as pd
 
+from src.core.config import Settings
 from src.stocks.financial_statements_collector import FinancialStatementsCollector
 from src.stocks.jobs import collect_financial_statements_job
 from src.core.vnstock_wrapper import VnstockRateLimitError
@@ -362,39 +363,19 @@ class TestSchedulerIntegration:
 
         mock_scheduler = AsyncMock()
 
-        with patch("src.core.scheduler.settings") as mock_settings:
-            mock_settings.scheduler_enabled = True
-            mock_settings.intraday_collect_hour = 15
-            mock_settings.intraday_collect_minute = 30
-            mock_settings.daily_ohlcv_enabled = True
-            mock_settings.daily_ohlcv_hour = 20
-            mock_settings.daily_ohlcv_minute = 0
-            mock_settings.financial_statements_enabled = True
-            mock_settings.financial_statements_hour = 2
-            mock_settings.financial_statements_minute = 0
-            mock_settings.sector_historical_enabled = True
-            mock_settings.sector_historical_hour = 15
-            mock_settings.sector_historical_minute = 45
-            # The Universe collection cycle owns its own schedule; these
-            # tests are about the jobs that were here before it.
-            mock_settings.collector_enabled = False
-
+        # A real Settings rather than a MagicMock: every field a schedule reads
+        # then has a usable value, so a schedule added elsewhere does not break
+        # a test about this one.
+        with patch(
+            "src.core.scheduler.settings",
+            Settings(scheduler_enabled=True, financial_statements_enabled=True),
+        ):
             await setup_scheduler(mock_scheduler)
 
-            # Should add 5 schedules: intraday, cleanup, daily_ohlcv,
-            # financial_statements, sector_historical
-            assert mock_scheduler.add_schedule.call_count == 5
-
-            # Find the financial statements schedule call. The scheduler registers
-            # a logging wrapper around the job, so match the wrapper's name.
-            calls = mock_scheduler.add_schedule.call_args_list
-            financial_statements_call = None
-            for c in calls:
-                if len(c[0]) > 0 and c[0][0].__name__ == "financial_statements_job_wrapper":
-                    financial_statements_call = c
-                    break
-
-            assert financial_statements_call is not None
+        assert "collect-financial-statements" in {
+            call.kwargs.get("id")
+            for call in mock_scheduler.add_schedule.await_args_list
+        }
 
     @pytest.mark.asyncio
     async def test_scheduler_skips_financial_statements_when_disabled(self):
@@ -403,31 +384,16 @@ class TestSchedulerIntegration:
 
         mock_scheduler = AsyncMock()
 
-        with patch("src.core.scheduler.settings") as mock_settings:
-            mock_settings.scheduler_enabled = True
-            mock_settings.intraday_collect_hour = 15
-            mock_settings.intraday_collect_minute = 30
-            mock_settings.daily_ohlcv_enabled = True
-            mock_settings.daily_ohlcv_hour = 20
-            mock_settings.daily_ohlcv_minute = 0
-            mock_settings.financial_statements_enabled = False
-            mock_settings.sector_historical_enabled = True
-            mock_settings.sector_historical_hour = 15
-            mock_settings.sector_historical_minute = 45
-            # The Universe collection cycle owns its own schedule; these
-            # tests are about the jobs that were here before it.
-            mock_settings.collector_enabled = False
-
+        with patch(
+            "src.core.scheduler.settings",
+            Settings(scheduler_enabled=True, financial_statements_enabled=False),
+        ):
             await setup_scheduler(mock_scheduler)
 
-            # Should add only 4 schedules (no financial_statements)
-            assert mock_scheduler.add_schedule.call_count == 4
-
-            # Verify no call registers the financial statements wrapper
-            calls = mock_scheduler.add_schedule.call_args_list
-            for c in calls:
-                if len(c[0]) > 0:
-                    assert c[0][0].__name__ != "financial_statements_job_wrapper"
+        assert "collect-financial-statements" not in {
+            call.kwargs.get("id")
+            for call in mock_scheduler.add_schedule.await_args_list
+        }
 
 
 class TestConfigSettings:
