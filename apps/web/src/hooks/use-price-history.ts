@@ -9,6 +9,7 @@ import {
   type SessionInterval,
   type StockPricePoint,
 } from "@/lib/api"
+import { recentWindow } from "@/lib/market-session"
 import { queryKeys } from "@/lib/query-keys"
 
 export type PriceRange = "1D" | "5D" | "1M" | "6M" | "1N" | "5N"
@@ -30,8 +31,6 @@ const rangeConfig: Record<PriceRange, { days: number; interval: HistoryInterval 
   "1N": { days: 366, interval: "1W" },
   "5N": { days: 1827, interval: "1M" },
 }
-
-const isoDate = (date: Date) => date.toISOString().slice(0, 10)
 
 /** Whether a range is made of whole sessions, which is all the store holds. */
 const isSessionInterval = (interval: HistoryInterval): interval is SessionInterval =>
@@ -75,34 +74,32 @@ function lastSession(points: StockPricePoint[]): StockPricePoint[] {
  * Whole-session ranges come from the store, which holds them for every symbol
  * the Collector covers — no provider call, and the same sessions the rest of
  * the page is dated by. A symbol outside the Universe has nothing stored, and
- * the store says so with a 404 rather than an empty chart; that falls back to
- * the frozen provider-backed route, which is also the only path for the intraday
- * range, since the store holds one bar per session and no finer.
+ * the store answers with nothing rather than
+ * with a chart, and that falls back to the frozen provider-backed route — which
+ * is also the only path for the intraday range, since the store holds one bar
+ * per session and no finer.
  *
- * Deliberately not polled: the fallback goes straight to the upstream provider
- * on a cache miss, and a chart that refetches on a timer is what exhausts the
- * quota everything else on the page shares.
+ * Deliberately not polled: the fallback reaches a Provider Source on a cache
+ * miss, and a chart that refetches on a timer is what exhausts the quota
+ * everything else on the page shares.
  */
 export function usePriceHistory(symbol: string, range: PriceRange) {
   return useQuery<StockPricePoint[]>({
     queryKey: queryKeys.priceHistory(symbol, range),
     queryFn: async () => {
       const { days, interval } = rangeConfig[range]
-      const end = new Date()
-      const start = new Date(end)
-      start.setDate(start.getDate() - days)
+      const { start, end } = recentWindow(days)
 
       if (isSessionInterval(interval)) {
-        const stored = await fetchMarketSeries(
-          symbol,
-          isoDate(start),
-          isoDate(end),
-          interval
-        )
-        if (stored !== null) return stored.points.map(toPricePoint).filter(Boolean) as StockPricePoint[]
+        const stored = await fetchMarketSeries(symbol, start, end, interval)
+        // Empty counts as nothing, not as an answer: a watched symbol whose
+        // history has not been loaded yet would otherwise draw a blank chart
+        // where the frozen route still has sessions to show.
+        const drawn = stored?.points.map(toPricePoint).filter(Boolean) ?? []
+        if (drawn.length > 0) return drawn as StockPricePoint[]
       }
 
-      const points = await fetchStockHistory(symbol, isoDate(start), isoDate(end), interval)
+      const points = await fetchStockHistory(symbol, start, end, interval)
       return range === "1D" ? lastSession(points) : points
     },
     staleTime: 4 * 60 * 60 * 1000,

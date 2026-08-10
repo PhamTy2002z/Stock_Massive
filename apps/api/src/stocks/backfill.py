@@ -273,7 +273,7 @@ class Backfill:
         # Read once. Asking per symbol per question would be three round trips
         # each and three chances for the answers to disagree.
         recorded = {state.symbol: state for state in self._state.all()}
-        owed = self._symbols_to_load(recorded, boundary)
+        owed = self._symbols_to_load(recorded, boundary, self._window.crossover(today))
 
         written = 0
         progress: list[SymbolProgress] = []
@@ -320,12 +320,13 @@ class Backfill:
         self,
         recorded: dict[str, SymbolBackfill],
         boundary: date,
+        crossover: date,
     ) -> list[str]:
         """Pick the symbols still owed history, up to this run's allowance."""
         owed = [
             symbol
             for symbol in self._universe
-            if not self._is_done(recorded.get(symbol), boundary)
+            if not self._is_done(recorded.get(symbol), boundary, crossover)
         ]
         if len(owed) > self._symbols_per_run:
             logger.info(
@@ -336,26 +337,34 @@ class Backfill:
             )
         return owed[: self._symbols_per_run]
 
-    @staticmethod
-    def _is_done(state: SymbolBackfill | None, boundary: date) -> bool:
-        """Owed nothing means the cursor has reached the end of the walk.
+    def _is_done(
+        self,
+        state: SymbolBackfill | None,
+        boundary: date,
+        crossover: date,
+    ) -> bool:
+        """Whether this symbol is owed nothing, this run or any later one.
 
-        Judged on the cursor rather than on the recorded status, because the
-        end of the walk moves with what the system can reach: a symbol loaded
-        while no FiinQuant account was configured stopped at the crossover and
-        is genuinely owed the Main Source's window once one appears. Reading
-        "completed" as done forever would leave that symbol with a five-year
-        hole nothing would ever fill.
+        A completed walk settles the symbol for good. The end of that walk was
+        the day it ran, and every session since is the `Collector`'s — asking
+        again each day would make a one-time load into a second daily cycle
+        writing what the first already wrote.
 
-        With an account configured the walk ends at today, so a symbol already
-        loaded is owed at most the sessions since its last run — one cheap call
-        on the allowance measured in tens of thousands, which also repairs a
-        session the daily cycle missed. The expensive Cover Source stretch is
-        behind the cursor and is never asked for twice.
+        With one exception, which is why the status alone will not do: a symbol
+        loaded while no FiinQuant account was configured stopped at the
+        crossover and never saw the Main Source's own window. Once an account
+        appears it is genuinely owed those years, and reading "completed" as
+        settled would leave it with a hole nothing would ever fill.
+
+        A symbol that stopped part-way — failed, or interrupted — is judged on
+        its cursor instead, so it resumes rather than being written off.
         """
-        if state is None:
+        if state is None or state.covered_through is None:
             return False
-        return state.covered_through is not None and state.covered_through >= boundary
+        entered_the_main_window = state.covered_through > crossover
+        if state.status == "completed":
+            return self._main_history is None or entered_the_main_window
+        return state.covered_through >= boundary
 
     def _segments(self, today: date) -> tuple[Segment, ...]:
         """The stretches this load walks, oldest first, each with its source."""
@@ -495,14 +504,14 @@ def build_backfill(
             shared_session_factory,
         )
 
-        credentials = {
+        account = {
             "username": settings.fiinquant_username,
             "password": settings.fiinquant_password,
             "session_factory": shared_session_factory(),
             "circuit_breaker": ProviderCircuitBreaker(),
         }
-        main_history = FiinQuantMarketProvider(**credentials)
-        valuation_history = FiinQuantValuationProvider(**credentials)
+        main_history = FiinQuantMarketProvider(**account)
+        valuation_history = FiinQuantValuationProvider(**account)
 
     return Backfill(
         store=store,

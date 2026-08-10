@@ -468,7 +468,29 @@ class TestASeriesOfSessions:
         assert [point["close_price"] for point in body["points"]] == [59_700, 60_300]
         assert body["points"][0]["open_price"] == 58_700
         assert body["points"][0]["volume"] == 2_000_000
-        assert body["points"][0]["effective_at"].startswith("2026-08-06")
+        # Dated by the week, not by the session that opened it: a symbol that
+        # took Monday off has to land on the same bar as one that did not.
+        assert body["points"][0]["effective_at"].startswith("2026-08-03")
+
+    def test_a_bar_missing_part_of_its_period_reports_no_total_at_all(self):
+        """The Cover Source's history carries volume but no traded value.
+
+        Summing what is there would report a few days' turnover as the week's —
+        a smaller number that looks like a total, with nothing on the wire to
+        say part of the period was left out.
+        """
+        engine = database()
+        deep = session_snapshot(date(2026, 8, 6), 59_000, ProviderSource.VNSTOCK)
+        write(engine, Capability.MARKET, deep.model_copy(update={"total_value_vnd": None}))
+        write(engine, Capability.MARKET, session_snapshot(date(2026, 8, 7), 59_700))
+
+        body = ask(
+            engine,
+            "VCB/series/market?start=2026-08-01&end=2026-08-09&interval=1W",
+        ).json()
+
+        assert body["points"][0]["total_value_vnd"] is None
+        assert body["points"][0]["volume"] == 2_000_000
 
     def test_only_the_newest_session_decides_whether_the_series_is_stale(self):
         engine = database()
