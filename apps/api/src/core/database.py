@@ -83,6 +83,20 @@ def get_sync_db() -> Generator[Session, None, None]:
         session.close()
 
 
+def get_sync_session() -> Generator[Session, None, None]:
+    """FastAPI dependency for a read-only synchronous session.
+
+    The snapshot-first read paths are synchronous because the store is, and a
+    handler declaring a plain `def` already runs in the threadpool. Nothing is
+    committed here: the routes that use it only read.
+    """
+    session = sync_session_factory()
+    try:
+        yield session
+    finally:
+        session.close()
+
+
 class Base(DeclarativeBase):
     """Base class for SQLAlchemy models."""
     pass

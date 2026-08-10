@@ -140,31 +140,33 @@ class TestSchedulerSetup:
 
         mock_scheduler = AsyncMock()
 
-        with patch("src.core.scheduler.settings") as mock_settings:
-            mock_settings.scheduler_enabled = True
-            mock_settings.intraday_collect_hour = 15
-            mock_settings.intraday_collect_minute = 30
-            # Daily OHLCV settings (required since scheduler.py added this schedule)
-            mock_settings.daily_ohlcv_enabled = True
-            mock_settings.daily_ohlcv_hour = 20
-            mock_settings.daily_ohlcv_minute = 0
-            # Financial statements settings
-            mock_settings.financial_statements_enabled = True
-            mock_settings.financial_statements_hour = 2
-            mock_settings.financial_statements_minute = 0
-            # Sector historical settings
-            mock_settings.sector_historical_enabled = True
-            mock_settings.sector_historical_hour = 15
-            mock_settings.sector_historical_minute = 45
-            # The Universe collection cycle owns its own schedule; these
-            # tests are about the jobs that were here before it.
-            mock_settings.collector_enabled = False
-
+        # A real Settings rather than a MagicMock: every field a schedule reads
+        # then has a usable value, so adding a schedule does not break this
+        # test for reasons that have nothing to do with what it asserts.
+        enabled = Settings(
+            scheduler_enabled=True,
+            daily_ohlcv_enabled=True,
+            financial_statements_enabled=True,
+            sector_historical_enabled=True,
+            collector_enabled=True,
+            backfill_enabled=True,
+        )
+        with patch("src.core.scheduler.settings", enabled):
             await setup_scheduler(mock_scheduler)
 
-            # Should add 5 schedules: intraday collection, cleanup, daily_ohlcv,
-            # financial_statements, and sector_historical
-            assert mock_scheduler.add_schedule.call_count == 5
+        registered = {
+            call.kwargs.get("id")
+            for call in mock_scheduler.add_schedule.await_args_list
+        }
+        assert registered == {
+            "intraday-collection-daily",
+            "data-cleanup-daily",
+            "daily-ohlcv-collection",
+            "collect-financial-statements",
+            "sector-historical-daily",
+            "universe-snapshots",
+            "universe-backfill",
+        }
 
     @pytest.mark.asyncio
     async def test_setup_scheduler_disabled(self):
@@ -173,9 +175,9 @@ class TestSchedulerSetup:
 
         mock_scheduler = AsyncMock()
 
-        with patch("src.core.scheduler.settings") as mock_settings:
-            mock_settings.scheduler_enabled = False
-
+        with patch(
+            "src.core.scheduler.settings", Settings(scheduler_enabled=False)
+        ):
             await setup_scheduler(mock_scheduler)
 
             # Should not add any schedules
