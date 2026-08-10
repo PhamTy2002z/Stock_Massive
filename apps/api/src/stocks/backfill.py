@@ -43,12 +43,20 @@ HISTORY_DEPTH_DAYS = 10 * 365
 # than a hundred, small enough that an interrupted load loses little.
 CHUNK_DAYS = 365
 
+# How far before a chunk starts the request reaches. The adapter measures a
+# session's change against the session before it in the same answer, so without
+# this the first session of every chunk would be stored with no reference price
+# — and which sessions those were would depend on when a run happened to be
+# interrupted. Wide enough to clear a long weekend; it costs no extra call, and
+# the sessions it repeats collapse in the store.
+CHUNK_OVERLAP_DAYS = 7
+
 # How many symbols one run will take on. The allowance is shared with the daily
 # cycle, and a load that spent all of it would starve the collection that
 # everything else depends on.
 SYMBOLS_PER_RUN = 5
 
-BackfillStatus = Literal["in_progress", "completed", "failed"]
+BackfillStatus = Literal["pending", "in_progress", "completed", "failed"]
 
 
 class MarketHistoryProvider(Protocol):
@@ -60,6 +68,51 @@ class MarketHistoryProvider(Protocol):
         from_date: date,
         to_date: date,
     ) -> Sequence[MarketSnapshot]: ...
+
+
+@dataclass(frozen=True)
+class HistoryWindow:
+    """How deep the load reaches, where it stops, and how it is cut up.
+
+    One type because the three always travel together and only mean anything
+    against each other: the depth is measured from the same day the boundary
+    is, and a chunk is a slice of the stretch between them.
+    """
+
+    depth_days: int = HISTORY_DEPTH_DAYS
+    main_source_days: int = MAIN_SOURCE_HISTORY_DAYS
+    chunk_days: int = CHUNK_DAYS
+    overlap_days: int = CHUNK_OVERLAP_DAYS
+
+    def boundary(self, today: date) -> date:
+        """The newest session the Cover Source is asked for.
+
+        Past it the Main Source answers with a richer session than a quote
+        history carries, so the load stops rather than overwriting nothing.
+        """
+        return today - timedelta(days=self.main_source_days)
+
+    def earliest(self, today: date) -> date:
+        """The oldest session the load reaches back to."""
+        return today - timedelta(days=self.depth_days)
+
+    def chunks(self, start: date, boundary: date) -> Iterator[tuple[date, date, date]]:
+        """Yield the windows still to fetch, oldest first.
+
+        Each is (asked-for start, covered start, covered end). The asked-for
+        start reaches back before the covered one so the adapter can measure the
+        first covered session against the one before it; the covered end is what
+        progress is recorded at, because that is what this chunk is responsible
+        for.
+
+        A start already past the boundary yields nothing, which is how "there
+        is no stretch deeper than the Main Source" reads the same as "already
+        loaded".
+        """
+        while start <= boundary:
+            end = min(start + timedelta(days=self.chunk_days - 1), boundary)
+            yield start - timedelta(days=self.overlap_days), start, end
+            start = end + timedelta(days=1)
 
 
 @dataclass(frozen=True)
@@ -89,6 +142,10 @@ class BackfillSummary:
     @property
     def in_progress(self) -> tuple[str, ...]:
         return tuple(item.symbol for item in self._with_status("in_progress"))
+
+    @property
+    def pending(self) -> tuple[str, ...]:
+        return tuple(item.symbol for item in self._with_status("pending"))
 
     @property
     def failed(self) -> tuple[SymbolProgress, ...]:
@@ -155,41 +212,37 @@ class Backfill:
         universe: Universe,
         history: MarketHistoryProvider,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
-        depth_days: int = HISTORY_DEPTH_DAYS,
-        main_source_days: int = MAIN_SOURCE_HISTORY_DAYS,
-        chunk_days: int = CHUNK_DAYS,
+        window: HistoryWindow = HistoryWindow(),
         symbols_per_run: int = SYMBOLS_PER_RUN,
-        chunk_limit: int | None = None,
     ) -> None:
         self._store = store
         self._state = state
         self._universe = universe
         self._history = history
         self._now = now
-        self._depth_days = depth_days
-        self._main_source_days = main_source_days
-        self._chunk_days = chunk_days
+        self._window = window
         self._symbols_per_run = symbols_per_run
-        # Bounds the chunks one symbol gets in one run. Left off by default;
-        # it exists so a run can be stopped part-way and proven to resume.
-        self._chunk_limit = chunk_limit
 
     def run(self) -> BackfillSummary:
         today = self._now().astimezone(VN_TZ).date()
-        boundary = today - timedelta(days=self._main_source_days)
-        earliest = today - timedelta(days=self._depth_days)
+        boundary = self._window.boundary(today)
+        earliest = self._window.earliest(today)
+
+        # Read once. Asking per symbol per question would be three round trips
+        # each and three chances for the answers to disagree.
+        recorded = {state.symbol: state for state in self._state.all()}
+        owed = self._symbols_to_load(recorded, boundary)
 
         written = 0
         progress: list[SymbolProgress] = []
-        owed = self._symbols_to_load(boundary)
 
         for symbol in self._universe:
             if symbol not in owed:
                 # Already loaded, and still worth reporting: "which symbols are
                 # done" is a question about the Universe, not about this run.
-                progress.append(self._settled(symbol))
+                progress.append(self._settled(recorded.get(symbol), symbol))
                 continue
-            count, item = self._load(symbol, earliest, boundary)
+            count, item = self._load(recorded.get(symbol), symbol, earliest, boundary)
             written += count
             progress.append(item)
 
@@ -202,15 +255,16 @@ class Backfill:
             snapshots_written=written, progress=tuple(progress)
         )
 
-    def _settled(self, symbol: str) -> SymbolProgress:
+    @staticmethod
+    def _settled(state: SymbolBackfill | None, symbol: str) -> SymbolProgress:
         """Report a symbol this run did not touch, from what is on record.
 
-        A symbol left waiting for the next run reads as in progress rather than
-        as done: nothing about it has finished.
+        A symbol with no record has not started — distinct from one that is
+        part-way through, because "waiting its turn behind the per-run cap" and
+        "half loaded" call for different reactions from whoever is watching.
         """
-        state = self._state.get(symbol)
         if state is None:
-            return SymbolProgress(symbol=symbol, status="in_progress")
+            return SymbolProgress(symbol=symbol, status="pending")
         return SymbolProgress(
             symbol=symbol,
             status=state.status,
@@ -218,12 +272,16 @@ class Backfill:
             reason=state.last_error,
         )
 
-    def _symbols_to_load(self, boundary: date) -> list[str]:
+    def _symbols_to_load(
+        self,
+        recorded: dict[str, SymbolBackfill],
+        boundary: date,
+    ) -> list[str]:
         """Pick the symbols still owed history, up to this run's allowance."""
         owed = [
             symbol
             for symbol in self._universe
-            if not self._is_done(self._state.get(symbol), boundary)
+            if not self._is_done(recorded.get(symbol), boundary)
         ]
         if len(owed) > self._symbols_per_run:
             logger.info(
@@ -246,12 +304,12 @@ class Backfill:
 
     def _load(
         self,
+        state: SymbolBackfill | None,
         symbol: str,
         earliest: date,
         boundary: date,
     ) -> tuple[int, SymbolProgress]:
         """Walk one symbol's missing years, recording progress as it goes."""
-        state = self._state.get(symbol)
         start = (
             state.covered_through + timedelta(days=1)
             if state is not None and state.covered_through is not None
@@ -261,10 +319,10 @@ class Backfill:
         written = 0
         covered_through = state.covered_through if state is not None else None
 
-        for chunk_start, chunk_end in self._chunks(start, boundary):
+        for asked_from, _covered_from, chunk_end in self._window.chunks(start, boundary):
             try:
                 snapshots = self._history.fetch_market_history(
-                    symbol, chunk_start, chunk_end
+                    symbol, asked_from, chunk_end
                 )
             except Exception as exc:
                 reason = f"{type(exc).__name__}: {exc}"
@@ -318,23 +376,6 @@ class Backfill:
             written += 1
         return written
 
-    def _chunks(self, start: date, boundary: date) -> Iterator[tuple[date, date]]:
-        """Yield the windows still to fetch, oldest first.
-
-        A symbol whose history already reaches the boundary yields nothing,
-        which is how "there is no stretch deeper than the Main Source" reads
-        the same as "already loaded".
-        """
-        produced = 0
-        while start <= boundary:
-            if self._chunk_limit is not None and produced >= self._chunk_limit:
-                return
-            end = min(start + timedelta(days=self._chunk_days - 1), boundary)
-            yield start, end
-            produced += 1
-            start = end + timedelta(days=1)
-
-
 def build_backfill(
     store: SnapshotStore,
     state: BackfillStateStore,
@@ -350,6 +391,10 @@ def build_backfill(
         state=state,
         universe=universe or Universe.from_settings(settings),
         history=VnstockMarketHistoryProvider(vnstock_source=settings.vnstock_source),
+        window=HistoryWindow(
+            depth_days=settings.backfill_depth_days,
+            main_source_days=settings.backfill_main_source_days,
+        ),
         symbols_per_run=settings.backfill_symbols_per_run,
     )
 

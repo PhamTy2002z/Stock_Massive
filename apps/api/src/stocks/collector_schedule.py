@@ -82,6 +82,73 @@ class CycleOutcome:
         }
 
 
+def _guarded_run(job_id, job_name, label, work, to_outcome, outcome_type):
+    """Run one job at a time, recording how it went and never raising.
+
+    Two runs of the same job writing at once spend the same provider allowance
+    twice over for the same Snapshots — and FiinQuant grants one connection.
+    Shared by both runs here because the guard, the record and the refusal to
+    throw are the same thing said about two different bodies of work.
+    """
+    if not job_store.try_start_job(job_id, job_name):
+        logger.info("A %s is already running; leaving it to finish", label)
+        return outcome_type(status="skipped")
+
+    try:
+        summary = work()
+    except Exception as exc:
+        reason = f"{type(exc).__name__}: {exc}"
+        logger.error("The %s failed: %s", label, reason, exc_info=True)
+        job_store.fail_job(job_id, reason)
+        return outcome_type(status="failed", error=reason)
+
+    outcome = to_outcome(summary)
+    job_store.complete_job(job_id, outcome.as_result())
+    return outcome
+
+
+@dataclass(frozen=True)
+class BackfillOutcome:
+    """How one attempted pass of the history load ended.
+
+    Carries its status for the same reason the cycle does: a pass that failed
+    and a pass with nothing left to load both write nothing.
+    """
+
+    status: Literal["completed", "failed", "skipped"]
+    snapshots_written: int = 0
+    completed: tuple[str, ...] = ()
+    in_progress: tuple[str, ...] = ()
+    pending: tuple[str, ...] = ()
+    failed: tuple[dict, ...] = ()
+    error: str | None = None
+
+    @classmethod
+    def of(cls, summary: BackfillSummary) -> "BackfillOutcome":
+        return cls(
+            status="completed",
+            snapshots_written=summary.snapshots_written,
+            completed=summary.completed,
+            in_progress=summary.in_progress,
+            pending=summary.pending,
+            failed=tuple(
+                {"symbol": item.symbol, "reason": item.reason}
+                for item in summary.failed
+            ),
+        )
+
+    def as_result(self) -> dict:
+        return {
+            "status": self.status,
+            "snapshots_written": self.snapshots_written,
+            "completed": list(self.completed),
+            "in_progress": list(self.in_progress),
+            "pending": list(self.pending),
+            "failed": [dict(item) for item in self.failed],
+            "error": self.error,
+        }
+
+
 def run_collection_cycle(
     cycle: Callable[[], CollectionSummary] = run_cycle,
 ) -> CycleOutcome:
@@ -91,23 +158,14 @@ def run_collection_cycle(
     it, and the reason is more use on the run's record than in a traceback
     nobody is watching for.
     """
-    if not job_store.try_start_job(COLLECTOR_JOB_ID, COLLECTOR_JOB_NAME):
-        # Two cycles writing at once spend the same provider allowance twice
-        # over for the same Snapshots — and FiinQuant grants one connection.
-        logger.info("A collection cycle is already running; leaving it to finish")
-        return CycleOutcome(status="skipped")
-
-    try:
-        summary = cycle()
-    except Exception as exc:
-        reason = f"{type(exc).__name__}: {exc}"
-        logger.error("Collection cycle failed: %s", reason, exc_info=True)
-        job_store.fail_job(COLLECTOR_JOB_ID, reason)
-        return CycleOutcome(status="failed", error=reason)
-
-    outcome = CycleOutcome.of(summary)
-    job_store.complete_job(COLLECTOR_JOB_ID, outcome.as_result())
-    return outcome
+    return _guarded_run(
+        COLLECTOR_JOB_ID,
+        COLLECTOR_JOB_NAME,
+        "collection cycle",
+        cycle,
+        CycleOutcome.of,
+        CycleOutcome,
+    )
 
 
 async def collect_universe_snapshots(
@@ -136,44 +194,29 @@ async def collect_universe_snapshots(
 
 
 def run_history_backfill(
-    pass_: Callable[[], BackfillSummary] = run_backfill,
-) -> dict:
+    load: Callable[[], BackfillSummary] = run_backfill,
+) -> BackfillOutcome:
     """Run one pass of the history load, at most one at a time.
 
     Never raises, for the same reason the cycle does not: a scheduled run that
     throws takes the scheduler's thread with it.
     """
-    if not job_store.try_start_job(BACKFILL_JOB_ID, BACKFILL_JOB_NAME):
-        logger.info("A history load is already running; leaving it to finish")
-        return {"status": "skipped"}
-
-    try:
-        summary = pass_()
-    except Exception as exc:
-        reason = f"{type(exc).__name__}: {exc}"
-        logger.error("History load failed: %s", reason, exc_info=True)
-        job_store.fail_job(BACKFILL_JOB_ID, reason)
-        return {"status": "failed", "error": reason}
-
-    result = {
-        "status": "completed",
-        "snapshots_written": summary.snapshots_written,
-        "completed": list(summary.completed),
-        "in_progress": list(summary.in_progress),
-        "failed": [
-            {"symbol": item.symbol, "reason": item.reason} for item in summary.failed
-        ],
-    }
-    job_store.complete_job(BACKFILL_JOB_ID, result)
-    return result
+    return _guarded_run(
+        BACKFILL_JOB_ID,
+        BACKFILL_JOB_NAME,
+        "history load",
+        load,
+        BackfillOutcome.of,
+        BackfillOutcome,
+    )
 
 
 async def backfill_universe_history(
-    pass_: Callable[[], BackfillSummary] = run_backfill,
-) -> dict:
+    load: Callable[[], BackfillSummary] = run_backfill,
+) -> BackfillOutcome:
     """Run one pass of the history load off the event loop.
 
     No trading-day gate: this loads sessions that closed years ago, and the day
     it runs on says nothing about whether they exist.
     """
-    return await asyncio.to_thread(run_history_backfill, pass_)
+    return await asyncio.to_thread(run_history_backfill, load)
