@@ -3,8 +3,8 @@
 import { AlertTriangle } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useSymbolSnapshot } from "@/hooks/use-symbol-snapshot"
-import { formatDataAge, formatVolume } from "@/lib/format"
-import { formatVietnamDate } from "@/lib/market-session"
+import { formatDataAge } from "@/lib/format"
+import { formatVietnamDate, formatVietnamTime } from "@/lib/market-session"
 import { cn } from "@/lib/utils"
 import type {
   FundamentalSnapshotData,
@@ -53,7 +53,21 @@ function formatVnd(value: number | null): string {
 
 const formatPrice = (value: number | null) => (value === null ? DASH : whole(value))
 
-const formatShares = (value: number | null) => (value === null ? DASH : formatVolume(value))
+/**
+ * A quantity of shares, in the same unit vocabulary as the money beside it.
+ *
+ * The app-wide M/K ladder covers a session's volume but not ownership — VCB has
+ * 8.36 billion shares listed, and "8355.7M" is a number nobody reads. Rather
+ * than run two vocabularies in one panel, every quantity here takes the
+ * Vietnamese ladder, which is also what the profile sidebar on this page uses.
+ */
+function formatShares(value: number | null): string {
+  if (value === null) return DASH
+  if (value >= 1e9) return `${decimal(value / 1e9)} tỷ`
+  if (value >= 1e6) return `${decimal(value / 1e6)} triệu`
+  if (value >= 1e3) return `${decimal(value / 1e3)} nghìn`
+  return whole(value)
+}
 
 const formatRatio = (value: number | null) =>
   value === null
@@ -82,6 +96,10 @@ function marketFigures(data: MarketSnapshotData): Figure[] {
     { label: "Khối lượng", value: formatShares(data.volume) },
     { label: "Giá trị giao dịch", value: formatVnd(data.total_value_vnd) },
     { label: "Mua / bán chủ động", value: activeFlow },
+    {
+      label: "Khối ngoại mua / bán",
+      value: `${formatVnd(data.foreign_buy_value_vnd)} / ${formatVnd(data.foreign_sell_value_vnd)}`,
+    },
     { label: "Khối ngoại ròng", value: formatVnd(data.foreign_net_value_vnd) },
     { label: "Vốn hoá", value: formatVnd(data.market_cap_vnd) },
   ]
@@ -108,8 +126,9 @@ function referenceFigures(data: ReferenceSnapshotData): Figure[] {
 }
 
 function fundamentalFigures(data: FundamentalSnapshotData): Figure[] {
+  // No period row: the statement's own period is what the provenance line
+  // stamps, so repeating it here would be the same date twice.
   return [
-    { label: "Kỳ báo cáo", value: formatVietnamDate(data.period_end) || DASH },
     {
       label: "LNST 12 tháng",
       value: formatVnd(data.trailing_12_month_net_income_vnd),
@@ -118,16 +137,26 @@ function fundamentalFigures(data: FundamentalSnapshotData): Figure[] {
   ]
 }
 
-/** Which session this part describes, how old it is, and who published it. */
-function Provenance({ meta }: { meta: SnapshotSectionMeta }) {
+/** What this part is dated by, how old it is, and who published it. */
+function Provenance({ meta, stampLabel }: { meta: SnapshotSectionMeta; stampLabel: string }) {
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] leading-[1.29] text-muted-foreground">
       <span className="rounded-full border border-border px-2 py-0.5 font-medium text-foreground">
         {meta.source}
       </span>
-      <span>Phiên {formatVietnamDate(meta.effective_at)}</span>
+      <span>
+        {stampLabel} {formatVietnamDate(meta.effective_at)}
+      </span>
       <span aria-hidden>·</span>
       <span>{formatDataAge(meta.age_seconds)} trước</span>
+      <span aria-hidden>·</span>
+      {/* Age counts from the session, so it says nothing about when the
+          Collector last ran. Both facts are needed: one to judge the number,
+          the other to judge the system. */}
+      <span>
+        thu lúc {formatVietnamTime(new Date(meta.observed_at))}{" "}
+        {formatVietnamDate(meta.observed_at)}
+      </span>
       {meta.stale && (
         <span className="flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 font-medium text-destructive">
           <AlertTriangle aria-hidden className="size-3.5" />
@@ -142,17 +171,20 @@ function CapabilityBlock<TData>({
   title,
   section,
   figures,
+  /** What `effective_at` names for this capability: a session, or a period. */
+  stampLabel = "Phiên",
 }: {
   title: string
   section: SnapshotSection<TData> | null
   figures: (data: TData) => Figure[]
+  stampLabel?: string
 }) {
   return (
     <div className="border-t border-border pt-3.5 first:border-t-0 first:pt-0">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <h3 className="text-sm font-semibold leading-[1.29] tracking-[-0.208px]">{title}</h3>
         {section ? (
-          <Provenance meta={section} />
+          <Provenance meta={section} stampLabel={stampLabel} />
         ) : (
           // Absent is not the same as empty: the symbol is watched, this part of
           // it simply has not been collected yet.
@@ -215,11 +247,16 @@ function Sections({ snapshot }: { snapshot: SymbolSnapshot }) {
         title="Cấu trúc sở hữu"
         section={snapshot.reference}
         figures={referenceFigures}
+        // Share counts move on corporate actions, but the Adapter dates them by
+        // the day it read them — so this stamp is a reading, not a session.
+        stampLabel="Đọc ngày"
       />
       <CapabilityBlock
         title="Báo cáo tài chính"
         section={snapshot.fundamental}
         figures={fundamentalFigures}
+        // A statement is dated by the quarter it closes, not by a session.
+        stampLabel="Kỳ"
       />
     </div>
   )
@@ -238,9 +275,8 @@ export function StockSnapshotPanel({
     return (
       <PanelShell symbol={symbol} className={className}>
         <p className="mt-2.5 text-[13px] leading-[1.4] text-muted-foreground">
-          {symbol} không nằm trong tập mã hệ thống thu thập sau mỗi phiên. Các số liệu
-          khác trên trang này được lấy trực tiếp từ nhà cung cấp khi bạn mở trang, nên
-          không kèm tuổi dữ liệu.
+          {symbol} không nằm trong tập mã hệ thống thu thập sau mỗi phiên, nên chưa
+          có số liệu nào được lưu kèm tuổi dữ liệu cho mã này.
         </p>
       </PanelShell>
     )

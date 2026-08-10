@@ -2,7 +2,7 @@
 
 import { RefreshCw, TrendingDown, TrendingUp } from "lucide-react"
 import { useIntradayOrderStats } from "@/hooks/use-intraday-order-stats"
-import { formatSessionDate } from "@/lib/format"
+import { formatVietnamDate } from "@/lib/market-session"
 import { cn } from "@/lib/utils"
 
 interface OrderFlowTabContentProps {
@@ -119,7 +119,7 @@ export function OrderFlowTabContent({ symbol, className }: OrderFlowTabContentPr
   const sizeGap = avgSellSize > 0 ? ((avgBuySize - avgSellSize) / avgSellSize) * 100 : 0
 
   const Trend = buyDominant ? TrendingUp : TrendingDown
-  const sessionDate = formatSessionDate(data.date ?? undefined)
+  const sessionDate = formatVietnamDate(data.date)
   const updated = data.last_updated
     ? new Date(data.last_updated).toLocaleTimeString("vi-VN", {
         hour: "2-digit",
