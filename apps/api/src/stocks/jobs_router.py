@@ -3,7 +3,7 @@ import asyncio
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from src.auth.dependencies import require_admin
@@ -26,6 +26,13 @@ from src.stocks.schemas.common import MessageResponse
 # Must match the id jobs.py registers for this collector.
 OHLCV_JOB_ID = "daily-ohlcv"
 
+# Runs the system performs for itself, on its own schedule. A reader who opened
+# the app to look at a stock cannot start these, stop them, or usefully wait
+# them out, so putting a progress bar for them on screen only asks the reader to
+# care about plumbing. They stay recorded — operators watch them at
+# /jobs/collector and /jobs/backfill — just not broadcast.
+INTERNAL_JOB_IDS = frozenset({COLLECTOR_JOB_ID, BACKFILL_JOB_ID})
+
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
@@ -45,13 +52,24 @@ class JobStatusResponse(BaseModel):
 
 
 @router.get("/status", response_model=list[JobStatusResponse])
-def get_jobs_status() -> list[JobStatusResponse]:
-    """Get status of all jobs from today.
+def get_jobs_status(
+    include_internal: bool = Query(
+        False,
+        description="Include the runs the system performs for itself.",
+    ),
+) -> list[JobStatusResponse]:
+    """Report the jobs a reader is waiting on, from today.
 
-    Returns list of job statuses, empty if no jobs today.
-    Used by frontend for polling progress updates.
+    The system's own scheduled runs are left out by default: they are answered
+    for operators at /jobs/collector and /jobs/backfill, and surfacing them
+    here put a progress bar for the Snapshot cycle in front of people who only
+    came to read a stock.
     """
-    statuses = job_store.get_all_statuses()
+    statuses = [
+        status
+        for status in job_store.get_all_statuses()
+        if include_internal or status.job_id not in INTERNAL_JOB_IDS
+    ]
     return [
         JobStatusResponse(
             job_id=s.job_id,
