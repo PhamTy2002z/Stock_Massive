@@ -4,6 +4,7 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { QueryProvider } from "@/components/providers/query-provider";
 import { QueryErrorBoundary } from "@/components/providers/query-error-boundary";
+import { ConnectionGate } from "@/components/providers/connection-gate";
 import { Toaster } from "@/components/ui/sonner";
 
 const inter = Inter({
@@ -46,9 +47,14 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <QueryProvider>
-            <QueryErrorBoundary>
-              {children}
-            </QueryErrorBoundary>
+            {/* Outside the error boundary on purpose: an unreachable API is a
+                wait, not a fault, and the veil has to survive without the tree
+                below it unmounting. */}
+            <ConnectionGate>
+              <QueryErrorBoundary>
+                {children}
+              </QueryErrorBoundary>
+            </ConnectionGate>
             <Toaster />
           </QueryProvider>
         </ThemeProvider>
