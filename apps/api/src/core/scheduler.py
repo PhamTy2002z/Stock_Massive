@@ -30,6 +30,39 @@ async def collect_daily_ohlcv_job_async():
     return result
 
 
+async def collect_universe_snapshots_job_async(
+    force: bool = False,
+    cycle=None,
+    today: date | None = None,
+) -> dict:
+    """Run one collection cycle for the Universe, off the event loop.
+
+    The cycle is synchronous — the store is, and FiinQuantX is — and can run
+    for minutes. On the loop it would stop the API answering anything at all
+    for that whole window, so it goes to a thread.
+
+    A closed exchange is not worth a cycle, but an on-demand run ignores the
+    calendar: filling a gap after a bad day is what it is for, and the day it
+    is asked for is rarely the day the data is missing from.
+    """
+    from src.stocks.collector_job import run_collection_cycle
+
+    day = today or datetime.now(VN_TZ).date()
+    if not force and not _is_trading_day(day):
+        logger.info("Skipping the collection cycle: %s is not a trading day", day)
+        return {
+            "skipped": True,
+            "snapshots_written": 0,
+            "succeeded": [],
+            "failures": [],
+            "missing": [],
+        }
+
+    if cycle is None:
+        return await asyncio.to_thread(run_collection_cycle)
+    return await asyncio.to_thread(run_collection_cycle, cycle)
+
+
 def make_job_wrapper(ref_name: str, job_name: str, job, done_msg: str, fail_msg: str):
     """Create an async job wrapper with standard trigger/success/failure logging.
 
@@ -94,6 +127,13 @@ financial_statements_job_wrapper = make_job_wrapper(
     collect_financial_statements_job,
     "Financial statements collection completed",
     "Financial statements collection failed",
+)
+universe_snapshots_job_wrapper = make_job_wrapper(
+    "universe_snapshots_job_wrapper",
+    "Universe Snapshot Collection",
+    collect_universe_snapshots_job_async,
+    "Universe collection cycle completed",
+    "Universe collection cycle failed",
 )
 sector_historical_job_wrapper = make_job_wrapper(
     "sector_historical_job_wrapper",
@@ -187,6 +227,22 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
         logger.info(
             f"Scheduled sector historical at "
             f"{settings.sector_historical_hour}:{settings.sector_historical_minute:02d} ICT"
+        )
+
+    # The collection cycle for the Universe, after the session closes.
+    if settings.collector_enabled:
+        await scheduler.add_schedule(
+            universe_snapshots_job_wrapper,
+            CronTrigger(
+                hour=settings.collector_hour,
+                minute=settings.collector_minute,
+                timezone="Asia/Ho_Chi_Minh",
+            ),
+            id="universe-snapshots",
+        )
+        logger.info(
+            f"Scheduled the Universe collection cycle at "
+            f"{settings.collector_hour}:{settings.collector_minute:02d} ICT"
         )
 
     logger.info("=== Scheduler setup complete ===")
