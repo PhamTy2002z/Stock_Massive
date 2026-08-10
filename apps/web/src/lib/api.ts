@@ -939,3 +939,90 @@ export async function fetchSymbolSnapshot(symbol: string): Promise<SymbolSnapsho
     throw error
   }
 }
+
+
+/** One session in a stored series, with the Provider Source that answered for it. */
+export interface SeriesPoint {
+  effective_at: string
+  source: string
+}
+
+export interface MarketBar extends SeriesPoint {
+  open_price: number | null
+  high_price: number | null
+  low_price: number | null
+  close_price: number | null
+  volume: number | null
+  total_value_vnd: number | null
+}
+
+export interface ValuationPoint extends SeriesPoint {
+  provider_pe: number | null
+  provider_pb: number | null
+}
+
+/**
+ * A stretch of sessions from the store.
+ *
+ * `age_seconds` and `stale` describe the newest session only — the rest of a
+ * series is old by definition — and are null/false for a window the store holds
+ * nothing in.
+ */
+export interface SeriesResponse<TPoint extends SeriesPoint> {
+  symbol: string
+  age_seconds: number | null
+  stale: boolean
+  points: TPoint[]
+}
+
+export interface MarketSeries extends SeriesResponse<MarketBar> {
+  interval: string
+}
+
+export type ValuationSeries = SeriesResponse<ValuationPoint>
+
+/** Intervals the stored series can be asked for. Anything finer is a session's inside. */
+export type SessionInterval = "1D" | "1W" | "1M"
+
+function seriesQuery(start: string, end: string, extra?: Record<string, string>) {
+  return new URLSearchParams({ start, end, ...extra }).toString()
+}
+
+/**
+ * Sessions for a watched symbol, or `null` when the symbol is not watched.
+ *
+ * The 404 is the Universe answering, not a failure — the caller falls back to
+ * the frozen provider-backed route for symbols this system does not collect.
+ */
+export async function fetchMarketSeries(
+  symbol: string,
+  start: string,
+  end: string,
+  interval: SessionInterval
+): Promise<MarketSeries | null> {
+  const query = seriesQuery(start, end, { interval })
+  try {
+    return await fetchApi<MarketSeries>(
+      `/stocks/${encodeURIComponent(symbol)}/series/market?${query}`
+    )
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return null
+    throw error
+  }
+}
+
+/** P/E and P/B session by session, or `null` for a symbol outside the Universe. */
+export async function fetchValuationSeries(
+  symbol: string,
+  start: string,
+  end: string
+): Promise<ValuationSeries | null> {
+  try {
+    return await fetchApi<ValuationSeries>(
+      `/stocks/${encodeURIComponent(symbol)}/series/valuation?${seriesQuery(start, end)}`
+    )
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return null
+    throw error
+  }
+}

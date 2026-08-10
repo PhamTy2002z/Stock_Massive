@@ -24,7 +24,13 @@ from sqlalchemy.orm import Session
 from src.core.config import Settings, get_settings
 from src.stocks.models import SymbolBackfill
 
-from .providers import Capability, MarketSnapshot, SnapshotStore
+from .providers import (
+    Capability,
+    MarketSnapshot,
+    SnapshotStore,
+    SymbolSnapshot,
+    ValuationSnapshot,
+)
 from .providers.normalize import VN_TZ
 from .universe import Universe
 
@@ -60,7 +66,7 @@ BackfillStatus = Literal["pending", "in_progress", "completed", "failed"]
 
 
 class MarketHistoryProvider(Protocol):
-    """Read a stretch of one symbol's history from the Cover Source."""
+    """Read a stretch of one symbol's session history."""
 
     def fetch_market_history(
         self,
@@ -68,6 +74,32 @@ class MarketHistoryProvider(Protocol):
         from_date: date,
         to_date: date,
     ) -> Sequence[MarketSnapshot]: ...
+
+
+class ValuationHistoryProvider(Protocol):
+    """Read a stretch of the ratio series, which arrives per symbol per session."""
+
+    def fetch_valuation(
+        self,
+        symbols: Sequence[str],
+        from_date: date,
+        to_date: date,
+    ) -> Sequence[ValuationSnapshot]: ...
+
+
+@dataclass(frozen=True)
+class Segment:
+    """One stretch of history and the source that reaches it.
+
+    The load is not one walk from one provider: the deep years come from the
+    Cover Source and the Main Source's own granted window comes from the Main
+    Source, which is the only reason the daily cycle can be cheap. Segments run
+    oldest first so the single per-symbol cursor stays monotonic across both.
+    """
+
+    history: MarketHistoryProvider
+    ends: date
+    valuation: ValuationHistoryProvider | None = None
 
 
 @dataclass(frozen=True)
@@ -84,11 +116,12 @@ class HistoryWindow:
     chunk_days: int = CHUNK_DAYS
     overlap_days: int = CHUNK_OVERLAP_DAYS
 
-    def boundary(self, today: date) -> date:
+    def crossover(self, today: date) -> date:
         """The newest session the Cover Source is asked for.
 
-        Past it the Main Source answers with a richer session than a quote
-        history carries, so the load stops rather than overwriting nothing.
+        Past it the Main Source is granted its own history and answers with a
+        richer session than a quote history carries, so the Cover Source stops
+        rather than spending the scarcer allowance on data the other reaches.
         """
         return today - timedelta(days=self.main_source_days)
 
@@ -211,6 +244,8 @@ class Backfill:
         state: BackfillStateStore,
         universe: Universe,
         history: MarketHistoryProvider,
+        main_history: MarketHistoryProvider | None = None,
+        valuation_history: ValuationHistoryProvider | None = None,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         window: HistoryWindow = HistoryWindow(),
         symbols_per_run: int = SYMBOLS_PER_RUN,
@@ -219,14 +254,21 @@ class Backfill:
         self._state = state
         self._universe = universe
         self._history = history
+        self._main_history = main_history
+        self._valuation_history = valuation_history
         self._now = now
         self._window = window
         self._symbols_per_run = symbols_per_run
 
     def run(self) -> BackfillSummary:
         today = self._now().astimezone(VN_TZ).date()
-        boundary = self._window.boundary(today)
         earliest = self._window.earliest(today)
+        segments = self._segments(today)
+        # What the walk is responsible for reaching. Without a Main Source
+        # account there is no second segment, so the load ends where it always
+        # did rather than sitting half-finished waiting for a window nothing in
+        # this environment can fetch.
+        boundary = segments[-1].ends
 
         # Read once. Asking per symbol per question would be three round trips
         # each and three chances for the answers to disagree.
@@ -242,7 +284,9 @@ class Backfill:
                 # done" is a question about the Universe, not about this run.
                 progress.append(self._settled(recorded.get(symbol), symbol))
                 continue
-            count, item = self._load(recorded.get(symbol), symbol, earliest, boundary)
+            count, item = self._load(
+                recorded.get(symbol), symbol, earliest, boundary, segments
+            )
             written += count
             progress.append(item)
 
@@ -294,13 +338,38 @@ class Backfill:
 
     @staticmethod
     def _is_done(state: SymbolBackfill | None, boundary: date) -> bool:
+        """Owed nothing means the cursor has reached the end of the walk.
+
+        Judged on the cursor rather than on the recorded status, because the
+        end of the walk moves with what the system can reach: a symbol loaded
+        while no FiinQuant account was configured stopped at the crossover and
+        is genuinely owed the Main Source's window once one appears. Reading
+        "completed" as done forever would leave that symbol with a five-year
+        hole nothing would ever fill.
+
+        With an account configured the walk ends at today, so a symbol already
+        loaded is owed at most the sessions since its last run — one cheap call
+        on the allowance measured in tens of thousands, which also repairs a
+        session the daily cycle missed. The expensive Cover Source stretch is
+        behind the cursor and is never asked for twice.
+        """
         if state is None:
             return False
-        if state.status == "completed":
-            return True
-        # A failed or half-finished symbol that nonetheless reached the
-        # boundary is done: there is nothing left to ask for.
         return state.covered_through is not None and state.covered_through >= boundary
+
+    def _segments(self, today: date) -> tuple[Segment, ...]:
+        """The stretches this load walks, oldest first, each with its source."""
+        crossover = self._window.crossover(today)
+        segments = [Segment(history=self._history, ends=crossover)]
+        if self._main_history is not None:
+            segments.append(
+                Segment(
+                    history=self._main_history,
+                    ends=today,
+                    valuation=self._valuation_history,
+                )
+            )
+        return tuple(segments)
 
     def _load(
         self,
@@ -308,6 +377,7 @@ class Backfill:
         symbol: str,
         earliest: date,
         boundary: date,
+        segments: Sequence[Segment],
     ) -> tuple[int, SymbolProgress]:
         """Walk one symbol's missing years, recording progress as it goes."""
         start = (
@@ -319,31 +389,48 @@ class Backfill:
         written = 0
         covered_through = state.covered_through if state is not None else None
 
-        for asked_from, _covered_from, chunk_end in self._window.chunks(start, boundary):
-            try:
-                snapshots = self._history.fetch_market_history(
-                    symbol, asked_from, chunk_end
-                )
-            except Exception as exc:
-                reason = f"{type(exc).__name__}: {exc}"
-                logger.warning("Backfill for %s stopped: %s", symbol, reason)
-                self._state.record(
-                    symbol, "failed", covered_through=covered_through, reason=reason
-                )
-                self._state.commit()
-                return written, SymbolProgress(
-                    symbol=symbol,
-                    status="failed",
-                    covered_through=covered_through,
-                    reason=reason,
-                )
+        for segment in segments:
+            for asked_from, _covered_from, chunk_end in self._window.chunks(
+                start, segment.ends
+            ):
+                try:
+                    written += self._write(
+                        symbol,
+                        segment.history.fetch_market_history(
+                            symbol, asked_from, chunk_end
+                        ),
+                        Capability.MARKET,
+                    )
+                    if segment.valuation is not None:
+                        written += self._write(
+                            symbol,
+                            segment.valuation.fetch_valuation(
+                                [symbol], asked_from, chunk_end
+                            ),
+                            Capability.VALUATION,
+                        )
+                except Exception as exc:
+                    reason = f"{type(exc).__name__}: {exc}"
+                    logger.warning("Backfill for %s stopped: %s", symbol, reason)
+                    self._state.record(
+                        symbol, "failed", covered_through=covered_through, reason=reason
+                    )
+                    self._state.commit()
+                    return written, SymbolProgress(
+                        symbol=symbol,
+                        status="failed",
+                        covered_through=covered_through,
+                        reason=reason,
+                    )
 
-            written += self._write(symbol, snapshots)
-            covered_through = chunk_end
-            # Recorded and committed per chunk: a restart between two chunks
-            # must cost the one chunk, not the whole stretch of history.
-            self._state.record(symbol, "in_progress", covered_through=chunk_end)
-            self._state.commit()
+                covered_through = chunk_end
+                # Recorded and committed per chunk: a restart between two chunks
+                # must cost the one chunk, not the whole stretch of history.
+                self._state.record(symbol, "in_progress", covered_through=chunk_end)
+                self._state.commit()
+            # The next segment picks up the day after this one ended, never
+            # before: one cursor covers both only because they run in order.
+            start = max(start, segment.ends + timedelta(days=1))
 
         # Nothing left to ask for, either because the walk reached the boundary
         # or because it never had a stretch to walk: a symbol whose history is
@@ -358,11 +445,16 @@ class Backfill:
             symbol=symbol, status=status, covered_through=covered_through
         )
 
-    def _write(self, symbol: str, snapshots: Sequence[MarketSnapshot]) -> int:
+    def _write(
+        self,
+        symbol: str,
+        snapshots: Sequence[SymbolSnapshot],
+        capability: Capability,
+    ) -> int:
         written = 0
         for snapshot in snapshots:
             try:
-                self._store.save(Capability.MARKET, snapshot)
+                self._store.save(capability, snapshot)
             except Exception as exc:
                 # One refused session is one day of history, not a reason to
                 # abandon the decade around it.
@@ -382,15 +474,43 @@ def build_backfill(
     settings: Settings | None = None,
     universe: Universe | None = None,
 ) -> Backfill:
-    """Wire the Cover Source adapter for the configured account."""
+    """Wire one adapter per stretch of history the load has to cover.
+
+    The Cover Source is always there; the Main Source only when an account is
+    configured, which is why a development environment loads the deep years and
+    stops. Both FiinQuant adapters share one login and one breaker: the free
+    tier grants a single concurrent connection, and the health being tracked
+    belongs to the account rather than to either capability.
+    """
     from .providers.vnstock_provider import VnstockMarketHistoryProvider
 
     settings = settings or get_settings()
+    main_history = valuation_history = None
+
+    if settings.fiinquant_username and settings.fiinquant_password:
+        from .providers.fiinquant import (
+            FiinQuantMarketProvider,
+            FiinQuantValuationProvider,
+            ProviderCircuitBreaker,
+            shared_session_factory,
+        )
+
+        credentials = {
+            "username": settings.fiinquant_username,
+            "password": settings.fiinquant_password,
+            "session_factory": shared_session_factory(),
+            "circuit_breaker": ProviderCircuitBreaker(),
+        }
+        main_history = FiinQuantMarketProvider(**credentials)
+        valuation_history = FiinQuantValuationProvider(**credentials)
+
     return Backfill(
         store=store,
         state=state,
         universe=universe or Universe.from_settings(settings),
         history=VnstockMarketHistoryProvider(vnstock_source=settings.vnstock_source),
+        main_history=main_history,
+        valuation_history=valuation_history,
         window=HistoryWindow(
             depth_days=settings.backfill_depth_days,
             main_source_days=settings.backfill_main_source_days,

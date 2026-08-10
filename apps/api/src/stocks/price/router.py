@@ -1,4 +1,15 @@
-"""Price domain router for price-related endpoints."""
+"""Price domain router for price-related endpoints.
+
+Frozen, and still needed: everything here calls a provider inside the request.
+`/{symbol}/history` keeps that path for the two things the store cannot answer —
+granularity finer than a session, and symbols outside the Universe. Sessions for
+a watched symbol are served by `/{symbol}/series/market`, which reads the store
+and carries a data age; a caller wanting the pipeline's promise asks that one.
+
+`/intraday`, `/volume-analysis` and `/volume-anomalies` describe flow within a
+session, which `docs/adr/0001` and #6 put outside the pipeline. The market-wide
+endpoints are frozen by #6 itself.
+"""
 
 import logging
 from datetime import date

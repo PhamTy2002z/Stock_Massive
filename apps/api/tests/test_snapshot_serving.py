@@ -34,6 +34,7 @@ from src.stocks.schemas.snapshot import (
     ReferenceData,
     ValuationData,
 )
+from src.stocks.providers.normalize import VN_TZ
 from src.stocks.universe import Universe
 
 OBSERVED_AT = datetime(2026, 8, 10, 8, 30, tzinfo=timezone.utc)
@@ -136,8 +137,8 @@ def write(engine, capability: Capability, snapshot) -> None:
         session.commit()
 
 
-def serve(engine, symbol: str, universe=("VCB",), redis=None):
-    """Ask the serving endpoint for one symbol, with nothing else wired up."""
+def ask(engine, path: str, universe=("VCB",), redis=None):
+    """Ask one store-backed endpoint, with nothing else wired up."""
     session = Session(engine)
     app.dependency_overrides[get_sync_session] = lambda: session
     try:
@@ -145,10 +146,32 @@ def serve(engine, symbol: str, universe=("VCB",), redis=None):
             "src.stocks.snapshot_router.get_universe",
             return_value=Universe(symbols=universe),
         ), patch("src.stocks.providers.store.get_redis", return_value=redis):
-            return TestClient(app).get(f"/api/v1/stocks/{symbol}/snapshot")
+            return TestClient(app).get(f"/api/v1/stocks/{path}")
     finally:
         app.dependency_overrides.clear()
         session.close()
+
+
+def serve(engine, symbol: str, universe=("VCB",), redis=None):
+    """Ask the serving endpoint for one symbol, with nothing else wired up."""
+    return ask(engine, f"{symbol}/snapshot", universe=universe, redis=redis)
+
+
+def session_snapshot(session_day: date, close: float, source=ProviderSource.FIINQUANT):
+    return MarketSnapshot(
+        symbol="VCB",
+        metadata=SnapshotMetadata(
+            source=source,
+            effective_at=datetime.combine(session_day, datetime.min.time(), tzinfo=VN_TZ),
+            observed_at=OBSERVED_AT,
+        ),
+        open_price=close - 300,
+        high_price=close + 200,
+        low_price=close - 500,
+        last_price=close,
+        volume=1_000_000,
+        total_value_vnd=60_000_000_000,
+    )
 
 
 class TestASymbolTheSystemWatches:
@@ -405,3 +428,131 @@ class TestASymbolWaitingOnItsFirstCollection:
             "reference": None,
             "fundamental": None,
         }
+
+
+class TestASeriesOfSessions:
+    """Stories 4 and 7 of #6: years of price, and valuation read against itself."""
+
+    def test_the_sessions_come_back_oldest_first_with_their_sources(self):
+        engine = database()
+        write(engine, Capability.MARKET, session_snapshot(date(2019, 3, 1), 30_000,
+                                                          ProviderSource.VNSTOCK))
+        write(engine, Capability.MARKET, session_snapshot(date(2026, 8, 7), 59_700))
+        write(engine, Capability.MARKET, session_snapshot(date(2026, 8, 10), 60_300))
+
+        body = ask(engine, "VCB/series/market?start=2010-01-01&end=2026-08-10").json()
+
+        assert [point["close_price"] for point in body["points"]] == [
+            30_000,
+            59_700,
+            60_300,
+        ]
+        # The seam between the two providers is on the wire, not hidden by it.
+        assert [point["source"] for point in body["points"]] == [
+            "vnstock",
+            "fiinquant",
+            "fiinquant",
+        ]
+
+    def test_a_weekly_bar_spans_its_sessions_rather_than_sampling_one(self):
+        engine = database()
+        for day, close in ((6, 59_000), (7, 59_700), (10, 60_300)):
+            write(engine, Capability.MARKET, session_snapshot(date(2026, 8, day), close))
+
+        body = ask(
+            engine,
+            "VCB/series/market?start=2026-08-01&end=2026-08-10&interval=1W",
+        ).json()
+
+        # Two weeks: 3–9 August closing at Friday's 59_700, then 10 August.
+        assert [point["close_price"] for point in body["points"]] == [59_700, 60_300]
+        assert body["points"][0]["open_price"] == 58_700
+        assert body["points"][0]["volume"] == 2_000_000
+        assert body["points"][0]["effective_at"].startswith("2026-08-06")
+
+    def test_only_the_newest_session_decides_whether_the_series_is_stale(self):
+        engine = database()
+        write(engine, Capability.MARKET, session_snapshot(date(2019, 3, 1), 30_000))
+        write(engine, Capability.MARKET, session_snapshot(date(2026, 8, 10), 60_300))
+
+        with patch(
+            "src.stocks.providers.store.datetime",
+            wraps=datetime,
+        ) as clock:
+            clock.now.return_value = datetime(2026, 8, 11, 12, tzinfo=timezone.utc)
+            body = ask(engine, "VCB/series/market").json()
+
+        assert body["stale"] is False
+        assert body["age_seconds"] is not None
+
+    def test_a_window_the_store_holds_nothing_for_is_empty_not_missing(self):
+        engine = database()
+        write(engine, Capability.MARKET, session_snapshot(date(2026, 8, 10), 60_300))
+
+        body = ask(engine, "VCB/series/market?start=2026-01-01&end=2026-01-05").json()
+
+        assert body["points"] == []
+        assert body["age_seconds"] is None
+        assert body["stale"] is False
+
+    def test_the_ratio_series_carries_one_point_per_session(self):
+        engine = database()
+        write(engine, Capability.VALUATION, valuation_snapshot())
+
+        body = ask(engine, "VCB/series/valuation").json()
+
+        assert body["points"] == [
+            {
+                "effective_at": body["points"][0]["effective_at"],
+                "source": "fiinquant",
+                "provider_pe": 12.5,
+                "provider_pb": 1.8,
+            }
+        ]
+
+    def test_an_interval_finer_than_a_session_is_refused_by_name(self):
+        """The store holds one bar a day. Answering 5m with a daily bar would
+        be a lie the caller cannot see; #6 leaves in-session data frozen."""
+        engine = database()
+
+        response = ask(engine, "VCB/series/market?interval=5m")
+
+        assert response.status_code == 400
+        assert "1D" in response.json()["detail"]
+
+    def test_a_backwards_window_is_refused_before_the_store_is_read(self):
+        engine = database()
+
+        response = ask(engine, "VCB/series/market?start=2026-08-10&end=2026-08-01")
+
+        assert response.status_code == 400
+
+    def test_a_symbol_outside_the_universe_is_refused_the_same_way_everywhere(self):
+        engine = database()
+
+        for path in ("VCB/snapshot", "VCB/series/market", "VCB/series/valuation"):
+            response = ask(engine, path, universe=("HPG",))
+            assert response.status_code == 404
+            assert "chưa thu thập" in response.json()["detail"]
+
+    def test_the_series_paths_open_no_socket(self):
+        """The promise the whole pipeline exists for, asserted rather than argued.
+
+        Every outbound connection in this process goes through socket.connect,
+        so a connect that raises turns any provider call in the request path
+        into a failed test instead of a slow one.
+        """
+        import socket
+
+        engine = database()
+        write(engine, Capability.MARKET, session_snapshot(date(2026, 8, 10), 60_300))
+        write(engine, Capability.VALUATION, valuation_snapshot())
+
+        def refuse(*args, **kwargs):
+            raise AssertionError("the serving path reached for the network")
+
+        with patch.object(socket.socket, "connect", refuse), patch.object(
+            socket.socket, "connect_ex", refuse
+        ):
+            for path in ("VCB/snapshot", "VCB/series/market", "VCB/series/valuation"):
+                assert ask(engine, path).status_code == 200

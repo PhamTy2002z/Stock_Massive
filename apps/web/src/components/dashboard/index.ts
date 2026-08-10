@@ -17,6 +17,10 @@ export {
   StockSnapshotPanel,
   StockSnapshotPanelSkeleton,
 } from "./stock-snapshot-panel"
+export {
+  StockValuationHistory,
+  StockValuationHistorySkeleton,
+} from "./stock-valuation-history"
 export { StockStatsTable } from "./stock-stats-table"
 export { StockCompanyInfo } from "./stock-company-info"
 export { StockSearchBar, getStockLoadingToastId, clearStockLoadingToast } from "./stock-search-bar"
