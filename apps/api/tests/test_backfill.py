@@ -139,16 +139,26 @@ class FakeHistory:
 
     source = ProviderSource.VNSTOCK
 
-    def __init__(self, broken: set[str] | None = None, die_after: int | None = None):
+    def __init__(
+        self,
+        broken: set[str] | None = None,
+        die_after: int | None = None,
+        unlisted_before: date | None = None,
+    ):
         self.windows: list[tuple[str, date, date]] = []
         self.broken = broken or set()
         self.die_after = die_after
+        self.unlisted_before = unlisted_before
 
     def fetch_market_history(self, symbol, from_date, to_date):
         if self.die_after is not None and len(self.windows) >= self.die_after:
             raise KilledMidLoad()
         self.windows.append((symbol, from_date, to_date))
         if symbol in self.broken:
+            raise RuntimeError(f"vnstock market history fetch failed for {symbol}")
+        if self.unlisted_before is not None and to_date < self.unlisted_before:
+            # What vnstock does for a window before the company listed: it
+            # raises rather than answering with no sessions.
             raise RuntimeError(f"vnstock market history fetch failed for {symbol}")
         return (history_snapshot(symbol, to_date),)
 
@@ -569,6 +579,37 @@ class TestTheMainSourceWindow:
         assert main.windows == []
         assert summary.snapshots_written == 0
         assert summary.completed == ("HPG",)
+
+    def test_a_company_younger_than_the_depth_loads_from_its_first_session(self):
+        """vnstock raises for a window before the symbol listed.
+
+        TCB listed in 2018 and the load reaches back a decade, so its first
+        chunks can never be answered — and a symbol whose walk stops on the
+        first refusal never loads the years it does have. Measured against the
+        live provider, not guessed.
+        """
+        engine = database()
+        history = FakeHistory(unlisted_before=date(2026, 6, 11))
+
+        summary = backfill(engine, history=history).run()
+
+        # Every chunk was still attempted: nothing here knows a listing date.
+        assert len(history.windows_for("HPG")) == 3
+        assert summary.completed == ("HPG",)
+        with Session(engine) as session:
+            stored = SnapshotStore(session, redis=None).series(
+                Capability.MARKET, "HPG", now=NOW
+            )
+        assert len(stored.snapshots) == 2
+
+    def test_a_symbol_that_answers_nothing_at_all_is_not_marked_loaded(self):
+        """An outage on a first run must not settle a symbol with no history."""
+        engine = database()
+
+        summary = backfill(engine, history=FakeHistory(broken={"HPG"})).run()
+
+        assert summary.completed == ()
+        assert summary.failed[0].symbol == "HPG"
 
     def test_the_ratio_series_is_not_asked_of_the_cover_stretch(self):
         """vnstock owns no ratio series, and the deep years are its stretch."""
