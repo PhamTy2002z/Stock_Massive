@@ -42,7 +42,10 @@ export function useAuth() {
 
   const signOut = useMutation({
     mutationFn: logoutAction,
-    onSuccess: () => {
+    // `logoutAction` ends in `redirect()`, which Next reports by rejecting the
+    // action promise — the mutation therefore never settles as a success, so
+    // the clean-up has to run either way.
+    onSettled: () => {
       // Drop every cached query: some hold data scoped to the user who left.
       queryClient.clear()
     },
