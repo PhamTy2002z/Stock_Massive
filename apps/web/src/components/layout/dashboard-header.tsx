@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { StockSearchBar } from "@/components/dashboard"
 import { StockSymbol } from "@/lib/api"
 import { NotificationPanel } from "./notification-panel"
+import { ThemeToggle } from "./theme-toggle"
 import { UserMenu } from "./user-menu"
 
 interface DashboardHeaderProps {
@@ -14,9 +15,13 @@ interface DashboardHeaderProps {
 }
 
 /**
- * Full-width bar above the sidebar: 64px, white, one hairline underneath.
- * The mark and wordmark lead, search sits immediately beside them rather than
- * floating in the middle, and the account block anchors the right edge.
+ * Full-width bar above the sidebar: 64px, one hairline underneath. The mark and
+ * wordmark lead, search sits immediately beside them rather than floating in
+ * the middle, and the account block anchors the right edge.
+ *
+ * It sits on --nav rather than --card so the two themes can disagree: white on
+ * light, true black on dark — the one surface in the app that goes to pure
+ * black, which is what separates the bar from the tiles beneath it.
  */
 export function DashboardHeader({ onStockSelect }: DashboardHeaderProps) {
   const handleStockSelect = (stock: StockSymbol) => {
@@ -26,7 +31,7 @@ export function DashboardHeader({ onStockSelect }: DashboardHeaderProps) {
   }
 
   return (
-    <header className="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-5 border-b border-border bg-card px-5">
+    <header className="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-5 border-b border-border bg-nav px-5 text-nav-foreground">
       <Link
         href="/"
         aria-label="Stock Massive"
@@ -60,6 +65,8 @@ export function DashboardHeader({ onStockSelect }: DashboardHeaderProps) {
           <Share2 className="size-[17px]" />
           <span className="sr-only">Chia sẻ</span>
         </Button>
+
+        <ThemeToggle />
 
         {/* Notifications - Job Status Panel */}
         <NotificationPanel />

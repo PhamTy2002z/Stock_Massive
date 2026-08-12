@@ -130,8 +130,11 @@ export function OrderFlowTabContent({ symbol, className }: OrderFlowTabContentPr
 
   return (
     <div className={cn("flex min-w-0 flex-col gap-4", className)}>
-      {/* The verdict, stated in words before any bar has to be decoded. */}
-      <div className="min-w-0 rounded-[18px] bg-[#272729] p-[18px] text-white">
+      {/* The verdict, stated in words before any bar has to be decoded. It is
+          a dark tile in both themes — that is how it stands apart on a light
+          page. On dark it steps up to the floating-surface tone instead, since
+          the tile tone is what the page itself is already wearing. */}
+      <div className="min-w-0 rounded-[18px] bg-[#272729] p-[18px] text-white dark:bg-popover">
         <div className="flex flex-wrap items-center gap-3">
           <span
             className={cn(

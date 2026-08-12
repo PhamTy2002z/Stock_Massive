@@ -65,13 +65,13 @@ export function PeerMetricsTable({ peers, targetSymbol }: PeerMetricsTableProps)
               key={peer.symbol}
               className={cn(
                 "border-b border-border/30 hover:bg-muted/20",
-                peer.symbol === targetSymbol && "bg-white/10 border-white/30"
+                peer.symbol === targetSymbol && "bg-foreground/[0.07] border-foreground/25"
               )}
             >
               <td className="py-2 px-3">
                 <span className={cn(
                   "font-semibold",
-                  peer.symbol === targetSymbol && "text-white"
+                  peer.symbol === targetSymbol && "text-foreground"
                 )}>
                   {peer.symbol}
                 </span>

@@ -31,7 +31,7 @@ export function FinancialDetailSheet({
           <SheetTitle className="flex items-center gap-2">
             {stock ? (
               <>
-                <span className="text-white font-semibold">{stock.symbol}</span>
+                <span className="text-foreground font-semibold">{stock.symbol}</span>
                 <span className="text-muted-foreground font-normal text-sm truncate">
                   - {stock.company_name}
                 </span>

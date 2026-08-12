@@ -52,6 +52,14 @@ module.exports = {
   				DEFAULT: 'hsl(var(--interactive))',
   				strong: 'hsl(var(--interactive-strong))'
   			},
+  			nav: {
+  				DEFAULT: 'hsl(var(--nav))',
+  				foreground: 'hsl(var(--nav-foreground))'
+  			},
+  			ceiling: 'hsl(var(--ceiling))',
+  			reference: 'hsl(var(--reference))',
+  			floor: 'hsl(var(--floor))',
+  			caution: 'hsl(var(--caution))',
   			card: {
   				DEFAULT: 'hsl(var(--card))',
   				foreground: 'hsl(var(--card-foreground))'

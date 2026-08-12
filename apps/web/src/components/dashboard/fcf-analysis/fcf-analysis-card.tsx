@@ -35,7 +35,7 @@ export function FCFAnalysisCard({ symbol, className }: FCFAnalysisCardProps) {
           <Wallet className="h-5 w-5" />
           FCF Analysis
           <span className="text-sm font-normal text-muted-foreground">- {data.period}</span>
-          <span className="ml-auto text-white font-bold">{data.symbol}</span>
+          <span className="ml-auto text-foreground font-bold">{data.symbol}</span>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -45,13 +45,13 @@ export function FCFAnalysisCard({ symbol, className }: FCFAnalysisCardProps) {
         <div className="grid grid-cols-2 gap-4 pt-4 border-t border-border/50">
           <div className="text-center">
             <div className="text-sm text-muted-foreground">FCF Margin</div>
-            <div className="text-xl font-bold text-white">
+            <div className="text-xl font-bold text-foreground">
               {data.fcf_margin ? `${(data.fcf_margin * 100).toFixed(1)}%` : "-"}
             </div>
           </div>
           <div className="text-center">
             <div className="text-sm text-muted-foreground">FCF Yield</div>
-            <div className="text-xl font-bold text-white">
+            <div className="text-xl font-bold text-foreground">
               {data.fcf_yield ? `${(data.fcf_yield * 100).toFixed(2)}%` : "-"}
             </div>
           </div>

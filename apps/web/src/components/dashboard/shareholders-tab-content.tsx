@@ -67,8 +67,8 @@ function OwnershipBreakdown({ shareholders }: { shareholders: ShareholderItem[] 
     "bg-foreground",
     "bg-interactive",
     "bg-[hsl(var(--positive))]",
-    "bg-[#7c3fae]",
-    "bg-[#cf7a1a]",
+    "bg-ceiling",
+    "bg-caution",
   ]
 
   return (
@@ -182,7 +182,7 @@ export function ShareholdersTabContent({
               <span
                 className={cn(
                   "text-right text-[13px] leading-[1.43] tracking-[-0.208px] tabular-nums",
-                  stale ? "text-[#cf7a1a]" : "text-muted-foreground"
+                  stale ? "text-caution" : "text-muted-foreground"
                 )}
               >
                 {shareholder.update_date ?? "—"}
