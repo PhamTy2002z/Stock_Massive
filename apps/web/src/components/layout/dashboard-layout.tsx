@@ -25,7 +25,15 @@ const HEADER_HEIGHT = "4rem"
 
 export function DashboardLayout({ children, onStockSelect, bleed }: DashboardLayoutProps) {
   return (
-    <div className="flex min-h-svh w-full flex-col">
+    /* A bleeding page is pinned to exactly one viewport rather than allowed to
+       grow: the page itself must not scroll, or the whole frame — rail and all
+       — travels with the content instead of the content moving inside it. */
+    <div
+      className={cn(
+        "flex w-full flex-col",
+        bleed ? "h-svh overflow-hidden" : "min-h-svh"
+      )}
+    >
       <DashboardHeader onStockSelect={onStockSelect} />
       {/* Rail is the only desktop mode: there is no pin control, so the sidebar
           must not start pinned open. */}
@@ -35,7 +43,10 @@ export function DashboardLayout({ children, onStockSelect, bleed }: DashboardLay
         style={{ "--sidebar-top": HEADER_HEIGHT } as React.CSSProperties}
       >
         <AppSidebar />
-        <SidebarInset>
+        {/* SidebarInset carries its own min-height of one viewport less the
+            header. Under bleed that floor is what pushes the frame past the
+            screen, so it is released and the flex row sizes it instead. */}
+        <SidebarInset className={cn(bleed && "min-h-0")}>
           <JobProgressBar />
           <main
             className={cn(

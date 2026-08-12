@@ -13,17 +13,6 @@ const MODES = [
   { value: "system", label: "Hệ thống", icon: Monitor },
 ] as const
 
-/** The surface ladder plus the accents, shown so a change is visible here. */
-const SWATCHES = [
-  { token: "--background", label: "Nền trang", className: "bg-background" },
-  { token: "--card", label: "Bề mặt nổi", className: "bg-card" },
-  { token: "--popover", label: "Lớp trên cùng", className: "bg-popover" },
-  { token: "--primary", label: "Hành động", className: "bg-primary" },
-  { token: "--interactive", label: "Liên kết", className: "bg-interactive" },
-  { token: "--positive", label: "Tăng", className: "bg-positive" },
-  { token: "--negative", label: "Giảm", className: "bg-negative" },
-]
-
 function ThemePicker() {
   const { theme, setTheme } = useTheme()
 
@@ -66,27 +55,6 @@ function ThemePicker() {
   )
 }
 
-function PalettePreview() {
-  return (
-    <div className="flex flex-wrap gap-3">
-      {SWATCHES.map(({ token, label, className }) => (
-        <div key={token} className="flex items-center gap-2">
-          <span
-            aria-hidden
-            className={cn(
-              "size-6 rounded-lg border border-[hsl(var(--hairline))]",
-              className
-            )}
-          />
-          <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
-            {label}
-          </span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
 /** A quote block in miniature — the fastest way to judge a theme is on the
  *  numbers, where up and down have to stay apart on both surfaces. */
 function QuotePreview() {
@@ -109,8 +77,8 @@ function QuotePreview() {
         </span>
       </div>
       <div className="mt-2 flex items-center gap-3 text-[11px] leading-[1.3] tracking-[-0.11px] tabular-nums">
-        <span className="text-positive">Trần 68.650</span>
-        <span className="text-negative">Sàn 59.750</span>
+        <span className="text-ceiling">Trần 68.650</span>
+        <span className="text-floor">Sàn 59.750</span>
       </div>
     </div>
   )
@@ -135,12 +103,6 @@ export function AppearanceSection() {
           description="Hệ thống sẽ đi theo cài đặt của thiết bị."
         >
           <ThemePicker />
-        </SettingsRow>
-        <SettingsRow
-          label="Bảng màu"
-          description="Các bề mặt và màu ngữ nghĩa của chế độ đang chọn."
-        >
-          <PalettePreview />
         </SettingsRow>
         <SettingsRow
           label="Xem trước"
