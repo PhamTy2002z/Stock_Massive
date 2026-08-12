@@ -111,8 +111,8 @@ export function SpikeStockTable({
                       <span className={cn(
                         "inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold",
                         rank === 1 && "bg-yellow-500/20 text-yellow-600 dark:text-yellow-400",
-                        rank === 2 && "bg-gray-300/30 text-gray-600 dark:text-gray-400",
-                        rank === 3 && "bg-white/20 text-white dark:text-white",
+                        rank === 2 && "bg-muted-foreground/25 text-muted-foreground",
+                        rank === 3 && "bg-foreground/15 text-foreground",
                         rank > 3 && "text-muted-foreground"
                       )}>
                         {rank}

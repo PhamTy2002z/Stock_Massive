@@ -34,16 +34,18 @@ export default function RootLayout({
   return (
     <html lang="vi" suppressHydrationWarning>
       <body className={`${inter.className} ${jetBrainsMono.variable}`}>
-        {/* forcedTheme, not just defaultTheme: next-themes persists the chosen
-            theme in localStorage, so every browser that ever loaded the old
-            dark build keeps rendering dark no matter what the default says —
-            and the app ships no theme switcher to escape with. The v3 design is
-            light; drop forcedTheme if a switcher is ever added. */}
+        {/* forcedTheme is gone now that ThemeToggle ships: it was only ever
+            there because a browser holding a stale "dark" in localStorage had
+            no way back to the light v3 design. There is a way back now, and
+            dark is a designed surface rather than a leftover.
+
+            defaultTheme stays "light" rather than "system" so a first visit
+            still lands on the light design; "system" is a choice the user
+            makes in the toggle, which is why enableSystem is on. */}
         <ThemeProvider
           attribute="class"
           defaultTheme="light"
-          forcedTheme="light"
-          enableSystem={false}
+          enableSystem
           disableTransitionOnChange
         >
           <QueryProvider>

@@ -76,7 +76,12 @@ export function UserMenu() {
             <User className="mr-2 size-4" />
             Profile
           </DropdownMenuItem>
-          <DropdownMenuItem>
+          {/* Profile and Help are still inert; Settings is the one that leads
+              somewhere now that /settings exists. */}
+          <DropdownMenuItem
+            className="cursor-pointer"
+            onClick={() => router.push("/settings")}
+          >
             <Settings className="mr-2 size-4" />
             Settings
           </DropdownMenuItem>

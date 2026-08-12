@@ -91,9 +91,13 @@ export function StockValuationHistory({
             width={44}
             tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }}
           />
+          {/* recharts types the tooltip label as ReactNode, not string — the
+              value is our own date key, so it is narrowed rather than asserted. */}
           <Tooltip
             contentStyle={CHART_TOOLTIP_STYLE}
-            labelFormatter={(value: string) => `Phiên ${formatVietnamDate(value)}`}
+            labelFormatter={(label) =>
+              typeof label === "string" ? `Phiên ${formatVietnamDate(label)}` : label
+            }
             formatter={(value, name) => [ratio(value), String(name)]}
           />
           <Legend />

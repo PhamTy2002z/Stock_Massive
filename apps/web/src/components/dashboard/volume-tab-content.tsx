@@ -15,8 +15,8 @@ const baselines = [10, 20, 60]
 
 const legend = [
   { color: "bg-[#c7c7cc]", label: "Bình thường" },
-  { color: "bg-[#7a5c00]", label: "Tăng cao 1,5–2×" },
-  { color: "bg-[#cf7a1a]", label: "Cao 2–3×" },
+  { color: "bg-reference", label: "Tăng cao 1,5–2×" },
+  { color: "bg-caution", label: "Cao 2–3×" },
   { color: "bg-negative", label: "Rất cao >3×" },
 ]
 

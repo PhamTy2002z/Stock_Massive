@@ -65,10 +65,12 @@ function OwnershipBreakdown({ shareholders }: { shareholders: ShareholderItem[] 
 
   const tones = [
     "bg-foreground",
-    "bg-interactive",
+    // A chart token, not --interactive: on this palette the interactive tone is
+    // the ink itself, which would collide with the slice above it.
+    "bg-[hsl(var(--chart-3))]",
     "bg-[hsl(var(--positive))]",
-    "bg-[#7c3fae]",
-    "bg-[#cf7a1a]",
+    "bg-ceiling",
+    "bg-caution",
   ]
 
   return (
@@ -182,7 +184,7 @@ export function ShareholdersTabContent({
               <span
                 className={cn(
                   "text-right text-[13px] leading-[1.43] tracking-[-0.208px] tabular-nums",
-                  stale ? "text-[#cf7a1a]" : "text-muted-foreground"
+                  stale ? "text-caution" : "text-muted-foreground"
                 )}
               >
                 {shareholder.update_date ?? "—"}
@@ -214,7 +216,7 @@ export function ShareholdersTabContent({
               onClick={() => goToPage(currentPage + 1)}
               disabled={currentPage === totalPages}
               aria-label="Trang sau"
-              className="flex size-9 items-center justify-center rounded-full bg-interactive text-white transition-transform duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <ChevronRight className="size-4" />
             </button>

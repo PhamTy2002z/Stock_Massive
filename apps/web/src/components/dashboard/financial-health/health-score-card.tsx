@@ -25,7 +25,7 @@ export function HealthScoreCard({ symbol, className }: HealthScoreCardProps) {
         <CardTitle className="flex items-center gap-2 text-lg">
           <Activity className="h-5 w-5" />
           Financial Health Score
-          <span className="ml-auto text-white font-bold">{data.symbol}</span>
+          <span className="ml-auto text-foreground font-bold">{data.symbol}</span>
         </CardTitle>
         <p className="text-xs text-muted-foreground">
           Time range: Q4 2024 | Industry avg: 65
@@ -45,7 +45,7 @@ export function HealthScoreCard({ symbol, className }: HealthScoreCardProps) {
               <div className="text-sm text-muted-foreground">Overall Score</div>
               <div className={cn(
                 "text-4xl font-bold tabular-nums",
-                data.health_score >= 70 ? "text-white" :
+                data.health_score >= 70 ? "text-positive" :
                 data.health_score >= 50 ? "text-yellow-500" : "text-red-500"
               )}>
                 {data.health_score}
