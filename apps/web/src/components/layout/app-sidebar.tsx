@@ -7,8 +7,6 @@ import {
   Activity,
   FileText,
   Gauge,
-  GitCompare,
-  LayoutGrid,
   Map,
 } from "lucide-react"
 import {
@@ -35,10 +33,8 @@ const navGroups: NavItem[][] = [
   [
     { title: "Stock 360", url: "/analytics/deep-dive", icon: Gauge },
     { title: "Financials", url: "/analytics/financial-statements", icon: FileText },
-    { title: "Compare", url: "/compare", icon: GitCompare },
     { title: "Trends & Signals", url: "/analytics/volume-spikes", icon: Activity },
   ],
-  [{ title: "Workspaces", url: "/workspaces", icon: LayoutGrid }],
 ]
 
 function NavMain() {
