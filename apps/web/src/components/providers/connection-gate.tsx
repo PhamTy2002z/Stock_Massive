@@ -2,6 +2,7 @@
 
 import { useQueryClient } from "@tanstack/react-query"
 import { Loader2 } from "lucide-react"
+import { usePathname } from "next/navigation"
 import { useEffect, useSyncExternalStore } from "react"
 import { toast } from "sonner"
 
@@ -34,7 +35,14 @@ export function ConnectionGate({ children }: { children: React.ReactNode }) {
     // on, and a veil in the HTML would flash on every first paint.
     () => "ready" as const
   )
-  const waiting = state === "waiting"
+  // PROTOTYPE-BRANCH ONLY (issue #21). A throwaway route runs on fixtures and
+  // needs no API, but the surrounding chrome — header search, JobProgressBar —
+  // still calls one, so an absent backend veiled the mockup itself. Drop this
+  // when the branch is folded back.
+  const pathname = usePathname()
+  const isPrototype = pathname?.startsWith("/prototypes") ?? false
+
+  const waiting = state === "waiting" && !isPrototype
 
   useEffect(() => {
     if (!waiting) {
