@@ -113,6 +113,19 @@ class Settings(BaseSettings):
     backfill_depth_days: int = 10 * 365
     backfill_main_source_days: int = 5 * 365
 
+    # Warm-up — nạp lại cửa sổ tín hiệu gần đây cho một mã (src/stocks/warmup.py).
+    # 25 phiên: một Volume Spike cần 20 phiên nền cộng phiên đích, phần dư để
+    # một phiên nhà cung cấp chưa kịp bổ sung không làm mã đó thiếu nền.
+    warmup_window_trading_days: int = 25
+
+    # Market catch-up — thu thập lại lúc 23:00 khi Trading Day chưa nhúc nhích
+    # (docs/adr/0005). Main Source bổ sung phiên vừa đóng vào muộn trong tối,
+    # nên chu kỳ 16:15 thường xuyên chỉ lấy được phiên hôm trước; không có lần
+    # chạy này thì phiên đó không bao giờ được thu.
+    market_catchup_enabled: bool = True
+    market_catchup_hour: int = 23
+    market_catchup_minute: int = 0
+
     # Rate Limiting
     rate_limit_enabled: bool = True
     rate_limit_standard_max: int = 100  # requests per window

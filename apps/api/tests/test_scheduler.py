@@ -193,6 +193,7 @@ class TestSchedulerSetup:
             "sector-historical-daily",
             "universe-snapshots",
             "universe-backfill",
+            "market-catchup",
         }
 
     @pytest.mark.asyncio

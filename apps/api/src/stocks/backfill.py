@@ -26,7 +26,7 @@ from src.stocks.models import SymbolBackfill
 
 from .providers import (
     Capability,
-    MarketSnapshot,
+    MarketHistoryProvider,
     SnapshotStore,
     SymbolSnapshot,
     ValuationSnapshot,
@@ -62,18 +62,23 @@ CHUNK_OVERLAP_DAYS = 7
 # everything else depends on.
 SYMBOLS_PER_RUN = 5
 
+# How long a failed symbol waits before a run may take it on again: two hours,
+# then four, then eight, up to a week. The cap is a week rather than a day
+# because this load runs once a day — a backoff shorter than the interval
+# between runs is no backoff at all, and a symbol that has failed five nights
+# running is a symbol something is wrong with rather than one having a bad
+# night.
+BACKOFF_BASE_HOURS = 1
+BACKOFF_MAX_HOURS = 7 * 24
+
+
+def _backoff(attempts: int) -> timedelta:
+    """How long to leave a symbol alone after ``attempts`` failures in a row."""
+    return timedelta(
+        hours=min(BACKOFF_BASE_HOURS * 2**attempts, BACKOFF_MAX_HOURS)
+    )
+
 BackfillStatus = Literal["pending", "in_progress", "completed", "failed"]
-
-
-class MarketHistoryProvider(Protocol):
-    """Read a stretch of one symbol's session history."""
-
-    def fetch_market_history(
-        self,
-        symbol: str,
-        from_date: date,
-        to_date: date,
-    ) -> Sequence[MarketSnapshot]: ...
 
 
 class ValuationHistoryProvider(Protocol):
@@ -188,8 +193,13 @@ class BackfillSummary:
 class BackfillStateStore:
     """How far each symbol's load has got, kept where a restart can find it."""
 
-    def __init__(self, session: Session):
+    def __init__(
+        self,
+        session: Session,
+        now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+    ):
         self.session = session
+        self._now = now
 
     def get(self, symbol: str) -> SymbolBackfill | None:
         return self.session.execute(
@@ -214,6 +224,12 @@ class BackfillStateStore:
 
         ``covered_through`` only ever moves forward: a run that failed before
         fetching anything must not erase what an earlier run paid for.
+
+        A failure also pushes the symbol out of the rotation for a while, and
+        any other outcome brings it straight back. Progress is what clears the
+        backoff, not success: a walk that got one chunk further is a walk that
+        is working, and making it serve out a penalty earned by an earlier
+        failure would stall a symbol that is only slow.
         """
         state = self.get(symbol)
         if state is None:
@@ -223,6 +239,13 @@ class BackfillStateStore:
         if covered_through is not None:
             state.covered_through = covered_through
         state.last_error = reason[:500] if reason else None
+
+        if status == "failed":
+            state.attempts = (state.attempts or 0) + 1
+            state.next_attempt_at = self._now() + _backoff(state.attempts)
+        else:
+            state.attempts = 0
+            state.next_attempt_at = None
         self.session.flush()
 
     def commit(self) -> None:
@@ -322,20 +345,70 @@ class Backfill:
         boundary: date,
         crossover: date,
     ) -> list[str]:
-        """Pick the symbols still owed history, up to this run's allowance."""
+        """Pick the symbols still owed history, up to this run's allowance.
+
+        Ordered by how long each has been waiting rather than by where it sits
+        in the Universe. In Universe order the first few symbols take every slot
+        of every run, so a symbol that fails on its first chunk is retried
+        tonight, tomorrow and the night after while the symbols behind it are
+        never reached at all. Least-recently-touched first turns the allowance
+        into a rotation: a symbol just attempted goes to the back of the queue.
+
+        Symbols still inside their backoff are left out entirely, so a permanent
+        failure stops spending the allowance the working symbols need.
+        """
+        now = self._now()
         owed = [
             symbol
             for symbol in self._universe
             if not self._is_done(recorded.get(symbol), boundary, crossover)
         ]
-        if len(owed) > self._symbols_per_run:
+        ready = [
+            symbol
+            for symbol in owed
+            if not self._is_waiting(recorded.get(symbol), now)
+        ]
+        ready.sort(key=lambda symbol: self._waiting_since(recorded.get(symbol)))
+
+        if len(owed) > len(ready):
+            logger.info(
+                "Backfill is leaving %d symbol(s) in their retry backoff",
+                len(owed) - len(ready),
+            )
+        if len(ready) > self._symbols_per_run:
             logger.info(
                 "Backfill is taking %d of %d symbols this run; the rest wait for "
                 "the next one",
                 self._symbols_per_run,
-                len(owed),
+                len(ready),
             )
-        return owed[: self._symbols_per_run]
+        return ready[: self._symbols_per_run]
+
+    @staticmethod
+    def _is_waiting(state: SymbolBackfill | None, now: datetime) -> bool:
+        """Whether this symbol's backoff has yet to run out."""
+        if state is None or state.next_attempt_at is None:
+            return False
+        due = state.next_attempt_at
+        # SQLite hands the column back without a zone; it was written in UTC.
+        if due.tzinfo is None:
+            due = due.replace(tzinfo=timezone.utc)
+        return due > now
+
+    @staticmethod
+    def _waiting_since(state: SymbolBackfill | None) -> datetime:
+        """When this symbol was last touched, oldest sorting first.
+
+        A symbol with no record at all has been waiting since before the system
+        had a record of anything, so it sorts ahead of every symbol that has had
+        a turn.
+        """
+        if state is None or state.updated_at is None:
+            return datetime.min.replace(tzinfo=timezone.utc)
+        touched = state.updated_at
+        if touched.tzinfo is None:
+            touched = touched.replace(tzinfo=timezone.utc)
+        return touched
 
     def _is_done(
         self,
