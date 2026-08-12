@@ -18,7 +18,7 @@ const SWATCHES = [
   { token: "--background", label: "Nền trang", className: "bg-background" },
   { token: "--card", label: "Bề mặt nổi", className: "bg-card" },
   { token: "--popover", label: "Lớp trên cùng", className: "bg-popover" },
-  { token: "--interactive-strong", label: "Hành động", className: "bg-interactive-strong" },
+  { token: "--primary", label: "Hành động", className: "bg-primary" },
   { token: "--interactive", label: "Liên kết", className: "bg-interactive" },
   { token: "--positive", label: "Tăng", className: "bg-positive" },
   { token: "--negative", label: "Giảm", className: "bg-negative" },
@@ -51,9 +51,9 @@ function ThemePicker() {
             className={cn(
               "flex flex-1 items-center justify-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] font-medium leading-[1.29] tracking-[-0.208px] outline-none transition-[background-color,color,transform] duration-150 focus-visible:ring-2 focus-visible:ring-interactive-strong active:scale-95 md:flex-none",
               selected
-                // The filled action takes Apple Blue; the lighter blue is
-                // link-text only and must never fill a control.
-                ? "bg-interactive-strong text-white"
+                // Ink on emerald, never white — the filled control is a lit
+                // surface with dark type, not a coloured chip.
+                ? "bg-primary text-primary-foreground"
                 : "text-muted-foreground hover:text-foreground"
             )}
           >
