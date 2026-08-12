@@ -25,6 +25,7 @@ Nguồn sự thật cho lệnh: `package.json` ở root, `apps/api/Makefile`, `a
 - **Nhánh** — `develop` là nhánh tích hợp; mọi tính năng/sửa lỗi tách nhánh riêng từ `develop`, làm trong git worktree, rồi merge ngược về `develop`. `main` được protected và chỉ nhận merge từ `develop`.
 - **Cổng kiểm tra trước khi báo xong** — backend: `make test` tại `apps/api`. Frontend: `pnpm type-check`, `pnpm lint`, `pnpm test`, `pnpm build` tại `apps/web`. Phần nào không chạy được thì nêu rõ phần đó.
 - **Commit** — Conventional Commits, mô tả thay đổi kỹ thuật. Giữ ngoài index: secrets, `.env`, dữ liệu nhạy cảm, dump database, file sinh tự động.
+- **Ngôn ngữ của artifact** — issue, comment, pull request (title + body), spec, ticket: viết bằng tiếng Anh. Trao đổi trực tiếp với người dùng vẫn bằng tiếng Việt.
 
 `apps/api/AGENTS.md` do vnstock tự sinh (hướng dẫn dựng môi trường vnstock), không phải quy ước của repo này.
 

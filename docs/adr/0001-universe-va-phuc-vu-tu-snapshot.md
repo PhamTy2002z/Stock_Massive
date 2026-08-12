@@ -2,6 +2,11 @@
 
 Hệ thống chỉ thu thập và phân tích cho **Universe** — tập mã được cấu hình, trần 100 mã — và mọi endpoint chỉ đọc từ `SnapshotStore`; một collector chạy sau phiên là nơi duy nhất gọi ra ngoài. Mỗi tài khoản chọn tối đa 5 mã.
 
+ADR-0004 introduces one narrow exception to the collection boundary: the
+Profit Ranking Census reads minimal fundamental and listing fields market-wide
+to determine which 50 symbols enter the Universe. It does not collect market
+Snapshots outside the Universe, and the serving boundary remains unchanged.
+
 Trần Universe **không đến từ hạn mức nhà cung cấp**. Đo thực tế (`apps/api/prototypes/probe_fiinquant_free_tier.py`) cho thấy gói FiinQuant free trả về đủ 110 mã lịch sử trong một lời gọi, và hạn mức 90 request/phút tính theo **lời gọi** chứ không theo mã — thu thập EOD cho 100 mã tốn khoảng 60 request/tháng trên hạn mức 100.000. Con số 33 trên trang Pricing chỉ áp cho luồng realtime, thứ kiến trúc này không dùng. Trần tồn tại vì hai lý do khác: gateway trả 504 khi một lời gọi gom quá nhiều mã kèm lịch sử dài, và collector phải chạy xong trong một cửa sổ thời gian sau phiên.
 
 ## Considered Options
