@@ -3,56 +3,76 @@
 @tailwind utilities;
 
 @layer base {
+  /* Light theme. The canvas is white and stays white — no gradient, no tint,
+     no atmospheric band. Hierarchy is a grey ladder, and the only chromatic
+     event is the emerald:
+
+       #ffffff canvas       — cards, nav, sidebar
+       #fafafa canvas-soft  — the page under them
+       #ededed hairline-cool / #dfdfdf hairline — fine chrome
+       #707070 ink-mute     — secondary copy
+       #171717 ink          — body text, never pure black
+       #3ecf8e emerald      — the filled action, and nothing else
+
+     Emerald is rationed to roughly one filled control per view, and it is
+     always set with ink on top rather than white: the button reads as a lit
+     surface with dark type, which is the idiosyncratic part of this brand. */
   :root {
-    /* Neutral ramp taken from the Dashboard v3 design: page #f5f5f7, surfaces
-       #ffffff, hairlines #e0e0e0/#f0f0f0, ink #1d1d1f, secondary ink #7a7a7a. */
-    --background: 240 11% 96%;
-    --foreground: 240 3% 12%;
+    --background: 0 0% 98%;
+    --foreground: 0 0% 9%;
     --card: 0 0% 100%;
-    --card-foreground: 240 3% 12%;
+    --card-foreground: 0 0% 9%;
     --popover: 0 0% 100%;
-    --popover-foreground: 240 3% 12%;
-    --primary: 25 95% 53%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 240 11% 96%;
-    --secondary-foreground: 240 3% 12%;
-    --muted: 240 11% 96%;
-    --muted-foreground: 0 0% 48%;
-    --accent: 240 11% 96%;
-    --accent-foreground: 240 3% 12%;
+    --popover-foreground: 0 0% 9%;
+    --primary: 153 60% 53%;
+    /* Ink on emerald. Never white — see the note above. */
+    --primary-foreground: 0 0% 9%;
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 9%;
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 44%;
+    --accent: 0 0% 93%;
+    --accent-foreground: 0 0% 9%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 88%;
-    --input: 0 0% 88%;
-    --ring: 211 100% 45%;
-    --chart-1: 142 76% 36%;
-    --chart-2: 0 84% 60%;
-    --chart-3: 25 95% 53%;
-    --chart-4: 43 96% 56%;
-    --chart-5: 262 83% 58%;
+    --border: 0 0% 87%;
+    --input: 0 0% 87%;
+    --ring: 153 60% 53%;
+    /* Charts are the one place the reference allows the rare accents —
+       purple #6b01c2, yellow #ffdb13, violet #644fc1 — alongside the emerald.
+       They are chart points here and nowhere else. */
+    --chart-1: 153 60% 53%;
+    --chart-2: 355 73% 47%;
+    --chart-3: 273 99% 38%;
+    --chart-4: 51 100% 54%;
+    --chart-5: 251 48% 53%;
     --radius: 0.625rem;
     --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 240 3% 12%;
-    --sidebar-primary: 25 95% 53%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 11% 96%;
-    --sidebar-accent-foreground: 240 3% 12%;
-    --sidebar-border: 0 0% 88%;
-    --sidebar-ring: 211 100% 45%;
+    --sidebar-foreground: 0 0% 9%;
+    --sidebar-primary: 153 60% 53%;
+    --sidebar-primary-foreground: 0 0% 9%;
+    --sidebar-accent: 0 0% 93%;
+    --sidebar-accent-foreground: 0 0% 9%;
+    --sidebar-border: 0 0% 87%;
+    --sidebar-ring: 153 60% 53%;
 
-    /* Market semantics and the interactive blue. Kept separate from --primary
-       so the platform's orange brand accent is untouched. */
+    /* Market semantics. Green and red are data, not brand: a board has to say
+       up from down. They are deliberately not the brand emerald — the up
+       colour is a deeper, denser green so a rising number never reads as a
+       button and a button never reads as a rising number. */
     --positive: 140 85% 26%;
     --negative: 355 73% 47%;
-    --interactive: 210 100% 40%;
-    --interactive-strong: 211 100% 45%;
-    --hairline: 0 0% 94%;
+    /* Links and icon actions are ink, underlined, the way this brand writes
+       them. Emerald cannot carry text — at 2.7:1 on white it fails contrast
+       long before it fails taste — so it is reserved for filled surfaces. */
+    --interactive: 0 0% 9%;
+    --interactive-strong: 153 60% 53%;
+    --hairline: 0 0% 93%;
 
-    /* The top bar is its own surface rather than a card: on dark it drops to
-       true black, the one place pure black appears. On light it stays the
-       white the v3 design ships. */
+    /* The top bar is its own surface rather than a card, so the two themes can
+       disagree about it. */
     --nav: 0 0% 100%;
-    --nav-foreground: 240 3% 12%;
+    --nav-foreground: 0 0% 9%;
 
     /* The Vietnamese board convention — ceiling violet, reference yellow, floor
        cyan — plus the amber that flags a stale figure. These were inline hexes
@@ -64,82 +84,70 @@
     --caution: 32 78% 46%;
   }
 
-  /* Dark theme: the "black theater" reference. The canvas is true black
-     (#000000) with no gradient and no texture, and depth is carried by three
-     surfaces only — charcoal #1d1d1f for anything elevated off the canvas,
-     smoke #333336 for what floats above that. There are no shadows anywhere;
-     tone and radius do the lifting.
+  /* Dark theme, built from the same reference's night surfaces — the fill it
+     uses for code blocks, dashboard chrome and the inverted pricing tier:
 
-     The greys are a fixed ladder, used by role rather than by taste:
-       #1d1d1f charcoal  — elevated surface (cards, sidebar)
-       #333336 smoke     — floating surface, secondary fills, hover
-       #86868b ash       — muted copy, meta labels, input borders
-       #cccccc platinum  — nav glyphs and nav labels
-       #f5f5f7 silk      — headings and body copy
-       #ffffff white     — maximum contrast, text on a filled button
+       #1c1c1c canvas-night      — the page
+       #202020 canvas-night-soft — cards and sidebar, lifted one step
+       #262626                   — menus floating above a card
+       #9a9a9a ink-mute-2        — secondary copy on night
+       #ffffff on-dark           — body text
 
-     Chromatic colour is rationed to the two blues: #0071e3 fills the primary
-     action, #2997ff marks a link. Nothing else is tinted — see the note on
-     --positive below for the one exception this app has to make. */
+     The emerald keeps its exact value across both themes; only the ground it
+     sits on changes. It is still ink-on-emerald, still one filled control per
+     view, and still the only chromatic thing that is not data. */
   .dark {
-    --background: 0 0% 0%;
-    --foreground: 240 11% 96%;
-    --card: 240 3% 12%;
-    --card-foreground: 240 11% 96%;
-    /* Smoke, so a menu opening over a charcoal card still separates from it. */
-    --popover: 240 3% 21%;
-    --popover-foreground: 240 11% 96%;
-    /* Apple Blue. The brand orange does not cross into the dark theme: this
-       system allows exactly one chromatic action colour, and blue is it. */
-    --primary: 210 100% 45%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 240 3% 21%;
-    --secondary-foreground: 240 11% 96%;
-    --muted: 240 3% 12%;
-    /* Ash grey — meta labels and helper copy, still 4.8:1 on a charcoal card. */
-    --muted-foreground: 240 2% 54%;
-    --accent: 240 3% 21%;
+    --background: 0 0% 11%;
+    --foreground: 0 0% 100%;
+    --card: 0 0% 13%;
+    --card-foreground: 0 0% 100%;
+    --popover: 0 0% 15%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 153 60% 53%;
+    --primary-foreground: 0 0% 9%;
+    --secondary: 0 0% 15%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 0 0% 15%;
+    --muted-foreground: 0 0% 60%;
+    --accent: 0 0% 18%;
     --accent-foreground: 0 0% 100%;
     --destructive: 3 100% 61%;
     --destructive-foreground: 0 0% 100%;
-    /* Ash at ~30%, flattened to an opaque step: the token is consumed as
-       hsl(var(--border)) and cannot carry an alpha channel. */
-    --border: 240 2% 20%;
-    --input: 240 2% 30%;
-    --ring: 210 100% 45%;
-    --chart-1: 135 64% 50%;
+    --border: 0 0% 18%;
+    --input: 0 0% 24%;
+    --ring: 153 60% 53%;
+    --chart-1: 153 60% 53%;
     --chart-2: 3 100% 61%;
-    --chart-3: 209 100% 58%;
-    --chart-4: 45 88% 60%;
-    --chart-5: 273 65% 74%;
-    /* Charcoal, one step off the black canvas — the sidebar has to read as a
-       panel resting on the page rather than a hole cut through it. */
-    --sidebar-background: 240 3% 12%;
-    --sidebar-foreground: 0 0% 80%;
-    --sidebar-primary: 210 100% 45%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3% 21%;
-    --sidebar-accent-foreground: 240 11% 96%;
-    --sidebar-border: 240 2% 20%;
-    --sidebar-ring: 210 100% 45%;
+    --chart-3: 273 65% 74%;
+    --chart-4: 51 100% 62%;
+    --chart-5: 251 60% 70%;
+    /* One step off the page, so the panel rests on it rather than cuts a hole
+       through it. */
+    --sidebar-background: 0 0% 13%;
+    --sidebar-foreground: 0 0% 88%;
+    --sidebar-primary: 153 60% 53%;
+    --sidebar-primary-foreground: 0 0% 9%;
+    --sidebar-accent: 0 0% 18%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 0 0% 18%;
+    --sidebar-ring: 153 60% 53%;
 
-    /* The one place this app departs from the reference's colour rationing.
-       Apple's page has no data in it; a board that cannot say up from down is
-       broken, so green and red stay. They are Apple's own system colours for
-       dark (#30d158 / #ff453a) rather than invented ones. */
-    --positive: 135 64% 50%;
+    /* Data, not brand — and here the separation has to be enforced harder,
+       because a rising number and the brand emerald are both green. The up
+       colour stays denser and yellower than the emerald so the two never read
+       as the same thing. */
+    --positive: 140 62% 45%;
     --negative: 3 100% 61%;
-    /* Link Blue #2997ff for links, Apple Blue #0071e3 for the filled action —
-       the same split the reference draws between text and button. */
-    --interactive: 209 100% 58%;
-    --interactive-strong: 210 100% 45%;
-    --hairline: 240 2% 16%;
+    /* White, underlined, the way this brand writes a link. Emerald is kept off
+       text entirely so nothing green in a table can be mistaken for a price
+       that went up. */
+    --interactive: 0 0% 100%;
+    --interactive-strong: 153 60% 53%;
+    --hairline: 0 0% 16%;
 
-    /* The bar is the canvas — nav and page are both true black, and the
-       hairline under it is the only thing that separates them. Nav labels sit
-       at platinum, not white: full white on a black bar reads as aggressive. */
-    --nav: 0 0% 0%;
-    --nav-foreground: 0 0% 80%;
+    /* One step darker than the page — the bar separates by tone, not by rule. */
+    --nav: 0 0% 9%;
+    --nav-foreground: 0 0% 100%;
 
     /* Same four hues, lifted to where they clear a black canvas. Hue is held
        so the board still reads as the board. */

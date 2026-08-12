@@ -65,7 +65,9 @@ function OwnershipBreakdown({ shareholders }: { shareholders: ShareholderItem[] 
 
   const tones = [
     "bg-foreground",
-    "bg-interactive",
+    // A chart token, not --interactive: on this palette the interactive tone is
+    // the ink itself, which would collide with the slice above it.
+    "bg-[hsl(var(--chart-3))]",
     "bg-[hsl(var(--positive))]",
     "bg-ceiling",
     "bg-caution",
@@ -214,7 +216,7 @@ export function ShareholdersTabContent({
               onClick={() => goToPage(currentPage + 1)}
               disabled={currentPage === totalPages}
               aria-label="Trang sau"
-              className="flex size-9 items-center justify-center rounded-full bg-interactive-strong text-white transition-transform duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <ChevronRight className="size-4" />
             </button>
