@@ -12,6 +12,7 @@
     "start:web": "pnpm --dir apps/web start",
     "dev:full": "docker compose --profile full up --build",
     "prototype:analysis-artifact": "echo '→ http://localhost:3010/prototypes/analysis-artifact?variant=A&symbol=VCB' && pnpm --dir apps/web dev --port 3010",
+    "prototype:alpha-desk": "echo '→ http://localhost:3011/prototypes/alpha-desk?variant=A&state=ready' && pnpm --dir apps/web dev --port 3011",
     "stop": "docker compose down",
     "stop:clean": "docker compose down -v",
     "logs": "docker compose logs -f",

@@ -63,7 +63,7 @@ export function PrototypeSwitcher({
 
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex justify-center">
-      <div className="pointer-events-auto flex items-center gap-1 rounded-full bg-neutral-900 px-1.5 py-1.5 text-white shadow-2xl ring-1 ring-black/20">
+      <div className="pointer-events-auto flex max-w-[calc(100vw-1rem)] items-center gap-1 overflow-x-auto rounded-full bg-neutral-900 px-1.5 py-1.5 text-white shadow-2xl ring-1 ring-black/20">
         <button
           type="button"
           onClick={() => go(-1)}
@@ -72,9 +72,11 @@ export function PrototypeSwitcher({
         >
           <ChevronLeft className="h-4 w-4" />
         </button>
-        <span className="min-w-[13rem] px-2 text-center text-xs font-medium tabular-nums">
+        <span className="min-w-0 shrink-0 px-1 text-center text-xs font-medium tabular-nums sm:min-w-[13rem] sm:px-2">
           {current}
-          {names?.[current] ? ` — ${names[current]}` : ""}
+          {names?.[current] && (
+            <span className="hidden sm:inline"> — {names[current]}</span>
+          )}
           <span className="ml-1.5 text-white/50">
             {index + 1}/{variants.length}
           </span>
@@ -119,19 +121,31 @@ export function PrototypeSegments({
   }
 
   return (
-    <div className="flex items-center gap-0.5 pr-1">
-      {options.map((o) => (
-        <button
-          key={o}
-          type="button"
-          onClick={() => set(o)}
-          className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
-            o === current ? "bg-white text-neutral-900" : "hover:bg-white/15"
-          }`}
-        >
-          {o}
-        </button>
-      ))}
-    </div>
+    <>
+      <select
+        value={current}
+        onChange={(event) => set(event.target.value)}
+        aria-label={param}
+        className="mr-1 rounded-full border-0 bg-white px-2 py-1 text-xs font-medium text-neutral-900 outline-none sm:hidden"
+      >
+        {options.map((option) => (
+          <option key={option} value={option}>{option}</option>
+        ))}
+      </select>
+      <div className="hidden items-center gap-0.5 pr-1 sm:flex">
+        {options.map((o) => (
+          <button
+            key={o}
+            type="button"
+            onClick={() => set(o)}
+            className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+              o === current ? "bg-white text-neutral-900" : "hover:bg-white/15"
+            }`}
+          >
+            {o}
+          </button>
+        ))}
+      </div>
+    </>
   )
 }

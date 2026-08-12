@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation"
 import Link from "next/link"
 import {
   Activity,
+  Bot,
   FileText,
   Gauge,
   GitCompare,
@@ -33,6 +34,7 @@ type NavItem = {
 const navGroups: NavItem[][] = [
   [{ title: "Market Map", url: "/", icon: Map }],
   [
+    { title: "Alpha Desk", url: "/prototypes/alpha-desk", icon: Bot },
     { title: "Stock 360", url: "/analytics/deep-dive", icon: Gauge },
     { title: "Financials", url: "/analytics/financial-statements", icon: FileText },
     { title: "Compare", url: "/compare", icon: GitCompare },

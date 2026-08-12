@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { Search, Share2 } from "lucide-react"
+import { MoreHorizontal, Search, Share2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { StockSearchBar } from "@/components/dashboard"
@@ -61,17 +61,24 @@ export function DashboardHeader({ onStockSelect }: DashboardHeaderProps) {
         </Button>
 
         {/* Share */}
-        <Button variant="ghost" size="icon" className="size-9 rounded-full">
+        <Button variant="ghost" size="icon" className="hidden size-9 rounded-full md:inline-flex">
           <Share2 className="size-[17px]" />
           <span className="sr-only">Chia sẻ</span>
         </Button>
 
-        <ThemeToggle />
+        <div className="hidden sm:block">
+          <ThemeToggle />
+        </div>
 
-        {/* Notifications - Job Status Panel */}
-        <NotificationPanel />
-
-        <UserMenu />
+        <div className="hidden items-center gap-1.5 sm:flex">
+          {/* Notifications - Job Status Panel */}
+          <NotificationPanel />
+          <UserMenu />
+        </div>
+        <Button variant="ghost" size="icon" className="size-9 rounded-full sm:hidden">
+          <MoreHorizontal className="size-[17px]" />
+          <span className="sr-only">Mở menu</span>
+        </Button>
       </div>
     </header>
   )
