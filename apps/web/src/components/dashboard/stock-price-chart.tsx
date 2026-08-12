@@ -192,10 +192,14 @@ export function StockPriceChart({ symbol, refPrice, className }: StockPriceChart
             strokeWidth="1"
             vectorEffect="non-scaling-stroke"
           />
+          {/* The reference line is stroked through a class rather than the
+              attribute: a CSS property can carry a var() and so can follow the
+              theme. Light keeps the lighter yellow it already shipped; dark
+              takes the token that clears the tile. */}
           {refPrice !== null && refPrice !== undefined && (
             <path
               d={`M0 ${y(refPrice).toFixed(1)}H${VIEW_W}`}
-              stroke="#c99a00"
+              className="stroke-[#c99a00] dark:stroke-reference"
               strokeWidth="1"
               strokeDasharray="4 4"
               vectorEffect="non-scaling-stroke"
@@ -230,7 +234,7 @@ export function StockPriceChart({ symbol, refPrice, className }: StockPriceChart
         {refPrice !== null && refPrice !== undefined && (
           <span
             style={{ top: `${(y(refPrice) / VIEW_H) * 220 - 10}px` }}
-            className="absolute right-0 rounded-full border border-[hsl(var(--hairline))] bg-card px-2 py-0.5 text-[11px] leading-[1.3] tracking-[-0.11px] tabular-nums text-[#7a5c00]"
+            className="absolute right-0 rounded-full border border-[hsl(var(--hairline))] bg-card px-2 py-0.5 text-[11px] leading-[1.3] tracking-[-0.11px] tabular-nums text-reference"
           >
             TC {Math.round(refPrice).toLocaleString("vi-VN")}
           </span>

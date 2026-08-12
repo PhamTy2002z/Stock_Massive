@@ -30,9 +30,11 @@ export function FCFWaterfall({ data }: FCFWaterfallProps) {
 
   const items = [
     { label: "Net Income", value: data.net_income, color: "bg-muted-foreground" },
-    { label: "CFO", value: data.cfo, color: "bg-white" },
+    // bg-foreground, not bg-white: these two bars are the emphasised pair, and
+    // white was only ever correct while the app rendered on a dark tile.
+    { label: "CFO", value: data.cfo, color: "bg-foreground" },
     { label: "CapEx", value: data.capex, color: "bg-red-500" },
-    { label: "FCF", value: data.fcf, color: "bg-white" },
+    { label: "FCF", value: data.fcf, color: "bg-foreground" },
   ]
 
   return (

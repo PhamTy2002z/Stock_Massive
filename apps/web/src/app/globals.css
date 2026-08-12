@@ -47,53 +47,91 @@
     --interactive: 210 100% 40%;
     --interactive-strong: 211 100% 45%;
     --hairline: 0 0% 94%;
+
+    /* The top bar is its own surface rather than a card: on dark it drops to
+       true black, the one place pure black appears. On light it stays the
+       white the v3 design ships. */
+    --nav: 0 0% 100%;
+    --nav-foreground: 240 3% 12%;
+
+    /* The Vietnamese board convention — ceiling violet, reference yellow, floor
+       cyan — plus the amber that flags a stale figure. These were inline hexes
+       in five components; they are tokens now because all four are dark ink
+       chosen for a white board and go unreadable on a near-black one. */
+    --ceiling: 273 47% 46%;
+    --reference: 45 100% 24%;
+    --floor: 195 91% 26%;
+    --caution: 32 78% 46%;
   }
 
+  /* Dark ramp, from the Apple tile palette. Depth comes from stepping the
+     surface lightness, never from a shadow or a border: the page sits on
+     tile-3 (#252527), cards on tile-1 (#272729), and anything that floats
+     over a card — popover, sidebar, sticky bar — on tile-2 (#2a2a2c). The
+     steps are deliberately ~1% apart; they read as separation, not contrast. */
   .dark {
-    --background: 0 0% 11%;
+    --background: 240 3% 15%;
     --foreground: 0 0% 100%;
-    --card: 0 0% 15%;
+    --card: 240 3% 16%;
     --card-foreground: 0 0% 100%;
-    --popover: 0 0% 15%;
+    --popover: 240 2% 17%;
     --popover-foreground: 0 0% 100%;
+    /* The platform's orange brand accent is untouched across both themes. */
     --primary: 25 95% 53%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 0 0% 8%;
+    --secondary: 240 3% 19%;
     --secondary-foreground: 0 0% 100%;
-    --muted: 0 0% 8%;
-    --muted-foreground: 0 0% 65%;
-    --accent: 0 0% 18%;
+    --muted: 240 3% 19%;
+    /* #cccccc — the palette's secondary copy on dark. Pure white is too loud
+       for anything that isn't the primary read. */
+    --muted-foreground: 0 0% 80%;
+    --accent: 240 2% 22%;
     --accent-foreground: 0 0% 100%;
-    --destructive: 0 63% 31%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 0 0% 20%;
-    --input: 0 0% 15%;
-    --ring: 25 95% 53%;
-    --chart-1: 142 70% 45%;
-    --chart-2: 0 84% 60%;
+    /* The old 31% lightness was a fill value, but --destructive is read as
+       text (sign-out, error copy) far more often than it is filled. */
+    --destructive: 3 85% 63%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 2% 24%;
+    --input: 240 2% 22%;
+    --ring: 209 100% 58%;
+    --chart-1: 142 56% 49%;
+    --chart-2: 3 100% 69%;
     --chart-3: 25 95% 53%;
-    --chart-4: 43 96% 56%;
-    --chart-5: 262 83% 58%;
-    /* The sidebar sits one step *above* --background (11%), not below it. At 8%
-       it was the darkest surface on screen, so the expanded panel read as a hole
+    --chart-4: 43 96% 62%;
+    --chart-5: 262 83% 70%;
+    /* The sidebar sits one step *above* --background, not below it. Below, it
+       was the darkest surface on screen and the expanded panel read as a hole
        punched through the page instead of a panel floating over it. */
-    --sidebar-background: 0 0% 13%;
+    --sidebar-background: 240 2% 17%;
     --sidebar-foreground: 0 0% 88%;
     --sidebar-primary: 25 95% 53%;
     --sidebar-primary-foreground: 0 0% 100%;
     /* Hover and active have to clear the new background, and the accent
        foreground goes to full white so the selected item outranks the rest. */
-    --sidebar-accent: 0 0% 19%;
+    --sidebar-accent: 240 2% 22%;
     --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 0 0% 22%;
-    --sidebar-ring: 25 95% 53%;
+    --sidebar-border: 240 2% 24%;
+    --sidebar-ring: 209 100% 58%;
 
-    /* Dark equivalents: the light values fail contrast on a #1c1c1c surface. */
-    --positive: 140 62% 45%;
-    --negative: 355 85% 65%;
-    --interactive: 210 100% 66%;
-    --interactive-strong: 211 100% 70%;
-    --hairline: 0 0% 18%;
+    /* #37c46a / #ff6961 — the up/down pair the dark tiles already use. The
+       light values fail contrast against a near-black surface. */
+    --positive: 142 56% 49%;
+    --negative: 3 100% 69%;
+    /* Sky Link Blue #2997ff. Action Blue (#0066cc) disappears against a
+       near-black tile, so the dark surfaces get the brighter sibling. */
+    --interactive: 209 100% 58%;
+    --interactive-strong: 209 100% 64%;
+    --hairline: 240 3% 20%;
+
+    --nav: 0 0% 0%;
+    --nav-foreground: 0 0% 100%;
+
+    /* Same four hues, lifted to where they clear a near-black surface. Hue is
+       held so the board still reads as the board. */
+    --ceiling: 273 65% 74%;
+    --reference: 45 88% 60%;
+    --floor: 195 75% 62%;
+    --caution: 32 85% 62%;
   }
 }
 

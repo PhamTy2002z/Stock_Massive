@@ -20,7 +20,9 @@ function getScoreColor(score: number): string {
 }
 
 function getProgressColor(score: number): string {
-  if (score >= 70) return "bg-white"
+  // The top band matches the green its label already uses; it read as white
+  // only because the bar was drawn for the old dark-only build.
+  if (score >= 70) return "bg-positive"
   if (score >= 50) return "bg-yellow-500"
   return "bg-red-500"
 }

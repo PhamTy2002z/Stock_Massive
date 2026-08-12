@@ -17,7 +17,7 @@ const FSCORE_LABELS: Record<keyof FScoreDetails, string> = {
 }
 
 function getFScoreLabel(score: number): { text: string; color: string } {
-  if (score >= 7) return { text: "Mạnh", color: "text-white" }
+  if (score >= 7) return { text: "Mạnh", color: "text-positive" }
   if (score >= 4) return { text: "Trung bình", color: "text-yellow-500" }
   return { text: "Yếu", color: "text-red-500" }
 }
@@ -38,7 +38,7 @@ export function FScoreIndicator({ score, details }: FScoreIndicatorProps) {
         <div
           className={cn(
             "h-full rounded-full transition-all",
-            score >= 7 ? "bg-white" : score >= 4 ? "bg-yellow-500" : "bg-red-500"
+            score >= 7 ? "bg-positive" : score >= 4 ? "bg-yellow-500" : "bg-red-500"
           )}
           style={{ width: `${(score / 9) * 100}%` }}
         />

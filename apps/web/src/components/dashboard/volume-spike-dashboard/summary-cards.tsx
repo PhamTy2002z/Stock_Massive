@@ -29,8 +29,8 @@ export function SummaryCards({
       </Card>
       <Card className="bg-card/50 border-border/50">
         <CardContent className="p-4 flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-white/10">
-            <Activity className="h-5 w-5 text-white" />
+          <div className="p-2 rounded-lg bg-foreground/10">
+            <Activity className="h-5 w-5 text-foreground" />
           </div>
           <div>
             <p className="text-sm text-muted-foreground">Tỷ lệ TB</p>

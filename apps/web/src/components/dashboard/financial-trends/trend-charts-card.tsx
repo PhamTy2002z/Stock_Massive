@@ -24,7 +24,7 @@ export function TrendChartsCard({ symbol, className }: TrendChartsCardProps) {
         <CardTitle className="flex items-center gap-2 text-lg">
           <TrendingUp className="h-5 w-5" />
           Phân tích xu hướng
-          <span className="ml-auto text-white font-bold">{data.symbol}</span>
+          <span className="ml-auto text-foreground font-bold">{data.symbol}</span>
         </CardTitle>
         <p className="text-xs text-muted-foreground">
           {data.periods.length} quý gần nhất
