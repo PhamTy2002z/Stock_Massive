@@ -184,7 +184,7 @@ export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
               onClick={() => setPage(currentPage + 1)}
               disabled={currentPage === totalPages}
               aria-label="Trang sau"
-              className="flex size-9 items-center justify-center rounded-full bg-interactive text-white transition-transform duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex size-9 items-center justify-center rounded-full bg-interactive-strong text-white transition-transform duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <ChevronRight className="size-4" />
             </button>
