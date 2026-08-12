@@ -5,6 +5,7 @@ import * as SheetPrimitive from "@radix-ui/react-dialog"
 import { cva, type VariantProps } from "class-variance-authority"
 import { X } from "lucide-react"
 
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 const Sheet = SheetPrimitive.Root
@@ -64,9 +65,23 @@ const SheetContent = React.forwardRef<
       className={cn(sheetVariants({ side }), className)}
       {...props}
     >
-      <SheetPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-secondary">
-        <X className="h-4 w-4" />
-        <span className="sr-only">Close</span>
+      {/* The close control is the same ghost icon button the header uses, not
+          a one-off: a circular 36px target, quiet until pointed at, and no
+          border or fill of its own.
+
+          It focuses on focus-visible rather than focus. Radix moves focus here
+          when the sheet opens, so a focus-styled ring painted a hard blue
+          circle around the glyph every time the sheet was opened with a
+          mouse — a keyboard affordance shown to someone who never asked. */}
+      <SheetPrimitive.Close asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="absolute right-5 top-5 size-9 rounded-full text-muted-foreground transition-[background-color,color,transform] duration-150 hover:text-foreground active:scale-95"
+        >
+          <X className="size-[17px]" />
+          <span className="sr-only">Đóng</span>
+        </Button>
       </SheetPrimitive.Close>
       {children}
     </SheetPrimitive.Content>

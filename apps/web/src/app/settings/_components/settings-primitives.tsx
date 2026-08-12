@@ -23,9 +23,9 @@ export function SettingsSection({
   children: React.ReactNode
 }) {
   return (
-    /* scroll-mt clears the 64px sticky header, so an anchor jump does not park
-       the heading underneath the bar. */
-    <section id={id} className="scroll-mt-24">
+    /* Sections scroll inside their own column rather than the page, so the
+       anchor only needs to clear its own top padding. */
+    <section id={id} className="scroll-mt-8">
       <h2 className="text-[21px] font-semibold leading-[1.19] tracking-[-0.374px]">
         {title}
       </h2>

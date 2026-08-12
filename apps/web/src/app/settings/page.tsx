@@ -12,7 +12,9 @@ export const metadata: Metadata = {
 
 export default function SettingsPage() {
   return (
-    <DashboardLayoutClient>
+    /* bleed: the rail has to sit flush against the app sidebar and run the
+       full height, which it cannot do from inside a padded, scrolling main. */
+    <DashboardLayoutClient bleed>
       <SettingsView />
     </DashboardLayoutClient>
   )
