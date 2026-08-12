@@ -99,6 +99,12 @@ class SymbolBackfill(Base):
     # The newest session already loaded. The next run starts the day after it.
     covered_through = Column(Date, nullable=True)
     last_error = Column(String(500), nullable=True)
+    # How many times in a row this symbol has failed, and the soonest a run may
+    # take it on again. A run only has a handful of slots and the Universe has a
+    # hundred symbols: without a backoff, the same few permanent failures take
+    # every slot every night and the symbols behind them are never reached.
+    attempts = Column(Integer, nullable=False, server_default="0")
+    next_attempt_at = Column(DateTime(timezone=True), nullable=True)
     updated_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -139,5 +145,13 @@ class ProviderSnapshot(Base):
             "symbol",
             "source",
             "observed_at",
+        ),
+        # Resolving a Trading Day asks which sessions exist across every symbol
+        # at once, so it cannot use the index above — that one leads with a
+        # symbol. See src/stocks/trading_day.py.
+        Index(
+            "ix_provider_snapshot_capability_effective",
+            "capability",
+            effective_at.desc(),
         ),
     )
