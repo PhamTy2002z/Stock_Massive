@@ -124,31 +124,29 @@ market history for one symbol so it becomes evaluable without waiting 21
 - Entry points: called by M1 when a **Cohort Version** stages candidates, and by
   an operator command (below). It is never called from a serving request.
 
-`FiinQuantMarketProvider` currently exposes only `fetch_market(symbols)` for the
-latest session. Warm-up needs a dated window, so add to the market protocol in
-`providers/contracts.py`:
-
-```python
-class MarketHistoryProvider(Protocol):
-    source: ProviderSource
-    def fetch_market_history(
-        self, symbols: Sequence[str], from_date: date, to_date: date
-    ) -> Sequence[MarketSnapshot]: ...
-```
-
-Implement it on `FiinQuantMarketProvider` against the same batched call the
-collector uses, and keep `BatchTooLarge` halving behaviour by reusing the
-batching helper extracted from `Collector._read`.
+A dated-window read already exists: `MarketHistoryProvider` lives in
+`backfill.py` with a single-symbol signature, and both `FiinQuantMarketProvider`
+and `VnstockMarketHistoryProvider` implement it. Warm-up reuses it rather than
+adding a second protocol for the same call. The protocol moves to
+`providers/contracts.py` — it is now shared by two callers, and Warm-up must not
+import from Backfill — and gains the `source` attribute both adapters already
+carry, so `Warmup` can refuse the Cover Source at construction instead of
+discovering the mistake as a wrong ratio weeks later.
 
 ### Backfill fairness
 
 ADR-0005: "Backfill selection must use fair rotation and retry backoff so
 repeatedly failing symbols cannot occupy every per-run slot."
 
-In `src/stocks/backfill.py`, symbol selection changes to order by
-`(next_attempt_at NULLS FIRST, updated_at ASC)` and each failure sets
-`next_attempt_at = now + min(2 ** attempts, 24) hours`. Two columns on
-`symbol_backfills`:
+In `src/stocks/backfill.py`, symbols still inside their backoff are dropped from
+selection entirely and the rest are ordered by `updated_at ASC` (no record at
+all sorts first), so the allowance becomes a rotation. Each failure sets
+`next_attempt_at = now + min(2 ** attempts hours, 7 days)`.
+
+The cap is a week rather than the day this spec first named: the load runs once
+daily, so a backoff shorter than the interval between runs is no backoff at all.
+The ordering is what makes the rotation fair; the cap is what stops a dead
+symbol spending the allowance. Two columns on `symbol_backfills`:
 
 ```
 attempts        INTEGER NOT NULL DEFAULT 0

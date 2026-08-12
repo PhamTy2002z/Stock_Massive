@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Literal
@@ -19,6 +19,7 @@ from src.core.trading_calendar import is_trading_day
 
 from .backfill import BackfillSummary, run_backfill
 from .collector import CollectionSummary, run_cycle
+from .warmup import WarmupSummary, run_warmup
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,9 @@ COLLECTOR_JOB_NAME = "Thu thập Snapshot cho Universe"
 
 BACKFILL_JOB_ID = "universe-backfill"
 BACKFILL_JOB_NAME = "Nạp lịch sử cho Universe"
+
+WARMUP_JOB_ID = "universe-warmup"
+WARMUP_JOB_NAME = "Nạp cửa sổ tín hiệu gần đây"
 
 
 @dataclass(frozen=True)
@@ -220,3 +224,126 @@ async def backfill_universe_history(
     it runs on says nothing about whether they exist.
     """
     return await asyncio.to_thread(run_history_backfill, load)
+
+
+def _stored_trading_day() -> date | None:
+    """The newest Trading Day the store holds, opening a session of its own."""
+    from src.core.database import get_sync_db
+
+    from .trading_day import latest_trading_day
+
+    with get_sync_db() as session:
+        return latest_trading_day(session)
+
+
+def market_has_advanced_to(
+    day: date,
+    latest: Callable[[], date | None] = _stored_trading_day,
+) -> bool:
+    """Whether the store already holds a session for this day.
+
+    Asked of the data rather than of the collection job's record, because the
+    two answer different questions. A cycle that ran, succeeded and wrote
+    nothing — because FiinQuant had not appended the session yet — records a
+    success while the Trading Day has not moved at all. Reading the job record
+    would call that done; reading the store sees the gap that is actually there.
+    """
+    stored = latest()
+    return stored is not None and stored >= day
+
+
+async def catch_up_market_data(
+    force: bool = False,
+    cycle: Callable[[], CollectionSummary] = run_cycle,
+    today: date | None = None,
+    latest: Callable[[], date | None] = _stored_trading_day,
+) -> CycleOutcome:
+    """Collect again late in the evening if the Trading Day never moved.
+
+    The evening cycle runs shortly after the close, and the Main Source appends
+    the session that just closed some hours later — so a perfectly healthy cycle
+    routinely comes away with yesterday's session. Left alone, that day is never
+    collected: the next cycle asks for the session that just closed, not the one
+    before it, and the deep Backfill never looks at recent history.
+
+    Runs under the Collector's own guard rather than a guard of its own. It is
+    the same body of work spending the same single FiinQuant connection, and two
+    of them at once would spend the allowance twice for one set of Snapshots.
+    """
+    from zoneinfo import ZoneInfo
+
+    day = today or datetime.now(ZoneInfo(VN_TZ_NAME)).date()
+    if not force and not is_trading_day(day):
+        logger.info("Skipping the market catch-up: %s is not a trading day", day)
+        return CycleOutcome(status="skipped")
+
+    if not force and market_has_advanced_to(day, latest):
+        logger.info("Skipping the market catch-up: the store already holds %s", day)
+        return CycleOutcome(status="skipped")
+
+    return await asyncio.to_thread(run_collection_cycle, cycle)
+
+
+@dataclass(frozen=True)
+class WarmupOutcome:
+    """How one attempted Warm-up ended."""
+
+    status: Literal["completed", "failed", "skipped"]
+    sessions_written: int = 0
+    completed: tuple[str, ...] = ()
+    failed: tuple[dict, ...] = ()
+    error: str | None = None
+
+    @classmethod
+    def of(cls, summary: WarmupSummary) -> "WarmupOutcome":
+        return cls(
+            status="completed",
+            sessions_written=summary.sessions_written,
+            completed=summary.completed,
+            failed=tuple(
+                {"symbol": item.symbol, "reason": item.reason}
+                for item in summary.failed
+            ),
+        )
+
+    def as_result(self) -> dict:
+        return {
+            "status": self.status,
+            "sessions_written": self.sessions_written,
+            "completed": list(self.completed),
+            "failed": [dict(item) for item in self.failed],
+            "error": self.error,
+        }
+
+
+def run_symbol_warmup(
+    symbols: Sequence[str],
+    warm: Callable[[Sequence[str]], WarmupSummary] = run_warmup,
+) -> WarmupOutcome:
+    """Warm the named symbols, at most one Warm-up at a time.
+
+    Guarded separately from the collection cycle: a Warm-up reads a window of
+    history for a handful of named symbols while a cycle reads one session for
+    the whole Universe, so the two are not the same work and blocking one on
+    the other would leave a new cohort member waiting a day to become evaluable.
+    """
+    return _guarded_run(
+        WARMUP_JOB_ID,
+        WARMUP_JOB_NAME,
+        "warm-up",
+        lambda: warm(symbols),
+        WarmupOutcome.of,
+        WarmupOutcome,
+    )
+
+
+async def warm_up_symbols(
+    symbols: Sequence[str],
+    warm: Callable[[Sequence[str]], WarmupSummary] = run_warmup,
+) -> WarmupOutcome:
+    """Run one Warm-up off the event loop.
+
+    No trading-day gate: the window it loads is made of sessions that have
+    already closed, and the day it is asked for says nothing about them.
+    """
+    return await asyncio.to_thread(run_symbol_warmup, symbols, warm)
