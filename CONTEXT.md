@@ -50,6 +50,7 @@ _Avoid_: conversation, chat, session
 
 **Turn**:
 Một lượt đối đáp trong một Thread: tin nhắn của người dùng, các vòng gọi tool mà agent thực hiện để trả lời, rồi câu trả lời. Là đơn vị của mọi trần trong hệ thống — trần vòng gọi tool, trần phiên đồng thời, chi phí token — và là đơn vị người dùng huỷ được. Một Turn bị huỷ hoặc chết giữa đường vẫn để lại Tool Call Trace của phần đã chạy.
+Sau khi được tiếp nhận, Turn thuộc về hệ thống chứ không thuộc về kết nối: tải lại trang, đổi route, đóng tab hoặc mất mạng không huỷ Turn; chỉ một yêu cầu huỷ rõ ràng mới làm điều đó.
 _Avoid_: request, exchange, round
 
 **Tool Call Trace**:
@@ -59,6 +60,13 @@ _Avoid_: log, audit, span
 **Capability Probe**:
 Bài kiểm tra hợp đồng chạy lúc khởi động trên tuyến LLM đang cấu hình: buộc `tool_choice`, gọi tool song song khi stream, structured output, và một vòng tool khép kín. Tuyến nào không qua thì hệ thống từ chối khởi động và in lý do, thay vì chạy với một tuyến âm thầm bỏ rơi tham số. Tồn tại vì lớp dịch của gateway từng bỏ im lặng đúng những tham số này — thất bại kiểu đó không lộ ra ở runtime, nó chỉ làm câu trả lời sai đi.
 _Avoid_: health check, smoke test, ping
+
+**Widget**:
+Một phép chiếu trực quan có kiểu và phiên bản của các registered fields trong một
+Turn. Widget trình bày số liệu nhưng không tự tính số liệu, không thay thế
+Analysis hoặc bề mặt dữ liệu của Stock 360, và giữ nguyên ngữ cảnh dữ liệu lịch
+sử của câu trả lời khi Thread được mở lại.
+_Avoid_: chart, visualization, graphic
 
 ### Phạm vi phục vụ
 
@@ -70,6 +78,13 @@ _Avoid_: watchlist, danh mục, market coverage
 Lần nạp lịch sử duy nhất cho một mã mới vào Universe, lấy phần sâu hơn khả năng của Main Source từ Cover Source. Chạy một lần rồi thôi; từ đó Main Source nối tiếp mỗi ngày.
 _Avoid_: import, sync, migration
 
+**Warm-up**:
+A repeatable load of recent Main Source market history that makes a new or
+repaired Universe member evaluable without waiting for daily collection to
+accumulate 21 Trading Days. It is bounded to the recent signal window and is
+separate from the one-time, multi-year Backfill.
+_Avoid_: backfill, deep history, daily collection
+
 **Collector**:
 Tiến trình chạy sau phiên, là nơi duy nhất được gọi ra Provider Source. Request của người dùng không bao giờ chạm tới nhà cung cấp.
 _Avoid_: job, worker, crawler
@@ -77,3 +92,83 @@ _Avoid_: job, worker, crawler
 **Trading Day**:
 Một ngày mà hệ thống có Snapshot EOD — `date(max(effective_at))` trong `provider_snapshots`, chứ không phải một ngày trên lịch. Định nghĩa theo dữ liệu vì hệ thống không có lịch nghỉ lễ: `is_trading_day()` chỉ biết thứ trong tuần nên đọc Tết thành ngày giao dịch, và một Analysis đóng nhãn một phiên không tồn tại thì không diff được với bản của phiên sau.
 _Avoid_: session date, ngày giao dịch theo lịch
+
+### Market signals
+
+These terms define the bounded cohorts, data readiness, and provenance of
+derived end-of-day market signals.
+
+**Profit Leaders Cohort**:
+A dynamic set of exactly 50 currently listed HOSE or HNX equities ranked by
+trailing-12-month net income attributable to the parent company at one common
+reporting period. It reserves 50 places in the Universe and becomes active only
+when at least 45 members have enough market history for evaluation.
+_Avoid_: Top 50 list, profitable stocks, market-wide Universe
+
+**Cohort Version**:
+An immutable Profit Leaders Cohort membership tied to one Rankable Reporting
+Period and census result. A version is `candidate` while its members receive a
+Warm-up and `active` once its Signal Coverage permits serving it; activation
+never rewrites an older version.
+_Avoid_: current list, cached ranking, latest Top 50
+
+**Profit Ranking Census**:
+A periodic market-wide read of only the profitability, reporting-period,
+exchange, and listing-status fields needed to form the Profit Leaders Cohort.
+It does not place every censused symbol in the Universe or collect market data
+for it.
+_Avoid_: full-market collection, fundamental backfill, market scan
+
+**Rankable Reporting Period**:
+A common reporting period with valid profitability data for at least 95% of
+currently listed HOSE and HNX equities. The active ranking stays on the previous
+period until the newer period reaches this threshold.
+_Avoid_: latest filing, mixed period, newest row
+
+**Volume Spike**:
+A signal for one Trading Day whose volume reaches a configured multiple of the
+average volume across exactly the 20 immediately preceding Trading Days. An
+explicit zero-volume Snapshot is part of the baseline; a missing Snapshot makes
+that symbol unevaluable.
+_Avoid_: volume anomaly, unusual volume, volume surge
+
+**Signal Coverage**:
+The share of a signal cohort that is evaluable for one Trading Day. A
+Profit Leaders Cohort result is `ready` at 50 of 50 symbols, `partial` at 45 to
+49 symbols, and `insufficient_data` below 45 symbols; an All Universe result is
+`ready` at 100%, `partial` at 90% or more, and `insufficient_data` below 90%.
+_Avoid_: symbols processed, success rate, data availability
+
+**Signal Scope**:
+The cohort a Volume Spike query evaluates: `profit_leaders` for the active
+Profit Leaders Cohort or `universe` for the entire bounded Universe. An exchange
+filter on `universe` narrows both the evaluated members and the Signal Coverage
+denominator.
+_Avoid_: top-profitable-only, data source, tab
+
+**Signal Trading Day**:
+The newest Trading Day on which at least 45 Profit Leaders Cohort members are
+evaluable. It can trail the newest market Snapshot while a newer day is still
+below the Signal Coverage threshold.
+_Avoid_: today, current date, latest row
+
+**Signal Freshness**:
+How the Signal Trading Day relates to stored market data and elapsed time:
+`fresh` when it is the newest market Trading Day, `lagging` when a newer market
+Trading Day exists but lacks Signal Coverage, and `stale` when the signal data
+is more than seven calendar days old. It is independent of Signal Coverage.
+_Avoid_: status, cache age, last refreshed
+
+**Signal Issue**:
+A stable, machine-readable condition explaining why a symbol or result is not
+ordinary and complete, such as `missing_target_session`,
+`insufficient_history`, `recently_inactive`, `cohort_warming`,
+`lagging_market_data`, `stale_market_data`, or `ranking_unavailable`. It is
+domain provenance, not an HTTP or infrastructure error.
+_Avoid_: error message, warning text, exception
+
+**Recently Inactive**:
+A symbol with at least one explicit zero-volume Snapshot in the 20-Trading-Day
+Volume Spike baseline. Its signal remains evaluable but carries this condition
+so a return from suspension or inactivity is not presented as ordinary flow.
+_Avoid_: missing volume, insufficient history, halted
