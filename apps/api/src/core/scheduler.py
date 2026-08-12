@@ -26,6 +26,31 @@ settings = get_settings()
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
 
+def vn_cron(**fields) -> CronTrigger:
+    """Build a cron trigger in Vietnam time, anchored to Vietnam time.
+
+    ``start_time`` is passed explicitly, and that is the whole point of this
+    function. APScheduler 4 alpha defaults it from the host's local clock. The
+    API container runs in UTC, and ``CronTrigger`` matches the cron fields
+    against those wall-clock digits without first converting the default start
+    to its configured timezone. Vietnam runs seven hours ahead of UTC, so a
+    trigger registered at 22:31 ICT is anchored at 15:31 and its next fire is
+    computed as 17:00 *today* — an instant five hours in the past, which
+    APScheduler runs immediately as a misfire.
+
+    The effect is that every restart is also an unscheduled run of every job
+    whose time falls in the seven hours behind it, all at once. That is worse
+    than an early run: the collection cycle and the history backfill are 45
+    minutes apart on purpose, because the process has one worker and the free
+    FiinQuant tier grants one concurrent connection, so firing them together is
+    exactly the contention the stagger exists to prevent.
+
+    Every schedule in this module goes through here. A ``CronTrigger`` built
+    directly would look correct and reintroduce the bug.
+    """
+    return CronTrigger(timezone=VN_TZ, start_time=datetime.now(VN_TZ), **fields)
+
+
 async def collect_daily_ohlcv_job_async():
     """Async wrapper for sync collect_daily_ohlcv_job (runs in thread pool)."""
     logger.info("Starting daily OHLCV collection job (async wrapper)")
@@ -138,10 +163,9 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
     # Daily intraday collection at configured time (default 15:30 Vietnam time)
     await scheduler.add_schedule(
         collect_intraday_job_wrapper,
-        CronTrigger(
+        vn_cron(
             hour=settings.intraday_collect_hour,
             minute=settings.intraday_collect_minute,
-            timezone="Asia/Ho_Chi_Minh",
         ),
         id="intraday-collection-daily",
     )
@@ -153,7 +177,7 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
     # Daily cleanup at 16:00 Vietnam time (30 min after collection)
     await scheduler.add_schedule(
         cleanup_job_wrapper,
-        CronTrigger(hour=16, minute=0, timezone="Asia/Ho_Chi_Minh"),
+        vn_cron(hour=16, minute=0),
         id="data-cleanup-daily",
     )
     logger.info("Scheduled data cleanup at 16:00 ICT")
@@ -162,10 +186,9 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
     if settings.daily_ohlcv_enabled:
         await scheduler.add_schedule(
             ohlcv_job_wrapper,
-            CronTrigger(
+            vn_cron(
                 hour=settings.daily_ohlcv_hour,
                 minute=settings.daily_ohlcv_minute,
-                timezone="Asia/Ho_Chi_Minh",
             ),
             id="daily-ohlcv-collection",
         )
@@ -179,11 +202,10 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
     if settings.financial_statements_enabled:
         await scheduler.add_schedule(
             financial_statements_job_wrapper,
-            CronTrigger(
+            vn_cron(
                 hour=settings.financial_statements_hour,
                 minute=settings.financial_statements_minute,
                 day_of_week="sun",
-                timezone="Asia/Ho_Chi_Minh",
             ),
             id="collect-financial-statements",
         )
@@ -196,10 +218,9 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
     if settings.sector_historical_enabled:
         await scheduler.add_schedule(
             sector_historical_job_wrapper,
-            CronTrigger(
+            vn_cron(
                 hour=settings.sector_historical_hour,
                 minute=settings.sector_historical_minute,
-                timezone="Asia/Ho_Chi_Minh",
             ),
             id="sector-historical-daily",
         )
@@ -212,10 +233,9 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
     if settings.collector_enabled:
         await scheduler.add_schedule(
             universe_snapshots_job_wrapper,
-            CronTrigger(
+            vn_cron(
                 hour=settings.collector_hour,
                 minute=settings.collector_minute,
-                timezone="Asia/Ho_Chi_Minh",
             ),
             id="universe-snapshots",
         )
@@ -229,10 +249,9 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
     if settings.backfill_enabled:
         await scheduler.add_schedule(
             universe_backfill_job_wrapper,
-            CronTrigger(
+            vn_cron(
                 hour=settings.backfill_hour,
                 minute=settings.backfill_minute,
-                timezone="Asia/Ho_Chi_Minh",
             ),
             id="universe-backfill",
         )

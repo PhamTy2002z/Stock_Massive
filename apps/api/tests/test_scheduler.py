@@ -2,9 +2,29 @@
 import pytest
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
+from zoneinfo import ZoneInfo
 
 from src.core.config import Settings
 from src.stocks.jobs import collect_intraday_data_job, cleanup_old_data_job
+
+
+class TestCronTrigger:
+    """Regression tests for Vietnam-time schedule registration."""
+
+    def test_vn_cron_does_not_return_a_past_fire_time(self):
+        """Anchor cron matching to ICT rather than the same digits in UTC."""
+        from src.core import scheduler
+
+        now = datetime(2026, 8, 12, 22, 31, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
+
+        with patch("src.core.scheduler.datetime") as mock_datetime:
+            mock_datetime.now.return_value = now
+            trigger = scheduler.vn_cron(hour=17, minute=0)
+
+        assert trigger.start_time == now
+        assert trigger.next() == datetime(
+            2026, 8, 13, 17, 0, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh")
+        )
 
 
 class TestCollectIntradayDataJob:
@@ -136,7 +156,7 @@ class TestSchedulerSetup:
     @pytest.mark.asyncio
     async def test_setup_scheduler_enabled(self):
         """Test scheduler setup when enabled."""
-        from src.core.scheduler import setup_scheduler
+        from src.core.scheduler import setup_scheduler, vn_cron
 
         mock_scheduler = AsyncMock()
 
@@ -151,8 +171,15 @@ class TestSchedulerSetup:
             collector_enabled=True,
             backfill_enabled=True,
         )
-        with patch("src.core.scheduler.settings", enabled):
+        with (
+            patch("src.core.scheduler.settings", enabled),
+            patch("src.core.scheduler.vn_cron", wraps=vn_cron) as mock_vn_cron,
+        ):
             await setup_scheduler(mock_scheduler)
+
+        # A direct CronTrigger call would silently restore the UTC-anchor bug
+        # for that schedule, so every registered schedule must use the helper.
+        assert mock_vn_cron.call_count == mock_scheduler.add_schedule.await_count
 
         registered = {
             call.kwargs.get("id")
