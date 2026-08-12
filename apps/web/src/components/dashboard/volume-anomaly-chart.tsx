@@ -80,7 +80,7 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
               className={cn(
                 "font-medium",
                 data.anomaly_level === "very_high" && "text-red-500",
-                data.anomaly_level === "high" && "text-white",
+                data.anomaly_level === "high" && "text-caution",
                 data.anomaly_level === "elevated" && "text-yellow-500"
               )}
             >

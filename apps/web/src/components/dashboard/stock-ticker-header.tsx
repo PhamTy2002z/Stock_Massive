@@ -129,9 +129,9 @@ export function StockTickerHeader({
           <SessionBadge updatedAt={updatedAt} />
           {/* Ceiling purple / reference yellow / floor cyan — the board colours
               Vietnamese traders already read, kept off the up-down green-red. */}
-          <LimitPrice label="Trần" value={ceiling} className="text-[#7c3fae]" />
-          <LimitPrice label="TC" value={refPrice} className="text-[#7a5c00]" />
-          <LimitPrice label="Sàn" value={floor} className="text-[#06607f]" />
+          <LimitPrice label="Trần" value={ceiling} className="text-ceiling" />
+          <LimitPrice label="TC" value={refPrice} className="text-reference" />
+          <LimitPrice label="Sàn" value={floor} className="text-floor" />
         </div>
       </div>
 
