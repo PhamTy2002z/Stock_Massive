@@ -48,9 +48,17 @@ _Avoid_: job, task, attempt
 Một cuộc hội thoại giữa một người dùng và agent, giữ toàn bộ ngữ cảnh mà v1 có — ngoài Thread, v1 không có ký ức dài hạn nào. Mang theo danh sách mã nó đã chạm, để trả lời được "những Thread nào nói về FPT" mà không cần bảng nối. Thứ tự tin nhắn do một số thứ tự trong Thread giữ, không do thời điểm ghi: hai tin nhắn có thể trùng millisecond khi đang stream.
 _Avoid_: conversation, chat, session
 
+**Turn**:
+Một lượt đối đáp trong một Thread: tin nhắn của người dùng, các vòng gọi tool mà agent thực hiện để trả lời, rồi câu trả lời. Là đơn vị của mọi trần trong hệ thống — trần vòng gọi tool, trần phiên đồng thời, chi phí token — và là đơn vị người dùng huỷ được. Một Turn bị huỷ hoặc chết giữa đường vẫn để lại Tool Call Trace của phần đã chạy.
+_Avoid_: request, exchange, round
+
 **Tool Call Trace**:
-Bản ghi một lần agent gọi tool — tên, tham số, kết quả, độ trễ, token, lỗi. Neo vào tin nhắn của người dùng đã khởi phát lượt đó, vì tin nhắn ấy đã tồn tại trước lần gọi đầu tiên còn câu trả lời thì chưa. Đủ để đọc lại chuỗi quyết định của agent, nhưng không cam kết chạy lại ra kết quả cũ: dữ liệu trong store đổi mỗi đêm và model không tất định.
+Bản ghi một lần agent gọi tool — tên, tham số, kết quả, độ trễ, token, lỗi. Neo vào tin nhắn của người dùng đã khởi phát Turn đó, vì tin nhắn ấy đã tồn tại trước lần gọi đầu tiên còn câu trả lời thì chưa. Đủ để đọc lại chuỗi quyết định của agent, nhưng không cam kết chạy lại ra kết quả cũ: dữ liệu trong store đổi mỗi đêm và model không tất định.
 _Avoid_: log, audit, span
+
+**Capability Probe**:
+Bài kiểm tra hợp đồng chạy lúc khởi động trên tuyến LLM đang cấu hình: buộc `tool_choice`, gọi tool song song khi stream, structured output, và một vòng tool khép kín. Tuyến nào không qua thì hệ thống từ chối khởi động và in lý do, thay vì chạy với một tuyến âm thầm bỏ rơi tham số. Tồn tại vì lớp dịch của gateway từng bỏ im lặng đúng những tham số này — thất bại kiểu đó không lộ ra ở runtime, nó chỉ làm câu trả lời sai đi.
+_Avoid_: health check, smoke test, ping
 
 ### Phạm vi phục vụ
 
