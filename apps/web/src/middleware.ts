@@ -2,7 +2,11 @@ import { NextResponse, type NextRequest } from "next/server"
 
 // Public routes - accessible without authentication
 // All other routes are protected by default
-const publicRoutes = ["/login", "/register"]
+// `/prototypes` is PROTOTYPE-BRANCH ONLY (issue #21): the throwaway route runs
+// on fixtures with no API call, and gating it behind login would mean booting
+// Docker and the DB just to look at a mockup. Drop this entry when the branch is
+// folded back.
+const publicRoutes = ["/login", "/register", "/prototypes"]
 
 // Guest-only routes - redirect to home if already authenticated
 const guestOnlyRoutes = ["/login", "/register"]
