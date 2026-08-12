@@ -17,8 +17,11 @@ from src.stocks.backfill import BackfillStateStore, BackfillStatus
 from src.stocks.collector_schedule import (
     BACKFILL_JOB_ID,
     COLLECTOR_JOB_ID,
+    WARMUP_JOB_ID,
     backfill_universe_history,
+    catch_up_market_data,
     collect_universe_snapshots,
+    warm_up_symbols,
 )
 from src.stocks.universe import get_universe
 from src.stocks.schemas.common import MessageResponse
@@ -31,7 +34,7 @@ OHLCV_JOB_ID = "daily-ohlcv"
 # them out, so putting a progress bar for them on screen only asks the reader to
 # care about plumbing. They stay recorded — operators watch them at
 # /jobs/collector and /jobs/backfill — just not broadcast.
-INTERNAL_JOB_IDS = frozenset({COLLECTOR_JOB_ID, BACKFILL_JOB_ID})
+INTERNAL_JOB_IDS = frozenset({COLLECTOR_JOB_ID, BACKFILL_JOB_ID, WARMUP_JOB_ID})
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -214,6 +217,81 @@ async def trigger_backfill_job(background_tasks: BackgroundTasks) -> MessageResp
 
     background_tasks.add_task(backfill_universe_history)
     return MessageResponse(message="History backfill triggered", status="started")
+
+
+class WarmupRequest(BaseModel):
+    """Which symbols to load the recent signal window for."""
+
+    symbols: list[str]
+
+
+@router.post(
+    "/trigger/warmup",
+    response_model=MessageResponse,
+    dependencies=[Depends(heavy_rate_limit), Depends(require_admin)],
+)
+async def trigger_warmup_job(
+    request: WarmupRequest,
+    background_tasks: BackgroundTasks,
+) -> MessageResponse:
+    """Load the recent signal window for named symbols now.
+
+    Symbols are named rather than taken from the Universe: this exists to make
+    one repaired or newly seated symbol evaluable, and running it over the whole
+    Universe would spend a hundred windows of the allowance to fix one.
+
+    Gated on the collector switch, not a switch of its own. An operator who
+    turned the collector off turned off every path that reaches a Provider
+    Source, and a Warm-up is one of them.
+    """
+    if not get_settings().collector_enabled:
+        raise HTTPException(
+            status_code=409,
+            detail="Collector đang tắt trong cấu hình (COLLECTOR_ENABLED).",
+        )
+
+    symbols = [symbol.strip().upper() for symbol in request.symbols if symbol.strip()]
+    if not symbols:
+        raise HTTPException(status_code=422, detail="Cần ít nhất một mã để nạp.")
+
+    if job_store.is_running(WARMUP_JOB_ID):
+        raise HTTPException(
+            status_code=409,
+            detail="Một lần nạp cửa sổ tín hiệu đang chạy. Theo dõi tại /jobs/status.",
+        )
+
+    background_tasks.add_task(warm_up_symbols, symbols)
+    return MessageResponse(message="Warm-up triggered", status="started")
+
+
+@router.post(
+    "/trigger/market-catchup",
+    response_model=MessageResponse,
+    dependencies=[Depends(heavy_rate_limit), Depends(require_admin)],
+)
+async def trigger_market_catchup_job(
+    background_tasks: BackgroundTasks,
+) -> MessageResponse:
+    """Collect again now if the stored Trading Day has not reached today.
+
+    Unlike /trigger/collector this is not forced: it is the scheduled evening
+    check asked for early, and a run that finds the day already stored should
+    say so rather than spend the allowance proving it.
+    """
+    if not get_settings().collector_enabled:
+        raise HTTPException(
+            status_code=409,
+            detail="Collector đang tắt trong cấu hình (COLLECTOR_ENABLED).",
+        )
+
+    if job_store.is_running(COLLECTOR_JOB_ID):
+        raise HTTPException(
+            status_code=409,
+            detail="Chu kỳ thu thập đang chạy. Theo dõi tại /jobs/collector.",
+        )
+
+    background_tasks.add_task(catch_up_market_data)
+    return MessageResponse(message="Market catch-up triggered", status="started")
 
 
 @router.post(

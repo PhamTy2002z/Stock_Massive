@@ -11,6 +11,7 @@ from src.core.config import get_settings
 from src.core.trading_calendar import is_trading_day
 from src.stocks.collector_schedule import (
     backfill_universe_history,
+    catch_up_market_data,
     collect_universe_snapshots,
 )
 from src.stocks.jobs import (
@@ -139,6 +140,13 @@ universe_backfill_job_wrapper = make_job_wrapper(
     "Universe history backfill completed",
     "Universe history backfill failed",
 )
+market_catchup_job_wrapper = make_job_wrapper(
+    "market_catchup_job_wrapper",
+    "Market Catch-up",
+    catch_up_market_data,
+    "Market catch-up completed",
+    "Market catch-up failed",
+)
 sector_historical_job_wrapper = make_job_wrapper(
     "sector_historical_job_wrapper",
     "Sector Historical Performance",
@@ -258,6 +266,23 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
         logger.info(
             f"Scheduled the Universe history backfill at "
             f"{settings.backfill_hour}:{settings.backfill_minute:02d} ICT"
+        )
+
+    # Late enough that the Main Source has appended the session that closed
+    # today. The 16:15 cycle routinely comes away with yesterday's session,
+    # and without this run that day is never collected at all.
+    if settings.market_catchup_enabled:
+        await scheduler.add_schedule(
+            market_catchup_job_wrapper,
+            vn_cron(
+                hour=settings.market_catchup_hour,
+                minute=settings.market_catchup_minute,
+            ),
+            id="market-catchup",
+        )
+        logger.info(
+            f"Scheduled the market catch-up at "
+            f"{settings.market_catchup_hour}:{settings.market_catchup_minute:02d} ICT"
         )
 
     logger.info("=== Scheduler setup complete ===")

@@ -276,6 +276,30 @@ class MarketDataProvider(Protocol):
     def fetch_market(self, symbols: Sequence[str]) -> Sequence[MarketSnapshot]: ...
 
 
+class MarketHistoryProvider(Protocol):
+    """Read a stretch of one symbol's session history.
+
+    Per symbol rather than per batch, unlike ``MarketDataProvider``: a window of
+    sessions is what a provider will answer for one ticker at a time, and both
+    callers — the one-time deep Backfill and the bounded Warm-up — walk symbols
+    one at a time anyway.
+
+    ``source`` is part of the contract because the two callers are not free to
+    use either provider. A Warm-up reads the Main Source only (``docs/adr/0005``)
+    while a Backfill reads the Cover Source for the deep years, and a reader that
+    cannot tell which one it was handed cannot enforce that.
+    """
+
+    source: ProviderSource
+
+    def fetch_market_history(
+        self,
+        symbol: str,
+        from_date: date,
+        to_date: date,
+    ) -> Sequence[MarketSnapshot]: ...
+
+
 class ValuationDataProvider(Protocol):
     """Collect provider-published valuation ratios for a bounded universe.
 
