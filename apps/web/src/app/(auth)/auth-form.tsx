@@ -2,7 +2,7 @@
 
 import Image from "next/image"
 import Link from "next/link"
-import { useSearchParams } from "next/navigation"
+import { unstable_rethrow, useSearchParams } from "next/navigation"
 import { useState } from "react"
 import { Eye, EyeOff, Loader2 } from "lucide-react"
 import { toast } from "sonner"
@@ -57,7 +57,11 @@ export default function AuthForm({ mode, action }: AuthFormProps) {
         toast.error(result.error)
         setIsLoading(false)
       }
-    } catch {
+    } catch (error) {
+      // A successful sign-in ends in `redirect()`, which Next reports by
+      // rejecting the action promise — swallowing it here would show a failure
+      // toast on success and leave the router with nothing to act on.
+      unstable_rethrow(error)
       toast.error("Đã có lỗi xảy ra. Vui lòng thử lại.")
       setIsLoading(false)
     }
