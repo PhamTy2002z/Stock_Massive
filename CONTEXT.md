@@ -41,8 +41,16 @@ Bản phân tích AI của một mã cho một Trading Day — dashboard theo te
 _Avoid_: report, insight, bản tin
 
 **Analysis Run**:
-Bản ghi việc sản xuất một Analysis cho một `(symbol, trading_day)`: `pending` khi Trading Day đã có Snapshot nhưng chưa tới lượt mã này, `producing` khi đang chạy, `ready`, hoặc `failed` kèm lý do và số lần đã thử. Tách khỏi Analysis vì trạng thái thất bại của từng mã phải sống sót qua một lần restart — không có nó thì một mã fail trông y hệt một mã chưa tới lượt, và giao diện không biết có nên mời thử lại.
+Bản ghi việc sản xuất một Analysis cho một `(symbol, trading_day)`: `pending` khi Trading Day đã có Snapshot nhưng chưa tới lượt mã này, `producing` khi đang chạy, `ready`, hoặc `failed` kèm lý do và số lần đã thử. Tách khỏi Analysis vì trạng thái thất bại của từng mã phải sống sót qua một lần restart — không có nó thì một mã fail trông y hệt một mã chưa tới lượt, và giao diện không biết có nên mời thử lại. Một Analysis Run ở `ready` luôn có nghĩa Analysis tương ứng đã tồn tại đầy đủ; trạng thái nửa vời chỉ sống ở đây, không bao giờ ở Analysis.
 _Avoid_: job, task, attempt
+
+**Thread**:
+Một cuộc hội thoại giữa một người dùng và agent, giữ toàn bộ ngữ cảnh mà v1 có — ngoài Thread, v1 không có ký ức dài hạn nào. Mang theo danh sách mã nó đã chạm, để trả lời được "những Thread nào nói về FPT" mà không cần bảng nối. Thứ tự tin nhắn do một số thứ tự trong Thread giữ, không do thời điểm ghi: hai tin nhắn có thể trùng millisecond khi đang stream.
+_Avoid_: conversation, chat, session
+
+**Tool Call Trace**:
+Bản ghi một lần agent gọi tool — tên, tham số, kết quả, độ trễ, token, lỗi. Neo vào tin nhắn của người dùng đã khởi phát lượt đó, vì tin nhắn ấy đã tồn tại trước lần gọi đầu tiên còn câu trả lời thì chưa. Đủ để đọc lại chuỗi quyết định của agent, nhưng không cam kết chạy lại ra kết quả cũ: dữ liệu trong store đổi mỗi đêm và model không tất định.
+_Avoid_: log, audit, span
 
 ### Phạm vi phục vụ
 
