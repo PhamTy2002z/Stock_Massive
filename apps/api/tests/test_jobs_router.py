@@ -148,6 +148,17 @@ class TestJobsRouter:
         # CORS headers should be added by middleware
         # TestClient may not include all headers, but response should succeed
 
+    def test_the_market_wide_ohlcv_trigger_is_gone(self):
+        """The job it started was deleted, so the route has to go with it.
+
+        A trigger route imports its job inside the handler, which is why nothing
+        else catches this: the module imports fine, the suite passes, and the
+        route raises only when an operator presses the button.
+        """
+        response = client.post("/api/v1/jobs/trigger/ohlcv")
+
+        assert response.status_code == 404
+
     def test_multiple_concurrent_requests(self):
         """Test API can handle multiple concurrent requests."""
         import concurrent.futures

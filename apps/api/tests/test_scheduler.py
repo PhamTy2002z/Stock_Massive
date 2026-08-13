@@ -165,7 +165,6 @@ class TestSchedulerSetup:
         # test for reasons that have nothing to do with what it asserts.
         enabled = Settings(
             scheduler_enabled=True,
-            daily_ohlcv_enabled=True,
             profit_census_enabled=True,
             sector_historical_enabled=True,
             collector_enabled=True,
@@ -188,7 +187,6 @@ class TestSchedulerSetup:
         assert registered == {
             "intraday-collection-daily",
             "data-cleanup-daily",
-            "daily-ohlcv-collection",
             "profit-census-weekly",
             "profit-census-retry-daily",
             "sector-historical-daily",
@@ -225,7 +223,6 @@ class TestConfigSettings:
         assert settings.intraday_collect_minute == 30
         assert settings.intraday_retention_days == 30
         assert "VCB" in settings.intraday_symbols
-        assert settings.daily_ohlcv_enabled is False
         assert settings.sector_historical_enabled is False
 
     def test_scheduler_symbols_parsing(self):

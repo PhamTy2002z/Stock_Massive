@@ -432,8 +432,6 @@ class TestTheOperatorsRoute:
             "src.core.scheduler.settings",
             Settings(
                 scheduler_enabled=True,
-                daily_ohlcv_enabled=False,
-                financial_statements_enabled=False,
                 sector_historical_enabled=False,
                 backfill_enabled=True,
             ),

@@ -55,8 +55,6 @@ def scheduler_settings(**overrides) -> Settings:
     """Settings with only the collection cycle scheduled, unless told otherwise."""
     return Settings(
         scheduler_enabled=True,
-        daily_ohlcv_enabled=False,
-        financial_statements_enabled=False,
         sector_historical_enabled=False,
         **overrides,
     )
