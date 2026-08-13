@@ -29,7 +29,7 @@ meaning.
 | **Warm-up** | — | Missing entirely. |
 | **Trading Day** | `src/core/trading_calendar.is_trading_day` is a weekday test | Not the domain concept. Keep it as a *scheduling* gate only. |
 | **Profit Ranking Census**, **Cohort Version** | `FinancialStatement` + `financial_statements_collector.py` rank quarterly profit | Ancestor with the wrong shape. Superseded. |
-| **Volume Spike** | `AnalyticsService.get_volume_spikes` over `stock_daily_ohlcv`, grouped by industry | Legacy market-wide path ADR-0003 forbids. Superseded. |
+| **Volume Spike** | `src/stocks/signals/{volume_spike,router}.py` | Built (M2). The legacy market-wide `stock_daily_ohlcv` path is gone; the table survives per §4. |
 | **Watchlist**, **Analysis**, **Analysis Run** | `apps/web/src/app/(dashboard)/watchlist/_components/.gitkeep` | Missing entirely. Built by spec `0003` §A2. |
 | **Thread**, **Turn**, **Tool Call Trace**, **Widget**, **Capability Probe** | — | Missing entirely. No LLM route is wired anywhere. Built by spec `0003` §A3, §A5, §A6. |
 | **Signal Field**, **Signal Registry**, **Window Health**, `prepare_bars()` | — | Missing entirely. Built by spec `0003` §A1. |
@@ -48,7 +48,7 @@ Each milestone is independently shippable and ends at a stated exit criterion.
 | --- | --- | --- | --- |
 | M0 | Trading Day, market generation, Warm-up | — | built |
 | M1 | Profit Ranking Census and Cohort Version | M0 | built |
-| M2 | Volume Spike serving with coverage and provenance | M1 | open |
+| M2 | Volume Spike serving with coverage and provenance | M1 | built |
 | ~~M3~~ | ~~Watchlist, Analysis, Analysis Run~~ | M0 | superseded by spec `0003` §A2 |
 | ~~M4~~ | ~~Thread, Turn, Tool Call Trace, Widget, Capability Probe~~ | M3 | superseded by spec `0003` §A3/§A5/§A6 |
 

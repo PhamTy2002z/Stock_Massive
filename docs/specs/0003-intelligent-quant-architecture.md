@@ -24,8 +24,8 @@ listed in [§14](#14-open-decisions), not a choice made silently while coding.
 | --- | --- | --- |
 | **Trading Day**, market generation, **Warm-up** | `src/stocks/trading_day.py`, `warmup.py` | Built (spec 0001 M0). Consume as-is. |
 | **Profit Ranking Census**, **Cohort Version** | `src/stocks/census.py`, `cohort.py`, `listing_roster.py` | Built (spec 0001 M1). |
-| **Volume Spike** serving | `AnalyticsService.get_volume_spikes` over `stock_daily_ohlcv` | Legacy path, superseded by spec 0001 M2. Not yet replaced. |
-| `src/stocks/signals/` — computations, `prepare_bars()`, **Signal Registry** | — | Missing entirely. A1 below. |
+| **Volume Spike** serving | `src/stocks/signals/{volume_spike,router}.py` | Built (spec 0001 M2). The legacy `stock_daily_ohlcv` path is gone. |
+| `src/stocks/signals/` — `prepare_bars()`, **Signal Registry**, the fourteen computations | package exists from M2; none of these are in it | A1 below. |
 | **Corporate Action** persistence | — | Missing. Prerequisite, not a follow-up (ADR-0006). |
 | **Watchlist**, **Analysis**, **Analysis Run** | — | Missing. A2 below. |
 | `LLMClient`, **Capability Probe** | — | Missing. `requirements.txt` carries **no** provider SDK and no agent framework — but does have `httpx`, `tenacity`, pydantic v2. |
@@ -740,9 +740,18 @@ an in-place payload `UPDATE` keyed on `source`, stamping `price_basis` under
 `schema_version` 2 — **not** a re-collection, because `schema_version` is part of the
 store's uniqueness key.
 
+**A1 also retrofits the Volume Spike signal M2 already shipped.** M2 reads
+`provider_snapshots` directly and knows nothing about **Price Basis**, so once
+`prepare_bars()` exists the 20-Trading-Day baseline must go through it and gain the
+`volume_basis_break` condition of ADR-0006 — a baseline crossing a share-count-changing
+action is `degraded`, not silently comparable. This is not a defect in M2: the contract it
+would need did not exist when it shipped. It is why the retrofit is named here rather
+than left for someone to notice.
+
 Exit criterion: a registered field either returns with honest **Window Health** or
-refuses with a named reason, and the null harness fails the suite when any `signal`
-field's FPR exceeds 1%.
+refuses with a named reason, the null harness fails the suite when any `signal` field's
+FPR exceeds 1%, and no computation reaches bars except through `prepare_bars()` —
+Volume Spike included.
 
 ### A2 — Watchlist, Analysis, Analysis Run
 
@@ -871,8 +880,8 @@ Inferred rather than stated, and each cheap to reverse.
 - The nine tables land in **one Alembic revision at A2**, leaving five empty until A5.
   The alternative — a revision per milestone group — is a live option if an empty-table
   migration proves awkward in review; nothing else depends on the choice.
-- `src/stocks/signals/` is shared by the **Volume Spike** signal of spec 0001 M2 and the
-  registry of A1. If M2 ships first it establishes the package, and A1 extends it.
+- `src/stocks/signals/` is shared by the **Volume Spike** signal and the registry. M2
+  shipped first and established the package, so A1 extends it rather than creating it.
 - A3 has no dependency on **A1** and may be built alongside it, but it does depend on
   **A2** — for the migration alone, since its exit criterion needs `llm_call_usage` to
   exist. Splitting the migration per milestone group would free A3 from A2 entirely; that
