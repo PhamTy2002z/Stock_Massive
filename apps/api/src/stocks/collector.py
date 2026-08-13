@@ -29,7 +29,7 @@ from .providers import (
     ValuationDataProvider,
 )
 from .providers.normalize import VN_TZ
-from .universe import Universe
+from .universe import Universe, build_universe
 
 logger = logging.getLogger(__name__)
 
@@ -316,7 +316,10 @@ def build_collector(
 
     return Collector(
         store=store,
-        universe=universe or Universe.from_settings(settings),
+        # Both halves of the Universe: the cohort the census seated is collected
+        # by exactly the same cycle as the declared symbols, which is what makes
+        # a cohort member evaluable the day after it is activated.
+        universe=universe or build_universe(store.session, settings),
         market=market,
         valuation=valuation,
         reference=VnstockReferenceProvider(vnstock_source=settings.vnstock_source),

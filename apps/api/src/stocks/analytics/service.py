@@ -7,18 +7,15 @@ from datetime import date, timedelta
 from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy import select, func, desc, and_
+from sqlalchemy import select, desc, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.vnstock_client import Listing
 from src.core.vnstock_client import VnstockUnavailable, VnstockUnsupported
 
 from src.core.cache import TradingHoursCache
-from src.stocks.financial_statements_collector import FinancialStatementsCollector
-from src.stocks.models import FinancialStatement, StockDailyOHLCV
+from src.stocks.models import CohortMember, CohortVersion, StockDailyOHLCV
 from src.stocks.shared import StockServiceError, fetch_industry_mapping
 from src.stocks.schemas.analytics import (
-    FinancialStatementItem,
-    FinancialStatementsResponse,
     VolumeSpikeItem,
     IndustryVolumeSpikeGroup,
     VolumeSpikeMetadata,
@@ -29,32 +26,15 @@ from src.stocks.shared import StockServiceError, validate_symbol
 
 logger = logging.getLogger(__name__)
 
-# Exchange name mapping (UI name → DB name)
-EXCHANGE_ALIASES = {
-    "HOSE": "HSX",
-    "HSX": "HSX",
-    "HNX": "HNX",
-}
-
-
-def normalize_exchange(exchange: str | None) -> str | None:
-    """Normalize exchange name for database query."""
-    if not exchange:
-        return None
-    return EXCHANGE_ALIASES.get(exchange.upper(), exchange.upper())
-
+# The HOSE/HSX aliasing this file used to carry went with the profit ranking it
+# served. Board names are settled at the provider boundary now — see
+# Exchange.parse in providers/contracts.py — so there is one place that knows
+# "HSX" and "HOSE" are the same exchange.
 
 # Constants for volume spike calculation
 VOLUME_LOOKBACK_DAYS = 20
 VOLUME_BUFFER_DAYS = 30  # Extra days for weekends/holidays
 MIN_DATA_POINTS = VOLUME_LOOKBACK_DAYS + 1  # Current + 20 prior
-
-# Cache instance with trading-hours-aware TTL
-financial_statements_cache = TradingHoursCache(
-    key_prefix="stock:financial_statements:",
-    ttl_trading=3600,      # 1 hour during trading
-    ttl_off_hours=86400,   # 24 hours off-hours
-)
 
 # Volume spikes cache: 5min trading, 1hr off-hours
 volume_spikes_cache = TradingHoursCache(
@@ -62,16 +42,6 @@ volume_spikes_cache = TradingHoursCache(
     ttl_trading=300,       # 5 min during trading
     ttl_off_hours=3600,    # 1 hour off-hours
 )
-
-
-def build_financial_statements_cache_key(
-    limit: int,
-    exchange: Optional[str],
-    year: Optional[int],
-    quarter: Optional[int],
-) -> str:
-    """Build cache key for financial statements rankings."""
-    return f"{limit}:{exchange or 'all'}:{year or 'latest'}:{quarter or 'latest'}"
 
 
 def build_volume_spikes_cache_key(
@@ -92,82 +62,6 @@ class AnalyticsService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-
-    async def collect_financial_statements(self) -> dict:
-        """Run financial statements collection and invalidate cached rankings."""
-        collector = FinancialStatementsCollector(self.db)
-        result = await collector.collect()
-
-        # Clear cache after fresh collection
-        financial_statements_cache.clear_prefix()
-
-        return result
-
-    async def get_financial_statements(
-        self,
-        limit: int = 50,
-        exchange: Optional[str] = None,
-        year: Optional[int] = None,
-        quarter: Optional[int] = None,
-    ) -> FinancialStatementsResponse:
-        """Get financial statements ranked by net profit."""
-        # Normalize exchange alias (HOSE → HSX)
-        normalized_exchange = normalize_exchange(exchange)
-
-        # If no period specified, get latest available
-        if year is None or quarter is None:
-            latest = await self.db.execute(
-                select(FinancialStatement.year, FinancialStatement.quarter)
-                .order_by(desc(FinancialStatement.year), desc(FinancialStatement.quarter))
-                .limit(1)
-            )
-            row = latest.first()
-            if row:
-                year, quarter = row.year, row.quarter
-            else:
-                # No data yet
-                return FinancialStatementsResponse(
-                    period="N/A",
-                    updated_at=None,
-                    total=0,
-                    data=[]
-                )
-
-        # Build query
-        query = select(FinancialStatement).where(
-            FinancialStatement.year == year,
-            FinancialStatement.quarter == quarter
-        )
-
-        if normalized_exchange:
-            query = query.where(FinancialStatement.exchange == normalized_exchange)
-
-        query = query.order_by(FinancialStatement.rank.asc()).limit(limit)
-
-        result = await self.db.execute(query)
-        rows = result.scalars().all()
-
-        # Get total count
-        count_query = select(func.count()).select_from(FinancialStatement).where(
-            FinancialStatement.year == year,
-            FinancialStatement.quarter == quarter
-        )
-        if normalized_exchange:
-            count_query = count_query.where(FinancialStatement.exchange == normalized_exchange)
-        count_result = await self.db.execute(count_query)
-        total = count_result.scalar() or 0
-
-        # Get latest update time
-        updated_at = None
-        if rows:
-            updated_at = max(r.updated_at for r in rows if r.updated_at)
-
-        return FinancialStatementsResponse(
-            period=f"Q{quarter}-{year}",
-            updated_at=updated_at,
-            total=total,
-            data=[FinancialStatementItem.model_validate(r) for r in rows]
-        )
 
     async def get_volume_spikes(
         self,
@@ -197,9 +91,10 @@ class AnalyticsService:
         top_symbols: Optional[set[str]] = None
         if top_profitable_only:
             top_symbols = await self._get_top_profitable_symbols()
-            # If no financial data exists, return empty response immediately
+            # No active cohort means the filter has nothing to filter by, and an
+            # unfiltered answer is not the answer that was asked for.
             if not top_symbols:
-                logger.info("Top 50 filter enabled but no financial data - returning empty")
+                logger.info("Top 50 filter enabled but no active cohort - returning empty")
                 return self._empty_response(target_date or date.today(), start_time)
 
         # 1. Get latest available date if not specified
@@ -413,33 +308,25 @@ class AnalyticsService:
         return result
 
     async def _get_top_profitable_symbols(self) -> set[str]:
-        """Get symbols of top 50 profitable companies from latest period."""
-        # Get latest period
-        latest = await self.db.execute(
-            select(FinancialStatement.year, FinancialStatement.quarter)
-            .order_by(desc(FinancialStatement.year), desc(FinancialStatement.quarter))
-            .limit(1)
-        )
-        row = latest.first()
-        if not row:
-            logger.warning("No financial statements found for top 50 filter")
-            return set()
+        """The members of the active Cohort Version.
 
-        year, quarter = row.year, row.quarter
-        logger.info(f"Top 50 filter: Using period Q{quarter}-{year}")
+        Read from the cohort rather than re-derived here. There is one answer to
+        "the fifty most profitable listed companies" in this system and the census
+        owns it — two rankings computed in two places is what the removal of
+        `financial_statements` was for.
 
-        # Get top 50 symbols for this period (rank 1-50)
+        Only the *active* version, and no fallback to the newest candidate: a
+        candidate is a ranking whose members are not evaluable yet, so filtering
+        by it would ask for a signal on symbols with no baseline stored.
+        """
         result = await self.db.execute(
-            select(FinancialStatement.symbol)
-            .where(
-                FinancialStatement.year == year,
-                FinancialStatement.quarter == quarter,
-                FinancialStatement.rank >= 1,
-                FinancialStatement.rank <= 50
-            )
+            select(CohortMember.symbol)
+            .join(CohortVersion, CohortVersion.id == CohortMember.cohort_version_id)
+            .where(CohortVersion.state == "active")
         )
-        symbols = {r.symbol for r in result.all()}
-        logger.info(f"Top 50 filter: Found {len(symbols)} symbols")
+        symbols = {row.symbol for row in result.all()}
+        if not symbols:
+            logger.warning("No active Cohort Version for the top 50 filter")
         return symbols
 
     def _empty_response(self, target_date: date, start_time: float) -> VolumeSpikeResponse:

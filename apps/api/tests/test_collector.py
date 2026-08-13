@@ -18,7 +18,7 @@ from src.stocks.collector import (
     Collector,
     build_collector,
 )
-from src.stocks.models import ProviderSnapshot
+from src.stocks.models import CohortMember, CohortVersion, ProviderSnapshot
 from src.stocks.providers.fiinquant import FiinQuantMarketProvider
 from src.stocks.providers import (
     BatchTooLarge,
@@ -159,6 +159,10 @@ class FakeFundamentalProvider:
 def snapshot_store(redis=None) -> SnapshotStore:
     engine = create_engine("sqlite://")
     ProviderSnapshot.__table__.create(engine)
+    # The Universe is half cohort now, and the cycle reads it off the session it
+    # was handed, so the tables it lives in have to be there.
+    CohortVersion.__table__.create(engine)
+    CohortMember.__table__.create(engine)
     return SnapshotStore(Session(engine), redis=redis)
 
 
@@ -172,7 +176,7 @@ def collector(store: SnapshotStore, symbols=("HPG", "VCB"), **overrides) -> Coll
     providers.update(overrides)
     return Collector(
         store=store,
-        universe=Universe(symbols=tuple(symbols)),
+        universe=Universe(explicit=tuple(symbols)),
         now=lambda: NOW,
         **providers,
     )
