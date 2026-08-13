@@ -8,7 +8,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
-import { signalIssueSentences } from "@/lib/signal-issues"
+import { signalIssueSentence } from "@/lib/signal-issues"
 import type { UnevaluableSymbol } from "@/lib/api"
 
 /**
@@ -46,7 +46,7 @@ export function UnevaluablePanel({
             >
               <span className="font-medium">{item.symbol}</span>
               <span className="text-muted-foreground">
-                {signalIssueSentences(item.issues).join(" • ")}
+                {item.issues.map(signalIssueSentence).join(" • ")}
               </span>
             </li>
           ))}

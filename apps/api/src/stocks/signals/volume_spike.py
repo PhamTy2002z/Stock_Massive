@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta, timezone
 from enum import Enum
 
@@ -189,7 +189,16 @@ class VolumeSpikeSignal:
 
     @property
     def spikes(self) -> tuple[SymbolReading, ...]:
-        """The symbols that cleared the threshold, loudest first."""
+        """The symbols that cleared the threshold, loudest first.
+
+        Empty whenever no Signal Trading Day was settled on. The readings behind
+        an unresolved answer are what the newest session *would* have said if
+        enough of the cohort could be evaluated on it, and they are kept so the
+        answer can state its coverage honestly — but a spike drawn from a
+        session the signal refused to stand behind is not a finding.
+        """
+        if self.trading_day is None:
+            return ()
         return tuple(
             sorted(
                 (
@@ -379,21 +388,20 @@ def _read_symbol(
         # infinite spike.
         return reading
 
-    return SymbolReading(
-        symbol=reading.symbol,
-        exchange=reading.exchange,
-        volume=reading.volume,
-        baseline_average_volume=average,
-        ratio=target.volume / average,
-        close_price=reading.close_price,
-        change_pct=reading.change_pct,
-        issues=issues,
-    )
+    return replace(reading, ratio=target.volume / average)
 
 
 @dataclass(frozen=True)
 class _Resolution:
-    """The session a signal settled on, and the cohort that was current then."""
+    """The session a signal settled on, and the cohort that was current then.
+
+    ``day`` is None when no session in the window could be evaluated, and the
+    readings are kept anyway: they are what the newest session with a cohort
+    behind it did say, which is how the answer can report "44 of 50" instead of
+    "0 of 50" while still refusing to serve a signal. Reporting zero would
+    describe a cohort nothing is known about, and the reader would have no way
+    to tell that from one that is two symbols short.
+    """
 
     day: date | None
     version_id: int | None
@@ -402,12 +410,30 @@ class _Resolution:
     readings: tuple[SymbolReading, ...]
     issue: SignalIssue | None = None
 
+    @classmethod
+    def unresolved(
+        cls,
+        issue: SignalIssue,
+        members: tuple[str, ...] = (),
+        readings: tuple[SymbolReading, ...] = (),
+    ) -> "_Resolution":
+        """No session to answer for, and the reason why."""
+        return cls(
+            day=None,
+            version_id=None,
+            reporting_period=None,
+            members=members,
+            readings=readings,
+            issue=issue,
+        )
+
 
 def _resolve(
     session: Session,
     day: date | None,
     min_members: int,
     lookback: int,
+    newest: date | None,
 ) -> _Resolution:
     """Find the newest session the active cohort can actually be evaluated on.
 
@@ -425,14 +451,7 @@ def _resolve(
     if day is not None:
         version = cohort_version_active_on(session, day)
         if version is None:
-            return _Resolution(
-                day=None,
-                version_id=None,
-                reporting_period=None,
-                members=(),
-                readings=(),
-                issue=SignalIssue.RANKING_UNAVAILABLE,
-            )
+            return _Resolution.unresolved(SignalIssue.RANKING_UNAVAILABLE)
         members = store.symbols(version.id)
         return _Resolution(
             day=day,
@@ -442,27 +461,20 @@ def _resolve(
             readings=evaluate_symbols(session, members, day),
         )
 
-    newest = latest_trading_day(session)
     if newest is None:
-        return _Resolution(
-            day=None,
-            version_id=None,
-            reporting_period=None,
-            members=(),
-            readings=(),
-            issue=SignalIssue.RANKING_UNAVAILABLE,
-        )
+        return _Resolution.unresolved(SignalIssue.RANKING_UNAVAILABLE)
 
     candidates = (newest,) + trading_days_before(session, newest, lookback - 1)
-    seen_version = False
-    fallback_members: tuple[str, ...] = ()
+    # What the newest session with a cohort behind it managed to evaluate. Held
+    # on to so a walk that ends without a usable session can still say how close
+    # it came.
+    best_members: tuple[str, ...] = ()
+    best_readings: tuple[SymbolReading, ...] = ()
     for candidate in candidates:
         version = cohort_version_active_on(session, candidate)
         if version is None:
             continue
-        seen_version = True
         members = store.symbols(version.id)
-        fallback_members = fallback_members or members
         readings = evaluate_symbols(session, members, candidate)
         evaluable = sum(1 for reading in readings if reading.evaluable)
         if evaluable >= min_members:
@@ -473,23 +485,22 @@ def _resolve(
                 members=members,
                 readings=readings,
             )
+        if not best_members:
+            best_members, best_readings = members, readings
 
     logger.info(
         "No session in the last %d has %d evaluable cohort members",
         lookback,
         min_members,
     )
-    return _Resolution(
-        day=None,
-        version_id=None,
-        reporting_period=None,
-        members=fallback_members,
-        readings=(),
+    return _Resolution.unresolved(
         issue=(
             SignalIssue.COHORT_WARMING
-            if seen_version
+            if best_members
             else SignalIssue.RANKING_UNAVAILABLE
         ),
+        members=best_members,
+        readings=best_readings,
     )
 
 
@@ -596,19 +607,28 @@ def volume_spike_signal(
     says which it is.
     """
     stamped = now or datetime.now(timezone.utc)
-    resolution = _resolve(session, trading_day, min_members, lookback)
     newest = latest_trading_day(session)
+    resolution = _resolve(session, trading_day, min_members, lookback, newest)
 
     if resolution.day is None:
+        # The cohort's own readings, even for the Universe scope: they are the
+        # only measured thing here, and they say how far the ranking is from
+        # being servable. The Universe was never evaluated — no session was
+        # settled on to evaluate it against — so its scope reports nothing
+        # rather than borrowing the cohort's fraction.
+        readings = (
+            resolution.readings if scope is SignalScope.PROFIT_LEADERS else ()
+        )
+        evaluated = sum(1 for reading in readings if reading.evaluable)
         return VolumeSpikeSignal(
             scope=scope,
             trading_day=None,
             threshold=threshold,
-            coverage=_coverage(scope, 0, len(resolution.members), min_members),
+            coverage=_coverage(scope, evaluated, len(readings), min_members),
             freshness=_freshness(None, newest, stamped),
             cohort_version=None,
             issues=(resolution.issue,) if resolution.issue else (),
-            readings=(),
+            readings=readings,
         )
 
     if scope is SignalScope.PROFIT_LEADERS:

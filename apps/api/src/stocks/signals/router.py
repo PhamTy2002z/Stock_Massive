@@ -28,6 +28,7 @@ from .volume_spike import (
     DEFAULT_THRESHOLD,
     MIN_THRESHOLD,
     SignalScope,
+    SymbolReading,
     VolumeSpikeSignal,
     signal_cache_key,
     volume_spike_signal,
@@ -35,18 +36,27 @@ from .volume_spike import (
 
 router = APIRouter(prefix="/signals", tags=["signals"])
 
-# The key carries every input the answer depends on, so an entry can only be
-# read back by a request that would compute exactly it. The TTLs are therefore
-# housekeeping — they bound how long unreachable entries occupy Redis — rather
-# than a guess at how long the answer stays true.
+# The key carries every input that can change the *finding*, so an entry is only
+# reachable by a request that would compute exactly it. Freshness is the one
+# thing it cannot carry: `stale` is measured against the wall clock, so an entry
+# written at six days old would still read `fresh` when served on day eight. The
+# TTL is what bounds that error, which is why it is short and the same on both
+# sides of the session — the answer is stable, its age is not.
+SIGNAL_CACHE_TTL_SECONDS = 15 * 60
+
 volume_spikes_cache = TradingHoursCache(
     key_prefix="stock:signals:volume_spikes:",
-    ttl_trading=15 * 60,
-    ttl_off_hours=6 * 3600,
+    ttl_trading=SIGNAL_CACHE_TTL_SECONDS,
+    ttl_off_hours=SIGNAL_CACHE_TTL_SECONDS,
 )
 
 
-def _item(reading) -> VolumeSpikeItem:
+def _item(reading: SymbolReading) -> VolumeSpikeItem:
+    """One spiking symbol on the wire.
+
+    The baseline is rounded to whole shares: the fraction is left over from
+    dividing twenty sessions, not a quantity anyone traded.
+    """
     return VolumeSpikeItem(
         symbol=reading.symbol,
         exchange=reading.exchange,
