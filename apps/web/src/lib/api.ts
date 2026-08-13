@@ -455,54 +455,6 @@ export async function fetchVN30Overview(): Promise<VN30OverviewResponse> {
   return fetchApi<VN30OverviewResponse>("/stocks/vn30-overview")
 }
 
-// Financial Statements Types
-export interface FinancialStatementItem {
-  rank: number
-  symbol: string
-  company_name: string | null
-  exchange: string | null
-  net_profit: number | null
-  revenue: number | null
-  profit_margin: number | null
-  eps: number | null
-  year: number
-  quarter: number
-}
-
-export interface FinancialStatementsResponse {
-  period: string
-  updated_at: string | null
-  total: number
-  data: FinancialStatementItem[]
-}
-
-export async function fetchFinancialStatements(
-  limit: number = 50,
-  exchange?: string
-): Promise<FinancialStatementsResponse> {
-  const params = new URLSearchParams()
-  params.set("limit", limit.toString())
-  if (exchange) params.set("exchange", exchange)
-
-  return fetchApi<FinancialStatementsResponse>(`/stocks/analytics/financial-statements?${params}`)
-}
-
-// Financial Statements Collection Result
-export interface FinancialStatementsCollectionResult {
-  success: number
-  failed: number
-  rate_limited: number
-  total_symbols: number
-  elapsed_seconds: number
-  error: string | null
-}
-
-export async function triggerFinancialStatementsCollection(): Promise<FinancialStatementsCollectionResult> {
-  return fetchApi<FinancialStatementsCollectionResult>("/stocks/analytics/financial-statements/collect", {
-    method: "POST",
-  })
-}
-
 // Volume Spike Types
 export type VolumeSpikeAnomalyLevel = "normal" | "elevated" | "high" | "very_high"
 

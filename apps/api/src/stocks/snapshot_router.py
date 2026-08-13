@@ -28,7 +28,7 @@ from .schemas.snapshot import (
 )
 from .series_view import SESSION_INTERVALS, bars
 from .shared import StockServiceError, validate_symbol
-from .universe import get_universe
+from .universe import build_universe
 
 router = APIRouter()
 
@@ -56,7 +56,7 @@ def _section(capability: Capability, read: SnapshotRead):
     )
 
 
-def _watched(symbol: str) -> str:
+def _watched(symbol: str, db: Session) -> str:
     """The canonical symbol, or a refusal that says which kind of wrong it is.
 
     Malformed text and an untracked company are answered apart. Both are
@@ -67,6 +67,11 @@ def _watched(symbol: str) -> str:
     The untracked case is worded as what this system did or did not do, never
     as a claim about the symbol itself: with no provider in the request path,
     nothing here knows whether an unknown ticker is listed, delisted or a typo.
+
+    Membership is read through the session because half the Universe is the
+    active Cohort Version: a symbol the census seated this morning is watched
+    from this morning, and a process-lifetime cache would have gone on refusing
+    it until the next deploy.
     """
     try:
         canonical = validate_symbol(symbol)
@@ -76,7 +81,7 @@ def _watched(symbol: str) -> str:
             detail=f"Mã chứng khoán không hợp lệ: {symbol}",
         ) from exc
 
-    if not get_universe().contains(canonical):
+    if not build_universe(db).contains(canonical):
         raise HTTPException(
             status_code=404,
             detail=f"Hệ thống chưa thu thập dữ liệu cho mã {canonical}.",
@@ -98,7 +103,7 @@ def get_symbol_snapshot(
     Malformed text and an untracked company are answered apart, the same way
     every store-backed route here answers them.
     """
-    canonical = _watched(symbol)
+    canonical = _watched(symbol, db)
 
     store = SnapshotStore(db)
     sections = {}
@@ -143,7 +148,7 @@ def get_market_series(
     `Backfill` and each session since by the `Collector`, and both stretches are
     read together — every bar says which of them answered for it.
     """
-    canonical = _watched(symbol)
+    canonical = _watched(symbol, db)
     if interval not in SESSION_INTERVALS:
         raise HTTPException(
             status_code=400,
@@ -180,7 +185,7 @@ def get_valuation_series(
     No interval: a weekly P/E would have to be an average, and an average of a
     ratio is a claim this system has no basis to make.
     """
-    canonical = _watched(symbol)
+    canonical = _watched(symbol, db)
     from_date, to_date = _window(start, end)
 
     series = SnapshotStore(db).series(

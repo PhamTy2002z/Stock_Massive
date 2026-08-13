@@ -58,6 +58,35 @@ class ShareType(str, Enum):
     ISSUED = "issued"
 
 
+class Exchange(str, Enum):
+    """The boards a Vietnamese equity can be listed on.
+
+    An enum rather than free text because eligibility is decided by it: the
+    Profit Ranking Census ranks HOSE and HNX and excludes UPCOM, so a board name
+    arriving in one of its other spellings — "HSX" for HOSE is in use elsewhere
+    in this codebase — would drop real companies out of the cohort without
+    anything failing.
+    """
+
+    HOSE = "HOSE"
+    HNX = "HNX"
+    UPCOM = "UPCOM"
+
+    @classmethod
+    def parse(cls, value: str) -> "Exchange":
+        """Read a provider's spelling of a board name, or refuse it."""
+        text = value.strip().upper()
+        if text == "HSX":
+            return cls.HOSE
+        return cls(text)
+
+
+# The boards a Profit Ranking Census ranks. UPCOM is excluded by ADR-0003: it
+# lists companies under lighter disclosure rules, so a profit figure there is not
+# comparable with one from the two main boards.
+RANKED_EXCHANGES: frozenset[Exchange] = frozenset({Exchange.HOSE, Exchange.HNX})
+
+
 class InternalSnapshot(StrictModel):
     """Immutable base for records crossing a provider boundary."""
 
@@ -325,6 +354,47 @@ class ReferenceDataProvider(Protocol):
     source: ProviderSource
 
     def fetch_reference(self, symbols: Sequence[str]) -> Sequence[ReferenceSnapshot]: ...
+
+
+class ListingEntry(InternalSnapshot):
+    """One company as the exchanges currently list it.
+
+    Not a ``SymbolSnapshot``: it carries no per-symbol observation metadata
+    because it is not an observation *about* a company the system follows. It is
+    a line from the market's own register, and the whole register is read at once
+    and stamped once.
+    """
+
+    symbol: str
+    exchange: Exchange
+    is_listed: bool
+    company_name: str | None = None
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_symbol(cls, value: str) -> str:
+        try:
+            return validate_symbol(value)
+        except StockServiceError as exc:
+            raise ValueError(str(exc)) from exc
+
+    @field_validator("exchange", mode="before")
+    @classmethod
+    def normalize_exchange(cls, value: object) -> object:
+        return Exchange.parse(value) if isinstance(value, str) else value
+
+
+class ListingRosterProvider(Protocol):
+    """Read the whole market's listing register in one pass.
+
+    Market-wide and unbatched by design: the Profit Ranking Census has to know
+    which companies exist before it can decide which fifty to rank, and asking
+    per symbol would mean already knowing the answer.
+    """
+
+    source: ProviderSource
+
+    def fetch_listing_roster(self) -> Sequence[ListingEntry]: ...
 
 
 class FundamentalDataProvider(Protocol):

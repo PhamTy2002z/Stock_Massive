@@ -11,10 +11,19 @@ import { HealthScoreCard, HealthScoreCardSkeleton } from "./financial-health/hea
 import { TrendChartsCard, TrendChartsCardSkeleton } from "./financial-trends/trend-charts-card"
 import { PeerComparisonCard, PeerComparisonCardSkeleton } from "./peer-comparison/peer-comparison-card"
 import { FCFAnalysisCard, FCFAnalysisCardSkeleton } from "./fcf-analysis/fcf-analysis-card"
-import type { FinancialStatementItem } from "@/lib/api"
+/**
+ * The sheet only ever reads a ticker and a name off whatever row opened it, so
+ * that is all it asks for. It used to take the row type of the profit ranking
+ * table; tied to that, it would have gone out with it — and every card inside is
+ * keyed on nothing but the symbol.
+ */
+interface FinancialDetailSubject {
+  symbol: string
+  company_name: string | null
+}
 
 interface FinancialDetailSheetProps {
-  stock: FinancialStatementItem | null
+  stock: FinancialDetailSubject | null
   open: boolean
   onOpenChange: (open: boolean) => void
 }
