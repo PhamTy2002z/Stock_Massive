@@ -166,7 +166,7 @@ class TestSchedulerSetup:
         enabled = Settings(
             scheduler_enabled=True,
             daily_ohlcv_enabled=True,
-            financial_statements_enabled=True,
+            profit_census_enabled=True,
             sector_historical_enabled=True,
             collector_enabled=True,
             backfill_enabled=True,
@@ -189,7 +189,8 @@ class TestSchedulerSetup:
             "intraday-collection-daily",
             "data-cleanup-daily",
             "daily-ohlcv-collection",
-            "collect-financial-statements",
+            "profit-census-weekly",
+            "profit-census-retry-daily",
             "sector-historical-daily",
             "universe-snapshots",
             "universe-backfill",

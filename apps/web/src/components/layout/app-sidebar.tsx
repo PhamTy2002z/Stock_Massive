@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation"
 import Link from "next/link"
 import {
   Activity,
-  FileText,
   Gauge,
   Map,
 } from "lucide-react"
@@ -32,7 +31,6 @@ const navGroups: NavItem[][] = [
   [{ title: "Market Map", url: "/", icon: Map }],
   [
     { title: "Stock 360", url: "/analytics/deep-dive", icon: Gauge },
-    { title: "Financials", url: "/analytics/financial-statements", icon: FileText },
     { title: "Trends & Signals", url: "/analytics/volume-spikes", icon: Activity },
   ],
 ]

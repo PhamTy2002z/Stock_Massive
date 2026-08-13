@@ -197,7 +197,7 @@ def backfill(engine, symbols=("HPG",), history=None, **overrides) -> Backfill:
         # back by the next run's selection, and two clocks would let a symbol
         # come out of a backoff it never served.
         state=BackfillStateStore(session, now=settings["now"]),
-        universe=Universe(symbols=tuple(symbols)),
+        universe=Universe(explicit=tuple(symbols)),
         history=history if history is not None else FakeHistory(),
         **settings,
     )
@@ -404,8 +404,8 @@ class TestTheOperatorsRoute:
         app.dependency_overrides[get_sync_session] = lambda: session
         try:
             with patch(
-                "src.stocks.jobs_router.get_universe",
-                return_value=Universe(symbols=("HPG", "VCB", "FPT")),
+                "src.stocks.jobs_router.build_universe",
+                return_value=Universe(explicit=("HPG", "VCB", "FPT")),
             ):
                 body = TestClient(app).get("/api/v1/jobs/backfill").json()
         finally:

@@ -1,5 +1,19 @@
 """SQLAlchemy models for stocks module."""
-from sqlalchemy import BigInteger, Column, Date, DateTime, Float, Index, Integer, JSON, Numeric, String, UniqueConstraint, text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    JSON,
+    Numeric,
+    String,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.sql import func
 
 from src.core.database import Base
@@ -51,34 +65,6 @@ class StockIntradayBar(Base):
 
     def __repr__(self) -> str:
         return f"<StockIntradayBar {self.symbol} {self.bar_time}>"
-
-
-class FinancialStatement(Base):
-    """Financial statements - quarterly financial metrics for companies."""
-    __tablename__ = "financial_statements"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    symbol = Column(String(10), nullable=False, index=True)
-    company_name = Column(String(255))
-    exchange = Column(String(10))  # HOSE, HNX
-    year = Column(Integer, nullable=False)
-    quarter = Column(Integer, nullable=False)
-    net_profit = Column(BigInteger)  # VND
-    revenue = Column(BigInteger)  # VND
-    profit_margin = Column(Float)  # percentage
-    eps = Column(Float)
-    rank = Column(Integer, index=True)
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-    __table_args__ = (
-        UniqueConstraint("symbol", "year", "quarter", name="uq_financial_statements_symbol_period"),
-        Index("ix_financial_statements_period", "year", "quarter"),
-        Index("ix_financial_statements_exchange", "exchange"),
-    )
-
-    def __repr__(self) -> str:
-        return f"<FinancialStatement {self.symbol} Q{self.quarter}/{self.year}>"
 
 
 class SymbolBackfill(Base):
@@ -155,3 +141,160 @@ class ProviderSnapshot(Base):
             effective_at.desc(),
         ),
     )
+
+
+class ListingRoster(Base):
+    """Which symbols the exchanges list, and on which board, market-wide.
+
+    Not a Snapshot, and deliberately not in ``provider_snapshots``: that table
+    holds per-symbol observations for symbols the system has promised to follow,
+    while this is one row per listed company on the whole market — roughly 1,600
+    of them — and exists so the Profit Ranking Census knows what to rank before
+    any of it is in the Universe (``docs/adr/0004``).
+
+    One row per symbol rather than a history of listings. What a census needs is
+    the market as it stands now; a company that leaves has to be *seen* to have
+    left, which is why a symbol that disappears from a roster refresh is kept
+    with ``is_listed`` false instead of deleted. Deleted, a delisted cohort
+    member would simply stop matching and the cohort would quietly serve a
+    company that no longer trades.
+    """
+
+    __tablename__ = "listing_roster"
+
+    symbol = Column(String(20), primary_key=True)
+    exchange = Column(String(10), nullable=False)  # HOSE | HNX | UPCOM
+    is_listed = Column(Boolean, nullable=False)
+    company_name = Column(String(255), nullable=True)
+    source = Column(String(32), nullable=False)
+    observed_at = Column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        # The census asks for one exchange pair's listed equities and nothing
+        # else, every run.
+        Index("ix_listing_roster_exchange_listed", "exchange", "is_listed"),
+    )
+
+    def __repr__(self) -> str:
+        state = "listed" if self.is_listed else "delisted"
+        return f"<ListingRoster {self.symbol} {self.exchange} {state}>"
+
+
+class ProfitRankingCensusRun(Base):
+    """One pass of the market-wide profit census, and how far it got.
+
+    Durable because the run is long and quota-bound: ~1,600 symbols against 20
+    requests a minute cannot finish in one sitting, so a later run resumes from
+    ``covered_symbols`` rather than starting the market again. It is also the
+    record that decides whether a reporting period may be ranked at all —
+    ``covered_symbols / eligible_symbols`` is the Signal Coverage of the census
+    itself.
+    """
+
+    __tablename__ = "profit_ranking_census_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String(16), nullable=False)  # running | complete | failed
+    # The period being assessed, which is not known until the market has been
+    # read: it is the newest period companies are actually reporting.
+    target_period = Column(Date, nullable=True)
+    eligible_symbols = Column(Integer, nullable=False, server_default="0")
+    covered_symbols = Column(Integer, nullable=False, server_default="0")
+    last_error = Column(String(500), nullable=True)
+
+    def __repr__(self) -> str:
+        return (
+            f"<ProfitRankingCensusRun {self.id} {self.status} "
+            f"{self.covered_symbols}/{self.eligible_symbols}>"
+        )
+
+
+class CohortVersion(Base):
+    """One immutable ranking of the Profit Leaders Cohort.
+
+    Versioned rather than updated in place because a signal served last Tuesday
+    has to stay explainable: the answer to "which 50 companies was this about"
+    is the version that was active then, not the one active now. A ranking change
+    therefore writes a new version and supersedes the old one, and no row is ever
+    rewritten (``docs/adr/0003``).
+
+    The states are a queue, not a status field: a ``candidate`` is a ranking whose
+    members are still being made evaluable, ``active`` is the one being served —
+    at most one, enforced by a partial unique index — and ``superseded`` is
+    history kept for exactly the question above.
+    """
+
+    __tablename__ = "cohort_versions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    reporting_period = Column(Date, nullable=False)
+    census_run_id = Column(
+        Integer,
+        ForeignKey("profit_ranking_census_runs.id"),
+        nullable=False,
+    )
+    state = Column(String(16), nullable=False)  # candidate | active | superseded
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    activated_at = Column(DateTime(timezone=True), nullable=True)
+    superseded_at = Column(DateTime(timezone=True), nullable=True)
+    # How many members were evaluable when this version took over. Kept because
+    # a cohort activated at the 45-member floor and one activated with all 50
+    # serve differently honest signals, and the difference is invisible later.
+    coverage_at_activation = Column(Integer, nullable=True)
+
+    __table_args__ = (
+        # At most one active version, enforced by the database rather than by the
+        # activation code: activation is the one place two concurrent runs would
+        # both believe they were promoting the newest ranking, and the loser has
+        # to fail rather than leave two cohorts being served at once.
+        Index(
+            "uq_cohort_version_single_active",
+            "state",
+            unique=True,
+            postgresql_where=text("state = 'active'"),
+            sqlite_where=text("state = 'active'"),
+        ),
+        # Resolving which version was active on a past day scans the activation
+        # window, never the newest row.
+        Index("ix_cohort_version_activation_window", "activated_at", "superseded_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<CohortVersion {self.id} {self.state} {self.reporting_period}>"
+
+
+class CohortMember(Base):
+    """One company's seat in one Cohort Version, at the rank it earned.
+
+    ``net_income_vnd`` is copied here rather than read back from the fundamental
+    Snapshot it came from. The ranking has to stay reproducible: a restatement
+    that changes the figure must produce a new version, not silently reorder an
+    old one.
+    """
+
+    __tablename__ = "cohort_members"
+
+    cohort_version_id = Column(
+        Integer,
+        ForeignKey("cohort_versions.id"),
+        primary_key=True,
+    )
+    symbol = Column(String(20), primary_key=True)
+    rank = Column(Integer, nullable=False)
+    net_income_vnd = Column(Numeric(24, 2), nullable=False)
+    exchange = Column(String(10), nullable=False)
+
+    __table_args__ = (
+        # Two companies at rank 12 is a ranking that cannot be read back in
+        # order, so it is refused at write time rather than sorted around later.
+        UniqueConstraint(
+            "cohort_version_id",
+            "rank",
+            name="uq_cohort_member_rank",
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return f"<CohortMember {self.symbol} #{self.rank} of v{self.cohort_version_id}>"

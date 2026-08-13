@@ -17,7 +17,7 @@ from src.core.vnstock_client import VnstockUnavailable, VnstockUnsupported
 from src.stocks.router import router as stocks_router
 from src.stocks.jobs_router import router as jobs_router
 from src.stocks.shared import StockServiceError
-from src.stocks.universe import get_universe
+from src.stocks.universe import Universe
 
 # Configure logging at module level - ensures INFO logs are visible
 logging.basicConfig(
@@ -36,7 +36,11 @@ async def lifespan(app: FastAPI):
     # Before anything else starts: a Universe that cannot be honoured is a
     # configuration mistake, and the operator should meet it here rather than
     # hours later inside a collector run nobody is watching.
-    universe = get_universe()
+    #
+    # Only the declared half is checked here. The cohort half is seated from the
+    # database by whoever collects or serves, and a startup that refused to boot
+    # over it would take the API down for a data problem it cannot fix.
+    universe = Universe.from_settings(get_settings())
     logger.info(f"Universe declares {len(universe)} symbols")
 
     if settings.scheduler_enabled:

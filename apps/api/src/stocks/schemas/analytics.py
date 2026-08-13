@@ -9,40 +9,6 @@ from .common import StrictModel
 from src.stocks.schemas.price import VolumeAnomalyLevel
 
 
-class FinancialStatementItem(StrictModel):
-    """Single financial statement entry."""
-    rank: int = Field(..., description="Ranking position")
-    symbol: str = Field(..., description="Stock ticker")
-    company_name: Optional[str] = Field(None, description="Company name")
-    exchange: Optional[str] = Field(None, description="Exchange (HOSE/HNX)")
-    net_profit: Optional[int] = Field(None, description="Net profit in VND")
-    revenue: Optional[int] = Field(None, description="Revenue in VND")
-    profit_margin: Optional[float] = Field(None, description="Profit margin %")
-    eps: Optional[float] = Field(None, description="Earnings per share")
-    year: int = Field(..., description="Fiscal year")
-    quarter: int = Field(..., description="Fiscal quarter (1-4)")
-
-    model_config = {"from_attributes": True}
-
-
-class FinancialStatementsResponse(StrictModel):
-    """Financial statements list response."""
-    period: str = Field(..., description="Period label e.g. 'Q4-2024'")
-    updated_at: Optional[datetime] = Field(None, description="Last data update")
-    total: int = Field(..., description="Total records available")
-    data: List[FinancialStatementItem] = Field(..., description="Financial statements list")
-
-
-class FinancialStatementsCollectionResult(StrictModel):
-    """Result of financial statements collection job."""
-    success: int = Field(..., description="Number of records successfully stored")
-    failed: int = Field(..., description="Number of failed symbol fetches")
-    rate_limited: int = Field(default=0, description="Number of rate-limited requests")
-    total_symbols: int = Field(default=0, description="Total symbols processed")
-    elapsed_seconds: float = Field(default=0.0, description="Time taken in seconds")
-    error: Optional[str] = Field(None, description="Error message if job failed")
-
-
 # === Volume Spike Detection Schemas ===
 
 

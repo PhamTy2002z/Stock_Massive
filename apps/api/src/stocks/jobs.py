@@ -17,7 +17,6 @@ from src.core.vnstock_wrapper import (
 from src.core.job_status_store import job_store
 from src.stocks.intraday_collector import IntradayCollector
 from src.stocks.models import StockDailyOHLCV, StockIntradayBar
-from src.stocks.financial_statements_collector import FinancialStatementsCollector
 from src.stocks.analytics.sector_historical_service import SectorHistoricalService
 
 logger = logging.getLogger(__name__)
@@ -280,29 +279,6 @@ def _save_ohlcv_batch(batch_data: list) -> int:
                 logger.debug(f"Error saving row: {e}")
 
     return rows_saved
-
-
-async def collect_financial_statements_job() -> dict:
-    """Scheduled job to collect financial statements data.
-
-    Runs weekly to fetch quarterly financials for HOSE+HNX symbols.
-    Returns dict with success/failed counts.
-    """
-    logger.info("Starting financial statements collection job")
-    job_store.start_job("financial-statements", "Thu thập BCTC", 1)
-
-    try:
-        async with async_session_factory() as db:
-            collector = FinancialStatementsCollector(db)
-            result = await collector.collect()
-
-        logger.info(f"Financial statements job complete: {result}")
-        job_store.complete_job("financial-statements", result)
-        return result
-    except Exception as e:
-        logger.error(f"Financial statements collection job failed: {e}")
-        job_store.fail_job("financial-statements", str(e))
-        return {"success": 0, "failed": 0, "error": str(e)}
 
 
 def collect_sector_historical_job() -> dict:
