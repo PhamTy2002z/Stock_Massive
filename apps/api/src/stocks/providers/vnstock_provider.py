@@ -27,15 +27,19 @@ from pydantic import ValidationError
 from src.core.config import get_settings
 from src.core.vnstock_client import (
     Finance,
+    Listing,
     Quote,
     Trading,
     VnstockUnavailable,
     VnstockUnsupported,
 )
+from src.stocks.shared import StockServiceError
 from src.stocks.shared.converters import quote_price_vnd
 
 from .contracts import (
+    Exchange,
     FundamentalSnapshot,
+    ListingEntry,
     MarketSnapshot,
     ProviderSource,
     ReferenceSnapshot,
@@ -87,6 +91,19 @@ HISTORY_INTERVAL = "1D"
 # Statement periods arrive as column headers, one per quarter.
 PERIOD_PATTERN = re.compile(r"^(\d{4})-Q([1-4])$")
 QUARTER_END = {1: (3, 31), 2: (6, 30), 3: (9, 30), 4: (12, 31)}
+
+# The register is answered one board at a time. All three are read even though
+# only HOSE and HNX are rankable: a symbol has to be *seen* on UPCOM to be
+# excluded for being there, and a company that moves down to UPCOM has to stop
+# looking like a company that vanished.
+ROSTER_EXCHANGES = (Exchange.HOSE, Exchange.HNX, Exchange.UPCOM)
+
+# What a listing row must carry, and the value that marks an ordinary equity.
+# The register also lists funds, covered warrants and bonds, none of which have a
+# net income to rank.
+LISTING_FIELDS = ("symbol", "type")
+LISTING_EQUITY_TYPE = "STOCK"
+LISTING_NAME_FIELDS = ("organ_short_name", "organ_name")
 
 
 class VnstockProviderError(RuntimeError):
@@ -177,6 +194,10 @@ def _default_quote_factory(symbol: str, source: str) -> Any:
 
 def _default_finance_factory(symbol: str, source: str) -> Any:
     return Finance(symbol=symbol, source=source)
+
+
+def _default_listing_factory(source: str) -> Any:
+    return Listing(source=source)
 
 
 class VnstockProviderBase:
@@ -345,6 +366,98 @@ class VnstockReferenceProvider(VnstockProviderBase):
         except ValidationError as exc:
             logger.warning("Skipping unusable vnstock reference row for %s: %s", symbol, exc)
             return None
+
+
+class VnstockListingRosterProvider(VnstockProviderBase):
+    """Read the whole market's listing register, one board per request.
+
+    Three requests for the entire market is the cheapest thing this adapter does,
+    which matters because the census that follows it costs two requests per
+    symbol across roughly 1,600 of them.
+
+    All three boards or none. A refresh is an "as it stands now" picture of the
+    market, and the caller marks whatever is missing from it as delisted — so a
+    board that failed to answer would delist every company on it. Failing the
+    whole read is recoverable; a roster wrong about who is still trading is not
+    noticed until a cohort has already been rebuilt around it.
+    """
+
+    def __init__(
+        self,
+        vnstock_source: str | None = None,
+        pacer: RequestPacer | None = None,
+        now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        listing_factory: Callable[[str], Any] = _default_listing_factory,
+    ) -> None:
+        super().__init__(vnstock_source=vnstock_source, pacer=pacer, now=now)
+        self._listing_factory = listing_factory
+
+    def fetch_listing_roster(self) -> Sequence[ListingEntry]:
+        listing = self._listing_factory(self._vnstock_source)
+        entries: list[ListingEntry] = []
+        seen: set[str] = set()
+
+        for exchange in ROSTER_EXCHANGES:
+            frame = self._paced(
+                lambda board=exchange: listing.symbols_by_exchange(exchange=board.value),
+                f"vnstock listing roster fetch failed for {exchange.value}",
+            )
+            if frame is None or getattr(frame, "empty", True):
+                raise VnstockProviderError(
+                    f"vnstock returned no listings for {exchange.value}"
+                )
+            entries.extend(self._to_entries(frame, exchange, seen))
+
+        return tuple(entries)
+
+    def _to_entries(
+        self,
+        frame: pd.DataFrame,
+        exchange: Exchange,
+        seen: set[str],
+    ) -> list[ListingEntry]:
+        rows = lower_cased_columns(frame)
+        missing = missing_fields(rows, LISTING_FIELDS)
+        if missing:
+            raise VnstockProviderError(
+                f"vnstock listing for {exchange.value} is missing fields: "
+                f"{', '.join(missing)}"
+            )
+
+        equities = rows[rows["type"].astype(str).str.upper() == LISTING_EQUITY_TYPE]
+        entries: list[ListingEntry] = []
+
+        for _, row in equities.iterrows():
+            symbol = str(row.get("symbol") or "").strip().upper()
+            # A board is read before the ones after it, so the first board a
+            # symbol appears on is the one it is recorded against. Dual listing
+            # does not happen on these exchanges; a duplicate here is the
+            # register repeating itself, and taking the second one would move a
+            # HOSE company to UPCOM and drop it out of the ranking.
+            if not symbol or symbol in seen:
+                continue
+
+            try:
+                entries.append(
+                    ListingEntry(
+                        symbol=symbol,
+                        exchange=exchange,
+                        # Everything in the register is currently listed. Whoever
+                        # is *not* in it is what a delisting looks like, and that
+                        # is the caller's comparison to make, not this adapter's.
+                        is_listed=True,
+                        company_name=_listing_name(row),
+                    )
+                )
+            except (ValidationError, StockServiceError) as exc:
+                # An index code or a malformed ticker sitting in the register
+                # costs itself. The market has ~1,600 rows and the census needs
+                # the other 1,599.
+                logger.info("Skipping unusable listing row %s: %s", symbol, exc)
+                continue
+            seen.add(symbol)
+
+        return entries
 
 
 class VnstockMarketHistoryProvider(VnstockProviderBase):
@@ -582,6 +695,18 @@ class VnstockFundamentalProvider(VnstockProviderBase):
         except ValidationError as exc:
             logger.warning("Skipping unusable vnstock statements for %s: %s", symbol, exc)
             return None
+
+
+def _listing_name(row: pd.Series) -> str | None:
+    """Prefer the short trading name, fall back to the legal one, else nothing."""
+    for field in LISTING_NAME_FIELDS:
+        value = row.get(field)
+        if value is None or pd.isna(value):
+            continue
+        name = str(value).strip()
+        if name:
+            return name
+    return None
 
 
 def _session_start(observed_at: datetime) -> datetime:

@@ -143,8 +143,8 @@ def ask(engine, path: str, universe=("VCB",), redis=None):
     app.dependency_overrides[get_sync_session] = lambda: session
     try:
         with patch(
-            "src.stocks.snapshot_router.get_universe",
-            return_value=Universe(symbols=universe),
+            "src.stocks.snapshot_router.build_universe",
+            return_value=Universe(explicit=universe),
         ), patch("src.stocks.providers.store.get_redis", return_value=redis):
             return TestClient(app).get(f"/api/v1/stocks/{path}")
     finally:

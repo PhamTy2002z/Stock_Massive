@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from src.stocks.models import ProviderSnapshot
 
 from .providers.contracts import Capability
-from .providers.normalize import VN_TZ
+from .providers.normalize import VN_TZ, day_in_vn
 
 # Every adapter that writes a market Snapshot dates it at midnight in Vietnam on
 # the day it traded — FiinQuant through ``_session_start``, vnstock through
@@ -40,21 +40,6 @@ def _day_start(day: date) -> datetime:
     return datetime.combine(day, time.min, tzinfo=VN_TZ)
 
 
-def _session_day(effective_at: datetime) -> date:
-    """Read a stored session stamp back as the day it traded in Vietnam.
-
-    PostgreSQL hands back a ``TIMESTAMPTZ`` in UTC, where VN midnight is 17:00
-    the previous day — taking ``.date()`` off it would report every session as
-    the day before. SQLite, which the tests run on, drops the offset and returns
-    the wall time that was written, and that wall time is already Vietnamese.
-    Converting when there is a zone and trusting the clock when there is not is
-    right on both.
-    """
-    if effective_at.tzinfo is None:
-        return effective_at.date()
-    return effective_at.astimezone(VN_TZ).date()
-
-
 def latest_trading_day(session: Session) -> date | None:
     """The newest day the store holds a market Snapshot for, or None.
 
@@ -66,7 +51,7 @@ def latest_trading_day(session: Session) -> date | None:
             ProviderSnapshot.capability == _MARKET
         )
     ).scalar_one_or_none()
-    return None if newest is None else _session_day(newest)
+    return None if newest is None else day_in_vn(newest)
 
 
 def trading_days_before(session: Session, day: date, count: int) -> tuple[date, ...]:
@@ -89,7 +74,7 @@ def trading_days_before(session: Session, day: date, count: int) -> tuple[date, 
         .order_by(ProviderSnapshot.effective_at.desc())
         .limit(count)
     ).scalars()
-    return tuple(_session_day(stamp) for stamp in rows)
+    return tuple(day_in_vn(stamp) for stamp in rows)
 
 
 def trading_days_between(session: Session, start: date, end: date) -> tuple[date, ...]:
@@ -110,7 +95,7 @@ def trading_days_between(session: Session, start: date, end: date) -> tuple[date
         )
         .order_by(ProviderSnapshot.effective_at.asc())
     ).scalars()
-    return tuple(_session_day(stamp) for stamp in rows)
+    return tuple(day_in_vn(stamp) for stamp in rows)
 
 
 def market_generation(session: Session) -> datetime | None:
