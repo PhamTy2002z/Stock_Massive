@@ -70,16 +70,6 @@ class Settings(BaseSettings):
     intraday_symbols: str = "VCB,FPT,VNM,VIC,VHM"  # Comma-separated VN30 subset
     intraday_retention_days: int = 30
 
-    # Daily OHLCV Collector
-    # Disabled by default: the full-market job exhausts vnstock Guest quota and
-    # competes with interactive dashboard requests. Hybrid collectors own this
-    # refresh path instead.
-    daily_ohlcv_enabled: bool = False
-    daily_ohlcv_hour: int = 16  # 4 PM Vietnam time (after market close)
-    daily_ohlcv_minute: int = 0
-    daily_ohlcv_delay: float = 2.0  # Delay between requests to avoid rate limit
-    daily_ohlcv_batch_size: int = 50  # Symbols per batch
-
     # Profit Ranking Census — đếm lợi nhuận toàn bộ HOSE+HNX để dựng Profit
     # Leaders Cohort (src/stocks/census.py, docs/adr/0004). Chiếm đúng khung
     # Chủ nhật 02:00 mà job financial_statements đã bỏ lại.
@@ -111,7 +101,7 @@ class Settings(BaseSettings):
     # Bật mặc định: Universe rỗng thì chu kỳ không làm gì, và với Universe đã khai
     # thì đây là đường duy nhất dữ liệu chảy vào SnapshotStore. Chạy sau khi thị
     # trường đóng cửa lúc 15:00. Đặt 16:15 để không đụng khung giờ của các job
-    # sẵn có (intraday 15:30, sector historical 15:45, cleanup và OHLCV 16:00):
+    # sẵn có (intraday 15:30, sector historical 15:45, cleanup 16:00):
     # tiến trình chỉ có một worker, và hai job gọi ra nhà cung cấp cùng lúc là
     # hai job tranh nhau đúng một kết nối FiinQuant.
     collector_enabled: bool = True

@@ -1,5 +1,4 @@
 import { cn } from "@/lib/utils"
-import { VolumeSpikeChartSkeleton } from "../volume-spike-chart"
 
 // Skeleton
 export function VolumeSpikeDashboardSkeleton({ className }: { className?: string }) {
@@ -8,27 +7,21 @@ export function VolumeSpikeDashboardSkeleton({ className }: { className?: string
       <div className="flex justify-between">
         <div>
           <div className="h-8 w-48 bg-muted animate-pulse rounded" />
-          <div className="h-4 w-32 bg-muted animate-pulse rounded mt-2" />
+          <div className="h-4 w-64 bg-muted animate-pulse rounded mt-2" />
         </div>
         <div className="h-9 w-9 bg-muted animate-pulse rounded" />
       </div>
+      <div className="h-9 w-72 bg-muted animate-pulse rounded" />
       <div className="flex gap-4">
         <div className="h-9 w-32 bg-muted animate-pulse rounded" />
         <div className="h-9 w-32 bg-muted animate-pulse rounded" />
-        <div className="h-5 w-20 bg-muted animate-pulse rounded" />
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {[...Array(3)].map((_, i) => (
-          <div key={i} className="h-24 bg-muted animate-pulse rounded-lg" />
-        ))}
-      </div>
+      {/* The coverage band has a place in the skeleton too: it is part of every
+          answer, so a layout that only makes room for it sometimes would shift
+          the table under the reader once the data lands. */}
+      <div className="h-20 bg-muted animate-pulse rounded-lg" />
       <div className="space-y-2">
-        <div className="h-10 w-64 bg-muted animate-pulse rounded" />
-        <VolumeSpikeChartSkeleton />
-      </div>
-      <div className="space-y-3">
-        <div className="h-6 w-32 bg-muted animate-pulse rounded" />
-        {[...Array(5)].map((_, i) => (
+        {[...Array(6)].map((_, i) => (
           <div key={i} className="h-12 bg-muted animate-pulse rounded-lg" />
         ))}
       </div>

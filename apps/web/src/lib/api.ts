@@ -455,68 +455,73 @@ export async function fetchVN30Overview(): Promise<VN30OverviewResponse> {
   return fetchApi<VN30OverviewResponse>("/stocks/vn30-overview")
 }
 
-// Volume Spike Types
-export type VolumeSpikeAnomalyLevel = "normal" | "elevated" | "high" | "very_high"
+// Volume Spike Signal Types
+//
+// The scope value is the API's own: `universe` is rendered as "Toàn bộ Universe"
+// and never as "toàn thị trường" — this system watches a hundred symbols and
+// the interface must not claim otherwise.
+export type SignalScope = "profit_leaders" | "universe"
+export type SignalCoverageState = "ready" | "partial" | "insufficient_data"
+export type SignalFreshness = "fresh" | "lagging" | "stale"
+
+export interface SignalCoverage {
+  state: SignalCoverageState
+  evaluated: number
+  total: number
+}
+
+export interface SignalCohortVersion {
+  id: number
+  reporting_period: string
+}
 
 export interface VolumeSpikeItem {
   symbol: string
-  company_name: string | null
   exchange: string | null
-  current_volume: number
-  avg_volume_20d: number
-  spike_ratio: number
-  price_change_pct: number | null
+  volume: number
+  baseline_average_volume: number
+  ratio: number
   close_price: number | null
-  anomaly_level: VolumeSpikeAnomalyLevel
-  icb_code: string | null
-  icb_name: string | null
+  change_pct: number | null
+  issues: string[]
 }
 
-export interface IndustryVolumeSpikeGroup {
-  icb_code: string
-  icb_name: string
-  spike_count: number
-  avg_spike_ratio: number
-  stocks: VolumeSpikeItem[]
-}
-
-export interface VolumeSpikeMetadata {
-  calculation_time_ms: number
-  cache_hit: boolean
-  symbols_processed: number
-  symbols_with_spikes: number
+export interface UnevaluableSymbol {
+  symbol: string
+  issues: string[]
 }
 
 export interface VolumeSpikeResponse {
-  trade_date: string
-  total_spikes: number
-  industries: IndustryVolumeSpikeGroup[]
-  metadata: VolumeSpikeMetadata
+  scope: SignalScope
+  trading_day: string | null
+  threshold: number
+  coverage: SignalCoverage
+  freshness: SignalFreshness
+  cohort_version: SignalCohortVersion | null
+  issues: string[]
+  spikes: VolumeSpikeItem[]
+  unevaluable: UnevaluableSymbol[]
 }
 
 export interface VolumeSpikeParams {
-  targetDate?: string
-  minRatio?: number
+  scope?: SignalScope
+  threshold?: number
   exchange?: string
-  includeUpcom?: boolean
-  limit?: number
-  topProfitableOnly?: boolean
+  tradingDay?: string
 }
 
 export async function fetchVolumeSpikes(
   params: VolumeSpikeParams = {}
 ): Promise<VolumeSpikeResponse> {
   const searchParams = new URLSearchParams()
-  if (params.targetDate) searchParams.set("target_date", params.targetDate)
-  if (params.minRatio) searchParams.set("min_ratio", params.minRatio.toString())
+  if (params.scope) searchParams.set("scope", params.scope)
+  if (params.threshold) searchParams.set("threshold", params.threshold.toString())
   if (params.exchange) searchParams.set("exchange", params.exchange)
-  if (params.includeUpcom !== undefined) searchParams.set("include_upcom", String(params.includeUpcom))
-  if (params.limit) searchParams.set("limit", params.limit.toString())
-  if (params.topProfitableOnly) searchParams.set("top_profitable_only", "true")
+  if (params.tradingDay) searchParams.set("trading_day", params.tradingDay)
 
   const queryString = searchParams.toString()
   return fetchApi<VolumeSpikeResponse>(
-    `/stocks/analytics/volume-spikes${queryString ? `?${queryString}` : ""}`
+    `/signals/volume-spikes${queryString ? `?${queryString}` : ""}`
   )
 }
 
