@@ -11,7 +11,7 @@ Issues and specs for this repo live as GitHub issues in `PhamTy2002z/Stock_Massi
 - **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
 - **Close**: `gh issue close <number> --comment "..."`
 
-Infer the repo from `git remote -v` — `gh` does this automatically when run inside a clone. Note this repo has a second remote (`buzz`); `origin` is the GitHub one.
+Infer the repo from `git remote -v` — `gh` does this automatically when run inside a clone. `origin` is the only remote.
 
 ## Pull requests as a triage surface
 
