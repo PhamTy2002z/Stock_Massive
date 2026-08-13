@@ -351,8 +351,26 @@ class TestCoverage:
 
         assert signal.coverage.state is state
         assert signal.coverage.total == 50
-        if state is not CoverageState.INSUFFICIENT_DATA:
-            assert signal.coverage.evaluated == evaluable
+        # Reported even when the answer is refused: forty-four evaluable
+        # companies and a cohort nothing is known about are different states,
+        # and "0 of 50" would describe the second.
+        assert signal.coverage.evaluated == evaluable
+
+    def test_an_answer_it_refuses_to_serve_still_names_what_it_could_not_see(self):
+        sessions = trading_calendar(BASELINE_TRADING_DAYS + 1)
+        session, _ = self._cohort_market(50, 44, sessions)
+
+        signal = volume_spike_signal(
+            session, scope=SignalScope.PROFIT_LEADERS, now=NOW
+        )
+
+        assert signal.trading_day is None
+        assert signal.spikes == ()
+        assert len(signal.unevaluable) == 6
+        assert all(
+            SignalIssue.MISSING_TARGET_SESSION in reading.issues
+            for reading in signal.unevaluable
+        )
 
     @pytest.mark.parametrize(
         "evaluable,state",
@@ -458,46 +476,63 @@ class TestCoverage:
 class TestFreshnessAndHistory:
     """When the answer is from, which is a separate question from how complete."""
 
-    def _market(self, evaluable_on_newest: bool, sessions: tuple[date, ...]):
+    def _market(
+        self,
+        sessions: tuple[date, ...],
+        evaluable: int = 50,
+        evaluable_on_newest: bool = True,
+    ):
+        """Fifty seated companies, of which ``evaluable`` can be evaluated.
+
+        ``evaluable_on_newest`` decides whether the cohort reaches the newest
+        session at all. False leaves a newer market session in the store that no
+        cohort member holds, which is what a lagging signal is made of — the
+        symbol outside the cohort is there to keep that session in the store.
+        """
         session = open_session()
         symbols = [f"C{index:02d}" for index in range(50)]
         seat_cohort(session, symbols)
         list_on(session, symbols)
-        # One symbol outside the cohort holds every session, so the newest
-        # Trading Day exists in the store whether or not the cohort can be
-        # evaluated on it.
         steady_market(session, ["VCB"], sessions)
         window = sessions if evaluable_on_newest else sessions[:-1]
-        steady_market(session, symbols, window)
+        steady_market(session, symbols[:evaluable], window)
+        steady_market(session, symbols[evaluable:], window[:-1])
         return session
 
+    @pytest.mark.parametrize("evaluable,coverage", [(50, CoverageState.READY), (47, CoverageState.PARTIAL)])
     @pytest.mark.parametrize(
-        "evaluable_on_newest,newest_session_age_days,expected",
+        "evaluable_on_newest,newest_session_age_days,freshness",
         [
             (True, 0, Freshness.FRESH),
             (False, 0, Freshness.LAGGING),
             (True, 30, Freshness.STALE),
-            (False, 30, Freshness.STALE),
         ],
     )
     def test_freshness_is_computed_apart_from_coverage(
         self,
+        evaluable: int,
+        coverage: CoverageState,
         evaluable_on_newest: bool,
         newest_session_age_days: int,
-        expected: Freshness,
+        freshness: Freshness,
     ):
+        """All six combinations, because neither answer implies the other.
+
+        A signal can be whole and a week stale, or fresh and three companies
+        short. Collapsed into one status, whichever of the two the collapse
+        dropped is the one the reader needed.
+        """
         last = TODAY - timedelta(days=newest_session_age_days)
         sessions = trading_calendar(BASELINE_TRADING_DAYS + 2, last=last)
-        session = self._market(evaluable_on_newest, sessions)
+        session = self._market(sessions, evaluable, evaluable_on_newest)
 
         signal = volume_spike_signal(
             session, scope=SignalScope.PROFIT_LEADERS, now=NOW
         )
 
-        assert signal.freshness is expected
-        # Coverage is whole in every one of these cases: the signal resolved to
-        # a session its cohort could be evaluated on, however old that is.
-        assert signal.coverage.state is CoverageState.READY
+        assert signal.freshness is freshness
+        assert signal.coverage.state is coverage
+        assert signal.coverage.evaluated == evaluable
 
     def test_a_lagging_signal_says_so_in_its_issues(self):
         sessions = trading_calendar(BASELINE_TRADING_DAYS + 2)

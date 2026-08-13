@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { formatPercent } from "@/lib/format"
-import { signalIssueSentences } from "@/lib/signal-issues"
+import { signalIssueSentence } from "@/lib/signal-issues"
 import {
   ChevronLeft,
   ChevronRight,
@@ -110,7 +110,7 @@ export function SpikeStockTable({
           <tbody>
             {pagedRows.map((stock, idx) => {
               const rank = (page - 1) * pageSize + idx + 1
-              const notes = signalIssueSentences(stock.issues)
+              const notes = stock.issues.map(signalIssueSentence)
               return (
                 <tr
                   key={stock.symbol}

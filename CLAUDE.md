@@ -17,7 +17,7 @@ Nguồn sự thật cho lệnh: `package.json` ở root, `apps/api/Makefile`, `a
 - `pnpm dev` chạy `db`/`redis`/`api` trong Docker còn web trên host, để Next.js có file watching native. Cần web trong container thì `pnpm dev:full`.
 - `make dev` ở `apps/api` chạy backend thẳng trên máy khi cần debug Python; `db`/`redis` vẫn lấy từ Docker (`pnpm dev:api:detach`).
 - Áp migration trong container bằng `pnpm db:migrate`. Tạo revision thì chạy `alembic revision --autogenerate -m "..."` tại `apps/api` với DB đang lên.
-- vnstock là điểm nghẽn quota: 20 req/phút khi thiếu `VNSTOCK_API_KEY`, 60 khi có. Các job nặng (`DAILY_OHLCV_ENABLED`, `SECTOR_HISTORICAL_ENABLED`) mặc định tắt vì lý do này.
+- vnstock là điểm nghẽn quota: 20 req/phút khi thiếu `VNSTOCK_API_KEY`, 60 khi có. Các job nặng (`SECTOR_HISTORICAL_ENABLED`, `BACKFILL_ENABLED`) mặc định tắt vì lý do này.
 - Chạy nhiều worktree song song: đặt `API_PORT`/`WEB_PORT` khác nhau, và sửa `CORS_ORIGINS` cho khớp origin mới của web.
 
 ## Quy tắc bắt buộc

@@ -28,9 +28,6 @@ from src.stocks.collector_schedule import (
 from src.stocks.universe import build_universe
 from src.stocks.schemas.common import MessageResponse
 
-# Must match the id jobs.py registers for this collector.
-OHLCV_JOB_ID = "daily-ohlcv"
-
 # Runs the system performs for itself, on its own schedule. A reader who opened
 # the app to look at a stock cannot start these, stop them, or usefully wait
 # them out, so putting a progress bar for them on screen only asks the reader to
@@ -337,26 +334,3 @@ async def trigger_profit_census_job(
     return MessageResponse(message="Profit census triggered", status="started")
 
 
-@router.post(
-    "/trigger/ohlcv",
-    response_model=MessageResponse,
-    dependencies=[Depends(heavy_rate_limit), Depends(require_admin)],
-)
-async def trigger_ohlcv_job(background_tasks: BackgroundTasks) -> MessageResponse:
-    """Manually trigger OHLCV collection job.
-
-    Runs in background, returns immediately.
-    Check /jobs/status for progress.
-    """
-    from src.core.scheduler import collect_daily_ohlcv_job_async
-
-    # Refuse rather than stack a second run: this job writes to the same tables
-    # and spends the same upstream quota as the one already in flight.
-    if job_store.is_running(OHLCV_JOB_ID):
-        raise HTTPException(
-            status_code=409,
-            detail="Job thu thập OHLCV đang chạy. Theo dõi tiến độ tại /jobs/status.",
-        )
-
-    background_tasks.add_task(collect_daily_ohlcv_job_async)
-    return MessageResponse(message="OHLCV job triggered", status="started")

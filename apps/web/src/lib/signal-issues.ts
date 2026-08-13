@@ -12,6 +12,8 @@
  * parts they do understand.
  */
 
+import type { SignalCoverageState, SignalFreshness } from "@/lib/api"
+
 export type SignalIssueCode =
   | "missing_target_session"
   | "insufficient_history"
@@ -35,18 +37,19 @@ export function signalIssueSentence(code: string): string {
   return SENTENCES[code as SignalIssueCode] ?? "Có vấn đề về dữ liệu cho mục này"
 }
 
-export function signalIssueSentences(codes: string[]): string[] {
-  return codes.map(signalIssueSentence)
-}
-
 /**
  * What the coverage state means for the answer on screen.
  *
  * Deliberately phrased as what the reader is looking at rather than as a status
  * name: "ready" says nothing about whether the fifty companies were all there.
+ *
+ * The state is typed rather than a bare string, so a state the API adds later
+ * fails the build here instead of quietly falling through to the
+ * "chưa đủ để kết luận" wording — which would tell the reader an answer is
+ * unusable when it may be nothing of the sort.
  */
 export function coverageSentence(
-  state: string,
+  state: SignalCoverageState,
   evaluated: number,
   total: number,
 ): string {
@@ -62,7 +65,7 @@ export function coverageSentence(
 /**
  * How the answered session relates to the newest market data.
  */
-export function freshnessSentence(freshness: string): string {
+export function freshnessSentence(freshness: SignalFreshness): string {
   if (freshness === "fresh") return "Phiên mới nhất hệ thống có dữ liệu"
   if (freshness === "lagging") return "Chưa phải phiên mới nhất của thị trường"
   return "Dữ liệu đã cũ"

@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 import {
   coverageSentence,
   freshnessSentence,
-  signalIssueSentences,
+  signalIssueSentence,
 } from "@/lib/signal-issues"
 import type { VolumeSpikeResponse } from "@/lib/api"
 
@@ -64,7 +64,7 @@ export function CoverageBand({
 
       {issues.length > 0 && (
         <ul className="text-sm text-muted-foreground space-y-1">
-          {signalIssueSentences(issues).map((sentence) => (
+          {issues.map(signalIssueSentence).map((sentence) => (
             <li key={sentence}>• {sentence}</li>
           ))}
         </ul>

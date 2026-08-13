@@ -1,4 +1,4 @@
-// Format helpers shared by the spike table and its header.
+// Format helpers for the spike table.
 
 export function formatVolume(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
