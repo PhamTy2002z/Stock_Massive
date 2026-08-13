@@ -90,7 +90,8 @@ stock-massive/
 │           │   ├── schemas/    # 6 Pydantic schema files
 │           │   ├── models.py   # SQLAlchemy ORM models
 │           │   ├── jobs.py     # Background job definitions
-│           │   └── intraday_collector.py, financial_statements_collector.py
+│           │   ├── signals/    # Volume Spike, computed from stored sessions
+│           │   └── intraday_collector.py, census.py, cohort.py
 │           ├── core/        # 9 core config files (config, database, cache, scheduler, etc.)
 │           └── main.py
 │
@@ -141,11 +142,14 @@ All endpoints prefixed with `/api/v1/stocks`:
 | `/{symbol}/volume-analysis` | GET | Volume pattern analysis |
 | `/{symbol}/volume-anomalies` | GET | Volume anomaly detection |
 
-### Analytics (4 endpoints)
+### Signals (1 endpoint)
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/analytics/volume-spikes` | GET | Top volume spike stocks |
-| `/analytics/financial-statements` | GET | Top companies by net profit |
+| `/api/v1/signals/volume-spikes` | GET | Volume spikes for one Signal Scope, with coverage, freshness and issues |
+
+### Analytics (2 endpoints)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
 | `/analytics/sector-historical` | GET | Sector historical performance |
 | `/api/v1/jobs/status` | GET | Poll background job progress |
 
@@ -271,8 +275,7 @@ docker compose -f docker-compose.prod.yml --profile db up -d --build
 | `/login` | Email/password sign in |
 | `/register` | Account creation |
 | `/analytics/deep-dive` | Stock deep-dive analysis |
-| `/analytics/volume-spikes` | Volume spike detection dashboard |
-| `/analytics/financial-statements` | Financial statements ranking |
+| `/analytics/volume-spikes` | Volume spike signal for the profit-leaders cohort and the whole Universe |
 
 ## Documentation
 

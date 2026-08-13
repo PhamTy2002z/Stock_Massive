@@ -43,7 +43,7 @@ export const queryKeys = {
   volumeAnalysis: (symbol: string, days: number = 20) =>
     [...queryKeys.stock(symbol), "volumeAnalysis", days] as const,
   volumeSpikes: (params: VolumeSpikeParams) =>
-    ["analytics", "volumeSpikes", params] as const,
+    ["signals", "volumeSpikes", params] as const,
 
   // Advanced Tab - Technical
   ratioSummary: (symbol: string) =>

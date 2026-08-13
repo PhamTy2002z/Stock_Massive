@@ -16,6 +16,7 @@ from src.core.scheduler import setup_scheduler
 from src.core.vnstock_client import VnstockUnavailable, VnstockUnsupported
 from src.stocks.router import router as stocks_router
 from src.stocks.jobs_router import router as jobs_router
+from src.stocks.signals.router import router as signals_router
 from src.stocks.shared import StockServiceError
 from src.stocks.universe import Universe
 
@@ -85,6 +86,10 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(stocks_router, prefix="/api/v1")
 app.include_router(jobs_router, prefix="/api/v1")
+# Signals sit beside /stocks rather than inside it: a signal is an answer about
+# a set of symbols, and mounting it under a path that reads as one symbol's data
+# would misdescribe every route added here later.
+app.include_router(signals_router, prefix="/api/v1")
 
 
 @app.exception_handler(StockServiceError)
