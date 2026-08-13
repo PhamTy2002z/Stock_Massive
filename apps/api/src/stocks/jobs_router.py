@@ -16,14 +16,16 @@ from src.core.database import get_sync_session
 from src.stocks.backfill import BackfillStateStore, BackfillStatus
 from src.stocks.collector_schedule import (
     BACKFILL_JOB_ID,
+    CENSUS_JOB_ID,
     COLLECTOR_JOB_ID,
     WARMUP_JOB_ID,
     backfill_universe_history,
     catch_up_market_data,
+    census_market_profits,
     collect_universe_snapshots,
     warm_up_symbols,
 )
-from src.stocks.universe import get_universe
+from src.stocks.universe import build_universe
 from src.stocks.schemas.common import MessageResponse
 
 # Must match the id jobs.py registers for this collector.
@@ -34,7 +36,9 @@ OHLCV_JOB_ID = "daily-ohlcv"
 # them out, so putting a progress bar for them on screen only asks the reader to
 # care about plumbing. They stay recorded — operators watch them at
 # /jobs/collector and /jobs/backfill — just not broadcast.
-INTERNAL_JOB_IDS = frozenset({COLLECTOR_JOB_ID, BACKFILL_JOB_ID, WARMUP_JOB_ID})
+INTERNAL_JOB_IDS = frozenset(
+    {COLLECTOR_JOB_ID, BACKFILL_JOB_ID, WARMUP_JOB_ID, CENSUS_JOB_ID}
+)
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -192,7 +196,7 @@ def get_backfill_progress(
             ),
             last_error=recorded[symbol].last_error if symbol in recorded else None,
         )
-        for symbol in get_universe()
+        for symbol in build_universe(db)
     ]
 
 
@@ -292,6 +296,45 @@ async def trigger_market_catchup_job(
 
     background_tasks.add_task(catch_up_market_data)
     return MessageResponse(message="Market catch-up triggered", status="started")
+
+
+@router.post(
+    "/trigger/profit-census",
+    response_model=MessageResponse,
+    dependencies=[Depends(heavy_rate_limit), Depends(require_admin)],
+)
+async def trigger_profit_census_job(
+    background_tasks: BackgroundTasks,
+    refresh_roster: bool = Query(
+        True,
+        description="Re-read the listing register before censusing.",
+    ),
+) -> MessageResponse:
+    """Census the market's profits now, and let the cohort act on the result.
+
+    ``refresh_roster=false`` asks for the daily shape of the run: chase the
+    symbols missing at the newest period without re-reading the listing register.
+    That is the cheaper of the two by a long way, and it is what an operator
+    wants when a quarter is a handful of filings short of rankable.
+
+    Gated on the census switch rather than the collector's: this spends vnstock's
+    statement allowance, which is a different budget from the FiinQuant
+    connection every other run here competes for.
+    """
+    if not get_settings().profit_census_enabled:
+        raise HTTPException(
+            status_code=409,
+            detail="Kiểm kê lợi nhuận đang tắt trong cấu hình (PROFIT_CENSUS_ENABLED).",
+        )
+
+    if job_store.is_running(CENSUS_JOB_ID):
+        raise HTTPException(
+            status_code=409,
+            detail="Một lần kiểm kê đang chạy. Theo dõi tại /jobs/status.",
+        )
+
+    background_tasks.add_task(census_market_profits, refresh_roster)
+    return MessageResponse(message="Profit census triggered", status="started")
 
 
 @router.post(

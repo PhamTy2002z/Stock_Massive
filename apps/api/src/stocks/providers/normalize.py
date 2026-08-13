@@ -7,6 +7,7 @@ rather than copying it.
 """
 
 from collections.abc import Sequence
+from datetime import date, datetime
 from typing import Any
 
 import pandas as pd
@@ -17,6 +18,22 @@ from ..shared import validate_symbol
 # Every provider in scope reports Vietnamese sessions, and several of them
 # stamp timestamps with no zone at all.
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+
+
+def day_in_vn(stamp: datetime) -> date:
+    """Read a stored stamp back as the Vietnamese day it was written for.
+
+    Every adapter dates a session or a reporting period at midnight in Vietnam,
+    so the day is recoverable — but only if the zone is honoured. PostgreSQL
+    hands back a ``TIMESTAMPTZ`` in UTC, where VN midnight is 17:00 the previous
+    day, and taking ``.date()`` off that reports everything as the day before.
+    SQLite, which the tests run on, drops the offset and returns the wall time
+    that was written, which is already Vietnamese. Converting when there is a
+    zone and trusting the clock when there is not is right on both.
+    """
+    if stamp.tzinfo is None:
+        return stamp.date()
+    return stamp.astimezone(VN_TZ).date()
 
 
 def normalized_symbols(symbols: Sequence[str]) -> tuple[str, ...]:

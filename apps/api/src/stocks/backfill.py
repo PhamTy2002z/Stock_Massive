@@ -32,7 +32,7 @@ from .providers import (
     ValuationSnapshot,
 )
 from .providers.normalize import VN_TZ
-from .universe import Universe
+from .universe import Universe, build_universe
 
 logger = logging.getLogger(__name__)
 
@@ -622,7 +622,10 @@ def build_backfill(
     return Backfill(
         store=store,
         state=state,
-        universe=universe or Universe.from_settings(settings),
+        # The cohort half is loaded too: a company seated by the census has the
+        # same claim on deep history as a declared one, and the Warm-up that made
+        # it evaluable only reaches back 25 sessions.
+        universe=universe or build_universe(store.session, settings),
         history=VnstockMarketHistoryProvider(vnstock_source=settings.vnstock_source),
         main_history=main_history,
         valuation_history=valuation_history,
