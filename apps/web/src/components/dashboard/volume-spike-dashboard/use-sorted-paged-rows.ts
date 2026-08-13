@@ -2,18 +2,18 @@
 
 import { useMemo, useState } from "react"
 
-export type SpikeSortField = "spike_ratio" | "current_volume" | "price_change_pct"
+export type SpikeSortField = "ratio" | "volume" | "change_pct"
 
 const PAGE_SIZE = 10
 
 /**
- * Shared sort + paginate state for spike stock tables.
- * Defaults: sort by spike_ratio desc, page 1, page size 10.
+ * Shared sort + paginate state for the spike table.
+ * Defaults: sort by ratio desc, page 1, page size 10.
  */
 export function useSortedPagedRows<
   Row extends { [K in SpikeSortField]?: number | null },
 >(rows: Row[]) {
-  const [sortField, setSortField] = useState<SpikeSortField>("spike_ratio")
+  const [sortField, setSortField] = useState<SpikeSortField>("ratio")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
   const [page, setPage] = useState(1)
 

@@ -1,22 +1,21 @@
-"""Scheduled job functions for intraday data collection and cleanup."""
+"""Scheduled job functions for intraday data collection and cleanup.
+
+The market-wide daily OHLCV collection that used to live here is gone with the
+signal it fed. It read roughly 1,600 symbols out of vnstock every evening to
+answer a question ADR-0003 says this system does not answer, and it spent the
+allowance the Universe's own collection cycle needs. Sessions for the symbols
+this system does follow are written by the Collector, into ``provider_snapshots``.
+"""
 import logging
-import time
 from datetime import datetime, timedelta
 
-import pandas as pd
-from sqlalchemy import delete, text
+from sqlalchemy import delete
 
 from src.core.config import get_settings
-from src.core.database import async_session_factory, get_sync_db
-from src.core.vnstock_wrapper import (
-    VnstockRateLimitError,
-    get_adaptive_delay,
-    get_all_symbols,
-    get_stock_history,
-)
+from src.core.database import async_session_factory
 from src.core.job_status_store import job_store
 from src.stocks.intraday_collector import IntradayCollector
-from src.stocks.models import StockDailyOHLCV, StockIntradayBar
+from src.stocks.models import StockIntradayBar
 from src.stocks.analytics.sector_historical_service import SectorHistoricalService
 
 logger = logging.getLogger(__name__)
@@ -81,204 +80,6 @@ async def cleanup_old_data_job() -> int:
         logger.error(f"Cleanup job failed: {e}")
         job_store.fail_job("cleanup", str(e))
         return 0
-
-
-def collect_daily_ohlcv_job() -> dict:
-    """Daily job to collect OHLCV data for all symbols.
-
-    Runs synchronously due to vnstock blocking calls.
-    Uses safe wrapper with SystemExit protection and adaptive delays.
-
-    Returns:
-        Dictionary with success/failed counts and total rows
-    """
-    if not settings.daily_ohlcv_enabled:
-        logger.info("Daily OHLCV collection disabled")
-        return {"success": 0, "failed": 0, "total_rows": 0, "skipped": True}
-
-    logger.info("Starting daily OHLCV collection for all symbols")
-    start_time = datetime.now()
-
-    # Get all symbols using safe wrapper
-    all_symbols = get_all_symbols(max_retries=3, base_delay=5.0)
-    if not all_symbols:
-        logger.error("Failed to get symbol list (rate limited or error)")
-        job_store.fail_job("daily-ohlcv", "Failed to fetch symbols")
-        return {"success": 0, "failed": 0, "total_rows": 0, "error": "Failed to fetch symbols"}
-
-    job_store.start_job("daily-ohlcv", "Thu thập OHLCV", len(all_symbols))
-
-    logger.info(f"Found {len(all_symbols)} symbols to process")
-
-    # Date range: last 7 days (for daily updates, we only need recent data)
-    end_date = datetime.now().strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
-
-    success_count = 0
-    error_count = 0
-    rate_limit_count = 0
-    total_rows = 0
-    batch_size = settings.daily_ohlcv_batch_size
-    base_delay = settings.daily_ohlcv_delay
-
-    # Process in batches
-    for batch_idx in range(0, len(all_symbols), batch_size):
-        batch = all_symbols[batch_idx : batch_idx + batch_size]
-        batch_num = batch_idx // batch_size + 1
-        total_batches = (len(all_symbols) + batch_size - 1) // batch_size
-
-        logger.info(f"Processing batch {batch_num}/{total_batches} ({len(batch)} symbols)")
-
-        batch_data = []
-        for symbol in batch:
-            try:
-                # Use safe wrapper (VCI only, TCBS discontinued)
-                df = get_stock_history(
-                    symbol=symbol,
-                    start=start_date,
-                    end=end_date,
-                    interval="1D",
-                    source="VCI",
-                    max_retries=2,
-                    base_delay=3.0,
-                )
-
-                if df is not None and not df.empty:
-                    df["symbol"] = symbol
-                    batch_data.append(df)
-                    success_count += 1
-                    total_rows += len(df)
-                else:
-                    error_count += 1
-
-            except VnstockRateLimitError:
-                rate_limit_count += 1
-                logger.warning(f"Rate limited for {symbol}, skipping")
-
-            except Exception as e:
-                logger.debug(f"Error fetching {symbol}: {e}")
-                error_count += 1
-
-            # Adaptive delay based on recent failures
-            delay = get_adaptive_delay(base_delay)
-            time.sleep(delay)
-
-        # Save batch to database
-        if batch_data:
-            _save_ohlcv_batch(batch_data)
-
-        logger.info(
-            f"Batch {batch_num} complete: {success_count} success, "
-            f"{error_count} errors, {rate_limit_count} rate limited"
-        )
-
-        # Update progress after each batch
-        job_store.update_progress(
-            "daily-ohlcv",
-            batch_idx + len(batch),
-            f"Batch {batch_num}/{total_batches}",
-        )
-
-        # Extra pause between batches if rate limits detected
-        if rate_limit_count > 0:
-            batch_pause = min(30, rate_limit_count * 5)
-            logger.info(f"Rate limits detected, pausing {batch_pause}s between batches")
-            time.sleep(batch_pause)
-
-    elapsed = (datetime.now() - start_time).total_seconds() / 60
-    logger.info(
-        f"Daily OHLCV collection complete in {elapsed:.1f} min: "
-        f"{success_count} success, {error_count} failed, "
-        f"{rate_limit_count} rate limited, {total_rows} rows"
-    )
-
-    result = {
-        "success": success_count,
-        "failed": error_count,
-        "rate_limited": rate_limit_count,
-        "total_rows": total_rows,
-        "elapsed_minutes": round(elapsed, 1),
-    }
-    job_store.complete_job("daily-ohlcv", result)
-    return result
-
-
-def _save_ohlcv_batch(batch_data: list) -> int:
-    """Save batch of OHLCV dataframes to database using upsert.
-
-    Args:
-        batch_data: List of pandas DataFrames with OHLCV data
-
-    Returns:
-        Number of rows inserted/updated
-    """
-    if not batch_data:
-        return 0
-
-    combined = pd.concat(batch_data, ignore_index=True)
-    combined = combined.rename(
-        columns={
-            "time": "trade_date",
-            "open": "open_price",
-            "high": "high_price",
-            "low": "low_price",
-            "close": "close_price",
-        }
-    )
-    combined["trade_date"] = pd.to_datetime(combined["trade_date"]).dt.date
-
-    rows_saved = 0
-    with get_sync_db() as conn:
-        for _, row in combined.iterrows():
-            try:
-                conn.execute(
-                    text(
-                        """
-                    INSERT INTO stock_daily_ohlcv
-                        (symbol, trade_date, open_price, high_price, low_price, close_price, volume)
-                    VALUES
-                        (:symbol, :trade_date, :open_price, :high_price, :low_price, :close_price, :volume)
-                    ON CONFLICT (symbol, trade_date) DO UPDATE SET
-                        open_price = EXCLUDED.open_price,
-                        high_price = EXCLUDED.high_price,
-                        low_price = EXCLUDED.low_price,
-                        close_price = EXCLUDED.close_price,
-                        volume = EXCLUDED.volume
-                """
-                    ),
-                    {
-                        "symbol": row["symbol"],
-                        "trade_date": row["trade_date"],
-                        "open_price": (
-                            float(row["open_price"])
-                            if pd.notna(row["open_price"])
-                            else None
-                        ),
-                        "high_price": (
-                            float(row["high_price"])
-                            if pd.notna(row["high_price"])
-                            else None
-                        ),
-                        "low_price": (
-                            float(row["low_price"])
-                            if pd.notna(row["low_price"])
-                            else None
-                        ),
-                        "close_price": (
-                            float(row["close_price"])
-                            if pd.notna(row["close_price"])
-                            else None
-                        ),
-                        "volume": (
-                            int(row["volume"]) if pd.notna(row["volume"]) else 0
-                        ),
-                    },
-                )
-                rows_saved += 1
-            except Exception as e:
-                logger.debug(f"Error saving row: {e}")
-
-    return rows_saved
 
 
 def collect_sector_historical_job() -> dict:

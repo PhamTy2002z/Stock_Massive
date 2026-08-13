@@ -64,10 +64,6 @@ services:
       COLLECTOR_ENABLED: ${COLLECTOR_ENABLED:-true}
       BACKFILL_ENABLED: ${BACKFILL_ENABLED:-false}
       SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
-      # Full-market OHLCV exhausts the vnstock Guest quota and starves the UI.
-      DAILY_OHLCV_ENABLED: ${DAILY_OHLCV_ENABLED:-false}
-      DAILY_OHLCV_DELAY: ${DAILY_OHLCV_DELAY:-2.0}
-      DAILY_OHLCV_BATCH_SIZE: ${DAILY_OHLCV_BATCH_SIZE:-50}
       SECTOR_HISTORICAL_ENABLED: ${SECTOR_HISTORICAL_ENABLED:-false}
     volumes:
       - ./apps/api/src:/code/src
