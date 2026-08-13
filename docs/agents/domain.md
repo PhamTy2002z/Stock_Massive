@@ -16,14 +16,17 @@ If any of these files don't exist, **proceed silently**. Don't flag their absenc
 ```
 /
 ├── CONTEXT.md
-├── docs/adr/
-│   ├── 0001-....md
-│   └── 0002-....md
+├── docs/
+│   ├── adr/       # 0001-....md, 0002-....md, ...
+│   ├── specs/     # implementation specifications the ADRs feed
+│   └── research/  # primary-source notes behind the decisions
 ├── apps/api/
 └── apps/web/
 ```
 
-Neither `CONTEXT.md` nor `docs/adr/` exists yet, and there are no other project docs — `CLAUDE.md` is currently the only written context. Read it, then read the code.
+Both exist. `docs/specs/` holds the implementation specifications the ADRs feed, and
+`docs/research/` holds the primary-source notes behind them. Read `CONTEXT.md` and the
+ADRs that touch your area, then the code.
 
 ## Use the glossary's vocabulary
 
