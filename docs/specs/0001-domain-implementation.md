@@ -1,13 +1,21 @@
 # Implementation specification — domain model of 2026-08
 
 This specification turns the shared understanding recorded in `CONTEXT.md` and
-`docs/adr/0001`, `0003`, `0004`, `0005` into buildable work. It is the single
-input to implementation; anything not derivable from it or from those artifacts
-is an open decision listed in [Open decisions](#open-decisions), not a choice
-made silently during coding.
+`docs/adr/0001`, `0003`, `0004`, `0005` into buildable work. Anything not
+derivable from it or from those artifacts is an open decision listed in
+[Open decisions](#3-open-decisions), not a choice made silently during coding.
 
 Terms in **bold** are glossary terms and always carry their `CONTEXT.md`
 meaning.
+
+> **Partly superseded.** §M0–§M2 stand as written. **§M3 and §M4 are superseded** by
+> [`0002-alpha-desk-product.md`](0002-alpha-desk-product.md) and
+> [`0003-intelligent-quant-architecture.md`](0003-intelligent-quant-architecture.md),
+> which re-issue that work as A1–A7 against the persistence model, table names, and
+> contracts settled after this spec was written. They are kept below as the record of
+> what was assumed before those decisions closed; **do not build from them.** Four of the
+> five entries under [Open decisions](#3-open-decisions) have since been settled and
+> carry their resolutions there.
 
 ## 1. Where the code stands today
 
@@ -22,8 +30,9 @@ meaning.
 | **Trading Day** | `src/core/trading_calendar.is_trading_day` is a weekday test | Not the domain concept. Keep it as a *scheduling* gate only. |
 | **Profit Ranking Census**, **Cohort Version** | `FinancialStatement` + `financial_statements_collector.py` rank quarterly profit | Ancestor with the wrong shape. Superseded. |
 | **Volume Spike** | `AnalyticsService.get_volume_spikes` over `stock_daily_ohlcv`, grouped by industry | Legacy market-wide path ADR-0003 forbids. Superseded. |
-| **Watchlist**, **Analysis**, **Analysis Run** | `apps/web/src/app/(dashboard)/watchlist/_components/.gitkeep` | Missing entirely. |
-| **Thread**, **Turn**, **Tool Call Trace**, **Widget**, **Capability Probe** | — | Missing entirely. No LLM route is wired anywhere. |
+| **Watchlist**, **Analysis**, **Analysis Run** | `apps/web/src/app/(dashboard)/watchlist/_components/.gitkeep` | Missing entirely. Built by spec `0003` §A2. |
+| **Thread**, **Turn**, **Tool Call Trace**, **Widget**, **Capability Probe** | — | Missing entirely. No LLM route is wired anywhere. Built by spec `0003` §A3, §A5, §A6. |
+| **Signal Field**, **Signal Registry**, **Window Health**, `prepare_bars()` | — | Missing entirely. Built by spec `0003` §A1. |
 
 Two legacy paths are *replaced*, not extended: the full-market
 `stock_daily_ohlcv` volume-anomaly path and the `financial_statements` ranking.
@@ -33,15 +42,19 @@ correct and an incorrect answer are servable.
 ## 2. Milestones
 
 Each milestone is independently shippable and ends at a stated exit criterion.
-`M0 → M1 → M2` is a hard chain. `M3` depends only on `M0`. `M4` depends on `M3`.
+`M0 → M1 → M2` is a hard chain.
 
-| ID | Title | Depends on |
-| --- | --- | --- |
-| M0 | Trading Day, market generation, Warm-up | — |
-| M1 | Profit Ranking Census and Cohort Version | M0 |
-| M2 | Volume Spike serving with coverage and provenance | M1 |
-| M3 | Watchlist, Analysis, Analysis Run | M0 |
-| M4 | Thread, Turn, Tool Call Trace, Widget, Capability Probe | M3 |
+| ID | Title | Depends on | Status |
+| --- | --- | --- | --- |
+| M0 | Trading Day, market generation, Warm-up | — | built |
+| M1 | Profit Ranking Census and Cohort Version | M0 | built |
+| M2 | Volume Spike serving with coverage and provenance | M1 | open |
+| ~~M3~~ | ~~Watchlist, Analysis, Analysis Run~~ | M0 | superseded by spec `0003` §A2 |
+| ~~M4~~ | ~~Thread, Turn, Tool Call Trace, Widget, Capability Probe~~ | M3 | superseded by spec `0003` §A3/§A5/§A6 |
+
+Spec `0003` re-issues the superseded pair as A1–A7 and adds the milestones those
+decisions turned out to need — a signals foundation, an LLM boundary, the nightly
+pipeline, and an evaluation gate.
 
 Every milestone must pass the repository gates before it is called done:
 `make test` in `apps/api`, and `pnpm type-check`, `pnpm lint`, `pnpm test`,
@@ -620,6 +633,11 @@ Source**.
 
 ## M3 — Watchlist, Analysis, Analysis Run
 
+> **Superseded** by [`0003`](0003-intelligent-quant-architecture.md) §A2. The
+> lifecycle below is right in outline and wrong in its table names and column set:
+> the canonical tables are `watchlist_entries`, `analysis`, and `analysis_run`, in
+> one revision alongside six more. Build from `0003`.
+
 ### Scope
 
 Let a user save symbols, and produce one shared **Analysis** per
@@ -672,8 +690,7 @@ that logs any violation rather than serving it.
 ### Watchlist rules
 
 - Cap: `WATCHLIST_MAX_ACTIVE = 10` per user, counting only `state='active'`.
-  (`CONTEXT.md` states 10; `docs/adr/0001` still says 5 in two places and must be
-  corrected as part of this milestone.)
+  (ADR-0001's two occurrences of 5 have since been amended to 10.)
 - A symbol can be added only if it is in the **Universe** at that moment.
   Attempting anything else is a 422 naming the reason.
 - A symbol that leaves the **Universe** — most often a cohort member dropping out
@@ -698,7 +715,7 @@ not-yet-reached symbol look identical, and the interface cannot know whether to
 offer a retry.
 
 The **Analysis** payload template is not yet specified — see
-[Open decisions](#open-decisions). M3 builds the lifecycle, storage, states,
+[Open decisions](#3-open-decisions). M3 builds the lifecycle, storage, states,
 API, and interface against a versioned payload; the template's fields are filled
 in once decided, without schema churn.
 
@@ -767,11 +784,18 @@ concurrent watchlists.
 
 ## M4 — Thread, Turn, Tool Call Trace, Widget, Capability Probe
 
+> **Superseded** by [`0003`](0003-intelligent-quant-architecture.md) §A3, §A5, and
+> §A6. Its three modelling decisions survive verbatim — order by `seq`, traces
+> anchored to the user message, `symbols` as a GIN-indexed column — but the table
+> names differ (`agent_thread`, `agent_message`, `agent_tool_call`, `agent_turn`),
+> **there is no `widgets` table**, and the Redis-stream replay sketched below is
+> replaced by snapshot-based SSE replay. Build from `0003`.
+
 ### Scope
 
 The conversational surface, with the durability and provenance the glossary
 requires. This milestone cannot start until the LLM route is chosen and recorded
-as an ADR — see [Open decisions](#open-decisions).
+as an ADR — see [Open decisions](#3-open-decisions).
 
 ### Data model
 
@@ -903,22 +927,31 @@ answering wrongly.
 
 ## 3. Open decisions
 
-These are genuinely undecided. Each blocks the milestone named and should be
-settled as an ADR or a `CONTEXT.md` entry, not during coding.
+Four of the five have since been settled. They are kept with their resolutions
+rather than deleted, so a reader who remembers the question finds the answer.
 
-1. **Watchlist cap: 10 or 5.** `CONTEXT.md:36` says 10; `docs/adr/0001:3,23` say
-   5. This spec builds 10 and requires ADR-0001 to be corrected in M3. Blocks: M3.
-2. **The Analysis template.** "Dashboard theo template cố định" fixes the shape
-   but not the fields. Which figures, which comparisons, which chart types, and
-   what the written judgement must always address. Blocks: M3 completion, not M3
-   start.
-3. **The LLM route.** No provider, model, or gateway is chosen or wired, and the
-   **Capability Probe** exists precisely because a gateway's translation layer
-   cannot be trusted. Blocks: M4 entirely.
-4. **Price-level judgements and the disclaimer.** `CONTEXT.md:3` commits to
-   giving concrete price-range views with a disclaimer. Its wording, its
-   placement, and whether it is a product surface or a legal one are unsettled.
-   Blocks: M3 completion.
+1. ~~**Watchlist cap: 10 or 5.**~~ **Resolved: 10.** ADR-0001 has been amended —
+   its two occurrences of 5 now read 10 — and the cap counts `active` entries
+   only, with `unsupported` entries outside it.
+2. ~~**The Analysis template.**~~ **Resolved.** The artifact is bounded inline
+   with the four fixed-order axes as tabs, expanding to the briefing treatment;
+   fields come from a versioned **Analysis Field Profile** capped at six per axis.
+   See [`0002`](0002-alpha-desk-product.md) §5 and
+   [`0003`](0003-intelligent-quant-architecture.md) §8.
+3. ~~**The LLM route.**~~ **Resolved.** Dev runs on CLIProxyAPI via CCS; production
+   is a real provider API behind the same env flip, with `gpt-5.6-luna` for batch
+   and `gpt-5.6-terra` for sessions. The **Capability Probe** stays, and it is why
+   the boundary is a protocol rather than an SDK. See
+   [`0003`](0003-intelligent-quant-architecture.md) §3 and
+   [ADR-0014](../adr/0014-atomic-spend-admission-and-workload-models.md).
+4. ~~**Price-level judgements and the disclaimer.**~~ **Resolved, by splitting the
+   number from the judgment.** The price zone is a registered field computed in
+   code, reading as *this symbol's ordinary daily range*; the verdict is the
+   model's and may rest only on registered fields. The disclaimer is a versioned
+   **Risk Notice** attached by the backend, which the model cannot omit, rewrite,
+   or satisfy with prose. See
+   [ADR-0010](../adr/0010-statistical-bar-for-computed-signal-fields.md) and
+   [ADR-0015](../adr/0015-system-prompt-contract-as-the-versioned-behavioural-core.md).
 5. **Whether an operator can pin a symbol into the cohort's 50 places.** ADR-0003
    says the system never silently evicts an explicitly selected symbol, but does
    not say whether an operator may reserve a cohort seat. Assumed **no** for now.
