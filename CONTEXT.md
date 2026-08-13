@@ -30,6 +30,41 @@ _Avoid_: primary, default provider
 Provider Source phục vụ phần một Capability mà Main Source không với tới — nằm ngoài Universe, sâu hơn độ sâu lịch sử được cấp, hoặc nhà cung cấp không có.
 _Avoid_: fallback, backup, secondary
 
+### Corporate actions
+
+These terms fix what a stored price means with respect to corporate actions, and
+how a raw price becomes a comparable one.
+
+**Price Basis**:
+What the price fields of one Snapshot mean with respect to corporate actions:
+`raw` for exactly what the exchange published for that session, or
+`adjusted_at_source` for prices the Provider Source rescaled as of `observed_at`.
+Declared by the Adapter that wrote the Snapshot, because it is the only code that
+knows which flag it passed — not by a config flag, which rows already written do
+not follow when it flips, and not by a session date, because each symbol's seam
+falls where its own Backfill happened to run. Only price fields have a basis:
+traded quantity and traded money are raw in every Snapshot.
+_Avoid_: adjusted flag, split-adjusted, convention
+
+**Corporate Action**:
+An event that changes a symbol's share count or its reference price at one
+ex-date — a split, a bonus or share dividend, a rights issue, a cash dividend —
+carrying the exercise ratio a share-count change needs, which a dividend record
+alone does not. It is `confirmed` only once a raw price gap in the store
+corroborates its ex-date, and an `unconfirmed` one may not drive arithmetic. A
+share-count change breaks the comparability of traded quantity; a cash dividend
+does not, and traded money survives both.
+_Avoid_: dividend, event, split
+
+**Adjustment Factor**:
+The ratio that turns a raw price into one comparable across a Corporate Action,
+applied when a window is read rather than when a session is stored. Computed from
+the action's declared exercise ratio and value per share; the raw price gap at the
+ex-date only confirms the date and never supplies the factor, since that gap is
+the entitlement and the session's ordinary move together. It applies to price
+fields only — there is no quantity equivalent, and none is wanted.
+_Avoid_: split ratio, multiplier, adjustment
+
 ### Sản phẩm AI
 
 **Watchlist**:
@@ -163,8 +198,10 @@ _Avoid_: status, cache age, last refreshed
 A stable, machine-readable condition explaining why a symbol or result is not
 ordinary and complete, such as `missing_target_session`,
 `insufficient_history`, `recently_inactive`, `cohort_warming`,
-`lagging_market_data`, `stale_market_data`, or `ranking_unavailable`. It is
-domain provenance, not an HTTP or infrastructure error.
+`lagging_market_data`, `stale_market_data`, `ranking_unavailable`,
+`mixed_price_basis`, `unadjustable_price_basis`, `unexplained_price_gap`,
+`volume_basis_break`, or `unconfirmed_corporate_action`. It is domain provenance,
+not an HTTP or infrastructure error.
 _Avoid_: error message, warning text, exception
 
 **Recently Inactive**:
