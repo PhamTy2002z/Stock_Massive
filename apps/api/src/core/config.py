@@ -80,11 +80,32 @@ class Settings(BaseSettings):
     daily_ohlcv_delay: float = 2.0  # Delay between requests to avoid rate limit
     daily_ohlcv_batch_size: int = 50  # Symbols per batch
 
-    # Financial Statements Job
-    financial_statements_enabled: bool = True
-    financial_statements_hour: int = 2  # 02:00 ICT (Sunday)
-    financial_statements_minute: int = 0
-    financial_statements_delay: float = 2.0  # seconds between API calls
+    # Profit Ranking Census — đếm lợi nhuận toàn bộ HOSE+HNX để dựng Profit
+    # Leaders Cohort (src/stocks/census.py, docs/adr/0004). Chiếm đúng khung
+    # Chủ nhật 02:00 mà job financial_statements đã bỏ lại.
+    #
+    # Hạn mức vnstock là chỗ nghẽn thật: ~1.600 mã × 2 request, trên 20
+    # request/phút khi không có API key. Một lần chạy đầy không xong trong một
+    # lượt, nên nó tự giãn nhịp và lần sau bỏ qua mã đã có số ở kỳ đang xét.
+    # Lần thử lại hằng ngày lúc 03:00 chỉ đuổi theo số mã còn thiếu ở kỳ mới,
+    # nên nó không đọc lại danh sách niêm yết.
+    profit_census_enabled: bool = True
+    profit_census_weekday: int = 6  # Chủ nhật
+    profit_census_hour: int = 2
+    profit_census_minute: int = 0
+    profit_census_request_delay: float = 1.2
+    profit_census_retry_hour: int = 3
+    profit_census_retry_minute: int = 0
+
+    # Cohort — 50 chỗ trong Universe dành cho nhóm dẫn đầu lợi nhuận
+    # (src/stocks/cohort.py). Ngưỡng kích hoạt là 45 chứ không phải 50: chờ đủ
+    # cả 50 mã evaluable sẽ để một mã gặp sự cố nhà cung cấp giữ cả bảng xếp
+    # hạng của một quý ngoài vòng phục vụ. Ngưỡng 0,95 là mức phủ mà một kỳ báo
+    # cáo phải đạt trước khi được xếp hạng — xếp hạng một kỳ mà nửa thị trường
+    # chưa báo cáo là tôn vinh ai nộp sớm.
+    cohort_size: int = 50
+    cohort_activation_min_members: int = 45
+    rankable_period_coverage: float = 0.95
 
     # Collector — chu kỳ thu thập Snapshot cho Universe (src/stocks/collector.py).
     # Bật mặc định: Universe rỗng thì chu kỳ không làm gì, và với Universe đã khai
@@ -112,6 +133,19 @@ class Settings(BaseSettings):
     # xuống là cách đóng khoảng lịch sử mà hiện chưa nguồn nào nạp.
     backfill_depth_days: int = 10 * 365
     backfill_main_source_days: int = 5 * 365
+
+    # Warm-up — nạp lại cửa sổ tín hiệu gần đây cho một mã (src/stocks/warmup.py).
+    # 25 phiên: một Volume Spike cần 20 phiên nền cộng phiên đích, phần dư để
+    # một phiên nhà cung cấp chưa kịp bổ sung không làm mã đó thiếu nền.
+    warmup_window_trading_days: int = 25
+
+    # Market catch-up — thu thập lại lúc 23:00 khi Trading Day chưa nhúc nhích
+    # (docs/adr/0005). Main Source bổ sung phiên vừa đóng vào muộn trong tối,
+    # nên chu kỳ 16:15 thường xuyên chỉ lấy được phiên hôm trước; không có lần
+    # chạy này thì phiên đó không bao giờ được thu.
+    market_catchup_enabled: bool = True
+    market_catchup_hour: int = 23
+    market_catchup_minute: int = 0
 
     # Rate Limiting
     rate_limit_enabled: bool = True

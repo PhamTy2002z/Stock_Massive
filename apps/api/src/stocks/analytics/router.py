@@ -12,14 +12,10 @@ from src.core.ratelimit import heavy_rate_limit, standard_rate_limit
 from src.core.vnstock_client import VnstockUnavailable
 from src.stocks.analytics.service import (
     AnalyticsService,
-    build_financial_statements_cache_key,
     build_volume_spikes_cache_key,
-    financial_statements_cache,
     volume_spikes_cache,
 )
 from src.stocks.schemas.analytics import (
-    FinancialStatementsCollectionResult,
-    FinancialStatementsResponse,
     VolumeSpikeResponse,
     VolumeSpikeMetadata,
 )
@@ -41,62 +37,6 @@ sector_peers_response_cache = TradingHoursCache(
 
 # Include sector historical router
 router.include_router(sector_historical_router, tags=["sector-historical"])
-
-
-@router.get("/financial-statements", response_model=FinancialStatementsResponse)
-async def get_financial_statements(
-    limit: int = Query(50, ge=1, le=100, description="Number of results"),
-    exchange: Optional[str] = Query(None, pattern="^(HOSE|HSX|HNX)$", description="Filter by exchange: HOSE (or HSX) or HNX"),
-    year: Optional[int] = Query(None, ge=2020, le=2030, description="Fiscal year"),
-    quarter: Optional[int] = Query(None, ge=1, le=4, description="Fiscal quarter"),
-    db: AsyncSession = Depends(get_db),
-) -> FinancialStatementsResponse:
-    """Get top performing companies by net profit.
-
-    Returns ranked list of companies sorted by quarterly net profit.
-    Data is updated weekly via scheduled batch job.
-    """
-    # Build cache key
-    cache_key = build_financial_statements_cache_key(limit, exchange, year, quarter)
-
-    # Try cache
-    cached = financial_statements_cache.get(cache_key)
-    if cached:
-        return FinancialStatementsResponse(**cached)
-
-    # Query database
-    service = AnalyticsService(db)
-    result = await service.get_financial_statements(
-        limit=limit,
-        exchange=exchange,
-        year=year,
-        quarter=quarter,
-    )
-
-    # Cache result
-    financial_statements_cache.set(cache_key, result.model_dump(mode='json'))
-
-    return result
-
-
-@router.post(
-    "/financial-statements/collect",
-    response_model=FinancialStatementsCollectionResult,
-    dependencies=[Depends(heavy_rate_limit), Depends(require_admin)],
-)
-async def collect_financial_statements(
-    db: AsyncSession = Depends(get_db),
-) -> FinancialStatementsCollectionResult:
-    """Manually trigger financial statements data collection.
-
-    Fetches quarterly financials for all HOSE+HNX symbols and stores
-    ranked data. This is a long-running operation (10-30 minutes).
-
-    Note: Data is also collected automatically every Sunday at 02:00 ICT.
-    """
-    service = AnalyticsService(db)
-    result = await service.collect_financial_statements()
-    return FinancialStatementsCollectionResult(**result)
 
 
 @router.get(

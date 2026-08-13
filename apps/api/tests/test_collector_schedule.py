@@ -16,10 +16,15 @@ from src.core.job_status_store import job_store
 from src.stocks.collector import CollectionSummary, SymbolFailure
 from src.stocks.collector_schedule import (
     COLLECTOR_JOB_ID,
+    WARMUP_JOB_ID,
+    catch_up_market_data,
     collect_universe_snapshots,
+    market_has_advanced_to,
     run_collection_cycle,
+    run_symbol_warmup,
 )
 from src.stocks.providers import Capability
+from src.stocks.warmup import WarmupResult, WarmupSummary
 
 TRADING_DAY = date(2026, 8, 7)  # a Friday
 CLOSED_DAY = date(2026, 8, 8)  # the Saturday after it
@@ -271,3 +276,141 @@ class TestLastRunIsVisible:
         assert status is not None
         assert status.status == "failed"
         assert "SSLError" in status.error
+
+
+class TestMarketCatchUp:
+    """The late run that exists because a healthy cycle can still fall a day behind.
+
+    FiinQuant appends the session that just closed late in the evening, so the
+    16:15 cycle routinely comes away with yesterday's. Left alone that session
+    is never collected: the next cycle asks for the one that just closed, and
+    the deep Backfill never looks at recent history (``docs/adr/0005``).
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_day_the_store_already_holds_is_not_collected_again(self):
+        cycle = RecordingCycle()
+
+        outcome = await catch_up_market_data(
+            cycle=cycle, today=TRADING_DAY, latest=lambda: TRADING_DAY
+        )
+
+        assert cycle.runs == 0
+        assert outcome.status == "skipped"
+
+    @pytest.mark.asyncio
+    async def test_a_trading_day_the_store_never_reached_is_collected(self):
+        cycle = RecordingCycle()
+
+        outcome = await catch_up_market_data(
+            cycle=cycle,
+            today=TRADING_DAY,
+            latest=lambda: date(2026, 8, 6),
+        )
+
+        assert cycle.runs == 1
+        assert outcome.status == "completed"
+
+    @pytest.mark.asyncio
+    async def test_an_empty_store_is_collected_rather_than_read_as_up_to_date(self):
+        cycle = RecordingCycle()
+
+        await catch_up_market_data(
+            cycle=cycle, today=TRADING_DAY, latest=lambda: None
+        )
+
+        assert cycle.runs == 1
+
+    @pytest.mark.asyncio
+    async def test_a_closed_exchange_is_not_worth_a_catch_up(self):
+        cycle = RecordingCycle()
+
+        await catch_up_market_data(
+            cycle=cycle, today=CLOSED_DAY, latest=lambda: date(2026, 8, 6)
+        )
+
+        assert cycle.runs == 0
+
+    def test_the_store_is_asked_rather_than_the_last_run_record(self):
+        """A cycle that succeeded and wrote nothing is not a day collected.
+
+        Reading the job record would call that done; reading the store sees the
+        gap that is actually there.
+        """
+        assert market_has_advanced_to(TRADING_DAY, latest=lambda: TRADING_DAY)
+        assert not market_has_advanced_to(TRADING_DAY, latest=lambda: date(2026, 8, 6))
+        assert not market_has_advanced_to(TRADING_DAY, latest=lambda: None)
+
+    def test_it_runs_under_the_collectors_own_guard(self):
+        """The same work spending the same single FiinQuant connection."""
+        cycle = RecordingCycle()
+        job_store.start_job(COLLECTOR_JOB_ID, "Thu thập Universe")
+
+        outcome = run_collection_cycle(cycle=cycle)
+
+        assert cycle.runs == 0
+        assert outcome.status == "skipped"
+
+    @pytest.mark.asyncio
+    async def test_the_catch_up_is_scheduled_late_in_the_evening(self):
+        from src.core.scheduler import setup_scheduler
+
+        scheduler = AsyncMock()
+        with patch("src.core.scheduler.settings", scheduler_settings()):
+            await setup_scheduler(scheduler)
+
+        trigger = one_schedule(scheduler, "market-catchup")
+        assert (trigger.hour, trigger.minute) == (23, 0)
+
+    @pytest.mark.asyncio
+    async def test_the_catch_up_can_be_turned_off_by_configuration(self):
+        from src.core.scheduler import setup_scheduler
+
+        scheduler = AsyncMock()
+        with patch(
+            "src.core.scheduler.settings",
+            scheduler_settings(market_catchup_enabled=False),
+        ):
+            await setup_scheduler(scheduler)
+
+        assert one_schedule(scheduler, "market-catchup") is None
+
+
+class TestWarmupRuns:
+    def test_a_warm_up_is_guarded_apart_from_the_collection_cycle(self):
+        """A cycle in flight must not stall a new cohort member for a day.
+
+        The two are not the same work: a Warm-up reads a window of history for
+        a handful of named symbols, a cycle reads one session for the whole
+        Universe.
+        """
+        warmed: list[tuple[str, ...]] = []
+
+        def warm(symbols):
+            warmed.append(tuple(symbols))
+            return WarmupSummary(
+                results=(WarmupResult(symbol="FPT", status="completed", sessions_written=21),)
+            )
+
+        job_store.start_job(COLLECTOR_JOB_ID, "Thu thập Universe")
+        outcome = run_symbol_warmup(["FPT"], warm=warm)
+
+        assert warmed == [("FPT",)]
+        assert outcome.status == "completed"
+        assert outcome.sessions_written == 21
+
+    def test_a_second_warm_up_is_refused_while_one_is_in_flight(self):
+        job_store.start_job(WARMUP_JOB_ID, "Nạp cửa sổ tín hiệu")
+
+        outcome = run_symbol_warmup(["FPT"], warm=lambda symbols: None)
+
+        assert outcome.status == "skipped"
+
+    def test_a_failed_warm_up_reports_the_reason_without_raising(self):
+        def warm(symbols):
+            raise ConnectionError("gateway unavailable")
+
+        outcome = run_symbol_warmup(["FPT"], warm=warm)
+
+        assert outcome.status == "failed"
+        assert "ConnectionError" in outcome.error

@@ -193,8 +193,11 @@ def backfill(engine, symbols=("HPG",), history=None, **overrides) -> Backfill:
     settings.update(overrides)
     return Backfill(
         store=SnapshotStore(session, redis=None),
-        state=BackfillStateStore(session),
-        universe=Universe(symbols=tuple(symbols)),
+        # The state store keeps the run's clock: the backoff it writes is read
+        # back by the next run's selection, and two clocks would let a symbol
+        # come out of a backoff it never served.
+        state=BackfillStateStore(session, now=settings["now"]),
+        universe=Universe(explicit=tuple(symbols)),
         history=history if history is not None else FakeHistory(),
         **settings,
     )
@@ -401,8 +404,8 @@ class TestTheOperatorsRoute:
         app.dependency_overrides[get_sync_session] = lambda: session
         try:
             with patch(
-                "src.stocks.jobs_router.get_universe",
-                return_value=Universe(symbols=("HPG", "VCB", "FPT")),
+                "src.stocks.jobs_router.build_universe",
+                return_value=Universe(explicit=("HPG", "VCB", "FPT")),
             ):
                 body = TestClient(app).get("/api/v1/jobs/backfill").json()
         finally:
@@ -619,3 +622,107 @@ class TestTheMainSourceWindow:
         backfill(engine, history=FakeHistory(), valuation_history=valuation).run()
 
         assert valuation.windows == []
+
+
+class TestFairRotation:
+    """A run has a handful of slots, and a broken symbol must not own them all.
+
+    In Universe order the first symbols take every slot of every run, so a
+    symbol that fails on its first chunk is retried tonight, tomorrow and the
+    night after while the symbols behind it are never reached at all
+    (``docs/adr/0005``).
+    """
+
+    universe = ("AAA", "BBB", "CCC")
+
+    def state_for(self, engine, symbol: str) -> SymbolBackfill:
+        with Session(engine) as session:
+            return BackfillStateStore(session).get(symbol)
+
+    def test_a_failing_symbol_frees_the_slot_for_the_ones_behind_it(self):
+        engine = database()
+        history = FakeHistory(broken={"AAA"})
+
+        def run_once() -> set[str]:
+            """Which symbols this run actually spent its slot on."""
+            before = len(history.windows)
+            backfill(
+                engine, symbols=self.universe, history=history, symbols_per_run=1
+            ).run()
+            return {symbol for symbol, _, _ in history.windows[before:]}
+
+        assert run_once() == {"AAA"}
+        # AAA is in its backoff now, so the slot goes to the symbol behind it
+        # rather than being spent on the same failure a second night running.
+        assert run_once() == {"BBB"}
+        assert run_once() == {"CCC"}
+
+    def test_a_symbol_inside_its_backoff_is_not_asked_again(self):
+        engine = database()
+        history = FakeHistory(broken={"AAA"})
+
+        backfill(engine, symbols=("AAA",), history=history, symbols_per_run=1).run()
+        asked_once = len(history.windows_for("AAA"))
+        backfill(engine, symbols=("AAA",), history=history, symbols_per_run=1).run()
+
+        assert len(history.windows_for("AAA")) == asked_once
+
+    def test_the_backoff_widens_with_each_failure_in_a_row(self):
+        engine = database()
+        history = FakeHistory(broken={"AAA"})
+        clock = NOW
+
+        for _ in range(3):
+            backfill(
+                engine,
+                symbols=("AAA",),
+                history=history,
+                symbols_per_run=1,
+                now=lambda captured=clock: captured,
+            ).run()
+            # Far enough past the backoff that the next run takes it on again.
+            clock += timedelta(days=14)
+
+        state = self.state_for(engine, "AAA")
+        assert state.attempts == 3
+        assert state.next_attempt_at is not None
+
+    def test_a_symbol_out_of_its_backoff_comes_back_into_the_rotation(self):
+        engine = database()
+        history = FakeHistory(broken={"AAA"})
+
+        backfill(engine, symbols=("AAA",), history=history, symbols_per_run=1).run()
+        asked_once = len(history.windows_for("AAA"))
+        backfill(
+            engine,
+            symbols=("AAA",),
+            history=history,
+            symbols_per_run=1,
+            now=lambda: NOW + timedelta(days=14),
+        ).run()
+
+        assert len(history.windows_for("AAA")) > asked_once
+
+    def test_progress_clears_the_backoff_rather_than_a_clean_run(self):
+        """A walk that got one chunk further is a walk that is working.
+
+        Making it serve out a penalty earned by an earlier failure would stall a
+        symbol that is only slow.
+        """
+        engine = database()
+        backfill(
+            engine, symbols=("AAA",), history=FakeHistory(broken={"AAA"}), symbols_per_run=1
+        ).run()
+        assert self.state_for(engine, "AAA").attempts == 1
+
+        backfill(
+            engine,
+            symbols=("AAA",),
+            history=FakeHistory(),
+            symbols_per_run=1,
+            now=lambda: NOW + timedelta(days=14),
+        ).run()
+
+        state = self.state_for(engine, "AAA")
+        assert state.attempts == 0
+        assert state.next_attempt_at is None

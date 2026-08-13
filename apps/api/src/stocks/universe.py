@@ -4,20 +4,37 @@ One place answers "which symbols are we watching" for both the collector and
 the serving path, so the two can never disagree about what the system has
 promised to have data for.
 
+The hundred places are split in half (``docs/adr/0003``). Fifty are declared by
+an operator and fifty are earned: they belong to the active Profit Leaders
+Cohort, which the census reseats as the market's profits change. The halves are
+not symmetrical — the declared half is a commitment and the cohort half is
+derived — so when the two together would breach the cap it is the cohort
+activation that is refused, never the configuration.
+
 The cap is a safety valve for the collector — its run has to fit in the window
 after the session closes, and the gateway has to survive the batch — not a
 quota sold to anyone. It never reaches the interface.
 """
 
-from dataclasses import dataclass
-from functools import lru_cache
+import logging
+from dataclasses import dataclass, field
 from typing import Iterator
+
+from sqlalchemy.orm import Session
 
 from src.core.config import Settings, get_settings
 
 from .shared import StockServiceError, validate_symbol
 
+logger = logging.getLogger(__name__)
+
 UNIVERSE_MAX_SYMBOLS = 100
+
+# Half the Universe, reserved for the Profit Leaders Cohort. An operator may
+# declare up to the other half; declaring more is refused at parse time rather
+# than quietly evicting cohort members, because a cohort silently missing its
+# lower ranks produces a ranking nobody asked for.
+UNIVERSE_EXPLICIT_MAX = 50
 
 
 class UniverseConfigurationError(RuntimeError):
@@ -33,16 +50,65 @@ class UniverseConfigurationError(RuntimeError):
 class Universe:
     """The symbols the system has promised to collect and serve, in order.
 
+    Two halves rather than one list, because they answer to different things: the
+    explicit half comes from configuration and changes when an operator says so,
+    the cohort half comes from the active Cohort Version and changes when the
+    market's profits do. Kept apart, a reader can always tell which is which —
+    flattened into one tuple, a symbol dropping out of the Universe would be
+    indistinguishable from an operator removing it.
+
     Order is preserved only so logs and batches read predictably; nothing
     depends on it, and two declarations that differ only in order describe the
     same Universe.
     """
 
-    symbols: tuple[str, ...]
+    explicit: tuple[str, ...]
+    cohort: tuple[str, ...] = field(default=())
+
+    @property
+    def symbols(self) -> tuple[str, ...]:
+        """Both halves as one list, explicit first, deduplicated.
+
+        A symbol in both halves holds one place, not two, and it is the explicit
+        entry that survives — the two are the same ticker, so which wins matters
+        only in that the answer has to be stable.
+        """
+        merged = dict.fromkeys(self.explicit)
+        merged.update(dict.fromkeys(self.cohort))
+        return tuple(merged)
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "Universe":
+        """The declared half alone, with no cohort seated.
+
+        Used where there is no database session to read a Cohort Version from —
+        startup validation, and callers that only need to know what was
+        configured. Everything that collects or serves builds through
+        ``build_universe`` instead.
+        """
         return parse_universe(settings.universe_symbols)
+
+    def with_cohort(self, cohort: tuple[str, ...]) -> "Universe":
+        """Seat a cohort, or refuse to and keep the configuration whole.
+
+        The cap is checked after deduplication and the refusal is total: a cohort
+        trimmed to fit would be the top forty-something companies presented as
+        the top fifty. An explicitly declared symbol is never evicted to make
+        room.
+        """
+        merged = dict.fromkeys(self.explicit)
+        merged.update(dict.fromkeys(cohort))
+        if len(merged) > UNIVERSE_MAX_SYMBOLS:
+            logger.error(
+                "Refusing to seat the cohort: %d declared symbols and %d cohort "
+                "members would put the Universe at %d, over the cap of %d",
+                len(self.explicit),
+                len(cohort),
+                len(merged),
+                UNIVERSE_MAX_SYMBOLS,
+            )
+            return self
+        return Universe(explicit=self.explicit, cohort=cohort)
 
     def contains(self, symbol: str) -> bool:
         """Answer membership for arbitrary text without raising.
@@ -89,16 +155,54 @@ def parse_universe(declared: str) -> Universe:
     # Deduplicated before the cap is applied: the cap bounds the work the
     # collector actually does, and it never asks for the same symbol twice.
     unique = tuple(dict.fromkeys(normalized))
-    if len(unique) > UNIVERSE_MAX_SYMBOLS:
+    if len(unique) > UNIVERSE_EXPLICIT_MAX:
         raise UniverseConfigurationError(
-            f"Universe is capped at {UNIVERSE_MAX_SYMBOLS} symbols "
-            f"but {len(written)} are declared ({len(unique)} of them distinct)"
+            f"Universe declarations are capped at {UNIVERSE_EXPLICIT_MAX} symbols "
+            f"but {len(written)} are declared ({len(unique)} of them distinct). "
+            f"The other {UNIVERSE_MAX_SYMBOLS - UNIVERSE_EXPLICIT_MAX} of the "
+            f"{UNIVERSE_MAX_SYMBOLS} places are reserved for the Profit Leaders "
+            f"Cohort (docs/adr/0003)"
         )
 
-    return Universe(symbols=unique)
+    return Universe(explicit=unique)
 
 
-@lru_cache
-def get_universe() -> Universe:
-    """Return the configured Universe, parsed once per process."""
-    return Universe.from_settings(get_settings())
+# The cohort half changes while the process runs, so it cannot be memoized for
+# the life of the process the way the configured half was. Keyed on the active
+# Cohort Version's id instead: a new version means a new key, and there is no
+# window where a promoted cohort is being served by one caller and not another.
+_cohort_cache: dict[int | None, tuple[str, ...]] = {}
+
+
+def build_universe(session: Session, settings: Settings | None = None) -> Universe:
+    """The Universe as it stands: declared symbols plus the active cohort.
+
+    Reads the active Cohort Version rather than a stored symbol list, so the
+    Universe and the cohort can never drift apart. The result is cached per
+    version id — the query is cheap but it runs on the serving path, and the
+    answer only changes when a version is promoted.
+    """
+    from .cohort import CohortStore
+
+    settings = settings or get_settings()
+    declared = Universe.from_settings(settings)
+
+    version = CohortStore(session).active()
+    version_id = version.id if version is not None else None
+    if version_id not in _cohort_cache:
+        _cohort_cache.clear()
+        _cohort_cache[version_id] = (
+            () if version is None else CohortStore(session).symbols(version_id)
+        )
+
+    return declared.with_cohort(_cohort_cache[version_id])
+
+
+def forget_cohort_cache() -> None:
+    """Drop the memoized cohort membership.
+
+    Called after an activation so the next read sees the new version, and by
+    tests. Clearing rather than invalidating one key: there is only ever one
+    active version, so anything already in here is by definition stale.
+    """
+    _cohort_cache.clear()

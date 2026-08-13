@@ -11,19 +11,46 @@ from src.core.config import get_settings
 from src.core.trading_calendar import is_trading_day
 from src.stocks.collector_schedule import (
     backfill_universe_history,
+    catch_up_market_data,
+    census_market_profits,
     collect_universe_snapshots,
+    retry_census_gaps,
 )
 from src.stocks.jobs import (
     cleanup_old_data_job,
     collect_daily_ohlcv_job,
     collect_intraday_data_job,
-    collect_financial_statements_job,
     collect_sector_historical_job,
 )
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+
+
+def vn_cron(**fields) -> CronTrigger:
+    """Build a cron trigger in Vietnam time, anchored to Vietnam time.
+
+    ``start_time`` is passed explicitly, and that is the whole point of this
+    function. APScheduler 4 alpha defaults it from the host's local clock. The
+    API container runs in UTC, and ``CronTrigger`` matches the cron fields
+    against those wall-clock digits without first converting the default start
+    to its configured timezone. Vietnam runs seven hours ahead of UTC, so a
+    trigger registered at 22:31 ICT is anchored at 15:31 and its next fire is
+    computed as 17:00 *today* — an instant five hours in the past, which
+    APScheduler runs immediately as a misfire.
+
+    The effect is that every restart is also an unscheduled run of every job
+    whose time falls in the seven hours behind it, all at once. That is worse
+    than an early run: the collection cycle and the history backfill are 45
+    minutes apart on purpose, because the process has one worker and the free
+    FiinQuant tier grants one concurrent connection, so firing them together is
+    exactly the contention the stagger exists to prevent.
+
+    Every schedule in this module goes through here. A ``CronTrigger`` built
+    directly would look correct and reintroduce the bug.
+    """
+    return CronTrigger(timezone=VN_TZ, start_time=datetime.now(VN_TZ), **fields)
 
 
 async def collect_daily_ohlcv_job_async():
@@ -93,12 +120,19 @@ ohlcv_job_wrapper = make_job_wrapper(
     "Daily OHLCV completed",
     "Daily OHLCV failed",
 )
-financial_statements_job_wrapper = make_job_wrapper(
-    "financial_statements_job_wrapper",
-    "Financial Statements Collection",
-    collect_financial_statements_job,
-    "Financial statements collection completed",
-    "Financial statements collection failed",
+profit_census_job_wrapper = make_job_wrapper(
+    "profit_census_job_wrapper",
+    "Profit Ranking Census",
+    census_market_profits,
+    "Profit census completed",
+    "Profit census failed",
+)
+profit_census_retry_job_wrapper = make_job_wrapper(
+    "profit_census_retry_job_wrapper",
+    "Profit Ranking Census Retry",
+    retry_census_gaps,
+    "Profit census retry completed",
+    "Profit census retry failed",
 )
 universe_snapshots_job_wrapper = make_job_wrapper(
     "universe_snapshots_job_wrapper",
@@ -113,6 +147,13 @@ universe_backfill_job_wrapper = make_job_wrapper(
     backfill_universe_history,
     "Universe history backfill completed",
     "Universe history backfill failed",
+)
+market_catchup_job_wrapper = make_job_wrapper(
+    "market_catchup_job_wrapper",
+    "Market Catch-up",
+    catch_up_market_data,
+    "Market catch-up completed",
+    "Market catch-up failed",
 )
 sector_historical_job_wrapper = make_job_wrapper(
     "sector_historical_job_wrapper",
@@ -138,10 +179,9 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
     # Daily intraday collection at configured time (default 15:30 Vietnam time)
     await scheduler.add_schedule(
         collect_intraday_job_wrapper,
-        CronTrigger(
+        vn_cron(
             hour=settings.intraday_collect_hour,
             minute=settings.intraday_collect_minute,
-            timezone="Asia/Ho_Chi_Minh",
         ),
         id="intraday-collection-daily",
     )
@@ -153,7 +193,7 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
     # Daily cleanup at 16:00 Vietnam time (30 min after collection)
     await scheduler.add_schedule(
         cleanup_job_wrapper,
-        CronTrigger(hour=16, minute=0, timezone="Asia/Ho_Chi_Minh"),
+        vn_cron(hour=16, minute=0),
         id="data-cleanup-daily",
     )
     logger.info("Scheduled data cleanup at 16:00 ICT")
@@ -162,10 +202,9 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
     if settings.daily_ohlcv_enabled:
         await scheduler.add_schedule(
             ohlcv_job_wrapper,
-            CronTrigger(
+            vn_cron(
                 hour=settings.daily_ohlcv_hour,
                 minute=settings.daily_ohlcv_minute,
-                timezone="Asia/Ho_Chi_Minh",
             ),
             id="daily-ohlcv-collection",
         )
@@ -175,31 +214,47 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
             f"(delay={settings.daily_ohlcv_delay}s, batch={settings.daily_ohlcv_batch_size})"
         )
 
-    # Weekly financial statements collection on Sunday at 02:00 ICT
-    if settings.financial_statements_enabled:
+    # The market-wide profit census: a full pass weekly, and a daily pass that
+    # only chases the symbols missing at the newest reporting period. Both are
+    # tracked runs under one guard, so the retry cannot start on top of a weekly
+    # pass that is still walking the market (docs/adr/0004).
+    if settings.profit_census_enabled:
         await scheduler.add_schedule(
-            financial_statements_job_wrapper,
-            CronTrigger(
-                hour=settings.financial_statements_hour,
-                minute=settings.financial_statements_minute,
-                day_of_week="sun",
-                timezone="Asia/Ho_Chi_Minh",
+            profit_census_job_wrapper,
+            vn_cron(
+                hour=settings.profit_census_hour,
+                minute=settings.profit_census_minute,
+                day_of_week=settings.profit_census_weekday,
             ),
-            id="collect-financial-statements",
+            id="profit-census-weekly",
         )
         logger.info(
-            f"Scheduled financial statements collection: Sunday "
-            f"{settings.financial_statements_hour:02d}:{settings.financial_statements_minute:02d} ICT"
+            f"Scheduled the profit census: day_of_week="
+            f"{settings.profit_census_weekday} at "
+            f"{settings.profit_census_hour:02d}:{settings.profit_census_minute:02d} ICT"
+        )
+
+        await scheduler.add_schedule(
+            profit_census_retry_job_wrapper,
+            vn_cron(
+                hour=settings.profit_census_retry_hour,
+                minute=settings.profit_census_retry_minute,
+            ),
+            id="profit-census-retry-daily",
+        )
+        logger.info(
+            f"Scheduled the profit census retry at "
+            f"{settings.profit_census_retry_hour:02d}:"
+            f"{settings.profit_census_retry_minute:02d} ICT"
         )
 
     # Daily sector historical performance at 15:45 ICT (after sector-performance at 15:30)
     if settings.sector_historical_enabled:
         await scheduler.add_schedule(
             sector_historical_job_wrapper,
-            CronTrigger(
+            vn_cron(
                 hour=settings.sector_historical_hour,
                 minute=settings.sector_historical_minute,
-                timezone="Asia/Ho_Chi_Minh",
             ),
             id="sector-historical-daily",
         )
@@ -212,10 +267,9 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
     if settings.collector_enabled:
         await scheduler.add_schedule(
             universe_snapshots_job_wrapper,
-            CronTrigger(
+            vn_cron(
                 hour=settings.collector_hour,
                 minute=settings.collector_minute,
-                timezone="Asia/Ho_Chi_Minh",
             ),
             id="universe-snapshots",
         )
@@ -229,16 +283,32 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
     if settings.backfill_enabled:
         await scheduler.add_schedule(
             universe_backfill_job_wrapper,
-            CronTrigger(
+            vn_cron(
                 hour=settings.backfill_hour,
                 minute=settings.backfill_minute,
-                timezone="Asia/Ho_Chi_Minh",
             ),
             id="universe-backfill",
         )
         logger.info(
             f"Scheduled the Universe history backfill at "
             f"{settings.backfill_hour}:{settings.backfill_minute:02d} ICT"
+        )
+
+    # Late enough that the Main Source has appended the session that closed
+    # today. The 16:15 cycle routinely comes away with yesterday's session,
+    # and without this run that day is never collected at all.
+    if settings.market_catchup_enabled:
+        await scheduler.add_schedule(
+            market_catchup_job_wrapper,
+            vn_cron(
+                hour=settings.market_catchup_hour,
+                minute=settings.market_catchup_minute,
+            ),
+            id="market-catchup",
+        )
+        logger.info(
+            f"Scheduled the market catch-up at "
+            f"{settings.market_catchup_hour}:{settings.market_catchup_minute:02d} ICT"
         )
 
     logger.info("=== Scheduler setup complete ===")
