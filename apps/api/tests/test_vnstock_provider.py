@@ -12,7 +12,9 @@ import pandas as pd
 import pytest
 
 from src.stocks.providers.contracts import (
+    MARKET_SCHEMA_VERSION,
     Capability,
+    PriceBasis,
     ProviderSource,
     ShareType,
     main_source,
@@ -132,6 +134,29 @@ class TestMarketHistoryNormalization:
         assert latest.last_price == 22_000
         assert latest.volume == 28_003_806
         assert latest.metadata.source is ProviderSource.VNSTOCK
+
+    def test_every_session_says_the_provider_had_already_adjusted_it(self):
+        """The Cover Source era declares itself, so it can be refused later.
+
+        There is no raw option on this endpoint: what comes back was rescaled
+        for every corporate action up to ``observed_at``, and that basis cannot
+        be recomputed from what is stored. A window lying wholly here is refused
+        for that reason rather than for being mixed — which only works if the
+        rows say which era they belong to (``docs/adr/0006``).
+        """
+        provider = history_provider(FakeQuote(hpg_history()))
+
+        snapshots = provider.fetch_market_history(
+            "HPG", date(2018, 3, 1), date(2018, 3, 2)
+        )
+
+        assert [snapshot.price_basis for snapshot in snapshots] == [
+            PriceBasis.ADJUSTED_AT_SOURCE
+        ] * 2
+        assert all(
+            snapshot.metadata.schema_version == MARKET_SCHEMA_VERSION
+            for snapshot in snapshots
+        )
 
     def test_a_session_is_dated_by_the_session_rather_than_by_the_read(self):
         provider = history_provider(FakeQuote(hpg_history()))

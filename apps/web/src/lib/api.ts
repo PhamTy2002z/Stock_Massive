@@ -820,6 +820,12 @@ export interface SnapshotSection<TData> extends SnapshotSectionMeta {
 }
 
 export interface MarketSnapshotData {
+  /**
+   * What the `*_price` fields mean with respect to corporate actions. It
+   * reaches the price fields alone: every volume and every `*_value_vnd` is
+   * reported as traded on either basis, and nothing rescales them.
+   */
+  price_basis: string
   price_unit: string
   last_price: number | null
   reference_price: number | null
@@ -914,6 +920,14 @@ export interface SeriesPoint {
 }
 
 export interface MarketBar extends SeriesPoint {
+  /**
+   * What this bar's prices mean: `raw` is what the exchange published for the
+   * session, `adjusted_at_source` what the provider had already rescaled for
+   * corporate actions. A weekly or monthly bar spanning the seam between the
+   * two eras reports `mixed` — those prices are not on one scale, and naming
+   * either side would be a claim about the other.
+   */
+  price_basis: string
   open_price: number | null
   high_price: number | null
   low_price: number | null
