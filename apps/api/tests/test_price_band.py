@@ -41,10 +41,10 @@ from src.stocks.providers.contracts import (
     SnapshotMetadata,
 )
 from src.stocks.providers.normalize import VN_TZ
+from src.stocks.signals.issues import SignalIssue
 from src.stocks.signals.price_band import (
     MIGRATION_PROGRAMME_END,
     BandAnchorBasis,
-    BandIssue,
     ExchangeAsOf,
     ExchangeMigration,
     LimitLock,
@@ -460,7 +460,7 @@ class TestWhatTheDetectorRefusesToDecide:
             reading = detect_limit_lock(session, "CCC", date(2026, 3, 9))
 
         assert reading.lock is LimitLock.INDETERMINATE
-        assert reading.degraded_reason is BandIssue.ANCHOR_NOT_STORED
+        assert reading.degraded_reason is SignalIssue.ANCHOR_NOT_STORED
         assert reading.limits is None
         # The regime still answers: which band applied is a separate question
         # from whether this session can be measured against it.
@@ -493,7 +493,7 @@ class TestWhatTheDetectorRefusesToDecide:
             reading = detect_limit_lock(session, "MBB", date(2025, 8, 13))
 
         assert reading.lock is LimitLock.INDETERMINATE
-        assert reading.degraded_reason is BandIssue.PRICE_MOVE_EXCEEDS_BAND
+        assert reading.degraded_reason is SignalIssue.PRICE_MOVE_EXCEEDS_BAND
 
     def test_a_session_the_store_does_not_hold_is_not_a_session_that_did_not_move(
         self,
@@ -505,7 +505,7 @@ class TestWhatTheDetectorRefusesToDecide:
             reading = detect_limit_lock(session, "MBB", date(2025, 8, 14))
 
         assert reading.lock is LimitLock.INDETERMINATE
-        assert reading.degraded_reason is BandIssue.SESSION_NOT_STORED
+        assert reading.degraded_reason is SignalIssue.MISSING_TARGET_SESSION
 
     def test_an_adjusted_session_cannot_be_judged_against_a_band(self):
         """Rescaled closes sit off the tick grid the band is defined on.
@@ -536,7 +536,7 @@ class TestWhatTheDetectorRefusesToDecide:
             reading = detect_limit_lock(session, "MBB", date(2019, 3, 4))
 
         assert reading.lock is LimitLock.INDETERMINATE
-        assert reading.degraded_reason is BandIssue.SESSION_NOT_RAW
+        assert reading.degraded_reason is SignalIssue.UNADJUSTABLE_PRICE_BASIS
 
     def test_an_adjusted_anchor_cannot_supply_a_reference_either(self):
         """The seam runs between two sessions, so a raw bar can have an adjusted
@@ -563,7 +563,7 @@ class TestWhatTheDetectorRefusesToDecide:
             reading = detect_limit_lock(session, "MBB", date(2021, 8, 5))
 
         assert reading.lock is LimitLock.INDETERMINATE
-        assert reading.degraded_reason is BandIssue.ANCHOR_NOT_RAW
+        assert reading.degraded_reason is SignalIssue.MIXED_PRICE_BASIS
 
     def test_a_symbol_that_did_not_trade_the_session_before_has_no_reference(self):
         """A suspension is also where the band widens, and by how much depends
@@ -585,7 +585,7 @@ class TestWhatTheDetectorRefusesToDecide:
             reading = detect_limit_lock(session, "MBB", date(2025, 8, 14))
 
         assert reading.lock is LimitLock.INDETERMINATE
-        assert reading.degraded_reason is BandIssue.ANCHOR_MISSING
+        assert reading.degraded_reason is SignalIssue.ANCHOR_MISSING
 
     def test_the_first_session_the_store_holds_has_nothing_behind_it(self):
         with open_session() as session:
@@ -601,7 +601,7 @@ class TestWhatTheDetectorRefusesToDecide:
 
             reading = detect_limit_lock(session, "MBB", date(2025, 8, 14))
 
-        assert reading.degraded_reason is BandIssue.ANCHOR_MISSING
+        assert reading.degraded_reason is SignalIssue.ANCHOR_MISSING
 
     def test_a_session_without_a_range_cannot_be_shown_to_have_been_locked(self):
         """A close at the ceiling is not a lock, so a bar with no high and low
@@ -637,7 +637,7 @@ class TestWhatTheDetectorRefusesToDecide:
             reading = detect_limit_lock(session, "MBB", date(2025, 8, 14))
 
         assert reading.lock is LimitLock.INDETERMINATE
-        assert reading.degraded_reason is BandIssue.SESSION_PRICES_INCOMPLETE
+        assert reading.degraded_reason is SignalIssue.SESSION_PRICES_INCOMPLETE
 
     def test_a_symbol_off_the_register_gets_no_band_to_be_judged_against(self):
         with open_session() as session:
@@ -654,7 +654,7 @@ class TestWhatTheDetectorRefusesToDecide:
             reading = detect_limit_lock(session, "MBB", date(2025, 8, 14))
 
         assert reading.lock is LimitLock.INDETERMINATE
-        assert reading.degraded_reason is BandIssue.EXCHANGE_UNKNOWN
+        assert reading.degraded_reason is SignalIssue.EXCHANGE_UNKNOWN
 
 
 class TestWhichStoredSessionIsRead:

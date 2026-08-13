@@ -57,6 +57,7 @@ from src.stocks.models import ListingRoster
 from ..providers import Capability, Exchange, MarketSnapshot, PriceBasis, SnapshotStore
 from ..providers.normalize import VN_TZ
 from ..trading_day import trading_days_before
+from .issues import SignalIssue
 
 # The permitted daily move, per board. Decimal rather than float because the
 # comparison that matters happens at the tick boundary: 82,700 × 0.93 is
@@ -144,49 +145,6 @@ class BandAnchorBasis(str, Enum):
     PRIOR_DAY_VWAP = "prior_day_vwap"
 
 
-class BandIssue(str, Enum):
-    """Why a session could not be judged against its band. A closed set.
-
-    Stable strings, because they travel: Window Health echoes them and the tool
-    layer serializes them for a model to cite. A reason that changed spelling
-    between releases would break a reader that had learned to recognise it.
-    """
-
-    # No board for the symbol, so no band to measure against.
-    EXCHANGE_UNKNOWN = "exchange_unknown"
-
-    # The store holds no session for this symbol on this day. Not the same as a
-    # session that did not move.
-    SESSION_NOT_STORED = "session_not_stored"
-
-    # The session is ``adjusted_at_source``: its prices have been rescaled off
-    # the tick grid the band is defined on.
-    SESSION_NOT_RAW = "session_not_raw"
-
-    # The session is held without a high and a low, so what it did between the
-    # limits is unknown. A close at the ceiling is not a lock.
-    SESSION_PRICES_INCOMPLETE = "session_prices_incomplete"
-
-    # The anchor this board's band is measured from is not in the store and
-    # cannot be derived from it: UPCOM's prior-day VWAP.
-    ANCHOR_NOT_STORED = "anchor_not_stored"
-
-    # The symbol has no stored session on the trading day before this one, so
-    # there is no previous close to anchor to.
-    ANCHOR_MISSING = "anchor_missing"
-
-    # The previous session is ``adjusted_at_source`` while this one is raw —
-    # what a symbol's own Price Basis seam looks like from one day to the next.
-    ANCHOR_NOT_RAW = "anchor_not_raw"
-
-    # The session moved further than its band permits, which means the anchor is
-    # wrong rather than that the market broke: an ex-date the exchange adjusted
-    # its reference for and the previous close did not follow. Once the
-    # Corporate Action series exists this same measurement is what separates an
-    # accounted ex-date from ADR-0006's ``unexplained_price_gap``.
-    PRICE_MOVE_EXCEEDS_BAND = "price_move_exceeds_band"
-
-
 class LimitLock(str, Enum):
     """Whether the session traded anywhere other than at one of its limits."""
 
@@ -266,7 +224,7 @@ class BandReading:
     anchor_date: date | None
     limits: BandLimits | None
     lock: LimitLock
-    degraded_reason: BandIssue | None
+    degraded_reason: SignalIssue | None
 
     @property
     def degraded(self) -> bool:
@@ -371,6 +329,11 @@ def detect_limit_lock(
     to a band-pressure reading; the second is an order book that could not clear,
     which is what collapses a range estimator to zero and has to be excluded from
     one.
+
+    The two sessions this reads — the one under test and the one it is anchored
+    to — are a two-day window, and the Price Basis vocabulary applies to it as
+    to any other: both adjusted is ``unadjustable_price_basis``, one of each is
+    ``mixed_price_basis``, and only an all-raw pair is measured.
     """
     symbol = symbol.upper()
     regime = resolve_band_regime(session, symbol, day, migrations=migrations)
@@ -381,21 +344,21 @@ def detect_limit_lock(
 
     target = held.get(day)
     if target is None:
-        return _undecided(symbol, day, regime, BandIssue.SESSION_NOT_STORED)
-    if target.price_basis is not PriceBasis.RAW:
-        return _undecided(symbol, day, regime, BandIssue.SESSION_NOT_RAW)
-    if target.high_price is None or target.low_price is None:
-        return _undecided(symbol, day, regime, BandIssue.SESSION_PRICES_INCOMPLETE)
+        return _undecided(symbol, day, regime, SignalIssue.MISSING_TARGET_SESSION)
     if regime.exchange is None:
-        return _undecided(symbol, day, regime, BandIssue.EXCHANGE_UNKNOWN)
+        return _undecided(symbol, day, regime, SignalIssue.EXCHANGE_UNKNOWN)
     if regime.anchor_basis is BandAnchorBasis.PRIOR_DAY_VWAP:
-        return _undecided(symbol, day, regime, BandIssue.ANCHOR_NOT_STORED)
+        return _undecided(symbol, day, regime, SignalIssue.ANCHOR_NOT_STORED)
 
     anchor_session = held.get(anchor_date) if anchor_date else None
     if anchor_session is None or anchor_session.last_price is None:
-        return _undecided(symbol, day, regime, BandIssue.ANCHOR_MISSING)
-    if anchor_session.price_basis is not PriceBasis.RAW:
-        return _undecided(symbol, day, regime, BandIssue.ANCHOR_NOT_RAW)
+        return _undecided(symbol, day, regime, SignalIssue.ANCHOR_MISSING)
+
+    basis_issue = _basis_of_the_pair(target, anchor_session)
+    if basis_issue is not None:
+        return _undecided(symbol, day, regime, basis_issue)
+    if target.high_price is None or target.low_price is None:
+        return _undecided(symbol, day, regime, SignalIssue.SESSION_PRICES_INCOMPLETE)
 
     anchor = _price(anchor_session.last_price)
     limits = band_limits(regime.exchange, anchor)
@@ -411,7 +374,7 @@ def detect_limit_lock(
             anchor_date=anchor_date,
             limits=limits,
             lock=LimitLock.INDETERMINATE,
-            degraded_reason=BandIssue.PRICE_MOVE_EXCEEDS_BAND,
+            degraded_reason=SignalIssue.PRICE_MOVE_EXCEEDS_BAND,
         )
 
     if high == low == limits.ceiling:
@@ -496,11 +459,31 @@ def _sessions(
     }
 
 
+def _basis_of_the_pair(
+    target: MarketSnapshot,
+    anchor: MarketSnapshot,
+) -> SignalIssue | None:
+    """What the two sessions' bases say about reading them together, if anything.
+
+    Both raw is the only pair that can be measured. Everything else is named the
+    way ADR-0006 names it for a window, because that is what a session and its
+    anchor are: two adjusted rows are ``unadjustable_price_basis`` — that basis
+    was fixed at ``observed_at`` and cannot be recomputed from what is stored —
+    while one of each is ``mixed_price_basis``, which is a symbol's own seam
+    falling between two consecutive days.
+    """
+    if target.price_basis is PriceBasis.RAW and anchor.price_basis is PriceBasis.RAW:
+        return None
+    if target.price_basis is anchor.price_basis:
+        return SignalIssue.UNADJUSTABLE_PRICE_BASIS
+    return SignalIssue.MIXED_PRICE_BASIS
+
+
 def _undecided(
     symbol: str,
     day: date,
     regime: BandRegime,
-    reason: BandIssue,
+    reason: SignalIssue,
 ) -> BandReading:
     """A reading that withholds the verdict, and says which input it is short of."""
     return BandReading(

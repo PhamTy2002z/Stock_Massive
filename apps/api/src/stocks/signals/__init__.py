@@ -5,12 +5,12 @@ Collector and the Warm-up already wrote, so an evening the provider is down
 still answers — with an older session, and saying so.
 """
 
+from .issues import SignalIssue
 from .price_band import (
     BAND_LIMIT_BY_EXCHANGE,
     EXCHANGE_MIGRATIONS,
     MIGRATION_PROGRAMME_END,
     BandAnchorBasis,
-    BandIssue,
     BandLimits,
     BandReading,
     BandRegime,
@@ -26,7 +26,6 @@ from .volume_spike import (
     BASELINE_TRADING_DAYS,
     CoverageState,
     Freshness,
-    SignalIssue,
     SignalScope,
     VolumeSpikeSignal,
     signal_cache_key,
@@ -37,7 +36,6 @@ __all__ = [
     "BAND_LIMIT_BY_EXCHANGE",
     "BASELINE_TRADING_DAYS",
     "BandAnchorBasis",
-    "BandIssue",
     "BandLimits",
     "BandReading",
     "BandRegime",
