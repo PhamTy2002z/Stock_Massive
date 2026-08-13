@@ -18,6 +18,13 @@ from .schemas.snapshot import MarketBar
 # scope, so sub-daily granularity stays on the frozen provider-backed route.
 SESSION_INTERVALS = ("1D", "1W", "1M")
 
+# What a bar says when the sessions it folds do not share one Price Basis. It
+# belongs to bars alone — no stored session is ever stamped with it — and it
+# exists because a week straddling the seam is genuinely on two scales. Naming
+# either one would be a claim about prices that were never on it, and the
+# reader is exactly the long-range chart that has to see the seam.
+MIXED_PRICE_BASIS = "mixed"
+
 
 def bucket(session: date, interval: str) -> date:
     """The period a session's bar is filed under.
@@ -46,6 +53,20 @@ def _summed(values: Sequence[float | int | None]) -> float | int | None:
     return sum(values)  # type: ignore[arg-type]
 
 
+def _price_basis(sessions: Sequence[MarketSnapshot]) -> str:
+    """What the prices in this bar mean, or that they do not agree.
+
+    Unlike the source, this is not the last session's. The source answers "who
+    measured the close", which one provider always did; the basis says what
+    scale the whole bar's prices are on, and a bar folding a raw open into an
+    already-adjusted high has no single answer to that.
+    """
+    bases = {session.price_basis for session in sessions}
+    if len(bases) == 1:
+        return bases.pop().value
+    return MIXED_PRICE_BASIS
+
+
 def _bar(period_start: date, sessions: Sequence[MarketSnapshot]) -> MarketBar:
     """Fold one period's sessions into the bar a chart draws.
 
@@ -58,6 +79,7 @@ def _bar(period_start: date, sessions: Sequence[MarketSnapshot]) -> MarketBar:
     return MarketBar(
         effective_at=datetime.combine(period_start, time.min, tzinfo=VN_TZ),
         source=sessions[-1].metadata.source.value,
+        price_basis=_price_basis(sessions),
         open_price=sessions[0].open_price,
         high_price=max(
             (s.high_price for s in sessions if s.high_price is not None), default=None

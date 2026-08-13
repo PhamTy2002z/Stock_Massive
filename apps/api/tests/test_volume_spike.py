@@ -21,7 +21,11 @@ from src.stocks.models import (
     ProviderSnapshot,
 )
 from src.stocks.providers import Capability, Exchange, ProviderSource
-from src.stocks.providers.contracts import MarketSnapshot, SnapshotMetadata
+from src.stocks.providers.contracts import (
+    MARKET_SCHEMA_VERSION,
+    MarketSnapshot,
+    SnapshotMetadata,
+)
 from src.stocks.providers.normalize import VN_TZ
 from src.stocks.signals.volume_spike import (
     BASELINE_TRADING_DAYS,
@@ -34,6 +38,8 @@ from src.stocks.signals.volume_spike import (
     volume_spike_signal,
 )
 from src.stocks.universe import Universe, forget_cohort_cache
+
+from .conftest import basis_of
 
 # A Thursday, so the sessions before it straddle two weekends and a baseline
 # built from calendar days would reach a different stretch of market than one
@@ -112,7 +118,9 @@ def write_sessions(
                 source=source,
                 effective_at=_stamp(day),
                 observed_at=NOW,
+                schema_version=MARKET_SCHEMA_VERSION,
             ),
+            price_basis=basis_of(source),
             last_price=close_price,
             change_pct=change_pct,
             volume=volume,
@@ -124,7 +132,7 @@ def write_sessions(
                 source=source.value,
                 effective_at=_stamp(day),
                 observed_at=NOW,
-                schema_version=1,
+                schema_version=MARKET_SCHEMA_VERSION,
                 payload=snapshot.model_dump(mode="json"),
             )
         )
