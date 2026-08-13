@@ -13,7 +13,11 @@ import certifi
 import pandas as pd
 import pytest
 
-from src.stocks.providers.contracts import BatchTooLarge
+from src.stocks.providers.contracts import (
+    MARKET_SCHEMA_VERSION,
+    BatchTooLarge,
+    PriceBasis,
+)
 from src.stocks.providers.fiinquant import (
     FiinQuantCircuitOpen,
     FiinQuantMarketProvider,
@@ -339,6 +343,37 @@ def test_fetch_market_history_yields_every_session_in_the_window():
     call = client.Fetch_Trading_Data.call_args.kwargs
     assert call["from_date"] == "2026-08-01"
     assert call["to_date"] == "2026-08-07"
+
+
+def test_every_session_the_main_source_writes_says_its_prices_are_raw():
+    """The flag the call carried, recorded on the row that came back.
+
+    Both entry points ask for ``adjusted=False``, so both write sessions the
+    exchange itself published. Saying so on the row is what lets a later reader
+    judge a window without knowing which job wrote it or when a Backfill
+    happened to run (``docs/adr/0006``).
+
+    The schema version moves with it: version 1 is the unstamped era, and the
+    store keys identity on it, so a session collected under 2 stands beside the
+    version-1 row of the same session rather than replacing it.
+    """
+    provider, client = make_provider()
+
+    daily = provider.fetch_market(["HPG"])[0]
+    history = provider.fetch_market_history("HPG", date(2026, 8, 1), date(2026, 8, 7))
+
+    assert daily.price_basis is PriceBasis.RAW
+    assert daily.metadata.schema_version == MARKET_SCHEMA_VERSION
+    assert [snapshot.price_basis for snapshot in history] == [PriceBasis.RAW] * 2
+    assert all(
+        snapshot.metadata.schema_version == MARKET_SCHEMA_VERSION
+        for snapshot in history
+    )
+    # The claim rests on the flag, so the flag is asserted rather than assumed.
+    assert all(
+        call.kwargs["adjusted"] is False
+        for call in client.Fetch_Trading_Data.call_args_list
+    )
 
 
 def test_market_history_leaves_out_the_statistics_it_cannot_date():

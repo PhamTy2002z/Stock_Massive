@@ -50,6 +50,36 @@ class PriceUnit(str, Enum):
     VND = "VND"
 
 
+class PriceBasis(str, Enum):
+    """What a stored session's prices mean with respect to corporate actions.
+
+    Written by the Adapter, which is the only code that knows which flag it
+    passed upstream, and never inferred from a session date: the seam between
+    the two eras is ``HistoryWindow.crossover()`` evaluated on the day a
+    symbol's Backfill ran, so each symbol's seam falls where its own Backfill
+    put it (``docs/adr/0006``).
+    """
+
+    # The numbers the exchange published for that session, permanently. Nothing
+    # rewrites them when a later action rescales the symbol; adjustment is a
+    # read-time transform over a persisted Corporate Action series.
+    RAW = "raw"
+
+    # Rescaled by the provider for every action up to the moment it answered.
+    # Not recomputable from what is stored, and it decays with every action
+    # since — which is why a window lying wholly here is refused rather than
+    # adjusted.
+    ADJUSTED_AT_SOURCE = "adjusted_at_source"
+
+
+# What a market payload written today looks like. Version 1 is the unstamped
+# era: those rows carry no Price Basis, and the one-time repair in
+# ``d1f4b7c02e93`` moves them here rather than re-collecting them, because
+# schema_version is part of uq_provider_snapshot_identity and a re-fetch under 2
+# would write a second row beside the first.
+MARKET_SCHEMA_VERSION = 2
+
+
 class ShareType(str, Enum):
     """Share-count semantics that must not be silently interchanged."""
 
@@ -194,8 +224,19 @@ class MarketSnapshot(SymbolSnapshot):
     the unit. ``market_cap_vnd`` is money but not traded, so it stays outside
     that pair; it is reported by the provider rather than derived from
     ``ReferenceSnapshot.canonical_shares()``.
+
+    ``price_basis`` reaches the ``*_price`` fields and nothing else. Every
+    ``*_volume`` is the count of shares that changed hands in that session, and
+    every ``*_value_vnd`` the money they changed hands for, both exactly as
+    reported and on either basis: no code here rescales a quantity or a sum of
+    money, because a share-count-changing action moves the unit of the former
+    while leaving the latter alone, and the price factor is not the quantity
+    factor anyway (``docs/adr/0006``).
     """
 
+    # Required, with no default on purpose: a payload that never says what its
+    # prices mean must fail validation loudly rather than be read as raw.
+    price_basis: PriceBasis
     price_unit: PriceUnit = PriceUnit.VND
     last_price: float | None = Field(default=None, gt=0)
     reference_price: float | None = Field(default=None, gt=0)
@@ -215,6 +256,27 @@ class MarketSnapshot(SymbolSnapshot):
     foreign_sell_value_vnd: float | None = Field(default=None, ge=0)
     foreign_net_value_vnd: float | None = None
     market_cap_vnd: float | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_schema_version(self) -> "MarketSnapshot":
+        """Refuse a market payload claiming a version older than the basis.
+
+        The basis was introduced at ``MARKET_SCHEMA_VERSION``, so a row that
+        carries one and calls itself version 1 describes a store state that has
+        never existed: the repair moves a row's version and its basis together,
+        and both Adapters write them together. Left unchecked, such a row would
+        be re-stamped by a repair keyed on version 1 — or worse, saved beside
+        the row it is a copy of, since ``schema_version`` is part of the store's
+        identity. Compared with ``>=`` rather than ``==`` so that a later
+        version can still be read by the contract that introduced this one.
+        """
+        if self.metadata.schema_version < MARKET_SCHEMA_VERSION:
+            raise ValueError(
+                "a market snapshot carrying a price basis cannot be at schema "
+                f"version {self.metadata.schema_version}; "
+                f"the basis exists from {MARKET_SCHEMA_VERSION} onward"
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_foreign_flow(self) -> "MarketSnapshot":

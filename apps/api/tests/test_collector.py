@@ -21,10 +21,12 @@ from src.stocks.collector import (
 from src.stocks.models import CohortMember, CohortVersion, ProviderSnapshot
 from src.stocks.providers.fiinquant import FiinQuantMarketProvider
 from src.stocks.providers import (
+    MARKET_SCHEMA_VERSION,
     BatchTooLarge,
     Capability,
     FundamentalSnapshot,
     MarketSnapshot,
+    PriceBasis,
     ProviderSource,
     ReferenceSnapshot,
     ShareCount,
@@ -57,7 +59,9 @@ def market_snapshot(symbol: str) -> MarketSnapshot:
             source=ProviderSource.FIINQUANT,
             effective_at=SESSION_AT,
             observed_at=NOW,
+            schema_version=MARKET_SCHEMA_VERSION,
         ),
+        price_basis=PriceBasis.RAW,
         last_price=22_000,
         volume=1_000_000,
     )

@@ -17,8 +17,10 @@ import pandas as pd
 from pydantic import ValidationError
 
 from .contracts import (
+    MARKET_SCHEMA_VERSION,
     BatchTooLarge,
     MarketSnapshot,
+    PriceBasis,
     ProviderSource,
     SnapshotMetadata,
     ValuationSnapshot,
@@ -59,6 +61,13 @@ MARKET_FIELDS = [
 # clear Tet, which closes the exchange for around nine days running with
 # weekends on either side. Widening it costs nothing: it is still one call.
 HISTORY_LOOKBACK_DAYS = 30
+
+# Every candle call this adapter makes passes ``adjusted=MARKET_ADJUSTED``, so
+# every session it writes says so on the row. The two constants belong together
+# and move together: flipping the flag without the basis would stamp rescaled
+# prices as exchange-published ones, and nothing downstream could tell.
+MARKET_ADJUSTED = False
+MARKET_PRICE_BASIS = PriceBasis.RAW
 
 OVERVIEW_FIELDS = ("ticker", "timestamp", "marketcap")
 CEILING_FLOOR_FIELDS = ("ticker", "timestamp", "ceilingprice", "floorprice")
@@ -346,7 +355,7 @@ class FiinQuantMarketProvider(FiinQuantProviderBase):
             realtime=False,
             tickers=[symbol],
             fields=MARKET_FIELDS,
-            adjusted=False,
+            adjusted=MARKET_ADJUSTED,
             by="1d",
             from_date=str(from_date),
             to_date=str(to_date),
@@ -387,7 +396,7 @@ class FiinQuantMarketProvider(FiinQuantProviderBase):
             tickers=tickers,
             # A list, not a tuple: the library indexes into this argument.
             fields=MARKET_FIELDS,
-            adjusted=False,
+            adjusted=MARKET_ADJUSTED,
             by="1d",
             from_date=from_date,
         ).get_data()
@@ -603,7 +612,11 @@ def _build_snapshot(
                 source=source,
                 effective_at=_session_start(latest["timestamp"]),
                 observed_at=observed_at,
+                schema_version=MARKET_SCHEMA_VERSION,
             ),
+            # This adapter is the only code that knows which flag the call
+            # carried, so it is the only code that may say what the prices mean.
+            price_basis=MARKET_PRICE_BASIS,
             last_price=close,
             reference_price=reference,
             open_price=optional_float(latest.get("open")),

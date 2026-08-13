@@ -17,9 +17,11 @@ from src.core.database import get_sync_session
 from src.main import app
 from src.stocks.models import ProviderSnapshot
 from src.stocks.providers import (
+    MARKET_SCHEMA_VERSION,
     Capability,
     FundamentalSnapshot,
     MarketSnapshot,
+    PriceBasis,
     ProviderSource,
     ReferenceSnapshot,
     ShareCount,
@@ -36,6 +38,8 @@ from src.stocks.schemas.snapshot import (
 )
 from src.stocks.providers.normalize import VN_TZ
 from src.stocks.universe import Universe
+
+from .conftest import basis_of
 
 OBSERVED_AT = datetime(2026, 8, 10, 8, 30, tzinfo=timezone.utc)
 SECTIONS = ("market", "valuation", "reference", "fundamental")
@@ -77,7 +81,9 @@ def market_snapshot(
             source=ProviderSource.FIINQUANT,
             effective_at=effective_at or observed_at - timedelta(minutes=30),
             observed_at=observed_at,
+            schema_version=MARKET_SCHEMA_VERSION,
         ),
+        price_basis=PriceBasis.RAW,
         last_price=59_700,
         volume=1_000,
     )
@@ -164,7 +170,9 @@ def session_snapshot(session_day: date, close: float, source=ProviderSource.FIIN
             source=source,
             effective_at=datetime.combine(session_day, datetime.min.time(), tzinfo=VN_TZ),
             observed_at=OBSERVED_AT,
+            schema_version=MARKET_SCHEMA_VERSION,
         ),
+        price_basis=basis_of(source),
         open_price=close - 300,
         high_price=close + 200,
         low_price=close - 500,
@@ -453,6 +461,51 @@ class TestASeriesOfSessions:
             "fiinquant",
             "fiinquant",
         ]
+
+    def test_each_session_carries_its_own_price_basis_to_the_wire(self):
+        """The one reader that wants both eras has to be able to tell them apart.
+
+        A long-range chart is served the whole decade on purpose — the
+        already-adjusted era is the *better* series for a decade of shape — so
+        the endpoint is not narrowed to one basis. What it owes the reader
+        instead is the seam: which sessions are the numbers the exchange
+        published, and which the provider had already rescaled
+        (``docs/adr/0002``, ``docs/adr/0006``).
+        """
+        engine = database()
+        write(engine, Capability.MARKET, session_snapshot(date(2019, 3, 1), 30_000,
+                                                          ProviderSource.VNSTOCK))
+        write(engine, Capability.MARKET, session_snapshot(date(2026, 8, 10), 60_300))
+
+        body = ask(engine, "VCB/series/market?start=2010-01-01&end=2026-08-10").json()
+
+        assert [point["price_basis"] for point in body["points"]] == [
+            "adjusted_at_source",
+            "raw",
+        ]
+
+    def test_a_bar_folding_both_eras_names_neither_of_them(self):
+        """A week spanning the seam is on two scales, so it says so.
+
+        Reporting the newer session's basis — the way the bar reports the
+        newer session's source — would put an exchange-published label on an
+        open that was rescaled. The source field answers "who measured the
+        close", which has one answer; the basis answers "what scale is this bar
+        on", which here has none.
+        """
+        engine = database()
+        write(engine, Capability.MARKET, session_snapshot(date(2026, 8, 6), 59_000,
+                                                          ProviderSource.VNSTOCK))
+        write(engine, Capability.MARKET, session_snapshot(date(2026, 8, 7), 59_700))
+
+        body = ask(
+            engine,
+            "VCB/series/market?start=2026-08-01&end=2026-08-09&interval=1W",
+        ).json()
+
+        assert [point["price_basis"] for point in body["points"]] == ["mixed"]
+        # The source still answers for the close, unchanged by any of this.
+        assert body["points"][0]["source"] == "fiinquant"
 
     def test_a_weekly_bar_spans_its_sessions_rather_than_sampling_one(self):
         engine = database()
