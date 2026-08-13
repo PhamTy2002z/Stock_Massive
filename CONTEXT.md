@@ -67,6 +67,14 @@ _Avoid_: split ratio, multiplier, adjustment
 
 ### Sản phẩm AI
 
+**Intelligent Quant**:
+Tính năng agent AI đặt bên trên đường dữ liệu đã có: một agent gọi tool, stream
+câu trả lời, giữ Thread, và sinh Widget, ngồi trên một đường ống Analysis tất định
+chạy mỗi đêm. `Intelligent Quant` là tên trong mã và trong tài liệu; **Alpha Desk**
+là nhãn người dùng thấy trên sidebar và là tab đầu tiên. Không phải chatbot: mọi
+ticket biến nó thành "nhập prompt, trả text" đều đọc sai đích đến.
+_Avoid_: chatbot, AI assistant, copilot
+
 **Watchlist**:
 Danh sách mã một người dùng đã lưu để được phân tích lại mỗi Trading Day, trần 10 mã; mã đã thành `unsupported` không tính vào trần. Khác Universe: Universe là cam kết thu thập dữ liệu của hệ thống, Watchlist là lựa chọn của từng người dùng — nên trần Watchlist có mặt trong giao diện, còn trần Universe thì không.
 _Avoid_: wishlist, favorites, danh mục
@@ -74,6 +82,15 @@ _Avoid_: wishlist, favorites, danh mục
 **Analysis**:
 Bản phân tích AI của một mã cho một Trading Day — dashboard theo template cố định cộng nhận định bằng chữ. Khoá theo `(symbol, trading_day)` và dùng chung toàn hệ thống, không thuộc về người dùng nào: hai Watchlist chứa cùng một mã đọc đúng một Analysis, thêm lại một mã vừa gỡ trong cùng ngày không sinh bản mới, và gỡ mã không xoá gì. Đổi lại, Analysis không được cá nhân hoá theo người dùng.
 _Avoid_: report, insight, bản tin
+
+**Analysis Field Profile**:
+Danh sách có phiên bản các **Signal Field** mà đường ống Analysis được phép đưa vào
+một Analysis, tối đa 6 field mỗi trục, chia theo ngành. Tồn tại vì model không được
+chọn tự do trong toàn bộ **Signal Registry**: bundle đầu vào phải ổn định, xem lại
+được và có biên. Một field thuộc profile nhưng chưa hiện thực vẫn phải xuất hiện ở
+trạng thái `refused` — bỏ im lặng sẽ làm hai Analysis cùng `profile_version` nói hai
+điều khác nhau.
+_Avoid_: field list, template fields, schema
 
 **Analysis Run**:
 Bản ghi việc sản xuất một Analysis cho một `(symbol, trading_day)`: `pending` khi Trading Day đã có Snapshot nhưng chưa tới lượt mã này, `producing` khi đang chạy, `ready`, hoặc `failed` kèm lý do và số lần đã thử. Tách khỏi Analysis vì trạng thái thất bại của từng mã phải sống sót qua một lần restart — không có nó thì một mã fail trông y hệt một mã chưa tới lượt, và giao diện không biết có nên mời thử lại. Một Analysis Run ở `ready` luôn có nghĩa Analysis tương ứng đã tồn tại đầy đủ; trạng thái nửa vời chỉ sống ở đây, không bao giờ ở Analysis.
@@ -103,6 +120,95 @@ Analysis hoặc bề mặt dữ liệu của Stock 360, và giữ nguyên ngữ 
 sử của câu trả lời khi Thread được mở lại.
 _Avoid_: chart, visualization, graphic
 
+### Agent surface
+
+These terms fix what the agent may reach, what it may say, and what survives an
+answer once it is disputed.
+
+**Tool Catalog**:
+The twelve semantic tools that are the agent's entire reach into `apps/api` — six
+data, five computation clusters, one identity-scoped. Semantic, not a wrapper set:
+an endpoint's name and parameters are shaped for a page's data needs, a tool's for a
+model to choose correctly. It is versioned, because its schemas are part of the
+cacheable prompt prefix and part of what an Eval Fixture was frozen against.
+_Avoid_: tools, API surface, function set
+
+**Tool Context**:
+The out-of-band record of who is asking, injected into a tool call by the harness and
+never present in a tool's model-visible schema. `get_watchlist()` is the only tool
+that reads it. Identity is out of band so that asking for another user's data is not
+a refused request but an unexpressible one.
+_Avoid_: user param, session, auth context
+
+**Data Reference**:
+A handle to a series a tool declined to return — symbol, range, field, fixed date —
+which the visualization layer resolves through the authenticated boundary. `data_ref`
+in code. It exists because the model may receive summary statistics and never raw
+bars; it is also the no-network data-in mechanism a future sandbox would need, which
+is why it is kept even though code execution is out.
+_Avoid_: series id, pointer, cache key
+
+**Structured Refusal**:
+A tool's typed answer that a request lies outside what the system serves — most often
+`{reason: "not_in_universe", suggestions: [...]}` with up to three same-ICB Universe
+symbols ordered by descending ADTV. It is computed by query in the tool layer, never
+produced by the model, and it lists what *is* available rather than only saying no.
+_Avoid_: error, rejection, not_found
+
+**System Prompt Contract**:
+The versioned artifact holding the agent's behavioural core: mission, non-overridable
+invariants, the **Recommendation Gate**, tool-use policy, output protocol, voice, and
+trusted runtime context, with a fixed precedence when they conflict. It is the core of
+behaviour and never the enforcement mechanism — each invariant is proven by the
+narrowest layer able to prove it, and the model cannot certify that it passed one.
+_Avoid_: system prompt, instructions, persona
+
+**Recommendation Gate**:
+The set of conditions a recommendation block must satisfy before it may be released:
+Universe membership, an explicit Trading Day and reference price, price zones that are
+registered fields computed in code, **Window Health** that is not a refusal, at least
+one cited suitable field with material contradictory evidence exposed, full metadata on
+every cited field, and news never as a sole directional basis. A block that fails is
+never displayed and flagged afterwards — the Turn ends `incomplete` with reason
+`grounding_failed`.
+_Avoid_: guardrail, safety check, validation
+
+**Risk Notice**:
+The versioned notice the backend attaches to every completed or useful incomplete
+assistant message, independently of model output. The renderer displays it; the model
+cannot omit it, rewrite it, or satisfy it with prose of its own. Attached rather than
+prompted, because a disclaimer enforced by prompt is a model behaviour measured after
+the fact instead of a property of the system.
+_Avoid_: disclaimer, legal text, footer
+
+**Evidence Manifest**:
+The immutable record kept with each assistant message so a disputed answer can be
+re-read: prompt version and hash, deployment SHA, exact model and route, catalog and
+schema versions, cited fields with value, unit, source and `as_of`, Risk Notice
+version, validator outcomes, and the terminal state. Kept indefinitely, unlike the
+90-day **Tool Call Trace**, and it holds no credentials, no hidden reasoning, and no
+copy of the prompt text.
+_Avoid_: audit log, metadata, provenance
+
+### Answer quality
+
+**Eval Battery**:
+The fixed set of `Eval Case`s measuring what the runtime cannot prove — false
+refusal, scope refusal, interpretation fidelity, contradictory-evidence exposure,
+injection resistance, and regression — run over both free-form surfaces, the agent
+Turn and the nightly Analysis prose. It is not a growing scoreboard: cases are seeded
+once and afterwards enter only through a confirmed flagged message.
+_Avoid_: test suite, benchmark, probe set
+
+**Eval Fixture**:
+A frozen snapshot of the store at one Trading Day, loaded into a dedicated eval
+database and carrying the registry, profile, catalog and schema versions it was frozen
+against — refusing to run on a mismatch. The tool layer, `prepare_bars()`, and the
+Signal Registry are the real ones, so the model is the only non-deterministic element.
+Frozen because the store changes every night, and a run on live data cannot separate a
+worse model from moved data.
+_Avoid_: test data, seed, mock store
+
 ### Phạm vi phục vụ
 
 **Universe**:
@@ -131,7 +237,48 @@ _Avoid_: session date, ngày giao dịch theo lịch
 ### Market signals
 
 These terms define the bounded cohorts, data readiness, and provenance of
-derived end-of-day market signals.
+derived end-of-day market signals, and the bar one must clear before any surface
+may cite it.
+
+**Signal Field**:
+One model-visible number, and the unit the statistical bar applies to — not the tool
+that returns it, because one tool returns fields of different kinds. It declares
+`unit`, `sign`, `interpretation`, `kind` (`estimator` | `percentile` | `signal`),
+**Claim**, `source` (`computed` | `stored`), `min_sessions`, `threshold`, and
+`null_fpr`. Its `interpretation` is the only sanctioned reading of it.
+_Avoid_: metric, indicator, value
+
+**Signal Registry**:
+The single place a **Signal Field** is declared, and the reason an unregistered
+computation needs no prohibition: the tool layer serializes registered fields only, so
+a field that fails the bar simply has no route to a model. It lives at domain level
+because the nightly Analysis cites through it too — otherwise the artifact people read
+every day would be the unguarded one.
+_Avoid_: field catalog, schema registry, metric list
+
+**Window Health**:
+What `prepare_bars()` returns beside the frame, and what every computation echoes:
+`sessions_used`, `limit_lock_days`, `band_regime`, `adjustment`, `adtv_percentile`. It
+exists so the Vietnamese-market hazards are enforced by construction rather than by a
+review checklist — one gateway to bars, one honest report of what that window was
+made of.
+_Avoid_: data quality, window status, coverage
+
+**Null Calibration**:
+Measuring how often a `signal` field fires on data that contains no signal, against
+two nulls — matched-volatility GBM with and without the ±7% truncation, and a
+stationary block bootstrap on the symbol's own returns — with the published rate the
+max of the two and the catalog-wide ceiling a fixed 1%. The threshold is *derived*
+from the null offline and frozen, never calibrated at runtime, which would make it a
+function of today's data.
+_Avoid_: backtest, significance test, validation
+
+**Claim**:
+What a **Signal Field** asserts: `descriptive` or `predictive`. In v1 every field is
+`descriptive`, and that is a schema constraint rather than a label — a descriptive
+field may not return a direction-bearing key at all. `predictive` unlocks only behind
+a measured net-of-cost forward-return harness.
+_Avoid_: confidence, accuracy, signal type
 
 **Profit Leaders Cohort**:
 A dynamic set of exactly 50 currently listed HOSE or HNX equities ranked by
