@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from src.stocks.models import ProviderSnapshot
 from src.stocks.providers import (
+    MARKET_SCHEMA_VERSION,
     Capability,
     MarketSnapshot,
     ProviderSource,
@@ -16,6 +17,8 @@ from src.stocks.providers import (
 )
 from src.stocks.providers.normalize import VN_TZ
 from src.stocks.warmup import Warmup, WarmupUnavailable
+
+from .conftest import basis_of
 
 NOW = datetime(2026, 8, 13, 10, 0, tzinfo=timezone.utc)
 
@@ -38,7 +41,9 @@ def market_snapshot(
             source=source,
             effective_at=datetime.combine(day, datetime.min.time(), tzinfo=VN_TZ),
             observed_at=NOW,
+            schema_version=MARKET_SCHEMA_VERSION,
         ),
+        price_basis=basis_of(source),
         last_price=59_700,
         volume=1_000,
     )

@@ -32,8 +32,17 @@ class SnapshotSection(StrictModel):
 
 
 class MarketData(StrictModel):
-    """The traded session, in VND, as the collector normalized it."""
+    """The traded session, in VND, as the collector normalized it.
 
+    ``price_basis`` says what the ``*_price`` fields mean with respect to
+    corporate actions — ``raw`` is what the exchange published for that session,
+    ``adjusted_at_source`` is what the provider had already rescaled when it
+    answered. It reaches the price fields and nothing else: every ``*_volume``
+    and every ``*_value_vnd`` is reported as traded, on either basis, and
+    nothing here rescales one (``docs/adr/0006``).
+    """
+
+    price_basis: str
     price_unit: str
     last_price: float | None = None
     reference_price: float | None = None
@@ -134,8 +143,21 @@ class SeriesPoint(StrictModel):
 
 
 class MarketBar(SeriesPoint):
-    """One bar. Aggregated bars carry the source of the sessions they span."""
+    """One bar. Aggregated bars carry the source of the sessions they span.
 
+    ``price_basis`` travels with the bar for the same reason the source does:
+    the deep years were loaded already adjusted by the Cover Source and every
+    session since is raw, so the two ends of a long chart are two different
+    measurements and the seam has to stay visible (``docs/adr/0002``).
+
+    At ``1D`` it is one session's own basis. A weekly or monthly bar that spans
+    the seam reports ``mixed`` rather than picking a side: those sessions are
+    not on one scale, and naming either of them would be a claim about prices
+    that were never on it. That value exists at this level only — a stored
+    session is always one basis or the other.
+    """
+
+    price_basis: str
     open_price: float | None = None
     high_price: float | None = None
     low_price: float | None = None

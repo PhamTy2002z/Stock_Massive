@@ -18,8 +18,10 @@ from sqlalchemy.pool import StaticPool
 from src.stocks.backfill import Backfill, BackfillStateStore, HistoryWindow
 from src.stocks.models import ProviderSnapshot, SymbolBackfill
 from src.stocks.providers import (
+    MARKET_SCHEMA_VERSION,
     Capability,
     MarketSnapshot,
+    PriceBasis,
     ProviderSource,
     SnapshotMetadata,
     SnapshotStore,
@@ -59,7 +61,9 @@ def history_snapshot(symbol: str, session_day: date) -> MarketSnapshot:
                 session_day, datetime.min.time(), tzinfo=VN_TZ
             ),
             observed_at=NOW,
+            schema_version=MARKET_SCHEMA_VERSION,
         ),
+        price_basis=PriceBasis.ADJUSTED_AT_SOURCE,
         last_price=21_850,
         volume=20_000_000,
     )
@@ -74,7 +78,9 @@ def main_session(symbol: str, session_day: date) -> MarketSnapshot:
                 session_day, datetime.min.time(), tzinfo=VN_TZ
             ),
             observed_at=NOW,
+            schema_version=MARKET_SCHEMA_VERSION,
         ),
+        price_basis=PriceBasis.RAW,
         last_price=22_000,
         volume=28_000_000,
     )
@@ -273,7 +279,9 @@ class TestTheSeamBetweenSources:
                             BOUNDARY, datetime.min.time(), tzinfo=VN_TZ
                         ),
                         observed_at=NOW,
+                        schema_version=MARKET_SCHEMA_VERSION,
                     ),
+                    price_basis=PriceBasis.RAW,
                     last_price=22_000,
                 ),
             )

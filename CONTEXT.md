@@ -44,6 +44,12 @@ knows which flag it passed — not by a config flag, which rows already written 
 not follow when it flips, and not by a session date, because each symbol's seam
 falls where its own Backfill happened to run. Only price fields have a basis:
 traded quantity and traded money are raw in every Snapshot.
+A stored Snapshot always carries one of the two. `mixed` is not a third basis
+and is never stored: it is what an aggregated bar on the market series reports
+when the sessions it folds do not share one, so a weekly bar straddling the seam
+names neither side. Where a **Signal Issue** says `mixed_price_basis` the same
+condition is being refused rather than served — a chart may draw two scales
+labelled as such, a computation may not run across them.
 _Avoid_: adjusted flag, split-adjusted, convention
 
 **Corporate Action**:

@@ -8,14 +8,18 @@ from sqlalchemy.orm import Session
 
 from src.stocks.models import ProviderSnapshot
 from src.stocks.providers import (
+    MARKET_SCHEMA_VERSION,
     Capability,
     FundamentalSnapshot,
     MarketSnapshot,
+    PriceBasis,
     ProviderSource,
     SnapshotMetadata,
     SnapshotStore,
     ValuationSnapshot,
 )
+
+from .conftest import basis_of
 
 
 class MemoryRedis:
@@ -42,6 +46,7 @@ def snapshot_metadata(effective_at: datetime, observed_at: datetime) -> Snapshot
         source=ProviderSource.FIINQUANT,
         effective_at=effective_at,
         observed_at=observed_at,
+        schema_version=MARKET_SCHEMA_VERSION,
     )
 
 
@@ -49,6 +54,7 @@ def market_snapshot(observed_at: datetime, symbol: str = "VCB") -> MarketSnapsho
     return MarketSnapshot(
         symbol=symbol,
         metadata=snapshot_metadata(observed_at, observed_at),
+        price_basis=PriceBasis.RAW,
         last_price=59_700,
         volume=1_000,
     )
@@ -201,7 +207,9 @@ def test_cover_source_snapshots_are_readable_only_when_asked_for_by_name():
             source=ProviderSource.VNSTOCK,
             effective_at=observed_at,
             observed_at=observed_at,
+            schema_version=MARKET_SCHEMA_VERSION,
         ),
+        price_basis=PriceBasis.ADJUSTED_AT_SOURCE,
         last_price=58_000,
     )
 
@@ -299,7 +307,9 @@ def test_latest_returns_the_newest_session_not_the_newest_write():
             source=ProviderSource.FIINQUANT,
             effective_at=now - timedelta(hours=6),
             observed_at=now - timedelta(hours=5),
+            schema_version=MARKET_SCHEMA_VERSION,
         ),
+        price_basis=PriceBasis.RAW,
         last_price=59_700,
     )
     older_session_fetched_later = MarketSnapshot(
@@ -308,7 +318,9 @@ def test_latest_returns_the_newest_session_not_the_newest_write():
             source=ProviderSource.FIINQUANT,
             effective_at=now - timedelta(days=7),
             observed_at=now,
+            schema_version=MARKET_SCHEMA_VERSION,
         ),
+        price_basis=PriceBasis.RAW,
         last_price=51_000,
     )
 
@@ -352,7 +364,9 @@ def market_session(
                 session_day.year, session_day.month, session_day.day, tzinfo=timezone.utc
             ),
             observed_at=observed_at,
+            schema_version=MARKET_SCHEMA_VERSION,
         ),
+        price_basis=basis_of(source),
         last_price=last_price,
         volume=1_000,
     )

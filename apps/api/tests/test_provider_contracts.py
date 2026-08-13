@@ -6,9 +6,11 @@ import pytest
 from pydantic import ValidationError
 
 from src.stocks.providers import (
+    MARKET_SCHEMA_VERSION,
     Capability,
     FundamentalSnapshot,
     MarketSnapshot,
+    PriceBasis,
     PriceUnit,
     ProviderSource,
     ReferenceSnapshot,
@@ -35,10 +37,25 @@ def metadata(source: ProviderSource = ProviderSource.VNSTOCK) -> SnapshotMetadat
     )
 
 
+def market_metadata(source: ProviderSource = ProviderSource.FIINQUANT) -> SnapshotMetadata:
+    """Metadata for a market session, which exists only from version 2 onward.
+
+    The other capabilities are still at 1: the Price Basis is a market field,
+    so it is the only payload whose shape moved.
+    """
+    return SnapshotMetadata(
+        source=source,
+        effective_at=NOW,
+        observed_at=NOW,
+        schema_version=MARKET_SCHEMA_VERSION,
+    )
+
+
 def test_market_snapshot_normalizes_symbol_and_locks_vnd_unit():
     snapshot = MarketSnapshot(
         symbol="vcb",
-        metadata=metadata(ProviderSource.FIINQUANT),
+        metadata=market_metadata(ProviderSource.FIINQUANT),
+        price_basis=PriceBasis.RAW,
         last_price=59_700,
         volume=1_000,
     )
@@ -50,21 +67,102 @@ def test_market_snapshot_normalizes_symbol_and_locks_vnd_unit():
     with pytest.raises(ValidationError):
         MarketSnapshot(
             symbol="VCB",
-            metadata=metadata(ProviderSource.FIINQUANT),
+            metadata=market_metadata(ProviderSource.FIINQUANT),
+            price_basis=PriceBasis.RAW,
             price_unit="thousand_vnd",
         )
 
     with pytest.raises(ValidationError, match="Invalid symbol format"):
         MarketSnapshot(
             symbol="VCB;DROP",
-            metadata=metadata(ProviderSource.FIINQUANT),
+            metadata=market_metadata(ProviderSource.FIINQUANT),
+            price_basis=PriceBasis.RAW,
         )
+
+
+def test_a_market_snapshot_states_what_its_prices_mean():
+    """An unstamped session fails loudly instead of being read as raw.
+
+    The basis is what makes a window judgeable: a reader who cannot tell
+    exchange-published prices from provider-adjusted ones cannot tell whether
+    the two ends of a window are the same measurement (``docs/adr/0006``). A
+    default would answer that question by guessing, and it would guess for
+    every row a future adapter forgets to stamp.
+    """
+    with pytest.raises(ValidationError, match="price_basis"):
+        MarketSnapshot(
+            symbol="VCB",
+            metadata=metadata(ProviderSource.FIINQUANT),
+            last_price=59_700,
+        )
+
+    covered = MarketSnapshot(
+        symbol="VCB",
+        metadata=market_metadata(ProviderSource.VNSTOCK),
+        price_basis=PriceBasis.ADJUSTED_AT_SOURCE,
+        last_price=59_700,
+    )
+    assert covered.price_basis is PriceBasis.ADJUSTED_AT_SOURCE
+    assert covered.model_dump(mode="json")["price_basis"] == "adjusted_at_source"
+
+    # No third basis, and nothing free-text: an unrecognised one is a row whose
+    # prices mean something this system has no transform for.
+    with pytest.raises(ValidationError):
+        MarketSnapshot(
+            symbol="VCB",
+            metadata=market_metadata(ProviderSource.FIINQUANT),
+            price_basis="adjusted",
+            last_price=59_700,
+        )
+
+
+def test_a_stamped_session_cannot_call_itself_version_one():
+    """The basis and the schema version move together or not at all.
+
+    Version 1 is the era with no basis in it, so a payload carrying one and
+    claiming that version describes a store state that has never existed. Left
+    to pass, it would be picked up again by a repair keyed on version 1, and
+    ``SnapshotStore.save`` — which looks a session up by this very field —
+    would write it beside the row it is a copy of.
+    """
+    with pytest.raises(ValidationError, match="schema version 1"):
+        MarketSnapshot(
+            symbol="VCB",
+            metadata=metadata(ProviderSource.FIINQUANT),
+            price_basis=PriceBasis.RAW,
+            last_price=59_700,
+        )
+
+    # A later version is still readable by the contract that introduced this
+    # one: the check is a floor, not an equality, so version 3 does not have to
+    # wait for every reader to be rewritten.
+    ahead = MarketSnapshot(
+        symbol="VCB",
+        metadata=SnapshotMetadata(
+            source=ProviderSource.FIINQUANT,
+            effective_at=NOW,
+            observed_at=NOW,
+            schema_version=MARKET_SCHEMA_VERSION + 1,
+        ),
+        price_basis=PriceBasis.RAW,
+        last_price=59_700,
+    )
+    assert ahead.metadata.schema_version == MARKET_SCHEMA_VERSION + 1
+
+    # The other capabilities never gained a basis, so they stay where they were.
+    at_version_one = ValuationSnapshot(
+        symbol="VCB",
+        metadata=metadata(ProviderSource.FIINQUANT),
+        provider_pe=12.5,
+    )
+    assert at_version_one.metadata.schema_version == 1
 
 
 def test_market_snapshot_separates_volume_fields_from_value_fields():
     snapshot = MarketSnapshot(
         symbol="HPG",
-        metadata=metadata(ProviderSource.FIINQUANT),
+        metadata=market_metadata(ProviderSource.FIINQUANT),
+        price_basis=PriceBasis.RAW,
         last_price=22_000,
         volume=12_000_000,
         total_value_vnd=264_000_000_000,
@@ -88,6 +186,11 @@ def test_market_snapshot_separates_volume_fields_from_value_fields():
     volume_fields = {name for name in MarketSnapshot.model_fields if "volume" in name}
     value_fields = {name for name in MarketSnapshot.model_fields if name.endswith("_value_vnd")}
     assert volume_fields.isdisjoint(value_fields)
+    # Neither side of that split carries a basis of its own: the one basis on
+    # the row reaches the price fields, and nothing rescales a quantity or a
+    # sum of money against it.
+    basis_fields = {name for name in MarketSnapshot.model_fields if name.endswith("_basis")}
+    assert basis_fields == {"price_basis"}
     assert value_fields == {
         "total_value_vnd",
         "foreign_buy_value_vnd",
@@ -99,7 +202,8 @@ def test_market_snapshot_separates_volume_fields_from_value_fields():
 def test_market_snapshot_allows_negative_foreign_net_value_only():
     outflow = MarketSnapshot(
         symbol="HPG",
-        metadata=metadata(ProviderSource.FIINQUANT),
+        metadata=market_metadata(ProviderSource.FIINQUANT),
+        price_basis=PriceBasis.RAW,
         foreign_net_value_vnd=-11_000_000_000,
     )
     assert outflow.foreign_net_value_vnd == -11_000_000_000
@@ -108,7 +212,8 @@ def test_market_snapshot_allows_negative_foreign_net_value_only():
         with pytest.raises(ValidationError):
             MarketSnapshot(
                 symbol="HPG",
-                metadata=metadata(ProviderSource.FIINQUANT),
+                metadata=market_metadata(ProviderSource.FIINQUANT),
+                price_basis=PriceBasis.RAW,
                 **{field: -1},
             )
 
@@ -116,7 +221,8 @@ def test_market_snapshot_allows_negative_foreign_net_value_only():
         with pytest.raises(ValidationError):
             MarketSnapshot(
                 symbol="HPG",
-                metadata=metadata(ProviderSource.FIINQUANT),
+                metadata=market_metadata(ProviderSource.FIINQUANT),
+                price_basis=PriceBasis.RAW,
                 **{field: 0},
             )
 
@@ -157,7 +263,8 @@ def test_fundamental_snapshot_no_longer_carries_valuation_ratios():
 def test_market_snapshot_keeps_foreign_net_flow_within_gross_flow():
     balanced = MarketSnapshot(
         symbol="HPG",
-        metadata=metadata(ProviderSource.FIINQUANT),
+        metadata=market_metadata(ProviderSource.FIINQUANT),
+        price_basis=PriceBasis.RAW,
         foreign_buy_value_vnd=19_800_000_000,
         foreign_sell_value_vnd=8_800_000_000,
         foreign_net_value_vnd=11_000_000_000,
@@ -168,7 +275,8 @@ def test_market_snapshot_keeps_foreign_net_flow_within_gross_flow():
     # reported net away from buy minus sell without breaking the bound.
     MarketSnapshot(
         symbol="HPG",
-        metadata=metadata(ProviderSource.FIINQUANT),
+        metadata=market_metadata(ProviderSource.FIINQUANT),
+        price_basis=PriceBasis.RAW,
         foreign_buy_value_vnd=19_800_000_000,
         foreign_sell_value_vnd=8_800_000_000,
         foreign_net_value_vnd=-1_000_000_000,
@@ -177,7 +285,8 @@ def test_market_snapshot_keeps_foreign_net_flow_within_gross_flow():
     with pytest.raises(ValidationError, match="cannot exceed"):
         MarketSnapshot(
             symbol="HPG",
-            metadata=metadata(ProviderSource.FIINQUANT),
+            metadata=market_metadata(ProviderSource.FIINQUANT),
+            price_basis=PriceBasis.RAW,
             foreign_buy_value_vnd=19_800_000,
             foreign_sell_value_vnd=8_800_000,
             foreign_net_value_vnd=11_000_000_000,

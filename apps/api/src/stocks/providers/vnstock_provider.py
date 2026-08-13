@@ -37,10 +37,12 @@ from src.stocks.shared import StockServiceError
 from src.stocks.shared.converters import quote_price_vnd
 
 from .contracts import (
+    MARKET_SCHEMA_VERSION,
     Exchange,
     FundamentalSnapshot,
     ListingEntry,
     MarketSnapshot,
+    PriceBasis,
     ProviderSource,
     ReferenceSnapshot,
     ShareCount,
@@ -87,6 +89,14 @@ TRAILING_QUARTERS = 4
 # What a quote history answers with, and the interval that asks for sessions.
 HISTORY_FIELDS = ("time", "open", "high", "low", "close", "volume")
 HISTORY_INTERVAL = "1D"
+
+# The quote history takes no adjustment flag: VCI rescales it for every
+# corporate action up to the moment it answers, and there is no way to ask for
+# the numbers the exchange published. So the sessions this adapter writes say
+# ``adjusted_at_source``, and a window lying wholly in them is refused rather
+# than adjusted — that basis was fixed at ``observed_at`` and cannot be
+# recomputed from what is stored (``docs/adr/0006``).
+MARKET_PRICE_BASIS = PriceBasis.ADJUSTED_AT_SOURCE
 
 # Statement periods arrive as column headers, one per quarter.
 PERIOD_PATTERN = re.compile(r"^(\d{4})-Q([1-4])$")
@@ -579,7 +589,12 @@ class VnstockMarketHistoryProvider(VnstockProviderBase):
                     source=self.source,
                     effective_at=effective_at,
                     observed_at=observed_at,
+                    schema_version=MARKET_SCHEMA_VERSION,
                 ),
+                # No raw option exists on this endpoint: what comes back has
+                # been rescaled for every action up to the moment it answered,
+                # and ``observed_at`` is when that was.
+                price_basis=MARKET_PRICE_BASIS,
                 last_price=close,
                 # Only where the previous session is in this same answer. The
                 # first row of a window has no predecessor here, and taking the
