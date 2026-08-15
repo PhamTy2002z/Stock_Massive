@@ -28,8 +28,9 @@ from src.core.config import Settings
 from src.stocks.market_index import (
     MARKET_INDEX_SYMBOL,
     MARKET_INDEX_WINDOW_TRADING_DAYS,
+    MarketIndexLoader,
     MarketIndexUnavailable,
-    MarketIndexWarmup,
+    build_market_index_loader,
 )
 from src.stocks.models import CorporateAction, ListingRoster, ProviderSnapshot
 from src.stocks.providers import (
@@ -170,10 +171,10 @@ class CoverIndexHistory:
         raise AssertionError("the index series is written from one source only")
 
 
-def build(history, window: int = 25) -> tuple[MarketIndexWarmup, Session]:
+def build(history, window: int = 25) -> tuple[MarketIndexLoader, Session]:
     store, session = open_store()
     return (
-        MarketIndexWarmup(
+        MarketIndexLoader(
             store=store,
             history=history,
             now=lambda: NOW,
@@ -209,6 +210,31 @@ class TestTheDepthFollowsTheFieldThatReadsIt:
             Settings().market_index_window_trading_days
             == MARKET_INDEX_WINDOW_TRADING_DAYS
         )
+
+    def test_a_configured_depth_below_the_fields_floor_is_refused(self):
+        """Writing the default as the field's floor plus a margin does not
+        enforce anything: production runs on the configured value, and a
+        constant nothing checks is a comment. The wiring is where the floor
+        bites, and it names both numbers so an operator sees a misconfiguration
+        instead of a field refusing weeks later for a reason pointing at
+        collection."""
+        store, _ = open_store()
+        settings = Settings(
+            fiinquant_username="operator",
+            fiinquant_password="password",
+            market_index_window_trading_days=RELATIVE_STRENGTH_MIN_SESSIONS - 1,
+        )
+
+        with pytest.raises(MarketIndexUnavailable) as refused:
+            build_market_index_loader(store, settings=settings)
+
+        assert str(RELATIVE_STRENGTH_MIN_SESSIONS) in str(refused.value)
+
+    def test_no_fiinquant_account_is_refused_rather_than_degraded(self):
+        store, _ = open_store()
+
+        with pytest.raises(MarketIndexUnavailable, match="FiinQuant"):
+            build_market_index_loader(store, settings=Settings())
 
     def test_the_index_loaded_is_the_benchmark_the_field_names(self):
         assert MARKET_INDEX_SYMBOL == RELATIVE_STRENGTH_BENCHMARK
@@ -280,7 +306,7 @@ class TestTheLoad:
         store, _ = open_store()
 
         with pytest.raises(MarketIndexUnavailable):
-            MarketIndexWarmup(store=store, history=CoverIndexHistory())
+            MarketIndexLoader(store=store, history=CoverIndexHistory())
 
     def test_the_store_refuses_each_contract_under_the_other_capability(self):
         """The two contracts are siblings rather than one subclassing the other,
@@ -315,6 +341,41 @@ class TestTheLoad:
         assert summary.sessions_written == 0
         assert len(summary.failed) == 1
         assert "ConnectionError" in summary.failed[0].reason
+
+    def test_a_run_that_stored_nothing_is_a_failed_run(self):
+        """The index publishes a level on every session the exchange opens, and
+        re-storing one already held still counts — so a run that wrote nothing
+        is the silent-empty failure this codebase refuses elsewhere, not a
+        healthy run with nothing to do."""
+        warmup, _ = build(RecordingIndexHistory([]))
+
+        summary = warmup.run()
+
+        assert summary.completed == ()
+        assert [item.index for item in summary.failed] == [MARKET_INDEX_SYMBOL]
+        assert "no sessions" in summary.failed[0].reason
+
+    def test_a_store_that_refuses_every_session_is_a_failed_run_too(self):
+        """The other way to write nothing, and it must not read as success
+        either — the count of what was refused is on the reason."""
+        days = list(weekdays(date(2026, 8, 3), date(2026, 8, 7)))
+
+        class RefusingStore:
+            def save(self, capability, snapshot):
+                raise RuntimeError("the database is read only")
+
+        loader = MarketIndexLoader(
+            store=RefusingStore(),
+            history=RecordingIndexHistory(days),
+            now=lambda: NOW,
+            window_trading_days=25,
+        )
+
+        summary = loader.run()
+
+        assert summary.sessions_written == 0
+        assert [item.index for item in summary.failed] == [MARKET_INDEX_SYMBOL]
+        assert f"refused all {len(days)}" in summary.failed[0].reason
 
 
 class TestTheIndexDoesNotDefineTheMarket:
@@ -437,7 +498,12 @@ class TestTheGatewayServesIt:
         assert {bar.band_undecided_reason for bar in frame.bars} == {
             SignalIssue.BAND_NOT_APPLICABLE
         }
-        assert all(bar.limit_lock is LimitLock.INDETERMINATE for bar in frame.bars)
+        # Not `indeterminate`. That one is the store admitting it could not
+        # judge a session which does have a band, and it would leave an equity's
+        # word on the one bar that most needs not to carry one.
+        assert all(bar.limit_lock is LimitLock.NOT_APPLICABLE for bar in frame.bars)
+        assert all(not bar.limit_locked for bar in frame.bars)
+        assert health.limit_lock_days == 0
         assert health.band_regime is None
         # Counted at zero on purpose: nothing was left undecided, because there
         # was nothing to decide.
