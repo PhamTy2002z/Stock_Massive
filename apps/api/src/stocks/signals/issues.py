@@ -139,6 +139,14 @@ class SignalIssue(str, Enum):
     # live Provider Source read is ever substituted to fill the slot.
     UNAVAILABLE = "unavailable"
 
+    # The symbol's foreign ownership room is full, or full enough to stop
+    # buying by itself, so a foreign flow measured over the window was
+    # mechanically constrained rather than freely chosen. A degradation because
+    # the number is real: what changes is that it may not be read as a change of
+    # view. Its absence from a window is not this code — an uncollected room is
+    # reported as unknown rather than as open.
+    FOREIGN_ROOM_EXHAUSTED = "foreign_room_exhausted"
+
     # --- Cross-sectional fields, from ADR-0010 ---------------------------
     # Fewer symbols survived exclusion than a percentile can be taken over. A
     # position within a sample of eleven is a rank wearing a distribution's

@@ -55,6 +55,7 @@ from .issues import SignalIssue
 if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to a checker
     from .bars import BarFrame, WindowHealth
     from .fundamentals import FundamentalStanding
+    from .reference import ForeignRoomStanding
 
 # The catalog-wide ceiling on how often a `signal` field may fire on data that
 # contains no signal. Fixed here rather than declared per tool: a self-declared
@@ -324,11 +325,17 @@ class FieldWindow:
     finds either the newest quarter at or before the window's cutoff, with the
     age of that quarter on it, or ``None`` where the store holds no statement
     for this symbol at all.
+
+    ``foreign_room`` is the same shape of fact from the reference Capability: the
+    ceiling on foreign ownership, which is not a session and is not derivable
+    from one. It is here because a foreign-flow number cannot be read without it
+    — a flow that flattened because the room filled is not a change of view.
     """
 
     frame: "BarFrame"
     health: "WindowHealth"
     fundamental: "FundamentalStanding | None" = None
+    foreign_room: "ForeignRoomStanding | None" = None
 
 
 @dataclass(frozen=True)

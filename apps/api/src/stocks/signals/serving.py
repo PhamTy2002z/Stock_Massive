@@ -26,6 +26,7 @@ from .cross_sectional import CROSS_SECTION_MIN_SYMBOLS, percentile_of
 from .fields import FieldReading, FieldValue, FieldWindow, SignalField, Unit
 from .fundamentals import fundamentals_on_or_before
 from .issues import SignalIssue
+from .reference import foreign_room_on_or_before
 
 
 def serve_field(
@@ -67,7 +68,19 @@ def serve_field(
             field=field, value=None, health=health, refusal=health.refusal
         )
 
-    reading = field.reading(FieldWindow(frame=frame, health=health))
+    # The room as it stood at the window's own newest session, not as it stands
+    # now: a window answered for an old date must not acquire a room reading
+    # nobody had then. Loaded for every field rather than only for the ones that
+    # read it — it is one indexed row, and a declaration saying which fields
+    # need it would cost more than it saves.
+    cutoff = health.last_session or frame.bars[-1].session_date
+    reading = field.reading(
+        FieldWindow(
+            frame=frame,
+            health=health,
+            foreign_room=foreign_room_on_or_before(session, symbol, cutoff),
+        )
+    )
     if reading.value is None:
         return FieldValue(
             field=field,
