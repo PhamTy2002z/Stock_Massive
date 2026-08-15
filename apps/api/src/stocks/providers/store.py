@@ -16,6 +16,7 @@ from src.stocks.models import ProviderSnapshot
 from .contracts import (
     Capability,
     FundamentalSnapshot,
+    MarketIndexSnapshot,
     MarketSnapshot,
     ProviderSource,
     ReferenceSnapshot,
@@ -32,6 +33,7 @@ _DEFAULT_REDIS = object()
 
 SNAPSHOT_MODEL_BY_CAPABILITY = {
     Capability.MARKET: MarketSnapshot,
+    Capability.MARKET_INDEX: MarketIndexSnapshot,
     Capability.VALUATION: ValuationSnapshot,
     Capability.REFERENCE: ReferenceSnapshot,
     Capability.FUNDAMENTAL: FundamentalSnapshot,
@@ -60,6 +62,11 @@ STATEMENT_MAX_AGE_SECONDS = 150 * _DAY
 
 MAX_AGE_SECONDS = {
     Capability.MARKET: SESSION_MAX_AGE_SECONDS,
+    # The index closes on exactly the sessions the equities do, so it ages on
+    # the same clock — and it has to, since a benchmark that went stale on a
+    # different threshold from the symbols regressed against it would report a
+    # fresh beta over a stale market.
+    Capability.MARKET_INDEX: SESSION_MAX_AGE_SECONDS,
     Capability.VALUATION: SESSION_MAX_AGE_SECONDS,
     # Ownership and share counts change on corporate actions, but the adapter
     # dates them by the day it read them, so they age on the session clock.

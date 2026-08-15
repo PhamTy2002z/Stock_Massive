@@ -21,6 +21,44 @@ from configuration: a flag flipping tomorrow does not change what an
 already-stored window reports, which is the requirement ``docs/adr/0006`` puts
 on ``adjustment`` in particular.
 
+## Two series, and what the second one is not
+
+``series`` names which stored session series the window is drawn from. The
+default is the equity series — a listed company, everything below applies. The
+other is the **market index**, and it is here rather than behind a reader of its
+own so that ``prepare_bars()`` stays the only path to a bar even for the
+benchmark a beta is regressed against (``docs/adr/0017``).
+
+An index is not a tradeable symbol, and the gateway states what that costs
+rather than discovering it:
+
+- **No band is measured, on any session.** The band is a percentage of a board's
+  reference price and the index sits on no board. Every index bar carries
+  ``band_undecided_reason = band_not_applicable`` and ``limit_lock =
+  not_applicable`` — neither is the ``indeterminate`` a session nobody could
+  judge would carry — and the whole window carries no ``band_regime``. It
+  follows that ``unexplained_price_gap`` cannot fire on
+  an index either — that refusal reads a break of the band as evidence of a
+  wrong anchor, and with no band there is no break to read. A 9% index session
+  is the market, and the store has nothing to say against it.
+- **No Corporate Action series is read.** The exchange absorbs member
+  entitlements and reconstitutions into the index divisor, so the published
+  series is already continuous. The window reports ``applied=False`` over zero
+  actions, which is a measurement rather than a default: there were none to
+  apply. ``volume_basis_break`` is likewise unreachable.
+- **No liquidity standing.** ``adtv`` is ``None``: there is no peer cross-section
+  an index belongs to, and ranking it among a hundred equities would answer a
+  question nobody asked.
+
+The **Price Basis** rule is *not* relaxed. An index level says what it means
+like every other stored session does, and a series that mixed two would still be
+refused — see ``Capability.MARKET_INDEX`` for why one source owns it.
+
+The window itself is still cut from the market's own Trading Days. That is the
+whole reason a beta is computable: the benchmark is read on exactly the sessions
+the symbol was, so the two series line up by construction rather than by a join
+done later.
+
 ## Projections, then four price refusals
 
 The default ``price`` projection admits sessions with a close and enforces the
@@ -85,7 +123,13 @@ from sqlalchemy.orm import Session
 
 from src.stocks.models import CorporateAction
 
-from ..providers.contracts import Exchange, MarketSnapshot, PriceBasis
+from ..providers.contracts import (
+    Capability,
+    Exchange,
+    MarketSnapshot,
+    PriceBasis,
+    SessionSnapshot,
+)
 from ..trading_day import latest_trading_day, trading_days_before
 from ..universe import build_universe
 from .corporate_actions import CorporateActionStore, adjustment_factor
@@ -94,8 +138,10 @@ from .issues import SignalIssue
 from .price_band import (
     EXCHANGE_MIGRATIONS,
     BandAnchorBasis,
+    BandLimits,
     BandRegime,
     BandRegimeResolver,
+    BandReading,
     ExchangeAsOf,
     ExchangeMigration,
     LimitLock,
@@ -124,6 +170,60 @@ class BarProjection(str, Enum):
     VOLUME = "volume"
 
 
+class BarSeries(str, Enum):
+    """Which stored session series a window is drawn from.
+
+    Two members and no more, because there are two kinds of thing this system
+    stores a session for. Everything the gateway does differently for an index
+    hangs off this one value rather than off a symbol name: a reserved ticker
+    tested for by string would be a rule every future reader has to remember,
+    and the sixth of them is where a review checklist fails (``docs/adr/0010``).
+    """
+
+    EQUITY = "equity"
+    MARKET_INDEX = "market_index"
+
+    @property
+    def capability(self) -> Capability:
+        """The Capability this series' sessions are stored under."""
+        if self is BarSeries.MARKET_INDEX:
+            return Capability.MARKET_INDEX
+        return Capability.MARKET
+
+    # Three predicates rather than one ``is_equity``, because three different
+    # questions are being asked and a single boolean standing for all of them
+    # invites a wrong fourth use. Each site below says which capability of a
+    # listed instrument it is reaching for, so a reader of that line does not
+    # have to know why an index is different in general.
+    @property
+    def has_price_band(self) -> bool:
+        """Whether a session of this series was permitted to move only so far.
+
+        A band is a percentage of a board's reference price, and a market index
+        sits on no board.
+        """
+        return self is BarSeries.EQUITY
+
+    @property
+    def has_corporate_actions(self) -> bool:
+        """Whether an entitlement can move this series' prices.
+
+        An index absorbs its members' entitlements and its own reconstitutions
+        into the divisor the exchange publishes it with, so the level series is
+        already continuous and there is nothing for read-time adjustment to do.
+        """
+        return self is BarSeries.EQUITY
+
+    @property
+    def has_peer_cross_section(self) -> bool:
+        """Whether this series' instruments have peers to be ranked among.
+
+        A composite trades among nothing; ranking its turnover would rank it
+        against its own members.
+        """
+        return self is BarSeries.EQUITY
+
+
 @dataclass(frozen=True)
 class Bar:
     """One session of a served window.
@@ -150,6 +250,34 @@ class Bar:
     total_value_vnd: float | None
     adjustment_factor: Decimal
     limit_lock: LimitLock
+    # The two prices this session was permitted to trade between, in the **raw**
+    # terms the exchange published them in — the band is defined on a tick grid
+    # and an adjusted price does not sit on one (``price_band``). Kept beside the
+    # lock verdict rather than recomputed downstream, because the anchor it was
+    # measured from is the previous session's raw close and only the gateway
+    # still has it.
+    #
+    # ``band`` and ``band_undecided_reason`` move together and exactly one of
+    # them is set on a served bar: a session either has the band it was judged
+    # against, or the reason nobody could decide one — every UPCOM session,
+    # whose anchor is not stored; every session whose predecessor the store does
+    # not hold; and every ex-date whose band was measured from a pre-adjustment
+    # close. A field reading an absent band therefore never has to guess why,
+    # which is the difference between a named refusal and a plausible one.
+    band: BandLimits | None = None
+    band_undecided_reason: SignalIssue | None = None
+    # What the provider valued the whole company at on this session. Money, and
+    # therefore left alone by the rebasing above for the same reason traded
+    # value is: a share-count change moves the count and the price together and
+    # leaves their product where it was.
+    market_cap_vnd: float | None = None
+    # What foreign investors bought less what they sold in this session, in
+    # **money**, exactly as the provider reported it — positive is net foreign
+    # buying. Money and not shares, because money is what the Main Source
+    # actually writes: it reports active buy and sell as quantity and foreign
+    # buy and sell as value, and the naming split exists so the two can never be
+    # swapped by accident.
+    foreign_net_value_vnd: float | None = None
     # Kept exactly as the provider stated it. A caller such as Volume Spike
     # displays the session's own change while still reaching the session only
     # through this gateway; recomputing it from adjusted closes would subtly
@@ -159,6 +287,19 @@ class Bar:
     @property
     def limit_locked(self) -> bool:
         return self.limit_lock in (LimitLock.CEILING, LimitLock.FLOOR)
+
+    @property
+    def raw_close(self) -> float | None:
+        """This session's close as the exchange published it.
+
+        The band above is in raw prices and ``close`` is in the window's rebased
+        ones, so a distance between the two is only a distance once the
+        Adjustment Factor is divided back out. On a window with no action in it
+        the factor is 1 and the two are the same number.
+        """
+        if self.close is None:
+            return None
+        return float(Decimal(str(self.close)) / self.adjustment_factor)
 
 
 @dataclass(frozen=True)
@@ -200,8 +341,9 @@ class BarPreparationContext:
     _end: date | None
     _window: tuple[date, ...]
     _anchor_date: date | None
-    _sessions: dict[str, dict[date, MarketSnapshot]]
+    _sessions: dict[str, dict[date, SessionSnapshot]]
     _actions: dict[str, tuple[CorporateAction, ...]]
+    _series: BarSeries = BarSeries.EQUITY
 
 
 @dataclass(frozen=True)
@@ -239,6 +381,27 @@ class WindowBandRegime:
 
 
 @dataclass(frozen=True)
+class AdtvStanding:
+    """How much money this symbol traded, and where that sits among its peers.
+
+    The one cross-sectional read the gateway makes, and it carries the two things
+    ADR-0010 refuses a percentile without: the ``n`` it was ranked among and the
+    date the ranking was cut at. A percentile over eleven names is a rank dressed
+    up as a distribution, and a percentile with no date is one nobody can
+    reproduce.
+
+    ``average_value_vnd`` is traded **money**, never traded shares. Money is the
+    one quantity a corporate action leaves alone: an ADTV in shares crosses an
+    ex-date and changes unit, an ADTV in dong does not (``docs/adr/0006``).
+    """
+
+    average_value_vnd: float
+    percentile: float
+    n: int
+    as_of: date
+
+
+@dataclass(frozen=True)
 class WindowHealth:
     """What the window is made of, stated beside whatever was computed from it.
 
@@ -257,11 +420,16 @@ class WindowHealth:
     limit_lock_dates: tuple[date, ...]
     band_regime: WindowBandRegime | None
     adjustment: AdjustmentReport
-    adtv_percentile: float | None
+    adtv: AdtvStanding | None
     # Sessions whose band could not be decided at all — an anchor the store does
     # not hold, an UPCOM reference that is not reconstructible, a board nothing
     # names. Counted rather than folded into ``limit_lock_days``: a session
     # nobody could judge is not a session that traded inside its band.
+    #
+    # Zero on a window nobody asked a band of — a quantity projection, or the
+    # market index, which has none to ask about. Both are already named on every
+    # bar of such a window, and counting them here would report a data gap where
+    # there is no data to be missing.
     band_undecided_days: int
     band_undecided_reasons: tuple[SignalIssue, ...]
     refusal: SignalIssue | None
@@ -280,6 +448,18 @@ class WindowHealth:
         exercise ratio carries and a dividend record does not.
         """
         return SignalIssue.VOLUME_BASIS_BREAK not in self.degradations
+
+    @property
+    def anchor_basis(self) -> BandAnchorBasis | None:
+        """What this window's band was a percentage of, where a board is known.
+
+        Reached through one name rather than walked to through the regime by
+        every field that wants it: the walk is three optionals deep and a caller
+        that got one of them wrong would report the wrong board's convention.
+        """
+        if self.band_regime is None:
+            return None
+        return self.band_regime.anchor_basis
 
     @property
     def limit_lock_degradation(self) -> SignalIssue | None:
@@ -307,6 +487,7 @@ def prepare_bars_context(
     window_days: int,
     *,
     end: date | None = None,
+    series: BarSeries = BarSeries.EQUITY,
 ) -> BarPreparationContext:
     """Load one canonical window for several later ``prepare_bars`` calls."""
     wanted = tuple(sorted({symbol.upper() for symbol in symbols}))
@@ -321,17 +502,26 @@ def prepare_bars_context(
             _anchor_date=None,
             _sessions={},
             _actions={},
+            _series=series,
         )
 
     earlier = trading_days_before(session, resolved_end, window_days)
     window = tuple(reversed(earlier[: window_days - 1])) + (resolved_end,)
     anchor_date = earlier[window_days - 1] if len(earlier) >= window_days else None
     days = ((anchor_date,) if anchor_date is not None else ()) + window
-    held = sessions_on_days(session, wanted, days)
-    actions = CorporateActionStore(session).for_symbols(
-        wanted,
-        start=window[0],
-        end=window[-1],
+    held = sessions_on_days(session, wanted, days, capability=series.capability)
+    # Not asked for on the index series, and the emptiness is the statement: an
+    # index has no corporate actions to hold, so a query that came back empty
+    # and a question never asked would report identically while meaning
+    # different things.
+    actions = (
+        CorporateActionStore(session).for_symbols(
+            wanted,
+            start=window[0],
+            end=window[-1],
+        )
+        if series.has_corporate_actions
+        else {}
     )
     return BarPreparationContext(
         _symbols=wanted,
@@ -341,6 +531,7 @@ def prepare_bars_context(
         _anchor_date=anchor_date,
         _sessions=held,
         _actions=actions,
+        _series=series,
     )
 
 
@@ -354,6 +545,7 @@ def prepare_bars(
     peers: Sequence[str] | None = None,
     migrations: Sequence[ExchangeMigration] = EXCHANGE_MIGRATIONS,
     projection: BarProjection = BarProjection.PRICE,
+    series: BarSeries = BarSeries.EQUITY,
     context: BarPreparationContext | None = None,
 ) -> tuple[BarFrame | None, WindowHealth]:
     """Serve ``window_days`` trailing sessions of one symbol, or refuse by name.
@@ -368,6 +560,11 @@ def prepare_bars(
     projection requires volume instead and reports share-count seams without
     refusing quantities for an unrelated price condition.
 
+    ``series`` names which stored session series the symbol belongs to, and the
+    market index is not an equity: no band, no Corporate Action series, no
+    liquidity standing. What each of those absences means is at the top of this
+    module.
+
     ``peers`` is the cross-section the liquidity percentile is measured against,
     and defaults to the Universe. A caller preparing many symbols at once should
     pass it, so the Universe is resolved once rather than per symbol.
@@ -381,6 +578,12 @@ def prepare_bars(
             raise ValueError("bar context window does not match the request")
         if end is not None and context._end != end:
             raise ValueError("bar context end does not match the request")
+        if context._series is not series:
+            # Two series' sessions are stored under different Capabilities, so a
+            # context loaded for one holds nothing for the other. Caught here
+            # rather than answered with an empty window, which would read as a
+            # symbol with no history.
+            raise ValueError("bar context series does not match the request")
         if symbol not in context._symbols:
             raise ValueError(f"bar context does not contain {symbol}")
         end = context._end
@@ -398,9 +601,19 @@ def prepare_bars(
         earlier = trading_days_before(session, end, window_days)
         window = tuple(reversed(earlier[: window_days - 1])) + (end,)
         anchor_date = earlier[window_days - 1] if len(earlier) >= window_days else None
-        held = sessions_in_range(session, symbol, anchor_date or window[0], end)
-        actions = CorporateActionStore(session).for_symbol(
-            symbol, start=window[0], end=window[-1]
+        held = sessions_in_range(
+            session,
+            symbol,
+            anchor_date or window[0],
+            end,
+            capability=series.capability,
+        )
+        actions = (
+            CorporateActionStore(session).for_symbol(
+                symbol, start=window[0], end=window[-1]
+            )
+            if series.has_corporate_actions
+            else ()
         )
     else:
         window = context._window
@@ -434,11 +647,14 @@ def prepare_bars(
         by_ex_date.setdefault(action.ex_date, []).append(action)
 
     regimes: dict[date, BandRegime] = {}
-    locks: dict[date, LimitLock] = {}
+    bands: dict[date, BandReading] = {}
     undecided: dict[date, SignalIssue] = {}
     factors: dict[date, Decimal] = {}
     adjustment_issues: tuple[SignalIssue, ...] = ()
     if projection is BarProjection.PRICE:
+        # Asked of both series. An index level says what it means with respect
+        # to corporate actions like any other stored session, and a series that
+        # somehow held two bases would be as meaningless there as here.
         basis_refusal = _basis_of(usable.values())
         if basis_refusal is not None:
             return None, _refused(
@@ -449,9 +665,15 @@ def prepare_bars(
                 sessions_used=sessions_used,
             )
 
+    # The band and the adjustment are both questions about a listed company:
+    # one takes a percentage of a board's reference price, the other reads a
+    # Corporate Action series. An index has neither, so neither is asked — and
+    # not asking is why `unexplained_price_gap` and `volume_basis_break` cannot
+    # reach an index window.
+    if projection is BarProjection.PRICE and series.has_price_band:
         resolver = BandRegimeResolver(session, symbol, migrations=migrations)
         regimes = {day: resolver.on(day) for day in usable}
-        locks, gap_refusal, undecided = _read_bands(
+        bands, gap_refusal, undecided = _read_bands(
             window,
             usable,
             regimes,
@@ -469,7 +691,7 @@ def prepare_bars(
             )
         factors, adjustment_issues = _factors(window, usable, by_ex_date)
 
-    frame = _frame(symbol, window, usable, locks, factors)
+    frame = _frame(symbol, window, usable, bands, factors, projection, series)
 
     degradations: list[SignalIssue] = []
     if any(action.changes_share_count for action in actions):
@@ -497,9 +719,12 @@ def prepare_bars(
             actions_in_window=len(actions),
             ex_dates_applied=applied_dates,
         ),
-        adtv_percentile=(
-            _adtv_percentile(session, symbol, window, usable, peers)
-            if projection is BarProjection.PRICE
+        adtv=(
+            # An index belongs to no cross-section: there is no set of peers it
+            # trades among, so a percentile of its turnover would rank a
+            # composite against its own members.
+            _adtv_standing(session, symbol, window, usable, peers, context)
+            if projection is BarProjection.PRICE and series.has_peer_cross_section
             else None
         ),
         band_undecided_days=len(undecided),
@@ -542,7 +767,7 @@ def _refused(
         adjustment=AdjustmentReport(
             applied=False, actions_applied=0, actions_in_window=0
         ),
-        adtv_percentile=None,
+        adtv=None,
         band_undecided_days=0,
         band_undecided_reasons=(),
         refusal=reason,
@@ -550,7 +775,7 @@ def _refused(
     )
 
 
-def _basis_of(rows: Iterable[MarketSnapshot]) -> SignalIssue | None:
+def _basis_of(rows: Iterable[SessionSnapshot]) -> SignalIssue | None:
     """What the window's Price Basis values say about serving it, if anything.
 
     Only an all-``raw`` window is served. Two bases in one window is a symbol's
@@ -573,7 +798,7 @@ def _read_bands(
     anchor_date: date | None,
     anchor_row: MarketSnapshot | None,
     by_ex_date: dict[date, list[CorporateAction]],
-) -> tuple[dict[date, LimitLock], SignalIssue | None, dict[date, SignalIssue]]:
+) -> tuple[dict[date, BandReading], SignalIssue | None, dict[date, SignalIssue]]:
     """Judge every session against its band, and refuse a move nothing explains.
 
     A session that broke its band is not a session the market went mad in; it is
@@ -588,7 +813,7 @@ def _read_bands(
     added to it, so no corporate action can produce one, and taking an action as
     its explanation would let a rally excuse a wrong anchor.
     """
-    locks: dict[date, LimitLock] = {}
+    bands: dict[date, BandReading] = {}
     undecided: dict[date, SignalIssue] = {}
 
     previous_date = anchor_date
@@ -615,23 +840,44 @@ def _read_bands(
                     if day not in by_ex_date
                     else "a break upward, which no action produces",
                 )
-                return locks, SignalIssue.UNEXPLAINED_PRICE_GAP, undecided
+                return bands, SignalIssue.UNEXPLAINED_PRICE_GAP, undecided
             # An ex-date the store knows about. The session is not judged for a
             # lock — its anchor is the pre-adjustment close, so the band it was
-            # measured against was never this session's band.
-            locks[day] = LimitLock.INDETERMINATE
+            # measured against was never this session's band, and neither the
+            # verdict nor the limits it was measured from describe this session.
+            # Recorded as undecided under the reason that made it so, like every
+            # other session nobody could judge: left out, Window Health would
+            # report a window with fewer unjudged sessions than it has, and a
+            # field reading the bars would find an absent band the health does
+            # not account for.
+            bands[day] = _unmeasured(reading)
+            undecided[day] = SignalIssue.PRICE_MOVE_EXCEEDS_BAND
             continue
 
         if reading.degraded_reason is not None:
             undecided[day] = reading.degraded_reason
-        locks[day] = reading.lock
+        bands[day] = reading
 
-    return locks, None, undecided
+    return bands, None, undecided
+
+
+def _unmeasured(reading: BandReading) -> BandReading:
+    """The same session with the band it was wrongly measured against removed."""
+    return BandReading(
+        symbol=reading.symbol,
+        session_date=reading.session_date,
+        regime=reading.regime,
+        anchor=None,
+        anchor_date=None,
+        limits=None,
+        lock=LimitLock.INDETERMINATE,
+        degraded_reason=reading.degraded_reason,
+    )
 
 
 def _factors(
     window: Sequence[date],
-    usable: dict[date, MarketSnapshot],
+    usable: dict[date, SessionSnapshot],
     by_ex_date: dict[date, list[CorporateAction]],
 ) -> tuple[dict[date, Decimal], list[SignalIssue]]:
     """The Adjustment Factor of every ex-date in the window that has a usable one.
@@ -666,7 +912,7 @@ def _factors(
 
 def _close_before(
     window: Sequence[date],
-    usable: dict[date, MarketSnapshot],
+    usable: dict[date, SessionSnapshot],
     day: date,
 ) -> Decimal | None:
     """The newest stored raw close strictly before this session in the window."""
@@ -680,9 +926,11 @@ def _close_before(
 def _frame(
     symbol: str,
     window: Sequence[date],
-    usable: dict[date, MarketSnapshot],
-    locks: dict[date, LimitLock],
+    usable: dict[date, SessionSnapshot],
+    bands: dict[date, BandReading],
     factors: dict[date, Decimal],
+    projection: BarProjection,
+    series: BarSeries,
 ) -> BarFrame:
     """Build the window's bars, rebased onto its last session's share terms.
 
@@ -700,6 +948,10 @@ def _frame(
         for ex_date, value in factors.items():
             if ex_date > day:
                 factor *= value
+        # Read off the contract rather than tested for here: only the stored
+        # session knows whether there is a company behind it, and a second test
+        # in this loop could disagree with the first.
+        market_cap_vnd, foreign_net_value_vnd = row.company_figures
         bars.append(
             Bar(
                 session_date=day,
@@ -709,12 +961,61 @@ def _frame(
                 close=_scaled(row.last_price, factor),
                 volume=row.volume,
                 total_value_vnd=row.total_value_vnd,
+                market_cap_vnd=market_cap_vnd,
+                foreign_net_value_vnd=foreign_net_value_vnd,
                 adjustment_factor=factor,
-                limit_lock=locks.get(day, LimitLock.INDETERMINATE),
+                limit_lock=_lock_of(bands.get(day), series),
+                band=bands[day].limits if day in bands else None,
+                band_undecided_reason=_undecided_reason(
+                    bands.get(day), projection, series
+                ),
                 change_pct=row.change_pct,
             )
         )
     return BarFrame(symbol=symbol, bars=tuple(bars))
+
+
+def _lock_of(reading: BandReading | None, series: BarSeries) -> LimitLock:
+    """Whether this session traded at a limit, or why that is not a question.
+
+    ``NOT_APPLICABLE`` on a series with no band, and it is a different answer
+    from ``INDETERMINATE``: the latter is the store admitting it could not judge
+    a session that does have a band, and using it for an index would leave an
+    equity's word on the one bar that most needs not to carry one.
+    """
+    if not series.has_price_band:
+        return LimitLock.NOT_APPLICABLE
+    return reading.lock if reading is not None else LimitLock.INDETERMINATE
+
+
+def _undecided_reason(
+    reading: BandReading | None,
+    projection: BarProjection,
+    series: BarSeries,
+) -> SignalIssue | None:
+    """Why this session has no band, or nothing where it has one.
+
+    The pairing ``Bar`` promises: a served bar carries either its band or the
+    reason it has none, never neither, so a field downstream never has to guess
+    why a band is absent.
+
+    Three ways a band can be missing, and they are kept apart because the fix
+    for each is different. An index has no band **at all** — no board, no
+    reference price to take a percentage of — and that is answered first, before
+    the projection: it is a fact about the instrument rather than about what
+    this window asked for. A window prepared for quantities has no band because
+    nobody asked. Anything left is a listed session the store could not judge,
+    and it carries the reason it could not.
+    """
+    if not series.has_price_band:
+        return SignalIssue.BAND_NOT_APPLICABLE
+    if projection is not BarProjection.PRICE:
+        return SignalIssue.BAND_NOT_MEASURED
+    if reading is None:
+        return SignalIssue.MISSING_TARGET_SESSION
+    if reading.limits is not None:
+        return None
+    return reading.degraded_reason or SignalIssue.EXCHANGE_UNKNOWN
 
 
 def _scaled(price: float | None, factor: Decimal) -> float | None:
@@ -748,13 +1049,14 @@ def _window_regime(
     )
 
 
-def _adtv_percentile(
+def _adtv_standing(
     session: Session,
     symbol: str,
     window: Sequence[date],
-    usable: dict[date, MarketSnapshot],
+    usable: dict[date, SessionSnapshot],
     peers: Sequence[str] | None,
-) -> float | None:
+    context: BarPreparationContext | None = None,
+) -> AdtvStanding | None:
     """Where this symbol's traded money sits among its peers over the same days.
 
     Traded **money** rather than traded shares, because money is the one quantity
@@ -770,7 +1072,7 @@ def _adtv_percentile(
     if not days:
         return None
 
-    mine = _average_value(usable, days)
+    mine = average_over_sessions(usable[day].total_value_vnd for day in days)
     if mine is None:
         return None
 
@@ -779,35 +1081,63 @@ def _adtv_percentile(
     if len(others) < ADTV_MIN_PEERS:
         return None
 
-    held = sessions_on_days(session, others, days)
+    # A context already holds every one of these symbols' sessions across the
+    # same window, loaded once for the whole batch. Read from it rather than
+    # asking again: the standing is measured per prepared window, so a caller
+    # preparing a hundred symbols would otherwise pay this cross-sectional read
+    # a hundred times over for one answer that does not change between them.
+    held = (
+        context._sessions
+        if context is not None and set(others) <= set(context._symbols)
+        else sessions_on_days(session, others, days)
+    )
     measured = [
         value
         for name in others
-        if (value := _average_value(held.get(name, {}), days)) is not None
+        if (value := _peer_average(held.get(name, {}), days)) is not None
     ]
     if len(measured) < ADTV_MIN_PEERS:
         return None
 
     below = sum(1 for value in measured if value <= mine)
-    return below / len(measured)
+    return AdtvStanding(
+        average_value_vnd=mine,
+        percentile=below / len(measured),
+        n=len(measured),
+        as_of=days[-1],
+    )
 
 
-def _average_value(
-    held: dict[date, MarketSnapshot],
+def _peer_average(
+    held: dict[date, SessionSnapshot],
     days: Sequence[date],
 ) -> float | None:
-    """Average traded money across these sessions, or nothing if any is missing.
+    """One peer's average traded money over exactly these sessions."""
+    return average_over_sessions(
+        None if (row := held.get(day)) is None else row.total_value_vnd
+        for day in days
+    )
+
+
+def average_over_sessions(values: Iterable[float | None]) -> float | None:
+    """The average across exactly these sessions, or nothing if any is missing.
 
     All or nothing on purpose: a symbol that traded on twelve of the twenty days
     has an average over a different stretch of market than the symbol beside it,
     and ranking the two together would present them as comparable.
+
+    Deliberately **unit-neutral**. The gateway averages traded money over rows
+    it has just loaded while the liquidity fields average money over one window
+    and shares over another, and all of them need the same all-or-nothing rule;
+    a helper named for one of the two denominations would be read as licence to
+    call it on the other, which is the swap the money/quantity naming split
+    exists to prevent. Each caller states its own unit.
     """
-    values: list[float] = []
-    for day in days:
-        row = held.get(day)
-        if row is None or row.total_value_vnd is None:
+    collected: list[float] = []
+    for value in values:
+        if value is None:
             return None
-        values.append(row.total_value_vnd)
-    if not values:
+        collected.append(value)
+    if not collected:
         return None
-    return sum(values) / len(values)
+    return sum(collected) / len(collected)

@@ -50,7 +50,7 @@ from collections.abc import Sequence
 from statistics import median
 
 from .bars import Bar, BarFrame
-from .fields import FieldReading
+from .fields import FieldReading, FieldWindow
 from .issues import SignalIssue
 
 # The trailing stretch today's session is judged against. Sixty sessions is the
@@ -121,13 +121,16 @@ def volatility_regime_z(frame: BarFrame) -> float | None:
     return _reading(frame)[0]
 
 
-def volatility_regime_reading(frame: BarFrame) -> FieldReading:
+def volatility_regime_reading(window: FieldWindow) -> FieldReading:
     """The registered field's own answer over one window.
 
-    Pure, like every other reading in this package: it is what the null harness
-    runs and what ``serve_field`` dresses with Window Health, and it reaches
-    nothing outside the frame it was handed.
+    Pure, like every other reading in this package: it is what ``serve_field``
+    dresses with Window Health, and it reaches nothing outside the window it was
+    handed. This one reads only the bars of it — the statistic the null harness
+    runs is the same arithmetic over the same frame, which is what lets a field
+    be calibrated against synthetic windows at all.
     """
+    frame = window.frame
     value, reason = _reading(frame)
     if value is None:
         return FieldReading(value=None, refusal=reason)

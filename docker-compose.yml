@@ -68,6 +68,11 @@ services:
       # actually reads — the setting defaults to on, and a switch that only
       # exists in the settings class is one a container never sees.
       CORPORATE_ACTIONS_ENABLED: ${CORPORATE_ACTIONS_ENABLED:-true}
+      # The daily load of the benchmark's session series (docs/adr/0017).
+      # Forwarded for the same reason the switch above is: it defaults to on,
+      # and a switch that only exists in the settings class is one a container
+      # never sees.
+      MARKET_INDEX_ENABLED: ${MARKET_INDEX_ENABLED:-true}
       SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
       SECTOR_HISTORICAL_ENABLED: ${SECTOR_HISTORICAL_ENABLED:-false}
     volumes:

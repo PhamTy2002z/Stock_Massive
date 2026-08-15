@@ -79,7 +79,8 @@ from dataclasses import dataclass
 from datetime import date
 
 from .bars import Bar, BarFrame
-from .fields import FieldReading
+from .fields import FieldReading, FieldWindow
+from .moments import sample_variance
 from .issues import SignalIssue
 from .volatility import garman_klass_variance
 
@@ -235,7 +236,7 @@ def rogers_satchell_variance(bars: Sequence[Bar]) -> float | None:
 def close_to_close_variance(bars: Sequence[Bar]) -> float | None:
     """The textbook estimator, kept as the baseline the others are efficient against."""
     returns = _close_returns(bars)
-    return _sample_variance(returns)
+    return sample_variance(returns)
 
 
 def yang_zhang_variance(bars: Sequence[Bar]) -> float | None:
@@ -255,8 +256,8 @@ def yang_zhang_variance(bars: Sequence[Bar]) -> float | None:
         math.log(bar.close / bar.open)  # type: ignore[arg-type]
         for bar in bars[1:]
     ]
-    v_overnight = _sample_variance(overnight)
-    v_open_to_close = _sample_variance(open_to_close)
+    v_overnight = sample_variance(overnight)
+    v_open_to_close = sample_variance(open_to_close)
     v_rs = rogers_satchell_variance(bars[1:])
     if v_overnight is None or v_open_to_close is None or v_rs is None:
         return None
@@ -276,7 +277,7 @@ def annualized_percent(variance: float) -> float:
     return 100.0 * math.sqrt(max(variance, 0.0) * TRADING_SESSIONS_PER_YEAR)
 
 
-def realized_volatility_reading(frame: BarFrame) -> FieldReading:
+def realized_volatility_reading(window: FieldWindow) -> FieldReading:
     """Yang-Zhang as the headline, with its three relatives beside it.
 
     The components are returned rather than hidden because they disagree in a
@@ -284,6 +285,7 @@ def realized_volatility_reading(frame: BarFrame) -> FieldReading:
     so on a symbol whose moves arrive overnight they sit well under Yang-Zhang,
     and the gap is the reader's cue that the headline is doing work.
     """
+    frame = window.frame
     bars = _usable(frame)
     variance = yang_zhang_variance(bars)
     if variance is None:
@@ -316,7 +318,7 @@ def realized_volatility_reading(frame: BarFrame) -> FieldReading:
     )
 
 
-def price_zone_reading(frame: BarFrame) -> FieldReading:
+def price_zone_reading(window: FieldWindow) -> FieldReading:
     """One realized σ either side of the anchor close, as a percentage.
 
     A number, and only a number. The zone says how far this symbol ordinarily
@@ -337,6 +339,7 @@ def price_zone_reading(frame: BarFrame) -> FieldReading:
     and changes no reading; taken on a loud symbol the two diverge visibly, and
     the one that stays consistent with its own estimator is the one to ship.
     """
+    frame = window.frame
     bars = _usable(frame)
     variance = yang_zhang_variance(bars)
     if variance is None:
@@ -442,7 +445,7 @@ def drawdown_ratio(frame: BarFrame) -> float | None:
 
 
 def _drawdown_reading(
-    frame: BarFrame,
+    window: FieldWindow,
     pick: Callable[[Drawdown], float],
     scatter: Callable[[float, int], float | None],
 ) -> FieldReading:
@@ -455,6 +458,7 @@ def _drawdown_reading(
     error beside each of these is a real sampling spread rather than the
     benchmark wearing a standard error's name.
     """
+    frame = window.frame
     bars = _usable(frame)
     fall = drawdown_of(bars)
     if fall is None:
@@ -505,23 +509,23 @@ def _percent_scatter(share: float) -> Callable[[float, int], float | None]:
     return scatter
 
 
-def max_drawdown_reading(frame: BarFrame) -> FieldReading:
+def max_drawdown_reading(window: FieldWindow) -> FieldReading:
     return _drawdown_reading(
-        frame,
+        window,
         lambda fall: fall.max_drawdown_pct,
         _percent_scatter(MAX_DRAWDOWN_NULL_SCATTER),
     )
 
 
-def current_drawdown_reading(frame: BarFrame) -> FieldReading:
+def current_drawdown_reading(window: FieldWindow) -> FieldReading:
     return _drawdown_reading(
-        frame,
+        window,
         lambda fall: fall.current_drawdown_pct,
         _percent_scatter(CURRENT_DRAWDOWN_NULL_SCATTER),
     )
 
 
-def days_underwater_reading(frame: BarFrame) -> FieldReading:
+def days_underwater_reading(window: FieldWindow) -> FieldReading:
     """How long since the last peak, and how long that is under a coin.
 
     The scatter here does not scale with volatility at all — the length of an
@@ -532,13 +536,13 @@ def days_underwater_reading(frame: BarFrame) -> FieldReading:
     underwater" as a finding.
     """
     return _drawdown_reading(
-        frame,
+        window,
         lambda fall: float(fall.days_underwater),
         lambda _sigma, sessions: DAYS_UNDERWATER_NULL_SCATTER * sessions,
     )
 
 
-def drawdown_versus_benchmark_reading(frame: BarFrame) -> FieldReading:
+def drawdown_versus_benchmark_reading(window: FieldWindow) -> FieldReading:
     """The observed fall over the one a coin would have produced.
 
     Computed here rather than through ``drawdown_ratio`` so the benchmark that
@@ -546,6 +550,7 @@ def drawdown_versus_benchmark_reading(frame: BarFrame) -> FieldReading:
     call and the benchmark from a second would recompute Yang-Zhang over the
     whole window twice to answer the same question two ways.
     """
+    frame = window.frame
     bars = _usable(frame)
     fall = drawdown_of(bars)
     variance = yang_zhang_variance(bars)
@@ -662,7 +667,7 @@ def annualization_of(returns: Sequence[float]) -> Annualization:
     )
 
 
-def sharpe_reading(frame: BarFrame) -> FieldReading:
+def sharpe_reading(window: FieldWindow) -> FieldReading:
     """The ratio, its Lo standard error, and the interval that usually contains zero.
 
     The interval is the headline rather than a caveat. On the samples this system
@@ -670,12 +675,13 @@ def sharpe_reading(frame: BarFrame) -> FieldReading:
     of zero, and a field that printed the point estimate alone would be inviting
     a comparison between two numbers that are the same number.
     """
+    frame = window.frame
     returns = _close_returns(_usable(frame))
     if len(returns) < 3:
         return FieldReading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
 
     mean = sum(returns) / len(returns)
-    variance = _sample_variance(returns)
+    variance = sample_variance(returns)
     if variance is None or variance <= 0:
         return FieldReading(value=None, refusal=SignalIssue.BASELINE_DISPERSION_ZERO)
 
@@ -709,7 +715,7 @@ def sharpe_reading(frame: BarFrame) -> FieldReading:
     )
 
 
-def sortino_reading(frame: BarFrame) -> FieldReading:
+def sortino_reading(window: FieldWindow) -> FieldReading:
     """Sortino, with the divisor the common implementation gets wrong.
 
     Downside deviation divides by the **total** number of observations, not by
@@ -717,6 +723,7 @@ def sortino_reading(frame: BarFrame) -> FieldReading:
     risk precisely when most returns are positive — which is most of the time,
     and is the case a reader would most like to be warned about.
     """
+    frame = window.frame
     returns = _close_returns(_usable(frame))
     if len(returns) < 3:
         return FieldReading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
@@ -776,14 +783,6 @@ def _close_returns(bars: Sequence[Bar]) -> list[float]:
     return [
         math.log(later / earlier) for earlier, later in zip(closes, closes[1:])
     ]
-
-
-def _sample_variance(values: Sequence[float]) -> float | None:
-    """The mean-adjusted sample variance, or nothing below two observations."""
-    if len(values) < 2:
-        return None
-    mean = sum(values) / len(values)
-    return sum((item - mean) ** 2 for item in values) / (len(values) - 1)
 
 
 def _component(variance: float | None) -> float | None:

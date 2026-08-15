@@ -14,6 +14,15 @@ RAW_ACCESS_ALLOWLIST = {
     "corporate_actions.py": {"SnapshotStore"},
     "price_band.py": {"sessions"},
     "sessions.py": {"ProviderSnapshot"},
+    # Neither of these reads a session. A quarterly statement is the
+    # `fundamental` Capability and a foreign ownership room the `reference` one:
+    # both are dated by something other than a trading session, neither has a
+    # window, and `prepare_bars()` does not serve them and could not. They are
+    # batched readers of one capability each, and the allowlist names the reader
+    # rather than exempting the file so a second path inside either still needs
+    # an argument.
+    "fundamentals.py": {"ProviderSnapshot"},
+    "reference.py": {"ProviderSnapshot"},
 }
 
 

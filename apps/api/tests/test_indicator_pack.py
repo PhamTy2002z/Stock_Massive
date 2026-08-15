@@ -27,6 +27,7 @@ from src.stocks.signals.registry import (
 )
 from src.stocks.signals.serving import serve_field
 
+from .signal_windows import window_of
 from .test_price_band import list_on, write_session
 
 
@@ -140,7 +141,7 @@ def test_rsi_uses_wilders_fourteen_session_definition():
         46.28,
     ]
 
-    reading = rsi_reading(frame_of(closes))
+    reading = rsi_reading(window_of(frame_of(closes)))
 
     assert reading.value == pytest.approx(70.464135, rel=1e-6)
     assert reading.extras == {"period": 14, "sessions": 15}
@@ -149,7 +150,7 @@ def test_rsi_uses_wilders_fourteen_session_definition():
 def test_macd_is_the_twelve_session_ema_less_the_twenty_six_session_ema():
     # Twenty-five closes at 100 seed both EMAs there. A final close at 112
     # moves the fast EMA by 24/13 and the slow one by 6/13, leaving 18/13.
-    reading = macd_reading(frame_of([100.0] * 25 + [112.0]))
+    reading = macd_reading(window_of(frame_of([100.0] * 25 + [112.0])))
 
     assert reading.value == pytest.approx(18.0 / 13.0)
     assert reading.extras == {
@@ -162,9 +163,9 @@ def test_macd_is_the_twelve_session_ema_less_the_twenty_six_session_ema():
 def test_bollinger_percent_b_is_the_fraction_from_lower_to_upper_band():
     # For closes 1..20 the population variance is 33.25. With two standard
     # deviations on either side, the last close sits at this worked fraction.
-    reading = bollinger_percent_b_reading(
+    reading = bollinger_percent_b_reading(window_of(
         frame_of([float(value) for value in range(1, 21)])
-    )
+    ))
 
     assert reading.value == pytest.approx(0.9118772355)
     assert reading.extras == {
@@ -175,7 +176,7 @@ def test_bollinger_percent_b_is_the_fraction_from_lower_to_upper_band():
 
 
 def test_bollinger_percent_b_is_masked_when_the_band_has_no_width():
-    reading = bollinger_percent_b_reading(frame_of([20_000.0] * 20))
+    reading = bollinger_percent_b_reading(window_of(frame_of([20_000.0] * 20)))
 
     assert reading.value is None
     assert reading.refusal is SignalIssue.ZERO_RANGE_SESSION

@@ -11,8 +11,16 @@ Một nhà cung cấp dữ liệu bên ngoài mà hệ thống lấy số liệu
 _Avoid_: API, data feed, upstream
 
 **Capability**:
-Một lớp dữ liệu có thể được sở hữu bởi một Provider Source độc lập với các lớp khác: `market` (giá, khối lượng, dòng tiền), `valuation` (P/E, P/B), `reference` (sở hữu và số lượng cổ phiếu, đổi chậm), `fundamental` (báo cáo tài chính).
+Một lớp dữ liệu có thể được sở hữu bởi một Provider Source độc lập với các lớp khác: `market` (giá, khối lượng, dòng tiền), `valuation` (P/E, P/B), `reference` (sở hữu và số lượng cổ phiếu, đổi chậm), `fundamental` (báo cáo tài chính), `market_index` (chuỗi phiên của chỉ số thị trường).
 _Avoid_: data type, category, domain
+
+**Market Index**:
+Chỉ số thị trường (VN-Index) được lưu như một chuỗi phiên riêng dưới Capability `market_index`, không phải một mã trong `market`. Chỉ số không phải chứng khoán niêm yết: không có biên độ, không có sự kiện quyền, không có dòng tiền ngoại — và quan trọng nhất, **Trading Day** được suy ra từ Capability `market`, nên một phiên chỉ số nằm ở đó sẽ tham gia định nghĩa cửa sổ mà mọi mã được đo trên đó. Lý do đầy đủ ở [ADR 0017](docs/adr/0017-market-index-as-its-own-capability.md).
+_Avoid_: một mã trong Universe, alias VN-Index trong đường giá live
+
+**Market Index Load**:
+Lần nạp chuỗi phiên của chỉ số: lặp lại được và chỉ đọc Main Source như **Warm-up**, sâu như **Backfill** (một năm phiên), và khác cả hai ở chỗ nạp một công cụ không nằm trong Universe nào. Độ sâu do chính field đọc nó khai — `relative_strength` khai 250 phiên — và được kiểm ở lúc dựng loader, không phải chỉ ghi trong hằng số.
+_Avoid_: Warm-up chỉ số, Backfill chỉ số
 
 **Snapshot**:
 Một bản ghi dữ liệu đã chuẩn hoá của một mã tại một thời điểm, sau khi qua ranh giới Provider Source — luôn mang theo nguồn, `effective_at` (dữ liệu nói về lúc nào) và `observed_at` (hệ thống thấy nó lúc nào).

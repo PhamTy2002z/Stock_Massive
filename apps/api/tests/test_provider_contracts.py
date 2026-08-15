@@ -305,11 +305,20 @@ def test_source_ownership_matches_the_measured_main_cover_table():
         ),
         Capability.REFERENCE: SourceOwnership(main=ProviderSource.VNSTOCK),
         Capability.FUNDAMENTAL: SourceOwnership(main=ProviderSource.VNSTOCK),
+        Capability.MARKET_INDEX: SourceOwnership(main=ProviderSource.FIINQUANT),
     }
 
     assert main_source(Capability.VALUATION) is ProviderSource.FIINQUANT
     assert cover_source(Capability.VALUATION) is ProviderSource.VNSTOCK
     assert cover_source(Capability.FUNDAMENTAL) is None
+
+    # The index has one owner and no cover on purpose (docs/adr/0017): the Cover
+    # Source's quote history is adjusted_at_source, and an index is adjusted for
+    # nothing — so admitting it would put a basis on the row asserting a
+    # rescaling nobody performed.
+    assert main_source(Capability.MARKET_INDEX) is ProviderSource.FIINQUANT
+    assert cover_source(Capability.MARKET_INDEX) is None
+    assert not owns_capability(Capability.MARKET_INDEX, ProviderSource.VNSTOCK)
 
 
 def test_source_ownership_answers_which_sources_may_own_a_capability():

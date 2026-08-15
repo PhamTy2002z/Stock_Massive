@@ -375,18 +375,31 @@ class TestEachKindCarriesItsOwnBar:
                 extras={"n": None, "as_of": "2026-08-14"},
             )
 
-    def test_a_computed_field_carries_the_computation_that_answers_for_it(self):
+    def test_a_field_carries_the_computation_that_answers_for_it(self):
         """Passed beside the field instead, a caller could serve one field's
         declaration with another field's arithmetic and get a valid-looking
         answer."""
-        with pytest.raises(ValueError, match="computed, so the computation"):
+        with pytest.raises(ValueError, match="declares exactly one"):
             a_field(reading=None)
 
         assert all(
-            entry.reading is not None
+            entry.reading is not None or entry.ranked is not None
             for entry in REGISTRY.values()
-            if entry.source is FieldSource.COMPUTED
         )
+
+    def test_a_field_answers_for_one_symbol_or_across_a_sample_and_not_both(self):
+        """Whether a number is a position within a sample is the field's to say.
+
+        A field declaring both would let a caller pick, and the two answers are
+        not the same number: one is this symbol's own figure and the other is
+        where that figure sits among ninety-nine others.
+        """
+        with pytest.raises(ValueError, match="declares exactly one"):
+            a_field(ranked=lambda window: None)
+
+    def test_a_ranked_field_answers_with_a_percentile(self):
+        with pytest.raises(ValueError, match="ranked across a cross-section"):
+            a_field(reading=None, ranked=lambda window: None, kind=FieldKind.ESTIMATOR)
 
     def test_a_value_with_no_number_and_no_reason_is_refused(self):
         with open_session() as session:

@@ -157,6 +157,13 @@ class LimitLock(str, Enum):
     # nobody knows.
     INDETERMINATE = "indeterminate"
 
+    # There is no question. The instrument has no band to lock at — a market
+    # index sits on no board (``docs/adr/0017``). Distinct from
+    # ``INDETERMINATE``, which is the store admitting it could not judge a
+    # session that does have a band: reusing that here would put an equity's
+    # vocabulary on an instrument the word does not apply to.
+    NOT_APPLICABLE = "not_applicable"
+
 
 @dataclass(frozen=True)
 class ExchangeMigration:

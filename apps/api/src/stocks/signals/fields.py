@@ -54,6 +54,8 @@ from .issues import SignalIssue
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to a checker
     from .bars import BarFrame, WindowHealth
+    from .fundamentals import FundamentalStanding
+    from .reference import ForeignRoomStanding
 
 # The catalog-wide ceiling on how often a `signal` field may fire on data that
 # contains no signal. Fixed here rather than declared per tool: a self-declared
@@ -118,11 +120,15 @@ class FieldKind(str, Enum):
     # threshold frozen from the null rather than calibrated at runtime.
     SIGNAL = "signal"
 
-    # A deterministic transform admitted so a caller and a model can share the
-    # market's vocabulary without turning its conventional cutoffs into a
-    # statistical claim. It has neither a threshold nor sampling uncertainty:
-    # the number is exact for the window, while its predictive value is not
-    # asserted at all.
+    # A number that is exact for what it describes, so there is no sampling
+    # distribution behind it to report. Two shapes qualify and both are here for
+    # the same reason. A deterministic transform of the window admits a caller
+    # and a model to the market's shared vocabulary without turning its
+    # conventional cutoffs into a statistical claim; a figure read straight from
+    # a stored provider row — a foreign ownership room against its cap — is
+    # exact for the date it was read, and the honest caveat on it is its age
+    # rather than an error bar. Neither carries a threshold, and neither asserts
+    # any predictive value at all.
     VOCABULARY = "vocabulary"
 
 
@@ -162,7 +168,15 @@ class Sign(str, Enum):
 
 
 class Unit(str, Enum):
-    """What the number is measured in."""
+    """What the number is measured in.
+
+    ``VND`` and ``SHARES`` are the money/quantity split the market contracts
+    already make, and keeping it here rather than in prose is what lets the
+    serving layer act on it: a share-denominated figure changes unit partway
+    through a window that crosses a share-count-changing action and a
+    money-denominated one does not, so the unit is what decides whether a window
+    degrades a field (``docs/adr/0006``).
+    """
 
     Z_SCORE = "z_score"
     PERCENT = "percent"
@@ -170,8 +184,29 @@ class Unit(str, Enum):
     RATIO = "ratio"
     SESSIONS = "sessions"
     VND = "vnd"
+    SHARES = "shares"
+    # Amihud's illiquidity: percent of price moved per billion dong traded. Its
+    # own unit rather than a ratio, because the number is meaningless without
+    # both denominations and a ``ratio`` label would invite a comparison with
+    # every other dimensionless figure in the catalog.
+    PERCENT_PER_BILLION_VND = "percent_per_billion_vnd"
     PERCENTILE = "percentile"
     INDEX_0_100 = "index_0_100"
+
+
+class Denomination(str, Enum):
+    """Whether a traded figure counts money or shares.
+
+    A closed set rather than the two words spelled inline, because this is the
+    one distinction in the package that a wrong answer looks entirely reasonable
+    under: money crosses an ex-date unchanged and shares do not, so a figure
+    labelled with the wrong one of these is off by a corporate action while
+    reading perfectly. Two fields that report their basis have to report it in
+    the same vocabulary for a reader to compare them at all.
+    """
+
+    MONEY = "money"
+    SHARES = "shares"
 
 
 class ThresholdOrigin(str, Enum):
@@ -266,15 +301,60 @@ class NullCalibration:
 class FieldReading:
     """What one computation produced, before it is dressed as a ``FieldValue``.
 
-    The seam between a pure function over bars and a served answer: a reading
-    knows the number and what came with it, and knows nothing about the window it
-    was drawn from or the field that declared it. That is what lets a
-    computation be tested, and run against a null, without a store behind it.
+    The seam between a pure function over a window and a served answer: a reading
+    knows the number and what came with it, and knows nothing about the field
+    that declared it. That is what lets a computation be tested, and run against
+    a null, without a store behind it.
+
+    ``degraded_reason`` is the computation's **own** verdict on its answer, and
+    it exists because some degradations are not properties of the window. A
+    window is too limit-locked for any range estimator in the package at once,
+    and that lives on Window Health; a band distance measured on UPCOM is
+    degraded for this field alone, because that board's anchor is not stored and
+    no other field asks for it (``docs/adr/0006``).
     """
 
     value: float | None
     extras: Mapping[str, Any] = field(default_factory=dict)
     refusal: SignalIssue | None = None
+    degraded_reason: SignalIssue | None = None
+
+
+@dataclass(frozen=True)
+class FieldWindow:
+    """Everything a registered field may read, and the only thing it is handed.
+
+    One argument rather than a bar frame, because "the window" is more than the
+    bars for some fields and the alternative to saying so once is saying it
+    differently in each of them. A field asking for a session's traded money
+    reads a bar; a field asking how thin this symbol is against its peers reads
+    the cross-sectional standing the gateway measured while serving the window;
+    a field asking whether a flow was mechanically capped reads a foreign room
+    that is not a session fact at all. All three arrive here, and a field that
+    reached past this object for any of them would be the second path to data
+    that ``prepare_bars()`` exists to make impossible.
+
+    Built in ``serving`` alone. ``health`` is the gateway's own account of the
+    window and is echoed beside whatever was computed from it, so a field never
+    recounts what the gateway already counted.
+
+    ``fundamental`` is present only where a field's own declaration asked for a
+    cross-section, because that is the only serving path that loads statements —
+    one query for every symbol rather than one per symbol. A field reading it
+    finds either the newest quarter at or before the window's cutoff, with the
+    age of that quarter on it, or ``None`` where the store holds no statement
+    for this symbol at all.
+
+    ``foreign_room`` is the same shape of fact from the reference Capability: the
+    ceiling on foreign ownership, which is not a session and is not derivable
+    from one. It is here because a foreign-flow number cannot be read without it
+    — a flow that flattened because the room filled is not a change of view.
+    """
+
+    frame: "BarFrame"
+    health: "WindowHealth"
+    fundamental: "FundamentalStanding | None" = None
+    foreign_room: "ForeignRoomStanding | None" = None
 
 
 @dataclass(frozen=True)
@@ -288,14 +368,14 @@ class SignalField:
     and a checklist.
 
     ``reading`` and ``statistic`` are the mechanism rather than two more
-    declarations. ``reading`` is the pure function from a window of bars to this
+    declarations. ``reading`` is the pure function from a ``FieldWindow`` to this
     field's answer, and it lives on the field so that the pairing is recorded
     where the field is: passed alongside a field instead, a caller could serve
     the Sharpe declaration with the Sortino computation and get a
     perfectly-valid-looking answer. ``statistic`` is the narrower one the null
-    harness runs — just the number the threshold is compared against — and a
-    ``signal`` field must have it, because the harness runs the real field over
-    synthetic windows and there is no other way to run it.
+    harness runs — just the number the threshold is compared against, over the
+    bars alone — and a ``signal`` field must have it, because the harness runs
+    the real field over synthetic windows and there is no other way to run it.
     """
 
     name: str
@@ -313,7 +393,13 @@ class SignalField:
     threshold: Threshold | None
     null_fpr: NullCalibration | None
     output_keys: tuple[str, ...] = ()
-    reading: Callable[["BarFrame"], FieldReading] | None = None
+    reading: Callable[[FieldWindow], FieldReading] | None = None
+    # The cross-sectional half of the same mechanism: the per-symbol quantity a
+    # percentile ranks, over the same ``FieldWindow`` a reading gets. Declared
+    # instead of ``reading`` rather than beside it, because a cross-sectional
+    # field has no single-symbol answer at all — its number is a position within
+    # a sample, and a caller holding one symbol has no sample.
+    ranked: Callable[[FieldWindow], FieldReading] | None = None
     statistic: Callable[["BarFrame"], float | None] | None = None
 
     def __post_init__(self) -> None:
@@ -331,10 +417,18 @@ class SignalField:
                     "behind a measured forward-return harness"
                 )
 
-        if self.source is FieldSource.COMPUTED and self.reading is None:
+        if (self.reading is None) == (self.ranked is None):
             raise ValueError(
-                f"{self.name} is computed, so the computation that answers for "
-                "it belongs on the declaration rather than beside it"
+                f"{self.name} declares exactly one of a reading and a ranked "
+                "quantity: the computation that answers for a field belongs on "
+                "the declaration rather than beside it, and whether it is "
+                "answered for one symbol or within a sample is not a caller's "
+                "choice to make"
+            )
+        if self.ranked is not None and self.kind is not FieldKind.PERCENTILE:
+            raise ValueError(
+                f"{self.name} is ranked across a cross-section, so what it "
+                f"answers with is a percentile rather than a {self.kind.value}"
             )
 
         if self.kind is FieldKind.SIGNAL:

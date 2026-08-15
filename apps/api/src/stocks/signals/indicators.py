@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 
 from .bars import BarFrame
-from .fields import FieldReading
+from .fields import FieldReading, FieldWindow
 from .issues import SignalIssue
 
 RSI_PERIOD = 14
@@ -28,8 +28,8 @@ def _closing_prices(frame: BarFrame, min_sessions: int) -> list[float] | None:
     return closes if len(closes) >= min_sessions else None
 
 
-def rsi_reading(frame: BarFrame) -> FieldReading:
-    closes = _closing_prices(frame, RSI_PERIOD + 1)
+def rsi_reading(window: FieldWindow) -> FieldReading:
+    closes = _closing_prices(window.frame, RSI_PERIOD + 1)
     if closes is None:
         return FieldReading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
 
@@ -62,8 +62,8 @@ def _ema(values: list[float], period: int) -> float:
     return average
 
 
-def macd_reading(frame: BarFrame) -> FieldReading:
-    closes = _closing_prices(frame, MACD_SLOW_PERIOD)
+def macd_reading(window: FieldWindow) -> FieldReading:
+    closes = _closing_prices(window.frame, MACD_SLOW_PERIOD)
     if closes is None:
         return FieldReading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
     value = _ema(closes, MACD_FAST_PERIOD) - _ema(closes, MACD_SLOW_PERIOD)
@@ -77,8 +77,8 @@ def macd_reading(frame: BarFrame) -> FieldReading:
     )
 
 
-def bollinger_percent_b_reading(frame: BarFrame) -> FieldReading:
-    closes = _closing_prices(frame, BOLLINGER_MIN_SESSIONS)
+def bollinger_percent_b_reading(window: FieldWindow) -> FieldReading:
+    closes = _closing_prices(window.frame, BOLLINGER_MIN_SESSIONS)
     if closes is None:
         return FieldReading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
     window = closes[-BOLLINGER_PERIOD:]
