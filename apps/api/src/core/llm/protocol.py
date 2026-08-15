@@ -177,7 +177,9 @@ class Completion:
     model: str
     text: str | None = None
     tool_calls: tuple[ToolCall, ...] = ()
-    usage: Usage = field(default_factory=Usage)
+    # None means the provider supplied no evidence. It is intentionally not an
+    # all-zero Usage: absence may not refund a committed reservation.
+    usage: Usage | None = None
     finish_reason: str = "stop"
 
     @property

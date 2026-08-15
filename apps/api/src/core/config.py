@@ -205,6 +205,9 @@ class Settings(BaseSettings):
     llm_model_batch: str = "gpt-5.6-luna"
     llm_model_session: str = "gpt-5.6-terra"
     llm_request_timeout_seconds: float = 120.0
+    # Explicit paid-call switch for the boot-time Capability Probe. Test code
+    # turns this off by name; no code path guesses that pytest is running.
+    llm_capability_probe_enabled: bool = True
 
     # Khối giá mà Budget Validation đọc lúc khởi động. Đơn vị USD trên một
     # triệu token, khai riêng cho từng workload: batch và interactive là hai

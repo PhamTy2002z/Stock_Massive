@@ -1,5 +1,11 @@
 """Pytest configuration and fixtures."""
 import asyncio
+import os
+
+# Paid startup calls are disabled by an explicit configuration flag. This is
+# deliberately set before importing `src.main`; no production code detects
+# pytest, CI, or a test environment on its own.
+os.environ["LLM_CAPABILITY_PROBE_ENABLED"] = "false"
 
 import pytest
 import pytest_asyncio
