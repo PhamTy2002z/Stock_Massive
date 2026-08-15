@@ -15,7 +15,14 @@ from src.auth.router import router as auth_router
 from src.core.config import get_settings
 from src.core.cache import CacheRefreshUnavailable
 from src.core.database import engine
-from src.core.llm import enforce_budget_validation, llm_config_from_settings
+from src.core.llm import (
+    CapabilityProbe,
+    Workload,
+    build_client,
+    enforce_budget_validation,
+    enforce_capability_probe,
+    llm_config_from_settings,
+)
 from src.core.quota import QuotaRefused
 from src.core.scheduler import setup_scheduler
 from src.core.vnstock_client import VnstockUnavailable, VnstockUnsupported
@@ -34,6 +41,23 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+
+async def run_capability_probe_at_startup(config) -> None:
+    """Run paid route checks only behind the explicit configuration flag."""
+    if not get_settings().llm_capability_probe_enabled:
+        logger.info("Capability Probe skipped by explicit configuration")
+        return
+
+    client = build_client(config)
+    try:
+        result = await CapabilityProbe(
+            client,
+            model=config.model_for(Workload.SESSION),
+        ).run()
+    finally:
+        await client.aclose()
+    enforce_capability_probe(result, alpha_desk_enabled=config.enabled)
 
 
 @asynccontextmanager
@@ -55,7 +79,12 @@ async def lifespan(app: FastAPI):
     # one Analysis or one Turn fails here rather than midway through the first
     # real Turn — and with Alpha Desk off it only logs, because there is
     # nothing to protect.
-    enforce_budget_validation(llm_config_from_settings(get_settings()))
+    llm_config = llm_config_from_settings(get_settings())
+    enforce_budget_validation(llm_config)
+
+    # The paid route contract comes after the local Universe and budget checks
+    # and before the scheduler can create any workload that depends on it.
+    await run_capability_probe_at_startup(llm_config)
 
     if settings.scheduler_enabled:
         async with AsyncScheduler() as scheduler:
