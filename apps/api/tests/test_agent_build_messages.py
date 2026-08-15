@@ -165,9 +165,27 @@ def test_dropping_a_turn_reports_a_summary_is_needed_and_never_splits_one():
 
     assert result.turns_dropped > 0
     assert result.summary_needed is True
+    assert result.summarise_from_turn == 0
     assert result.summarise_through_turn == result.turns_dropped
     users = [m.content for m in result.messages if m.role is Role.USER]
     assert users == [f"Hỏi lần {index} về FPT" for index in range(8 - len(users), 8)]
+
+
+def test_a_new_summary_covers_only_the_turns_the_old_one_did_not():
+    """The existing summary is carried forward, never fed back to a summariser."""
+    result = build_messages(
+        transcript(10, summary="Tóm tắt cũ.", summarised_turns=3),
+        ContextBudget(max_tokens=1_200, keep_intact_turns=2),
+    )
+
+    assert result.summary_used is True
+    assert result.summary_needed is True
+    assert result.turns_dropped > 0
+    # New material starts where the old summary stopped, so the caller
+    # summarises turns[3:through] and keeps "Tóm tắt cũ." beside it.
+    assert result.summarise_from_turn == 3
+    assert result.summarise_through_turn == 3 + result.turns_dropped
+    assert "Tóm tắt cũ." in result.messages[1].content
 
 
 def test_an_existing_summary_is_consumed_and_never_re_summarised():
@@ -184,6 +202,7 @@ def test_an_existing_summary_is_consumed_and_never_re_summarised():
     assert users == ["Hỏi lần 4 về FPT", "Hỏi lần 5 về FPT"]
     # The summary text itself is carried, not re-fed to a summariser.
     assert result.summary_needed is False
+    assert result.summarise_from_turn == 4
     assert result.summarise_through_turn == 4
 
 

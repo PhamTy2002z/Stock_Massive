@@ -18,6 +18,8 @@ from src.agent.loop import (
     SessionSlots,
     ToolCallIdMismatch,
     TurnRequest,
+    TurnStatus,
+    admit_round,
     assert_distinct_ids,
     pair_results,
 )
@@ -34,6 +36,7 @@ from src.core.llm import (
     ModelRefusal,
     OwnerType,
     Role,
+    ToolAttempts,
     ToolCall,
     Usage,
     Workload,
@@ -182,7 +185,7 @@ async def test_a_turn_runs_at_most_eight_rounds_then_answers_with_tool_choice_no
 
     assert outcome.rounds_used == MAX_TOOL_ROUNDS
     assert outcome.rounds_exhausted is True
-    assert outcome.status == "complete"
+    assert outcome.status is TurnStatus.COMPLETE
     assert len(client.requests) == MAX_TOOL_ROUNDS + 1
     assert [request.tool_choice for request in client.requests] == (
         ["auto"] * MAX_TOOL_ROUNDS + ["none"]
@@ -259,7 +262,7 @@ async def test_one_failing_tool_does_not_kill_the_round():
     assert healthy.result["close"] == 95.4
     assert failed.result["status"] == "tool_error"
     assert "unreachable" in failed.result["error"]
-    assert outcome.status == "complete"
+    assert outcome.status is TurnStatus.COMPLETE
 
 
 def test_a_result_under_the_wrong_id_fails_loudly_and_is_never_handed_back():
@@ -340,34 +343,61 @@ async def test_tool_error_is_returned_to_the_model_and_capped_at_two_attempts():
     outcome = await loop(client, catalog(spec("flaky", always_fails))).run(turn_request())
 
     assert len(attempts) == 2
-    assert outcome.status == "complete"
+    assert outcome.status is TurnStatus.COMPLETE
     refused = outcome.tool_calls[-1].result
     assert refused["status"] == "tool_error"
     assert "already failed twice" in refused["error"]
 
 
+def test_a_healthy_fan_out_is_never_gated_but_a_retry_spends_its_allowance():
+    """The cap governs retries; one tool asked about three symbols is not one."""
+    fan_out = tuple(
+        ToolCall(id=f"call_{n}", name="get_price_series", arguments={}, output_index=n)
+        for n in range(3)
+    )
+
+    untouched = ToolAttempts()
+    assert admit_round(fan_out, untouched) == (True, True, True)
+
+    once_failed = ToolAttempts()
+    once_failed.record_failure("get_price_series")
+    assert admit_round(fan_out, once_failed) == (True, False, False)
+
+    twice_failed = ToolAttempts()
+    twice_failed.record_failure("get_price_series")
+    twice_failed.record_failure("get_price_series")
+    assert admit_round(fan_out, twice_failed) == (False, False, False)
+
+
 @pytest.mark.asyncio
-async def test_the_two_attempt_cap_holds_across_parallel_calls_in_one_round():
-    attempts: list[str] = []
+async def test_three_parallel_calls_to_one_healthy_tool_all_dispatch():
+    dispatched: list[str] = []
 
-    async def always_fails(_context: ToolContext, _arguments: dict) -> dict:
-        attempts.append("try")
-        raise RuntimeError("nope")
+    async def counted(_context: ToolContext, arguments: dict) -> dict:
+        dispatched.append(str(arguments.get("symbol")))
+        return {"close": 95.4}
 
-    three_at_once = Completion(
+    fan_out = Completion(
         model=SESSION_MODEL,
         tool_calls=tuple(
-            ToolCall(id=f"call_{n}", name="flaky", arguments={}, output_index=n)
-            for n in range(3)
+            ToolCall(
+                id=f"call_{n}",
+                name="get_price_series",
+                arguments={"symbol": symbol},
+                output_index=n,
+            )
+            for n, symbol in enumerate(("FPT", "VCB", "HPG"))
         ),
     )
-    client = FakeClient([three_at_once, answer()])
+    client = FakeClient([fan_out, answer()])
 
-    outcome = await loop(client, catalog(spec("flaky", always_fails))).run(turn_request())
+    outcome = await loop(client, catalog(spec("get_price_series", counted))).run(
+        turn_request()
+    )
 
-    assert len(attempts) == 2
+    assert sorted(dispatched) == ["FPT", "HPG", "VCB"]
     assert len(outcome.tool_calls) == 3
-    assert "already failed twice" in outcome.tool_calls[-1].result["error"]
+    assert all("error" not in call.result for call in outcome.tool_calls)
 
 
 @pytest.mark.asyncio
@@ -393,7 +423,7 @@ async def test_gateway_timeout_is_not_retried_again_inside_the_loop():
     outcome = await loop(client).run(turn_request())
 
     assert len(client.requests) == 1
-    assert outcome.status == "incomplete"
+    assert outcome.status is TurnStatus.INCOMPLETE
     assert outcome.terminal_reason == "gateway_timeout"
 
 
@@ -404,7 +434,7 @@ async def test_auth_unavailable_is_never_retried_and_surfaces_re_auth_needed():
     outcome = await loop(client).run(turn_request())
 
     assert len(client.requests) == 1
-    assert outcome.status == "incomplete"
+    assert outcome.status is TurnStatus.INCOMPLETE
     assert outcome.terminal_reason == "auth_unavailable"
 
 
@@ -421,6 +451,22 @@ async def test_a_tool_whose_channel_died_ends_the_turn_the_same_way():
 
     assert outcome.terminal_reason == "auth_unavailable"
     assert len(client.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_dead_credential_does_not_discard_the_round_it_shared():
+    async def dead_credential(_context: ToolContext, _arguments: dict) -> dict:
+        raise AuthUnavailable("the news channel's credential died")
+
+    client = FakeClient([wants("get_analysis", "search_news"), answer()])
+    tools = catalog(spec("get_analysis", _ok), spec("search_news", dead_credential))
+
+    outcome = await loop(client, tools).run(turn_request())
+
+    assert outcome.terminal_reason == "auth_unavailable"
+    # The store read that succeeded beside it is still on the Turn.
+    assert [call.name for call in outcome.tool_calls] == ["get_analysis"]
+    assert outcome.tool_calls[0].result["close"] == 95.4
 
 
 @pytest.mark.asyncio
@@ -441,7 +487,7 @@ async def test_any_other_route_failure_ends_the_turn_incomplete():
 
     outcome = await loop(client).run(turn_request())
 
-    assert outcome.status == "incomplete"
+    assert outcome.status is TurnStatus.INCOMPLETE
     assert outcome.terminal_reason == "route_error"
 
 
@@ -485,7 +531,7 @@ async def test_a_turn_that_cannot_fund_its_next_call_makes_no_further_call():
     outcome = await agent.run(turn_request())
 
     assert len(client.requests) == 2  # the refused one is the last
-    assert outcome.status == "incomplete"
+    assert outcome.status is TurnStatus.INCOMPLETE
     assert outcome.terminal_reason == "turn_cost"
     # The partial answer and the traces of what ran survive.
     assert len(outcome.tool_calls) == 1
@@ -530,7 +576,7 @@ async def test_cancellation_completes_the_in_flight_tool_call_then_persists():
     outcome = await agent.run(turn_request(), lambda: stop["value"])
 
     assert finished == ["done"]  # the in-flight call was allowed to complete
-    assert outcome.status == "cancelled"
+    assert outcome.status is TurnStatus.CANCELLED
     assert outcome.terminal_reason == "cancelled_by_user"
     assert len(outcome.tool_calls) == 1
     assert len(client.requests) == 1  # no further model call after the cancel
@@ -539,12 +585,19 @@ async def test_cancellation_completes_the_in_flight_tool_call_then_persists():
 
 @pytest.mark.asyncio
 async def test_a_turn_cancelled_before_its_first_call_never_reaches_the_route():
+    saved: list = []
     client = FakeClient([answer()])
+    agent = AgentLoop(
+        client=client, catalog=catalog(), config=config(), checkpoint=saved.append
+    )
 
-    outcome = await loop(client).run(turn_request(), lambda: True)
+    outcome = await agent.run(turn_request(), lambda: True)
 
     assert client.requests == []
-    assert outcome.status == "cancelled"
+    assert outcome.status is TurnStatus.CANCELLED
+    # Every terminal path checkpoints, including this one.
+    assert len(saved) == 1
+    assert saved[0].tool_calls == ()
 
 
 @pytest.mark.asyncio
@@ -607,3 +660,40 @@ async def test_grounded_evidence_makes_an_analysis_and_a_universe_refusal_does_n
     refused = FakeClient([wants("outside"), answer()])
     outcome = await loop(refused).run(turn_request())
     assert outcome.answer_kind is AnswerKind.REFUSAL
+
+
+@pytest.mark.asyncio
+async def test_any_structured_refusal_is_not_counted_as_grounded_evidence():
+    """A refusal that is not `not_in_universe` is still not evidence."""
+
+    async def needs_more_history(_context: ToolContext, _arguments: dict) -> dict:
+        return {"reason": "edge_and_variance_required_together"}
+
+    client = FakeClient([wants("indicator_pack"), answer()])
+
+    outcome = await loop(client, catalog(spec("indicator_pack", needs_more_history))).run(
+        turn_request()
+    )
+
+    assert outcome.answer_kind is AnswerKind.EDUCATION
+
+
+@pytest.mark.asyncio
+async def test_a_news_result_that_found_nothing_is_not_grounded_evidence():
+    """`search_news` answers a successful call with `reason: None`."""
+
+    async def empty_news(_context: ToolContext, _arguments: dict) -> dict:
+        return {"untrusted_evidence": [], "reason": "no_cleared_news_in_window"}
+
+    async def some_news(_context: ToolContext, _arguments: dict) -> dict:
+        return {"untrusted_evidence": [{"title": "x"}], "reason": None}
+
+    nothing = FakeClient([wants("search_news"), answer()])
+    assert (
+        await loop(nothing, catalog(spec("search_news", empty_news))).run(turn_request())
+    ).answer_kind is AnswerKind.EDUCATION
+
+    found = FakeClient([wants("search_news"), answer()])
+    assert (
+        await loop(found, catalog(spec("search_news", some_news))).run(turn_request())
+    ).answer_kind is AnswerKind.ANALYSIS
