@@ -10,6 +10,7 @@ Each field declares `unit`, `sign`, `interpretation`, `kind`, `claim`, `source`,
 
 | `kind` | What it is | Bar |
 | --- | --- | --- |
+| `vocabulary` | an exact named transform with no predictive claim | no threshold, null, or sampling uncertainty |
 | `estimator` | a point estimate with a sampling distribution | must carry SE or CI |
 | `percentile` | a cross-sectional position | must carry `n` and the cutoff date |
 | `signal` | has a threshold, can fire | the full bar below |

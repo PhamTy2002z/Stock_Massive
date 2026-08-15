@@ -12,11 +12,12 @@ from sqlalchemy.pool import StaticPool
 from src.stocks.signals.bars import Bar, BarFrame
 from src.stocks.signals.fields import Claim, FieldKind, Sign, Unit
 from src.stocks.signals.indicators import (
+    INDICATOR_WARMUP_SESSIONS,
     bollinger_percent_b_reading,
     macd_reading,
     rsi_reading,
-    fractional_kelly_sizing,
 )
+from src.stocks.signals.position_sizing import fractional_kelly_sizing
 from src.stocks.signals.price_band import LimitLock
 from src.stocks.signals.issues import SignalIssue
 from src.stocks.models import CorporateAction, ListingRoster, ProviderSnapshot
@@ -65,7 +66,7 @@ def open_session() -> Session:
     return Session(engine)
 
 
-def store_indicator_history(session: Session, sessions: int = 30) -> list[date]:
+def store_indicator_history(session: Session, sessions: int = 105) -> list[date]:
     list_on(session, "AAA", Exchange.HOSE)
     days: list[date] = []
     cursor = date(2025, 1, 2)
@@ -112,6 +113,12 @@ def test_the_indicator_pack_is_registered_as_vocabulary_not_as_signals():
     assert all(field.threshold is None for field in fields)
     assert all(field.null_fpr is None for field in fields)
     assert all("no out-of-sample edge is claimed" in field.interpretation for field in fields)
+
+
+def test_recursive_indicators_load_a_warmup_before_their_named_period():
+    assert RSI.min_sessions == INDICATOR_WARMUP_SESSIONS
+    assert MACD.min_sessions == INDICATOR_WARMUP_SESSIONS
+    assert INDICATOR_WARMUP_SESSIONS > 26
 
 
 def test_rsi_uses_wilders_fourteen_session_definition():
