@@ -16,6 +16,7 @@ from src.core.config import get_settings
 from src.core.cache import CacheRefreshUnavailable
 from src.core.database import engine
 from src.core.llm import enforce_budget_validation, llm_config_from_settings
+from src.core.quota import QuotaRefused
 from src.core.scheduler import setup_scheduler
 from src.core.vnstock_client import VnstockUnavailable, VnstockUnsupported
 from src.stocks.router import router as stocks_router
@@ -133,6 +134,24 @@ async def stock_service_error_handler(request: Request, exc: StockServiceError):
 async def vnstock_unavailable_handler(request: Request, exc: VnstockUnavailable):
     """Upstream quota exhausted — a retryable condition, not a server fault."""
     logger.warning(f"vnstock unavailable on {request.url.path}: {exc}")
+    return JSONResponse(
+        status_code=503,
+        content={"detail": str(exc)},
+        headers={"Retry-After": "60"},
+    )
+
+
+@app.exception_handler(QuotaRefused)
+async def quota_refused_handler(request: Request, exc: QuotaRefused):
+    """The account allowance would not admit this call (`src/core/quota.py`).
+
+    Retryable and not a server fault, like an exhausted upstream quota: the
+    Collector is holding the provider, or Redis is down and a Provider Source
+    call with no arbiter is one nothing is counting. Store-backed endpoints
+    never reach this handler, and that is the point of failing closed here
+    rather than falling back to a pace no other process can see.
+    """
+    logger.warning("vnstock allowance refused %s: %s", request.url.path, exc)
     return JSONResponse(
         status_code=503,
         content={"detail": str(exc)},

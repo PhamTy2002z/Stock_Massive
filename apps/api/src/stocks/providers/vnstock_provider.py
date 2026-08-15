@@ -8,17 +8,20 @@ The binding constraint here is quota rather than the gateway — 20 requests a
 minute without an API key, 60 with one — so the two adapters read very
 differently. Reference comes off one batched price board that covers the whole
 Universe in a single request. Statements have no batched form at all, so
-fundamental pays two requests per symbol and paces itself to the allowance.
+fundamental pays two requests per symbol against that same allowance.
+
+Neither adapter paces itself. The allowance belongs to the account, so it is
+spent in one place for every live path (``src/core/quota.py``,
+``docs/adr/0014``); an adapter with a pacer of its own was one of the three
+copies that together added up to more than the account had.
 """
 
 from __future__ import annotations
 
 import logging
-import os
 import re
 from collections.abc import Callable, Sequence
 from datetime import date, datetime, timezone
-from time import monotonic, sleep
 from typing import Any
 
 import pandas as pd
@@ -61,17 +64,6 @@ from .normalize import (
 )
 
 logger = logging.getLogger(__name__)
-
-# The allowances vnstock's own quota layer grants: its guest tier is cut off at
-# 20 requests a minute and an API key lifts that to 60.
-QUOTA_WITHOUT_API_KEY = 20
-QUOTA_WITH_API_KEY = 60
-
-# The same environment variable vnstock's quota layer reads to decide the tier.
-# Deliberately not a pydantic setting: settings also load from a .env file
-# without reaching the environment, and a key vnstock never sees would triple
-# the pace this adapter runs at while the account stayed on the guest tier.
-API_KEY_ENV_VAR = "VNSTOCK_API_KEY"
 
 # The flattened VCI price board carries all of reference in one row per symbol.
 # ``current_room`` is the room still available, not the holding — measured
@@ -167,67 +159,6 @@ class VnstockReadFailed(VnstockProviderError):
     """
 
 
-def quota_per_minute(api_key: str) -> int:
-    """Return the request allowance these credentials actually have."""
-    return QUOTA_WITH_API_KEY if api_key else QUOTA_WITHOUT_API_KEY
-
-
-class RequestPacer:
-    """Space calls out so a run can never outpace the provider's allowance.
-
-    Discovering the limit by being cut off costs the whole remaining run:
-    vnstock answers an exhausted quota by calling ``sys.exit()``, so a collector
-    that sprints into it takes the process with it. Waiting is cheaper.
-    """
-
-    def __init__(
-        self,
-        calls_per_minute: int,
-        clock: Callable[[], float] = monotonic,
-        sleep: Callable[[float], None] = sleep,
-    ) -> None:
-        if calls_per_minute < 1:
-            raise ValueError("the request allowance must be at least one per minute")
-        self.min_interval = 60.0 / calls_per_minute
-        self._clock = clock
-        self._sleep = sleep
-        self._last_call: float | None = None
-
-    def wait(self) -> None:
-        now = self._clock()
-        if self._last_call is not None:
-            remaining = self.min_interval - (now - self._last_call)
-            if remaining > 0:
-                self._sleep(remaining)
-                # Advance by what was slept rather than reading the clock
-                # again: the two agree, and one reading keeps the pacing
-                # honest even when the clock is coarse.
-                now += remaining
-        self._last_call = now
-
-
-_process_pacer: RequestPacer | None = None
-
-
-def process_pacer() -> RequestPacer:
-    """Return the one pacer every adapter shares by default.
-
-    The allowance belongs to the account, not to an adapter. Two adapters each
-    pacing themselves would run a cycle that reads both capabilities at twice
-    the allowance and be cut off halfway through — and vnstock answers an
-    exhausted quota by calling ``sys.exit()``, taking the collector with it.
-
-    Built once, from the environment vnstock's own quota layer reads, so the
-    pace this adapter keeps and the tier vnstock grants cannot disagree.
-    """
-    global _process_pacer
-    if _process_pacer is None:
-        _process_pacer = RequestPacer(
-            quota_per_minute(os.environ.get(API_KEY_ENV_VAR, ""))
-        )
-    return _process_pacer
-
-
 def _default_trading_factory(source: str) -> Any:
     return Trading(source=source)
 
@@ -249,27 +180,32 @@ def _default_company_factory(symbol: str, source: str) -> Any:
 
 
 class VnstockProviderBase:
-    """Symbol handling, pacing and error hygiene shared by both adapters."""
+    """Symbol handling and error hygiene shared by both adapters.
+
+    Pacing is no longer here. It belongs to the account rather than to an
+    adapter, and this class holding a pacer of its own was one of the three
+    uncoordinated copies ``src/core/quota.py`` replaced: the allowance is now
+    spent in ``src/core/vnstock_client``, where every live call passes through
+    whether it came from an adapter or from a legacy service.
+    """
 
     source = ProviderSource.VNSTOCK
 
     def __init__(
         self,
         vnstock_source: str | None = None,
-        pacer: RequestPacer | None = None,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ) -> None:
         self._vnstock_source = vnstock_source or get_settings().vnstock_source
-        self._pacer = pacer or process_pacer()
         self._now = now
 
-    def _paced(self, call: Callable[[], Any], message: str) -> Any:
-        """Run one upstream read within the allowance, keeping its text out of ours.
+    def _read(self, call: Callable[[], Any], message: str) -> Any:
+        """Run one upstream read, keeping its error text out of ours.
 
-        Quota exhaustion and an unimplemented provider carry meanings of their
-        own that the rest of the app already handles, so they travel unchanged.
+        Quota exhaustion, an unimplemented provider and a refusal from the
+        arbiter all carry meanings of their own that the rest of the app already
+        handles, so they travel unchanged.
         """
-        self._pacer.wait()
         try:
             return call()
         except (VnstockUnavailable, VnstockUnsupported, VnstockProviderError):
@@ -302,11 +238,10 @@ class VnstockReferenceProvider(VnstockProviderBase):
     def __init__(
         self,
         vnstock_source: str | None = None,
-        pacer: RequestPacer | None = None,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         trading_factory: Callable[[str], Any] = _default_trading_factory,
     ) -> None:
-        super().__init__(vnstock_source=vnstock_source, pacer=pacer, now=now)
+        super().__init__(vnstock_source=vnstock_source, now=now)
         self._trading_factory = trading_factory
 
     def fetch_reference(self, symbols: Sequence[str]) -> Sequence[ReferenceSnapshot]:
@@ -314,7 +249,7 @@ class VnstockReferenceProvider(VnstockProviderBase):
         if not normalized:
             return ()
 
-        board = self._paced(
+        board = self._read(
             lambda: self._trading_factory(self._vnstock_source).price_board(
                 symbols_list=list(normalized),
                 flatten_columns=True,
@@ -433,11 +368,10 @@ class VnstockListingRosterProvider(VnstockProviderBase):
     def __init__(
         self,
         vnstock_source: str | None = None,
-        pacer: RequestPacer | None = None,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         listing_factory: Callable[[str], Any] = _default_listing_factory,
     ) -> None:
-        super().__init__(vnstock_source=vnstock_source, pacer=pacer, now=now)
+        super().__init__(vnstock_source=vnstock_source, now=now)
         self._listing_factory = listing_factory
 
     def fetch_listing_roster(self) -> Sequence[ListingEntry]:
@@ -446,7 +380,7 @@ class VnstockListingRosterProvider(VnstockProviderBase):
         seen: set[str] = set()
 
         for exchange in ROSTER_EXCHANGES:
-            frame = self._paced(
+            frame = self._read(
                 lambda board=exchange: listing.symbols_by_exchange(exchange=board.value),
                 f"vnstock listing roster fetch failed for {exchange.value}",
             )
@@ -528,11 +462,10 @@ class VnstockMarketHistoryProvider(VnstockProviderBase):
     def __init__(
         self,
         vnstock_source: str | None = None,
-        pacer: RequestPacer | None = None,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         quote_factory: Callable[[str, str], Any] = _default_quote_factory,
     ) -> None:
-        super().__init__(vnstock_source=vnstock_source, pacer=pacer, now=now)
+        super().__init__(vnstock_source=vnstock_source, now=now)
         self._quote_factory = quote_factory
 
     def fetch_market_history(
@@ -546,7 +479,7 @@ class VnstockMarketHistoryProvider(VnstockProviderBase):
         (normalized,) = normalized_symbols([symbol])
 
         quote = self._quote_factory(normalized, self._vnstock_source)
-        frame = self._paced(
+        frame = self._read(
             lambda: quote.history(
                 start=from_date.strftime("%Y-%m-%d"),
                 end=to_date.strftime("%Y-%m-%d"),
@@ -665,11 +598,10 @@ class VnstockFundamentalProvider(VnstockProviderBase):
     def __init__(
         self,
         vnstock_source: str | None = None,
-        pacer: RequestPacer | None = None,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         finance_factory: Callable[[str, str], Any] = _default_finance_factory,
     ) -> None:
-        super().__init__(vnstock_source=vnstock_source, pacer=pacer, now=now)
+        super().__init__(vnstock_source=vnstock_source, now=now)
         self._finance_factory = finance_factory
 
     def fetch_fundamentals(
@@ -710,11 +642,11 @@ class VnstockFundamentalProvider(VnstockProviderBase):
         observed_at: datetime,
     ) -> FundamentalSnapshot | None:
         finance = self._finance_factory(symbol, self._vnstock_source)
-        income = self._paced(
+        income = self._read(
             lambda: finance.income_statement(period="quarter", lang="en", dropna=True),
             f"vnstock income statement fetch failed for {symbol}",
         )
-        balance = self._paced(
+        balance = self._read(
             lambda: finance.balance_sheet(period="quarter", lang="en", dropna=True),
             f"vnstock balance sheet fetch failed for {symbol}",
         )
@@ -769,11 +701,10 @@ class VnstockCorporateActionProvider(VnstockProviderBase):
     def __init__(
         self,
         vnstock_source: str | None = None,
-        pacer: RequestPacer | None = None,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         company_factory: Callable[[str, str], Any] = _default_company_factory,
     ) -> None:
-        super().__init__(vnstock_source=vnstock_source, pacer=pacer, now=now)
+        super().__init__(vnstock_source=vnstock_source, now=now)
         self._company_factory = company_factory
 
     def fetch_corporate_actions(
@@ -782,7 +713,7 @@ class VnstockCorporateActionProvider(VnstockProviderBase):
     ) -> Sequence[CorporateActionEvent]:
         normalized = normalized_symbols([symbol])[0]
         company = self._company_factory(normalized, self._vnstock_source)
-        frame = self._paced(
+        frame = self._read(
             lambda: company.events(),
             f"vnstock corporate action fetch failed for {normalized}",
         )

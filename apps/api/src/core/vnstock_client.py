@@ -15,21 +15,29 @@ The guard converts:
     upstream NotImplementedError -> VnstockUnsupported (routers map to 501)
 
 Both are ordinary exceptions, so normal error handling applies.
+
+Being the one place every live vnstock call passes through, this is also where
+the account allowance is spent: each call takes a slot from the Redis arbiter
+in `src/core/quota.py` on whichever lane the caller declared. That replaced a
+`BoundedSemaphore` here, which bounded concurrency and not rate, and which was
+one of three uncoordinated guards over a single account quota (`docs/adr/0014`).
 """
 import functools
 import logging
-import threading
 from typing import Any, Callable
 
 import vnstock as _vnstock
 from tenacity import RetryError
 
+from src.core.quota import active_lane, quota_arbiter
+
 logger = logging.getLogger(__name__)
 
-# vnstock is not documented as thread-safe and the free tier allows 60 req/min.
-# Handlers now run in FastAPI's threadpool, so cap how many can be in flight.
-_MAX_CONCURRENT_CALLS = 4
-_call_slots = threading.BoundedSemaphore(_MAX_CONCURRENT_CALLS)
+# Calls that only walk vnstock's object graph — `Vnstock().stock(...)` hands
+# back a component holder rather than a response. Guarded like everything else
+# and deliberately not paced: spending an account slot on a call that reaches no
+# provider would make the allowance smaller than it actually is.
+_NAVIGATION_LABELS = frozenset({"Vnstock.stock"})
 
 
 class VnstockUnavailable(Exception):
@@ -60,33 +68,44 @@ def _unwrap(exc: BaseException) -> BaseException:
     return exc
 
 
-def _guard(func: Callable[..., Any], label: str) -> Callable[..., Any]:
-    """Wrap a bound vnstock method so upstream failures stay catchable."""
+def _guard(
+    func: Callable[..., Any],
+    label: str,
+    paced: bool = True,
+) -> Callable[..., Any]:
+    """Wrap a bound vnstock method so upstream failures stay catchable.
+
+    Paced by default: the arbiter is asked for a slot before the call, on the
+    lane the caller declared, and a refusal — the Collector holding its lease,
+    or no Redis at all — propagates as a `QuotaRefused` rather than becoming a
+    call made outside the allowance.
+    """
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        with _call_slots:
-            try:
-                return func(*args, **kwargs)
-            except BaseException as exc:  # noqa: BLE001 - SystemExit must be caught
-                root = _unwrap(exc)
+        if paced:
+            quota_arbiter().acquire(active_lane())
+        try:
+            return func(*args, **kwargs)
+        except BaseException as exc:  # noqa: BLE001 - SystemExit must be caught
+            root = _unwrap(exc)
 
-                if isinstance(root, SystemExit):
-                    logger.warning("vnstock quota exhausted during %s", label)
-                    raise VnstockUnavailable(
-                        "Nguồn dữ liệu vnstock đang giới hạn truy cập, thử lại sau ít phút."
-                    ) from exc
+            if isinstance(root, SystemExit):
+                logger.warning("vnstock quota exhausted during %s", label)
+                raise VnstockUnavailable(
+                    "Nguồn dữ liệu vnstock đang giới hạn truy cập, thử lại sau ít phút."
+                ) from exc
 
-                if isinstance(root, NotImplementedError):
-                    logger.info("vnstock provider does not implement %s", label)
-                    raise VnstockUnsupported(
-                        f"Nguồn dữ liệu hiện tại không hỗ trợ {label}."
-                    ) from exc
+            if isinstance(root, NotImplementedError):
+                logger.info("vnstock provider does not implement %s", label)
+                raise VnstockUnsupported(
+                    f"Nguồn dữ liệu hiện tại không hỗ trợ {label}."
+                ) from exc
 
-                if root is not exc and isinstance(root, Exception):
-                    # Surface the real error rather than an opaque RetryError.
-                    raise root from exc
-                raise
+            if root is not exc and isinstance(root, Exception):
+                # Surface the real error rather than an opaque RetryError.
+                raise root from exc
+            raise
 
     return wrapper
 
@@ -109,7 +128,7 @@ class _GuardedProxy:
         label = f"{object.__getattribute__(self, '_label')}.{name}"
 
         if callable(attr):
-            guarded = _guard(attr, label)
+            guarded = _guard(attr, label, paced=label not in _NAVIGATION_LABELS)
 
             @functools.wraps(attr)
             def maybe_proxy(*args, **kwargs):
@@ -135,8 +154,11 @@ def _guarded_class(cls: type, name: str) -> Callable[..., _GuardedProxy]:
 
     @functools.wraps(cls, updated=())
     def factory(*args, **kwargs) -> _GuardedProxy:
-        # Construction itself can hit the quota check.
-        instance = _guard(cls, name)(*args, **kwargs)
+        # Construction itself can hit vnstock's own quota check, so it stays
+        # guarded — but it reaches no provider, so it is not paced. Charging the
+        # account for building an object would let the number of objects a
+        # caller happens to build decide how much data it may read.
+        instance = _guard(cls, name, paced=False)(*args, **kwargs)
         return _GuardedProxy(instance, name)
 
     return factory

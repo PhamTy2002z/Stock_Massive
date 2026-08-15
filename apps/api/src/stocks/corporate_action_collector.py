@@ -185,13 +185,17 @@ def run_corporate_action_load(
 
     Synchronous throughout, like every other collector here: the store is, and
     vnstock is, so a caller on an event loop hands this to a thread.
+
+    On the Collector lane: this is collection, one request per symbol, and it is
+    scheduled into a window nothing else uses precisely so it does not contend.
     """
     from src.core.database import get_sync_db
+    from src.core.quota import QuotaLane, quota_lane
 
     from .universe import build_universe
 
     settings = settings or get_settings()
-    with get_sync_db() as session:
+    with quota_lane(QuotaLane.COLLECTOR), get_sync_db() as session:
         universe = build_universe(session, settings)
         if not len(universe):
             logger.info("No symbols in the Universe, so no corporate actions to load")

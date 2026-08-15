@@ -37,7 +37,8 @@ class Settings(BaseSettings):
     # VNSTOCK_API_KEY cố ý không khai ở đây: vnstock đọc thẳng từ os.environ để
     # quyết định tier (20 request/phút khi không thấy, 60 khi thấy). Khai lại
     # thành setting sẽ đọc được cả từ .env — nơi vnstock không nhìn tới — nên hai
-    # bên có thể lệch nhau. Xem API_KEY_ENV_VAR ở providers/vnstock_provider.py.
+    # bên có thể lệch nhau. Xem API_KEY_ENV_VAR ở src/core/quota.py, nơi cùng
+    # biến môi trường đó quyết định giãn cách của Redis arbiter.
 
     # FiinQuant — Main Source cho market và valuation, xem docs/adr/0002
     fiinquant_username: str = ""
@@ -77,14 +78,16 @@ class Settings(BaseSettings):
     #
     # Hạn mức vnstock là chỗ nghẽn thật: ~1.600 mã × 2 request, trên 20
     # request/phút khi không có API key. Một lần chạy đầy không xong trong một
-    # lượt, nên nó tự giãn nhịp và lần sau bỏ qua mã đã có số ở kỳ đang xét.
-    # Lần thử lại hằng ngày lúc 03:00 chỉ đuổi theo số mã còn thiếu ở kỳ mới,
-    # nên nó không đọc lại danh sách niêm yết.
+    # lượt, nên lần sau bỏ qua mã đã có số ở kỳ đang xét. Lần thử lại hằng ngày
+    # lúc 03:00 chỉ đuổi theo số mã còn thiếu ở kỳ mới, nên nó không đọc lại
+    # danh sách niêm yết.
+    #
+    # Không còn tham số giãn nhịp riêng: nhịp gọi thuộc về tài khoản, và
+    # src/core/quota.py giữ nó cho mọi đường gọi vnstock (docs/adr/0014).
     profit_census_enabled: bool = True
     profit_census_weekday: int = 6  # Chủ nhật
     profit_census_hour: int = 2
     profit_census_minute: int = 0
-    profit_census_request_delay: float = 1.2
     profit_census_retry_hour: int = 3
     profit_census_retry_minute: int = 0
 
