@@ -19,7 +19,7 @@ one.
 """
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import datetime
 from enum import Enum
 
 from sqlalchemy import delete, select
@@ -78,7 +78,6 @@ class WatchlistItem:
     symbol: str
     state: WatchlistState
     added_at: datetime
-    last_seen_analysis_date: date | None
 
 
 @dataclass(frozen=True)
@@ -144,7 +143,6 @@ async def _view(
             symbol=row.symbol,
             state=entry_state(row.symbol, universe),
             added_at=row.added_at,
-            last_seen_analysis_date=row.last_seen_analysis_date,
         )
         for row in rows
     )

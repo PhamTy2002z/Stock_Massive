@@ -36,7 +36,6 @@ def _response(view: WatchlistView) -> WatchlistResponse:
                 symbol=item.symbol,
                 state=item.state,
                 added_at=item.added_at,
-                last_seen_analysis_date=item.last_seen_analysis_date,
             )
             for item in view.items
         ],

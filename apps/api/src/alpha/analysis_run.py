@@ -38,7 +38,13 @@ from src.stocks.shared import validate_symbol
 from src.stocks.universe import build_universe
 
 from .models import Analysis, AnalysisRun
-from .producer import AnalysisDraft, Producer, ProductionFailure, sanitized_reason
+from .producer import (
+    FAILURE_CODES,
+    AnalysisDraft,
+    Producer,
+    ProductionFailure,
+    sanitized_reason,
+)
 from .refusals import AlphaRefusal
 from .watchlist import watches
 
@@ -86,6 +92,12 @@ MAX_ATTEMPTS_PER_SESSION = 3
 # deploy — and nothing was there to report anything.
 ABANDONED_CODE = "run_abandoned"
 
+# Every code `analysis_run.error_code` can hold. The two taxonomies stay
+# separate where they are produced, for the reason above, but an interface
+# rendering a failed run has to branch over one closed set — split across two
+# constants, the sweep's code is a blank on the screen the first time it fires.
+RUN_ERROR_CODES = FAILURE_CODES | {ABANDONED_CODE}
+
 
 class AnalysisRefusal(AlphaRefusal):
     """A request against an Analysis Run refused for a named reason."""
@@ -129,21 +141,6 @@ def published_analysis(
             Analysis.symbol == symbol,
             Analysis.trading_day == trading_day,
         )
-    ).scalar_one_or_none()
-
-
-def latest_analysis(session: Session, symbol: str) -> Analysis | None:
-    """The newest Analysis this system holds for a symbol.
-
-    The rail's answer when today's is not ready yet: `failed` shows the most
-    recent Analysis that does exist rather than an empty cell, and this is the
-    query that finds it. No status filter, for the same reason as above.
-    """
-    return session.execute(
-        select(Analysis)
-        .where(Analysis.symbol == symbol)
-        .order_by(Analysis.trading_day.desc())
-        .limit(1)
     ).scalar_one_or_none()
 
 

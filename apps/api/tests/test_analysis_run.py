@@ -30,7 +30,9 @@ import pytest
 from sqlalchemy import delete, select
 
 from src.alpha.analysis_run import (
+    ABANDONED_CODE,
     MAX_ATTEMPTS_PER_SESSION,
+    RUN_ERROR_CODES,
     AnalysisRefusal,
     RunOrigin,
     RunStatus,
@@ -40,7 +42,12 @@ from src.alpha.analysis_run import (
     sweep_stuck_runs,
 )
 from src.alpha.models import Analysis, AnalysisRun, WatchlistEntry
-from src.alpha.producer import AnalysisDraft, ProductionFailure, stub_producer
+from src.alpha.producer import (
+    FAILURE_CODES,
+    AnalysisDraft,
+    ProductionFailure,
+    stub_producer,
+)
 from src.auth.models import User
 from src.core.config import get_settings
 from src.core.database import Base, get_sync_db, sync_engine, sync_session_factory
@@ -464,6 +471,14 @@ class TestStuckSweep:
 
         assert outcome.status is RunStatus.READY
         assert _run(session).attempts == 2
+
+    def test_its_code_is_in_the_one_set_an_interface_branches_on(self):
+        """The sweep's code sits outside the pipeline's taxonomy on purpose, so
+        the set an interface renders from has to be the union — otherwise the
+        first swept run shows as a blank."""
+        assert ABANDONED_CODE not in FAILURE_CODES
+        assert FAILURE_CODES < RUN_ERROR_CODES
+        assert ABANDONED_CODE in RUN_ERROR_CODES
 
     def test_the_window_comes_from_configuration(self, session, monkeypatch):
         monkeypatch.setenv("ANALYSIS_RUN_STUCK_MINUTES", "5")
