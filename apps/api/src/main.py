@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from src.alpha.router import router as watchlist_router
-from src.alpha.watchlist import WatchlistRefusal
+from src.alpha.refusals import AlphaRefusal
 from src.auth.router import router as auth_router
 from src.core.config import get_settings
 from src.core.cache import CacheRefreshUnavailable
@@ -97,12 +97,13 @@ app.include_router(signals_router, prefix="/api/v1")
 app.include_router(watchlist_router, prefix="/api/v1")
 
 
-@app.exception_handler(WatchlistRefusal)
-async def watchlist_refusal_handler(request: Request, exc: WatchlistRefusal):
-    """A Watchlist change refused for a named reason.
+@app.exception_handler(AlphaRefusal)
+async def alpha_refusal_handler(request: Request, exc: AlphaRefusal):
+    """An Alpha Desk request refused for a named reason.
 
-    The reason travels as a code beside the sentence, so the rail can branch on
-    "full" versus "not in the Universe" without parsing Vietnamese prose.
+    The reason travels as a code beside the sentence, so the interface can
+    branch on "full" versus "not in the Universe" without parsing Vietnamese
+    prose.
     """
     return JSONResponse(
         status_code=exc.status_code,
