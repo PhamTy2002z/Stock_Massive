@@ -83,6 +83,7 @@ from src.stocks.signals.registry import (
     FOREIGN_FLOW_PERSISTENCE,
     FOREIGN_FLOW_PRESSURE,
     FOREIGN_FLOW_SHARE_PRESSURE,
+    FOREIGN_ROOM_PCT,
     NULL_DERIVATION_SEED,
 )
 from src.stocks.signals.serving import serve_field
@@ -230,7 +231,9 @@ class TestThePressureRatio:
         reading = net_value_over_adtv_reading(window_of(frame_of_flows(flows)))
 
         assert reading.value is None
-        assert reading.refusal is SignalIssue.INSUFFICIENT_HISTORY
+        # Its own code: a window with a hole in its foreign split is a different
+        # collection gap from a window that is simply too short.
+        assert reading.refusal is SignalIssue.FOREIGN_FLOW_NOT_STORED
 
     def test_the_standard_error_corrects_for_the_persistence_it_measures(self):
         """An independent-observation error would understate a persistent flow.
@@ -409,6 +412,47 @@ class TestTheForeignRoom:
             days = store_history(session, 30)
 
             assert foreign_room_on_or_before(session, "AAA", days[-1]) is None
+
+
+class TestTheForeignRoomPercentage:
+    def test_it_is_served_because_its_inputs_are_stored(self):
+        """The prerequisite list assumed it had none; the reference feed has them.
+
+        Registering a refusal over data this system does collect would be the
+        same dishonesty as substituting a live read for data it does not — the
+        spec forbids fictionalising availability in either direction.
+        """
+        with open_session() as session:
+            days = store_history(session, 30)
+            store_room(session, "AAA", days[-1], current=250_000, total=1_000_000)
+
+            value = serve_field(session, "AAA", FOREIGN_ROOM_PCT, end=days[-1])
+
+        assert value.value == pytest.approx(25.0)
+        assert value.extras["current_room_shares"] == 250_000
+        assert value.extras["foreign_room_state"] == "open"
+        assert value.degraded_reason is None
+
+    def test_a_full_room_is_served_and_degraded(self):
+        with open_session() as session:
+            days = store_history(session, 30)
+            store_room(session, "AAA", days[-1], current=0, total=1_000_000)
+
+            value = serve_field(session, "AAA", FOREIGN_ROOM_PCT, end=days[-1])
+
+        assert value.value == pytest.approx(0.0)
+        assert value.degraded_reason is SignalIssue.FOREIGN_ROOM_EXHAUSTED
+
+    def test_an_uncollected_room_refuses_rather_than_reporting_a_full_one(self):
+        """Reporting 100% would assert the thing nobody looked at."""
+        with open_session() as session:
+            days = store_history(session, 30)
+
+            value = serve_field(session, "AAA", FOREIGN_ROOM_PCT, end=days[-1])
+
+        assert value.value is None
+        assert value.refusal is SignalIssue.FOREIGN_ROOM_NOT_STORED
+        assert value.extras["foreign_room_state"] == "unknown"
 
 
 class TestTheShareDenominatedRatioIsRefused:

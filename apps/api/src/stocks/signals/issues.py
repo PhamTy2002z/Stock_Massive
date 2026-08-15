@@ -139,6 +139,34 @@ class SignalIssue(str, Enum):
     # live Provider Source read is ever substituted to fill the slot.
     UNAVAILABLE = "unavailable"
 
+    # --- Traded figures, from ADR-0010 -----------------------------------
+    # A session inside the window carries no traded figure at all — no money on
+    # a money-denominated average, no share count on a share-denominated one.
+    # Distinct from `insufficient_history`, which is about how many sessions the
+    # window reached: here every session is present and one of them is blank, and
+    # averaging the rest would produce an average over a different stretch of
+    # market than the symbol beside it.
+    TRADED_FIGURE_NOT_STORED = "traded_figure_not_stored"
+
+    # Every session in the window traded nothing, so a ratio measured per unit
+    # of traded money has no observation to average. A fact about the symbol
+    # rather than about the store, and the one a reader of a thin UPCOM name
+    # most needs.
+    NO_TRADED_SESSIONS = "no_traded_sessions"
+
+    # The window holds a session with no foreign flow figure, so a sum or a run
+    # over it would be a sum through a hole. Its own code rather than the traded
+    # figure above, because the two are different collection gaps with different
+    # fixes: one is the session's turnover, the other is its foreign split.
+    FOREIGN_FLOW_NOT_STORED = "foreign_flow_not_stored"
+
+    # No reference reading of this symbol's foreign ownership room is stored at
+    # or before the date being answered for, so the room percentage has nothing
+    # to report. Deliberately not the same as a room that is full: an
+    # uncollected room is unknown, and reporting it as open would assert the
+    # thing nobody looked at.
+    FOREIGN_ROOM_NOT_STORED = "foreign_room_not_stored"
+
     # The symbol's foreign ownership room is full, or full enough to stop
     # buying by itself, so a foreign flow measured over the window was
     # mechanically constrained rather than freely chosen. A degradation because

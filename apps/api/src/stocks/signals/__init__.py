@@ -14,7 +14,7 @@ from .bars import (
     BarFrame,
     WindowBandRegime,
     WindowHealth,
-    average_traded_money,
+    average_over_sessions,
     prepare_bars,
 )
 from .corporate_actions import (
@@ -59,6 +59,7 @@ from .fields import (
     FieldKind,
     FieldReading,
     FieldSource,
+    Denomination,
     FieldValue,
     FieldWindow,
     NullCalibration,
@@ -75,7 +76,9 @@ from .foreign_flow import (
     FOREIGN_FLOW_SESSIONS,
     FOREIGN_PERSISTENCE_MIN_SESSIONS,
     FOREIGN_PERSISTENCE_SESSIONS,
+    FOREIGN_ROOM_MIN_SESSIONS,
     PERSISTENCE_RUN_THRESHOLD,
+    foreign_room_pct_reading,
     net_value_over_adtv_reading,
     net_volume_over_adtv_reading,
     persistence_run_days,
@@ -106,6 +109,7 @@ from .position_sizing import (
     FractionalKellySizing,
     fractional_kelly_sizing,
 )
+from .moments import mean_standard_error, sample_variance
 from .price_band import (
     BAND_LIMIT_BY_EXCHANGE,
     EXCHANGE_MIGRATIONS,
@@ -146,6 +150,7 @@ from .market_behavior import (
 from .reference import (
     FOREIGN_ROOM_EXHAUSTED_SHARE,
     ForeignRoomStanding,
+    ForeignRoomState,
     foreign_room_on_or_before,
 )
 from .registry import (
@@ -157,6 +162,7 @@ from .registry import (
     FOREIGN_FLOW_PERSISTENCE,
     FOREIGN_FLOW_PRESSURE,
     FOREIGN_FLOW_SHARE_PRESSURE,
+    FOREIGN_ROOM_PCT,
     MOMENTUM_RANK,
     RELATIVE_STRENGTH,
     ROE_PERCENTILE,
@@ -243,7 +249,7 @@ __all__ = [
     "AMIHUD_ILLIQUIDITY",
     "amihud_illiquidity_reading",
     "AR1Fit",
-    "average_traded_money",
+    "average_over_sessions",
     "BAND_LIMIT_BY_EXCHANGE",
     "band_limits",
     "BAND_PRESSURE",
@@ -284,6 +290,7 @@ __all__ = [
     "days_underwater_reading",
     "degradation_of",
     "DEGRADED_LIMIT_LOCK_SHARE",
+    "Denomination",
     "detect_limit_lock",
     "Drawdown",
     "DRAWDOWN_MIN_SESSIONS",
@@ -316,8 +323,12 @@ __all__ = [
     "FOREIGN_PERSISTENCE_MIN_SESSIONS",
     "FOREIGN_PERSISTENCE_SESSIONS",
     "FOREIGN_ROOM_EXHAUSTED_SHARE",
+    "FOREIGN_ROOM_MIN_SESSIONS",
     "foreign_room_on_or_before",
+    "FOREIGN_ROOM_PCT",
+    "foreign_room_pct_reading",
     "ForeignRoomStanding",
+    "ForeignRoomState",
     "fractional_kelly_sizing",
     "FractionalKellySizing",
     "Freshness",
@@ -346,6 +357,7 @@ __all__ = [
     "MEAN_REVERSION_SESSIONS",
     "MEAN_REVERSION_Z",
     "mean_reversion_z_reading",
+    "mean_standard_error",
     "measure_band",
     "MIGRATION_PROGRAMME_END",
     "MOMENTUM_FORMATION_SESSIONS",
@@ -384,6 +396,7 @@ __all__ = [
     "RSI_MIN_SESSIONS",
     "RSI_PERIOD",
     "rsi_reading",
+    "sample_variance",
     "schema_description",
     "serve_cross_section",
     "SETTLEMENT_FLOOR_SESSIONS",

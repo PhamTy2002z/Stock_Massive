@@ -122,8 +122,13 @@ def bar(
     value: float | None = 1e9,
     lock: LimitLock = LimitLock.NONE,
     band: BandLimits | None = None,
+    undecided: SignalIssue | None = None,
     spread: float = 0.005,
 ) -> Bar:
+    # The gateway's own pairing: a bar has either its band or the reason it has
+    # none, so a fixture that leaves both off is a window no gateway could serve.
+    if band is None and undecided is None:
+        undecided = SignalIssue.ANCHOR_NOT_STORED
     return Bar(
         session_date=day,
         open=close,
@@ -135,6 +140,7 @@ def bar(
         adjustment_factor=Decimal(1),
         limit_lock=lock,
         band=band,
+        band_undecided_reason=undecided,
     )
 
 
@@ -249,7 +255,7 @@ class TestTheLiquidityProfile:
         reading = adtv_money_reading(window_of(BarFrame(symbol="AAA", bars=tuple(bars))))
 
         assert reading.value is None
-        assert reading.refusal is SignalIssue.INSUFFICIENT_HISTORY
+        assert reading.refusal is SignalIssue.TRADED_FIGURE_NOT_STORED
 
     def test_amihud_is_percent_moved_per_billion_dong_traded(self):
         """Amihud (2002): |R| over traded money, in the units the shortlist names.
@@ -358,6 +364,25 @@ class TestBandPressure:
         assert reading.value is None
         assert reading.refusal is SignalIssue.ANCHOR_NOT_STORED
 
+    def test_the_reason_comes_from_the_bar_that_had_no_band(self):
+        """Not from the window: two kinds of unjudgeable session in one window
+        would otherwise both be reported as whichever the window listed first."""
+        days = weekdays(BAND_PRESSURE_SESSIONS)
+        bars = tuple(
+            bar(
+                day,
+                20_000.0,
+                band=None,
+                undecided=SignalIssue.EXCHANGE_UNKNOWN,
+                lock=LimitLock.INDETERMINATE,
+            )
+            for day in days
+        )
+
+        reading = band_pressure_reading(window_of(BarFrame(symbol="AAA", bars=bars)))
+
+        assert reading.refusal is SignalIssue.EXCHANGE_UNKNOWN
+
     def test_a_partly_undecided_window_is_degraded_rather_than_refused(self):
         """The sessions that were judged are real; the count rests on fewer of them."""
         anchor = 20_000.0
@@ -443,6 +468,39 @@ class TestTheMeanReversionGauge:
 
         assert reading.value is None
         assert reading.refusal is SignalIssue.HALF_LIFE_EXCEEDS_WINDOW
+
+    def test_the_half_life_is_still_served_where_the_z_is_suppressed(self):
+        """Only the z measures the window; the half-life is what explains it.
+
+        A finite half-life at or beyond the window length is a real estimate —
+        it is the estimate that says why the z was withheld — so withholding it
+        too would leave a reader with a refusal and nothing to read it by.
+        """
+        closes = [
+            20_000.0 * math.exp(0.002 * index)
+            for index in range(MEAN_REVERSION_SESSIONS + 1)
+        ]
+        window = window_of(frame_of(closes))
+
+        z = mean_reversion_z_reading(window)
+        half_life = mean_reversion_half_life_reading(window)
+
+        assert z.value is None
+        assert z.refusal is SignalIssue.HALF_LIFE_EXCEEDS_WINDOW
+        assert half_life.value is not None
+        assert half_life.value >= MEAN_REVERSION_SESSIONS
+        assert half_life.extras["half_life_reaches_window"] is True
+
+    def test_the_suppressed_z_is_not_reachable_through_the_half_life(self):
+        """Suppression that leaks through the field beside it is not suppression."""
+        closes = [
+            20_000.0 * math.exp(0.002 * index)
+            for index in range(MEAN_REVERSION_SESSIONS + 1)
+        ]
+
+        half_life = mean_reversion_half_life_reading(window_of(frame_of(closes)))
+
+        assert "trailing_z" not in half_life.extras
 
     def test_a_half_life_under_the_settlement_floor_is_stated_as_such(self):
         """T+2 makes the round trip impossible, and the tool says so itself."""

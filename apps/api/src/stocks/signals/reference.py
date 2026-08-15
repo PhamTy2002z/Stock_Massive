@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
+from enum import Enum
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -40,6 +41,21 @@ from ..providers.normalize import VN_TZ
 FOREIGN_ROOM_EXHAUSTED_SHARE = 0.01
 
 _REFERENCE = Capability.REFERENCE.value
+
+
+class ForeignRoomState(str, Enum):
+    """The room in one word, for a payload that must always say something.
+
+    Three states rather than two, because "nobody has collected this symbol's
+    room" and "the room is open" are different facts, and a field that reported
+    them the same way would be asserting the second on the evidence of the
+    first. A closed set for the same reason every other vocabulary in this
+    package is one: the web app holds one Vietnamese sentence per value.
+    """
+
+    OPEN = "open"
+    EXHAUSTED = "exhausted"
+    UNKNOWN = "unknown"
 
 
 @dataclass(frozen=True)
@@ -75,17 +91,23 @@ class ForeignRoomStanding:
         return share is not None and share <= FOREIGN_ROOM_EXHAUSTED_SHARE
 
     @property
-    def state(self) -> str:
-        """The room in one word, for a payload that must always say something.
-
-        Three states rather than two, because "nobody has collected this
-        symbol's room" and "the room is open" are different facts and a field
-        that reported them the same way would be asserting the second on the
-        evidence of the first.
-        """
+    def state(self) -> ForeignRoomState:
+        """Which of the three this reading is."""
         if self.available_share is None:
-            return "unknown"
-        return "exhausted" if self.exhausted else "open"
+            return ForeignRoomState.UNKNOWN
+        return (
+            ForeignRoomState.EXHAUSTED
+            if self.exhausted
+            else ForeignRoomState.OPEN
+        )
+
+    def as_extras(self) -> dict[str, object]:
+        """What a foreign-flow answer says about the room beside its number."""
+        return {
+            "foreign_room_state": self.state.value,
+            "foreign_room_available_share": self.available_share,
+            "foreign_room_as_of": self.as_of.isoformat(),
+        }
 
 
 def foreign_room_on_or_before(

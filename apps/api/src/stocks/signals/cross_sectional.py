@@ -9,20 +9,29 @@ position in a distribution and becomes a rank with a percent sign on it.
 ## Momentum — and the naming inconsistency, settled
 
 **Jegadeesh-Titman (1993)** and the French data library's own definition: the
-formation stretch is the prior **(2-12)** return, twelve months of it with the
-most recent month skipped, and the skip is there to step around the short-horizon
-reversal Jegadeesh (1990) and Lehmann (1990) measured.
+formation stretch is the prior **(2-12)** return — the cumulative return from
+twelve months back to two months back — and the month it leaves out is there to
+step around the short-horizon reversal Jegadeesh (1990) and Lehmann (1990)
+measured.
 
-The inherited inconsistency (spec 0003 §14.1) is that the registered field is
-named ``percentile_12_2`` while its ``min_sessions`` of 273 is ``252 + 21`` — a
-**one**-month skip, which the research shortlist calls 12-1. It resolves as two
-spellings of one window rather than as a disagreement: "12-2" names the
-formation by its month endpoints, twelve months back to two months back, and
-"12-1" names the same stretch by the length of what it skips. Both describe 252
-sessions of formation after skipping 21, which is what is implemented here and
-what the registered 273 is the sum of. The name stays, the skip stays, and
-``test_cross_sectional`` pins the arithmetic against the constant so the two
-spellings cannot drift into two windows.
+The inherited inconsistency (spec 0003 §14.1) is real and the two halves of it
+are **not** two spellings of one window. The field is named ``percentile_12_2``,
+which is French's (2-12): a **twelve-month lookback** whose last month is
+skipped, so the formation is the eleven months inside it — 231 sessions of
+formation after a 21-session skip, 252 in total. The inherited ``min_sessions``
+of 273 is ``252 + 21``, which is a *twelve-month formation* plus a skip and
+therefore a **thirteen-month** lookback. They differ by a month of market.
+
+**The name won.** It is the string the Analysis Field Profile looks the field up
+by (spec 0003 §8.4), so changing it would rename a contract two surfaces read,
+while §14.1 explicitly sanctions the other half: "let the registered
+``min_sessions`` follow the formula actually implemented". So the implemented
+formula is French's, ``min_sessions`` is ``231 + 21 = 252``, and the ADR's
+window-plus-skip rule still reads literally — the window is the formation and
+the skip is the month in front of it.
+
+``test_cross_sectional`` pins the arithmetic to the constants so the formation
+and the skip cannot drift apart again.
 
 **A one-day rank is not a valid read of this field.** The ±7% band spreads a
 single shock across consecutive limit days, so a formation shorter than about a
@@ -82,12 +91,13 @@ without a premium attached: higher is a larger company.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from .bars import Bar, BarFrame
 from .fields import FieldReading, FieldWindow
 from .fundamentals import FundamentalStanding
 from .issues import SignalIssue
+from .moments import sample_variance
 
 # Sessions in a trading year and in the shorter windows the trend field also
 # reports. 252 is the convention every published figure this would be compared
@@ -97,13 +107,20 @@ TRADING_SESSIONS_PER_YEAR = 252
 TREND_QUARTER_SESSIONS = 63
 TREND_HALF_YEAR_SESSIONS = 126
 TREND_YEAR_SESSIONS = TRADING_SESSIONS_PER_YEAR
-TREND_MIN_SESSIONS = TREND_YEAR_SESSIONS
 
-# The prior (2-12) formation and the month it skips. Their sum is the registered
-# ``min_sessions``, and it is a sum rather than a literal so the two can never
-# be edited apart.
-MOMENTUM_FORMATION_SESSIONS = 252
-MOMENTUM_SKIP_SESSIONS = 21
+# A total return over ``n`` sessions is measured between ``n + 1`` closes, so the
+# window the field declares is the year plus the close the year is measured
+# from. Written as the sum rather than as 253, because the day somebody shortens
+# the year the floor has to follow it.
+TREND_MIN_SESSIONS = TREND_YEAR_SESSIONS + 1
+
+# The month French's (2-12) convention leaves out, and the eleven months of
+# formation inside the twelve-month lookback that remain. Both are written as
+# expressions of the year so the three cannot drift apart: the skip is one month
+# of it, the formation is what is left, and their sum is the lookback the field
+# declares.
+MOMENTUM_SKIP_SESSIONS = TRADING_SESSIONS_PER_YEAR // 12
+MOMENTUM_FORMATION_SESSIONS = TRADING_SESSIONS_PER_YEAR - MOMENTUM_SKIP_SESSIONS
 MOMENTUM_MIN_SESSIONS = MOMENTUM_FORMATION_SESSIONS + MOMENTUM_SKIP_SESSIONS
 
 # The shortest formation this field will measure a return over. A month, because
@@ -115,6 +132,13 @@ MOMENTUM_MIN_FORMATION_SESSIONS = 21
 # What relative strength would regress against, named on the refusal so the
 # missing precursor is a fact on the wire rather than a gap in a document.
 RELATIVE_STRENGTH_BENCHMARK = "VNINDEX"
+
+# A year of overlapping daily returns, matching the length the risk cluster
+# already reads a Sharpe and a drawdown over. Deliberately the same year: a beta
+# and a Sharpe both described as "over the last year" that were measured over
+# different stretches would be two answers a reader has no way to reconcile. The
+# 250 rather than 252 is the risk cluster's own number and is inherited from it
+# for that reason.
 RELATIVE_STRENGTH_MIN_SESSIONS = 250
 
 # The factor percentiles need one session — the one the market capitalisation is
@@ -153,11 +177,9 @@ def _return_standard_error_pct(closes: Sequence[float], sessions: int) -> float 
     annualized symbol is ±40 points before anything is said about direction,
     which is the number a reader needs beside the headline.
     """
-    returns = _log_returns(closes)
-    if len(returns) < 2:
+    variance = sample_variance(_log_returns(closes))
+    if variance is None:
         return None
-    mean = sum(returns) / len(returns)
-    variance = sum((item - mean) ** 2 for item in returns) / (len(returns) - 1)
     return 100.0 * math.sqrt(variance * max(sessions, 0))
 
 
@@ -318,8 +340,26 @@ def _stamped(
     )
 
 
-def _needs_statement(window: FieldWindow) -> FundamentalStanding | None:
-    return window.fundamental
+def _quarterly_ratio(
+    window: FieldWindow,
+    numerator: Callable[[FundamentalStanding], float | None],
+    denominator: Callable[[FundamentalStanding, BarFrame], float | None],
+) -> FieldReading:
+    """One factor as a percentage, or the reason the store cannot form it.
+
+    The three ratios below differ only in which two figures they divide, so the
+    refusal and the staleness stamp are written once: three copies of them would
+    be three chances for one factor to refuse under a different code than its
+    neighbours for the same missing statement.
+    """
+    standing = window.fundamental
+    if standing is None:
+        return FieldReading(value=None, refusal=SignalIssue.FUNDAMENTAL_NOT_STORED)
+    top = numerator(standing)
+    bottom = denominator(standing, window.frame)
+    if top is None or bottom is None or bottom <= 0:
+        return FieldReading(value=None, refusal=SignalIssue.FUNDAMENTAL_NOT_STORED)
+    return _stamped(100.0 * top / bottom, standing, window.frame)
 
 
 def earnings_yield_ranked(window: FieldWindow) -> FieldReading:
@@ -330,38 +370,29 @@ def earnings_yield_ranked(window: FieldWindow) -> FieldReading:
     that ranks below every profitable one, while its P/E is a negative number
     that sorts as though it were the cheapest name in the Universe.
     """
-    standing = _needs_statement(window)
-    if standing is None:
-        return FieldReading(value=None, refusal=SignalIssue.FUNDAMENTAL_NOT_STORED)
-    earnings = standing.trailing_12_month_net_income_vnd
-    cap = _market_cap(window.frame)
-    if earnings is None or cap is None:
-        return FieldReading(value=None, refusal=SignalIssue.FUNDAMENTAL_NOT_STORED)
-    return _stamped(100.0 * earnings / cap, standing, window.frame)
+    return _quarterly_ratio(
+        window,
+        lambda standing: standing.trailing_12_month_net_income_vnd,
+        lambda _standing, frame: _market_cap(frame),
+    )
 
 
 def book_yield_ranked(window: FieldWindow) -> FieldReading:
     """Parent-company equity over market capitalisation."""
-    standing = _needs_statement(window)
-    if standing is None:
-        return FieldReading(value=None, refusal=SignalIssue.FUNDAMENTAL_NOT_STORED)
-    equity = standing.parent_equity_vnd
-    cap = _market_cap(window.frame)
-    if equity is None or cap is None:
-        return FieldReading(value=None, refusal=SignalIssue.FUNDAMENTAL_NOT_STORED)
-    return _stamped(100.0 * equity / cap, standing, window.frame)
+    return _quarterly_ratio(
+        window,
+        lambda standing: standing.parent_equity_vnd,
+        lambda _standing, frame: _market_cap(frame),
+    )
 
 
 def roe_ranked(window: FieldWindow) -> FieldReading:
     """Trailing twelve-month net income over parent-company equity."""
-    standing = _needs_statement(window)
-    if standing is None:
-        return FieldReading(value=None, refusal=SignalIssue.FUNDAMENTAL_NOT_STORED)
-    earnings = standing.trailing_12_month_net_income_vnd
-    equity = standing.parent_equity_vnd
-    if earnings is None or equity is None or equity <= 0:
-        return FieldReading(value=None, refusal=SignalIssue.FUNDAMENTAL_NOT_STORED)
-    return _stamped(100.0 * earnings / equity, standing, window.frame)
+    return _quarterly_ratio(
+        window,
+        lambda standing: standing.trailing_12_month_net_income_vnd,
+        lambda standing, _frame: standing.parent_equity_vnd,
+    )
 
 
 def size_ranked(window: FieldWindow) -> FieldReading:

@@ -120,11 +120,15 @@ class FieldKind(str, Enum):
     # threshold frozen from the null rather than calibrated at runtime.
     SIGNAL = "signal"
 
-    # A deterministic transform admitted so a caller and a model can share the
-    # market's vocabulary without turning its conventional cutoffs into a
-    # statistical claim. It has neither a threshold nor sampling uncertainty:
-    # the number is exact for the window, while its predictive value is not
-    # asserted at all.
+    # A number that is exact for what it describes, so there is no sampling
+    # distribution behind it to report. Two shapes qualify and both are here for
+    # the same reason. A deterministic transform of the window admits a caller
+    # and a model to the market's shared vocabulary without turning its
+    # conventional cutoffs into a statistical claim; a figure read straight from
+    # a stored provider row — a foreign ownership room against its cap — is
+    # exact for the date it was read, and the honest caveat on it is its age
+    # rather than an error bar. Neither carries a threshold, and neither asserts
+    # any predictive value at all.
     VOCABULARY = "vocabulary"
 
 
@@ -188,6 +192,21 @@ class Unit(str, Enum):
     PERCENT_PER_BILLION_VND = "percent_per_billion_vnd"
     PERCENTILE = "percentile"
     INDEX_0_100 = "index_0_100"
+
+
+class Denomination(str, Enum):
+    """Whether a traded figure counts money or shares.
+
+    A closed set rather than the two words spelled inline, because this is the
+    one distinction in the package that a wrong answer looks entirely reasonable
+    under: money crosses an ex-date unchanged and shares do not, so a figure
+    labelled with the wrong one of these is off by a corporate action while
+    reading perfectly. Two fields that report their basis have to report it in
+    the same vocabulary for a reader to compare them at all.
+    """
+
+    MONEY = "money"
+    SHARES = "shares"
 
 
 class ThresholdOrigin(str, Enum):

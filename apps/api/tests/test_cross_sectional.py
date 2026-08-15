@@ -12,10 +12,12 @@ and nothing else on the wire would say so.
 *Below thirty survivors the whole call refuses.* A percentile over eleven names
 is a rank with a percent sign on it.
 
-*The momentum window is 252 sessions of formation after skipping 21.* The field
-is named for the (2-12) convention and its ``min_sessions`` is the sum, and this
-file pins the arithmetic to the constants so the two spellings of that window
-cannot drift into two windows.
+*The momentum window is 231 sessions of formation after skipping 21.* That is
+French's prior (2-12) return, which the field is named for: a twelve-month
+lookback with its most recent month left out. The inherited ``min_sessions`` of
+273 described a thirteen-month lookback instead, so the two were never the same
+window; the tests below pin the arithmetic to the constants so they cannot drift
+apart again.
 
 *Relative strength refuses rather than substituting.* There is no stored market
 index, and the live price path's alias is not read to make the field look
@@ -199,16 +201,19 @@ def a_sample(
 
 class TestTheMomentumWindow:
     def test_the_formation_is_the_registered_sessions_after_the_registered_skip(self):
-        """273 is 252 + 21, and the arithmetic is pinned to the constants.
+        """The lookback is the formation plus the skip, and both are pinned here.
 
-        The field is named for the (2-12) convention while its ``min_sessions``
-        is written as a formation plus a skip. Both describe one window, and
-        this is what stops them becoming two.
+        French's prior (2-12) return is a twelve-month lookback whose most
+        recent month is skipped, so the formation is the eleven months inside
+        it. Written as expressions of the trading year, the three constants
+        cannot be edited apart — which is what the inherited 273 was.
         """
         assert MOMENTUM_MIN_SESSIONS == (
             MOMENTUM_FORMATION_SESSIONS + MOMENTUM_SKIP_SESSIONS
         )
         assert MOMENTUM_RANK.min_sessions == MOMENTUM_MIN_SESSIONS
+
+        assert MOMENTUM_MIN_SESSIONS == TREND_YEAR_SESSIONS
 
         # A series that rises 1% a session for the formation and then falls for
         # the skipped month: the return read is the rise, never the fall.
@@ -221,14 +226,22 @@ class TestTheMomentumWindow:
         assert value == pytest.approx(expected, rel=1e-9)
 
     def test_the_most_recent_month_is_skipped_and_not_merely_shortened(self):
-        """The skip steps around short-horizon reversal; it is not a rounding."""
-        rising = [1000.0 * (1.005**index) for index in range(MOMENTUM_MIN_SESSIONS)]
+        """The skip steps around short-horizon reversal; it is not a rounding.
 
-        with_skip = momentum_return_pct(rising)
-        without_skip = momentum_return_pct(rising, skip=0)
+        A series that rose through its formation and gave some back over the
+        last month: the skipped read sees only the rise, and a read of the same
+        length ending today sees the giving back. Equal-length windows on a
+        series that grew at one rate would not tell the two apart at all.
+        """
+        rising = [1000.0 * (1.005**index) for index in range(MOMENTUM_FORMATION_SESSIONS)]
+        falling = [rising[-1] * (0.99**index) for index in range(1, MOMENTUM_SKIP_SESSIONS + 1)]
+        series = rising + falling
 
-        assert with_skip is not None and without_skip is not None
-        assert without_skip > with_skip
+        with_skip = momentum_return_pct(series)
+        ending_today = momentum_return_pct(series, skip=0)
+
+        assert with_skip is not None and ending_today is not None
+        assert with_skip > ending_today
 
     def test_a_formation_under_a_month_is_refused_rather_than_ranked(self):
         """The documented refusal behind "never read a one-day rank".
