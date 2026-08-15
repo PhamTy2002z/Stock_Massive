@@ -8,6 +8,8 @@ from src.stocks.collector_schedule import (
     BACKFILL_JOB_NAME,
     COLLECTOR_JOB_ID,
     COLLECTOR_JOB_NAME,
+    MARKET_INDEX_JOB_ID,
+    MARKET_INDEX_JOB_NAME,
 )
 from src.main import app
 
@@ -200,6 +202,14 @@ class TestWhatTheInterfaceIsToldAbout:
     def test_the_history_load_stays_out_of_it_too(self):
         job_store.cleanup_old(max_age_hours=0)
         job_store.start_job(BACKFILL_JOB_ID, BACKFILL_JOB_NAME, total_items=10)
+
+        listed = client.get("/api/v1/jobs/status").json()
+
+        assert [job["job_id"] for job in listed] == []
+
+    def test_the_market_index_load_stays_out_of_it_as_well(self):
+        job_store.cleanup_old(max_age_hours=0)
+        job_store.start_job(MARKET_INDEX_JOB_ID, MARKET_INDEX_JOB_NAME)
 
         listed = client.get("/api/v1/jobs/status").json()
 

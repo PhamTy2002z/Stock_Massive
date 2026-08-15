@@ -17,6 +17,7 @@ from src.stocks.collector_schedule import (
     census_market_profits,
     collect_universe_snapshots,
     load_corporate_actions,
+    load_market_index,
     retry_census_gaps,
 )
 from src.stocks.jobs import (
@@ -147,6 +148,13 @@ corporate_actions_job_wrapper = make_job_wrapper(
     load_corporate_actions,
     "Corporate action load completed",
     "Corporate action load failed",
+)
+market_index_job_wrapper = make_job_wrapper(
+    "market_index_job_wrapper",
+    "Market Index Series",
+    load_market_index,
+    "Market index load completed",
+    "Market index load failed",
 )
 analysis_run_sweep_job_wrapper = make_job_wrapper(
     "analysis_run_sweep_job_wrapper",
@@ -314,6 +322,25 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
         logger.info(
             f"Scheduled the market catch-up at "
             f"{settings.market_catchup_hour}:{settings.market_catchup_minute:02d} ICT"
+        )
+
+    # The benchmark series, after the market catch-up has had its turn at the
+    # single FiinQuant connection. Deliberately behind it rather than beside it:
+    # a beta is only computable when the index and the symbols stop on the same
+    # Trading Day, so the index is loaded once the session that just closed has
+    # been collected for the Universe.
+    if settings.market_index_enabled:
+        await scheduler.add_schedule(
+            market_index_job_wrapper,
+            vn_cron(
+                hour=settings.market_index_hour,
+                minute=settings.market_index_minute,
+            ),
+            id="market-index",
+        )
+        logger.info(
+            f"Scheduled the market index load at "
+            f"{settings.market_index_hour}:{settings.market_index_minute:02d} ICT"
         )
 
     # An interval rather than a time of day: a run dies whenever the process

@@ -19,6 +19,7 @@ from pydantic import ValidationError
 from .contracts import (
     MARKET_SCHEMA_VERSION,
     BatchTooLarge,
+    MarketIndexSnapshot,
     MarketSnapshot,
     PriceBasis,
     ProviderSource,
@@ -68,6 +69,13 @@ HISTORY_LOOKBACK_DAYS = 30
 # prices as exchange-published ones, and nothing downstream could tell.
 MARKET_ADJUSTED = False
 MARKET_PRICE_BASIS = PriceBasis.RAW
+
+# What a daily index bar is made of, and it is deliberately shorter than
+# MARKET_FIELDS. An index has no foreign split and no active buy/sell
+# decomposition — asking for bu/sd/fb/fs/fn would either fail the field check or,
+# worse, come back zeroed and be stored as a measurement of a flow that does not
+# exist for a composite.
+INDEX_FIELDS = ["open", "high", "low", "close", "volume", "value"]
 
 OVERVIEW_FIELDS = ("ticker", "timestamp", "marketcap")
 CEILING_FLOOR_FIELDS = ("ticker", "timestamp", "ceilingprice", "floorprice")
@@ -464,6 +472,82 @@ class FiinQuantMarketProvider(FiinQuantProviderBase):
         return tuple(snapshots)
 
 
+class FiinQuantMarketIndexProvider(FiinQuantProviderBase):
+    """Read a market index's own daily series, as a series of index levels.
+
+    The same candle call the market adapter makes, over an index code rather
+    than a ticker, and with three deliberate subtractions: the shorter field
+    list above, no ``PriceStatistics`` calls at all — an index has neither a
+    band nor a market capitalisation, so there is nothing those two could answer
+    — and a contract with no room for either.
+
+    History only. There is no ``fetch_index`` answering "the index right now":
+    the stored series exists to be regressed against a symbol's stored window,
+    and a current level nothing else is dated against would be the live read
+    ``docs/specs/0003`` §13 forbids on a serving path.
+    """
+
+    def fetch_index_history(
+        self,
+        index: str,
+        from_date: date,
+        to_date: date,
+    ) -> Sequence[MarketIndexSnapshot]:
+        if from_date > to_date:
+            raise ValueError("from_date cannot be later than to_date")
+        code = index.strip().upper()
+        if not code:
+            return ()
+
+        return self._protected(
+            lambda: self._fetch_index_history(code, from_date, to_date),
+            "FiinQuant market index history fetch failed",
+        )
+
+    def _fetch_index_history(
+        self,
+        index: str,
+        from_date: date,
+        to_date: date,
+    ) -> tuple[MarketIndexSnapshot, ...]:
+        candles = self._get_session().Fetch_Trading_Data(
+            realtime=False,
+            tickers=[index],
+            fields=INDEX_FIELDS,
+            # Passed for the same reason the market call passes it: the flag and
+            # the basis written below move together. An index is not adjusted for
+            # anything either way, so the two agree trivially — but a call that
+            # quietly asked for something else would still be saying `raw` on the
+            # row.
+            adjusted=MARKET_ADJUSTED,
+            by="1d",
+            from_date=str(from_date),
+            to_date=str(to_date),
+        ).get_data()
+
+        _require_populated(candles, "market index history")
+        sessions = _prepare(candles, ("ticker", "timestamp", *INDEX_FIELDS), (index,))
+        observed_at = self._now()
+
+        snapshots: list[MarketIndexSnapshot] = []
+        previous: pd.Series | None = None
+        for session in _one_row_per_session(sessions, index):
+            snapshot = _build_index_snapshot(
+                index=index,
+                source=self.source,
+                observed_at=observed_at,
+                latest=session,
+                previous=previous,
+            )
+            # A session the contract refuses still stands as the level the next
+            # one moved from, exactly as in the market history.
+            previous = session
+            if snapshot is not None:
+                snapshots.append(snapshot)
+
+        return tuple(snapshots)
+
+
 class FiinQuantValuationProvider(FiinQuantProviderBase):
     """Turn one batched read of the ratio series into a snapshot per session.
 
@@ -636,6 +720,54 @@ def _build_snapshot(
         )
     except ValidationError as exc:
         logger.warning("Skipping unusable FiinQuant row for %s: %s", symbol, exc)
+        return None
+
+
+def _build_index_snapshot(
+    index: str,
+    source: ProviderSource,
+    observed_at: datetime,
+    latest: pd.Series,
+    previous: pd.Series | None,
+) -> MarketIndexSnapshot | None:
+    """Assemble one index session, or None when the row cannot be trusted.
+
+    Dropped rather than raised for the same reason a suspended equity's row is:
+    one unusable session is one day of the series, and a whole load abandoned
+    over it would leave the benchmark short of the depth the field it feeds
+    declares.
+
+    ``change_pct`` is measured against the previous stored level rather than
+    read from the provider, which is the same arithmetic the market history
+    does. No ``reference_price`` is written: that field is the band's anchor and
+    an index has no band.
+    """
+    close = optional_float(latest.get("close"))
+    reference = optional_float(previous.get("close")) if previous is not None else None
+    change_pct = None
+    if close is not None and reference not in (None, 0):
+        change_pct = (close - reference) / reference * 100
+
+    try:
+        return MarketIndexSnapshot(
+            symbol=index,
+            metadata=SnapshotMetadata(
+                source=source,
+                effective_at=_session_start(latest["timestamp"]),
+                observed_at=observed_at,
+                schema_version=MARKET_SCHEMA_VERSION,
+            ),
+            price_basis=MARKET_PRICE_BASIS,
+            last_price=close,
+            open_price=optional_float(latest.get("open")),
+            high_price=optional_float(latest.get("high")),
+            low_price=optional_float(latest.get("low")),
+            change_pct=change_pct,
+            volume=optional_int(latest.get("volume")),
+            total_value_vnd=optional_float(latest.get("value")),
+        )
+    except ValidationError as exc:
+        logger.warning("Skipping unusable FiinQuant index row for %s: %s", index, exc)
         return None
 
 

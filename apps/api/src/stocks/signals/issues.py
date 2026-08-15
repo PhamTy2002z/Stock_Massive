@@ -132,6 +132,90 @@ class SignalIssue(str, Enum):
     # with the error the check was for.
     AUTOCORRELATION_UNUSABLE = "autocorrelation_unusable"
 
+    # The field is registered and has no inputs in the store today. Declared
+    # rather than dropped, because a profile silently missing a field would make
+    # two Analyses carrying the same profile version mean different things
+    # (spec 0003 §8.4, §13). The input it is short of travels with it, and no
+    # live Provider Source read is ever substituted to fill the slot.
+    UNAVAILABLE = "unavailable"
+
+    # A window prepared for quantities rather than for prices, so no session in
+    # it was judged against a band. Not a data gap: nobody asked. A price-band
+    # field handed such a window is asking the wrong window rather than meeting
+    # a market it could not judge, and the two would be indistinguishable under
+    # any of the codes above.
+    BAND_NOT_MEASURED = "band_not_measured"
+
+    # The instrument this window is drawn from has no price band at all: a
+    # market index sits on no board, so there is no reference price to take a
+    # percentage of and no limit for a session to lock at (`docs/adr/0017`).
+    # Deliberately neither `exchange_unknown` — which says a board exists and
+    # nothing named it — nor `band_not_measured`, which says a band exists and
+    # this window did not ask for one. Here the band does not exist, and a field
+    # reaching for one is asking the wrong instrument.
+    BAND_NOT_APPLICABLE = "band_not_applicable"
+
+    # --- Traded figures, from ADR-0010 -----------------------------------
+    # A session inside the window carries no traded figure at all — no money on
+    # a money-denominated average, no share count on a share-denominated one.
+    # Distinct from `insufficient_history`, which is about how many sessions the
+    # window reached: here every session is present and one of them is blank, and
+    # averaging the rest would produce an average over a different stretch of
+    # market than the symbol beside it.
+    TRADED_FIGURE_NOT_STORED = "traded_figure_not_stored"
+
+    # Every session in the window traded nothing, so a ratio measured per unit
+    # of traded money has no observation to average. A fact about the symbol
+    # rather than about the store, and the one a reader of a thin UPCOM name
+    # most needs.
+    NO_TRADED_SESSIONS = "no_traded_sessions"
+
+    # The window holds a session with no foreign flow figure, so a sum or a run
+    # over it would be a sum through a hole. Its own code rather than the traded
+    # figure above, because the two are different collection gaps with different
+    # fixes: one is the session's turnover, the other is its foreign split.
+    FOREIGN_FLOW_NOT_STORED = "foreign_flow_not_stored"
+
+    # No reference reading of this symbol's foreign ownership room is stored at
+    # or before the date being answered for, so the room percentage has nothing
+    # to report. Deliberately not the same as a room that is full: an
+    # uncollected room is unknown, and reporting it as open would assert the
+    # thing nobody looked at.
+    FOREIGN_ROOM_NOT_STORED = "foreign_room_not_stored"
+
+    # The symbol's foreign ownership room is full, or full enough to stop
+    # buying by itself, so a foreign flow measured over the window was
+    # mechanically constrained rather than freely chosen. A degradation because
+    # the number is real: what changes is that it may not be read as a change of
+    # view. Its absence from a window is not this code — an uncollected room is
+    # reported as unknown rather than as open.
+    FOREIGN_ROOM_EXHAUSTED = "foreign_room_exhausted"
+
+    # --- Cross-sectional fields, from ADR-0010 ---------------------------
+    # Fewer symbols survived exclusion than a percentile can be taken over. A
+    # position within a sample of eleven is a rank wearing a distribution's
+    # clothes, so the whole call refuses rather than each surviving symbol
+    # answering with a number nobody can read.
+    INSUFFICIENT_CROSS_SECTION = "insufficient_cross_section"
+
+    # The newest quarterly statement behind a stored figure is old enough that
+    # narrating it as current would be wrong. A degradation rather than a
+    # refusal: the number is real and was true of its quarter, and the quarter
+    # is stamped beside it.
+    STALE_FUNDAMENTAL_PERIOD = "stale_fundamental_period"
+
+    # The store holds no quarterly statement for this symbol at or before the
+    # date being ranked, so there is nothing to rank it on. Distinct from the
+    # code above, which is about a figure that exists and is old.
+    FUNDAMENTAL_NOT_STORED = "fundamental_not_stored"
+
+    # The fitted AR(1) half-life reaches the window the gauge was fitted over,
+    # which includes a series carrying no reversion at all — the estimate is
+    # unbounded there rather than merely large. Past that point a z against the
+    # window's own trailing mean is measuring the window rather than the market,
+    # so the z is suppressed rather than served with a caveat beside it.
+    HALF_LIFE_EXCEEDS_WINDOW = "half_life_exceeds_window"
+
     # More than a fifth of the window was locked at a limit, so a range-based
     # estimate over it is measuring the band rather than the market. A
     # degradation with a name, not a refusal: the sessions are real and the
