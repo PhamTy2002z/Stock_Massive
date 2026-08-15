@@ -60,12 +60,20 @@ class ListedIdentity:
     ``company_name`` is nullable because the register's second call is
     best-effort: a provider that answered with boards and not with names leaves
     the industry mapping intact rather than losing the whole refresh.
+
+    ``icb_code`` and ``icb_name`` are nullable for the same reason, and they are
+    the reason this identity is read at all by the nightly pipeline: the ICB
+    level-2 code is what selects a symbol's per-industry fundamentals, and it
+    has to be answerable from a stored row because the pipeline may not ask a
+    Provider Source.
     """
 
     symbol: str
     exchange: Exchange
     company_name: str | None
     is_listed: bool
+    icb_code: str | None = None
+    icb_name: str | None = None
 
 
 class ListingRosterStore:
@@ -111,6 +119,8 @@ class ListingRosterStore:
                         exchange=entry.exchange.value,
                         is_listed=True,
                         company_name=entry.company_name,
+                        icb_code=entry.icb_code,
+                        icb_name=entry.icb_name,
                         source=source.value,
                         observed_at=stamped,
                     )
@@ -127,6 +137,14 @@ class ListingRosterStore:
             row.exchange = entry.exchange.value
             row.is_listed = True
             row.company_name = entry.company_name
+            # Written only when the refresh carried one. The classification read
+            # behind a refresh is best-effort, so an entry without one means the
+            # industry list was not answered this time — and writing that absence
+            # through would unclassify the market on a read that never disagreed
+            # with the stored answer.
+            if entry.icb_code is not None:
+                row.icb_code = entry.icb_code
+                row.icb_name = entry.icb_name
             row.source = source.value
             row.observed_at = stamped
 
@@ -200,6 +218,8 @@ class ListingRosterStore:
             exchange=Exchange(row.exchange),
             company_name=row.company_name,
             is_listed=bool(row.is_listed),
+            icb_code=row.icb_code,
+            icb_name=row.icb_name,
         )
 
     def delisted_among(self, symbols: Iterable[str]) -> tuple[str, ...]:

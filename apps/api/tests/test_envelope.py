@@ -46,6 +46,7 @@ from src.alpha.envelope import (
     measure_cross_sections,
     price_zone_entry,
     ranked_field_ids,
+    stored_industry,
 )
 from src.alpha.field_profile import (
     AXIS_ORDER,
@@ -229,6 +230,24 @@ def store_peers(session: Session, *, period_end: date | None = None) -> tuple[st
     return PEERS
 
 
+def classify(
+    session: Session,
+    symbol: str = SYMBOL,
+    *,
+    icb_code: str | None = None,
+    icb_name: str | None = None,
+) -> None:
+    """Stamp the register's ICB classification onto an already listed symbol.
+
+    The row itself rather than a roster refresh: a refresh is a picture of the
+    whole market and would delist every peer this fixture just listed.
+    """
+    row = session.get(ListingRoster, symbol)
+    row.icb_code = icb_code
+    row.icb_name = icb_name
+    session.flush()
+
+
 def a_figure(health: Health, *, value: float | None = 1.0) -> EvidenceFigure:
     """One figure in a stated health, for the section-health rules alone."""
     return EvidenceFigure(
@@ -355,6 +374,60 @@ class TestTheIndustryBlock:
             cross_sections={},
         )
         assert built.as_wire()["industry"] == "retail"
+
+
+class TestTheStoredIndustry:
+    """Which block a symbol selects is read off the register, never asked for.
+
+    The resolver is the pipeline's only answer to "what business is this", and
+    it has to come from a stored row: the classification a Provider Source could
+    answer is exactly the live read the input boundary forbids (spec 0003 §8.1).
+    """
+
+    def test_a_bank_in_the_register_carries_the_bank_metrics(self, stored):
+        classify(stored, icb_code="8300", icb_name="Ngân hàng")
+
+        built = build_envelope(stored, SYMBOL, TRADING_DAY, cross_sections={})
+
+        assert built.industry is AnalysisIndustry.BANKS
+        assert built.as_wire()["industry"] == "banks"
+        for field_id in (
+            "bank_metrics.nim_pct",
+            "bank_metrics.npl_ratio_pct",
+            "bank_metrics.llr_coverage_pct",
+        ):
+            figure = built.figure(field_id)
+            assert figure is not None, field_id
+            assert figure.health is Health.REFUSED
+            assert figure.value is None
+            assert figure.reason_code == SignalIssue.UNAVAILABLE.value
+
+    def test_the_profile_version_does_not_move_when_a_block_is_selected(
+        self, stored
+    ):
+        """The profile did not change — only which of its blocks applies."""
+        classify(stored, icb_code="8300", icb_name="Ngân hàng")
+
+        built = build_envelope(stored, SYMBOL, TRADING_DAY, cross_sections={})
+
+        assert built.field_profile_version == FIELD_PROFILE_VERSION
+
+    def test_a_classified_symbol_with_no_block_of_its_own_is_other(self, stored):
+        classify(stored, icb_code="1700", icb_name="Tài nguyên cơ bản")
+
+        assert stored_industry(stored, SYMBOL) is AnalysisIndustry.OTHER
+
+    def test_a_symbol_the_register_holds_no_code_for_stays_unclassified(self, stored):
+        assert stored_industry(stored, SYMBOL) is AnalysisIndustry.UNCLASSIFIED
+
+    def test_a_symbol_the_register_never_carried_stays_unclassified(self, stored):
+        """Absent from the register is not classified into nothing special."""
+        assert stored_industry(stored, "NOROW") is AnalysisIndustry.UNCLASSIFIED
+
+    def test_it_reads_the_register_however_the_symbol_was_spelled(self, stored):
+        classify(stored, icb_code="5300", icb_name="Bán lẻ")
+
+        assert stored_industry(stored, SYMBOL.lower()) is AnalysisIndustry.RETAIL
 
 
 class TestWhatHasNoComputationBehindIt:

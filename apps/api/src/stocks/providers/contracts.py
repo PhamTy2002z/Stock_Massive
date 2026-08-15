@@ -533,12 +533,21 @@ class ListingEntry(InternalSnapshot):
     because it is not an observation *about* a company the system follows. It is
     a line from the market's own register, and the whole register is read at once
     and stamped once.
+
+    ``icb_code`` and ``icb_name`` are the ICB level-2 classification, and they
+    are optional for the same reason ``company_name`` is: the register's
+    classification read is best-effort, and an entry that arrived without one
+    says "not read this time" rather than "this company has no industry". What
+    the store does with that distinction is where it matters — a refresh with no
+    classification leaves the stored one standing.
     """
 
     symbol: str
     exchange: Exchange
     is_listed: bool
     company_name: str | None = None
+    icb_code: str | None = None
+    icb_name: str | None = None
 
     @field_validator("symbol")
     @classmethod
@@ -552,6 +561,21 @@ class ListingEntry(InternalSnapshot):
     @classmethod
     def normalize_exchange(cls, value: object) -> object:
         return Exchange.parse(value) if isinstance(value, str) else value
+
+    @field_validator("icb_code", "icb_name")
+    @classmethod
+    def blank_is_no_classification(cls, value: str | None) -> str | None:
+        """An empty code is nothing read, never a code.
+
+        Kept as an empty string it would reach ``industry_for_icb`` as a code the
+        table does not name, and the symbol would be reported as classified into
+        an industry the profile has nothing extra for — which is a different
+        claim from "nobody has classified it".
+        """
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
 
 
 class ListingRosterProvider(Protocol):

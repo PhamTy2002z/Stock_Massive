@@ -20,6 +20,7 @@ from src.alpha.field_profile import (
     PRICE_ZONE_FIELD_ID,
     AnalysisIndustry,
     Axis,
+    industry_for_icb,
     profile_for,
 )
 from src.stocks.signals.registry import REGISTRY
@@ -91,6 +92,36 @@ class TestWhatTheIndustriesAdd:
     def test_an_unclassified_symbol_gets_the_shared_fundamentals_and_nothing_else(self):
         assert len(_ids(AnalysisIndustry.UNCLASSIFIED, Axis.FUNDAMENTAL)) == 3
         assert len(_ids(AnalysisIndustry.OTHER, Axis.FUNDAMENTAL)) == 3
+
+
+class TestWhatAnIcbCodeSelects:
+    """Which fundamentals block a stored classification reaches for.
+
+    Level 2 and no other level: the profile's three industries are ICB
+    supersectors, and a level-3 or level-4 code read as one would select a block
+    the code does not name.
+    """
+
+    def test_the_three_supersectors_the_profile_carries_metrics_for(self):
+        assert industry_for_icb("8300") is AnalysisIndustry.BANKS
+        assert industry_for_icb("8600") is AnalysisIndustry.REAL_ESTATE
+        assert industry_for_icb("5300") is AnalysisIndustry.RETAIL
+
+    def test_a_classified_code_with_no_block_of_its_own_is_other(self):
+        assert industry_for_icb("1700") is AnalysisIndustry.OTHER
+
+    def test_no_stored_code_is_unclassified_rather_than_other(self):
+        """The store not knowing is a different fact from nothing extra to add."""
+        assert industry_for_icb(None) is AnalysisIndustry.UNCLASSIFIED
+        assert industry_for_icb("") is AnalysisIndustry.UNCLASSIFIED
+        assert industry_for_icb("  ") is AnalysisIndustry.UNCLASSIFIED
+
+    def test_a_code_stored_with_whitespace_still_selects_its_block(self):
+        assert industry_for_icb(" 8300 ") is AnalysisIndustry.BANKS
+
+    def test_a_deeper_icb_level_selects_no_block_of_its_own(self):
+        """8355 is the level-4 code for banks, and the register stores level 2."""
+        assert industry_for_icb("8355") is AnalysisIndustry.OTHER
 
 
 class TestWhatIsRegisteredAndWhatIsNot:

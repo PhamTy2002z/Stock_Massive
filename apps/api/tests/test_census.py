@@ -519,6 +519,137 @@ class TestRosterRefresh:
         assert store.exchange_of("AAA") is Exchange.HOSE
 
 
+class TestStoredClassification:
+    """The register carries what business a listed company is in.
+
+    It is the only durable place that can: the mapping arrives with the board,
+    from a register the whole market is read out of, and the nightly Analysis
+    pipeline may not ask a Provider Source what industry a symbol is in
+    (spec 0003 §8.1).
+    """
+
+    def test_a_refresh_stores_the_classification_beside_the_board(self):
+        session = open_session()
+        store = ListingRosterStore(session)
+
+        store.refresh(
+            (
+                ListingEntry(
+                    symbol="AAA",
+                    exchange=Exchange.HOSE,
+                    is_listed=True,
+                    icb_code="8300",
+                    icb_name="Ngân hàng",
+                ),
+            ),
+            source=ProviderSource.VNSTOCK,
+            observed_at=NOW,
+        )
+
+        identity = store.identity_of("AAA")
+        assert identity is not None
+        assert identity.icb_code == "8300"
+        assert identity.icb_name == "Ngân hàng"
+
+    def test_a_refresh_that_answered_with_no_classification_leaves_it_alone(self):
+        """The classification read is best-effort and must not blank the store.
+
+        A board that answered and an industry list that did not is a normal
+        outcome, and a refresh that wrote the absence through would unclassify
+        the whole market on it.
+        """
+        session = open_session()
+        store = ListingRosterStore(session)
+        store.refresh(
+            (
+                ListingEntry(
+                    symbol="AAA",
+                    exchange=Exchange.HNX,
+                    is_listed=True,
+                    icb_code="8600",
+                    icb_name="Bất động sản",
+                ),
+            ),
+            source=ProviderSource.VNSTOCK,
+            observed_at=NOW,
+        )
+
+        store.refresh(
+            (ListingEntry(symbol="AAA", exchange=Exchange.HOSE, is_listed=True),),
+            source=ProviderSource.VNSTOCK,
+            observed_at=NOW,
+        )
+
+        identity = store.identity_of("AAA")
+        assert identity is not None
+        assert identity.exchange is Exchange.HOSE
+        assert identity.icb_code == "8600"
+        assert identity.icb_name == "Bất động sản"
+
+    def test_a_later_refresh_moves_a_company_that_was_reclassified(self):
+        session = open_session()
+        store = ListingRosterStore(session)
+        store.refresh(
+            (
+                ListingEntry(
+                    symbol="AAA",
+                    exchange=Exchange.HOSE,
+                    is_listed=True,
+                    icb_code="5300",
+                    icb_name="Bán lẻ",
+                ),
+            ),
+            source=ProviderSource.VNSTOCK,
+            observed_at=NOW,
+        )
+
+        store.refresh(
+            (
+                ListingEntry(
+                    symbol="AAA",
+                    exchange=Exchange.HOSE,
+                    is_listed=True,
+                    icb_code="8300",
+                    icb_name="Ngân hàng",
+                ),
+            ),
+            source=ProviderSource.VNSTOCK,
+            observed_at=NOW,
+        )
+
+        identity = store.identity_of("AAA")
+        assert identity is not None
+        assert identity.icb_code == "8300"
+
+    def test_a_symbol_first_seen_without_one_is_stored_unclassified(self):
+        session = open_session()
+        store = ListingRosterStore(session)
+
+        store.refresh(
+            (ListingEntry(symbol="AAA", exchange=Exchange.HOSE, is_listed=True),),
+            source=ProviderSource.VNSTOCK,
+            observed_at=NOW,
+        )
+
+        identity = store.identity_of("AAA")
+        assert identity is not None
+        assert identity.icb_code is None
+        assert identity.icb_name is None
+
+    def test_a_blank_classification_is_stored_as_none_rather_than_empty(self):
+        """An empty string would read as a code, and select `other`."""
+        entry = ListingEntry(
+            symbol="AAA",
+            exchange=Exchange.HOSE,
+            is_listed=True,
+            icb_code="  ",
+            icb_name="",
+        )
+
+        assert entry.icb_code is None
+        assert entry.icb_name is None
+
+
 class TestExchangeSpelling:
     """One board, one spelling, decided at the boundary."""
 
