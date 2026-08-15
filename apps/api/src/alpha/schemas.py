@@ -4,6 +4,8 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
+from .watchlist import WatchlistState
+
 
 class WatchlistAddRequest(BaseModel):
     """A symbol to start watching, as typed."""
@@ -19,6 +21,10 @@ class WatchlistItemResponse(BaseModel):
     """One symbol on the rail."""
 
     symbol: str
+    # `active` or `unsupported`, and nothing about why: a delisting and an
+    # operator trimming the Universe are the same state here because v1 cannot
+    # tell them apart.
+    state: WatchlistState
     added_at: datetime
     # Advances only when that specific Analysis is opened, which is what makes
     # the unread badge mean anything.
@@ -34,5 +40,7 @@ class WatchlistResponse(BaseModel):
     """
 
     cap: int
+    # Active entries only, and it may exceed `cap`: a symbol restored to the
+    # Universe revives whether or not there is room, and the overflow stands.
     count: int
     entries: list[WatchlistItemResponse]
