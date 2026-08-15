@@ -96,6 +96,12 @@ def serialize_window_health(health: WindowHealth) -> dict[str, Any]:
                     if health.band_regime.limit_ratio is not None
                     else None
                 ),
+                "anchor_basis": (
+                    health.band_regime.anchor_basis.value
+                    if health.band_regime.anchor_basis is not None
+                    else None
+                ),
+                "exchange_as_of": health.band_regime.exchange_as_of.value,
                 "uniform": health.band_regime.uniform,
             }
             if health.band_regime is not None

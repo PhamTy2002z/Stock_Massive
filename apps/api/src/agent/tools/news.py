@@ -16,7 +16,14 @@ from src.stocks.providers.normalize import VN_TZ
 from src.stocks.shared import validate_symbol
 from src.stocks.universe import build_universe
 
-from .catalog import ToolCatalog, ToolContext, ToolDataAccess, ToolSpec
+from .catalog import (
+    MAX_TOOL_RESULT_BYTES,
+    ToolCatalog,
+    ToolContext,
+    ToolDataAccess,
+    ToolSpec,
+    serialized_size,
+)
 from .data import SessionFactory, UniverseFactory, _object_schema
 from .scope import structured_universe_refusal
 
@@ -186,27 +193,37 @@ class NewsTools:
             return self._empty(symbol, window_days, reason="news_unavailable")
 
         cutoff = self._now().astimezone(timezone.utc) - timedelta(days=window_days)
-        items = []
+        items: list[Mapping[str, Any]] = []
         for raw in read.payload if isinstance(read.payload, Sequence) else ():
             if not isinstance(raw, Mapping):
                 continue
-            wrapped = self._wrap(raw, cutoff=cutoff)
+            wrapped = self._sanitize_untrusted_evidence(raw, cutoff=cutoff)
             if wrapped is not None:
-                items.append({"untrusted_evidence": wrapped})
+                candidate = [*items, {"untrusted_evidence": wrapped}]
+                if serialized_size(
+                    self._result(
+                        symbol,
+                        window_days,
+                        candidate,
+                        stale=read.stale,
+                        age_seconds=read.age_seconds,
+                    )
+                ) <= MAX_TOOL_RESULT_BYTES:
+                    items = candidate
             if len(items) >= MAX_NEWS_ITEMS:
                 break
-        return {
-            "symbol": symbol,
-            "window_days": window_days,
-            "items": items,
-            "count": len(items),
-            "stale": read.stale,
-            "age_seconds": read.age_seconds,
-            "reason": None if items else "no_cleared_news_in_window",
-        }
+        return self._result(
+            symbol,
+            window_days,
+            items,
+            stale=read.stale,
+            age_seconds=read.age_seconds,
+        )
 
     @staticmethod
-    def _wrap(raw: Mapping[str, Any], *, cutoff: datetime) -> Mapping[str, Any] | None:
+    def _sanitize_untrusted_evidence(
+        raw: Mapping[str, Any], *, cutoff: datetime
+    ) -> Mapping[str, Any] | None:
         source = _visible_text(
             raw.get("news_source", raw.get("source")), MAX_TITLE_CHARS
         )
@@ -238,6 +255,25 @@ class NewsTools:
             "claim_class": "source_claim",
             "title": title,
             "content": content,
+        }
+
+    @staticmethod
+    def _result(
+        symbol: str,
+        window_days: int,
+        items: Sequence[Mapping[str, Any]],
+        *,
+        stale: bool,
+        age_seconds: float,
+    ) -> Mapping[str, Any]:
+        return {
+            "symbol": symbol,
+            "window_days": window_days,
+            "items": list(items),
+            "count": len(items),
+            "stale": stale,
+            "age_seconds": age_seconds,
+            "reason": None if items else "no_cleared_news_in_window",
         }
 
     @staticmethod

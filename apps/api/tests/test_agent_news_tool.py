@@ -9,7 +9,8 @@ from datetime import date, datetime, timezone
 
 import pytest
 
-from src.agent.tools import ToolContext
+from src.agent.tools import MAX_TOOL_RESULT_BYTES, ToolContext
+from src.agent.tools.catalog import serialized_size
 from src.agent.tools.news import NewsTools
 from src.core.news_lane import FRESH_SECONDS, STALE_LIMIT_SECONDS, NewsLane
 from src.stocks.universe import Universe
@@ -208,6 +209,63 @@ async def test_news_refuses_without_redis_and_never_calls_the_provider():
         "reason": "news_unavailable",
     }
     assert calls == 0
+
+
+@pytest.mark.asyncio
+async def test_news_refuses_when_the_fresh_read_cannot_be_cached():
+    class CacheWriteFails(FakeRedis):
+        def set(self, key, value, nx=False, ex=None, px=None):
+            if key == "stock_massive:news:FPT":
+                raise ConnectionError("redis write failed")
+            return super().set(key, value, nx=nx, ex=ex, px=px)
+
+    calls = 0
+
+    def fetch(_symbol: str):
+        nonlocal calls
+        calls += 1
+        return [
+            {
+                "news_title": "Fetched but not admitted",
+                "news_full_content": "This must not escape the failed lane.",
+                "news_source": "VCI",
+                "public_date": "2026-08-15T10:00:00+00:00",
+            }
+        ]
+
+    catalog, _ = build(fetch, redis=CacheWriteFails())
+
+    result = await catalog.dispatch(
+        "search_news", {"symbol": "FPT", "window_days": 7}, context()
+    )
+
+    assert calls == 1
+    assert result["items"] == []
+    assert result["reason"] == "news_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_news_admits_only_the_items_that_fit_the_utf8_result_budget():
+    def fetch(_symbol: str):
+        return [
+            {
+                "news_title": "ệ" * 240,
+                "news_full_content": "ộ" * 600,
+                "news_source": "VCI",
+                "public_date": "2026-08-15T10:00:00+00:00",
+            }
+            for _ in range(10)
+        ]
+
+    catalog, _ = build(fetch)
+
+    result = await catalog.dispatch(
+        "search_news", {"symbol": "FPT", "window_days": 7}, context()
+    )
+
+    assert 0 < result["count"] < 5
+    assert result["count"] == len(result["items"])
+    assert serialized_size(result) <= MAX_TOOL_RESULT_BYTES
 
 
 @pytest.mark.asyncio

@@ -214,18 +214,20 @@ class ComputationTools:
                 context,
             )
 
-        healthy_answers = [
+        field_answers = [
             answer for answer in answers.values() if isinstance(answer, FieldValue)
         ]
-        if not healthy_answers:
+        if not field_answers:
             raise ValueError(f"{name} produced no Window Health")
-        shared = max(
-            healthy_answers,
-            key=lambda answer: (answer.health.sessions_used, answer.field.min_sessions),
-        ).health
+        # Registered fields carry fixed trailing windows.  The shared cluster
+        # report therefore belongs to the widest registered window, selected by
+        # declaration rather than by how much data happened to be available.
+        widest_answer = max(field_answers, key=lambda answer: answer.field.min_sessions)
+        shared = widest_answer.health
         result: dict[str, Any] = {
             "symbol": symbol,
             "as_of": context.trading_day.isoformat(),
+            "health_basis_field": widest_answer.field.name,
             REGISTERED_FIELD_VALUES_KEY: answers,
             SHARED_WINDOW_HEALTH_KEY: shared,
         }
