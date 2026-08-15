@@ -152,6 +152,22 @@ class Usage:
             + self.reasoning_tokens
         )
 
+    def __add__(self, other: "Usage") -> "Usage":
+        """Sum two calls' counters, for a caller totalling one Turn.
+
+        Here rather than in the caller: a second five-field type that had to be
+        kept in step with this one is a fifth counter waiting to be forgotten.
+        """
+        if not isinstance(other, Usage):
+            return NotImplemented
+        return Usage(
+            input_tokens=self.input_tokens + other.input_tokens,
+            cached_input_tokens=self.cached_input_tokens + other.cached_input_tokens,
+            cache_write_tokens=self.cache_write_tokens + other.cache_write_tokens,
+            output_tokens=self.output_tokens + other.output_tokens,
+            reasoning_tokens=self.reasoning_tokens + other.reasoning_tokens,
+        )
+
 
 @dataclass(frozen=True)
 class CompletionRequest:

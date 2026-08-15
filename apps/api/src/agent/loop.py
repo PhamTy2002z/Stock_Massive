@@ -38,9 +38,11 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
+from enum import Enum
 from typing import Any
 
 from src.core.llm import (
@@ -67,6 +69,7 @@ from src.core.llm import (
     llm_metrics,
     tool_error_result,
 )
+from src.core.llm.errors import MAX_TOOL_ATTEMPTS
 
 from .context import (
     ConstructedContext,
@@ -78,7 +81,7 @@ from .context import (
     estimate_tokens,
 )
 from .prompt import AnswerEvidence, AnswerKind, RuntimeContext, classify_answer_kind, render
-from .tools.catalog import ToolCatalog, ToolContext
+from .tools.catalog import ToolCatalog, ToolContext, refusal_reason
 
 logger = logging.getLogger(__name__)
 
@@ -98,11 +101,24 @@ ROUNDS_EXHAUSTED_NOTE = (
     "the evidence already gathered, and state plainly which evidence you were not "
     "able to obtain."
 )
+# Built once so the three places that care about it — the message appended to
+# the final call, the budget it is charged against, and the reservation that
+# funds it — cannot disagree about what it costs.
+ROUNDS_EXHAUSTED_MESSAGE = Message(role=Role.SYSTEM, content=ROUNDS_EXHAUSTED_NOTE)
+ROUNDS_EXHAUSTED_TOKENS = estimate_tokens(ROUNDS_EXHAUSTED_MESSAGE)
 
 TOOL_EXHAUSTED_MESSAGE = (
     "this tool has already failed twice in this Turn and will not be called again; "
     "take a different approach or say what is missing"
 )
+
+
+class TurnStatus(str, Enum):
+    """How a Turn ended, in the lifecycle table's own vocabulary."""
+
+    COMPLETE = "complete"
+    INCOMPLETE = "incomplete"
+    CANCELLED = "cancelled"
 
 
 class SessionCapacityExceeded(RuntimeError):
@@ -155,7 +171,7 @@ class ToolCallIdMismatch(MalformedArguments):
 class TurnRequest:
     """One user message and everything needed to answer it."""
 
-    thread_id: Any
+    thread_id: uuid.UUID | str
     request_message_id: int
     user_id: int
     user_text: str
@@ -178,8 +194,7 @@ class TurnDraft:
 class TurnOutcome:
     """How the Turn ended, and what it leaves behind."""
 
-    # complete | incomplete | cancelled
-    status: str
+    status: TurnStatus
     terminal_reason: str | None
     text: str | None
     answer_kind: AnswerKind
@@ -192,6 +207,53 @@ class TurnOutcome:
 
 Checkpoint = Callable[[TurnDraft], Awaitable[None] | None]
 Cancelled = Callable[[], bool]
+
+
+@dataclass
+class _TurnState:
+    """Everything one Turn accumulates, in one place.
+
+    A single mutable object rather than seven locals threaded through every
+    terminal path: the eight ``_ended`` call sites differ only in status and
+    reason, and a positional tail of six values is where a swap goes unnoticed.
+    """
+
+    text: str | None = None
+    tool_rounds: int = 0
+    usage: Usage = field(default_factory=Usage)
+    calls: list[TranscriptToolCall] = field(default_factory=list)
+    model_refused: bool = False
+    universe_refusals: int = 0
+    grounded_tool_calls: int = 0
+    summary_needed: bool = False
+
+    def add_usage(self, usage: Usage | None) -> None:
+        # ``None`` usage is not zero usage: a provider that supplied no evidence
+        # has not told us the call was free, so it is skipped rather than added.
+        if usage is not None:
+            self.usage = self.usage + usage
+
+    def observe(self, result: Mapping[str, Any]) -> None:
+        """Classify one tool result the way the Contract classifies answers."""
+        reason = refusal_reason(result)
+        if reason == "not_in_universe":
+            self.universe_refusals += 1
+        elif reason is None:
+            self.grounded_tool_calls += 1
+
+    def evidence(self) -> AnswerEvidence:
+        return AnswerEvidence(
+            model_refused=self.model_refused,
+            universe_refusals=self.universe_refusals,
+            grounded_tool_calls=self.grounded_tool_calls,
+        )
+
+    def draft(self) -> TurnDraft:
+        return TurnDraft(
+            text=self.text,
+            rounds_used=self.tool_rounds,
+            tool_calls=tuple(self.calls),
+        )
 
 
 def pair_results(
@@ -254,6 +316,30 @@ def assert_distinct_ids(calls: Sequence[ToolCall]) -> None:
         seen.add(call.id)
 
 
+def admit_round(calls: Sequence[ToolCall], attempts: ToolAttempts) -> tuple[bool, ...]:
+    """Decide which of a round's calls may be dispatched.
+
+    The two-attempt cap governs *retries*. A tool that has already failed gets
+    only the attempts it has left, and because a round runs concurrently that
+    allowance has to be spent before dispatch rather than after failure —
+    otherwise three parallel calls to one broken tool all get through.
+
+    A tool that has not failed yet has nothing to retry, so a healthy fan-out —
+    one tool asked about three symbols in one round, which the prompt's own
+    tool-use policy invites — is never gated.
+    """
+    allowance = {call.name: attempts.remaining(call.name) for call in calls}
+    admitted: list[bool] = []
+    for call in calls:
+        left = allowance[call.name]
+        if left >= MAX_TOOL_ATTEMPTS:
+            admitted.append(True)
+            continue
+        admitted.append(left > 0)
+        allowance[call.name] = max(0, left - 1)
+    return tuple(admitted)
+
+
 class AgentLoop:
     """One Turn, from the user's message to a terminal state."""
 
@@ -289,13 +375,8 @@ class AgentLoop:
             return await self._run(request, cancelled)
 
     async def _run(self, request: TurnRequest, cancelled: Cancelled) -> TurnOutcome:
+        state = _TurnState()
         attempts = ToolAttempts()
-        calls_made: list[TranscriptToolCall] = []
-        text: str | None = None
-        usage = _UsageTotals()
-        tool_rounds = 0
-        evidence = _EvidenceCounters()
-        summary_needed = False
         tool_context = ToolContext(
             user_id=request.user_id,
             trading_day=request.runtime.trading_day,
@@ -305,17 +386,14 @@ class AgentLoop:
 
         for round_index in range(MAX_TOOL_ROUNDS + 1):
             if cancelled():
-                return self._ended(
-                    "cancelled", "cancelled_by_user", text, tool_rounds,
-                    calls_made, usage, evidence, summary_needed,
-                )
+                return await self._ended(TurnStatus.CANCELLED, "cancelled_by_user", state)
 
             final = round_index == MAX_TOOL_ROUNDS
-            context = self._construct(system_prompt, request, calls_made, final)
-            summary_needed = summary_needed or context.summary_needed
+            context = self._construct(system_prompt, request, state, final)
+            state.summary_needed = state.summary_needed or context.summary_needed
             messages = list(context.messages)
             if final:
-                messages.append(Message(role=Role.SYSTEM, content=ROUNDS_EXHAUSTED_NOTE))
+                messages.append(ROUNDS_EXHAUSTED_MESSAGE)
 
             try:
                 completion = await self._complete(request, messages, context, final)
@@ -327,78 +405,58 @@ class AgentLoop:
                     request.request_message_id,
                     refusal.operator_detail or refusal.reason,
                 )
-                return self._ended(
-                    "incomplete", refusal.reason, text, tool_rounds,
-                    calls_made, usage, evidence, summary_needed,
-                )
+                return await self._ended(TurnStatus.INCOMPLETE, refusal.reason, state)
             except ModelRefusal as refusal:
-                usage.add(refusal.usage)
-                evidence.model_refused = True
-                return self._ended(
-                    "complete", "model_refusal", refusal.refusal, tool_rounds,
-                    calls_made, usage, evidence, summary_needed,
-                )
+                state.add_usage(refusal.usage)
+                state.model_refused = True
+                state.text = refusal.refusal
+                return await self._ended(TurnStatus.COMPLETE, "model_refusal", state)
             except AuthUnavailable:
                 # Never retried: a dead credential turns one failure into a run
                 # of identical ones.
-                return self._ended(
-                    "incomplete", "auth_unavailable", text, tool_rounds,
-                    calls_made, usage, evidence, summary_needed,
-                )
+                return await self._ended(TurnStatus.INCOMPLETE, "auth_unavailable", state)
             except GatewayTimeout:
                 # Already retried with backoff inside the client; a third
                 # attempt here would silently double the tabled ceiling.
-                return self._ended(
-                    "incomplete", "gateway_timeout", text, tool_rounds,
-                    calls_made, usage, evidence, summary_needed,
-                )
+                return await self._ended(TurnStatus.INCOMPLETE, "gateway_timeout", state)
             except MalformedArguments:
                 # Counted and logged at the boundary. Nothing is disabled here.
                 raise
             except LLMError:
-                return self._ended(
-                    "incomplete", "route_error", text, tool_rounds,
-                    calls_made, usage, evidence, summary_needed,
-                )
+                return await self._ended(TurnStatus.INCOMPLETE, "route_error", state)
 
-            usage.add(completion.usage)
+            state.add_usage(completion.usage)
             if completion.text:
-                text = completion.text
-            await self._save(text, tool_rounds, calls_made)
+                state.text = completion.text
+            await self._save(state)
 
             if final or not completion.tool_calls:
-                return self._ended(
-                    "complete", None, text, tool_rounds,
-                    calls_made, usage, evidence, summary_needed,
-                    rounds_exhausted=final,
+                return await self._ended(
+                    TurnStatus.COMPLETE, None, state, rounds_exhausted=final
                 )
 
             assert_distinct_ids(completion.tool_calls)
-            try:
-                calls_made.extend(
-                    await self._round(
-                        completion.tool_calls, request, tool_context, attempts, evidence
-                    )
-                )
-            except AuthUnavailable:
+            fatal = await self._round(
+                completion.tool_calls, request, tool_context, attempts, state
+            )
+            state.tool_rounds += 1
+            await self._save(state)
+
+            if isinstance(fatal, AuthUnavailable):
                 # A tool's own channel died — the news lane is the one that can.
-                # Same class, same behaviour: never retried, surfaced as
-                # re-auth needed.
-                return self._ended(
-                    "incomplete", "auth_unavailable", text, tool_rounds,
-                    calls_made, usage, evidence, summary_needed,
+                # Same class, same behaviour: never retried, surfaced as re-auth
+                # needed, and the round's healthy siblings are already recorded.
+                return await self._ended(
+                    TurnStatus.INCOMPLETE, "auth_unavailable", state
                 )
-            tool_rounds += 1
-            await self._save(text, tool_rounds, calls_made)
+            if fatal is not None:
+                raise fatal
 
             # Cancellation stops *after* the in-flight tool call completes.
             # Every tool is read-only, so there is nothing to roll back, and a
             # half-cancel path costs more than the call it would save.
             if cancelled():
-                return self._ended(
-                    "cancelled", "cancelled_by_user", text, tool_rounds,
-                    calls_made, usage, evidence, summary_needed,
-                )
+                return await self._ended(TurnStatus.CANCELLED, "cancelled_by_user", state)
 
         raise RuntimeError("the round loop ended without a terminal state")  # pragma: no cover
 
@@ -406,21 +464,22 @@ class AgentLoop:
         self,
         system_prompt: str,
         request: TurnRequest,
-        calls_made: Sequence[TranscriptToolCall],
+        state: _TurnState,
         final: bool,
     ) -> ConstructedContext:
         """Meet the constructed-context ceiling, note and all."""
         budget = self._budget
         if final:
-            note = Message(role=Role.SYSTEM, content=ROUNDS_EXHAUSTED_NOTE)
-            budget = replace(budget, max_tokens=budget.max_tokens - estimate_tokens(note))
+            budget = replace(
+                budget, max_tokens=budget.max_tokens - ROUNDS_EXHAUSTED_TOKENS
+            )
         transcript = Transcript(
             system_prompt=system_prompt,
             turns=(
                 *request.history,
                 TranscriptTurn(
                     user_text=request.user_text,
-                    tool_calls=tuple(calls_made),
+                    tool_calls=tuple(state.calls),
                 ),
             ),
             summary=request.summary,
@@ -449,7 +508,7 @@ class AgentLoop:
             lane=BudgetLane.TURN,
             workload=Workload.SESSION,
             input_tokens=context.estimated_tokens
-            + (estimate_tokens(messages[-1]) if final else 0),
+            + (ROUNDS_EXHAUSTED_TOKENS if final else 0),
             output_tokens=self._max_output_tokens,
         )
         return await self._client.complete(
@@ -470,19 +529,15 @@ class AgentLoop:
         request: TurnRequest,
         tool_context: ToolContext,
         attempts: ToolAttempts,
-        evidence: "_EvidenceCounters",
-    ) -> tuple[TranscriptToolCall, ...]:
-        """Dispatch one round concurrently; one failing tool does not kill it."""
-        # The two-attempt cap is spent before dispatch, not after failure: the
-        # calls in a round run concurrently, so a round that asked for the same
-        # broken tool three times would otherwise get three attempts out of a
-        # limit of two.
-        allowance = {call.name: attempts.remaining(call.name) for call in calls}
-        admitted: list[bool] = []
-        for call in calls:
-            admitted.append(allowance[call.name] > 0)
-            allowance[call.name] = max(0, allowance[call.name] - 1)
+        state: _TurnState,
+    ) -> BaseException | None:
+        """Dispatch one round concurrently; one failing tool does not kill it.
 
+        Every result is recorded before a fatal failure is handed back, so a
+        dead credential on the news channel does not throw away the three store
+        reads that succeeded beside it.
+        """
+        admitted = admit_round(calls, attempts)
         outcomes = await asyncio.gather(
             *(
                 self._dispatch(call, request, tool_context, allowed)
@@ -490,14 +545,19 @@ class AgentLoop:
             ),
             return_exceptions=True,
         )
-        results: list[TranscriptToolCall] = []
+        fatal: BaseException | None = None
         for call, outcome in pair_results(calls, outcomes):
             if isinstance(outcome, BaseException):
-                result = self._failure(call, outcome, attempts)
+                if isinstance(
+                    outcome, (MalformedArguments, AuthUnavailable, asyncio.CancelledError)
+                ):
+                    fatal = fatal or outcome
+                    continue
+                result = self._record_failure(call, outcome, attempts)
             else:
                 result = outcome
-            evidence.observe(result)
-            results.append(
+            state.observe(result)
+            state.calls.append(
                 TranscriptToolCall(
                     call_id=call.id,
                     name=call.name,
@@ -505,7 +565,7 @@ class AgentLoop:
                     result=result,
                 )
             )
-        return tuple(results)
+        return fatal
 
     async def _dispatch(
         self,
@@ -527,116 +587,61 @@ class AgentLoop:
         return call.id, result
 
     @staticmethod
-    def _failure(
+    def _record_failure(
         call: ToolCall,
         error: BaseException,
         attempts: ToolAttempts,
     ) -> Mapping[str, Any]:
-        """Turn one tool's failure into something the model can act on."""
-        if isinstance(error, (MalformedArguments, AuthUnavailable, asyncio.CancelledError)):
-            raise error
+        """Turn one tool's failure into something the model can act on.
+
+        A shape rather than prose, so the model can tell a tool that failed
+        from a tool that answered "nothing found" — different facts about the
+        world, leading to different next moves.
+        """
         attempts.record_failure(call.name)
         logger.warning("Tool %s failed: %s", call.name, error)
         return tool_error_result(call.id, call.name, str(error))
 
-    async def _save(
-        self,
-        text: str | None,
-        rounds_used: int,
-        calls_made: Sequence[TranscriptToolCall],
-    ) -> None:
+    async def _save(self, state: _TurnState) -> None:
         if self._checkpoint is None:
             return
-        saved = self._checkpoint(
-            TurnDraft(text=text, rounds_used=rounds_used, tool_calls=tuple(calls_made))
-        )
+        saved = self._checkpoint(state.draft())
         if inspect.isawaitable(saved):
             await saved
 
-    @staticmethod
-    def _ended(
-        status: str,
+    async def _ended(
+        self,
+        status: TurnStatus,
         terminal_reason: str | None,
-        text: str | None,
-        rounds_used: int,
-        calls_made: Sequence[TranscriptToolCall],
-        usage: "_UsageTotals",
-        evidence: "_EvidenceCounters",
-        summary_needed: bool,
+        state: _TurnState,
         rounds_exhausted: bool = False,
     ) -> TurnOutcome:
+        """Checkpoint what survived, then describe how the Turn ended.
+
+        The checkpoint happens on every terminal path, including a Turn
+        cancelled before its first model call: a Turn that leaves nothing
+        behind is a Turn the user cannot be told anything about.
+        """
+        await self._save(state)
         return TurnOutcome(
             status=status,
             terminal_reason=terminal_reason,
-            text=text,
-            answer_kind=classify_answer_kind(evidence.snapshot()),
-            rounds_used=rounds_used,
+            text=state.text,
+            answer_kind=classify_answer_kind(state.evidence()),
+            rounds_used=state.tool_rounds,
             rounds_exhausted=rounds_exhausted,
-            tool_calls=tuple(calls_made),
-            usage=usage.total(),
-            summary_needed=summary_needed,
-        )
-
-
-@dataclass
-class _UsageTotals:
-    """Five counters summed across a Turn's calls.
-
-    ``None`` usage is not zero usage: a provider that supplied no evidence has
-    not told us the call was free, so it is skipped rather than added in.
-    """
-
-    input_tokens: int = 0
-    cached_input_tokens: int = 0
-    cache_write_tokens: int = 0
-    output_tokens: int = 0
-    reasoning_tokens: int = 0
-
-    def add(self, usage: Usage | None) -> None:
-        if usage is None:
-            return
-        self.input_tokens += usage.input_tokens
-        self.cached_input_tokens += usage.cached_input_tokens
-        self.cache_write_tokens += usage.cache_write_tokens
-        self.output_tokens += usage.output_tokens
-        self.reasoning_tokens += usage.reasoning_tokens
-
-    def total(self) -> Usage:
-        return Usage(
-            input_tokens=self.input_tokens,
-            cached_input_tokens=self.cached_input_tokens,
-            cache_write_tokens=self.cache_write_tokens,
-            output_tokens=self.output_tokens,
-            reasoning_tokens=self.reasoning_tokens,
-        )
-
-
-@dataclass
-class _EvidenceCounters:
-    """What the harness saw, in the Contract's classification terms."""
-
-    model_refused: bool = False
-    universe_refusals: int = 0
-    grounded_tool_calls: int = 0
-
-    def observe(self, result: Mapping[str, Any]) -> None:
-        if result.get("reason") == "not_in_universe":
-            self.universe_refusals += 1
-        elif "error" not in result:
-            self.grounded_tool_calls += 1
-
-    def snapshot(self) -> AnswerEvidence:
-        return AnswerEvidence(
-            model_refused=self.model_refused,
-            universe_refusals=self.universe_refusals,
-            grounded_tool_calls=self.grounded_tool_calls,
+            tool_calls=tuple(state.calls),
+            usage=state.usage,
+            summary_needed=state.summary_needed,
         )
 
 
 __all__ = [
     "DEFAULT_MAX_OUTPUT_TOKENS",
     "MAX_TOOL_ROUNDS",
+    "ROUNDS_EXHAUSTED_MESSAGE",
     "ROUNDS_EXHAUSTED_NOTE",
+    "ROUNDS_EXHAUSTED_TOKENS",
     "SESSION_CONCURRENCY",
     "AgentLoop",
     "SessionCapacityExceeded",
@@ -645,6 +650,8 @@ __all__ = [
     "TurnDraft",
     "TurnOutcome",
     "TurnRequest",
+    "TurnStatus",
+    "admit_round",
     "assert_distinct_ids",
     "pair_results",
 ]

@@ -102,7 +102,6 @@ class AnswerEvidence:
     """
 
     model_refused: bool = False
-    out_of_scope: bool = False
     universe_refusals: int = 0
     grounded_tool_calls: int = 0
 
@@ -195,7 +194,7 @@ def classify_answer_kind(evidence: AnswerEvidence) -> AnswerKind:
     model call, and no branch that a model's own claim about its answer could
     enter.
     """
-    if evidence.model_refused or evidence.out_of_scope:
+    if evidence.model_refused:
         return AnswerKind.REFUSAL
     if evidence.grounded_tool_calls > 0:
         return AnswerKind.ANALYSIS

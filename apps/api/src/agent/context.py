@@ -45,7 +45,7 @@ CHARS_PER_TOKEN = 3
 # the ids on a tool block.
 MESSAGE_OVERHEAD_TOKENS = 4
 
-SUMMARY_LABEL = "Summary of the earlier conversation in this Thread:"
+SUMMARY_LABEL = "Summary of the earlier Turns in this Thread:"
 
 
 @dataclass(frozen=True)
@@ -120,7 +120,13 @@ class ConstructedContext:
     estimated_tokens: int
     summary_used: bool = False
     summary_needed: bool = False
-    # How many of the original Transcript's Turns a summary should now cover.
+    # The half-open span of the original Transcript's Turns a summary should
+    # now cover. ``from`` is where *new* material starts, which is exactly what
+    # an existing summary already covers: the caller summarises only
+    # ``turns[from:through]`` and carries the existing summary text forward
+    # beside it. Reporting the whole span would make the caller re-summarise a
+    # summary, which is the compounding drift rung 3 exists to avoid.
+    summarise_from_turn: int = 0
     summarise_through_turn: int = 0
     turns_dropped: int = 0
     results_collapsed: int = 0
@@ -291,6 +297,7 @@ def build_messages(
                 summary_needed=(
                     dropped > 0 or len(live) > budget.summary_threshold_turns
                 ),
+                summarise_from_turn=covered,
                 summarise_through_turn=covered + dropped,
                 turns_dropped=dropped,
                 results_collapsed=len(collapsed),

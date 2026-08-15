@@ -163,7 +163,6 @@ def test_answer_kind_is_classified_by_the_harness_without_a_model_call():
     assert (
         classify_answer_kind(AnswerEvidence(universe_refusals=1)) is AnswerKind.REFUSAL
     )
-    assert classify_answer_kind(AnswerEvidence(out_of_scope=True)) is AnswerKind.REFUSAL
     # A refusal outranks the evidence that was gathered before it.
     assert (
         classify_answer_kind(
