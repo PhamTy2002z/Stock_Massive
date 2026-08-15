@@ -100,6 +100,7 @@ class Collector:
         fundamental: FundamentalDataProvider | None = None,
         batch_size: int = DEFAULT_BATCH_SIZE,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        capabilities: Sequence[Capability] | None = None,
     ) -> None:
         self._store = store
         self._universe = universe
@@ -109,6 +110,15 @@ class Collector:
         self._fundamental = fundamental
         self._batch_size = batch_size
         self._now = now
+        # Which of the wired adapters this cycle is allowed to read. ``None`` is
+        # every one of them and is what a full cycle passes.
+        #
+        # It exists because the evening's conditional re-runs are not a second
+        # collector: they re-read only the two capabilities whose Main Source
+        # appends a session late, and re-reading the quarterly statements three
+        # more times would spend a different provider's allowance to establish a
+        # Trading Day that has nothing to do with it (``docs/adr/0014``).
+        self._capabilities = None if capabilities is None else frozenset(capabilities)
 
     @property
     def capabilities(self) -> tuple[Capability, ...]:
@@ -228,15 +238,27 @@ class Collector:
     def _readers(
         self,
     ) -> Iterator[tuple[Capability, Callable[[Sequence[str]], Sequence[SymbolSnapshot]]]]:
-        """Yield one read per capability that has an adapter wired to it."""
-        if self._market is not None:
-            yield Capability.MARKET, self._market.fetch_market
-        if self._valuation is not None:
-            yield Capability.VALUATION, self._fetch_valuation
-        if self._reference is not None:
-            yield Capability.REFERENCE, self._reference.fetch_reference
-        if self._fundamental is not None:
-            yield Capability.FUNDAMENTAL, self._fundamental.fetch_fundamentals
+        """Yield one read per wired capability this cycle is asked to cover."""
+        wired = (
+            (Capability.MARKET, self._market, lambda: self._market.fetch_market),
+            (Capability.VALUATION, self._valuation, lambda: self._fetch_valuation),
+            (
+                Capability.REFERENCE,
+                self._reference,
+                lambda: self._reference.fetch_reference,
+            ),
+            (
+                Capability.FUNDAMENTAL,
+                self._fundamental,
+                lambda: self._fundamental.fetch_fundamentals,
+            ),
+        )
+        for capability, adapter, reader in wired:
+            if adapter is None:
+                continue
+            if self._capabilities is not None and capability not in self._capabilities:
+                continue
+            yield capability, reader()
 
     def _fetch_valuation(self, batch: Sequence[str]) -> Sequence[SymbolSnapshot]:
         """Ask for the sessions that have closed since a cycle last succeeded.
@@ -263,6 +285,7 @@ def build_collector(
     store: SnapshotStore,
     settings: Settings | None = None,
     universe: Universe | None = None,
+    capabilities: Sequence[Capability] | None = None,
 ) -> Collector:
     """Wire the real adapters for the configured account.
 
@@ -324,12 +347,14 @@ def build_collector(
         valuation=valuation,
         reference=VnstockReferenceProvider(vnstock_source=settings.vnstock_source),
         fundamental=VnstockFundamentalProvider(vnstock_source=settings.vnstock_source),
+        capabilities=capabilities,
     )
 
 
 def run_cycle(
     settings: Settings | None = None,
     universe: Universe | None = None,
+    capabilities: Sequence[Capability] | None = None,
 ) -> CollectionSummary:
     """Run one cycle against the configured account and commit what it wrote.
 
@@ -354,7 +379,10 @@ def run_cycle(
     with quota_arbiter().collector_lease(), quota_lane(QuotaLane.COLLECTOR):
         with get_sync_db() as session:
             return build_collector(
-                SnapshotStore(session), settings=settings, universe=universe
+                SnapshotStore(session),
+                settings=settings,
+                universe=universe,
+                capabilities=capabilities,
             ).run()
 
 

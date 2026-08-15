@@ -15,6 +15,7 @@ from src.core.config import Settings
 from src.core.job_status_store import job_store
 from src.stocks.collector import CollectionSummary, SymbolFailure
 from src.stocks.collector_schedule import (
+    CATCH_UP_CAPABILITIES,
     COLLECTOR_JOB_ID,
     WARMUP_JOB_ID,
     catch_up_market_data,
@@ -350,15 +351,23 @@ class TestMarketCatchUp:
         assert outcome.status == "skipped"
 
     @pytest.mark.asyncio
-    async def test_the_catch_up_is_scheduled_late_in_the_evening(self):
+    async def test_the_three_conditional_re_runs_are_scheduled_in_ict(self):
+        """One at each configured time, and each of them the same conditional call."""
         from src.core.scheduler import setup_scheduler
 
         scheduler = AsyncMock()
         with patch("src.core.scheduler.settings", scheduler_settings()):
             await setup_scheduler(scheduler)
 
-        trigger = one_schedule(scheduler, "market-catchup")
-        assert (trigger.hour, trigger.minute) == (23, 0)
+        for schedule_id, expected in (
+            ("market-catchup-1830", (18, 30)),
+            ("market-catchup-2130", (21, 30)),
+            ("market-catchup-2300", (23, 0)),
+        ):
+            trigger = one_schedule(scheduler, schedule_id)
+            assert trigger is not None, schedule_id
+            assert (trigger.hour, trigger.minute) == expected
+            assert str(trigger.timezone) == "Asia/Ho_Chi_Minh"
 
     @pytest.mark.asyncio
     async def test_the_catch_up_can_be_turned_off_by_configuration(self):
@@ -371,7 +380,25 @@ class TestMarketCatchUp:
         ):
             await setup_scheduler(scheduler)
 
-        assert one_schedule(scheduler, "market-catchup") is None
+        assert one_schedule(scheduler, "market-catchup-1830") is None
+        assert one_schedule(scheduler, "market-catchup-2300") is None
+
+    def test_the_times_are_parsed_where_a_wrong_one_can_still_be_seen(self):
+        """A mistyped time explodes at ``Settings()``, not at scheduling time.
+
+        Checked while an operator is still watching the console rather than
+        inside ``setup_scheduler``, which runs after the process is up and
+        nobody is looking. A time outside a day is refused too: ``25:99`` is
+        perfectly valid arithmetic and a schedule that never fires.
+        """
+        assert scheduler_settings().market_catchup_schedule == (
+            (18, 30),
+            (21, 30),
+            (23, 0),
+        )
+        for wrong in ("half past six", "1830", "25:99", "18:60"):
+            with pytest.raises(ValueError):
+                scheduler_settings(market_catchup_times=wrong)
 
 
 class TestWarmupRuns:
@@ -412,3 +439,151 @@ class TestWarmupRuns:
 
         assert outcome.status == "failed"
         assert "ConnectionError" in outcome.error
+
+
+class TestTheEveningCadence:
+    """Three conditional re-runs, and what makes each of them conditional.
+
+    The point of the evening's re-runs is *establishing* a Trading Day, not
+    refreshing one already established. So every fire asks the store, and the
+    one that finds a gap is the one that closes it (spec 0003 §11).
+    """
+
+    def test_only_the_two_fiinquant_capabilities_are_re_read(self):
+        """The reference and fundamental capabilities have no part in this."""
+        assert CATCH_UP_CAPABILITIES == (Capability.MARKET, Capability.VALUATION)
+
+    @pytest.mark.asyncio
+    async def test_the_re_runs_stop_as_soon_as_a_new_trading_day_exists(self):
+        cycle = RecordingCycle()
+        stored = [date(2026, 8, 6)]
+
+        # 18:30 finds the gap and closes it.
+        first = await catch_up_market_data(
+            cycle=cycle, today=TRADING_DAY, latest=lambda: stored[0], capture=_no_cohort
+        )
+        stored[0] = TRADING_DAY
+
+        # 21:30 and 23:00 find a day already established and do nothing.
+        second = await catch_up_market_data(
+            cycle=cycle, today=TRADING_DAY, latest=lambda: stored[0], capture=_no_cohort
+        )
+        third = await catch_up_market_data(
+            cycle=cycle, today=TRADING_DAY, latest=lambda: stored[0], capture=_no_cohort
+        )
+
+        assert cycle.runs == 1
+        assert (first.status, second.status, third.status) == (
+            "completed",
+            "skipped",
+            "skipped",
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_restart_mid_evening_resumes_from_the_store(self):
+        """Every input is Postgres or the clock; none of it is the job store.
+
+        The in-memory job status store is empty after a restart, so a cadence
+        that read it would treat a missed 18:30 as an evening that never needed
+        one and wait until 21:30 to find out otherwise.
+        """
+        from src.core import scheduler
+
+        job_store.cleanup_old(max_age_hours=0)
+        with patch.object(scheduler, "settings", scheduler_settings()), patch.object(
+            scheduler, "is_trading_day", lambda day: True
+        ), patch.object(scheduler, "_time_passed_today", lambda hour, minute: True), patch(
+            "src.stocks.collector_schedule.market_has_advanced_to",
+            lambda day, latest=None: False,
+        ):
+            assert scheduler._should_catch_up_market_data() is True
+
+        with patch.object(scheduler, "settings", scheduler_settings()), patch.object(
+            scheduler, "is_trading_day", lambda day: True
+        ), patch.object(scheduler, "_time_passed_today", lambda hour, minute: True), patch(
+            "src.stocks.collector_schedule.market_has_advanced_to",
+            lambda day, latest=None: True,
+        ):
+            assert scheduler._should_catch_up_market_data() is False
+
+
+class TestCapturingTheCohort:
+    """Establishing a Trading Day is what queues the evening's work."""
+
+    @pytest.mark.asyncio
+    async def test_a_completed_cycle_captures_the_cohort(self):
+        captured: list[int] = []
+
+        outcome = await collect_universe_snapshots(
+            cycle=RecordingCycle(),
+            today=TRADING_DAY,
+            capture=lambda: captured.append(1) or {"created": ["FPT"]},
+        )
+
+        assert len(captured) == 1
+        assert outcome.cohort == {"created": ["FPT"]}
+
+    @pytest.mark.asyncio
+    async def test_a_skipped_cycle_captures_nothing(self):
+        """Nothing was written, so there is no day to have established."""
+        captured: list[int] = []
+
+        outcome = await collect_universe_snapshots(
+            cycle=RecordingCycle(),
+            today=CLOSED_DAY,
+            capture=lambda: captured.append(1),
+        )
+
+        assert captured == []
+        assert outcome.cohort is None
+
+    @pytest.mark.asyncio
+    async def test_a_failed_cycle_captures_nothing(self):
+        captured: list[int] = []
+
+        outcome = await collect_universe_snapshots(
+            cycle=RecordingCycle(error=RuntimeError("FiinQuant said no")),
+            today=TRADING_DAY,
+            capture=lambda: captured.append(1),
+        )
+
+        assert outcome.status == "failed"
+        assert captured == []
+
+    @pytest.mark.asyncio
+    async def test_the_catch_up_captures_it_too(self):
+        """Whichever run establishes the day is the one that queues the evening."""
+        captured: list[int] = []
+
+        await catch_up_market_data(
+            cycle=RecordingCycle(),
+            today=TRADING_DAY,
+            latest=lambda: date(2026, 8, 6),
+            capture=lambda: captured.append(1),
+        )
+
+        assert len(captured) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_capture_that_fails_does_not_take_the_collection_with_it(self):
+        """The Snapshots are already committed; the next pass captures again."""
+        from src.stocks import collector_schedule
+
+        def explode(*args, **kwargs):
+            raise RuntimeError("the database went away")
+
+        # The real capture is used, and the session it opens is what fails —
+        # patching the callable the schedule was handed would prove nothing.
+        with patch("src.core.database.get_sync_db", explode):
+            outcome = await collect_universe_snapshots(
+                cycle=RecordingCycle(),
+                today=TRADING_DAY,
+                capture=collector_schedule.capture_cohort_from_the_store,
+            )
+
+        assert outcome.status == "completed"
+        assert outcome.cohort is None
+
+
+def _no_cohort() -> dict | None:
+    return None
