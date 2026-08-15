@@ -184,6 +184,20 @@ def cohort_report(
 
     ``blocked`` stays what ``cohort_state`` means by it — no Trading Day was
     established at all — and is not reused here for an evening that ran late.
+
+    **``partial`` now covers two evenings an operator acts on differently**, and
+    the counts are what separate them, not the word:
+
+    - ``pending + producing == 0`` — the queue is drained and some symbols
+      failed. Go and read their error codes.
+    - ``pending + producing > 0`` — it is past 07:00 and the queue is still
+      grinding. Go and look at the dispatcher.
+
+    The four states are fixed by spec 0003 §11 and a late evening has to map onto
+    one of them, so the state word is deliberately coarse — the same choice
+    ``cohort_state`` makes when an evening nobody watches a symbol for reports
+    ``complete`` with ``total: 0``. **Anything rendering ``partial`` shows the
+    counts beside it**; the word alone cannot be acted on.
     """
     status = cohort_state(session, trading_day)
     if status.state is not CohortState.RUNNING or status.trading_day is None:

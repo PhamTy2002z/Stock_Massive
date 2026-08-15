@@ -769,6 +769,30 @@ class TestTheDeadline:
             ).scalars()
         ] == [TRADING_DAY]
 
+    def test_the_counts_separate_the_two_evenings_partial_covers(self, session):
+        """One word, two situations — an operator reads the counts, not the word.
+
+        A drained queue that lost a symbol and a queue still grinding at 09:00
+        both report ``partial``, because spec §11 fixes the four states and a late
+        evening has to be one of them. ``pending + producing`` is the discriminator.
+        """
+        queue(session, A)
+        queue(session, B, status=RunStatus.FAILED, attempts=MAX_ATTEMPTS_PER_SESSION)
+        past = availability_deadline(TRADING_DAY) + ONE_MINUTE
+
+        still_grinding = cohort_report(session, TRADING_DAY, now=past)
+
+        assert still_grinding.state is CohortState.PARTIAL
+        assert still_grinding.pending + still_grinding.producing == 1
+
+        # Now drain what is left: same state word, and the counts say why.
+        drain_queue(session, a_producer(), trading_day=TRADING_DAY, clock=lambda: past)
+        drained = cohort_report(session, TRADING_DAY, now=past)
+
+        assert drained.state is CohortState.PARTIAL
+        assert drained.pending + drained.producing == 0
+        assert drained.failed == 1
+
     def test_no_trading_day_at_all_is_the_only_blocked(self, session):
         """`blocked` means there was nothing to run against, not a late evening."""
         assert (
