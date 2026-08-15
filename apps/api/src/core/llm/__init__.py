@@ -2,8 +2,8 @@
 
 ``docs/adr/0008`` keeps the agent loop hand-rolled over this package rather than
 inside a framework, for a reason this package is the whole of: the failures on
-this channel class are silent. A measured gateway keyed streamed tool calls on
-a local counter instead of the upstream index and concatenated two calls'
+this channel class are silent. A measured gateway keyed streamed tool calls on a
+local counter instead of the upstream index and concatenated two calls'
 arguments into invalid JSON under the wrong id — while returning 200. Nothing
 downstream can notice that; it only makes the answers wrong.
 
@@ -26,16 +26,61 @@ from .config import (
     Workload,
     llm_config_from_settings,
 )
+from .errors import (
+    AuthUnavailable,
+    GatewayTimeout,
+    LLMError,
+    LLMMetrics,
+    MalformedArguments,
+    ModelRefusal,
+    ToolAttempts,
+    ToolError,
+    llm_metrics,
+    tool_error_result,
+)
+from .protocol import (
+    Completion,
+    CompletionRequest,
+    JsonSchemaFormat,
+    LLMClient,
+    Message,
+    Role,
+    ToolCall,
+    ToolSchema,
+    Usage,
+)
+from .transport import OpenAICompatibleClient, build_client
 
 __all__ = [
+    "AuthUnavailable",
     "BudgetValidation",
     "BudgetValidationError",
+    "Completion",
+    "CompletionRequest",
+    "GatewayTimeout",
+    "JsonSchemaFormat",
+    "LLMClient",
     "LLMConfig",
+    "LLMError",
+    "LLMMetrics",
     "LLMRoute",
+    "MalformedArguments",
+    "Message",
+    "ModelRefusal",
+    "OpenAICompatibleClient",
     "PricingTable",
+    "Role",
     "TokenPrices",
+    "ToolAttempts",
+    "ToolCall",
+    "ToolError",
+    "ToolSchema",
+    "Usage",
     "Workload",
+    "build_client",
     "enforce_budget_validation",
     "llm_config_from_settings",
+    "llm_metrics",
+    "tool_error_result",
     "validate_budget",
 ]
