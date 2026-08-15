@@ -515,6 +515,43 @@ class TestNothingIsComputedFromTheWholeSample:
         for day in shared:
             assert short[day] == long[day]
 
+    def test_across_an_action_the_facts_hold_and_only_the_rebasing_moves(self):
+        """The one number that is window-relative, and why that is not the bias.
+
+        Adjustment expresses a window's prices in the share terms of that
+        window's last session, so a longer window that reaches past an ex-date
+        rebases a bar the shorter one did not. That is a rebasing rather than a
+        statistic — extending it to actions *after* the window would make a
+        historical window depend on its own future, which is the bias by another
+        road — and every per-session verdict underneath it is unchanged.
+        """
+        with open_session() as session:
+            days = store_acb_window(session)
+            save(session, ACB_CASH_2025, ACB_STOCK_2025)
+            CorporateActionStore(session).confirm_pending("ACB")
+
+            before_action, _ = prepare_bars(
+                session, "ACB", 3, end=date(2025, 5, 22)
+            )
+            across_action, _ = prepare_bars(session, "ACB", 8, end=days[-1])
+
+        assert before_action is not None and across_action is not None
+        shared = date(2025, 5, 22)
+        short = {bar.session_date: bar for bar in before_action.bars}[shared]
+        long = {bar.session_date: bar for bar in across_action.bars}[shared]
+
+        # The facts about the session are the same in both.
+        assert short.limit_lock == long.limit_lock
+        assert short.volume == long.volume
+        assert short.close is not None and long.close is not None
+
+        # The rebasing is not, and the raw price it was taken from is.
+        assert short.adjustment_factor == Decimal(1)
+        assert long.adjustment_factor == pytest.approx(ACB_BLEND_FACTOR, abs=1e-7)
+        raw_short = Decimal(str(short.close)) / short.adjustment_factor
+        raw_long = Decimal(str(long.close)) / long.adjustment_factor
+        assert raw_short == pytest.approx(raw_long, abs=1e-6)
+
 
 class TestHowThinTheSymbolIs:
     def test_the_window_is_ranked_against_its_peers_by_traded_money(self):

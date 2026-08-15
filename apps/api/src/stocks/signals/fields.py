@@ -47,7 +47,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import date
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
@@ -69,10 +68,14 @@ CATALOG_NULL_FPR_CEILING = 0.01
 DEGRADED_LIMIT_LOCK_SHARE = 0.20
 
 # Keys a `descriptive` field may not return, whatever it calls itself. Matched on
-# the whole key rather than as a substring: `direction` is refused and
-# `direction_of_travel` with it, while `expected_return` is refused and
-# `return_window_days` is not. The list is the ADR's three plus the wordings a
-# field would reach for next once those three are taken.
+# the **whole key**, so `expected_return` is refused and `return_window_days` is
+# not — a substring rule would refuse half the honest metadata in this package.
+# The cost of that choice is real and is accepted rather than hidden: a field
+# determined to point somewhere can spell it `direction_of_travel` and pass. The
+# list is the ADR's three plus the wordings a field would reach for next once
+# those three are taken, and it is a tripwire against drift rather than a proof
+# of its absence — what actually holds the line is `claim` being a type and the
+# nightly artifact carrying the fields it rested on.
 DIRECTION_BEARING_KEYS = frozenset(
     {
         "action",
@@ -252,6 +255,21 @@ class NullCalibration:
 
 
 @dataclass(frozen=True)
+class FieldReading:
+    """What one computation produced, before it is dressed as a ``FieldValue``.
+
+    The seam between a pure function over bars and a served answer: a reading
+    knows the number and what came with it, and knows nothing about the window it
+    was drawn from or the field that declared it. That is what lets a
+    computation be tested, and run against a null, without a store behind it.
+    """
+
+    value: float | None
+    extras: Mapping[str, Any] = field(default_factory=dict)
+    refusal: SignalIssue | None = None
+
+
+@dataclass(frozen=True)
 class SignalField:
     """One model-visible number, and everything that has to be true of it.
 
@@ -261,10 +279,15 @@ class SignalField:
     fails at import rather than shipping — which is the difference between a bar
     and a checklist.
 
-    ``statistic`` is the mechanism rather than a tenth declaration: the pure
-    function from a window of bars to the number the threshold is compared
-    against. A ``signal`` field must have one, because the null harness runs the
-    real field over synthetic windows and there is no other way to run it.
+    ``reading`` and ``statistic`` are the mechanism rather than two more
+    declarations. ``reading`` is the pure function from a window of bars to this
+    field's answer, and it lives on the field so that the pairing is recorded
+    where the field is: passed alongside a field instead, a caller could serve
+    the Sharpe declaration with the Sortino computation and get a
+    perfectly-valid-looking answer. ``statistic`` is the narrower one the null
+    harness runs — just the number the threshold is compared against — and a
+    ``signal`` field must have it, because the harness runs the real field over
+    synthetic windows and there is no other way to run it.
     """
 
     name: str
@@ -282,6 +305,7 @@ class SignalField:
     threshold: Threshold | None
     null_fpr: NullCalibration | None
     output_keys: tuple[str, ...] = ()
+    reading: Callable[["BarFrame"], FieldReading] | None = None
     statistic: Callable[["BarFrame"], float | None] | None = None
 
     def __post_init__(self) -> None:
@@ -298,6 +322,12 @@ class SignalField:
                     f"{', '.join(pointing)}: a claim about direction unlocks only "
                     "behind a measured forward-return harness"
                 )
+
+        if self.source is FieldSource.COMPUTED and self.reading is None:
+            raise ValueError(
+                f"{self.name} is computed, so the computation that answers for "
+                "it belongs on the declaration rather than beside it"
+            )
 
         if self.kind is FieldKind.SIGNAL:
             if self.threshold is None or self.null_fpr is None:
@@ -365,15 +395,19 @@ class FieldValue:
                 f"{self.field.name} returned no value and no reason for it"
             )
 
+        # Presence is not the test, and a key holding ``None`` is the way an
+        # estimator ships no uncertainty while looking as though it does. Either
+        # a field can say how much its number would move, or it refuses.
         if self.field.kind is FieldKind.ESTIMATOR and not (
-            "standard_error" in self.extras or "confidence_interval" in self.extras
+            self.extras.get("standard_error") is not None
+            or self.extras.get("confidence_interval") is not None
         ):
             raise ValueError(
                 f"{self.field.name} is an estimator, so it ships a standard error "
-                "or a confidence interval"
+                "or a confidence interval, and neither may be null"
             )
         if self.field.kind is FieldKind.PERCENTILE and not (
-            "n" in self.extras and "as_of" in self.extras
+            self.extras.get("n") is not None and self.extras.get("as_of") is not None
         ):
             raise ValueError(
                 f"{self.field.name} is a percentile, so it ships the n it was "
@@ -391,11 +425,6 @@ class FieldValue:
         if self.value is None or self.field.threshold is None:
             return False
         return self.value >= self.field.threshold.value
-
-
-def as_of_stamp(value: date) -> str:
-    """A cutoff date in the one form a percentile's ``as_of`` is written in."""
-    return value.isoformat()
 
 
 def schema_description(field: SignalField) -> str:

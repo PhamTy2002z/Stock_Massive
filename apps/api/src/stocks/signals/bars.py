@@ -79,6 +79,7 @@ from ..providers.contracts import Exchange, MarketSnapshot, PriceBasis
 from ..trading_day import latest_trading_day, trading_days_before
 from ..universe import build_universe
 from .corporate_actions import CorporateActionStore, adjustment_factor
+from .fields import DEGRADED_LIMIT_LOCK_SHARE
 from .issues import SignalIssue
 from .price_band import (
     EXCHANGE_MIGRATIONS,
@@ -151,11 +152,6 @@ class BarFrame:
     @property
     def sessions(self) -> tuple[date, ...]:
         return tuple(bar.session_date for bar in self.bars)
-
-    @property
-    def closes(self) -> tuple[float, ...]:
-        """The closing prices, with sessions that have none left out."""
-        return tuple(bar.close for bar in self.bars if bar.close is not None)
 
     def without_limit_locks(self) -> "BarFrame":
         """The same window with its limit-locked sessions removed.
@@ -249,6 +245,25 @@ class WindowHealth:
         exercise ratio carries and a dividend record does not.
         """
         return SignalIssue.VOLUME_BASIS_BREAK not in self.degradations
+
+    @property
+    def limit_lock_degradation(self) -> SignalIssue | None:
+        """Whether the window was too locked for a range reading to be ordinary.
+
+        A property of the window rather than of any field that reads one, which
+        is why it lives here: every range estimator in this package asks the same
+        question, and asked separately in each of them it would be answered
+        differently in each of them.
+
+        Past a fifth of the window the estimate is measuring the band rather than
+        the market, and ADR-0010 makes that a degradation with a named reason
+        rather than a footnote.
+        """
+        if self.sessions_used == 0:
+            return None
+        if self.limit_lock_days / self.sessions_used > DEGRADED_LIMIT_LOCK_SHARE:
+            return SignalIssue.LIMIT_LOCKED_WINDOW
+        return None
 
 
 def prepare_bars(

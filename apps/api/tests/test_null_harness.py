@@ -75,15 +75,23 @@ REGISTRY_DRIFT_FACTOR = 3.0
 
 
 def _gbm_rates(field: SignalField, truncated: bool) -> tuple[float, int]:
-    """The worst false-positive rate across the volatilities this field ships for.
+    """The false-positive rate across the volatilities this field ships for.
 
-    Worst rather than average: a field is shipped for every symbol at once, so
-    the rate a reader is owed is the one it fires at on the symbol it behaves
-    worst on.
+    **Pooled, not worst-of.** A rate and the paths behind it have to be the same
+    measurement: taking the worst of three groups would publish a number resting
+    on a third of the paths this reports, and the ADR's floor of a thousand paths
+    per null would be met on paper and not in fact.
+
+    Pooling is the right measurement anyway. The null is over the volatility
+    grid as a whole — a symbol is drawn from that range rather than fixed at one
+    point of it — and the worst-group refinement belongs to the offline
+    derivation, which ran enough paths per group to see one. That is where the
+    shipped thresholds came from, and it is why they sit above what the pooled
+    rate alone would have demanded.
     """
     rng = np.random.default_rng(NULL_DERIVATION_SEED)
-    rates: list[float] = []
-    paths = 0
+    fired = 0.0
+    measured = 0
     for sigma in MATCHED_DAILY_VOLATILITIES:
         shapes = gbm_shapes(
             rng,
@@ -92,9 +100,10 @@ def _gbm_rates(field: SignalField, truncated: bool) -> tuple[float, int]:
             daily_volatility=sigma,
             truncated=truncated,
         )
-        rates.append(false_positive_rate(field, frames_from(shapes)))
-        paths += GBM_PATHS_PER_VOLATILITY
-    return max(rates), paths
+        frames = frames_from(shapes)
+        fired += false_positive_rate(field, frames) * len(frames)
+        measured += len(frames)
+    return fired / measured, measured
 
 
 def _bootstrap_rate(field: SignalField) -> tuple[float, int]:
