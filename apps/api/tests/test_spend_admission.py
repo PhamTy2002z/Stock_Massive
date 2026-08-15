@@ -262,6 +262,28 @@ class TestCommittedUsageLedger:
             assert row.reasoning_tokens == 10
             assert row.actual_micro_usd == 450
 
+    def test_reservation_prices_input_at_the_cache_write_worst_case(self):
+        config = replace(
+            llm_config(),
+            pricing=replace(
+                llm_config().pricing,
+                session=TokenPrices(
+                    input=2,
+                    cached_input=0.2,
+                    cache_write=4,
+                    output=5,
+                ),
+            ),
+        )
+        admission, _ = admission_with(config)
+
+        reservation = admission.reserve(
+            replace(spend(), input_tokens=1_000, output_tokens=0),
+            "session-model",
+        )
+
+        assert reservation.reserved_micro_usd == 4_000
+
 
 class TestAnalysisCeilings:
     def test_generation_input_ceiling_refuses_without_writing_a_reservation(
@@ -506,18 +528,14 @@ class TestBudgetLanes:
                 eval_usd=5,
             ),
         )
-        moments = iter(
-            [
-                datetime(2026, 8, 31, 16, 59, tzinfo=timezone.utc),
-                datetime(2026, 8, 31, 17, 1, tzinfo=timezone.utc),
-            ]
-        )
-        admission, sessions = admission_with(config, now=lambda: next(moments))
+        moments = [datetime(2026, 8, 31, 16, 59, tzinfo=timezone.utc)]
+        admission, sessions = admission_with(config, now=lambda: moments[0])
 
         before = admission.reserve(
             analysis_spend(owner_id="aug", input_tokens=1_000, output_tokens=200),
             "batch-model",
         )
+        moments[0] = datetime(2026, 8, 31, 17, 1, tzinfo=timezone.utc)
         after = admission.reserve(
             analysis_spend(owner_id="sep", input_tokens=1_000, output_tokens=200),
             "batch-model",
@@ -527,6 +545,25 @@ class TestBudgetLanes:
         assert after.provider_called_at.astimezone(ZoneInfo("Asia/Ho_Chi_Minh")).month == 9
         with sessions() as session:
             assert len(session.scalars(select(LlmCallUsage)).all()) == 2
+
+    def test_timestamp_is_sampled_after_scope_locking_when_midnight_crosses(self):
+        moments = iter(
+            [
+                datetime(2026, 8, 31, 16, 59, tzinfo=timezone.utc),
+                datetime(2026, 8, 31, 17, 1, tzinfo=timezone.utc),
+                datetime(2026, 8, 31, 17, 1, tzinfo=timezone.utc),
+            ]
+        )
+        admission, _ = admission_with(llm_config(), now=lambda: next(moments))
+
+        reservation = admission.reserve(
+            analysis_spend(owner_id="crossing", input_tokens=1),
+            "batch-model",
+        )
+
+        assert reservation.provider_called_at == datetime(
+            2026, 8, 31, 17, 1, tzinfo=timezone.utc
+        )
 
     def test_capability_probe_has_a_hard_daily_emergency_ceiling(self):
         expensive = replace(
@@ -699,6 +736,57 @@ class TestPerUserCeilings:
         assert refused.value.reset_at == base + timedelta(days=30)
         assert after_window.owner.id == "31"
 
+    def test_rolling_reset_waits_until_enough_old_spend_has_expired(self):
+        expensive = replace(
+            llm_config(),
+            pricing=replace(
+                llm_config().pricing,
+                session=TokenPrices(10, 10, 10, 10),
+            ),
+        )
+        base = datetime(2026, 8, 1, 3, 0, tzinfo=timezone.utc)
+        now = [base]
+        admission, _ = admission_with(expensive, now=lambda: now[0])
+        admission.reserve(
+            replace(
+                spend(),
+                owner=CallOwner(OwnerType.TURN_REQUEST_MESSAGE, "small", user_id=7),
+                input_tokens=10_000,
+                output_tokens=0,
+            ),
+            "session-model",
+        )
+        for index in range(30):
+            now[0] = base + timedelta(days=1 + index // 6)
+            admission.reserve(
+                replace(
+                    spend(),
+                    owner=CallOwner(
+                        OwnerType.TURN_REQUEST_MESSAGE, f"large-{index}", user_id=7
+                    ),
+                    input_tokens=30_000,
+                    output_tokens=19_000,
+                ),
+                "session-model",
+            )
+
+        now[0] = base + timedelta(days=6)
+        with pytest.raises(BudgetRefusal) as refused:
+            admission.reserve(
+                replace(
+                    spend(),
+                    owner=CallOwner(
+                        OwnerType.TURN_REQUEST_MESSAGE, "refused", user_id=7
+                    ),
+                    input_tokens=30_000,
+                    output_tokens=19_000,
+                ),
+                "session-model",
+            )
+
+        assert refused.value.reason == "user_spend_rolling_30d"
+        assert refused.value.reset_at == base + timedelta(days=31)
+
 
 class FailingTransport:
     def __init__(self, failure: Exception) -> None:
@@ -765,3 +853,19 @@ class TestFailedCalls:
             assert len(rows) == 1
             assert rows[0].status == "usage_unknown"
             assert rows[0].reserved_micro_usd == 3_000
+
+    async def test_success_without_provider_usage_keeps_the_reservation(self, ledger):
+        admission, sessions = ledger
+
+        class RouteOmitsUsage:
+            async def dispatch(self, completion_request):
+                return Completion(model=completion_request.model, text="done")
+
+        client = ReservedLLMClient(RouteOmitsUsage(), admission)
+
+        await client.complete(request(), spend())
+
+        with sessions() as session:
+            row = session.scalar(select(LlmCallUsage))
+            assert row.status == "usage_unknown"
+            assert row.actual_micro_usd is None

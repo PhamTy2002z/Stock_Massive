@@ -81,11 +81,12 @@ class ReservedLLMClient:
                             exc.usage,
                         )
                     raise
-                await asyncio.to_thread(
-                    self._admission.reconcile,
-                    reservation,
-                    result.usage,
-                )
+                if result.usage is not None:
+                    await asyncio.to_thread(
+                        self._admission.reconcile,
+                        reservation,
+                        result.usage,
+                    )
                 return result
 
         raise RuntimeError("the retry loop ended without a result")  # pragma: no cover

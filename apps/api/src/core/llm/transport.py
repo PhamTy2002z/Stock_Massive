@@ -242,7 +242,7 @@ def _tool_choice(choice: str) -> Any:
     return {"type": "function", "function": {"name": choice}}
 
 
-def _usage(payload: dict[str, Any] | None) -> Usage:
+def _usage(payload: dict[str, Any] | None) -> Usage | None:
     """Split the provider's counters so nothing is charged twice.
 
     Providers report the cached and cache-written parts *inside* the prompt
@@ -251,7 +251,7 @@ def _usage(payload: dict[str, Any] | None) -> Usage:
     reasoning tokens twice at the output price.
     """
     if not payload:
-        return Usage()
+        return None
 
     prompt = int(payload.get("prompt_tokens") or payload.get("input_tokens") or 0)
     completion = int(
