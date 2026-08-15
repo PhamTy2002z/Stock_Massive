@@ -190,9 +190,14 @@ class TestOneCycle:
     def test_every_symbol_gets_a_snapshot_for_every_wired_capability(self):
         store = snapshot_store(redis=MemoryRedis())
 
-        summary = collector(store).run()
+        cycle = collector(store)
+        summary = cycle.run()
 
-        for capability in Capability:
+        # The cycle's own list rather than every Capability there is. The
+        # benchmark's `market_index` sessions are loaded by their own job for one
+        # index that is in no Universe (docs/adr/0017), so asserting the cycle
+        # covers it would be asserting the wrong thing about both.
+        for capability in cycle.capabilities:
             for symbol in ("HPG", "VCB"):
                 read = store.latest(capability, symbol)
                 assert read is not None, f"{symbol} has no {capability.value} snapshot"
@@ -305,9 +310,10 @@ class TestIsolation:
             )
         store = SnapshotStore(Session(engine), redis=None)
 
-        summary = collector(store).run()
+        cycle = collector(store)
+        summary = cycle.run()
 
-        for capability in Capability:
+        for capability in cycle.capabilities:
             assert store.latest(capability, "VCB") is not None
             assert store.latest(capability, "HPG") is None
         assert summary.succeeded == ("VCB",)
@@ -395,7 +401,7 @@ class TestErrorHygiene:
 
 
 class TestWiringFromConfiguration:
-    def test_a_configured_account_wires_every_capability(self):
+    def test_a_configured_account_wires_every_per_symbol_capability(self):
         built = build_collector(
             snapshot_store(),
             settings=Settings(
@@ -405,7 +411,28 @@ class TestWiringFromConfiguration:
             ),
         )
 
-        assert built.capabilities == tuple(Capability)
+        assert built.capabilities == (
+            Capability.MARKET,
+            Capability.VALUATION,
+            Capability.REFERENCE,
+            Capability.FUNDAMENTAL,
+        )
+
+    def test_the_cycle_never_collects_the_market_index(self):
+        """The cycle is per symbol over the Universe, and the benchmark is in no
+        Universe. Its series is loaded by its own job at its own depth
+        (docs/adr/0017), so a cycle that reached for it would be asking a
+        hundred-symbol batch call for one index."""
+        built = build_collector(
+            snapshot_store(),
+            settings=Settings(
+                universe_symbols="HPG,VCB",
+                fiinquant_username="collector",
+                fiinquant_password="password",
+            ),
+        )
+
+        assert Capability.MARKET_INDEX not in built.capabilities
 
     def test_without_fiinquant_the_cycle_still_collects_what_vnstock_owns(self):
         """A development environment must start without a FiinQuant account, and

@@ -54,19 +54,24 @@ single Vietnamese equity is an extrapolation rather than a result, and that
 sentence lives in the field's ``interpretation`` — the contract a model reads
 before calling — rather than in a narration nobody is obliged to produce.
 
-## Relative strength — refused, with the missing benchmark named
+## Relative strength — still refused, and now for a different reason
 
-Rolling beta and correlation need a market index series, and **this system does
-not store one**. The VN-Index appears only as an alias inside a live price path,
-which is precisely the substitution spec 0003 §13 forbids: a legacy live read
-used to make a registered field look available. So the field is registered and
-refuses under ``unavailable`` with the input it is short of on the refusal.
+Rolling beta and correlation need a market index series, and **the system now
+stores one**: ``src/stocks/market_index.py`` persists the benchmark's sessions
+under the ``market_index`` Capability, deep enough to clear this field's own
+floor, and ``prepare_bars(series=BarSeries.MARKET_INDEX)`` serves it through the
+same gateway a symbol's window comes from (``docs/adr/0017``). The VN-Index alias
+inside the live price path is still never read — that substitution is what spec
+0003 §13 forbids, and having a stored series does not make a live one admissible.
 
-Ledoit-Wolf shrinkage is what the field would use the day the benchmark exists —
-a hundred symbols on 250 observations is the ill-conditioned regime their
-estimator was written for, and the shrinkage intensity is the honesty signal, an
-intensity approaching one meaning the data was insufficient. None of that is
-implemented against a benchmark that is not there.
+What is missing is the estimator, not the data, and the refusal says so. It stays
+``unavailable`` rather than becoming a number, because a beta computed by nothing
+is not a beta.
+
+Ledoit-Wolf shrinkage is what that estimator will use: a hundred symbols on 250
+observations is the ill-conditioned regime it was written for, and the shrinkage
+intensity is the honesty signal — an intensity approaching one means the data was
+insufficient.
 
 ## Factor percentiles — quarterly, and stamped with their age
 
@@ -129,8 +134,14 @@ MOMENTUM_MIN_SESSIONS = MOMENTUM_FORMATION_SESSIONS + MOMENTUM_SKIP_SESSIONS
 # refusal behind "never read a one-day rank".
 MOMENTUM_MIN_FORMATION_SESSIONS = 21
 
-# What relative strength would regress against, named on the refusal so the
-# missing precursor is a fact on the wire rather than a gap in a document.
+# What relative strength regresses against, named on the refusal so a reader can
+# tell which benchmark the field means without opening a document.
+#
+# It is also the string the ingestion side loads by: ``src/stocks/market_index.py``
+# takes both the index to store and how deep to store it from this module,
+# because the series exists for this field and for nothing else. Declared once
+# here, a second benchmark is a second declaration beside this one rather than a
+# literal in a loader that nothing checks against the field.
 RELATIVE_STRENGTH_BENCHMARK = "VNINDEX"
 
 # A year of overlapping daily returns, matching the length the risk cluster
@@ -279,22 +290,29 @@ def trend_reading(window: FieldWindow) -> FieldReading:
 
 
 def relative_strength_reading(window: FieldWindow) -> FieldReading:
-    """Refused: there is no stored benchmark to regress this symbol against.
+    """Refused: the benchmark is stored and the estimator over it is not written.
 
     Registered and refused rather than left out, so the Analysis Field Profile
     stays honest — a profile that silently dropped a field would make two
-    Analyses carrying the same profile version mean different things. The input
-    it is short of travels with the refusal, and the live price path's VN-Index
-    alias is deliberately not read: substituting a legacy live call to make a
-    registered field look available is the failure spec 0003 §13 names.
+    Analyses carrying the same profile version mean different things.
+
+    The refusal moved with the facts. It used to say the store held no benchmark;
+    the benchmark now exists, so saying that would be the field lying about its
+    own dependency and pointing whoever read it at a data load that is already
+    done. What it says instead is what is actually missing: the rolling
+    regression. The live price path's VN-Index alias is still never read — a
+    stored series does not make a live one admissible, and substituting one to
+    make a registered field look available is the failure spec 0003 §13 names.
     """
     return FieldReading(
         value=None,
         refusal=SignalIssue.UNAVAILABLE,
         extras={
             "missing_input": (
-                "a stored session series for the market index; the index exists "
-                "only as an alias in the live price path and is never read here"
+                "the rolling beta and correlation estimator; the benchmark it "
+                "regresses against is stored under the market_index Capability "
+                "and is served by the same bar gateway, and no live provider "
+                "read is substituted for either"
             ),
             "benchmark": RELATIVE_STRENGTH_BENCHMARK,
             "shrinkage": "ledoit_wolf",

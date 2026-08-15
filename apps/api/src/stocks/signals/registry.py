@@ -780,13 +780,15 @@ RELATIVE_STRENGTH = SignalField(
     sign=Sign.SIGNED,
     interpretation=(
         "Rolling beta and correlation against the market index. **Unavailable**: "
-        "this system stores no market-index session series, so there is nothing "
-        "durable to regress against, and the index alias inside the live price "
+        "the benchmark's session series is now stored durably and is served by "
+        "the same bar gateway a symbol's window comes from, but the rolling "
+        "regression over it is not implemented — so what is missing is the "
+        "estimator rather than the data. The index alias inside the live price "
         "path is deliberately not read in its place. The field is registered so "
         "the Analysis Field Profile stays honest about what it is missing, and "
         "it will report beta and correlation under Ledoit-Wolf shrinkage — with "
         "the shrinkage intensity beside them, an intensity approaching one "
-        "meaning the data was insufficient — once the benchmark is ingested."
+        "meaning the data was insufficient."
     ),
     kind=FieldKind.ESTIMATOR,
     claim=Claim.DESCRIPTIVE,

@@ -43,6 +43,17 @@ class Capability(str, Enum):
     REFERENCE = "reference"
     FUNDAMENTAL = "fundamental"
 
+    # The market index's own session series, kept apart from ``market``
+    # (``docs/adr/0017``). An index is not a tradeable symbol: it has no board
+    # and therefore no price band, no corporate action, no foreign flow and no
+    # market capitalisation, and — the deciding reason — a **Trading Day** is
+    # ``date(max(effective_at))`` over the ``market`` Capability, so an index
+    # session stored there would help *define* the market-wide window every
+    # equity is measured against. One index row landing before the Universe's
+    # would move ``latest_trading_day`` forward and refuse every symbol for one
+    # session of missing history.
+    MARKET_INDEX = "market_index"
+
 
 class PriceUnit(str, Enum):
     """Canonical price unit used after provider normalization."""
@@ -158,6 +169,14 @@ SOURCE_OWNERSHIP_BY_CAPABILITY: Mapping[Capability, SourceOwnership] = MappingPr
         ),
         Capability.REFERENCE: SourceOwnership(main=ProviderSource.VNSTOCK),
         Capability.FUNDAMENTAL: SourceOwnership(main=ProviderSource.VNSTOCK),
+        # No cover source, and that is the decision rather than an omission. The
+        # Cover Source's quote history is ``adjusted_at_source`` and there is no
+        # raw option (``docs/adr/0006``), but an index is never adjusted for
+        # anything — so a vnstock index series would carry a basis that asserts a
+        # rescaling nobody performed, and a window mixing it with the Main
+        # Source's would be refused as ``mixed_price_basis`` for a seam that does
+        # not exist in the market. One source, one basis, one meaning.
+        Capability.MARKET_INDEX: SourceOwnership(main=ProviderSource.FIINQUANT),
     }
 )
 
@@ -214,16 +233,22 @@ class SymbolSnapshot(InternalSnapshot):
             raise ValueError(str(exc)) from exc
 
 
-class MarketSnapshot(SymbolSnapshot):
-    """Source-neutral hot market fields written by the collector.
+class SessionSnapshot(SymbolSnapshot):
+    """One session of a priced instrument, whatever kind of instrument it is.
+
+    What a listed equity and a market index genuinely have in common, and
+    nothing else: an open, a high, a low, a close, how much changed hands, and
+    what the prices mean with respect to corporate actions. The equity-only
+    figures — the band, the foreign split, the market capitalisation — live on
+    ``MarketSnapshot`` below and are absent from ``MarketIndexSnapshot`` rather
+    than present-and-null on it, so "an index has no ceiling price" is a fact of
+    the type instead of a ``None`` indistinguishable from one nobody collected.
 
     Every ``*_price`` and ``*_vnd`` field is denominated in ``price_unit``.
     Traded quantity is named ``*_volume`` and traded money ``*_value_vnd``, and
     no field carries both words: the provider reports active buy/sell as
     quantity but foreign buy/sell as money, so mixing the two silently changes
-    the unit. ``market_cap_vnd`` is money but not traded, so it stays outside
-    that pair; it is reported by the provider rather than derived from
-    ``ReferenceSnapshot.canonical_shares()``.
+    the unit.
 
     ``price_basis`` reaches the ``*_price`` fields and nothing else. Every
     ``*_volume`` is the count of shares that changed hands in that session, and
@@ -239,27 +264,16 @@ class MarketSnapshot(SymbolSnapshot):
     price_basis: PriceBasis
     price_unit: PriceUnit = PriceUnit.VND
     last_price: float | None = Field(default=None, gt=0)
-    reference_price: float | None = Field(default=None, gt=0)
     open_price: float | None = Field(default=None, gt=0)
     high_price: float | None = Field(default=None, gt=0)
     low_price: float | None = Field(default=None, gt=0)
-    ceiling_price: float | None = Field(default=None, gt=0)
-    floor_price: float | None = Field(default=None, gt=0)
     change_pct: float | None = None
     volume: int | None = Field(default=None, ge=0)
     total_value_vnd: float | None = Field(default=None, ge=0)
-    active_buy_volume: int | None = Field(default=None, ge=0)
-    active_sell_volume: int | None = Field(default=None, ge=0)
-    foreign_buy_volume: int | None = Field(default=None, ge=0)
-    foreign_sell_volume: int | None = Field(default=None, ge=0)
-    foreign_buy_value_vnd: float | None = Field(default=None, ge=0)
-    foreign_sell_value_vnd: float | None = Field(default=None, ge=0)
-    foreign_net_value_vnd: float | None = None
-    market_cap_vnd: float | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
-    def validate_schema_version(self) -> "MarketSnapshot":
-        """Refuse a market payload claiming a version older than the basis.
+    def validate_schema_version(self) -> "SessionSnapshot":
+        """Refuse a session payload claiming a version older than the basis.
 
         The basis was introduced at ``MARKET_SCHEMA_VERSION``, so a row that
         carries one and calls itself version 1 describes a store state that has
@@ -272,11 +286,63 @@ class MarketSnapshot(SymbolSnapshot):
         """
         if self.metadata.schema_version < MARKET_SCHEMA_VERSION:
             raise ValueError(
-                "a market snapshot carrying a price basis cannot be at schema "
+                "a session snapshot carrying a price basis cannot be at schema "
                 f"version {self.metadata.schema_version}; "
                 f"the basis exists from {MARKET_SCHEMA_VERSION} onward"
             )
         return self
+
+
+class MarketIndexSnapshot(SessionSnapshot):
+    """One session of a market index — a level, not a price of anything.
+
+    Deliberately ``SessionSnapshot`` and not one field more. An index is a
+    divisor-managed composite rather than a listed security, and the three
+    things a trailing window normally has to reckon with are absent from it by
+    construction rather than by collection gap:
+
+    - **No price band.** The band is a percentage of a board's reference price
+      and the index sits on no board, so there is no ceiling, no floor and no
+      limit lock to read. A session that moved 9% is the market moving, not an
+      anchor that is wrong.
+    - **No corporate action.** Reconstitutions and the entitlements of member
+      companies are absorbed into the index divisor by the exchange that
+      publishes it, so the series is already continuous and there is nothing for
+      read-time adjustment to apply. ``price_basis`` is still declared, because
+      a stored series that does not say what its numbers mean is exactly what
+      ``docs/adr/0006`` refuses — it is ``raw`` in the sense that matters here:
+      the level the exchange published for that session, permanently.
+    - **No foreign flow and no market capitalisation** for the composite as a
+      whole, and none is invented from its members.
+
+    ``symbol`` carries the index code as the provider spells it — ``VNINDEX``,
+    ``VN30`` — which passes the ordinary symbol pattern. It cannot collide with
+    an equity of the same name because the two live in different Capabilities:
+    that separation is the point of ``Capability.MARKET_INDEX``.
+    """
+
+
+class MarketSnapshot(SessionSnapshot):
+    """Source-neutral hot market fields written by the collector.
+
+    A listed equity's session: everything ``SessionSnapshot`` holds, plus the
+    figures that only exist because a company is behind the ticker.
+    ``market_cap_vnd`` is money but not traded, so it stays outside the
+    quantity/money naming pair; it is reported by the provider rather than
+    derived from ``ReferenceSnapshot.canonical_shares()``.
+    """
+
+    reference_price: float | None = Field(default=None, gt=0)
+    ceiling_price: float | None = Field(default=None, gt=0)
+    floor_price: float | None = Field(default=None, gt=0)
+    active_buy_volume: int | None = Field(default=None, ge=0)
+    active_sell_volume: int | None = Field(default=None, ge=0)
+    foreign_buy_volume: int | None = Field(default=None, ge=0)
+    foreign_sell_volume: int | None = Field(default=None, ge=0)
+    foreign_buy_value_vnd: float | None = Field(default=None, ge=0)
+    foreign_sell_value_vnd: float | None = Field(default=None, ge=0)
+    foreign_net_value_vnd: float | None = None
+    market_cap_vnd: float | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def validate_foreign_flow(self) -> "MarketSnapshot":
@@ -389,6 +455,31 @@ class MarketHistoryProvider(Protocol):
         from_date: date,
         to_date: date,
     ) -> Sequence[MarketSnapshot]: ...
+
+
+class MarketIndexHistoryProvider(Protocol):
+    """Read a stretch of one market index's session history.
+
+    Separate from ``MarketHistoryProvider`` rather than the same protocol over a
+    different ticker, because the two return different contracts and the
+    difference is the point: an index answer carries no band, no foreign split
+    and no market capitalisation, and a caller that could be handed either would
+    have to test which one it got before reading a field.
+
+    ``source`` is part of the contract for the same reason it is on the market
+    history: the ``market_index`` Capability has one owner and no cover
+    (``docs/adr/0002``, ``docs/adr/0017``), so a loader handed some other source
+    has to be able to refuse it.
+    """
+
+    source: ProviderSource
+
+    def fetch_index_history(
+        self,
+        index: str,
+        from_date: date,
+        to_date: date,
+    ) -> Sequence[MarketIndexSnapshot]: ...
 
 
 class ValuationDataProvider(Protocol):

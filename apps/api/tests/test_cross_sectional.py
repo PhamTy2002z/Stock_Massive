@@ -297,12 +297,16 @@ class TestTheTrendSignal:
 
 class TestRelativeStrength:
     def test_it_refuses_and_names_the_input_it_is_short_of(self):
+        """The refusal follows the facts. Once the benchmark series is stored
+        (docs/adr/0017), a field still saying the store holds no market index
+        would point whoever read it at a data load that is already done."""
         reading = relative_strength_reading(window_of(frame_of([1000.0] * 30)))
 
         assert reading.value is None
         assert reading.refusal is SignalIssue.UNAVAILABLE
         assert reading.extras["benchmark"] == "VNINDEX"
-        assert "market index" in reading.extras["missing_input"]
+        assert "estimator" in reading.extras["missing_input"]
+        assert Capability.MARKET_INDEX.value in reading.extras["missing_input"]
 
     def test_the_refusal_survives_being_served(self):
         """A refusal that lost its reason on the way out would be a silent drop."""
