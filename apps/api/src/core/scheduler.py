@@ -8,7 +8,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from zoneinfo import ZoneInfo
 
-from src.alpha.jobs import sweep_stuck_analysis_runs
+from src.alpha.jobs import drain_analysis_queue, sweep_stuck_analysis_runs
 from src.core.config import get_settings
 from src.core.trading_calendar import is_trading_day
 from src.stocks.collector_schedule import (
@@ -162,6 +162,13 @@ analysis_run_sweep_job_wrapper = make_job_wrapper(
     sweep_stuck_analysis_runs,
     "Analysis Run sweep completed",
     "Analysis Run sweep failed",
+)
+analysis_dispatch_job_wrapper = make_job_wrapper(
+    "analysis_dispatch_job_wrapper",
+    "Analysis Queue Drain",
+    drain_analysis_queue,
+    "Analysis queue drain completed",
+    "Analysis queue drain failed",
 )
 sector_historical_job_wrapper = make_job_wrapper(
     "sector_historical_job_wrapper",
@@ -364,6 +371,29 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
     logger.info(
         f"Scheduled the Analysis Run sweep every "
         f"{settings.analysis_run_stuck_minutes} minutes"
+    )
+
+    # The one worker that drains the queue. An interval and not a time of day:
+    # the cohort is captured by data readiness rather than by a clock, and a
+    # Watchlist addition queues an on-demand run at any hour. It is one schedule
+    # in one process on purpose — the `FOR UPDATE SKIP LOCKED` claim is what
+    # holds if that ever stops being true (docs/adr/0014, src/alpha/dispatcher.py).
+    #
+    # Registered whatever `alpha_desk_enabled` says, and the job itself returns
+    # immediately while the flag is off. Gated here instead, flipping the flag on
+    # a running deployment would leave the queue undrained until the next restart.
+    await scheduler.add_schedule(
+        analysis_dispatch_job_wrapper,
+        IntervalTrigger(
+            seconds=settings.analysis_dispatch_interval_seconds,
+            start_time=datetime.now(VN_TZ),
+        ),
+        id="analysis-queue-drain",
+    )
+    logger.info(
+        f"Scheduled the Analysis queue drain every "
+        f"{settings.analysis_dispatch_interval_seconds}s, at most "
+        f"{settings.analysis_dispatch_batch_size} run(s) per tick"
     )
 
     logger.info("=== Scheduler setup complete ===")
