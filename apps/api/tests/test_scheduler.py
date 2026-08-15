@@ -126,15 +126,20 @@ class TestCleanupOldDataJob:
         """Test successful cleanup of old data."""
         with patch("src.stocks.jobs.async_session_factory") as mock_factory:
             mock_session = AsyncMock()
-            mock_result = MagicMock()
-            mock_result.rowcount = 50
-            mock_session.execute.return_value = mock_result
+            intraday_result = MagicMock()
+            intraday_result.rowcount = 50
+            trace_result = MagicMock()
+            trace_result.rowcount = 7
+            mock_session.execute.side_effect = [intraday_result, trace_result]
             mock_factory.return_value.__aenter__.return_value = mock_session
 
             deleted_count = await cleanup_old_data_job()
 
-            assert deleted_count == 50
-            mock_session.execute.assert_called_once()
+            assert deleted_count == 57
+            assert mock_session.execute.call_count == 2
+            statements = [str(call.args[0]) for call in mock_session.execute.call_args_list]
+            assert "stock_intraday_bars" in statements[0]
+            assert "agent_tool_call" in statements[1]
             mock_session.commit.assert_called_once()
 
     @pytest.mark.asyncio
@@ -142,9 +147,11 @@ class TestCleanupOldDataJob:
         """Test cleanup when no old data exists."""
         with patch("src.stocks.jobs.async_session_factory") as mock_factory:
             mock_session = AsyncMock()
-            mock_result = MagicMock()
-            mock_result.rowcount = 0
-            mock_session.execute.return_value = mock_result
+            intraday_result = MagicMock()
+            intraday_result.rowcount = 0
+            trace_result = MagicMock()
+            trace_result.rowcount = 0
+            mock_session.execute.side_effect = [intraday_result, trace_result]
             mock_factory.return_value.__aenter__.return_value = mock_session
 
             deleted_count = await cleanup_old_data_job()

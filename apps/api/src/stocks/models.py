@@ -166,6 +166,12 @@ class ListingRoster(Base):
     exchange = Column(String(10), nullable=False)  # HOSE | HNX | UPCOM
     is_listed = Column(Boolean, nullable=False)
     company_name = Column(String(255), nullable=True)
+    # Stored with the market-wide roster so the Tool Catalog can enforce its
+    # Universe boundary without making a request-time provider call.  Nullable
+    # because an exchange row can be usable for listing status before the ICB
+    # classification feed has caught up.
+    industry_code = Column(String(20), nullable=True)
+    industry_name = Column(String(255), nullable=True)
     source = Column(String(32), nullable=False)
     observed_at = Column(DateTime(timezone=True), nullable=False)
 

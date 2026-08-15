@@ -111,6 +111,8 @@ class ListingRosterStore:
                         exchange=entry.exchange.value,
                         is_listed=True,
                         company_name=entry.company_name,
+                        industry_code=entry.industry_code,
+                        industry_name=entry.industry_name,
                         source=source.value,
                         observed_at=stamped,
                     )
@@ -127,6 +129,8 @@ class ListingRosterStore:
             row.exchange = entry.exchange.value
             row.is_listed = True
             row.company_name = entry.company_name
+            row.industry_code = entry.industry_code
+            row.industry_name = entry.industry_name
             row.source = source.value
             row.observed_at = stamped
 
