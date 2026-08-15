@@ -85,3 +85,18 @@ class SignalIssue(str, Enum):
     # reports only what was measured, and is the input the gap refusal is built
     # from.
     PRICE_MOVE_EXCEEDS_BAND = "price_move_exceeds_band"
+
+    # --- The window gateway, from ADR-0006 and ADR-0010 -------------------
+    # The one above, after the action series has been looked in and found to
+    # hold nothing on that date. A window carrying a price move nothing
+    # explains is refused rather than served: the move is either an action this
+    # system does not hold or an anchor that is wrong, and both make every
+    # price on one side of it incomparable with every price on the other.
+    UNEXPLAINED_PRICE_GAP = "unexplained_price_gap"
+
+    # A share-count-changing action falls inside the window, so the unit of
+    # every `*_volume` field changes partway through it. A degradation rather
+    # than a refusal, because prices are made comparable across the same action
+    # and money never needed to be: a billion dong traded is a billion dong
+    # traded on either side of a split (`docs/adr/0006`).
+    VOLUME_BASIS_BREAK = "volume_basis_break"

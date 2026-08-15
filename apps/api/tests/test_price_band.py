@@ -34,7 +34,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from src.stocks.models import ListingRoster, ProviderSnapshot
-from src.stocks.providers import Capability, Exchange, ProviderSource
+from src.stocks.providers import Capability, Exchange, PriceBasis, ProviderSource
 from src.stocks.providers.contracts import (
     MARKET_SCHEMA_VERSION,
     MarketSnapshot,
@@ -84,13 +84,20 @@ def write_session(
     low: float | None = None,
     open_price: float | None = None,
     volume: int = 1_000_000,
+    total_value_vnd: float | None = None,
     source: ProviderSource = ProviderSource.FIINQUANT,
+    basis: PriceBasis | None = None,
 ) -> None:
     """Store one session, defaulting the intraday range to the close.
 
     ``high``/``low`` default to the close rather than to nothing, because an
     anchor session only ever needs its close and spelling out a range on every
     one of them would bury the ranges that are the point of the test.
+
+    ``basis`` defaults to the one that source has always written, which is the
+    only pairing the store has ever held. It is overridable so that a test can
+    prove the code reads the basis off the row rather than deriving it from the
+    source — the separation the field exists for.
     """
     snapshot = MarketSnapshot(
         symbol=symbol,
@@ -100,7 +107,8 @@ def write_session(
             observed_at=NOW,
             schema_version=MARKET_SCHEMA_VERSION,
         ),
-        price_basis=basis_of(source),
+        price_basis=basis if basis is not None else basis_of(source),
+        total_value_vnd=total_value_vnd,
         open_price=open_price if open_price is not None else close,
         high_price=high if high is not None else close,
         low_price=low if low is not None else close,

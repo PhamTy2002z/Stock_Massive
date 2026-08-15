@@ -54,10 +54,10 @@ from sqlalchemy.orm import Session
 
 from src.stocks.models import ListingRoster
 
-from ..providers import Capability, Exchange, MarketSnapshot, PriceBasis, SnapshotStore
-from ..providers.normalize import VN_TZ
+from ..providers import Exchange, MarketSnapshot, PriceBasis
 from ..trading_day import trading_days_before
 from .issues import SignalIssue
+from .sessions import sessions_in_range
 
 # The permitted daily move, per board. Decimal rather than float because the
 # comparison that matters happens at the tick boundary: 82,700 × 0.93 is
@@ -269,6 +269,98 @@ def band_limits(exchange: Exchange, anchor: Decimal) -> BandLimits:
     return BandLimits(anchor=anchor, ceiling=ceiling, floor=floor)
 
 
+class BandRegimeResolver:
+    """The band regime of one symbol, across as many sessions as are asked for.
+
+    A class rather than a function because the listing register is read once and
+    every further date is decided in process. ``prepare_bars()`` asks this
+    question for every bar of a window that can run to 273 of them, and a
+    per-date query would make the gateway's cost a multiple of its window
+    length for an answer that changes at most once in the store's whole history.
+
+    The register of dated migrations is asked first and the listing roster
+    second, so a symbol with a dated move is answered from its history rather
+    than from its present. A symbol with neither is answered with no band at
+    all: defaulting to HOSE would be the likeliest guess and the least
+    detectable error, since a band quietly narrowed to ±7 reports limit locks on
+    ordinary HNX sessions.
+    """
+
+    def __init__(
+        self,
+        session: Session,
+        symbol: str,
+        *,
+        migrations: Sequence[ExchangeMigration] = EXCHANGE_MIGRATIONS,
+    ) -> None:
+        self.symbol = symbol.upper()
+        self._migrations = sorted(
+            (entry for entry in migrations if entry.symbol.upper() == self.symbol),
+            key=lambda entry: entry.first_session,
+        )
+        self._listed = self._current_exchange(session)
+
+    def on(self, day: date) -> BandRegime:
+        """Which band applied on this session, and on whose authority."""
+        exchange, as_of = self._exchange_on(day)
+        if exchange is None:
+            return BandRegime(
+                symbol=self.symbol,
+                session_date=day,
+                exchange=None,
+                limit_ratio=None,
+                anchor_basis=None,
+                exchange_as_of=as_of,
+            )
+        return BandRegime(
+            symbol=self.symbol,
+            session_date=day,
+            exchange=exchange,
+            limit_ratio=BAND_LIMIT_BY_EXCHANGE[exchange],
+            anchor_basis=(
+                BandAnchorBasis.PRIOR_DAY_VWAP
+                if exchange is Exchange.UPCOM
+                else BandAnchorBasis.PREVIOUS_CLOSE
+            ),
+            exchange_as_of=as_of,
+        )
+
+    def _current_exchange(self, session: Session) -> Exchange | None:
+        listed = session.execute(
+            select(ListingRoster.exchange).where(ListingRoster.symbol == self.symbol)
+        ).scalar_one_or_none()
+        if listed is None:
+            return None
+        try:
+            return Exchange.parse(str(listed))
+        except ValueError:
+            # A board name the enum does not recognise is not a board. Guessing
+            # one would pick a band, and the wrong band is worse than none.
+            return None
+
+    def _exchange_on(self, day: date) -> tuple[Exchange | None, ExchangeAsOf]:
+        """The board this symbol traded on that day, and how confidently."""
+        moved = [entry for entry in self._migrations if entry.first_session <= day]
+        if moved:
+            return moved[-1].to_exchange, ExchangeAsOf.DATED_MIGRATION
+        if self._migrations:
+            # Every recorded move is still ahead of this bar, so the symbol was
+            # on whatever the earliest of them moved it off.
+            return self._migrations[0].from_exchange, ExchangeAsOf.DATED_MIGRATION
+
+        if self._listed is None:
+            return None, ExchangeAsOf.UNKNOWN
+
+        assumed = (
+            day <= MIGRATION_PROGRAMME_END and self._listed in _MIGRATION_DESTINATIONS
+        )
+        return self._listed, (
+            ExchangeAsOf.CURRENT_LISTING_ASSUMED
+            if assumed
+            else ExchangeAsOf.CURRENT_LISTING
+        )
+
+
 def resolve_band_regime(
     session: Session,
     symbol: str,
@@ -278,45 +370,23 @@ def resolve_band_regime(
 ) -> BandRegime:
     """Which band applied to this symbol on this session, and on whose authority.
 
-    The register is asked first and the listing roster second, so a symbol with
-    a dated move is answered from its history rather than from its present. A
-    symbol with neither is answered with no band at all: defaulting to HOSE
-    would be the likeliest guess and the least detectable error, since a band
-    quietly narrowed to ±7 reports limit locks on ordinary HNX sessions.
+    One session's worth of the resolver above, for the caller that has exactly
+    one to ask about.
     """
-    symbol = symbol.upper()
-    exchange, as_of = _exchange_on(session, symbol, day, migrations)
-    if exchange is None:
-        return BandRegime(
-            symbol=symbol,
-            session_date=day,
-            exchange=None,
-            limit_ratio=None,
-            anchor_basis=None,
-            exchange_as_of=as_of,
-        )
-    return BandRegime(
-        symbol=symbol,
-        session_date=day,
-        exchange=exchange,
-        limit_ratio=BAND_LIMIT_BY_EXCHANGE[exchange],
-        anchor_basis=(
-            BandAnchorBasis.PRIOR_DAY_VWAP
-            if exchange is Exchange.UPCOM
-            else BandAnchorBasis.PREVIOUS_CLOSE
-        ),
-        exchange_as_of=as_of,
-    )
+    return BandRegimeResolver(session, symbol, migrations=migrations).on(day)
 
 
-def detect_limit_lock(
-    session: Session,
-    symbol: str,
-    day: date,
-    *,
-    migrations: Sequence[ExchangeMigration] = EXCHANGE_MIGRATIONS,
+def measure_band(
+    regime: BandRegime,
+    target: MarketSnapshot | None,
+    anchor: MarketSnapshot | None,
+    anchor_date: date | None,
 ) -> BandReading:
-    """Whether this session traded anywhere other than at one of its limits.
+    """Judge one session against its band, from rows a caller already holds.
+
+    The whole verdict, and no reading of the store: a caller that has loaded a
+    window has both sessions in hand already, and ``prepare_bars()`` would
+    otherwise re-read two rows per bar.
 
     A lock is ``high == low == limit``: every trade of the session matched at
     the band. The open and the close follow from that and are not checked
@@ -330,38 +400,31 @@ def detect_limit_lock(
     which is what collapses a range estimator to zero and has to be excluded from
     one.
 
-    The two sessions this reads — the one under test and the one it is anchored
-    to — are a two-day window, and the Price Basis vocabulary applies to it as
-    to any other: both adjusted is ``unadjustable_price_basis``, one of each is
-    ``mixed_price_basis``, and only an all-raw pair is measured.
+    The two sessions this reads are a two-day window, and the Price Basis
+    vocabulary applies to it as to any other: both adjusted is
+    ``unadjustable_price_basis``, one of each is ``mixed_price_basis``, and only
+    an all-raw pair is measured.
     """
-    symbol = symbol.upper()
-    regime = resolve_band_regime(session, symbol, day, migrations=migrations)
+    symbol = regime.symbol
+    day = regime.session_date
 
-    previous = trading_days_before(session, day, 1)
-    anchor_date = previous[0] if previous else None
-    held = _sessions(session, symbol, anchor_date or day, day)
-
-    target = held.get(day)
     if target is None:
         return _undecided(symbol, day, regime, SignalIssue.MISSING_TARGET_SESSION)
     if regime.exchange is None:
         return _undecided(symbol, day, regime, SignalIssue.EXCHANGE_UNKNOWN)
     if regime.anchor_basis is BandAnchorBasis.PRIOR_DAY_VWAP:
         return _undecided(symbol, day, regime, SignalIssue.ANCHOR_NOT_STORED)
-
-    anchor_session = held.get(anchor_date) if anchor_date else None
-    if anchor_session is None or anchor_session.last_price is None:
+    if anchor is None or anchor.last_price is None or anchor_date is None:
         return _undecided(symbol, day, regime, SignalIssue.ANCHOR_MISSING)
 
-    basis_issue = _basis_of_the_pair(target, anchor_session)
+    basis_issue = _basis_of_the_pair(target, anchor)
     if basis_issue is not None:
         return _undecided(symbol, day, regime, basis_issue)
     if target.high_price is None or target.low_price is None:
         return _undecided(symbol, day, regime, SignalIssue.SESSION_PRICES_INCOMPLETE)
 
-    anchor = _price(anchor_session.last_price)
-    limits = band_limits(regime.exchange, anchor)
+    anchor_price = _price(anchor.last_price)
+    limits = band_limits(regime.exchange, anchor_price)
     high = _price(target.high_price)
     low = _price(target.low_price)
 
@@ -370,7 +433,7 @@ def detect_limit_lock(
             symbol=symbol,
             session_date=day,
             regime=regime,
-            anchor=anchor,
+            anchor=anchor_price,
             anchor_date=anchor_date,
             limits=limits,
             lock=LimitLock.INDETERMINATE,
@@ -388,7 +451,7 @@ def detect_limit_lock(
         symbol=symbol,
         session_date=day,
         regime=regime,
-        anchor=anchor,
+        anchor=anchor_price,
         anchor_date=anchor_date,
         limits=limits,
         lock=lock,
@@ -396,67 +459,31 @@ def detect_limit_lock(
     )
 
 
-def _exchange_on(
+def detect_limit_lock(
     session: Session,
     symbol: str,
     day: date,
-    migrations: Sequence[ExchangeMigration],
-) -> tuple[Exchange | None, ExchangeAsOf]:
-    """The board this symbol traded on that day, and how confidently."""
-    dated = sorted(
-        (entry for entry in migrations if entry.symbol.upper() == symbol),
-        key=lambda entry: entry.first_session,
-    )
-    moved = [entry for entry in dated if entry.first_session <= day]
-    if moved:
-        return moved[-1].to_exchange, ExchangeAsOf.DATED_MIGRATION
-    if dated:
-        # Every recorded move is still ahead of this bar, so the symbol was on
-        # whatever the earliest of them moved it off.
-        return dated[0].from_exchange, ExchangeAsOf.DATED_MIGRATION
+    *,
+    migrations: Sequence[ExchangeMigration] = EXCHANGE_MIGRATIONS,
+) -> BandReading:
+    """Whether this session traded anywhere other than at one of its limits.
 
-    listed = session.execute(
-        select(ListingRoster.exchange).where(ListingRoster.symbol == symbol)
-    ).scalar_one_or_none()
-    if listed is None:
-        return None, ExchangeAsOf.UNKNOWN
-    try:
-        current = Exchange.parse(str(listed))
-    except ValueError:
-        # A board name the enum does not recognise is not a board. Guessing one
-        # would pick a band, and the wrong band is worse than none.
-        return None, ExchangeAsOf.UNKNOWN
-
-    assumed = day <= MIGRATION_PROGRAMME_END and current in _MIGRATION_DESTINATIONS
-    return current, (
-        ExchangeAsOf.CURRENT_LISTING_ASSUMED if assumed else ExchangeAsOf.CURRENT_LISTING
-    )
-
-
-def _sessions(
-    session: Session,
-    symbol: str,
-    start: date,
-    end: date,
-) -> dict[date, MarketSnapshot]:
-    """This symbol's stored sessions across a short window, keyed by day.
-
-    Read through ``SnapshotStore.series`` rather than with a query of its own,
-    because the Main-Source-wins resolution it already performs is what decides
-    which of two copies of a session is read — and the two copies are on
-    different price bases, so the choice decides whether the question can be
-    asked at all. Redis is passed as ``None``: ``series`` is a Postgres read
-    that never consults the cache, and the default would open a connection this
-    path has no use for.
+    The loading half: it reads the session and the one before it, and hands both
+    to ``measure_band`` for the verdict.
     """
-    series = SnapshotStore(session, redis=None).series(
-        Capability.MARKET, symbol, start=start, end=end
+    symbol = symbol.upper()
+    regime = resolve_band_regime(session, symbol, day, migrations=migrations)
+
+    previous = trading_days_before(session, day, 1)
+    anchor_date = previous[0] if previous else None
+    held = sessions_in_range(session, symbol, anchor_date or day, day)
+
+    return measure_band(
+        regime,
+        held.get(day),
+        held.get(anchor_date) if anchor_date else None,
+        anchor_date,
     )
-    return {
-        snapshot.metadata.effective_at.astimezone(VN_TZ).date(): snapshot
-        for snapshot in series.snapshots
-        if isinstance(snapshot, MarketSnapshot)
-    }
 
 
 def _basis_of_the_pair(
