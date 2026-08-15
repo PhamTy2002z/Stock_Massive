@@ -118,6 +118,13 @@ class FieldKind(str, Enum):
     # threshold frozen from the null rather than calibrated at runtime.
     SIGNAL = "signal"
 
+    # A deterministic transform admitted so a caller and a model can share the
+    # market's vocabulary without turning its conventional cutoffs into a
+    # statistical claim. It has neither a threshold nor sampling uncertainty:
+    # the number is exact for the window, while its predictive value is not
+    # asserted at all.
+    VOCABULARY = "vocabulary"
+
 
 class Claim(str, Enum):
     """What this field asserts about the future, which in v1 is nothing."""
@@ -164,6 +171,7 @@ class Unit(str, Enum):
     SESSIONS = "sessions"
     VND = "vnd"
     PERCENTILE = "percentile"
+    INDEX_0_100 = "index_0_100"
 
 
 class ThresholdOrigin(str, Enum):
