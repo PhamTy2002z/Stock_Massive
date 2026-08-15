@@ -11,20 +11,20 @@ own Watchlist row, so there is no request shape that could read or move somebody
 else's.
 """
 
-import asyncio
 from datetime import date
-from typing import Annotated, Callable, TypeVar
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
 
 from src.auth.dependencies import CurrentUser
-from src.core.database import get_db, get_sync_db, in_sync_session
+from src.core.database import get_db, in_sync_session, in_sync_write
 from src.stocks.shared import StockServiceError, validate_symbol
 
 from .analysis_reads import analysis_for, recent_analyses
 from .analysis_run import AnalysisRefusal, request_retry
+from .models import Analysis
+from .naming import session_label
 from .schemas import (
     AnalysisDetailResponse,
     AnalysisHistoryResponse,
@@ -37,23 +37,6 @@ from .watchlist import mark_analysis_seen
 router = APIRouter(prefix="/analyses", tags=["analyses"])
 
 Db = Annotated[AsyncSession, Depends(get_db)]
-
-_T = TypeVar("_T")
-
-
-async def _in_sync_write(work: Callable[[Session], _T]) -> _T:
-    """A synchronous write from an async handler, off the event loop.
-
-    Not ``in_sync_session``, which is read-only by contract, and not the
-    request's async session, which belongs to a different driver. Same seam as
-    the on-demand lane (`src/alpha/on_demand.py`) and documented there in full.
-    """
-
-    def run() -> _T:
-        with get_sync_db() as session:
-            return work(session)
-
-    return await asyncio.to_thread(run)
 
 
 def _symbol(raw: str) -> str:
@@ -73,14 +56,28 @@ def _symbol(raw: str) -> str:
         )
 
 
-def _summary(row) -> AnalysisSummaryResponse:
-    return AnalysisSummaryResponse(
-        symbol=row.symbol,
-        trading_day=row.trading_day,
-        verdict=row.verdict,
-        schema_version=row.schema_version,
-        created_at=row.created_at,
+def _no_analysis(symbol: str, trading_day: date) -> AnalysisRefusal:
+    """The one refusal a pair with no Analysis gets, wherever it is asked for.
+
+    Reading one and opening one refuse identically on purpose: they are the same
+    fact about the store, and two sentences for it would be two things the
+    interface has to recognise.
+    """
+    return AnalysisRefusal(
+        reason="analysis_not_found",
+        message=f"Chưa có Analysis cho mã {symbol} ở {session_label(trading_day)}.",
+        status_code=404,
     )
+
+
+async def _published(symbol: str, trading_day: date) -> Analysis:
+    """The Analysis for this pair, or the refusal that says there is none."""
+    row = await in_sync_session(
+        lambda session: analysis_for(session, symbol, trading_day)
+    )
+    if row is None:
+        raise _no_analysis(symbol, trading_day)
+    return row
 
 
 @router.get("/{symbol}", response_model=AnalysisHistoryResponse)
@@ -95,7 +92,7 @@ async def get_analysis_history(symbol: str, current_user: CurrentUser) -> Analys
     history = await in_sync_session(lambda session: recent_analyses(session, normalized))
     return AnalysisHistoryResponse(
         symbol=history.symbol,
-        entries=[_summary(row) for row in history.entries],
+        entries=[AnalysisSummaryResponse.of(row) for row in history.entries],
         depth=history.depth,
         older_exist=history.older_exist,
     )
@@ -113,19 +110,7 @@ async def get_analysis(
     briefing with nothing in it, which reads as a broken Analysis rather than as
     a session that was never analysed.
     """
-    normalized = _symbol(symbol)
-    row = await in_sync_session(
-        lambda session: analysis_for(session, normalized, trading_day)
-    )
-    if row is None:
-        raise AnalysisRefusal(
-            reason="analysis_not_found",
-            message=(
-                f"Chưa có Analysis cho mã {normalized} ở phiên "
-                f"{trading_day.strftime('%d/%m/%Y')}."
-            ),
-            status_code=404,
-        )
+    row = await _published(_symbol(symbol), trading_day)
     return AnalysisDetailResponse(
         symbol=row.symbol,
         trading_day=row.trading_day,
@@ -153,18 +138,7 @@ async def post_analysis_opened(
     would mark a symbol read on the strength of a URL.
     """
     normalized = _symbol(symbol)
-    row = await in_sync_session(
-        lambda session: analysis_for(session, normalized, trading_day)
-    )
-    if row is None:
-        raise AnalysisRefusal(
-            reason="analysis_not_found",
-            message=(
-                f"Chưa có Analysis cho mã {normalized} ở phiên "
-                f"{trading_day.strftime('%d/%m/%Y')}."
-            ),
-            status_code=404,
-        )
+    await _published(normalized, trading_day)
 
     seen = await mark_analysis_seen(db, current_user.id, normalized, trading_day)
     return AnalysisOpenedResponse(symbol=normalized, last_seen_analysis_date=seen)
@@ -184,7 +158,7 @@ async def post_analysis_retry(
     pair and the artifact is shared, so two people retrying is one run.
     """
     normalized = _symbol(symbol)
-    outcome = await _in_sync_write(
+    outcome = await in_sync_write(
         lambda session: request_retry(session, current_user.id, normalized, trading_day)
     )
     return RetryResponse(

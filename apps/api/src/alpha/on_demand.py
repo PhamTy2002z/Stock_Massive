@@ -35,7 +35,6 @@ the pipeline milestone's, and a lane that produced inline would be a second
 place where an Analysis gets written.
 """
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import date
@@ -45,12 +44,13 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from src.core.database import get_sync_db
+from src.core.database import in_sync_write
 from src.stocks.shared import validate_symbol
 from src.stocks.trading_day import latest_trading_day
 
 from .analysis_run import RunOrigin, RunStatus, published_analysis, stored_run
 from .models import AnalysisRun
+from .naming import session_label
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ class OnDemandOutcome(str, Enum):
 
 
 @dataclass(frozen=True)
-class OnDemandRequest:
+class OnDemandResult:
     """What the lane did, and what the user has left.
 
     ``remaining`` is carried on every outcome, including the free ones, so the
@@ -94,11 +94,6 @@ class OnDemandRequest:
     remaining: int
     allowance: int = ON_DEMAND_ANALYSES_PER_DAY
     message: str | None = None
-
-
-def _session_label(trading_day: date) -> str:
-    """A session as the interface names it: dated, never "today"."""
-    return trading_day.strftime("%d/%m")
 
 
 def on_demand_analyses_used(session: Session, user_id: int, trading_day: date) -> int:
@@ -123,7 +118,7 @@ def request_on_demand_analysis(
     session: Session,
     user_id: int,
     symbol: str,
-) -> OnDemandRequest:
+) -> OnDemandResult:
     """Open the on-demand lane for one addition, and say what it did.
 
     Deliberately three parameters. The Trading Day is resolved here, from the
@@ -137,7 +132,7 @@ def request_on_demand_analysis(
     trading_day = latest_trading_day(session)
 
     if trading_day is None:
-        return OnDemandRequest(
+        return OnDemandResult(
             outcome=OnDemandOutcome.NO_SNAPSHOTTED_SESSION,
             trading_day=None,
             remaining=ON_DEMAND_ANALYSES_PER_DAY,
@@ -151,27 +146,27 @@ def request_on_demand_analysis(
     remaining = max(0, ON_DEMAND_ANALYSES_PER_DAY - used)
 
     if published_analysis(session, symbol, trading_day) is not None:
-        return OnDemandRequest(
+        return OnDemandResult(
             outcome=OnDemandOutcome.ALREADY_ANALYSED,
             trading_day=trading_day,
             remaining=remaining,
         )
 
     if stored_run(session, symbol, trading_day) is not None:
-        return OnDemandRequest(
+        return OnDemandResult(
             outcome=OnDemandOutcome.ALREADY_QUEUED,
             trading_day=trading_day,
             remaining=remaining,
         )
 
     if remaining == 0:
-        return OnDemandRequest(
+        return OnDemandResult(
             outcome=OnDemandOutcome.ALLOWANCE_EXHAUSTED,
             trading_day=trading_day,
             remaining=0,
             message=(
                 f"Bạn đã dùng hết {ON_DEMAND_ANALYSES_PER_DAY} lượt dựng Analysis "
-                f"theo yêu cầu cho phiên {_session_label(trading_day)}. Mã vẫn nằm "
+                f"theo yêu cầu cho {session_label(trading_day)}. Mã vẫn nằm "
                 "trên Watchlist và sẽ có Analysis trong đợt chạy đêm kế tiếp."
             ),
         )
@@ -198,31 +193,27 @@ def request_on_demand_analysis(
             symbol,
             trading_day,
         )
-        return OnDemandRequest(
+        return OnDemandResult(
             outcome=OnDemandOutcome.ALREADY_QUEUED,
             trading_day=trading_day,
             remaining=remaining,
         )
 
-    return OnDemandRequest(
+    return OnDemandResult(
         outcome=OnDemandOutcome.CREATED,
         trading_day=trading_day,
         remaining=remaining - 1,
     )
 
 
-async def open_on_demand_lane(user_id: int, symbol: str) -> OnDemandRequest:
+async def open_on_demand_lane(user_id: int, symbol: str) -> OnDemandResult:
     """Reach the lane from an async request handler.
 
-    Its own synchronous session in a thread rather than ``in_sync_session``,
-    which is read-only by contract: this writes, and it commits. It is also
-    deliberately not the request's async session — the addition has to stand on
-    its own whatever the lane decides, so the seat is committed before this runs
-    and a failure here leaves a Watchlist entry rather than rolling one back.
+    Through `in_sync_write` because this writes and commits, and the addition it
+    follows has to stand whatever the lane decides — the seat is committed
+    before this runs, so a failure here leaves a Watchlist entry rather than
+    rolling one back.
     """
-
-    def run() -> OnDemandRequest:
-        with get_sync_db() as session:
-            return request_on_demand_analysis(session, user_id, symbol)
-
-    return await asyncio.to_thread(run)
+    return await in_sync_write(
+        lambda session: request_on_demand_analysis(session, user_id, symbol)
+    )

@@ -1,6 +1,7 @@
 """Wire shapes for Alpha Desk."""
 
 from datetime import date, datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -93,6 +94,22 @@ class AnalysisSummaryResponse(BaseModel):
     schema_version: int
     created_at: datetime
 
+    @classmethod
+    def of(cls, row: Any) -> "AnalysisSummaryResponse":
+        """Map anything shaped like an Analysis onto the wire.
+
+        Three routes serve this shape from two different sources — the ORM row
+        and the summary the rail reads — and each had written the same five
+        assignments out. One of them is where a field gets forgotten.
+        """
+        return cls(
+            symbol=row.symbol,
+            trading_day=row.trading_day,
+            verdict=row.verdict,
+            schema_version=row.schema_version,
+            created_at=row.created_at,
+        )
+
 
 class AnalysisDetailResponse(AnalysisSummaryResponse):
     """One Analysis in full. The payload is the artifact the user reads."""
@@ -159,7 +176,6 @@ class RailResponse(BaseModel):
     # The session the rail is showing, named by date. Null only on a store that
     # holds no closed session at all; it is never substituted with today.
     trading_day: date | None
-    history_depth: int = HISTORY_DEPTH_SESSIONS
     entries: list[RailEntryResponse]
 
 

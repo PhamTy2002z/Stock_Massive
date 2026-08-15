@@ -242,16 +242,26 @@ def _state_of(
     if run.status == RunStatus.PRODUCING.value:
         return AnalysisState.PRODUCING, None
 
-    if run.status == RunStatus.FAILED.value:
-        attempts = run.attempts or 0
-        return AnalysisState.FAILED, RunFailure(
+    attempts = run.attempts or 0
+    failure = (
+        RunFailure(
             code=run.error_code,
             message=run.error_message,
             attempts=attempts,
             exhausted=attempts >= max_attempts,
         )
+        if run.error_code is not None
+        else None
+    )
 
-    return AnalysisState.PENDING, None
+    if run.status == RunStatus.FAILED.value:
+        return AnalysisState.FAILED, failure
+
+    # A queued run that has already failed once keeps its reason. The state is
+    # `pending` — it really is waiting its turn — but a symbol waiting with no
+    # account of why it is waiting is what a retry would otherwise leave behind
+    # for as long as the queue takes to reach it.
+    return AnalysisState.PENDING, failure
 
 
 @dataclass(frozen=True)
@@ -313,9 +323,16 @@ class RailReading:
 def read_rail(session: Session, symbols: tuple[str, ...]) -> RailReading:
     """Resolve the session and read every watched symbol against it, together.
 
-    One function so the session and the states cannot come from two moments. A
-    rail labelled with one Trading Day while its cells were computed against
-    another is wrong in the one place the user checks first.
+    One function, and one read, so the Trading Day and the states computed
+    against it cannot come from two moments. A rail labelled with one session
+    while its cells were computed against another is wrong in the one place the
+    user checks first.
+
+    Which symbols to read is the caller's question, answered before this and
+    passed in: the Watchlist is one user's membership list, and the Universe
+    rule that turns a row `unsupported` belongs to the module that owns it. A
+    symbol added between the two reads is simply not in ``symbols``, so it
+    cannot appear here with a state nobody computed.
     """
     trading_day = latest_trading_day(session)
     return RailReading(
