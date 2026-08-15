@@ -156,7 +156,12 @@ class SpendAdmission:
         called_at = self._clock()
         prices = self._config.prices_for(candidate.workload)
         reserved = _micro_usd(
-            prices,
+            TokenPrices(
+                input=prices.worst_case_input,
+                cached_input=prices.cached_input,
+                cache_write=prices.cache_write,
+                output=prices.output,
+            ),
             input_tokens=candidate.input_tokens,
             output_tokens=candidate.output_tokens,
         )
@@ -164,27 +169,38 @@ class SpendAdmission:
         session = self._session_factory()
         try:
             with session.begin():
-                month_start, month_reset = _ict_month(called_at)
-                day_start, day_reset = _ict_day(called_at)
-                scopes = [
-                    f"lane:{candidate.lane.value}:{month_start.isoformat()}",
-                    f"owner:{candidate.owner.type.value}:{candidate.owner.id}",
-                ]
-                if candidate.owner.user_id is not None:
-                    scopes.extend(
-                        [
-                            f"user-day:{candidate.owner.user_id}:{day_start.isoformat()}",
-                            f"user-rolling:{candidate.owner.user_id}",
-                            f"turn-active-user:{candidate.owner.user_id}",
-                            "turn-active-system",
-                        ]
-                    )
-                if candidate.owner.type is OwnerType.CAPABILITY_PROBE:
-                    scopes.append(f"probe-day:{day_start.isoformat()}")
-                _lock_scopes(
-                    session,
-                    scopes,
-                )
+                while True:
+                    month_start, month_reset = _ict_month(called_at)
+                    day_start, day_reset = _ict_day(called_at)
+                    scopes = [
+                        f"lane:{candidate.lane.value}:{month_start.isoformat()}",
+                        f"owner:{candidate.owner.type.value}:{candidate.owner.id}",
+                    ]
+                    if candidate.owner.user_id is not None:
+                        scopes.extend(
+                            [
+                                f"user-day:{candidate.owner.user_id}:{day_start.isoformat()}",
+                                f"user-rolling:{candidate.owner.user_id}",
+                                f"turn-active-user:{candidate.owner.user_id}",
+                                "turn-active-system",
+                            ]
+                        )
+                    if candidate.owner.type is OwnerType.CAPABILITY_PROBE:
+                        scopes.append(f"probe-day:{day_start.isoformat()}")
+                    _lock_scopes(session, scopes)
+
+                    # The timestamp is sampled after any lock wait, immediately
+                    # before the row is written and committed for dispatch. If
+                    # that wait crossed an ICT boundary, lock the new scopes as
+                    # well and evaluate only against the real call period.
+                    dispatch_at = self._clock()
+                    if (
+                        _ict_month(dispatch_at)[0] == month_start
+                        and _ict_day(dispatch_at)[0] == day_start
+                    ):
+                        called_at = dispatch_at
+                        break
+                    called_at = dispatch_at
                 lane_limit = _lane_limit_micro_usd(self._config, candidate.lane)
                 lane_spent = _charged_cost(
                     session,
@@ -370,15 +386,15 @@ class SpendAdmission:
             LlmCallUsage.provider_called_at <= called_at,
         )
         if rolling + reserved > USER_ROLLING_30D_MICRO_USD:
-            oldest = session.scalar(
-                select(func.min(LlmCallUsage.provider_called_at)).where(
-                    LlmCallUsage.user_id == user_id,
-                    LlmCallUsage.owner_type == OwnerType.TURN_REQUEST_MESSAGE.value,
-                    LlmCallUsage.provider_called_at > rolling_start,
-                    LlmCallUsage.provider_called_at <= called_at,
-                )
+            reset_at = _rolling_reset_at(
+                session,
+                user_id=user_id,
+                rolling_start=rolling_start,
+                called_at=called_at,
+                amount_to_release=(
+                    rolling + reserved - USER_ROLLING_30D_MICRO_USD
+                ),
             )
-            reset_at = _aware(oldest) + timedelta(days=30) if oldest else None
             raise BudgetRefusal(
                 "user_spend_rolling_30d",
                 "Your rolling generation allowance has been exhausted.",
@@ -461,19 +477,13 @@ def _check_candidate_shape(candidate: SpendRequest) -> None:
 
 
 def _charged_cost(session: Session, *conditions: object) -> int:
-    charged = case(
-        (LlmCallUsage.status == "reconciled", LlmCallUsage.actual_micro_usd),
-        else_=LlmCallUsage.reserved_micro_usd,
-    )
+    charged = _charged_cost_expression()
     value = session.scalar(select(func.coalesce(func.sum(charged), 0)).where(*conditions))
     return int(value or 0)
 
 
 def _owner_totals(session: Session, owner: CallOwner) -> tuple[int, int, int]:
-    charged_cost = case(
-        (LlmCallUsage.status == "reconciled", LlmCallUsage.actual_micro_usd),
-        else_=LlmCallUsage.reserved_micro_usd,
-    )
+    charged_cost = _charged_cost_expression()
     charged_input = case(
         (
             LlmCallUsage.status == "reconciled",
@@ -501,6 +511,42 @@ def _owner_totals(session: Session, owner: CallOwner) -> tuple[int, int, int]:
         )
     ).one()
     return int(row[0] or 0), int(row[1] or 0), int(row[2] or 0)
+
+
+def _charged_cost_expression():
+    return case(
+        (LlmCallUsage.status == "reconciled", LlmCallUsage.actual_micro_usd),
+        else_=LlmCallUsage.reserved_micro_usd,
+    )
+
+
+def _rolling_reset_at(
+    session: Session,
+    *,
+    user_id: int,
+    rolling_start: datetime,
+    called_at: datetime,
+    amount_to_release: int,
+) -> datetime | None:
+    rows = session.execute(
+        select(
+            LlmCallUsage.provider_called_at,
+            _charged_cost_expression(),
+        )
+        .where(
+            LlmCallUsage.user_id == user_id,
+            LlmCallUsage.owner_type == OwnerType.TURN_REQUEST_MESSAGE.value,
+            LlmCallUsage.provider_called_at > rolling_start,
+            LlmCallUsage.provider_called_at <= called_at,
+        )
+        .order_by(LlmCallUsage.provider_called_at, LlmCallUsage.id)
+    ).all()
+    released = 0
+    for provider_called_at, charged in rows:
+        released += int(charged or 0)
+        if released >= amount_to_release:
+            return _aware(provider_called_at) + timedelta(days=30)
+    return None
 
 
 def _lock_scopes(session: Session, scopes: list[str]) -> None:
