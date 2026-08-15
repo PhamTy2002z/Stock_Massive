@@ -50,6 +50,7 @@ from .fields import (
 )
 from .indicators import (
     BOLLINGER_MIN_SESSIONS,
+    INDICATOR_WARMUP_SESSIONS,
     MACD_MIN_SESSIONS,
     RSI_MIN_SESSIONS,
     bollinger_percent_b_reading,
@@ -433,8 +434,9 @@ RSI = SignalField(
     unit=Unit.INDEX_0_100,
     sign=Sign.NON_NEGATIVE,
     interpretation=(
-        "Wilder's 14-session relative-strength index on the prepared closing "
-        f"prices, from 0 to 100. {_NO_INDICATOR_EDGE}"
+        "Wilder's smoothed 14-session relative-strength index on the prepared "
+        "closing prices, from 0 to 100, after "
+        f"{INDICATOR_WARMUP_SESSIONS} sessions of warm-up. {_NO_INDICATOR_EDGE}"
     ),
     kind=FieldKind.VOCABULARY,
     claim=Claim.DESCRIPTIVE,
@@ -451,7 +453,8 @@ MACD = SignalField(
     sign=Sign.SIGNED,
     interpretation=(
         "The 12-session exponential moving average of the prepared closing "
-        "prices minus the 26-session exponential moving average, in VND. "
+        "prices minus the 26-session exponential moving average, in VND, after "
+        f"{INDICATOR_WARMUP_SESSIONS} sessions of warm-up. "
         f"{_NO_INDICATOR_EDGE}"
     ),
     kind=FieldKind.VOCABULARY,

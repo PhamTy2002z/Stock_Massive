@@ -3,44 +3,34 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
 
 from .bars import BarFrame
 from .fields import FieldReading
 from .issues import SignalIssue
 
 RSI_PERIOD = 14
-RSI_MIN_SESSIONS = RSI_PERIOD + 1
 MACD_FAST_PERIOD = 12
 MACD_SLOW_PERIOD = 26
-MACD_MIN_SESSIONS = MACD_SLOW_PERIOD
+# Wilder smoothing and an EMA are recursive: loading only the named period
+# would seed them anew on every call. One hundred sessions leaves less than one
+# percent of either seed in the answer while remaining inside the warm-up the
+# signal store already maintains.
+INDICATOR_WARMUP_SESSIONS = 100
+RSI_MIN_SESSIONS = INDICATOR_WARMUP_SESSIONS
+MACD_MIN_SESSIONS = INDICATOR_WARMUP_SESSIONS
 BOLLINGER_PERIOD = 20
 BOLLINGER_MIN_SESSIONS = BOLLINGER_PERIOD
 BOLLINGER_STANDARD_DEVIATIONS = 2.0
-KELLY_EDGE_SENSITIVITY = 0.50
 
 
-@dataclass(frozen=True)
-class FractionalKellySizing:
-    """Long-only capital fractions from inputs supplied by the caller.
-
-    The full-Kelly number is deliberately named only as a ceiling. The two
-    usable answers stop at half Kelly, and the sensitivity range repeats the
-    half-Kelly arithmetic after moving the dominant input — the mean edge — by
-    plus or minus fifty percent.
-    """
-
-    edge_input: float
-    variance_input: float
-    quarter_kelly: float
-    half_kelly: float
-    full_kelly_ceiling: float
-    input_sensitivity_range: tuple[float, float]
+def _closing_prices(frame: BarFrame, min_sessions: int) -> list[float] | None:
+    closes = [bar.close for bar in frame.bars if bar.close is not None]
+    return closes if len(closes) >= min_sessions else None
 
 
 def rsi_reading(frame: BarFrame) -> FieldReading:
-    closes = [bar.close for bar in frame.bars if bar.close is not None]
-    if len(closes) < RSI_MIN_SESSIONS:
+    closes = _closing_prices(frame, RSI_PERIOD + 1)
+    if closes is None:
         return FieldReading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
 
     changes = [current - previous for previous, current in zip(closes, closes[1:])]
@@ -73,8 +63,8 @@ def _ema(values: list[float], period: int) -> float:
 
 
 def macd_reading(frame: BarFrame) -> FieldReading:
-    closes = [bar.close for bar in frame.bars if bar.close is not None]
-    if len(closes) < MACD_MIN_SESSIONS:
+    closes = _closing_prices(frame, MACD_SLOW_PERIOD)
+    if closes is None:
         return FieldReading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
     value = _ema(closes, MACD_FAST_PERIOD) - _ema(closes, MACD_SLOW_PERIOD)
     return FieldReading(
@@ -88,8 +78,8 @@ def macd_reading(frame: BarFrame) -> FieldReading:
 
 
 def bollinger_percent_b_reading(frame: BarFrame) -> FieldReading:
-    closes = [bar.close for bar in frame.bars if bar.close is not None]
-    if len(closes) < BOLLINGER_MIN_SESSIONS:
+    closes = _closing_prices(frame, BOLLINGER_MIN_SESSIONS)
+    if closes is None:
         return FieldReading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
     window = closes[-BOLLINGER_PERIOD:]
     mean = sum(window) / BOLLINGER_PERIOD
@@ -111,27 +101,4 @@ def bollinger_percent_b_reading(frame: BarFrame) -> FieldReading:
             "standard_deviations": BOLLINGER_STANDARD_DEVIATIONS,
             "sessions": len(window),
         },
-    )
-
-
-def fractional_kelly_sizing(*, edge: float, variance: float) -> FractionalKellySizing:
-    """Size from caller-owned estimates; this function has no market-data input."""
-    if not math.isfinite(edge) or edge < 0.0:
-        raise ValueError("edge must be a finite non-negative caller estimate")
-    if not math.isfinite(variance) or variance <= 0.0:
-        raise ValueError("variance must be a finite positive caller estimate")
-    full_kelly_ceiling = edge / variance
-    quarter_kelly = 0.25 * full_kelly_ceiling
-    half_kelly = 0.50 * full_kelly_ceiling
-    sensitivity = (
-        0.50 * (edge * (1.0 - KELLY_EDGE_SENSITIVITY) / variance),
-        0.50 * (edge * (1.0 + KELLY_EDGE_SENSITIVITY) / variance),
-    )
-    return FractionalKellySizing(
-        edge_input=edge,
-        variance_input=variance,
-        quarter_kelly=quarter_kelly,
-        half_kelly=half_kelly,
-        full_kelly_ceiling=full_kelly_ceiling,
-        input_sensitivity_range=sensitivity,
     )
