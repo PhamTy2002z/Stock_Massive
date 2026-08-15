@@ -21,14 +21,12 @@ from src.stocks.providers.contracts import (
 )
 from src.stocks.providers.normalize import VN_TZ
 from src.stocks.providers.vnstock_provider import (
-    RequestPacer,
     VnstockCorporateActionProvider,
     VnstockFundamentalProvider,
     VnstockMarketHistoryProvider,
     VnstockProviderError,
     VnstockReadFailed,
     VnstockReferenceProvider,
-    quota_per_minute,
 )
 from src.stocks.shared import StockServiceError
 
@@ -111,7 +109,6 @@ def hpg_history() -> pd.DataFrame:
 def history_provider(quote: FakeQuote) -> VnstockMarketHistoryProvider:
     return VnstockMarketHistoryProvider(
         quote_factory=lambda symbol, source: quote,
-        pacer=RequestPacer(quota_per_minute(""), sleep=lambda seconds: None),
         now=lambda: NOW,
     )
 
@@ -232,7 +229,6 @@ class TestMarketHistoryNormalization:
 def reference_provider(trading: FakeTrading) -> VnstockReferenceProvider:
     return VnstockReferenceProvider(
         trading_factory=lambda source: trading,
-        pacer=RequestPacer(quota_per_minute(""), sleep=lambda seconds: None),
         now=lambda: NOW,
     )
 
@@ -511,7 +507,6 @@ def fundamental_provider(by_symbol: dict) -> VnstockFundamentalProvider:
 
     return VnstockFundamentalProvider(
         finance_factory=factory,
-        pacer=RequestPacer(quota_per_minute(""), sleep=lambda seconds: None),
         now=lambda: NOW,
     )
 
@@ -631,39 +626,6 @@ class TestFundamentalNormalization:
             (snapshot,) = provider.fetch_fundamentals(["HPG"])
 
             assert snapshot.period_end == expected
-
-
-class TestFundamentalQuota:
-    def test_each_upstream_read_is_paced_to_the_configured_allowance(self):
-        """Two statements per symbol, each spaced by the quota interval.
-
-        Without an API key vnstock allows 20 requests a minute, so a Universe
-        read has to spend three seconds between calls rather than discovering
-        the limit by being cut off.
-        """
-        slept: list[float] = []
-        elapsed = [0.0]
-
-        def sleep(seconds: float) -> None:
-            slept.append(seconds)
-            elapsed[0] += seconds
-
-        provider = VnstockFundamentalProvider(
-            finance_factory=lambda symbol, source: FakeFinance(
-                HPG_INCOME, HPG_BALANCE
-            ),
-            pacer=RequestPacer(
-                quota_per_minute(""),
-                clock=lambda: elapsed[0],
-                sleep=sleep,
-            ),
-            now=lambda: NOW,
-        )
-
-        provider.fetch_fundamentals(["HPG", "FPT"])
-
-        # Four reads, the first free and the rest each waiting a full interval.
-        assert slept == pytest.approx([3.0, 3.0, 3.0])
 
 
 class TestFundamentalIsolation:
@@ -818,7 +780,6 @@ def acb_events() -> pd.DataFrame:
 def action_provider(company: FakeCompany) -> VnstockCorporateActionProvider:
     return VnstockCorporateActionProvider(
         company_factory=lambda symbol, source: company,
-        pacer=RequestPacer(quota_per_minute(""), sleep=lambda seconds: None),
         now=lambda: NOW,
     )
 
@@ -950,45 +911,21 @@ class TestSourceOwnership:
         assert VnstockFundamentalProvider.source is main_source(Capability.FUNDAMENTAL)
 
 
-class TestQuota:
-    def test_an_api_key_raises_the_allowance(self):
-        assert quota_per_minute("") == 20
-        assert quota_per_minute("a-key") == 60
+class TestTheAllowanceIsNotThisModuleS:
+    """The pace belongs to the account, so it is not kept here any more.
 
-    def test_the_allowance_is_read_from_the_variable_vnstock_itself_reads(
-        self, monkeypatch
-    ):
-        """A key vnstock cannot see must not raise the pace this side keeps.
+    What replaced it is one Redis arbiter over every live vnstock path
+    (``src/core/quota.py``, ``docs/adr/0014``), and its own tests live in
+    ``tests/test_vnstock_quota.py``. This class stays as the pointer, because
+    the obvious place to look for the pacing is the module that used to do it.
+    """
 
-        vnstock decides the tier from the environment. Reading the key from
-        anywhere else — a settings file it never loads, say — would pace at 60
-        against an account still on 20, and it answers being cut off by calling
-        sys.exit().
-        """
+    def test_no_adapter_carries_an_allowance_of_its_own(self):
         import src.stocks.providers.vnstock_provider as module
 
-        monkeypatch.setattr(module, "_process_pacer", None)
-        monkeypatch.delenv(module.API_KEY_ENV_VAR, raising=False)
-        assert module.process_pacer().min_interval == pytest.approx(3.0)
-
-        monkeypatch.setattr(module, "_process_pacer", None)
-        monkeypatch.setenv(module.API_KEY_ENV_VAR, "a-key")
-        assert module.process_pacer().min_interval == pytest.approx(1.0)
-
-    def test_both_adapters_default_to_one_shared_allowance(self, monkeypatch):
-        """The allowance belongs to the account, not to an adapter.
-
-        A cycle reading both capabilities with a pacer each would run at twice
-        the allowance and be cut off partway through.
-        """
-        import src.stocks.providers.vnstock_provider as module
-
-        monkeypatch.setattr(module, "_process_pacer", None)
-
-        reference = VnstockReferenceProvider()
-        fundamental = VnstockFundamentalProvider()
-
-        assert reference._pacer is fundamental._pacer
+        assert not hasattr(module, "RequestPacer")
+        assert not hasattr(module, "process_pacer")
+        assert not hasattr(VnstockReferenceProvider(), "_pacer")
 
 
 class TestAgainstTheLiveProvider:
@@ -1040,45 +977,3 @@ class TestAgainstTheLiveProvider:
         # thousands of billions, so a billion-scaled layout would be tiny here.
         assert snapshot.trailing_12_month_net_income_vnd > 1e11
         assert snapshot.parent_equity_vnd > 1e13
-
-
-class TestRequestPacer:
-    def test_the_first_call_does_not_wait(self):
-        slept: list[float] = []
-        pacer = RequestPacer(20, clock=lambda: 0.0, sleep=slept.append)
-
-        pacer.wait()
-
-        assert slept == []
-
-    def test_a_second_immediate_call_waits_out_the_interval(self):
-        slept: list[float] = []
-        pacer = RequestPacer(20, clock=lambda: 0.0, sleep=slept.append)
-
-        pacer.wait()
-        pacer.wait()
-
-        assert slept == pytest.approx([3.0])
-
-    def test_a_call_after_the_interval_does_not_wait(self):
-        slept: list[float] = []
-        ticks = iter([0.0, 10.0, 10.0])
-        pacer = RequestPacer(20, clock=lambda: next(ticks), sleep=slept.append)
-
-        pacer.wait()
-        pacer.wait()
-
-        assert slept == []
-
-    def test_a_faster_allowance_waits_less(self):
-        slept: list[float] = []
-        pacer = RequestPacer(60, clock=lambda: 0.0, sleep=slept.append)
-
-        pacer.wait()
-        pacer.wait()
-
-        assert slept == pytest.approx([1.0])
-
-    def test_an_allowance_of_nothing_is_refused(self):
-        with pytest.raises(ValueError):
-            RequestPacer(0)

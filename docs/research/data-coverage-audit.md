@@ -153,3 +153,6 @@ first step, but there is no persistence, no market-wide news, and no sentiment a
 5. **Fundamental persistence is 4 fields/quarter, latest quarter only** — everything richer is a live quota-bound vnstock call, with VCI/KBS source inconsistency and an F-score capped at 6/9.
 6. **Suspected intraday-commit defect** — the scheduled 15:30 job's session never commits (`src/stocks/jobs.py:38` + `intraday_collector.py:141`), so its writes appear to be discarded.
 7. **Two uncoordinated vnstock throttles** (`vnstock_wrapper` retries vs `RequestPacer`) sharing one 20–60 req/min account quota.
+   *Resolved after this audit* (issue #63): one Redis arbiter in `src/core/quota.py` now owns
+   the account allowance for every live path, and `RequestPacer` is gone. The audit text above
+   is left as it was measured at `426c23b`.
