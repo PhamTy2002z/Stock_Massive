@@ -76,6 +76,9 @@ class RunOrigin(str, Enum):
     """
 
     NIGHTLY = "nightly"
+    # Created only by `src/alpha/on_demand.py`, which is also where the per-user
+    # allowance is counted from. A run stamped `on_demand` by any other path
+    # would be one nobody was charged for.
     ON_DEMAND = "on_demand"
     RETRY = "retry"
 
@@ -144,7 +147,13 @@ def published_analysis(
     ).scalar_one_or_none()
 
 
-def _stored_run(session: Session, symbol: str, trading_day: date) -> AnalysisRun | None:
+def stored_run(session: Session, symbol: str, trading_day: date) -> AnalysisRun | None:
+    """The run row for this pair, or None when nothing has asked for one yet.
+
+    Public because the on-demand lane needs the same question answered before it
+    decides whether an addition costs anything, and two modules asking it two
+    ways would be two definitions of "already queued".
+    """
     return session.execute(
         select(AnalysisRun).where(
             AnalysisRun.symbol == symbol,
@@ -164,7 +173,7 @@ def _run_for(
     One row per pair, for the reason ``AnalysisRun`` records: it is what makes
     two people retrying the same symbol one run.
     """
-    existing = _stored_run(session, symbol, trading_day)
+    existing = stored_run(session, symbol, trading_day)
     if existing is not None:
         return existing
 
@@ -182,7 +191,7 @@ def _run_for(
         # Another caller created it between the select and the insert. Theirs is
         # as good as ours: the row identifies the pair, not the requester.
         session.rollback()
-        created = _stored_run(session, symbol, trading_day)
+        created = stored_run(session, symbol, trading_day)
         if created is None:
             raise
         return created
