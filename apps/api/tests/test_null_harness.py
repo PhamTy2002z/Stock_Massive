@@ -172,19 +172,36 @@ class TestEverySignalFieldClearsTheCatalogCeiling:
             assert paths >= 1000, f"{name}'s {label} null ran {paths} paths"
 
     @pytest.mark.parametrize("name", _names())
-    def test_the_bootstrap_is_measured_and_not_only_the_gbm(self, name, measured):
-        """GBM alone is not the bar, and the two do not agree.
+    def test_all_three_nulls_are_measured_and_not_only_the_gbm(self, name, measured):
+        """GBM alone is not the bar, so all three run and all three are read.
 
         A detector silent on Brownian motion can still fire constantly on a real
         quiet series, because GBM has neither fat tails nor serial dependence.
-        This asserts the second null is actually exercised — that it ran, and
-        that it is the harder of the two rather than a formality.
+        Which of the three ends up hardest is a property of the statistic rather
+        than a law — see the field-specific test below — so what is asserted here
+        is only that none of them was skipped.
         """
-        gbm, _ = measured[name]["gbm"]
-        bootstrap, _ = measured[name]["block_bootstrap"]
+        assert set(measured[name]) == {"gbm", "gbm_truncated", "block_bootstrap"}
+        for label, (rate, paths) in measured[name].items():
+            assert 0.0 <= rate <= 1.0, f"{name}'s {label} null returned {rate}"
+            assert paths > 0
 
-        assert bootstrap > 0.0
-        assert bootstrap >= gbm
+    def test_which_null_is_hardest_depends_on_the_statistic(self, measured):
+        """And the difference is the argument for running more than one.
+
+        The volatility-regime z is a location-scale reading of a quantity with a
+        power-law tail, so the bootstrap — the only null carrying fat tails —
+        demands far more of it than Brownian motion does. The drawdown ratio is
+        already divided by the volatility those tails inflate, so it barely
+        notices them and the truncated GBM is its hardest null instead. A harness
+        that ran one null would have calibrated one of these two wrongly, and
+        there is no way to know in advance which.
+        """
+        regime = measured[VOLATILITY_REGIME_Z.name]
+        drawdown = measured["drawdown_stats.mdd_over_expected"]
+
+        assert regime["block_bootstrap"][0] > regime["gbm"][0]
+        assert drawdown["block_bootstrap"][0] < drawdown["gbm_truncated"][0]
 
     @pytest.mark.parametrize("name", _names())
     def test_the_registry_does_not_understate_what_was_measured(self, name, measured):
