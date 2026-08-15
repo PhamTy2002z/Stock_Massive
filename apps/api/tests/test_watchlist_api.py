@@ -67,15 +67,23 @@ def alpha_schema():
 def declared_universe(monkeypatch):
     """Declare a Universe the way an operator does, through the environment.
 
+    Yields the declaration itself, so a test can trim the Universe mid-flight —
+    which is one of the two ways a watched symbol becomes `unsupported`, and the
+    only one an operator can cause on purpose.
+
     The settings are cached for the life of the process and the cohort half is
-    memoized per version, so both are cleared on the way in and on the way out;
-    leaving a test's Universe behind would silently reconfigure every test after
-    it.
+    memoized per version, so both are cleared on every declaration and again on
+    the way out; leaving a test's Universe behind would silently reconfigure
+    every test after it.
     """
-    monkeypatch.setenv("UNIVERSE_SYMBOLS", ",".join(DECLARED))
-    get_settings.cache_clear()
-    forget_cohort_cache()
-    yield
+
+    def declare(*symbols: str) -> None:
+        monkeypatch.setenv("UNIVERSE_SYMBOLS", ",".join(symbols))
+        get_settings.cache_clear()
+        forget_cohort_cache()
+
+    declare(*DECLARED)
+    yield declare
     monkeypatch.undo()
     get_settings.cache_clear()
     forget_cohort_cache()
@@ -155,6 +163,10 @@ async def auth(client, account):
 
 def _symbols(body: dict) -> list[str]:
     return [entry["symbol"] for entry in body["entries"]]
+
+
+def _state(body: dict, symbol: str) -> str:
+    return next(entry["state"] for entry in body["entries"] if entry["symbol"] == symbol)
 
 
 class TestListing:
@@ -357,3 +369,165 @@ class TestRemoving:
                 )
             ).scalars().all()
         assert rows == [before]
+
+
+class TestUnsupported:
+    """A watched symbol that has left the Universe.
+
+    One state covers both a real delisting and an operator trimming the
+    configured Universe, because v1 cannot tell them apart and does not pretend
+    to. The symbol stays, its history stays readable, nothing new is produced
+    for it, and it costs the user no slot.
+
+    Auto-removal was rejected and these tests are where that stays rejected: it
+    destroys a user's choice because of an operator's config change, turning a
+    reversible change into data loss.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_symbol_leaving_the_universe_stays_on_the_list(
+        self, client, auth, declared_universe
+    ):
+        await client.post(f"{API}/watchlist", json={"symbol": "AAA"}, headers=auth)
+
+        declared_universe(*[s for s in DECLARED if s != "AAA"])
+
+        body = (await client.get(f"{API}/watchlist", headers=auth)).json()
+        assert _symbols(body) == ["AAA"]
+        assert _state(body, "AAA") == "unsupported"
+
+    @pytest.mark.asyncio
+    async def test_its_stored_analyses_stay_readable(
+        self, client, auth, declared_universe, stored_analysis
+    ):
+        stored_analysis("AAA")
+        await client.post(f"{API}/watchlist", json={"symbol": "AAA"}, headers=auth)
+
+        declared_universe(*[s for s in DECLARED if s != "AAA"])
+        await client.get(f"{API}/watchlist", headers=auth)
+
+        with get_sync_db() as session:
+            stored = session.execute(
+                select(Analysis).where(
+                    Analysis.symbol == "AAA", Analysis.trading_day == TRADING_DAY
+                )
+            ).scalar_one()
+        assert stored.verdict == "hold"
+
+    @pytest.mark.asyncio
+    async def test_nothing_removes_it_automatically(
+        self, client, auth, declared_universe
+    ):
+        """Reading the rail is not an opportunity to tidy up. A dozen polls must
+        leave the row exactly where the user put it."""
+        await client.post(f"{API}/watchlist", json={"symbol": "AAA"}, headers=auth)
+        declared_universe(*[s for s in DECLARED if s != "AAA"])
+
+        for _ in range(12):
+            await client.get(f"{API}/watchlist", headers=auth)
+
+        with get_sync_db() as session:
+            assert session.execute(
+                select(WatchlistEntry).where(WatchlistEntry.symbol == "AAA")
+            ).scalar_one() is not None
+
+    @pytest.mark.asyncio
+    async def test_it_can_still_be_removed_deliberately(
+        self, client, auth, declared_universe
+    ):
+        """The remove button is the whole point of keeping the row: the user
+        clears it, not the system."""
+        await client.post(f"{API}/watchlist", json={"symbol": "AAA"}, headers=auth)
+        declared_universe(*[s for s in DECLARED if s != "AAA"])
+
+        response = await client.delete(f"{API}/watchlist/AAA", headers=auth)
+
+        assert response.status_code == 200, response.text
+        assert response.json()["entries"] == []
+
+    @pytest.mark.asyncio
+    async def test_it_does_not_consume_a_slot(self, client, auth, declared_universe):
+        """The cap counts active entries only, so trimming the Universe hands
+        the user back a slot they did not ask to lose."""
+        for symbol in DECLARED[:WATCHLIST_MAX_SYMBOLS]:
+            await client.post(f"{API}/watchlist", json={"symbol": symbol}, headers=auth)
+
+        declared_universe(*[s for s in DECLARED if s != "AAA"])
+
+        body = (await client.get(f"{API}/watchlist", headers=auth)).json()
+        assert body["count"] == WATCHLIST_MAX_SYMBOLS - 1
+        assert len(body["entries"]) == WATCHLIST_MAX_SYMBOLS
+
+        added = await client.post(
+            f"{API}/watchlist",
+            json={"symbol": DECLARED[WATCHLIST_MAX_SYMBOLS]},
+            headers=auth,
+        )
+        assert added.status_code == 201, added.text
+        assert added.json()["count"] == WATCHLIST_MAX_SYMBOLS
+
+    @pytest.mark.asyncio
+    async def test_a_symbol_returning_to_the_universe_revives_by_itself(
+        self, client, auth, declared_universe
+    ):
+        await client.post(f"{API}/watchlist", json={"symbol": "AAA"}, headers=auth)
+        declared_universe(*[s for s in DECLARED if s != "AAA"])
+        assert (
+            _state((await client.get(f"{API}/watchlist", headers=auth)).json(), "AAA")
+            == "unsupported"
+        )
+
+        declared_universe(*DECLARED)
+
+        body = (await client.get(f"{API}/watchlist", headers=auth)).json()
+        assert _state(body, "AAA") == "active"
+        assert body["count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_a_revival_over_the_cap_stands_and_evicts_nobody(
+        self, client, auth, declared_universe
+    ):
+        """The system never picks which symbol to evict. The overflow stands and
+        adding is what gets blocked, until the user trims."""
+        trimmed = [s for s in DECLARED if s != "AAA"]
+        await client.post(f"{API}/watchlist", json={"symbol": "AAA"}, headers=auth)
+        declared_universe(*trimmed)
+        for symbol in trimmed[:WATCHLIST_MAX_SYMBOLS]:
+            accepted = await client.post(
+                f"{API}/watchlist", json={"symbol": symbol}, headers=auth
+            )
+            assert accepted.status_code == 201, accepted.text
+
+        declared_universe(*DECLARED)
+
+        body = (await client.get(f"{API}/watchlist", headers=auth)).json()
+        assert body["count"] == WATCHLIST_MAX_SYMBOLS + 1
+        assert len(body["entries"]) == WATCHLIST_MAX_SYMBOLS + 1
+        assert all(entry["state"] == "active" for entry in body["entries"])
+
+        refused = await client.post(
+            f"{API}/watchlist",
+            json={"symbol": trimmed[WATCHLIST_MAX_SYMBOLS]},
+            headers=auth,
+        )
+        assert refused.status_code == 409, refused.text
+        assert refused.json()["detail"]["reason"] == "watchlist_full"
+
+        after = (await client.get(f"{API}/watchlist", headers=auth)).json()
+        assert len(after["entries"]) == WATCHLIST_MAX_SYMBOLS + 1
+
+    @pytest.mark.asyncio
+    async def test_an_unsupported_symbol_cannot_be_added_again(
+        self, client, auth, declared_universe
+    ):
+        """Adding is still Universe-restricted, so re-adding a symbol the
+        Universe has dropped is refused with the reason named — not silently
+        accepted into a state that produces nothing."""
+        declared_universe(*[s for s in DECLARED if s != "AAA"])
+
+        response = await client.post(
+            f"{API}/watchlist", json={"symbol": "AAA"}, headers=auth
+        )
+
+        assert response.status_code == 422, response.text
+        assert response.json()["detail"]["reason"] == "symbol_not_in_universe"
