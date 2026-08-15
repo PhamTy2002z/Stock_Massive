@@ -92,6 +92,26 @@ class ToolResultTooLarge(ValueError):
         self.size = size
 
 
+def refusal_reason(result: Mapping[str, Any]) -> str | None:
+    """The Structured Refusal a result carries, or ``None`` if it carries data.
+
+    Owned here because the envelope is this layer's, and a caller re-deriving
+    it gets one case wrong: ``search_news`` answers a successful call with
+    ``reason: None``, so the *presence* of the key is not a refusal. Anything
+    reading the shape from outside would count "nothing found" as evidence.
+    """
+
+    reason = result.get("reason")
+    if reason:
+        return str(reason)
+    error = result.get("error")
+    if isinstance(error, Mapping):
+        return str(error.get("code") or "tool_error")
+    if error:
+        return "tool_error"
+    return None
+
+
 def serialized_size(value: Mapping[str, Any]) -> int:
     """The exact compact UTF-8 size charged against the response budget."""
 
