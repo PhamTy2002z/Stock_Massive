@@ -19,7 +19,7 @@ one.
 """
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 
 from sqlalchemy import delete, select
@@ -73,11 +73,18 @@ def entry_state(symbol: str, universe: Universe) -> WatchlistState:
 
 @dataclass(frozen=True)
 class WatchlistItem:
-    """One symbol on the rail, as the interface needs it."""
+    """One symbol on the rail, as the interface needs it.
+
+    ``last_seen_analysis_date`` is carried rather than served as its own read:
+    the unread badge is per user per symbol, so it is one column of the row the
+    rail already has, and a second request for it could disagree with the list
+    it is describing.
+    """
 
     symbol: str
     state: WatchlistState
     added_at: datetime
+    last_seen_analysis_date: date | None = None
 
 
 @dataclass(frozen=True)
@@ -143,6 +150,7 @@ async def _view(
             symbol=row.symbol,
             state=entry_state(row.symbol, universe),
             added_at=row.added_at,
+            last_seen_analysis_date=row.last_seen_analysis_date,
         )
         for row in rows
     )
@@ -225,6 +233,53 @@ async def add_symbol(session: AsyncSession, user_id: int, symbol: str) -> Watchl
     session.add(WatchlistEntry(user_id=user_id, symbol=normalized))
     await session.flush()
     return await _view(session, user_id, universe)
+
+
+async def mark_analysis_seen(
+    session: AsyncSession,
+    user_id: int,
+    symbol: str,
+    trading_day: date,
+) -> date:
+    """Record that this user opened this symbol's Analysis for this session.
+
+    The one write path behind the unread badge, and it advances only for the
+    Analysis actually opened. Never on app open and never on a list request:
+    clearing ten badges because the user arrived would empty the indicator at
+    exactly the moment it has something to say.
+
+    It never moves backwards. Opening last Tuesday's Analysis after this
+    evening's is an ordinary thing to do, and it must not re-mark the newer one
+    unread — so the stored date is the later of the two rather than the one just
+    opened.
+
+    Scoped to the caller's own row, which is the whole of the ownership check:
+    ``last_seen_analysis_date`` is per user per symbol, so a user cannot read or
+    move anyone else's simply because there is no query here that could.
+    """
+    normalized = _normalized(symbol)
+    entry = (
+        await session.execute(
+            select(WatchlistEntry).where(
+                WatchlistEntry.user_id == user_id,
+                WatchlistEntry.symbol == normalized,
+            )
+        )
+    ).scalar_one_or_none() if normalized is not None else None
+
+    if entry is None:
+        raise WatchlistRefusal(
+            reason="symbol_not_watched",
+            message=f"Mã {symbol.strip().upper()} không có trong Watchlist của bạn.",
+            status_code=404,
+        )
+
+    seen = entry.last_seen_analysis_date
+    if seen is None or seen < trading_day:
+        entry.last_seen_analysis_date = trading_day
+        await session.flush()
+        return trading_day
+    return seen
 
 
 async def remove_symbol(session: AsyncSession, user_id: int, symbol: str) -> WatchlistView:

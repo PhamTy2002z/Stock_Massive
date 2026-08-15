@@ -356,24 +356,19 @@ def produce_analysis(
     )
 
 
-def retry_analysis(
-    session: Session,
-    user_id: int,
-    symbol: str,
-    trading_day: date,
-    producer: Producer,
-) -> RunOutcome:
-    """Retry on behalf of a user who watches the symbol.
-
-    Any watcher may, not only whoever added it first: production is idempotent
-    per ``(symbol, trading_day)`` and the artifact is shared system-wide, so two
-    people retrying is one run and there is nothing to ration by restricting it.
+def _standing_to_retry(session: Session, user_id: int, symbol: str) -> str:
+    """The normalized symbol, once this user is allowed to ask for another go.
 
     Two refusals, both about the request rather than the production. A user who
     does not watch the symbol has no standing to spend the system's budget on
     it, and a symbol that has left the Universe produces nothing at all — that
     is what `unsupported` means, and the retry button is the one path a user
     could otherwise use to argue with it.
+
+    Any watcher may retry, not only whoever added it first: production is
+    idempotent per ``(symbol, trading_day)`` and the artifact is shared
+    system-wide, so two people retrying is one run and there is nothing to
+    ration by restricting it.
     """
     normalized = validate_symbol(symbol)
 
@@ -394,12 +389,96 @@ def retry_analysis(
             status_code=422,
         )
 
+    return normalized
+
+
+def retry_analysis(
+    session: Session,
+    user_id: int,
+    symbol: str,
+    trading_day: date,
+    producer: Producer,
+) -> RunOutcome:
+    """Retry on behalf of a user who watches the symbol, producing inline."""
     return produce_analysis(
         session,
-        normalized,
+        _standing_to_retry(session, user_id, symbol),
         trading_day,
         producer,
         origin=RunOrigin.RETRY,
+    )
+
+
+def request_retry(session: Session, user_id: int, symbol: str, trading_day: date) -> RunOutcome:
+    """Ask for one more attempt at a failed pair, without producing here.
+
+    The path the retry button takes. It queues rather than generates, because
+    generation belongs to whoever drains the queue: an HTTP handler that
+    produced inline would be a second place an Analysis gets written, and it
+    would hold a request open for the length of an LLM call.
+
+    ``attempts`` is untouched. It counts production attempts, so the ceiling
+    bites on what was actually spent rather than on how many times a button was
+    pressed — and the ceiling is checked here so the refusal arrives before the
+    queue rather than after another wasted pass.
+
+    A pair that is already ready, already producing, or has never had a run is
+    returned as it stands. There is nothing to retry in any of those, and
+    minting a run for a symbol nobody has tried yet would jump the nightly
+    queue on a button that says "retry".
+    """
+    normalized = _standing_to_retry(session, user_id, symbol)
+
+    published = published_analysis(session, normalized, trading_day)
+    if published is not None:
+        return RunOutcome(
+            status=RunStatus.READY,
+            analysis=published,
+            produced=False,
+            attempts=0,
+        )
+
+    run = stored_run(session, normalized, trading_day)
+    if run is None:
+        raise AnalysisRefusal(
+            reason="nothing_to_retry",
+            message=(
+                f"Chưa có lượt dựng Analysis nào cho mã {normalized} ở phiên "
+                f"{trading_day.strftime('%d/%m')} để thử lại."
+            ),
+            status_code=404,
+        )
+
+    if run.status != RunStatus.FAILED.value:
+        return RunOutcome(
+            status=RunStatus(run.status),
+            analysis=None,
+            produced=False,
+            attempts=run.attempts,
+        )
+
+    if run.attempts >= MAX_ATTEMPTS_PER_SESSION:
+        return RunOutcome(
+            status=RunStatus.FAILED,
+            analysis=None,
+            produced=False,
+            attempts=run.attempts,
+            locked=True,
+            error_code=run.error_code,
+            error_message=run.error_message,
+        )
+
+    run.status = RunStatus.PENDING.value
+    run.finished_at = None
+    run.error_code = None
+    run.error_message = None
+    run.next_attempt_at = None
+    session.commit()
+    return RunOutcome(
+        status=RunStatus.PENDING,
+        analysis=None,
+        produced=False,
+        attempts=run.attempts,
     )
 
 
