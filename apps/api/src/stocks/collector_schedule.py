@@ -3,6 +3,19 @@
 Everything that decides whether a cycle runs at all lives here: the calendar,
 the one-at-a-time rule, and the on-demand override. The Collector itself knows
 none of it — it collects when asked.
+
+**The evening cadence is driven by data readiness rather than by a clock alone.**
+The full cycle runs after the close, and the two FiinQuant-owned capabilities
+re-run two or three times later in the evening *only while no new Trading Day
+has been established*. The store is what is asked, never the job record: a cycle
+that ran, succeeded and wrote nothing — because the Main Source had not appended
+the session yet — records a success while the Trading Day has not moved at all
+(``docs/adr/0005``, spec 0003 §11).
+
+**Establishing a Trading Day is what captures the nightly cohort.** Every
+completed collection asks for it, and the capture is idempotent, so a second
+cycle for the same day captures nothing and a restart mid-evening resumes for
+free (``src/alpha/nightly.py``).
 """
 
 from __future__ import annotations
@@ -10,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Literal
 
@@ -19,6 +32,7 @@ from src.core.trading_calendar import is_trading_day
 
 from .backfill import BackfillSummary, run_backfill
 from .collector import CollectionSummary, run_cycle
+from .providers.contracts import Capability
 from .corporate_action_collector import (
     CorporateActionSummary,
     run_corporate_action_load,
@@ -54,6 +68,17 @@ CORPORATE_ACTIONS_JOB_NAME = "Nạp sự kiện quyền của Universe"
 MARKET_INDEX_JOB_ID = "market-index"
 MARKET_INDEX_JOB_NAME = "Nạp chuỗi phiên của chỉ số"
 
+# What the evening's conditional re-runs read, and nothing else. These are the
+# two capabilities FiinQuant owns, and the only ones whose Main Source appends
+# the session that just closed late enough for a 16:15 cycle to miss it. The
+# reference and fundamental capabilities are vnstock's, arrive on their own
+# calendars, and re-reading them three more times an evening would spend a
+# different allowance to establish a Trading Day they have no part in.
+CATCH_UP_CAPABILITIES: tuple[Capability, ...] = (
+    Capability.MARKET,
+    Capability.VALUATION,
+)
+
 
 @dataclass(frozen=True)
 class CycleOutcome:
@@ -71,6 +96,10 @@ class CycleOutcome:
     failures: tuple[dict, ...] = ()
     missing: tuple[dict, ...] = field(default=())
     error: str | None = None
+    # What establishing a Trading Day queued for the evening, where this cycle
+    # established one. Null on a cycle that skipped or failed, and null on one
+    # that wrote Snapshots for a day already captured — which is most of them.
+    cohort: dict | None = None
 
     @classmethod
     def of(cls, summary: CollectionSummary) -> "CycleOutcome":
@@ -101,6 +130,7 @@ class CycleOutcome:
             "failures": [dict(failure) for failure in self.failures],
             "missing": [dict(item) for item in self.missing],
             "error": self.error,
+            "cohort": self.cohort,
         }
 
 
@@ -190,10 +220,42 @@ def run_collection_cycle(
     )
 
 
+def capture_nightly_cohort() -> dict | None:
+    """Queue the evening's cohort against whatever Trading Day the store holds.
+
+    Called after every completed collection rather than only after the one that
+    moved the day, because the capture is idempotent and asking is one query:
+    a cycle that established the day captures the cohort, a cycle that did not
+    finds every run already there, and a process that restarted between the two
+    is indistinguishable from either.
+
+    Never raises. A cohort that could not be captured must not take the
+    collection with it — the Snapshots are already committed, and the next
+    completed cycle or the startup pass will capture against the same day.
+    """
+    from src.core.database import get_sync_db
+
+    from src.alpha.nightly import capture_nightly_cohort as capture
+
+    try:
+        with get_sync_db() as session:
+            capture_result = capture(session)
+    except Exception as exc:  # pragma: no cover - defensive, logged and dropped
+        logger.error(
+            "Could not capture the nightly cohort: %s: %s",
+            type(exc).__name__,
+            exc,
+            exc_info=True,
+        )
+        return None
+    return capture_result.as_result() if capture_result.captured else None
+
+
 async def collect_universe_snapshots(
     force: bool = False,
     cycle: Callable[[], CollectionSummary] = run_cycle,
     today: date | None = None,
+    capture: Callable[[], dict | None] = capture_nightly_cohort,
 ) -> CycleOutcome:
     """Run one collection cycle for the Universe, off the event loop.
 
@@ -212,7 +274,24 @@ async def collect_universe_snapshots(
         logger.info("Skipping the collection cycle: %s is not a trading day", day)
         return CycleOutcome(status="skipped")
 
-    return await asyncio.to_thread(run_collection_cycle, cycle)
+    outcome = await asyncio.to_thread(run_collection_cycle, cycle)
+    return await _with_cohort(outcome, capture)
+
+
+async def _with_cohort(
+    outcome: CycleOutcome,
+    capture: Callable[[], dict | None],
+) -> CycleOutcome:
+    """Capture the cohort where the cycle got far enough to establish a day.
+
+    Only after ``completed``. A skipped cycle wrote nothing to establish a day
+    with, and a failed one may have died before the Market Snapshot it was
+    holding — capturing there would queue an evening against a session that is
+    not in the store.
+    """
+    if outcome.status != "completed":
+        return outcome
+    return replace(outcome, cohort=await asyncio.to_thread(capture))
 
 
 def run_history_backfill(
@@ -270,19 +349,35 @@ def market_has_advanced_to(
     return stored is not None and stored >= day
 
 
+def _catch_up_cycle() -> CollectionSummary:
+    """One re-read of the two FiinQuant-owned capabilities and nothing else."""
+    return run_cycle(capabilities=CATCH_UP_CAPABILITIES)
+
+
 async def catch_up_market_data(
     force: bool = False,
-    cycle: Callable[[], CollectionSummary] = run_cycle,
+    cycle: Callable[[], CollectionSummary] = _catch_up_cycle,
     today: date | None = None,
     latest: Callable[[], date | None] = _stored_trading_day,
+    capture: Callable[[], dict | None] = capture_nightly_cohort,
 ) -> CycleOutcome:
-    """Collect again late in the evening if the Trading Day never moved.
+    """Collect again later in the evening if the Trading Day never moved.
 
     The evening cycle runs shortly after the close, and the Main Source appends
     the session that just closed some hours later — so a perfectly healthy cycle
     routinely comes away with yesterday's session. Left alone, that day is never
     collected: the next cycle asks for the session that just closed, not the one
     before it, and the deep Backfill never looks at recent history.
+
+    **It stops as soon as a new Trading Day exists**, which is why the store is
+    what is asked rather than the job record. The point of the evening's re-runs
+    is establishing a day, not refreshing one already established, and each of
+    the three scheduled times is the same call: whichever fires first and finds
+    a gap closes it, and the rest skip.
+
+    Only the two FiinQuant-owned capabilities are re-read. The reference and
+    fundamental capabilities are vnstock's, arrive on their own calendars, and
+    have no part in establishing a Trading Day (spec 0003 §11).
 
     Runs under the Collector's own guard rather than a guard of its own. It is
     the same body of work spending the same single FiinQuant connection, and two
@@ -299,7 +394,8 @@ async def catch_up_market_data(
         logger.info("Skipping the market catch-up: the store already holds %s", day)
         return CycleOutcome(status="skipped")
 
-    return await asyncio.to_thread(run_collection_cycle, cycle)
+    outcome = await asyncio.to_thread(run_collection_cycle, cycle)
+    return await _with_cohort(outcome, capture)
 
 
 @dataclass(frozen=True)

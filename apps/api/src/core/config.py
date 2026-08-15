@@ -168,13 +168,18 @@ class Settings(BaseSettings):
     market_index_minute: int = 30
     market_index_window_trading_days: int = 275
 
-    # Market catch-up — thu thập lại lúc 23:00 khi Trading Day chưa nhúc nhích
-    # (docs/adr/0005). Main Source bổ sung phiên vừa đóng vào muộn trong tối,
-    # nên chu kỳ 16:15 thường xuyên chỉ lấy được phiên hôm trước; không có lần
-    # chạy này thì phiên đó không bao giờ được thu.
+    # Market catch-up — thu thập lại khi Trading Day chưa nhúc nhích
+    # (docs/adr/0005, spec 0003 §11). Main Source bổ sung phiên vừa đóng vào
+    # muộn trong tối, nên chu kỳ 16:15 thường xuyên chỉ lấy được phiên hôm
+    # trước; không có lần chạy này thì phiên đó không bao giờ được thu.
+    #
+    # Ba mốc chứ không phải một: lần chạy 23:00 duy nhất trước đây để cả buổi
+    # tối trôi qua trước khi thử lại, mà hạn phục vụ là 07:00 ICT và mỗi lần
+    # thử sớm hơn là thêm vài giờ cho đường ống chạy. Mỗi mốc là cùng một lời
+    # gọi và tự bỏ qua ngay khi một Trading Day mới đã tồn tại, nên chi phí của
+    # ba mốc trong một tối bình thường là ba câu truy vấn.
     market_catchup_enabled: bool = True
-    market_catchup_hour: int = 23
-    market_catchup_minute: int = 0
+    market_catchup_times: str = "18:30,21:30,23:00"
 
     # Analysis Run — cửa sổ trước khi một lượt dựng Analysis còn kẹt ở
     # `producing` bị coi là đã chết và được thu dọn (src/alpha/analysis_run.py).
@@ -268,6 +273,23 @@ class Settings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return value
+
+    @property
+    def market_catchup_schedule(self) -> tuple[tuple[int, int], ...]:
+        """Mỗi mốc thu thập bù dưới dạng `(giờ, phút)`, theo thứ tự trong ngày.
+
+        Phân tích ở đây chứ không ở scheduler: một mốc viết sai phải nổ lúc đọc
+        cấu hình — khi người vận hành còn đang nhìn console — chứ không phải im
+        lặng biến mất khỏi lịch và chỉ lộ ra sau một đêm không ai thu được phiên.
+        """
+        parsed: list[tuple[int, int]] = []
+        for entry in self.market_catchup_times.split(","):
+            entry = entry.strip()
+            if not entry:
+                continue
+            hour, _, minute = entry.partition(":")
+            parsed.append((int(hour), int(minute)))
+        return tuple(sorted(parsed))
 
 
 @lru_cache
