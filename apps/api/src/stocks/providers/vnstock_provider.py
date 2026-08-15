@@ -123,9 +123,22 @@ LISTING_NAME_FIELDS = ("organ_short_name", "organ_name")
 # made of. The English title is read rather than the Vietnamese one because the
 # kind of a share issue is only in the title text, and the English wording is the
 # one this system's parsing is measured against.
-EVENT_FIELDS = ("event_code", "category", "exright_date", "public_date")
 EVENT_ACTION_CATEGORY = "DIVIDEND"
 EVENT_TITLE_FIELD = "event_title_en"
+EVENT_FIELDS = (
+    "event_code",
+    "category",
+    "exright_date",
+    "public_date",
+    # The three that carry the action itself, and they are required for the same
+    # reason as the dates. A feed without the title answers with rows whose kind
+    # is unreadable; one without the terms answers with actions that can never
+    # produce a factor. Either way the table fills with rows nothing may be
+    # reasoned from, which reads like a market with no corporate actions in it.
+    EVENT_TITLE_FIELD,
+    "exercise_ratio",
+    "value_per_share",
+)
 
 
 class VnstockProviderError(RuntimeError):

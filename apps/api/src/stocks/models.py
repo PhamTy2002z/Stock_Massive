@@ -256,6 +256,12 @@ class CorporateAction(Base):
         # overwrite the first, losing half of an adjustment that has to be
         # computed from both at once.
         #
+        # It has a cost, and it is the reason the choice is written down rather
+        # than assumed: the kind is parsed from a title the provider controls, so
+        # a rewording that reclassifies a row forks a duplicate instead of
+        # updating the row it is a re-read of. That is the lesser failure — a
+        # duplicate is visible in the series, a silently halved ex-date is not.
+        #
         # Two indexes because one cannot cover both cases. A NULL ex-date does
         # not collide with another NULL under a plain unique constraint, which
         # would let every run insert TCB's undated bonus issue again — so those

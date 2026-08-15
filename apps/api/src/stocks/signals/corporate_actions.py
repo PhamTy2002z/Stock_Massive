@@ -30,13 +30,17 @@ Read by name rather than by kind, a 700-dong dividend becomes a 7% bonus issue.
 
 For one ex-date, with every action on it taken together:
 
-    reference = (previous_close − cash_per_share + Σ rightsᵢ × subscriptionᵢ)
+    reference = (previous_close − cash_per_share)
                 ÷ (1 + Σ ratio_of_every_entitling_issue)
     factor    = reference ÷ previous_close
 
+There is no subscription term in that formula, and its absence is the reason a
+rights issue is refused below rather than approximated: the exchange's own
+reference adds the money subscribers pay in, and this system does not hold it.
+
 Blending is the point rather than a detail. ACB's 2025-05-23 ex-date is a 15%
 stock dividend *and* a 1,000 VND cash dividend, and the two together give a
-factor of 0.8356 where the stock dividend alone implies 0.8696 — a 4% error, on
+factor of 0.8355 where the stock dividend alone implies 0.8696 — a 4% error, on
 every price before that date, in the direction that looks plausible.
 
 ## What it refuses
@@ -63,7 +67,13 @@ from sqlalchemy.orm import Session
 
 from src.stocks.models import CorporateAction
 
-from ..providers import CorporateActionEvent, ProviderSource
+from ..providers import (
+    Capability,
+    CorporateActionEvent,
+    MarketSnapshot,
+    ProviderSource,
+    SnapshotStore,
+)
 from .issues import SignalIssue
 from .price_band import detect_limit_lock
 
@@ -123,12 +133,11 @@ _TITLE_PATTERNS: tuple[tuple[re.Pattern[str], ActionKind], ...] = (
     (re.compile(r"\bsplit\b", re.I), ActionKind.STOCK_SPLIT),
 )
 
-# The event codes this system reasons about. ``DIV`` is a cash payment and
-# ``ISS`` is a share issue of some kind; everything else in the feed's dividend
-# category is left ``UNKNOWN`` rather than assigned the arithmetic of a
-# neighbouring code.
+# The one event code whose meaning does not need the title: ``DIV`` carries a
+# payment and nothing else. ``ISS`` covers every kind of share issue, so it is
+# read from the title below rather than named here, and a row under any other
+# code is left ``UNKNOWN`` rather than assigned the arithmetic of a neighbour.
 EVENT_CODE_CASH = "DIV"
-EVENT_CODE_SHARE_ISSUE = "ISS"
 
 # The kinds that multiply a holding: one share becomes 1 + ratio shares. This is
 # the distinction ADR-0006 makes a downstream field depend on — a share-count
@@ -175,6 +184,11 @@ class ConfirmationReason(str, Enum):
     # dividend on a 25,000 VND share is 2.8% against a ±7% band.
     EFFECT_WITHIN_BAND = "effect_within_band"
 
+    # The terms do not say where the reference should have gone, so the session
+    # cannot agree or disagree with them. A rights issue on a session that did
+    # not gap is the case: its subscription price is not in the feed.
+    TERMS_NOT_PRICEABLE = "terms_not_priceable"
+
     # The session did not move the way an action of these terms would have made
     # it move. The date is contradicted rather than merely unproven.
     NO_CORROBORATING_GAP = "no_corroborating_gap"
@@ -200,7 +214,7 @@ class FactorReading:
     ``share_count_ratio`` travels beside the factor rather than being derived
     from it, because the two are different numbers and confusing them is the
     error ADR-0006 spends a section on: ACB's 2025 ex-date multiplies the share
-    count by 1.15 while multiplying past prices by 0.8356. A quantity rescaled by
+    count by 1.15 while multiplying past prices by 0.8355. A quantity rescaled by
     the price factor would be wrong by exactly the cash dividend.
     """
 
@@ -300,33 +314,11 @@ def adjustment_factor(
     if any(action.confirmation != Confirmation.CONFIRMED.value for action in actions):
         return refuse(SignalIssue.UNCONFIRMED_CORPORATE_ACTION)
 
-    issued = Decimal(0)
-    cash = Decimal(0)
-    for action in actions:
-        terms = terms_of(action)
-        if terms.kind is ActionKind.UNKNOWN:
-            return refuse(SignalIssue.CORPORATE_ACTION_TERMS_INCOMPLETE)
-        if terms.kind is ActionKind.RIGHTS_ISSUE:
-            # The subscription price is not in the feed, and the par value it is
-            # conventionally set at is knowledge from outside this row. Guessing
-            # it would put a plausible number on an entitlement whose whole size
-            # depends on it.
-            return refuse(SignalIssue.CORPORATE_ACTION_TERMS_INCOMPLETE)
-        if terms.kind is ActionKind.CASH_DIVIDEND:
-            if terms.cash_per_share is None:
-                return refuse(SignalIssue.CORPORATE_ACTION_TERMS_INCOMPLETE)
-            cash += terms.cash_per_share
-            continue
-        if terms.kind in (ActionKind.ESOP, ActionKind.PRIVATE_PLACEMENT):
-            # Neither entitles an existing holder to anything, so neither moves
-            # the exchange's reference price. Skipped explicitly rather than
-            # falling through to the ratio arithmetic below, where their ratio
-            # would rescale a history that nothing rescaled.
-            continue
-        if terms.ratio is None:
-            return refuse(SignalIssue.CORPORATE_ACTION_TERMS_INCOMPLETE)
-        issued += terms.ratio
+    blended = blend(actions)
+    if blended is None:
+        return refuse(SignalIssue.CORPORATE_ACTION_TERMS_INCOMPLETE)
 
+    issued, cash = blended
     reference = (previous_close - cash) / (Decimal(1) + issued)
     if reference <= 0:
         # A dividend larger than the share price is not an adjustment, it is a
@@ -364,18 +356,26 @@ def confirm_ex_date(
     the only thing the prices are asked — the terms supply the factor, and the
     prices supply the date.
 
-    Two cases are separated that a looser test would merge. An action whose
-    declared terms move the reference by *less* than the band permits could never
-    show up as a gap, so it is left unconfirmed with ``EFFECT_WITHIN_BAND``
+    The gap has to point downward. Every corporate action lowers the exchange's
+    reference — an entitlement is something taken out of the share — so a session
+    that broke *above* its ceiling is a wrong anchor of some other kind, and
+    taking it would let a rally corroborate a dividend.
+
+    Two further cases are separated that a looser test would merge. An action
+    whose declared terms move the reference by *less* than the band permits could
+    never show up as a gap, so it is left unconfirmed with ``EFFECT_WITHIN_BAND``
     rather than reported as contradicted: nothing is wrong with the row, the
     instrument simply does not reach. An action whose terms say the session
     should have gapped, on a session that did not, is contradicted.
     """
     reading = detect_limit_lock(session, symbol, ex_date)
-    if reading.degraded_reason is SignalIssue.PRICE_MOVE_EXCEEDS_BAND:
-        return ConfirmationVerdict(Confirmation.CONFIRMED, None)
+    gapped = reading.degraded_reason is SignalIssue.PRICE_MOVE_EXCEEDS_BAND
 
-    if reading.degraded_reason is not None or reading.limits is None:
+    if not gapped and (
+        reading.degraded_reason is not None
+        or reading.limits is None
+        or reading.anchor is None
+    ):
         # The session could not be measured at all: no stored anchor, a mixed
         # price basis, an UPCOM band whose anchor is not in the store. Logged
         # with the band's own vocabulary, because that is the reason a reader
@@ -390,19 +390,37 @@ def confirm_ex_date(
             Confirmation.UNCONFIRMED, ConfirmationReason.SESSION_UNDECIDED
         )
 
-    if reading.anchor is None:
+    assert reading.limits is not None  # a gapped reading carries its band
+
+    if gapped:
+        # Out of band, but which way. Every corporate action lowers the
+        # exchange's reference — an entitlement is something taken out of the
+        # share — so a session that broke *upward* is some other kind of wrong
+        # anchor and must not be read as this action's confirmation.
+        low = _session_low(session, symbol, ex_date)
+        if low is not None and low < reading.limits.floor:
+            return ConfirmationVerdict(Confirmation.CONFIRMED, None)
         return ConfirmationVerdict(
-            Confirmation.UNCONFIRMED, ConfirmationReason.SESSION_UNDECIDED
+            Confirmation.UNCONFIRMED, ConfirmationReason.NO_CORROBORATING_GAP
         )
 
-    reference = _reference_from_terms(actions, reading.anchor)
-    if reference is None:
+    blended = blend(actions)
+    if blended is None:
         # Terms this system cannot price cannot say what the session should have
         # done, so the session cannot contradict them either.
         return ConfirmationVerdict(
-            Confirmation.UNCONFIRMED, ConfirmationReason.EFFECT_WITHIN_BAND
+            Confirmation.UNCONFIRMED, ConfirmationReason.TERMS_NOT_PRICEABLE
         )
 
+    issued, cash = blended
+    if issued == 0 and cash == 0:
+        # An action that entitles a holder to nothing moves no reference, so
+        # there is nothing for a session to corroborate.
+        return ConfirmationVerdict(
+            Confirmation.UNCONFIRMED, ConfirmationReason.TERMS_NOT_PRICEABLE
+        )
+
+    reference = (reading.anchor - cash) / (Decimal(1) + issued)
     if reference >= reading.limits.floor:
         return ConfirmationVerdict(
             Confirmation.UNCONFIRMED, ConfirmationReason.EFFECT_WITHIN_BAND
@@ -412,48 +430,48 @@ def confirm_ex_date(
     )
 
 
-def _reference_from_terms(
-    actions: Sequence[CorporateAction],
-    previous_close: Decimal,
-) -> Decimal | None:
-    """The reference these terms imply, ignoring whether they are confirmed yet.
+def blend(actions: Sequence[CorporateAction]) -> tuple[Decimal, Decimal] | None:
+    """Everything one ex-date entitles a holder to, as one ratio and one payment.
 
-    Confirmation is what this is being computed *for*, so reading it back here
-    would make every action's first pass refuse itself.
+    ``None`` where any action on the date cannot be priced, and deliberately not
+    "the part of it that can be": a date carrying one unpriceable action is
+    unpriceable as a whole, because the missing term belongs to the same
+    reference calculation as the rest. Answering with the rest would under-adjust
+    by exactly the term that was dropped, which is indistinguishable from a real
+    price move.
+
+    Says nothing about confirmation. It is used both to compute a factor from
+    actions already confirmed and to work out what a session *should* have done
+    while confirming them, and reading the verdict here would make that second
+    caller refuse every action on its first pass.
     """
-    priced = [
-        action
-        for action in actions
-        if ActionKind(action.kind)
-        not in (
-            ActionKind.UNKNOWN,
-            ActionKind.RIGHTS_ISSUE,
-            ActionKind.ESOP,
-            ActionKind.PRIVATE_PLACEMENT,
-        )
-    ]
-    if not priced or len(priced) != len(actions):
-        # A date carrying one unpriceable action is unpriceable as a whole: the
-        # missing term is part of the same reference calculation.
-        return None
-
     issued = Decimal(0)
     cash = Decimal(0)
-    for action in priced:
+    for action in actions:
         terms = terms_of(action)
+        if terms.kind is ActionKind.UNKNOWN:
+            return None
+        if terms.kind is ActionKind.RIGHTS_ISSUE:
+            # The subscription price is not in the feed, and the par value it is
+            # conventionally set at is knowledge from outside this row. Guessing
+            # it would put a plausible number on an entitlement whose whole size
+            # depends on it.
+            return None
         if terms.kind is ActionKind.CASH_DIVIDEND:
             if terms.cash_per_share is None:
                 return None
             cash += terms.cash_per_share
             continue
+        if terms.kind in (ActionKind.ESOP, ActionKind.PRIVATE_PLACEMENT):
+            # Neither entitles an existing holder to anything, so neither moves
+            # the exchange's reference price. Skipped explicitly rather than
+            # falling through to the ratio arithmetic below, where their ratio
+            # would rescale a history that nothing rescaled.
+            continue
         if terms.ratio is None:
             return None
         issued += terms.ratio
-
-    if issued == 0 and cash == 0:
-        return None
-    reference = (previous_close - cash) / (Decimal(1) + issued)
-    return reference if reference > 0 else None
+    return issued, cash
 
 
 class CorporateActionStore:
@@ -610,29 +628,31 @@ class CorporateActionStore:
         confirmed action is never re-judged: the verdict was made against the raw
         prices of that session, and those do not change.
         """
-        pending = [
-            action
-            for action in self.for_symbol(symbol)
-            if action.confirmation != Confirmation.CONFIRMED.value
-        ]
-        if not pending:
-            return 0
-
+        held = self.for_symbol(symbol)
+        # Grouped once, from one read. Every action on the date is kept, not only
+        # the pending ones: the reference a session moved to was set by all of
+        # them together, so judging a pending row against its own terms alone
+        # would ask whether half an ex-date explains the whole gap.
         by_date: dict[date, list[CorporateAction]] = {}
-        for action in pending:
+        for action in held:
             assert action.ex_date is not None  # for_symbol excludes the undated
             by_date.setdefault(action.ex_date, []).append(action)
 
+        pending_dates = sorted(
+            {
+                action.ex_date
+                for action in held
+                if action.confirmation != Confirmation.CONFIRMED.value
+            }
+        )
         confirmed = 0
-        for ex_date in sorted(by_date):
-            # Every action on the date, not only the pending ones: the reference
-            # a session moved to was set by all of them together.
-            on_date = [
-                action
-                for action in self.for_symbol(symbol, start=ex_date, end=ex_date)
-            ]
+        for ex_date in pending_dates:
+            on_date = by_date[ex_date]
             verdict = confirm_ex_date(self.session, symbol, ex_date, on_date)
-            for action in by_date[ex_date]:
+            for action in on_date:
+                if action.confirmation == Confirmation.CONFIRMED.value:
+                    # Already judged against raw prices that will not change.
+                    continue
                 action.confirmation = verdict.confirmation.value
                 action.confirmation_reason = (
                     verdict.reason.value if verdict.reason is not None else None
@@ -643,17 +663,20 @@ class CorporateActionStore:
         return confirmed
 
 
-def previous_close(session: Session, symbol: str, ex_date: date) -> Decimal | None:
-    """The raw close the exchange's reference for this ex-date was measured from.
+def _session_low(session: Session, symbol: str, day: date) -> Decimal | None:
+    """The lowest raw price this session traded at, if the store holds one.
 
-    Reads the same stored series the band regime does, and refuses the same
-    things: a non-raw session is not an anchor, because an ``adjusted_at_source``
-    close has already had this very action folded into it and anchoring to it
-    would adjust the same event twice.
+    Read through ``SnapshotStore.series`` rather than with a query of its own,
+    for the reason the band regime reads it that way: two copies of a session
+    can be held on two different price bases, and the Main-Source-wins
+    resolution is what decides which of them the verdict is made against.
     """
-    reading = detect_limit_lock(session, symbol, ex_date)
-    if reading.anchor is not None:
-        return reading.anchor
+    series = SnapshotStore(session, redis=None).series(
+        Capability.MARKET, symbol.upper(), start=day, end=day
+    )
+    for snapshot in series.snapshots:
+        if isinstance(snapshot, MarketSnapshot) and snapshot.low_price is not None:
+            return Decimal(str(snapshot.low_price))
     return None
 
 

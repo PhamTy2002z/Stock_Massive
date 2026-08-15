@@ -43,10 +43,10 @@ from src.stocks.signals.corporate_actions import (
     adjustment_factor,
     classify,
     confirm_ex_date,
-    previous_close,
     terms_of,
 )
 from src.stocks.signals.issues import SignalIssue
+from src.stocks.signals.price_band import detect_limit_lock
 
 from .test_price_band import list_on, write_session
 
@@ -148,6 +148,19 @@ def store_mbb_sessions(session: Session) -> None:
     write_session(session, "MBB", date(2026, 8, 11), close=20350.0, high=20550.0, low=20350.0)
 
 
+def anchor_close(session: Session, symbol: str, ex_date: date) -> Decimal:
+    """The raw close the exchange's reference for this ex-date was measured from.
+
+    Taken off the band reading rather than queried, because that is the only path
+    that refuses a non-raw anchor: an ``adjusted_at_source`` close has this very
+    action already folded into it, and adjusting from it would apply the same
+    event twice.
+    """
+    anchor = detect_limit_lock(session, symbol, ex_date).anchor
+    assert anchor is not None
+    return anchor
+
+
 def save(session: Session, *events: CorporateActionEvent) -> tuple[CorporateAction, ...]:
     store = CorporateActionStore(session)
     return tuple(
@@ -244,7 +257,7 @@ class TestTheAdjustmentFactor:
             store_acb_sessions(session)
             actions = save(session, ACB_CASH_2025, ACB_STOCK_2025)
             CorporateActionStore(session).confirm_pending("ACB")
-            anchor = previous_close(session, "ACB", date(2025, 5, 23))
+            anchor = anchor_close(session, "ACB", date(2025, 5, 23))
             reading = adjustment_factor(actions, anchor)
 
         assert anchor == Decimal("25550.0")
@@ -263,7 +276,7 @@ class TestTheAdjustmentFactor:
             actions = save(session, ACB_CASH_2025, ACB_STOCK_2025)
             CorporateActionStore(session).confirm_pending("ACB")
             reading = adjustment_factor(
-                actions, previous_close(session, "ACB", date(2025, 5, 23))
+                actions, anchor_close(session, "ACB", date(2025, 5, 23))
             )
 
         assert reading.share_count_ratio == Decimal("1.15")
@@ -298,7 +311,7 @@ class TestTheAdjustmentFactor:
             CorporateActionStore(session).confirm_pending("MBB")
             confirmations = {action.confirmation for action in actions}
             reading = adjustment_factor(
-                actions, previous_close(session, "MBB", date(2026, 8, 11))
+                actions, anchor_close(session, "MBB", date(2026, 8, 11))
             )
 
         assert confirmations == {Confirmation.CONFIRMED.value}
@@ -349,6 +362,44 @@ class TestConfirmingAnExDate:
 
         assert verdict.confirmation is Confirmation.UNCONFIRMED
         assert verdict.reason is ConfirmationReason.NO_CORROBORATING_GAP
+
+    def test_a_gap_the_other_way_confirms_nothing(self):
+        """Every corporate action lowers the reference, so a rally is not one.
+
+        Out-of-band is the test a looser reading would stop at, and it is
+        symmetric: a session that broke above its ceiling has a wrong anchor of
+        some other kind, and taking it would let a rally corroborate a dividend.
+        """
+        with open_session() as session:
+            list_on(session, "ACB", Exchange.HOSE)
+            write_session(session, "ACB", date(2025, 5, 22), close=25550.0)
+            write_session(
+                session, "ACB", date(2025, 5, 23), close=30000.0, high=30000.0, low=29500.0
+            )
+            actions = save(session, ACB_CASH_2025, ACB_STOCK_2025)
+            verdict = confirm_ex_date(session, "ACB", date(2025, 5, 23), actions)
+
+        assert verdict.confirmation is Confirmation.UNCONFIRMED
+        assert verdict.reason is ConfirmationReason.NO_CORROBORATING_GAP
+
+    def test_terms_with_no_price_in_them_leave_the_session_unable_to_disagree(self):
+        """A rights issue on a session that did not gap says nothing either way.
+
+        Reported apart from "the effect is too small to see", because these terms
+        have no known effect at all: the subscription price they turn on is not
+        in the feed, so there is no size to compare the band against.
+        """
+        with open_session() as session:
+            list_on(session, "MBB", Exchange.HOSE)
+            write_session(session, "MBB", date(2026, 8, 10), close=24250.0)
+            write_session(
+                session, "MBB", date(2026, 8, 11), close=24000.0, high=24100.0, low=23900.0
+            )
+            actions = save(session, MBB_RIGHTS_2026)
+            verdict = confirm_ex_date(session, "MBB", date(2026, 8, 11), actions)
+
+        assert verdict.confirmation is Confirmation.UNCONFIRMED
+        assert verdict.reason is ConfirmationReason.TERMS_NOT_PRICEABLE
 
     def test_an_effect_too_small_to_show_is_not_a_contradiction(self):
         """A 700 VND dividend on a 25,000 VND share is 2.8% against a ±7% band.
