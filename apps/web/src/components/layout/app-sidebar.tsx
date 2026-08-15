@@ -6,6 +6,7 @@ import Link from "next/link"
 import {
   Activity,
   Gauge,
+  ListChecks,
   Map,
 } from "lucide-react"
 import {
@@ -33,6 +34,9 @@ const navGroups: NavItem[][] = [
     { title: "Stock 360", url: "/analytics/deep-dive", icon: Gauge },
     { title: "Trends & Signals", url: "/analytics/volume-spikes", icon: Activity },
   ],
+  // The Watchlist is the one destination that is about the signed-in user
+  // rather than about the market, which is why it sits in its own group.
+  [{ title: "Watchlist", url: "/watchlist", icon: ListChecks }],
 ]
 
 function NavMain() {

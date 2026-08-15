@@ -21,7 +21,7 @@ from datetime import date
 from sqlalchemy.orm import Session
 
 from ..trading_day import latest_trading_day
-from .bars import WindowHealth, prepare_bars
+from .bars import WindowHealth, prepare_bars, prepare_bars_context
 from .cross_sectional import CROSS_SECTION_MIN_SYMBOLS, percentile_of
 from .fields import FieldReading, FieldValue, FieldWindow, SignalField, Unit
 from .fundamentals import fundamentals_on_or_before
@@ -149,15 +149,13 @@ def serve_cross_section(
     would take to skip it, and a field that does not read the standing is handed
     one it ignores.
 
-    **The cost this does pay is the gateway's own liquidity standing**, which is
-    measured per prepared window and therefore once per symbol here, each time
-    over the same peers and the same twenty sessions. On a hundred-symbol sample
-    that is a hundred repetitions of one cross-sectional read. It is accepted
-    rather than special-cased: the alternative is a second path into peer
-    sessions that bypasses ``prepare_bars()``, and the whole thesis of the
-    gateway is that no such path exists. The fix, when it is worth making, is to
-    let the gateway take a resolved peer standing rather than to let a field
-    around it.
+    Sessions and corporate actions are loaded once for the whole sample through
+    ``prepare_bars_context`` rather than once per symbol, and the gateway reads
+    each symbol's window out of that. The liquidity standing every prepared
+    window carries is measured against the same batch, so the one
+    cross-sectional read in the gateway is paid once for the call instead of
+    once per member — which on a hundred-symbol sample is the difference between
+    one peer scan and a hundred of them.
     """
     if field.ranked is None:
         raise ValueError(
@@ -178,6 +176,7 @@ def serve_cross_section(
         )
 
     statements = fundamentals_on_or_before(session, names, end)
+    context = prepare_bars_context(session, names, field.min_sessions, end=end)
     measured: dict[str, tuple[FieldReading, WindowHealth]] = {}
     excluded: dict[str, SignalIssue] = {}
     for name in names:
@@ -188,6 +187,7 @@ def serve_cross_section(
             min_sessions=field.min_sessions,
             end=end,
             peers=names,
+            context=context,
         )
         if frame is None or health.refusal is not None:
             excluded[name] = health.refusal or SignalIssue.INSUFFICIENT_HISTORY

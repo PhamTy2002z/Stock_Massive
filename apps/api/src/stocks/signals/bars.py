@@ -21,7 +21,16 @@ from configuration: a flag flipping tomorrow does not change what an
 already-stored window reports, which is the requirement ``docs/adr/0006`` puts
 on ``adjustment`` in particular.
 
-## Four refusals
+## Projections, then four price refusals
+
+The default ``price`` projection admits sessions with a close and enforces the
+price-basis, band and adjustment contract below. The ``volume`` projection
+admits sessions with a traded quantity instead: price availability and basis do
+not decide whether a quantity exists, while share-count actions still travel as
+``volume_basis_break``. Both projections use the same stored-session seam and
+the same canonical Trading Days.
+
+The following refusals apply to the price projection:
 
 | Refusal | Cause |
 | --- | --- |
@@ -70,6 +79,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from enum import Enum
 
 from sqlalchemy.orm import Session
 
@@ -107,6 +117,13 @@ ADTV_SESSIONS = 20
 # Below this many peers a percentile stops meaning anything, so none is reported
 # (``docs/adr/0010``, the same floor the cross-sectional fields refuse under).
 ADTV_MIN_PEERS = 30
+
+
+class BarProjection(str, Enum):
+    """Which stored measurement makes a session usable for this computation."""
+
+    PRICE = "price"
+    VOLUME = "volume"
 
 
 @dataclass(frozen=True)
@@ -163,6 +180,11 @@ class Bar:
     # buy and sell as value, and the naming split exists so the two can never be
     # swapped by accident.
     foreign_net_value_vnd: float | None = None
+    # Kept exactly as the provider stated it. A caller such as Volume Spike
+    # displays the session's own change while still reaching the session only
+    # through this gateway; recomputing it from adjusted closes would subtly
+    # change the existing wire value around corporate actions.
+    change_pct: float | None = None
 
     @property
     def limit_locked(self) -> bool:
@@ -210,6 +232,19 @@ class BarFrame:
             symbol=self.symbol,
             bars=tuple(bar for bar in self.bars if not bar.limit_locked),
         )
+
+
+@dataclass(frozen=True, repr=False)
+class BarPreparationContext:
+    """An opaque market-wide window reused by per-symbol preparation."""
+
+    _symbols: tuple[str, ...]
+    _window_days: int
+    _end: date | None
+    _window: tuple[date, ...]
+    _anchor_date: date | None
+    _sessions: dict[str, dict[date, MarketSnapshot]]
+    _actions: dict[str, tuple[CorporateAction, ...]]
 
 
 @dataclass(frozen=True)
@@ -342,6 +377,49 @@ class WindowHealth:
         return None
 
 
+def prepare_bars_context(
+    session: Session,
+    symbols: Sequence[str],
+    window_days: int,
+    *,
+    end: date | None = None,
+) -> BarPreparationContext:
+    """Load one canonical window for several later ``prepare_bars`` calls."""
+    wanted = tuple(sorted({symbol.upper() for symbol in symbols}))
+    window_days = max(0, window_days)
+    resolved_end = end or latest_trading_day(session)
+    if resolved_end is None or window_days == 0:
+        return BarPreparationContext(
+            _symbols=wanted,
+            _window_days=window_days,
+            _end=resolved_end,
+            _window=(),
+            _anchor_date=None,
+            _sessions={},
+            _actions={},
+        )
+
+    earlier = trading_days_before(session, resolved_end, window_days)
+    window = tuple(reversed(earlier[: window_days - 1])) + (resolved_end,)
+    anchor_date = earlier[window_days - 1] if len(earlier) >= window_days else None
+    days = ((anchor_date,) if anchor_date is not None else ()) + window
+    held = sessions_on_days(session, wanted, days)
+    actions = CorporateActionStore(session).for_symbols(
+        wanted,
+        start=window[0],
+        end=window[-1],
+    )
+    return BarPreparationContext(
+        _symbols=wanted,
+        _window_days=window_days,
+        _end=resolved_end,
+        _window=window,
+        _anchor_date=anchor_date,
+        _sessions=held,
+        _actions=actions,
+    )
+
+
 def prepare_bars(
     session: Session,
     symbol: str,
@@ -351,6 +429,8 @@ def prepare_bars(
     end: date | None = None,
     peers: Sequence[str] | None = None,
     migrations: Sequence[ExchangeMigration] = EXCHANGE_MIGRATIONS,
+    projection: BarProjection = BarProjection.PRICE,
+    context: BarPreparationContext | None = None,
 ) -> tuple[BarFrame | None, WindowHealth]:
     """Serve ``window_days`` trailing sessions of one symbol, or refuse by name.
 
@@ -358,6 +438,11 @@ def prepare_bars(
     question about that session and is taken as asked. ``min_sessions`` is the
     calling field's floor and defaults to the whole window — below it the answer
     is an ``insufficient_history`` refusal, never a quietly shortened window.
+
+    ``projection`` names the measurement the caller consumes. The default price
+    projection enforces price-basis, band and adjustment rules; the volume
+    projection requires volume instead and reports share-count seams without
+    refusing quantities for an unrelated price condition.
 
     ``peers`` is the cross-section the liquidity percentile is measured against,
     and defaults to the Universe. A caller preparing many symbols at once should
@@ -367,7 +452,16 @@ def prepare_bars(
     window_days = max(0, window_days)
     floor = window_days if min_sessions is None else min_sessions
 
-    end = end or latest_trading_day(session)
+    if context is not None:
+        if context._window_days != window_days:
+            raise ValueError("bar context window does not match the request")
+        if end is not None and context._end != end:
+            raise ValueError("bar context end does not match the request")
+        if symbol not in context._symbols:
+            raise ValueError(f"bar context does not contain {symbol}")
+        end = context._end
+    else:
+        end = end or latest_trading_day(session)
     if end is None or window_days == 0:
         return None, _refused(
             symbol, window_days, floor, SignalIssue.INSUFFICIENT_HISTORY
@@ -376,65 +470,82 @@ def prepare_bars(
     # One extra session before the window: the first bar's band is measured
     # against the close before it, and without an anchor the window's oldest
     # session could never be judged for a lock or a gap.
-    earlier = trading_days_before(session, end, window_days)
-    window = tuple(reversed(earlier[: window_days - 1])) + (end,)
-    anchor_date = earlier[window_days - 1] if len(earlier) >= window_days else None
+    if context is None:
+        earlier = trading_days_before(session, end, window_days)
+        window = tuple(reversed(earlier[: window_days - 1])) + (end,)
+        anchor_date = earlier[window_days - 1] if len(earlier) >= window_days else None
+        held = sessions_in_range(session, symbol, anchor_date or window[0], end)
+        actions = CorporateActionStore(session).for_symbol(
+            symbol, start=window[0], end=window[-1]
+        )
+    else:
+        window = context._window
+        anchor_date = context._anchor_date
+        held = context._sessions.get(symbol, {})
+        actions = context._actions.get(symbol, ())
 
-    held = sessions_in_range(session, symbol, anchor_date or window[0], end)
     bars_held = {day: held[day] for day in window if day in held}
-    usable = {
-        day: row for day, row in bars_held.items() if row.last_price is not None
-    }
+    if projection is BarProjection.VOLUME:
+        usable = {day: row for day, row in bars_held.items() if row.volume is not None}
+    else:
+        usable = {
+            day: row for day, row in bars_held.items() if row.last_price is not None
+        }
     sessions_used = len(usable)
     if sessions_used < floor:
+        used_days = sorted(usable)
         return None, _refused(
             symbol,
             window_days,
             floor,
             SignalIssue.INSUFFICIENT_HISTORY,
             sessions_used=sessions_used,
+            first_session=used_days[0] if used_days else None,
+            last_session=used_days[-1] if used_days else None,
         )
 
-    basis_refusal = _basis_of(usable.values())
-    if basis_refusal is not None:
-        return None, _refused(
-            symbol,
-            window_days,
-            floor,
-            basis_refusal,
-            sessions_used=sessions_used,
-        )
-
-    resolver = BandRegimeResolver(session, symbol, migrations=migrations)
-    regimes = {day: resolver.on(day) for day in usable}
-
-    actions = CorporateActionStore(session).for_symbol(
-        symbol, start=window[0], end=window[-1]
-    )
     by_ex_date: dict[date, list[CorporateAction]] = {}
     for action in actions:
         assert action.ex_date is not None  # for_symbol excludes the undated
         by_ex_date.setdefault(action.ex_date, []).append(action)
 
-    bands, gap_refusal, undecided = _read_bands(
-        window,
-        usable,
-        regimes,
-        anchor_date,
-        held.get(anchor_date) if anchor_date else None,
-        by_ex_date,
-    )
-    if gap_refusal is not None:
-        return None, _refused(
-            symbol,
-            window_days,
-            floor,
-            gap_refusal,
-            sessions_used=sessions_used,
-        )
+    regimes: dict[date, BandRegime] = {}
+    bands: dict[date, BandReading] = {}
+    undecided: dict[date, SignalIssue] = {}
+    factors: dict[date, Decimal] = {}
+    adjustment_issues: tuple[SignalIssue, ...] = ()
+    if projection is BarProjection.PRICE:
+        basis_refusal = _basis_of(usable.values())
+        if basis_refusal is not None:
+            return None, _refused(
+                symbol,
+                window_days,
+                floor,
+                basis_refusal,
+                sessions_used=sessions_used,
+            )
 
-    factors, adjustment_issues = _factors(window, usable, by_ex_date)
-    frame = _frame(symbol, window, usable, bands, factors)
+        resolver = BandRegimeResolver(session, symbol, migrations=migrations)
+        regimes = {day: resolver.on(day) for day in usable}
+        bands, gap_refusal, undecided = _read_bands(
+            window,
+            usable,
+            regimes,
+            anchor_date,
+            held.get(anchor_date) if anchor_date else None,
+            by_ex_date,
+        )
+        if gap_refusal is not None:
+            return None, _refused(
+                symbol,
+                window_days,
+                floor,
+                gap_refusal,
+                sessions_used=sessions_used,
+            )
+        factors, adjustment_issues = _factors(window, usable, by_ex_date)
+
+    frame = _frame(symbol, window, usable, bands, factors, projection)
 
     degradations: list[SignalIssue] = []
     if any(action.changes_share_count for action in actions):
@@ -462,7 +573,11 @@ def prepare_bars(
             actions_in_window=len(actions),
             ex_dates_applied=applied_dates,
         ),
-        adtv=_adtv_standing(session, symbol, window, usable, peers),
+        adtv=(
+            _adtv_standing(session, symbol, window, usable, peers, context)
+            if projection is BarProjection.PRICE
+            else None
+        ),
         band_undecided_days=len(undecided),
         band_undecided_reasons=tuple(
             sorted(set(undecided.values()), key=lambda issue: issue.value)
@@ -480,6 +595,8 @@ def _refused(
     reason: SignalIssue,
     *,
     sessions_used: int = 0,
+    first_session: date | None = None,
+    last_session: date | None = None,
 ) -> WindowHealth:
     """A Window Health that carries the refusal and what was measured before it.
 
@@ -493,8 +610,8 @@ def _refused(
         window_days=window_days,
         min_sessions=floor,
         sessions_used=sessions_used,
-        first_session=None,
-        last_session=None,
+        first_session=first_session,
+        last_session=last_session,
         limit_lock_days=0,
         limit_lock_dates=(),
         band_regime=None,
@@ -663,6 +780,7 @@ def _frame(
     usable: dict[date, MarketSnapshot],
     bands: dict[date, BandReading],
     factors: dict[date, Decimal],
+    projection: BarProjection,
 ) -> BarFrame:
     """Build the window's bars, rebased onto its last session's share terms.
 
@@ -696,22 +814,30 @@ def _frame(
                     bands[day].lock if day in bands else LimitLock.INDETERMINATE
                 ),
                 band=bands[day].limits if day in bands else None,
-                band_undecided_reason=_undecided_reason(bands.get(day)),
+                band_undecided_reason=_undecided_reason(bands.get(day), projection),
+                change_pct=row.change_pct,
             )
         )
     return BarFrame(symbol=symbol, bars=tuple(bars))
 
 
-def _undecided_reason(reading: BandReading | None) -> SignalIssue | None:
+def _undecided_reason(
+    reading: BandReading | None,
+    projection: BarProjection,
+) -> SignalIssue | None:
     """Why this session has no band, or nothing where it has one.
 
     The pairing ``Bar`` promises: a served bar carries either its band or the
-    reason it has none, never neither. A session the band reader never reached
-    is not one this gateway can produce — it walks the same days the frame is
-    built from — but it is named rather than left null, because an absent band
-    with no reason is exactly the state a field downstream would have to guess
-    at.
+    reason it has none, never neither, so a field downstream never has to guess
+    why a band is absent.
+
+    A window prepared for quantities has no band on any of its sessions, and
+    that is not a data gap — nobody asked. It is named as its own reason, so a
+    price-band field handed such a window refuses saying it was given the wrong
+    window rather than saying the market could not be judged.
     """
+    if projection is not BarProjection.PRICE:
+        return SignalIssue.BAND_NOT_MEASURED
     if reading is None:
         return SignalIssue.MISSING_TARGET_SESSION
     if reading.limits is not None:
@@ -756,6 +882,7 @@ def _adtv_standing(
     window: Sequence[date],
     usable: dict[date, MarketSnapshot],
     peers: Sequence[str] | None,
+    context: BarPreparationContext | None = None,
 ) -> AdtvStanding | None:
     """Where this symbol's traded money sits among its peers over the same days.
 
@@ -781,7 +908,16 @@ def _adtv_standing(
     if len(others) < ADTV_MIN_PEERS:
         return None
 
-    held = sessions_on_days(session, others, days)
+    # A context already holds every one of these symbols' sessions across the
+    # same window, loaded once for the whole batch. Read from it rather than
+    # asking again: the standing is measured per prepared window, so a caller
+    # preparing a hundred symbols would otherwise pay this cross-sectional read
+    # a hundred times over for one answer that does not change between them.
+    held = (
+        context._sessions
+        if context is not None and set(others) <= set(context._symbols)
+        else sessions_on_days(session, others, days)
+    )
     measured = [
         value
         for name in others

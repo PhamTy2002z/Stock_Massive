@@ -514,10 +514,10 @@ would either invent a baseline or discard a real suspension.
   or `partial` and `fresh`, and collapsing them into one status would hide one
   of the two.
 - **Signal Issue** codes, closed set: `missing_target_session`,
-  `insufficient_history`, `recently_inactive`, `cohort_warming`,
-  `lagging_market_data`, `stale_market_data`, `ranking_unavailable`. They are
-  domain provenance and are carried in the 200 response body — never as an HTTP
-  status, never as prose.
+  `insufficient_history`, `recently_inactive`, `volume_basis_break`,
+  `cohort_warming`, `lagging_market_data`, `stale_market_data`,
+  `ranking_unavailable`. They are domain provenance and are carried in the 200
+  response body — never as an HTTP status, never as prose.
 
 ### API
 
@@ -574,9 +574,10 @@ renders.
 
 Cache key is the tuple ADR-0005 names: **Signal Scope**, resolved **Trading
 Day**, threshold, exchange filter, **Cohort Version** id, and market generation.
-Any of the six changing produces a different key, so no invalidation call is
-needed and a stale entry is unreachable rather than merely unlikely. Reuse
-`core/cache.py`.
+The A1 `prepare_bars()` retrofit adds corporate-action generation because Window
+Health now depends on that stored series. Any dependency changing produces a
+different key, so no invalidation call is needed and a stale entry is
+unreachable rather than merely unlikely. Reuse `core/cache.py`.
 
 ### Web
 
@@ -618,7 +619,7 @@ regression with the table already gone has nothing to compare against.
 - An exchange filter narrows the coverage denominator.
 - Freshness is independent of coverage across all six combinations.
 - A historical query uses the Cohort Version active on that day.
-- Cache keys differ across each of the six inputs.
+- Cache keys differ across every query and stored-data dependency.
 
 `apps/web` — component tests for the coverage band, the `insufficient_data`
 state, and the scope switch.

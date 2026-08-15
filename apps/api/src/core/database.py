@@ -125,11 +125,37 @@ async def in_sync_session(work: Callable[[Session], _T]) -> _T:
     fifteen and make the sixteenth caller wait thirty seconds to fail.
 
     Read-only by construction: nothing is committed here. Writes belong to the
-    async session the request already has.
+    async session the request already has — or, where the work being written is
+    itself synchronous, to `in_sync_write` below.
     """
 
     def run() -> _T:
         with sync_session_factory() as session:
+            return work(session)
+
+    return await asyncio.to_thread(run)
+
+
+async def in_sync_write(work: Callable[[Session], _T]) -> _T:
+    """The same seam as `in_sync_session`, for work that has to commit.
+
+    Separate rather than a flag on the one above, because the read version's
+    promise is worth keeping absolute: a caller reading that signature must not
+    have to check an argument to know whether the query it is passing could
+    write.
+
+    Deliberately not the request's async session either. That one belongs to a
+    different driver, and the work reaching this seam is synchronous library
+    code — the on-demand lane, the retry queue — whose transaction boundaries
+    are its own business.
+
+    The caller's own act comes first, always. A handler that seats a row and
+    then reaches here must commit the row before it does, so a failure in this
+    transaction leaves the user's request standing rather than rolling it back.
+    """
+
+    def run() -> _T:
+        with get_sync_db() as session:
             return work(session)
 
     return await asyncio.to_thread(run)
