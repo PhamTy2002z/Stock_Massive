@@ -180,6 +180,119 @@ class ListingRoster(Base):
         return f"<ListingRoster {self.symbol} {self.exchange} {state}>"
 
 
+class CorporateAction(Base):
+    """One declared corporate action, and whether it may drive arithmetic.
+
+    The input read-time adjustment has and no other (``docs/adr/0006``). A raw
+    price store is only comparable across a split, a bonus or a dividend if the
+    series of actions is held durably, so this table is a prerequisite for the
+    signal window rather than a refinement of it.
+
+    Its own table rather than a Snapshot: ``provider_snapshots`` holds one
+    observation of a symbol at one moment, while an action is an event with its
+    own date that is re-read and re-confirmed as the price history around it
+    arrives. Two of the columns exist because the provider's feed is not
+    self-describing:
+
+    ``kind`` and ``changes_share_count`` are derived once, at write time, from
+    free text the feed puts the kind of a share issue in. They are stored rather
+    than recomputed on read because ADR-0006 makes a downstream field depend on
+    the distinction — a share-count change breaks every ``*_volume`` field while
+    a cash dividend leaves them alone — and the requirement is that the answer be
+    derivable from a stored row without re-reading the provider.
+
+    ``confirmation`` is the gate. Only a confirmed action may drive arithmetic;
+    an unconfirmed one leaves a window that contains it degraded rather than
+    adjusted, and ``confirmation_reason`` says which of the several ways that
+    happened, since "no ex-date at all" and "an ex-date the prices contradict"
+    are different problems with different fixes.
+    """
+
+    __tablename__ = "corporate_actions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String(20), nullable=False)
+    # Nullable because the feed leaves it null on real rows: TCB's 2026 bonus
+    # issue at ratio 0.6 arrives with a public date and nothing else. That row
+    # has to be stored — an action nobody knows the date of is exactly what makes
+    # a window unadjustable — so the null is carried rather than refused.
+    ex_date = Column(Date, nullable=True)
+    event_code = Column(String(16), nullable=False)
+    # The provider's own wording, kept verbatim. It is where the kind of a share
+    # issue lives, so a `kind` that looks wrong can be checked against what was
+    # actually said rather than argued about.
+    title = Column(String(255), nullable=False)
+    record_date = Column(Date, nullable=True)
+    # The fallback half of this row's identity, and the only date a null-ex-date
+    # action has.
+    public_date = Column(Date, nullable=True)
+    kind = Column(String(24), nullable=False)
+    # As declared. On a share issue this is the share ratio; on a cash dividend
+    # the feed puts the payment as a fraction of par here, which is not a share
+    # ratio at all — so it is stored as given and read by kind, never by name.
+    exercise_ratio = Column(Numeric(18, 8), nullable=True)
+    value_per_share = Column(Numeric(18, 2), nullable=True)
+    changes_share_count = Column(Boolean, nullable=False)
+    confirmation = Column(String(16), nullable=False)
+    confirmation_reason = Column(String(48), nullable=True)
+    source = Column(String(32), nullable=False)
+    observed_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        # Identity is (symbol, ex-date, event code) **plus the kind**, enforced by
+        # the database rather than by the collector: the load re-reads a
+        # company's whole history every run, so without this a year of runs is a
+        # year of duplicate rows that read as a year of corporate actions.
+        #
+        # The kind is in the key because the three columns the ticket names do
+        # not identify a row in the feed as it actually arrives. MBB's
+        # 2026-08-11 ex-date carries two ``ISS`` rows — a 15% stock dividend and
+        # a 10% rights issue — and keying without the kind would let the second
+        # overwrite the first, losing half of an adjustment that has to be
+        # computed from both at once.
+        #
+        # Two indexes because one cannot cover both cases. A NULL ex-date does
+        # not collide with another NULL under a plain unique constraint, which
+        # would let every run insert TCB's undated bonus issue again — so those
+        # rows are keyed on their public date instead, which is the only other
+        # date they carry.
+        Index(
+            "uq_corporate_action_dated",
+            "symbol",
+            "ex_date",
+            "event_code",
+            "kind",
+            unique=True,
+            postgresql_where=text("ex_date IS NOT NULL"),
+            sqlite_where=text("ex_date IS NOT NULL"),
+        ),
+        Index(
+            "uq_corporate_action_undated",
+            "symbol",
+            "public_date",
+            "event_code",
+            "kind",
+            unique=True,
+            postgresql_where=text("ex_date IS NULL"),
+            sqlite_where=text("ex_date IS NULL"),
+        ),
+        # Adjusting a window asks for one symbol's actions across a date range,
+        # every time.
+        Index("ix_corporate_action_symbol_ex_date", "symbol", "ex_date"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<CorporateAction {self.symbol} {self.event_code} "
+            f"{self.ex_date} {self.confirmation}>"
+        )
+
+
 class ProfitRankingCensusRun(Base):
     """One pass of the market-wide profit census, and how far it got.
 

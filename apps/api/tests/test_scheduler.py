@@ -169,6 +169,7 @@ class TestSchedulerSetup:
             sector_historical_enabled=True,
             collector_enabled=True,
             backfill_enabled=True,
+            corporate_actions_enabled=True,
         )
         with (
             patch("src.core.scheduler.settings", enabled),
@@ -193,6 +194,7 @@ class TestSchedulerSetup:
             "universe-snapshots",
             "universe-backfill",
             "market-catchup",
+            "corporate-actions-weekly",
         }
 
     @pytest.mark.asyncio

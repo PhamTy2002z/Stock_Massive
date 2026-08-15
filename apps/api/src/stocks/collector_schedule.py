@@ -19,6 +19,10 @@ from src.core.trading_calendar import is_trading_day
 
 from .backfill import BackfillSummary, run_backfill
 from .collector import CollectionSummary, run_cycle
+from .corporate_action_collector import (
+    CorporateActionSummary,
+    run_corporate_action_load,
+)
 from .warmup import WarmupSummary, run_warmup
 
 if TYPE_CHECKING:  # imported lazily below: the census reaches a provider library
@@ -42,6 +46,9 @@ WARMUP_JOB_NAME = "Nạp cửa sổ tín hiệu gần đây"
 
 CENSUS_JOB_ID = "profit-census"
 CENSUS_JOB_NAME = "Kiểm kê lợi nhuận toàn thị trường"
+
+CORPORATE_ACTIONS_JOB_ID = "corporate-actions"
+CORPORATE_ACTIONS_JOB_NAME = "Nạp sự kiện quyền của Universe"
 
 
 @dataclass(frozen=True)
@@ -354,6 +361,73 @@ async def warm_up_symbols(
     already closed, and the day it is asked for says nothing about them.
     """
     return await asyncio.to_thread(run_symbol_warmup, symbols, warm)
+
+
+@dataclass(frozen=True)
+class CorporateActionOutcome:
+    """How one attempted pass of the corporate action load ended."""
+
+    status: Literal["completed", "failed", "skipped"]
+    actions_stored: int = 0
+    actions_confirmed: int = 0
+    completed: tuple[str, ...] = ()
+    failed: tuple[dict, ...] = ()
+    error: str | None = None
+
+    @classmethod
+    def of(cls, summary: CorporateActionSummary) -> "CorporateActionOutcome":
+        return cls(
+            status="completed",
+            actions_stored=summary.actions_stored,
+            actions_confirmed=summary.actions_confirmed,
+            completed=summary.completed,
+            failed=tuple(
+                {"symbol": item.symbol, "reason": item.reason}
+                for item in summary.failed
+            ),
+        )
+
+    def as_result(self) -> dict:
+        return {
+            "status": self.status,
+            "actions_stored": self.actions_stored,
+            "actions_confirmed": self.actions_confirmed,
+            "completed": list(self.completed),
+            "failed": [dict(item) for item in self.failed],
+            "error": self.error,
+        }
+
+
+def run_corporate_action_collection(
+    load: Callable[[], CorporateActionSummary] = run_corporate_action_load,
+) -> CorporateActionOutcome:
+    """Load the Universe's corporate actions, at most one pass at a time.
+
+    Guarded separately from the collection cycle. The two spend different
+    allowances — this one is vnstock's, the cycle is FiinQuant's single
+    connection — so blocking one on the other would stop an evening's session
+    being collected because a weekly event load was still running.
+    """
+    return _guarded_run(
+        CORPORATE_ACTIONS_JOB_ID,
+        CORPORATE_ACTIONS_JOB_NAME,
+        "corporate action load",
+        load,
+        CorporateActionOutcome.of,
+        CorporateActionOutcome,
+    )
+
+
+async def load_corporate_actions(
+    load: Callable[[], CorporateActionSummary] = run_corporate_action_load,
+) -> CorporateActionOutcome:
+    """Run one corporate action load off the event loop.
+
+    No trading-day gate: an action is announced on the company's calendar rather
+    than the exchange's, and the run is deliberately scheduled for a weekend day
+    that ``is_trading_day`` would refuse.
+    """
+    return await asyncio.to_thread(run_corporate_action_collection, load)
 
 
 def run_profit_census(

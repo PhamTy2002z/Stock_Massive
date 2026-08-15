@@ -14,6 +14,7 @@ from src.stocks.collector_schedule import (
     catch_up_market_data,
     census_market_profits,
     collect_universe_snapshots,
+    load_corporate_actions,
     retry_census_gaps,
 )
 from src.stocks.jobs import (
@@ -138,6 +139,13 @@ market_catchup_job_wrapper = make_job_wrapper(
     "Market catch-up completed",
     "Market catch-up failed",
 )
+corporate_actions_job_wrapper = make_job_wrapper(
+    "corporate_actions_job_wrapper",
+    "Corporate Action Load",
+    load_corporate_actions,
+    "Corporate action load completed",
+    "Corporate action load failed",
+)
 sector_historical_job_wrapper = make_job_wrapper(
     "sector_historical_job_wrapper",
     "Sector Historical Performance",
@@ -213,6 +221,27 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
             f"Scheduled the profit census retry at "
             f"{settings.profit_census_retry_hour:02d}:"
             f"{settings.profit_census_retry_minute:02d} ICT"
+        )
+
+    # The Corporate Action series, on the slow cadence ADR-0006 calls for. A
+    # weekend morning of its own: it shares vnstock's allowance with the census,
+    # and read-time adjustment has no other input, so it must not be the job that
+    # waits behind a market-wide pass that overran.
+    if settings.corporate_actions_enabled:
+        await scheduler.add_schedule(
+            corporate_actions_job_wrapper,
+            vn_cron(
+                hour=settings.corporate_actions_hour,
+                minute=settings.corporate_actions_minute,
+                day_of_week=settings.corporate_actions_weekday,
+            ),
+            id="corporate-actions-weekly",
+        )
+        logger.info(
+            f"Scheduled the corporate action load: day_of_week="
+            f"{settings.corporate_actions_weekday} at "
+            f"{settings.corporate_actions_hour:02d}:"
+            f"{settings.corporate_actions_minute:02d} ICT"
         )
 
     # Daily sector historical performance at 15:45 ICT (after sector-performance at 15:30)
