@@ -881,16 +881,46 @@ class TestCorporateActionNormalization:
 
         assert action_provider(company).fetch_corporate_actions("ACB") == ()
 
-    def test_a_layout_without_the_fields_is_refused_outright(self):
-        """A missing column is true for every symbol, not for this one.
+    def test_a_layout_without_the_identifying_fields_is_refused_outright(self):
+        """No dates and no title is a frame nothing can be stored or read from.
 
-        Skipping symbol by symbol would end in an empty table that reads like a
-        market with no corporate actions in it.
+        Refused rather than skipped row by row: it would otherwise end in an
+        empty table that reads like a market with no corporate actions in it.
         """
         company = FakeCompany(event_frame([{"event_code": "DIV", "category": "DIVIDEND"}]))
 
         with pytest.raises(VnstockProviderError, match="missing fields"):
             action_provider(company).fetch_corporate_actions("ACB")
+
+    def test_a_feed_with_no_terms_column_at_all_is_still_read(self):
+        """This frame's schema follows its contents, and absence is ordinary.
+
+        A company whose history holds no cash dividend comes back with no
+        ``value_per_share`` column — five of the thirty symbols in the configured
+        Universe did on the first live run. Demanding the column refuses that
+        company's share issues, which are perfectly readable, over the absence of
+        a kind of event it has never had. Stored without the term, an action
+        already has an honest answer: it refuses to produce a factor.
+        """
+        company = FakeCompany(
+            event_frame(
+                [
+                    {
+                        "event_code": "ISS",
+                        "event_title_en": "Share Issue - Stock dividend ratio 20.0%",
+                        "public_date": "2025-08-08",
+                        "exright_date": "2025-08-13",
+                        "exercise_ratio": 0.20,
+                        "category": "DIVIDEND",
+                    }
+                ]
+            )
+        )
+
+        (event,) = action_provider(company).fetch_corporate_actions("STB")
+
+        assert event.exercise_ratio == 0.20
+        assert event.value_per_share is None
 
     def test_the_feed_is_read_once_per_symbol(self):
         """One request per symbol is what makes a Universe pass affordable."""
