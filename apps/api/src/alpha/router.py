@@ -14,7 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.auth.dependencies import CurrentUser
 from src.core.database import get_db
 
-from .schemas import WatchlistAddRequest, WatchlistItemResponse, WatchlistResponse
+from .on_demand import OnDemandRequest, open_on_demand_lane
+from .schemas import (
+    OnDemandResponse,
+    WatchlistAddRequest,
+    WatchlistAddResponse,
+    WatchlistItemResponse,
+    WatchlistResponse,
+)
 from .watchlist import (
     WatchlistView,
     add_symbol,
@@ -48,14 +55,44 @@ async def get_watchlist(current_user: CurrentUser, db: Db) -> WatchlistResponse:
     return _response(await list_watchlist(db, current_user.id))
 
 
-@router.post("", response_model=WatchlistResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=WatchlistAddResponse, status_code=status.HTTP_201_CREATED)
 async def post_watchlist(
     payload: WatchlistAddRequest,
     current_user: CurrentUser,
     db: Db,
-) -> WatchlistResponse:
-    """Start watching a symbol, or be told why not."""
-    return _response(await add_symbol(db, current_user.id, payload.symbol))
+) -> WatchlistAddResponse:
+    """Start watching a symbol, or be told why not.
+
+    Two acts in a fixed order, and the order is the point. The addition is
+    committed first and stands whatever happens next: it is the thing the user
+    asked for, and the on-demand Analysis is a consequence the system may refuse
+    on its own budget without taking the symbol away with it.
+    """
+    view = await add_symbol(db, current_user.id, payload.symbol)
+    await db.commit()
+
+    # Run for a re-add too. The lane is idempotent per `(symbol, trading_day)`,
+    # so it finds the existing run rather than making a second one — which is
+    # why nothing here has to track whether this request seated a new row.
+    lane = await open_on_demand_lane(current_user.id, payload.symbol)
+
+    base = _response(view)
+    return WatchlistAddResponse(
+        cap=base.cap,
+        count=base.count,
+        entries=base.entries,
+        on_demand=_lane_response(lane),
+    )
+
+
+def _lane_response(lane: OnDemandRequest) -> OnDemandResponse:
+    return OnDemandResponse(
+        outcome=lane.outcome,
+        trading_day=lane.trading_day,
+        remaining=lane.remaining,
+        allowance=lane.allowance,
+        message=lane.message,
+    )
 
 
 @router.delete("/{symbol}", response_model=WatchlistResponse)
