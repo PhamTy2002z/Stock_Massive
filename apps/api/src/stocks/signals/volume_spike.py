@@ -27,29 +27,25 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, timezone
 from enum import Enum
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.stocks.models import ListingRoster, ProviderSnapshot
+from src.stocks.models import ListingRoster
 
 from ..cohort import (
     COHORT_ACTIVATION_MIN_MEMBERS,
     CohortStore,
     cohort_version_active_on,
 )
-from ..providers.contracts import (
-    Capability,
-    Exchange,
-    MarketSnapshot,
-    main_source,
-)
+from ..providers.contracts import Exchange, MarketSnapshot
 from ..providers.normalize import VN_TZ
 from ..trading_day import latest_trading_day, trading_days_before
 from ..universe import Universe, build_universe
 from .issues import SignalIssue
+from .sessions import sessions_on_days
 
 logger = logging.getLogger(__name__)
 
@@ -76,8 +72,6 @@ STALE_SIGNAL_AGE_DAYS = 7
 # worth showing. Below it the sample says more about the collector than about
 # the market.
 UNIVERSE_PARTIAL_COVERAGE = 0.90
-
-_MARKET = Capability.MARKET.value
 
 
 class SignalScope(str, Enum):
@@ -205,59 +199,6 @@ class VolumeSpikeSignal:
         )
 
 
-def _day_start(day: date) -> datetime:
-    """Midnight in Vietnam, which is how a session is stamped."""
-    return datetime.combine(day, time.min, tzinfo=VN_TZ)
-
-
-def _sessions_by_symbol(
-    session: Session,
-    symbols: Sequence[str],
-    days: Sequence[date],
-) -> dict[str, dict[date, MarketSnapshot]]:
-    """Read these symbols' sessions for exactly these days, in one query.
-
-    Where two sources hold the same session the Main Source wins, the way
-    ``SnapshotStore.series`` resolves it: the Cover Source's history is a quote
-    series and carries a thinner session, so letting a late backfill overwrite a
-    collected one would change the number without changing anything visible.
-    """
-    if not symbols or not days:
-        return {}
-
-    stamps = [_day_start(day) for day in days]
-    wanted = [symbol.upper() for symbol in symbols]
-    rows = session.execute(
-        select(ProviderSnapshot)
-        .where(
-            ProviderSnapshot.capability == _MARKET,
-            ProviderSnapshot.symbol.in_(wanted),
-            ProviderSnapshot.effective_at.in_(stamps),
-        )
-        .order_by(
-            ProviderSnapshot.effective_at.asc(),
-            ProviderSnapshot.observed_at.asc(),
-        )
-    ).scalars()
-
-    main = main_source(Capability.MARKET).value
-    held: dict[str, dict[date, ProviderSnapshot]] = {}
-    for row in rows:
-        day = row.effective_at.astimezone(VN_TZ).date()
-        by_day = held.setdefault(row.symbol, {})
-        existing = by_day.get(day)
-        if existing is None or existing.source != main:
-            by_day[day] = row
-
-    return {
-        symbol: {
-            day: MarketSnapshot.model_validate(row.payload)
-            for day, row in by_day.items()
-        }
-        for symbol, by_day in held.items()
-    }
-
-
 def _exchanges_of(session: Session, symbols: Sequence[str]) -> dict[str, str]:
     """Which board each symbol is listed on, from the listing register.
 
@@ -308,9 +249,7 @@ def evaluate_symbols(
             for symbol in wanted
         )
 
-    sessions = _sessions_by_symbol(
-        session, wanted, (day,) + tuple(baseline_window)
-    )
+    sessions = sessions_on_days(session, wanted, (day,) + tuple(baseline_window))
     return tuple(
         _read_symbol(symbol, sessions.get(symbol, {}), day, baseline_window, exchanges)
         for symbol in wanted

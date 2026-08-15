@@ -5,6 +5,16 @@ Collector and the Warm-up already wrote, so an evening the provider is down
 still answers — with an older session, and saying so.
 """
 
+from .bars import (
+    ADTV_MIN_PEERS,
+    ADTV_SESSIONS,
+    AdjustmentReport,
+    Bar,
+    BarFrame,
+    WindowBandRegime,
+    WindowHealth,
+    prepare_bars,
+)
 from .corporate_actions import (
     ActionKind,
     ActionTerms,
@@ -28,14 +38,17 @@ from .price_band import (
     BandLimits,
     BandReading,
     BandRegime,
+    BandRegimeResolver,
     ExchangeAsOf,
     ExchangeMigration,
     LimitLock,
     band_limits,
     detect_limit_lock,
+    measure_band,
     resolve_band_regime,
     tick_size,
 )
+from .sessions import sessions_in_range, sessions_on_days
 from .volume_spike import (
     BASELINE_TRADING_DAYS,
     CoverageState,
@@ -47,14 +60,20 @@ from .volume_spike import (
 )
 
 __all__ = [
+    "ADTV_MIN_PEERS",
+    "ADTV_SESSIONS",
     "BAND_LIMIT_BY_EXCHANGE",
     "BASELINE_TRADING_DAYS",
     "ActionKind",
     "ActionTerms",
+    "AdjustmentReport",
+    "Bar",
+    "BarFrame",
     "BandAnchorBasis",
     "BandLimits",
     "BandReading",
     "BandRegime",
+    "BandRegimeResolver",
     "Confirmation",
     "ConfirmationReason",
     "ConfirmationVerdict",
@@ -70,13 +89,19 @@ __all__ = [
     "SignalIssue",
     "SignalScope",
     "VolumeSpikeSignal",
+    "WindowBandRegime",
+    "WindowHealth",
     "adjustment_factor",
     "band_limits",
     "blend",
     "classify",
     "confirm_ex_date",
     "detect_limit_lock",
+    "measure_band",
+    "prepare_bars",
     "resolve_band_regime",
+    "sessions_in_range",
+    "sessions_on_days",
     "signal_cache_key",
     "terms_of",
     "tick_size",
