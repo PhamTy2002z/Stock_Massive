@@ -10,6 +10,7 @@ Each field declares `unit`, `sign`, `interpretation`, `kind`, `claim`, `source`,
 
 | `kind` | What it is | Bar |
 | --- | --- | --- |
+| `vocabulary` | an exact named transform with no predictive claim | no threshold, null, or sampling uncertainty |
 | `estimator` | a point estimate with a sampling distribution | must carry SE or CI |
 | `percentile` | a cross-sectional position | must carry `n` and the cutoff date |
 | `signal` | has a threshold, can fire | the full bar below |
@@ -100,6 +101,16 @@ becomes a contract field: every field declares
 not return a direction-bearing key at all — no `direction`, no
 `signal: buy | sell`, no `expected_return`. The bar is a property of the tool, so
 it has to bite at the type rather than at the prompt.
+
+## Vocabulary is exact arithmetic, not an estimator
+
+RSI, MACD, and Bollinger %B are admitted only as named market vocabulary. Their
+values are deterministic transforms of a prepared window, so classifying them
+as `estimator` would require a meaningless SE or CI; classifying them as
+`signal` would turn practitioner cutoffs into claims that the out-of-sample
+evidence does not support. The `vocabulary` kind therefore carries no threshold,
+null, or sampling uncertainty, while `claim: "descriptive"` and each field's
+sanctioned `interpretation` keep the absence of predictive edge explicit.
 
 ## The price-zone tension, resolved
 

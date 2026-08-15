@@ -48,6 +48,15 @@ from .fields import (
     ThresholdOrigin,
     Unit,
 )
+from .indicators import (
+    BOLLINGER_MIN_SESSIONS,
+    INDICATOR_WARMUP_SESSIONS,
+    MACD_MIN_SESSIONS,
+    RSI_MIN_SESSIONS,
+    bollinger_percent_b_reading,
+    macd_reading,
+    rsi_reading,
+)
 from .market_behavior import (
     BAND_PRESSURE_MIN_SESSIONS,
     BAND_PRESSURE_SESSIONS,
@@ -653,6 +662,70 @@ MARKET_BEHAVIOR_FIELDS: tuple[SignalField, ...] = (
 )
 
 
+# --- Descriptive indicator vocabulary ------------------------------------
+
+_NO_INDICATOR_EDGE = (
+    "This is descriptive market vocabulary only: no out-of-sample edge is "
+    "claimed after accounting for data snooping."
+)
+
+RSI = SignalField(
+    name="indicator_pack.rsi_14",
+    unit=Unit.INDEX_0_100,
+    sign=Sign.NON_NEGATIVE,
+    interpretation=(
+        "Wilder's smoothed 14-session relative-strength index on the prepared "
+        "closing prices, from 0 to 100, after "
+        f"{INDICATOR_WARMUP_SESSIONS} sessions of warm-up. {_NO_INDICATOR_EDGE}"
+    ),
+    kind=FieldKind.VOCABULARY,
+    claim=Claim.DESCRIPTIVE,
+    source=FieldSource.COMPUTED,
+    min_sessions=RSI_MIN_SESSIONS,
+    threshold=None,
+    null_fpr=None,
+    reading=rsi_reading,
+)
+
+MACD = SignalField(
+    name="indicator_pack.macd_12_26_vnd",
+    unit=Unit.VND,
+    sign=Sign.SIGNED,
+    interpretation=(
+        "The 12-session exponential moving average of the prepared closing "
+        "prices minus the 26-session exponential moving average, in VND, after "
+        f"{INDICATOR_WARMUP_SESSIONS} sessions of warm-up. "
+        f"{_NO_INDICATOR_EDGE}"
+    ),
+    kind=FieldKind.VOCABULARY,
+    claim=Claim.DESCRIPTIVE,
+    source=FieldSource.COMPUTED,
+    min_sessions=MACD_MIN_SESSIONS,
+    threshold=None,
+    null_fpr=None,
+    reading=macd_reading,
+)
+
+BOLLINGER_PERCENT_B = SignalField(
+    name="indicator_pack.bollinger_percent_b_20",
+    unit=Unit.RATIO,
+    sign=Sign.SIGNED,
+    interpretation=(
+        "The prepared close's position in its 20-session Bollinger envelope, "
+        "as the unitless fraction from the lower band to the upper band; it "
+        "may lie outside zero to one. "
+        f"{_NO_INDICATOR_EDGE}"
+    ),
+    kind=FieldKind.VOCABULARY,
+    claim=Claim.DESCRIPTIVE,
+    source=FieldSource.COMPUTED,
+    min_sessions=BOLLINGER_MIN_SESSIONS,
+    threshold=None,
+    null_fpr=None,
+    reading=bollinger_percent_b_reading,
+)
+
+
 def _index(*fields: SignalField) -> Mapping[str, SignalField]:
     """Key the declarations by name, refusing two fields with one name.
 
@@ -685,6 +758,9 @@ REGISTRY: Mapping[str, SignalField] = _index(
     DRAWDOWN_VERSUS_BENCHMARK,
     SHARPE,
     SORTINO,
+    RSI,
+    MACD,
+    BOLLINGER_PERCENT_B,
 )
 
 
