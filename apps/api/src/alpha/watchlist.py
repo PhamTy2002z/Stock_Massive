@@ -30,6 +30,7 @@ from src.stocks.shared import StockServiceError, validate_symbol
 from src.stocks.universe import Universe, build_universe
 
 from .models import WatchlistEntry
+from .refusals import AlphaRefusal
 
 # Ten per user, and unlike the Universe cap this one reaches the interface. A
 # user collides with it every time they add a symbol, so it is shown as a count
@@ -37,19 +38,8 @@ from .models import WatchlistEntry
 WATCHLIST_MAX_SYMBOLS = 10
 
 
-class WatchlistRefusal(Exception):
-    """A Watchlist change refused for a named reason.
-
-    The reason is a stable code the interface may branch on; the message is the
-    sentence a person reads and is allowed to change. Folded into one string,
-    every caller would have to parse the reason out of prose.
-    """
-
-    def __init__(self, reason: str, message: str, status_code: int) -> None:
-        super().__init__(f"{reason}: {message}")
-        self.reason = reason
-        self.message = message
-        self.status_code = status_code
+class WatchlistRefusal(AlphaRefusal):
+    """A Watchlist change refused for a named reason."""
 
 
 class WatchlistState(str, Enum):
