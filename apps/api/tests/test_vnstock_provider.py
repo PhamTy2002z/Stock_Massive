@@ -27,6 +27,7 @@ from src.stocks.providers.vnstock_provider import (
     VnstockFundamentalProvider,
     VnstockListingRosterProvider,
     VnstockMarketHistoryProvider,
+    VnstockListingRosterProvider,
     VnstockProviderError,
     VnstockReadFailed,
     VnstockReferenceProvider,

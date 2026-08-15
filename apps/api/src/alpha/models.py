@@ -305,7 +305,7 @@ class AgentToolCall(Base):
     tool_name = Column(String(64), nullable=False)
     arguments = Column(JSONB, nullable=False)
     result = Column(JSONB, nullable=True)
-    # ok | tool_error | timeout
+    # ok | tool_error | timeout | unknown_tool
     status = Column(String(16), nullable=False)
     error = Column(String(500), nullable=True)
     latency_ms = Column(Integer, nullable=True)

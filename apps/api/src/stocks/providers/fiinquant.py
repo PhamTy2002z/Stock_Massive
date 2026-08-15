@@ -16,6 +16,8 @@ from typing import Any
 import pandas as pd
 from pydantic import ValidationError
 
+from src.core.provider_access import ensure_provider_source_allowed
+
 from .contracts import (
     MARKET_SCHEMA_VERSION,
     BatchTooLarge,
@@ -287,6 +289,7 @@ class FiinQuantProviderBase:
         error is raised outside the handler and only the exception type name
         survives.
         """
+        ensure_provider_source_allowed()
         failure: str | None = None
         oversized = False
         try:
@@ -918,4 +921,3 @@ def _session_start(value: Any) -> datetime:
     return _as_aware(value).astimezone(VN_TZ).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
-
