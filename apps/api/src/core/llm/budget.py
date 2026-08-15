@@ -44,6 +44,13 @@ TURN_COST_CEILING_USD = 0.50
 # Money compared in floating point needs a tolerance, and the unit the ledger
 # is denominated in is the honest one: a micro-USD (``docs/adr/0014``).
 MICRO_USD = 1e-6
+HARD_MONTHLY_ENVELOPE_USD = 50.0
+HARD_LANE_ALLOCATIONS_USD = {
+    "analysis": 10.0,
+    "turn": 30.0,
+    "emergency": 5.0,
+    "eval": 5.0,
+}
 
 
 @dataclass(frozen=True)
@@ -173,6 +180,27 @@ def _lane_failures(config: LLMConfig, analysis: float, turn: float) -> list[Budg
                 "monthly_envelope",
                 f"the four lanes allocate ${lanes.allocated_usd:.2f} against a "
                 f"${lanes.monthly_envelope_usd:.2f} envelope",
+            )
+        )
+
+    configured = {
+        "analysis": lanes.analysis_usd,
+        "turn": lanes.turn_usd,
+        "emergency": lanes.emergency_usd,
+        "eval": lanes.eval_usd,
+    }
+    if (
+        abs(lanes.monthly_envelope_usd - HARD_MONTHLY_ENVELOPE_USD) > MICRO_USD
+        or any(
+            abs(configured[name] - amount) > MICRO_USD
+            for name, amount in HARD_LANE_ALLOCATIONS_USD.items()
+        )
+    ):
+        failures.append(
+            BudgetFailure(
+                "monthly_envelope",
+                "the configured envelope must remain $50 split as $10 Analysis, "
+                "$30 Turn, $5 emergency and $5 eval",
             )
         )
 

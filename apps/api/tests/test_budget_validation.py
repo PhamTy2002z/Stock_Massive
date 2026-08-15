@@ -110,6 +110,20 @@ class TestImpossibleConfiguration:
         assert not report.ok
         assert "monthly_envelope" in _failed_ceilings(report)
 
+    def test_the_hard_fifty_dollar_envelope_cannot_be_configured_upward(self):
+        report = validate_budget(
+            _config(
+                llm_budget_monthly_usd=100.0,
+                llm_budget_analysis_usd=20.0,
+                llm_budget_turn_usd=60.0,
+                llm_budget_emergency_usd=10.0,
+                llm_budget_eval_usd=10.0,
+            )
+        )
+
+        assert not report.ok
+        assert "monthly_envelope" in _failed_ceilings(report)
+
     def test_a_lane_too_small_for_one_unit_of_its_own_workload_is_refused(self):
         report = validate_budget(
             _config(

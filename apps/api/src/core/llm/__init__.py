@@ -26,6 +26,7 @@ from .admission import (
     Reservation,
     SpendAdmission,
     SpendRequest,
+    TurnState,
 )
 from .client import MissingSpendReservation, ReservedLLMClient, build_client
 from .config import (
@@ -60,6 +61,14 @@ from .protocol import (
     ToolSchema,
     Usage,
 )
+from .probe import (
+    CapabilityProbe,
+    CapabilityProbeError,
+    ProbeCheck,
+    ProbeResult,
+    clear_capability_probe_cache,
+    enforce_capability_probe,
+)
 
 __all__ = [
     "AuthUnavailable",
@@ -71,6 +80,8 @@ __all__ = [
     "Completion",
     "CompletionRequest",
     "CallOwner",
+    "CapabilityProbe",
+    "CapabilityProbeError",
     "GatewayTimeout",
     "JsonSchemaFormat",
     "LLMClient",
@@ -84,6 +95,8 @@ __all__ = [
     "ModelRefusal",
     "OwnerType",
     "PricingTable",
+    "ProbeCheck",
+    "ProbeResult",
     "Role",
     "Reservation",
     "SpendAdmission",
@@ -94,10 +107,13 @@ __all__ = [
     "ToolError",
     "ToolSchema",
     "SpendRequest",
+    "TurnState",
     "Usage",
     "Workload",
     "build_client",
+    "clear_capability_probe_cache",
     "enforce_budget_validation",
+    "enforce_capability_probe",
     "llm_config_from_settings",
     "llm_metrics",
     "tool_error_result",

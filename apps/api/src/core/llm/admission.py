@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_CEILING
 from enum import Enum
 import hashlib
 import logging
 from typing import Callable, Protocol
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
-from src.alpha.models import LlmCallUsage
+from src.alpha.models import AgentThread, AgentTurn, LlmCallUsage
 
 from .config import LLMConfig, TokenPrices, Workload
 from .protocol import Usage
@@ -27,6 +28,13 @@ TURN_CONTEXT_PER_CALL = 32_000
 TURN_INPUT_TOTAL = 100_000
 TURN_OUTPUT_TOTAL = 20_000
 TURN_COST_MICRO_USD = 500_000
+USER_TURN_STARTS_PER_DAY = 20
+USER_DAILY_MICRO_USD = 3_000_000
+USER_ROLLING_30D_MICRO_USD = 15_000_000
+USER_ACTIVE_TURNS = 1
+SYSTEM_ACTIVE_TURNS = 3
+PROBE_DAILY_MICRO_USD = 250_000
+ICT = ZoneInfo("Asia/Ho_Chi_Minh")
 
 
 class BudgetLane(str, Enum):
@@ -75,6 +83,15 @@ class Reservation:
     provider_called_at: datetime
 
 
+@dataclass(frozen=True)
+class TurnState:
+    """Counts admission needs from the Turn lifecycle table."""
+
+    starts_today: int
+    active_for_user: int
+    active_system: int
+
+
 class BudgetRefusal(RuntimeError):
     """Stable branchable refusal, with a USD-free user representation."""
 
@@ -87,7 +104,7 @@ class BudgetRefusal(RuntimeError):
         reset_at: datetime | None = None,
         operator_detail: str = "",
     ) -> None:
-        super().__init__(message)
+        super().__init__(f"{reason}: {message}")
         self.reason = reason
         self.state = state
         self.reset_at = reset_at
@@ -117,10 +134,13 @@ class SpendAdmission:
         config: LLMConfig,
         session_factory: Callable[[], Session],
         clock: Callable[[], datetime],
+        turn_state_reader: Callable[[Session, int, datetime, str], TurnState]
+        | None = None,
     ) -> None:
         self._config = config
         self._session_factory = session_factory
         self._clock = clock
+        self._turn_state_reader = turn_state_reader or _read_turn_state
 
     def reserve(self, candidate: SpendRequest, model: str) -> Reservation:
         expected_model = self._config.model_for(candidate.workload)
@@ -136,7 +156,12 @@ class SpendAdmission:
         called_at = self._clock()
         prices = self._config.prices_for(candidate.workload)
         reserved = _micro_usd(
-            prices,
+            TokenPrices(
+                input=prices.worst_case_input,
+                cached_input=prices.cached_input,
+                cache_write=prices.cache_write,
+                output=prices.output,
+            ),
             input_tokens=candidate.input_tokens,
             output_tokens=candidate.output_tokens,
         )
@@ -144,13 +169,72 @@ class SpendAdmission:
         session = self._session_factory()
         try:
             with session.begin():
-                _lock_scopes(
-                    session,
-                    [
-                        f"lane:{candidate.lane.value}:{called_at:%Y-%m}",
+                while True:
+                    month_start, month_reset = _ict_month(called_at)
+                    day_start, day_reset = _ict_day(called_at)
+                    scopes = [
+                        f"lane:{candidate.lane.value}:{month_start.isoformat()}",
                         f"owner:{candidate.owner.type.value}:{candidate.owner.id}",
-                    ],
+                    ]
+                    if candidate.owner.user_id is not None:
+                        scopes.extend(
+                            [
+                                f"user-day:{candidate.owner.user_id}:{day_start.isoformat()}",
+                                f"user-rolling:{candidate.owner.user_id}",
+                                f"turn-active-user:{candidate.owner.user_id}",
+                                "turn-active-system",
+                            ]
+                        )
+                    if candidate.owner.type is OwnerType.CAPABILITY_PROBE:
+                        scopes.append(f"probe-day:{day_start.isoformat()}")
+                    _lock_scopes(session, scopes)
+
+                    # The timestamp is sampled after any lock wait, immediately
+                    # before the row is written and committed for dispatch. If
+                    # that wait crossed an ICT boundary, lock the new scopes as
+                    # well and evaluate only against the real call period.
+                    dispatch_at = self._clock()
+                    if (
+                        _ict_month(dispatch_at)[0] == month_start
+                        and _ict_day(dispatch_at)[0] == day_start
+                    ):
+                        called_at = dispatch_at
+                        break
+                    called_at = dispatch_at
+                lane_limit = _lane_limit_micro_usd(self._config, candidate.lane)
+                lane_spent = _charged_cost(
+                    session,
+                    LlmCallUsage.lane == candidate.lane.value,
+                    LlmCallUsage.provider_called_at >= month_start,
+                    LlmCallUsage.provider_called_at < month_reset,
                 )
+                if lane_spent + reserved > lane_limit:
+                    raise BudgetRefusal(
+                        "lane_budget_exhausted",
+                        "This service lane is unavailable until its allowance resets.",
+                        reset_at=month_reset,
+                        operator_detail=(
+                            f"{candidate.lane.value} lane has {lane_spent} micro-USD "
+                            f"charged against {lane_limit}; request is {reserved}"
+                        ),
+                    )
+                if candidate.owner.type is OwnerType.CAPABILITY_PROBE:
+                    probe_spent = _charged_cost(
+                        session,
+                        LlmCallUsage.owner_type == OwnerType.CAPABILITY_PROBE.value,
+                        LlmCallUsage.provider_called_at >= day_start,
+                        LlmCallUsage.provider_called_at < day_reset,
+                    )
+                    if probe_spent + reserved > PROBE_DAILY_MICRO_USD:
+                        raise BudgetRefusal(
+                            "probe_budget_exhausted",
+                            "The Capability Probe allowance is exhausted.",
+                            reset_at=day_reset,
+                            operator_detail=(
+                                f"Capability Probe has {probe_spent} micro-USD "
+                                f"charged today and requested {reserved} more"
+                            ),
+                        )
                 if candidate.owner.type is OwnerType.ANALYSIS_RUN:
                     owner_cost = _charged_cost(
                         session,
@@ -190,6 +274,16 @@ class SpendAdmission:
                                 f"charged and requested {reserved} more"
                             ),
                         )
+                    if candidate.owner.user_id is None:
+                        raise ValueError("a Turn spend owner requires user_id")
+                    self._check_user(
+                        session,
+                        candidate,
+                        reserved,
+                        called_at,
+                        day_start,
+                        day_reset,
+                    )
                 row = LlmCallUsage(
                     owner_type=candidate.owner.type.value,
                     owner_id=candidate.owner.id,
@@ -210,6 +304,13 @@ class SpendAdmission:
                 )
                 session.add(row)
                 session.flush()
+                utilization = (lane_spent + reserved) / lane_limit
+                if utilization >= 0.70:
+                    logger.warning(
+                        "%s lane reached %.0f%% of its monthly budget",
+                        candidate.lane.value,
+                        utilization * 100,
+                    )
                 reservation = Reservation(
                     id=row.id,
                     owner=candidate.owner,
@@ -221,6 +322,88 @@ class SpendAdmission:
             return reservation
         finally:
             session.close()
+
+    def _check_user(
+        self,
+        session: Session,
+        candidate: SpendRequest,
+        reserved: int,
+        called_at: datetime,
+        day_start: datetime,
+        day_reset: datetime,
+    ) -> None:
+        user_id = candidate.owner.user_id
+        assert user_id is not None
+        state = self._turn_state_reader(
+            session,
+            user_id,
+            called_at,
+            candidate.owner.id,
+        )
+        if state.starts_today > USER_TURN_STARTS_PER_DAY:
+            raise BudgetRefusal(
+                "user_turn_starts_daily",
+                "Your daily Turn allowance has been exhausted.",
+                reset_at=day_reset,
+            )
+        if state.active_for_user > USER_ACTIVE_TURNS:
+            raise BudgetRefusal(
+                "user_active_turn",
+                "Another Turn is already active for this account.",
+                state="capacity_exhausted",
+            )
+        if state.active_system > SYSTEM_ACTIVE_TURNS:
+            raise BudgetRefusal(
+                "system_active_turns",
+                "The service is at its active Turn capacity.",
+                state="capacity_exhausted",
+            )
+
+        daily = _charged_cost(
+            session,
+            LlmCallUsage.user_id == user_id,
+            LlmCallUsage.owner_type == OwnerType.TURN_REQUEST_MESSAGE.value,
+            LlmCallUsage.provider_called_at >= day_start,
+            LlmCallUsage.provider_called_at < day_reset,
+        )
+        if daily + reserved > USER_DAILY_MICRO_USD:
+            raise BudgetRefusal(
+                "user_spend_daily",
+                "Your daily generation allowance has been exhausted.",
+                reset_at=day_reset,
+                operator_detail=(
+                    f"user {user_id} has {daily} micro-USD charged today and "
+                    f"requested {reserved} more"
+                ),
+            )
+
+        rolling_start = called_at - timedelta(days=30)
+        rolling = _charged_cost(
+            session,
+            LlmCallUsage.user_id == user_id,
+            LlmCallUsage.owner_type == OwnerType.TURN_REQUEST_MESSAGE.value,
+            LlmCallUsage.provider_called_at > rolling_start,
+            LlmCallUsage.provider_called_at <= called_at,
+        )
+        if rolling + reserved > USER_ROLLING_30D_MICRO_USD:
+            reset_at = _rolling_reset_at(
+                session,
+                user_id=user_id,
+                rolling_start=rolling_start,
+                called_at=called_at,
+                amount_to_release=(
+                    rolling + reserved - USER_ROLLING_30D_MICRO_USD
+                ),
+            )
+            raise BudgetRefusal(
+                "user_spend_rolling_30d",
+                "Your rolling generation allowance has been exhausted.",
+                reset_at=reset_at,
+                operator_detail=(
+                    f"user {user_id} has {rolling} micro-USD charged in 30 days "
+                    f"and requested {reserved} more"
+                ),
+            )
 
     def reconcile(self, reservation: Reservation, usage: Usage) -> None:
         session = self._session_factory()
@@ -294,19 +477,13 @@ def _check_candidate_shape(candidate: SpendRequest) -> None:
 
 
 def _charged_cost(session: Session, *conditions: object) -> int:
-    charged = case(
-        (LlmCallUsage.status == "reconciled", LlmCallUsage.actual_micro_usd),
-        else_=LlmCallUsage.reserved_micro_usd,
-    )
+    charged = _charged_cost_expression()
     value = session.scalar(select(func.coalesce(func.sum(charged), 0)).where(*conditions))
     return int(value or 0)
 
 
 def _owner_totals(session: Session, owner: CallOwner) -> tuple[int, int, int]:
-    charged_cost = case(
-        (LlmCallUsage.status == "reconciled", LlmCallUsage.actual_micro_usd),
-        else_=LlmCallUsage.reserved_micro_usd,
-    )
+    charged_cost = _charged_cost_expression()
     charged_input = case(
         (
             LlmCallUsage.status == "reconciled",
@@ -336,6 +513,42 @@ def _owner_totals(session: Session, owner: CallOwner) -> tuple[int, int, int]:
     return int(row[0] or 0), int(row[1] or 0), int(row[2] or 0)
 
 
+def _charged_cost_expression():
+    return case(
+        (LlmCallUsage.status == "reconciled", LlmCallUsage.actual_micro_usd),
+        else_=LlmCallUsage.reserved_micro_usd,
+    )
+
+
+def _rolling_reset_at(
+    session: Session,
+    *,
+    user_id: int,
+    rolling_start: datetime,
+    called_at: datetime,
+    amount_to_release: int,
+) -> datetime | None:
+    rows = session.execute(
+        select(
+            LlmCallUsage.provider_called_at,
+            _charged_cost_expression(),
+        )
+        .where(
+            LlmCallUsage.user_id == user_id,
+            LlmCallUsage.owner_type == OwnerType.TURN_REQUEST_MESSAGE.value,
+            LlmCallUsage.provider_called_at > rolling_start,
+            LlmCallUsage.provider_called_at <= called_at,
+        )
+        .order_by(LlmCallUsage.provider_called_at, LlmCallUsage.id)
+    ).all()
+    released = 0
+    for provider_called_at, charged in rows:
+        released += int(charged or 0)
+        if released >= amount_to_release:
+            return _aware(provider_called_at) + timedelta(days=30)
+    return None
+
+
 def _lock_scopes(session: Session, scopes: list[str]) -> None:
     """Serialize every absent-or-present scope without a sentinel table."""
     if session.get_bind().dialect.name != "postgresql":
@@ -349,6 +562,77 @@ def _lock_scopes(session: Session, scopes: list[str]) -> None:
         session.execute(select(func.pg_advisory_xact_lock(key)))
 
 
+def _lane_limit_micro_usd(config: LLMConfig, lane: BudgetLane) -> int:
+    amount = {
+        BudgetLane.ANALYSIS: config.lanes.analysis_usd,
+        BudgetLane.TURN: config.lanes.turn_usd,
+        BudgetLane.EMERGENCY: config.lanes.emergency_usd,
+        BudgetLane.EVAL: config.lanes.eval_usd,
+    }[lane]
+    return int(
+        (Decimal(str(amount)) * Decimal(1_000_000)).to_integral_value(
+            rounding=ROUND_CEILING
+        )
+    )
+
+
+def _ict_month(moment: datetime) -> tuple[datetime, datetime]:
+    local = moment.astimezone(ICT)
+    start = local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if start.month == 12:
+        reset = start.replace(year=start.year + 1, month=1)
+    else:
+        reset = start.replace(month=start.month + 1)
+    return start.astimezone(timezone.utc), reset.astimezone(timezone.utc)
+
+
+def _ict_day(moment: datetime) -> tuple[datetime, datetime]:
+    local = moment.astimezone(ICT)
+    start = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    reset = start + timedelta(days=1)
+    return start.astimezone(timezone.utc), reset.astimezone(timezone.utc)
+
+
+def _aware(moment: datetime) -> datetime:
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=timezone.utc)
+
+
+def _read_turn_state(
+    session: Session,
+    user_id: int,
+    called_at: datetime,
+    owner_id: str,
+) -> TurnState:
+    """Read current Turn counts inside the same locked admission transaction."""
+    day_start, day_reset = _ict_day(called_at)
+    starts = session.scalar(
+        select(func.count(AgentTurn.id))
+        .join(AgentThread, AgentThread.id == AgentTurn.thread_id)
+        .where(
+            AgentThread.user_id == user_id,
+            AgentTurn.started_at >= day_start,
+            AgentTurn.started_at < day_reset,
+        )
+    )
+    active = ("admitted", "running")
+    active_for_user = session.scalar(
+        select(func.count(AgentTurn.id))
+        .join(AgentThread, AgentThread.id == AgentTurn.thread_id)
+        .where(
+            AgentThread.user_id == user_id,
+            AgentTurn.status.in_(active),
+        )
+    )
+    active_system = session.scalar(
+        select(func.count(AgentTurn.id)).where(AgentTurn.status.in_(active))
+    )
+    return TurnState(
+        starts_today=int(starts or 0),
+        active_for_user=int(active_for_user or 0),
+        active_system=int(active_system or 0),
+    )
+
+
 __all__ = [
     "AdmissionLedger",
     "BudgetLane",
@@ -358,4 +642,5 @@ __all__ = [
     "Reservation",
     "SpendAdmission",
     "SpendRequest",
+    "TurnState",
 ]
