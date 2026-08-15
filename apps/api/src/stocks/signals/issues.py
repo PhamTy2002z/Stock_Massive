@@ -209,6 +209,15 @@ class SignalIssue(str, Enum):
     # code above, which is about a figure that exists and is old.
     FUNDAMENTAL_NOT_STORED = "fundamental_not_stored"
 
+    # The newest reference reading behind a stored figure is old enough that
+    # narrating it as current would be wrong. The reference twin of
+    # `stale_fundamental_period`, and a separate code because the two are
+    # different collection cadences with different fixes: one is a quarterly
+    # filing, the other is a daily board read that stopped. A degradation rather
+    # than a refusal — the number is real and the date it was read travels with
+    # it.
+    STALE_REFERENCE_READING = "stale_reference_reading"
+
     # The fitted AR(1) half-life reaches the window the gauge was fitted over,
     # which includes a series carrying no reversion at all — the estimate is
     # unbounded there rather than merely large. Past that point a z against the

@@ -75,6 +75,7 @@ from src.stocks.signals.nulls import (
 from src.stocks.signals.price_band import LimitLock
 from src.stocks.signals.reference import (
     FOREIGN_ROOM_EXHAUSTED_SHARE,
+    REFERENCE_STALE_DAYS,
     ForeignRoomStanding,
     foreign_room_on_or_before,
 )
@@ -359,7 +360,11 @@ class TestTheForeignRoom:
         """
         frame = frame_of_flows([1e9] * FOREIGN_FLOW_SESSIONS)
         room = ForeignRoomStanding(
-            symbol="AAA", current_room=0, total_room=1_000_000, as_of=date(2024, 2, 1)
+            symbol="AAA",
+            current_room=0,
+            total_room=1_000_000,
+            as_of=date(2024, 2, 1),
+            age_days=0,
         )
 
         reading = net_value_over_adtv_reading(window_with_room(frame, room))
@@ -375,15 +380,52 @@ class TestTheForeignRoom:
             current_room=int(1_000_000 * FOREIGN_ROOM_EXHAUSTED_SHARE),
             total_room=1_000_000,
             as_of=date(2024, 2, 1),
+            age_days=0,
         )
         open_room = ForeignRoomStanding(
-            symbol="AAA", current_room=200_000, total_room=1_000_000, as_of=date(2024, 2, 1)
+            symbol="AAA",
+            current_room=200_000,
+            total_room=1_000_000,
+            as_of=date(2024, 2, 1),
+            age_days=0,
         )
 
         assert nearly.exhausted
         assert nearly.state == "exhausted"
         assert not open_room.exhausted
         assert open_room.state == "open"
+
+    def test_a_stale_reading_degrades_ahead_of_whatever_it_said(self):
+        """Nobody has looked lately is a weaker claim than the room is full.
+
+        Reporting the exhaustion would assert today's constraint on last
+        quarter's evidence, so the age of the reading is what gets reported.
+        """
+        frame = frame_of_flows([1e9] * FOREIGN_FLOW_SESSIONS)
+        stale = ForeignRoomStanding(
+            symbol="AAA",
+            current_room=0,
+            total_room=1_000_000,
+            as_of=date(2024, 2, 1),
+            age_days=REFERENCE_STALE_DAYS + 1,
+        )
+
+        reading = net_value_over_adtv_reading(window_with_room(frame, stale))
+
+        assert stale.stale
+        assert reading.degraded_reason is SignalIssue.STALE_REFERENCE_READING
+        assert reading.extras["foreign_room_as_of"] == "2024-02-01"
+
+    def test_a_reading_inside_the_threshold_is_not_stale(self):
+        fresh = ForeignRoomStanding(
+            symbol="AAA",
+            current_room=200_000,
+            total_room=1_000_000,
+            as_of=date(2024, 2, 1),
+            age_days=REFERENCE_STALE_DAYS,
+        )
+
+        assert not fresh.stale
 
     def test_an_uncollected_room_is_unknown_and_not_open(self):
         """Two different facts, and asserting the second from the first is wrong."""
