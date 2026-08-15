@@ -308,20 +308,27 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
         )
 
     # Late enough that the Main Source has appended the session that closed
-    # today. The 16:15 cycle routinely comes away with yesterday's session,
-    # and without this run that day is never collected at all.
+    # today. The 16:15 cycle routinely comes away with yesterday's session, and
+    # without these runs that day is never collected at all.
+    #
+    # Three times rather than one, and each of them conditional: every fire asks
+    # the store whether a new Trading Day exists and does nothing if one does
+    # (spec 0003 §11). So the cost of three on an ordinary evening is three
+    # queries, and the benefit on a bad one is hours of pipeline time before the
+    # 07:00 ICT availability deadline.
     if settings.market_catchup_enabled:
-        await scheduler.add_schedule(
-            market_catchup_job_wrapper,
-            vn_cron(
-                hour=settings.market_catchup_hour,
-                minute=settings.market_catchup_minute,
-            ),
-            id="market-catchup",
-        )
+        for hour, minute in settings.market_catchup_schedule:
+            await scheduler.add_schedule(
+                market_catchup_job_wrapper,
+                vn_cron(hour=hour, minute=minute),
+                id=f"market-catchup-{hour:02d}{minute:02d}",
+            )
         logger.info(
-            f"Scheduled the market catch-up at "
-            f"{settings.market_catchup_hour}:{settings.market_catchup_minute:02d} ICT"
+            "Scheduled the conditional market catch-up at %s ICT",
+            ", ".join(
+                f"{hour:02d}:{minute:02d}"
+                for hour, minute in settings.market_catchup_schedule
+            ),
         )
 
     # The benchmark series, after the market catch-up has had its turn at the
@@ -447,6 +454,46 @@ async def run_startup_jobs_with_delay() -> None:
     await run_startup_jobs()
 
 
+def _should_catch_up_market_data() -> bool:
+    """Whether a restart landed mid-evening with the Trading Day still unmoved.
+
+    Every input is Postgres or the clock, and none of it is the in-memory job
+    status store: that store is empty after a restart, so a cadence that read it
+    would treat a missed 18:30 as an evening that never needed one and wait
+    until 21:30 to find out otherwise. The store is what says whether the day
+    moved, and the schedule is what says whether it was due (spec 0003 §11).
+    """
+    from src.stocks.collector_schedule import market_has_advanced_to
+
+    if not settings.market_catchup_enabled:
+        return False
+
+    today = datetime.now(VN_TZ).date()
+    if not is_trading_day(today):
+        return False
+
+    schedule = settings.market_catchup_schedule
+    if not schedule or not _time_passed_today(*schedule[0]):
+        return False
+
+    return not market_has_advanced_to(today)
+
+
+async def _resume_the_nightly_cohort() -> None:
+    """Queue whatever the evening's cohort is missing, whenever we came back.
+
+    Unconditional and idempotent. A process that died between establishing a
+    Trading Day and capturing the cohort leaves an evening with no runs in it,
+    and nothing else would notice until the next collection cycle — which on
+    this cadence can be a day. Asking on every start costs one query.
+    """
+    from src.stocks.collector_schedule import capture_nightly_cohort
+
+    captured = await asyncio.to_thread(capture_nightly_cohort)
+    if captured:
+        logger.info(f"Resumed the nightly cohort on startup: {captured}")
+
+
 async def run_startup_jobs() -> None:
     """Run missed scheduled jobs on startup.
 
@@ -477,6 +524,23 @@ async def run_startup_jobs() -> None:
             logger.info("Startup cleanup job completed successfully")
         except Exception as e:
             logger.error(f"Startup cleanup job failed: {e}", exc_info=True)
+
+    # Check and run the conditional market catch-up, then resume the cohort.
+    # In that order: the catch-up may be what establishes the Trading Day, and
+    # it captures the cohort itself when it does.
+    should_catch_up = _should_catch_up_market_data()
+    logger.info(f"Should run market catch-up: {should_catch_up}")
+    if should_catch_up:
+        try:
+            await catch_up_market_data()
+            logger.info("Startup market catch-up completed successfully")
+        except Exception as e:
+            logger.error(f"Startup market catch-up failed: {e}", exc_info=True)
+
+    try:
+        await _resume_the_nightly_cohort()
+    except Exception as e:
+        logger.error(f"Resuming the nightly cohort failed: {e}", exc_info=True)
 
     # Check and run sector historical job
     should_run_sector_hist = _should_run_sector_historical_job()
