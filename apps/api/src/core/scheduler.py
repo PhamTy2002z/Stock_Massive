@@ -487,9 +487,9 @@ async def _resume_the_nightly_cohort() -> None:
     and nothing else would notice until the next collection cycle — which on
     this cadence can be a day. Asking on every start costs one query.
     """
-    from src.stocks.collector_schedule import capture_nightly_cohort
+    from src.stocks.collector_schedule import capture_cohort_from_the_store
 
-    captured = await asyncio.to_thread(capture_nightly_cohort)
+    captured = await asyncio.to_thread(capture_cohort_from_the_store)
     if captured:
         logger.info(f"Resumed the nightly cohort on startup: {captured}")
 

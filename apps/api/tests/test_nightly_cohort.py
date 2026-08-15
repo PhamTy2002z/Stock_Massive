@@ -16,8 +16,9 @@ Snapshot, a restart and two concurrent captures all end the same way.
 ``(symbol, trading_day)`` and shared, so it was never that user's to cancel.
 
 *The state has no table.* It is derived from the runs, which already carry
-status and origin. ``blocked`` is the honest word for an evening with nothing to
-run against, and it is not a synonym for failed.
+status and origin. ``blocked`` is reserved for the one evening that had no
+session to be run against, and it is neither a synonym for failed nor the answer
+for an evening nobody watched a symbol in.
 
 Run against a live Postgres: two of these are about what the database refuses.
 """
@@ -31,7 +32,6 @@ from sqlalchemy import delete, select
 from src.alpha.analysis_run import RunOrigin, RunStatus
 from src.alpha.models import Analysis, AnalysisRun, WatchlistEntry
 from src.alpha.nightly import (
-    AVAILABILITY_DEADLINE_HOUR_ICT,
     CohortState,
     capture_nightly_cohort,
     cohort_state,
@@ -359,9 +359,21 @@ class TestTheDerivedState:
         assert status.trading_day is None
         assert status.total == 0
 
-    def test_a_day_nobody_watches_a_symbol_for_is_blocked(self, session):
+    def test_a_day_nobody_watches_a_symbol_for_is_complete_and_not_blocked(
+        self, session
+    ):
+        """An operator seeing `blocked` goes and looks at the Collector.
+
+        An evening where nobody watches a symbol has a perfectly good session
+        and nothing to do with it, so answering `blocked` there would send them
+        to exactly the wrong place. `total: 0` is what says which kind of
+        finished evening it was.
+        """
         status = cohort_state(session, TRADING_DAY)
-        assert status.state is CohortState.BLOCKED
+
+        assert status.state is CohortState.COMPLETE
+        assert status.total == 0
+        assert status.trading_day == TRADING_DAY
 
     def test_a_cohort_with_work_left_is_running(self, session, users):
         watch(session, users[0], *WATCHED)
@@ -440,8 +452,18 @@ class TestTheDerivedState:
         assert "analysis_cohort" not in tables
         assert "nightly_cohort" not in tables
 
-    def test_the_availability_deadline_is_stated_rather_than_implied(self):
-        assert AVAILABILITY_DEADLINE_HOUR_ICT == 7
+    def test_blocked_is_reserved_for_the_one_condition_that_earns_it(
+        self, session, users, monkeypatch
+    ):
+        """No Trading Day, and nothing else. Every other evening has a session."""
+        watch(session, users[0], *WATCHED)
+        capture_nightly_cohort(session, TRADING_DAY)
+        monkeypatch.setattr(
+            "src.alpha.nightly.latest_trading_day", lambda session: None
+        )
+
+        assert cohort_state(session).state is CohortState.BLOCKED
+        assert cohort_state(session, TRADING_DAY).state is CohortState.RUNNING
 
 
 class TestNoMigrationWasAdded:

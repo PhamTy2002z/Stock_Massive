@@ -435,7 +435,7 @@ class TestSpendAdmission:
         assert spend.owner.type is OwnerType.ANALYSIS_RUN
         assert spend.owner.id == str(RUN_ID)
 
-    def test_the_worst_case_stays_inside_the_per_call_ceilings(self):
+    def test_an_ordinary_envelope_stays_inside_the_per_call_ceilings(self):
         from src.core.llm.admission import (
             ANALYSIS_INPUT_PER_CALL,
             ANALYSIS_OUTPUT_PER_CALL,
@@ -444,6 +444,45 @@ class TestSpendAdmission:
         spend = spend_for(build_request(an_envelope(), MODEL), RUN_ID)
         assert 0 < spend.input_tokens <= ANALYSIS_INPUT_PER_CALL
         assert 0 < spend.output_tokens <= ANALYSIS_OUTPUT_PER_CALL
+
+    def test_an_oversized_prompt_is_reserved_at_its_real_size_and_refused(self):
+        """Clamping the estimate to the ceiling would make the ceiling a no-op.
+
+        Admission refuses on `input_tokens > ANALYSIS_INPUT_PER_CALL`, so an
+        estimate capped at that number is an estimate that can never trip it:
+        the oversized prompt would go out on an understated reservation and the
+        6,000-token rule would never fire on anything.
+        """
+        from src.core.llm.admission import (
+            ANALYSIS_INPUT_PER_CALL,
+            _check_candidate_shape,
+        )
+
+        huge = replace(
+            an_envelope(), company_name="x" * (ANALYSIS_INPUT_PER_CALL * 10)
+        )
+        spend = spend_for(build_request(huge, MODEL), RUN_ID)
+
+        assert spend.input_tokens > ANALYSIS_INPUT_PER_CALL
+        with pytest.raises(BudgetRefusal) as refused:
+            _check_candidate_shape(spend)
+        assert refused.value.reason == "analysis_input_per_call"
+
+    @pytest.mark.asyncio
+    async def test_a_refusal_that_is_not_about_money_does_not_claim_it_is(self):
+        client = FakeClient(
+            BudgetRefusal(
+                "analysis_input_per_call",
+                "This Analysis generation has exhausted its input allowance.",
+            )
+        )
+
+        with pytest.raises(ProductionFailure) as raised:
+            await generate(client)
+
+        assert raised.value.code == "budget_exhausted"
+        assert "analysis_input_per_call" in raised.value.message
+        assert "Không còn ngân sách" not in raised.value.message
 
     def test_one_generation_leaves_room_for_the_sanctioned_regeneration(self):
         """Reserving the per-call ceiling would make the retry unfundable by design."""

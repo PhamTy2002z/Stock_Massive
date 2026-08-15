@@ -25,19 +25,19 @@ import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from src.core.job_status_store import job_store
 from src.core.trading_calendar import is_trading_day
 
 from .backfill import BackfillSummary, run_backfill
 from .collector import CollectionSummary, run_cycle
-from .providers.contracts import Capability
 from .corporate_action_collector import (
     CorporateActionSummary,
     run_corporate_action_load,
 )
 from .market_index import MarketIndexSummary, run_market_index_load
+from .providers.contracts import Capability
 from .warmup import WarmupSummary, run_warmup
 
 if TYPE_CHECKING:  # imported lazily below: the census reaches a provider library
@@ -99,7 +99,7 @@ class CycleOutcome:
     # What establishing a Trading Day queued for the evening, where this cycle
     # established one. Null on a cycle that skipped or failed, and null on one
     # that wrote Snapshots for a day already captured — which is most of them.
-    cohort: dict | None = None
+    cohort: dict[str, Any] | None = None
 
     @classmethod
     def of(cls, summary: CollectionSummary) -> "CycleOutcome":
@@ -121,7 +121,7 @@ class CycleOutcome:
             ),
         )
 
-    def as_result(self) -> dict:
+    def as_result(self) -> dict[str, Any]:
         """Flatten into the JSON the job record and the API serve it as."""
         return {
             "status": self.status,
@@ -220,12 +220,18 @@ def run_collection_cycle(
     )
 
 
-def capture_nightly_cohort() -> dict | None:
+def capture_cohort_from_the_store() -> dict[str, Any] | None:
     """Queue the evening's cohort against whatever Trading Day the store holds.
 
+    Named apart from ``src.alpha.nightly.capture_nightly_cohort``, which it
+    calls: that one is handed a session and answers with a ``CohortCapture``,
+    this one owns a session and answers with the JSON a job record carries. Two
+    functions of one name would be one import alias away from a caller passing
+    the wrong thing to the wrong one.
+
     Called after every completed collection rather than only after the one that
-    moved the day, because the capture is idempotent and asking is one query:
-    a cycle that established the day captures the cohort, a cycle that did not
+    moved the day, because the capture is idempotent and asking is one query: a
+    cycle that established the day captures the cohort, a cycle that did not
     finds every run already there, and a process that restarted between the two
     is indistinguishable from either.
 
@@ -235,11 +241,11 @@ def capture_nightly_cohort() -> dict | None:
     """
     from src.core.database import get_sync_db
 
-    from src.alpha.nightly import capture_nightly_cohort as capture
+    from src.alpha.nightly import capture_nightly_cohort
 
     try:
         with get_sync_db() as session:
-            capture_result = capture(session)
+            captured = capture_nightly_cohort(session)
     except Exception as exc:  # pragma: no cover - defensive, logged and dropped
         logger.error(
             "Could not capture the nightly cohort: %s: %s",
@@ -248,14 +254,14 @@ def capture_nightly_cohort() -> dict | None:
             exc_info=True,
         )
         return None
-    return capture_result.as_result() if capture_result.captured else None
+    return captured.as_result() if captured.captured else None
 
 
 async def collect_universe_snapshots(
     force: bool = False,
     cycle: Callable[[], CollectionSummary] = run_cycle,
     today: date | None = None,
-    capture: Callable[[], dict | None] = capture_nightly_cohort,
+    capture: Callable[[], dict[str, Any] | None] = capture_cohort_from_the_store,
 ) -> CycleOutcome:
     """Run one collection cycle for the Universe, off the event loop.
 
@@ -280,7 +286,7 @@ async def collect_universe_snapshots(
 
 async def _with_cohort(
     outcome: CycleOutcome,
-    capture: Callable[[], dict | None],
+    capture: Callable[[], dict[str, Any] | None],
 ) -> CycleOutcome:
     """Capture the cohort where the cycle got far enough to establish a day.
 
@@ -359,7 +365,7 @@ async def catch_up_market_data(
     cycle: Callable[[], CollectionSummary] = _catch_up_cycle,
     today: date | None = None,
     latest: Callable[[], date | None] = _stored_trading_day,
-    capture: Callable[[], dict | None] = capture_nightly_cohort,
+    capture: Callable[[], dict[str, Any] | None] = capture_cohort_from_the_store,
 ) -> CycleOutcome:
     """Collect again later in the evening if the Trading Day never moved.
 

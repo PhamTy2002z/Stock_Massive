@@ -89,6 +89,17 @@ CHARS_PER_TOKEN = 3.5
 # Every generation is one attempt plus at most one regeneration.
 MAX_GENERATIONS_PER_ATTEMPT = 2
 
+if MAX_OUTPUT_TOKENS * MAX_GENERATIONS_PER_ATTEMPT > ANALYSIS_OUTPUT_PER_CALL:
+    # Checked at import rather than left to a reviewer, because the failure it
+    # guards against is silent: raise the output bound past half the per-call
+    # ceiling and the regeneration this module is built around stops being
+    # fundable, without a single test going red.
+    raise ValueError(
+        f"an output bound of {MAX_OUTPUT_TOKENS} leaves no room for the "
+        f"{MAX_GENERATIONS_PER_ATTEMPT} generations one attempt may make inside "
+        f"the {ANALYSIS_OUTPUT_PER_CALL}-token per-call ceiling"
+    )
+
 
 class Verdict(str, Enum):
     """The one scalar the rail reads as an extracted column.
@@ -449,7 +460,8 @@ async def generate_fragment(
         except AuthUnavailable as exc:
             raise ProductionFailure(
                 "auth_unavailable",
-                f"Tuyến LLM từ chối thông tin xác thực: {sanitized_reason(str(exc))}",
+                "Tuyến LLM từ chối thông tin xác thực: "
+                f"{sanitized_reason(str(exc))}",
             ) from exc
         except ModelRefusal as exc:
             # The model declined rather than the route failing. Its own words are
@@ -462,7 +474,8 @@ async def generate_fragment(
         except LLMError as exc:
             raise ProductionFailure(
                 "llm_transport_error",
-                f"Tuyến LLM không trả lời được: {sanitized_reason(str(exc))}",
+                "Tuyến LLM không trả lời được: "
+                f"{sanitized_reason(str(exc))}",
             ) from exc
 
         previous = completion.text or ""
@@ -483,23 +496,31 @@ def _budget_failure(
     refusal: BudgetRefusal,
     rejection: FragmentRejected | None,
 ) -> ProductionFailure:
-    """What an unfundable call means, which depends on which call it was.
+    """What a refused reservation means, which depends on which call it was.
 
-    A first generation nobody could fund is a spend failure and says so. A
-    *regeneration* nobody could fund is not: the attempt failed because the
+    A first generation admission would not fund is a spend failure and says so.
+    A *regeneration* it would not fund is not: the attempt failed because the
     fragment was invalid, and the budget is why nothing could be done about it —
     reporting it as a spend failure would hide a model that produced garbage
     behind a number in a ledger.
+
+    The message carries admission's own reason rather than asserting one, because
+    the refusals it can raise are not all about money: a prompt over the per-call
+    input ceiling arrives here as ``analysis_input_per_call``, and calling that
+    "out of budget" would send an operator to the ledger instead of to the
+    envelope that grew.
     """
     if rejection is None:
         return ProductionFailure(
             "budget_exhausted",
-            f"Không còn ngân sách để sinh Analysis: {sanitized_reason(refusal.reason)}",
+            "Lượt sinh Analysis bị từ chối ở khâu cấp ngân sách: "
+            f"{sanitized_reason(refusal.reason)}",
         )
     return ProductionFailure(
         "invalid_model_output",
-        "Fragment không hợp lệ và ngân sách còn lại không đủ để sinh lại "
-        f"({sanitized_reason(refusal.reason)}): {sanitized_reason(str(rejection))}",
+        "Fragment không hợp lệ và ngân sách còn lại không đủ để sinh "
+        f"lại ({sanitized_reason(refusal.reason)}): "
+        f"{sanitized_reason(str(rejection))}",
     )
 
 
@@ -529,16 +550,19 @@ def _parsed(completion: Completion) -> Any:
 
 
 def _estimated_input_tokens(request: CompletionRequest) -> int:
-    """What this prompt is worth, bounded by what one generation may ask for.
+    """What this prompt is worth, stated honestly however large it is.
 
-    Bounded rather than allowed to grow: an envelope that would not fit the
-    per-call ceiling is refused by admission under ``analysis_input_per_call``
-    instead of being reserved at a number the ceiling forbids.
+    **Deliberately unclamped.** Admission refuses a generation whose reserved
+    input exceeds ``ANALYSIS_INPUT_PER_CALL``, so clamping the estimate to that
+    ceiling would make the ceiling unenforceable: an oversized envelope would be
+    admitted on an understated reservation and the ≤6,000-token rule
+    (``docs/adr/0014``, spec 0003 §11) would never fire. A prompt too big for one
+    generation is a defect in what the backend assembled, and the only way it
+    surfaces is by being reserved at its real size and refused.
     """
     characters = sum(len(message.content or "") for message in request.messages)
     characters += len(json.dumps(FRAGMENT_SCHEMA))
-    estimate = math.ceil(characters / CHARS_PER_TOKEN)
-    return min(max(estimate, 1), ANALYSIS_INPUT_PER_CALL)
+    return max(math.ceil(characters / CHARS_PER_TOKEN), 1)
 
 
 def _enum_or_error(
@@ -592,8 +616,14 @@ def _citations(
         )
         return ()
 
+    # Both sets are read once. They are properties over the whole envelope, so
+    # asking inside the comprehensions would rebuild the figures tuple per cited
+    # id — and a fragment is allowed to cite every figure there is.
+    known = envelope.field_ids
+    usable = envelope.citable_field_ids
+
     cited = tuple(str(item) for item in value)
-    unknown = [item for item in cited if item not in envelope.field_ids]
+    unknown = [item for item in cited if item not in known]
     if unknown:
         errors.append(
             FragmentError(
@@ -606,11 +636,7 @@ def _citations(
             )
         )
 
-    unusable = [
-        item
-        for item in cited
-        if item in envelope.field_ids and item not in envelope.citable_field_ids
-    ]
+    unusable = [item for item in cited if item in known and item not in usable]
     if unusable:
         errors.append(
             FragmentError(
@@ -655,7 +681,11 @@ def _axes(value: Any, errors: list[FragmentError]) -> tuple[AxisJudgment, ...]:
     for index, item in enumerate(value):
         axis = Axis(named[index])
         emphasis = _enum_or_error(
-            Emphasis, item.get("emphasis"), f"$.axes[{index}].emphasis", "emphasis", errors
+            Emphasis,
+            item.get("emphasis"),
+            f"$.axes[{index}].emphasis",
+            "emphasis",
+            errors,
         )
         judgments.append(
             AxisJudgment(
