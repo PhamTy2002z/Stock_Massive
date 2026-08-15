@@ -8,23 +8,15 @@ from datetime import datetime, time
 from typing import Any, Callable, Optional
 from zoneinfo import ZoneInfo
 
-from src.core.redis import get_redis
+from src.core.redis import (
+    RELEASE_IF_OWNED_SCRIPT as _RELEASE_LOCK_SCRIPT,
+    RENEW_IF_OWNED_SCRIPT as _RENEW_LOCK_SCRIPT,
+    eval_script,
+    get_redis,
+)
 
 logger = logging.getLogger(__name__)
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
-
-_RELEASE_LOCK_SCRIPT = """
-if redis.call('GET', KEYS[1]) == ARGV[1] then
-    return redis.call('DEL', KEYS[1])
-end
-return 0
-"""
-_RENEW_LOCK_SCRIPT = """
-if redis.call('GET', KEYS[1]) == ARGV[1] then
-    return redis.call('EXPIRE', KEYS[1], ARGV[2])
-end
-return 0
-"""
 
 
 class CacheRefreshUnavailable(RuntimeError):
@@ -263,13 +255,8 @@ class TradingHoursCache:
                 except Exception as e:
                     logger.warning(f"Redis lock release error for {key}: {e}")
 
-    @staticmethod
-    def _eval_compare_script(redis, script: str, keys: list[str], args: list[str]):
-        """Execute a small compare-and-mutate script on either Redis client."""
-        try:
-            return redis.eval(script, keys=keys, args=args)
-        except TypeError:
-            return redis.eval(script, len(keys), *keys, *args)
+    # The two client shapes are reconciled once, in src/core/redis.py.
+    _eval_compare_script = staticmethod(eval_script)
 
     @classmethod
     def _renew_lock(

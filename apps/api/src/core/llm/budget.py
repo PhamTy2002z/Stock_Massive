@@ -10,6 +10,15 @@ least explicable.
 The check is local. It reads the configured models and prices, multiplies them
 by the token ceilings, and compares. No token is spent and no socket is opened,
 which is why it can run inside ``lifespan`` before anything else starts.
+
+**The dev lane still declares prices.** CLIProxyAPI on a personal subscription
+publishes none, and dev traffic produces no cost figures at all — a ~300-token
+CLI system prompt rides on every request and there is no cache control
+(``docs/specs/0003`` §3). What is configured there is therefore the *production*
+price table the dev route stands in for, which is the same table the budget is
+computed from analytically. Accepting a zero price instead would let a route
+boot whose every call costs nothing on paper, and the ceilings this file exists
+to enforce would pass by arithmetic rather than by being affordable.
 """
 
 from __future__ import annotations
@@ -17,7 +26,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
-from .config import LLMConfig, Workload
+from .config import LLMConfig, TokenPrices, Workload
 
 logger = logging.getLogger(__name__)
 
@@ -188,13 +197,30 @@ def _lane_failures(config: LLMConfig, analysis: float, turn: float) -> list[Budg
     return failures
 
 
+def _worst_case_usd(prices: TokenPrices, input_tokens: int, output_tokens: int) -> float:
+    """Price a whole allowance of tokens at the dearest each one can be.
+
+    Input is charged at ``worst_case_input`` — writing the cacheable prefix is
+    usually dearer than reading it fresh, and admission reserves that worst case
+    before dispatch. Output is charged through the same ``cost_usd`` the ledger
+    will use, so a validation that passes and a call that is then refused cannot
+    disagree about arithmetic.
+    """
+    return TokenPrices(
+        input=prices.worst_case_input,
+        cached_input=prices.cached_input,
+        cache_write=prices.cache_write,
+        output=prices.output,
+    ).cost_usd(input_tokens=input_tokens, output_tokens=output_tokens)
+
+
 def worst_case_analysis_cost_usd(config: LLMConfig) -> float:
     """What one Analysis generation costs when every token is charged dearest."""
-    prices = config.prices_for(Workload.BATCH)
-    return (
-        ANALYSIS_INPUT_TOKENS * prices.worst_case_input
-        + ANALYSIS_OUTPUT_TOKENS * prices.output
-    ) / 1_000_000
+    return _worst_case_usd(
+        config.prices_for(Workload.BATCH),
+        ANALYSIS_INPUT_TOKENS,
+        ANALYSIS_OUTPUT_TOKENS,
+    )
 
 
 def worst_case_turn_cost_usd(config: LLMConfig) -> float:
@@ -204,10 +230,9 @@ def worst_case_turn_cost_usd(config: LLMConfig) -> float:
     that reasons at length and answers briefly costs the same as one that does
     not, and the ceiling has to be the one that survives both.
     """
-    prices = config.prices_for(Workload.SESSION)
-    return (
-        TURN_INPUT_TOKENS * prices.worst_case_input + TURN_OUTPUT_TOKENS * prices.output
-    ) / 1_000_000
+    return _worst_case_usd(
+        config.prices_for(Workload.SESSION), TURN_INPUT_TOKENS, TURN_OUTPUT_TOKENS
+    )
 
 
 def validate_budget(config: LLMConfig) -> BudgetValidation:

@@ -115,9 +115,10 @@ class OpenAICompatibleClient:
                     chunk = _decode_sse_line(line)
                     if chunk is not None:
                         assembler.add_chunk(chunk)
-        except httpx.TimeoutException as exc:
-            raise self._timeout(exc) from exc
         except httpx.RequestError as exc:
+            # Covers TimeoutException, which subclasses it: a route that did not
+            # answer and a route that could not be reached are the same fact
+            # from here, and both are retryable.
             raise self._timeout(exc) from exc
 
         if assembler.refusal:
@@ -141,9 +142,10 @@ class OpenAICompatibleClient:
                 json=self._body(request),
                 headers=self._headers(),
             )
-        except httpx.TimeoutException as exc:
-            raise self._timeout(exc) from exc
         except httpx.RequestError as exc:
+            # Covers TimeoutException, which subclasses it: a route that did not
+            # answer and a route that could not be reached are the same fact
+            # from here, and both are retryable.
             raise self._timeout(exc) from exc
 
         if response.status_code >= 400:

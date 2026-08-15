@@ -171,15 +171,15 @@ class Settings(BaseSettings):
     # được một núm vặn mà không ai chỉnh riêng.
     analysis_run_stuck_minutes: int = 30
 
-    # Alpha Desk — the LLM route, its two workload models, and what they cost
-    # (src/core/llm/, docs/adr/0014). Off by default: the boundary is a paid
-    # channel, so a deployment opts into it rather than out of it.
+    # Alpha Desk — tuyến LLM, hai model theo workload, và giá của chúng
+    # (src/core/llm/, docs/adr/0014). Tắt mặc định: đây là kênh trả tiền, nên
+    # một lần triển khai phải chủ động bật chứ không phải chủ động tắt.
     #
-    # Model ids live here and nowhere else in the source. That is the whole
-    # reason the boundary exists — a route change has to be an env-var flip,
-    # and a constant compiled into a module survives the flip. The defaults are
-    # the production pair the orchestration decision settled on; the dev lane
-    # points LLM_BASE_URL at a local CLIProxyAPI and overrides both models.
+    # Mã model nằm ở đây và không ở đâu khác trong mã nguồn. Đó chính là lý do
+    # tồn tại của boundary — đổi tuyến phải chỉ là đổi biến môi trường, mà một
+    # hằng số biên dịch trong module thì sống sót qua lần đổi đó. Giá trị mặc
+    # định là cặp production đã chốt; lane dev trỏ LLM_BASE_URL vào CLIProxyAPI
+    # cục bộ và ghi đè cả hai model.
     alpha_desk_enabled: bool = False
     llm_base_url: str = ""
     llm_api_key: str = ""
@@ -187,15 +187,15 @@ class Settings(BaseSettings):
     llm_model_session: str = "gpt-5.6-terra"
     llm_request_timeout_seconds: float = 120.0
 
-    # The pricing block Budget Validation reads at startup. Prices are USD per
-    # million tokens and are declared per workload, because batch and
-    # interactive are different models with different prices — one shared block
-    # would misprice whichever lane it was not written for.
+    # Khối giá mà Budget Validation đọc lúc khởi động. Đơn vị USD trên một
+    # triệu token, khai riêng cho từng workload: batch và interactive là hai
+    # model khác nhau với giá khác nhau, một khối dùng chung sẽ định sai giá
+    # cho lane mà nó không được viết cho.
     #
-    # Zero is not "free": it is a key nobody filled in, and Budget Validation
-    # refuses it rather than approving a configuration that costs nothing on
-    # paper. Reasoning tokens have no price of their own — they bill at the
-    # output price, which is why five counters meet four prices.
+    # Số 0 không phải "miễn phí": đó là một key chưa ai điền, và Budget
+    # Validation từ chối nó thay vì chấp nhận một cấu hình mà trên giấy tờ
+    # không tốn gì. Token suy luận không có giá riêng — nó tính theo giá
+    # output, nên năm bộ đếm gặp bốn mức giá.
     llm_pricing_version: str = ""
     llm_pricing_effective_date: date | None = None
     llm_price_batch_input_usd_per_mtok: float = 0.0
@@ -207,10 +207,10 @@ class Settings(BaseSettings):
     llm_price_session_cache_write_usd_per_mtok: float = 0.0
     llm_price_session_output_usd_per_mtok: float = 0.0
 
-    # The $50/month envelope and the four lanes that share it (docs/adr/0014).
-    # Configuration rather than constants because the envelope is a spending
-    # decision, not a promise the product makes; Budget Validation checks that
-    # the four lanes still add up to it.
+    # Hạn mức $50/tháng và bốn lane chia nhau nó (docs/adr/0014). Là cấu hình
+    # chứ không phải hằng số vì hạn mức là một quyết định chi tiêu, không phải
+    # lời hứa của sản phẩm; Budget Validation kiểm tra bốn lane vẫn cộng đúng
+    # bằng hạn mức đó.
     llm_budget_monthly_usd: float = 50.0
     llm_budget_analysis_usd: float = 10.0
     llm_budget_turn_usd: float = 30.0

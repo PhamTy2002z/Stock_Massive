@@ -45,6 +45,13 @@ from enum import Enum
 from secrets import token_hex
 from typing import Any
 
+from src.core.redis import (
+    RELEASE_IF_OWNED_SCRIPT,
+    RENEW_IF_OWNED_SCRIPT,
+    eval_script,
+    get_redis,
+)
+
 logger = logging.getLogger(__name__)
 
 # The environment variable vnstock's own quota layer reads to decide the tier.
@@ -84,6 +91,14 @@ COLLECTOR_LEASE_KEY = f"{KEY_PREFIX}:collector:lease"
 # How long a waiting-news marker survives a process that died while waiting.
 NEWS_WAITING_TTL_SECONDS = 60
 
+# How long a frozen legacy route may wait for its slot before it is refused.
+# These are user requests holding a threadpool thread, and the queue behind them
+# grows by one account spacing per waiting caller: past this a 503 with a
+# Retry-After is a better answer than a request that eventually succeeds long
+# after whoever asked has gone. The crons — the Collector, the census, Backfill —
+# have nobody waiting, so they queue for as long as it takes.
+LEGACY_MAX_WAIT_SECONDS = 15.0
+
 # Reserve the next slot in a leaky bucket and say how long the caller must wait
 # for it. The value at ``key`` is the millisecond timestamp of the next free
 # slot; a caller takes that slot and pushes the marker one spacing further on,
@@ -107,22 +122,6 @@ if max_wait >= 0 and wait > max_wait then
 end
 redis.call('SET', key, next_at + spacing, 'PX', ttl)
 return wait
-"""
-
-# Release only a lease this process still owns. Deleting unconditionally would
-# let a process whose lease had already expired delete its successor's.
-RELEASE_LEASE_SCRIPT = """
-if redis.call('GET', KEYS[1]) == ARGV[1] then
-    return redis.call('DEL', KEYS[1])
-end
-return 0
-"""
-
-RENEW_LEASE_SCRIPT = """
-if redis.call('GET', KEYS[1]) == ARGV[1] then
-    return redis.call('EXPIRE', KEYS[1], ARGV[2])
-end
-return 0
 """
 
 
@@ -198,6 +197,23 @@ def news_spacing(api_key: str) -> float:
 class VnstockQuotaArbiter:
     """The one thing that decides whether a live vnstock call may happen now."""
 
+    @staticmethod
+    @contextmanager
+    def _fail_closed() -> Iterator[None]:
+        """Any Redis failure inside this block refuses the call.
+
+        Written once because it is the rule, not a habit: a Provider Source call
+        the arbiter could not admit is a call nothing is counting, and every
+        ``except`` that decided otherwise on its own would be a hole in the
+        allowance rather than a bug in a method.
+        """
+        try:
+            yield
+        except QuotaRefused:
+            raise
+        except Exception as exc:  # noqa: BLE001 - fail closed, whatever broke
+            raise QuotaUnavailable(f"the vnstock arbiter is unreachable: {exc}") from exc
+
     def __init__(
         self,
         redis_factory: Callable[[], Any] | None = None,
@@ -206,11 +222,7 @@ class VnstockQuotaArbiter:
         sleep: Callable[[float], None] = time.sleep,
         yield_step: float = 0.25,
     ) -> None:
-        if redis_factory is None:
-            from src.core.redis import get_redis
-
-            redis_factory = get_redis
-        self._redis_factory = redis_factory
+        self._redis_factory = redis_factory or get_redis
         self._api_key = (
             api_key if api_key is not None else os.environ.get(API_KEY_ENV_VAR, "")
         )
@@ -246,6 +258,8 @@ class VnstockQuotaArbiter:
 
         if lane in (QuotaLane.BACKFILL, QuotaLane.LEGACY):
             self._stand_aside_for_news(redis)
+        if max_wait is None and lane is QuotaLane.LEGACY:
+            max_wait = LEGACY_MAX_WAIT_SECONDS
 
         return self._wait_for_slot(redis, ACCOUNT_KEY, self.account_spacing, max_wait)
 
@@ -336,10 +350,8 @@ class VnstockQuotaArbiter:
         redis = self._client()
         token = token_hex(16)
 
-        try:
+        with self._fail_closed():
             acquired = redis.set(COLLECTOR_LEASE_KEY, token, nx=True, ex=ttl_seconds)
-        except Exception as exc:  # noqa: BLE001 - any Redis failure is fail-closed
-            raise QuotaUnavailable(f"the vnstock arbiter is unreachable: {exc}") from exc
 
         if not acquired:
             raise CollectorLeaseHeld(
@@ -361,7 +373,7 @@ class VnstockQuotaArbiter:
             stop.set()
             heartbeat.join(timeout=heartbeat_seconds)
             try:
-                self._eval(redis, RELEASE_LEASE_SCRIPT, [COLLECTOR_LEASE_KEY], [token])
+                self._eval(redis, RELEASE_IF_OWNED_SCRIPT, [COLLECTOR_LEASE_KEY], [token])
             except QuotaUnavailable:
                 # The lease expires on its own; losing the release is a delay,
                 # not a deadlock, and raising here would replace whatever real
@@ -379,7 +391,10 @@ class VnstockQuotaArbiter:
         while not stop.wait(heartbeat_seconds):
             try:
                 renewed = self._eval(
-                    redis, RENEW_LEASE_SCRIPT, [COLLECTOR_LEASE_KEY], [token, ttl_seconds]
+                    redis,
+                    RENEW_IF_OWNED_SCRIPT,
+                    [COLLECTOR_LEASE_KEY],
+                    [token, ttl_seconds],
                 )
             except QuotaUnavailable as exc:
                 logger.warning("Could not renew the Collector lease: %s", exc)
@@ -398,25 +413,21 @@ class VnstockQuotaArbiter:
         return self._lease_held(self._client())
 
     def _lease_held(self, redis: Any) -> bool:
-        try:
+        with self._fail_closed():
             return redis.get(COLLECTOR_LEASE_KEY) is not None
-        except Exception as exc:  # noqa: BLE001 - any Redis failure is fail-closed
-            raise QuotaUnavailable(f"the vnstock arbiter is unreachable: {exc}") from exc
 
     # -- news priority ----------------------------------------------------
 
     def _news_waiting(self, redis: Any) -> int:
-        try:
+        with self._fail_closed():
             waiting = redis.get(NEWS_WAITING_KEY)
-        except Exception as exc:  # noqa: BLE001 - any Redis failure is fail-closed
-            raise QuotaUnavailable(f"the vnstock arbiter is unreachable: {exc}") from exc
         try:
             return max(0, int(waiting or 0))
         except (TypeError, ValueError):
             return 0
 
     def _mark_news_waiting(self, redis: Any, delta: int) -> None:
-        try:
+        with self._fail_closed():
             if delta > 0:
                 redis.incr(NEWS_WAITING_KEY)
                 # A process that dies mid-wait would otherwise leave a marker
@@ -424,8 +435,6 @@ class VnstockQuotaArbiter:
                 redis.expire(NEWS_WAITING_KEY, NEWS_WAITING_TTL_SECONDS)
             else:
                 redis.decr(NEWS_WAITING_KEY)
-        except Exception as exc:  # noqa: BLE001 - any Redis failure is fail-closed
-            raise QuotaUnavailable(f"the vnstock arbiter is unreachable: {exc}") from exc
 
     # -- Redis plumbing ---------------------------------------------------
 
@@ -439,20 +448,8 @@ class VnstockQuotaArbiter:
         return redis
 
     def _eval(self, redis: Any, script: str, keys: list[str], args: list[Any]) -> Any:
-        """Run a script against either client this deployment might be using.
-
-        redis-py takes the key count positionally and Upstash takes keyword
-        lists; both are configured shapes, so both are spoken here.
-        """
-        try:
-            try:
-                return redis.eval(script, keys=keys, args=args)
-            except TypeError:
-                return redis.eval(script, len(keys), *keys, *args)
-        except QuotaRefused:
-            raise
-        except Exception as exc:  # noqa: BLE001 - any Redis failure is fail-closed
-            raise QuotaUnavailable(f"the vnstock arbiter is unreachable: {exc}") from exc
+        with self._fail_closed():
+            return eval_script(redis, script, keys, args)
 
 
 _arbiter: VnstockQuotaArbiter | None = None
@@ -478,6 +475,7 @@ def set_quota_arbiter(arbiter: VnstockQuotaArbiter | None) -> None:
 
 __all__ = [
     "ACCOUNT_KEY",
+    "LEGACY_MAX_WAIT_SECONDS",
     "ACCOUNT_SPACING_WITHOUT_KEY",
     "ACCOUNT_SPACING_WITH_KEY",
     "COLLECTOR_LEASE_KEY",
@@ -485,8 +483,6 @@ __all__ = [
     "NEWS_SPACING_WITHOUT_KEY",
     "NEWS_SPACING_WITH_KEY",
     "NEWS_WAITING_KEY",
-    "RELEASE_LEASE_SCRIPT",
-    "RENEW_LEASE_SCRIPT",
     "RESERVE_SLOT_SCRIPT",
     "CollectorLeaseHeld",
     "QuotaLane",

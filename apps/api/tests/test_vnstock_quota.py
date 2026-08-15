@@ -17,6 +17,7 @@ from src.core.quota import (
     ACCOUNT_SPACING_WITH_KEY,
     ACCOUNT_SPACING_WITHOUT_KEY,
     COLLECTOR_LEASE_KEY,
+    LEGACY_MAX_WAIT_SECONDS,
     NEWS_KEY,
     NEWS_SPACING_WITH_KEY,
     NEWS_SPACING_WITHOUT_KEY,
@@ -147,6 +148,35 @@ class TestAccountSpacing:
         assert arbiter.acquire(QuotaLane.LEGACY) == pytest.approx(
             ACCOUNT_SPACING_WITHOUT_KEY, abs=0.01
         )
+
+
+class TestALegacyRouteWaitsOnlySoLong:
+    """A frozen legacy endpoint is a user request on a threadpool thread."""
+
+    def test_a_queue_deeper_than_the_bound_is_refused_rather_than_queued(self):
+        arbiter, _, _ = build(api_key="")
+        depth = int(LEGACY_MAX_WAIT_SECONDS // ACCOUNT_SPACING_WITHOUT_KEY) + 1
+
+        for _ in range(depth):
+            arbiter.acquire(QuotaLane.LEGACY)
+
+        with pytest.raises(QuotaWaitTooLong):
+            arbiter.acquire(QuotaLane.LEGACY)
+
+    def test_a_cron_with_nobody_waiting_queues_for_as_long_as_it_takes(self):
+        arbiter, _, _ = build(api_key="")
+
+        waits = [arbiter.acquire(QuotaLane.BACKFILL) for _ in range(20)]
+
+        assert waits[-1] > LEGACY_MAX_WAIT_SECONDS
+
+    def test_a_caller_that_names_its_own_bound_keeps_it(self):
+        arbiter, _, _ = build(api_key="")
+
+        arbiter.acquire(QuotaLane.LEGACY)
+
+        with pytest.raises(QuotaWaitTooLong):
+            arbiter.acquire(QuotaLane.LEGACY, max_wait=0.5)
 
 
 class TestNewsLane:

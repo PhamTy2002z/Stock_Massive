@@ -33,6 +33,7 @@ from secrets import token_hex
 from typing import Any
 
 from src.core.quota import QuotaLane, QuotaRefused, quota_lane
+from src.core.redis import RELEASE_IF_OWNED_SCRIPT, eval_script
 
 logger = logging.getLogger(__name__)
 
@@ -208,9 +209,16 @@ class NewsLane:
         return token if claimed else None
 
     def _release_refresh(self, redis: Any, symbol: str, token: str) -> None:
+        """Give the claim back, and only if it is still this reader's.
+
+        One compare-and-delete rather than a read then a delete: between those
+        two round-trips the claim can expire and be taken, and the reader that
+        lost it would then release its successor's.
+        """
         try:
-            if redis.get(self._lock_key(symbol)) == token:
-                redis.delete(self._lock_key(symbol))
+            eval_script(
+                redis, RELEASE_IF_OWNED_SCRIPT, [self._lock_key(symbol)], [token]
+            )
         except Exception as exc:  # noqa: BLE001 - the TTL releases it either way
             logger.warning("Could not release the news refresh lock: %s", exc)
 

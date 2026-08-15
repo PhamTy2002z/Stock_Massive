@@ -19,11 +19,8 @@ import threading
 import time
 from typing import Any
 
-from src.core.quota import (
-    RELEASE_LEASE_SCRIPT,
-    RENEW_LEASE_SCRIPT,
-    RESERVE_SLOT_SCRIPT,
-)
+from src.core.quota import RESERVE_SLOT_SCRIPT
+from src.core.redis import RELEASE_IF_OWNED_SCRIPT, RENEW_IF_OWNED_SCRIPT
 
 
 class UnknownScript(AssertionError):
@@ -106,11 +103,11 @@ class FakeRedis:
         with self._lock:
             if script == RESERVE_SLOT_SCRIPT:
                 return self._reserve(keys[0], [float(arg) for arg in args])
-            if script == RELEASE_LEASE_SCRIPT:
+            if script == RELEASE_IF_OWNED_SCRIPT:
                 if self.get(keys[0]) == str(args[0]):
                     return self.delete(keys[0])
                 return 0
-            if script == RENEW_LEASE_SCRIPT:
+            if script == RENEW_IF_OWNED_SCRIPT:
                 if self.get(keys[0]) == str(args[0]):
                     return int(self.expire(keys[0], int(args[1])))
                 return 0
