@@ -1,6 +1,7 @@
 """Async database configuration using SQLAlchemy 2.0."""
+import asyncio
 from contextlib import contextmanager
-from typing import AsyncGenerator, Generator
+from typing import AsyncGenerator, Callable, Generator, TypeVar
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from sqlalchemy import create_engine
@@ -95,6 +96,43 @@ def get_sync_session() -> Generator[Session, None, None]:
         yield session
     finally:
         session.close()
+
+
+_T = TypeVar("_T")
+
+
+async def in_sync_session(work: Callable[[Session], _T]) -> _T:
+    """The one way an async request reaches synchronous store code.
+
+    Half this codebase is synchronous because the store is: the Universe, the
+    Snapshot reads, the Trading Day resolution and the signal window all take a
+    plain ``Session``. The request path above them is async. Every route that
+    needs both has the same problem, so it is answered once here rather than
+    invented again per route — three routes each solving it differently is three
+    ways to block the event loop, and only one of them will be found.
+
+    Two properties are the whole point:
+
+    *It runs off the event loop.* Calling sync SQLAlchemy inside a coroutine
+    blocks every other request in the process for the length of the query.
+    ``asyncio.to_thread`` is what the tool layer already owes the sync
+    ``SnapshotStore``, so the same mechanism serves both.
+
+    *It opens its own session and closes it.* Never the request's async session
+    — that one belongs to a different driver and a different loop — and never a
+    session held across anything long. The async pool is fifteen connections; a
+    session held for the length of a streaming Turn would cap concurrency at
+    fifteen and make the sixteenth caller wait thirty seconds to fail.
+
+    Read-only by construction: nothing is committed here. Writes belong to the
+    async session the request already has.
+    """
+
+    def run() -> _T:
+        with sync_session_factory() as session:
+            return work(session)
+
+    return await asyncio.to_thread(run)
 
 
 class Base(DeclarativeBase):
