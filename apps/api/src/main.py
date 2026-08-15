@@ -8,6 +8,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from src.alpha.router import router as watchlist_router
+from src.alpha.watchlist import WatchlistRefusal
 from src.auth.router import router as auth_router
 from src.core.config import get_settings
 from src.core.cache import CacheRefreshUnavailable
@@ -90,6 +92,22 @@ app.include_router(jobs_router, prefix="/api/v1")
 # a set of symbols, and mounting it under a path that reads as one symbol's data
 # would misdescribe every route added here later.
 app.include_router(signals_router, prefix="/api/v1")
+# The Watchlist is one user's choice rather than market data, so it sits beside
+# /stocks rather than under it.
+app.include_router(watchlist_router, prefix="/api/v1")
+
+
+@app.exception_handler(WatchlistRefusal)
+async def watchlist_refusal_handler(request: Request, exc: WatchlistRefusal):
+    """A Watchlist change refused for a named reason.
+
+    The reason travels as a code beside the sentence, so the rail can branch on
+    "full" versus "not in the Universe" without parsing Vietnamese prose.
+    """
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": {"reason": exc.reason, "message": exc.message}},
+    )
 
 
 @app.exception_handler(StockServiceError)

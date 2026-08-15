@@ -1,0 +1,438 @@
+"""The nine tables Alpha Desk stands on, declared together.
+
+Five of them stay empty until the agent loop lands. They are here anyway,
+because they come into existence together: ``agent_message`` means nothing
+without ``agent_thread``, and a trace anchored to a message that does not exist
+is not a partial system, it is a broken one. Splitting them into nine
+migrations would add nine places to rebase wrong on an Alembic chain that is
+already long, and buy no partial rollback that is real — nobody ships half of a
+transcript.
+
+Postgres types throughout, deliberately. ``JSONB`` and ``text[]`` are load
+bearing here: the Analysis payload is queried by key, and "which Threads
+discussed FPT" is answered by a GIN index over an array rather than by a join
+table that exists to answer one question.
+
+Three invariants in this file are what every later milestone rests on, and each
+is enforced by the database rather than by the code that writes it:
+
+1. ``analysis`` is unique on ``(symbol, trading_day)`` and **excludes**
+   ``schema_version`` — unlike ``provider_snapshots``. There is one author, at
+   most one Analysis per pair, and every reader reads by exactly that pair. Two
+   rows differing only by template version would force every reader to choose,
+   and no choice rule is correct.
+2. Transcript order is held by ``UNIQUE(thread_id, seq)``, never by timestamps.
+   Two streamed messages can share a millisecond, and a timestamp cannot express
+   inserting between two rows.
+3. Traces anchor to the user's message (``request_message_id`` NOT NULL) — the
+   one row that already exists before the first tool call. A nullable id patched
+   in once the assistant message forms would orphan traces exactly when a Turn
+   dies mid-flight and the trace matters most.
+"""
+
+from sqlalchemy import (
+    BigInteger,
+    Column,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+)
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.sql import func, text
+
+from src.core.database import Base
+
+
+class WatchlistEntry(Base):
+    """One symbol a user asked to keep being analysed.
+
+    Deliberately thin. There is no ``state`` column even though the interface
+    shows one: a watched symbol is ``active`` while the **Universe** carries it
+    and ``unsupported`` while it does not, so the state is a question about the
+    Universe asked at read time. Stored, it would need a writer — and the writer
+    would be the thing that has to notice a symbol coming back, which is exactly
+    the revival the product wants to happen by itself.
+
+    ``last_seen_analysis_date`` is per user per symbol because the unread badge
+    is: it advances only when that specific Analysis is opened.
+    """
+
+    __tablename__ = "watchlist_entries"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    symbol = Column(String(20), nullable=False)
+    added_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_seen_analysis_date = Column(Date, nullable=True)
+
+    __table_args__ = (
+        # One row per user per symbol, so re-adding a symbol already watched is
+        # a no-op rather than a second slot quietly consumed.
+        UniqueConstraint("user_id", "symbol", name="uq_watchlist_entry_user_symbol"),
+        # Every read is one user's whole list, in the order they added.
+        Index("ix_watchlist_entry_user_added", "user_id", "added_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<WatchlistEntry user={self.user_id} {self.symbol}>"
+
+
+class Analysis(Base):
+    """One published Analysis for one ``(symbol, trading_day)``, immutable.
+
+    **A row here existing means it is complete.** In-flight state lives only in
+    ``analysis_run``, which is what makes *serve yesterday instantly while today
+    runs* need no mechanism at all: ``ORDER BY trading_day DESC LIMIT 1``. There
+    is never a half-written Analysis to filter out.
+
+    The payload is a blob with ``symbol``, ``trading_day`` and ``verdict``
+    lifted out of it. Not four normalised per-axis tables: the template is fixed
+    but will change, and normalising the axes turns every template change into
+    four migrations. Not a pure blob either — the rail shows one word for ten
+    symbols and should not parse ten payloads to find it.
+    """
+
+    __tablename__ = "analysis"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    symbol = Column(String(20), nullable=False)
+    trading_day = Column(Date, nullable=False)
+    verdict = Column(String(16), nullable=False)
+    payload = Column(JSONB, nullable=False)
+    # Readers handle several values rather than choosing between two rows; that
+    # is what this column is for, and why it is not in the key below.
+    schema_version = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("symbol", "trading_day", name="uq_analysis_symbol_trading_day"),
+        # The rail asks one question of this table: the newest Analysis for a
+        # symbol. Descending so the answer is the index's first row.
+        Index("ix_analysis_symbol_day", "symbol", trading_day.desc()),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Analysis {self.symbol} {self.trading_day} {self.verdict}>"
+
+
+class AnalysisRun(Base):
+    """The production of one Analysis: mutable, updated in place.
+
+    Split from ``analysis`` because the run changes while the content is written
+    once. Merged, every ``attempts`` bump would make Postgres rewrite a row
+    dragging a large JSONB payload along.
+
+    One row per ``(symbol, trading_day)``, enforced below. That is what makes
+    two users retrying the same symbol one run rather than two, and what lets
+    the three-attempt ceiling be a column instead of a counter somewhere else.
+
+    The error is two columns rather than one. ``error_code`` is the stable
+    vocabulary a caller may branch on; ``error_message`` is the sanitized
+    sentence a person reads. Folded into one string, the interface would have to
+    parse the reason out of prose, and the prose is exactly the part that is
+    allowed to change.
+    """
+
+    __tablename__ = "analysis_run"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    symbol = Column(String(20), nullable=False)
+    trading_day = Column(Date, nullable=False)
+    # pending | producing | ready | failed
+    status = Column(String(16), nullable=False)
+    # nightly | on_demand | retry — what asked for this run, kept because a
+    # symbol that only ever gets produced on demand is a different operational
+    # story from one the nightly pass keeps missing.
+    origin = Column(String(16), nullable=False)
+    attempts = Column(Integer, nullable=False, server_default="0")
+    error_code = Column(String(48), nullable=True)
+    error_message = Column(String(500), nullable=True)
+    next_attempt_at = Column(DateTime(timezone=True), nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "symbol",
+            "trading_day",
+            name="uq_analysis_run_symbol_trading_day",
+        ),
+        # The sweep asks for every run left producing past a window, across all
+        # symbols at once, so it cannot use an index leading with a symbol.
+        Index("ix_analysis_run_status_started", "status", "started_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AnalysisRun {self.symbol} {self.trading_day} {self.status}>"
+
+
+class AgentThread(Base):
+    """One conversation between a user and the agent.
+
+    ``symbols`` is an array with a GIN index rather than a join table because
+    the question asked in practice is *which Threads discussed FPT*, and a join
+    table exists to answer exactly that one question at the cost of a second
+    write on every Turn.
+    """
+
+    __tablename__ = "agent_thread"
+
+    id = Column(Uuid, primary_key=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    title = Column(String(255), nullable=True)
+    symbols = Column(ARRAY(String(20)), nullable=False, server_default=text("'{}'"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        Index("ix_agent_thread_symbols", "symbols", postgresql_using="gin"),
+        Index("ix_agent_thread_user_updated", "user_id", updated_at.desc()),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AgentThread {self.id} user={self.user_id}>"
+
+
+class AgentMessage(Base):
+    """One canonical, immutable message in a Thread.
+
+    ``content`` is JSONB because an assistant message carries more than prose:
+    the validated **Widget** spec rides here, per the decision that a message
+    stores the spec and never the chart data.
+
+    ``flagged_reason`` and ``flagged_at`` are both nullable and stay null in v1;
+    they exist for the evaluation lane to mark a message without rewriting the
+    transcript it is judging.
+    """
+
+    __tablename__ = "agent_message"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    thread_id = Column(
+        Uuid,
+        ForeignKey("agent_thread.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # Allocated inside the writing transaction; a conflict retries. Order is
+    # this column's job and never a timestamp's.
+    seq = Column(Integer, nullable=False)
+    # user | assistant | summary
+    role = Column(String(16), nullable=False)
+    content = Column(JSONB, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    flagged_reason = Column(String(48), nullable=True)
+    flagged_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("thread_id", "seq", name="uq_agent_message_thread_seq"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AgentMessage {self.thread_id}#{self.seq} {self.role}>"
+
+
+class AgentToolCall(Base):
+    """One **Tool Call Trace**: what the agent asked for and what it got back.
+
+    Full results are stored. They are the first thing usually dropped for fear
+    of bloat, but the catalog already caps a result at 4KB, and they are exactly
+    what is needed to debug a wrong answer — what the model actually saw.
+
+    Anchored to the *request* message, not the response: the user's message
+    already exists before the first tool call, so the anchor can be NOT NULL and
+    a Turn that dies mid-flight still leaves a readable chain.
+    """
+
+    __tablename__ = "agent_tool_call"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    thread_id = Column(
+        Uuid,
+        ForeignKey("agent_thread.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    request_message_id = Column(
+        BigInteger,
+        ForeignKey("agent_message.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    tool_name = Column(String(64), nullable=False)
+    arguments = Column(JSONB, nullable=False)
+    result = Column(JSONB, nullable=True)
+    # ok | tool_error | timeout
+    status = Column(String(16), nullable=False)
+    error = Column(String(500), nullable=True)
+    latency_ms = Column(Integer, nullable=True)
+    prompt_tokens = Column(Integer, nullable=True)
+    completion_tokens = Column(Integer, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        # Per-Turn tool cost is a SUM over this column.
+        Index("ix_agent_tool_call_request_message", "request_message_id"),
+        # These rows are kept 90 days, and the cleanup job scans by age alone.
+        Index("ix_agent_tool_call_started", "started_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AgentToolCall {self.tool_name} {self.status}>"
+
+
+class AgentTurn(Base):
+    """The lifecycle of one **Turn**, and the draft checkpointed inside it.
+
+    Its own table because neither neighbour can hold it: ``agent_message`` is
+    canonical and immutable, and ``agent_tool_call`` is anchored to a single
+    call. The id is chosen by the client so a reconnecting browser can ask about
+    the Turn it started rather than the one it hopes it started.
+    """
+
+    __tablename__ = "agent_turn"
+
+    id = Column(Uuid, primary_key=True)
+    thread_id = Column(
+        Uuid,
+        ForeignKey("agent_thread.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    request_message_id = Column(
+        BigInteger,
+        ForeignKey("agent_message.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    response_message_id = Column(
+        BigInteger,
+        ForeignKey("agent_message.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    retry_of_turn_id = Column(
+        Uuid,
+        ForeignKey("agent_turn.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # admitted | running | complete | incomplete | cancelled
+    status = Column(String(16), nullable=False)
+    terminal_reason = Column(String(48), nullable=True)
+    cancel_requested_at = Column(DateTime(timezone=True), nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    # Where the SSE stream got to, so a reconnect resumes rather than replays.
+    last_event_seq = Column(Integer, nullable=False, server_default="0")
+    draft_content = Column(JSONB, nullable=True)
+
+    __table_args__ = (
+        Index("ix_agent_turn_thread_started", "thread_id", started_at.desc()),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AgentTurn {self.id} {self.status}>"
+
+
+class LlmCallUsage(Base):
+    """One reservation against the budget, and what it actually cost.
+
+    Written before the network call and reconciled after it. A death after the
+    provider accepted the request leaves ``usage_unknown`` with the full
+    reservation charged, which is the honest reading: the money is gone whether
+    or not the answer arrived.
+
+    The four prices are copied onto the row rather than looked up later. A price
+    change must not silently rewrite what last month cost.
+
+    ``owner_id`` is text because the four owner kinds are keyed differently — a
+    run by a bigint, a Turn's request message by a bigint, a probe by a run
+    identifier, an eval by a UUID. One nullable column per kind would be four
+    columns of which three are always null.
+    """
+
+    __tablename__ = "llm_call_usage"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    # analysis_run | turn_request_message | capability_probe | eval_run
+    owner_type = Column(String(32), nullable=False)
+    owner_id = Column(String(64), nullable=False)
+    route = Column(String(64), nullable=False)
+    model = Column(String(64), nullable=False)
+    input_tokens = Column(Integer, nullable=False, server_default="0")
+    cached_read_tokens = Column(Integer, nullable=False, server_default="0")
+    cache_write_tokens = Column(Integer, nullable=False, server_default="0")
+    output_tokens = Column(Integer, nullable=False, server_default="0")
+    # Billed at the output price, which is why there are five counters and four
+    # prices rather than five of each.
+    reasoning_tokens = Column(Integer, nullable=False, server_default="0")
+    pricing_version = Column(String(32), nullable=False)
+    input_token_price_usd = Column(Numeric(20, 12), nullable=False)
+    cached_read_token_price_usd = Column(Numeric(20, 12), nullable=False)
+    cache_write_token_price_usd = Column(Numeric(20, 12), nullable=False)
+    output_token_price_usd = Column(Numeric(20, 12), nullable=False)
+    reserved_micro_usd = Column(BigInteger, nullable=False)
+    actual_micro_usd = Column(BigInteger, nullable=True)
+    # reserved | reconciled | usage_unknown
+    status = Column(String(16), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    reconciled_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        # Admission sums open reservations plus actual spend over a window.
+        Index("ix_llm_call_usage_created", "created_at"),
+        Index("ix_llm_call_usage_owner", "owner_type", "owner_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<LlmCallUsage {self.owner_type}:{self.owner_id} {self.status}>"
+
+
+class EvalRun(Base):
+    """One pass of the **Eval Battery**, and everything it was run against.
+
+    Every version that could move the score is copied onto the row — prompt,
+    tool catalog, registry, fixture — because a score without them is a number
+    nobody can reproduce or argue with.
+    """
+
+    __tablename__ = "eval_run"
+
+    id = Column(Uuid, primary_key=True)
+    started_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    # gate | exploratory
+    mode = Column(String(16), nullable=False)
+    route = Column(String(64), nullable=False)
+    model = Column(String(64), nullable=False)
+    prompt_version = Column(String(32), nullable=False)
+    tool_catalog_version = Column(String(32), nullable=False)
+    registry_version = Column(String(32), nullable=False)
+    fixture_version = Column(String(32), nullable=False)
+    # Per-category pass/fail totals. JSONB because the categories are the
+    # battery's business and adding one must not be a migration.
+    category_totals = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    report_path = Column(Text, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<EvalRun {self.id} {self.mode}>"
