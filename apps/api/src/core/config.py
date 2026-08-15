@@ -2,6 +2,7 @@
 from datetime import date
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -249,6 +250,21 @@ class Settings(BaseSettings):
     sector_historical_hour: int = 15  # 15:45 ICT (after sector-performance job at 15:30)
     sector_historical_minute: int = 45
     sector_historical_delay: float = 1.2  # seconds between API calls (~50 req/min)
+
+    @field_validator("llm_pricing_effective_date", mode="before")
+    @classmethod
+    def _blank_date_is_unset(cls, value: object) -> object:
+        """Một biến môi trường rỗng nghĩa là chưa ai điền, không phải ngày sai.
+
+        `docker-compose.yml` chuyển tiếp cả khối giá bằng `${VAR:-}`, nên một
+        key chưa khai vào container dưới dạng chuỗi rỗng chứ không phải vắng
+        mặt. Để nguyên thì container chết ngay ở `Settings()` — trước cả khi
+        Budget Validation kịp nói ra điều nó muốn nói, rằng bảng giá này chưa
+        được điền.
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
 
 @lru_cache
