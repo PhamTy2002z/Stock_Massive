@@ -132,6 +132,13 @@ class SignalIssue(str, Enum):
     # with the error the check was for.
     AUTOCORRELATION_UNUSABLE = "autocorrelation_unusable"
 
+    # The fitted AR(1) half-life reaches the window the gauge was fitted over,
+    # which includes a series carrying no reversion at all — the estimate is
+    # unbounded there rather than merely large. Past that point a z against the
+    # window's own trailing mean is measuring the window rather than the market,
+    # so the z is suppressed rather than served with a caveat beside it.
+    HALF_LIFE_EXCEEDS_WINDOW = "half_life_exceeds_window"
+
     # More than a fifth of the window was locked at a limit, so a range-based
     # estimate over it is measuring the band rather than the market. A
     # degradation with a name, not a refusal: the sessions are real and the

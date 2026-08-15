@@ -155,7 +155,15 @@ class Sign(str, Enum):
 
 
 class Unit(str, Enum):
-    """What the number is measured in."""
+    """What the number is measured in.
+
+    ``VND`` and ``SHARES`` are the money/quantity split the market contracts
+    already make, and keeping it here rather than in prose is what lets the
+    serving layer act on it: a share-denominated figure changes unit partway
+    through a window that crosses a share-count-changing action and a
+    money-denominated one does not, so the unit is what decides whether a window
+    degrades a field (``docs/adr/0006``).
+    """
 
     Z_SCORE = "z_score"
     PERCENT = "percent"
@@ -163,6 +171,12 @@ class Unit(str, Enum):
     RATIO = "ratio"
     SESSIONS = "sessions"
     VND = "vnd"
+    SHARES = "shares"
+    # Amihud's illiquidity: percent of price moved per billion dong traded. Its
+    # own unit rather than a ratio, because the number is meaningless without
+    # both denominations and a ``ratio`` label would invite a comparison with
+    # every other dimensionless figure in the catalog.
+    PERCENT_PER_BILLION_VND = "percent_per_billion_vnd"
     PERCENTILE = "percentile"
 
 
@@ -258,15 +272,46 @@ class NullCalibration:
 class FieldReading:
     """What one computation produced, before it is dressed as a ``FieldValue``.
 
-    The seam between a pure function over bars and a served answer: a reading
-    knows the number and what came with it, and knows nothing about the window it
-    was drawn from or the field that declared it. That is what lets a
-    computation be tested, and run against a null, without a store behind it.
+    The seam between a pure function over a window and a served answer: a reading
+    knows the number and what came with it, and knows nothing about the field
+    that declared it. That is what lets a computation be tested, and run against
+    a null, without a store behind it.
+
+    ``degraded_reason`` is the computation's **own** verdict on its answer, and
+    it exists because some degradations are not properties of the window. A
+    window is too limit-locked for any range estimator in the package at once,
+    and that lives on Window Health; a band distance measured on UPCOM is
+    degraded for this field alone, because that board's anchor is not stored and
+    no other field asks for it (``docs/adr/0006``).
     """
 
     value: float | None
     extras: Mapping[str, Any] = field(default_factory=dict)
     refusal: SignalIssue | None = None
+    degraded_reason: SignalIssue | None = None
+
+
+@dataclass(frozen=True)
+class FieldWindow:
+    """Everything a registered field may read, and the only thing it is handed.
+
+    One argument rather than a bar frame, because "the window" is more than the
+    bars for some fields and the alternative to saying so once is saying it
+    differently in each of them. A field asking for a session's traded money
+    reads a bar; a field asking how thin this symbol is against its peers reads
+    the cross-sectional standing the gateway measured while serving the window;
+    a field asking whether a flow was mechanically capped reads a foreign room
+    that is not a session fact at all. All three arrive here, and a field that
+    reached past this object for any of them would be the second path to data
+    that ``prepare_bars()`` exists to make impossible.
+
+    Built in ``serving`` alone. ``health`` is the gateway's own account of the
+    window and is echoed beside whatever was computed from it, so a field never
+    recounts what the gateway already counted.
+    """
+
+    frame: "BarFrame"
+    health: "WindowHealth"
 
 
 @dataclass(frozen=True)
@@ -280,14 +325,14 @@ class SignalField:
     and a checklist.
 
     ``reading`` and ``statistic`` are the mechanism rather than two more
-    declarations. ``reading`` is the pure function from a window of bars to this
+    declarations. ``reading`` is the pure function from a ``FieldWindow`` to this
     field's answer, and it lives on the field so that the pairing is recorded
     where the field is: passed alongside a field instead, a caller could serve
     the Sharpe declaration with the Sortino computation and get a
     perfectly-valid-looking answer. ``statistic`` is the narrower one the null
-    harness runs — just the number the threshold is compared against — and a
-    ``signal`` field must have it, because the harness runs the real field over
-    synthetic windows and there is no other way to run it.
+    harness runs — just the number the threshold is compared against, over the
+    bars alone — and a ``signal`` field must have it, because the harness runs
+    the real field over synthetic windows and there is no other way to run it.
     """
 
     name: str
@@ -305,7 +350,7 @@ class SignalField:
     threshold: Threshold | None
     null_fpr: NullCalibration | None
     output_keys: tuple[str, ...] = ()
-    reading: Callable[["BarFrame"], FieldReading] | None = None
+    reading: Callable[[FieldWindow], FieldReading] | None = None
     statistic: Callable[["BarFrame"], float | None] | None = None
 
     def __post_init__(self) -> None:
