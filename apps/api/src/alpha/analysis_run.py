@@ -37,9 +37,10 @@ from src.core.config import get_settings
 from src.stocks.shared import validate_symbol
 from src.stocks.universe import build_universe
 
-from .models import Analysis, AnalysisRun, WatchlistEntry
-from .producer import Producer, ProductionFailure, sanitized_reason
+from .models import Analysis, AnalysisRun
+from .producer import AnalysisDraft, Producer, ProductionFailure, sanitized_reason
 from .refusals import AlphaRefusal
+from .watchlist import watches
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +147,15 @@ def latest_analysis(session: Session, symbol: str) -> Analysis | None:
     ).scalar_one_or_none()
 
 
+def _stored_run(session: Session, symbol: str, trading_day: date) -> AnalysisRun | None:
+    return session.execute(
+        select(AnalysisRun).where(
+            AnalysisRun.symbol == symbol,
+            AnalysisRun.trading_day == trading_day,
+        )
+    ).scalar_one_or_none()
+
+
 def _run_for(
     session: Session,
     symbol: str,
@@ -154,15 +164,10 @@ def _run_for(
 ) -> AnalysisRun:
     """The run row for this pair, created at ``pending`` if there is none.
 
-    One row per pair, held by the unique key, which is what makes two people
-    retrying the same symbol one run and lets the attempt ceiling be a column.
+    One row per pair, for the reason ``AnalysisRun`` records: it is what makes
+    two people retrying the same symbol one run.
     """
-    existing = session.execute(
-        select(AnalysisRun).where(
-            AnalysisRun.symbol == symbol,
-            AnalysisRun.trading_day == trading_day,
-        )
-    ).scalar_one_or_none()
+    existing = _stored_run(session, symbol, trading_day)
     if existing is not None:
         return existing
 
@@ -180,12 +185,10 @@ def _run_for(
         # Another caller created it between the select and the insert. Theirs is
         # as good as ours: the row identifies the pair, not the requester.
         session.rollback()
-        return session.execute(
-            select(AnalysisRun).where(
-                AnalysisRun.symbol == symbol,
-                AnalysisRun.trading_day == trading_day,
-            )
-        ).scalar_one()
+        created = _stored_run(session, symbol, trading_day)
+        if created is None:
+            raise
+        return created
     return run
 
 
@@ -210,7 +213,7 @@ def write_analysis(
     session: Session,
     symbol: str,
     trading_day: date,
-    draft,
+    draft: AnalysisDraft,
 ) -> Analysis:
     """Publish the Analysis. The first of the two writes, and it commits.
 
@@ -347,18 +350,6 @@ def produce_analysis(
     )
 
 
-def _watches(session: Session, user_id: int, symbol: str) -> bool:
-    return (
-        session.execute(
-            select(WatchlistEntry.id).where(
-                WatchlistEntry.user_id == user_id,
-                WatchlistEntry.symbol == symbol,
-            )
-        ).scalar_one_or_none()
-        is not None
-    )
-
-
 def retry_analysis(
     session: Session,
     user_id: int,
@@ -380,7 +371,7 @@ def retry_analysis(
     """
     normalized = validate_symbol(symbol)
 
-    if not _watches(session, user_id, normalized):
+    if not watches(session, user_id, normalized):
         raise AnalysisRefusal(
             reason="symbol_not_watched",
             message=f"Mã {normalized} không có trong Watchlist của bạn.",
@@ -389,7 +380,7 @@ def retry_analysis(
 
     if not build_universe(session).contains(normalized):
         raise AnalysisRefusal(
-            reason="symbol_not_in_universe",
+            reason="not_in_universe",
             message=(
                 f"Mã {normalized} không còn trong Universe nên hệ thống không "
                 "dựng Analysis mới cho nó."
