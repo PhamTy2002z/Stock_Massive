@@ -104,3 +104,73 @@ export function onDemandSentence(
   }
   return null
 }
+
+const VN_TIME_ZONE = "Asia/Ho_Chi_Minh"
+
+// When the day's Collector run is expected to have landed a Snapshot. Before
+// it, a session with no data is simply a session that has not been collected
+// yet, and saying so would be noise every afternoon.
+const COLLECTION_DEADLINE_MINUTES = 16 * 60 + 15
+
+/** The parts of the Ho Chi Minh City wall clock this file reasons about. */
+function vietnamNow(now: Date): { date: string; weekday: string; minutes: number } {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: VN_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now)
+  const value = (type: string) => parts.find((part) => part.type === type)?.value ?? ""
+
+  return {
+    date: `${value("year")}-${value("month")}-${value("day")}`,
+    weekday: value("weekday"),
+    // `hour12: false` renders midnight as 24 in some ICU builds.
+    minutes: (Number(value("hour")) % 24) * 60 + Number(value("minute")),
+  }
+}
+
+/**
+ * The one system-level status line, or nothing.
+ *
+ * *"Dữ liệu phiên 12/08 chưa về."* — shown once for the whole rail rather than
+ * once per symbol, because it is a statement about the collection run and not
+ * about any one symbol's Analysis. Ten copies of a system fact would read as
+ * ten separate problems.
+ *
+ * Three conditions, all of them required: a weekday, past the collection
+ * deadline, and no Snapshot for today. Weekends show nothing at all — there was
+ * no session to collect, so there is nothing late.
+ *
+ * The accepted cost of having no holiday calendar is that this fires once on a
+ * public holiday: one redundant sentence, which is cheaper than an Analysis
+ * labelled with a session that never happened.
+ */
+export function missingSessionNotice(
+  tradingDay: string | null,
+  now: Date = new Date(),
+): string | null {
+  const { date, weekday, minutes } = vietnamNow(now)
+
+  if (weekday === "Sat" || weekday === "Sun") return null
+  if (minutes < COLLECTION_DEADLINE_MINUTES) return null
+  if (tradingDay === date) return null
+
+  return `Dữ liệu ${sessionLabel(date)} chưa về.`
+}
+
+/**
+ * The edge of the browsable window, said out loud.
+ *
+ * Only when something lies beyond it. A boundary announced on a symbol with
+ * eleven Analyses would teach the reader that the rail always stops somewhere,
+ * which is the opposite of what the line is for.
+ */
+export function historyBoundaryNotice(depth: number, olderExist: boolean): string | null {
+  if (!olderExist) return null
+  return `Chỉ hiển thị ${depth} phiên gần nhất. Analysis cũ hơn vẫn được lưu và tra cứu được theo ngày.`
+}

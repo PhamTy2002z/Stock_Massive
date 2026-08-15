@@ -23,7 +23,11 @@ import { queryKeys } from "@/lib/query-keys"
  * mounted inside other surfaces later, and a suspense boundary that swallowed
  * the whole page while the rail loaded would be the wrong trade there.
  */
-const RAIL_POLL_MS = 60 * 1000
+// The rail follows the job progress bar's pattern: TanStack Query polling and
+// nothing else. A minute is chosen against what the data does — an Analysis is
+// produced from end-of-day figures, so this exists to notice the evening's
+// production, not to chase a moving number.
+export const RAIL_POLL_MS = 60 * 1000
 
 export function useWatchlistRail() {
   return useQuery<Rail>({
