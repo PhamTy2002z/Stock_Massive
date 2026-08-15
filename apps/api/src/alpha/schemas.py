@@ -1,6 +1,6 @@
 """Wire shapes for Alpha Desk."""
 
-from datetime import date, datetime
+from datetime import datetime
 
 from pydantic import BaseModel, Field
 
@@ -26,9 +26,6 @@ class WatchlistItemResponse(BaseModel):
     # tell them apart.
     state: WatchlistState
     added_at: datetime
-    # Advances only when that specific Analysis is opened, which is what makes
-    # the unread badge mean anything.
-    last_seen_analysis_date: date | None
 
 
 class WatchlistResponse(BaseModel):

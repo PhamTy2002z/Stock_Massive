@@ -231,7 +231,7 @@ class TestAdding:
         )
 
         assert response.status_code == 422, response.text
-        assert response.json()["detail"]["reason"] == "symbol_not_in_universe"
+        assert response.json()["detail"]["reason"] == "not_in_universe"
 
     @pytest.mark.asyncio
     async def test_refuses_a_malformed_symbol_the_same_way(self, client, auth):
@@ -242,7 +242,7 @@ class TestAdding:
         )
 
         assert response.status_code == 422, response.text
-        assert response.json()["detail"]["reason"] == "symbol_not_in_universe"
+        assert response.json()["detail"]["reason"] == "not_in_universe"
 
     @pytest.mark.asyncio
     async def test_refuses_the_eleventh_symbol_with_a_stable_reason(self, client, auth):
@@ -530,4 +530,4 @@ class TestUnsupported:
         )
 
         assert response.status_code == 422, response.text
-        assert response.json()["detail"]["reason"] == "symbol_not_in_universe"
+        assert response.json()["detail"]["reason"] == "not_in_universe"
