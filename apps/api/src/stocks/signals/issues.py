@@ -132,6 +132,31 @@ class SignalIssue(str, Enum):
     # with the error the check was for.
     AUTOCORRELATION_UNUSABLE = "autocorrelation_unusable"
 
+    # The field is registered and has no inputs in the store today. Declared
+    # rather than dropped, because a profile silently missing a field would make
+    # two Analyses carrying the same profile version mean different things
+    # (spec 0003 §8.4, §13). The input it is short of travels with it, and no
+    # live Provider Source read is ever substituted to fill the slot.
+    UNAVAILABLE = "unavailable"
+
+    # --- Cross-sectional fields, from ADR-0010 ---------------------------
+    # Fewer symbols survived exclusion than a percentile can be taken over. A
+    # position within a sample of eleven is a rank wearing a distribution's
+    # clothes, so the whole call refuses rather than each surviving symbol
+    # answering with a number nobody can read.
+    INSUFFICIENT_CROSS_SECTION = "insufficient_cross_section"
+
+    # The newest quarterly statement behind a stored figure is old enough that
+    # narrating it as current would be wrong. A degradation rather than a
+    # refusal: the number is real and was true of its quarter, and the quarter
+    # is stamped beside it.
+    STALE_FUNDAMENTAL_PERIOD = "stale_fundamental_period"
+
+    # The store holds no quarterly statement for this symbol at or before the
+    # date being ranked, so there is nothing to rank it on. Distinct from the
+    # code above, which is about a figure that exists and is old.
+    FUNDAMENTAL_NOT_STORED = "fundamental_not_stored"
+
     # The fitted AR(1) half-life reaches the window the gauge was fitted over,
     # which includes a series carrying no reversion at all — the estimate is
     # unbounded there rather than merely large. Past that point a z against the

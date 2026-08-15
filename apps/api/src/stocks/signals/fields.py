@@ -54,6 +54,7 @@ from .issues import SignalIssue
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to a checker
     from .bars import BarFrame, WindowHealth
+    from .fundamentals import FundamentalStanding
 
 # The catalog-wide ceiling on how often a `signal` field may fire on data that
 # contains no signal. Fixed here rather than declared per tool: a self-declared
@@ -316,10 +317,18 @@ class FieldWindow:
     Built in ``serving`` alone. ``health`` is the gateway's own account of the
     window and is echoed beside whatever was computed from it, so a field never
     recounts what the gateway already counted.
+
+    ``fundamental`` is present only where a field's own declaration asked for a
+    cross-section, because that is the only serving path that loads statements —
+    one query for every symbol rather than one per symbol. A field reading it
+    finds either the newest quarter at or before the window's cutoff, with the
+    age of that quarter on it, or ``None`` where the store holds no statement
+    for this symbol at all.
     """
 
     frame: "BarFrame"
     health: "WindowHealth"
+    fundamental: "FundamentalStanding | None" = None
 
 
 @dataclass(frozen=True)
@@ -359,6 +368,12 @@ class SignalField:
     null_fpr: NullCalibration | None
     output_keys: tuple[str, ...] = ()
     reading: Callable[[FieldWindow], FieldReading] | None = None
+    # The cross-sectional half of the same mechanism: the per-symbol quantity a
+    # percentile ranks, over the same ``FieldWindow`` a reading gets. Declared
+    # instead of ``reading`` rather than beside it, because a cross-sectional
+    # field has no single-symbol answer at all — its number is a position within
+    # a sample, and a caller holding one symbol has no sample.
+    ranked: Callable[[FieldWindow], FieldReading] | None = None
     statistic: Callable[["BarFrame"], float | None] | None = None
 
     def __post_init__(self) -> None:
@@ -376,10 +391,18 @@ class SignalField:
                     "behind a measured forward-return harness"
                 )
 
-        if self.source is FieldSource.COMPUTED and self.reading is None:
+        if (self.reading is None) == (self.ranked is None):
             raise ValueError(
-                f"{self.name} is computed, so the computation that answers for "
-                "it belongs on the declaration rather than beside it"
+                f"{self.name} declares exactly one of a reading and a ranked "
+                "quantity: the computation that answers for a field belongs on "
+                "the declaration rather than beside it, and whether it is "
+                "answered for one symbol or within a sample is not a caller's "
+                "choice to make"
+            )
+        if self.ranked is not None and self.kind is not FieldKind.PERCENTILE:
+            raise ValueError(
+                f"{self.name} is ranked across a cross-section, so what it "
+                f"answers with is a percentile rather than a {self.kind.value}"
             )
 
         if self.kind is FieldKind.SIGNAL:
