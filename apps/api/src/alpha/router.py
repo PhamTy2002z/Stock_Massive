@@ -34,6 +34,7 @@ def _response(view: WatchlistView) -> WatchlistResponse:
         entries=[
             WatchlistItemResponse(
                 symbol=item.symbol,
+                state=item.state,
                 added_at=item.added_at,
                 last_seen_analysis_date=item.last_seen_analysis_date,
             )

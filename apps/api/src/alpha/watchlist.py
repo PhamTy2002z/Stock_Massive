@@ -1,7 +1,8 @@
 """Which symbols one user asked to keep being analysed, and the rules on it.
 
-Three rules and nothing else. The cap is ten. Addition is restricted to the
-**Universe**. Removal deletes nothing.
+Four rules and nothing else. The cap is ten, counting active entries. Addition
+is restricted to the **Universe**. Removal deletes nothing. A symbol the
+Universe has dropped goes `unsupported` and stays where the user put it.
 
 The last of those is the one worth stating out loud, because the obvious
 implementation of "remove from my Watchlist" is a cascade. An **Analysis** is
@@ -19,13 +20,14 @@ one.
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from enum import Enum
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import in_sync_session
 from src.stocks.shared import StockServiceError, validate_symbol
-from src.stocks.universe import build_universe
+from src.stocks.universe import Universe, build_universe
 
 from .models import WatchlistEntry
 
@@ -50,11 +52,40 @@ class WatchlistRefusal(Exception):
         self.status_code = status_code
 
 
+class WatchlistState(str, Enum):
+    """Whether a watched symbol still gets analysed.
+
+    Two values, not three. ``unsupported`` covers both a real delisting and an
+    operator trimming the configured Universe, because v1 cannot tell them apart
+    — and a state named for a cause it cannot establish would be a lie the
+    interface repeats.
+    """
+
+    ACTIVE = "active"
+    UNSUPPORTED = "unsupported"
+
+
+def entry_state(symbol: str, universe: Universe) -> WatchlistState:
+    """One watched symbol's state, which is a question about the Universe.
+
+    The signature is the argument. A symbol and the Universe are everything this
+    takes, so there is nowhere for a cause to enter: a symbol that was delisted
+    and a symbol an operator dropped from the configuration arrive here as the
+    same fact — not in the Universe — and leave as the same state.
+
+    Derived rather than stored, which is what makes revival automatic. A stored
+    state would need a writer, and the writer would have to be the thing that
+    notices a symbol coming back; nothing notices, so it would not come back.
+    """
+    return WatchlistState.ACTIVE if universe.contains(symbol) else WatchlistState.UNSUPPORTED
+
+
 @dataclass(frozen=True)
 class WatchlistItem:
     """One symbol on the rail, as the interface needs it."""
 
     symbol: str
+    state: WatchlistState
     added_at: datetime
     last_seen_analysis_date: date | None
 
@@ -65,7 +96,13 @@ class WatchlistView:
 
     ``count`` is carried rather than derived from ``len(items)`` because the two
     are not the same question — the cap counts what still gets analysed, and the
-    rail lists everything the user chose.
+    rail lists everything the user chose. An ``unsupported`` entry appears in
+    ``items`` and not in ``count``: it costs the user nothing, because they did
+    not cause it.
+
+    ``count`` may therefore exceed ``cap``. That is a real state, not a bug: a
+    symbol restored to the Universe revives whether or not there is room, and
+    the rule is that the overflow stands.
     """
 
     items: tuple[WatchlistItem, ...]
@@ -86,17 +123,24 @@ def _normalized(symbol: str) -> str | None:
         return None
 
 
-async def _in_universe(symbol: str) -> bool:
-    """Whether the Universe currently carries this symbol.
+async def _current_universe() -> Universe:
+    """The Universe as it stands, read from an async handler.
 
     The Universe is read from a synchronous session because the store is
-    synchronous, and this is a request path, so it crosses the one documented
-    seam rather than blocking the event loop on a query.
+    synchronous, so this crosses the one documented seam rather than blocking
+    the event loop on a query. Read once per request and passed down: two reads
+    inside one request could disagree, and a Watchlist where a symbol is
+    ``active`` in the list and refused by the cap is not a state anyone can act
+    on.
     """
-    return await in_sync_session(lambda session: build_universe(session).contains(symbol))
+    return await in_sync_session(build_universe)
 
 
-async def _view(session: AsyncSession, user_id: int) -> WatchlistView:
+async def _view(
+    session: AsyncSession,
+    user_id: int,
+    universe: Universe,
+) -> WatchlistView:
     rows = (
         await session.execute(
             select(WatchlistEntry)
@@ -108,19 +152,21 @@ async def _view(session: AsyncSession, user_id: int) -> WatchlistView:
     items = tuple(
         WatchlistItem(
             symbol=row.symbol,
+            state=entry_state(row.symbol, universe),
             added_at=row.added_at,
             last_seen_analysis_date=row.last_seen_analysis_date,
         )
         for row in rows
     )
-    return WatchlistView(items=items, count=len(items))
+    active = sum(1 for item in items if item.state is WatchlistState.ACTIVE)
+    return WatchlistView(items=items, count=active)
 
 
 async def list_watchlist(session: AsyncSession, user_id: int) -> WatchlistView:
     """Everything this user watches. Empty for a new user, and genuinely so —
     a seeded symbol is an Analysis produced that night for a holding nobody
     chose."""
-    return await _view(session, user_id)
+    return await _view(session, user_id, await _current_universe())
 
 
 async def add_symbol(session: AsyncSession, user_id: int, symbol: str) -> WatchlistView:
@@ -131,9 +177,15 @@ async def add_symbol(session: AsyncSession, user_id: int, symbol: str) -> Watchl
     a double tap, a replayed request — must not read as a lost slot. It is also
     why the duplicate check comes before the cap: a full Watchlist re-adding
     something already on it is not full for that request.
+
+    The cap counts active entries, so a Watchlist carrying `unsupported` symbols
+    has room the user never lost. Where it has no room, the refusal is the only
+    thing that happens — nothing is evicted to make space, because the system
+    does not get to choose which of a user's symbols matters least.
     """
     normalized = _normalized(symbol)
-    if normalized is None or not await _in_universe(normalized):
+    universe = await _current_universe()
+    if normalized is None or not universe.contains(normalized):
         raise WatchlistRefusal(
             reason="symbol_not_in_universe",
             message=(
@@ -143,7 +195,7 @@ async def add_symbol(session: AsyncSession, user_id: int, symbol: str) -> Watchl
             status_code=422,
         )
 
-    view = await _view(session, user_id)
+    view = await _view(session, user_id, universe)
     if any(item.symbol == normalized for item in view.items):
         return view
 
@@ -165,7 +217,7 @@ async def add_symbol(session: AsyncSession, user_id: int, symbol: str) -> Watchl
 
     session.add(WatchlistEntry(user_id=user_id, symbol=normalized))
     await session.flush()
-    return await _view(session, user_id)
+    return await _view(session, user_id, universe)
 
 
 async def remove_symbol(session: AsyncSession, user_id: int, symbol: str) -> WatchlistView:
@@ -192,4 +244,4 @@ async def remove_symbol(session: AsyncSession, user_id: int, symbol: str) -> Wat
             status_code=404,
         )
 
-    return await _view(session, user_id)
+    return await _view(session, user_id, await _current_universe())
