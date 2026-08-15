@@ -30,6 +30,8 @@ Tuổi dữ liệu tính từ `effective_at` (phiên mà số liệu nói về),
 
 Đóng băng **không** có nghĩa là hỏng hay sắp xoá. Nghĩa là: hành vi giữ nguyên, không mở rộng, và ai đọc phải biết những endpoint này tiêu hạn mức theo số người dùng chứ không theo lượng dữ liệu.
 
+Từ [ADR 0014](adr/0014-atomic-spend-admission-and-workload-models.md), chúng đi qua **lane `legacy`** của arbiter trong `apps/api/src/core/quota.py`: cùng một chiếc rổ hạn mức với Collector, xếp **dưới** tin tức, và bị từ chối thẳng khi Collector đang giữ lease. Hệ quả người dùng nhìn thấy là 503 kèm `Retry-After` trong lúc chu kỳ thu thập chạy — đúng thứ tự ưu tiên mong muốn, vì cái đang chạy là thứ nạp dữ liệu cho toàn bộ đường đọc từ store ở trên. Không có Redis thì các endpoint đóng băng trả 503 còn ba endpoint đọc store vẫn phục vụ bình thường.
+
 ## Frontend chọn đường nào
 
 Biểu đồ giá thử `/series/market` trước cho mọi khoảng từ 5 phiên trở lên; gặp 404 thì lùi về `/history`. Nên với mã trong Universe, biểu đồ dài không tốn một lời gọi provider nào; với mã ngoài Universe nó vẫn vẽ được, chỉ là bằng đường đóng băng. Khoảng "1 phiên" luôn đi `/history` vì nó cần bar 5 phút.

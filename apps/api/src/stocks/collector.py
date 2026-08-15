@@ -340,13 +340,22 @@ def run_cycle(
     Synchronous throughout. The store is synchronous and FiinQuantX is a
     synchronous library, so a caller on an event loop hands this to a thread
     rather than the other way round.
+
+    It holds the Collector lease for the whole cycle (``docs/adr/0014``). That
+    lease is what makes ADR-0001's rule real rather than a convention: while it
+    is held, news, Backfill and the frozen legacy routes are refused outright
+    instead of quietly sharing an allowance the cycle is already spending. It is
+    released when the cycle ends, however it ends, and expires on its own if the
+    process dies holding it.
     """
     from src.core.database import get_sync_db
+    from src.core.quota import QuotaLane, quota_arbiter, quota_lane
 
-    with get_sync_db() as session:
-        return build_collector(
-            SnapshotStore(session), settings=settings, universe=universe
-        ).run()
+    with quota_arbiter().collector_lease(), quota_lane(QuotaLane.COLLECTOR):
+        with get_sync_db() as session:
+            return build_collector(
+                SnapshotStore(session), settings=settings, universe=universe
+            ).run()
 
 
 if __name__ == "__main__":  # pragma: no cover - the manual entry point
