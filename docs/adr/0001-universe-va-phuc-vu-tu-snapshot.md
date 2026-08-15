@@ -38,15 +38,28 @@ Trần Universe **không đến từ hạn mức nhà cung cấp**. Đo thực t
   vẫn store-only: một người dùng nhấn agent liên tục không bao giờ tiêu được hạn
   mức vnstock của Collector.
 
-  Ngoại lệ này **cũng phủ định một câu** trong hai ADR sau, và được nêu ra ở đây
-  chứ không âm thầm ghi đè:
-  [ADR-0004](0004-market-wide-profit-ranking-census.md) — *"User requests never
-  call a Provider Source"* — và
-  [ADR-0005](0005-separate-signal-warm-up-from-deep-backfill.md) — *"User
-  refreshes only reread stored data; they never trigger either process or call a
-  Provider Source"*. Cả hai vẫn đúng cho mọi Capability của Snapshot; chỉ tin tức
-  — thứ không phải một Capability và không nằm trong `provider_snapshots` — ra
-  khỏi luật đó.
+  Ngoại lệ này thu hẹp **đúng ba câu**, và cả ba được gọi tên ở đây chứ không
+  âm thầm ghi đè:
+
+  1. Câu ở đầu ADR này — *"một collector chạy sau phiên là nơi duy nhất gọi ra
+     ngoài"*;
+  2. [ADR-0004](0004-market-wide-profit-ranking-census.md) — *"User requests
+     never call a Provider Source"*;
+  3. [ADR-0005](0005-separate-signal-warm-up-from-deep-backfill.md) — *"User
+     refreshes only reread stored data; they never trigger either process or
+     call a Provider Source"*.
+
+  Cả ba vẫn đúng cho mọi Capability của Snapshot; chỉ tin tức — thứ không phải
+  một Capability và không nằm trong `provider_snapshots` — ra khỏi luật đó.
+
+  Thứ giữ cho đây là một ngoại lệ chứ không phải một tiền lệ là **arbiter**:
+  `apps/api/src/core/quota.py` là chiếc rổ rò rỉ duy nhất trên Redis cho toàn bộ
+  hạn mức tài khoản vnstock, và `apps/api/src/core/news_lane.py` là lane tin tức
+  chạy trong đó — cache tươi 6 giờ, single-flight theo mã, 5/15 rpm, và tối đa
+  24 giờ phục vụ dữ liệu cũ *có nhãn* khi Collector đang giữ lease hoặc nhà cung
+  cấp hỏng. **Mất Redis là fail-closed cho mọi lời gọi Provider Source**: endpoint
+  đọc từ store vẫn phục vụ bình thường, còn lời gọi ra ngoài bị từ chối thay vì
+  rơi về một nhịp cục bộ mà không tiến trình nào khác nhìn thấy.
 - Danh sách endpoint còn gọi provider trong request nằm ở
   [`docs/serving-path.md`](../serving-path.md). Các endpoint đó **không** phải
   đường đi của agent.

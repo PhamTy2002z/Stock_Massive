@@ -12,7 +12,10 @@ behind:
 requests per symbol against an allowance of 20 a minute. A full pass cannot
 finish in one sitting, so a run resumes: a symbol already covered at the period
 being assessed is skipped rather than re-read, and progress is committed as it
-goes so an interrupted run leaves what it earned behind.
+goes so an interrupted run leaves what it earned behind. The pace itself is not
+this module's to keep — it runs on the Collector lane of the one account
+arbiter (``src/core/quota.py``), because a sleep of its own alongside the
+adapters' own pacer is how one allowance came to be spent twice.
 
 *Companies report at different times.* There is no moment when the market has
 one common reporting period. A period becomes rankable only once ``0.95`` of the
@@ -33,7 +36,6 @@ import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
-from time import sleep as _sleep
 from typing import Any, Literal
 
 from sqlalchemy import distinct, select
@@ -374,11 +376,9 @@ class Census:
         store: SnapshotStore,
         fundamental: FundamentalDataProvider,
         roster: ListingRosterProvider | None = None,
-        request_delay: float = 0.0,
         coverage_threshold: float = RANKABLE_PERIOD_COVERAGE,
         commit_every: int = COMMIT_EVERY_SYMBOLS,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
-        sleep: Callable[[float], None] = _sleep,
     ) -> None:
         self._session = session
         self._store = store
@@ -386,11 +386,9 @@ class Census:
         self._roster_provider = roster
         self._roster = ListingRosterStore(session)
         self._runs = CensusRunStore(session)
-        self._delay = request_delay
         self._threshold = coverage_threshold
         self._commit_every = max(1, commit_every)
         self._now = now
-        self._sleep = sleep
 
     def run(self, refresh_roster: bool = True) -> CensusOutcome:
         """Census the market once, and report whether a period became rankable.
@@ -531,9 +529,6 @@ class Census:
                 self._session.commit()
                 logger.info("Census progress: %d/%d read", index, len(outstanding))
 
-            if self._delay > 0 and index < len(outstanding):
-                self._sleep(self._delay)
-
         return read
 
     def _read_symbol(self, symbol: str) -> None:
@@ -628,7 +623,6 @@ def build_census(
             if with_roster
             else None
         ),
-        request_delay=settings.profit_census_request_delay,
         coverage_threshold=settings.rankable_period_coverage,
     )
 
@@ -643,10 +637,18 @@ def run_census(
     a caller on an event loop hands this to a thread. It opens its own session
     because it commits as it goes — a run this long that held one transaction
     open would keep an hour of writes invisible and then lose them together.
+
+    It runs on the Collector lane: ADR-0004 admits the census as part of the
+    collection boundary rather than as a user-facing read, and its two requests
+    a symbol across ~1,600 symbols are exactly the traffic the account bucket
+    exists to space. It does not take the Collector lease — the daily cycle
+    holds that, and a census running for an hour must not be able to lock the
+    cycle out of the evening it was scheduled for.
     """
     from src.core.database import get_sync_db
+    from src.core.quota import QuotaLane, quota_lane
 
-    with get_sync_db() as session:
+    with quota_lane(QuotaLane.COLLECTOR), get_sync_db() as session:
         census = build_census(session, settings=settings, with_roster=refresh_roster)
         return census.run(refresh_roster=refresh_roster)
 

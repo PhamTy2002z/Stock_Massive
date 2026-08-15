@@ -638,10 +638,17 @@ def build_backfill(
 
 
 def run_backfill(settings: Settings | None = None) -> BackfillSummary:
-    """Run one pass of the history load and commit what it wrote."""
-    from src.core.database import get_sync_db
+    """Run one pass of the history load and commit what it wrote.
 
-    with get_sync_db() as session:
+    On the Backfill lane, which ranks below news and stands aside for a reader
+    with a user behind them (``docs/adr/0014``). It is the heaviest consumer of
+    the vnstock allowance in the system, and it is the one whose caller is a
+    cron rather than a person.
+    """
+    from src.core.database import get_sync_db
+    from src.core.quota import QuotaLane, quota_lane
+
+    with quota_lane(QuotaLane.BACKFILL), get_sync_db() as session:
         return build_backfill(
             SnapshotStore(session), BackfillStateStore(session), settings=settings
         ).run()

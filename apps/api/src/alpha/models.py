@@ -106,7 +106,11 @@ class Analysis(Base):
 
     __tablename__ = "analysis"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
     symbol = Column(String(20), nullable=False)
     trading_day = Column(Date, nullable=False)
     verdict = Column(String(16), nullable=False)
@@ -389,12 +393,21 @@ class LlmCallUsage(Base):
 
     __tablename__ = "llm_call_usage"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
     # analysis_run | turn_request_message | capability_probe | eval_run
     owner_type = Column(String(32), nullable=False)
     owner_id = Column(String(64), nullable=False)
+    user_id = Column(Integer, nullable=True)
+    # analysis | turn | emergency | eval
+    lane = Column(String(16), nullable=False)
     route = Column(String(64), nullable=False)
     model = Column(String(64), nullable=False)
+    reserved_input_tokens = Column(Integer, nullable=False, server_default="0")
+    reserved_output_tokens = Column(Integer, nullable=False, server_default="0")
     input_tokens = Column(Integer, nullable=False, server_default="0")
     cached_read_tokens = Column(Integer, nullable=False, server_default="0")
     cache_write_tokens = Column(Integer, nullable=False, server_default="0")
@@ -411,6 +424,7 @@ class LlmCallUsage(Base):
     actual_micro_usd = Column(BigInteger, nullable=True)
     # reserved | reconciled | usage_unknown
     status = Column(String(16), nullable=False)
+    provider_called_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     reconciled_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -418,6 +432,8 @@ class LlmCallUsage(Base):
         # Admission sums open reservations plus actual spend over a window.
         Index("ix_llm_call_usage_created", "created_at"),
         Index("ix_llm_call_usage_owner", "owner_type", "owner_id"),
+        Index("ix_llm_call_usage_lane_called", "lane", "provider_called_at"),
+        Index("ix_llm_call_usage_user_called", "user_id", "provider_called_at"),
     )
 
     def __repr__(self) -> str:
