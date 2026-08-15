@@ -253,9 +253,11 @@ may cite it.
 **Signal Field**:
 One model-visible number, and the unit the statistical bar applies to — not the tool
 that returns it, because one tool returns fields of different kinds. It declares
-`unit`, `sign`, `interpretation`, `kind` (`estimator` | `percentile` | `signal`),
-**Claim**, `source` (`computed` | `stored`), `min_sessions`, `threshold`, and
-`null_fpr`. Its `interpretation` is the only sanctioned reading of it.
+`unit`, `sign`, `interpretation`, `kind` (`vocabulary` | `estimator` |
+`percentile` | `signal`), **Claim**, `source` (`computed` | `stored`),
+`min_sessions`, `threshold`, and `null_fpr`. A `vocabulary` field is an exact
+named transform with neither a firing threshold nor sampling uncertainty; its
+`interpretation` is the only sanctioned reading of it.
 _Avoid_: metric, indicator, value
 
 **Signal Registry**:

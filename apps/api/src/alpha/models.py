@@ -155,6 +155,20 @@ class AnalysisRun(Base):
     # story from one the nightly pass keeps missing.
     origin = Column(String(16), nullable=False)
     attempts = Column(Integer, nullable=False, server_default="0")
+    # Who asked, when a person's request is what created the row. Null for the
+    # nightly cohort, which is nobody's in particular, and null once the account
+    # is gone — an Analysis is shared and outlives whoever triggered it.
+    #
+    # It exists because the on-demand allowance is per user per Trading Day and
+    # there is nowhere else the pairing could live: the Analysis is keyed by
+    # `(symbol, trading_day)` precisely so it belongs to no user, and counting
+    # Watchlist additions instead would charge the second watcher of a symbol
+    # for a run the first one caused.
+    requested_by_user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     error_code = Column(String(48), nullable=True)
     error_message = Column(String(500), nullable=True)
     next_attempt_at = Column(DateTime(timezone=True), nullable=True)
@@ -176,6 +190,9 @@ class AnalysisRun(Base):
         # The sweep asks for every run left producing past a window, across all
         # symbols at once, so it cannot use an index leading with a symbol.
         Index("ix_analysis_run_status_started", "status", "started_at"),
+        # The on-demand allowance is a count of one user's runs for one session,
+        # asked on every Watchlist addition.
+        Index("ix_analysis_run_requester_day", "requested_by_user_id", "trading_day"),
     )
 
     def __repr__(self) -> str:
