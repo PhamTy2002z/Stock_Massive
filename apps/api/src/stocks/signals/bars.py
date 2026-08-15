@@ -84,8 +84,10 @@ from .issues import SignalIssue
 from .price_band import (
     EXCHANGE_MIGRATIONS,
     BandAnchorBasis,
+    BandLimits,
     BandRegime,
     BandRegimeResolver,
+    BandReading,
     ExchangeAsOf,
     ExchangeMigration,
     LimitLock,
@@ -133,10 +135,32 @@ class Bar:
     total_value_vnd: float | None
     adjustment_factor: Decimal
     limit_lock: LimitLock
+    # The two prices this session was permitted to trade between, in the **raw**
+    # terms the exchange published them in — the band is defined on a tick grid
+    # and an adjusted price does not sit on one (``price_band``). ``None`` where
+    # the band could not be decided at all, which is every UPCOM session (its
+    # anchor is not stored) and every session whose predecessor the store does
+    # not hold. Kept beside the lock verdict rather than recomputed downstream,
+    # because the anchor it was measured from is the previous session's raw
+    # close and only the gateway still has it.
+    band: BandLimits | None = None
 
     @property
     def limit_locked(self) -> bool:
         return self.limit_lock in (LimitLock.CEILING, LimitLock.FLOOR)
+
+    @property
+    def raw_close(self) -> float | None:
+        """This session's close as the exchange published it.
+
+        The band above is in raw prices and ``close`` is in the window's rebased
+        ones, so a distance between the two is only a distance once the
+        Adjustment Factor is divided back out. On a window with no action in it
+        the factor is 1 and the two are the same number.
+        """
+        if self.close is None:
+            return None
+        return float(Decimal(str(self.close)) / self.adjustment_factor)
 
 
 @dataclass(frozen=True)
@@ -204,6 +228,27 @@ class WindowBandRegime:
 
 
 @dataclass(frozen=True)
+class AdtvStanding:
+    """How much money this symbol traded, and where that sits among its peers.
+
+    The one cross-sectional read the gateway makes, and it carries the two things
+    ADR-0010 refuses a percentile without: the ``n`` it was ranked among and the
+    date the ranking was cut at. A percentile over eleven names is a rank dressed
+    up as a distribution, and a percentile with no date is one nobody can
+    reproduce.
+
+    ``average_value_vnd`` is traded **money**, never traded shares. Money is the
+    one quantity a corporate action leaves alone: an ADTV in shares crosses an
+    ex-date and changes unit, an ADTV in dong does not (``docs/adr/0006``).
+    """
+
+    average_value_vnd: float
+    percentile: float
+    n: int
+    as_of: date
+
+
+@dataclass(frozen=True)
 class WindowHealth:
     """What the window is made of, stated beside whatever was computed from it.
 
@@ -222,7 +267,7 @@ class WindowHealth:
     limit_lock_dates: tuple[date, ...]
     band_regime: WindowBandRegime | None
     adjustment: AdjustmentReport
-    adtv_percentile: float | None
+    adtv: AdtvStanding | None
     # Sessions whose band could not be decided at all — an anchor the store does
     # not hold, an UPCOM reference that is not reconstructible, a board nothing
     # names. Counted rather than folded into ``limit_lock_days``: a session
@@ -340,7 +385,7 @@ def prepare_bars(
         assert action.ex_date is not None  # for_symbol excludes the undated
         by_ex_date.setdefault(action.ex_date, []).append(action)
 
-    locks, gap_refusal, undecided = _read_bands(
+    bands, gap_refusal, undecided = _read_bands(
         window,
         usable,
         regimes,
@@ -358,7 +403,7 @@ def prepare_bars(
         )
 
     factors, adjustment_issues = _factors(window, usable, by_ex_date)
-    frame = _frame(symbol, window, usable, locks, factors)
+    frame = _frame(symbol, window, usable, bands, factors)
 
     degradations: list[SignalIssue] = []
     if any(action.changes_share_count for action in actions):
@@ -386,7 +431,7 @@ def prepare_bars(
             actions_in_window=len(actions),
             ex_dates_applied=applied_dates,
         ),
-        adtv_percentile=_adtv_percentile(session, symbol, window, usable, peers),
+        adtv=_adtv_standing(session, symbol, window, usable, peers),
         band_undecided_days=len(undecided),
         band_undecided_reasons=tuple(
             sorted(set(undecided.values()), key=lambda issue: issue.value)
@@ -425,7 +470,7 @@ def _refused(
         adjustment=AdjustmentReport(
             applied=False, actions_applied=0, actions_in_window=0
         ),
-        adtv_percentile=None,
+        adtv=None,
         band_undecided_days=0,
         band_undecided_reasons=(),
         refusal=reason,
@@ -456,7 +501,7 @@ def _read_bands(
     anchor_date: date | None,
     anchor_row: MarketSnapshot | None,
     by_ex_date: dict[date, list[CorporateAction]],
-) -> tuple[dict[date, LimitLock], SignalIssue | None, dict[date, SignalIssue]]:
+) -> tuple[dict[date, BandReading], SignalIssue | None, dict[date, SignalIssue]]:
     """Judge every session against its band, and refuse a move nothing explains.
 
     A session that broke its band is not a session the market went mad in; it is
@@ -471,7 +516,7 @@ def _read_bands(
     added to it, so no corporate action can produce one, and taking an action as
     its explanation would let a rally excuse a wrong anchor.
     """
-    locks: dict[date, LimitLock] = {}
+    bands: dict[date, BandReading] = {}
     undecided: dict[date, SignalIssue] = {}
 
     previous_date = anchor_date
@@ -498,18 +543,33 @@ def _read_bands(
                     if day not in by_ex_date
                     else "a break upward, which no action produces",
                 )
-                return locks, SignalIssue.UNEXPLAINED_PRICE_GAP, undecided
+                return bands, SignalIssue.UNEXPLAINED_PRICE_GAP, undecided
             # An ex-date the store knows about. The session is not judged for a
             # lock — its anchor is the pre-adjustment close, so the band it was
-            # measured against was never this session's band.
-            locks[day] = LimitLock.INDETERMINATE
+            # measured against was never this session's band, and neither the
+            # verdict nor the limits it was measured from describe this session.
+            bands[day] = _unmeasured(reading)
             continue
 
         if reading.degraded_reason is not None:
             undecided[day] = reading.degraded_reason
-        locks[day] = reading.lock
+        bands[day] = reading
 
-    return locks, None, undecided
+    return bands, None, undecided
+
+
+def _unmeasured(reading: BandReading) -> BandReading:
+    """The same session with the band it was wrongly measured against removed."""
+    return BandReading(
+        symbol=reading.symbol,
+        session_date=reading.session_date,
+        regime=reading.regime,
+        anchor=None,
+        anchor_date=None,
+        limits=None,
+        lock=LimitLock.INDETERMINATE,
+        degraded_reason=reading.degraded_reason,
+    )
 
 
 def _factors(
@@ -564,7 +624,7 @@ def _frame(
     symbol: str,
     window: Sequence[date],
     usable: dict[date, MarketSnapshot],
-    locks: dict[date, LimitLock],
+    bands: dict[date, BandReading],
     factors: dict[date, Decimal],
 ) -> BarFrame:
     """Build the window's bars, rebased onto its last session's share terms.
@@ -593,7 +653,10 @@ def _frame(
                 volume=row.volume,
                 total_value_vnd=row.total_value_vnd,
                 adjustment_factor=factor,
-                limit_lock=locks.get(day, LimitLock.INDETERMINATE),
+                limit_lock=(
+                    bands[day].lock if day in bands else LimitLock.INDETERMINATE
+                ),
+                band=bands[day].limits if day in bands else None,
             )
         )
     return BarFrame(symbol=symbol, bars=tuple(bars))
@@ -630,13 +693,13 @@ def _window_regime(
     )
 
 
-def _adtv_percentile(
+def _adtv_standing(
     session: Session,
     symbol: str,
     window: Sequence[date],
     usable: dict[date, MarketSnapshot],
     peers: Sequence[str] | None,
-) -> float | None:
+) -> AdtvStanding | None:
     """Where this symbol's traded money sits among its peers over the same days.
 
     Traded **money** rather than traded shares, because money is the one quantity
@@ -652,7 +715,7 @@ def _adtv_percentile(
     if not days:
         return None
 
-    mine = _average_value(usable, days)
+    mine = average_traded_money(usable[day].total_value_vnd for day in days)
     if mine is None:
         return None
 
@@ -665,31 +728,48 @@ def _adtv_percentile(
     measured = [
         value
         for name in others
-        if (value := _average_value(held.get(name, {}), days)) is not None
+        if (value := _peer_average(held.get(name, {}), days)) is not None
     ]
     if len(measured) < ADTV_MIN_PEERS:
         return None
 
     below = sum(1 for value in measured if value <= mine)
-    return below / len(measured)
+    return AdtvStanding(
+        average_value_vnd=mine,
+        percentile=below / len(measured),
+        n=len(measured),
+        as_of=days[-1],
+    )
 
 
-def _average_value(
+def _peer_average(
     held: dict[date, MarketSnapshot],
     days: Sequence[date],
 ) -> float | None:
+    """One peer's average traded money over exactly these sessions."""
+    return average_traded_money(
+        None if (row := held.get(day)) is None else row.total_value_vnd
+        for day in days
+    )
+
+
+def average_traded_money(values: Iterable[float | None]) -> float | None:
     """Average traded money across these sessions, or nothing if any is missing.
 
     All or nothing on purpose: a symbol that traded on twelve of the twenty days
     has an average over a different stretch of market than the symbol beside it,
     and ranking the two together would present them as comparable.
+
+    Shared with the liquidity field rather than spelled twice, because the
+    gateway measures this over rows it has just loaded while the field measures
+    it over the bars it was served, and the two have to be the same ADTV or the
+    percentile beside a number would be ranking something else.
     """
-    values: list[float] = []
-    for day in days:
-        row = held.get(day)
-        if row is None or row.total_value_vnd is None:
+    collected: list[float] = []
+    for value in values:
+        if value is None:
             return None
-        values.append(row.total_value_vnd)
-    if not values:
+        collected.append(value)
+    if not collected:
         return None
-    return sum(values) / len(values)
+    return sum(collected) / len(collected)

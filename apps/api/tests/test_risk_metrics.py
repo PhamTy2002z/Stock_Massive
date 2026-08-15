@@ -85,6 +85,7 @@ from src.stocks.signals.risk import (
     yang_zhang_variance,
 )
 
+from .signal_windows import window_of
 from .test_price_band import list_on, write_session
 
 
@@ -195,7 +196,7 @@ class TestRealizedVolatility:
         the only one unbiased under drift. Printing one number would hide which
         of those assumptions the answer is resting on.
         """
-        reading = realized_volatility_reading(frame_of([20_000.0 * (1.01**i) for i in range(60)]))
+        reading = realized_volatility_reading(window_of(frame_of([20_000.0 * (1.01**i) for i in range(60)])))
 
         assert reading.value is not None
         assert reading.value >= 0
@@ -214,7 +215,7 @@ class TestRealizedVolatility:
         frame = frame_of([20_000.0 * (1.005 ** (i % 7)) for i in range(60)])
         bars = list(frame.bars)
         variance = yang_zhang_variance(bars)
-        reading = realized_volatility_reading(frame)
+        reading = realized_volatility_reading(window_of(frame))
 
         assert variance is not None
         assert reading.value == pytest.approx(
@@ -223,7 +224,7 @@ class TestRealizedVolatility:
 
     def test_it_is_never_negative(self):
         frame = frame_of([20_000.0 + 500.0 * math.sin(i) for i in range(60)])
-        reading = realized_volatility_reading(frame)
+        reading = realized_volatility_reading(window_of(frame))
 
         assert reading.value is not None
         assert reading.value >= 0
@@ -240,13 +241,13 @@ class TestRealizedVolatility:
             else:
                 bars.append(bar(day, price, price * 1.01, price * 0.99, price * 1.002))
                 price *= 1.002
-        reading = realized_volatility_reading(BarFrame(symbol="AAA", bars=tuple(bars)))
+        reading = realized_volatility_reading(window_of(BarFrame(symbol="AAA", bars=tuple(bars))))
 
         assert reading.extras["limit_lock_days"] == 2
         assert reading.extras["zero_range_days"] == 2
 
     def test_the_estimator_ships_its_uncertainty(self):
-        reading = realized_volatility_reading(frame_of([20_000.0 * (1.003**i) for i in range(60)]))
+        reading = realized_volatility_reading(window_of(frame_of([20_000.0 * (1.003**i) for i in range(60)])))
 
         assert reading.extras["standard_error"] > 0
 
@@ -344,13 +345,13 @@ class TestDrawdownStatistics:
         assert variance is not None
         sigma_root_t = math.sqrt(variance) * math.sqrt(len(frame.bars) - 1)
 
-        assert max_drawdown_reading(frame).extras["standard_error"] == pytest.approx(
+        assert max_drawdown_reading(window_of(frame)).extras["standard_error"] == pytest.approx(
             100.0 * MAX_DRAWDOWN_NULL_SCATTER * sigma_root_t
         )
-        assert current_drawdown_reading(frame).extras[
+        assert current_drawdown_reading(window_of(frame)).extras[
             "standard_error"
         ] == pytest.approx(100.0 * CURRENT_DRAWDOWN_NULL_SCATTER * sigma_root_t)
-        assert days_underwater_reading(frame).extras[
+        assert days_underwater_reading(window_of(frame)).extras[
             "standard_error"
         ] == pytest.approx(DAYS_UNDERWATER_NULL_SCATTER * (len(frame.bars) - 1))
 
@@ -392,7 +393,7 @@ class TestDrawdownStatistics:
 
     def test_the_expected_fall_travels_beside_the_observed_one(self):
         frame = frame_of([20_000.0 * (0.998**i) for i in range(120)])
-        reading = max_drawdown_reading(frame)
+        reading = max_drawdown_reading(window_of(frame))
 
         assert reading.extras["expected_max_drawdown_pct"] < 0
         assert reading.extras["max_drawdown_pct"] < 0
@@ -401,7 +402,7 @@ class TestDrawdownStatistics:
 
 class TestRiskAdjustedReturn:
     def test_sharpe_ships_the_lo_standard_error_and_its_interval(self):
-        reading = sharpe_reading(frame_of([20_000.0 * (1.0005**i) for i in range(250)]))
+        reading = sharpe_reading(window_of(frame_of([20_000.0 * (1.0005**i) for i in range(250)])))
 
         assert reading.value is not None
         assert reading.extras["standard_error"] > 0
@@ -415,7 +416,7 @@ class TestRiskAdjustedReturn:
         closes = [20_000.0]
         for _ in range(120):
             closes.append(closes[-1] * (1.0 + rng.gauss(0.0002, 0.02)))
-        reading = sharpe_reading(frame_of(closes))
+        reading = sharpe_reading(window_of(frame_of(closes)))
 
         assert reading.extras["indistinguishable_from_zero"] is True
 
@@ -436,7 +437,7 @@ class TestRiskAdjustedReturn:
         for _ in range(250):
             step = 0.6 * step + rng.gauss(0.0004, 0.01)
             closes.append(closes[-1] * (1.0 + step))
-        reading = sharpe_reading(frame_of(closes))
+        reading = sharpe_reading(window_of(frame_of(closes)))
 
         assert reading.extras["annualization"] == "lo_corrected"
         assert reading.extras["first_autocorrelation"] > 1.96 / math.sqrt(250)
@@ -446,7 +447,7 @@ class TestRiskAdjustedReturn:
         """√252 is the number the correction exists to refuse, so it is not what
         the field falls back to when the correction has no root to take."""
         closes = [20_000.0 * (1.0 + 0.03 * (index % 2)) for index in range(250)]
-        reading = sharpe_reading(frame_of(closes))
+        reading = sharpe_reading(window_of(frame_of(closes)))
 
         assert reading.value is None
         assert reading.refusal is SignalIssue.AUTOCORRELATION_UNUSABLE
@@ -456,7 +457,7 @@ class TestRiskAdjustedReturn:
         closes = [20_000.0]
         for _ in range(250):
             closes.append(closes[-1] * (1.0 + rng.gauss(0.0, 0.015)))
-        reading = sharpe_reading(frame_of(closes))
+        reading = sharpe_reading(window_of(frame_of(closes)))
 
         assert reading.extras["annualization"] == "sqrt_252"
 
@@ -486,7 +487,7 @@ class TestRiskAdjustedReturn:
         for _ in range(250):
             closes.append(closes[-1] * (1.0 + rng.gauss(0.0005, 0.012)))
         frame = frame_of(closes)
-        reading = sortino_reading(frame)
+        reading = sortino_reading(window_of(frame))
 
         returns = [
             math.log(later.close / earlier.close)
@@ -503,14 +504,14 @@ class TestRiskAdjustedReturn:
     def test_sortino_is_withheld_below_the_downside_observation_floor(self):
         """Sortino's discrete downside deviation is documented as unstable on a
         handful of observations, so it is not printed with a caveat."""
-        reading = sortino_reading(frame_of([20_000.0 * (1.002**i) for i in range(60)]))
+        reading = sortino_reading(window_of(frame_of([20_000.0 * (1.002**i) for i in range(60)])))
 
         assert reading.value is None
         assert reading.refusal is SignalIssue.INSUFFICIENT_DOWNSIDE_OBSERVATIONS
         assert MIN_DOWNSIDE_OBSERVATIONS == 10
 
     def test_a_flat_series_has_no_ratio_to_report(self):
-        reading = sharpe_reading(frame_of([20_000.0] * 60))
+        reading = sharpe_reading(window_of(frame_of([20_000.0] * 60)))
 
         assert reading.value is None
         assert reading.refusal is SignalIssue.BASELINE_DISPERSION_ZERO
@@ -519,7 +520,7 @@ class TestRiskAdjustedReturn:
 class TestThePriceZone:
     def test_it_is_one_realized_sigma_either_side_of_the_reference_price(self):
         frame = frame_of([20_000.0 * (1.0 + 0.004 * math.sin(i)) for i in range(21)])
-        reading = price_zone_reading(frame)
+        reading = price_zone_reading(window_of(frame))
         variance = yang_zhang_variance(list(frame.bars))
 
         assert variance is not None and reading.value is not None
@@ -550,7 +551,7 @@ class TestThePriceZone:
         assert PRICE_ZONE.name == "price_zone.ordinary_range_pct"
 
     def test_it_never_reports_a_negative_range(self):
-        reading = price_zone_reading(frame_of([20_000.0] * 21, spread=0.005))
+        reading = price_zone_reading(window_of(frame_of([20_000.0] * 21, spread=0.005)))
 
         assert reading.value is not None
         assert reading.value >= 0

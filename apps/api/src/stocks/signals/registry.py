@@ -48,6 +48,22 @@ from .fields import (
     ThresholdOrigin,
     Unit,
 )
+from .market_behavior import (
+    BAND_PRESSURE_MIN_SESSIONS,
+    BAND_PRESSURE_SESSIONS,
+    LIQUIDITY_MIN_SESSIONS,
+    LIQUIDITY_SESSIONS,
+    MEAN_REVERSION_MIN_SESSIONS,
+    MEAN_REVERSION_SESSIONS,
+    SETTLEMENT_FLOOR_SESSIONS,
+    adtv_money_reading,
+    adtv_percentile_reading,
+    adtv_shares_reading,
+    amihud_illiquidity_reading,
+    band_pressure_reading,
+    mean_reversion_half_life_reading,
+    mean_reversion_z_reading,
+)
 from .risk import (
     DRAWDOWN_MIN_SESSIONS,
     current_drawdown_reading,
@@ -413,6 +429,230 @@ SORTINO = SignalField(
 )
 
 
+# --- The market-behaviour cluster ----------------------------------------
+#
+# Nothing below fires. The volatility-regime z above is the cluster's one
+# ``signal`` field and it was calibrated when it was registered; the four
+# questions added here — how much money trades, how illiquid that makes the
+# symbol, how often it reaches its band, how stretched it is against its own
+# mean — are all descriptive, and each carries the uncertainty its kind demands
+# instead of a threshold. A "thin" or "stretched" flag would be one narration
+# away from a claim about what the price does next, and the research behind this
+# cluster could verify no such claim for this market.
+
+ADTV_MONEY = SignalField(
+    name="liquidity_profile.adtv_vnd",
+    unit=Unit.VND,
+    sign=Sign.NON_NEGATIVE,
+    interpretation=(
+        "Average money traded in this symbol per session over the last "
+        f"{LIQUIDITY_SESSIONS} sessions, in dong. It is denominated in **money**, "
+        "which is the figure that survives a corporate action: a share count "
+        "changes at an ex-date and the dong traded do not. It says how much of "
+        "this symbol can be bought or sold on an ordinary day and nothing about "
+        "what its price will do."
+    ),
+    kind=FieldKind.ESTIMATOR,
+    claim=Claim.DESCRIPTIVE,
+    source=FieldSource.COMPUTED,
+    min_sessions=LIQUIDITY_MIN_SESSIONS,
+    threshold=None,
+    null_fpr=None,
+    output_keys=(
+        "standard_error",
+        "adtv_basis",
+        "sessions",
+        "limit_lock_days",
+    ),
+    reading=adtv_money_reading,
+)
+
+ADTV_SHARES = SignalField(
+    name="liquidity_profile.adtv_shares",
+    unit=Unit.SHARES,
+    sign=Sign.NON_NEGATIVE,
+    interpretation=(
+        "Average number of shares traded in this symbol per session over the "
+        f"last {LIQUIDITY_SESSIONS} sessions. It is denominated in **shares**, so "
+        "a window crossing a stock dividend, bonus issue or split holds two "
+        "different units and the answer says so through its degradation. Where "
+        "a figure has to be compared across such a window, the money ADTV is "
+        "the one that can be."
+    ),
+    kind=FieldKind.ESTIMATOR,
+    claim=Claim.DESCRIPTIVE,
+    source=FieldSource.COMPUTED,
+    min_sessions=LIQUIDITY_MIN_SESSIONS,
+    threshold=None,
+    null_fpr=None,
+    output_keys=(
+        "standard_error",
+        "adtv_basis",
+        "sessions",
+        "quantities_comparable",
+    ),
+    reading=adtv_shares_reading,
+)
+
+AMIHUD_ILLIQUIDITY = SignalField(
+    name="liquidity_profile.amihud_illiq",
+    unit=Unit.PERCENT_PER_BILLION_VND,
+    sign=Sign.NON_NEGATIVE,
+    interpretation=(
+        "Amihud's illiquidity: how far this symbol's price moves, in percent, "
+        "per billion dong traded, averaged over the last "
+        f"{LIQUIDITY_SESSIONS} sessions. **Higher means more illiquid** — the "
+        "same money moves the price further. Sessions in which nothing traded "
+        "are counted beside it rather than averaged in, because a price move "
+        "divided by no traded money is not a measurement."
+    ),
+    kind=FieldKind.ESTIMATOR,
+    claim=Claim.DESCRIPTIVE,
+    source=FieldSource.COMPUTED,
+    min_sessions=LIQUIDITY_MIN_SESSIONS,
+    threshold=None,
+    null_fpr=None,
+    output_keys=(
+        "standard_error",
+        "measured_sessions",
+        "zero_volume_days",
+        "limit_lock_days",
+        "sessions",
+    ),
+    reading=amihud_illiquidity_reading,
+)
+
+ADTV_PERCENTILE = SignalField(
+    name="liquidity_profile.adtv_percentile",
+    unit=Unit.PERCENTILE,
+    sign=Sign.NON_NEGATIVE,
+    interpretation=(
+        "Where this symbol's average daily traded money sits among the Universe "
+        f"over the same {LIQUIDITY_SESSIONS} sessions, as a percentile from 0 to "
+        "100. Higher means more of the Universe trades less than this symbol "
+        "does. It is a position within a named sample on a named date, both of "
+        "which travel with it, and it is not comparable with a percentile taken "
+        "over a different sample."
+    ),
+    kind=FieldKind.PERCENTILE,
+    claim=Claim.DESCRIPTIVE,
+    source=FieldSource.COMPUTED,
+    min_sessions=LIQUIDITY_MIN_SESSIONS,
+    threshold=None,
+    null_fpr=None,
+    output_keys=("n", "as_of", "adtv_vnd", "adtv_basis", "sessions"),
+    reading=adtv_percentile_reading,
+)
+
+BAND_PRESSURE = SignalField(
+    # The id the Analysis Field Profile already names (spec 0003 §8.4).
+    name="band_pressure.limit_days_in_window",
+    unit=Unit.SESSIONS,
+    sign=Sign.NON_NEGATIVE,
+    interpretation=(
+        "How many of the last "
+        f"{BAND_PRESSURE_SESSIONS} sessions this symbol spent locked at a price "
+        "limit, with its own base rate and the distance from its latest close to "
+        "that session's ceiling and floor beside it. The distances share one "
+        "sign convention: **positive means the limit sits above the close**, so "
+        "the ceiling distance is the room the price still had and the floor "
+        "distance is negative. A session locked at a limit is one that never "
+        "traded away from it, which is not the same as one that closed there."
+    ),
+    kind=FieldKind.ESTIMATOR,
+    claim=Claim.DESCRIPTIVE,
+    source=FieldSource.COMPUTED,
+    min_sessions=BAND_PRESSURE_MIN_SESSIONS,
+    threshold=None,
+    null_fpr=None,
+    output_keys=(
+        "standard_error",
+        "base_rate_pct",
+        "closes_at_ceiling",
+        "closes_at_floor",
+        "distance_to_ceiling_pct",
+        "distance_to_floor_pct",
+        "anchor_basis",
+        "decided_days",
+        "undecided_days",
+        "sessions",
+    ),
+    reading=band_pressure_reading,
+)
+
+_MEAN_REVERSION_KEYS = (
+    "confidence_interval",
+    "half_life_sessions",
+    "trailing_z",
+    "ar1_phi",
+    "settlement_floor_sessions",
+    "half_life_under_settlement_floor",
+    "bootstrap_paths_without_reversion",
+    "baseline_sessions",
+    "sessions",
+    "limit_lock_days",
+)
+
+MEAN_REVERSION_Z = SignalField(
+    name="mean_reversion.trailing_z",
+    unit=Unit.Z_SCORE,
+    sign=Sign.SIGNED,
+    interpretation=(
+        "How far this symbol's latest close sits from its own mean over the "
+        f"trailing {MEAN_REVERSION_SESSIONS} sessions, in standard deviations of "
+        "that stretch. Positive is above its own recent mean and negative below. "
+        "It is **descriptive**: it says where the price is relative to its own "
+        "history and carries no view on where it goes next. Where the fitted "
+        "half-life beside it reaches the window length the z is withheld "
+        "entirely, because there it measures the window rather than the market."
+    ),
+    kind=FieldKind.ESTIMATOR,
+    claim=Claim.DESCRIPTIVE,
+    source=FieldSource.COMPUTED,
+    min_sessions=MEAN_REVERSION_MIN_SESSIONS,
+    threshold=None,
+    null_fpr=None,
+    output_keys=_MEAN_REVERSION_KEYS,
+    reading=mean_reversion_z_reading,
+)
+
+MEAN_REVERSION_HALF_LIFE = SignalField(
+    name="mean_reversion.half_life_sessions",
+    unit=Unit.SESSIONS,
+    sign=Sign.NON_NEGATIVE,
+    interpretation=(
+        "How many sessions a deviation from this symbol's own trailing mean has "
+        "taken to decay by half, from an AR(1) fit over the last "
+        f"{MEAN_REVERSION_SESSIONS} sessions, with a block-bootstrap interval. "
+        f"Under about {SETTLEMENT_FLOOR_SESSIONS} sessions the reading is not "
+        "round-trip actionable at all: Vietnamese settlement is T+2, so the "
+        "shares are not deliverable until the move has already half-decayed. The "
+        "field states that floor rather than leaving it to be discovered."
+    ),
+    kind=FieldKind.ESTIMATOR,
+    claim=Claim.DESCRIPTIVE,
+    source=FieldSource.COMPUTED,
+    min_sessions=MEAN_REVERSION_MIN_SESSIONS,
+    threshold=None,
+    null_fpr=None,
+    output_keys=_MEAN_REVERSION_KEYS,
+    reading=mean_reversion_half_life_reading,
+)
+
+# The cluster as one list, so a test can assert something of all of it and a
+# later field cannot be added without joining what is asserted.
+MARKET_BEHAVIOR_FIELDS: tuple[SignalField, ...] = (
+    VOLATILITY_REGIME_Z,
+    ADTV_MONEY,
+    ADTV_SHARES,
+    AMIHUD_ILLIQUIDITY,
+    ADTV_PERCENTILE,
+    BAND_PRESSURE,
+    MEAN_REVERSION_Z,
+    MEAN_REVERSION_HALF_LIFE,
+)
+
+
 def _index(*fields: SignalField) -> Mapping[str, SignalField]:
     """Key the declarations by name, refusing two fields with one name.
 
@@ -430,6 +670,13 @@ def _index(*fields: SignalField) -> Mapping[str, SignalField]:
 
 REGISTRY: Mapping[str, SignalField] = _index(
     VOLATILITY_REGIME_Z,
+    ADTV_MONEY,
+    ADTV_SHARES,
+    AMIHUD_ILLIQUIDITY,
+    ADTV_PERCENTILE,
+    BAND_PRESSURE,
+    MEAN_REVERSION_Z,
+    MEAN_REVERSION_HALF_LIFE,
     REALIZED_VOLATILITY,
     PRICE_ZONE,
     MAX_DRAWDOWN,

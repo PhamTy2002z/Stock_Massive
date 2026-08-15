@@ -570,7 +570,28 @@ class TestHowThinTheSymbolIs:
 
         # AAA trades 16 billion a session; seventeen of the thirty-two peers
         # (P00 through P16) trade that or less.
-        assert health.adtv_percentile == pytest.approx(17 / 32)
+        assert health.adtv is not None
+        assert health.adtv.percentile == pytest.approx(17 / 32)
+        assert health.adtv.average_value_vnd == pytest.approx(16e9)
+
+    def test_the_standing_carries_the_sample_it_was_ranked_in(self):
+        """A percentile with no ``n`` and no cutoff date is one nobody can read.
+
+        Both travel because ADR-0010 admits a percentile on no other terms: the
+        number alone cannot say whether it was taken over the Universe or over
+        the eleven names that happened to have traded.
+        """
+        with open_session() as session:
+            days = _store_flat_cross_section(session, peers=32, sessions=20)
+            peers = [f"P{index:02d}" for index in range(32)]
+
+            _, health = prepare_bars(
+                session, "AAA", 20, end=days[-1], peers=[*peers, "AAA"]
+            )
+
+        assert health.adtv is not None
+        assert health.adtv.n == 32
+        assert health.adtv.as_of == days[-1]
 
     def test_too_few_peers_to_rank_against_reports_nothing(self):
         """A percentile over eleven names is a rank dressed up as a distribution."""
@@ -582,7 +603,7 @@ class TestHowThinTheSymbolIs:
                 session, "AAA", 20, end=days[-1], peers=[*peers, "AAA"]
             )
 
-        assert health.adtv_percentile is None
+        assert health.adtv is None
         assert ADTV_MIN_PEERS == 30
 
 
