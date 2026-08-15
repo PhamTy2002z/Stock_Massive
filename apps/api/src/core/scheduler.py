@@ -5,8 +5,10 @@ from datetime import datetime, date
 
 from apscheduler import AsyncScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from zoneinfo import ZoneInfo
 
+from src.alpha.jobs import sweep_stuck_analysis_runs
 from src.core.config import get_settings
 from src.core.trading_calendar import is_trading_day
 from src.stocks.collector_schedule import (
@@ -145,6 +147,13 @@ corporate_actions_job_wrapper = make_job_wrapper(
     load_corporate_actions,
     "Corporate action load completed",
     "Corporate action load failed",
+)
+analysis_run_sweep_job_wrapper = make_job_wrapper(
+    "analysis_run_sweep_job_wrapper",
+    "Analysis Run Sweep",
+    sweep_stuck_analysis_runs,
+    "Analysis Run sweep completed",
+    "Analysis Run sweep failed",
 )
 sector_historical_job_wrapper = make_job_wrapper(
     "sector_historical_job_wrapper",
@@ -306,6 +315,22 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
             f"Scheduled the market catch-up at "
             f"{settings.market_catchup_hour}:{settings.market_catchup_minute:02d} ICT"
         )
+
+    # An interval rather than a time of day: a run dies whenever the process
+    # does, which is not on a schedule. Why the interval is the stuck window
+    # itself is recorded on `analysis_run_stuck_minutes` in core/config.py.
+    await scheduler.add_schedule(
+        analysis_run_sweep_job_wrapper,
+        IntervalTrigger(
+            minutes=settings.analysis_run_stuck_minutes,
+            start_time=datetime.now(VN_TZ),
+        ),
+        id="analysis-run-sweep",
+    )
+    logger.info(
+        f"Scheduled the Analysis Run sweep every "
+        f"{settings.analysis_run_stuck_minutes} minutes"
+    )
 
     logger.info("=== Scheduler setup complete ===")
 

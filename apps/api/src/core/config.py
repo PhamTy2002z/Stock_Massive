@@ -153,6 +153,20 @@ class Settings(BaseSettings):
     market_catchup_hour: int = 23
     market_catchup_minute: int = 0
 
+    # Analysis Run — cửa sổ trước khi một lượt dựng Analysis còn kẹt ở
+    # `producing` bị coi là đã chết và được thu dọn (src/alpha/analysis_run.py).
+    # Một tiến trình chết hoặc một lần deploy giữa chừng để lại lượt chạy ở
+    # `producing` mà không còn ai đẩy tiếp; không có mốc này thì mã đó giữ chỗ
+    # cho tới khi có người để ý — với nhịp chạy hằng đêm nghĩa là cả một ngày.
+    #
+    # 30 phút: dài hơn hẳn một lượt dựng thật (một lần gọi model, không có vòng
+    # tool), nên không bao giờ thu dọn nhầm một lượt đang chạy.
+    #
+    # Nhịp quét đặt đúng bằng cửa sổ chứ không thêm một tham số nữa: một lượt
+    # chết được thu dọn trong khoảng một tới hai lần cửa sổ, đủ nhanh và bớt
+    # được một núm vặn mà không ai chỉnh riêng.
+    analysis_run_stuck_minutes: int = 30
+
     # Rate Limiting
     rate_limit_enabled: bool = True
     rate_limit_standard_max: int = 100  # requests per window

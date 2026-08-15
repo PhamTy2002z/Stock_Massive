@@ -61,7 +61,9 @@ class WatchlistEntry(Base):
     the revival the product wants to happen by itself.
 
     ``last_seen_analysis_date`` is per user per symbol because the unread badge
-    is: it advances only when that specific Analysis is opened.
+    is: it advances only when that specific Analysis is opened. Nothing writes
+    or serves it yet — the milestone that opens an Analysis is the one that can
+    advance it, and a field on the wire that never moves is worse than no field.
     """
 
     __tablename__ = "watchlist_entries"
@@ -92,9 +94,8 @@ class Analysis(Base):
     """One published Analysis for one ``(symbol, trading_day)``, immutable.
 
     **A row here existing means it is complete.** In-flight state lives only in
-    ``analysis_run``, which is what makes *serve yesterday instantly while today
-    runs* need no mechanism at all: ``ORDER BY trading_day DESC LIMIT 1``. There
-    is never a half-written Analysis to filter out.
+    ``analysis_run``; what that buys is argued in ``src/alpha/analysis_run.py``,
+    and it is the reason this table has no status column to filter on.
 
     The payload is a blob with ``symbol``, ``trading_day`` and ``verdict``
     lifted out of it. Not four normalised per-axis tables: the template is fixed
@@ -137,11 +138,9 @@ class AnalysisRun(Base):
     two users retrying the same symbol one run rather than two, and what lets
     the three-attempt ceiling be a column instead of a counter somewhere else.
 
-    The error is two columns rather than one. ``error_code`` is the stable
-    vocabulary a caller may branch on; ``error_message`` is the sanitized
-    sentence a person reads. Folded into one string, the interface would have to
-    parse the reason out of prose, and the prose is exactly the part that is
-    allowed to change.
+    The error is two columns rather than one, for the reason every Alpha Desk
+    refusal is two fields (``src/alpha/refusals.py``): the code is branched on,
+    the sentence is read, and the sentence is the part allowed to change.
     """
 
     __tablename__ = "analysis_run"

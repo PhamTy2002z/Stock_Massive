@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
+from apscheduler.triggers.cron import CronTrigger
+
 from src.core.config import Settings
 from src.stocks.jobs import collect_intraday_data_job, cleanup_old_data_job
 
@@ -177,9 +179,20 @@ class TestSchedulerSetup:
         ):
             await setup_scheduler(mock_scheduler)
 
+        triggers = [call.args[1] for call in mock_scheduler.add_schedule.await_args_list]
+
         # A direct CronTrigger call would silently restore the UTC-anchor bug
-        # for that schedule, so every registered schedule must use the helper.
-        assert mock_vn_cron.call_count == mock_scheduler.add_schedule.await_count
+        # for that schedule, so every time-of-day schedule must use the helper.
+        assert mock_vn_cron.call_count == sum(
+            isinstance(trigger, CronTrigger) for trigger in triggers
+        )
+
+        # The bug the helper exists for is APScheduler defaulting `start_time`
+        # from the host's clock, and it is not specific to cron: an interval
+        # trigger anchored the same way misfires the same way on a container
+        # running in UTC. So the rule every schedule answers to is that its
+        # anchor was chosen rather than inherited.
+        assert all(trigger.start_time is not None for trigger in triggers)
 
         registered = {
             call.kwargs.get("id")
@@ -195,6 +208,7 @@ class TestSchedulerSetup:
             "universe-backfill",
             "market-catchup",
             "corporate-actions-weekly",
+            "analysis-run-sweep",
         }
 
     @pytest.mark.asyncio
