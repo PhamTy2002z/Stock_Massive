@@ -57,8 +57,8 @@ SSE_DATA_PREFIX = "data:"
 SSE_DONE = "[DONE]"
 
 
-class OpenAICompatibleClient:
-    """An ``LLMClient`` over any route that speaks chat completions."""
+class OpenAICompatibleTransport:
+    """The network transport used only behind the reserved public client."""
 
     def __init__(
         self,
@@ -75,7 +75,7 @@ class OpenAICompatibleClient:
         if self._owns_client:
             await self._http.aclose()
 
-    async def complete(self, request: CompletionRequest) -> Completion:
+    async def dispatch(self, request: CompletionRequest) -> Completion:
         """Make one call, and return a typed result or raise a typed failure.
 
         Retries only ``gateway_timeout``, twice in total. ``auth_unavailable``
@@ -123,15 +123,24 @@ class OpenAICompatibleClient:
 
         if assembler.refusal:
             llm_metrics().record_refusal(assembler.refusal)
-            raise ModelRefusal(assembler.refusal)
+            raise ModelRefusal(
+                assembler.refusal,
+                usage=_usage(assembler.usage_payload),
+            )
 
+        usage = _usage(assembler.usage_payload)
+        try:
+            tool_calls = assembler.tool_calls()
+        except LLMError as exc:
+            exc.usage = usage
+            raise
         return Completion(
             model=assembler.model or request.model,
             text=assembler.text,
             # Parsed here rather than as they arrive: a call is only complete
             # when the stream ends, and half a JSON object never parses.
-            tool_calls=assembler.tool_calls(),
-            usage=_usage(assembler.usage_payload),
+            tool_calls=tool_calls,
+            usage=usage,
             finish_reason=assembler.finish_reason,
         )
 
@@ -164,13 +173,19 @@ class OpenAICompatibleClient:
         refusal = message.get("refusal")
         if refusal:
             llm_metrics().record_refusal(str(refusal))
-            raise ModelRefusal(str(refusal))
+            raise ModelRefusal(str(refusal), usage=_usage(payload.get("usage")))
 
+        usage = _usage(payload.get("usage"))
+        try:
+            tool_calls = parse_tool_calls(message.get("tool_calls"))
+        except LLMError as exc:
+            exc.usage = usage
+            raise
         return Completion(
             model=str(payload.get("model") or request.model),
             text=message.get("content"),
-            tool_calls=parse_tool_calls(message.get("tool_calls")),
-            usage=_usage(payload.get("usage")),
+            tool_calls=tool_calls,
+            usage=usage,
             finish_reason=str(choices[0].get("finish_reason") or "stop"),
         )
 
@@ -287,20 +302,20 @@ def _usage(payload: dict[str, Any] | None) -> Usage:
     )
 
 
-def build_client(
+def build_transport(
     config: LLMConfig | None = None,
     http_client: httpx.AsyncClient | None = None,
-) -> OpenAICompatibleClient:
-    """Build the client for the configured route."""
+) -> OpenAICompatibleTransport:
+    """Build the unguarded network implementation for composition."""
     if config is None:
         from .config import llm_config_from_settings
 
         config = llm_config_from_settings()
-    return OpenAICompatibleClient(config, http_client=http_client)
+    return OpenAICompatibleTransport(config, http_client=http_client)
 
 
 __all__ = [
     "CHAT_COMPLETIONS_PATH",
-    "OpenAICompatibleClient",
-    "build_client",
+    "OpenAICompatibleTransport",
+    "build_transport",
 ]

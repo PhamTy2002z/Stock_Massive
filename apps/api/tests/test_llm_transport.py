@@ -33,7 +33,7 @@ from src.core.llm.protocol import (
     Role,
     ToolSchema,
 )
-from src.core.llm.transport import OpenAICompatibleClient
+from src.core.llm.transport import OpenAICompatibleTransport
 
 PRICE_TOOL = ToolSchema(
     name="get_price",
@@ -77,10 +77,22 @@ def sse(*chunks: dict) -> bytes:
     return "".join(lines).encode()
 
 
-def client(handler) -> OpenAICompatibleClient:
+class TransportHarness:
+    """Exercise the internal transport without making it an application client."""
+
+    def __init__(self, transport: OpenAICompatibleTransport) -> None:
+        self.transport = transport
+
+    async def complete(self, completion_request):
+        return await self.transport.dispatch(completion_request)
+
+
+def client(handler) -> TransportHarness:
     transport = httpx.MockTransport(handler)
-    return OpenAICompatibleClient(
-        config(), http_client=httpx.AsyncClient(transport=transport)
+    return TransportHarness(
+        OpenAICompatibleTransport(
+            config(), http_client=httpx.AsyncClient(transport=transport)
+        )
     )
 
 
@@ -457,7 +469,7 @@ class TestNoAutoDisable:
 
         assert llm_metrics().malformed_arguments == 3
         # Still enabled, still the same route: nothing here may disable one.
-        assert subject._config.enabled is True
+        assert subject.transport._config.enabled is True
         llm_metrics().reset()
 
     def test_nothing_in_the_package_writes_the_feature_flag(self):

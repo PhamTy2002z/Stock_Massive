@@ -18,7 +18,18 @@ from .budget import (
     enforce_budget_validation,
     validate_budget,
 )
+from .admission import (
+    BudgetLane,
+    BudgetRefusal,
+    CallOwner,
+    OwnerType,
+    Reservation,
+    SpendAdmission,
+    SpendRequest,
+)
+from .client import MissingSpendReservation, ReservedLLMClient, build_client
 from .config import (
+    BudgetLanes,
     LLMConfig,
     LLMRoute,
     PricingTable,
@@ -49,14 +60,17 @@ from .protocol import (
     ToolSchema,
     Usage,
 )
-from .transport import OpenAICompatibleClient, build_client
 
 __all__ = [
     "AuthUnavailable",
+    "BudgetLane",
+    "BudgetRefusal",
+    "BudgetLanes",
     "BudgetValidation",
     "BudgetValidationError",
     "Completion",
     "CompletionRequest",
+    "CallOwner",
     "GatewayTimeout",
     "JsonSchemaFormat",
     "LLMClient",
@@ -65,16 +79,21 @@ __all__ = [
     "LLMMetrics",
     "LLMRoute",
     "MalformedArguments",
+    "MissingSpendReservation",
     "Message",
     "ModelRefusal",
-    "OpenAICompatibleClient",
+    "OwnerType",
     "PricingTable",
     "Role",
+    "Reservation",
+    "SpendAdmission",
+    "ReservedLLMClient",
     "TokenPrices",
     "ToolAttempts",
     "ToolCall",
     "ToolError",
     "ToolSchema",
+    "SpendRequest",
     "Usage",
     "Workload",
     "build_client",
