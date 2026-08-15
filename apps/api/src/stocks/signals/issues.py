@@ -139,6 +139,13 @@ class SignalIssue(str, Enum):
     # live Provider Source read is ever substituted to fill the slot.
     UNAVAILABLE = "unavailable"
 
+    # A window prepared for quantities rather than for prices, so no session in
+    # it was judged against a band. Not a data gap: nobody asked. A price-band
+    # field handed such a window is asking the wrong window rather than meeting
+    # a market it could not judge, and the two would be indistinguishable under
+    # any of the codes above.
+    BAND_NOT_MEASURED = "band_not_measured"
+
     # --- Traded figures, from ADR-0010 -----------------------------------
     # A session inside the window carries no traded figure at all — no money on
     # a money-denominated average, no share count on a share-denominated one.

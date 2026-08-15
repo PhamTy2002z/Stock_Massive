@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from src.alpha.analysis_router import router as analysis_router
 from src.alpha.router import router as watchlist_router
 from src.alpha.refusals import AlphaRefusal
 from src.auth.router import router as auth_router
@@ -95,6 +96,10 @@ app.include_router(signals_router, prefix="/api/v1")
 # The Watchlist is one user's choice rather than market data, so it sits beside
 # /stocks rather than under it.
 app.include_router(watchlist_router, prefix="/api/v1")
+# An Analysis is keyed by (symbol, trading_day) and shared system-wide, so it
+# sits beside the Watchlist rather than under it: it never belonged to one
+# user's list, which is why removing a symbol deletes nothing.
+app.include_router(analysis_router, prefix="/api/v1")
 
 
 @app.exception_handler(AlphaRefusal)

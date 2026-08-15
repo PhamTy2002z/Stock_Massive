@@ -58,11 +58,11 @@ import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from enum import Enum
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.stocks.models import CorporateAction
@@ -78,6 +78,16 @@ from .issues import SignalIssue
 from .price_band import detect_limit_lock
 
 logger = logging.getLogger(__name__)
+
+
+def corporate_action_generation(session: Session) -> datetime | None:
+    """A cache token that advances whenever the stored action series changes."""
+    newest = session.execute(select(func.max(CorporateAction.observed_at))).scalar_one()
+    if newest is None:
+        return None
+    if newest.tzinfo is None:
+        return newest.replace(tzinfo=timezone.utc)
+    return newest
 
 
 class ActionKind(str, Enum):
@@ -593,8 +603,22 @@ class CorporateActionStore:
         are reached through ``undated`` instead, which is what a caller asking
         "is anything about this symbol unaccounted for" needs.
         """
+        return self.for_symbols((symbol,), start=start, end=end).get(
+            symbol.upper(), ()
+        )
+
+    def for_symbols(
+        self,
+        symbols: Sequence[str],
+        start: date | None = None,
+        end: date | None = None,
+    ) -> dict[str, tuple[CorporateAction, ...]]:
+        """Several symbols' dated actions in one read, grouped oldest first."""
+        wanted = sorted({symbol.upper() for symbol in symbols})
+        if not wanted:
+            return {}
         conditions = [
-            CorporateAction.symbol == symbol.upper(),
+            CorporateAction.symbol.in_(wanted),
             CorporateAction.ex_date.is_not(None),
         ]
         if start is not None:
@@ -604,9 +628,16 @@ class CorporateActionStore:
         rows = self.session.execute(
             select(CorporateAction)
             .where(*conditions)
-            .order_by(CorporateAction.ex_date.asc(), CorporateAction.id.asc())
+            .order_by(
+                CorporateAction.symbol.asc(),
+                CorporateAction.ex_date.asc(),
+                CorporateAction.id.asc(),
+            )
         ).scalars()
-        return tuple(rows)
+        grouped: dict[str, list[CorporateAction]] = {symbol: [] for symbol in wanted}
+        for row in rows:
+            grouped[row.symbol].append(row)
+        return {symbol: tuple(actions) for symbol, actions in grouped.items()}
 
     def undated(self, symbol: str) -> tuple[CorporateAction, ...]:
         """The actions held for this symbol that carry no ex-date at all."""

@@ -63,6 +63,13 @@ services:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://api.yourdomain.com/api/v1}
     container_name: stockmassive-web
     restart: unless-stopped
+    environment:
+      # The authenticated route handlers call the API from inside the network.
+      # Without this they fall back to the public build-time URL and hairpin out
+      # through the internet to reach the container next door — slower, and it
+      # makes every Alpha Desk request depend on the public hostname resolving
+      # from inside the host.
+      INTERNAL_API_URL: http://api:8000/api/v1
     ports:
       - "3000:3000"
     depends_on:
