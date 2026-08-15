@@ -1,4 +1,5 @@
 """Application configuration using pydantic-settings."""
+from datetime import date
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -36,7 +37,8 @@ class Settings(BaseSettings):
     # VNSTOCK_API_KEY cố ý không khai ở đây: vnstock đọc thẳng từ os.environ để
     # quyết định tier (20 request/phút khi không thấy, 60 khi thấy). Khai lại
     # thành setting sẽ đọc được cả từ .env — nơi vnstock không nhìn tới — nên hai
-    # bên có thể lệch nhau. Xem API_KEY_ENV_VAR ở providers/vnstock_provider.py.
+    # bên có thể lệch nhau. Xem API_KEY_ENV_VAR ở src/core/quota.py, nơi cùng
+    # biến môi trường đó quyết định giãn cách của Redis arbiter.
 
     # FiinQuant — Main Source cho market và valuation, xem docs/adr/0002
     fiinquant_username: str = ""
@@ -76,14 +78,16 @@ class Settings(BaseSettings):
     #
     # Hạn mức vnstock là chỗ nghẽn thật: ~1.600 mã × 2 request, trên 20
     # request/phút khi không có API key. Một lần chạy đầy không xong trong một
-    # lượt, nên nó tự giãn nhịp và lần sau bỏ qua mã đã có số ở kỳ đang xét.
-    # Lần thử lại hằng ngày lúc 03:00 chỉ đuổi theo số mã còn thiếu ở kỳ mới,
-    # nên nó không đọc lại danh sách niêm yết.
+    # lượt, nên lần sau bỏ qua mã đã có số ở kỳ đang xét. Lần thử lại hằng ngày
+    # lúc 03:00 chỉ đuổi theo số mã còn thiếu ở kỳ mới, nên nó không đọc lại
+    # danh sách niêm yết.
+    #
+    # Không còn tham số giãn nhịp riêng: nhịp gọi thuộc về tài khoản, và
+    # src/core/quota.py giữ nó cho mọi đường gọi vnstock (docs/adr/0014).
     profit_census_enabled: bool = True
     profit_census_weekday: int = 6  # Chủ nhật
     profit_census_hour: int = 2
     profit_census_minute: int = 0
-    profit_census_request_delay: float = 1.2
     profit_census_retry_hour: int = 3
     profit_census_retry_minute: int = 0
 
@@ -166,6 +170,52 @@ class Settings(BaseSettings):
     # chết được thu dọn trong khoảng một tới hai lần cửa sổ, đủ nhanh và bớt
     # được một núm vặn mà không ai chỉnh riêng.
     analysis_run_stuck_minutes: int = 30
+
+    # Alpha Desk — tuyến LLM, hai model theo workload, và giá của chúng
+    # (src/core/llm/, docs/adr/0014). Tắt mặc định: đây là kênh trả tiền, nên
+    # một lần triển khai phải chủ động bật chứ không phải chủ động tắt.
+    #
+    # Mã model nằm ở đây và không ở đâu khác trong mã nguồn. Đó chính là lý do
+    # tồn tại của boundary — đổi tuyến phải chỉ là đổi biến môi trường, mà một
+    # hằng số biên dịch trong module thì sống sót qua lần đổi đó. Giá trị mặc
+    # định là cặp production đã chốt; lane dev trỏ LLM_BASE_URL vào CLIProxyAPI
+    # cục bộ và ghi đè cả hai model.
+    alpha_desk_enabled: bool = False
+    llm_base_url: str = ""
+    llm_api_key: str = ""
+    llm_model_batch: str = "gpt-5.6-luna"
+    llm_model_session: str = "gpt-5.6-terra"
+    llm_request_timeout_seconds: float = 120.0
+
+    # Khối giá mà Budget Validation đọc lúc khởi động. Đơn vị USD trên một
+    # triệu token, khai riêng cho từng workload: batch và interactive là hai
+    # model khác nhau với giá khác nhau, một khối dùng chung sẽ định sai giá
+    # cho lane mà nó không được viết cho.
+    #
+    # Số 0 không phải "miễn phí": đó là một key chưa ai điền, và Budget
+    # Validation từ chối nó thay vì chấp nhận một cấu hình mà trên giấy tờ
+    # không tốn gì. Token suy luận không có giá riêng — nó tính theo giá
+    # output, nên năm bộ đếm gặp bốn mức giá.
+    llm_pricing_version: str = ""
+    llm_pricing_effective_date: date | None = None
+    llm_price_batch_input_usd_per_mtok: float = 0.0
+    llm_price_batch_cached_input_usd_per_mtok: float = 0.0
+    llm_price_batch_cache_write_usd_per_mtok: float = 0.0
+    llm_price_batch_output_usd_per_mtok: float = 0.0
+    llm_price_session_input_usd_per_mtok: float = 0.0
+    llm_price_session_cached_input_usd_per_mtok: float = 0.0
+    llm_price_session_cache_write_usd_per_mtok: float = 0.0
+    llm_price_session_output_usd_per_mtok: float = 0.0
+
+    # Hạn mức $50/tháng và bốn lane chia nhau nó (docs/adr/0014). Là cấu hình
+    # chứ không phải hằng số vì hạn mức là một quyết định chi tiêu, không phải
+    # lời hứa của sản phẩm; Budget Validation kiểm tra bốn lane vẫn cộng đúng
+    # bằng hạn mức đó.
+    llm_budget_monthly_usd: float = 50.0
+    llm_budget_analysis_usd: float = 10.0
+    llm_budget_turn_usd: float = 30.0
+    llm_budget_emergency_usd: float = 5.0
+    llm_budget_eval_usd: float = 5.0
 
     # Rate Limiting
     rate_limit_enabled: bool = True

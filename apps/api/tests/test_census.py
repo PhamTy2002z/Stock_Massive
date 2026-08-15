@@ -148,7 +148,6 @@ def census(session: Session, provider, roster=None, **overrides) -> Census:
         fundamental=provider,
         roster=roster,
         now=lambda: NOW,
-        sleep=lambda _: None,
         **overrides,
     )
 
