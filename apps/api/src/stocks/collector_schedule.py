@@ -23,7 +23,7 @@ from .corporate_action_collector import (
     CorporateActionSummary,
     run_corporate_action_load,
 )
-from .market_index import MarketIndexSummary, run_market_index_warmup
+from .market_index import MarketIndexSummary, run_market_index_load
 from .warmup import WarmupSummary, run_warmup
 
 if TYPE_CHECKING:  # imported lazily below: the census reaches a provider library
@@ -399,8 +399,8 @@ class MarketIndexOutcome:
         }
 
 
-def run_market_index_load(
-    load: Callable[[], MarketIndexSummary] = run_market_index_warmup,
+def run_market_index_collection(
+    load: Callable[[], MarketIndexSummary] = run_market_index_load,
 ) -> MarketIndexOutcome:
     """Load the benchmark's session series, at most one load at a time.
 
@@ -422,7 +422,7 @@ def run_market_index_load(
 
 
 async def load_market_index(
-    load: Callable[[], MarketIndexSummary] = run_market_index_warmup,
+    load: Callable[[], MarketIndexSummary] = run_market_index_load,
     today: date | None = None,
     force: bool = False,
 ) -> MarketIndexOutcome:
@@ -442,7 +442,7 @@ async def load_market_index(
         logger.info("Skipping the market index load: %s is not a trading day", day)
         return MarketIndexOutcome(status="skipped")
 
-    return await asyncio.to_thread(run_market_index_load, load)
+    return await asyncio.to_thread(run_market_index_collection, load)
 
 
 @dataclass(frozen=True)

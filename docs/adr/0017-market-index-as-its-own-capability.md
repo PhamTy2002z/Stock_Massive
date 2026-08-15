@@ -71,6 +71,14 @@ traded quantity, traded money, and the Price Basis. The equity-only figures
 present-and-null on it. "An index has no ceiling price" is then a fact of the
 type, instead of a `None` indistinguishable from one nobody collected.
 
+Splitting the equity contract is more than the ticket asked for and is what
+criterion three costs: an index payload reusing `MarketSnapshot` would store a
+band, a foreign split and a market capitalisation as nulls on every row, and no
+reader could tell "this instrument has none" from "nobody collected it". The
+base answers `company_figures` with `(None, None)` and `MarketSnapshot`
+overrides it, so the gateway reads the distinction off the contract rather than
+testing the type — one mechanism, which cannot disagree with itself.
+
 **The same Price Basis rule.** Not relaxed. An index level says what it means
 like every other stored session does, and `prepare_bars()` refuses a mixed-basis
 index window exactly as it refuses a mixed-basis equity one.
@@ -85,7 +93,11 @@ happen to be null.
   constructed for an index window; every index bar carries
   `band_undecided_reason = band_not_applicable` — a new Signal Issue, distinct
   from `exchange_unknown` (a board exists and nothing named it) and from
-  `band_not_measured` (a band exists and this window did not ask). The window
+  `band_not_measured` (a band exists and this window did not ask) — and
+  `limit_lock = not_applicable`, a new `LimitLock` member kept apart from
+  `indeterminate` for the same reason: that one is the store admitting it could
+  not judge a session which *does* have a band, and reusing it here would leave
+  an equity's word on the one bar that most needs not to carry one. The window
   carries no `band_regime`, and `band_undecided_days` is zero: nothing was left
   undecided, because there was nothing to decide.
 - **It follows that `unexplained_price_gap` cannot fire on an index.** That
@@ -110,21 +122,41 @@ the symbol was, so the two series line up by construction rather than by a join
 done afterwards. An index row on a day no equity traded is outside the window
 rather than an extra bar in it.
 
-## The warm-up depth
+## The load, and its depth
 
-`src/stocks/market_index.py` is a **Warm-up** in ADR-0005's sense — bounded, Main
-Source only, repeatable, so the run that first fills the series is the run that
-tops it up daily and repairs a week that was missed. Only the bound differs from
-the equity Warm-up's month: this one is set by the deepest field that reads the
-series.
+`src/stocks/market_index.py` is neither a Warm-up nor a Backfill and is named for
+itself. It borrows a property from each: repeatable and Main Source only like a
+**Warm-up** (ADR-0005), so the run that first fills the series is the run that
+tops it up daily and repairs a week that was missed; and deep like a
+**Backfill**, a year of sessions rather than the recent signal window. It matches
+neither because it loads one instrument that is in no Universe, under a
+Capability of its own. Calling it a Warm-up would have contradicted `CONTEXT.md`,
+which defines that term as recent `market` history making a *Universe member*
+evaluable.
 
 `RELATIVE_STRENGTH_MIN_SESSIONS` is 250 and `prepare_bars()` refuses a window
 short of what the field declares, so a benchmark stored 249 sessions deep would
 leave that field refusing under `insufficient_history` — the same unavailability
-wearing a reason that points at the wrong fix. The depth is written as the
-field's own floor plus a margin of 25 sessions, so the two cannot be edited
-apart, and the margin is how far behind the daily run may fall while still
-leaving the field its full window on the next successful run.
+wearing a reason that points at the wrong fix. The default depth is written as
+the field's own floor plus a margin of 25 sessions.
+
+**Writing it as that expression is not what enforces it.** Production reads the
+depth from configuration, so a constant nothing checks would be a comment:
+`build_market_index_loader` compares the *configured* window against the field's
+floor and refuses to wire a loader below it, naming both numbers. Shortening the
+load past what its only reader needs is then a refusal an operator sees at wiring
+time, rather than a field that starts refusing weeks later for a reason that
+points at collection.
+
+The margin is how far behind the daily run may fall — a long holiday, a broken
+week — while still leaving the field its full 250 on the next successful run.
+
+The arithmetic that turns a session count into the calendar span a provider is
+asked for, and the trim that keeps "bounded" a property of what is *written*,
+live in `src/stocks/session_window.py` and are shared with the equity Warm-up.
+Two loaders answering the same mechanical question two ways would be one of them
+wrong, and the drift is not hypothetical: the holiday allowance was briefly
+declared twice with the same value and two different reasons.
 
 ## Considered options
 

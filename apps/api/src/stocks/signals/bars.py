@@ -34,8 +34,10 @@ rather than discovering it:
 
 - **No band is measured, on any session.** The band is a percentage of a board's
   reference price and the index sits on no board. Every index bar carries
-  ``band_undecided_reason = band_not_applicable``, and the whole window carries
-  no ``band_regime``. It follows that ``unexplained_price_gap`` cannot fire on
+  ``band_undecided_reason = band_not_applicable`` and ``limit_lock =
+  not_applicable`` — neither is the ``indeterminate`` a session nobody could
+  judge would carry — and the whole window carries no ``band_regime``. It
+  follows that ``unexplained_price_gap`` cannot fire on
   an index either — that refusal reads a break of the band as evidence of a
   wrong anchor, and with no band there is no break to read. A 9% index session
   is the market, and the store has nothing to say against it.
@@ -188,13 +190,36 @@ class BarSeries(str, Enum):
             return Capability.MARKET_INDEX
         return Capability.MARKET
 
+    # Three predicates rather than one ``is_equity``, because three different
+    # questions are being asked and a single boolean standing for all of them
+    # invites a wrong fourth use. Each site below says which capability of a
+    # listed instrument it is reaching for, so a reader of that line does not
+    # have to know why an index is different in general.
     @property
-    def is_equity(self) -> bool:
-        """Whether this series' instruments have a board behind them.
+    def has_price_band(self) -> bool:
+        """Whether a session of this series was permitted to move only so far.
 
-        Read by the three places that need a company rather than a level — the
-        band, the Corporate Action series, and the liquidity cross-section — so
-        each of them says which of the two it is asking about.
+        A band is a percentage of a board's reference price, and a market index
+        sits on no board.
+        """
+        return self is BarSeries.EQUITY
+
+    @property
+    def has_corporate_actions(self) -> bool:
+        """Whether an entitlement can move this series' prices.
+
+        An index absorbs its members' entitlements and its own reconstitutions
+        into the divisor the exchange publishes it with, so the level series is
+        already continuous and there is nothing for read-time adjustment to do.
+        """
+        return self is BarSeries.EQUITY
+
+    @property
+    def has_peer_cross_section(self) -> bool:
+        """Whether this series' instruments have peers to be ranked among.
+
+        A composite trades among nothing; ranking its turnover would rank it
+        against its own members.
         """
         return self is BarSeries.EQUITY
 
@@ -495,7 +520,7 @@ def prepare_bars_context(
             start=window[0],
             end=window[-1],
         )
-        if series.is_equity
+        if series.has_corporate_actions
         else {}
     )
     return BarPreparationContext(
@@ -587,7 +612,7 @@ def prepare_bars(
             CorporateActionStore(session).for_symbol(
                 symbol, start=window[0], end=window[-1]
             )
-            if series.is_equity
+            if series.has_corporate_actions
             else ()
         )
     else:
@@ -645,7 +670,7 @@ def prepare_bars(
     # Corporate Action series. An index has neither, so neither is asked — and
     # not asking is why `unexplained_price_gap` and `volume_basis_break` cannot
     # reach an index window.
-    if projection is BarProjection.PRICE and series.is_equity:
+    if projection is BarProjection.PRICE and series.has_price_band:
         resolver = BandRegimeResolver(session, symbol, migrations=migrations)
         regimes = {day: resolver.on(day) for day in usable}
         bands, gap_refusal, undecided = _read_bands(
@@ -699,7 +724,7 @@ def prepare_bars(
             # trades among, so a percentile of its turnover would rank a
             # composite against its own members.
             _adtv_standing(session, symbol, window, usable, peers, context)
-            if projection is BarProjection.PRICE and series.is_equity
+            if projection is BarProjection.PRICE and series.has_peer_cross_section
             else None
         ),
         band_undecided_days=len(undecided),
@@ -923,7 +948,10 @@ def _frame(
         for ex_date, value in factors.items():
             if ex_date > day:
                 factor *= value
-        market_cap_vnd, foreign_net_value_vnd = _company_figures(row)
+        # Read off the contract rather than tested for here: only the stored
+        # session knows whether there is a company behind it, and a second test
+        # in this loop could disagree with the first.
+        market_cap_vnd, foreign_net_value_vnd = row.company_figures
         bars.append(
             Bar(
                 session_date=day,
@@ -936,9 +964,7 @@ def _frame(
                 market_cap_vnd=market_cap_vnd,
                 foreign_net_value_vnd=foreign_net_value_vnd,
                 adjustment_factor=factor,
-                limit_lock=(
-                    bands[day].lock if day in bands else LimitLock.INDETERMINATE
-                ),
+                limit_lock=_lock_of(bands.get(day), series),
                 band=bands[day].limits if day in bands else None,
                 band_undecided_reason=_undecided_reason(
                     bands.get(day), projection, series
@@ -949,19 +975,17 @@ def _frame(
     return BarFrame(symbol=symbol, bars=tuple(bars))
 
 
-def _company_figures(row: SessionSnapshot) -> tuple[float | None, float | None]:
-    """What this session valued the company at, and its net foreign flow.
+def _lock_of(reading: BandReading | None, series: BarSeries) -> LimitLock:
+    """Whether this session traded at a limit, or why that is not a question.
 
-    Both are absent from an index session by construction rather than by
-    collection gap — a composite has no capitalisation of its own and no foreign
-    split — and ``MarketIndexSnapshot`` does not carry the fields at all, which
-    is what makes that absence readable here instead of guessable. A ``Bar`` over
-    the index therefore reports ``None`` for both, and any field reaching for
-    them refuses on its own terms.
+    ``NOT_APPLICABLE`` on a series with no band, and it is a different answer
+    from ``INDETERMINATE``: the latter is the store admitting it could not judge
+    a session that does have a band, and using it for an index would leave an
+    equity's word on the one bar that most needs not to carry one.
     """
-    if not isinstance(row, MarketSnapshot):
-        return None, None
-    return row.market_cap_vnd, row.foreign_net_value_vnd
+    if not series.has_price_band:
+        return LimitLock.NOT_APPLICABLE
+    return reading.lock if reading is not None else LimitLock.INDETERMINATE
 
 
 def _undecided_reason(
@@ -983,7 +1007,7 @@ def _undecided_reason(
     nobody asked. Anything left is a listed session the store could not judge,
     and it carries the reason it could not.
     """
-    if not series.is_equity:
+    if not series.has_price_band:
         return SignalIssue.BAND_NOT_APPLICABLE
     if projection is not BarProjection.PRICE:
         return SignalIssue.BAND_NOT_MEASURED

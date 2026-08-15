@@ -271,6 +271,18 @@ class SessionSnapshot(SymbolSnapshot):
     volume: int | None = Field(default=None, ge=0)
     total_value_vnd: float | None = Field(default=None, ge=0)
 
+    @property
+    def company_figures(self) -> tuple[float | None, float | None]:
+        """What this session valued the company at, and its net foreign flow.
+
+        Answered by the contract rather than by whoever is reading it, because
+        only the contract knows: a session that is not a company's has neither
+        figure, and ``MarketIndexSnapshot`` does not carry the fields at all. A
+        reader testing the type instead would be a second mechanism for a
+        distinction the type already makes, and the two could disagree.
+        """
+        return None, None
+
     @model_validator(mode="after")
     def validate_schema_version(self) -> "SessionSnapshot":
         """Refuse a session payload claiming a version older than the basis.
@@ -343,6 +355,11 @@ class MarketSnapshot(SessionSnapshot):
     foreign_sell_value_vnd: float | None = Field(default=None, ge=0)
     foreign_net_value_vnd: float | None = None
     market_cap_vnd: float | None = Field(default=None, ge=0)
+
+    @property
+    def company_figures(self) -> tuple[float | None, float | None]:
+        """The two figures a listed company's session carries and a level does not."""
+        return self.market_cap_vnd, self.foreign_net_value_vnd
 
     @model_validator(mode="after")
     def validate_foreign_flow(self) -> "MarketSnapshot":

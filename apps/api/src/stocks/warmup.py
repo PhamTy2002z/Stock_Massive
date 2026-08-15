@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from typing import Literal
 
 from src.core.config import Settings, get_settings
@@ -31,6 +31,7 @@ from .providers import (
     main_source,
 )
 from .providers.normalize import VN_TZ
+from .session_window import newest_sessions, reaches_back_to
 
 logger = logging.getLogger(__name__)
 
@@ -40,13 +41,6 @@ logger = logging.getLogger(__name__)
 # Warm-up run before it lands would otherwise come away one session short of
 # evaluable.
 WARMUP_WINDOW_TRADING_DAYS = 25
-
-# Sessions are asked for by calendar date, so the window has to be translated.
-# Five sessions a week is seven calendar days, and the slack absorbs the public
-# holidays — including a Tet that shuts the exchange for nine days — without
-# reaching so far back that the load stops being bounded.
-_CALENDAR_DAYS_PER_TRADING_DAY = 7 / 5
-_CALENDAR_SLACK_DAYS = 14
 
 WarmupStatus = Literal["completed", "failed"]
 
@@ -132,8 +126,7 @@ class Warmup:
         return summary
 
     def _reaches_back_to(self, today: date) -> date:
-        span = round(self._window * _CALENDAR_DAYS_PER_TRADING_DAY)
-        return today - timedelta(days=span + _CALENDAR_SLACK_DAYS)
+        return reaches_back_to(today, self._window)
 
     def _warm(self, symbol: str, from_date: date, to_date: date) -> WarmupResult:
         try:
@@ -164,15 +157,12 @@ class Warmup:
     def _bounded(self, sessions: Sequence[MarketSnapshot]) -> tuple[MarketSnapshot, ...]:
         """Keep the newest sessions in the window and drop the rest.
 
-        The calendar span reaches back further than the window to survive the
-        holidays, so a quiet stretch comes back with more sessions than were
-        asked for. Trimming keeps "bounded to the recent signal window" a
-        property of what is written, not only of what was requested.
+        "Bounded to the recent signal window" has to be a property of what is
+        written and not only of what was requested; the shared rule for that,
+        and for how far back the request reached in the first place, is in
+        ``session_window``.
         """
-        newest_first = sorted(
-            sessions, key=lambda item: item.metadata.effective_at, reverse=True
-        )
-        return tuple(newest_first[: self._window])
+        return newest_sessions(sessions, self._window)
 
 
 def build_warmup(
