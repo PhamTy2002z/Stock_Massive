@@ -24,6 +24,10 @@ from src.core.llm.config import (
 
 def _settings(**overrides) -> Settings:
     base = dict(
+        # Ignore any .env a developer happens to have: these tests are about
+        # the values handed in, and a local file overriding one of them would
+        # fail the suite for a reason that is not in the repository.
+        _env_file=None,
         alpha_desk_enabled=True,
         llm_base_url="http://localhost:8317/v1",
         llm_api_key="dev-token",

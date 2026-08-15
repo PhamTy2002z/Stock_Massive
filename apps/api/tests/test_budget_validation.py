@@ -40,6 +40,9 @@ AFFORDABLE = dict(
 
 def _config(**overrides):
     base = dict(
+        # Ignore any .env a developer happens to have: a local price or lane
+        # override would fail these tests for a reason not in the repository.
+        _env_file=None,
         alpha_desk_enabled=True,
         llm_base_url="http://localhost:8317/v1",
         llm_api_key="dev-token",

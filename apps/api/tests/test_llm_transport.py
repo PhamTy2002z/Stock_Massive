@@ -60,6 +60,7 @@ ANALYSIS_SCHEMA = JsonSchemaFormat(
 def config():
     return llm_config_from_settings(
         Settings(
+            _env_file=None,
             alpha_desk_enabled=True,
             llm_base_url="https://route.test/v1",
             llm_api_key="a-token",
