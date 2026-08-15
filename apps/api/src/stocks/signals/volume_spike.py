@@ -49,6 +49,7 @@ from ..providers.contracts import (
 from ..providers.normalize import VN_TZ
 from ..trading_day import latest_trading_day, trading_days_before
 from ..universe import Universe, build_universe
+from .issues import SignalIssue
 
 logger = logging.getLogger(__name__)
 
@@ -105,24 +106,6 @@ class Freshness(str, Enum):
     FRESH = "fresh"
     LAGGING = "lagging"
     STALE = "stale"
-
-
-class SignalIssue(str, Enum):
-    """Why an answer is less than whole. A closed set, by design.
-
-    These are domain provenance, not transport failures: they travel in the body
-    of a 200 response, never as an HTTP status and never as prose. A closed set
-    is what lets the web app hold one Vietnamese sentence per code instead of
-    rendering whatever the API happened to say.
-    """
-
-    MISSING_TARGET_SESSION = "missing_target_session"
-    INSUFFICIENT_HISTORY = "insufficient_history"
-    RECENTLY_INACTIVE = "recently_inactive"
-    COHORT_WARMING = "cohort_warming"
-    LAGGING_MARKET_DATA = "lagging_market_data"
-    STALE_MARKET_DATA = "stale_market_data"
-    RANKING_UNAVAILABLE = "ranking_unavailable"
 
 
 @dataclass(frozen=True)
