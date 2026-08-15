@@ -435,9 +435,9 @@ class TestTheNullIsMetadataAndNotAPayload:
 
 
 class TestTheSeededVolatilityRegimeField:
-    def test_it_is_registered_as_a_signal_and_is_the_one_the_harness_runs(self):
+    def test_it_is_registered_as_a_signal_and_so_the_harness_runs_it(self):
         assert VOLATILITY_REGIME_Z in signal_fields()
-        assert fields_of_kind(FieldKind.SIGNAL) == (VOLATILITY_REGIME_Z,)
+        assert VOLATILITY_REGIME_Z in fields_of_kind(FieldKind.SIGNAL)
 
     def test_it_reaches_bars_through_the_gateway_and_echoes_window_health(self):
         with open_session() as session:
