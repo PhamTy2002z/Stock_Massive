@@ -63,6 +63,20 @@ class SignalIssue(str, Enum):
     # there is no previous close to anchor to.
     ANCHOR_MISSING = "anchor_missing"
 
+    # --- Corporate Actions, from ADR-0006 --------------------------------
+    # An action falling in the window has no ex-date, or has one the raw prices
+    # do not corroborate. It may not drive arithmetic, so the window is degraded
+    # rather than adjusted: something happened to this symbol that the series
+    # cannot be made comparable across.
+    UNCONFIRMED_CORPORATE_ACTION = "unconfirmed_corporate_action"
+
+    # A confirmed action whose declared terms do not add up to a factor. The
+    # measured case is a rights issue: the subscription price is not in the
+    # provider's feed, and the par value it is usually set at is knowledge from
+    # outside the row. Distinct from the code above because nothing here is in
+    # doubt about *whether* the action happened.
+    CORPORATE_ACTION_TERMS_INCOMPLETE = "corporate_action_terms_incomplete"
+
     # The session moved further than its band permits, which means the anchor is
     # wrong rather than that the market broke — an ex-date the exchange adjusted
     # its reference for and the previous close did not follow. Deliberately not

@@ -3,6 +3,8 @@
 from .contracts import (
     BatchTooLarge,
     Capability,
+    CorporateActionEvent,
+    CorporateActionProvider,
     Exchange,
     MARKET_SCHEMA_VERSION,
     FundamentalDataProvider,
@@ -39,6 +41,8 @@ from .store import SnapshotRead, SnapshotStore
 __all__ = [
     "BatchTooLarge",
     "Capability",
+    "CorporateActionEvent",
+    "CorporateActionProvider",
     "Exchange",
     "MARKET_SCHEMA_VERSION",
     "FundamentalDataProvider",

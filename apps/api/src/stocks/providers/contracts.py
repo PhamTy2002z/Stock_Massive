@@ -468,3 +468,86 @@ class FundamentalDataProvider(Protocol):
         self,
         symbols: Sequence[str],
     ) -> Sequence[FundamentalSnapshot]: ...
+
+
+class CorporateActionEvent(InternalSnapshot):
+    """One row of a company's event feed, as the provider declares it.
+
+    Deliberately the provider's own vocabulary and nothing more. What kind of
+    action this is, whether it moves the share count, and what Adjustment Factor
+    it implies are all read off these fields by
+    ``src.stocks.signals.corporate_actions`` — an adapter that decided them here
+    would be one place the provider's wording and this system's arithmetic could
+    drift apart silently.
+
+    Three fields carry the whole load, and two of them are traps:
+
+    - ``exercise_ratio`` means **two different things** by ``event_code``. On an
+      ``ISS`` row it is the share ratio: 0.15 is fifteen new shares per hundred
+      held. On a ``DIV`` row it is the cash paid as a fraction of the 10,000 VND
+      par — TCB's 700 VND dividend arrives as 0.07 — and reading that as a share
+      ratio would invent a 7% bonus issue out of a cash payment.
+    - ``ex_date`` is optional because the feed leaves it null on real rows. TCB's
+      2026 bonus issue at ratio 0.6 carries only a ``public_date``.
+    - ``title`` is free text, and the only place the *kind* of a share issue
+      appears: "Stock dividend ratio 15.0%", "Rights issue ratio 10.0%", "ESOP
+      ratio 0.3%" all arrive as ``ISS``. Kept verbatim rather than parsed here,
+      so what the provider said stays readable next to what was made of it.
+    """
+
+    symbol: str
+    event_code: str
+    title: str
+    ex_date: date | None = None
+    record_date: date | None = None
+    public_date: date | None = None
+    exercise_ratio: float | None = None
+    value_per_share: float | None = None
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_symbol(cls, value: str) -> str:
+        try:
+            return validate_symbol(value)
+        except StockServiceError as exc:
+            raise ValueError(str(exc)) from exc
+
+    @field_validator("event_code")
+    @classmethod
+    def normalize_event_code(cls, value: str) -> str:
+        code = value.strip().upper()
+        if not code:
+            raise ValueError("a corporate action must carry an event code")
+        return code
+
+    @model_validator(mode="after")
+    def require_something_to_key_on(self) -> "CorporateActionEvent":
+        """Refuse a row that cannot be told apart from the next one.
+
+        Identity is ``(symbol, ex-date, event code)``, and a row with neither
+        date is not addressable under it or under the fallback the store keeps
+        for null ex-dates. Stored anyway, such a row would be written afresh on
+        every collection run — the one thing an idempotent load must not do.
+        """
+        if self.ex_date is None and self.public_date is None:
+            raise ValueError(
+                "a corporate action needs an ex-date or a public date: with "
+                "neither it cannot be stored idempotently"
+            )
+        return self
+
+
+class CorporateActionProvider(Protocol):
+    """Read one company's declared corporate actions.
+
+    Per symbol because the feed is: there is no batched form, which is what makes
+    this a slow cadence rather than part of the per-session cycle. Corporate
+    actions are annual events, so a Universe walked over days costs nothing.
+    """
+
+    source: ProviderSource
+
+    def fetch_corporate_actions(
+        self,
+        symbol: str,
+    ) -> Sequence[CorporateActionEvent]: ...
