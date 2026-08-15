@@ -208,6 +208,7 @@ class TestSchedulerSetup:
             "universe-backfill",
             "market-catchup",
             "corporate-actions-weekly",
+            "market-index",
             "analysis-run-sweep",
         }
 

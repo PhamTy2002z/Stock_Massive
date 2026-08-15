@@ -145,6 +145,24 @@ class Settings(BaseSettings):
     # một phiên nhà cung cấp chưa kịp bổ sung không làm mã đó thiếu nền.
     warmup_window_trading_days: int = 25
 
+    # Market index — nạp chuỗi phiên của chỉ số làm benchmark
+    # (src/stocks/market_index.py, docs/adr/0017). Bật mặc định như Collector:
+    # một chỉ số là một request mỗi lần chạy, và đây là đầu vào duy nhất của
+    # `relative_strength.beta_vs_market_index`.
+    #
+    # 275 phiên = 250 phiên field khai + biên 25 phiên. Hằng số mặc định nằm ở
+    # `MARKET_INDEX_WINDOW_TRADING_DAYS` và được viết bằng chính mức sàn của
+    # field, để hạ độ sâu ở đây là một quyết định vận hành chứ không phải một
+    # thay đổi âm thầm làm field từ chối vì `insufficient_history`.
+    #
+    # 23:30: sau lần thu thập bù 23:00, để chỉ số và các mã cùng dừng ở một
+    # Trading Day — beta đo trên hai chuỗi lệch nhau một phiên là beta trên hai
+    # đoạn thị trường khác nhau.
+    market_index_enabled: bool = True
+    market_index_hour: int = 23
+    market_index_minute: int = 30
+    market_index_window_trading_days: int = 275
+
     # Market catch-up — thu thập lại lúc 23:00 khi Trading Day chưa nhúc nhích
     # (docs/adr/0005). Main Source bổ sung phiên vừa đóng vào muộn trong tối,
     # nên chu kỳ 16:15 thường xuyên chỉ lấy được phiên hôm trước; không có lần

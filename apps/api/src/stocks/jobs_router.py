@@ -18,11 +18,13 @@ from src.stocks.collector_schedule import (
     BACKFILL_JOB_ID,
     CENSUS_JOB_ID,
     COLLECTOR_JOB_ID,
+    MARKET_INDEX_JOB_ID,
     WARMUP_JOB_ID,
     backfill_universe_history,
     catch_up_market_data,
     census_market_profits,
     collect_universe_snapshots,
+    load_market_index,
     warm_up_symbols,
 )
 from src.stocks.universe import build_universe
@@ -34,7 +36,13 @@ from src.stocks.schemas.common import MessageResponse
 # care about plumbing. They stay recorded — operators watch them at
 # /jobs/collector and /jobs/backfill — just not broadcast.
 INTERNAL_JOB_IDS = frozenset(
-    {COLLECTOR_JOB_ID, BACKFILL_JOB_ID, WARMUP_JOB_ID, CENSUS_JOB_ID}
+    {
+        COLLECTOR_JOB_ID,
+        BACKFILL_JOB_ID,
+        WARMUP_JOB_ID,
+        CENSUS_JOB_ID,
+        MARKET_INDEX_JOB_ID,
+    }
 )
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -293,6 +301,41 @@ async def trigger_market_catchup_job(
 
     background_tasks.add_task(catch_up_market_data)
     return MessageResponse(message="Market catch-up triggered", status="started")
+
+
+@router.post(
+    "/trigger/market-index",
+    response_model=MessageResponse,
+    dependencies=[Depends(heavy_rate_limit), Depends(require_admin)],
+)
+async def trigger_market_index_job(
+    background_tasks: BackgroundTasks,
+) -> MessageResponse:
+    """Load the benchmark's session series now.
+
+    Forced past the trading-day gate, because this is what an operator runs to
+    fill the series for the first time — and the day they do that says nothing
+    about the sessions it reaches back over.
+
+    Gated on its own switch rather than the collector's. It shares FiinQuant's
+    single connection with the cycle, but it is a load of one index at its own
+    depth rather than a session for the Universe, and an operator who wants one
+    without the other must be able to say so.
+    """
+    if not get_settings().market_index_enabled:
+        raise HTTPException(
+            status_code=409,
+            detail="Nạp chỉ số đang tắt trong cấu hình (MARKET_INDEX_ENABLED).",
+        )
+
+    if job_store.is_running(MARKET_INDEX_JOB_ID):
+        raise HTTPException(
+            status_code=409,
+            detail="Một lần nạp chỉ số đang chạy. Theo dõi tại /jobs/status.",
+        )
+
+    background_tasks.add_task(load_market_index, force=True)
+    return MessageResponse(message="Market index load triggered", status="started")
 
 
 @router.post(

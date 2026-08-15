@@ -146,6 +146,15 @@ class SignalIssue(str, Enum):
     # any of the codes above.
     BAND_NOT_MEASURED = "band_not_measured"
 
+    # The instrument this window is drawn from has no price band at all: a
+    # market index sits on no board, so there is no reference price to take a
+    # percentage of and no limit for a session to lock at (`docs/adr/0017`).
+    # Deliberately neither `exchange_unknown` — which says a board exists and
+    # nothing named it — nor `band_not_measured`, which says a band exists and
+    # this window did not ask for one. Here the band does not exist, and a field
+    # reaching for one is asking the wrong instrument.
+    BAND_NOT_APPLICABLE = "band_not_applicable"
+
     # --- Traded figures, from ADR-0010 -----------------------------------
     # A session inside the window carries no traded figure at all — no money on
     # a money-denominated average, no share count on a share-denominated one.

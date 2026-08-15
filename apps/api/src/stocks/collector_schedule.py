@@ -23,6 +23,7 @@ from .corporate_action_collector import (
     CorporateActionSummary,
     run_corporate_action_load,
 )
+from .market_index import MarketIndexSummary, run_market_index_warmup
 from .warmup import WarmupSummary, run_warmup
 
 if TYPE_CHECKING:  # imported lazily below: the census reaches a provider library
@@ -49,6 +50,9 @@ CENSUS_JOB_NAME = "Kiểm kê lợi nhuận toàn thị trường"
 
 CORPORATE_ACTIONS_JOB_ID = "corporate-actions"
 CORPORATE_ACTIONS_JOB_NAME = "Nạp sự kiện quyền của Universe"
+
+MARKET_INDEX_JOB_ID = "market-index"
+MARKET_INDEX_JOB_NAME = "Nạp chuỗi phiên của chỉ số"
 
 
 @dataclass(frozen=True)
@@ -361,6 +365,84 @@ async def warm_up_symbols(
     already closed, and the day it is asked for says nothing about them.
     """
     return await asyncio.to_thread(run_symbol_warmup, symbols, warm)
+
+
+@dataclass(frozen=True)
+class MarketIndexOutcome:
+    """How one attempted load of the benchmark series ended."""
+
+    status: Literal["completed", "failed", "skipped"]
+    sessions_written: int = 0
+    completed: tuple[str, ...] = ()
+    failed: tuple[dict, ...] = ()
+    error: str | None = None
+
+    @classmethod
+    def of(cls, summary: MarketIndexSummary) -> "MarketIndexOutcome":
+        return cls(
+            status="completed",
+            sessions_written=summary.sessions_written,
+            completed=summary.completed,
+            failed=tuple(
+                {"index": item.index, "reason": item.reason}
+                for item in summary.failed
+            ),
+        )
+
+    def as_result(self) -> dict:
+        return {
+            "status": self.status,
+            "sessions_written": self.sessions_written,
+            "completed": list(self.completed),
+            "failed": [dict(item) for item in self.failed],
+            "error": self.error,
+        }
+
+
+def run_market_index_load(
+    load: Callable[[], MarketIndexSummary] = run_market_index_warmup,
+) -> MarketIndexOutcome:
+    """Load the benchmark's session series, at most one load at a time.
+
+    Guarded separately from the collection cycle even though both spend
+    FiinQuant's single connection, because they answer different questions and
+    the stagger between them is what keeps the connection uncontended: the cycle
+    reads one session for a hundred symbols, this reads a year of sessions for
+    one index. Sharing the Collector's guard would let a cycle that overran stop
+    the benchmark advancing to the Trading Day the cycle just wrote.
+    """
+    return _guarded_run(
+        MARKET_INDEX_JOB_ID,
+        MARKET_INDEX_JOB_NAME,
+        "market index load",
+        load,
+        MarketIndexOutcome.of,
+        MarketIndexOutcome,
+    )
+
+
+async def load_market_index(
+    load: Callable[[], MarketIndexSummary] = run_market_index_warmup,
+    today: date | None = None,
+    force: bool = False,
+) -> MarketIndexOutcome:
+    """Run one benchmark load off the event loop.
+
+    Gated on the trading calendar, unlike the equity Warm-up. That Warm-up is
+    asked for by a person filling a named symbol's gap, so the day it is asked
+    on says nothing; this one is a scheduled top-up of a series that only ever
+    gains a session on a day the exchange opened. An on-demand run overrides the
+    gate for the same reason the collection cycle's does — repairing a gap is
+    rarely done on the day the gap is in.
+    """
+    from zoneinfo import ZoneInfo
+
+    day = today or datetime.now(ZoneInfo(VN_TZ_NAME)).date()
+    if not force and not is_trading_day(day):
+        logger.info("Skipping the market index load: %s is not a trading day", day)
+        return MarketIndexOutcome(status="skipped")
+
+    return await asyncio.to_thread(run_market_index_load, load)
 
 
 @dataclass(frozen=True)

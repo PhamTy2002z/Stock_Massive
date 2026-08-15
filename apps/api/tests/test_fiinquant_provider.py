@@ -20,6 +20,7 @@ from src.stocks.providers.contracts import (
 )
 from src.stocks.providers.fiinquant import (
     FiinQuantCircuitOpen,
+    FiinQuantMarketIndexProvider,
     FiinQuantMarketProvider,
     FiinQuantProviderError,
     FiinQuantValuationProvider,
@@ -913,3 +914,129 @@ def test_a_ca_bundle_that_is_not_on_disk_fails_loudly(monkeypatch, tmp_path):
 
     with pytest.raises(FiinQuantProviderError, match="CA bundle"):
         ensure_ca_bundle()
+
+
+def index_candles() -> pd.DataFrame:
+    """Two VN-Index sessions, in the shape the daily candle call answers with.
+
+    No ``bu``/``sd`` and no ``fb``/``fs``/``fn``: a composite has no active
+    buy/sell decomposition and no foreign split, so the index adapter never asks
+    for those fields and this frame does not carry them.
+    """
+    return pd.DataFrame(
+        [
+            {
+                "ticker": "VNINDEX",
+                "timestamp": "2026-08-06 00:00",
+                "open": 1_272.4,
+                "high": 1_281.0,
+                "low": 1_268.9,
+                "close": 1_275.6,
+                "volume": 812_000_000,
+                "value": 21_400_000_000_000,
+            },
+            {
+                "ticker": "VNINDEX",
+                "timestamp": "2026-08-07 00:00",
+                "open": 1_276.0,
+                "high": 1_290.2,
+                "low": 1_274.1,
+                "close": 1_288.2,
+                "volume": 934_000_000,
+                "value": 24_900_000_000_000,
+            },
+        ]
+    )
+
+
+def make_index_provider(
+    candles: pd.DataFrame | None = None,
+) -> tuple[FiinQuantMarketIndexProvider, Mock]:
+    client = Mock()
+    client.Fetch_Trading_Data.return_value = FakeEvent(
+        index_candles() if candles is None else candles
+    )
+    provider = FiinQuantMarketIndexProvider(
+        "configured-user",
+        "configured-password",
+        session_factory=lambda _username, _password: client,
+        now=lambda: NOW,
+    )
+    return provider, client
+
+
+def test_fetch_index_history_yields_a_level_per_session():
+    provider, client = make_index_provider()
+
+    snapshots = provider.fetch_index_history(
+        "vnindex", date(2026, 8, 1), date(2026, 8, 7)
+    )
+
+    assert [snapshot.symbol for snapshot in snapshots] == ["VNINDEX", "VNINDEX"]
+    assert [snapshot.metadata.effective_at for snapshot in snapshots] == [
+        datetime(2026, 8, 6, tzinfo=VN_TZ),
+        datetime(2026, 8, 7, tzinfo=VN_TZ),
+    ]
+    assert [snapshot.last_price for snapshot in snapshots] == [1_275.6, 1_288.2]
+    # Measured against the previous stored level, exactly as the equity history
+    # measures its own.
+    assert snapshots[1].change_pct == pytest.approx(
+        (1_288.2 - 1_275.6) / 1_275.6 * 100
+    )
+    call = client.Fetch_Trading_Data.call_args.kwargs
+    assert call["from_date"] == "2026-08-01"
+    assert call["to_date"] == "2026-08-07"
+
+
+def test_the_index_call_asks_for_no_field_a_composite_does_not_have():
+    """Asking for bu/sd or fb/fs/fn would either fail the field check or come
+    back zeroed and be stored as a measurement of a flow that does not exist."""
+    provider, client = make_index_provider()
+
+    provider.fetch_index_history("VNINDEX", date(2026, 8, 1), date(2026, 8, 7))
+
+    assert client.Fetch_Trading_Data.call_args.kwargs["fields"] == [
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "value",
+    ]
+
+
+def test_the_index_reads_no_price_statistics_at_all():
+    """An index has neither a band nor a market capitalisation, so the two
+    ``PriceStatistics`` calls have nothing to answer for it."""
+    provider, client = make_index_provider()
+
+    provider.fetch_index_history("VNINDEX", date(2026, 8, 1), date(2026, 8, 7))
+
+    client.PriceStatistics.assert_not_called()
+
+
+def test_an_index_session_says_its_levels_are_raw():
+    provider, _client = make_index_provider()
+
+    snapshots = provider.fetch_index_history(
+        "VNINDEX", date(2026, 8, 1), date(2026, 8, 7)
+    )
+
+    assert {snapshot.price_basis for snapshot in snapshots} == {PriceBasis.RAW}
+    assert {
+        snapshot.metadata.schema_version for snapshot in snapshots
+    } == {MARKET_SCHEMA_VERSION}
+
+
+def test_an_empty_index_response_is_refused_rather_than_read_as_a_shut_market():
+    provider, _client = make_index_provider(candles=pd.DataFrame())
+
+    with pytest.raises(FiinQuantProviderError, match="market index history"):
+        provider.fetch_index_history("VNINDEX", date(2026, 8, 1), date(2026, 8, 7))
+
+
+def test_an_index_window_the_wrong_way_round_is_refused():
+    provider, _client = make_index_provider()
+
+    with pytest.raises(ValueError):
+        provider.fetch_index_history("VNINDEX", date(2026, 8, 7), date(2026, 8, 1))
