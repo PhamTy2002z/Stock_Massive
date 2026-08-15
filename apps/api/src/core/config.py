@@ -274,22 +274,47 @@ class Settings(BaseSettings):
             return None
         return value
 
+    @field_validator("market_catchup_times")
+    @classmethod
+    def _readable_catchup_times(cls, value: str) -> str:
+        """Một mốc viết sai phải nổ lúc `Settings()` chứ không lúc lên lịch.
+
+        Kiểm ở validator chứ không ở property đọc ra sau: property chỉ chạy khi
+        `setup_scheduler` gọi tới, tức là sau khi tiến trình đã khởi động xong và
+        người vận hành đã rời console. Đây cũng là quy ước của package signals —
+        một khai báo tự kiểm chính nó ngay lúc được khai.
+
+        Giờ và phút được kiểm biên chứ không chỉ kiểm kiểu: `"25:99"` là số hợp
+        lệ và là một mốc không bao giờ nổ ra, tức một buổi tối im lặng không thu
+        được phiên nào mà chẳng có gì báo.
+        """
+        _parse_catchup_times(value)
+        return value
+
     @property
     def market_catchup_schedule(self) -> tuple[tuple[int, int], ...]:
-        """Mỗi mốc thu thập bù dưới dạng `(giờ, phút)`, theo thứ tự trong ngày.
+        """Mỗi mốc thu thập bù dưới dạng `(giờ, phút)`, theo thứ tự trong ngày."""
+        return _parse_catchup_times(self.market_catchup_times)
 
-        Phân tích ở đây chứ không ở scheduler: một mốc viết sai phải nổ lúc đọc
-        cấu hình — khi người vận hành còn đang nhìn console — chứ không phải im
-        lặng biến mất khỏi lịch và chỉ lộ ra sau một đêm không ai thu được phiên.
-        """
-        parsed: list[tuple[int, int]] = []
-        for entry in self.market_catchup_times.split(","):
-            entry = entry.strip()
-            if not entry:
-                continue
-            hour, _, minute = entry.partition(":")
-            parsed.append((int(hour), int(minute)))
-        return tuple(sorted(parsed))
+
+def _parse_catchup_times(declared: str) -> tuple[tuple[int, int], ...]:
+    """Đọc `"18:30,21:30,23:00"` thành các mốc, hoặc từ chối cả chuỗi."""
+    parsed: list[tuple[int, int]] = []
+    for entry in declared.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        hour, separator, minute = entry.partition(":")
+        if not separator or not hour.isdigit() or not minute.isdigit():
+            raise ValueError(
+                f"{entry!r} không phải một mốc `HH:MM` trong MARKET_CATCHUP_TIMES"
+            )
+        if not (0 <= int(hour) <= 23 and 0 <= int(minute) <= 59):
+            raise ValueError(
+                f"{entry!r} nằm ngoài một ngày, nên là một mốc không bao giờ chạy"
+            )
+        parsed.append((int(hour), int(minute)))
+    return tuple(sorted(parsed))
 
 
 @lru_cache

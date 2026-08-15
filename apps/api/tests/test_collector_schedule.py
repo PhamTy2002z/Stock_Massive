@@ -384,14 +384,21 @@ class TestMarketCatchUp:
         assert one_schedule(scheduler, "market-catchup-2300") is None
 
     def test_the_times_are_parsed_where_a_wrong_one_can_still_be_seen(self):
-        """A mistyped time explodes at configuration rather than vanishing."""
+        """A mistyped time explodes at ``Settings()``, not at scheduling time.
+
+        Checked while an operator is still watching the console rather than
+        inside ``setup_scheduler``, which runs after the process is up and
+        nobody is looking. A time outside a day is refused too: ``25:99`` is
+        perfectly valid arithmetic and a schedule that never fires.
+        """
         assert scheduler_settings().market_catchup_schedule == (
             (18, 30),
             (21, 30),
             (23, 0),
         )
-        with pytest.raises(ValueError):
-            scheduler_settings(market_catchup_times="half past six").market_catchup_schedule
+        for wrong in ("half past six", "1830", "25:99", "18:60"):
+            with pytest.raises(ValueError):
+                scheduler_settings(market_catchup_times=wrong)
 
 
 class TestWarmupRuns:
@@ -571,7 +578,7 @@ class TestCapturingTheCohort:
             outcome = await collect_universe_snapshots(
                 cycle=RecordingCycle(),
                 today=TRADING_DAY,
-                capture=collector_schedule.capture_nightly_cohort,
+                capture=collector_schedule.capture_cohort_from_the_store,
             )
 
         assert outcome.status == "completed"

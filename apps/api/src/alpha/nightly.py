@@ -37,9 +37,10 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from enum import Enum
+from typing import Any
 
 from sqlalchemy import distinct, func, select
 from sqlalchemy.exc import IntegrityError
@@ -53,12 +54,6 @@ from .models import AnalysisRun, WatchlistEntry
 
 logger = logging.getLogger(__name__)
 
-# When an Analysis for a Trading Day has to be readable. Nothing in this module
-# may meet it by relabelling: a cohort is captured for the day the store
-# actually established, and the previous Trading Day is never dressed up as this
-# one to make the window (``docs/adr/0014``, spec 0003 §11).
-AVAILABILITY_DEADLINE_HOUR_ICT = 7
-
 
 class CohortState(str, Enum):
     """How one evening's cohort is going, derived from its runs.
@@ -68,6 +63,12 @@ class CohortState(str, Enum):
     about. It is deliberately not ``failed``: nothing was attempted, and saying
     a cohort failed when the market never closed a session anybody collected
     would send an operator looking in the wrong place.
+
+    The 07:00 ICT availability deadline is a constraint on this module rather
+    than a value in it: a cohort is captured for the day the store actually
+    established, and the previous Trading Day is never dressed up as this one to
+    make the window (``docs/adr/0014``, spec 0003 §11). Whoever drains the queue
+    is the one that has a deadline to measure against.
     """
 
     RUNNING = "running"
@@ -94,9 +95,9 @@ class CohortCapture:
     def captured(self) -> bool:
         return bool(self.created)
 
-    def as_result(self) -> dict:
+    def as_result(self) -> dict[str, Any]:
         return {
-            "trading_day": None if self.trading_day is None else self.trading_day.isoformat(),
+            "trading_day": _iso(self.trading_day),
             "created": list(self.created),
             "joined": list(self.joined),
         }
@@ -122,9 +123,9 @@ class CohortStatus:
     def total(self) -> int:
         return self.pending + self.producing + self.ready + self.failed
 
-    def as_result(self) -> dict:
+    def as_result(self) -> dict[str, Any]:
         return {
-            "trading_day": None if self.trading_day is None else self.trading_day.isoformat(),
+            "trading_day": _iso(self.trading_day),
             "state": self.state.value,
             "total": self.total,
             "pending": self.pending,
@@ -235,9 +236,9 @@ def cohort_state(session: Session, trading_day: date | None = None) -> CohortSta
     is work outstanding for that Trading Day — reported per origin, a cohort
     would read ``complete`` while the queue still had rows in it.
 
-    ``blocked`` covers both ways there is nothing to be run: no Trading Day was
-    established at all, and a Trading Day nobody watches a symbol for. Neither is
-    a failure, and both are answered the same way — there is no cohort here.
+    ``blocked`` is exactly one condition: no Trading Day was established, so the
+    cohort has nothing to be run against. It is not a failure and it is not an
+    empty Watchlist — see ``_state_of`` for why those two must not share a word.
     """
     trading_day = trading_day or latest_trading_day(session)
     if trading_day is None:
@@ -250,7 +251,7 @@ def cohort_state(session: Session, trading_day: date | None = None) -> CohortSta
             .group_by(AnalysisRun.status)
         ).all()
     )
-    status = CohortStatus(
+    counted = CohortStatus(
         trading_day=trading_day,
         state=CohortState.BLOCKED,
         pending=int(counts.get(RunStatus.PENDING.value, 0)),
@@ -258,20 +259,18 @@ def cohort_state(session: Session, trading_day: date | None = None) -> CohortSta
         ready=int(counts.get(RunStatus.READY.value, 0)),
         failed=int(counts.get(RunStatus.FAILED.value, 0)),
     )
-    if status.total == 0:
-        return status
-    return CohortStatus(
-        trading_day=status.trading_day,
-        state=_state_of(status),
-        pending=status.pending,
-        producing=status.producing,
-        ready=status.ready,
-        failed=status.failed,
-    )
+    return replace(counted, state=_state_of(counted))
 
 
 def _state_of(status: CohortStatus) -> CohortState:
-    """The three states a cohort with runs in it can be in.
+    """The three states an established Trading Day can be in.
+
+    An evening with no runs is ``complete`` and not ``blocked``. ``blocked``
+    means the cohort had no session to be run against, and an operator seeing it
+    goes and looks at the Collector; an evening where nobody watches a symbol has
+    a perfectly good session and nothing to do with it, so answering ``blocked``
+    there would send them to exactly the wrong place. ``total: 0`` beside the
+    state is what says which kind of finished evening this was.
 
     ``partial`` covers every finished evening that lost a symbol, including the
     one that lost all of them. There is no fifth state for *all failed*: the four
@@ -285,8 +284,11 @@ def _state_of(status: CohortStatus) -> CohortState:
     return CohortState.COMPLETE
 
 
+def _iso(day: date | None) -> str | None:
+    return None if day is None else day.isoformat()
+
+
 __all__ = [
-    "AVAILABILITY_DEADLINE_HOUR_ICT",
     "CohortCapture",
     "CohortState",
     "CohortStatus",

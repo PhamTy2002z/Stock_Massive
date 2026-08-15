@@ -11,8 +11,7 @@ audiences are different and so is the language. That module owns the closed set
 of **Signal Issue** codes; the web app holds one Vietnamese sentence per code
 for the surfaces a person reads in Vietnamese; this holds one English sentence
 per code for the artifact the model is handed. A code with no sentence here
-fails ``tests/test_evidence_envelope.py``, so the set cannot grow past the
-prose.
+fails ``tests/test_envelope.py``, so the set cannot grow past the prose.
 
 Every sentence says what is missing or what changed, never what to do about it.
 A reason that advised a reader would be the recommendation the whole citation

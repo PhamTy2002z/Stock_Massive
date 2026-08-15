@@ -57,7 +57,7 @@ from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
-from src.stocks.listing_roster import ListedIdentity, ListingRosterStore
+from src.stocks.listing_roster import ListingRosterStore
 from src.stocks.signals.bars import WindowHealth, prepare_bars
 from src.stocks.signals.fields import FieldValue, SignalField
 from src.stocks.signals.issues import SignalIssue
@@ -358,8 +358,8 @@ def build_envelope(
     if not price_zone.citable:
         raise ProductionFailure(
             "insufficient_core_evidence",
-            f"Không đọc được vùng giá thường ngày của mã {symbol} ở phiên "
-            f"{trading_day.isoformat()}: {price_zone.reason_code}.",
+            f"Không đọc được vùng giá thường ngày của mã {symbol} ở "
+            f"phiên {trading_day.isoformat()}: {price_zone.reason_code}.",
         )
 
     resolved_industry = industry(session, symbol)
@@ -368,7 +368,7 @@ def build_envelope(
     envelope = EvidenceEnvelope(
         symbol=symbol,
         company_name=None if listing is None else listing.company_name,
-        exchange=_exchange_of(listing),
+        exchange=None if listing is None else listing.exchange.value,
         industry=resolved_industry,
         trading_day=trading_day,
         price_zone=price_zone,
@@ -395,8 +395,8 @@ def build_envelope(
     if len(envelope.citable_field_ids) < 2:
         raise ProductionFailure(
             "insufficient_core_evidence",
-            f"Mã {symbol} không có figure nào khác vùng giá để trích dẫn cho "
-            f"phiên {trading_day.isoformat()}.",
+            f"Mã {symbol} không có figure nào khác vùng giá để trích dẫn "
+            f"cho phiên {trading_day.isoformat()}.",
         )
 
     return envelope
@@ -655,10 +655,6 @@ def _sample_around(session: Session, symbol: str) -> tuple[str, ...]:
     """
     universe = build_universe(session).symbols
     return universe if symbol in universe else universe + (symbol,)
-
-
-def _exchange_of(listing: ListedIdentity | None) -> str | None:
-    return None if listing is None else listing.exchange.value
 
 
 def _window_health_wire(health: WindowHealth) -> dict[str, Any]:
