@@ -176,8 +176,9 @@ Every model-visible field registers `unit`, `sign`, `interpretation`, `kind`, **
 **registered fields only**, so an unregistered computation needs no prohibition — it has
 no route to a model.
 
-`min_sessions` covers **window plus skip** (the momentum rank is 273, not 252 — see §14.1
-for the naming inconsistency that number exposes).
+`min_sessions` covers **window plus skip** (the momentum rank is 252: a 231-session
+formation plus the 21-session skip French's prior (2-12) convention leaves out — see
+§14.1, where the inherited 273 is settled).
 `null_fpr` rides in the tool schema description, not the payload. Thresholds are derived
 from the null offline and frozen as constants; where literature has a convention, the
 stricter of convention and derived value wins and the registry records which.
@@ -857,15 +858,20 @@ Genuinely undecided. None blocks a build session from starting A1, A2, or A3.
    concrete numbers are produced by the null harness at implementation and then frozen.
    Blocks: A1 completion.
 
-   **Settled at A1 implementation.** The inherited momentum-naming inconsistency — the
-   field named `momentum_rank.percentile_12_2` against a stated `min_sessions` of **273**
-   = `252 + 21`, a **one-month** skip the research shortlist calls 12-1 — is two
-   spellings of one window rather than a disagreement. "12-2" names the formation by its
-   month endpoints, twelve months back to two months back; "12-1" names the same stretch
-   by the length of what it skips. Both are 252 sessions of formation after skipping 21.
-   The name stands, the skip stands, and the registered `min_sessions` is written as
-   `MOMENTUM_FORMATION_SESSIONS + MOMENTUM_SKIP_SESSIONS` so the two cannot be edited
-   apart; `tests/test_cross_sectional.py` pins the arithmetic to those constants.
+   **Settled at A1 implementation: the name won and `min_sessions` moved.** The two
+   halves of the inherited inconsistency are genuinely different windows. The field name
+   `momentum_rank.percentile_12_2` is French's prior (2-12) return — a **twelve-month
+   lookback** whose most recent month is skipped, so the formation is the eleven months
+   inside it: 231 sessions after a 21-session skip, **252** in total. The inherited
+   `min_sessions` of 273 is `252 + 21`, a *twelve-month formation* plus a skip and
+   therefore a **thirteen-month** lookback. They differ by a month of market.
+
+   The name is the string the Analysis Field Profile looks the field up by (§8.4), so it
+   stands; this decision's own instruction — let the registered `min_sessions` follow the
+   formula actually implemented — settles the other half. `MOMENTUM_SKIP_SESSIONS` is
+   `252 // 12` and `MOMENTUM_FORMATION_SESSIONS` is what remains of the year, so the
+   window-plus-skip rule still reads literally and the two cannot be edited apart;
+   `tests/test_cross_sectional.py` pins the arithmetic to those constants.
 2. **How the limit-lock detector is written.** ADR-0006 settles that it reads raw prices
    and takes the band from the exchange regime for that session; the detector itself
    belongs to A1.

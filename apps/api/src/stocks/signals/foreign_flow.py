@@ -63,10 +63,10 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 
-from .bars import BarFrame, average_traded_money
-from .fields import FieldReading, FieldWindow
+from .bars import BarFrame, average_over_sessions
+from .fields import Denomination, FieldReading, FieldWindow
 from .issues import SignalIssue
-from .reference import ForeignRoomStanding
+from .reference import ForeignRoomStanding, ForeignRoomState
 
 # The stretch the pressure ratio measures over, which is also the stretch its
 # denominator averages: an ADTV means twenty sessions in this market, and a
@@ -90,6 +90,13 @@ FOREIGN_PERSISTENCE_MIN_SESSIONS = FOREIGN_PERSISTENCE_SESSIONS
 # persistence it is ignoring.
 FLOW_NEWEY_WEST_LAGS = 5
 
+# The room percentage is not a trailing statistic and reads no stretch of
+# market: its inputs are one reference snapshot and the date being answered for.
+# The window exists only because every registered field reaches the store
+# through the one gateway, and one session is the shortest honest thing to ask
+# it for.
+FOREIGN_ROOM_MIN_SESSIONS = 1
+
 # The threshold the run length fires at, in sessions, frozen from the null
 # harness at the registry's derivation seed and path count. Derived rather than
 # conventional: there is no published convention for how long a foreign-flow
@@ -98,7 +105,9 @@ FLOW_NEWEY_WEST_LAGS = 5
 PERSISTENCE_RUN_THRESHOLD = 15.0
 
 
-def _flows(frame: BarFrame, sessions: int) -> list[float] | None:
+def _flows(
+    frame: BarFrame, sessions: int
+) -> tuple[list[float] | None, SignalIssue | None]:
     """The newest sessions' net foreign flows, or nothing if any is missing.
 
     All or nothing, like the ADTV beside it: a sum over the twelve sessions that
@@ -107,23 +116,28 @@ def _flows(frame: BarFrame, sessions: int) -> list[float] | None:
     """
     bars = frame.bars[-sessions:]
     if len(bars) < sessions:
-        return None
+        return None, SignalIssue.INSUFFICIENT_HISTORY
     values: list[float] = []
     for bar in bars:
         if bar.foreign_net_value_vnd is None:
-            return None
+            return None, SignalIssue.FOREIGN_FLOW_NOT_STORED
         values.append(bar.foreign_net_value_vnd)
-    return values
+    return values, None
 
 
 def _room_extras(room: ForeignRoomStanding | None) -> dict[str, object]:
-    """The room state every answer in this module carries, present or not."""
+    """The room state every answer in this module carries, present or not.
+
+    A standing describes itself; what is left here is the case where there is no
+    standing at all, which is a fact about the store rather than about the room
+    and is therefore not the standing's to describe.
+    """
+    if room is not None:
+        return room.as_extras()
     return {
-        "foreign_room_state": "unknown" if room is None else room.state,
-        "foreign_room_available_share": (
-            None if room is None else room.available_share
-        ),
-        "foreign_room_as_of": None if room is None else room.as_of.isoformat(),
+        "foreign_room_state": ForeignRoomState.UNKNOWN.value,
+        "foreign_room_available_share": None,
+        "foreign_room_as_of": None,
     }
 
 
@@ -175,14 +189,20 @@ def net_value_over_adtv_reading(window: FieldWindow) -> FieldReading:
     two apart — so it says which of them the room permits.
     """
     frame = window.frame
-    flows = _flows(frame, FOREIGN_FLOW_SESSIONS)
+    flows, missing = _flows(frame, FOREIGN_FLOW_SESSIONS)
     if flows is None:
-        return FieldReading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
+        return FieldReading(value=None, refusal=missing)
 
     bars = frame.bars[-FOREIGN_FLOW_SESSIONS:]
-    adtv = average_traded_money(bar.total_value_vnd for bar in bars)
-    if adtv is None or adtv <= 0:
-        return FieldReading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
+    adtv = average_over_sessions(bar.total_value_vnd for bar in bars)
+    if adtv is None:
+        return FieldReading(
+            value=None, refusal=SignalIssue.TRADED_FIGURE_NOT_STORED
+        )
+    if adtv <= 0:
+        # Every session in the window traded nothing, so there is no turnover to
+        # express the flow in. A fact about the symbol, not a short window.
+        return FieldReading(value=None, refusal=SignalIssue.NO_TRADED_SESSIONS)
 
     net = sum(flows)
     mean_error = _long_run_standard_error(flows)
@@ -199,8 +219,8 @@ def net_value_over_adtv_reading(window: FieldWindow) -> FieldReading:
             # Both sides named, every time. The whole reason a share-denominated
             # ratio is refused rather than approximated is that nothing on the
             # wire would otherwise say which unit a reader is holding.
-            "numerator_basis": "money",
-            "denominator_basis": "money",
+            "numerator_basis": Denomination.MONEY.value,
+            "denominator_basis": Denomination.MONEY.value,
             "sessions": len(flows),
             **_room_extras(window.foreign_room),
         },
@@ -219,7 +239,7 @@ def persistence_run_days(frame: BarFrame) -> float | None:
     foreign money moved, which is neither buying nor selling, and counting it
     into either would lengthen a streak with a session that had no side.
     """
-    flows = _flows(frame, FOREIGN_PERSISTENCE_SESSIONS)
+    flows, _missing = _flows(frame, FOREIGN_PERSISTENCE_SESSIONS)
     if flows is None:
         return None
 
@@ -244,11 +264,11 @@ def persistence_run_days_reading(window: FieldWindow) -> FieldReading:
     nothing about how long it will.
     """
     frame = window.frame
+    flows, missing = _flows(frame, FOREIGN_PERSISTENCE_SESSIONS)
     run = persistence_run_days(frame)
-    if run is None:
-        return FieldReading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
+    if run is None or flows is None:
+        return FieldReading(value=None, refusal=missing)
 
-    flows = _flows(frame, FOREIGN_PERSISTENCE_SESSIONS) or []
     newest = flows[-1] if flows else 0.0
     return FieldReading(
         value=run,
@@ -261,6 +281,39 @@ def persistence_run_days_reading(window: FieldWindow) -> FieldReading:
             **_room_extras(window.foreign_room),
         },
         degraded_reason=_room_degradation(window.foreign_room),
+    )
+
+
+def foreign_room_pct_reading(window: FieldWindow) -> FieldReading:
+    """How much of this symbol's foreign ownership cap is still open, in percent.
+
+    The Money-flow field the Analysis Field Profile names beside the two flow
+    figures, and the one the spec's prerequisite list assumed had no inputs.
+    It does: the reference Capability is collected on every cycle and the price
+    board publishes both the remaining room and the cap it sits under, so this
+    is served rather than refused — spec 0003 §13 forbids fictionalising a
+    field's availability in **either** direction, and registering a refusal over
+    stored data would be the same dishonesty with the sign flipped.
+
+    Refused where no reference reading exists at or before the window's cutoff.
+    An uncollected room is unknown, and reporting 100% for it would assert the
+    thing nobody looked at.
+    """
+    room = window.foreign_room
+    if room is None or room.available_share is None:
+        return FieldReading(
+            value=None,
+            refusal=SignalIssue.FOREIGN_ROOM_NOT_STORED,
+            extras=_room_extras(room),
+        )
+    return FieldReading(
+        value=100.0 * room.available_share,
+        extras={
+            "current_room_shares": room.current_room,
+            "total_room_shares": room.total_room,
+            **_room_extras(room),
+        },
+        degraded_reason=_room_degradation(room),
     )
 
 

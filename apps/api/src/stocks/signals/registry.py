@@ -69,7 +69,9 @@ from .foreign_flow import (
     FOREIGN_FLOW_SESSIONS,
     FOREIGN_PERSISTENCE_MIN_SESSIONS,
     FOREIGN_PERSISTENCE_SESSIONS,
+    FOREIGN_ROOM_MIN_SESSIONS,
     PERSISTENCE_RUN_THRESHOLD,
+    foreign_room_pct_reading,
     net_value_over_adtv_reading,
     net_volume_over_adtv_reading,
     persistence_run_days,
@@ -619,7 +621,7 @@ BAND_PRESSURE = SignalField(
 _MEAN_REVERSION_KEYS = (
     "confidence_interval",
     "half_life_sessions",
-    "trailing_z",
+    "half_life_reaches_window",
     "ar1_phi",
     "settlement_floor_sessions",
     "half_life_under_settlement_floor",
@@ -1041,10 +1043,46 @@ FOREIGN_FLOW_SHARE_PRESSURE = SignalField(
     reading=net_volume_over_adtv_reading,
 )
 
+FOREIGN_ROOM_PCT = SignalField(
+    # The id the Analysis Field Profile already names on the Money-flow axis
+    # (spec 0003 §8.4). It belongs to the company profile by name and to this
+    # cluster by inputs: it is the fact that says whether a flow beside it was
+    # freely chosen or mechanically capped.
+    name="company_profile.foreign_room_pct",
+    unit=Unit.PERCENT,
+    sign=Sign.NON_NEGATIVE,
+    interpretation=(
+        "How much of this symbol's statutory foreign ownership cap is still "
+        "open, as a percentage of the cap. Zero means foreigners cannot buy at "
+        "all, which stops a foreign flow mechanically rather than by anyone's "
+        "choice. It is read from the newest reference snapshot at or before the "
+        "session being answered for, and the date of that reading travels with "
+        "it — the room changes over months, so a stale one is not today's."
+    ),
+    # Exact for the date it was read rather than estimated from a sample, so
+    # there is no sampling error to ship beside it and the caveat that does
+    # matter — how old the reading is — travels as its own key.
+    kind=FieldKind.VOCABULARY,
+    claim=Claim.DESCRIPTIVE,
+    source=FieldSource.STORED,
+    min_sessions=FOREIGN_ROOM_MIN_SESSIONS,
+    threshold=None,
+    null_fpr=None,
+    output_keys=(
+        "current_room_shares",
+        "total_room_shares",
+        "foreign_room_state",
+        "foreign_room_available_share",
+        "foreign_room_as_of",
+    ),
+    reading=foreign_room_pct_reading,
+)
+
 FOREIGN_FLOW_FIELDS: tuple[SignalField, ...] = (
     FOREIGN_FLOW_PRESSURE,
     FOREIGN_FLOW_PERSISTENCE,
     FOREIGN_FLOW_SHARE_PRESSURE,
+    FOREIGN_ROOM_PCT,
 )
 
 
@@ -1154,6 +1192,7 @@ REGISTRY: Mapping[str, SignalField] = _index(
     FOREIGN_FLOW_PRESSURE,
     FOREIGN_FLOW_PERSISTENCE,
     FOREIGN_FLOW_SHARE_PRESSURE,
+    FOREIGN_ROOM_PCT,
     RSI,
     MACD,
     BOLLINGER_PERCENT_B,

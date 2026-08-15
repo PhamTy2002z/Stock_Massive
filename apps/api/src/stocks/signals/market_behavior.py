@@ -90,9 +90,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .bars import ADTV_SESSIONS, Bar, BarFrame, average_traded_money
-from .fields import FieldReading, FieldWindow
+from .bars import ADTV_SESSIONS, Bar, BarFrame, average_over_sessions
+from .fields import Denomination, FieldReading, FieldWindow
 from .issues import SignalIssue
+from .moments import mean_standard_error
 
 # The stretch an ADTV averages over. Twenty sessions because that is what ADTV
 # means in this market's own vocabulary, and it is the same twenty the gateway
@@ -137,6 +138,14 @@ SETTLEMENT_FLOOR_SESSIONS = 3
 # dependence a half-life is estimated from, short enough that a sixty-session
 # window is not resampled as three copies of one block.
 MEAN_REVERSION_BLOCK_SESSIONS = 10
+
+# Four hundred paths is what a 90% interval needs and no more: its bounds are
+# the 20th and 380th order statistics, each resting on hundreds of draws, so a
+# rerun moves them by a fraction of a session. This is **not** a null
+# calibration and ADR-0010's floor of a thousand paths does not apply to it —
+# that floor bounds a measured false-positive rate, a tail quantity where a
+# handful of paths decide the answer, while this is an interval around a point
+# estimate computed on every call and therefore paying for itself per request.
 MEAN_REVERSION_BOOTSTRAP_PATHS = 400
 MEAN_REVERSION_BOOTSTRAP_SEED = 20260815
 
@@ -144,6 +153,14 @@ MEAN_REVERSION_BOOTSTRAP_SEED = 20260815
 # because the tails of a bootstrapped half-life on sixty observations are where
 # the censoring below lives and a 95% band would mostly be reporting it.
 HALF_LIFE_INTERVAL = 0.90
+
+# How close a rebased close has to sit to a limit price to be that limit price.
+# A raw close divided back out of its Adjustment Factor is a float that has been
+# through a decimal round trip, so it lands within a few units in the last place
+# of the number the exchange published rather than exactly on it. A relative
+# tolerance of a billionth is a thousand times that error and a millionth of one
+# tick, so it cannot admit a close that was genuinely a tick away.
+CLOSE_AT_BAND_TOLERANCE = 1e-9
 
 _LOG2 = math.log(2.0)
 
@@ -156,15 +173,6 @@ def _recent(frame: BarFrame, sessions: int) -> tuple[Bar, ...]:
     return frame.bars[-sessions:] if sessions > 0 else ()
 
 
-def _mean_standard_error(values: Sequence[float]) -> float | None:
-    """The standard error of a sample mean, or nothing below two observations."""
-    if len(values) < 2:
-        return None
-    mean = sum(values) / len(values)
-    variance = sum((item - mean) ** 2 for item in values) / (len(values) - 1)
-    return math.sqrt(variance / len(values))
-
-
 def adtv_money_reading(window: FieldWindow) -> FieldReading:
     """Average daily traded **money** over the newest twenty sessions.
 
@@ -175,19 +183,21 @@ def adtv_money_reading(window: FieldWindow) -> FieldReading:
     """
     bars = _recent(window.frame, LIQUIDITY_SESSIONS)
     values = [bar.total_value_vnd for bar in bars]
-    average = average_traded_money(values)
+    average = average_over_sessions(values)
     if average is None:
-        return FieldReading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
+        return FieldReading(
+            value=None, refusal=SignalIssue.TRADED_FIGURE_NOT_STORED
+        )
 
     measured = [value for value in values if value is not None]
     return FieldReading(
         value=average,
         extras={
-            "standard_error": _mean_standard_error(measured),
+            "standard_error": mean_standard_error(measured),
             # Stated on the field rather than left to the name. The whole point
             # of splitting money from shares is that a reader never has to infer
             # which one a figure is.
-            "adtv_basis": "money",
+            "adtv_basis": Denomination.MONEY.value,
             "sessions": len(bars),
             "limit_lock_days": sum(1 for bar in bars if bar.limit_locked),
         },
@@ -207,16 +217,18 @@ def adtv_shares_reading(window: FieldWindow) -> FieldReading:
     volumes = [
         None if bar.volume is None else float(bar.volume) for bar in bars
     ]
-    average = average_traded_money(volumes)
+    average = average_over_sessions(volumes)
     if average is None:
-        return FieldReading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
+        return FieldReading(
+            value=None, refusal=SignalIssue.TRADED_FIGURE_NOT_STORED
+        )
 
     measured = [value for value in volumes if value is not None]
     return FieldReading(
         value=average,
         extras={
-            "standard_error": _mean_standard_error(measured),
-            "adtv_basis": "shares",
+            "standard_error": mean_standard_error(measured),
+            "adtv_basis": Denomination.SHARES.value,
             "sessions": len(bars),
             "quantities_comparable": window.health.quantities_comparable,
         },
@@ -250,12 +262,15 @@ def amihud_illiquidity_reading(window: FieldWindow) -> FieldReading:
         terms.append(move / (traded / ONE_BILLION_VND))
 
     if not terms:
-        return FieldReading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
+        # Every session in the window traded nothing, so there is no price move
+        # per unit of money to average. Not short history — the sessions are all
+        # there and each of them is the same fact about the symbol.
+        return FieldReading(value=None, refusal=SignalIssue.NO_TRADED_SESSIONS)
 
     return FieldReading(
         value=sum(terms) / len(terms),
         extras={
-            "standard_error": _mean_standard_error(terms),
+            "standard_error": mean_standard_error(terms),
             "measured_sessions": len(terms),
             "zero_volume_days": zero_volume,
             "limit_lock_days": sum(1 for bar in bars if bar.limit_locked),
@@ -286,7 +301,7 @@ def adtv_percentile_reading(window: FieldWindow) -> FieldReading:
             "n": standing.n,
             "as_of": standing.as_of.isoformat(),
             "adtv_vnd": standing.average_value_vnd,
-            "adtv_basis": "money",
+            "adtv_basis": Denomination.MONEY.value,
             "sessions": min(len(window.frame.bars), LIQUIDITY_SESSIONS),
         },
     )
@@ -315,12 +330,17 @@ def band_pressure_reading(window: FieldWindow) -> FieldReading:
     served over those and the answer is degraded under the same reason.
     """
     bars = _recent(window.frame, BAND_PRESSURE_SESSIONS)
+    if not bars:
+        return FieldReading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
+
     decided = [bar for bar in bars if bar.band is not None]
-    undecided = len(bars) - len(decided)
-    reason = _undecided_reason(window)
+    undecided = [bar for bar in bars if bar.band is None]
+    reason = _undecided_reason(undecided)
 
     if not decided:
-        return FieldReading(value=None, refusal=reason)
+        # Every bar without a band carries the reason it has none, so a window
+        # nobody could judge always has one to refuse under.
+        return FieldReading(value=None, refusal=reason or SignalIssue.EXCHANGE_UNKNOWN)
 
     locked = sum(1 for bar in decided if bar.limit_locked)
     at_ceiling = sum(1 for bar in decided if _closed_at(bar, ceiling=True))
@@ -342,33 +362,35 @@ def band_pressure_reading(window: FieldWindow) -> FieldReading:
             "closes_at_floor": at_floor,
             "distance_to_ceiling_pct": distances[0],
             "distance_to_floor_pct": distances[1],
-            "anchor_basis": _anchor_basis(window),
+            "anchor_basis": (
+                None if (basis := window.health.anchor_basis) is None else basis.value
+            ),
             "decided_days": len(decided),
-            "undecided_days": undecided,
+            "undecided_days": len(undecided),
             "sessions": len(bars),
         },
         degraded_reason=reason if undecided else None,
     )
 
 
-def _undecided_reason(window: FieldWindow) -> SignalIssue:
-    """Why sessions in this window had no band, in the one Signal Issue vocabulary.
+def _undecided_reason(bars: Sequence[Bar]) -> SignalIssue | None:
+    """Why these sessions had no band, in the one Signal Issue vocabulary.
 
-    Taken from Window Health rather than guessed from the absent band: the
-    gateway is what judged the sessions and it recorded which input it was short
-    of. Several reasons in one window collapse to the first in sorted order,
-    which is stable across runs and is the code a surface renders one sentence
-    for.
+    Read off the bars themselves rather than off Window Health. The gateway
+    pairs an absent band with the reason it is absent on the bar, so the field
+    looking at a session is the thing that knows why that session could not be
+    judged — asking the window instead would be asking a question about the
+    whole window to answer one about a session, and the two disagree the moment
+    a window holds more than one kind of unjudgeable session.
+
+    Several reasons collapse to the first in sorted order, which is stable
+    across runs and is the code a surface renders one sentence for.
     """
-    reasons = window.health.band_undecided_reasons
-    return reasons[0] if reasons else SignalIssue.ANCHOR_NOT_STORED
-
-
-def _anchor_basis(window: FieldWindow) -> str | None:
-    regime = window.health.band_regime
-    if regime is None or regime.anchor_basis is None:
-        return None
-    return regime.anchor_basis.value
+    reasons = sorted(
+        {bar.band_undecided_reason for bar in bars if bar.band_undecided_reason},
+        key=lambda issue: issue.value,
+    )
+    return reasons[0] if reasons else None
 
 
 def _closed_at(bar: Bar, *, ceiling: bool) -> bool:
@@ -385,7 +407,7 @@ def _closed_at(bar: Bar, *, ceiling: bool) -> bool:
     if close is None:
         return False
     limit = bar.band.ceiling if ceiling else bar.band.floor
-    return math.isclose(close, float(limit), rel_tol=1e-9)
+    return math.isclose(close, float(limit), rel_tol=CLOSE_AT_BAND_TOLERANCE)
 
 
 def _distances(bar: Bar) -> tuple[float | None, float | None]:
@@ -464,6 +486,17 @@ class ReversionGauge:
     censored_paths: int
     baseline_sessions: int
 
+    @property
+    def reaches_window(self) -> bool:
+        """Whether the decay is slower than the window it was measured over.
+
+        The line the two fields part company on. The half-life is still a
+        finite estimate here and is served; the z is not, because a deviation
+        that takes longer than the whole window to half-decay makes the
+        window's own mean the thing the z is measuring.
+        """
+        return self.half_life >= MEAN_REVERSION_SESSIONS
+
 
 def _gauge(frame: BarFrame) -> tuple[ReversionGauge | None, SignalIssue | None]:
     """Fit the gauge, or say in one vocabulary why the window has none."""
@@ -484,10 +517,9 @@ def _gauge(frame: BarFrame) -> tuple[ReversionGauge | None, SignalIssue | None]:
         return None, SignalIssue.BASELINE_DISPERSION_ZERO
 
     half_life = half_life_of(fit.phi)
-    if half_life is None or half_life >= MEAN_REVERSION_SESSIONS:
-        # At or past the window there is no reversion in the sample to measure,
-        # and a z over it would be describing where the window happened to
-        # start. Suppressed rather than served with a caveat.
+    if half_life is None:
+        # φ̂ at or above one: the series does not revert at all and the estimate
+        # is unbounded rather than merely large. Neither field has a number.
         return None, SignalIssue.HALF_LIFE_EXCEEDS_WINDOW
 
     interval, censored = _half_life_interval(series)
@@ -567,11 +599,16 @@ def _gauge_extras(gauge: ReversionGauge, frame: BarFrame) -> dict[str, object]:
     one fit: a z quoted without the half-life that sanctioned it, or a half-life
     quoted without the settlement floor it falls under, is the half of the
     answer that reads as more certain than it is.
+
+    **The z is not in here**, and its absence is the suppression rule holding.
+    The z field's own value is the z; republishing it in the shared extras would
+    hand a reader the number through the half-life field on exactly the windows
+    where the z field refused to give it.
     """
     return {
         "confidence_interval": gauge.interval,
         "half_life_sessions": gauge.half_life,
-        "trailing_z": gauge.z,
+        "half_life_reaches_window": gauge.reaches_window,
         "ar1_phi": gauge.phi,
         "settlement_floor_sessions": SETTLEMENT_FLOOR_SESSIONS,
         # Under T+2 the shares are not deliverable until the move has already
@@ -598,6 +635,16 @@ def mean_reversion_z_reading(window: FieldWindow) -> FieldReading:
     gauge, reason = _gauge(window.frame)
     if gauge is None:
         return FieldReading(value=None, refusal=reason)
+    if gauge.reaches_window:
+        # Suppressed rather than served with a caveat, because a number with a
+        # caveat beside it is a number that gets read. The half-life field is
+        # still served here: it is a finite estimate and it is the estimate that
+        # explains why this one is missing.
+        return FieldReading(
+            value=None,
+            refusal=SignalIssue.HALF_LIFE_EXCEEDS_WINDOW,
+            extras=_gauge_extras(gauge, window.frame),
+        )
     return FieldReading(value=gauge.z, extras=_gauge_extras(gauge, window.frame))
 
 

@@ -137,13 +137,20 @@ class Bar:
     limit_lock: LimitLock
     # The two prices this session was permitted to trade between, in the **raw**
     # terms the exchange published them in — the band is defined on a tick grid
-    # and an adjusted price does not sit on one (``price_band``). ``None`` where
-    # the band could not be decided at all, which is every UPCOM session (its
-    # anchor is not stored) and every session whose predecessor the store does
-    # not hold. Kept beside the lock verdict rather than recomputed downstream,
-    # because the anchor it was measured from is the previous session's raw
-    # close and only the gateway still has it.
+    # and an adjusted price does not sit on one (``price_band``). Kept beside the
+    # lock verdict rather than recomputed downstream, because the anchor it was
+    # measured from is the previous session's raw close and only the gateway
+    # still has it.
+    #
+    # ``band`` and ``band_undecided_reason`` move together and exactly one of
+    # them is set on a served bar: a session either has the band it was judged
+    # against, or the reason nobody could decide one — every UPCOM session,
+    # whose anchor is not stored; every session whose predecessor the store does
+    # not hold; and every ex-date whose band was measured from a pre-adjustment
+    # close. A field reading an absent band therefore never has to guess why,
+    # which is the difference between a named refusal and a plausible one.
     band: BandLimits | None = None
+    band_undecided_reason: SignalIssue | None = None
     # What the provider valued the whole company at on this session. Money, and
     # therefore left alone by the rebasing above for the same reason traded
     # value is: a share-count change moves the count and the price together and
@@ -302,6 +309,18 @@ class WindowHealth:
         exercise ratio carries and a dividend record does not.
         """
         return SignalIssue.VOLUME_BASIS_BREAK not in self.degradations
+
+    @property
+    def anchor_basis(self) -> BandAnchorBasis | None:
+        """What this window's band was a percentage of, where a board is known.
+
+        Reached through one name rather than walked to through the regime by
+        every field that wants it: the walk is three optionals deep and a caller
+        that got one of them wrong would report the wrong board's convention.
+        """
+        if self.band_regime is None:
+            return None
+        return self.band_regime.anchor_basis
 
     @property
     def limit_lock_degradation(self) -> SignalIssue | None:
@@ -560,7 +579,13 @@ def _read_bands(
             # lock — its anchor is the pre-adjustment close, so the band it was
             # measured against was never this session's band, and neither the
             # verdict nor the limits it was measured from describe this session.
+            # Recorded as undecided under the reason that made it so, like every
+            # other session nobody could judge: left out, Window Health would
+            # report a window with fewer unjudged sessions than it has, and a
+            # field reading the bars would find an absent band the health does
+            # not account for.
             bands[day] = _unmeasured(reading)
+            undecided[day] = SignalIssue.PRICE_MOVE_EXCEEDS_BAND
             continue
 
         if reading.degraded_reason is not None:
@@ -671,9 +696,27 @@ def _frame(
                     bands[day].lock if day in bands else LimitLock.INDETERMINATE
                 ),
                 band=bands[day].limits if day in bands else None,
+                band_undecided_reason=_undecided_reason(bands.get(day)),
             )
         )
     return BarFrame(symbol=symbol, bars=tuple(bars))
+
+
+def _undecided_reason(reading: BandReading | None) -> SignalIssue | None:
+    """Why this session has no band, or nothing where it has one.
+
+    The pairing ``Bar`` promises: a served bar carries either its band or the
+    reason it has none, never neither. A session the band reader never reached
+    is not one this gateway can produce — it walks the same days the frame is
+    built from — but it is named rather than left null, because an absent band
+    with no reason is exactly the state a field downstream would have to guess
+    at.
+    """
+    if reading is None:
+        return SignalIssue.MISSING_TARGET_SESSION
+    if reading.limits is not None:
+        return None
+    return reading.degraded_reason or SignalIssue.EXCHANGE_UNKNOWN
 
 
 def _scaled(price: float | None, factor: Decimal) -> float | None:
@@ -729,7 +772,7 @@ def _adtv_standing(
     if not days:
         return None
 
-    mine = average_traded_money(usable[day].total_value_vnd for day in days)
+    mine = average_over_sessions(usable[day].total_value_vnd for day in days)
     if mine is None:
         return None
 
@@ -761,23 +804,25 @@ def _peer_average(
     days: Sequence[date],
 ) -> float | None:
     """One peer's average traded money over exactly these sessions."""
-    return average_traded_money(
+    return average_over_sessions(
         None if (row := held.get(day)) is None else row.total_value_vnd
         for day in days
     )
 
 
-def average_traded_money(values: Iterable[float | None]) -> float | None:
-    """Average traded money across these sessions, or nothing if any is missing.
+def average_over_sessions(values: Iterable[float | None]) -> float | None:
+    """The average across exactly these sessions, or nothing if any is missing.
 
     All or nothing on purpose: a symbol that traded on twelve of the twenty days
     has an average over a different stretch of market than the symbol beside it,
     and ranking the two together would present them as comparable.
 
-    Shared with the liquidity field rather than spelled twice, because the
-    gateway measures this over rows it has just loaded while the field measures
-    it over the bars it was served, and the two have to be the same ADTV or the
-    percentile beside a number would be ranking something else.
+    Deliberately **unit-neutral**. The gateway averages traded money over rows
+    it has just loaded while the liquidity fields average money over one window
+    and shares over another, and all of them need the same all-or-nothing rule;
+    a helper named for one of the two denominations would be read as licence to
+    call it on the other, which is the swap the money/quantity naming split
+    exists to prevent. Each caller states its own unit.
     """
     collected: list[float] = []
     for value in values:

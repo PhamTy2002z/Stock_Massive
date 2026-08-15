@@ -80,6 +80,7 @@ from datetime import date
 
 from .bars import Bar, BarFrame
 from .fields import FieldReading, FieldWindow
+from .moments import sample_variance
 from .issues import SignalIssue
 from .volatility import garman_klass_variance
 
@@ -235,7 +236,7 @@ def rogers_satchell_variance(bars: Sequence[Bar]) -> float | None:
 def close_to_close_variance(bars: Sequence[Bar]) -> float | None:
     """The textbook estimator, kept as the baseline the others are efficient against."""
     returns = _close_returns(bars)
-    return _sample_variance(returns)
+    return sample_variance(returns)
 
 
 def yang_zhang_variance(bars: Sequence[Bar]) -> float | None:
@@ -255,8 +256,8 @@ def yang_zhang_variance(bars: Sequence[Bar]) -> float | None:
         math.log(bar.close / bar.open)  # type: ignore[arg-type]
         for bar in bars[1:]
     ]
-    v_overnight = _sample_variance(overnight)
-    v_open_to_close = _sample_variance(open_to_close)
+    v_overnight = sample_variance(overnight)
+    v_open_to_close = sample_variance(open_to_close)
     v_rs = rogers_satchell_variance(bars[1:])
     if v_overnight is None or v_open_to_close is None or v_rs is None:
         return None
@@ -680,7 +681,7 @@ def sharpe_reading(window: FieldWindow) -> FieldReading:
         return FieldReading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
 
     mean = sum(returns) / len(returns)
-    variance = _sample_variance(returns)
+    variance = sample_variance(returns)
     if variance is None or variance <= 0:
         return FieldReading(value=None, refusal=SignalIssue.BASELINE_DISPERSION_ZERO)
 
@@ -782,14 +783,6 @@ def _close_returns(bars: Sequence[Bar]) -> list[float]:
     return [
         math.log(later / earlier) for earlier, later in zip(closes, closes[1:])
     ]
-
-
-def _sample_variance(values: Sequence[float]) -> float | None:
-    """The mean-adjusted sample variance, or nothing below two observations."""
-    if len(values) < 2:
-        return None
-    mean = sum(values) / len(values)
-    return sum((item - mean) ** 2 for item in values) / (len(values) - 1)
 
 
 def _component(variance: float | None) -> float | None:
