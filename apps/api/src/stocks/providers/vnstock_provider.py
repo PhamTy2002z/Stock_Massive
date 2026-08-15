@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -108,6 +108,30 @@ ROSTER_EXCHANGES = (Exchange.HOSE, Exchange.HNX, Exchange.UPCOM)
 LISTING_FIELDS = ("symbol", "type")
 LISTING_EQUITY_TYPE = "STOCK"
 LISTING_NAME_FIELDS = ("organ_short_name", "organ_name")
+
+# What the market-wide ICB list must carry, and the level read out of it. This
+# is the VCI shape, which is the source this system configures by default: one
+# row per symbol *per level*, so the level is a column to filter on rather than
+# something to assume — level 1 puts banks, insurers and developers together,
+# and levels 3 and 4 split each of them again. Level 2 is where "a bank" is one
+# code, which is the level the Analysis Field Profile's industry blocks are
+# keyed on (spec 0003 §8.4).
+#
+# The other source answers this call with `industry_code` / `industry_name`,
+# which its own documentation says are not ICB (see the shape
+# `src/stocks/shared/industries.py` was written against). A frame without these
+# four columns therefore classifies nobody rather than being read as if it
+# carried codes it does not.
+ICB_FIELDS = ("symbol", "icb_level", "icb_code", "icb_name")
+ICB_LEVEL = 2
+
+# The bounds of the register's columns, mirroring `ListingRoster.icb_code` and
+# `icb_name`. A code longer than a supersector code is dropped rather than
+# truncated: cutting `83000` down to `8300` would invent a classification the
+# provider never gave. A name is descriptive and nothing branches on it, so it
+# is bounded rather than dropped.
+ICB_CODE_LENGTH = 4
+ICB_NAME_LENGTH = 100
 
 # What an event row must carry, and the category that marks a corporate action.
 # The same feed answers with AGMs, insider dealings and additional listings; only
@@ -354,7 +378,7 @@ class VnstockReferenceProvider(VnstockProviderBase):
 class VnstockListingRosterProvider(VnstockProviderBase):
     """Read the whole market's listing register, one board per request.
 
-    Three requests for the entire market is the cheapest thing this adapter does,
+    Four requests for the entire market is the cheapest thing this adapter does,
     which matters because the census that follows it costs two requests per
     symbol across roughly 1,600 of them.
 
@@ -363,6 +387,13 @@ class VnstockListingRosterProvider(VnstockProviderBase):
     board that failed to answer would delist every company on it. Failing the
     whole read is recoverable; a roster wrong about who is still trading is not
     noticed until a cohort has already been rebuilt around it.
+
+    The fourth request classifies the market, and it is the opposite kind of
+    read: market-wide, best-effort, and never able to fail the refresh. It is
+    made here because this is the only pass that reads every listed company at
+    once, and because the nightly Analysis pipeline that needs the answer may
+    not call a Provider Source at all (spec 0003 §8.1) — an industry it cannot
+    read from a stored row is an industry it does not have.
     """
 
     def __init__(
@@ -376,27 +407,99 @@ class VnstockListingRosterProvider(VnstockProviderBase):
 
     def fetch_listing_roster(self) -> Sequence[ListingEntry]:
         listing = self._listing_factory(self._vnstock_source)
+        boards = [
+            (exchange, self._read_board(listing, exchange))
+            for exchange in ROSTER_EXCHANGES
+        ]
+        # Read after the boards and never before. The register is what a refresh
+        # has to come back with; spending the allowance on the classification of
+        # a market whose boards then failed to answer buys nothing.
+        classifications = self._read_classifications(listing)
+
         entries: list[ListingEntry] = []
         seen: set[str] = set()
-
-        for exchange in ROSTER_EXCHANGES:
-            frame = self._read(
-                lambda board=exchange: listing.symbols_by_exchange(exchange=board.value),
-                f"vnstock listing roster fetch failed for {exchange.value}",
-            )
-            if frame is None or getattr(frame, "empty", True):
-                raise VnstockProviderError(
-                    f"vnstock returned no listings for {exchange.value}"
-                )
-            entries.extend(self._to_entries(frame, exchange, seen))
+        for exchange, frame in boards:
+            entries.extend(self._to_entries(frame, exchange, seen, classifications))
 
         return tuple(entries)
+
+    def _read_board(self, listing: Any, exchange: Exchange) -> pd.DataFrame:
+        frame = self._read(
+            lambda: listing.symbols_by_exchange(exchange=exchange.value),
+            f"vnstock listing roster fetch failed for {exchange.value}",
+        )
+        if frame is None or getattr(frame, "empty", True):
+            raise VnstockProviderError(
+                f"vnstock returned no listings for {exchange.value}"
+            )
+        return frame
+
+    def _read_classifications(self, listing: Any) -> dict[str, tuple[str, str | None]]:
+        """The market's ICB level-2 classification, or nothing at all.
+
+        A failed read answers with an empty mapping rather than raising: the
+        boards have already been read, and the store leaves a stored
+        classification alone when a refresh carries none, so carrying on costs a
+        classification that is a week old rather than a register that is.
+
+        An exhausted allowance is the exception, and it travels. It is not a
+        fact about the classification at all — it says the account has nothing
+        left to spend, and the census that follows this refresh costs two
+        requests per symbol across the whole market. Swallowed here, it would be
+        met again immediately with no warning that it was already known.
+
+        A frame this adapter does not recognise classifies nobody. The other
+        vnstock source answers this call with codes of its own that are
+        explicitly not ICB, and reading those as level-2 codes would select an
+        industry block off a number that means something else entirely.
+        """
+        try:
+            frame = self._read(
+                lambda: listing.symbols_by_industries(),
+                "vnstock ICB classification fetch failed",
+            )
+        except VnstockUnavailable:
+            raise
+        except (VnstockProviderError, VnstockUnsupported) as exc:
+            logger.warning(
+                "vnstock ICB classification unavailable, refreshing the register "
+                "without it: %s",
+                exc,
+            )
+            return {}
+
+        if frame is None or getattr(frame, "empty", True):
+            logger.warning("vnstock returned no ICB classification for the market")
+            return {}
+
+        rows = lower_cased_columns(frame)
+        missing = missing_fields(rows, ICB_FIELDS)
+        if missing:
+            logger.warning(
+                "vnstock ICB classification is missing fields %s; refreshing the "
+                "register without it",
+                ", ".join(missing),
+            )
+            return {}
+
+        level_two = rows[pd.to_numeric(rows["icb_level"], errors="coerce") == ICB_LEVEL]
+        classified: dict[str, tuple[str, str | None]] = {}
+        for _, row in level_two.iterrows():
+            symbol = str(row.get("symbol") or "").strip().upper()
+            code = _icb_code(row.get("icb_code"))
+            if not symbol or code is None:
+                continue
+            classified[symbol] = (code, _icb_name(row.get("icb_name")))
+
+        logger.info("ICB level-2 classification read for %d symbols", len(classified))
+        return classified
 
     def _to_entries(
         self,
         frame: pd.DataFrame,
         exchange: Exchange,
         seen: set[str],
+        classifications: Mapping[str, tuple[str, str | None]],
     ) -> list[ListingEntry]:
         rows = lower_cased_columns(frame)
         missing = missing_fields(rows, LISTING_FIELDS)
@@ -419,6 +522,7 @@ class VnstockListingRosterProvider(VnstockProviderBase):
             if not symbol or symbol in seen:
                 continue
 
+            icb_code, icb_name = classifications.get(symbol, (None, None))
             try:
                 entries.append(
                     ListingEntry(
@@ -429,6 +533,8 @@ class VnstockListingRosterProvider(VnstockProviderBase):
                         # is the caller's comparison to make, not this adapter's.
                         is_listed=True,
                         company_name=_listing_name(row),
+                        icb_code=icb_code,
+                        icb_name=icb_name,
                     )
                 )
             except (ValidationError, StockServiceError) as exc:
@@ -813,14 +919,40 @@ def _event_date(value: Any) -> date | None:
     return stamp.date()
 
 
+def _icb_code(value: object) -> str | None:
+    """The level-2 code, or nothing — never a piece of one.
+
+    A value that does not fit a supersector code is dropped rather than cut:
+    a code is an identifier, and half of one identifies a different industry.
+    """
+    text = _text(value)
+    if text is None or len(text) > ICB_CODE_LENGTH:
+        return None
+    return text
+
+
+def _icb_name(value: object) -> str | None:
+    """The industry's name, bounded by the column that stores it.
+
+    Cut rather than dropped, unlike the code: nothing branches on the name, so
+    a long one shortened still says what it said.
+    """
+    text = _text(value)
+    return None if text is None else text[:ICB_NAME_LENGTH]
+
+
+def _text(value: object) -> str | None:
+    """A provider cell as a non-empty string, or None."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    return str(value).strip() or None
+
+
 def _listing_name(row: pd.Series) -> str | None:
     """Prefer the short trading name, fall back to the legal one, else nothing."""
     for field in LISTING_NAME_FIELDS:
-        value = row.get(field)
-        if value is None or pd.isna(value):
-            continue
-        name = str(value).strip()
-        if name:
+        name = _text(row.get(field))
+        if name is not None:
             return name
     return None
 
