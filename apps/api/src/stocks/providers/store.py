@@ -2,6 +2,7 @@
 
 import json
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
@@ -77,6 +78,40 @@ def _day_starts(day: date, after: int = 0) -> datetime:
     session and drop it.
     """
     return datetime.combine(day + timedelta(days=after), time.min, tzinfo=VN_TZ)
+
+
+def resolve_sessions(
+    rows: Iterable[ProviderSnapshot],
+    capability: Capability,
+) -> dict[datetime, ProviderSnapshot]:
+    """One row per session, out of rows that may hold two copies of one.
+
+    The Backfill window and the daily cycle overlap, so a session can arrive
+    from both sources. **The Main Source wins**: it answers with a richer
+    session than a quote history carries, and — since ``docs/adr/0006`` — the
+    two copies are on different **Price Basis** values, so which one is read
+    decides whether a window can be computed on at all rather than only how
+    detailed it is. Picking by write order instead would let a late Backfill run
+    replace a collected session with the thinner, adjusted version of it.
+
+    Rows must arrive ordered oldest-written first, which is how every caller
+    queries them: among two rows from the same source the later write then wins
+    by being seen last.
+
+    Extracted rather than repeated. Three readers need this exact rule — the
+    series a chart draws, the multi-symbol read the cross-sectional fields make,
+    and the single-symbol window ``prepare_bars()`` serves — and a second
+    spelling of it would be a second answer to "which of these two sessions is
+    the session".
+    """
+    main = main_source(capability).value
+    held: dict[datetime, ProviderSnapshot] = {}
+    for row in rows:
+        # Take this row unless a Main Source row is already holding the session.
+        standing = held.get(row.effective_at)
+        if standing is None or standing.source != main:
+            held[row.effective_at] = row
+    return held
 
 
 @dataclass(frozen=True)
@@ -289,20 +324,9 @@ class SnapshotStore:
         ).scalars()
 
         model = SNAPSHOT_MODEL_BY_CAPABILITY[capability]
-        main = main_source(capability).value
-        # One session is one point. The backfill window and the daily cycle
-        # overlap, so a session can arrive from both; the Main Source wins
-        # because it answers with a richer session than a quote history carries.
-        # Picking by write order instead would let a late backfill run replace
-        # a collected session with the thinner version of it.
-        by_session: dict[datetime, ProviderSnapshot] = {}
-        for row in rows:
-            held = by_session.get(row.effective_at)
-            # Take this row unless a Main Source row is already holding the
-            # session. Rows arrive oldest-written first, so among two from the
-            # same source the later write wins by being seen last.
-            if held is None or held.source != main:
-                by_session[row.effective_at] = row
+        # One session is one point, and which of two copies is that point is
+        # decided in one place for every reader of the store.
+        by_session = resolve_sessions(rows, capability)
 
         snapshots = tuple(
             model.model_validate(row.payload)
