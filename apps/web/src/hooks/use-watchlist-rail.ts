@@ -10,6 +10,7 @@ import {
   type Rail,
 } from "@/lib/alpha"
 import { queryKeys } from "@/lib/query-keys"
+import { STALE_TIME } from "@/lib/query-config"
 
 /**
  * The rail: this user's symbols against the session the data defines.
@@ -33,7 +34,7 @@ export function useWatchlistRail() {
   return useQuery<Rail>({
     queryKey: queryKeys.watchlistRail,
     queryFn: fetchRail,
-    staleTime: 30 * 1000,
+    staleTime: STALE_TIME.FAST,
     refetchInterval: RAIL_POLL_MS,
     refetchOnWindowFocus: true,
   })

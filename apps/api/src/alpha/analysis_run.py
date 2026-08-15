@@ -38,6 +38,7 @@ from src.stocks.shared import validate_symbol
 from src.stocks.universe import build_universe
 
 from .models import Analysis, AnalysisRun
+from .naming import session_label
 from .producer import (
     FAILURE_CODES,
     AnalysisDraft,
@@ -422,6 +423,13 @@ def request_retry(session: Session, user_id: int, symbol: str, trading_day: date
     pressed — and the ceiling is checked here so the refusal arrives before the
     queue rather than after another wasted pass.
 
+    **The last failure's reason survives being queued.** It describes the
+    attempt that happened, and that attempt is still the most recent one until a
+    new one starts — ``_begin_attempt`` clears both columns at the moment it
+    takes the run to ``producing``, which is where clearing belongs. Nulling
+    them here would leave a symbol waiting with no account of why it is waiting,
+    for as long as the queue takes to reach it.
+
     A pair that is already ready, already producing, or has never had a run is
     returned as it stands. There is nothing to retry in any of those, and
     minting a run for a symbol nobody has tried yet would jump the nightly
@@ -443,8 +451,8 @@ def request_retry(session: Session, user_id: int, symbol: str, trading_day: date
         raise AnalysisRefusal(
             reason="nothing_to_retry",
             message=(
-                f"Chưa có lượt dựng Analysis nào cho mã {normalized} ở phiên "
-                f"{trading_day.strftime('%d/%m')} để thử lại."
+                f"Chưa có lượt dựng Analysis nào cho mã {normalized} ở "
+                f"{session_label(trading_day)} để thử lại."
             ),
             status_code=404,
         )
@@ -469,9 +477,6 @@ def request_retry(session: Session, user_id: int, symbol: str, trading_day: date
         )
 
     run.status = RunStatus.PENDING.value
-    run.finished_at = None
-    run.error_code = None
-    run.error_message = None
     run.next_attempt_at = None
     session.commit()
     return RunOutcome(
@@ -479,6 +484,8 @@ def request_retry(session: Session, user_id: int, symbol: str, trading_day: date
         analysis=None,
         produced=False,
         attempts=run.attempts,
+        error_code=run.error_code,
+        error_message=run.error_message,
     )
 
 

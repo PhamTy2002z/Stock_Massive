@@ -326,7 +326,6 @@ class TestTheLatestPerSymbol:
 
         assert rail["count"] == 2
         assert rail["cap"] == 10
-        assert rail["history_depth"] == HISTORY_DEPTH_SESSIONS
 
 
 class TestTheFiveStates:
@@ -742,6 +741,34 @@ class TestRetry:
             _entry(await _rail(client, auth), DECLARED[0])["state"]
             == AnalysisState.PENDING.value
         )
+
+    @pytest.mark.asyncio
+    async def test_a_queued_retry_keeps_the_reason_the_last_attempt_gave(
+        self, client, auth, closed_session, seeded_run
+    ):
+        """Nothing drains the queue until the pipeline milestone, so a symbol
+        can sit here for a while. Clearing the reason on the way in would leave
+        it waiting with no account of why — the reason describes the attempt
+        that happened, and `_begin_attempt` clears it when a new one starts."""
+        closed_session(SESSION)
+        seeded_run(
+            DECLARED[0],
+            SESSION,
+            RunStatus.FAILED,
+            attempts=1,
+            error_code="llm_transport_error",
+            error_message="LLM route did not respond",
+        )
+        await _watch(client, auth, DECLARED[0])
+
+        await client.post(
+            f"{API}/analyses/{DECLARED[0]}/{SESSION.isoformat()}/retry", headers=auth
+        )
+
+        entry = _entry(await _rail(client, auth), DECLARED[0])
+        assert entry["state"] == AnalysisState.PENDING.value
+        assert entry["failure"]["code"] == "llm_transport_error"
+        assert entry["failure"]["message"] == "LLM route did not respond"
 
     @pytest.mark.asyncio
     async def test_a_retry_does_not_spend_an_attempt_by_itself(

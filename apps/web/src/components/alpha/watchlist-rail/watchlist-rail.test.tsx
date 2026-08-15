@@ -204,6 +204,17 @@ describe("a failed session", () => {
     expect(screen.getByText(/Đã thử 3\/3 lượt/)).toBeInTheDocument()
   })
 
+  it("keeps the reason after a retry queues it, as the previous attempt's", () => {
+    // Nothing drains the queue until the pipeline milestone, so a retried
+    // symbol waits at `pending` for a while. Dropping the reason there would
+    // leave it waiting with no account of why; keeping it red would claim
+    // something is wrong right now.
+    row({ ...failed, state: "pending" })
+
+    expect(screen.getByText(/Lượt trước: .*chưa có dữ liệu thị trường/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText("Retry FPT")).not.toBeInTheDocument()
+  })
+
   it("falls back to the reason the API sent when it does not know the code", () => {
     row({
       ...failed,

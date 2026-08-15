@@ -20,14 +20,41 @@ export async function currentAccessToken(): Promise<string | undefined> {
 }
 
 /**
+ * The rotation in flight, if there is one.
+ *
+ * The refresh token rotates: exchanging it invalidates it. The rail polls
+ * alongside history, detail and opened requests, so several of them can meet a
+ * `401` in the same instant — and without this, each would exchange the same
+ * token. The first wins, the rest are handed a token the API has already
+ * retired, and their `401` clears the cookies and signs the user out mid-poll.
+ *
+ * Process-local, which is the whole of the guarantee and worth stating: two Next
+ * instances behind a load balancer would still race. That is acceptable at this
+ * size and would need a shared lock, not a bigger variable, to fix.
+ */
+let inFlight: Promise<string | null> | null = null
+
+/**
  * Exchange the refresh cookie for a new pair, or null when there is no session.
  *
  * Only callable where cookies are writable — route handlers and server actions.
  * A rejected refresh clears the cookies: the session is genuinely over, and
  * leaving a dead refresh token behind makes every later request pay for the
  * same failed exchange.
+ *
+ * Concurrent callers share one exchange. They are asking the same question of
+ * the same cookie, so there is one answer.
  */
 export async function rotateAccessToken(): Promise<string | null> {
+  if (inFlight) return inFlight
+
+  inFlight = exchange().finally(() => {
+    inFlight = null
+  })
+  return inFlight
+}
+
+async function exchange(): Promise<string | null> {
   const refreshToken = await getRefreshToken()
   if (!refreshToken) return null
 
