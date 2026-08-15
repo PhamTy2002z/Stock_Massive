@@ -22,6 +22,7 @@ from src.stocks.providers.contracts import (
 from src.stocks.providers.normalize import VN_TZ
 from src.stocks.providers.vnstock_provider import (
     RequestPacer,
+    VnstockCorporateActionProvider,
     VnstockFundamentalProvider,
     VnstockMarketHistoryProvider,
     VnstockProviderError,
@@ -742,11 +743,178 @@ class TestFundamentalRefusal:
             provider.fetch_fundamentals(["HPG"])
 
 
+class FakeCompany:
+    """Stands in for ``Company(symbol=..., source=...)``, counting its reads."""
+
+    def __init__(self, frame: pd.DataFrame | Exception):
+        self.frame = frame
+        self.calls = 0
+
+    def events(self):
+        self.calls += 1
+        if isinstance(self.frame, Exception):
+            raise self.frame
+        return self.frame
+
+
+def event_frame(rows: list[dict]) -> pd.DataFrame:
+    """The columns a VCI event feed comes back with, as measured in Aug 2026."""
+    return pd.DataFrame(rows)
+
+
+def acb_events() -> pd.DataFrame:
+    """ACB's 2025 ex-date beside two rows that are not corporate actions.
+
+    The two extras are the point of the fixture: the same feed answers with
+    annual general meetings and director dealings, and a table whose whole
+    purpose is that everything in it may be reasoned about must not hold them.
+    """
+    return event_frame(
+        [
+            {
+                "event_code": "DIV",
+                "event_title_en": "Cash Dividend - Year 2024 - 1,000 VND",
+                "public_date": "2025-05-16",
+                "record_date": "2025-05-26",
+                "exright_date": "2025-05-23",
+                "value_per_share": 1000.0,
+                "exercise_ratio": 0.10,
+                "category": "DIVIDEND",
+            },
+            {
+                "event_code": "ISS",
+                "event_title_en": "Share Issue - Stock dividend ratio 15.0%",
+                "public_date": "2025-05-16",
+                "record_date": "2025-05-26",
+                "exright_date": "2025-05-23",
+                "value_per_share": float("nan"),
+                "exercise_ratio": 0.15,
+                "category": "DIVIDEND",
+            },
+            {
+                "event_code": "AGME",
+                "event_title_en": "ACB - Holds 2026 AGM",
+                "public_date": "2026-03-06",
+                "record_date": "2026-03-24",
+                "exright_date": "2026-03-23",
+                "value_per_share": float("nan"),
+                "exercise_ratio": float("nan"),
+                "category": "SHAREHOLDER_MEETING",
+            },
+            {
+                "event_code": "DDIND",
+                "event_title_en": "Nguyen Thu Lan - Subscribe to Buy 800,000 ACB shares",
+                "public_date": "2025-11-04",
+                "record_date": float("nan"),
+                "exright_date": float("nan"),
+                "value_per_share": float("nan"),
+                "exercise_ratio": float("nan"),
+                "category": "MAJOR_SHAREHOLDER_TRADING",
+            },
+        ]
+    )
+
+
+def action_provider(company: FakeCompany) -> VnstockCorporateActionProvider:
+    return VnstockCorporateActionProvider(
+        company_factory=lambda symbol, source: company,
+        pacer=RequestPacer(quota_per_minute(""), sleep=lambda seconds: None),
+        now=lambda: NOW,
+    )
+
+
+class TestCorporateActionNormalization:
+    def test_only_the_rows_that_move_a_price_are_kept(self):
+        company = FakeCompany(acb_events())
+
+        events = action_provider(company).fetch_corporate_actions("ACB")
+
+        assert [event.event_code for event in events] == ["DIV", "ISS"]
+
+    def test_the_declared_terms_arrive_unchanged(self):
+        """Both columns, exactly as given, with nothing reconciled here.
+
+        The cash row's 0.10 is 1,000 VND against the 10,000 VND par rather than a
+        share ratio, and this adapter is deliberately not the place that knows
+        it: interpreting here would put the provider's wording and the system's
+        arithmetic in two files that can drift apart.
+        """
+        company = FakeCompany(acb_events())
+
+        cash, stock = action_provider(company).fetch_corporate_actions("ACB")
+
+        assert (cash.exercise_ratio, cash.value_per_share) == (0.10, 1000.0)
+        assert (stock.exercise_ratio, stock.value_per_share) == (0.15, None)
+        assert cash.ex_date == date(2025, 5, 23)
+
+    def test_a_null_ex_date_is_carried_rather_than_refused(self):
+        """TCB's real 2026 bonus issue: a ratio, a public date, and no ex-date.
+
+        Dropping it would be the tidier table and the worse answer — an action
+        nobody knows the date of is exactly what makes a window unadjustable.
+        """
+        company = FakeCompany(
+            event_frame(
+                [
+                    {
+                        "event_code": "ISS",
+                        "event_title_en": "Share Issue - Bonus Issue ratio 60.0%",
+                        "public_date": "2026-05-14",
+                        "record_date": float("nan"),
+                        "exright_date": float("nan"),
+                        "value_per_share": float("nan"),
+                        "exercise_ratio": 0.6,
+                        "category": "DIVIDEND",
+                    }
+                ]
+            )
+        )
+
+        (event,) = action_provider(company).fetch_corporate_actions("TCB")
+
+        assert event.ex_date is None
+        assert event.public_date == date(2026, 5, 14)
+        assert event.exercise_ratio == 0.6
+
+    def test_a_company_with_no_events_is_not_a_failed_read(self):
+        company = FakeCompany(pd.DataFrame())
+
+        assert action_provider(company).fetch_corporate_actions("ACB") == ()
+
+    def test_a_layout_without_the_fields_is_refused_outright(self):
+        """A missing column is true for every symbol, not for this one.
+
+        Skipping symbol by symbol would end in an empty table that reads like a
+        market with no corporate actions in it.
+        """
+        company = FakeCompany(event_frame([{"event_code": "DIV", "category": "DIVIDEND"}]))
+
+        with pytest.raises(VnstockProviderError, match="missing fields"):
+            action_provider(company).fetch_corporate_actions("ACB")
+
+    def test_the_feed_is_read_once_per_symbol(self):
+        """One request per symbol is what makes a Universe pass affordable."""
+        company = FakeCompany(acb_events())
+
+        action_provider(company).fetch_corporate_actions("ACB")
+
+        assert company.calls == 1
+
+
 class TestSourceOwnership:
     """Each adapter serves the capability the Main/Cover table grants it."""
 
     def test_reference_is_served_by_the_source_it_claims(self):
         assert VnstockReferenceProvider.source is main_source(Capability.REFERENCE)
+
+    def test_corporate_actions_come_from_the_reference_source(self):
+        """The only source with a corporate action feed at all, and it is named.
+
+        The FiinQuant free tier has no such feed, so there is no source choice
+        here — but leaving that implicit would make a later fallback look
+        available.
+        """
+        assert VnstockCorporateActionProvider.source is main_source(Capability.REFERENCE)
 
     def test_fundamental_is_served_by_the_source_it_claims(self):
         assert VnstockFundamentalProvider.source is main_source(Capability.FUNDAMENTAL)
@@ -811,6 +979,25 @@ class TestAgainstTheLiveProvider:
         assert shares.share_type is ShareType.LISTED
         assert shares.value > 1_000_000_000
         assert snapshot.current_foreign_room <= snapshot.total_foreign_room
+
+    @pytest.mark.network
+    def test_the_event_feed_still_carries_the_terms_of_an_action(self):
+        """The columns every fake event frame above is copied from.
+
+        ACB pays a cash dividend and a stock dividend on one ex-date every year,
+        so this is the shape that has to keep arriving: two rows, one with a
+        payment and one with a ratio.
+        """
+        provider = VnstockCorporateActionProvider()
+
+        events = provider.fetch_corporate_actions("ACB")
+
+        assert events
+        assert {event.event_code for event in events} <= {"DIV", "ISS"}
+        cash = [event for event in events if event.event_code == "DIV"]
+        assert cash and all(event.value_per_share for event in cash)
+        issues = [event for event in events if event.event_code == "ISS"]
+        assert issues and all(event.exercise_ratio for event in issues)
 
     @pytest.mark.network
     def test_statements_still_arrive_in_the_layout_this_adapter_reads(self):

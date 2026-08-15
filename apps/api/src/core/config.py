@@ -124,6 +124,22 @@ class Settings(BaseSettings):
     backfill_depth_days: int = 10 * 365
     backfill_main_source_days: int = 5 * 365
 
+    # Corporate Actions — nạp sự kiện quyền của Universe
+    # (src/stocks/corporate_action_collector.py, docs/adr/0006). Nhịp chậm vì
+    # sự kiện quyền diễn ra vài lần một năm, không phải mỗi phiên: một request
+    # cho mỗi mã, cả Universe gọn trong một lần chạy dưới hạn mức vnstock.
+    #
+    # Bật mặc định như Collector: Universe rỗng thì không có gì để nạp, còn khi
+    # đã khai thì đây là đầu vào duy nhất của việc điều chỉnh giá lúc đọc — thiếu
+    # nó, mọi cửa sổ chứa một ex-date đều bị từ chối.
+    #
+    # Sáng thứ Bảy 04:00: tránh khung census Chủ nhật 02:00 và lần thử lại 03:00
+    # hằng ngày, vì cả ba tiêu cùng một hạn mức vnstock.
+    corporate_actions_enabled: bool = True
+    corporate_actions_weekday: int = 5  # Thứ Bảy
+    corporate_actions_hour: int = 4
+    corporate_actions_minute: int = 0
+
     # Warm-up — nạp lại cửa sổ tín hiệu gần đây cho một mã (src/stocks/warmup.py).
     # 25 phiên: một Volume Spike cần 20 phiên nền cộng phiên đích, phần dư để
     # một phiên nhà cung cấp chưa kịp bổ sung không làm mã đó thiếu nền.

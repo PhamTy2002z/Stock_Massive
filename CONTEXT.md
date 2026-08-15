@@ -57,9 +57,13 @@ An event that changes a symbol's share count or its reference price at one
 ex-date — a split, a bonus or share dividend, a rights issue, a cash dividend —
 carrying the exercise ratio a share-count change needs, which a dividend record
 alone does not. It is `confirmed` only once a raw price gap in the store
-corroborates its ex-date, and an `unconfirmed` one may not drive arithmetic. A
-share-count change breaks the comparability of traded quantity; a cash dividend
-does not, and traded money survives both.
+corroborates its ex-date — a gap *downward*, since an entitlement is taken out of
+the share and never added to it — and an `unconfirmed` one may not drive
+arithmetic. A confirmed action can still be unusable: a rights issue's
+subscription price is not in the reference provider's feed, so it carries
+`corporate_action_terms_incomplete` rather than a factor. A share-count change
+breaks the comparability of traded quantity; a cash dividend does not, and traded
+money survives both.
 _Avoid_: dividend, event, split
 
 **Adjustment Factor**:
@@ -353,8 +357,9 @@ ordinary and complete, such as `missing_target_session`,
 `insufficient_history`, `recently_inactive`, `cohort_warming`,
 `lagging_market_data`, `stale_market_data`, `ranking_unavailable`,
 `mixed_price_basis`, `unadjustable_price_basis`, `unexplained_price_gap`,
-`volume_basis_break`, or `unconfirmed_corporate_action`. It is domain provenance,
-not an HTTP or infrastructure error.
+`volume_basis_break`, `unconfirmed_corporate_action`, or
+`corporate_action_terms_incomplete`. It is domain provenance, not an HTTP or
+infrastructure error.
 _Avoid_: error message, warning text, exception
 
 **Recently Inactive**:

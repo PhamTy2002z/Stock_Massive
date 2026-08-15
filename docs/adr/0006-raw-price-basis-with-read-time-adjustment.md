@@ -149,6 +149,37 @@ symbol's exchange regime for that session — which `#39` already fixed, includi
 the HNX→HOSE migrations that change the regime mid-history. How the detector is
 written stays with `#37`'s hazard list; this ADR only settles that it reads raw.
 
+## Measured while implementing this, and where it changed the shape
+
+Three things the live `Company(source='VCI').events()` feed turned out to be, none
+of them visible when the decision above was written. Recorded here rather than in
+a new decision because none of them reverses anything; they narrow it.
+
+- **`(symbol, exright_date, event_code)` is not a key.** MBB's 2026-08-11 ex-date
+  carries two `ISS` rows — a 15% stock dividend and a 10% rights issue — so the
+  stored identity adds the *kind* of the issue. The cost is that identity now
+  depends on wording the provider controls: a reworded title that reclassifies a
+  row forks a duplicate rather than updating the row it is a re-read of. Accepted
+  over the alternative, which loses half of an adjustment that has to be computed
+  from both rows at once.
+- **A rights issue is confirmable and not adjustable.** Its reference adds the
+  money subscribers pay in — MBB's was `(24,250 + 0.10 × 10,000) ÷ 1.25` — and no
+  column in the feed carries that subscription price. It is stored, confirmed by
+  its gap like any other action, and then refuses a factor with a sixth Signal
+  Issue, `corporate_action_terms_incomplete`, which is beside
+  `unconfirmed_corporate_action` rather than a spelling of it: nothing is in
+  doubt about *whether* the action happened. So one of the four action types this
+  ADR names stays unadjustable until a source for the subscription price exists.
+- **`exercise_ratio` means two different things.** On an `ISS` row it is the
+  share ratio; on a `DIV` row it is the payment as a fraction of the 10,000 VND
+  par, so TCB's 700 VND dividend arrives as 0.07. Read by column name rather than
+  by kind, every cash dividend becomes a share-count change.
+
+The ex-date gap also has to point **downward**. An entitlement is taken out of
+the share, so a session that broke above its ceiling is a wrong anchor of some
+other kind; confirming on any out-of-band move would let a rally corroborate a
+dividend.
+
 ## Consequences
 
 The repair of the existing seam needs **no provider calls and no truncation**.

@@ -26,6 +26,7 @@ from pydantic import ValidationError
 
 from src.core.config import get_settings
 from src.core.vnstock_client import (
+    Company,
     Finance,
     Listing,
     Quote,
@@ -38,6 +39,7 @@ from src.stocks.shared.converters import quote_price_vnd
 
 from .contracts import (
     MARKET_SCHEMA_VERSION,
+    CorporateActionEvent,
     Exchange,
     FundamentalSnapshot,
     ListingEntry,
@@ -114,6 +116,29 @@ ROSTER_EXCHANGES = (Exchange.HOSE, Exchange.HNX, Exchange.UPCOM)
 LISTING_FIELDS = ("symbol", "type")
 LISTING_EQUITY_TYPE = "STOCK"
 LISTING_NAME_FIELDS = ("organ_short_name", "organ_name")
+
+# What an event row must carry, and the category that marks a corporate action.
+# The same feed answers with AGMs, insider dealings and additional listings; only
+# ``DIVIDEND`` rows carry a ratio or a payment, which is what an adjustment is
+# made of. The English title is read rather than the Vietnamese one because the
+# kind of a share issue is only in the title text, and the English wording is the
+# one this system's parsing is measured against.
+EVENT_ACTION_CATEGORY = "DIVIDEND"
+EVENT_TITLE_FIELD = "event_title_en"
+EVENT_FIELDS = (
+    "event_code",
+    "category",
+    "exright_date",
+    "public_date",
+    # The three that carry the action itself, and they are required for the same
+    # reason as the dates. A feed without the title answers with rows whose kind
+    # is unreadable; one without the terms answers with actions that can never
+    # produce a factor. Either way the table fills with rows nothing may be
+    # reasoned from, which reads like a market with no corporate actions in it.
+    EVENT_TITLE_FIELD,
+    "exercise_ratio",
+    "value_per_share",
+)
 
 
 class VnstockProviderError(RuntimeError):
@@ -208,6 +233,10 @@ def _default_finance_factory(symbol: str, source: str) -> Any:
 
 def _default_listing_factory(source: str) -> Any:
     return Listing(source=source)
+
+
+def _default_company_factory(symbol: str, source: str) -> Any:
+    return Company(symbol=symbol, source=source)
 
 
 class VnstockProviderBase:
@@ -710,6 +739,125 @@ class VnstockFundamentalProvider(VnstockProviderBase):
         except ValidationError as exc:
             logger.warning("Skipping unusable vnstock statements for %s: %s", symbol, exc)
             return None
+
+
+class VnstockCorporateActionProvider(VnstockProviderBase):
+    """Read one company's declared corporate actions from its event feed.
+
+    One request per symbol, and the feed answers with the company's whole event
+    history in one frame — annual general meetings, insider dealings, additional
+    listings and, among them, the handful of rows that actually move a price.
+    Only the ``DIVIDEND`` category is kept: an AGM is not an adjustment and a
+    director's share purchase is not either, and storing them would put rows into
+    a table whose whole purpose is that everything in it may be reasoned about.
+
+    Nothing here decides what an action *means*. The kind of a share issue lives
+    in free text and the ratio means different things by event code, both of
+    which are read in ``signals.corporate_actions`` — this adapter's job is to
+    turn a frame into records without losing or inventing a field.
+    """
+
+    def __init__(
+        self,
+        vnstock_source: str | None = None,
+        pacer: RequestPacer | None = None,
+        now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        company_factory: Callable[[str, str], Any] = _default_company_factory,
+    ) -> None:
+        super().__init__(vnstock_source=vnstock_source, pacer=pacer, now=now)
+        self._company_factory = company_factory
+
+    def fetch_corporate_actions(
+        self,
+        symbol: str,
+    ) -> Sequence[CorporateActionEvent]:
+        normalized = normalized_symbols([symbol])[0]
+        company = self._company_factory(normalized, self._vnstock_source)
+        frame = self._paced(
+            lambda: company.events(),
+            f"vnstock corporate action fetch failed for {normalized}",
+        )
+        if frame is None or getattr(frame, "empty", True):
+            # A company with no events is ordinary — a recent listing has none —
+            # and it is not the same as a failed read, which raised above.
+            return ()
+        return self._to_events(frame, normalized)
+
+    def _to_events(
+        self,
+        frame: pd.DataFrame,
+        symbol: str,
+    ) -> tuple[CorporateActionEvent, ...]:
+        rows = lower_cased_columns(frame)
+        missing = missing_fields(rows, EVENT_FIELDS)
+        if missing:
+            # A feed without these is a layout this adapter cannot read, which is
+            # true for every symbol. Skipping symbol by symbol would end in an
+            # empty table that reads like a market with no corporate actions.
+            raise VnstockProviderError(
+                f"vnstock events for {symbol} are missing fields: "
+                f"{', '.join(missing)}"
+            )
+
+        actions = rows[rows["category"].astype(str).str.upper() == EVENT_ACTION_CATEGORY]
+        events: list[CorporateActionEvent] = []
+
+        for _, row in actions.iterrows():
+            try:
+                events.append(
+                    CorporateActionEvent(
+                        symbol=symbol,
+                        event_code=str(row.get("event_code") or ""),
+                        title=str(row.get(EVENT_TITLE_FIELD) or "").strip(),
+                        ex_date=_event_date(row.get("exright_date")),
+                        record_date=_event_date(row.get("record_date")),
+                        public_date=_event_date(row.get("public_date")),
+                        exercise_ratio=_optional_float(row.get("exercise_ratio")),
+                        value_per_share=_optional_float(row.get("value_per_share")),
+                    )
+                )
+            except (ValidationError, StockServiceError) as exc:
+                # A row with no dates at all cannot be stored idempotently, and a
+                # row with no event code cannot be classified. Either costs
+                # itself; the company's other actions are still worth having.
+                logger.info(
+                    "Skipping unusable %s event row (%s): %s",
+                    symbol,
+                    row.get("event_code"),
+                    exc,
+                )
+                continue
+
+        return tuple(events)
+
+
+def _event_date(value: Any) -> date | None:
+    """Read an event date, treating every way the feed spells absence as None.
+
+    Dates arrive as ISO strings, as pandas timestamps, and as ``NaN`` — the last
+    of which is not a defect but the answer for a real row: TCB's 2026 bonus
+    issue carries a ``public_date`` and no ex-date at all.
+    """
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        # ``pd.isna`` refuses some containers; a value it cannot judge is a value
+        # to try parsing rather than one to drop.
+        pass
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        stamp = pd.to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if stamp is None or pd.isna(stamp):
+        return None
+    return stamp.date()
 
 
 def _listing_name(row: pd.Series) -> str | None:
