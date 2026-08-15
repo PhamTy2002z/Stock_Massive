@@ -44,7 +44,14 @@ from ..providers.contracts import Exchange
 from ..providers.normalize import VN_TZ
 from ..trading_day import latest_trading_day, trading_days_before
 from ..universe import Universe, build_universe
-from .bars import BarFrame, WindowHealth, prepare_bars
+from .bars import (
+    BarFrame,
+    BarPreparationContext,
+    BarProjection,
+    WindowHealth,
+    prepare_bars,
+    prepare_bars_context,
+)
 from .issues import SignalIssue
 
 logger = logging.getLogger(__name__)
@@ -233,8 +240,16 @@ def evaluate_symbols(
         return ()
 
     exchanges = _exchanges_of(session, wanted)
+    context = prepare_bars_context(session, wanted, baseline_days + 1, end=day)
     return tuple(
-        _prepare_symbol(session, symbol, day, baseline_days, exchanges)
+        _prepare_symbol(
+            session,
+            symbol,
+            day,
+            baseline_days,
+            exchanges,
+            context,
+        )
         for symbol in wanted
     )
 
@@ -245,6 +260,7 @@ def _prepare_symbol(
     day: date,
     baseline_days: int,
     exchanges: dict[str, str],
+    context: BarPreparationContext,
 ) -> SymbolReading:
     """Prepare one gateway window and turn it into a Volume Spike reading."""
     exchange = exchanges.get(symbol)
@@ -258,27 +274,16 @@ def _prepare_symbol(
         # empty cross-section prevents each symbol from resolving the Universe
         # for metadata the response never uses.
         peers=(),
+        projection=BarProjection.VOLUME,
+        context=context,
     )
     if frame is None:
         issue = health.refusal or SignalIssue.INSUFFICIENT_HISTORY
-        if issue is SignalIssue.INSUFFICIENT_HISTORY:
-            # The gateway reports a short 21-session window the same way whether
-            # the absent row is the target or one of the twenty before it. Ask
-            # the gateway for the target alone to preserve the public
-            # distinction without reopening a direct session path.
-            target_frame, target_health = prepare_bars(
-                session,
-                symbol,
-                1,
-                min_sessions=1,
-                end=day,
-                peers=(),
-            )
-            if (
-                target_frame is None
-                and target_health.refusal is SignalIssue.INSUFFICIENT_HISTORY
-            ):
-                issue = SignalIssue.MISSING_TARGET_SESSION
+        if (
+            issue is SignalIssue.INSUFFICIENT_HISTORY
+            and health.last_session != day
+        ):
+            issue = SignalIssue.MISSING_TARGET_SESSION
         return SymbolReading(symbol=symbol, exchange=exchange, issues=(issue,))
     return _read_prepared_symbol(symbol, frame, health, baseline_days, exchange)
 
@@ -514,14 +519,17 @@ def signal_cache_key(
     exchange: Exchange | None,
     cohort_version_id: int | None,
     market_generation: datetime | None,
+    corporate_action_generation: datetime | None,
 ) -> str:
-    """The six inputs an answer depends on, as one key (``docs/adr/0005``).
+    """Every input an answer depends on, as one key (``docs/adr/0005``).
 
     Every input that can change the answer is in the key, so a changed input
     lands on a different entry and no invalidation call has to be made or
     remembered. Market generation is what closes the loop: it moves whenever
     stored market data does, which makes an entry computed before a write
-    unreachable afterwards rather than merely unlikely to be read.
+    unreachable afterwards rather than merely unlikely to be read. Corporate
+    action generation does the same for the action rows now read by the bar
+    gateway.
     """
     return ":".join(
         [
@@ -531,6 +539,11 @@ def signal_cache_key(
             exchange.value if exchange else "all",
             str(cohort_version_id) if cohort_version_id is not None else "none",
             market_generation.isoformat() if market_generation else "none",
+            (
+                corporate_action_generation.isoformat()
+                if corporate_action_generation
+                else "none"
+            ),
         ]
     )
 

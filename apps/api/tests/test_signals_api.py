@@ -47,6 +47,19 @@ def serving(session) -> TestClient:
     return TestClient(app)
 
 
+class MemoryCache:
+    """The endpoint cache contract, kept local so cache identity is observable."""
+
+    def __init__(self):
+        self.values: dict[str, object] = {}
+
+    def get(self, key: str):
+        return self.values.get(key)
+
+    def set(self, key: str, value: object):
+        self.values[key] = value
+
+
 @pytest.fixture(autouse=True)
 def drop_overrides():
     yield
@@ -109,6 +122,46 @@ class TestServing:
         spike = next(item for item in body["spikes"] if item["symbol"] == MEMBERS[0])
         assert spike["ratio"] == pytest.approx(3.0)
         assert "volume_basis_break" in spike["issues"]
+
+    def test_an_action_write_makes_the_cached_answer_unreachable(self, monkeypatch):
+        session, sessions = a_market_with_a_cohort()
+        cache = MemoryCache()
+        monkeypatch.setattr("src.stocks.signals.router.volume_spikes_cache", cache)
+
+        client = serving(session)
+        first = client.get(
+            "/api/v1/signals/volume-spikes",
+            params={"scope": "profit_leaders", "threshold": 1.5},
+        ).json()
+        first_spike = next(
+            item for item in first["spikes"] if item["symbol"] == MEMBERS[0]
+        )
+        assert "volume_basis_break" not in first_spike["issues"]
+
+        CorporateActionStore(session).save(
+            CorporateActionEvent(
+                symbol=MEMBERS[0],
+                event_code="ISS",
+                title="Share Issue - Stock dividend ratio 10.0%",
+                ex_date=sessions[10],
+                record_date=sessions[11],
+                public_date=sessions[5],
+                exercise_ratio=0.10,
+                value_per_share=None,
+            ),
+            ProviderSource.VNSTOCK,
+            datetime(2026, 8, 13, 0, 0, 1, tzinfo=timezone.utc),
+        )
+
+        second = client.get(
+            "/api/v1/signals/volume-spikes",
+            params={"scope": "profit_leaders", "threshold": 1.5},
+        ).json()
+        second_spike = next(
+            item for item in second["spikes"] if item["symbol"] == MEMBERS[0]
+        )
+        assert "volume_basis_break" in second_spike["issues"]
+        assert len(cache.values) == 2
 
     def test_a_symbol_that_could_not_be_evaluated_is_named(self):
         session, sessions = a_market_with_a_cohort()

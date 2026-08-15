@@ -10,7 +10,7 @@ against is any of them being flattened into a ratio nobody can question.
 from datetime import date, datetime, time, timedelta, timezone
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -33,7 +33,10 @@ from src.stocks.providers.contracts import (
     SnapshotMetadata,
 )
 from src.stocks.providers.normalize import VN_TZ
-from src.stocks.signals.corporate_actions import CorporateActionStore
+from src.stocks.signals.corporate_actions import (
+    CorporateActionStore,
+    corporate_action_generation,
+)
 from src.stocks.signals.volume_spike import (
     BASELINE_TRADING_DAYS,
     CoverageState,
@@ -108,7 +111,7 @@ def write_sessions(
     session: Session,
     symbol: str,
     volumes: dict[date, int | None],
-    close_price: float = 20000,
+    close_price: float | None = 20000,
     change_pct: float | None = 1.5,
     source: ProviderSource = ProviderSource.FIINQUANT,
 ) -> None:
@@ -329,6 +332,60 @@ class TestComputation:
         assert reading.evaluable
         assert reading.ratio == pytest.approx(2.0)
         assert SignalIssue.VOLUME_BASIS_BREAK in reading.issues
+
+    @pytest.mark.parametrize(
+        ("source", "close_price"),
+        [
+            (ProviderSource.FIINQUANT, None),
+            (ProviderSource.VNSTOCK, 20_000),
+        ],
+    )
+    def test_price_constraints_do_not_change_a_volume_only_reading(
+        self,
+        source: ProviderSource,
+        close_price: float | None,
+    ):
+        session = open_session()
+        sessions = trading_calendar(BASELINE_TRADING_DAYS + 1)
+        volumes = {day: 1_000_000 for day in sessions}
+        volumes[sessions[-1]] = 2_000_000
+        write_sessions(
+            session,
+            "FPT",
+            volumes,
+            close_price=close_price,
+            source=source,
+        )
+
+        reading = reading_for(evaluate_symbols(session, ["FPT"], sessions[-1]), "FPT")
+
+        assert reading.evaluable
+        assert reading.ratio == pytest.approx(2.0)
+        assert reading.issues == ()
+
+    def test_a_cohort_is_prepared_in_a_bounded_number_of_queries(self):
+        session = open_session()
+        sessions = trading_calendar(BASELINE_TRADING_DAYS + 1)
+        symbols = [f"S{index:02d}" for index in range(50)]
+        for symbol in symbols:
+            write_sessions(session, symbol, {day: 1_000_000 for day in sessions})
+        session.flush()
+
+        statements = 0
+
+        def count_statement(*_args):
+            nonlocal statements
+            statements += 1
+
+        bind = session.get_bind()
+        event.listen(bind, "before_cursor_execute", count_statement)
+        try:
+            readings = evaluate_symbols(session, symbols, sessions[-1])
+        finally:
+            event.remove(bind, "before_cursor_execute", count_statement)
+
+        assert len(readings) == len(symbols)
+        assert statements <= 4
 
     def test_a_ratio_at_the_threshold_is_a_spike(self):
         session = open_session()
@@ -631,7 +688,7 @@ class TestFreshnessAndHistory:
 
 
 class TestCacheKey:
-    """Six inputs, six ways the key has to change (docs/adr/0005)."""
+    """Every stored dependency changes the cache identity (docs/adr/0005)."""
 
     BASE = dict(
         scope=SignalScope.PROFIT_LEADERS,
@@ -640,6 +697,7 @@ class TestCacheKey:
         exchange=None,
         cohort_version_id=12,
         market_generation=NOW,
+        corporate_action_generation=NOW,
     )
 
     @pytest.mark.parametrize(
@@ -651,6 +709,7 @@ class TestCacheKey:
             ("exchange", Exchange.HNX),
             ("cohort_version_id", 13),
             ("market_generation", NOW + timedelta(seconds=1)),
+            ("corporate_action_generation", NOW + timedelta(seconds=2)),
         ],
     )
     def test_each_input_produces_a_different_key(self, field: str, value):
@@ -659,5 +718,26 @@ class TestCacheKey:
 
         assert signal_cache_key(**self.BASE) != signal_cache_key(**changed)
 
-    def test_the_same_six_inputs_produce_the_same_key(self):
+    def test_the_same_inputs_produce_the_same_key(self):
         assert signal_cache_key(**self.BASE) == signal_cache_key(**dict(self.BASE))
+
+    def test_an_action_write_advances_the_action_generation(self):
+        session = open_session()
+        assert corporate_action_generation(session) is None
+
+        CorporateActionStore(session).save(
+            CorporateActionEvent(
+                symbol="FPT",
+                event_code="ISS",
+                title="Share Issue - Stock dividend ratio 10.0%",
+                ex_date=TODAY,
+                record_date=None,
+                public_date=TODAY - timedelta(days=10),
+                exercise_ratio=0.10,
+                value_per_share=None,
+            ),
+            ProviderSource.VNSTOCK,
+            NOW,
+        )
+
+        assert corporate_action_generation(session) == NOW
