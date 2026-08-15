@@ -63,6 +63,11 @@ services:
       UNIVERSE_SYMBOLS: ${UNIVERSE_SYMBOLS:-}
       COLLECTOR_ENABLED: ${COLLECTOR_ENABLED:-true}
       BACKFILL_ENABLED: ${BACKFILL_ENABLED:-false}
+      # The weekly Corporate Action load. Forwarded like the other job switches
+      # so an operator can turn it off from the environment the container
+      # actually reads — the setting defaults to on, and a switch that only
+      # exists in the settings class is one a container never sees.
+      CORPORATE_ACTIONS_ENABLED: ${CORPORATE_ACTIONS_ENABLED:-true}
       SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
       SECTOR_HISTORICAL_ENABLED: ${SECTOR_HISTORICAL_ENABLED:-false}
     volumes:
