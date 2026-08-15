@@ -163,6 +163,11 @@ class ToolAttempts:
         self._attempts[tool_name] = self._attempts.get(tool_name, 0) + 1
         return self._attempts[tool_name]
 
+    def remaining(self, tool_name: str) -> int:
+        """How many attempts are left, which a caller dispatching a round of
+        parallel calls needs before any of them has failed yet."""
+        return max(0, self._limit - self._attempts.get(tool_name, 0))
+
     def may_attempt(self, tool_name: str) -> bool:
         return self._attempts.get(tool_name, 0) < self._limit
 
