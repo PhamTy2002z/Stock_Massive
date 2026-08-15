@@ -195,6 +195,19 @@ class Settings(BaseSettings):
     # được một núm vặn mà không ai chỉnh riêng.
     analysis_run_stuck_minutes: int = 30
 
+    # Nhịp rút hàng đợi Analysis (src/alpha/dispatcher.py). Một phút, vì cái
+    # đang chờ là một người: một mã thêm vào Watchlist đi theo lane on-demand và
+    # đứng đầu hàng đợi, nên khoảng cách giữa hai tick là phần lớn thời gian họ
+    # nhìn spinner. Với cohort hằng đêm nhịp này gần như vô nghĩa — hàng đợi
+    # được rút liên tục trong một tick cho tới khi cạn.
+    #
+    # Một tick không rút quá ngần này lượt. Cái được chặn không phải chi phí —
+    # ngân sách đã có trần riêng ở admission — mà là một tick chạy hàng giờ trên
+    # cohort lớn rồi chồng lên tick sau; hàng đợi chính là bảng, nên phần chưa
+    # rút không mất đi đâu cả.
+    analysis_dispatch_interval_seconds: int = 60
+    analysis_dispatch_batch_size: int = 25
+
     # Alpha Desk — tuyến LLM, hai model theo workload, và giá của chúng
     # (src/core/llm/, docs/adr/0014). Tắt mặc định: đây là kênh trả tiền, nên
     # một lần triển khai phải chủ động bật chứ không phải chủ động tắt.

@@ -212,6 +212,7 @@ class TestSchedulerSetup:
             "corporate-actions-weekly",
             "market-index",
             "analysis-run-sweep",
+            "analysis-queue-drain",
         }
 
     @pytest.mark.asyncio

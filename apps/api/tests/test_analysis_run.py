@@ -15,9 +15,9 @@ without producing again. **Idempotency is a consequence of the constraint, not
 extra code** — which is a claim that has to be tested by actually killing the
 process between the two writes, not by reading the code.
 
-The producer is a stub. This ticket owns the state machine; generation, the
-evidence envelope and the LLM call are a later milestone's, and the seam is a
-parameter precisely so that milestone changes nothing here.
+The producer here is a stub, and it lives in ``tests/`` rather than in ``src``:
+this file owns the state machine, generation is ``src/alpha/production.py``'s,
+and the seam is a parameter precisely so that neither one changes the other.
 
 Run against a live Postgres: what is under test includes what the database
 refuses.
@@ -46,12 +46,13 @@ from src.alpha.producer import (
     FAILURE_CODES,
     AnalysisDraft,
     ProductionFailure,
-    stub_producer,
 )
 from src.auth.models import User
 from src.core.config import get_settings
 from src.core.database import Base, get_sync_db, sync_engine, sync_session_factory
 from src.stocks.universe import forget_cohort_cache
+
+from .stub_producer import stub_producer
 
 SYMBOL = "RUNSYM"
 OTHER = "RUNOTH"

@@ -265,7 +265,24 @@ def mark_run_ready(session: Session, run: AnalysisRun) -> None:
     session.commit()
 
 
-def _mark_failed(session: Session, run: AnalysisRun, code: str, message: str) -> None:
+def mark_run_failed(
+    session: Session,
+    run: AnalysisRun,
+    code: str,
+    message: str,
+) -> None:
+    """Record why this attempt did not finish, and commit.
+
+    Public for the same reason ``mark_run_ready`` is: the dispatcher claims a run
+    itself — it has to, because a claim is what stops a second worker producing
+    the same pair — and then owns both endings. Two spellings of "write the
+    failure down" would be two places the taxonomy could be widened by accident,
+    and ``error_code`` is a vocabulary the interface branches on.
+
+    The message stored is the one a ``ProductionFailure`` declared, never
+    ``str(exception)``. That is what keeps a stack trace out of a column the
+    interface renders; ``sanitized_reason`` is the second, weaker line.
+    """
     run.status = RunStatus.FAILED.value
     run.finished_at = _now()
     run.error_code = code
@@ -336,7 +353,7 @@ def produce_analysis(
     try:
         draft = producer(symbol, trading_day)
     except ProductionFailure as failure:
-        _mark_failed(session, run, failure.code, failure.message)
+        mark_run_failed(session, run, failure.code, failure.message)
         return RunOutcome(
             status=RunStatus.FAILED,
             analysis=None,
