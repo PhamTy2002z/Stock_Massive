@@ -43,7 +43,14 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from src.core.llm import LLMClient, LLMConfig, Workload, llm_config_from_settings
+from src.core.database import get_sync_db
+from src.core.llm import (
+    LLMClient,
+    LLMConfig,
+    Workload,
+    build_client,
+    llm_config_from_settings,
+)
 from src.stocks.signals.serving import CrossSection
 
 from .analysis_run import (
@@ -158,7 +165,7 @@ def analysis_producer(
     model = resolved_config.model_for(Workload.BATCH)
     route = resolved_config.route.base_url
     now = clock or (lambda: datetime.now(timezone.utc))
-    open_session = session_factory or _default_session_factory
+    open_session = session_factory or get_sync_db
     rankings: dict[date, Mapping[str, CrossSection]] = {}
 
     def produce(symbol: str, trading_day: date) -> AnalysisDraft:
@@ -194,7 +201,7 @@ def analysis_producer(
                 session, symbol, trading_day, cross_sections=sample
             )
 
-        fragment = _generated(
+        fragment = _run_generation(
             envelope,
             client=client,
             config=resolved_config,
@@ -290,7 +297,7 @@ def _refuse_on_the_event_loop() -> None:
     )
 
 
-def _generated(
+def _run_generation(
     envelope: EvidenceEnvelope,
     *,
     client: LLMClient | None,
@@ -301,7 +308,7 @@ def _generated(
     """Run the one async call from synchronous code."""
 
     async def run() -> AnalysisFragment:
-        llm = client if client is not None else _build_client(config)
+        llm = client if client is not None else build_client(config)
         try:
             return await generate_fragment(
                 llm, envelope, model=model, run_id=run_id
@@ -311,18 +318,6 @@ def _generated(
                 await llm.aclose()
 
     return asyncio.run(run())
-
-
-def _build_client(config: LLMConfig) -> Any:
-    from src.core.llm import build_client
-
-    return build_client(config)
-
-
-def _default_session_factory() -> Any:
-    from src.core.database import get_sync_db
-
-    return get_sync_db()
 
 
 __all__ = [
