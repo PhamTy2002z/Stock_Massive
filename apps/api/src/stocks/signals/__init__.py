@@ -14,9 +14,9 @@ from .corporate_actions import (
     CorporateActionStore,
     FactorReading,
     adjustment_factor,
+    blend,
     classify,
     confirm_ex_date,
-    previous_close,
     terms_of,
 )
 from .issues import SignalIssue
@@ -72,10 +72,10 @@ __all__ = [
     "VolumeSpikeSignal",
     "adjustment_factor",
     "band_limits",
+    "blend",
     "classify",
     "confirm_ex_date",
     "detect_limit_lock",
-    "previous_close",
     "resolve_band_regime",
     "signal_cache_key",
     "terms_of",
