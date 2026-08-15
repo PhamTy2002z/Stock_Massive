@@ -244,6 +244,31 @@ class TestASymbolTheSystemWatches:
         assert response.status_code == 200
         assert response.json()["market"]["data"]["last_price"] == 59_700
 
+    def test_no_redis_refuses_provider_calls_and_still_serves_the_store(self):
+        """Fail-closed applies to the allowance, not to the answer.
+
+        With no arbiter reachable, a Provider Source call is one nothing is
+        counting, so it is refused (``docs/adr/0014``). The store knows nothing
+        about any of that and keeps answering, which is the difference between
+        failing closed on spending and failing closed on serving.
+        """
+        import pytest
+
+        from src.core.quota import QuotaLane, QuotaUnavailable, VnstockQuotaArbiter
+
+        engine = database()
+        write(engine, Capability.MARKET, market_snapshot())
+        arbiter = VnstockQuotaArbiter(redis_factory=lambda: None)
+
+        for lane in QuotaLane:
+            with pytest.raises(QuotaUnavailable):
+                arbiter.acquire(lane)
+
+        response = serve(engine, "VCB", redis=None)
+
+        assert response.status_code == 200
+        assert response.json()["market"]["data"]["last_price"] == 59_700
+
     def test_answering_a_request_opens_no_connection_of_its_own(self):
         """The whole point of Snapshot-first, asserted at the only place it can
         be: a socket. Named provider entry points would let a new one slip in

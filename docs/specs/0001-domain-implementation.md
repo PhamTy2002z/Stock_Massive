@@ -420,7 +420,6 @@ profit_census_enabled: bool = True
 profit_census_weekday: int = 6          # Sunday
 profit_census_hour: int = 2
 profit_census_minute: int = 0
-profit_census_request_delay: float = 1.2
 profit_census_retry_hour: int = 3       # daily targeted retry
 cohort_size: int = 50
 cohort_activation_min_members: int = 45

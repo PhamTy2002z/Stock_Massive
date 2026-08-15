@@ -1,0 +1,321 @@
+"""One OpenAI-compatible transport behind the ``LLMClient`` protocol.
+
+Built on the ``httpx`` and ``tenacity`` already in ``requirements.txt``. No
+provider SDK and no agent framework is added, and that is a decision rather
+than an omission (``docs/adr/0008``): every framework marries one client
+abstraction, and this is the abstraction a route change has to be free across.
+The cost is stated plainly — a few hundred lines of dispatch, retry and
+streaming that we own, and correctness that is ours.
+
+What the hand-rolling buys, concretely:
+
+- streamed tool calls assembled by the **upstream index** (``streaming.py``),
+- the **JSON-parse invariant** on every returned ``arguments``,
+- ``auth_unavailable`` as a first-class class that is **never retried**.
+
+There is no automatic model fallback. A fallback route may have different
+capabilities and different prices, which invalidates the monetary ceiling that
+was reserved against the original model (``docs/adr/0014``).
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any
+
+import httpx
+from tenacity import (
+    AsyncRetrying,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
+
+from .config import LLMConfig
+from .errors import (
+    MAX_GATEWAY_ATTEMPTS,
+    AuthUnavailable,
+    GatewayTimeout,
+    LLMError,
+    ModelRefusal,
+    classify_status,
+    llm_metrics,
+)
+from .protocol import Completion, CompletionRequest, Usage
+from .streaming import StreamAssembler, parse_tool_calls
+
+logger = logging.getLogger(__name__)
+
+CHAT_COMPLETIONS_PATH = "/chat/completions"
+
+# The tool_choice values that travel as themselves. Anything else is read as a
+# tool name and forced, which is what the Capability Probe checks is honoured.
+PASSTHROUGH_TOOL_CHOICES = frozenset({"auto", "none", "required"})
+
+SSE_DATA_PREFIX = "data:"
+SSE_DONE = "[DONE]"
+
+
+class OpenAICompatibleTransport:
+    """The network transport used only behind the reserved public client."""
+
+    def __init__(
+        self,
+        config: LLMConfig,
+        http_client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self._config = config
+        self._owns_client = http_client is None
+        self._http = http_client or httpx.AsyncClient(
+            timeout=httpx.Timeout(config.request_timeout_seconds)
+        )
+
+    async def aclose(self) -> None:
+        if self._owns_client:
+            await self._http.aclose()
+
+    async def dispatch(self, request: CompletionRequest) -> Completion:
+        """Make one call, and return a typed result or raise a typed failure.
+
+        Retries only ``gateway_timeout``, twice in total. ``auth_unavailable``
+        is not in the retry set at all — a dead credential answers the second
+        attempt exactly as it answered the first, and a route-wide failure
+        repeated per symbol is how one outage becomes a cohort of them.
+        """
+        async for attempt in AsyncRetrying(
+            stop=stop_after_attempt(MAX_GATEWAY_ATTEMPTS),
+            wait=wait_exponential(multiplier=0.5, max=4),
+            retry=retry_if_exception_type(GatewayTimeout),
+            reraise=True,
+        ):
+            with attempt:
+                if request.stream:
+                    return await self._streamed(request)
+                return await self._whole(request)
+
+        raise LLMError("the retry loop ended without a result")  # pragma: no cover
+
+    # -- the two response shapes ------------------------------------------
+
+    async def _streamed(self, request: CompletionRequest) -> Completion:
+        assembler = StreamAssembler(model=request.model)
+
+        try:
+            async with self._http.stream(
+                "POST",
+                self._url(),
+                json=self._body(request),
+                headers=self._headers(),
+            ) as response:
+                if response.status_code >= 400:
+                    body = (await response.aread()).decode("utf-8", "replace")
+                    raise self._classified(response.status_code, body)
+                async for line in response.aiter_lines():
+                    chunk = _decode_sse_line(line)
+                    if chunk is not None:
+                        assembler.add_chunk(chunk)
+        except httpx.RequestError as exc:
+            # Covers TimeoutException, which subclasses it: a route that did not
+            # answer and a route that could not be reached are the same fact
+            # from here, and both are retryable.
+            raise self._timeout(exc) from exc
+
+        if assembler.refusal:
+            llm_metrics().record_refusal(assembler.refusal)
+            raise ModelRefusal(
+                assembler.refusal,
+                usage=_usage(assembler.usage_payload),
+            )
+
+        usage = _usage(assembler.usage_payload)
+        try:
+            tool_calls = assembler.tool_calls()
+        except LLMError as exc:
+            exc.usage = usage
+            raise
+        return Completion(
+            model=assembler.model or request.model,
+            text=assembler.text,
+            # Parsed here rather than as they arrive: a call is only complete
+            # when the stream ends, and half a JSON object never parses.
+            tool_calls=tool_calls,
+            usage=usage,
+            finish_reason=assembler.finish_reason,
+        )
+
+    async def _whole(self, request: CompletionRequest) -> Completion:
+        try:
+            response = await self._http.post(
+                self._url(),
+                json=self._body(request),
+                headers=self._headers(),
+            )
+        except httpx.RequestError as exc:
+            # Covers TimeoutException, which subclasses it: a route that did not
+            # answer and a route that could not be reached are the same fact
+            # from here, and both are retryable.
+            raise self._timeout(exc) from exc
+
+        if response.status_code >= 400:
+            raise self._classified(response.status_code, response.text)
+
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise LLMError(f"the route answered with something that is not JSON: {exc}")
+
+        choices = payload.get("choices") or []
+        if not choices:
+            raise LLMError("the route answered with no choices at all")
+
+        message = choices[0].get("message") or {}
+        refusal = message.get("refusal")
+        if refusal:
+            llm_metrics().record_refusal(str(refusal))
+            raise ModelRefusal(str(refusal), usage=_usage(payload.get("usage")))
+
+        usage = _usage(payload.get("usage"))
+        try:
+            tool_calls = parse_tool_calls(message.get("tool_calls"))
+        except LLMError as exc:
+            exc.usage = usage
+            raise
+        return Completion(
+            model=str(payload.get("model") or request.model),
+            text=message.get("content"),
+            tool_calls=tool_calls,
+            usage=usage,
+            finish_reason=str(choices[0].get("finish_reason") or "stop"),
+        )
+
+    # -- the request ------------------------------------------------------
+
+    def _url(self) -> str:
+        return f"{self._config.route.base_url.rstrip('/')}{CHAT_COMPLETIONS_PATH}"
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self._config.route.api_key}",
+            "Content-Type": "application/json",
+        }
+
+    def _body(self, request: CompletionRequest) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "model": request.model,
+            "messages": [message.as_wire() for message in request.messages],
+            "stream": request.stream,
+        }
+
+        if request.stream:
+            # Without this a streamed response carries no usage at all, and a
+            # call with no usage cannot be reconciled against its reservation.
+            body["stream_options"] = {"include_usage": True}
+
+        if request.tools:
+            body["tools"] = [tool.as_wire() for tool in request.tools]
+            body["tool_choice"] = _tool_choice(request.tool_choice)
+            body["parallel_tool_calls"] = request.parallel_tool_calls
+
+        if request.response_format is not None:
+            body["response_format"] = request.response_format.as_wire()
+        if request.max_output_tokens is not None:
+            body["max_completion_tokens"] = request.max_output_tokens
+        if request.temperature is not None:
+            body["temperature"] = request.temperature
+
+        return body
+
+    # -- failures ---------------------------------------------------------
+
+    def _classified(self, status_code: int, body: str) -> LLMError:
+        error = classify_status(status_code, body[:500])
+        if isinstance(error, AuthUnavailable):
+            llm_metrics().record_auth_failure(str(error))
+        elif isinstance(error, GatewayTimeout):
+            llm_metrics().record_gateway_timeout(str(error))
+        return error
+
+    def _timeout(self, exc: Exception) -> GatewayTimeout:
+        error = GatewayTimeout(f"the route did not answer: {exc}")
+        llm_metrics().record_gateway_timeout(str(error))
+        return error
+
+
+def _decode_sse_line(line: str) -> dict[str, Any] | None:
+    """Read one SSE line, ignoring the framing.
+
+    Keep-alives, blank lines and comment lines are not events. ``[DONE]`` ends
+    the stream and carries nothing, so it is dropped here rather than being
+    handed to the assembler as an object it would refuse.
+    """
+    line = line.strip()
+    if not line or not line.startswith(SSE_DATA_PREFIX):
+        return None
+    data = line[len(SSE_DATA_PREFIX) :].strip()
+    if not data or data == SSE_DONE:
+        return None
+    try:
+        return json.loads(data)
+    except ValueError as exc:
+        raise LLMError(f"the route streamed a chunk that is not JSON: {exc}") from exc
+
+
+def _tool_choice(choice: str) -> Any:
+    if choice in PASSTHROUGH_TOOL_CHOICES:
+        return choice
+    return {"type": "function", "function": {"name": choice}}
+
+
+def _usage(payload: dict[str, Any] | None) -> Usage:
+    """Split the provider's counters so nothing is charged twice.
+
+    Providers report the cached and cache-written parts *inside* the prompt
+    total and reasoning *inside* the completion total. Left as they arrive, the
+    cheap cached tokens would be billed again at the full input price and the
+    reasoning tokens twice at the output price.
+    """
+    if not payload:
+        return Usage()
+
+    prompt = int(payload.get("prompt_tokens") or payload.get("input_tokens") or 0)
+    completion = int(
+        payload.get("completion_tokens") or payload.get("output_tokens") or 0
+    )
+    prompt_details = payload.get("prompt_tokens_details") or {}
+    completion_details = payload.get("completion_tokens_details") or {}
+
+    cached = int(prompt_details.get("cached_tokens") or 0)
+    cache_write = int(
+        prompt_details.get("cache_write_tokens")
+        or payload.get("cache_creation_input_tokens")
+        or 0
+    )
+    reasoning = int(completion_details.get("reasoning_tokens") or 0)
+
+    return Usage(
+        input_tokens=max(0, prompt - cached - cache_write),
+        cached_input_tokens=cached,
+        cache_write_tokens=cache_write,
+        output_tokens=max(0, completion - reasoning),
+        reasoning_tokens=reasoning,
+    )
+
+
+def build_transport(
+    config: LLMConfig | None = None,
+    http_client: httpx.AsyncClient | None = None,
+) -> OpenAICompatibleTransport:
+    """Build the unguarded network implementation for composition."""
+    if config is None:
+        from .config import llm_config_from_settings
+
+        config = llm_config_from_settings()
+    return OpenAICompatibleTransport(config, http_client=http_client)
+
+
+__all__ = [
+    "CHAT_COMPLETIONS_PATH",
+    "OpenAICompatibleTransport",
+    "build_transport",
+]
