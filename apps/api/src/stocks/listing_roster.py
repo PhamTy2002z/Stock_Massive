@@ -53,6 +53,21 @@ class RosterRefresh:
         }
 
 
+@dataclass(frozen=True)
+class ListedIdentity:
+    """Who a symbol is, as the register last saw it.
+
+    ``company_name`` is nullable because the register's second call is
+    best-effort: a provider that answered with boards and not with names leaves
+    the industry mapping intact rather than losing the whole refresh.
+    """
+
+    symbol: str
+    exchange: Exchange
+    company_name: str | None
+    is_listed: bool
+
+
 class ListingRosterStore:
     """Read and replace the stored listing register."""
 
@@ -165,6 +180,27 @@ class ListingRosterStore:
         if row is None or not row.is_listed:
             return None
         return Exchange(row.exchange)
+
+    def identity_of(self, symbol: str) -> "ListedIdentity | None":
+        """What the register says this symbol is, listed or not.
+
+        Distinct from ``exchange_of``, which answers a question about the
+        present — *is this symbol tradable on a board today* — and returns
+        nothing for a company that left. This answers a question about a stored
+        artifact: an Analysis dated last Tuesday names the board that company
+        traded on, and a delisting since then does not make the name wrong.
+        """
+        row = self.session.execute(
+            select(ListingRoster).where(ListingRoster.symbol == symbol.upper())
+        ).scalar_one_or_none()
+        if row is None:
+            return None
+        return ListedIdentity(
+            symbol=row.symbol,
+            exchange=Exchange(row.exchange),
+            company_name=row.company_name,
+            is_listed=bool(row.is_listed),
+        )
 
     def delisted_among(self, symbols: Iterable[str]) -> tuple[str, ...]:
         """Which of these symbols the register no longer lists.
