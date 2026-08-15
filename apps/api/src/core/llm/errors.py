@@ -23,6 +23,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from .protocol import Usage
+
 logger = logging.getLogger(__name__)
 
 # ``docs/specs/0003`` §3: the model may try another approach, but not the same
@@ -38,6 +40,10 @@ MAX_GATEWAY_ATTEMPTS = 2
 
 class LLMError(RuntimeError):
     """Any failure at the LLM boundary."""
+
+    def __init__(self, message: str, usage: Usage | None = None) -> None:
+        super().__init__(message)
+        self.usage = usage
 
 
 class ToolError(LLMError):
@@ -85,8 +91,8 @@ class ModelRefusal(LLMError):
     up arguing with its own model on a user's behalf.
     """
 
-    def __init__(self, refusal: str) -> None:
-        super().__init__(refusal)
+    def __init__(self, refusal: str, usage: Usage | None = None) -> None:
+        super().__init__(refusal, usage=usage)
         self.refusal = refusal
 
 

@@ -17,7 +17,10 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from .admission import SpendRequest
 
 
 class Role(str, Enum):
@@ -185,7 +188,11 @@ class Completion:
 class LLMClient(Protocol):
     """The whole boundary. Everything else is an implementation detail."""
 
-    async def complete(self, request: CompletionRequest) -> Completion:
+    async def complete(
+        self,
+        request: CompletionRequest,
+        spend: "SpendRequest | None" = None,
+    ) -> Completion:
         """Make one call and return a typed result or raise a typed failure."""
         ...
 
