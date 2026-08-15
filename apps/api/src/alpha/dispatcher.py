@@ -94,9 +94,14 @@ AUTH_PROBE_MINUTES = 15
 CLAIMABLE = (RunStatus.PENDING.value, RunStatus.FAILED.value)
 
 
-@dataclass(frozen=True)
+@dataclass
 class DrainReport:
     """What one pass of the dispatcher did, in the terms an operator reads.
+
+    Mutable, and it is the pass's running tally rather than a summary built at
+    the end. One type instead of two: a tally and a report holding the same three
+    lists would be the same fact in two shapes, and the second would exist only
+    to be copied from the first.
 
     ``paused_until`` is set only where the route refused a credential, and it is
     the one outcome that says something about the system rather than about the
@@ -104,9 +109,9 @@ class DrainReport:
     """
 
     trading_day: date | None
-    produced: tuple[str, ...] = ()
-    repaired: tuple[str, ...] = ()
-    failed: tuple[str, ...] = ()
+    produced: list[str] = field(default_factory=list)
+    repaired: list[str] = field(default_factory=list)
+    failed: list[str] = field(default_factory=list)
     paused_until: datetime | None = None
 
     @property
@@ -126,13 +131,6 @@ class DrainReport:
                 None if self.paused_until is None else self.paused_until.isoformat()
             ),
         }
-
-
-@dataclass
-class _Tally:
-    produced: list[str] = field(default_factory=list)
-    repaired: list[str] = field(default_factory=list)
-    failed: list[str] = field(default_factory=list)
 
 
 def _now() -> datetime:
@@ -255,9 +253,9 @@ def drain_queue(
         # deadline forbids, so this reports nothing rather than reaching back.
         return DrainReport(trading_day=None)
 
-    tally = _Tally()
+    report = DrainReport(trading_day=trading_day)
     while True:
-        if limit is not None and _claimed(tally) >= limit:
+        if limit is not None and report.claimed >= limit:
             break
         if should_stop is not None and should_stop():
             logger.info("Stopping the Analysis dispatcher between runs")
@@ -267,33 +265,18 @@ def drain_queue(
         if run is None:
             break
 
-        paused = _produce_claimed(session, run, producer, tally, now=now)
-        if paused is not None:
-            return DrainReport(
-                trading_day=trading_day,
-                produced=tuple(tally.produced),
-                repaired=tuple(tally.repaired),
-                failed=tuple(tally.failed),
-                paused_until=paused,
-            )
+        report.paused_until = _produce_claimed(session, run, producer, report, now=now)
+        if report.paused_until is not None:
+            break
 
-    return DrainReport(
-        trading_day=trading_day,
-        produced=tuple(tally.produced),
-        repaired=tuple(tally.repaired),
-        failed=tuple(tally.failed),
-    )
-
-
-def _claimed(tally: _Tally) -> int:
-    return len(tally.produced) + len(tally.repaired) + len(tally.failed)
+    return report
 
 
 def _produce_claimed(
     session: Session,
     run: AnalysisRun,
     producer: Producer,
-    tally: _Tally,
+    report: DrainReport,
     *,
     now: datetime,
 ) -> datetime | None:
@@ -312,7 +295,7 @@ def _produce_claimed(
         # writes, or a concurrent producer that won. Nothing to generate, and the
         # only thing wrong is the run's status.
         mark_run_ready(session, run)
-        tally.repaired.append(symbol)
+        report.repaired.append(symbol)
         return None
 
     try:
@@ -322,12 +305,12 @@ def _produce_claimed(
             return _pause_route(session, run, now=now, reason=failure.message)
         mark_run_failed(session, run, failure.code, failure.message)
         _schedule_retry(session, run, now=now)
-        tally.failed.append(symbol)
+        report.failed.append(symbol)
         return None
 
     write_analysis(session, symbol, run.trading_day, draft)
     mark_run_ready(session, run)
-    tally.produced.append(symbol)
+    report.produced.append(symbol)
     return None
 
 

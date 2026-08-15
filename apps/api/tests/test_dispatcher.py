@@ -377,7 +377,7 @@ class TestDraining:
 
         report = drain_queue(session, producer, trading_day=TRADING_DAY, now=NOW)
 
-        assert report.produced == (A, B)
+        assert report.produced == [A, B]
         assert [symbol for symbol, _ in producer.seen] == [A, B]
         assert (
             stored_run(session, A, TRADING_DAY).status == RunStatus.READY.value
@@ -396,8 +396,8 @@ class TestDraining:
 
         report = drain_queue(session, never_called, trading_day=TRADING_DAY, now=NOW)
 
-        assert report.repaired == (A,)
-        assert report.produced == ()
+        assert report.repaired == [A]
+        assert report.produced == []
         assert stored_run(session, A, TRADING_DAY).status == RunStatus.READY.value
 
     def test_a_limit_bounds_one_pass_and_leaves_the_rest_queued(self, session):
@@ -408,14 +408,14 @@ class TestDraining:
             session, a_producer(), trading_day=TRADING_DAY, now=NOW, limit=2
         )
 
-        assert report.produced == (A, B)
+        assert report.produced == [A, B]
         assert stored_run(session, C, TRADING_DAY).status == RunStatus.PENDING.value
 
     def test_nothing_is_produced_for_a_day_the_store_does_not_hold(self, session):
         report = drain_queue(session, never_called, trading_day=None, now=NOW)
 
         assert report.claimed == 0
-        assert report.produced == ()
+        assert report.produced == []
 
     def test_no_analysis_is_dated_to_a_previous_trading_day(self, session):
         """The deadline is a reporting boundary; nothing here relabels."""
@@ -450,7 +450,7 @@ class TestShutdown:
             should_stop=lambda: len(stopped) >= 1,
         )
 
-        assert report.produced == (A,)
+        assert report.produced == [A]
         assert stored_run(session, A, TRADING_DAY).status == RunStatus.READY.value
         assert stored_run(session, B, TRADING_DAY).status == RunStatus.PENDING.value
 
@@ -530,7 +530,7 @@ class TestTheBackoff:
 
         assert due == NOW + timedelta(minutes=5)
         assert early.claimed == 0
-        assert on_time.produced == (A,)
+        assert on_time.produced == [A]
 
     def test_a_fourth_attempt_is_never_dispatched_in_the_same_session(self, session):
         queue(session, A, status=RunStatus.FAILED, attempts=MAX_ATTEMPTS_PER_SESSION)
@@ -573,7 +573,7 @@ class TestAuthUnavailable:
         )
 
         assert report.paused_until == NOW + timedelta(minutes=AUTH_PROBE_MINUTES)
-        assert report.failed == ()
+        assert report.failed == []
         for symbol in (A, B):
             run = stored_run(session, symbol, TRADING_DAY)
             assert run.status == RunStatus.PENDING.value
@@ -622,7 +622,7 @@ class TestAuthUnavailable:
         )
 
         assert early.claimed == 0
-        assert recovered.produced == (A,)
+        assert recovered.produced == [A]
 
     def test_the_pause_never_pulls_a_longer_backoff_forward(self, session):
         later = NOW + timedelta(minutes=30)
@@ -711,7 +711,7 @@ class TestTheScheduledJob:
             get_settings.cache_clear()
 
 
-class TestTheSweepBeside_It:
+class TestTheSweepBesideIt:
     def test_the_dispatcher_grows_no_sweep_of_its_own(self, session):
         """A stuck run is A2's to clear; two writers would race over one row."""
         queue(session, A, status=RunStatus.PRODUCING)
