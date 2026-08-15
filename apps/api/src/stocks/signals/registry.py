@@ -48,6 +48,22 @@ from .fields import (
     ThresholdOrigin,
     Unit,
 )
+from .cross_sectional import (
+    FACTOR_MIN_SESSIONS,
+    MOMENTUM_FORMATION_SESSIONS,
+    MOMENTUM_MIN_SESSIONS,
+    MOMENTUM_SKIP_SESSIONS,
+    RELATIVE_STRENGTH_MIN_SESSIONS,
+    TREND_MIN_SESSIONS,
+    TREND_YEAR_SESSIONS,
+    book_yield_ranked,
+    earnings_yield_ranked,
+    momentum_ranked,
+    relative_strength_reading,
+    roe_ranked,
+    size_ranked,
+    trend_reading,
+)
 from .indicators import (
     BOLLINGER_MIN_SESSIONS,
     INDICATOR_WARMUP_SESSIONS,
@@ -662,6 +678,219 @@ MARKET_BEHAVIOR_FIELDS: tuple[SignalField, ...] = (
 )
 
 
+# --- The cross-sectional cluster -----------------------------------------
+#
+# Four positions within the Universe rather than against a symbol's own past,
+# and two of them are honest about what this system does not hold: relative
+# strength has no stored benchmark to regress against, so it is registered and
+# refuses; the factor percentiles rest on quarterly statements and carry the age
+# of the quarter behind every figure.
+
+MOMENTUM_RANK = SignalField(
+    # The id the Analysis Field Profile already names (spec 0003 §8.4). "12-2"
+    # names the formation by its month endpoints — twelve months back to two
+    # months back — which is the same window ``252 + 21`` describes by the length
+    # of its skip. Both spellings, one window (see ``cross_sectional``).
+    name="momentum_rank.percentile_12_2",
+    unit=Unit.PERCENTILE,
+    sign=Sign.NON_NEGATIVE,
+    interpretation=(
+        "Where this symbol's return over the "
+        f"{MOMENTUM_FORMATION_SESSIONS} sessions ending "
+        f"{MOMENTUM_SKIP_SESSIONS} sessions ago sits within the Universe, as a "
+        "percentile from 0 to 100 with the raw return beside it. Higher means it "
+        "outran more of the Universe over that stretch. The most recent month is "
+        "skipped deliberately, to step around the short-horizon reversal that "
+        "contaminates a formation running up to today. **It is never a valid "
+        "read over one day**: the price band spreads a single shock across "
+        "consecutive limit sessions, so a short formation ranks a move that has "
+        "not finished arriving."
+    ),
+    kind=FieldKind.PERCENTILE,
+    claim=Claim.DESCRIPTIVE,
+    source=FieldSource.COMPUTED,
+    # Window plus skip, and this is the field the rule was written for.
+    min_sessions=MOMENTUM_MIN_SESSIONS,
+    threshold=None,
+    null_fpr=None,
+    output_keys=(
+        "n",
+        "as_of",
+        "excluded_symbols",
+        "formation_return_pct",
+        "formation_sessions",
+        "skipped_sessions",
+        "sessions",
+        "limit_lock_days",
+    ),
+    ranked=momentum_ranked,
+)
+
+TREND_SIGNAL = SignalField(
+    name="trend_signal.total_return_12m_pct",
+    unit=Unit.PERCENT,
+    sign=Sign.SIGNED,
+    interpretation=(
+        "This symbol's own total return over the last "
+        f"{TREND_YEAR_SESSIONS} sessions in percent, with the sign and magnitude "
+        "over three and six months beside it. Positive is a rise over the window "
+        "and negative a fall; the three windows disagreeing is itself the "
+        "reading. **The evidence for reading a past return's sign at all is from "
+        "liquid futures** (Moskowitz-Ooi-Pedersen 2012, all 58 instruments), and "
+        "applying it to a single Vietnamese equity is an extrapolation rather "
+        "than a published result."
+    ),
+    kind=FieldKind.ESTIMATOR,
+    claim=Claim.DESCRIPTIVE,
+    source=FieldSource.COMPUTED,
+    min_sessions=TREND_MIN_SESSIONS,
+    threshold=None,
+    null_fpr=None,
+    output_keys=(
+        "standard_error",
+        "return_3m_pct",
+        "sign_3m",
+        "return_6m_pct",
+        "sign_6m",
+        "return_12m_pct",
+        "sign_12m",
+        "evidence_basis",
+        "sessions",
+        "limit_lock_days",
+    ),
+    reading=trend_reading,
+)
+
+RELATIVE_STRENGTH = SignalField(
+    name="relative_strength.beta_vs_market_index",
+    unit=Unit.RATIO,
+    sign=Sign.SIGNED,
+    interpretation=(
+        "Rolling beta and correlation against the market index. **Unavailable**: "
+        "this system stores no market-index session series, so there is nothing "
+        "durable to regress against, and the index alias inside the live price "
+        "path is deliberately not read in its place. The field is registered so "
+        "the Analysis Field Profile stays honest about what it is missing, and "
+        "it will report beta and correlation under Ledoit-Wolf shrinkage — with "
+        "the shrinkage intensity beside them, an intensity approaching one "
+        "meaning the data was insufficient — once the benchmark is ingested."
+    ),
+    kind=FieldKind.ESTIMATOR,
+    claim=Claim.DESCRIPTIVE,
+    source=FieldSource.COMPUTED,
+    min_sessions=RELATIVE_STRENGTH_MIN_SESSIONS,
+    threshold=None,
+    null_fpr=None,
+    output_keys=("missing_input", "benchmark", "shrinkage"),
+    reading=relative_strength_reading,
+)
+
+_FACTOR_KEYS = (
+    "n",
+    "as_of",
+    "excluded_symbols",
+    "period_end",
+    "period_age_days",
+    "price_session",
+)
+
+EARNINGS_YIELD_PERCENTILE = SignalField(
+    name="factor_percentiles.earnings_yield_percentile",
+    unit=Unit.PERCENTILE,
+    sign=Sign.NON_NEGATIVE,
+    interpretation=(
+        "Where this symbol's trailing twelve-month earnings over its market "
+        "capitalisation sits within the Universe, as a percentile from 0 to 100. "
+        "Higher means cheaper on earnings. The Vietnamese evidence prefers "
+        "earnings-to-price over book-to-market as the value measure "
+        "(Huang-Liu-Shu 2023). The quarter the earnings come from is stamped "
+        "beside it, and the percentile is a positioning fact rather than a "
+        "timing one — the premia behind it are measured at annual horizons."
+    ),
+    kind=FieldKind.PERCENTILE,
+    claim=Claim.DESCRIPTIVE,
+    source=FieldSource.STORED,
+    min_sessions=FACTOR_MIN_SESSIONS,
+    threshold=None,
+    null_fpr=None,
+    output_keys=_FACTOR_KEYS,
+    ranked=earnings_yield_ranked,
+)
+
+BOOK_YIELD_PERCENTILE = SignalField(
+    name="factor_percentiles.book_yield_percentile",
+    unit=Unit.PERCENTILE,
+    sign=Sign.NON_NEGATIVE,
+    interpretation=(
+        "Where this symbol's parent-company equity over its market "
+        "capitalisation sits within the Universe, as a percentile from 0 to 100. "
+        "Higher means cheaper on book value. The quarter the equity comes from "
+        "is stamped beside it."
+    ),
+    kind=FieldKind.PERCENTILE,
+    claim=Claim.DESCRIPTIVE,
+    source=FieldSource.STORED,
+    min_sessions=FACTOR_MIN_SESSIONS,
+    threshold=None,
+    null_fpr=None,
+    output_keys=_FACTOR_KEYS,
+    ranked=book_yield_ranked,
+)
+
+ROE_PERCENTILE = SignalField(
+    name="factor_percentiles.roe_percentile",
+    unit=Unit.PERCENTILE,
+    sign=Sign.NON_NEGATIVE,
+    interpretation=(
+        "Where this symbol's trailing twelve-month return on parent-company "
+        "equity sits within the Universe, as a percentile from 0 to 100. Higher "
+        "means more profitable on the equity it holds. The quarter both figures "
+        "come from is stamped beside it."
+    ),
+    kind=FieldKind.PERCENTILE,
+    claim=Claim.DESCRIPTIVE,
+    source=FieldSource.STORED,
+    min_sessions=FACTOR_MIN_SESSIONS,
+    threshold=None,
+    null_fpr=None,
+    output_keys=_FACTOR_KEYS,
+    ranked=roe_ranked,
+)
+
+SIZE_PERCENTILE = SignalField(
+    name="factor_percentiles.size_percentile",
+    unit=Unit.PERCENTILE,
+    sign=Sign.NON_NEGATIVE,
+    interpretation=(
+        "Where this symbol's market capitalisation sits within the Universe, as "
+        "a percentile from 0 to 100. **Higher means larger.** The research this "
+        "field comes from declares its direction the other way round, as "
+        "+ = smaller, which folds the small-cap premium into the sign of the "
+        "number; a premium is a claim about returns, and a descriptive field does "
+        "not make one. The session the capitalisation was read from is stamped "
+        "beside it."
+    ),
+    kind=FieldKind.PERCENTILE,
+    claim=Claim.DESCRIPTIVE,
+    source=FieldSource.STORED,
+    min_sessions=FACTOR_MIN_SESSIONS,
+    threshold=None,
+    null_fpr=None,
+    output_keys=_FACTOR_KEYS,
+    ranked=size_ranked,
+)
+
+CROSS_SECTIONAL_FIELDS: tuple[SignalField, ...] = (
+    MOMENTUM_RANK,
+    TREND_SIGNAL,
+    RELATIVE_STRENGTH,
+    EARNINGS_YIELD_PERCENTILE,
+    BOOK_YIELD_PERCENTILE,
+    ROE_PERCENTILE,
+    SIZE_PERCENTILE,
+)
+
+
 # --- Descriptive indicator vocabulary ------------------------------------
 
 _NO_INDICATOR_EDGE = (
@@ -758,6 +987,13 @@ REGISTRY: Mapping[str, SignalField] = _index(
     DRAWDOWN_VERSUS_BENCHMARK,
     SHARPE,
     SORTINO,
+    MOMENTUM_RANK,
+    TREND_SIGNAL,
+    RELATIVE_STRENGTH,
+    EARNINGS_YIELD_PERCENTILE,
+    BOOK_YIELD_PERCENTILE,
+    ROE_PERCENTILE,
+    SIZE_PERCENTILE,
     RSI,
     MACD,
     BOLLINGER_PERCENT_B,

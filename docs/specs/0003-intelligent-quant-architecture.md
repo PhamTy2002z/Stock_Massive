@@ -857,13 +857,15 @@ Genuinely undecided. None blocks a build session from starting A1, A2, or A3.
    concrete numbers are produced by the null harness at implementation and then frozen.
    Blocks: A1 completion.
 
-   One inherited inconsistency to settle while registering the momentum field, flagged
-   rather than resolved here because it needs the formula, not a document: the field is
-   named `momentum_rank.percentile_12_2` and the bar decision calls it "12-2 momentum",
-   but its stated `min_sessions` of **273** is `252 + 21` — a **one-month** skip, i.e.
-   12-1, which is also what the research shortlist calls it. Either the name or the skip
-   is wrong. Pick one, and let the registered `min_sessions` follow the formula actually
-   implemented.
+   **Settled at A1 implementation.** The inherited momentum-naming inconsistency — the
+   field named `momentum_rank.percentile_12_2` against a stated `min_sessions` of **273**
+   = `252 + 21`, a **one-month** skip the research shortlist calls 12-1 — is two
+   spellings of one window rather than a disagreement. "12-2" names the formation by its
+   month endpoints, twelve months back to two months back; "12-1" names the same stretch
+   by the length of what it skips. Both are 252 sessions of formation after skipping 21.
+   The name stands, the skip stands, and the registered `min_sessions` is written as
+   `MOMENTUM_FORMATION_SESSIONS + MOMENTUM_SKIP_SESSIONS` so the two cannot be edited
+   apart; `tests/test_cross_sectional.py` pins the arithmetic to those constants.
 2. **How the limit-lock detector is written.** ADR-0006 settles that it reads raw prices
    and takes the band from the exchange regime for that session; the detector itself
    belongs to A1.

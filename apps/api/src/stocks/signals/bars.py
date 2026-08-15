@@ -144,6 +144,11 @@ class Bar:
     # because the anchor it was measured from is the previous session's raw
     # close and only the gateway still has it.
     band: BandLimits | None = None
+    # What the provider valued the whole company at on this session. Money, and
+    # therefore left alone by the rebasing above for the same reason traded
+    # value is: a share-count change moves the count and the price together and
+    # leaves their product where it was.
+    market_cap_vnd: float | None = None
 
     @property
     def limit_locked(self) -> bool:
@@ -652,6 +657,7 @@ def _frame(
                 close=_scaled(row.last_price, factor),
                 volume=row.volume,
                 total_value_vnd=row.total_value_vnd,
+                market_cap_vnd=row.market_cap_vnd,
                 adjustment_factor=factor,
                 limit_lock=(
                     bands[day].lock if day in bands else LimitLock.INDETERMINATE
