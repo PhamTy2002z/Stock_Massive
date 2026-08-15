@@ -539,6 +539,8 @@ class ListingEntry(InternalSnapshot):
     exchange: Exchange
     is_listed: bool
     company_name: str | None = None
+    industry_code: str | None = None
+    industry_name: str | None = None
 
     @field_validator("symbol")
     @classmethod

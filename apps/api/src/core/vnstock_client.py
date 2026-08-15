@@ -29,6 +29,7 @@ from typing import Any, Callable
 import vnstock as _vnstock
 from tenacity import RetryError
 
+from src.core.provider_access import ensure_provider_source_allowed
 from src.core.quota import active_lane, quota_arbiter
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,7 @@ def _guard(
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
+        ensure_provider_source_allowed()
         if paced:
             quota_arbiter().acquire(active_lane())
         try:

@@ -24,6 +24,7 @@ from src.stocks.providers.vnstock_provider import (
     VnstockCorporateActionProvider,
     VnstockFundamentalProvider,
     VnstockMarketHistoryProvider,
+    VnstockListingRosterProvider,
     VnstockProviderError,
     VnstockReadFailed,
     VnstockReferenceProvider,
@@ -32,6 +33,52 @@ from src.stocks.shared import StockServiceError
 
 
 NOW = datetime(2026, 8, 7, 10, 0, tzinfo=timezone.utc)
+
+
+class FakeListing:
+    def symbols_by_industries(self):
+        return pd.DataFrame(
+            [
+                {"symbol": "AAA", "industry_code": "10", "industry_name": "Banks"},
+                {"symbol": "BBB", "industry_code": "20", "industry_name": "Retail"},
+            ]
+        )
+
+    def symbols_by_exchange(self, exchange: str):
+        if exchange == "HOSE":
+            return pd.DataFrame(
+                [
+                    {
+                        "symbol": "AAA",
+                        "type": "STOCK",
+                        "organ_short_name": "AAA Bank",
+                    }
+                ]
+            )
+        if exchange == "HNX":
+            return pd.DataFrame(
+                [
+                    {
+                        "symbol": "BBB",
+                        "type": "STOCK",
+                        "organ_short_name": "BBB Retail",
+                    }
+                ]
+            )
+        return pd.DataFrame(
+            [{"symbol": "CW1", "type": "CW", "organ_short_name": "Not equity"}]
+        )
+
+
+def test_listing_roster_carries_icb_into_the_durable_contract():
+    provider = VnstockListingRosterProvider(listing_factory=lambda _source: FakeListing())
+
+    entries = provider.fetch_listing_roster()
+
+    assert [(entry.symbol, entry.industry_code) for entry in entries] == [
+        ("AAA", "10"),
+        ("BBB", "20"),
+    ]
 
 
 def price_board(rows: list[dict]) -> pd.DataFrame:

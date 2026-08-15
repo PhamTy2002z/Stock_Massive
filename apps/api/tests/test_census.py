@@ -461,6 +461,28 @@ class TestReadingTheMarket:
 class TestRosterRefresh:
     """The register is how a delisting becomes visible at all."""
 
+    def test_icb_classification_is_stored_with_the_listing(self):
+        session = open_session()
+        store = ListingRosterStore(session)
+
+        store.refresh(
+            (
+                ListingEntry(
+                    symbol="AAA",
+                    exchange=Exchange.HOSE,
+                    is_listed=True,
+                    industry_code="10",
+                    industry_name="Banks",
+                ),
+            ),
+            source=ProviderSource.VNSTOCK,
+            observed_at=NOW,
+        )
+
+        row = session.get(ListingRoster, "AAA")
+        assert row.industry_code == "10"
+        assert row.industry_name == "Banks"
+
     def test_a_symbol_missing_from_a_refresh_is_delisted_not_deleted(self):
         session = open_session()
         store = ListingRosterStore(session)

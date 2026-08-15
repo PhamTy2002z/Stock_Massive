@@ -7,10 +7,12 @@ allowance the Universe's own collection cycle needs. Sessions for the symbols
 this system does follow are written by the Collector, into ``provider_snapshots``.
 """
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete
 
+from src.agent.persistence import TOOL_CALL_RETENTION_DAYS
+from src.alpha.models import AgentToolCall
 from src.core.config import get_settings
 from src.core.database import async_session_factory
 from src.core.job_status_store import job_store
@@ -57,24 +59,48 @@ async def collect_intraday_data_job() -> dict:
 
 
 async def cleanup_old_data_job() -> int:
-    """Daily job to remove data older than retention period.
+    """Daily 16:00 job for every bounded operational-data retention policy.
 
     Returns:
         Number of deleted records
     """
-    cutoff = datetime.now() - timedelta(days=settings.intraday_retention_days)
-    logger.info(f"Cleaning up data older than {cutoff.date()}")
+    intraday_cutoff = datetime.now() - timedelta(days=settings.intraday_retention_days)
+    trace_cutoff = datetime.now(timezone.utc) - timedelta(days=TOOL_CALL_RETENTION_DAYS)
+    logger.info(
+        "Cleaning intraday data before %s and Tool Call Traces before %s",
+        intraday_cutoff.date(),
+        trace_cutoff.date(),
+    )
     job_store.start_job("cleanup", "Dọn dẹp dữ liệu cũ", 1)
 
     try:
         async with async_session_factory() as db:
-            stmt = delete(StockIntradayBar).where(StockIntradayBar.bar_time < cutoff)
-            result = await db.execute(stmt)
+            intraday_result = await db.execute(
+                delete(StockIntradayBar).where(
+                    StockIntradayBar.bar_time < intraday_cutoff
+                )
+            )
+            trace_result = await db.execute(
+                delete(AgentToolCall).where(AgentToolCall.started_at < trace_cutoff)
+            )
             await db.commit()
-            deleted_count = result.rowcount
+            intraday_deleted = intraday_result.rowcount or 0
+            trace_deleted = trace_result.rowcount or 0
+            deleted_count = intraday_deleted + trace_deleted
 
-        logger.info(f"Deleted {deleted_count} old records")
-        job_store.complete_job("cleanup", {"deleted_count": deleted_count})
+        logger.info(
+            "Deleted %d intraday rows and %d Tool Call Traces",
+            intraday_deleted,
+            trace_deleted,
+        )
+        job_store.complete_job(
+            "cleanup",
+            {
+                "deleted_count": deleted_count,
+                "intraday_deleted_count": intraday_deleted,
+                "tool_call_deleted_count": trace_deleted,
+            },
+        )
         return deleted_count
     except Exception as e:
         logger.error(f"Cleanup job failed: {e}")
