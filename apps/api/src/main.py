@@ -15,6 +15,7 @@ from src.auth.router import router as auth_router
 from src.core.config import get_settings
 from src.core.cache import CacheRefreshUnavailable
 from src.core.database import engine
+from src.core.llm import enforce_budget_validation, llm_config_from_settings
 from src.core.scheduler import setup_scheduler
 from src.core.vnstock_client import VnstockUnavailable, VnstockUnsupported
 from src.stocks.router import router as stocks_router
@@ -46,6 +47,14 @@ async def lifespan(app: FastAPI):
     # over it would take the API down for a data problem it cannot fix.
     universe = Universe.from_settings(get_settings())
     logger.info(f"Universe declares {len(universe)} symbols")
+
+    # Immediately after the Universe and before the scheduler starts, for the
+    # same reason and at zero cost: Budget Validation is arithmetic over the
+    # configured models and prices (docs/adr/0014). A route that cannot fund
+    # one Analysis or one Turn fails here rather than midway through the first
+    # real Turn — and with Alpha Desk off it only logs, because there is
+    # nothing to protect.
+    enforce_budget_validation(llm_config_from_settings(get_settings()))
 
     if settings.scheduler_enabled:
         async with AsyncScheduler() as scheduler:
