@@ -61,7 +61,9 @@ class WatchlistEntry(Base):
     the revival the product wants to happen by itself.
 
     ``last_seen_analysis_date`` is per user per symbol because the unread badge
-    is: it advances only when that specific Analysis is opened.
+    is: it advances only when that specific Analysis is opened. Nothing writes
+    or serves it yet — the milestone that opens an Analysis is the one that can
+    advance it, and a field on the wire that never moves is worse than no field.
     """
 
     __tablename__ = "watchlist_entries"
