@@ -16,7 +16,8 @@ from sqlalchemy import update
 from src.core.database import get_sync_session
 from src.main import app
 from src.stocks.models import CohortVersion
-from src.stocks.providers import Exchange
+from src.stocks.providers import CorporateActionEvent, Exchange, ProviderSource
+from src.stocks.signals.corporate_actions import CorporateActionStore
 from src.stocks.signals.volume_spike import BASELINE_TRADING_DAYS
 from src.stocks.universe import forget_cohort_cache
 
@@ -82,6 +83,32 @@ class TestServing:
         assert [spike["symbol"] for spike in body["spikes"]] == [MEMBERS[0]]
         assert body["spikes"][0]["ratio"] == pytest.approx(3.0)
         assert body["spikes"][0]["baseline_average_volume"] == 1_000_000
+
+    def test_a_volume_basis_break_stays_on_the_spike_item(self):
+        session, sessions = a_market_with_a_cohort()
+        CorporateActionStore(session).save(
+            CorporateActionEvent(
+                symbol=MEMBERS[0],
+                event_code="ISS",
+                title="Share Issue - Stock dividend ratio 10.0%",
+                ex_date=sessions[10],
+                record_date=sessions[11],
+                public_date=sessions[5],
+                exercise_ratio=0.10,
+                value_per_share=None,
+            ),
+            ProviderSource.VNSTOCK,
+            datetime(2026, 8, 13, tzinfo=timezone.utc),
+        )
+
+        body = serving(session).get(
+            "/api/v1/signals/volume-spikes",
+            params={"scope": "profit_leaders", "threshold": 1.5},
+        ).json()
+
+        spike = next(item for item in body["spikes"] if item["symbol"] == MEMBERS[0])
+        assert spike["ratio"] == pytest.approx(3.0)
+        assert "volume_basis_break" in spike["issues"]
 
     def test_a_symbol_that_could_not_be_evaluated_is_named(self):
         session, sessions = a_market_with_a_cohort()

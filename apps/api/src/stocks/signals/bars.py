@@ -133,6 +133,11 @@ class Bar:
     total_value_vnd: float | None
     adjustment_factor: Decimal
     limit_lock: LimitLock
+    # Kept exactly as the provider stated it. A caller such as Volume Spike
+    # displays the session's own change while still reaching the session only
+    # through this gateway; recomputing it from adjusted closes would subtly
+    # change the existing wire value around corporate actions.
+    change_pct: float | None = None
 
     @property
     def limit_locked(self) -> bool:
@@ -594,6 +599,7 @@ def _frame(
                 total_value_vnd=row.total_value_vnd,
                 adjustment_factor=factor,
                 limit_lock=locks.get(day, LimitLock.INDETERMINATE),
+                change_pct=row.change_pct,
             )
         )
     return BarFrame(symbol=symbol, bars=tuple(bars))

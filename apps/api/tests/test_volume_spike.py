@@ -17,16 +17,23 @@ from sqlalchemy.pool import StaticPool
 from src.stocks.models import (
     CohortMember,
     CohortVersion,
+    CorporateAction,
     ListingRoster,
     ProviderSnapshot,
 )
-from src.stocks.providers import Capability, Exchange, ProviderSource
+from src.stocks.providers import (
+    Capability,
+    CorporateActionEvent,
+    Exchange,
+    ProviderSource,
+)
 from src.stocks.providers.contracts import (
     MARKET_SCHEMA_VERSION,
     MarketSnapshot,
     SnapshotMetadata,
 )
 from src.stocks.providers.normalize import VN_TZ
+from src.stocks.signals.corporate_actions import CorporateActionStore
 from src.stocks.signals.volume_spike import (
     BASELINE_TRADING_DAYS,
     CoverageState,
@@ -71,6 +78,7 @@ def open_session() -> Session:
         ListingRoster.__table__,
         CohortVersion.__table__,
         CohortMember.__table__,
+        CorporateAction.__table__,
     ):
         table.create(engine)
     return Session(engine)
@@ -294,6 +302,33 @@ class TestComputation:
 
         assert reading.ratio is None
         assert reading.issues == (SignalIssue.RECENTLY_INACTIVE,)
+
+    def test_a_share_count_change_degrades_the_ratio_without_dropping_it(self):
+        session = open_session()
+        sessions = trading_calendar(BASELINE_TRADING_DAYS + 1)
+        volumes = {day: 1_000_000 for day in sessions}
+        volumes[sessions[-1]] = 2_000_000
+        write_sessions(session, "FPT", volumes)
+        CorporateActionStore(session).save(
+            CorporateActionEvent(
+                symbol="FPT",
+                event_code="ISS",
+                title="Share Issue - Stock dividend ratio 10.0%",
+                ex_date=sessions[10],
+                record_date=sessions[11],
+                public_date=sessions[5],
+                exercise_ratio=0.10,
+                value_per_share=None,
+            ),
+            ProviderSource.VNSTOCK,
+            NOW,
+        )
+
+        reading = reading_for(evaluate_symbols(session, ["FPT"], sessions[-1]), "FPT")
+
+        assert reading.evaluable
+        assert reading.ratio == pytest.approx(2.0)
+        assert SignalIssue.VOLUME_BASIS_BREAK in reading.issues
 
     def test_a_ratio_at_the_threshold_is_a_spike(self):
         session = open_session()
