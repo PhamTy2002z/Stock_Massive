@@ -267,11 +267,17 @@ every day would be the unguarded one.
 _Avoid_: field catalog, schema registry, metric list
 
 **Window Health**:
-What `prepare_bars()` returns beside the frame, and what every computation echoes:
-`sessions_used`, `limit_lock_days`, `band_regime`, `adjustment`, `adtv_percentile`. It
-exists so the Vietnamese-market hazards are enforced by construction rather than by a
-review checklist — one gateway to bars, one honest report of what that window was
-made of.
+What `prepare_bars()` returns beside the frame, and what every computation echoes.
+Its five named fields are `sessions_used`, `limit_lock_days`, `band_regime`,
+`adjustment` and `adtv_percentile`; beside them travel a refusal where the window
+could not be served, the degradations it carries where it could, and the detail
+each of the five is a summary of — which sessions were locked, whether the band
+held across the whole window, and how many sessions no band could be decided for.
+Every one of them is derived from the rows actually loaded, never from
+configuration: a flag flipping later does not change what an already-stored window
+reports. It exists so the Vietnamese-market hazards are enforced by construction
+rather than by a review checklist — one gateway to bars, one honest report of what
+that window was made of.
 _Avoid_: data quality, window status, coverage
 
 **Null Calibration**:
@@ -353,13 +359,25 @@ _Avoid_: status, cache age, last refreshed
 
 **Signal Issue**:
 A stable, machine-readable condition explaining why a symbol or result is not
-ordinary and complete, such as `missing_target_session`,
-`insufficient_history`, `recently_inactive`, `cohort_warming`,
-`lagging_market_data`, `stale_market_data`, `ranking_unavailable`,
-`mixed_price_basis`, `unadjustable_price_basis`, `unexplained_price_gap`,
-`volume_basis_break`, `unconfirmed_corporate_action`, or
-`corporate_action_terms_incomplete`. It is domain provenance, not an HTTP or
-infrastructure error.
+ordinary and complete. It is domain provenance, not an HTTP or infrastructure
+error, and it is one closed set rather than one per module — the web app holds
+one Vietnamese sentence per code, so a synonym is a blank on the screen. The set
+grows as computations do; every code that exists lives in
+`src/stocks/signals/issues.py`, grouped as below.
+
+- *Serving a cohort*: `missing_target_session`, `insufficient_history`,
+  `recently_inactive`, `cohort_warming`, `lagging_market_data`,
+  `stale_market_data`, `ranking_unavailable`.
+- *Price Basis and Corporate Actions* (ADR-0006): `mixed_price_basis`,
+  `unadjustable_price_basis`, `unexplained_price_gap`, `volume_basis_break`,
+  `unconfirmed_corporate_action`, `corporate_action_terms_incomplete`.
+- *Reading a session against its band*: `exchange_unknown`,
+  `session_prices_incomplete`, `anchor_not_stored`, `anchor_missing`,
+  `price_move_exceeds_band`.
+- *The statistical bar* (ADR-0010): `zero_range_session`,
+  `baseline_dispersion_zero`, `limit_locked_window`,
+  `insufficient_downside_observations`, `autocorrelation_unusable`.
+
 _Avoid_: error message, warning text, exception
 
 **Recently Inactive**:

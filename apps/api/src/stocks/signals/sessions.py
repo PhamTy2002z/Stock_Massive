@@ -81,6 +81,11 @@ def sessions_on_days(
         .where(
             ProviderSnapshot.capability == _MARKET,
             ProviderSnapshot.symbol.in_(wanted),
+            # The same two sources the single-symbol read admits. Left off, a row
+            # written by a source since retired from this Capability would be a
+            # session to one reader and not to the other, and the two would
+            # disagree about a symbol without either of them being wrong.
+            ProviderSnapshot.source.in_(_market_sources()),
             ProviderSnapshot.effective_at.in_(stamps),
         )
         .order_by(

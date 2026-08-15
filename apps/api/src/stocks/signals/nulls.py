@@ -97,8 +97,9 @@ REFERENCE_HISTORIES = 8
 # The stand-in's own shape. A 2% daily volatility is a liquid Vietnamese
 # large-cap; the persistence and shock put the stationary spread of log-variance
 # near 1.1, so a quiet regime and a loud one differ by roughly threefold, which
-# is what a volatility cluster looks like. Four degrees of freedom is the fat
-# tail measured on daily equity returns rather than a round number.
+# is what a volatility cluster looks like. Five degrees of freedom is inside the
+# four-to-six range measured on daily equity returns, and is the number every
+# constant frozen in the registry was derived at.
 REFERENCE_DAILY_VOLATILITY = 0.02
 VARIANCE_PERSISTENCE = 0.95
 VARIANCE_SHOCK = 0.35
@@ -165,8 +166,8 @@ def reference_bar_history(
 ) -> BarShapes:
     """The stand-in history the block bootstrap resamples.
 
-    Student-t innovations at four degrees of freedom under a persistent
-    stochastic volatility, truncated by the band. Fat tails and serial dependence
+    Student-t innovations at ``REFERENCE_TAIL_DEGREES`` degrees of freedom under
+    a persistent stochastic volatility, truncated by the band. Fat tails and serial dependence
     in the magnitude of moves are exactly the two properties GBM lacks, and the
     only two this null needs from its source; the series is otherwise not a claim
     about any symbol and is not presented as one.
