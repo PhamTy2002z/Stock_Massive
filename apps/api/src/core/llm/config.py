@@ -155,6 +155,22 @@ class LLMConfig:
         return self.pricing.for_workload(workload)
 
 
+def _prices_for(settings: Any, workload: Workload) -> TokenPrices:
+    """Read one workload's four prices off the settings that name it.
+
+    One reader rather than two mirrored blocks: the mirror is where a copied
+    line keeps the wrong workload's name, and a price read from the wrong lane
+    is a ceiling enforced against the wrong model.
+    """
+    prefix = f"llm_price_{workload.value}"
+    return TokenPrices(
+        input=getattr(settings, f"{prefix}_input_usd_per_mtok"),
+        cached_input=getattr(settings, f"{prefix}_cached_input_usd_per_mtok"),
+        cache_write=getattr(settings, f"{prefix}_cache_write_usd_per_mtok"),
+        output=getattr(settings, f"{prefix}_output_usd_per_mtok"),
+    )
+
+
 def llm_config_from_settings(settings: Any | None = None) -> LLMConfig:
     """Build the configuration the whole boundary shares."""
     if settings is None:
@@ -177,18 +193,8 @@ def llm_config_from_settings(settings: Any | None = None) -> LLMConfig:
         pricing=PricingTable(
             version=settings.llm_pricing_version.strip(),
             effective_from=settings.llm_pricing_effective_date,
-            batch=TokenPrices(
-                input=settings.llm_price_batch_input_usd_per_mtok,
-                cached_input=settings.llm_price_batch_cached_input_usd_per_mtok,
-                cache_write=settings.llm_price_batch_cache_write_usd_per_mtok,
-                output=settings.llm_price_batch_output_usd_per_mtok,
-            ),
-            session=TokenPrices(
-                input=settings.llm_price_session_input_usd_per_mtok,
-                cached_input=settings.llm_price_session_cached_input_usd_per_mtok,
-                cache_write=settings.llm_price_session_cache_write_usd_per_mtok,
-                output=settings.llm_price_session_output_usd_per_mtok,
-            ),
+            batch=_prices_for(settings, Workload.BATCH),
+            session=_prices_for(settings, Workload.SESSION),
         ),
         lanes=BudgetLanes(
             monthly_envelope_usd=settings.llm_budget_monthly_usd,
