@@ -5,6 +5,11 @@ there was nowhere to count them from. ``analysis`` is keyed by
 ``(symbol, trading_day)`` precisely so it belongs to no user, and ``analysis_run``
 carried *what* asked for a run (``origin``) but not *who*.
 
+A second revision inside A2, where §10.1 asked for one. The nine-table revision
+had already landed on `develop`, and amending a revision other worktrees have
+run is worse than adding one: the rule exists so the nine tables arrive
+together, not to forbid a column the milestone turns out to need.
+
 Nullable, and null is the common case: the nightly cohort is nobody's in
 particular. ``ON DELETE SET NULL`` rather than CASCADE because an Analysis is
 shared system-wide and outlives whoever triggered it — deleting an account must

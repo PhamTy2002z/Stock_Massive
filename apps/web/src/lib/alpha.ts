@@ -85,7 +85,6 @@ export interface Rail {
   count: number
   /** The session the rail is showing. Null only when nothing has closed yet. */
   trading_day: string | null
-  history_depth: number
   entries: RailEntry[]
 }
 

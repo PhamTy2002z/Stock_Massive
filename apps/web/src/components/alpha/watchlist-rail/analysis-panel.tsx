@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { Loader2 } from "lucide-react"
 
 import { useAnalysis, useAnalysisHistory, useMarkAnalysisOpened } from "@/hooks/use-analysis"
+import type { AnalysisDetail } from "@/lib/alpha"
 import { cn } from "@/lib/utils"
 import { dayAndMonth, historyBoundaryNotice } from "./state-copy"
 
@@ -98,7 +99,7 @@ function AnalysisView({
   data,
 }: {
   pending: boolean
-  data: { trading_day: string; verdict: string; schema_version: number; payload: Record<string, unknown> } | undefined
+  data: AnalysisDetail | undefined
 }) {
   if (pending) {
     return (

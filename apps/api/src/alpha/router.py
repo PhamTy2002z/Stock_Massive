@@ -20,7 +20,7 @@ from src.auth.dependencies import CurrentUser
 from src.core.database import get_db, in_sync_session
 
 from .analysis_reads import AnalysisState, SymbolReading, is_unread, read_rail
-from .on_demand import OnDemandRequest, open_on_demand_lane
+from .on_demand import OnDemandResult, open_on_demand_lane
 from .schemas import (
     AnalysisSummaryResponse,
     OnDemandResponse,
@@ -33,6 +33,7 @@ from .schemas import (
     WatchlistResponse,
 )
 from .watchlist import (
+    WatchlistItem,
     WatchlistState,
     WatchlistView,
     add_symbol,
@@ -67,7 +68,7 @@ async def get_watchlist(current_user: CurrentUser, db: Db) -> WatchlistResponse:
 
 
 def _rail_entry(
-    item,
+    item: WatchlistItem,
     reading: SymbolReading | None,
 ) -> RailEntryResponse:
     latest = reading.latest if reading is not None else None
@@ -84,17 +85,7 @@ def _rail_entry(
         symbol=item.symbol,
         state=state,
         added_at=item.added_at,
-        latest=(
-            AnalysisSummaryResponse(
-                symbol=latest.symbol,
-                trading_day=latest.trading_day,
-                verdict=latest.verdict,
-                schema_version=latest.schema_version,
-                created_at=latest.created_at,
-            )
-            if latest is not None
-            else None
-        ),
+        latest=AnalysisSummaryResponse.of(latest) if latest is not None else None,
         failure=(
             RunFailureResponse(
                 code=failure.code,
@@ -161,7 +152,7 @@ async def post_watchlist(
     )
 
 
-def _lane_response(lane: OnDemandRequest) -> OnDemandResponse:
+def _lane_response(lane: OnDemandResult) -> OnDemandResponse:
     return OnDemandResponse(
         outcome=lane.outcome,
         trading_day=lane.trading_day,
