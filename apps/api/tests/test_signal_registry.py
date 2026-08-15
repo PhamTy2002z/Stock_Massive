@@ -24,9 +24,11 @@ than described.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 import random
 from datetime import date, timedelta
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import create_engine
@@ -40,6 +42,7 @@ from src.stocks.signals.fields import (
     CATALOG_NULL_FPR_CEILING,
     Claim,
     FieldKind,
+    FieldReading,
     FieldSource,
     FieldValue,
     NullCalibration,
@@ -50,8 +53,9 @@ from src.stocks.signals.fields import (
     Unit,
     schema_description,
 )
+from src.stocks.signals.bars import Bar
 from src.stocks.signals.issues import SignalIssue
-from src.stocks.signals.price_band import band_limits
+from src.stocks.signals.price_band import LimitLock, band_limits
 from src.stocks.signals.registry import (
     REGISTRY,
     VOLATILITY_REGIME_Z,
@@ -59,11 +63,11 @@ from src.stocks.signals.registry import (
     registered_field,
     signal_fields,
 )
+from src.stocks.signals.serving import serve_field
 from src.stocks.signals.volatility import (
     VOLATILITY_REGIME_BASELINE_DAYS,
     VOLATILITY_REGIME_MIN_SESSIONS,
     garman_klass_variance,
-    volatility_regime,
 )
 
 from .test_price_band import list_on, write_session
@@ -158,15 +162,19 @@ def store_quiet_history(
     return tuple(days)
 
 
-def _decimal(value: float):
-    from decimal import Decimal
-
+def _decimal(value: float) -> Decimal:
     return Decimal(str(value))
+
+
+def a_reading(_frame) -> FieldReading:
+    """A computation that answers the same thing for every window."""
+    return FieldReading(value=1.0, extras={"standard_error": 0.1})
 
 
 def a_field(**overrides) -> SignalField:
     """A minimal well-formed estimator, for tests that break one thing at a time."""
     declared = {
+        "reading": a_reading,
         "name": "test.estimator",
         "unit": Unit.PERCENT,
         "sign": Sign.NON_NEGATIVE,
@@ -189,9 +197,24 @@ def a_health(session: Session, symbol: str, days: tuple[date, ...]):
 
 class TestNineDeclarationsOrItDoesNotShip:
     def test_every_registered_field_declares_all_nine(self):
+        """Asserted against the type rather than against an instance.
+
+        ``hasattr`` on a dataclass whose fields have no defaults can never fail,
+        so it would pass a field renamed out from under the ADR. What has to hold
+        is that the nine names ADR-0010 lists are the nine the type declares.
+        """
+        declared = {entry.name for entry in dataclasses.fields(SignalField)}
+
+        assert set(NINE_DECLARATIONS) <= declared
+
         for field in REGISTRY.values():
             for attribute in NINE_DECLARATIONS:
-                assert hasattr(field, attribute), f"{field.name} has no {attribute}"
+                # Present *and* answered for: `interpretation` and the two null
+                # attributes are the ones a field can carry emptily.
+                assert getattr(field, attribute) is not None or attribute in (
+                    "threshold",
+                    "null_fpr",
+                ), f"{field.name} declares no {attribute}"
 
     def test_a_field_that_omits_one_fails_where_it_is_written(self):
         """At import, not in review. A declaration with a hole is a TypeError."""
@@ -319,6 +342,52 @@ class TestEachKindCarriesItsOwnBar:
                 )
             )
 
+    def test_an_estimator_shipping_a_null_standard_error_is_refused(self):
+        """Presence is not the test, and a null under the key is how a field
+        ships no uncertainty while looking as though it does."""
+        with open_session() as session:
+            days = store_quiet_history(session, sessions=25)
+            health = a_health(session, "AAA", days)
+
+        with pytest.raises(ValueError, match="neither may be null"):
+            FieldValue(
+                field=a_field(),
+                value=1.0,
+                health=health,
+                extras={"standard_error": None, "confidence_interval": None},
+            )
+
+    def test_a_percentile_shipping_a_null_n_is_refused(self):
+        percentile = a_field(
+            name="test.percentile",
+            kind=FieldKind.PERCENTILE,
+            unit=Unit.PERCENTILE,
+        )
+        with open_session() as session:
+            days = store_quiet_history(session, sessions=25)
+            health = a_health(session, "AAA", days)
+
+        with pytest.raises(ValueError, match="ranked among"):
+            FieldValue(
+                field=percentile,
+                value=0.8,
+                health=health,
+                extras={"n": None, "as_of": "2026-08-14"},
+            )
+
+    def test_a_computed_field_carries_the_computation_that_answers_for_it(self):
+        """Passed beside the field instead, a caller could serve one field's
+        declaration with another field's arithmetic and get a valid-looking
+        answer."""
+        with pytest.raises(ValueError, match="computed, so the computation"):
+            a_field(reading=None)
+
+        assert all(
+            entry.reading is not None
+            for entry in REGISTRY.values()
+            if entry.source is FieldSource.COMPUTED
+        )
+
     def test_a_value_with_no_number_and_no_reason_is_refused(self):
         with open_session() as session:
             days = store_quiet_history(session, sessions=25)
@@ -424,9 +493,7 @@ class TestTheNullIsMetadataAndNotAPayload:
         rather than costing the response budget on every one."""
         with open_session() as session:
             days = store_quiet_history(session)
-            value = volatility_regime(
-                session, "AAA", VOLATILITY_REGIME_Z, end=days[-1]
-            )
+            value = serve_field(session, "AAA", VOLATILITY_REGIME_Z, end=days[-1])
 
         assert value.refusal is None
         assert "null_fpr" not in value.extras
@@ -442,9 +509,7 @@ class TestTheSeededVolatilityRegimeField:
     def test_it_reaches_bars_through_the_gateway_and_echoes_window_health(self):
         with open_session() as session:
             days = store_quiet_history(session)
-            value = volatility_regime(
-                session, "AAA", VOLATILITY_REGIME_Z, end=days[-1]
-            )
+            value = serve_field(session, "AAA", VOLATILITY_REGIME_Z, end=days[-1])
 
         assert value.refusal is None
         assert value.value is not None
@@ -457,9 +522,7 @@ class TestTheSeededVolatilityRegimeField:
         would be the sixth tool the checklist fails at."""
         with open_session() as session:
             days = store_quiet_history(session, sessions=30)
-            value = volatility_regime(
-                session, "AAA", VOLATILITY_REGIME_Z, end=days[-1]
-            )
+            value = serve_field(session, "AAA", VOLATILITY_REGIME_Z, end=days[-1])
 
         assert value.value is None
         assert value.refusal is SignalIssue.INSUFFICIENT_HISTORY
@@ -480,9 +543,7 @@ class TestTheSeededVolatilityRegimeField:
         there."""
         with open_session() as session:
             days = store_quiet_history(session, locked_from_end=(2, 3, 4))
-            value = volatility_regime(
-                session, "AAA", VOLATILITY_REGIME_Z, end=days[-1]
-            )
+            value = serve_field(session, "AAA", VOLATILITY_REGIME_Z, end=days[-1])
 
         assert value.refusal is None
         assert value.health.limit_lock_days == 3
@@ -495,9 +556,7 @@ class TestTheSeededVolatilityRegimeField:
         locked = tuple(range(2, 2 + VOLATILITY_REGIME_MIN_SESSIONS // 4))
         with open_session() as session:
             days = store_quiet_history(session, locked_from_end=locked)
-            value = volatility_regime(
-                session, "AAA", VOLATILITY_REGIME_Z, end=days[-1]
-            )
+            value = serve_field(session, "AAA", VOLATILITY_REGIME_Z, end=days[-1])
 
         assert value.degraded_reason is SignalIssue.LIMIT_LOCKED_WINDOW
 
@@ -505,9 +564,7 @@ class TestTheSeededVolatilityRegimeField:
         """Not a variance of zero to be logged: a session with nothing to read."""
         with open_session() as session:
             days = store_quiet_history(session, locked_from_end=(1,))
-            value = volatility_regime(
-                session, "AAA", VOLATILITY_REGIME_Z, end=days[-1]
-            )
+            value = serve_field(session, "AAA", VOLATILITY_REGIME_Z, end=days[-1])
 
         assert value.value is None
         assert value.refusal is SignalIssue.ZERO_RANGE_SESSION
@@ -516,11 +573,6 @@ class TestTheSeededVolatilityRegimeField:
         """Molnár (2012) flags the close-to-close version as a literature error
         that "sometimes produces negative estimates". With C/O the estimator is
         non-negative for every bar that has one, which is what this pins."""
-        from decimal import Decimal
-
-        from src.stocks.signals.bars import Bar
-        from src.stocks.signals.price_band import LimitLock
-
         bar = Bar(
             session_date=date(2025, 8, 14),
             open=25_000.0,

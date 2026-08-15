@@ -50,6 +50,14 @@ from .fields import (
 )
 from .risk import (
     DRAWDOWN_MIN_SESSIONS,
+    current_drawdown_reading,
+    days_underwater_reading,
+    drawdown_versus_benchmark_reading,
+    max_drawdown_reading,
+    price_zone_reading,
+    realized_volatility_reading,
+    sharpe_reading,
+    sortino_reading,
     DRAWDOWN_SESSIONS,
     MIN_DOWNSIDE_OBSERVATIONS,
     PRICE_ZONE_MIN_SESSIONS,
@@ -63,6 +71,7 @@ from .risk import (
 from .volatility import (
     VOLATILITY_REGIME_BASELINE_DAYS,
     VOLATILITY_REGIME_MIN_SESSIONS,
+    volatility_regime_reading,
     volatility_regime_z,
 )
 
@@ -126,9 +135,11 @@ VOLATILITY_REGIME_Z = SignalField(
     ),
     output_keys=(
         "garman_klass_variance",
+        "sessions",
         "baseline_sessions",
         "limit_lock_days",
     ),
+    reading=volatility_regime_reading,
     statistic=volatility_regime_z,
 )
 
@@ -155,11 +166,13 @@ REALIZED_VOLATILITY = SignalField(
     null_fpr=None,
     output_keys=(
         "standard_error",
-        "sessions",
         "components_annualized_pct",
+        "sessions",
+        "estimator_sessions",
         "limit_lock_days",
         "zero_range_days",
     ),
+    reading=realized_volatility_reading,
 )
 
 # The price-zone field the nightly artifact treats as core evidence. Named here
@@ -184,14 +197,16 @@ PRICE_ZONE = SignalField(
     threshold=None,
     null_fpr=None,
     output_keys=(
-        "reference_price",
+        "anchor_close",
         "lower_price",
         "upper_price",
-        "reference_session",
-        "sessions",
+        "anchor_session",
         "standard_error",
+        "sessions",
+        "estimator_sessions",
         "limit_lock_days",
     ),
+    reading=price_zone_reading,
 )
 
 _DRAWDOWN_KEYS = (
@@ -203,6 +218,7 @@ _DRAWDOWN_KEYS = (
     "peak_session",
     "trough_session",
     "sessions",
+    "estimator_sessions",
     "limit_lock_days",
 )
 
@@ -226,6 +242,7 @@ MAX_DRAWDOWN = SignalField(
     threshold=None,
     null_fpr=None,
     output_keys=_DRAWDOWN_KEYS,
+    reading=max_drawdown_reading,
 )
 
 CURRENT_DRAWDOWN = SignalField(
@@ -246,6 +263,7 @@ CURRENT_DRAWDOWN = SignalField(
     threshold=None,
     null_fpr=None,
     output_keys=_DRAWDOWN_KEYS,
+    reading=current_drawdown_reading,
 )
 
 DAYS_UNDERWATER = SignalField(
@@ -266,6 +284,7 @@ DAYS_UNDERWATER = SignalField(
     threshold=None,
     null_fpr=None,
     output_keys=_DRAWDOWN_KEYS,
+    reading=days_underwater_reading,
 )
 
 DRAWDOWN_VERSUS_BENCHMARK = SignalField(
@@ -317,8 +336,10 @@ DRAWDOWN_VERSUS_BENCHMARK = SignalField(
     output_keys=(
         "expected_max_drawdown_log",
         "sessions",
+        "estimator_sessions",
         "limit_lock_days",
     ),
+    reading=drawdown_versus_benchmark_reading,
     statistic=drawdown_ratio,
 )
 
@@ -347,10 +368,14 @@ SHARPE = SignalField(
         "confidence_interval",
         "indistinguishable_from_zero",
         "annualization",
+        "annualization_lags",
         "first_autocorrelation",
-        "sessions",
         "benchmark",
+        "sessions",
+        "estimator_sessions",
+        "limit_lock_days",
     ),
+    reading=sharpe_reading,
 )
 
 SORTINO = SignalField(
@@ -372,13 +397,19 @@ SORTINO = SignalField(
     threshold=None,
     null_fpr=None,
     output_keys=(
+        "standard_error",
+        "standard_error_basis",
+        "confidence_interval",
         "downside_obs_count",
         "downside_deviation_pct",
         "annualization",
-        "sessions",
+        "annualization_lags",
         "benchmark",
-        "standard_error",
+        "sessions",
+        "estimator_sessions",
+        "limit_lock_days",
     ),
+    reading=sortino_reading,
 )
 
 

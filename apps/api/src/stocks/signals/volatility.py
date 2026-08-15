@@ -47,17 +47,10 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from datetime import date
 from statistics import median
 
-from sqlalchemy.orm import Session
-
-from .bars import Bar, BarFrame, WindowHealth, prepare_bars
-from .fields import (
-    DEGRADED_LIMIT_LOCK_SHARE,
-    FieldValue,
-    SignalField,
-)
+from .bars import Bar, BarFrame
+from .fields import FieldReading
 from .issues import SignalIssue
 
 # The trailing stretch today's session is judged against. Sixty sessions is the
@@ -128,42 +121,24 @@ def volatility_regime_z(frame: BarFrame) -> float | None:
     return _reading(frame)[0]
 
 
-def volatility_regime(
-    session: Session,
-    symbol: str,
-    field: SignalField,
-    *,
-    end: date | None = None,
-) -> FieldValue:
-    """Serve the volatility-regime z for one symbol, through the one gateway.
+def volatility_regime_reading(frame: BarFrame) -> FieldReading:
+    """The registered field's own answer over one window.
 
-    Reaches bars only through ``prepare_bars()`` and echoes its Window Health,
-    refusal or not. A window the gateway refuses is refused here under the same
-    name: there is no second path to a bar, and a field that fell back to one
-    would be the sixth tool the checklist fails at.
+    Pure, like every other reading in this package: it is what the null harness
+    runs and what ``serve_field`` dresses with Window Health, and it reaches
+    nothing outside the frame it was handed.
     """
-    frame, health = prepare_bars(
-        session, symbol, field.min_sessions, min_sessions=field.min_sessions, end=end
-    )
-    if frame is None or health.refusal is not None:
-        return FieldValue(
-            field=field, value=None, health=health, refusal=health.refusal
-        )
-
     value, reason = _reading(frame)
     if value is None:
-        return FieldValue(field=field, value=None, health=health, refusal=reason)
-
-    return FieldValue(
-        field=field,
+        return FieldReading(value=None, refusal=reason)
+    return FieldReading(
         value=value,
-        health=health,
         extras={
             "garman_klass_variance": garman_klass_variance(frame.bars[-1]),
+            "sessions": len(frame.bars),
             "baseline_sessions": len(_baseline_log_variances(frame)),
-            "limit_lock_days": health.limit_lock_days,
+            "limit_lock_days": sum(1 for bar in frame.bars if bar.limit_locked),
         },
-        degraded_reason=_degradation(health),
     )
 
 
@@ -176,7 +151,7 @@ def log_variance(bar: Bar) -> float | None:
     power-law tail with no usable second moment. A location-scale z over that
     measures the tail rather than the regime, which is not a judgement call but a
     measured one — see the note on the registered field's threshold, where the
-    same null demands z ≈ 25 on the raw variance and 4 in logs.
+    same null demands z of about 25 on the raw variance and under 3 in logs.
 
     In logs the same scale mixture is a location shift, the median/MAD baseline
     is the natural one for it, and the sign keeps its meaning exactly: positive
@@ -228,17 +203,3 @@ def _baseline_log_variances(frame: BarFrame) -> list[float]:
         if (value := log_variance(bar)) is not None
     ]
 
-
-def _degradation(health: WindowHealth) -> SignalIssue | None:
-    """Whether this window was too locked to call the answer ordinary.
-
-    Past a fifth of the window the estimate is measuring the band rather than
-    the market, and ADR-0010 makes that a degradation with a named reason rather
-    than a footnote.
-    """
-    if health.sessions_used == 0:
-        return None
-    share = health.limit_lock_days / health.sessions_used
-    if share > DEGRADED_LIMIT_LOCK_SHARE:
-        return SignalIssue.LIMIT_LOCKED_WINDOW
-    return None
