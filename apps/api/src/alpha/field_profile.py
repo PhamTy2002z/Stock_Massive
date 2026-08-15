@@ -92,6 +92,50 @@ class AnalysisIndustry(str, Enum):
     UNCLASSIFIED = "unclassified"
 
 
+# The ICB supersector codes the three industry blocks are about. Level 2 rather
+# than any other level, because that is the level at which "a bank", "a
+# developer" and "a retailer" are one code each: level 1 puts banks, insurers
+# and developers together under Financials, and level 3 splits retail into
+# several codes with no metric of its own to add.
+#
+# A mapping rather than a chain of comparisons, so a fourth industry block is a
+# line here and a block in ``INDUSTRY_FUNDAMENTAL_FIELDS``. That the two agree is
+# checked at import, below, rather than left to whoever adds the line: a code
+# pointing at an industry with no block of its own selects exactly what ``other``
+# selects, and nothing downstream could tell the two apart.
+ICB_LEVEL_2_CODE_LENGTH = 4
+ICB_LEVEL_2_INDUSTRIES: Mapping[str, AnalysisIndustry] = MappingProxyType(
+    {
+        "8300": AnalysisIndustry.BANKS,
+        "8600": AnalysisIndustry.REAL_ESTATE,
+        "5300": AnalysisIndustry.RETAIL,
+    }
+)
+
+
+def industry_for_icb(code: str | None) -> AnalysisIndustry:
+    """Which industry block a stored ICB level-2 code selects.
+
+    The two negative answers are deliberately different. A code this table does
+    not name is ``OTHER`` — the register looked, and the profile has no extra
+    fundamentals for that business. No code at all is ``UNCLASSIFIED`` — nothing
+    has classified the symbol yet, which is a statement about this system rather
+    than about the company. Folded together, the day a classification lands
+    would read as the day every symbol changed industry.
+
+    A code is taken literally: no prefix match, no truncation of a deeper level.
+    ``8355`` is the level-4 code for banks and is not this table's ``8300``, and
+    a reader that quietly bridged them would select a block off a code that does
+    not say it.
+    """
+    if code is None:
+        return AnalysisIndustry.UNCLASSIFIED
+    stripped = code.strip()
+    if not stripped:
+        return AnalysisIndustry.UNCLASSIFIED
+    return ICB_LEVEL_2_INDUSTRIES.get(stripped, AnalysisIndustry.OTHER)
+
+
 @dataclass(frozen=True)
 class ProfileField:
     """One field the profile names, registered or not.
@@ -290,6 +334,18 @@ def _check_the_profile_holds() -> None:
             "a registered field"
         )
 
+    for code, industry in ICB_LEVEL_2_INDUSTRIES.items():
+        if len(code) != ICB_LEVEL_2_CODE_LENGTH or not code.isdigit():
+            raise ValueError(f"{code} is not an ICB level-2 code")
+        if industry not in INDUSTRY_FUNDAMENTAL_FIELDS:
+            # A code mapped to an industry with no block of its own selects
+            # exactly what `other` selects, so the mapping would be a fact the
+            # artifact cannot show and nothing downstream could tell apart.
+            raise ValueError(
+                f"{code} selects {industry.value}, which adds no fundamentals of "
+                "its own"
+            )
+
 
 _check_the_profile_holds()
 
@@ -297,6 +353,7 @@ _check_the_profile_holds()
 __all__ = [
     "AXIS_ORDER",
     "FIELD_PROFILE_VERSION",
+    "ICB_LEVEL_2_INDUSTRIES",
     "INDUSTRY_FUNDAMENTAL_FIELDS",
     "MAX_FIELDS_PER_AXIS",
     "MONEY_FLOW_FIELDS",
@@ -307,5 +364,6 @@ __all__ = [
     "AnalysisIndustry",
     "Axis",
     "ProfileField",
+    "industry_for_icb",
     "profile_for",
 ]

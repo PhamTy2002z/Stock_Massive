@@ -11,9 +11,11 @@ from datetime import date, datetime, timezone
 import pandas as pd
 import pytest
 
+from src.core.vnstock_client import VnstockUnavailable
 from src.stocks.providers.contracts import (
     MARKET_SCHEMA_VERSION,
     Capability,
+    Exchange,
     PriceBasis,
     ProviderSource,
     ShareType,
@@ -23,6 +25,7 @@ from src.stocks.providers.normalize import VN_TZ
 from src.stocks.providers.vnstock_provider import (
     VnstockCorporateActionProvider,
     VnstockFundamentalProvider,
+    VnstockListingRosterProvider,
     VnstockMarketHistoryProvider,
     VnstockProviderError,
     VnstockReadFailed,
@@ -705,6 +708,223 @@ class TestFundamentalRefusal:
             provider.fetch_fundamentals(["HPG"])
 
 
+def board_frame(rows: list[dict]) -> pd.DataFrame:
+    """The columns a VCI listing board comes back with, as measured in Aug 2026."""
+    return pd.DataFrame(rows)
+
+
+def listed_row(symbol: str, **overrides) -> dict:
+    row = {
+        "symbol": symbol,
+        "type": "STOCK",
+        "organ_short_name": f"{symbol} Corp",
+        "organ_name": f"Công ty Cổ phần {symbol}",
+    }
+    row.update(overrides)
+    return row
+
+
+def icb_frame(rows: list[dict]) -> pd.DataFrame:
+    """The ICB list VCI answers with: one row per symbol *per level*.
+
+    Which is the whole reason the level is read rather than assumed — the same
+    symbol arrives four times, and only one of those rows is the supersector
+    the Analysis Field Profile is keyed on.
+    """
+    return pd.DataFrame(rows)
+
+
+def icb_rows(symbol: str, *, code: str, name: str) -> list[dict]:
+    """One symbol's four ICB levels, with the level-2 code the one asked for."""
+    return [
+        {"symbol": symbol, "icb_level": level, "icb_code": value, "icb_name": label}
+        for level, value, label in (
+            (1, "8000", "Tài chính"),
+            (2, code, name),
+            (3, "8350", "Ngân hàng"),
+            (4, "8355", "Ngân hàng"),
+        )
+    ]
+
+
+class FakeListing:
+    """Stands in for ``Listing(source=...)``, recording every read it served."""
+
+    def __init__(
+        self,
+        boards: dict[str, pd.DataFrame] | None = None,
+        industries: pd.DataFrame | Exception | None = None,
+    ):
+        self.boards = boards or {}
+        self.industries = industries
+        self.board_calls: list[str] = []
+        self.industry_calls = 0
+
+    def symbols_by_exchange(self, exchange: str, **kwargs):
+        self.board_calls.append(exchange)
+        frame = self.boards.get(exchange)
+        if isinstance(frame, Exception):
+            raise frame
+        return board_frame([]) if frame is None else frame
+
+    def symbols_by_industries(self, **kwargs):
+        self.industry_calls += 1
+        if isinstance(self.industries, Exception):
+            raise self.industries
+        if self.industries is None:
+            raise NotImplementedError("this fake was built without an industry list")
+        return self.industries
+
+
+def roster_provider(listing: FakeListing) -> VnstockListingRosterProvider:
+    return VnstockListingRosterProvider(listing_factory=lambda source: listing)
+
+
+def one_board(rows: list[dict], industries=None) -> FakeListing:
+    """A market whose only company sits on HOSE, so a test can be about one row."""
+    return FakeListing(
+        boards={
+            Exchange.HOSE.value: board_frame(rows),
+            Exchange.HNX.value: board_frame([listed_row("HNXCO")]),
+            Exchange.UPCOM.value: board_frame([listed_row("UPCO")]),
+        },
+        industries=industries,
+    )
+
+
+class TestListingRosterNormalization:
+    """What the register carries, and what it refuses to invent.
+
+    The classification rides here rather than being asked for per symbol later:
+    the nightly Analysis pipeline may not call a Provider Source at all, so the
+    only chance to learn what business a company is in is the pass that already
+    reads the whole market (spec 0003 §8.1, §13).
+    """
+
+    def test_a_listed_equity_carries_its_level_two_classification(self):
+        listing = one_board(
+            [listed_row("VCB")],
+            industries=icb_frame(icb_rows("VCB", code="8300", name="Ngân hàng")),
+        )
+
+        entries = roster_provider(listing).fetch_listing_roster()
+
+        vcb = next(entry for entry in entries if entry.symbol == "VCB")
+        assert vcb.exchange is Exchange.HOSE
+        assert vcb.icb_code == "8300"
+        assert vcb.icb_name == "Ngân hàng"
+
+    def test_a_deeper_level_is_never_read_as_the_level_two_code(self):
+        """The level-3 and level-4 rows for a bank are 8350 and 8355."""
+        listing = one_board(
+            [listed_row("VCB")],
+            industries=icb_frame(icb_rows("VCB", code="8300", name="Ngân hàng")),
+        )
+
+        entries = roster_provider(listing).fetch_listing_roster()
+
+        assert {entry.icb_code for entry in entries} == {"8300", None}
+
+    def test_a_symbol_the_industry_list_does_not_carry_is_listed_unclassified(self):
+        listing = one_board(
+            [listed_row("VCB"), listed_row("NEW")],
+            industries=icb_frame(icb_rows("VCB", code="8300", name="Ngân hàng")),
+        )
+
+        entries = roster_provider(listing).fetch_listing_roster()
+
+        new = next(entry for entry in entries if entry.symbol == "NEW")
+        assert new.icb_code is None
+        assert new.icb_name is None
+
+    def test_the_whole_market_is_classified_in_one_read(self):
+        """One request for every listed company, beside the three board reads."""
+        listing = one_board(
+            [listed_row("VCB")],
+            industries=icb_frame(icb_rows("VCB", code="8300", name="Ngân hàng")),
+        )
+
+        roster_provider(listing).fetch_listing_roster()
+
+        assert listing.industry_calls == 1
+        assert listing.board_calls == [
+            Exchange.HOSE.value,
+            Exchange.HNX.value,
+            Exchange.UPCOM.value,
+        ]
+
+    def test_a_classification_read_that_fails_leaves_the_register_standing(
+        self, caplog
+    ):
+        """The register is the answer a refresh has to come back with.
+
+        Failing the whole read over the enrichment would delist nobody and
+        refresh nobody — and the store leaves an unclassified refresh's stored
+        classification alone, so nothing is lost by carrying on.
+        """
+        listing = one_board(
+            [listed_row("VCB")], industries=TimeoutError("industry list gone")
+        )
+
+        entries = roster_provider(listing).fetch_listing_roster()
+
+        assert {entry.symbol for entry in entries} == {"VCB", "HNXCO", "UPCO"}
+        assert all(entry.icb_code is None for entry in entries)
+
+    def test_an_exhausted_allowance_is_not_downgraded_to_a_warning(self):
+        """It says nothing about the classification, and everything about what follows.
+
+        The census after this refresh costs two requests per symbol across the
+        whole market. Swallowed here, an exhausted account would be met again
+        immediately with nothing having warned that it was already known.
+        """
+        listing = one_board(
+            [listed_row("VCB")], industries=VnstockUnavailable("allowance spent")
+        )
+
+        with pytest.raises(VnstockUnavailable):
+            roster_provider(listing).fetch_listing_roster()
+
+    def test_a_list_that_is_not_icb_classifies_nobody(self):
+        """KBS answers with codes of its own that are explicitly not ICB.
+
+        Read as ICB level 2 they would select an industry block off a number
+        that means something else entirely, so an unfamiliar shape classifies
+        nobody rather than being interpreted.
+        """
+        listing = one_board(
+            [listed_row("VCB")],
+            industries=icb_frame(
+                [{"symbol": "VCB", "industry_code": "301", "industry_name": "Ngân hàng"}]
+            ),
+        )
+
+        entries = roster_provider(listing).fetch_listing_roster()
+
+        assert all(entry.icb_code is None for entry in entries)
+
+    def test_only_ordinary_equities_reach_the_register(self):
+        """The board also lists funds and covered warrants, which nobody ranks."""
+        listing = one_board(
+            [listed_row("VCB"), listed_row("FUEVFVND", type="FUND")],
+            industries=icb_frame(icb_rows("VCB", code="8300", name="Ngân hàng")),
+        )
+
+        entries = roster_provider(listing).fetch_listing_roster()
+
+        assert "FUEVFVND" not in {entry.symbol for entry in entries}
+
+    def test_a_board_that_answered_with_nothing_fails_the_whole_read(self):
+        """An empty board is indistinguishable from every company leaving it."""
+        listing = FakeListing(
+            boards={Exchange.HOSE.value: board_frame([])},
+            industries=icb_frame([]),
+        )
+
+        with pytest.raises(VnstockProviderError):
+            roster_provider(listing).fetch_listing_roster()
+
+
 class FakeCompany:
     """Stands in for ``Company(symbol=..., source=...)``, counting its reads."""
 
@@ -965,6 +1185,23 @@ class TestAgainstTheLiveProvider:
         assert cash and all(event.value_per_share for event in cash)
         issues = [event for event in events if event.event_code == "ISS"]
         assert issues and all(event.exercise_ratio for event in issues)
+
+    @pytest.mark.network
+    def test_the_register_still_classifies_the_market_by_icb_level(self):
+        """The shape ``icb_rows`` above is copied from.
+
+        A bank is asserted by name because the level is the whole risk here: a
+        provider that stopped answering with one row per level, or started
+        numbering them differently, would classify every symbol as ``other``
+        while every test above still passed.
+        """
+        entries = VnstockListingRosterProvider().fetch_listing_roster()
+
+        by_symbol = {entry.symbol: entry for entry in entries}
+        assert by_symbol["VCB"].icb_code == "8300"
+        assert by_symbol["VHM"].icb_code == "8600"
+        classified = [entry for entry in entries if entry.icb_code]
+        assert len(classified) > len(entries) // 2
 
     @pytest.mark.network
     def test_statements_still_arrive_in_the_layout_this_adapter_reads(self):
