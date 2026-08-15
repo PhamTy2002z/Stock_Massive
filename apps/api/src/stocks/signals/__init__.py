@@ -5,6 +5,20 @@ Collector and the Warm-up already wrote, so an evening the provider is down
 still answers — with an older session, and saying so.
 """
 
+from .corporate_actions import (
+    ActionKind,
+    ActionTerms,
+    Confirmation,
+    ConfirmationReason,
+    ConfirmationVerdict,
+    CorporateActionStore,
+    FactorReading,
+    adjustment_factor,
+    classify,
+    confirm_ex_date,
+    previous_close,
+    terms_of,
+)
 from .issues import SignalIssue
 from .price_band import (
     BAND_LIMIT_BY_EXCHANGE,
@@ -35,24 +49,36 @@ from .volume_spike import (
 __all__ = [
     "BAND_LIMIT_BY_EXCHANGE",
     "BASELINE_TRADING_DAYS",
+    "ActionKind",
+    "ActionTerms",
     "BandAnchorBasis",
     "BandLimits",
     "BandReading",
     "BandRegime",
+    "Confirmation",
+    "ConfirmationReason",
+    "ConfirmationVerdict",
+    "CorporateActionStore",
     "CoverageState",
     "EXCHANGE_MIGRATIONS",
     "ExchangeAsOf",
     "ExchangeMigration",
+    "FactorReading",
     "Freshness",
     "LimitLock",
     "MIGRATION_PROGRAMME_END",
     "SignalIssue",
     "SignalScope",
     "VolumeSpikeSignal",
+    "adjustment_factor",
     "band_limits",
+    "classify",
+    "confirm_ex_date",
     "detect_limit_lock",
+    "previous_close",
     "resolve_band_regime",
     "signal_cache_key",
+    "terms_of",
     "tick_size",
     "volume_spike_signal",
 ]
