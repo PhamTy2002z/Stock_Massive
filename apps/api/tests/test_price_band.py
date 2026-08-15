@@ -86,6 +86,7 @@ def write_session(
     volume: int = 1_000_000,
     total_value_vnd: float | None = None,
     market_cap_vnd: float | None = None,
+    foreign_net_value_vnd: float | None = None,
     source: ProviderSource = ProviderSource.FIINQUANT,
     basis: PriceBasis | None = None,
 ) -> None:
@@ -116,6 +117,7 @@ def write_session(
         last_price=close,
         volume=volume,
         market_cap_vnd=market_cap_vnd,
+        foreign_net_value_vnd=foreign_net_value_vnd,
     )
     session.add(
         ProviderSnapshot(

@@ -105,6 +105,26 @@ VARIANCE_PERSISTENCE = 0.95
 VARIANCE_SHOCK = 0.35
 REFERENCE_TAIL_DEGREES = 5.0
 
+# What a null session trades, and how much of it is foreign. The level is
+# arbitrary — every field calibrated against these reads a ratio — but it has to
+# be a number, because a flow null with no denominator is not a flow.
+NULL_SESSION_TURNOVER_VND = 10e9
+
+# The spread of a session's net foreign flow as a share of its turnover. A tenth
+# is the order of magnitude a liquid HOSE large-cap runs at; the constant sets
+# the scale of both the numerator and the noise around it, so a rate measured
+# against it does not depend on it.
+NULL_FLOW_SCALE = 0.10
+
+# How persistent the stand-in flow series is, session to session. This is the
+# one property the flow null exists to carry: an independent-draw flow would
+# make an ordinary streak look remarkable, which is the failure a block
+# permutation of real flows is run to avoid. Half is a moderate reading of the
+# persistence Froot-O'Connell-Seasholes and Richards both measure, and like the
+# rest of the reference history it is a stand-in that says so rather than a
+# claim about any symbol.
+REFERENCE_FLOW_PERSISTENCE = 0.5
+
 _LOG_CEILING = math.log(1.0 + TRUNCATION_BAND)
 _LOG_FLOOR = math.log(1.0 - TRUNCATION_BAND)
 _BASE_PRICE = 20_000.0
@@ -119,6 +139,12 @@ class BarShapes:
     bar's shape — ``H/L``, ``C/O`` — and never its level. Kept this way, a
     bootstrap can splice two stretches of history together without inventing a
     jump at the seam, and the band truncation stays expressible as a constant.
+
+    ``flow`` is the session's net foreign money as a fraction of the money that
+    traded in it, and it rides here rather than beside because the bootstrap
+    resamples **whole bars**: a flow spliced independently of the bar it came
+    from would have its serial dependence destroyed by the one null that exists
+    to preserve it.
     """
 
     open: np.ndarray
@@ -126,6 +152,7 @@ class BarShapes:
     low: np.ndarray
     close: np.ndarray
     locked: np.ndarray
+    flow: np.ndarray
 
     def __len__(self) -> int:
         return int(self.open.shape[-1])
@@ -156,7 +183,11 @@ def gbm_shapes(
         rng.normal(0.0, step_sigma, size=(paths, sessions, INTRADAY_STEPS)),
         axis=2,
     )
-    return _shapes_from_walk(jump, walk, truncated=truncated)
+    # Independent session to session, deliberately. This is the null in which a
+    # foreign-flow streak is nothing but a coin landing the same way twice, and
+    # the bootstrap below is the one that asks what a persistent flow does.
+    flow = rng.normal(0.0, NULL_FLOW_SCALE, size=(paths, sessions))
+    return _shapes_from_walk(jump, walk, flow, truncated=truncated)
 
 
 def reference_bar_history(
@@ -204,7 +235,18 @@ def reference_bar_history(
     steps = rng.normal(0.0, 1.0, size=(1, sessions, INTRADAY_STEPS)) * (
         intraday_sigma / math.sqrt(INTRADAY_STEPS)
     )[None, :, None]
-    shapes = _shapes_from_walk(jump, np.cumsum(steps, axis=2), truncated=True)
+    # An AR(1) flow, scaled so its stationary spread is the same NULL_FLOW_SCALE
+    # the independent null draws at. Same size of flow, different memory: the
+    # only thing this null adds is the persistence, so a threshold it demands
+    # more of is demanding it for that reason and no other.
+    innovation = math.sqrt(1.0 - REFERENCE_FLOW_PERSISTENCE**2) * NULL_FLOW_SCALE
+    flow = np.empty((1, sessions))
+    level = 0.0
+    for index in range(sessions):
+        level = REFERENCE_FLOW_PERSISTENCE * level + innovation * rng.normal()
+        flow[0, index] = level
+
+    shapes = _shapes_from_walk(jump, np.cumsum(steps, axis=2), flow, truncated=True)
     # One series rather than one path of one series: the bootstrap below indexes
     # bars, and a leading axis of length one would make every block start at the
     # same place.
@@ -214,6 +256,7 @@ def reference_bar_history(
         low=shapes.low[0],
         close=shapes.close[0],
         locked=shapes.locked[0],
+        flow=shapes.flow[0],
     )
 
 
@@ -258,6 +301,7 @@ def block_bootstrap_shapes(
         low=history.low[index],
         close=history.close[index],
         locked=history.locked[index],
+        flow=history.flow[index],
     )
 
 
@@ -287,7 +331,10 @@ def frames_from(shapes: BarShapes, symbol: str = "NULL") -> list[BarFrame]:
                     low=level * float(shapes.low[path, index]),
                     close=close_price,
                     volume=1_000_000,
-                    total_value_vnd=None,
+                    total_value_vnd=NULL_SESSION_TURNOVER_VND,
+                    foreign_net_value_vnd=(
+                        NULL_SESSION_TURNOVER_VND * float(shapes.flow[path, index])
+                    ),
                     adjustment_factor=Decimal(1),
                     limit_lock=(
                         LimitLock.CEILING
@@ -353,6 +400,7 @@ def null_quantile(
 def _shapes_from_walk(
     jump: np.ndarray,
     walk: np.ndarray,
+    flow: np.ndarray,
     *,
     truncated: bool,
 ) -> BarShapes:
@@ -395,6 +443,7 @@ def _shapes_from_walk(
         low=np.exp(low_log),
         close=np.exp(close_log),
         locked=locked,
+        flow=flow,
     )
 
 

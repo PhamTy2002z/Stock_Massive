@@ -64,6 +64,17 @@ from .cross_sectional import (
     size_ranked,
     trend_reading,
 )
+from .foreign_flow import (
+    FOREIGN_FLOW_MIN_SESSIONS,
+    FOREIGN_FLOW_SESSIONS,
+    FOREIGN_PERSISTENCE_MIN_SESSIONS,
+    FOREIGN_PERSISTENCE_SESSIONS,
+    PERSISTENCE_RUN_THRESHOLD,
+    net_value_over_adtv_reading,
+    net_volume_over_adtv_reading,
+    persistence_run_days,
+    persistence_run_days_reading,
+)
 from .indicators import (
     BOLLINGER_MIN_SESSIONS,
     INDICATOR_WARMUP_SESSIONS,
@@ -891,6 +902,152 @@ CROSS_SECTIONAL_FIELDS: tuple[SignalField, ...] = (
 )
 
 
+# --- The foreign-flow cluster --------------------------------------------
+#
+# The distinctive dataset, and the one whose contract carries the most. Its
+# predictive claim is unverified for Vietnam, so both served fields are
+# descriptive and say so in their own interpretation; the share-denominated twin
+# has no stored inputs and is registered refused rather than filled with the
+# money figure.
+
+FOREIGN_FLOW_PRESSURE = SignalField(
+    # The id the Analysis Field Profile already names (spec 0003 §8.4).
+    name="foreign_flow_pressure.net_value_over_adtv",
+    unit=Unit.RATIO,
+    sign=Sign.SIGNED,
+    interpretation=(
+        "Net foreign buying over the last "
+        f"{FOREIGN_FLOW_SESSIONS} sessions divided by this symbol's average "
+        "daily traded value over the same sessions — **both in money** — so the "
+        "number is in days of ordinary turnover. **Positive means net foreign "
+        "buying.** It describes what foreign investors did and nothing about "
+        "what the price will do: no verified published result shows that HOSE "
+        "foreign net buying forecasts subsequent returns, and this field makes "
+        "no such claim. A foreign ownership room that is full stops buying "
+        "mechanically rather than by anyone's choice, so the room state travels "
+        "beside the number and an exhausted room degrades it."
+    ),
+    kind=FieldKind.ESTIMATOR,
+    claim=Claim.DESCRIPTIVE,
+    source=FieldSource.COMPUTED,
+    min_sessions=FOREIGN_FLOW_MIN_SESSIONS,
+    threshold=None,
+    null_fpr=None,
+    output_keys=(
+        "standard_error",
+        "standard_error_basis",
+        "standard_error_lags",
+        "net_value_vnd",
+        "adtv_vnd",
+        "numerator_basis",
+        "denominator_basis",
+        "sessions",
+        "foreign_room_state",
+        "foreign_room_available_share",
+        "foreign_room_as_of",
+    ),
+    reading=net_value_over_adtv_reading,
+)
+
+FOREIGN_FLOW_PERSISTENCE = SignalField(
+    name="foreign_flow_pressure.persistence_run_days",
+    unit=Unit.SESSIONS,
+    sign=Sign.NON_NEGATIVE,
+    interpretation=(
+        "How many consecutive sessions this symbol's net foreign flow has held "
+        f"one sign, looked for over the last {FOREIGN_PERSISTENCE_SESSIONS} "
+        "sessions. The direction of the streak is beside it — a long run of "
+        "selling and a long run of buying are the same length and not the same "
+        "fact. It says how long the flow has held a side and nothing about how "
+        "long it will: the Vietnamese predictiveness of foreign flow is "
+        "unverified. A session of exactly zero net flow ends a run rather than "
+        "extending it."
+    ),
+    kind=FieldKind.SIGNAL,
+    claim=Claim.DESCRIPTIVE,
+    source=FieldSource.COMPUTED,
+    min_sessions=FOREIGN_PERSISTENCE_MIN_SESSIONS,
+    threshold=Threshold(
+        value=PERSISTENCE_RUN_THRESHOLD,
+        origin=ThresholdOrigin.DERIVED,
+        # No published convention says how long a foreign-flow streak has to be
+        # before it is remarkable, which is part of why this field needed a
+        # null rather than a number somebody liked.
+        convention=None,
+        derived=PERSISTENCE_RUN_THRESHOLD,
+        note=(
+            "The two nulls disagree by nearly a factor of two, and the "
+            "disagreement is the whole argument for running the block "
+            "permutation. Under independently drawn flows — the GBM nulls, "
+            "truncated or not — the 99th percentile of the run length is 7 "
+            "sessions, which is a coin landing the same way seven times. Under "
+            "the stationary block bootstrap over a flow series carrying the "
+            "session-to-session persistence foreign flows actually have, it is "
+            "12. A field calibrated on the independent null alone would fire on "
+            "about 9% of null windows. "
+            "The smallest length clearing the 1% ceiling on all three is 13, "
+            "where the bootstrap sits at 0.95% — close enough to the ceiling "
+            "that a rerun could cross it. The shipped 15 is a margin over that "
+            "measurement rather than a second derivation: it puts the worst "
+            "null at 0.43%, under half the ceiling, and a rerun landing a "
+            "session either way does not move the constant."
+        ),
+    ),
+    null_fpr=NullCalibration(
+        gbm=0.0001,
+        gbm_truncated=0.0001,
+        block_bootstrap=0.0043,
+        paths=NULL_DERIVATION_PATHS,
+        seed=NULL_DERIVATION_SEED,
+    ),
+    output_keys=(
+        "run_sign",
+        "run_net_value_vnd",
+        "sessions",
+        "foreign_room_state",
+        "foreign_room_available_share",
+        "foreign_room_as_of",
+    ),
+    reading=persistence_run_days_reading,
+    statistic=persistence_run_days,
+)
+
+FOREIGN_FLOW_SHARE_PRESSURE = SignalField(
+    name="foreign_flow_pressure.net_volume_over_adtv",
+    unit=Unit.RATIO,
+    sign=Sign.SIGNED,
+    interpretation=(
+        "Net foreign buying in **shares** over this symbol's average daily "
+        "traded share count. **Unavailable**: the Main Source reports foreign "
+        "buy and sell as money and no adapter in this system writes the share "
+        "counts, so the ratio has no inputs. It is registered refused rather "
+        "than filled with the money-denominated ratio beside it, which is a "
+        "different number — an average in shares does not survive an ex-date "
+        "and an average in dong does."
+    ),
+    kind=FieldKind.ESTIMATOR,
+    claim=Claim.DESCRIPTIVE,
+    source=FieldSource.COMPUTED,
+    min_sessions=FOREIGN_FLOW_MIN_SESSIONS,
+    threshold=None,
+    null_fpr=None,
+    output_keys=(
+        "missing_input",
+        "available_instead",
+        "foreign_room_state",
+        "foreign_room_available_share",
+        "foreign_room_as_of",
+    ),
+    reading=net_volume_over_adtv_reading,
+)
+
+FOREIGN_FLOW_FIELDS: tuple[SignalField, ...] = (
+    FOREIGN_FLOW_PRESSURE,
+    FOREIGN_FLOW_PERSISTENCE,
+    FOREIGN_FLOW_SHARE_PRESSURE,
+)
+
+
 # --- Descriptive indicator vocabulary ------------------------------------
 
 _NO_INDICATOR_EDGE = (
@@ -994,6 +1151,9 @@ REGISTRY: Mapping[str, SignalField] = _index(
     BOOK_YIELD_PERCENTILE,
     ROE_PERCENTILE,
     SIZE_PERCENTILE,
+    FOREIGN_FLOW_PRESSURE,
+    FOREIGN_FLOW_PERSISTENCE,
+    FOREIGN_FLOW_SHARE_PRESSURE,
     RSI,
     MACD,
     BOLLINGER_PERCENT_B,

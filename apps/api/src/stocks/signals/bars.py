@@ -149,6 +149,13 @@ class Bar:
     # value is: a share-count change moves the count and the price together and
     # leaves their product where it was.
     market_cap_vnd: float | None = None
+    # What foreign investors bought less what they sold in this session, in
+    # **money**, exactly as the provider reported it — positive is net foreign
+    # buying. Money and not shares, because money is what the Main Source
+    # actually writes: it reports active buy and sell as quantity and foreign
+    # buy and sell as value, and the naming split exists so the two can never be
+    # swapped by accident.
+    foreign_net_value_vnd: float | None = None
 
     @property
     def limit_locked(self) -> bool:
@@ -658,6 +665,7 @@ def _frame(
                 volume=row.volume,
                 total_value_vnd=row.total_value_vnd,
                 market_cap_vnd=row.market_cap_vnd,
+                foreign_net_value_vnd=row.foreign_net_value_vnd,
                 adjustment_factor=factor,
                 limit_lock=(
                     bands[day].lock if day in bands else LimitLock.INDETERMINATE
