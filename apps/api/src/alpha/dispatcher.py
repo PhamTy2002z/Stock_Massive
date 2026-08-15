@@ -36,10 +36,12 @@ already reserved and possibly already dispatched, so cancelling it would abandon
 spend that has been committed and might have been charged.
 
 **The 07:00 ICT deadline is a reporting boundary, not a licence.** Nothing here
-relabels: a run is always produced for the Trading Day its row names. A cohort
-that misses the window is read by ``cohort_state`` as ``partial`` or ``blocked``,
-which is the honest answer and the only one available — an Analysis dated to the
-previous Trading Day is the thing the deadline exists to forbid.
+relabels: a run is always produced for the Trading Day its row names, and the
+dispatcher keeps draining past the hour. What changes at 07:00 is only what the
+evening is *called* — ``cohort_report`` reads an evening still carrying work as
+``partial`` rather than ``running``. An Analysis dated to the previous Trading
+Day is the thing the deadline exists to forbid, so it is the one thing that is
+never done to meet it.
 
 A2's stuck-run sweep keeps running beside this and stays the thing that clears a
 run abandoned mid-production. This module deliberately grows no version of it: a
@@ -51,12 +53,13 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from dataclasses import dataclass, field, replace
+from datetime import date, datetime, time, timedelta, timezone
 
 from sqlalchemy import case, func, select, update
 from sqlalchemy.orm import Session
 
+from src.stocks.providers.normalize import VN_TZ
 from src.stocks.trading_day import latest_trading_day
 
 from .analysis_run import (
@@ -68,6 +71,7 @@ from .analysis_run import (
     write_analysis,
 )
 from .models import Analysis, AnalysisRun, WatchlistEntry
+from .nightly import CohortState, CohortStatus, cohort_state
 from .producer import Producer, ProductionFailure
 
 logger = logging.getLogger(__name__)
@@ -92,6 +96,14 @@ AUTH_PROBE_MINUTES = 15
 # purpose: a run in flight belongs to whoever claimed it, and a run stuck there
 # is the A2 sweep's business rather than this module's.
 CLAIMABLE = (RunStatus.PENDING.value, RunStatus.FAILED.value)
+
+# When an evening's Analyses have to be readable, in ICT, on the morning after
+# the Trading Day they are about. Declared here rather than beside the cohort
+# because this is the module that measures against it: the deadline changes no
+# behaviour at all — nothing is skipped, nothing is relabelled, and a run claimed
+# at 07:01 is produced exactly as one claimed at 23:00 — it only changes what an
+# evening is *called* once it is missed (``docs/adr/0014``, spec 0003 §11).
+AVAILABILITY_DEADLINE_HOUR_ICT = 7
 
 
 @dataclass
@@ -135,6 +147,59 @@ class DrainReport:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def availability_deadline(trading_day: date) -> datetime:
+    """07:00 ICT on the morning after this Trading Day.
+
+    The morning *after*, because the session it is about closes in the afternoon
+    and the pipeline runs through the evening. A deadline on the Trading Day
+    itself would be a deadline that had already passed before the data existed.
+    """
+    return datetime.combine(
+        trading_day + timedelta(days=1),
+        time(hour=AVAILABILITY_DEADLINE_HOUR_ICT),
+        tzinfo=VN_TZ,
+    )
+
+
+def cohort_report(
+    session: Session,
+    trading_day: date | None = None,
+    *,
+    now: datetime | None = None,
+) -> CohortStatus:
+    """The evening's cohort as an operator reads it, deadline included.
+
+    ``cohort_state`` answers what the runs say; this answers what they say *at a
+    time*. Past 07:00 ICT an evening still carrying pending or producing runs is
+    no longer ``running`` — it is a cohort that missed its window, and the honest
+    word for it is ``partial``: some of it may be published, and the rest will not
+    arrive when it was promised.
+
+    **Nothing is relabelled to meet the deadline.** This is a reporting boundary
+    and not a licence: the runs keep their Trading Day, the dispatcher keeps
+    draining them, and an Analysis is never dated to the previous session to make
+    the window (``docs/adr/0014``).
+
+    ``blocked`` stays what ``cohort_state`` means by it — no Trading Day was
+    established at all — and is not reused here for an evening that ran late.
+    """
+    status = cohort_state(session, trading_day)
+    if status.state is not CohortState.RUNNING or status.trading_day is None:
+        return status
+    now = now or _now()
+    if now < availability_deadline(status.trading_day):
+        return status
+
+    logger.warning(
+        "The cohort for %s is past the %02d:00 ICT availability deadline with "
+        "%d run(s) outstanding",
+        status.trading_day,
+        AVAILABILITY_DEADLINE_HOUR_ICT,
+        status.pending + status.producing,
+    )
+    return replace(status, state=CohortState.PARTIAL)
 
 
 def claim_next_run(
@@ -229,11 +294,17 @@ def drain_queue(
     producer: Producer,
     *,
     trading_day: date | None = None,
-    now: datetime | None = None,
+    clock: Callable[[], datetime] = _now,
     limit: int | None = None,
     should_stop: Callable[[], bool] | None = None,
 ) -> DrainReport:
     """Produce every claimable run for one Trading Day, in the fixed order.
+
+    **A clock rather than an instant.** One pass makes as many LLM calls as the
+    queue has work, so a pass takes minutes; a single ``now`` read at the top
+    would schedule a failure late in the pass five minutes from when the pass
+    *started*, which can already be in the past by the time it is written. Each
+    claim and each schedule reads the time again.
 
     ``should_stop`` is checked **between** runs and never during one. That is the
     no-preemption guarantee in its entirety: a generation that has been admitted
@@ -245,7 +316,6 @@ def drain_queue(
     at a time; the next tick picks the queue up where this one left it, because
     the queue is the table.
     """
-    now = now or _now()
     trading_day = trading_day or latest_trading_day(session)
     if trading_day is None:
         # Nothing has ever been collected, so there is no Trading Day to produce
@@ -261,11 +331,13 @@ def drain_queue(
             logger.info("Stopping the Analysis dispatcher between runs")
             break
 
-        run = claim_next_run(session, trading_day, now=now)
+        run = claim_next_run(session, trading_day, now=clock())
         if run is None:
             break
 
-        report.paused_until = _produce_claimed(session, run, producer, report, now=now)
+        report.paused_until = _produce_claimed(
+            session, run, producer, report, clock=clock
+        )
         if report.paused_until is not None:
             break
 
@@ -278,7 +350,7 @@ def _produce_claimed(
     producer: Producer,
     report: DrainReport,
     *,
-    now: datetime,
+    clock: Callable[[], datetime],
 ) -> datetime | None:
     """Produce one claimed run. Returns the pause deadline, or None.
 
@@ -301,10 +373,13 @@ def _produce_claimed(
     try:
         draft = producer(symbol, run.trading_day)
     except ProductionFailure as failure:
+        # The time is read *after* the generation, not before it: what the
+        # backoff is measured from is the moment this attempt gave up, and a
+        # generation can take a minute or two of that gap on its own.
         if failure.code == "auth_unavailable":
-            return _pause_route(session, run, now=now, reason=failure.message)
+            return _pause_route(session, run, now=clock(), reason=failure.message)
         mark_run_failed(session, run, failure.code, failure.message)
-        _schedule_retry(session, run, now=now)
+        _schedule_retry(session, run, now=clock())
         report.failed.append(symbol)
         return None
 
@@ -349,11 +424,14 @@ def _pause_route(
     the route refused a credential, which says nothing about this symbol, and a
     failure written here is a failure a reader would go looking for in the data.
 
-    **The attempt it spent is not refunded.** ``attempts`` counts attempts that
-    ran, and an attempt that reached the route and was turned away did run — a
-    reservation may already have been committed against it. Refunding would make
-    the column mean "attempts that failed for a reason we consider the symbol's",
-    which is not a thing the ceiling can be reasoned about with.
+    **The attempt is refunded, and it has to be.** ADR-0014 says to mark the
+    current run *retryable*, and the ordering this dispatcher applies is total and
+    deterministic — so every fifteen-minute probe re-claims the same
+    top-priority run. Counting those attempts would lock that symbol out after
+    three probes, then start on the next one: the spec's "burn all three attempts
+    for a hundred symbols" would be serialized rather than prevented. The ceiling
+    exists to stop a pair being retried into the ground for its own reasons, and
+    a credential the route rejected is not one of them.
 
     Every other waiting run for the day is pushed out with it, and that push
     **never pulls a later schedule forward**: a run already backing off for
@@ -362,6 +440,8 @@ def _pause_route(
     until = now + timedelta(minutes=AUTH_PROBE_MINUTES)
 
     run.status = RunStatus.PENDING.value
+    run.attempts = max((run.attempts or 1) - 1, 0)
+    run.started_at = None
     run.finished_at = None
     run.error_code = None
     run.error_message = None
@@ -393,9 +473,12 @@ def _pause_route(
 
 __all__ = [
     "AUTH_PROBE_MINUTES",
+    "AVAILABILITY_DEADLINE_HOUR_ICT",
     "BACKOFF_MINUTES",
     "CLAIMABLE",
     "DrainReport",
+    "availability_deadline",
     "claim_next_run",
+    "cohort_report",
     "drain_queue",
 ]

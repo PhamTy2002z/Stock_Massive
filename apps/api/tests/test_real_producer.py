@@ -41,6 +41,8 @@ from src.alpha.analysis_run import (
     MAX_ATTEMPTS_PER_SESSION,
     RunOrigin,
     RunStatus,
+    produce_analysis,
+    retry_analysis,
     stored_run,
     write_analysis,
 )
@@ -51,13 +53,7 @@ from src.alpha.producer import (
     AnalysisDraft,
     ProductionFailure,
 )
-from src.alpha.production import (
-    AUDIT_FIELDS,
-    analysis_payload,
-    analysis_producer,
-    produce_pair,
-    retry_pair,
-)
+from src.alpha.production import AUDIT_FIELDS, analysis_payload, analysis_producer
 from src.auth.models import User
 from src.core.config import get_settings
 from src.core.database import Base, get_sync_db, sync_engine, sync_session_factory
@@ -377,8 +373,8 @@ class TestPublishing:
     ):
         producer, client = a_producer()
 
-        outcome = produce_pair(
-            session, SYMBOL, TRADING_DAY, origin=RunOrigin.NIGHTLY, producer=producer
+        outcome = produce_analysis(
+            session, SYMBOL, TRADING_DAY, producer, origin=RunOrigin.NIGHTLY
         )
 
         assert outcome.status is RunStatus.READY
@@ -390,7 +386,7 @@ class TestPublishing:
     def test_the_published_evidence_is_the_evidence_that_was_sent(self, session):
         producer, client = a_producer()
 
-        outcome = produce_pair(session, SYMBOL, TRADING_DAY, producer=producer)
+        outcome = produce_analysis(session, SYMBOL, TRADING_DAY, producer)
         sent = json.loads(client.requests[0].messages[1].content)
 
         assert outcome.analysis.payload["evidence"] == sent
@@ -399,10 +395,10 @@ class TestPublishing:
         self, session
     ):
         first, _ = a_producer()
-        produce_pair(session, SYMBOL, TRADING_DAY, producer=first)
+        produce_analysis(session, SYMBOL, TRADING_DAY, first)
 
         second, client = a_producer()
-        outcome = produce_pair(session, SYMBOL, TRADING_DAY, producer=second)
+        outcome = produce_analysis(session, SYMBOL, TRADING_DAY, second)
 
         assert outcome.produced is False
         assert outcome.status is RunStatus.READY
@@ -413,14 +409,14 @@ class TestPublishing:
     ):
         """The Analysis is written first, so a retry finds it and only repairs."""
         producer, _ = a_producer()
-        produce_pair(session, SYMBOL, TRADING_DAY, producer=producer)
+        produce_analysis(session, SYMBOL, TRADING_DAY, producer)
         published = session.get(Analysis, _analysis_id(session))
         run = stored_run(session, SYMBOL, TRADING_DAY)
         run.status = RunStatus.PRODUCING.value
         session.commit()
 
         second, client = a_producer()
-        outcome = produce_pair(session, SYMBOL, TRADING_DAY, producer=second)
+        outcome = produce_analysis(session, SYMBOL, TRADING_DAY, second)
 
         assert client.calls == 0
         assert outcome.produced is False
@@ -432,7 +428,7 @@ class TestPublishing:
         user_id = watcher(SYMBOL)
         producer, client = a_producer()
 
-        outcome = retry_pair(session, user_id, SYMBOL, TRADING_DAY, producer=producer)
+        outcome = retry_analysis(session, user_id, SYMBOL, TRADING_DAY, producer)
 
         assert outcome.status is RunStatus.READY
         assert outcome.analysis.verdict in {item.value for item in Verdict}
@@ -449,7 +445,7 @@ class TestFailure:
                 + "x" * 800,
             )
 
-        outcome = produce_pair(session, SYMBOL, TRADING_DAY, producer=failing)
+        outcome = produce_analysis(session, SYMBOL, TRADING_DAY, failing)
 
         assert outcome.status is RunStatus.FAILED
         assert outcome.error_code == "llm_transport_error"
@@ -471,10 +467,10 @@ class TestFailure:
             raise ProductionFailure("llm_transport_error", "route down")
 
         for _ in range(MAX_ATTEMPTS_PER_SESSION):
-            produce_pair(session, SYMBOL, TRADING_DAY, producer=failing)
+            produce_analysis(session, SYMBOL, TRADING_DAY, failing)
 
         producer, client = a_producer()
-        outcome = produce_pair(session, SYMBOL, TRADING_DAY, producer=producer)
+        outcome = produce_analysis(session, SYMBOL, TRADING_DAY, producer)
 
         assert outcome.locked is True
         assert client.calls == 0
@@ -527,11 +523,11 @@ class TestTheSynchronousSeam:
         production.measure_cross_sections = counting
         try:
             producer, _ = a_producer(a_fragment(), a_fragment())
-            produce_pair(session, SYMBOL, TRADING_DAY, producer=producer)
+            produce_analysis(session, SYMBOL, TRADING_DAY, producer)
             with get_sync_db() as other:
                 other.execute(delete(Analysis).where(Analysis.symbol == SYMBOL))
                 other.execute(delete(AnalysisRun).where(AnalysisRun.symbol == SYMBOL))
-            produce_pair(session, SYMBOL, TRADING_DAY, producer=producer)
+            produce_analysis(session, SYMBOL, TRADING_DAY, producer)
         finally:
             production.measure_cross_sections = original
 
