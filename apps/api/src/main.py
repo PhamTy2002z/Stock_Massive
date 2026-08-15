@@ -99,12 +99,7 @@ app.include_router(watchlist_router, prefix="/api/v1")
 
 @app.exception_handler(AlphaRefusal)
 async def alpha_refusal_handler(request: Request, exc: AlphaRefusal):
-    """An Alpha Desk request refused for a named reason.
-
-    The reason travels as a code beside the sentence, so the interface can
-    branch on "full" versus "not in the Universe" without parsing Vietnamese
-    prose.
-    """
+    """An Alpha Desk request refused for a named reason (`src/alpha/refusals.py`)."""
     return JSONResponse(
         status_code=exc.status_code,
         content={"detail": {"reason": exc.reason, "message": exc.message}},

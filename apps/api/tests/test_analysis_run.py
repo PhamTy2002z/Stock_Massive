@@ -408,7 +408,7 @@ class TestRetryCeiling:
         with pytest.raises(AnalysisRefusal) as refusal:
             retry_analysis(session, user_id, SYMBOL, TRADING_DAY, refuses_to_run)
 
-        assert refusal.value.reason == "symbol_not_in_universe"
+        assert refusal.value.reason == "not_in_universe"
         assert _analyses(session) == []
 
 

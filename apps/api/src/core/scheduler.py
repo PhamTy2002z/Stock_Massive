@@ -317,9 +317,8 @@ async def setup_scheduler(scheduler: AsyncScheduler) -> None:
         )
 
     # An interval rather than a time of day: a run dies whenever the process
-    # does, which is not on a schedule. The interval is the stuck window itself,
-    # so an abandoned run is cleared within one to two windows and there is no
-    # second knob that has to be kept consistent with the first.
+    # does, which is not on a schedule. Why the interval is the stuck window
+    # itself is recorded on `analysis_run_stuck_minutes` in core/config.py.
     await scheduler.add_schedule(
         analysis_run_sweep_job_wrapper,
         IntervalTrigger(

@@ -12,7 +12,7 @@ in as an argument, never imported by the machine that calls it.
 
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Callable, Protocol
+from typing import Callable
 
 # The template version stamped on rows this system writes today. Readers handle
 # several values — that is what the column is for — and it is deliberately not
@@ -53,8 +53,8 @@ def sanitized_reason(message: str) -> str:
 class AnalysisDraft:
     """A complete Analysis, before it is published.
 
-    ``verdict`` is lifted out of the payload because the rail shows one word for
-    ten symbols and should not parse ten payloads to find it.
+    ``verdict`` is lifted out of the payload for the reason `Analysis` records
+    (``src/alpha/models.py``), so the draft arrives shaped like the row.
     """
 
     verdict: str
@@ -81,15 +81,10 @@ class ProductionFailure(Exception):
         self.message = reason
 
 
-class AnalysisProducer(Protocol):
-    """What a milestone has to supply to produce Analyses for real."""
-
-    def __call__(self, symbol: str, trading_day: date) -> AnalysisDraft:
-        """Return a complete draft, or raise `ProductionFailure`."""
-
-
-# Callables are accepted anywhere the protocol is, which is what keeps a test
-# producer a three-line function.
+# What a milestone has to supply to produce Analyses for real: given a symbol and
+# a Trading Day, return a complete draft or raise `ProductionFailure`. A plain
+# callable rather than a Protocol, so a test producer is a three-line function
+# and the real pipeline is whatever shape it wants to be.
 Producer = Callable[[str, date], AnalysisDraft]
 
 

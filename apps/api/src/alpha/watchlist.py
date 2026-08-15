@@ -24,6 +24,7 @@ from enum import Enum
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from src.core.database import in_sync_session
 from src.stocks.shared import StockServiceError, validate_symbol
@@ -90,9 +91,8 @@ class WatchlistView:
     ``items`` and not in ``count``: it costs the user nothing, because they did
     not cause it.
 
-    ``count`` may therefore exceed ``cap``. That is a real state, not a bug: a
-    symbol restored to the Universe revives whether or not there is room, and
-    the rule is that the overflow stands.
+    ``count`` may therefore exceed ``cap``, and that is a real state rather than
+    a bug — see ``add_symbol`` for why the overflow is allowed to stand.
     """
 
     items: tuple[WatchlistItem, ...]
@@ -152,6 +152,25 @@ async def _view(
     return WatchlistView(items=items, count=active)
 
 
+def watches(session: Session, user_id: int, symbol: str) -> bool:
+    """Whether this user has the symbol on their Watchlist.
+
+    Synchronous, unlike everything else here, because its caller is the Analysis
+    Run lifecycle rather than a request. It lives in this module anyway: every
+    query against ``watchlist_entries`` belongs to one place, or two modules end
+    up with two answers to what "watched" means.
+    """
+    return (
+        session.execute(
+            select(WatchlistEntry.id).where(
+                WatchlistEntry.user_id == user_id,
+                WatchlistEntry.symbol == symbol,
+            )
+        ).scalar_one_or_none()
+        is not None
+    )
+
+
 async def list_watchlist(session: AsyncSession, user_id: int) -> WatchlistView:
     """Everything this user watches. Empty for a new user, and genuinely so —
     a seeded symbol is an Analysis produced that night for a holding nobody
@@ -177,7 +196,7 @@ async def add_symbol(session: AsyncSession, user_id: int, symbol: str) -> Watchl
     universe = await _current_universe()
     if normalized is None or not universe.contains(normalized):
         raise WatchlistRefusal(
-            reason="symbol_not_in_universe",
+            reason="not_in_universe",
             message=(
                 f"Mã {symbol.strip().upper()} không nằm trong Universe nên hệ thống "
                 "không có dữ liệu để phân tích mỗi phiên."
