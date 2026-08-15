@@ -100,3 +100,27 @@ class SignalIssue(str, Enum):
     # and money never needed to be: a billion dong traded is a billion dong
     # traded on either side of a split (`docs/adr/0006`).
     VOLUME_BASIS_BREAK = "volume_basis_break"
+
+    # --- The statistical bar, from ADR-0010 ------------------------------
+    # A robust baseline every reading of which was identical, so its
+    # median absolute deviation is zero and nothing can be measured in
+    # sigmas of it. Live rather than defensive: a thin name that matched at
+    # the same price every session of the window has exactly this baseline,
+    # and dividing by it would report the first session that moved as an
+    # unbounded excursion. Distinct from `insufficient_history`, which is
+    # about how many sessions there were rather than what was in them.
+    BASELINE_DISPERSION_ZERO = "baseline_dispersion_zero"
+
+    # The session being judged traded at one price all day, so a range-based
+    # reading of it has nothing to read. Covers both ways that happens: an order
+    # book locked at a limit, and a thin name that matched once and never again.
+    # Deliberately one code for the two, because what the estimator is short of
+    # is the same thing either way, and which of them it was is already on the
+    # window's limit-lock count.
+    ZERO_RANGE_SESSION = "zero_range_session"
+
+    # More than a fifth of the window was locked at a limit, so a range-based
+    # estimate over it is measuring the band rather than the market. A
+    # degradation with a name, not a refusal: the sessions are real and the
+    # number is computable, it is the reading of it that has to change.
+    LIMIT_LOCKED_WINDOW = "limit_locked_window"
