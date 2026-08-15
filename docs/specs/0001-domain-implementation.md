@@ -514,10 +514,10 @@ would either invent a baseline or discard a real suspension.
   or `partial` and `fresh`, and collapsing them into one status would hide one
   of the two.
 - **Signal Issue** codes, closed set: `missing_target_session`,
-  `insufficient_history`, `recently_inactive`, `cohort_warming`,
-  `lagging_market_data`, `stale_market_data`, `ranking_unavailable`. They are
-  domain provenance and are carried in the 200 response body — never as an HTTP
-  status, never as prose.
+  `insufficient_history`, `recently_inactive`, `volume_basis_break`,
+  `cohort_warming`, `lagging_market_data`, `stale_market_data`,
+  `ranking_unavailable`. They are domain provenance and are carried in the 200
+  response body — never as an HTTP status, never as prose.
 
 ### API
 
