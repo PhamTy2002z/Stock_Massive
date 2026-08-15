@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import date
 from types import MappingProxyType
 
@@ -25,6 +26,7 @@ from src.agent.loop import (
 )
 from src.agent.prompt import AnswerKind, MarketState, RuntimeContext
 from src.agent.tools.catalog import ToolCatalog, ToolContext, ToolSpec
+from src.alpha.refusals import AlphaRefusal
 from src.core.llm import (
     AuthUnavailable,
     BudgetLane,
@@ -617,6 +619,7 @@ async def test_a_fourth_concurrent_session_is_refused_immediately_and_never_queu
             pass
 
     assert refused.value.status_code == 503
+    assert refused.value.reason == "system_active_turns"
 
     release.set()
     await asyncio.gather(*held)
@@ -647,6 +650,24 @@ async def test_the_loop_refuses_the_fourth_session_through_its_own_slots():
 
     release.set()
     await first
+
+
+@pytest.mark.asyncio
+async def test_the_refusal_reaches_the_client_as_a_503_with_no_retry_after():
+    """The application's registered handler is what makes the 503 real."""
+    from src.main import app
+
+    handler = app.exception_handlers[AlphaRefusal]
+    response = await handler(None, SessionCapacityExceeded())
+
+    assert response.status_code == 503
+    assert json.loads(response.body)["detail"] == {
+        "reason": "system_active_turns",
+        "message": "The service is at its active Turn capacity. Try again shortly.",
+    }
+    # No Retry-After: the only number that could go there is a guess at when
+    # someone else's Turn ends.
+    assert "retry-after" not in {name.lower() for name in response.headers}
 
 
 # --- answer classification -------------------------------------------------
