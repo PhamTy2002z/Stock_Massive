@@ -78,4 +78,13 @@ export const queryKeys = {
   // Background jobs (global, not symbol-scoped)
   jobsStatus: ["jobs", "status"] as const,
 
+  // Alpha Desk. Keyed under one root so a mutation can invalidate the rail and
+  // every Analysis view behind it in one call — they are one screen's worth of
+  // state, and refreshing half of it shows two moments at once.
+  alpha: ["alpha"] as const,
+  watchlistRail: ["alpha", "rail"] as const,
+  analysisHistory: (symbol: string) => ["alpha", "analyses", symbol] as const,
+  analysis: (symbol: string, tradingDay: string) =>
+    ["alpha", "analyses", symbol, tradingDay] as const,
+
 } as const

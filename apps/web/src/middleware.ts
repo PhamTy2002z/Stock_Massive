@@ -51,11 +51,13 @@ export const config = {
     /*
      * Match all request paths except for the ones starting with:
      * - api/auth (session endpoints must stay reachable while signed out)
+     * - api/alpha-desk (a fetch cannot follow a login redirect; the handler
+     *   authenticates and answers 401 instead)
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
      * - public folder
      */
-    "/((?!api/auth|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!api/auth|api/alpha-desk|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 }
