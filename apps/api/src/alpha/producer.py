@@ -1,13 +1,18 @@
-"""The seam the nightly pipeline plugs into, and the stub standing in for it.
+"""The seam the nightly pipeline plugs into: a draft, or a failure with a name.
 
-Everything about *generating* an Analysis — the evidence envelope, the Analysis
-Field Profile, the strict structured-output call, the semantic validation — is a
-later milestone's. What the state machine needs from it is small enough to write
-down now: given a symbol and a Trading Day, either a draft or a named failure.
+What the state machine needs from generation is small: given a symbol and a
+Trading Day, either a complete Analysis or a named reason there is none. Keeping
+that contract here rather than inside the state machine is what let the lifecycle
+ship before the pipeline existed, and it is why the producer is passed in as an
+argument and never imported by the machine that calls it.
 
-Keeping that contract here rather than inside the state machine is what lets the
-pipeline land without touching a line of the lifecycle. The producer is passed
-in as an argument, never imported by the machine that calls it.
+The real one lives in ``src/alpha/production.py``. **There is deliberately no
+stub in this package.** One stood here while the lifecycle was built, writing a
+payload stamped ``stub: True`` so a placeholder that reached a user could be
+found in the database; now that a real producer exists, a stub reachable from
+``src`` is a way to publish a placeholder by wiring something to the wrong
+default. It lives in ``tests/stub_producer.py``, where nothing shipped can import
+it.
 """
 
 from dataclasses import dataclass, field
@@ -96,22 +101,3 @@ class ProductionFailure(Exception):
 # callable rather than a Protocol, so a test producer is a three-line function
 # and the real pipeline is whatever shape it wants to be.
 Producer = Callable[[str, date], AnalysisDraft]
-
-
-def stub_producer(symbol: str, trading_day: date) -> AnalysisDraft:
-    """A STUB. It produces no analysis and must never run in the nightly lane.
-
-    It exists so every state of the lifecycle can be driven before the pipeline
-    is written, and it says so in the row it writes: the payload carries
-    ``stub: True``, so a stubbed Analysis that somehow reached a user is
-    identifiable in the database rather than merely disappointing on screen.
-    """
-    return AnalysisDraft(
-        verdict="watch",
-        payload={
-            "stub": True,
-            "symbol": symbol,
-            "trading_day": trading_day.isoformat(),
-            "note": "Placeholder for the nightly Analysis pipeline (milestone A4).",
-        },
-    )
