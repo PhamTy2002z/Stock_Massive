@@ -9,12 +9,21 @@ route — forced `tool_choice`, parallel tool calls through streaming, strict
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime, timezone
 
 import httpx
 import pytest
 
 from src.core.config import Settings
+from src.core.llm.admission import (
+    BudgetLane,
+    CallOwner,
+    OwnerType,
+    Reservation,
+    SpendRequest,
+)
+from src.core.llm.client import ReservedLLMClient
+from src.core.llm.config import Workload, llm_config_from_settings
 from src.core.llm.errors import (
     AuthUnavailable,
     GatewayTimeout,
@@ -25,7 +34,6 @@ from src.core.llm.errors import (
     llm_metrics,
     tool_error_result,
 )
-from src.core.llm.config import llm_config_from_settings
 from src.core.llm.protocol import (
     CompletionRequest,
     JsonSchemaFormat,
@@ -82,9 +90,38 @@ class TransportHarness:
 
     def __init__(self, transport: OpenAICompatibleTransport) -> None:
         self.transport = transport
+        self.client = ReservedLLMClient(transport, FreeAdmission())
 
     async def complete(self, completion_request):
-        return await self.transport.dispatch(completion_request)
+        return await self.client.complete(
+            completion_request,
+            SpendRequest(
+                owner=CallOwner(OwnerType.TURN_REQUEST_MESSAGE, "transport", user_id=1),
+                lane=BudgetLane.TURN,
+                workload=Workload.SESSION,
+                input_tokens=1,
+                output_tokens=1,
+            ),
+        )
+
+
+class FreeAdmission:
+    def __init__(self) -> None:
+        self.next_id = 0
+
+    def reserve(self, candidate, model):
+        self.next_id += 1
+        return Reservation(
+            id=self.next_id,
+            owner=candidate.owner,
+            lane=candidate.lane,
+            model=model,
+            reserved_micro_usd=0,
+            provider_called_at=datetime.now(timezone.utc),
+        )
+
+    def reconcile(self, reservation, usage):
+        return None
 
 
 def client(handler) -> TransportHarness:

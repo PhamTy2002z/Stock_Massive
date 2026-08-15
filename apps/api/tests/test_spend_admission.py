@@ -1,6 +1,8 @@
 """The committed reservation is the only route to the provider boundary."""
 
-from datetime import date, datetime, timezone
+import asyncio
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from types import MappingProxyType
 from dataclasses import replace
 
@@ -29,6 +31,7 @@ from src.core.llm import (
     LLMRoute,
     PricingTable,
     TokenPrices,
+    TurnState,
     Message,
     Usage,
     Workload,
@@ -73,8 +76,10 @@ class RecordingAdmission:
     def __init__(self) -> None:
         self.events: list[str] = []
         self.reconciled: Usage | None = None
+        self.candidates: list[SpendRequest] = []
 
     def reserve(self, candidate: SpendRequest, model: str) -> Reservation:
+        self.candidates.append(candidate)
         self.events.append("reservation_committed")
         return Reservation(
             id=91,
@@ -140,6 +145,31 @@ class TestReservedLLMClient:
 
         assert transport.calls == 0
 
+    async def test_each_gateway_attempt_gets_its_own_reservation_and_retry_lane(self):
+        admission = RecordingAdmission()
+
+        class FlakyTransport:
+            def __init__(self):
+                self.calls = 0
+
+            async def dispatch(self, completion_request):
+                self.calls += 1
+                if self.calls == 1:
+                    raise GatewayTimeout("accepted but timed out")
+                return Completion(model=completion_request.model, text="done")
+
+        transport = FlakyTransport()
+        client = ReservedLLMClient(transport, admission)
+
+        result = await client.complete(request(), spend())
+
+        assert result.text == "done"
+        assert transport.calls == 2
+        assert [candidate.lane for candidate in admission.candidates] == [
+            BudgetLane.TURN,
+            BudgetLane.EMERGENCY,
+        ]
+
 
 def llm_config() -> LLMConfig:
     return LLMConfig(
@@ -181,6 +211,7 @@ def ledger():
         llm_config(),
         session_factory=sessions,
         clock=lambda: datetime(2026, 8, 15, 3, 0, tzinfo=timezone.utc),
+        turn_state_reader=lambda *_: TurnState(0, 1, 1),
     )
     return admission, sessions
 
@@ -363,6 +394,7 @@ class TestTurnCeilings:
             expensive,
             sessions,
             lambda: datetime(2026, 8, 15, 3, 0, tzinfo=timezone.utc),
+            lambda *_: TurnState(0, 1, 1),
         )
         reconcile_call(
             admission,
@@ -377,6 +409,295 @@ class TestTurnCeilings:
             )
 
         assert refused.value.reason == "turn_cost"
+
+
+def admission_with(
+    config,
+    *,
+    now=datetime(2026, 8, 15, 3, 0, tzinfo=timezone.utc),
+    turn_state_reader=lambda *_: TurnState(0, 1, 1),
+):
+    engine = create_engine("sqlite://")
+    LlmCallUsage.__table__.create(engine)
+    sessions = sessionmaker(bind=engine, expire_on_commit=False)
+    clock = now if callable(now) else lambda: now
+    return SpendAdmission(config, sessions, clock, turn_state_reader), sessions
+
+
+class TestBudgetLanes:
+    def test_exhausting_analysis_does_not_block_the_turn_lane(self):
+        config = replace(
+            llm_config(),
+            lanes=BudgetLanes(
+                monthly_envelope_usd=40.001,
+                analysis_usd=0.001,
+                turn_usd=30,
+                emergency_usd=5,
+                eval_usd=5,
+            ),
+        )
+        admission, _ = admission_with(config)
+        admission.reserve(
+            analysis_spend(input_tokens=1_000, output_tokens=200), "batch-model"
+        )
+
+        with pytest.raises(BudgetRefusal) as refused:
+            admission.reserve(
+                analysis_spend(owner_id="run-2", input_tokens=1_000),
+                "batch-model",
+            )
+        turn_reservation = admission.reserve(spend(), "session-model")
+
+        assert refused.value.reason == "lane_budget_exhausted"
+        assert turn_reservation.lane is BudgetLane.TURN
+
+    def test_eval_never_borrows_from_another_lane(self):
+        config = replace(
+            llm_config(),
+            lanes=BudgetLanes(
+                monthly_envelope_usd=45.000001,
+                analysis_usd=10,
+                turn_usd=30,
+                emergency_usd=5,
+                eval_usd=0.000001,
+            ),
+        )
+        admission, _ = admission_with(config)
+        candidate = SpendRequest(
+            owner=CallOwner(OwnerType.EVAL_RUN, "eval-1"),
+            lane=BudgetLane.EVAL,
+            workload=Workload.SESSION,
+            input_tokens=1,
+            output_tokens=0,
+        )
+
+        with pytest.raises(BudgetRefusal) as refused:
+            admission.reserve(candidate, "session-model")
+
+        assert refused.value.reason == "lane_budget_exhausted"
+
+    def test_seventy_percent_emits_an_operational_alert(self, caplog):
+        config = replace(
+            llm_config(),
+            lanes=BudgetLanes(
+                monthly_envelope_usd=40.001,
+                analysis_usd=0.001,
+                turn_usd=30,
+                emergency_usd=5,
+                eval_usd=5,
+            ),
+        )
+        admission, _ = admission_with(config)
+
+        admission.reserve(
+            analysis_spend(input_tokens=1_000, output_tokens=200), "batch-model"
+        )
+
+        assert "analysis lane reached 70%" in caplog.text
+
+    def test_cost_uses_the_ict_month_of_the_provider_call(self):
+        config = replace(
+            llm_config(),
+            lanes=BudgetLanes(
+                monthly_envelope_usd=40.001,
+                analysis_usd=0.001,
+                turn_usd=30,
+                emergency_usd=5,
+                eval_usd=5,
+            ),
+        )
+        moments = iter(
+            [
+                datetime(2026, 8, 31, 16, 59, tzinfo=timezone.utc),
+                datetime(2026, 8, 31, 17, 1, tzinfo=timezone.utc),
+            ]
+        )
+        admission, sessions = admission_with(config, now=lambda: next(moments))
+
+        before = admission.reserve(
+            analysis_spend(owner_id="aug", input_tokens=1_000, output_tokens=200),
+            "batch-model",
+        )
+        after = admission.reserve(
+            analysis_spend(owner_id="sep", input_tokens=1_000, output_tokens=200),
+            "batch-model",
+        )
+
+        assert before.provider_called_at.astimezone(ZoneInfo("Asia/Ho_Chi_Minh")).month == 8
+        assert after.provider_called_at.astimezone(ZoneInfo("Asia/Ho_Chi_Minh")).month == 9
+        with sessions() as session:
+            assert len(session.scalars(select(LlmCallUsage)).all()) == 2
+
+    def test_capability_probe_has_a_hard_daily_emergency_ceiling(self):
+        expensive = replace(
+            llm_config(),
+            pricing=replace(
+                llm_config().pricing,
+                session=TokenPrices(10, 10, 10, 10),
+            ),
+        )
+        admission, _ = admission_with(expensive)
+        first = SpendRequest(
+            owner=CallOwner(OwnerType.CAPABILITY_PROBE, "boot-1"),
+            lane=BudgetLane.EMERGENCY,
+            workload=Workload.SESSION,
+            input_tokens=25_000,
+            output_tokens=0,
+        )
+        admission.reserve(first, "session-model")
+
+        with pytest.raises(BudgetRefusal) as refused:
+            admission.reserve(
+                replace(
+                    first,
+                    owner=CallOwner(OwnerType.CAPABILITY_PROBE, "boot-2"),
+                    input_tokens=1,
+                ),
+                "session-model",
+            )
+
+        assert refused.value.reason == "probe_budget_exhausted"
+
+
+class TestPerUserCeilings:
+    def test_twenty_first_turn_start_is_refused_until_the_next_ict_day(self):
+        now = [datetime(2026, 8, 15, 16, 59, tzinfo=timezone.utc)]
+
+        def turn_state(_session, _user_id, moment, _owner_id):
+            starts = 21 if moment.astimezone(ZoneInfo("Asia/Ho_Chi_Minh")).day == 15 else 1
+            return TurnState(starts_today=starts, active_for_user=1, active_system=1)
+
+        admission, _ = admission_with(
+            llm_config(), now=lambda: now[0], turn_state_reader=turn_state
+        )
+
+        with pytest.raises(BudgetRefusal) as refused:
+            admission.reserve(spend(), "session-model")
+        now[0] = datetime(2026, 8, 15, 17, 1, tzinfo=timezone.utc)
+        reservation = admission.reserve(spend(), "session-model")
+
+        assert refused.value.reason == "user_turn_starts_daily"
+        assert refused.value.reset_at == datetime(
+            2026, 8, 15, 17, 0, tzinfo=timezone.utc
+        )
+        assert reservation.id == 1
+
+    @pytest.mark.parametrize(
+        ("state", "reason"),
+        [
+            (TurnState(1, 2, 2), "user_active_turn"),
+            (TurnState(1, 1, 4), "system_active_turns"),
+        ],
+    )
+    def test_active_turn_limits_are_stable_refusals(self, state, reason):
+        admission, _ = admission_with(
+            llm_config(), turn_state_reader=lambda *_: state
+        )
+
+        with pytest.raises(BudgetRefusal) as refused:
+            admission.reserve(spend(), "session-model")
+
+        assert refused.value.reason == reason
+        assert refused.value.public()["state"] == "capacity_exhausted"
+
+    def test_daily_spend_resets_at_ict_midnight(self):
+        expensive = replace(
+            llm_config(),
+            pricing=replace(
+                llm_config().pricing,
+                session=TokenPrices(10, 10, 10, 10),
+            ),
+        )
+        now = [datetime(2026, 8, 15, 16, 59, tzinfo=timezone.utc)]
+        admission, _ = admission_with(expensive, now=lambda: now[0])
+        for owner in range(6):
+            admission.reserve(
+                replace(
+                    spend(),
+                    owner=CallOwner(
+                        OwnerType.TURN_REQUEST_MESSAGE, str(owner), user_id=7
+                    ),
+                    input_tokens=30_000,
+                    output_tokens=19_000,
+                ),
+                "session-model",
+            )
+
+        with pytest.raises(BudgetRefusal) as refused:
+            admission.reserve(
+                replace(
+                    spend(),
+                    owner=CallOwner(OwnerType.TURN_REQUEST_MESSAGE, "last", user_id=7),
+                    input_tokens=7_000,
+                    output_tokens=0,
+                ),
+                "session-model",
+            )
+        now[0] = datetime(2026, 8, 15, 17, 1, tzinfo=timezone.utc)
+        next_day = admission.reserve(
+            replace(
+                spend(),
+                owner=CallOwner(OwnerType.TURN_REQUEST_MESSAGE, "next", user_id=7),
+                input_tokens=7_000,
+                output_tokens=0,
+            ),
+            "session-model",
+        )
+
+        assert refused.value.reason == "user_spend_daily"
+        assert next_day.owner.id == "next"
+
+    def test_thirty_day_spend_rolls_instead_of_resetting_by_month(self):
+        expensive = replace(
+            llm_config(),
+            pricing=replace(
+                llm_config().pricing,
+                session=TokenPrices(10, 10, 10, 10),
+            ),
+        )
+        base = datetime(2026, 8, 1, 3, 0, tzinfo=timezone.utc)
+        now = [base]
+        admission, _ = admission_with(expensive, now=lambda: now[0])
+        for index in range(30):
+            now[0] = base + timedelta(days=index // 6)
+            admission.reserve(
+                replace(
+                    spend(),
+                    owner=CallOwner(
+                        OwnerType.TURN_REQUEST_MESSAGE, str(index), user_id=7
+                    ),
+                    input_tokens=30_000,
+                    output_tokens=19_000,
+                ),
+                "session-model",
+            )
+
+        now[0] = base + timedelta(days=5)
+        with pytest.raises(BudgetRefusal) as refused:
+            admission.reserve(
+                replace(
+                    spend(),
+                    owner=CallOwner(OwnerType.TURN_REQUEST_MESSAGE, "30", user_id=7),
+                    input_tokens=30_000,
+                    output_tokens=19_000,
+                ),
+                "session-model",
+            )
+
+        now[0] = base + timedelta(days=35)
+        after_window = admission.reserve(
+            replace(
+                spend(),
+                owner=CallOwner(OwnerType.TURN_REQUEST_MESSAGE, "31", user_id=7),
+                input_tokens=30_000,
+                output_tokens=19_000,
+            ),
+            "session-model",
+        )
+
+        assert refused.value.reason == "user_spend_rolling_30d"
+        assert refused.value.reset_at == base + timedelta(days=30)
+        assert after_window.owner.id == "31"
 
 
 class FailingTransport:
@@ -426,3 +747,21 @@ class TestFailedCalls:
             assert row.status == "usage_unknown"
             assert row.actual_micro_usd is None
             assert row.reserved_micro_usd == 3_000
+
+    async def test_process_death_after_dispatch_leaves_usage_unknown(self, ledger):
+        admission, sessions = ledger
+
+        class ProcessDiesAfterDispatch:
+            async def dispatch(self, completion_request):
+                raise asyncio.CancelledError
+
+        client = ReservedLLMClient(ProcessDiesAfterDispatch(), admission)
+
+        with pytest.raises(asyncio.CancelledError):
+            await client.complete(request(), spend())
+
+        with sessions() as session:
+            rows = session.scalars(select(LlmCallUsage)).all()
+            assert len(rows) == 1
+            assert rows[0].status == "usage_unknown"
+            assert rows[0].reserved_micro_usd == 3_000

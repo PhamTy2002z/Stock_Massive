@@ -1,11 +1,9 @@
-"""One OpenAI-compatible transport behind the ``LLMClient`` protocol.
+"""One OpenAI-compatible transport behind the reserved ``LLMClient``.
 
-Built on the ``httpx`` and ``tenacity`` already in ``requirements.txt``. No
-provider SDK and no agent framework is added, and that is a decision rather
-than an omission (``docs/adr/0008``): every framework marries one client
-abstraction, and this is the abstraction a route change has to be free across.
-The cost is stated plainly — a few hundred lines of dispatch, retry and
-streaming that we own, and correctness that is ours.
+Built on ``httpx`` without a provider SDK or agent framework. Retry lives one
+layer above this transport, where each attempt can receive its own committed
+reservation; retrying here would silently make two paid requests against one
+ledger row.
 
 What the hand-rolling buys, concretely:
 
@@ -25,16 +23,8 @@ import logging
 from typing import Any
 
 import httpx
-from tenacity import (
-    AsyncRetrying,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
-
 from .config import LLMConfig
 from .errors import (
-    MAX_GATEWAY_ATTEMPTS,
     AuthUnavailable,
     GatewayTimeout,
     LLMError,
@@ -76,25 +66,10 @@ class OpenAICompatibleTransport:
             await self._http.aclose()
 
     async def dispatch(self, request: CompletionRequest) -> Completion:
-        """Make one call, and return a typed result or raise a typed failure.
-
-        Retries only ``gateway_timeout``, twice in total. ``auth_unavailable``
-        is not in the retry set at all — a dead credential answers the second
-        attempt exactly as it answered the first, and a route-wide failure
-        repeated per symbol is how one outage becomes a cohort of them.
-        """
-        async for attempt in AsyncRetrying(
-            stop=stop_after_attempt(MAX_GATEWAY_ATTEMPTS),
-            wait=wait_exponential(multiplier=0.5, max=4),
-            retry=retry_if_exception_type(GatewayTimeout),
-            reraise=True,
-        ):
-            with attempt:
-                if request.stream:
-                    return await self._streamed(request)
-                return await self._whole(request)
-
-        raise LLMError("the retry loop ended without a result")  # pragma: no cover
+        """Make exactly one paid attempt, returning or raising a typed result."""
+        if request.stream:
+            return await self._streamed(request)
+        return await self._whole(request)
 
     # -- the two response shapes ------------------------------------------
 
