@@ -166,6 +166,20 @@ class ListingRoster(Base):
     exchange = Column(String(10), nullable=False)  # HOSE | HNX | UPCOM
     is_listed = Column(Boolean, nullable=False)
     company_name = Column(String(255), nullable=True)
+    # The ICB level-2 classification, here rather than in its own table because
+    # it is the same kind of fact as the board: reference data about a listed
+    # company, arriving from the same market-wide register read, one row per
+    # company. It is what tells the nightly Analysis pipeline which per-industry
+    # fundamentals a symbol's Field Profile carries (spec 0003 §8.4) without
+    # calling a Provider Source to ask. ADR-0004 assigned it to a Reference
+    # Snapshot, which covers Universe members; the census needs it for the
+    # market, which is why it sits beside the board and the company name.
+    #
+    # Nullable, and it stays that way: the register's classification read is
+    # best-effort, so a symbol the market lists and nothing has classified is a
+    # normal row rather than a broken one.
+    icb_code = Column(String(4), nullable=True)
+    icb_name = Column(String(100), nullable=True)
     source = Column(String(32), nullable=False)
     observed_at = Column(DateTime(timezone=True), nullable=False)
 

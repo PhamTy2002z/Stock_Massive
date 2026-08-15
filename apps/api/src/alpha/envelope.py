@@ -72,6 +72,7 @@ from .field_profile import (
     AnalysisIndustry,
     Axis,
     ProfileField,
+    industry_for_icb,
     profile_for,
 )
 from .producer import ProductionFailure
@@ -298,23 +299,26 @@ class EvidenceEnvelope:
 
 
 # How the industry a symbol's profile is built for is decided. A seam rather than
-# a constant, because the shape of the answer is what the profile is built
-# around: when ICB classification is persisted, one function changes and nothing
-# else in the pipeline does.
+# a call, so an artifact can be built for a stated industry without the register
+# having to be written first — which is what makes the per-industry blocks
+# testable while none of their metrics has a store behind it.
 IndustryResolver = Callable[[Session, str], AnalysisIndustry]
 
 
 def stored_industry(session: Session, symbol: str) -> AnalysisIndustry:
     """Which industry the store says this symbol is in.
 
-    ``unclassified`` for every symbol today, and that is the honest answer rather
-    than a gap: no durable store in this system holds an ICB classification
-    (spec 0003 §13), and the live company service that could answer is exactly
-    the Provider Source this pipeline may not call. Returning ``other`` instead
-    would assert that the store had looked and found nothing special, which is
-    why the two are separate values.
+    Read off the listing register, which is where the ICB level-2 code lands
+    when the market's register is refreshed — a stored row, so the answer is
+    reproducible and no Provider Source is asked what business a company is in.
+
+    A symbol the register has never carried and one it carries with no code
+    both answer ``unclassified``: neither is a statement that the profile has
+    nothing extra for this business, which is what ``other`` means. The two stay
+    apart here for the same reason they are separate values at all.
     """
-    return AnalysisIndustry.UNCLASSIFIED
+    listing = ListingRosterStore(session).identity_of(symbol)
+    return industry_for_icb(None if listing is None else listing.icb_code)
 
 
 def build_envelope(
