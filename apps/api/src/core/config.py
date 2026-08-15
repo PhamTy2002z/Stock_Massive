@@ -1,4 +1,5 @@
 """Application configuration using pydantic-settings."""
+from datetime import date
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -166,6 +167,52 @@ class Settings(BaseSettings):
     # chết được thu dọn trong khoảng một tới hai lần cửa sổ, đủ nhanh và bớt
     # được một núm vặn mà không ai chỉnh riêng.
     analysis_run_stuck_minutes: int = 30
+
+    # Alpha Desk — the LLM route, its two workload models, and what they cost
+    # (src/core/llm/, docs/adr/0014). Off by default: the boundary is a paid
+    # channel, so a deployment opts into it rather than out of it.
+    #
+    # Model ids live here and nowhere else in the source. That is the whole
+    # reason the boundary exists — a route change has to be an env-var flip,
+    # and a constant compiled into a module survives the flip. The defaults are
+    # the production pair the orchestration decision settled on; the dev lane
+    # points LLM_BASE_URL at a local CLIProxyAPI and overrides both models.
+    alpha_desk_enabled: bool = False
+    llm_base_url: str = ""
+    llm_api_key: str = ""
+    llm_model_batch: str = "gpt-5.6-luna"
+    llm_model_session: str = "gpt-5.6-terra"
+    llm_request_timeout_seconds: float = 120.0
+
+    # The pricing block Budget Validation reads at startup. Prices are USD per
+    # million tokens and are declared per workload, because batch and
+    # interactive are different models with different prices — one shared block
+    # would misprice whichever lane it was not written for.
+    #
+    # Zero is not "free": it is a key nobody filled in, and Budget Validation
+    # refuses it rather than approving a configuration that costs nothing on
+    # paper. Reasoning tokens have no price of their own — they bill at the
+    # output price, which is why five counters meet four prices.
+    llm_pricing_version: str = ""
+    llm_pricing_effective_date: date | None = None
+    llm_price_batch_input_usd_per_mtok: float = 0.0
+    llm_price_batch_cached_input_usd_per_mtok: float = 0.0
+    llm_price_batch_cache_write_usd_per_mtok: float = 0.0
+    llm_price_batch_output_usd_per_mtok: float = 0.0
+    llm_price_session_input_usd_per_mtok: float = 0.0
+    llm_price_session_cached_input_usd_per_mtok: float = 0.0
+    llm_price_session_cache_write_usd_per_mtok: float = 0.0
+    llm_price_session_output_usd_per_mtok: float = 0.0
+
+    # The $50/month envelope and the four lanes that share it (docs/adr/0014).
+    # Configuration rather than constants because the envelope is a spending
+    # decision, not a promise the product makes; Budget Validation checks that
+    # the four lanes still add up to it.
+    llm_budget_monthly_usd: float = 50.0
+    llm_budget_analysis_usd: float = 10.0
+    llm_budget_turn_usd: float = 30.0
+    llm_budget_emergency_usd: float = 5.0
+    llm_budget_eval_usd: float = 5.0
 
     # Rate Limiting
     rate_limit_enabled: bool = True
