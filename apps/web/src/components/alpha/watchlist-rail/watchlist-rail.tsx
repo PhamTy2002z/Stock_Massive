@@ -6,9 +6,11 @@ import { AlphaRefusalError, type WatchlistAddition } from "@/lib/alpha"
 import { useRailMutations, useWatchlistRail } from "@/hooks/use-watchlist-rail"
 import { cn } from "@/lib/utils"
 import { AddSymbolForm } from "./add-symbol-form"
+import { AnalysisPanel } from "./analysis-panel"
 import { RailEntryRow } from "./rail-entry"
 import { RailHeader } from "./rail-header"
 import { WatchlistRailSkeleton } from "./skeleton"
+import { SystemStatusLine } from "./status-line"
 import { onDemandSentence } from "./state-copy"
 
 /**
@@ -29,6 +31,9 @@ export function WatchlistRail({ className }: { className?: string }) {
   const { data, isPending, isError, error, refetch } = useWatchlistRail()
   const { add, remove, retry } = useRailMutations()
   const [addition, setAddition] = useState<WatchlistAddition | null>(null)
+  // One symbol open at a time. Ten expanded artifacts is a page, not a rail —
+  // and the compact dock this becomes later has room for exactly one.
+  const [openSymbol, setOpenSymbol] = useState<string | null>(null)
 
   if (isPending) return <WatchlistRailSkeleton className={className} />
 
@@ -59,7 +64,14 @@ export function WatchlistRail({ className }: { className?: string }) {
 
   return (
     <section className={cn("flex flex-col gap-3", className)} aria-label="Watchlist">
-      <RailHeader tradingDay={data.trading_day} count={data.count} cap={data.cap} />
+      <RailHeader
+        tradingDay={data.trading_day}
+        count={data.count}
+        cap={data.cap}
+        unreadCount={data.entries.filter((entry) => entry.unread).length}
+      />
+
+      <SystemStatusLine tradingDay={data.trading_day} />
 
       <AddSymbolForm
         isAdding={add.isPending}
@@ -86,11 +98,20 @@ export function WatchlistRail({ className }: { className?: string }) {
               key={entry.symbol}
               entry={entry}
               tradingDay={data.trading_day}
+              isOpen={openSymbol === entry.symbol}
               isRemoving={remove.isPending && remove.variables === entry.symbol}
               isRetrying={retry.isPending && retry.variables?.symbol === entry.symbol}
+              onToggle={(symbol) =>
+                setOpenSymbol((open) => (open === symbol ? null : symbol))
+              }
               onRemove={(symbol) => remove.mutate(symbol)}
               onRetry={(symbol, tradingDay) => retry.mutate({ symbol, tradingDay })}
-            />
+            >
+              <AnalysisPanel
+                symbol={entry.symbol}
+                initialTradingDay={entry.latest?.trading_day ?? null}
+              />
+            </RailEntryRow>
           ))}
         </ul>
       )}

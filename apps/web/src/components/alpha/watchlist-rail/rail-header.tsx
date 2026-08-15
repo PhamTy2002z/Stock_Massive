@@ -20,11 +20,14 @@ export function RailHeader({
   tradingDay,
   count,
   cap,
+  unreadCount = 0,
   className,
 }: {
   tradingDay: string | null
   count: number
   cap: number
+  /** Symbols with an Analysis this user has not opened. Zero renders nothing. */
+  unreadCount?: number
   className?: string
 }) {
   return (
@@ -32,6 +35,16 @@ export function RailHeader({
       <div className="flex items-center gap-2 text-sm">
         <CalendarDays className="h-4 w-4 text-muted-foreground" />
         <span className="font-medium">Watchlist</span>
+        {/* Absent at zero rather than a grey "0". A badge that is always there
+            is chrome; one that appears is a signal. */}
+        {unreadCount > 0 && (
+          <span
+            aria-label={`${unreadCount} unread Analyses`}
+            className="rounded-full bg-sky-500 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-white"
+          >
+            {unreadCount}
+          </span>
+        )}
         <span className="text-muted-foreground">·</span>
         <span className="text-muted-foreground">{sessionLabel(tradingDay)}</span>
       </div>
