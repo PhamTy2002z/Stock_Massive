@@ -130,15 +130,24 @@ EVENT_FIELDS = (
     "category",
     "exright_date",
     "public_date",
-    # The three that carry the action itself, and they are required for the same
-    # reason as the dates. A feed without the title answers with rows whose kind
-    # is unreadable; one without the terms answers with actions that can never
-    # produce a factor. Either way the table fills with rows nothing may be
-    # reasoned from, which reads like a market with no corporate actions in it.
+    # The title is required with the dates rather than with the terms below: it
+    # is the only place the kind of a share issue appears, so a feed without it
+    # answers with rows whose kind is unreadable, and a table of those reads like
+    # a market with no corporate actions in it.
     EVENT_TITLE_FIELD,
-    "exercise_ratio",
-    "value_per_share",
 )
+
+# The columns carrying an action's terms, which are *not* required. This frame's
+# schema follows its contents: a company whose history holds no cash dividend
+# comes back without a ``value_per_share`` column at all, and five of the thirty
+# symbols in the configured Universe did on the first live run — STB without
+# either. Demanding them refuses those companies' share issues, which are
+# perfectly readable, over a column their absence of dividends explains.
+#
+# Absent, the terms read as missing, and an action with missing terms already has
+# an honest answer: it is stored and refuses to produce a factor. That is the
+# same outcome as a row whose columns are present and empty, which is what it is.
+EVENT_TERM_FIELDS = ("exercise_ratio", "value_per_share")
 
 
 class VnstockProviderError(RuntimeError):
@@ -797,6 +806,19 @@ class VnstockCorporateActionProvider(VnstockProviderBase):
             raise VnstockProviderError(
                 f"vnstock events for {symbol} are missing fields: "
                 f"{', '.join(missing)}"
+            )
+
+        absent_terms = missing_fields(rows, EVENT_TERM_FIELDS)
+        if absent_terms:
+            # Not a refusal, and worth a line anyway: every action this company
+            # has will be stored without that term and will refuse a factor, so a
+            # reader wondering why none of them adjusts anything has the reason
+            # here rather than having to re-read the feed to find it.
+            logger.info(
+                "The %s event feed carries no %s column, so any action needing "
+                "it is stored without its terms",
+                symbol,
+                " or ".join(absent_terms),
             )
 
         actions = rows[rows["category"].astype(str).str.upper() == EVENT_ACTION_CATEGORY]
