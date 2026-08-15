@@ -25,8 +25,13 @@ export interface RailEntryRowProps {
   tradingDay: string | null
   onRemove: (symbol: string) => void
   onRetry: (symbol: string, tradingDay: string) => void
+  /** Expand the symbol to read its Analyses. Expanding is what "opening" means. */
+  onToggle?: (symbol: string) => void
+  isOpen?: boolean
   isRemoving?: boolean
   isRetrying?: boolean
+  /** The viewer, rendered by the container so this row stays presentational. */
+  children?: React.ReactNode
 }
 
 /**
@@ -45,10 +50,13 @@ export function RailEntryRow({
   tradingDay,
   onRemove,
   onRetry,
+  onToggle,
+  isOpen,
   isRemoving,
   isRetrying,
+  children,
 }: RailEntryRowProps) {
-  const { symbol, state, latest, failure } = entry
+  const { symbol, state, latest, failure, unread } = entry
   const failureReason = failure ? failureSentence(failure) : null
   const canRetry = state === "failed" && tradingDay !== null && !failure?.exhausted
 
@@ -57,7 +65,26 @@ export function RailEntryRow({
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 space-y-1">
           <div className="flex items-center gap-2">
-            <span className="font-semibold tracking-tight">{symbol}</span>
+            {onToggle ? (
+              <button
+                type="button"
+                onClick={() => onToggle(symbol)}
+                aria-expanded={!!isOpen}
+                className="font-semibold tracking-tight hover:underline"
+              >
+                {symbol}
+              </button>
+            ) : (
+              <span className="font-semibold tracking-tight">{symbol}</span>
+            )}
+            {/* One symbol, one badge, cleared by opening that symbol's Analysis
+                and nothing else. */}
+            {unread && (
+              <span
+                aria-label={`${symbol} has an unread Analysis`}
+                className="h-1.5 w-1.5 rounded-full bg-sky-500"
+              />
+            )}
             <span
               className={cn(
                 "rounded border px-1.5 py-0.5 text-[11px] font-medium",
@@ -126,6 +153,8 @@ export function RailEntryRow({
           </button>
         </div>
       </div>
+
+      {isOpen && children}
     </li>
   )
 }
