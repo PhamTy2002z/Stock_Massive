@@ -161,6 +161,43 @@ class TestNoModelIdIsCompiledIn:
         assert defaults.llm_model_session == "gpt-5.6-terra"
 
 
+class TestAnUnfilledKeyReachesBudgetValidation:
+    """``docker-compose.yml`` forwards the price block with ``${VAR:-}``.
+
+    An unfilled key therefore arrives as an empty string rather than as an
+    absent variable. Settings has to survive that: the refusal belongs to
+    Budget Validation, which can name the key an operator failed to fill,
+    not to a Pydantic parse error thrown before the app has a voice.
+    """
+
+    def test_an_empty_effective_date_is_an_unset_one(self):
+        settings = Settings(
+            _env_file=None,
+            database_url="postgresql://unused/unused",
+            llm_pricing_effective_date="",
+        )
+
+        assert settings.llm_pricing_effective_date is None
+
+    def test_whitespace_is_not_a_date_either(self):
+        settings = Settings(
+            _env_file=None,
+            database_url="postgresql://unused/unused",
+            llm_pricing_effective_date="   ",
+        )
+
+        assert settings.llm_pricing_effective_date is None
+
+    def test_a_real_date_still_parses(self):
+        settings = Settings(
+            _env_file=None,
+            database_url="postgresql://unused/unused",
+            llm_pricing_effective_date="2026-08-01",
+        )
+
+        assert settings.llm_pricing_effective_date == date(2026, 8, 1)
+
+
 class TestConfigIsImmutable:
     def test_a_config_cannot_be_edited_after_it_is_built(self):
         config = llm_config_from_settings(_settings())
