@@ -74,15 +74,12 @@ symbol's ordinary daily range* — never *buy here*.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field as dataclass_field
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import date
-from typing import Any
 
-from sqlalchemy.orm import Session
-
-from .bars import Bar, BarFrame, WindowHealth, prepare_bars
-from .fields import DEGRADED_LIMIT_LOCK_SHARE, FieldValue, SignalField
+from .bars import Bar, BarFrame
+from .fields import FieldReading
 from .issues import SignalIssue
 from .volatility import garman_klass_variance
 
@@ -131,6 +128,16 @@ MIN_DOWNSIDE_OBSERVATIONS = 10
 # needs. Every one is window **plus skip**, and none of these skips: the skip
 # belongs to the momentum fields, and writing `+ 0` here would be pretending
 # otherwise.
+#
+# These lengths are **domain choices, not null derivations**, and the difference
+# is worth stating because ADR-0010 derives the other frozen constants in this
+# package from the null harness. A threshold is a number the null can answer
+# for — it asks how often a detector trips on noise. A window length is a
+# question about what stretch of market a reader means by "recently", and a null
+# has no opinion on it: run the harness at any of these lengths and the false
+# positive rate is the same, because the threshold was derived at the length the
+# field ships with. What each length is answerable to is the market — a quarter,
+# a month, a year — and each is argued for where it is declared.
 REALIZED_VOLATILITY_SESSIONS = 60
 REALIZED_VOLATILITY_MIN_SESSIONS = REALIZED_VOLATILITY_SESSIONS + 1
 
@@ -149,75 +156,26 @@ RISK_ADJUSTED_MIN_SESSIONS = RISK_ADJUSTED_SESSIONS
 _LOG2 = math.log(2.0)
 
 
-@dataclass(frozen=True)
-class Reading:
-    """What one computation produced, before it is dressed as a ``FieldValue``."""
-
-    value: float | None
-    extras: Mapping[str, Any] = dataclass_field(default_factory=dict)
-    refusal: SignalIssue | None = None
-
-
-def serve(
-    session: Session,
-    symbol: str,
-    field: SignalField,
-    compute: Callable[[BarFrame], Reading],
-    *,
-    end: date | None = None,
-) -> FieldValue:
-    """Run one field over one symbol's window, through the one gateway to bars.
-
-    Every field in this module goes through here, which is how "reaches bars
-    only through ``prepare_bars()``" stays true without each of them
-    remembering to. A window the gateway refuses is refused under the gateway's
-    own name: there is no second path to a bar, and a field that quietly took one
-    would be the sixth tool a review checklist fails at.
-    """
-    frame, health = prepare_bars(
-        session,
-        symbol,
-        field.min_sessions,
-        min_sessions=field.min_sessions,
-        end=end,
-    )
-    if frame is None or health.refusal is not None:
-        return FieldValue(
-            field=field, value=None, health=health, refusal=health.refusal
-        )
-
-    reading = compute(frame)
-    if reading.value is None:
-        return FieldValue(
-            field=field,
-            value=None,
-            health=health,
-            refusal=reading.refusal or SignalIssue.INSUFFICIENT_HISTORY,
-        )
-    return FieldValue(
-        field=field,
-        value=reading.value,
-        health=health,
-        extras=reading.extras,
-        degraded_reason=limit_lock_degradation(health),
-    )
-
-
-def limit_lock_degradation(health: WindowHealth) -> SignalIssue | None:
-    """Whether the window was too locked for a range estimate to be ordinary.
-
-    Every estimator here reads a range, and a locked session has none, so past a
-    fifth of the window the answer is measuring the band rather than the market
-    (``docs/adr/0010``).
-    """
-    if health.sessions_used == 0:
-        return None
-    if health.limit_lock_days / health.sessions_used > DEGRADED_LIMIT_LOCK_SHARE:
-        return SignalIssue.LIMIT_LOCKED_WINDOW
-    return None
-
-
 # --- Volatility estimators ------------------------------------------------
+
+
+def _session_counts(frame: BarFrame, bars: Sequence[Bar]) -> dict[str, object]:
+    """The three counts every reading in this module reports, spelled one way.
+
+    ``sessions`` is how long the window was, ``estimator_sessions`` how many
+    terms the arithmetic actually had — one fewer, because every estimator here
+    reads a session against the one before it — and ``limit_lock_days`` how many
+    of the window's sessions had no range at all.
+
+    One helper rather than three literals, because the first two differ by one
+    and were previously written both ways under the same key: a reader comparing
+    two fields' ``sessions`` would have been comparing two different counts.
+    """
+    return {
+        "sessions": len(frame.bars),
+        "estimator_sessions": max(len(bars) - 1, 0),
+        "limit_lock_days": sum(1 for bar in frame.bars if bar.limit_locked),
+    }
 
 
 def _usable(frame: BarFrame) -> list[Bar]:
@@ -318,7 +276,7 @@ def annualized_percent(variance: float) -> float:
     return 100.0 * math.sqrt(max(variance, 0.0) * TRADING_SESSIONS_PER_YEAR)
 
 
-def realized_volatility_reading(frame: BarFrame) -> Reading:
+def realized_volatility_reading(frame: BarFrame) -> FieldReading:
     """Yang-Zhang as the headline, with its three relatives beside it.
 
     The components are returned rather than hidden because they disagree in a
@@ -329,7 +287,7 @@ def realized_volatility_reading(frame: BarFrame) -> Reading:
     bars = _usable(frame)
     variance = yang_zhang_variance(bars)
     if variance is None:
-        return Reading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
+        return FieldReading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
 
     volatility = annualized_percent(variance)
     sessions = len(bars) - 1
@@ -339,8 +297,7 @@ def realized_volatility_reading(frame: BarFrame) -> Reading:
         "rogers_satchell": _component(rogers_satchell_variance(bars)),
         "close_to_close": _component(close_to_close_variance(bars)),
     }
-    locked = sum(1 for bar in frame.bars if bar.limit_locked)
-    return Reading(
+    return FieldReading(
         value=volatility,
         extras={
             # The close-to-close bound rather than Yang-Zhang's own. Their
@@ -348,9 +305,8 @@ def realized_volatility_reading(frame: BarFrame) -> Reading:
             # grows, so claiming it here would understate the error on exactly
             # the symbols where it is largest.
             "standard_error": volatility / math.sqrt(2.0 * sessions),
-            "sessions": sessions,
             "components_annualized_pct": components,
-            "limit_lock_days": locked,
+            **_session_counts(frame, bars),
             # Both bias a range estimate downward, and neither is correctable
             # from what is stored, so both are counted instead.
             "zero_range_days": sum(
@@ -360,34 +316,46 @@ def realized_volatility_reading(frame: BarFrame) -> Reading:
     )
 
 
-def price_zone_reading(frame: BarFrame) -> Reading:
-    """One realized σ either side of the reference price, as a percentage.
+def price_zone_reading(frame: BarFrame) -> FieldReading:
+    """One realized σ either side of the anchor close, as a percentage.
 
     A number, and only a number. The zone says how far this symbol ordinarily
     travels in a session; what to do about that is the model's to say and the
     artifact's to cite, and this field carries no key that could be read as
     either.
+
+    **The anchor is the window's own last close, and is named as one.** It is
+    deliberately not the exchange's reference price: ADR-0006 records that the
+    stored ``reference_price`` is the previous close of the same frame rather
+    than the exchange's reference, and that on UPCOM the real anchor — the prior
+    day's round-lot continuous VWAP — is not reconstructible from anything
+    stored. A zone drawn around a number this system cannot reproduce would carry
+    the exchange's authority and not its arithmetic.
+
+    The band is drawn in logs, which is the space σ was estimated in. At an
+    ordinary 2% it differs from the linear band by two hundredths of a percent
+    and changes no reading; taken on a loud symbol the two diverge visibly, and
+    the one that stays consistent with its own estimator is the one to ship.
     """
     bars = _usable(frame)
     variance = yang_zhang_variance(bars)
     if variance is None:
-        return Reading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
+        return FieldReading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
 
     sigma = math.sqrt(max(variance, 0.0))
-    reference = bars[-1].close
-    if reference is None or reference <= 0:
-        return Reading(value=None, refusal=SignalIssue.SESSION_PRICES_INCOMPLETE)
+    anchor = bars[-1].close
+    if anchor is None or anchor <= 0:
+        return FieldReading(value=None, refusal=SignalIssue.SESSION_PRICES_INCOMPLETE)
 
-    return Reading(
+    return FieldReading(
         value=100.0 * sigma,
         extras={
-            "reference_price": reference,
-            "lower_price": reference * (1.0 - sigma),
-            "upper_price": reference * (1.0 + sigma),
-            "reference_session": bars[-1].session_date.isoformat(),
-            "sessions": len(bars) - 1,
+            "anchor_close": anchor,
+            "lower_price": anchor * math.exp(-sigma),
+            "upper_price": anchor * math.exp(sigma),
+            "anchor_session": bars[-1].session_date.isoformat(),
             "standard_error": 100.0 * sigma / math.sqrt(2.0 * (len(bars) - 1)),
-            "limit_lock_days": sum(1 for bar in frame.bars if bar.limit_locked),
+            **_session_counts(frame, bars),
         },
     )
 
@@ -477,7 +445,7 @@ def _drawdown_reading(
     frame: BarFrame,
     pick: Callable[[Drawdown], float],
     scatter: Callable[[float, int], float | None],
-) -> Reading:
+) -> FieldReading:
     """One drawdown number, with how far it would move if the process ran again.
 
     ``scatter`` is where the honesty is. A realized drawdown is not an exact fact
@@ -490,38 +458,40 @@ def _drawdown_reading(
     bars = _usable(frame)
     fall = drawdown_of(bars)
     if fall is None:
-        return Reading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
+        return FieldReading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
 
     variance = yang_zhang_variance(bars)
-    sessions = len(bars) - 1
-    daily_sigma = (
-        math.sqrt(variance) if variance is not None and variance > 0 else None
-    )
-    expected_pct = (
-        None
-        if daily_sigma is None
-        else -100.0
-        * (1.0 - math.exp(-expected_max_drawdown(daily_sigma, sessions)))
-    )
-    standard_error = (
-        None if daily_sigma is None else scatter(daily_sigma, sessions)
-    )
+    if variance is None or variance <= 0:
+        # No measurable volatility over the window, so neither the benchmark nor
+        # the spread exists. Refused rather than served without them: a drawdown
+        # printed with no standard error and no expected fall beside it is the
+        # exact number ADR-0010 forbids — an estimate wearing the clothes of a
+        # fact.
+        return FieldReading(value=None, refusal=SignalIssue.BASELINE_DISPERSION_ZERO)
 
-    return Reading(
+    daily_sigma = math.sqrt(variance)
+    estimator_sessions = len(bars) - 1
+    standard_error = scatter(daily_sigma, estimator_sessions)
+    if standard_error is None:
+        return FieldReading(value=None, refusal=SignalIssue.BASELINE_DISPERSION_ZERO)
+
+    return FieldReading(
         value=pick(fall),
         extras={
             "standard_error": standard_error,
-            "expected_max_drawdown_pct": expected_pct,
+            "expected_max_drawdown_pct": -100.0
+            * (
+                1.0
+                - math.exp(
+                    -expected_max_drawdown(daily_sigma, estimator_sessions)
+                )
+            ),
             "max_drawdown_pct": fall.max_drawdown_pct,
             "current_drawdown_pct": fall.current_drawdown_pct,
             "days_underwater": fall.days_underwater,
             "peak_session": fall.peak_session.isoformat(),
             "trough_session": fall.trough_session.isoformat(),
-            "sessions": len(bars),
-            # The band serializes a crash: at ±7% a −30% fall takes at least
-            # five sessions, so how many of them were locked is part of reading
-            # the fall rather than a footnote to it.
-            "limit_lock_days": sum(1 for bar in frame.bars if bar.limit_locked),
+            **_session_counts(frame, bars),
         },
     )
 
@@ -535,7 +505,7 @@ def _percent_scatter(share: float) -> Callable[[float, int], float | None]:
     return scatter
 
 
-def max_drawdown_reading(frame: BarFrame) -> Reading:
+def max_drawdown_reading(frame: BarFrame) -> FieldReading:
     return _drawdown_reading(
         frame,
         lambda fall: fall.max_drawdown_pct,
@@ -543,7 +513,7 @@ def max_drawdown_reading(frame: BarFrame) -> Reading:
     )
 
 
-def current_drawdown_reading(frame: BarFrame) -> Reading:
+def current_drawdown_reading(frame: BarFrame) -> FieldReading:
     return _drawdown_reading(
         frame,
         lambda fall: fall.current_drawdown_pct,
@@ -551,7 +521,7 @@ def current_drawdown_reading(frame: BarFrame) -> Reading:
     )
 
 
-def days_underwater_reading(frame: BarFrame) -> Reading:
+def days_underwater_reading(frame: BarFrame) -> FieldReading:
     """How long since the last peak, and how long that is under a coin.
 
     The scatter here does not scale with volatility at all — the length of an
@@ -568,21 +538,29 @@ def days_underwater_reading(frame: BarFrame) -> Reading:
     )
 
 
-def drawdown_versus_benchmark_reading(frame: BarFrame) -> Reading:
-    ratio = drawdown_ratio(frame)
-    if ratio is None:
-        return Reading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
+def drawdown_versus_benchmark_reading(frame: BarFrame) -> FieldReading:
+    """The observed fall over the one a coin would have produced.
+
+    Computed here rather than through ``drawdown_ratio`` so the benchmark that
+    goes into the ratio is the one reported beside it: reading the ratio from one
+    call and the benchmark from a second would recompute Yang-Zhang over the
+    whole window twice to answer the same question two ways.
+    """
     bars = _usable(frame)
+    fall = drawdown_of(bars)
     variance = yang_zhang_variance(bars)
-    assert variance is not None  # drawdown_ratio returned a number
-    return Reading(
-        value=ratio,
+    if fall is None or variance is None or variance <= 0:
+        return FieldReading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
+
+    expected = expected_max_drawdown(math.sqrt(variance), len(bars) - 1)
+    if expected <= 0:
+        return FieldReading(value=None, refusal=SignalIssue.BASELINE_DISPERSION_ZERO)
+
+    return FieldReading(
+        value=fall.max_drawdown_log / expected,
         extras={
-            "expected_max_drawdown_log": expected_max_drawdown(
-                math.sqrt(variance), len(bars) - 1
-            ),
-            "sessions": len(bars),
-            "limit_lock_days": sum(1 for bar in frame.bars if bar.limit_locked),
+            "expected_max_drawdown_log": expected,
+            **_session_counts(frame, bars),
         },
     )
 
@@ -604,6 +582,11 @@ class Annualization:
     method: str
     first_autocorrelation: float
     significant: bool
+    # How many lags the correction's sum actually ran over. Reported rather than
+    # implied, because it is the one place this departs from the published
+    # formula and a reader comparing against Lo's own arithmetic needs to know
+    # where the sum stopped.
+    lags: int
 
 
 def autocorrelation(values: Sequence[float], lag: int) -> float:
@@ -633,6 +616,13 @@ def annualization_of(returns: Sequence[float]) -> Annualization:
     The shortcut is refused on significance rather than on size, at the standard
     ±1.96/√T band: a ρ̂₁ of 0.1 on 250 sessions is noise, and correcting for
     noise would make the annualization a function of the sample's luck.
+
+    **The sum is truncated, and that is a departure from the published formula.**
+    Lo's runs to q−1, which at q = 252 means 251 correlations estimated off a
+    250-session window — each of the last ones from a handful of overlapping
+    pairs, so the tail of the sum is noise with a formula around it. It stops at
+    ``AUTOCORRELATION_LAGS`` instead, and the number of lags it used travels with
+    every answer so the departure is on the wire rather than in a comment.
     """
     q = TRADING_SESSIONS_PER_YEAR
     n = len(returns)
@@ -644,10 +634,12 @@ def annualization_of(returns: Sequence[float]) -> Annualization:
             method="sqrt_252",
             first_autocorrelation=rho_1,
             significant=False,
+            lags=0,
         )
 
+    lags = max(min(AUTOCORRELATION_LAGS, n - 1), 0)
     total = 0.0
-    for lag in range(1, min(AUTOCORRELATION_LAGS, n - 1) + 1):
+    for lag in range(1, lags + 1):
         total += (q - lag) * autocorrelation(returns, lag)
     denominator = q + 2.0 * total
     if denominator <= 0:
@@ -659,16 +651,18 @@ def annualization_of(returns: Sequence[float]) -> Annualization:
             method="undefined",
             first_autocorrelation=rho_1,
             significant=True,
+            lags=lags,
         )
     return Annualization(
         factor=q / math.sqrt(denominator),
         method="lo_corrected",
         first_autocorrelation=rho_1,
         significant=True,
+        lags=lags,
     )
 
 
-def sharpe_reading(frame: BarFrame) -> Reading:
+def sharpe_reading(frame: BarFrame) -> FieldReading:
     """The ratio, its Lo standard error, and the interval that usually contains zero.
 
     The interval is the headline rather than a caveat. On the samples this system
@@ -678,23 +672,23 @@ def sharpe_reading(frame: BarFrame) -> Reading:
     """
     returns = _close_returns(_usable(frame))
     if len(returns) < 3:
-        return Reading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
+        return FieldReading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
 
     mean = sum(returns) / len(returns)
     variance = _sample_variance(returns)
     if variance is None or variance <= 0:
-        return Reading(value=None, refusal=SignalIssue.BASELINE_DISPERSION_ZERO)
+        return FieldReading(value=None, refusal=SignalIssue.BASELINE_DISPERSION_ZERO)
 
     per_session = mean / math.sqrt(variance)
     scale = annualization_of(returns)
     if math.isnan(scale.factor):
-        return Reading(value=None, refusal=SignalIssue.AUTOCORRELATION_UNUSABLE)
+        return FieldReading(value=None, refusal=SignalIssue.AUTOCORRELATION_UNUSABLE)
 
     ratio = per_session * scale.factor
     standard_error = (
         math.sqrt((1.0 + 0.5 * per_session**2) / len(returns)) * scale.factor
     )
-    return Reading(
+    return FieldReading(
         value=ratio,
         extras={
             "standard_error": standard_error,
@@ -704,17 +698,18 @@ def sharpe_reading(frame: BarFrame) -> Reading:
             ),
             "indistinguishable_from_zero": abs(ratio) <= 1.96 * standard_error,
             "annualization": scale.method,
+            "annualization_lags": scale.lags,
             "first_autocorrelation": scale.first_autocorrelation,
-            "sessions": len(returns),
             # Stated rather than assumed: this system holds no risk-free series,
             # so the differential return Sharpe (1994) defines is measured
             # against zero and says so.
             "benchmark": "zero",
+            **_session_counts(frame, _usable(frame)),
         },
     )
 
 
-def sortino_reading(frame: BarFrame) -> Reading:
+def sortino_reading(frame: BarFrame) -> FieldReading:
     """Sortino, with the divisor the common implementation gets wrong.
 
     Downside deviation divides by the **total** number of observations, not by
@@ -724,36 +719,50 @@ def sortino_reading(frame: BarFrame) -> Reading:
     """
     returns = _close_returns(_usable(frame))
     if len(returns) < 3:
-        return Reading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
+        return FieldReading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
 
     below = [item for item in returns if item < 0.0]
     if len(below) < MIN_DOWNSIDE_OBSERVATIONS:
-        return Reading(
+        return FieldReading(
             value=None, refusal=SignalIssue.INSUFFICIENT_DOWNSIDE_OBSERVATIONS
         )
 
     downside = math.sqrt(sum(item * item for item in below) / len(returns))
     if downside <= 0:
-        return Reading(value=None, refusal=SignalIssue.BASELINE_DISPERSION_ZERO)
+        return FieldReading(value=None, refusal=SignalIssue.BASELINE_DISPERSION_ZERO)
 
     mean = sum(returns) / len(returns)
     scale = annualization_of(returns)
     if math.isnan(scale.factor):
-        return Reading(value=None, refusal=SignalIssue.AUTOCORRELATION_UNUSABLE)
+        return FieldReading(value=None, refusal=SignalIssue.AUTOCORRELATION_UNUSABLE)
 
     ratio = (mean / downside) * scale.factor
-    return Reading(
+    # Lo derives his standard error for the Sharpe, where the denominator is the
+    # full standard deviation. Applied to a downside deviation it is an
+    # approximation and is marked as one rather than dropped: ADR-0010 requires
+    # an estimator to carry uncertainty, and shipping none would read as
+    # exactness on precisely the ratio Sortino & Forsey document as unstable in
+    # small samples. The observation count beside it is the number the research
+    # note actually asks a reader to judge it by.
+    per_session = mean / downside
+    standard_error = (
+        math.sqrt((1.0 + 0.5 * per_session**2) / len(returns)) * scale.factor
+    )
+    return FieldReading(
         value=ratio,
         extras={
+            "standard_error": standard_error,
+            "standard_error_basis": "lo_2002_applied_to_downside_deviation",
+            "confidence_interval": (
+                ratio - 1.96 * standard_error,
+                ratio + 1.96 * standard_error,
+            ),
             "downside_obs_count": len(below),
             "downside_deviation_pct": 100.0 * downside,
             "annualization": scale.method,
-            "sessions": len(returns),
+            "annualization_lags": scale.lags,
             "benchmark": "zero",
-            # No published small-sample standard error for Sortino, so none is
-            # invented: the observation count is what a reader judges it by, and
-            # it is the number the research note asks for.
-            "standard_error": None,
+            **_session_counts(frame, _usable(frame)),
         },
     )
 

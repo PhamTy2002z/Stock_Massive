@@ -57,6 +57,7 @@ from src.stocks.signals.registry import (
     SHARPE,
     SORTINO,
 )
+from src.stocks.signals.serving import serve_field
 from src.stocks.signals.risk import (
     CURRENT_DRAWDOWN_NULL_SCATTER,
     DAYS_UNDERWATER_NULL_SCATTER,
@@ -79,7 +80,6 @@ from src.stocks.signals.risk import (
     price_zone_reading,
     realized_volatility_reading,
     rogers_satchell_variance,
-    serve,
     sharpe_reading,
     sortino_reading,
     yang_zhang_variance,
@@ -526,12 +526,12 @@ class TestThePriceZone:
         sigma = math.sqrt(variance)
         reference = frame.bars[-1].close
         assert reading.value == pytest.approx(100.0 * sigma)
-        assert reading.extras["reference_price"] == reference
+        assert reading.extras["anchor_close"] == reference
         assert reading.extras["lower_price"] == pytest.approx(
-            reference * (1.0 - sigma)
+            reference * math.exp(-sigma)
         )
         assert reading.extras["upper_price"] == pytest.approx(
-            reference * (1.0 + sigma)
+            reference * math.exp(sigma)
         )
 
     def test_it_reads_twenty_sessions_plus_the_close_before_them(self):
@@ -556,24 +556,24 @@ class TestThePriceZone:
         assert reading.value >= 0
 
 
+CLUSTER = (
+    REALIZED_VOLATILITY,
+    PRICE_ZONE,
+    MAX_DRAWDOWN,
+    CURRENT_DRAWDOWN,
+    DAYS_UNDERWATER,
+    DRAWDOWN_VERSUS_BENCHMARK,
+    SHARPE,
+    SORTINO,
+)
+
+
 class TestEveryFieldReachesBarsThroughTheGatewayAlone:
-    @pytest.mark.parametrize(
-        ("field", "compute"),
-        [
-            (REALIZED_VOLATILITY, realized_volatility_reading),
-            (PRICE_ZONE, price_zone_reading),
-            (MAX_DRAWDOWN, max_drawdown_reading),
-            (CURRENT_DRAWDOWN, current_drawdown_reading),
-            (DAYS_UNDERWATER, days_underwater_reading),
-            (DRAWDOWN_VERSUS_BENCHMARK, drawdown_versus_benchmark_reading),
-            (SHARPE, sharpe_reading),
-            (SORTINO, sortino_reading),
-        ],
-    )
-    def test_it_echoes_window_health(self, field, compute):
+    @pytest.mark.parametrize("field", CLUSTER, ids=lambda f: f.name)
+    def test_it_echoes_window_health(self, field):
         with open_session() as session:
             days = store_history(session, 260)
-            value = serve(session, "AAA", field, compute, end=days[-1])
+            value = serve_field(session, "AAA", field, end=days[-1])
 
         assert value.refusal is None, f"{field.name} refused a clean window"
         assert value.value is not None
@@ -581,21 +581,22 @@ class TestEveryFieldReachesBarsThroughTheGatewayAlone:
         assert value.health.sessions_used == field.min_sessions
         assert value.health.last_session == days[-1]
 
-    @pytest.mark.parametrize(
-        ("field", "compute"),
-        [
-            (REALIZED_VOLATILITY, realized_volatility_reading),
-            (PRICE_ZONE, price_zone_reading),
-            (MAX_DRAWDOWN, max_drawdown_reading),
-            (SHARPE, sharpe_reading),
-        ],
-    )
-    def test_a_window_the_gateway_refuses_refuses_the_field(self, field, compute):
+    @pytest.mark.parametrize("field", CLUSTER, ids=lambda f: f.name)
+    def test_the_computation_that_answers_for_it_is_on_the_declaration(self, field):
+        """So there is no pairing for a caller to get wrong.
+
+        Serving the Sharpe declaration with the Sortino arithmetic is not a
+        mistake to be caught in review — it is not expressible.
+        """
+        assert field.reading is not None
+
+    @pytest.mark.parametrize("field", CLUSTER, ids=lambda f: f.name)
+    def test_a_window_the_gateway_refuses_refuses_the_field(self, field):
         """There is no second path to a bar, so a refused window is a refused
         field under the gateway's own name."""
         with open_session() as session:
             days = store_history(session, 15)
-            value = serve(session, "AAA", field, compute, end=days[-1])
+            value = serve_field(session, "AAA", field, end=days[-1])
 
         assert value.value is None
         assert value.refusal is SignalIssue.INSUFFICIENT_HISTORY
