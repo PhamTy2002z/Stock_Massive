@@ -18,6 +18,7 @@ export type SignalIssueCode =
   | "missing_target_session"
   | "insufficient_history"
   | "recently_inactive"
+  | "volume_basis_break"
   | "cohort_warming"
   | "lagging_market_data"
   | "stale_market_data"
@@ -27,6 +28,8 @@ const SENTENCES: Record<SignalIssueCode, string> = {
   missing_target_session: "Chưa có dữ liệu phiên này",
   insufficient_history: "Chưa đủ 20 phiên để so sánh",
   recently_inactive: "Có phiên không phát sinh giao dịch trong 20 phiên gần nhất",
+  volume_basis_break:
+    "Khối lượng qua ngày thay đổi số cổ phiếu không cùng cơ sở so sánh",
   cohort_warming: "Nhóm dẫn đầu lợi nhuận đang được nạp dữ liệu",
   lagging_market_data: "Đã có phiên mới hơn nhưng chưa đủ dữ liệu để tính",
   stale_market_data: "Dữ liệu phiên đã cũ hơn 7 ngày",

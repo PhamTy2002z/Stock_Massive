@@ -40,12 +40,19 @@ from ..cohort import (
     CohortStore,
     cohort_version_active_on,
 )
-from ..providers.contracts import Exchange, MarketSnapshot
+from ..providers.contracts import Exchange
 from ..providers.normalize import VN_TZ
 from ..trading_day import latest_trading_day, trading_days_before
 from ..universe import Universe, build_universe
+from .bars import (
+    BarFrame,
+    BarPreparationContext,
+    BarProjection,
+    WindowHealth,
+    prepare_bars,
+    prepare_bars_context,
+)
 from .issues import SignalIssue
-from .sessions import sessions_on_days
 
 logger = logging.getLogger(__name__)
 
@@ -128,10 +135,7 @@ class SymbolReading:
         zero baseline is an answer about a dormant company, not a gap in what
         was collected.
         """
-        return not {
-            SignalIssue.MISSING_TARGET_SESSION,
-            SignalIssue.INSUFFICIENT_HISTORY,
-        } & set(self.issues)
+        return self.volume is not None and self.baseline_average_volume is not None
 
 
 @dataclass(frozen=True)
@@ -226,46 +230,73 @@ def evaluate_symbols(
 ) -> tuple[SymbolReading, ...]:
     """Evaluate each symbol against the ``baseline_days`` sessions before ``day``.
 
-    The window is resolved once, market-wide, and every symbol is measured
-    against the same one. Resolved per symbol, a company with gaps would reach
-    further back, average a different stretch of market, and be presented beside
-    the others as if the two numbers were comparable.
+    The gateway resolves the same canonical trading dates for every symbol, so
+    a company with gaps cannot reach further back and quietly average a
+    different stretch of market. Each reading is then computed only from the
+    prepared frame and health report returned for that symbol.
     """
     wanted = [symbol.upper() for symbol in symbols]
     if not wanted:
         return ()
 
     exchanges = _exchanges_of(session, wanted)
-    baseline_window = trading_days_before(session, day, baseline_days)
-    if len(baseline_window) < baseline_days:
-        # The store does not hold twenty sessions before this one. Padding the
-        # window with calendar days would invent sessions the market never had.
-        return tuple(
-            SymbolReading(
-                symbol=symbol,
-                exchange=exchanges.get(symbol),
-                issues=(SignalIssue.INSUFFICIENT_HISTORY,),
-            )
-            for symbol in wanted
-        )
-
-    sessions = sessions_on_days(session, wanted, (day,) + tuple(baseline_window))
+    context = prepare_bars_context(session, wanted, baseline_days + 1, end=day)
     return tuple(
-        _read_symbol(symbol, sessions.get(symbol, {}), day, baseline_window, exchanges)
+        _prepare_symbol(
+            session,
+            symbol,
+            day,
+            baseline_days,
+            exchanges,
+            context,
+        )
         for symbol in wanted
     )
 
 
-def _read_symbol(
+def _prepare_symbol(
+    session: Session,
     symbol: str,
-    held: dict[date, MarketSnapshot],
     day: date,
-    baseline_window: Sequence[date],
+    baseline_days: int,
     exchanges: dict[str, str],
+    context: BarPreparationContext,
 ) -> SymbolReading:
-    """Turn one symbol's stored sessions into its reading for the day."""
+    """Prepare one gateway window and turn it into a Volume Spike reading."""
     exchange = exchanges.get(symbol)
-    target = held.get(day)
+    frame, health = prepare_bars(
+        session,
+        symbol,
+        baseline_days + 1,
+        min_sessions=baseline_days + 1,
+        end=day,
+        # Volume Spike does not consume the liquidity percentile. Naming an
+        # empty cross-section prevents each symbol from resolving the Universe
+        # for metadata the response never uses.
+        peers=(),
+        projection=BarProjection.VOLUME,
+        context=context,
+    )
+    if frame is None:
+        issue = health.refusal or SignalIssue.INSUFFICIENT_HISTORY
+        if (
+            issue is SignalIssue.INSUFFICIENT_HISTORY
+            and health.last_session != day
+        ):
+            issue = SignalIssue.MISSING_TARGET_SESSION
+        return SymbolReading(symbol=symbol, exchange=exchange, issues=(issue,))
+    return _read_prepared_symbol(symbol, frame, health, baseline_days, exchange)
+
+
+def _read_prepared_symbol(
+    symbol: str,
+    frame: BarFrame,
+    health: WindowHealth,
+    baseline_days: int,
+    exchange: str | None,
+) -> SymbolReading:
+    """Compute from the frame the gateway served, and echo its relevant issue."""
+    target = frame.bars[-1] if frame.bars else None
     # A session held without a traded quantity in it is not a session that
     # traded nothing: the field is absent, so there is no number to compare.
     if target is None or target.volume is None:
@@ -275,13 +306,9 @@ def _read_symbol(
             issues=(SignalIssue.MISSING_TARGET_SESSION,),
         )
 
-    baseline = [held.get(item) for item in baseline_window]
-    volumes = [
-        snapshot.volume
-        for snapshot in baseline
-        if snapshot is not None and snapshot.volume is not None
-    ]
-    if len(volumes) < len(baseline_window):
+    baseline = frame.bars[:-1]
+    volumes = [bar.volume for bar in baseline if bar.volume is not None]
+    if len(volumes) < baseline_days:
         return SymbolReading(
             symbol=symbol,
             exchange=exchange,
@@ -292,7 +319,11 @@ def _read_symbol(
     # company did not trade — and a company carrying one is worth flagging,
     # because a ratio drawn from a stretch of dormancy exaggerates a return to
     # ordinary volume.
-    issues = (SignalIssue.RECENTLY_INACTIVE,) if any(v == 0 for v in volumes) else ()
+    issues: list[SignalIssue] = []
+    if any(volume == 0 for volume in volumes):
+        issues.append(SignalIssue.RECENTLY_INACTIVE)
+    if SignalIssue.VOLUME_BASIS_BREAK in health.degradations:
+        issues.append(SignalIssue.VOLUME_BASIS_BREAK)
 
     average = sum(volumes) / len(volumes)
     reading = SymbolReading(
@@ -300,9 +331,9 @@ def _read_symbol(
         exchange=exchange,
         volume=target.volume,
         baseline_average_volume=average,
-        close_price=target.last_price,
+        close_price=target.close,
         change_pct=target.change_pct,
-        issues=issues,
+        issues=tuple(issues),
     )
     if average == 0:
         # Nothing traded across the whole window, so there is no ratio to state:
@@ -488,14 +519,17 @@ def signal_cache_key(
     exchange: Exchange | None,
     cohort_version_id: int | None,
     market_generation: datetime | None,
+    corporate_action_generation: datetime | None,
 ) -> str:
-    """The six inputs an answer depends on, as one key (``docs/adr/0005``).
+    """Every input an answer depends on, as one key (``docs/adr/0005``).
 
     Every input that can change the answer is in the key, so a changed input
     lands on a different entry and no invalidation call has to be made or
     remembered. Market generation is what closes the loop: it moves whenever
     stored market data does, which makes an entry computed before a write
-    unreachable afterwards rather than merely unlikely to be read.
+    unreachable afterwards rather than merely unlikely to be read. Corporate
+    action generation does the same for the action rows now read by the bar
+    gateway.
     """
     return ":".join(
         [
@@ -505,6 +539,11 @@ def signal_cache_key(
             exchange.value if exchange else "all",
             str(cohort_version_id) if cohort_version_id is not None else "none",
             market_generation.isoformat() if market_generation else "none",
+            (
+                corporate_action_generation.isoformat()
+                if corporate_action_generation
+                else "none"
+            ),
         ]
     )
 
