@@ -34,9 +34,33 @@ interface RouteContext {
   params: Promise<{ path: string[] }>
 }
 
+/**
+ * Whether a state-changing request came from this app.
+ *
+ * The session cookie is `SameSite=Lax`, which stops a cross-site `POST` from
+ * carrying it — but Lax is a browser default, not a guarantee this handler
+ * makes, and one `<form>` posted from another origin is all it takes to find
+ * out which browsers disagree. `Origin` is sent on every state-changing request
+ * by every browser that implements the header, so an absent or foreign one on a
+ * write is refused rather than trusted.
+ */
+function sameOrigin(request: NextRequest): boolean {
+  const origin = request.headers.get("origin")
+  if (!origin) return false
+  try {
+    return new URL(origin).origin === request.nextUrl.origin
+  } catch {
+    return false
+  }
+}
+
 async function forward(request: NextRequest, path: string[]): Promise<NextResponse> {
   if (path.length === 0 || !FORWARDED_RESOURCES.has(path[0])) {
     return NextResponse.json({ detail: "Unknown Alpha Desk resource" }, { status: 404 })
+  }
+
+  if (request.method !== "GET" && !sameOrigin(request)) {
+    return NextResponse.json({ detail: "Cross-origin request refused" }, { status: 403 })
   }
 
   const target = `${upstreamBase()}/${path.map(encodeURIComponent).join("/")}${request.nextUrl.search}`

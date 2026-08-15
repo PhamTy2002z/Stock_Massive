@@ -113,9 +113,17 @@ export function RailEntryRow({
             </p>
           )}
 
-          {failureReason && (
-            <p className="text-xs text-red-600 dark:text-red-400">{failureReason}</p>
-          )}
+          {failureReason &&
+            (state === "failed" ? (
+              <p className="text-xs text-red-600 dark:text-red-400">{failureReason}</p>
+            ) : (
+              // A queued symbol that has already failed once keeps its reason.
+              // Shown as the *previous* attempt's, and not in red: nothing is
+              // wrong right now, it is waiting its turn.
+              <p className="text-xs text-muted-foreground">
+                Lượt trước: {failureReason}
+              </p>
+            ))}
 
           {failure?.exhausted && (
             <p className="text-xs text-muted-foreground">

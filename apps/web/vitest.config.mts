@@ -10,6 +10,14 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+      // `server-only` is a guard resolved by export condition: an empty module
+      // under `react-server`, a throwing one otherwise. Vitest sets no such
+      // condition and gets the throwing side, so importing a route handler dies
+      // at the import. Pointed straight at the empty build — by file, because
+      // the package's `exports` map offers no subpath to ask for it.
+      "server-only": fileURLToPath(
+        new URL("./node_modules/server-only/empty.js", import.meta.url),
+      ),
     },
   },
   test: {

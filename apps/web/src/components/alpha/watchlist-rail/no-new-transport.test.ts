@@ -22,9 +22,11 @@ import { RAIL_POLL_MS } from "@/hooks/use-watchlist-rail"
 
 const SOURCE_ROOT = join(process.cwd(), "src")
 
-// Every entry point a push or streaming channel would have to come through.
-const NEW_TRANSPORTS = [
-  "EventSource",
+// The three channels this ticket declined, and nothing else. Notably absent:
+// `EventSource`. ADR-0013 *mandates* a native same-origin EventSource for the
+// Turn stream, so banning it here would turn this test red the day that
+// transport lands — a decision test that contradicts an ADR is worse than none.
+const DECLINED_CHANNELS = [
   "serviceWorker",
   "ServiceWorker",
   "PushManager",
@@ -53,7 +55,7 @@ describe("how the rail learns that an Analysis is ready", () => {
   it("adds no push channel, no service worker, and no mail", () => {
     const offenders = sourceFiles(SOURCE_ROOT).filter((path) => {
       const source = readFileSync(path, "utf8")
-      return NEW_TRANSPORTS.some((token) => source.includes(token))
+      return DECLINED_CHANNELS.some((token) => source.includes(token))
     })
 
     expect(offenders).toEqual([])
