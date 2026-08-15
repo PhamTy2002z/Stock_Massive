@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -28,6 +28,7 @@ import pandas as pd
 from pydantic import ValidationError
 
 from src.core.config import get_settings
+from src.core.provider_access import ensure_provider_source_allowed
 from src.core.vnstock_client import (
     Company,
     Finance,
@@ -108,6 +109,7 @@ ROSTER_EXCHANGES = (Exchange.HOSE, Exchange.HNX, Exchange.UPCOM)
 LISTING_FIELDS = ("symbol", "type")
 LISTING_EQUITY_TYPE = "STOCK"
 LISTING_NAME_FIELDS = ("organ_short_name", "organ_name")
+INDUSTRY_FIELDS = ("symbol", "industry_code", "industry_name")
 
 # What an event row must carry, and the category that marks a corporate action.
 # The same feed answers with AGMs, insider dealings and additional listings; only
@@ -206,6 +208,7 @@ class VnstockProviderBase:
         arbiter all carry meanings of their own that the rest of the app already
         handles, so they travel unchanged.
         """
+        ensure_provider_source_allowed()
         try:
             return call()
         except (VnstockUnavailable, VnstockUnsupported, VnstockProviderError):
@@ -352,11 +355,12 @@ class VnstockReferenceProvider(VnstockProviderBase):
 
 
 class VnstockListingRosterProvider(VnstockProviderBase):
-    """Read the whole market's listing register, one board per request.
+    """Read the whole market's listing register and ICB classification.
 
-    Three requests for the entire market is the cheapest thing this adapter does,
-    which matters because the census that follows it costs two requests per
-    symbol across roughly 1,600 of them.
+    Four requests cover the entire market — one ICB classification plus the
+    three boards. That is still the cheapest thing this adapter does, which
+    matters because the census that follows it costs two requests per symbol
+    across roughly 1,600 of them.
 
     All three boards or none. A refresh is an "as it stands now" picture of the
     market, and the caller marks whatever is missing from it as delisted — so a
@@ -378,6 +382,11 @@ class VnstockListingRosterProvider(VnstockProviderBase):
         listing = self._listing_factory(self._vnstock_source)
         entries: list[ListingEntry] = []
         seen: set[str] = set()
+        industry_frame = self._read(
+            listing.symbols_by_industries,
+            "vnstock industry roster fetch failed",
+        )
+        industries = self._industry_map(industry_frame)
 
         for exchange in ROSTER_EXCHANGES:
             frame = self._read(
@@ -388,7 +397,7 @@ class VnstockListingRosterProvider(VnstockProviderBase):
                 raise VnstockProviderError(
                     f"vnstock returned no listings for {exchange.value}"
                 )
-            entries.extend(self._to_entries(frame, exchange, seen))
+            entries.extend(self._to_entries(frame, exchange, seen, industries))
 
         return tuple(entries)
 
@@ -397,6 +406,7 @@ class VnstockListingRosterProvider(VnstockProviderBase):
         frame: pd.DataFrame,
         exchange: Exchange,
         seen: set[str],
+        industries: Mapping[str, tuple[str | None, str | None]],
     ) -> list[ListingEntry]:
         rows = lower_cased_columns(frame)
         missing = missing_fields(rows, LISTING_FIELDS)
@@ -420,6 +430,7 @@ class VnstockListingRosterProvider(VnstockProviderBase):
                 continue
 
             try:
+                industry_code, industry_name = industries.get(symbol, (None, None))
                 entries.append(
                     ListingEntry(
                         symbol=symbol,
@@ -429,6 +440,8 @@ class VnstockListingRosterProvider(VnstockProviderBase):
                         # is the caller's comparison to make, not this adapter's.
                         is_listed=True,
                         company_name=_listing_name(row),
+                        industry_code=industry_code,
+                        industry_name=industry_name,
                     )
                 )
             except (ValidationError, StockServiceError) as exc:
@@ -440,6 +453,27 @@ class VnstockListingRosterProvider(VnstockProviderBase):
             seen.add(symbol)
 
         return entries
+
+    @staticmethod
+    def _industry_map(
+        frame: pd.DataFrame,
+    ) -> dict[str, tuple[str | None, str | None]]:
+        rows = lower_cased_columns(frame)
+        missing = missing_fields(rows, INDUSTRY_FIELDS)
+        if missing:
+            raise VnstockProviderError(
+                "vnstock industry roster is missing fields: "
+                f"{', '.join(missing)}"
+            )
+        mapped: dict[str, tuple[str | None, str | None]] = {}
+        for _, row in rows.iterrows():
+            symbol = str(row.get("symbol") or "").strip().upper()
+            if not symbol:
+                continue
+            code = str(row.get("industry_code") or "").strip() or None
+            name = str(row.get("industry_name") or "").strip() or None
+            mapped[symbol] = (code, name)
+        return mapped
 
 
 class VnstockMarketHistoryProvider(VnstockProviderBase):
