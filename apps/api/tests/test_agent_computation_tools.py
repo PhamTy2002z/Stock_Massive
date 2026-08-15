@@ -149,6 +149,35 @@ async def test_a_non_universe_symbol_gets_the_shared_structured_refusal():
 
 
 @pytest.mark.asyncio
+async def test_cross_sectional_refuses_ranked_fields_without_raising_for_a_small_universe():
+    session = open_cross_session()
+    members, days = a_sample(session, count=3, sessions=252, with_statements=True)
+    session.commit()
+    catalog = tools_for(session, members=members).catalog(
+        trace_writer=lambda _trace: None
+    )
+    tool_context = ToolContext(
+        user_id=7,
+        trading_day=days[-1],
+        active_symbol=members[-1],
+    )
+
+    result = await catalog.dispatch(
+        "cross_sectional", {"symbol": members[-1]}, tool_context
+    )
+
+    ranked = {
+        name: field
+        for name, field in result["registered_fields"].items()
+        if name != "price_trend.sma_50_over_200"
+    }
+    assert ranked
+    assert all(field["value"] is None for field in ranked.values())
+    assert all(field["refusal"] is not None for field in ranked.values())
+    assert result["window_health"]["sessions_used"] == 252
+
+
+@pytest.mark.asyncio
 async def test_kelly_requires_both_user_inputs_and_never_estimates_an_edge():
     session = open_session()
     list_on(session, SYMBOL, Exchange.HOSE)

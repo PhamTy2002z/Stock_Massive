@@ -14,7 +14,7 @@ from .data import SessionFactory, StoreBackedTools, UniverseFactory
 from .news import NewsFetcher, NewsTools, _fetch_vci_news
 
 
-class AgentTools:
+class IntelligentQuantCatalog:
     """Build the one catalog surface whose ordering is part of its version."""
 
     def __init__(
@@ -59,4 +59,4 @@ class AgentTools:
         return ToolCatalog(registrations, trace_writer=trace_writer)
 
 
-__all__ = ["AgentTools"]
+__all__ = ["IntelligentQuantCatalog"]

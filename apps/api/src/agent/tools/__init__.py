@@ -11,10 +11,10 @@ from .catalog import (
 from .computations import ComputationTools
 from .data import StoreBackedTools
 from .news import NewsTools
-from .suite import AgentTools
+from .suite import IntelligentQuantCatalog
 
 __all__ = [
-    "AgentTools",
+    "IntelligentQuantCatalog",
     "ComputationTools",
     "MAX_TOOL_RESULT_BYTES",
     "ToolCatalog",

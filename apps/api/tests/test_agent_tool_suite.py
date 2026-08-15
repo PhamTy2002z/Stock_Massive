@@ -2,7 +2,7 @@
 
 from contextlib import contextmanager
 
-from src.agent.tools.suite import AgentTools
+from src.agent.tools.suite import IntelligentQuantCatalog
 from src.core.news_lane import NewsLane
 from src.stocks.universe import Universe
 from tests.fake_redis import FakeRedis
@@ -16,7 +16,7 @@ class SessionFactory:
 
 def test_the_composed_catalog_has_exactly_the_twelve_semantic_tools():
     redis = FakeRedis()
-    suite = AgentTools(
+    suite = IntelligentQuantCatalog(
         session_factory=SessionFactory(),
         redis=redis,
         universe_factory=lambda _session: Universe(explicit=("FPT",)),
@@ -41,4 +41,3 @@ def test_the_composed_catalog_has_exactly_the_twelve_semantic_tools():
         "get_watchlist",
     )
     assert len(catalog.tool_schemas) == 12
-

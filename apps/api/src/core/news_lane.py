@@ -170,8 +170,10 @@ class NewsLane:
             # dropped it at six hours would leave nothing to fall back on for
             # exactly the outage this lane is written for.
             redis.set(self._key(symbol), record, ex=self._stale_limit_seconds)
-        except Exception as exc:  # noqa: BLE001 - a read that cannot be stored is still a read
-            logger.warning("Could not cache the news read for %s: %s", symbol, exc)
+        except Exception as exc:  # noqa: BLE001 - Redis is the admission boundary
+            raise NewsUnavailable(
+                f"the fresh news read could not be admitted to the cache: {exc}"
+            ) from exc
         return NewsRead(
             symbol=symbol,
             payload=payload,

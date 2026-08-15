@@ -1,4 +1,4 @@
-"""Public contract of the Alpha Desk Tool Catalog."""
+"""Public contract of the Intelligent Quant Tool Catalog."""
 
 from __future__ import annotations
 
