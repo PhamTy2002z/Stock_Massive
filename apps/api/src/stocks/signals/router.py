@@ -24,6 +24,7 @@ from ..schemas.signals import (
     VolumeSpikeSignalResponse,
 )
 from ..trading_day import market_generation
+from .corporate_actions import corporate_action_generation
 from .volume_spike import (
     DEFAULT_THRESHOLD,
     MIN_THRESHOLD,
@@ -167,6 +168,7 @@ def get_volume_spikes(
         exchange=exchange,
         cohort_version_id=_cohort_version_id(db, trading_day),
         market_generation=market_generation(db),
+        corporate_action_generation=corporate_action_generation(db),
     )
     cached = volume_spikes_cache.get(cache_key)
     if cached is not None:

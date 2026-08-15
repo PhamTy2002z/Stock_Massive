@@ -18,6 +18,9 @@ or call a Provider Source.
 
 Successful Collector and Warm-up transactions advance a market generation used
 by Volume Spike cache keys together with Signal Scope, resolved Trading Day,
-threshold, exchange filter, and Cohort Version. Operator-only commands can
-trigger census retry, Warm-up, and market catch-up through the existing tracked
-run mechanism; they obey the same one-at-a-time guards as scheduled work.
+threshold, exchange filter, and Cohort Version. A separate corporate-action
+generation makes action ingestion or correction move the key as well, because
+the prepared volume window's health depends on those stored rows. Operator-only
+commands can trigger census retry, Warm-up, and market catch-up through the
+existing tracked run mechanism; they obey the same one-at-a-time guards as
+scheduled work.

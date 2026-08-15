@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 
 import type { VolumeSpikeResponse } from "@/lib/api"
+import { signalIssueSentence } from "@/lib/signal-issues"
 import { CoverageBand } from "./coverage-band"
 import { InsufficientDataNotice } from "./insufficient-notice"
 import { ScopeTabs } from "./scope-tabs"
@@ -61,6 +62,14 @@ describe("CoverageBand", () => {
 
     expect(screen.queryByText(/stale_market_data/)).not.toBeInTheDocument()
     expect(screen.getByText(/cũ hơn 7 ngày/i)).toBeInTheDocument()
+  })
+})
+
+describe("SignalIssue", () => {
+  it("explains a volume basis break in Vietnamese", () => {
+    expect(signalIssueSentence("volume_basis_break")).toMatch(
+      /thay đổi số cổ phiếu.*không cùng cơ sở/i,
+    )
   })
 })
 
