@@ -1,14 +1,15 @@
-"""Classic indicators as vocabulary, and Kelly as caller-owned arithmetic."""
+"""Classic indicators as descriptive market vocabulary."""
 
 from datetime import date, timedelta
 from decimal import Decimal
-import dataclasses
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
+from src.stocks.models import CorporateAction, ListingRoster, ProviderSnapshot
+from src.stocks.providers import Exchange
 from src.stocks.signals.bars import Bar, BarFrame
 from src.stocks.signals.fields import Claim, FieldKind, Sign, Unit
 from src.stocks.signals.indicators import (
@@ -17,19 +18,16 @@ from src.stocks.signals.indicators import (
     macd_reading,
     rsi_reading,
 )
-from src.stocks.signals.position_sizing import fractional_kelly_sizing
-from src.stocks.signals.price_band import LimitLock
 from src.stocks.signals.issues import SignalIssue
-from src.stocks.models import CorporateAction, ListingRoster, ProviderSnapshot
-from src.stocks.providers import Exchange
-from src.stocks.signals.serving import serve_field
-
-from .test_price_band import list_on, write_session
+from src.stocks.signals.price_band import LimitLock
 from src.stocks.signals.registry import (
     BOLLINGER_PERCENT_B,
     MACD,
     RSI,
 )
+from src.stocks.signals.serving import serve_field
+
+from .test_price_band import list_on, write_session
 
 
 def frame_of(closes: list[float]) -> BarFrame:
@@ -164,7 +162,9 @@ def test_macd_is_the_twelve_session_ema_less_the_twenty_six_session_ema():
 def test_bollinger_percent_b_is_the_fraction_from_lower_to_upper_band():
     # For closes 1..20 the population variance is 33.25. With two standard
     # deviations on either side, the last close sits at this worked fraction.
-    reading = bollinger_percent_b_reading(frame_of([float(value) for value in range(1, 21)]))
+    reading = bollinger_percent_b_reading(
+        frame_of([float(value) for value in range(1, 21)])
+    )
 
     assert reading.value == pytest.approx(0.9118772355)
     assert reading.extras == {
@@ -179,36 +179,6 @@ def test_bollinger_percent_b_is_masked_when_the_band_has_no_width():
 
     assert reading.value is None
     assert reading.refusal is SignalIssue.ZERO_RANGE_SESSION
-
-
-def test_fractional_kelly_uses_only_the_callers_edge_and_variance():
-    sizing = fractional_kelly_sizing(edge=0.02, variance=0.04)
-
-    assert sizing.edge_input == 0.02
-    assert sizing.variance_input == 0.04
-    assert sizing.quarter_kelly == pytest.approx(0.125)
-    assert sizing.half_kelly == pytest.approx(0.25)
-    assert sizing.full_kelly_ceiling == pytest.approx(0.5)
-    assert sizing.input_sensitivity_range == pytest.approx((0.125, 0.375))
-    assert "full_kelly" not in {field.name for field in dataclasses.fields(sizing)}
-
-
-@pytest.mark.parametrize(
-    ("edge", "variance", "message"),
-    [
-        (-0.01, 0.04, "edge"),
-        (float("nan"), 0.04, "edge"),
-        (0.02, 0.0, "variance"),
-        (0.02, float("inf"), "variance"),
-    ],
-)
-def test_fractional_kelly_refuses_inputs_that_are_not_long_only_estimates(
-    edge: float,
-    variance: float,
-    message: str,
-):
-    with pytest.raises(ValueError, match=message):
-        fractional_kelly_sizing(edge=edge, variance=variance)
 
 
 @pytest.mark.parametrize("field", [RSI, MACD, BOLLINGER_PERCENT_B])
