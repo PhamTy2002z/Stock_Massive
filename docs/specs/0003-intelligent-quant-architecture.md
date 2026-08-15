@@ -403,8 +403,10 @@ stable, reviewable, and bounded. Profile v1:
   `company_profile.foreign_room_pct`
 - **News** — approved-source item count over 7 sessions; over 30 sessions
 
-The registered price-zone field is core artifact evidence and does **not** consume a
-Technical slot.
+The registered price-zone field is `price_zone.ordinary_range_pct` — a ±1 realized
+Yang-Zhang σ over 20 sessions around the reference price, returned as the half-width in
+percent with the two prices beside it. It is core artifact evidence and does **not**
+consume a Technical slot.
 
 **A profile field that is not yet implemented is still emitted as `refused` with reason
 `unavailable`.** Silently dropping it would make two Analyses carrying the same

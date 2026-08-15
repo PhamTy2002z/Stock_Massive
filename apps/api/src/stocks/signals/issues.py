@@ -119,6 +119,19 @@ class SignalIssue(str, Enum):
     # window's limit-lock count.
     ZERO_RANGE_SESSION = "zero_range_session"
 
+    # Too few sessions closed below the benchmark for a downside deviation to
+    # mean anything. Sortino's discrete downside deviation is documented as
+    # unstable on a handful of observations (Sortino & Forsey 1996), so the
+    # ratio is withheld rather than printed with a caveat nobody reads.
+    INSUFFICIENT_DOWNSIDE_OBSERVATIONS = "insufficient_downside_observations"
+
+    # The returns are autocorrelated strongly enough negatively that Lo's
+    # corrected annualization has no positive variance to take a root of. Rare,
+    # and refused rather than fallen back from: √252 is precisely the number the
+    # correction exists to refuse, so reaching for it here would be answering
+    # with the error the check was for.
+    AUTOCORRELATION_UNUSABLE = "autocorrelation_unusable"
+
     # More than a fifth of the window was locked at a limit, so a range-based
     # estimate over it is measuring the band rather than the market. A
     # degradation with a name, not a refusal: the sessions are real and the
