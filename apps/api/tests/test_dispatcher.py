@@ -37,8 +37,11 @@ from src.alpha.analysis_run import (
 )
 from src.alpha.dispatcher import (
     AUTH_PROBE_MINUTES,
+    AVAILABILITY_DEADLINE_HOUR_ICT,
     BACKOFF_MINUTES,
+    availability_deadline,
     claim_next_run,
+    cohort_report,
     drain_queue,
 )
 from src.alpha.jobs import drain_analysis_queue
@@ -52,6 +55,7 @@ from src.core.database import Base, get_sync_db, sync_engine, sync_session_facto
 TRADING_DAY = date(2026, 8, 12)
 EARLIER = date(2026, 8, 11)
 NOW = datetime(2026, 8, 12, 22, 0, tzinfo=timezone.utc)
+ONE_MINUTE = timedelta(minutes=1)
 
 # Every symbol this module writes. Prefixed so the wipe below can take them all
 # without touching anything another module seeded.
@@ -375,7 +379,7 @@ class TestDraining:
             queue(session, symbol)
         producer = a_producer()
 
-        report = drain_queue(session, producer, trading_day=TRADING_DAY, now=NOW)
+        report = drain_queue(session, producer, trading_day=TRADING_DAY, clock=lambda: NOW)
 
         assert report.produced == [A, B]
         assert [symbol for symbol, _ in producer.seen] == [A, B]
@@ -394,7 +398,7 @@ class TestDraining:
         run.status = RunStatus.PENDING.value
         session.commit()
 
-        report = drain_queue(session, never_called, trading_day=TRADING_DAY, now=NOW)
+        report = drain_queue(session, never_called, trading_day=TRADING_DAY, clock=lambda: NOW)
 
         assert report.repaired == [A]
         assert report.produced == []
@@ -405,14 +409,14 @@ class TestDraining:
             queue(session, symbol)
 
         report = drain_queue(
-            session, a_producer(), trading_day=TRADING_DAY, now=NOW, limit=2
+            session, a_producer(), trading_day=TRADING_DAY, clock=lambda: NOW, limit=2
         )
 
         assert report.produced == [A, B]
         assert stored_run(session, C, TRADING_DAY).status == RunStatus.PENDING.value
 
     def test_nothing_is_produced_for_a_day_the_store_does_not_hold(self, session):
-        report = drain_queue(session, never_called, trading_day=None, now=NOW)
+        report = drain_queue(session, never_called, trading_day=None, clock=lambda: NOW)
 
         assert report.claimed == 0
         assert report.produced == []
@@ -422,7 +426,7 @@ class TestDraining:
         queue(session, A)
         producer = a_producer()
 
-        drain_queue(session, producer, trading_day=TRADING_DAY, now=NOW)
+        drain_queue(session, producer, trading_day=TRADING_DAY, clock=lambda: NOW)
 
         assert producer.seen == [(A, TRADING_DAY)]
         published = session.execute(
@@ -446,7 +450,7 @@ class TestShutdown:
             session,
             produce,
             trading_day=TRADING_DAY,
-            now=NOW,
+            clock=lambda: NOW,
             should_stop=lambda: len(stopped) >= 1,
         )
 
@@ -461,7 +465,7 @@ class TestTheBackoff:
         queue(session, A)
         producer = a_producer()
 
-        drain_queue(session, producer, trading_day=TRADING_DAY, now=NOW)
+        drain_queue(session, producer, trading_day=TRADING_DAY, clock=lambda: NOW)
 
         assert producer.seen == [(A, TRADING_DAY)]
 
@@ -469,7 +473,7 @@ class TestTheBackoff:
         queue(session, A)
 
         drain_queue(
-            session, a_failing_producer(), trading_day=TRADING_DAY, now=NOW
+            session, a_failing_producer(), trading_day=TRADING_DAY, clock=lambda: NOW
         )
         run = stored_run(session, A, TRADING_DAY)
 
@@ -480,9 +484,9 @@ class TestTheBackoff:
         queue(session, A)
         failing = a_failing_producer()
 
-        drain_queue(session, failing, trading_day=TRADING_DAY, now=NOW)
+        drain_queue(session, failing, trading_day=TRADING_DAY, clock=lambda: NOW)
         second_due = NOW + timedelta(minutes=BACKOFF_MINUTES[0])
-        drain_queue(session, failing, trading_day=TRADING_DAY, now=second_due)
+        drain_queue(session, failing, trading_day=TRADING_DAY, clock=lambda: second_due)
         run = stored_run(session, A, TRADING_DAY)
 
         assert run.attempts == 2
@@ -494,7 +498,7 @@ class TestTheBackoff:
         queue(session, A, status=RunStatus.FAILED, attempts=2)
         failing = a_failing_producer()
 
-        drain_queue(session, failing, trading_day=TRADING_DAY, now=NOW)
+        drain_queue(session, failing, trading_day=TRADING_DAY, clock=lambda: NOW)
         run = stored_run(session, A, TRADING_DAY)
 
         assert run.attempts == MAX_ATTEMPTS_PER_SESSION
@@ -505,7 +509,7 @@ class TestTheBackoff:
         """The schedule is a column, so a new session reads it back unchanged."""
         queue(session, A)
         drain_queue(
-            session, a_failing_producer(), trading_day=TRADING_DAY, now=NOW
+            session, a_failing_producer(), trading_day=TRADING_DAY, clock=lambda: NOW
         )
 
         restarted = sync_session_factory()
@@ -517,13 +521,13 @@ class TestTheBackoff:
                 restarted,
                 never_called,
                 trading_day=TRADING_DAY,
-                now=NOW + timedelta(minutes=1),
+                clock=lambda: NOW + timedelta(minutes=1),
             )
             on_time = drain_queue(
                 restarted,
                 a_producer(),
                 trading_day=TRADING_DAY,
-                now=NOW + timedelta(minutes=6),
+                clock=lambda: NOW + timedelta(minutes=6),
             )
         finally:
             restarted.close()
@@ -539,7 +543,7 @@ class TestTheBackoff:
             session,
             never_called,
             trading_day=TRADING_DAY,
-            now=NOW + timedelta(hours=2),
+            clock=lambda: NOW + timedelta(hours=2),
         )
 
         assert report.claimed == 0
@@ -551,7 +555,7 @@ class TestTheBackoff:
             session,
             a_failing_producer("invalid_model_output", "fragment\nstill invalid"),
             trading_day=TRADING_DAY,
-            now=NOW,
+            clock=lambda: NOW,
         )
         run = stored_run(session, A, TRADING_DAY)
 
@@ -569,7 +573,7 @@ class TestAuthUnavailable:
             session,
             a_failing_producer("auth_unavailable", "the route rejected the key"),
             trading_day=TRADING_DAY,
-            now=NOW,
+            clock=lambda: NOW,
         )
 
         assert report.paused_until == NOW + timedelta(minutes=AUTH_PROBE_MINUTES)
@@ -591,7 +595,7 @@ class TestAuthUnavailable:
             calls.append(symbol)
             raise ProductionFailure("auth_unavailable", "no credential")
 
-        drain_queue(session, refusing, trading_day=TRADING_DAY, now=NOW)
+        drain_queue(session, refusing, trading_day=TRADING_DAY, clock=lambda: NOW)
 
         assert calls == [A]
         assert [
@@ -605,20 +609,20 @@ class TestAuthUnavailable:
             session,
             a_failing_producer("auth_unavailable", "no credential"),
             trading_day=TRADING_DAY,
-            now=NOW,
+            clock=lambda: NOW,
         )
 
         early = drain_queue(
             session,
             never_called,
             trading_day=TRADING_DAY,
-            now=NOW + timedelta(minutes=AUTH_PROBE_MINUTES - 1),
+            clock=lambda: NOW + timedelta(minutes=AUTH_PROBE_MINUTES - 1),
         )
         recovered = drain_queue(
             session,
             a_producer(),
             trading_day=TRADING_DAY,
-            now=NOW + timedelta(minutes=AUTH_PROBE_MINUTES),
+            clock=lambda: NOW + timedelta(minutes=AUTH_PROBE_MINUTES),
         )
 
         assert early.claimed == 0
@@ -633,35 +637,66 @@ class TestAuthUnavailable:
             session,
             a_failing_producer("auth_unavailable", "no credential"),
             trading_day=TRADING_DAY,
-            now=NOW,
+            clock=lambda: NOW,
         )
 
         assert stored_run(session, B, TRADING_DAY).next_attempt_at == later
 
-    def test_the_attempt_it_spent_is_not_refunded(self, session):
-        """It reached the route and was turned away, which is an attempt that ran."""
+    def test_the_attempt_is_refunded(self, session):
+        """A credential the route rejected says nothing about this symbol."""
         queue(session, A)
 
         drain_queue(
             session,
             a_failing_producer("auth_unavailable", "no credential"),
             trading_day=TRADING_DAY,
-            now=NOW,
+            clock=lambda: NOW,
         )
 
-        assert stored_run(session, A, TRADING_DAY).attempts == 1
+        assert stored_run(session, A, TRADING_DAY).attempts == 0
+
+    def test_a_symbol_is_never_locked_out_by_a_long_outage(self, session):
+        """The ordering is total, so every probe re-claims the same run.
+
+        Counted, those probes would exhaust that one symbol's three attempts in
+        forty-five minutes and then start on the next — the spec's "burn all
+        three attempts for a hundred symbols", serialized rather than prevented.
+        """
+        queue(session, A)
+        refusing = a_failing_producer("auth_unavailable", "no credential")
+
+        for probe in range(6):
+            drain_queue(
+                session,
+                refusing,
+                trading_day=TRADING_DAY,
+                clock=lambda probe=probe: NOW
+                + timedelta(minutes=AUTH_PROBE_MINUTES * probe),
+            )
+
+        run = stored_run(session, A, TRADING_DAY)
+        assert run.attempts == 0
+        assert run.status == RunStatus.PENDING.value
+
+        recovered = drain_queue(
+            session,
+            a_producer(),
+            trading_day=TRADING_DAY,
+            clock=lambda: NOW + timedelta(hours=3),
+        )
+        assert recovered.produced == [A]
 
 
 class TestTheDeadline:
     def test_an_evening_that_lost_a_symbol_reports_partial(self, session):
         queue(session, A)
         queue(session, B)
-        drain_queue(session, a_producer(), trading_day=TRADING_DAY, now=NOW, limit=1)
+        drain_queue(session, a_producer(), trading_day=TRADING_DAY, clock=lambda: NOW, limit=1)
         drain_queue(
             session,
             a_failing_producer(),
             trading_day=TRADING_DAY,
-            now=NOW,
+            clock=lambda: NOW,
         )
         # Past the ceiling, so nothing is outstanding and the evening is over.
         run = stored_run(session, B, TRADING_DAY)
@@ -674,10 +709,71 @@ class TestTheDeadline:
         assert status.ready == 1
         assert status.failed == 1
 
-    def test_a_trading_day_with_no_runs_reports_blocked(self, session):
+    def test_before_the_deadline_an_evening_with_work_left_is_still_running(
+        self, session
+    ):
+        queue(session, A)
+
+        status = cohort_report(
+            session, TRADING_DAY, now=availability_deadline(TRADING_DAY) - ONE_MINUTE
+        )
+
+        assert status.state is CohortState.RUNNING
+        assert status.pending == 1
+
+    def test_past_the_deadline_the_same_evening_reports_partial(self, session):
+        queue(session, A)
+
+        status = cohort_report(
+            session, TRADING_DAY, now=availability_deadline(TRADING_DAY)
+        )
+
+        assert status.state is CohortState.PARTIAL
+        assert status.pending == 1
+
+    def test_the_deadline_is_seven_ict_on_the_morning_after(self):
+        """The session closes in the afternoon and the pipeline runs overnight."""
+        deadline = availability_deadline(TRADING_DAY)
+
+        assert deadline.date() == TRADING_DAY + timedelta(days=1)
+        assert deadline.hour == AVAILABILITY_DEADLINE_HOUR_ICT
+        assert deadline.utcoffset() == timedelta(hours=7)
+
+    def test_an_evening_that_finished_is_untouched_by_the_hour(self, session):
+        queue(session, A)
+        drain_queue(session, a_producer(), trading_day=TRADING_DAY, clock=lambda: NOW)
+
+        late = cohort_report(
+            session, TRADING_DAY, now=availability_deadline(TRADING_DAY) + ONE_MINUTE
+        )
+
+        assert late.state is CohortState.COMPLETE
+
+    def test_missing_the_deadline_dates_no_analysis_to_a_previous_day(self, session):
+        """A reporting boundary, not a licence: nothing is relabelled to meet it."""
+        queue(session, A)
+        producer = a_producer()
+
+        drain_queue(
+            session,
+            producer,
+            trading_day=TRADING_DAY,
+            clock=lambda: availability_deadline(TRADING_DAY) + ONE_MINUTE,
+        )
+
+        assert producer.seen == [(A, TRADING_DAY)]
+        assert [
+            row.trading_day
+            for row in session.execute(
+                select(Analysis).where(Analysis.symbol == A)
+            ).scalars()
+        ] == [TRADING_DAY]
+
+    def test_no_trading_day_at_all_is_the_only_blocked(self, session):
+        """`blocked` means there was nothing to run against, not a late evening."""
         assert (
-            cohort_state(session, TRADING_DAY - timedelta(days=400)).state
-            is CohortState.BLOCKED
+            cohort_report(session, TRADING_DAY, now=NOW + timedelta(days=400)).state
+            is not CohortState.BLOCKED
         )
 
 
@@ -720,7 +816,7 @@ class TestTheSweepBesideIt:
             session,
             never_called,
             trading_day=TRADING_DAY,
-            now=NOW + timedelta(hours=6),
+            clock=lambda: NOW + timedelta(hours=6),
         )
 
         assert report.claimed == 0

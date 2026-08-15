@@ -30,7 +30,12 @@ answers.
 first and the run flipped ``ready`` second; a death between them leaves the run
 ``producing`` and the retry finds the Analysis already published and only repairs
 the run state. This module never writes either row — it returns a draft, and
-``produce_analysis`` owns every commit.
+whoever called it owns every commit.
+
+**Nothing here is an entry point.** There is one caller in the system, the
+dispatcher, and it claims its own runs. A convenience wrapper pairing this
+producer with the state machine would be a second way to produce, which is
+exactly the shape the retired stub got published through.
 """
 
 from __future__ import annotations
@@ -53,13 +58,7 @@ from src.core.llm import (
 )
 from src.stocks.signals.serving import CrossSection
 
-from .analysis_run import (
-    RunOrigin,
-    RunOutcome,
-    produce_analysis,
-    retry_analysis,
-    stored_run,
-)
+from .analysis_run import stored_run
 from .envelope import EvidenceEnvelope, build_envelope, measure_cross_sections
 from .generation import PROMPT_VERSION, AnalysisFragment, generate_fragment
 from .producer import (
@@ -222,54 +221,6 @@ def analysis_producer(
     return produce
 
 
-def produce_pair(
-    session: Session,
-    symbol: str,
-    trading_day: date,
-    *,
-    origin: RunOrigin = RunOrigin.NIGHTLY,
-    producer: Producer | None = None,
-) -> RunOutcome:
-    """Produce one pair for real, through the lifecycle that owns the writes.
-
-    The one entry point anything outside this package uses to produce. It exists
-    so that "produce this pair" is a single call rather than the pairing of a
-    state machine with a producer that every caller would have to get right —
-    and getting it wrong once, with a stub, is exactly the failure mode this
-    milestone retires.
-    """
-    return produce_analysis(
-        session,
-        symbol,
-        trading_day,
-        producer or analysis_producer(),
-        origin=origin,
-    )
-
-
-def retry_pair(
-    session: Session,
-    user_id: int,
-    symbol: str,
-    trading_day: date,
-    *,
-    producer: Producer | None = None,
-) -> RunOutcome:
-    """Retry one pair on behalf of a watcher, producing for real.
-
-    The standing checks stay in the lifecycle — a user who does not watch the
-    symbol, and a symbol that has left the **Universe**, are refusals about the
-    request rather than about production.
-    """
-    return retry_analysis(
-        session,
-        user_id,
-        symbol,
-        trading_day,
-        producer or analysis_producer(),
-    )
-
-
 def _refuse_on_the_event_loop() -> None:
     """Refuse to produce from the loop thread, in words a reader can act on.
 
@@ -324,6 +275,4 @@ __all__ = [
     "AUDIT_FIELDS",
     "analysis_payload",
     "analysis_producer",
-    "produce_pair",
-    "retry_pair",
 ]
