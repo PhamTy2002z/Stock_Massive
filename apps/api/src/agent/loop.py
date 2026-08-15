@@ -45,6 +45,7 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
 
+from src.alpha.refusals import AlphaRefusal
 from src.core.llm import (
     AuthUnavailable,
     BudgetLane,
@@ -121,18 +122,25 @@ class TurnStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class SessionCapacityExceeded(RuntimeError):
+class SessionCapacityExceeded(AlphaRefusal):
     """The 4th concurrent session, refused rather than queued.
 
     Queueing behind a 60-second Turn puts the user in front of a spinner with
-    no estimable end, so the answer is immediate and honest.
-    """
+    no estimable end, so the answer is immediate and honest — and for the same
+    reason it carries no ``Retry-After``: the only number that could go there
+    would be a guess at when someone else's Turn ends.
 
-    status_code = 503
+    An :class:`AlphaRefusal` so the application's existing handler maps it to
+    503 with the same body shape as every other refusal, and under the reason
+    admission already uses for this exact condition — a capacity refusal should
+    read the same whether it was caught at the route or at the ledger.
+    """
 
     def __init__(self, limit: int = SESSION_CONCURRENCY) -> None:
         super().__init__(
-            f"the service is already running {limit} agent sessions; try again shortly"
+            reason="system_active_turns",
+            message="The service is at its active Turn capacity. Try again shortly.",
+            status_code=503,
         )
         self.limit = limit
 
@@ -413,7 +421,8 @@ class AgentLoop:
                 return await self._ended(TurnStatus.COMPLETE, "model_refusal", state)
             except AuthUnavailable:
                 # Never retried: a dead credential turns one failure into a run
-                # of identical ones.
+                # of identical ones. ``auth_unavailable`` is the stable reason
+                # the interactive surface renders as *re-auth needed*.
                 return await self._ended(TurnStatus.INCOMPLETE, "auth_unavailable", state)
             except GatewayTimeout:
                 # Already retried with backoff inside the client; a third

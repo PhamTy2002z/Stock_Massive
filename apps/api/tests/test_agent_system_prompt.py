@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import dataclasses
+import inspect
+import pathlib
 from dataclasses import replace
 from datetime import date
 
 import pytest
+
+from src.agent.prompt import sections as sections_module
 
 from src.agent.prompt import (
     PROMPT_HASH,
@@ -170,6 +175,29 @@ def test_answer_kind_is_classified_by_the_harness_without_a_model_call():
         )
         is AnswerKind.REFUSAL
     )
+
+
+def test_a_prompt_change_is_a_source_change_with_no_runtime_surface():
+    import src.agent.prompt as package
+
+    mutators = [
+        name
+        for name in dir(package)
+        if name.startswith(("set_", "load_", "update_", "variant", "experiment", "ab_"))
+    ]
+    assert mutators == []
+    assert list(inspect.signature(render).parameters) == ["context"]
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        SECTIONS[0].body = "rewritten at runtime"  # type: ignore[misc]
+
+
+def test_classifying_an_answer_cannot_reach_the_model_boundary():
+    """V1 adds no router: a second call is a second call, even a cheap one."""
+    package = pathlib.Path(sections_module.__file__).parent
+
+    for module in package.glob("*.py"):
+        assert "src.core.llm" not in module.read_text()
 
 
 def test_a_section_with_a_formatting_hole_is_refused_at_import_time():
