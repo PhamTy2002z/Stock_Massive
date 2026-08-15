@@ -30,6 +30,16 @@ FAILURE_CODES = frozenset(
         "llm_transport_error",
         "invalid_model_output",
         "persistence_error",
+        # The seventh, and the one spec 0003 §8.10 does not list. Admission
+        # refuses a generation the remaining budget cannot fund
+        # (``docs/adr/0014``), and that refusal has to arrive as something: left
+        # to propagate it would look like a crash and strand the run at
+        # `producing` for the sweep, and folded into `llm_transport_error` it
+        # would blame a route that was never called. It is deliberately not
+        # `auth_unavailable` either — that one pauses the dispatcher route-wide
+        # while a credential is repaired, and a spent allowance is repaired by
+        # waiting for the month rather than by anyone logging in.
+        "budget_exhausted",
     }
 )
 

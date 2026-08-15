@@ -142,7 +142,24 @@ def _room_extras(room: ForeignRoomStanding | None) -> dict[str, object]:
 
 
 def _room_degradation(room: ForeignRoomStanding | None) -> SignalIssue | None:
-    if room is not None and room.exhausted:
+    """Which of the two things wrong with a room reading gets reported.
+
+    Staleness first. A reading three months old describes a book that has since
+    traded, so "the room was full then" is a weaker statement than "nobody has
+    looked lately" — reporting the exhaustion of a stale reading would assert
+    today's constraint on last quarter's evidence.
+
+    Nothing is lost by the ordering: a field carries one degradation code, and
+    the room's own state travels beside it either way — ``_room_extras`` puts
+    ``foreign_room_state`` and ``foreign_room_as_of`` on every answer, so a
+    reader of a stale reading can still see that it said "exhausted", and when
+    it said so.
+    """
+    if room is None:
+        return None
+    if room.stale:
+        return SignalIssue.STALE_REFERENCE_READING
+    if room.exhausted:
         return SignalIssue.FOREIGN_ROOM_EXHAUSTED
     return None
 

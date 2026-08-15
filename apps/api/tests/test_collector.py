@@ -149,14 +149,22 @@ class FakeValuationProvider:
 class FakeReferenceProvider:
     source = ProviderSource.VNSTOCK
 
+    def __init__(self):
+        self.batches: list[list[str]] = []
+
     def fetch_reference(self, symbols):
+        self.batches.append(list(symbols))
         return tuple(reference_snapshot(symbol) for symbol in symbols)
 
 
 class FakeFundamentalProvider:
     source = ProviderSource.VNSTOCK
 
+    def __init__(self):
+        self.batches: list[list[str]] = []
+
     def fetch_fundamentals(self, symbols):
+        self.batches.append(list(symbols))
         return tuple(fundamental_snapshot(symbol) for symbol in symbols)
 
 
@@ -461,3 +469,52 @@ class TestEmptyUniverse:
             snapshots_written=0, succeeded=(), failures=()
         )
         assert market.batches == []
+
+
+class TestARestrictedCycle:
+    """The evening's conditional re-runs are the same collector, reading less.
+
+    They exist to establish a **Trading Day**, and only the two FiinQuant-owned
+    capabilities can do that. Re-reading the quarterly statements three more
+    times an evening would spend a different provider's allowance on a question
+    it has no part in answering (spec 0003 §11).
+    """
+
+    def test_it_reads_only_the_capabilities_it_was_asked_for(self):
+        store = snapshot_store(redis=MemoryRedis())
+        reference = FakeReferenceProvider()
+        fundamental = FakeFundamentalProvider()
+
+        cycle = collector(
+            store,
+            reference=reference,
+            fundamental=fundamental,
+            capabilities=(Capability.MARKET, Capability.VALUATION),
+        )
+        summary = cycle.run()
+
+        assert cycle.capabilities == (Capability.MARKET, Capability.VALUATION)
+        assert reference.batches == []
+        assert fundamental.batches == []
+        assert summary.snapshots_written > 0
+
+    def test_no_restriction_reads_everything_wired(self):
+        store = snapshot_store(redis=MemoryRedis())
+
+        assert collector(store).capabilities == (
+            Capability.MARKET,
+            Capability.VALUATION,
+            Capability.REFERENCE,
+            Capability.FUNDAMENTAL,
+        )
+
+    def test_asking_for_a_capability_with_no_adapter_reads_nothing(self):
+        """A restriction narrows what is wired; it never wires something in."""
+        store = snapshot_store(redis=MemoryRedis())
+
+        cycle = collector(
+            store, market=None, capabilities=(Capability.MARKET,)
+        )
+
+        assert cycle.capabilities == ()
+        assert cycle.run().snapshots_written == 0

@@ -40,6 +40,20 @@ from ..providers.normalize import VN_TZ
 # regulatory ceiling starts to bind.
 FOREIGN_ROOM_EXHAUSTED_SHARE = 0.01
 
+# How old a reference reading may be before a figure drawn from it is degraded.
+# Ninety days: the room moves when foreigners trade and when the cap is
+# re-issued, so a reading from last quarter describes a different book, and the
+# reference Capability is collected on every ordinary cycle — a reading three
+# months old is a collector that stopped rather than a room that never moved.
+#
+# Declared here because this is the registry contract for the reference
+# Capability, and the nightly pipeline's freshness rule reads the threshold off
+# the contract rather than holding one of its own (spec 0003 §8.3). Like
+# ``FUNDAMENTAL_STALE_DAYS`` it is a domain choice and not a null derivation: a
+# null can say how often a statistic trips on noise, and has no opinion on how
+# long a collected fact stays current.
+REFERENCE_STALE_DAYS = 90
+
 _REFERENCE = Capability.REFERENCE.value
 
 
@@ -72,6 +86,17 @@ class ForeignRoomStanding:
     current_room: int | None
     total_room: int | None
     as_of: date
+    # How far the date being answered for is past the reading, in days. Carried
+    # rather than recomputed by each reader, for the reason
+    # ``FundamentalStanding`` carries its own: the age is a property of the
+    # question and the row together, and a reader holding only the row would
+    # have to be handed the cutoff again to work it out.
+    age_days: int
+
+    @property
+    def stale(self) -> bool:
+        """Whether narrating this reading as current would be wrong."""
+        return self.age_days > REFERENCE_STALE_DAYS
 
     @property
     def available_share(self) -> float | None:
@@ -141,9 +166,11 @@ def foreign_room_on_or_before(
         return None
 
     snapshot = ReferenceSnapshot.model_validate(row.payload)
+    read_on = row.effective_at.astimezone(VN_TZ).date()
     return ForeignRoomStanding(
         symbol=row.symbol,
         current_room=snapshot.current_foreign_room,
         total_room=snapshot.total_foreign_room,
-        as_of=row.effective_at.astimezone(VN_TZ).date(),
+        as_of=read_on,
+        age_days=(day - read_on).days,
     )
