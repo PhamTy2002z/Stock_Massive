@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import Float, cast, func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.alpha.models import Analysis, WatchlistEntry
@@ -24,10 +24,10 @@ from src.stocks.universe import Universe, build_universe
 
 from .catalog import MAX_TOOL_RESULT_BYTES, ToolCatalog, ToolContext, ToolSpec, serialized_size
 from .fields import REGISTERED_FIELD_VALUES_KEY
+from .scope import adtv_by_symbol, structured_universe_refusal
 
 DATA_REFERENCE_TTL_SECONDS = 24 * 60 * 60
 PRICE_SAMPLE_POINTS = 12
-ADTV_SESSIONS = 20
 
 SessionFactory = Callable[[], Session]
 UniverseFactory = Callable[[Session], Universe]
@@ -542,39 +542,12 @@ class StoreBackedTools:
     def _refusal(
         self, session: Session, symbol: str, trading_day: date
     ) -> Mapping[str, Any] | None:
-        universe = self._universe_factory(session)
-        if universe.contains(symbol):
-            return None
-        return {
-            "reason": "not_in_universe",
-            "suggestions": self._suggestions(
-                session, symbol, universe.symbols, trading_day
-            ),
-        }
-
-    def _suggestions(
-        self,
-        session: Session,
-        symbol: str,
-        universe_symbols: Sequence[str],
-        trading_day: date,
-    ) -> list[str]:
-        industry = session.execute(
-            select(ListingRoster.industry_code).where(ListingRoster.symbol == symbol)
-        ).scalar_one_or_none()
-        if not industry or not universe_symbols:
-            return []
-        candidates = tuple(
-            session.execute(
-                select(ListingRoster.symbol).where(
-                    ListingRoster.industry_code == industry,
-                    ListingRoster.is_listed.is_(True),
-                    ListingRoster.symbol.in_(universe_symbols),
-                )
-            ).scalars()
+        return structured_universe_refusal(
+            session,
+            self._universe_factory,
+            symbol,
+            trading_day,
         )
-        ranked = self._adtv(session, candidates, trading_day)
-        return sorted(candidates, key=lambda item: (ranked.get(item, -1), item), reverse=True)[:3]
 
     @staticmethod
     def _latest_payloads(
@@ -607,40 +580,7 @@ class StoreBackedTools:
     def _adtv(
         session: Session, symbols: Sequence[str], end: date | None
     ) -> dict[str, float]:
-        if not symbols:
-            return {}
-        value = cast(ProviderSnapshot.payload["total_value_vnd"].as_string(), Float)
-        filters = [
-            ProviderSnapshot.capability == Capability.MARKET.value,
-            ProviderSnapshot.source == main_source(Capability.MARKET).value,
-            ProviderSnapshot.symbol.in_(symbols),
-            value.is_not(None),
-        ]
-        if end is not None:
-            filters.append(
-                ProviderSnapshot.effective_at
-                < datetime.combine(end + timedelta(days=1), time.min, tzinfo=timezone.utc)
-            )
-        numbered = (
-            select(
-                ProviderSnapshot.symbol.label("symbol"),
-                value.label("value"),
-                func.row_number()
-                .over(
-                    partition_by=ProviderSnapshot.symbol,
-                    order_by=ProviderSnapshot.effective_at.desc(),
-                )
-                .label("position"),
-            )
-            .where(*filters)
-            .subquery()
-        )
-        rows = session.execute(
-            select(numbered.c.symbol, func.avg(numbered.c.value))
-            .where(numbered.c.position <= ADTV_SESSIONS)
-            .group_by(numbered.c.symbol)
-        ).all()
-        return {str(symbol): float(average) for symbol, average in rows}
+        return adtv_by_symbol(session, symbols, end)
 
     @staticmethod
     def _matches(row: Mapping[str, Any], criteria: Mapping[str, Any]) -> bool:

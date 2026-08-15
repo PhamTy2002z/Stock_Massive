@@ -23,8 +23,12 @@ from src.core.provider_access import store_only_execution
 
 from .fields import (
     REGISTERED_FIELD_VALUES_KEY,
+    SHARED_WINDOW_HEALTH_KEY,
+    RefusedRegisteredField,
     registered_field_schema,
+    serialize_refused_field,
     serialize_field_value,
+    serialize_window_health,
 )
 
 MAX_TOOL_RESULT_BYTES = 4 * 1024
@@ -59,6 +63,7 @@ class ToolSpec:
     callable: ToolCallable
     data_access: ToolDataAccess = ToolDataAccess.STORE_ONLY
     registered_fields: tuple[str, ...] = ()
+    shared_window_health: bool = False
 
     def schema(self) -> ToolSchema:
         field_descriptions = [
@@ -233,9 +238,30 @@ class ToolCatalog:
                 f"tool {registration.name} returned undeclared registered fields: "
                 f"{', '.join(sorted(undeclared))}"
             )
+        shared_health = payload.pop(SHARED_WINDOW_HEALTH_KEY, None)
+        if registration.shared_window_health:
+            if shared_health is None:
+                if payload.get("reason") == "not_in_universe":
+                    return payload
+                raise ValueError(
+                    f"tool {registration.name} must return shared Window Health"
+                )
+            payload["window_health"] = serialize_window_health(shared_health)
+        elif shared_health is not None:
+            raise ValueError(
+                f"tool {registration.name} did not declare shared Window Health"
+            )
         if answers:
             payload["registered_fields"] = {
-                name: serialize_field_value(answer) for name, answer in answers.items()
+                name: (
+                    serialize_refused_field(answer)
+                    if isinstance(answer, RefusedRegisteredField)
+                    else serialize_field_value(
+                        answer,
+                        include_window_health=not registration.shared_window_health,
+                    )
+                )
+                for name, answer in answers.items()
             }
         return payload
 

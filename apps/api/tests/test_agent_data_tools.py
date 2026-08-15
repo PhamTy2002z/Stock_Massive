@@ -337,7 +337,12 @@ def test_tool_package_has_no_provider_or_legacy_live_read_path():
     }
 
     imported: set[str] = set()
+    # Ticket #76 adds the one named Provider Source exception. The proof still
+    # applies unchanged to every other tool module; only search_news may import
+    # the guarded vnstock boundary.
     for path in package.glob("*.py"):
+        if path.name == "news.py":
+            continue
         tree = ast.parse(path.read_text(), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -346,3 +351,11 @@ def test_tool_package_has_no_provider_or_legacy_live_read_path():
                 imported.add(node.module)
 
     assert not imported.intersection(forbidden_modules)
+
+    news_tree = ast.parse((package / "news.py").read_text(), filename="news.py")
+    news_imports = {
+        node.module
+        for node in ast.walk(news_tree)
+        if isinstance(node, ast.ImportFrom) and node.module
+    }
+    assert news_imports.intersection(forbidden_modules) == {"src.core.vnstock_client"}
