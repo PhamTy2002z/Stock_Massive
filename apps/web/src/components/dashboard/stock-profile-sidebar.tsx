@@ -38,8 +38,8 @@ function Panel({
   className?: string
 }) {
   return (
-    <div className={cn("rounded-[18px] border border-border bg-card p-[18px]", className)}>
-      <div className="pb-1 text-[13px] font-semibold leading-[1.29] tracking-[-0.208px] text-muted-foreground">
+    <div className={cn("rounded-card border border-border bg-card p-[14px]", className)}>
+      <div className="pb-1 text-meta font-semibold leading-[1.29] text-muted-foreground">
         {title}
       </div>
       {children}
@@ -49,11 +49,11 @@ function Panel({
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 border-t border-[hsl(var(--hairline))] py-[9px]">
-      <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+    <div className="flex items-baseline justify-between gap-3 border-t border-hairline py-[9px]">
+      <span className="text-meta text-muted-foreground">
         {label}
       </span>
-      <span className="text-right text-[15px] leading-[1.47] tracking-[-0.374px] tabular-nums">
+      <span className="text-right text-[0.95rem] tabular-nums">
         {value}
       </span>
     </div>
@@ -69,7 +69,7 @@ function PeerList({ symbol }: { symbol: string }) {
 
   if (peers.length === 0) {
     return (
-      <div className="py-2 text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+      <div className="py-2 text-meta text-muted-foreground">
         Chưa tìm được mã cùng ngành để so sánh.
       </div>
     )
@@ -84,17 +84,17 @@ function PeerList({ symbol }: { symbol: string }) {
           <Link
             key={peer.symbol}
             href={`/analytics/deep-dive?symbol=${encodeURIComponent(peer.symbol)}`}
-            className="flex items-baseline justify-between gap-3 border-t border-[hsl(var(--hairline))] py-[9px] transition-colors hover:bg-muted/50"
+            className="flex items-baseline justify-between gap-3 border-t border-hairline py-[9px] transition-colors hover:bg-foreground/[0.06]"
           >
-            <span className="text-[15px] font-semibold leading-[1.24] tracking-[-0.374px]">
+            <span className="text-[0.95rem] font-semibold">
               {peer.symbol}
             </span>
-            <span className="text-[15px] leading-[1.47] tracking-[-0.374px] tabular-nums text-muted-foreground">
+            <span className="text-[0.95rem] tabular-nums text-muted-foreground">
               {peer.pe === null ? "—" : `P/E ${decimal(peer.pe)}`}
             </span>
             <span
               className={cn(
-                "min-w-16 text-right text-[15px] leading-[1.47] tracking-[-0.374px] tabular-nums",
+                "min-w-16 text-right text-[0.95rem] tabular-nums",
                 premium === null
                   ? "text-muted-foreground"
                   : premium >= 0
@@ -145,8 +145,8 @@ export function StockProfileSidebar({ stock, className }: StockProfileSidebarPro
 export function StockProfileSidebarSkeleton({ className }: { className?: string }) {
   return (
     <div className={cn("flex flex-col gap-4", className)}>
-      <div className="h-[248px] animate-pulse rounded-[18px] border border-border bg-card" />
-      <div className="h-[196px] animate-pulse rounded-[18px] border border-border bg-card" />
+      <div className="h-[248px] animate-pulse rounded-card border border-border bg-card" />
+      <div className="h-[196px] animate-pulse rounded-card border border-border bg-card" />
     </div>
   )
 }

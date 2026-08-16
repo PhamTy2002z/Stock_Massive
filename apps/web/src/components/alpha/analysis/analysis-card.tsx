@@ -53,7 +53,7 @@ export function AnalysisCard({
     return (
       <p
         className={cn(
-          "flex items-center gap-2 rounded-lg border border-border/60 px-3 py-2 text-xs text-muted-foreground",
+          "flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground",
           className,
         )}
       >

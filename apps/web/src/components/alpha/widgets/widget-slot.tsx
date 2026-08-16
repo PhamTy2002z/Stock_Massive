@@ -41,7 +41,7 @@ export interface WidgetSlotProps {
 }
 
 /** Tall enough to hold any of the four, so the swap moves nothing. */
-export const PLACEHOLDER_CLASS = "h-[168px] w-full rounded-[18px] border border-border"
+export const PLACEHOLDER_CLASS = "h-[168px] w-full rounded-card border border-border"
 
 export function WidgetSlot({ spec, resolve, onExpand, className }: WidgetSlotProps) {
   // Parsed once per spec identity rather than on every render: the result is
@@ -121,7 +121,7 @@ export function WidgetSlot({ spec, resolve, onExpand, className }: WidgetSlotPro
       <div
         role="status"
         className={cn(
-          "rounded-[18px] border border-border bg-card p-4 text-[13px]",
+          "rounded-card border border-border bg-card p-4 text-meta",
           className
         )}
       >

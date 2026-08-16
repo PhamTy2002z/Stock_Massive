@@ -10,15 +10,21 @@ import {
   Map,
   MessagesSquare,
 } from "lucide-react"
+
+import { VisgniteWordmark } from "@/components/shared/visgnite-logo"
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
+  SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarSeparator,
+  SidebarTrigger,
 } from "@/components/ui/sidebar"
+import { UserMenu } from "./user-menu"
 
 type NavItem = {
   title: string
@@ -85,14 +91,44 @@ function NavMain() {
   )
 }
 
+/**
+ * The left rail, and the panel that carries the brand.
+ *
+ * The reference puts the mark at the top of the sidebar rather than in a bar
+ * above it — the panel runs the full height of the viewport, opens onto
+ * navigation and closes on the account row. That is why the header and the
+ * footer live here now instead of in the top bar: the bar above the content is
+ * about *the page you are on*, and this panel is about the product.
+ *
+ * Collapsed to the icon rail the wordmark drops to the mark alone, so nothing
+ * in the panel changes height as it opens.
+ */
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
-  // No SidebarHeader: the logo lives in the full-width bar above, so the rail
-  // opens straight onto navigation.
   return (
     <Sidebar collapsible="icon" {...props}>
-      <SidebarContent className="pt-2">
+      <SidebarHeader className="flex-row items-center gap-1.5 group-data-[collapsible=icon]:justify-center">
+        <Link
+          href="/"
+          aria-label="VisgniteAI"
+          className="flex min-w-0 items-center rounded-lg px-1 py-0.5 text-foreground outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-sidebar-ring group-data-[collapsible=icon]:px-0"
+        >
+          {/* On the rail the wordmark is the mark alone — the text node is the
+              element's own last child, which is what the selector drops. */}
+          <VisgniteWordmark className="group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:text-[0px]" />
+        </Link>
+        {/* The collapse control sits with the mark, the way the reference draws
+            it. Hidden on the rail: there is no room for it beside the mark, and
+            the rail opens on approach anyway. */}
+        <SidebarTrigger className="ml-auto size-[30px] rounded-lg group-data-[collapsible=icon]:hidden" />
+      </SidebarHeader>
+
+      <SidebarContent className="pt-1">
         <NavMain />
       </SidebarContent>
+
+      <SidebarFooter className="p-2">
+        <UserMenu />
+      </SidebarFooter>
     </Sidebar>
   )
 }

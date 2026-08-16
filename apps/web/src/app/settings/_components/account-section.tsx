@@ -39,7 +39,7 @@ function CopyButton({ value, label }: { value: string; label: string }) {
       type="button"
       onClick={handleCopy}
       aria-label={`Sao chép ${label}`}
-      className="flex shrink-0 items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-[13px] leading-[1.29] tracking-[-0.208px] transition-[background-color,transform] duration-150 hover:bg-accent active:scale-95"
+      className="flex shrink-0 items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-meta transition-[background-color,transform] duration-150 hover:bg-accent active:scale-95"
     >
       {copied ? <Check className="size-[15px] text-positive" /> : <Copy className="size-[15px]" />}
       {copied ? "Đã chép" : "Chép"}
@@ -61,7 +61,7 @@ export function AccountSection() {
     >
       <SettingsPanel
         footer={
-          <p className="text-[11px] leading-[1.3] tracking-[-0.11px] text-muted-foreground">
+          <p className="text-micro text-muted-foreground">
             Chỉnh sửa hồ sơ chưa được build — các giá trị dưới đây chỉ để xem.
           </p>
         }

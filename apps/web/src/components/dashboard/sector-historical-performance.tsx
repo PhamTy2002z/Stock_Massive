@@ -58,7 +58,7 @@ function CustomTooltip({
   const data = payload[0].payload
 
   return (
-    <Card className="shadow-lg border-border/50">
+    <Card className="shadow-lg border-border">
       <CardContent className="p-3 space-y-1">
         <p className="font-semibold text-sm">{data.name}</p>
         <div className="flex justify-between gap-4 text-xs">
@@ -66,7 +66,7 @@ function CustomTooltip({
           <span
             className={cn(
               "font-medium",
-              data.value >= 0 ? "text-green-600" : "text-red-600"
+              data.value >= 0 ? "text-positive" : "text-negative"
             )}
           >
             {data.value >= 0 ? "+" : ""}

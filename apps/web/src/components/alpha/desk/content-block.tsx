@@ -41,14 +41,17 @@ export function ContentBlockView({
   return (
     <div
       className={cn(
-        "space-y-2",
+        "space-y-2.5",
+        // The one callout the reference frames in teal — the same treatment its
+        // "ask VisgniteAI about this board" strip gets. A tinted surface, not a
+        // filled control, so it does not spend the teal budget.
         isRecommendation &&
-          "rounded-md border border-sky-500/40 bg-sky-500/5 px-3 py-2",
+          "rounded-card border border-primary/25 bg-primary/[0.05] px-3.5 py-3",
         className,
       )}
     >
       {isRecommendation && (
-        <p className="text-[11px] font-medium uppercase tracking-wide text-sky-600 dark:text-sky-400">
+        <p className="text-eyebrow font-semibold uppercase text-primary">
           Hành động tham chiếu
         </p>
       )}
@@ -57,7 +60,7 @@ export function ContentBlockView({
           already a Markdown-safe unit, and shipping a parser to interpret model
           output is a second place where what is stored and what is shown can
           disagree. */}
-      <p className="whitespace-pre-wrap text-sm leading-relaxed">{block.text}</p>
+      <p className="whitespace-pre-wrap text-[0.95rem] leading-[1.62]">{block.text}</p>
 
       {block.citations.length > 0 && <Figures citations={block.citations} />}
     </div>
@@ -66,10 +69,10 @@ export function ContentBlockView({
 
 function Figures({ citations }: { citations: Citation[] }) {
   return (
-    <Collapsible className="rounded-md border border-border/60 bg-muted/20">
+    <Collapsible className="overflow-hidden rounded-xl border border-border bg-surface-raised">
       <ul className="divide-y divide-border/50">
         {citations.map((citation, index) => (
-          <li key={`${citation.field_path}-${index}`} className="px-2 py-1.5 text-xs">
+          <li key={`${citation.field_path}-${index}`} className="px-3 py-2 text-meta">
             <Figure
               value={citation.value}
               unit={citation.unit}
@@ -80,16 +83,16 @@ function Figures({ citations }: { citations: Citation[] }) {
         ))}
       </ul>
 
-      <CollapsibleTrigger className="group flex w-full items-center gap-1 border-t border-border/60 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground">
+      <CollapsibleTrigger className="group flex w-full items-center gap-1 border-t border-border px-3 py-2 text-meta text-muted-foreground transition-colors hover:text-foreground">
         View details
         <ChevronDown className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180 motion-reduce:transition-none" />
       </CollapsibleTrigger>
 
       <CollapsibleContent>
-        <dl className="space-y-2 border-t border-border/60 px-2 py-2 text-xs">
+        <dl className="space-y-2 border-t border-border px-3 py-2.5 text-meta">
           {citations.map((citation, index) => (
             <div key={`${citation.field_path}-detail-${index}`} className="space-y-0.5">
-              <dt className="font-mono text-[11px] text-muted-foreground">
+              <dt className="font-mono text-micro text-muted-foreground">
                 {citation.field_path}
               </dt>
               {citation.interpretation && <dd>{citation.interpretation}</dd>}

@@ -128,7 +128,7 @@ export function StockSearchBar({
           onKeyDown={handleKeyDown}
           onFocus={() => results.length > 0 && setIsOpen(true)}
           placeholder={placeholder}
-          className="h-10 w-full rounded-full border-border bg-secondary pl-10 pr-[18px] text-[15px] tracking-[-0.374px] transition-colors duration-200 focus:bg-card focus-visible:ring-2 focus-visible:ring-[hsl(var(--interactive-strong))] focus-visible:ring-offset-0"
+          className="h-10 w-full rounded-full border-border bg-secondary pl-10 pr-[18px] text-[0.95rem] transition-colors duration-200 focus:bg-card focus-visible:ring-2 focus-visible:ring-[hsl(var(--interactive-strong))] focus-visible:ring-offset-0"
         />
         {isLoading && (
           <Spinner className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />

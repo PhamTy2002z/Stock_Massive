@@ -9,7 +9,7 @@ import { DashboardLayoutClient } from "@/components/layout/dashboard-layout-clie
 export const dynamic = "force-dynamic"
 
 export const metadata: Metadata = {
-  title: "Alpha Desk · Stock Massive",
+  title: "Alpha Desk · VisgniteAI",
 }
 
 export default function AlphaDeskPage() {

@@ -5,6 +5,7 @@ import {
   MarketIndices,
   MarketIndicesSkeleton,
   SectorPerformanceSection,
+  SectorHeatGrid,
   FundCertificates,
   VN30OverviewTable,
   VN30OverviewTableSkeleton,
@@ -53,6 +54,11 @@ export default async function Home() {
 
             <VN30OverviewTable />
 
+            {/* Every sector at once, before the two ranked lists narrow it to
+                the extremes: the wall answers how broad the session was, and
+                the cards under it answer who led and who dragged. */}
+            <SectorHeatGrid />
+
             {/* Sector extremes and funds share one row: three readings of the
                 same session, each answering a different question. */}
             <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-3.5">
@@ -65,7 +71,7 @@ export default async function Home() {
                 Dữ liệu chỉ mang tính tham khảo, không phải khuyến nghị đầu tư. Nguồn: HOSE,
                 HNX, UPCoM.
               </span>
-              <span>© {new Date().getFullYear()} Stock Massive</span>
+              <span>© {new Date().getFullYear()} VisgniteAI</span>
             </footer>
           </div>
         </DashboardLayoutClient>

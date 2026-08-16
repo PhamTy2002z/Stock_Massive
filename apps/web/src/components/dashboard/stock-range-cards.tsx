@@ -55,8 +55,8 @@ function Card({
   className?: string
 }) {
   return (
-    <div className={cn("min-w-0 rounded-[18px] border border-border bg-card p-[18px]", className)}>
-      <div className="text-[13px] font-semibold leading-[1.29] tracking-[-0.208px] text-muted-foreground">
+    <div className={cn("min-w-0 rounded-card border border-border bg-card p-[14px]", className)}>
+      <div className="text-meta font-semibold leading-[1.29] text-muted-foreground">
         {title}
       </div>
       {children}
@@ -86,7 +86,7 @@ function RangeTrack({ percent }: { percent: number }) {
 
 function Caption({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mt-2.5 text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+    <div className="mt-2.5 text-meta text-muted-foreground">
       {children}
     </div>
   )
@@ -94,7 +94,7 @@ function Caption({ children }: { children: React.ReactNode }) {
 
 function Unavailable({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mt-2.5 text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+    <div className="mt-2.5 text-meta text-muted-foreground">
       {children}
     </div>
   )
@@ -153,10 +153,10 @@ export function StockRangeCards({
           <Unavailable>Chưa có giá thấp/cao của phiên</Unavailable>
         ) : (
           <>
-            <div className="mt-2.5 flex items-baseline justify-between gap-3 text-[15px] leading-[1.47] tracking-[-0.374px] tabular-nums">
+            <div className="mt-2.5 flex items-baseline justify-between gap-3 text-[0.95rem] tabular-nums">
               <span className="text-negative">{whole(lowPrice as number)}</span>
               {openPrice !== null && (
-                <span className="text-[13px] text-muted-foreground">
+                <span className="text-meta text-muted-foreground">
                   Mở cửa {whole(openPrice)}
                 </span>
               )}
@@ -182,9 +182,9 @@ export function StockRangeCards({
           <Unavailable>Chưa có vùng giá 52 tuần</Unavailable>
         ) : (
           <>
-            <div className="mt-2.5 flex items-baseline justify-between gap-3 text-[15px] leading-[1.47] tracking-[-0.374px] tabular-nums">
+            <div className="mt-2.5 flex items-baseline justify-between gap-3 text-[0.95rem] tabular-nums">
               <span>{whole(low52Week as number)}</span>
-              <span className="text-[13px] text-muted-foreground">
+              <span className="text-meta text-muted-foreground">
                 Hiện tại {whole(price as number)}
               </span>
               <span>{whole(high52Week as number)}</span>
@@ -203,10 +203,10 @@ export function StockRangeCards({
         ) : (
           <>
             <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-2xl font-semibold leading-[1.2] tracking-[-0.374px] tabular-nums">
+              <span className="text-2xl font-semibold leading-[1.2] tabular-nums">
                 {formatShares(volume)}
               </span>
-              <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+              <span className="text-meta text-muted-foreground">
                 cổ phiếu{tradingValue !== null ? ` · ${formatValue(tradingValue)}` : ""}
               </span>
             </div>
@@ -221,7 +221,7 @@ export function StockRangeCards({
                   />
                   <span
                     style={{ flex: Math.max(0, 100 - volumeVsAvg) }}
-                    className="rounded-full bg-[hsl(var(--hairline))]"
+                    className="rounded-full bg-hairline"
                   />
                 </div>
                 <Caption>
@@ -248,7 +248,7 @@ export function StockRangeCardsSkeleton({ className }: { className?: string }) {
       {[0, 1, 2].map((i) => (
         <div
           key={i}
-          className="h-[132px] animate-pulse rounded-[18px] border border-border bg-card"
+          className="h-[132px] animate-pulse rounded-card border border-border bg-card"
         />
       ))}
     </div>

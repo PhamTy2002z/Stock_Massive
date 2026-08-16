@@ -17,9 +17,9 @@ export function CCCIndicator({ ccc, dso, dio, dpo }: CCCIndicatorProps) {
   }
 
   const getCCCColor = (days: number) => {
-    if (days <= 30) return "text-white"
-    if (days <= 60) return "text-yellow-500"
-    return "text-red-500"
+    if (days <= 30) return "text-foreground"
+    if (days <= 60) return "text-caution"
+    return "text-negative"
   }
 
   return (
@@ -32,15 +32,15 @@ export function CCCIndicator({ ccc, dso, dio, dpo }: CCCIndicatorProps) {
       </div>
 
       <div className="grid grid-cols-3 gap-2 text-center text-xs">
-        <div className="p-2 bg-muted/30 rounded">
+        <div className="p-2 bg-surface-sunken rounded">
           <div className="text-muted-foreground">DSO</div>
           <div className="font-medium">{dso?.toFixed(0) || "-"} ngày</div>
         </div>
-        <div className="p-2 bg-muted/30 rounded">
+        <div className="p-2 bg-surface-sunken rounded">
           <div className="text-muted-foreground">DIO</div>
           <div className="font-medium">{dio?.toFixed(0) || "-"} ngày</div>
         </div>
-        <div className="p-2 bg-muted/30 rounded">
+        <div className="p-2 bg-surface-sunken rounded">
           <div className="text-muted-foreground">DPO</div>
           <div className="font-medium">{dpo?.toFixed(0) || "-"} ngày</div>
         </div>

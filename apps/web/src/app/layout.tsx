@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono, Newsreader } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { QueryProvider } from "@/components/providers/query-provider";
@@ -17,12 +17,27 @@ const jetBrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
 });
 
+/**
+ * The one serif in the system, and it says one thing: the greeting that opens
+ * a new conversation. An optical-size face at display weight is what makes
+ * that line read as someone addressing you rather than as a heading — which is
+ * exactly why it is rationed to that line and never used for chrome.
+ *
+ * Vietnamese is in the subset because the greeting is Vietnamese; without it
+ * the diacritics would fall back mid-word to a different face.
+ */
+const newsreader = Newsreader({
+  subsets: ["latin", "vietnamese"],
+  weight: ["300", "400"],
+  variable: "--font-newsreader",
+});
+
 export const metadata: Metadata = {
-  title: "Stock Massive",
-  description: "Stock analysis platform with real-time charting",
+  title: "VisgniteAI",
+  description: "Trợ lý phân tích chứng khoán Việt Nam — HOSE, HNX, UPCOM",
   icons: {
-    icon: "/logo.png",
-    apple: "/logo.png",
+    icon: "/visgnite-mark.svg",
+    apple: "/visgnite-mark.svg",
   },
 };
 
@@ -33,18 +48,17 @@ export default function RootLayout({
 }) {
   return (
     <html lang="vi" suppressHydrationWarning>
-      <body className={`${inter.className} ${jetBrainsMono.variable}`}>
-        {/* forcedTheme is gone now that ThemeToggle ships: it was only ever
-            there because a browser holding a stale "dark" in localStorage had
-            no way back to the light v3 design. There is a way back now, and
-            dark is a designed surface rather than a leftover.
-
-            defaultTheme stays "light" rather than "system" so a first visit
-            still lands on the light design; "system" is a choice the user
-            makes in the toggle, which is why enableSystem is on. */}
+      <body
+        className={`${inter.className} ${jetBrainsMono.variable} ${newsreader.variable}`}
+      >
+        {/* Night is the design, not a mode: the VisgniteAI reference is drawn
+            on #191815 and every surface step above it is defined against that
+            ground, so a first visit lands there. The light theme is the same
+            system re-grounded on paper and stays a choice the user makes in
+            the toggle — which is why enableSystem is still on. */}
         <ThemeProvider
           attribute="class"
-          defaultTheme="light"
+          defaultTheme="dark"
           enableSystem
           disableTransitionOnChange
         >

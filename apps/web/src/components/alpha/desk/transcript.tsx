@@ -30,6 +30,7 @@ const FOLLOW_THRESHOLD_PX = 120
 
 export function Transcript({
   entries,
+  opening,
   onRetry,
   onFlag,
   onUnflag,
@@ -37,6 +38,12 @@ export function Transcript({
   className,
 }: {
   entries: TranscriptEntry[]
+  /**
+   * What an empty conversation opens on. Defaults to the first-run copy alone;
+   * the container passes the version with the greeting and the session glance,
+   * both of which need hooks this component must not own.
+   */
+  opening?: React.ReactNode
   onRetry: () => void
   /**
    * Flagging one canonical assistant message, and clearing it again.
@@ -79,16 +86,20 @@ export function Transcript({
       className={cn("scrollbar-thin overflow-y-auto overscroll-contain", className)}
     >
       {entries.length === 0 ? (
-        <FirstRun />
+        (opening ?? <FirstRun />)
       ) : (
-        <div className="mx-auto w-full max-w-3xl space-y-4 p-4">
+        <div className="mx-auto w-full max-w-[760px] space-y-7 px-4 py-5">
           {entries.map((entry) => {
             if (entry.kind === "user") {
               return (
                 <div key={entry.key} className="flex justify-end">
+                  {/* The question is the one thing in a bubble, and it is the
+                      bubble surface rather than the muted one: on a near-black
+                      ground `bg-muted` sits a single percent off the page and
+                      the bubble stops reading as a bubble. */}
                   <p
                     className={cn(
-                      "max-w-[85%] whitespace-pre-wrap rounded-lg bg-muted px-3 py-2 text-sm",
+                      "max-w-[82%] animate-vg-message-in whitespace-pre-wrap rounded-2xl bg-surface-bubble px-[1.05em] py-[0.7em] text-[0.95rem] leading-[1.5] text-foreground",
                       entry.pending && "opacity-70",
                     )}
                   >

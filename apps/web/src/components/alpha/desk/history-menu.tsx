@@ -39,7 +39,7 @@ export function HistoryMenu({
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2 py-1 text-xs hover:bg-muted">
+      <DropdownMenuTrigger className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-meta text-ink-4 transition-colors hover:bg-foreground/[0.06] hover:text-foreground">
         <History className="h-3.5 w-3.5" />
         {/* The label goes first when the row runs out of room; the icon is what
             has to survive. */}
@@ -47,18 +47,18 @@ export function HistoryMenu({
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align="end" className="max-h-80 w-72 overflow-y-auto">
-        <DropdownMenuItem onSelect={onNewThread} className="gap-2 text-xs">
+        <DropdownMenuItem onSelect={onNewThread} className="gap-2 text-meta">
           <Plus className="h-3.5 w-3.5" />
           New thread
         </DropdownMenuItem>
 
         <DropdownMenuSeparator />
-        <DropdownMenuLabel className="text-xs">Recent</DropdownMenuLabel>
+        <DropdownMenuLabel className="text-micro uppercase tracking-wide text-muted-foreground">Recent</DropdownMenuLabel>
 
         {isPending ? (
-          <p className="px-2 py-1.5 text-xs text-muted-foreground">Loading…</p>
+          <p className="px-2.5 py-2 text-meta text-muted-foreground">Loading…</p>
         ) : !data || data.threads.length === 0 ? (
-          <p className="px-2 py-1.5 text-xs text-muted-foreground">
+          <p className="px-2.5 py-2 text-meta text-muted-foreground">
             No threads yet.
           </p>
         ) : (
@@ -66,7 +66,7 @@ export function HistoryMenu({
             <DropdownMenuItem
               key={thread.id}
               onSelect={() => onOpenThread(thread.id)}
-              className="flex-col items-start gap-0.5 text-xs"
+              className="flex-col items-start gap-0.5 text-meta"
               aria-current={thread.id === currentThreadId}
             >
               <span className="w-full truncate">

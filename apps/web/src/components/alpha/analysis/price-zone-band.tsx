@@ -73,7 +73,7 @@ export function PriceZoneBand({
           width={halfWidth * 2}
           height="4"
           rx="2"
-          className="fill-sky-500/30 stroke-sky-500/60"
+          className="fill-primary/30 stroke-primary/60"
           strokeWidth="0.5"
         />
         <line
@@ -86,7 +86,7 @@ export function PriceZoneBand({
         />
       </svg>
 
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-micro text-muted-foreground">
         {priceZoneSentence(band.halfWidthPct)} {scaleNote(band.halfWidthPct)}{" "}
         {CHROME.asOf} <span className="tabular-nums">{zone?.asOf ?? "—"}</span> ·{" "}
         {anchor}

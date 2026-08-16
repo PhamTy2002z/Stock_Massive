@@ -45,10 +45,10 @@ export function WidgetExpand({ spec, data, onOpenChange }: WidgetExpandProps) {
           <div className="mx-auto flex max-w-3xl flex-col gap-4">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <DialogPrimitive.Title className="text-[17px] font-semibold leading-[1.24]">
+                <DialogPrimitive.Title className="text-[1.05rem] font-semibold leading-[1.24]">
                   {spec.title}
                 </DialogPrimitive.Title>
-                <DialogPrimitive.Description className="text-[13px] text-muted-foreground">
+                <DialogPrimitive.Description className="text-meta text-muted-foreground">
                   Dữ liệu ngày {formatDataDate(data.as_of)}
                 </DialogPrimitive.Description>
               </div>
@@ -62,7 +62,7 @@ export function WidgetExpand({ spec, data, onOpenChange }: WidgetExpandProps) {
 
             <Component spec={spec} data={data} expanded />
 
-            <details className="rounded-[18px] border border-border bg-card p-4 text-[13px]">
+            <details className="rounded-card border border-border bg-card p-4 text-meta">
               <summary className="cursor-pointer select-none">Xem cách tính</summary>
               <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1">
                 <dt className="text-muted-foreground">Trường dữ liệu</dt>

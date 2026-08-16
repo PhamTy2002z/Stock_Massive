@@ -33,21 +33,21 @@ export function SourcesAndMethods({
   if (rows.length === 0) return null
 
   return (
-    <Collapsible className={cn("rounded-md border border-border/60", className)}>
-      <CollapsibleTrigger className="group flex w-full items-center gap-1 px-3 py-2 text-xs text-muted-foreground hover:text-foreground">
+    <Collapsible className={cn("overflow-hidden rounded-xl border border-border", className)}>
+      <CollapsibleTrigger className="group flex w-full items-center gap-1.5 px-3 py-2.5 text-meta text-muted-foreground transition-colors hover:text-foreground">
         Sources &amp; methods
         <span className="tabular-nums">({rows.length})</span>
         <ChevronDown className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180 motion-reduce:transition-none" />
       </CollapsibleTrigger>
 
       <CollapsibleContent>
-        <ul className="divide-y divide-border/50 border-t border-border/60">
+        <ul className="divide-y divide-border border-t border-border">
           {rows.map((row, index) => (
             <li
               key={`${row.registered_field ?? "field"}-${index}`}
-              className="space-y-0.5 px-3 py-2 text-xs"
+              className="space-y-0.5 px-3 py-2.5 text-meta"
             >
-              <p className="font-mono text-[11px] text-muted-foreground">
+              <p className="font-mono text-micro text-muted-foreground">
                 {row.registered_field ?? "—"}
               </p>
               <Figure

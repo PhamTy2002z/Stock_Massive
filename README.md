@@ -1,4 +1,4 @@
-<h1 align="center">Stock Massive 📈</h1>
+<h1 align="center">VisgniteAI ⚡</h1>
 
 <p align="center">
   <strong>Phân tích sâu một nhúm cổ phiếu Việt Nam bạn thực sự quan tâm — không phải màn hình theo dõi cả thị trường.</strong>

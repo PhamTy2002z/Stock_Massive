@@ -33,26 +33,26 @@ function SectorRow({
   const picks = (direction === "up" ? sector.top_gainers : sector.top_losers).slice(0, 2)
 
   return (
-    <div className="grid grid-cols-[1fr_auto] items-baseline gap-4 border-t border-[hsl(var(--hairline))] py-2.5">
+    <div className="grid grid-cols-[1fr_auto] items-baseline gap-4 border-t border-hairline py-2.5">
       <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="truncate text-[15px] font-semibold leading-[1.24] tracking-[-0.374px]">
+        <span className="truncate text-[0.95rem] font-semibold">
           {sector.icb_name}
         </span>
-        <span className="text-[13px] leading-[1.43] tracking-[-0.224px] text-muted-foreground">
+        <span className="text-meta text-muted-foreground">
           {marketCap(sector.total_market_cap)} · {sector.stock_count} CP
         </span>
       </div>
       <div className="flex flex-col items-end gap-0.5">
         <span
           className={cn(
-            "text-[15px] leading-[1.47] tracking-[-0.374px] tabular-nums",
+            "text-[0.95rem] tabular-nums",
             direction === "up" ? "text-positive" : "text-negative"
           )}
         >
           {percent(sector.change_pct)}
         </span>
         {picks.length > 0 && (
-          <span className="text-[13px] leading-[1.43] tracking-[-0.224px] text-muted-foreground">
+          <span className="text-meta text-muted-foreground">
             {picks.join(", ")}
           </span>
         )}
@@ -75,17 +75,17 @@ function SectorCard({
   return (
     <SurfaceCard>
       <div className="flex flex-wrap items-baseline justify-between gap-4 pb-2">
-        <span className="text-[17px] font-semibold leading-[1.24] tracking-[-0.374px]">
+        <span className="text-[1.05rem] font-semibold leading-[1.24]">
           {title}
         </span>
         {session && (
-          <span className="text-[13px] leading-[1.43] tracking-[-0.224px] text-muted-foreground">
+          <span className="text-meta text-muted-foreground">
             Phiên {session}
           </span>
         )}
       </div>
       {sectors.length === 0 ? (
-        <p className="border-t border-[hsl(var(--hairline))] py-4 text-[13px] leading-[1.43] tracking-[-0.224px] text-muted-foreground">
+        <p className="border-t border-hairline py-4 text-meta text-muted-foreground">
           Chưa có ngành nào {direction === "up" ? "tăng" : "giảm"} trong phiên này.
         </p>
       ) : (
@@ -148,7 +148,7 @@ function SectorPerformanceSkeleton({ className }: { className?: string }) {
         <div
           key={i}
           className={cn(
-            "h-[340px] animate-pulse rounded-[18px] border border-border bg-card",
+            "h-[340px] animate-pulse rounded-card border border-border bg-card",
             className
           )}
         />

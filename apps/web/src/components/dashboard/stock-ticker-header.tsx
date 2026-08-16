@@ -63,7 +63,7 @@ function SessionBadge({ updatedAt }: { updatedAt?: number }) {
   if (!session) return null
 
   return (
-    <span className="flex items-center gap-1.5 rounded-full border border-[hsl(var(--hairline))] bg-card px-2.5 py-[3px] text-[12px] font-normal tracking-[-0.12px] text-muted-foreground">
+    <span className="flex items-center gap-1.5 rounded-full border border-hairline bg-card px-2.5 py-[3px] text-[12px] font-normal tracking-[-0.12px] text-muted-foreground">
       <span
         className={cn(
           "size-1.5 rounded-full",
@@ -120,12 +120,12 @@ export function StockTickerHeader({
             {symbol}
           </span>
           <span aria-hidden className="h-5 w-px shrink-0 bg-border" />
-          <span className="truncate text-[17px] leading-[1.47] tracking-[-0.374px] text-foreground/80">
+          <span className="truncate text-[1.05rem] leading-[1.47] text-foreground/80">
             {companyName}
           </span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3.5 text-[13px] font-semibold leading-[1.29] tracking-[-0.208px] tabular-nums">
+        <div className="flex flex-wrap items-center gap-3.5 text-meta font-semibold leading-[1.29] tabular-nums">
           <SessionBadge updatedAt={updatedAt} />
           {/* Ceiling purple / reference yellow / floor cyan — the board colours
               Vietnamese traders already read, kept off the up-down green-red. */}
@@ -150,7 +150,7 @@ export function StockTickerHeader({
           </span>
           <span
             className={cn(
-              "flex items-center gap-1.5 text-[15px] leading-[1.47] tracking-[-0.374px] tabular-nums",
+              "flex items-center gap-1.5 text-[0.95rem] tabular-nums",
               toneClass
             )}
           >
@@ -166,7 +166,7 @@ export function StockTickerHeader({
             type="button"
             disabled
             title="Danh mục theo dõi đang chờ API"
-            className="flex items-center gap-[7px] rounded-full border border-border bg-card px-[15px] py-2 text-[13px] leading-[1.29] tracking-[-0.208px] disabled:cursor-not-allowed disabled:opacity-45"
+            className="flex items-center gap-[7px] rounded-full border border-border bg-card px-[15px] py-2 text-meta disabled:cursor-not-allowed disabled:opacity-45"
           >
             <Star aria-hidden className="size-3.5" />
             Theo dõi
@@ -175,7 +175,7 @@ export function StockTickerHeader({
             type="button"
             disabled
             title="Cảnh báo giá đang chờ API"
-            className="flex items-center gap-[7px] rounded-full border border-border bg-card px-[15px] py-2 text-[13px] leading-[1.29] tracking-[-0.208px] disabled:cursor-not-allowed disabled:opacity-45"
+            className="flex items-center gap-[7px] rounded-full border border-border bg-card px-[15px] py-2 text-meta disabled:cursor-not-allowed disabled:opacity-45"
           >
             <Bell aria-hidden className="size-3.5" />
             Cảnh báo giá

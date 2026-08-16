@@ -58,7 +58,7 @@ export function AdvancedTab({ symbol }: AdvancedTabProps) {
   return (
     <div className="space-y-4">
       {/* Sub-tab Navigation */}
-      <div className="flex items-center gap-1 p-1 rounded-lg bg-muted/50 border border-border/50">
+      <div className="flex items-center gap-1 p-1 rounded-lg bg-surface-sunken border border-border">
         {subTabs.map((tab) => {
           const Icon = tab.icon
           const isActive = activeSubTab === tab.value
@@ -76,7 +76,7 @@ export function AdvancedTab({ symbol }: AdvancedTabProps) {
                 isActive && [
                   "bg-background text-foreground",
                   "shadow-sm",
-                  "border border-border/80",
+                  "border border-border",
                 ],
                 !isActive && [
                   "text-muted-foreground",
@@ -98,7 +98,7 @@ export function AdvancedTab({ symbol }: AdvancedTabProps) {
       </div>
 
       {/* Sub-tab Content */}
-      <div className="rounded-lg border border-border/50 bg-card/50 p-4">
+      <div className="rounded-lg border border-border bg-card p-4">
         {activeSubTab === "order-flow" && (
           <Suspense fallback={<SubtabSkeleton />}>
             <OrderFlowSubtab symbol={symbol} />
@@ -123,13 +123,13 @@ export function AdvancedTabSkeleton() {
   return (
     <div className="space-y-4">
       {/* Sub-tab Navigation Skeleton */}
-      <div className="flex items-center gap-1 p-1 rounded-lg bg-muted/50 border border-border/50">
+      <div className="flex items-center gap-1 p-1 rounded-lg bg-surface-sunken border border-border">
         {[1, 2, 3].map((i) => (
           <Skeleton key={i} className="flex-1 h-9 rounded-md" />
         ))}
       </div>
       {/* Content Skeleton */}
-      <div className="rounded-lg border border-border/50 bg-card/50 p-4">
+      <div className="rounded-lg border border-border bg-card p-4">
         <SubtabSkeleton />
       </div>
     </div>

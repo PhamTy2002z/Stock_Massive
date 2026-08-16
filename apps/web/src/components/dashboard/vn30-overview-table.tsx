@@ -57,30 +57,30 @@ function Row({ stock }: { stock: VN30OverviewItem }) {
     <Link
       href={`/analytics/deep-dive?symbol=${encodeURIComponent(stock.symbol)}`}
       style={{ gridTemplateColumns: COLUMNS }}
-      className="-mx-2.5 grid min-w-[700px] items-center gap-3 rounded-lg border-t border-[hsl(var(--hairline))] px-2.5 py-2.5 transition-colors duration-150 hover:bg-muted"
+      className="-mx-2.5 grid min-w-[700px] items-center gap-3 rounded-lg border-t border-hairline px-2.5 py-2.5 transition-colors duration-150 hover:bg-foreground/[0.035]"
     >
-      <span className="text-[15px] font-semibold leading-[1.24] tracking-[-0.374px]">
+      <span className="font-mono text-control font-semibold">
         {stock.symbol}
       </span>
-      <span className="truncate text-[15px] leading-[1.47] tracking-[-0.374px] text-foreground/80">
+      <span className="truncate text-control text-ink-3">
         {stock.company_name}
       </span>
-      <span className="text-right text-[15px] leading-[1.47] tracking-[-0.374px] tabular-nums">
+      <span className="text-right font-mono text-control tabular-nums">
         {formatPrice(stock.price)}
       </span>
       <span
         className={cn(
-          "flex items-center justify-end gap-1.5 text-[15px] leading-[1.47] tracking-[-0.374px] tabular-nums",
+          "flex items-center justify-end gap-1.5 font-mono text-control tabular-nums",
           change === null ? "text-muted-foreground" : isUp ? "text-positive" : "text-negative"
         )}
       >
         {change !== null && <Trend aria-hidden className="size-[13px]" />}
         {formatPercent(change)}
       </span>
-      <span className="text-right text-[15px] leading-[1.47] tracking-[-0.374px] tabular-nums text-muted-foreground">
+      <span className="text-right font-mono text-control tabular-nums text-ink-4">
         {formatVolume(stock.volume)}
       </span>
-      <span className="text-right text-[15px] leading-[1.47] tracking-[-0.374px] tabular-nums text-muted-foreground">
+      <span className="text-right font-mono text-control tabular-nums text-ink-4">
         {formatMarketCap(stock.market_cap)}
       </span>
     </Link>
@@ -136,7 +136,7 @@ export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
       <SurfaceCard className="overflow-x-auto px-[18px] pb-[18px] pt-1">
         <div
           style={{ gridTemplateColumns: COLUMNS }}
-          className="grid min-w-[700px] items-center gap-3 py-3 text-[13px] font-semibold leading-[1.29] tracking-[-0.224px] text-muted-foreground"
+          className="grid min-w-[700px] items-center gap-3 py-3 text-eyebrow font-semibold uppercase text-muted-foreground"
         >
           <span>Mã</span>
           <span>Tên công ty</span>
@@ -153,21 +153,24 @@ export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
             ))}
           </div>
         ) : visible.length === 0 ? (
-          <p className="py-8 text-center text-[15px] leading-[1.47] tracking-[-0.374px] text-muted-foreground">
+          <p className="py-8 text-center text-[0.95rem] text-muted-foreground">
             Chưa có dữ liệu rổ VN30 cho phiên này.
           </p>
         ) : (
           visible.map((stock) => <Row key={stock.symbol} stock={stock} />)
         )}
 
-        <div className="mt-1.5 flex min-w-[700px] flex-wrap items-center justify-between gap-6 border-t border-[hsl(var(--hairline))] pt-4">
-          <span className="text-[13px] leading-[1.43] tracking-[-0.224px] text-muted-foreground">
+        <div className="mt-1.5 flex min-w-[700px] flex-wrap items-center justify-between gap-6 border-t border-border pt-4">
+          <span className="text-meta text-muted-foreground">
             {stocks.length === 0
               ? "0 cổ phiếu"
               : `${start + 1}–${Math.min(start + ROWS_PER_PAGE, stocks.length)} trên ${stocks.length} cổ phiếu`}
           </span>
-          <div className="flex items-center gap-4">
-            <span className="text-[13px] leading-[1.43] tracking-[-0.224px] text-muted-foreground">
+          {/* Both controls are the same quiet square. The teal "next" the v3
+              design used made paging read as the primary action on a page whose
+              primary action is reading the board. */}
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-meta text-muted-foreground">
               Trang {currentPage}/{totalPages}
             </span>
             <button
@@ -175,18 +178,18 @@ export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
               onClick={() => setPage(currentPage - 1)}
               disabled={currentPage === 1}
               aria-label="Trang trước"
-              className="flex size-9 items-center justify-center rounded-full border border-[hsl(var(--hairline))] bg-muted/40 text-muted-foreground transition-transform duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex size-7 items-center justify-center rounded-lg border border-border text-ink-4 transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
             >
-              <ChevronLeft className="size-4" />
+              <ChevronLeft className="size-3.5" />
             </button>
             <button
               type="button"
               onClick={() => setPage(currentPage + 1)}
               disabled={currentPage === totalPages}
               aria-label="Trang sau"
-              className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex size-7 items-center justify-center rounded-lg border border-border text-ink-4 transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
             >
-              <ChevronRight className="size-4" />
+              <ChevronRight className="size-3.5" />
             </button>
           </div>
         </div>
@@ -199,7 +202,7 @@ export function VN30OverviewTableSkeleton({ className }: { className?: string })
   return (
     <div className={cn("min-w-0", className)}>
       <div className="mb-3.5 h-8 w-48 animate-pulse rounded bg-muted" />
-      <div className="h-[520px] animate-pulse rounded-[18px] border border-border bg-card" />
+      <div className="h-[520px] animate-pulse rounded-card border border-border bg-card" />
     </div>
   )
 }

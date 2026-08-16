@@ -33,7 +33,7 @@ export function FCFWaterfall({ data }: FCFWaterfallProps) {
     // bg-foreground, not bg-white: these two bars are the emphasised pair, and
     // white was only ever correct while the app rendered on a dark tile.
     { label: "CFO", value: data.cfo, color: "bg-foreground" },
-    { label: "CapEx", value: data.capex, color: "bg-red-500" },
+    { label: "CapEx", value: data.capex, color: "bg-negative" },
     { label: "FCF", value: data.fcf, color: "bg-foreground" },
   ]
 
@@ -45,7 +45,7 @@ export function FCFWaterfall({ data }: FCFWaterfallProps) {
             <span className="text-muted-foreground">{item.label}</span>
             <span className={cn(
               "font-medium tabular-nums",
-              (item.value || 0) >= 0 ? "text-green-500" : "text-red-500"
+              (item.value || 0) >= 0 ? "text-positive" : "text-negative"
             )}>
               {formatBillions(item.value)}
             </span>

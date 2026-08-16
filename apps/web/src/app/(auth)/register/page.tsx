@@ -5,8 +5,8 @@ import AuthFormFallback from "../auth-form-fallback"
 import RegisterForm from "./register-form"
 
 export const metadata: Metadata = {
-  title: "Tạo tài khoản - Stock Massive",
-  description: "Tạo tài khoản Stock Massive",
+  title: "Tạo tài khoản · VisgniteAI",
+  description: "Tạo tài khoản VisgniteAI",
 }
 
 export default function RegisterPage() {

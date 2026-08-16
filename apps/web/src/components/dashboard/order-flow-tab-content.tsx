@@ -20,7 +20,7 @@ const shares = (value: number) =>
 
 function Card({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={cn("min-w-0 rounded-[18px] border border-border bg-card p-[18px]", className)}>
+    <div className={cn("min-w-0 rounded-card border border-border bg-card p-[14px]", className)}>
       {children}
     </div>
   )
@@ -44,7 +44,7 @@ function Split({
 
   return (
     <div className="mt-4">
-      <div className="flex items-baseline justify-between gap-3 text-[13px] leading-[1.43] tracking-[-0.208px]">
+      <div className="flex items-baseline justify-between gap-3 text-meta">
         <span className="text-muted-foreground">{label}</span>
         <span className="tabular-nums">
           <span className="text-positive">Mua {decimal(buyPct)}%</span>{" "}
@@ -56,7 +56,7 @@ function Split({
         <span style={{ flex: buy || 1 }} className="rounded-full bg-positive" />
         <span style={{ flex: sell || 1 }} className="rounded-full bg-negative" />
       </div>
-      <div className="mt-1.5 text-[13px] leading-[1.43] tracking-[-0.208px] tabular-nums text-muted-foreground">
+      <div className="mt-1.5 text-meta tabular-nums text-muted-foreground">
         {unit(buy)} / {unit(sell)}
       </div>
     </div>
@@ -66,12 +66,12 @@ function Split({
 function Stat({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
-      <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+      <span className="text-meta text-muted-foreground">
         {label}
       </span>
       <span
         className={cn(
-          "text-[17px] font-semibold leading-[1.35] tracking-[-0.374px] tabular-nums",
+          "text-[1.05rem] font-semibold leading-[1.35] tabular-nums",
           tone
         )}
       >
@@ -90,16 +90,16 @@ export function OrderFlowTabContent({ symbol, className }: OrderFlowTabContentPr
   const { data, isLoading, isError, error, refetch, isFetching } = useIntradayOrderStats(symbol)
 
   if (isLoading) {
-    return <div className="h-[420px] animate-pulse rounded-[18px] border border-border bg-card" />
+    return <div className="h-[420px] animate-pulse rounded-card border border-border bg-card" />
   }
 
   if (isError || !data) {
     return (
       <Card className={className}>
-        <div className="text-[17px] font-semibold leading-[1.24] tracking-[-0.374px]">
+        <div className="text-[1.05rem] font-semibold leading-[1.24]">
           Chưa có dữ liệu dòng lệnh
         </div>
-        <p className="mt-1 text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+        <p className="mt-1 text-meta text-muted-foreground">
           {error instanceof Error
             ? error.message
             : `Phiên gần nhất của ${symbol} chưa được thu thập.`}
@@ -134,27 +134,27 @@ export function OrderFlowTabContent({ symbol, className }: OrderFlowTabContentPr
           a dark tile in both themes — that is how it stands apart on a light
           page. On dark it steps up to the floating-surface tone instead, since
           the tile tone is what the page itself is already wearing. */}
-      <div className="min-w-0 rounded-[18px] bg-[#272729] p-[18px] text-white dark:bg-popover">
+      <div className="min-w-0 rounded-card bg-surface-menu p-[14px] text-foreground">
         <div className="flex flex-wrap items-center gap-3">
           <span
             className={cn(
-              "flex items-center gap-[7px] rounded-full px-[11px] py-1 text-[13px] font-semibold leading-[1.29] tracking-[-0.208px]",
+              "flex items-center gap-[7px] rounded-full px-[11px] py-1 text-meta font-semibold leading-[1.29]",
               buyDominant
-                ? "bg-[rgba(55,196,106,0.16)] text-[#37c46a]"
-                : "bg-[rgba(255,105,97,0.16)] text-[#ff6961]"
+                ? "bg-positive/[0.16] text-positive"
+                : "bg-negative/[0.16] text-negative"
             )}
           >
             <Trend aria-hidden className="size-3.5" />
             {buyDominant ? "Lực mua áp đảo" : "Lực bán áp đảo"}
           </span>
-          <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-[#cccccc]">
+          <span className="text-meta text-ink-3">
             {sessionDate ? `Phiên ${sessionDate}` : "Phiên gần nhất"}
             {updated ? ` · cập nhật ${updated}` : ""}
           </span>
         </div>
-        <p className="mt-3 text-pretty text-[17px] leading-[1.5] tracking-[-0.374px]">
+        <p className="mt-3 text-pretty text-[1.05rem] leading-[1.5]">
           Bên mua chiếm{" "}
-          <strong className={cn("font-semibold", buyDominant && "text-[#37c46a]")}>
+          <strong className={cn("font-semibold", buyDominant && "text-positive")}>
             {decimal(buyVolumePct)}% khối lượng
           </strong>{" "}
           nhưng <strong className="font-semibold">{decimal(buyOrderPct)}% số lệnh</strong>
@@ -167,7 +167,7 @@ export function OrderFlowTabContent({ symbol, className }: OrderFlowTabContentPr
           )}
           . Khối lượng ròng{" "}
           <strong
-            className={cn("font-semibold", buyDominant ? "text-[#37c46a]" : "text-[#ff6961]")}
+            className={cn("font-semibold", buyDominant ? "text-positive" : "text-negative")}
           >
             {buyDominant ? "+" : "−"}
             {shares(Math.abs(data.net_volume))} CP
@@ -178,7 +178,7 @@ export function OrderFlowTabContent({ symbol, className }: OrderFlowTabContentPr
 
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <span className="text-[17px] font-semibold leading-[1.24] tracking-[-0.374px]">
+          <span className="text-[1.05rem] font-semibold leading-[1.24]">
             Mua và bán trên hai thước đo
           </span>
           <button
@@ -206,7 +206,7 @@ export function OrderFlowTabContent({ symbol, className }: OrderFlowTabContentPr
           unit={(v) => `${v.toLocaleString("vi-VN")} lệnh`}
         />
 
-        <div className="mt-[18px] grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3.5 border-t border-[hsl(var(--hairline))] pt-4">
+        <div className="mt-[18px] grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3.5 border-t border-hairline pt-4">
           <Stat
             label="Số lệnh mua / bán"
             value={`${data.buy_orders.toLocaleString("vi-VN")} / ${data.sell_orders.toLocaleString("vi-VN")}`}

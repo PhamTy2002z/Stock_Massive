@@ -16,6 +16,7 @@ import {
 import { isActive, isSettled } from "@/lib/alpha-desk/live-turn"
 import { buildTranscript, type OpenedAnalysis } from "@/lib/alpha-desk/transcript"
 import type { FlagReason } from "@/lib/alpha-desk/types"
+import { DeskOpening } from "./desk-opening"
 import { DeskSurface } from "./desk-surface"
 import { HistoryMenu } from "./history-menu"
 import { SymbolDock, type DockSymbol } from "./symbol-dock"
@@ -289,6 +290,7 @@ export function AlphaDesk() {
   return (
     <DeskSurface
       dock={dock}
+      opening={<DeskOpening />}
       history={
         <HistoryMenu
           currentThreadId={threadId}

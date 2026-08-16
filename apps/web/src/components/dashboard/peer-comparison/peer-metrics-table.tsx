@@ -29,8 +29,8 @@ function getHeatmapColor(value: number | null, avg: number, inverse: boolean = f
   if (value === null) return ""
   const isAbove = inverse ? value < avg : value > avg
   return isAbove
-    ? "bg-green-500/20 text-green-600 dark:text-green-400"
-    : "bg-red-500/20 text-red-600 dark:text-red-400"
+    ? "bg-positive/20 text-positive"
+    : "bg-negative/20 text-negative"
 }
 
 export function PeerMetricsTable({ peers, targetSymbol }: PeerMetricsTableProps) {
@@ -49,7 +49,7 @@ export function PeerMetricsTable({ peers, targetSymbol }: PeerMetricsTableProps)
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-border/50">
+          <tr className="border-b border-border">
             <th className="py-2 px-3 text-left font-medium text-muted-foreground">Symbol</th>
             <th className="py-2 px-3 text-left font-medium text-muted-foreground">Company</th>
             <th className="py-2 px-3 text-right font-medium text-muted-foreground">ROE</th>
@@ -64,7 +64,7 @@ export function PeerMetricsTable({ peers, targetSymbol }: PeerMetricsTableProps)
             <tr
               key={peer.symbol}
               className={cn(
-                "border-b border-border/30 hover:bg-muted/20",
+                "border-b border-border hover:bg-foreground/[0.06]",
                 peer.symbol === targetSymbol && "bg-foreground/[0.07] border-foreground/25"
               )}
             >
@@ -99,7 +99,7 @@ export function PeerMetricsTable({ peers, targetSymbol }: PeerMetricsTableProps)
         </tbody>
       </table>
       <div className="mt-2 text-xs text-muted-foreground">
-        Legend: <span className="text-green-500">Green</span> = Above avg, <span className="text-red-500">Red</span> = Below avg (P/E, P/B: lower is better)
+        Legend: <span className="text-positive">Green</span> = Above avg, <span className="text-negative">Red</span> = Below avg (P/E, P/B: lower is better)
       </div>
     </div>
   )

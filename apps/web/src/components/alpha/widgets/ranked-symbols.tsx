@@ -99,12 +99,12 @@ export function RankedSymbols({
             className="grid grid-cols-[28px_minmax(44px,auto)_minmax(0,1fr)] items-center gap-2 py-1.5"
           >
             <span
-              className="text-[13px] tabular-nums"
+              className="text-meta tabular-nums"
               style={{ color: WIDGET_PALETTE.inkMuted }}
             >
               {index + 1}
             </span>
-            <span className="truncate text-[13px] font-medium">{row.symbol}</span>
+            <span className="truncate text-meta font-medium">{row.symbol}</span>
             <span className="flex min-w-0 items-center justify-end gap-2">
               {bars && values[index] !== null && (
                 <span
@@ -121,7 +121,7 @@ export function RankedSymbols({
                   />
                 </span>
               )}
-              <span className="shrink-0 text-[13px] tabular-nums">
+              <span className="shrink-0 text-meta tabular-nums">
                 {formatFieldValue(values[index], unit)}
               </span>
             </span>

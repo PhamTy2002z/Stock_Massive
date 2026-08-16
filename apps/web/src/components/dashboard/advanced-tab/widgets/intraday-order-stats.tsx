@@ -37,7 +37,7 @@ export function IntradayOrderStats({ data, isLoading }: IntradayOrderStatsProps)
   if (!data) {
     return (
       <div className="text-center py-12">
-        <div className="w-14 h-14 mx-auto mb-3 rounded-2xl bg-muted/30 flex items-center justify-center">
+        <div className="w-14 h-14 mx-auto mb-3 rounded-2xl bg-surface-sunken flex items-center justify-center">
           <Activity className="w-7 h-7 text-muted-foreground/40" />
         </div>
         <p className="text-sm font-medium text-muted-foreground">Dữ liệu intraday chưa khả dụng</p>
@@ -62,7 +62,7 @@ export function IntradayOrderStats({ data, isLoading }: IntradayOrderStatsProps)
             Bán ({(100 - buyPct).toFixed(1)}%)
           </span>
         </div>
-        <div className="h-3 rounded-full overflow-hidden flex bg-muted/30 shadow-inner">
+        <div className="h-3 rounded-full overflow-hidden flex bg-surface-sunken shadow-inner">
           <div
             className="transition-all duration-500 ease-out"
             style={{
@@ -139,16 +139,16 @@ export function IntradayOrderStats({ data, isLoading }: IntradayOrderStatsProps)
       <div
         className={cn(
           "p-4 rounded-xl text-center transition-all duration-200",
-          netVolume > 0 && "bg-green-500/5 border border-green-500/20",
-          netVolume < 0 && "bg-red-500/5 border border-red-500/20",
-          netVolume === 0 && "bg-muted/30 border border-border/50"
+          netVolume > 0 && "bg-positive/5 border border-positive/20",
+          netVolume < 0 && "bg-negative/5 border border-negative/20",
+          netVolume === 0 && "bg-surface-sunken border border-border"
         )}
       >
         <p className="text-sm text-muted-foreground mb-1">KL Ròng</p>
         <p
           className={cn(
             "text-2xl font-bold tabular-nums",
-            netVolume > 0 ? "text-green-600" : netVolume < 0 ? "text-red-600" : "text-muted-foreground"
+            netVolume > 0 ? "text-positive" : netVolume < 0 ? "text-negative" : "text-muted-foreground"
           )}
         >
           {netVolume > 0 ? "+" : ""}{formatVolume(netVolume)}
@@ -156,9 +156,9 @@ export function IntradayOrderStats({ data, isLoading }: IntradayOrderStatsProps)
         <div
           className={cn(
             "inline-flex items-center gap-1 mt-2 px-2 py-0.5 rounded-full text-xs font-medium",
-            netVolume > 0 && "bg-green-500/20 text-green-600",
-            netVolume < 0 && "bg-red-500/20 text-red-600",
-            netVolume === 0 && "bg-muted/50 text-muted-foreground"
+            netVolume > 0 && "bg-positive/20 text-positive",
+            netVolume < 0 && "bg-negative/20 text-negative",
+            netVolume === 0 && "bg-surface-sunken text-muted-foreground"
           )}
         >
           {netVolume > 0 ? (

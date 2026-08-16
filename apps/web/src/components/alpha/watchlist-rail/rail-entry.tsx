@@ -16,11 +16,11 @@ import { STATE_LABEL, dayAndMonth, failureSentence, stateSentence } from "./stat
  * ever had one caller, and stays with it.
  */
 const STATE_TONE: Record<AnalysisState, string> = {
-  ready: "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  pending: "border-border/60 bg-muted/40 text-muted-foreground",
-  producing: "border-sky-500/40 bg-sky-500/10 text-sky-600 dark:text-sky-400",
-  failed: "border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400",
-  unsupported: "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  ready: "border-positive/40 bg-positive/10 text-positive",
+  pending: "border-border bg-foreground/[0.04] text-muted-foreground",
+  producing: "border-primary/40 bg-primary/10 text-primary",
+  failed: "border-negative/40 bg-negative/10 text-negative",
+  unsupported: "border-caution/40 bg-caution/10 text-caution",
 }
 
 export interface RailEntryRowProps {
@@ -65,7 +65,7 @@ export function RailEntryRow({
   const canRetry = state === "failed" && tradingDay !== null && !failure?.exhausted
 
   return (
-    <li className="rounded-lg border border-border/60 bg-card/50 p-3">
+    <li className="rounded-lg border border-border bg-card p-3">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 space-y-1">
           <div className="flex items-center gap-2">
@@ -86,12 +86,12 @@ export function RailEntryRow({
             {unread && (
               <span
                 aria-label={`${symbol} has an unread Analysis`}
-                className="h-1.5 w-1.5 rounded-full bg-sky-500"
+                className="h-1.5 w-1.5 rounded-full bg-primary"
               />
             )}
             <span
               className={cn(
-                "rounded border px-1.5 py-0.5 text-[11px] font-medium",
+                "rounded border px-1.5 py-0.5 text-micro font-medium",
                 STATE_TONE[state],
               )}
             >
@@ -119,7 +119,7 @@ export function RailEntryRow({
 
           {failureReason &&
             (state === "failed" ? (
-              <p className="text-xs text-red-600 dark:text-red-400">{failureReason}</p>
+              <p className="text-xs text-negative">{failureReason}</p>
             ) : (
               // A queued symbol that has already failed once keeps its reason.
               // Shown as the *previous* attempt's, and not in red: nothing is
@@ -143,7 +143,7 @@ export function RailEntryRow({
               type="button"
               onClick={() => onRetry(symbol, tradingDay!)}
               disabled={isRetrying}
-              className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-foreground/[0.06] disabled:opacity-50"
               aria-label={`Retry ${symbol}`}
             >
               <RotateCw className={cn("h-3 w-3", isRetrying && "animate-spin")} />
@@ -154,7 +154,7 @@ export function RailEntryRow({
             type="button"
             onClick={() => onRemove(symbol)}
             disabled={isRemoving}
-            className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+            className="rounded-md p-1 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-50"
             aria-label={`Remove ${symbol}`}
           >
             {isRemoving ? (

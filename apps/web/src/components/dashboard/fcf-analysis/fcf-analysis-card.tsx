@@ -42,7 +42,7 @@ export function FCFAnalysisCard({ symbol, className }: FCFAnalysisCardProps) {
         <FCFWaterfall data={data} />
 
         {/* Metrics Row */}
-        <div className="grid grid-cols-2 gap-4 pt-4 border-t border-border/50">
+        <div className="grid grid-cols-2 gap-4 pt-4 border-t border-border">
           <div className="text-center">
             <div className="text-sm text-muted-foreground">FCF Margin</div>
             <div className="text-xl font-bold text-foreground">

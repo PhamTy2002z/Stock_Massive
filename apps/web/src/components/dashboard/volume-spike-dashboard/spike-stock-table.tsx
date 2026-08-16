@@ -64,14 +64,14 @@ export function SpikeStockTable({
   return (
     <div
       className={cn(
-        "rounded-lg border border-border/50 bg-card/50 overflow-hidden",
+        "rounded-lg border border-border bg-card overflow-hidden",
         className,
       )}
     >
       <div className="overflow-x-auto">
         <table className="w-full border-collapse min-w-[700px]">
           <thead>
-            <tr className="border-b border-border/50 bg-muted/30">
+            <tr className="border-b border-border bg-surface-sunken">
               <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground w-12">
                 #
               </th>
@@ -119,7 +119,7 @@ export function SpikeStockTable({
                   tabIndex={0}
                   role="button"
                   aria-label={`Xem chi tiết ${stock.symbol}`}
-                  className="border-b border-border/30 hover:bg-muted/20 transition-colors cursor-pointer focus:outline-none focus:bg-muted/30"
+                  className="border-b border-border hover:bg-foreground/[0.06] transition-colors cursor-pointer focus:outline-none focus:bg-surface-sunken"
                 >
                   <td className="py-2 px-3 text-center text-xs text-muted-foreground tabular-nums">
                     {rank}
@@ -135,7 +135,7 @@ export function SpikeStockTable({
                     )}
                     {notes.length > 0 && (
                       <span
-                        className="ml-2 inline-flex items-center gap-1 text-xs text-amber-500"
+                        className="ml-2 inline-flex items-center gap-1 text-xs text-caution"
                         title={notes.join(" • ")}
                       >
                         <Info className="h-3 w-3" />
@@ -158,8 +158,8 @@ export function SpikeStockTable({
                     <span
                       className={
                         stock.change_pct && stock.change_pct >= 0
-                          ? "text-green-500"
-                          : "text-red-500"
+                          ? "text-positive"
+                          : "text-negative"
                       }
                     >
                       {formatPercent(stock.change_pct)}
@@ -172,7 +172,7 @@ export function SpikeStockTable({
         </table>
       </div>
       {totalPages > 1 && (
-        <div className="flex items-center justify-between px-3 py-2 border-t border-border/50 bg-muted/20">
+        <div className="flex items-center justify-between px-3 py-2 border-t border-border bg-surface-sunken">
           <span className="text-xs text-muted-foreground">
             {(page - 1) * pageSize + 1}-
             {Math.min(page * pageSize, sortedRows.length)} / {sortedRows.length}
