@@ -1,0 +1,454 @@
+"""The Recommendation Validator: an unprovable block is never displayed (#82)."""
+
+from __future__ import annotations
+
+from datetime import date
+
+import pytest
+
+from src.agent.blocks import split_blocks
+from src.agent.context import TranscriptToolCall
+from src.agent.grounding import (
+    GROUNDING_FAILED,
+    BlockKind,
+    EvidenceRef,
+    EvidenceSource,
+    GroundingFailure,
+    RecommendationValidator,
+    TraceIndex,
+    display_text,
+    figures_agree,
+)
+from src.agent.tools.fields import serialize_registered_field
+
+TRADING_DAY = date(2026, 8, 14)
+RSI = "indicator_pack.rsi_14"
+ZONE = "price_zone.ordinary_range_pct"
+DRAWDOWN = "drawdown_stats.current_drawdown_pct"
+
+
+def registered(
+    name: str,
+    value: float | None,
+    *,
+    refusal: str | None = None,
+    degraded: str | None = None,
+    health_refusal: str | None = None,
+) -> dict:
+    """One registered field exactly as the Tool Catalog serializes it."""
+    return {
+        **serialize_registered_field(name, value=value, refusal=refusal),
+        "degraded_reason": degraded,
+        "window_health": {"refusal": health_refusal, "last_session": "2026-08-14"},
+    }
+
+
+def computation(symbol: str = "FPT", **fields) -> dict:
+    return {
+        "symbol": symbol,
+        "as_of": TRADING_DAY.isoformat(),
+        "registered_fields": dict(fields),
+    }
+
+
+def quote(symbol: str = "FPT", close: float = 95.4) -> dict:
+    return {
+        "symbol": symbol,
+        "quote": {
+            "close_price": close,
+            "as_of": TRADING_DAY.isoformat(),
+            "age_days": 0,
+            "stale": False,
+        },
+    }
+
+
+def news(symbol: str = "FPT", value: str = "tăng trưởng 30") -> dict:
+    return {
+        "symbol": symbol,
+        "window_days": 7,
+        "count": 1,
+        "stale": False,
+        "age_seconds": 10,
+        "reason": None,
+        "items": [
+            {
+                "untrusted_evidence": {
+                    "source": "CafeF",
+                    "published_at": "2026-08-13T09:00:00+00:00",
+                    "claim_class": "source_claim",
+                    "title": "FPT báo lãi",
+                    "content": value,
+                }
+            }
+        ],
+    }
+
+
+def traces(**results) -> TraceIndex:
+    return TraceIndex(
+        [
+            TranscriptToolCall(
+                call_id=call_id,
+                name="indicator_pack" if call_id == "c1" else call_id,
+                arguments={"symbol": "FPT"},
+                result=result,
+            )
+            for call_id, result in results.items()
+        ]
+    )
+
+
+def standard_traces() -> TraceIndex:
+    return traces(
+        c1=computation(
+            **{
+                RSI: registered(RSI, 61.2),
+                ZONE: registered(ZONE, 4.5),
+                DRAWDOWN: registered(DRAWDOWN, -12.5),
+            }
+        ),
+        c2=quote(),
+        c3=news(),
+    )
+
+
+def validator() -> RecommendationValidator:
+    return RecommendationValidator(trading_day=TRADING_DAY)
+
+
+RECOMMENDATION = (
+    "[rec:FPT@2026-08-14] Giá tham chiếu 95.4 [ref-price:c2#quote.close_price]. "
+    f"RSI 61.2 [ev:c1#registered_fields.{RSI}.value] cho thấy đà tăng còn nguyên. "
+    f"Vùng dao động thường ngày 4.5 [zone:tich_luy@c1#registered_fields.{ZONE}.value]. "
+    f"Chiều ngược lại, mức giảm -12.5 [against:c1#registered_fields.{DRAWDOWN}.value]."
+)
+
+
+# --- attribution -----------------------------------------------------------
+
+
+def test_a_material_figure_with_no_reference_is_never_released():
+    with pytest.raises(GroundingFailure) as raised:
+        validator().validate("RSI hiện ở 61.2, khá cao.", standard_traces())
+
+    assert raised.value.code == "unreferenced_figure"
+    assert raised.value.reason == GROUNDING_FAILED
+
+
+def test_one_reference_cannot_attribute_two_figures():
+    text = f"RSI 61.2 và giá 95.4 [ev:c1#registered_fields.{RSI}.value]."
+
+    with pytest.raises(GroundingFailure) as raised:
+        validator().validate(text, standard_traces())
+
+    assert raised.value.code == "unreferenced_figure"
+
+
+def test_a_trading_day_and_a_list_number_are_not_material_figures():
+    block = validator().validate(
+        "1. Dữ liệu tới 2026-08-14 chưa có thay đổi đáng kể.", standard_traces()
+    )
+
+    assert block.kind is BlockKind.PROSE
+    assert block.citations == ()
+
+
+def test_a_figure_that_disagrees_with_its_trace_is_blocked():
+    text = f"RSI đang là 71.2 [ev:c1#registered_fields.{RSI}.value]."
+
+    with pytest.raises(GroundingFailure) as raised:
+        validator().validate(text, standard_traces())
+
+    assert raised.value.code == "figure_mismatch"
+
+
+def test_a_figure_is_compared_at_the_precision_it_was_written_to():
+    index = traces(c1=computation(**{RSI: registered(RSI, 61.2487)}))
+
+    block = validator().validate(
+        f"RSI 61.2 [ev:c1#registered_fields.{RSI}.value].", index
+    )
+
+    assert block.citations[0].value == pytest.approx(61.2487)
+
+
+def test_money_matches_at_a_scale_and_a_z_score_does_not():
+    assert figures_agree("3.4", 3_400_000_000, unit="vnd")
+    assert not figures_agree("3.4", 3_400_000_000, unit="z_score")
+
+
+# --- reference resolution --------------------------------------------------
+
+
+def test_a_reference_to_a_call_this_turn_did_not_make_fails():
+    with pytest.raises(GroundingFailure) as raised:
+        standard_traces().resolve(EvidenceRef(call_id="c9", field_path="a.b"))
+
+    assert raised.value.code == "unknown_tool_call"
+
+
+def test_a_reference_into_a_refused_tool_result_fails():
+    index = traces(c1={"reason": "not_in_universe", "suggestions": []})
+
+    with pytest.raises(GroundingFailure) as raised:
+        index.resolve(EvidenceRef(call_id="c1", field_path="anything"))
+
+    assert raised.value.code == "refused_tool_call"
+
+
+def test_a_dotted_registered_field_name_resolves_as_one_key():
+    citation = standard_traces().resolve(
+        EvidenceRef(call_id="c1", field_path=f"registered_fields.{RSI}.value")
+    )
+
+    assert citation.value == 61.2
+    assert citation.unit == "index_0_100"
+    assert citation.interpretation
+    assert citation.claim == "descriptive"
+    assert citation.as_of == "2026-08-14"
+    assert citation.source is EvidenceSource.REGISTERED_FIELD
+
+
+@pytest.mark.parametrize(
+    "key, replacement, code",
+    [
+        ("unit", "percent", "unit_mismatch"),
+        ("claim", "predictive", "claim_mismatch"),
+        ("interpretation", "Đi lên là tốt.", "interpretation_mismatch"),
+        ("source", "stored", "source_mismatch"),
+    ],
+)
+def test_a_serialization_that_disagrees_with_the_registry_is_refused(
+    key, replacement, code
+):
+    field = registered(RSI, 61.2)
+    field[key] = replacement
+    index = traces(c1=computation(**{RSI: field}))
+
+    with pytest.raises(GroundingFailure) as raised:
+        index.resolve(EvidenceRef(call_id="c1", field_path=f"registered_fields.{RSI}.value"))
+
+    assert raised.value.code == code
+
+
+def test_a_registered_field_without_a_date_carries_no_staleness():
+    result = computation(**{RSI: registered(RSI, 61.2)})
+    result.pop("as_of")
+    result["registered_fields"][RSI]["window_health"] = {"refusal": None}
+    index = traces(c1=result)
+
+    with pytest.raises(GroundingFailure) as raised:
+        index.resolve(EvidenceRef(call_id="c1", field_path=f"registered_fields.{RSI}.value"))
+
+    assert raised.value.code == "missing_as_of"
+
+
+def test_a_news_figure_is_marked_as_an_unverified_source_claim():
+    citation = standard_traces().resolve(
+        EvidenceRef(call_id="c3", field_path="items.0.untrusted_evidence.content")
+    )
+
+    assert citation.source is EvidenceSource.SOURCE_CLAIM
+    assert citation.provenance == "CafeF"
+
+
+def test_a_user_supplied_number_is_marked_user_input_and_needs_no_trace():
+    block = validator().validate(
+        "Với giả định vốn 100 [user:von_gia_dinh] triệu đồng.", standard_traces()
+    )
+
+    assert block.citations[0].source is EvidenceSource.USER_INPUT
+    assert block.citations[0].provenance == "user_input"
+
+
+# --- the seven Gate conditions, each failing alone -------------------------
+
+
+def test_a_complete_recommendation_is_released():
+    block = validator().validate(RECOMMENDATION, standard_traces())
+
+    assert block.kind is BlockKind.RECOMMENDATION
+    assert block.symbol == "FPT"
+    assert block.trading_day == "2026-08-14"
+    assert "[ev:" not in block.text and "[rec:" not in block.text
+    assert any(citation.contradictory for citation in block.citations)
+    assert any(citation.zone_label == "tich_luy" for citation in block.citations)
+
+
+def test_one_a_symbol_the_tool_layer_never_served_fails_the_gate():
+    index = traces(
+        c1=computation(symbol="VNM", **{RSI: registered(RSI, 61.2), ZONE: registered(ZONE, 4.5), DRAWDOWN: registered(DRAWDOWN, -12.5)}),
+        c2=quote(symbol="VNM"),
+    )
+
+    with pytest.raises(GroundingFailure) as raised:
+        validator().validate(RECOMMENDATION, index)
+
+    assert raised.value.code == "symbol_not_in_universe"
+
+
+def test_two_a_trading_day_that_is_not_this_turns_fails_the_gate():
+    with pytest.raises(GroundingFailure) as raised:
+        validator().validate(
+            RECOMMENDATION.replace("2026-08-14]", "2026-08-13]"), standard_traces()
+        )
+
+    assert raised.value.code == "trading_day_mismatch"
+
+
+def test_two_a_recommendation_without_a_reference_price_fails_the_gate():
+    text = RECOMMENDATION.replace(
+        "Giá tham chiếu 95.4 [ref-price:c2#quote.close_price]. ", ""
+    )
+
+    with pytest.raises(GroundingFailure) as raised:
+        validator().validate(text, standard_traces())
+
+    assert raised.value.code == "missing_reference_price"
+
+
+def test_three_a_price_zone_that_is_not_a_registered_field_fails_the_gate():
+    text = RECOMMENDATION.replace(
+        f"[zone:tich_luy@c1#registered_fields.{ZONE}.value]",
+        "[zone:tich_luy@c2#quote.close_price]",
+    ).replace("Vùng dao động thường ngày 4.5", "Vùng dao động thường ngày 95.4")
+
+    with pytest.raises(GroundingFailure) as raised:
+        validator().validate(text, standard_traces())
+
+    assert raised.value.code == "unregistered_price_zone"
+
+
+def test_three_a_recommendation_with_no_price_zone_at_all_fails_the_gate():
+    text = RECOMMENDATION.replace(
+        f"Vùng dao động thường ngày 4.5 [zone:tich_luy@c1#registered_fields.{ZONE}.value]. ",
+        "",
+    )
+
+    with pytest.raises(GroundingFailure) as raised:
+        validator().validate(text, standard_traces())
+
+    assert raised.value.code == "missing_price_zone"
+
+
+def test_four_a_refusal_level_window_health_blocks_the_recommendation():
+    index = traces(
+        c1=computation(
+            **{
+                RSI: registered(RSI, 61.2, health_refusal="insufficient_sessions"),
+                ZONE: registered(ZONE, 4.5),
+                DRAWDOWN: registered(DRAWDOWN, -12.5),
+            }
+        ),
+        c2=quote(),
+    )
+
+    with pytest.raises(GroundingFailure) as raised:
+        validator().validate(RECOMMENDATION, index)
+
+    assert raised.value.code == "window_health_refusal"
+
+
+def test_five_a_verdict_that_only_names_levels_cites_nothing_for_itself():
+    """Every other condition holds; only the supporting field is missing."""
+    text = (
+        "[rec:FPT@2026-08-14] Giá tham chiếu 95.4 [ref-price:c2#quote.close_price]. "
+        f"Vùng dao động thường ngày 4.5 [zone:tich_luy@c1#registered_fields.{ZONE}.value]. "
+        f"Chiều ngược lại, mức giảm -12.5 [against:c1#registered_fields.{DRAWDOWN}.value]."
+    )
+
+    with pytest.raises(GroundingFailure) as raised:
+        validator().validate(text, standard_traces())
+
+    assert raised.value.code == "no_supporting_field"
+
+
+def test_five_a_verdict_with_no_contradictory_evidence_fails_the_gate():
+    text = RECOMMENDATION.replace(
+        f"Chiều ngược lại, mức giảm -12.5 [against:c1#registered_fields.{DRAWDOWN}.value].",
+        "",
+    )
+
+    with pytest.raises(GroundingFailure) as raised:
+        validator().validate(text, standard_traces())
+
+    assert raised.value.code == "no_contradictory_evidence"
+
+
+def test_six_a_cited_field_with_no_value_fails_the_gate():
+    """The reference resolves; the Gate refuses it for what it does not carry."""
+    index = traces(
+        c1=computation(
+            **{
+                RSI: registered(RSI, None),
+                ZONE: registered(ZONE, 4.5),
+                DRAWDOWN: registered(DRAWDOWN, -12.5),
+            }
+        ),
+        c2=quote(),
+        c3=news(),
+    )
+    # Cited at the field rather than at its value, so resolution succeeds and
+    # hands the Gate a citation whose value is None.
+    text = RECOMMENDATION.replace(
+        f"RSI 61.2 [ev:c1#registered_fields.{RSI}.value]",
+        f"RSI chưa tính được [ev:c1#registered_fields.{RSI}]",
+    )
+
+    with pytest.raises(GroundingFailure) as raised:
+        validator().validate(text, index)
+
+    assert raised.value.code == "incomplete_citation"
+    assert "value" in raised.value.detail
+
+
+def test_seven_news_cannot_carry_a_price_zone_by_itself():
+    text = RECOMMENDATION.replace(
+        f"Vùng dao động thường ngày 4.5 [zone:tich_luy@c1#registered_fields.{ZONE}.value]",
+        "Vùng theo tin [zone:tich_luy@c3#items.0.untrusted_evidence.title]",
+    )
+
+    with pytest.raises(GroundingFailure) as raised:
+        validator().validate(text, standard_traces())
+
+    assert raised.value.code == "news_only_basis"
+
+
+def test_seven_news_cannot_carry_the_reference_price_either():
+    text = RECOMMENDATION.replace(
+        "Giá tham chiếu 95.4 [ref-price:c2#quote.close_price]",
+        "Giá tham chiếu theo tin [ref-price:c3#items.0.untrusted_evidence.title]",
+    )
+
+    with pytest.raises(GroundingFailure) as raised:
+        validator().validate(text, standard_traces())
+
+    assert raised.value.code == "news_only_basis"
+
+
+# --- block splitting -------------------------------------------------------
+
+
+def test_a_fenced_block_is_never_split_across_its_blank_lines():
+    text = "Mở đầu.\n\n```\nmột\n\nhai\n```\n\nKết."
+
+    assert split_blocks(text) == ("Mở đầu.", "```\nmột\n\nhai\n```", "Kết.")
+
+
+def test_a_bullet_group_and_a_table_each_stay_one_block():
+    text = "- một\n- hai\n\n| a | b |\n| - | - |\n| 1 | 2 |"
+
+    blocks = split_blocks(text)
+
+    assert len(blocks) == 2
+    assert blocks[0].count("\n") == 1
+    assert blocks[1].startswith("| a | b |")
+
+
+def test_the_markers_never_reach_the_reader():
+    rendered = display_text(
+        f"RSI 61.2 [ev:c1#registered_fields.{RSI}.value] là trung tính."
+    )
+
+    assert rendered == "RSI 61.2 là trung tính."

@@ -27,6 +27,24 @@ class RefusedRegisteredField:
     refusal: SignalIssue
 
 
+def sanctioned_interpretation(field: SignalField) -> str:
+    """The one sentence that rides beside a value, derived and never stored.
+
+    The complete sanctioned interpretation already rides in the model-visible
+    tool schema.  Its opening sentence is the self-contained definition a result
+    needs beside the value; repeating the full multi-paragraph caveat for seven
+    fields would break the catalog's 4 KB per-call contract.  The surrounding
+    mapping key is the field id, so it is not duplicated in the sentence.
+
+    Shared with the Recommendation Validator deliberately: the validator
+    compares what a tool serialized against what the registry declares, and a
+    second copy of this derivation is how a block comes to pass a check against
+    the wrong sentence.
+    """
+
+    return field.interpretation.split(". ", 1)[0].rstrip(".") + "."
+
+
 def registered_field_schema(name: str) -> dict[str, Any]:
     """Describe a registered value once in tool schema, including its null FPR."""
 
@@ -53,12 +71,7 @@ def serialize_registered_field(
     allowed_details = {
         key: supplied[key] for key in field.output_keys if key in supplied
     }
-    # The complete sanctioned interpretation already rides in the model-visible
-    # tool schema. Its opening sentence is the self-contained definition a
-    # result needs beside the value; repeating the full multi-paragraph caveat
-    # for seven fields would break the catalog's 4 KB per-call contract. The
-    # surrounding mapping key is the field id, so it is not duplicated here.
-    interpretation = field.interpretation.split(". ", 1)[0].rstrip(".") + "."
+    interpretation = sanctioned_interpretation(field)
     return {
         "value": value,
         "unit": field.unit.value,

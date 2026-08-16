@@ -117,6 +117,7 @@ class OpenAICompatibleTransport:
             tool_calls=tool_calls,
             usage=usage,
             finish_reason=assembler.finish_reason,
+            request_id=assembler.request_id,
         )
 
     async def _whole(self, request: CompletionRequest) -> Completion:
@@ -162,6 +163,7 @@ class OpenAICompatibleTransport:
             tool_calls=tool_calls,
             usage=usage,
             finish_reason=str(choices[0].get("finish_reason") or "stop"),
+            request_id=str(payload["id"]) if payload.get("id") else None,
         )
 
     # -- the request ------------------------------------------------------

@@ -34,6 +34,7 @@ it re-derives nothing and only fails when a field drifts past the ceiling.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping
 from types import MappingProxyType
 
@@ -1209,6 +1210,39 @@ def registered_field(name: str) -> SignalField:
     than a condition to handle.
     """
     return REGISTRY[name]
+
+
+def registry_version() -> str:
+    """A stable identity for the declarations this build serves.
+
+    Derived from the declarations themselves rather than bumped by hand, for the
+    same reason ``contract_hash`` is taken over the prose: a version somebody
+    has to remember to bump is a version that eventually names the wrong
+    registry, and this one ends up in the Evidence Manifest and in ``eval_run``,
+    where being wrong is silent.
+
+    Only the six declarations a reader acts on are hashed — name, unit, sign,
+    claim, source and the sanctioned interpretation. A threshold or a null
+    calibration moving does change the numbers, but it is the *reading* of a
+    field that an answer is disputed against.
+    """
+    digest = hashlib.sha256()
+    for name in sorted(REGISTRY):
+        entry = REGISTRY[name]
+        digest.update(
+            "\x00".join(
+                (
+                    entry.name,
+                    entry.unit.value,
+                    entry.sign.value,
+                    entry.claim.value,
+                    entry.source.value,
+                    entry.interpretation,
+                )
+            ).encode("utf-8")
+        )
+        digest.update(b"\x01")
+    return digest.hexdigest()[:16]
 
 
 def signal_fields() -> tuple[SignalField, ...]:

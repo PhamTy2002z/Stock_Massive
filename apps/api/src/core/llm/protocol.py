@@ -197,6 +197,11 @@ class Completion:
     # all-zero Usage: absence may not refund a committed reservation.
     usage: Usage | None = None
     finish_reason: str = "stop"
+    # The route's own id for this call, recorded in the Evidence Manifest so a
+    # disputed answer can be traced back at the provider. ``None`` when the
+    # route supplied none: the entire value of the field is that somebody can
+    # look it up, so a synthesized id would be worse than an absent one.
+    request_id: str | None = None
 
     @property
     def wants_tools(self) -> bool:

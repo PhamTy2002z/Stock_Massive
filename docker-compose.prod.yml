@@ -41,8 +41,16 @@ services:
       dockerfile: Dockerfile.prod
     container_name: stockmassive-api
     restart: unless-stopped
+    # Alpha Desk gives an active Turn 30 seconds to reach a safe checkpoint on
+    # shutdown (docs/adr/0013). The stop grace has to exceed that window, or the
+    # checkpoint it buys is killed before it lands and the Turn comes back as an
+    # interrupted one with less of its answer than it actually produced.
+    stop_grace_period: 45s
     environment:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      # Which build answered — one of the Evidence Manifest's fields
+      # (docs/adr/0015). Only the deployment knows it.
+      GIT_SHA: ${GIT_SHA:-unknown}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
       UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
