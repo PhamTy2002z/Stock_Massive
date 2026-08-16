@@ -47,7 +47,6 @@ from src.alpha.models import (
     FLAG_OVERREACH,
     FLAG_REASONS,
     FLAG_WRONG_FIGURE,
-    TOOL_CALL_OK,
     TOOL_CALL_UNKNOWN_TOOL,
     TURN_COMPLETE,
     TURN_INCOMPLETE,
@@ -57,7 +56,7 @@ from src.alpha.models import (
     AgentTurn,
 )
 from src.auth.models import User
-from src.core.config import get_settings
+from src.core.config import Settings
 from src.core.database import Base
 
 from .eval_store import create_database, drop_database
@@ -170,7 +169,7 @@ class _World:
         self,
         *,
         tool_name: str = "get_price_zone",
-        status: str = TOOL_CALL_OK,
+        status: str = "ok",
         started_at: datetime = INSIDE,
     ) -> None:
         request_id = self.message(role="user", answer_kind=None, created_at=started_at)
@@ -234,8 +233,14 @@ def test_the_configured_default_is_the_window_the_threshold_is_stated_over():
     runs the other way — so the ADR's seven days is written down twice. This is
     the assertion that keeps the two copies equal, because a settings default
     that drifted would silently change what "5% over 7 days" is measured over.
+
+    Read off the field rather than off a constructed ``Settings``: this is a
+    claim about the two code constants agreeing, and a developer who exported
+    ``EVAL_OPS_WINDOW_DAYS`` has configured their window rather than broken it.
     """
-    assert get_settings().eval_ops_window_days == OPS_WINDOW_DAYS
+    assert (
+        Settings.model_fields["eval_ops_window_days"].default == OPS_WINDOW_DAYS
+    )
 
 
 def test_the_grounding_rate_is_over_turns_not_over_incomplete_turns(world):
@@ -268,6 +273,27 @@ def test_above_five_percent_of_turns_reopens_category_b(world):
 
     assert reading.grounding_failed_rate == pytest.approx(0.10)
     assert reading.reopens_category_b
+
+
+def test_a_widened_window_reads_the_rate_and_never_the_threshold(world):
+    """*5% over 7 days* is one sentence, and the span is half of it.
+
+    A month smooths the burst that separates fabrication from over-blocking, so
+    a wider reading is useful and is not the quantity the rule decides on.
+    """
+    for _ in range(4):
+        world.turn(started_at=OUTSIDE)
+    world.turn(
+        status=TURN_INCOMPLETE,
+        terminal_reason="grounding_failed",
+        started_at=OUTSIDE,
+    )
+
+    wide = snapshot(world, window_days=OPS_WINDOW_DAYS + 30)
+
+    assert wide.grounding_failed_rate == pytest.approx(0.20)
+    assert not wide.threshold_applies
+    assert not wide.reopens_category_b
 
 
 def test_an_empty_window_is_not_a_breach(world):
@@ -342,7 +368,7 @@ def test_unknown_tool_is_counted_by_the_name_that_was_asked_for(world):
     world.tool_call(status=TOOL_CALL_UNKNOWN_TOOL, tool_name="run_python")
     world.tool_call(status=TOOL_CALL_UNKNOWN_TOOL, tool_name="run_python")
     world.tool_call(status=TOOL_CALL_UNKNOWN_TOOL, tool_name="backtest")
-    world.tool_call(status=TOOL_CALL_OK, tool_name="get_price_zone")
+    world.tool_call(status="ok", tool_name="get_price_zone")
 
     reading = snapshot(world)
 

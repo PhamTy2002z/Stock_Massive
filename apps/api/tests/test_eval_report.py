@@ -511,6 +511,39 @@ class TestTheFixedOpsQueryIsInTheReport:
         assert "Flagged messages, by reason" in rendered
         assert "| `wrong_figure` | 3 |" in rendered
 
+    def test_a_widened_window_prints_the_rate_and_withholds_the_verdict(self):
+        """The module calls a rate over another span meaningless; so must the page."""
+        from dataclasses import replace
+
+        wide = replace(an_ops(turns=100, grounding_failed=20), window_days=30)
+
+        rendered = render_report(a_run(results=(turn_result(),), ops=wide))
+
+        assert "20.0%" in rendered
+        assert "**not applied here**" in rendered
+        assert "Category B is reopened" not in rendered
+
+    def test_a_window_with_no_traffic_claims_no_result_from_the_threshold(self):
+        """Nothing measured is not "the bar was met"."""
+        quiet = OpsSnapshot(
+            since=FINISHED - timedelta(days=OPS_WINDOW_DAYS),
+            until=FINISHED,
+            window_days=OPS_WINDOW_DAYS,
+            turns=0,
+            grounding_failed=0,
+            incomplete_reasons={},
+            tool_calls=0,
+            unknown_tool_calls={},
+            answer_kinds=dict.fromkeys(("analysis", "education", "refusal"), 0),
+            flags=dict.fromkeys(("wrong_figure", "other"), 0),
+        )
+
+        rendered = render_report(a_run(results=(turn_result(),), ops=quiet))
+
+        assert "**No Turn ran in this window**" in rendered
+        assert "at or below the 5% threshold" not in rendered
+        assert "Category B stands." not in rendered
+
     def test_an_unread_store_says_why_rather_than_showing_zeros(self):
         """Zeros for a store nobody read is the lie in the other direction."""
         rendered = render_report(

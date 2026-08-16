@@ -18,11 +18,6 @@ from datetime import date
 from enum import Enum
 from typing import Any
 
-from src.alpha.models import (
-    TOOL_CALL_ERROR,
-    TOOL_CALL_OK,
-    TOOL_CALL_UNKNOWN_TOOL,
-)
 from src.core.llm import ToolSchema
 from src.core.provider_access import store_only_execution
 
@@ -184,7 +179,7 @@ class ToolCatalog:
         if registration is None:
             result: Mapping[str, Any] = {
                 "error": {
-                    "code": TOOL_CALL_UNKNOWN_TOOL,
+                    "code": "unknown_tool",
                     "tool_name": tool_name,
                     "available_tools": list(self.names),
                 }
@@ -195,7 +190,7 @@ class ToolCatalog:
                 tool_name=tool_name,
                 arguments=dict(arguments),
                 result=dict(result),
-                status=TOOL_CALL_UNKNOWN_TOOL,
+                status="unknown_tool",
                 error=None,
                 latency_ms=self._latency_ms(started),
                 prompt_tokens=prompt_tokens,
@@ -220,7 +215,7 @@ class ToolCatalog:
                 tool_name=tool_name,
                 arguments=dict(arguments),
                 result=None,
-                status=TOOL_CALL_ERROR,
+                status="tool_error",
                 error=str(exc),
                 latency_ms=self._latency_ms(started),
                 prompt_tokens=prompt_tokens,
@@ -234,7 +229,7 @@ class ToolCatalog:
             tool_name=tool_name,
             arguments=dict(arguments),
             result=dict(result),
-            status=TOOL_CALL_OK,
+            status="ok",
             error=None,
             latency_ms=self._latency_ms(started),
             prompt_tokens=prompt_tokens,
