@@ -222,6 +222,11 @@ class AgentThread(Base):
     )
     title = Column(String(255), nullable=True)
     symbols = Column(ARRAY(String(20)), nullable=False, server_default=text("'{}'"))
+    # When the user pinned it, rather than whether they did. A boolean would
+    # order every pinned Thread by `updated_at` and put the one pinned first at
+    # the bottom the moment another is answered in; the stamp keeps the pinned
+    # group in the order the user built it.
+    pinned_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(
         DateTime(timezone=True),
