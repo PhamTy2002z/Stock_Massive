@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 
 import { WatchlistRail } from "@/components/alpha/watchlist-rail"
 import { useLiveTurn } from "@/hooks/use-live-turn"
-import { useCreateThread, useThread } from "@/hooks/use-threads"
+import { useCreateThread, useFlagMessage, useThread } from "@/hooks/use-threads"
 import { useWatchlistRail } from "@/hooks/use-watchlist-rail"
 import {
   deepLinkedSymbol,
@@ -15,6 +15,7 @@ import {
 } from "@/lib/alpha-desk/desk-session"
 import { isActive, isSettled } from "@/lib/alpha-desk/live-turn"
 import { buildTranscript, type OpenedAnalysis } from "@/lib/alpha-desk/transcript"
+import type { FlagReason } from "@/lib/alpha-desk/types"
 import { DeskSurface } from "./desk-surface"
 import { HistoryMenu } from "./history-menu"
 import { SymbolDock, type DockSymbol } from "./symbol-dock"
@@ -67,6 +68,7 @@ export function AlphaDesk() {
   const turn = useLiveTurn(threadId)
   const createThread = useCreateThread()
   const rail = useWatchlistRail()
+  const flagging = useFlagMessage(threadId)
 
   // The deep link is consumed once. Left in the URL, every later reload would
   // read as a fresh arrival, open yet another Thread, and abandon the Turn the
@@ -201,6 +203,19 @@ export function AlphaDesk() {
     void retry({ text: lastQuestion, activeSymbol })
   }, [lastQuestion, activeSymbol, retry])
 
+  // -- the one dispute action ---------------------------------------------
+
+  // Nothing else happens. No ticket is opened, nobody is notified, and the
+  // conversation is not interrupted: the flag is a pair of columns on the
+  // message, and the surface says so rather than implying a process
+  // (`docs/adr/0016`).
+  const { flag, unflag } = flagging
+  const onFlag = useCallback(
+    (messageId: number, reason: FlagReason) => flag.mutate({ messageId, reason }),
+    [flag],
+  )
+  const onUnflag = useCallback((messageId: number) => unflag.mutate(messageId), [unflag])
+
   // -- the dock -----------------------------------------------------------
 
   const dockSymbols: DockSymbol[] = useMemo(
@@ -274,6 +289,9 @@ export function AlphaDesk() {
       onSend={submit}
       onCancel={turn.cancel}
       onRetry={onRetry}
+      onFlag={onFlag}
+      onUnflag={onUnflag}
+      flagFailedFor={flagging.failedMessageId}
       onDismissRefusal={dismissRefusal}
     />
   )

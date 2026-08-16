@@ -12,7 +12,7 @@ from src.stocks.universe import build_universe
 from .catalog import ToolCatalog
 from .computations import ComputationTools
 from .data import SessionFactory, StoreBackedTools, UniverseFactory
-from .news import NewsFetcher, NewsTools, _fetch_vci_news
+from .news import Clock, NewsFetcher, NewsTools, _fetch_vci_news
 
 
 class IntelligentQuantCatalog:
@@ -26,6 +26,12 @@ class IntelligentQuantCatalog:
         universe_factory: UniverseFactory = build_universe,
         news_lane: NewsLane | None = None,
         fetch_news: NewsFetcher = _fetch_vci_news,
+        # What "recent" means to ``search_news``. The wall clock in service, and
+        # a parameter for exactly one caller: the Eval Battery reads a fixture
+        # frozen at one Trading Day, and a news window measured from today would
+        # make the same fixture a different exam every week until its articles
+        # aged out of every window entirely.
+        news_now: Clock | None = None,
     ) -> None:
         self.data = StoreBackedTools(
             session_factory=session_factory,
@@ -37,6 +43,7 @@ class IntelligentQuantCatalog:
             universe_factory=universe_factory,
             news_lane=news_lane,
             fetch_news=fetch_news,
+            now=news_now,
         )
         self.computations = ComputationTools(
             session_factory=session_factory,

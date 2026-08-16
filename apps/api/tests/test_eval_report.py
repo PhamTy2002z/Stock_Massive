@@ -205,23 +205,28 @@ class TestWhatEveryReportCarries:
         assert "Cổ phiếu này đang ở vùng giá nào?" in rendered
 
     def test_a_category_nobody_ran_is_marked_absent_rather_than_passing(self):
+        """A battery narrowed to one category must not read as a clean sheet."""
         rendered = render_report(a_run(results=(turn_result(),)))
-        assert "∅" in rendered
+        categories = rendered.split("## Categories")[1].split("##")[0]
+        assert "| A | 0 | 0 | 0 | 3/3 | — |" in categories
+        assert "pass" not in categories.split("| A |")[1].split("\n")[0]
 
 
 class TestTheTwoLanesAreSeparable:
-    def test_each_surface_gets_its_own_case_section(self):
+    def test_the_cases_are_grouped_by_the_lane_they_ran_on(self):
+        """Registration order interleaves them; a reader should not have to."""
         rendered = render_report(
-            a_run(results=(turn_result(), analysis_result()))
+            a_run(results=(analysis_result(), turn_result()))
         )
-        assert "## Cases — turn lane" in rendered
-        assert "## Cases — analysis lane" in rendered
+        assert rendered.index("`b-1`") < rendered.index("`analysis-d-bank`")
+        assert "turn lane" in rendered
+        assert "analysis lane" in rendered
 
     def test_the_surface_table_counts_them_apart(self):
         rendered = render_report(
             a_run(results=(turn_result(), analysis_result()))
         )
-        surfaces = rendered.split("## Surfaces")[1].split("##")[0]
+        surfaces = rendered.split("## Surfaces")[1].split("## Baseline")[0]
         assert "| turn | 1 | 3 |" in surfaces
         assert "| analysis | 1 | 3 |" in surfaces
 
@@ -366,13 +371,14 @@ class TestTheOneFailureThatOverridesEveryRate:
                         run_index=0,
                         results=(
                             CheckResult(
-                                Check.DIRECTION_LEXICON,
+                                Check.SIGN_FIDELITY,
                                 False,
-                                "a descriptive answer points somewhere: sẽ tăng",
+                                "block 0 calls drawdown_stats.current_drawdown_pct "
+                                "positive and it holds -12.4",
                             ),
                         ),
                     ),
-                    answer="Chỉ số này cho thấy giá sẽ tăng.",
+                    answer="Biên độ sụt giảm dương 12,4%.",
                     status="completed",
                     terminal_reason=None,
                     answer_kind="descriptive",
@@ -386,31 +392,32 @@ class TestTheOneFailureThatOverridesEveryRate:
         assert result.hard_fails == ("d-3",)
         assert result.category_totals["hard_fails"] == ["d-3"]
 
-    def test_the_report_says_so_above_the_rates_it_overrides(self):
+    def test_the_report_says_so_where_the_rates_it_overrides_are_read(self):
+        from src.eval.verdict import HARD_FAIL_NOTICE
+
         rendered = render_report(a_run(results=(self.pointed_backwards(),)))
-        assert "**Hard fail in `d-3`.**" in rendered
-        assert rendered.index("Hard fail") < rendered.index("## Categories")
+        assert HARD_FAIL_NOTICE in rendered
+        assert "d-3 run 1: sign_fidelity" in rendered
 
     def test_a_clean_run_names_none(self):
         assert a_run(results=(turn_result(),)).hard_fails == ()
 
 
 class TestTheHumanRubricIsInTheDocument:
-    def test_the_three_binary_questions_are_written_out_for_d_and_e(self):
+    def test_an_unscored_report_says_so_rather_than_reading_as_judged(self):
+        """D and E on their deterministic half alone is not the gating reading."""
         rendered = render_report(a_run(results=(analysis_result(),)))
-        assert "## Human rubric" in rendered
-        assert "blind to the deterministic results" in rendered
-        assert "sanctioned `interpretation`" in rendered
+        assert "The human rubric has not been entered" in rendered
 
-    def test_the_judgement_count_is_stated_rather_than_left_to_be_counted(self):
-        rendered = render_report(
-            a_run(results=(analysis_result("d-1"), analysis_result("e-1")))
+    def test_a_scored_report_carries_the_reviewers_answers_per_case(self):
+        from src.eval.rubric import RubricScores
+
+        scores = RubricScores(
+            {"analysis-d-bank": {"cited": True, "sanctioned": False}}
         )
-        assert "2 D/E cases × 3 binary questions = 6 judgements" in rendered
-
-    def test_a_run_with_no_quality_cases_asks_for_no_rubric(self):
-        rendered = render_report(a_run(results=(turn_result(),)))
-        assert "## Human rubric" not in rendered
+        rendered = render_report(a_run(results=(analysis_result(),)), scores)
+        assert "`rubric.sanctioned`" in rendered
+        assert "The human rubric has not been entered" not in rendered
 
 
 def test_the_report_directory_is_the_repos_and_not_apps_apis():

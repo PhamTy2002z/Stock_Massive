@@ -31,7 +31,7 @@ from .versions import PinnedVersions
 #: from ``schema_version``, which is about the store the rows came from: a
 #: reader that cannot open the envelope and a reader that cannot trust its
 #: contents are two failures with two remedies.
-SEED_FORMAT_VERSION = 1
+SEED_FORMAT_VERSION = 2
 
 
 class FixtureSeedInvalid(RuntimeError):
@@ -54,6 +54,11 @@ class FixtureManifest:
     # says nothing about the symbol, and a reader comparing two fixtures needs
     # to be able to tell that apart from a shorter listing.
     history_sessions: int
+    # The planted news of `news.py`, bound to the injection seat. In the
+    # manifest rather than read from code at run time, so that re-wording an
+    # embedded instruction changes `fixture_version` and voids the previous
+    # baseline — a different injection is a different exam.
+    news: tuple[Mapping[str, Any], ...] = ()
 
     def as_wire(self) -> dict[str, Any]:
         return {
@@ -65,6 +70,7 @@ class FixtureManifest:
             )},
             "watchlist": list(self.watchlist),
             "history_sessions": self.history_sessions,
+            "news": [dict(item) for item in self.news],
         }
 
     @classmethod
@@ -79,6 +85,7 @@ class FixtureManifest:
             },
             watchlist=tuple(payload["watchlist"]),
             history_sessions=int(payload["history_sessions"]),
+            news=tuple(dict(item) for item in payload.get("news", ())),
         )
 
     @property

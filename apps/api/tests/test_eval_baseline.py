@@ -28,7 +28,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from src.alpha.models import EvalRun
 from src.eval.baseline import (
     CASE_EQUIVALENT_DRIFT,
-    CATEGORY_THRESHOLDS,
     CategoryScore,
     compare_to_baseline,
     resolve_baseline,
@@ -36,6 +35,7 @@ from src.eval.baseline import (
 )
 from src.eval.cases import EvalCategory
 from src.eval.store import create_schema, eval_engine
+from src.eval.verdict import THRESHOLDS
 
 from .eval_store import TARGET_DB, create_database, drop_database
 
@@ -134,14 +134,13 @@ def seat_run(
 
 
 class TestWhatCountsAsPassing:
-    def test_the_thresholds_are_the_adrs(self):
-        """A, C and F at 3/3; B at 90%; D and E at 85%."""
-        assert CATEGORY_THRESHOLDS[EvalCategory.GROUNDING_CANARY] == 1.0
-        assert CATEGORY_THRESHOLDS[EvalCategory.SCOPE] == 1.0
-        assert CATEGORY_THRESHOLDS[EvalCategory.INJECTION] == 1.0
-        assert CATEGORY_THRESHOLDS[EvalCategory.FALSE_REFUSAL] == 0.90
-        assert CATEGORY_THRESHOLDS[EvalCategory.INTERPRETATION] == 0.85
-        assert CATEGORY_THRESHOLDS[EvalCategory.DATA_GAP] == 0.85
+    def test_the_baseline_reads_the_one_table_of_thresholds(self):
+        """`verdict` owns them; a second copy here is the one that goes stale."""
+        for category in EvalCategory:
+            score = CategoryScore(
+                category=category.value, cases=1, runs=3, passed=3
+            )
+            assert score.threshold == THRESHOLDS[category]
 
     def test_a_full_sheet_passes(self):
         assert run_passes(a_passing_run())
