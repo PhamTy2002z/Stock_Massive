@@ -40,14 +40,20 @@ export function AlphaDesk() {
   const searchParams = useSearchParams()
   const symbolParam = searchParams.get("symbol")
 
-  // Read once, on mount. `sessionStorage` is not reactive, and re-reading it on
-  // a later render would fight the state it seeded.
-  const [opening] = useState(() =>
-    openingState(deepLinkedSymbol(symbolParam), readDeskSession()),
-  )
+  // The deep link is on the URL, so the server render and the hydrating browser
+  // read the same value and the first tree agrees. Read once: the effect below
+  // strips `?symbol=` from the URL, and a live read would then see an arrival
+  // that is no longer there.
+  const [deepLinked] = useState(() => deepLinkedSymbol(symbolParam))
 
-  const [threadId, setThreadId] = useState<string | null>(opening.threadId)
-  const [activeSymbol, setActiveSymbol] = useState<string | null>(opening.activeSymbol)
+  // What this tab remembered is *not* on the URL — `sessionStorage` exists only
+  // in the browser, so seeding state from it during render makes the hydrated
+  // tree disagree with the server HTML (a remembered lens draws a dock chip the
+  // server never drew). It is applied after hydration instead, by the effect
+  // below, and `restored` is what marks that having happened.
+  const [restored, setRestored] = useState(false)
+  const [threadId, setThreadId] = useState<string | null>(null)
+  const [activeSymbol, setActiveSymbol] = useState<string | null>(deepLinked)
   // Sent, and the create has not committed it yet. Shown locally for exactly
   // that gap, then replaced by the copy the Thread comes back with.
   const [unconfirmedQuestion, setUnconfirmedQuestion] = useState<string | null>(null)
@@ -77,26 +83,36 @@ export function AlphaDesk() {
     if (symbolParam !== null) router.replace("/alpha-desk", { scroll: false })
   }, [symbolParam, router])
 
+  // What the surface opens onto, applied once the first render is committed.
+  // Everything the tab remembered lands here — the Thread, the lens, and the
+  // Turn that was still running, which is picked up wherever it got to.
   const { attach } = turn
-  const attachedOnce = useRef(false)
   useEffect(() => {
-    if (attachedOnce.current) return
-    attachedOnce.current = true
+    if (restored) return
+    setRestored(true)
+    const opening = openingState(deepLinked, readDeskSession())
+    setThreadId(opening.threadId)
+    setActiveSymbol(opening.activeSymbol)
     if (opening.turnId && opening.threadId) attach(opening.turnId, opening.threadId)
-  }, [opening.turnId, opening.threadId, attach])
+  }, [restored, deepLinked, attach])
 
   // What this tab was doing, for the next mount. A settled Turn is forgotten:
   // reattaching to it would open a stream for a Turn the transcript already
   // shows as a canonical message.
+  //
+  // Gated on `restored`, because the pre-hydration state is empty by
+  // construction: writing it out would erase the very session the effect above
+  // is about to read.
   const liveTurnId = turn.state.turnId
   const turnSettled = isSettled(turn.state)
   useEffect(() => {
+    if (!restored) return
     writeDeskSession({
       threadId,
       turnId: turnSettled ? null : liveTurnId,
       activeSymbol,
     })
-  }, [threadId, liveTurnId, turnSettled, activeSymbol])
+  }, [restored, threadId, liveTurnId, turnSettled, activeSymbol])
 
   // -- sending ------------------------------------------------------------
 
