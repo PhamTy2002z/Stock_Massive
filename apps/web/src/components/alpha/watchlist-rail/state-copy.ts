@@ -69,15 +69,25 @@ export const STATE_DOT: Record<AnalysisState, string> = {
  * itself when something is wrong teaches the reader that silence means nothing
  * was checked.
  */
-export function stateSentence(state: AnalysisState, tradingDay: string | null): string {
+export function stateSentence(
+  state: AnalysisState,
+  tradingDay: string | null,
+  failure: RunFailure | null = null,
+): string {
   const session = sessionLabel(tradingDay)
   switch (state) {
     case "ready":
       return `Đã có Analysis cho ${session}.`
     case "pending":
-      return tradingDay
-        ? `Chưa tới lượt dựng Analysis cho ${session}.`
-        : "Chưa có phiên nào chốt dữ liệu nên chưa dựng Analysis."
+      if (!tradingDay) return "Chưa có phiên nào chốt dữ liệu nên chưa dựng Analysis."
+      // Two different waits, and the difference is the one a user asks about.
+      // Queued behind other symbols is "not yet your turn"; waiting on the
+      // Collector is "your turn came and the data had not arrived" — and the
+      // backend holds the run rather than spending an attempt on it, so
+      // nothing here is a failure to report.
+      return waitingForSessionData(state, failure)
+        ? `Đang chờ dữ liệu ${session} về cho mã này.`
+        : `Chưa tới lượt dựng Analysis cho ${session}.`
     case "producing":
       return `Đang dựng Analysis cho ${session}.`
     case "failed":
@@ -94,6 +104,24 @@ export function stateSentence(state: AnalysisState, tradingDay: string | null): 
  * screen has not learned — which falls back to the sentence the API sent rather
  * than rendering the code itself. A code on screen is a dead end for the reader.
  */
+/**
+ * The one failure code that is a wait rather than a fault.
+ *
+ * The backend defers a run whose session has not been collected for this symbol
+ * yet: the state stays `pending`, no attempt is spent, and the reason rides
+ * along so the rail can say what is being waited on. Rendered as a previous
+ * attempt's failure it would read as something going wrong once every twenty
+ * minutes, which is the opposite of what is happening.
+ */
+export const WAITING_FOR_SESSION_DATA = "missing_market_snapshot"
+
+export function waitingForSessionData(
+  state: AnalysisState,
+  failure: RunFailure | null | undefined,
+): boolean {
+  return state === "pending" && failure?.code === WAITING_FOR_SESSION_DATA
+}
+
 const FAILURE_SENTENCE: Record<string, string> = {
   missing_market_snapshot: "Phiên này chưa có dữ liệu thị trường để dựng Analysis.",
   insufficient_core_evidence: "Không đủ dữ liệu cốt lõi cho mã này ở phiên đang xét.",

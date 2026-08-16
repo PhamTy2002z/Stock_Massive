@@ -123,6 +123,28 @@ describe("the five states", () => {
     expect(screen.queryByLabelText(/Retry/)).not.toBeInTheDocument()
   })
 
+  it("separates waiting for the Collector from waiting for a turn", () => {
+    // The backend holds a run whose session has not been collected for this
+    // symbol yet: pending, no attempt spent, and the reason carried along. Read
+    // as a previous attempt's failure it would say something went wrong every
+    // twenty minutes, when nothing has gone wrong at all.
+    row({
+      state: "pending",
+      latest: null,
+      failure: {
+        code: "missing_market_snapshot",
+        message: "no session data for FPT",
+        attempts: 0,
+        max_attempts: 3,
+        exhausted: false,
+      },
+    })
+
+    expect(screen.getByText(/Đang chờ dữ liệu phiên 12\/08/)).toBeInTheDocument()
+    expect(screen.queryByText(/Lượt trước/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/lượt cho phiên này/)).not.toBeInTheDocument()
+  })
+
   it("shows a run mid-flight as producing", () => {
     row({ state: "producing" })
 
@@ -205,13 +227,19 @@ describe("a failed session", () => {
   })
 
   it("keeps the reason after a retry queues it, as the previous attempt's", () => {
-    // Nothing drains the queue until the pipeline milestone, so a retried
-    // symbol waits at `pending` for a while. Dropping the reason there would
-    // leave it waiting with no account of why; keeping it red would claim
-    // something is wrong right now.
-    row({ ...failed, state: "pending" })
+    // A retried symbol waits at `pending` until the dispatcher reaches it.
+    // Dropping the reason there would leave it waiting with no account of why;
+    // keeping it red would claim something is wrong right now.
+    //
+    // A route failure rather than a missing session: the latter is not a spent
+    // attempt at all, and the rail says so in its own sentence above.
+    row({
+      ...failed,
+      state: "pending",
+      failure: { ...failed.failure, code: "llm_transport_error" },
+    })
 
-    expect(screen.getByText(/Lượt trước: .*chưa có dữ liệu thị trường/i)).toBeInTheDocument()
+    expect(screen.getByText(/Lượt trước: .*không phản hồi/i)).toBeInTheDocument()
     expect(screen.queryByLabelText("Retry FPT")).not.toBeInTheDocument()
   })
 
