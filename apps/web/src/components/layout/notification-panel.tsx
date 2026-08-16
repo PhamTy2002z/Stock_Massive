@@ -46,10 +46,10 @@ export function NotificationPanel() {
               {completedJobs.map((job) => (
                 <div
                   key={job.jobId}
-                  className="flex items-start gap-2 p-2 rounded-md bg-muted/50"
+                  className="flex items-start gap-2 p-2 rounded-md bg-surface-sunken"
                 >
                   {job.status === "completed" ? (
-                    <CheckCircle2 className="h-4 w-4 text-green-500 mt-0.5" />
+                    <CheckCircle2 className="h-4 w-4 text-positive mt-0.5" />
                   ) : (
                     <XCircle className="h-4 w-4 text-destructive mt-0.5" />
                   )}

@@ -254,7 +254,7 @@ export function OrderFlowCharts({ data, isLoading }: OrderFlowChartsProps) {
   if (!data) {
     return (
       <div className="text-center py-16">
-        <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-muted/30 flex items-center justify-center">
+        <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-surface-sunken flex items-center justify-center">
           <Activity className="w-8 h-8 text-muted-foreground/40" />
         </div>
         <p className="text-sm font-medium text-muted-foreground">Dữ liệu intraday chưa khả dụng</p>
@@ -282,7 +282,7 @@ export function OrderFlowCharts({ data, isLoading }: OrderFlowChartsProps) {
             boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
           }}
         >
-          <h4 className="text-sm font-semibold mb-4 flex items-center gap-2 text-white">
+          <h4 className="text-sm font-semibold mb-4 flex items-center gap-2 text-foreground">
             <Activity className="h-4 w-4" style={{ color: COLORS.buy }} />
             Tỷ lệ Mua/Bán
           </h4>
@@ -295,8 +295,8 @@ export function OrderFlowCharts({ data, isLoading }: OrderFlowChartsProps) {
               size="md"
             />
             <div className="flex flex-col items-center gap-1">
-              <ArrowUpDown className="h-5 w-5 text-white/30" />
-              <span className="text-xs text-white/40">vs</span>
+              <ArrowUpDown className="h-5 w-5 text-foreground/30" />
+              <span className="text-xs text-foreground/40">vs</span>
             </div>
             <RadialProgress
               value={buyVolumePct}
@@ -358,7 +358,7 @@ export function OrderFlowCharts({ data, isLoading }: OrderFlowChartsProps) {
         }}
       >
         <div className="flex items-center justify-between mb-4">
-          <h4 className="text-sm font-semibold text-white">So sánh Khối lượng</h4>
+          <h4 className="text-sm font-semibold text-foreground">So sánh Khối lượng</h4>
           <div
             className="flex items-center gap-2 px-3 py-1.5 rounded-full"
             style={{ backgroundColor: COLORS.cardBorder }}
@@ -400,7 +400,7 @@ export function OrderFlowCharts({ data, isLoading }: OrderFlowChartsProps) {
                         boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
                       }}
                     >
-                      <p className="text-sm font-semibold text-white">{d.name}</p>
+                      <p className="text-sm font-semibold text-foreground">{d.name}</p>
                       <p className="text-xs mt-0.5" style={{ color: COLORS.textMuted }}>
                         {formatVolume(d.value)} cổ phiếu
                       </p>

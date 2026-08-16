@@ -19,45 +19,40 @@ interface DashboardLayoutProps {
   bleed?: boolean
 }
 
-// Matches the header's h-16. The sidebar starts below the bar rather than
-// beside it, so it needs to know how much of the viewport is already spoken for.
-const HEADER_HEIGHT = "4rem"
-
+/**
+ * The frame: a full-height sidebar on the left, everything else beside it.
+ *
+ * The bar used to run the full width *above* the sidebar, which made the brand
+ * a property of the window rather than of the panel. The reference does the
+ * opposite — the sidebar owns the mark and the account and runs floor to
+ * ceiling, and the bar above the content belongs to the page it sits on. So
+ * the header moved inside the inset, and `--sidebar-top` went back to zero.
+ */
 export function DashboardLayout({ children, onStockSelect, bleed }: DashboardLayoutProps) {
   return (
     /* A bleeding page is pinned to exactly one viewport rather than allowed to
        grow: the page itself must not scroll, or the whole frame — rail and all
        — travels with the content instead of the content moving inside it. */
-    <div
-      className={cn(
-        "flex w-full flex-col",
-        bleed ? "h-svh overflow-hidden" : "min-h-svh"
-      )}
+    <SidebarProvider
+      defaultOpen
+      className={cn("w-full", bleed ? "h-svh overflow-hidden" : "min-h-svh")}
     >
-      <DashboardHeader onStockSelect={onStockSelect} />
-      {/* Rail is the only desktop mode: there is no pin control, so the sidebar
-          must not start pinned open. */}
-      <SidebarProvider
-        defaultOpen={false}
-        className="min-h-0 flex-1"
-        style={{ "--sidebar-top": HEADER_HEIGHT } as React.CSSProperties}
-      >
-        <AppSidebar />
-        {/* SidebarInset carries its own min-height of one viewport less the
-            header. Under bleed that floor is what pushes the frame past the
-            screen, so it is released and the flex row sizes it instead. */}
-        <SidebarInset className={cn(bleed && "min-h-0")}>
-          <JobProgressBar />
-          <main
-            className={cn(
-              "min-h-0 flex-1",
-              bleed ? "overflow-hidden" : "overflow-auto p-6"
-            )}
-          >
-            {children}
-          </main>
-        </SidebarInset>
-      </SidebarProvider>
-    </div>
+      <AppSidebar />
+      {/* SidebarInset carries its own min-height of one viewport. Under bleed
+          that floor is what pushes the frame past the screen, so it is released
+          and the flex row sizes it instead. */}
+      <SidebarInset className={cn("min-w-0", bleed && "min-h-0")}>
+        <DashboardHeader onStockSelect={onStockSelect} />
+        <JobProgressBar />
+        <main
+          className={cn(
+            "min-h-0 flex-1",
+            bleed ? "overflow-hidden" : "overflow-auto p-5"
+          )}
+        >
+          {children}
+        </main>
+      </SidebarInset>
+    </SidebarProvider>
   )
 }

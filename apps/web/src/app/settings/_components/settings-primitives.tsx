@@ -26,11 +26,11 @@ export function SettingsSection({
     /* Sections scroll inside their own column rather than the page, so the
        anchor only needs to clear its own top padding. */
     <section id={id} className="scroll-mt-8">
-      <h2 className="text-[21px] font-semibold leading-[1.19] tracking-[-0.374px]">
+      <h2 className="text-[21px] font-semibold leading-[1.19]">
         {title}
       </h2>
       {description ? (
-        <p className="mt-1 text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+        <p className="mt-1 text-meta text-muted-foreground">
           {description}
         </p>
       ) : null}
@@ -47,10 +47,10 @@ export function SettingsPanel({
   footer?: React.ReactNode
 }) {
   return (
-    <div className="overflow-hidden rounded-[18px] border border-[hsl(var(--hairline))] bg-card">
+    <div className="overflow-hidden rounded-card border border-hairline bg-card">
       {children}
       {footer ? (
-        <div className="border-t border-[hsl(var(--hairline))] bg-muted/40 px-5 py-3.5">
+        <div className="border-t border-hairline bg-surface-sunken px-5 py-3.5">
           {footer}
         </div>
       ) : null}
@@ -74,16 +74,16 @@ export function SettingsRow({
       className={cn(
         // Below md the control drops under its label rather than fighting it
         // for a share of a phone-width row.
-        "flex flex-col gap-3 border-b border-[hsl(var(--hairline))] px-5 py-4 last:border-b-0 md:flex-row md:items-center md:justify-between md:gap-6",
+        "flex flex-col gap-3 border-b border-hairline px-5 py-4 last:border-b-0 md:flex-row md:items-center md:justify-between md:gap-6",
         className
       )}
     >
       <div className="min-w-0 md:max-w-[46%]">
-        <div className="text-[15px] font-semibold leading-[1.24] tracking-[-0.374px]">
+        <div className="text-[0.95rem] font-semibold">
           {label}
         </div>
         {description ? (
-          <p className="mt-0.5 text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+          <p className="mt-0.5 text-meta text-muted-foreground">
             {description}
           </p>
         ) : null}
@@ -99,7 +99,7 @@ export function SettingsRow({
  */
 export function ReadOnlyField({ value }: { value: string }) {
   return (
-    <div className="w-full truncate rounded-lg border border-border bg-background px-3 py-2 text-[13px] leading-[1.43] tracking-[-0.208px] tabular-nums text-muted-foreground md:w-[320px]">
+    <div className="w-full truncate rounded-lg border border-border bg-background px-3 py-2 text-meta tabular-nums text-muted-foreground md:w-[320px]">
       {value}
     </div>
   )

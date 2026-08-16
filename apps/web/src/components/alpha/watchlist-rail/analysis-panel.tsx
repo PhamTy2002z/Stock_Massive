@@ -53,7 +53,7 @@ export function AnalysisPanel({
     : null
 
   return (
-    <div className={cn("mt-3 space-y-3 border-t border-border/60 pt-3", className)}>
+    <div className={cn("mt-3 space-y-3 border-t border-border pt-3", className)}>
       {history.isPending ? (
         <p className="flex items-center gap-2 text-xs text-muted-foreground">
           <Loader2 className="h-3 w-3 animate-spin" /> Đang tải lịch sử Analysis…
@@ -69,17 +69,17 @@ export function AnalysisPanel({
                 onClick={() => setSelected(row.trading_day)}
                 aria-current={row.trading_day === selected}
                 className={cn(
-                  "rounded border px-1.5 py-0.5 text-[11px] tabular-nums",
+                  "rounded border px-1.5 py-0.5 text-micro tabular-nums",
                   row.trading_day === selected
                     ? "border-foreground/40 bg-muted font-medium"
-                    : "border-border/60 text-muted-foreground hover:bg-muted",
+                    : "border-border text-muted-foreground hover:bg-foreground/[0.06]",
                 )}
               >
                 {dayAndMonth(row.trading_day)}
               </button>
             ))}
           </div>
-          {boundary && <p className="text-[11px] text-muted-foreground">{boundary}</p>}
+          {boundary && <p className="text-micro text-muted-foreground">{boundary}</p>}
         </div>
       ) : (
         <p className="text-xs text-muted-foreground">

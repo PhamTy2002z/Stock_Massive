@@ -44,7 +44,7 @@ function Card({
   className?: string
 }) {
   return (
-    <div className={cn("min-w-0 rounded-[18px] border border-border bg-card p-[18px]", className)}>
+    <div className={cn("min-w-0 rounded-card border border-border bg-card p-[14px]", className)}>
       {children}
     </div>
   )
@@ -76,10 +76,10 @@ function OwnershipBreakdown({ shareholders }: { shareholders: ShareholderItem[] 
   return (
     <Card>
       <div className="flex flex-wrap items-baseline justify-between gap-4">
-        <span className="text-[17px] font-semibold leading-[1.24] tracking-[-0.374px]">
+        <span className="text-[1.05rem] font-semibold leading-[1.24]">
           Cơ cấu sở hữu
         </span>
-        <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+        <span className="text-meta text-muted-foreground">
           {named.length} cổ đông công bố trên 1%
         </span>
       </div>
@@ -95,7 +95,7 @@ function OwnershipBreakdown({ shareholders }: { shareholders: ShareholderItem[] 
         <span style={{ flex: others }} className="rounded-full bg-border" />
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-[13px] leading-[1.43] tracking-[-0.208px] tabular-nums">
+      <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-meta tabular-nums">
         {named.map((holder, i) => (
           <span key={holder.id || holder.name} className="flex items-center gap-[7px]">
             <span className={cn("size-2 rounded-full", tones[i % tones.length])} />
@@ -132,7 +132,7 @@ export function ShareholdersTabContent({
   if (totalItems === 0) {
     return (
       <Card className={className}>
-        <p className="py-6 text-center text-[15px] leading-[1.47] tracking-[-0.374px] text-muted-foreground">
+        <p className="py-6 text-center text-[0.95rem] text-muted-foreground">
           Không có dữ liệu cổ đông cho mã {symbol}
         </p>
       </Card>
@@ -148,7 +148,7 @@ export function ShareholdersTabContent({
       <Card className="overflow-x-auto py-2">
         <div
           style={{ gridTemplateColumns: columns }}
-          className="grid min-w-[620px] items-center gap-3.5 py-3.5 text-[13px] font-semibold leading-[1.29] tracking-[-0.208px] text-muted-foreground"
+          className="grid min-w-[620px] items-center gap-3.5 py-3.5 text-meta font-semibold leading-[1.29] text-muted-foreground"
         >
           <span>Cổ đông</span>
           <span className="text-right">Số lượng</span>
@@ -163,17 +163,17 @@ export function ShareholdersTabContent({
             <div
               key={shareholder.id || `${shareholder.name}-${startIndex + index}`}
               style={{ gridTemplateColumns: columns }}
-              className="grid min-w-[620px] items-center gap-3.5 border-t border-[hsl(var(--hairline))] py-[11px]"
+              className="grid min-w-[620px] items-center gap-3.5 border-t border-hairline py-[11px]"
             >
-              <span className="truncate text-[15px] leading-[1.47] tracking-[-0.374px]">
+              <span className="truncate text-[0.95rem]">
                 {shareholder.name}
               </span>
-              <span className="text-right text-[15px] leading-[1.47] tracking-[-0.374px] tabular-nums">
+              <span className="text-right text-[0.95rem] tabular-nums">
                 {shareFormat(shareholder.shares)}
               </span>
               <span
                 className={cn(
-                  "text-right text-[15px] leading-[1.47] tracking-[-0.374px] tabular-nums",
+                  "text-right text-[0.95rem] tabular-nums",
                   shareholder.ownership_pct < 0.01 && "text-muted-foreground"
                 )}
               >
@@ -183,7 +183,7 @@ export function ShareholdersTabContent({
                   number is still the latest one filed, just not recent. */}
               <span
                 className={cn(
-                  "text-right text-[13px] leading-[1.43] tracking-[-0.208px] tabular-nums",
+                  "text-right text-meta tabular-nums",
                   stale ? "text-caution" : "text-muted-foreground"
                 )}
               >
@@ -194,12 +194,12 @@ export function ShareholdersTabContent({
           )
         })}
 
-        <div className="mt-1.5 flex min-w-[620px] flex-wrap items-center justify-between gap-6 border-t border-[hsl(var(--hairline))] pt-4">
-          <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+        <div className="mt-1.5 flex min-w-[620px] flex-wrap items-center justify-between gap-6 border-t border-hairline pt-4">
+          <span className="text-meta text-muted-foreground">
             {startIndex + 1}–{endIndex} trên {totalItems} cổ đông
           </span>
-          <div className="flex items-center gap-3.5">
-            <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-meta text-muted-foreground">
               Trang {currentPage}/{totalPages}
             </span>
             <button
@@ -207,18 +207,18 @@ export function ShareholdersTabContent({
               onClick={() => goToPage(currentPage - 1)}
               disabled={currentPage === 1}
               aria-label="Trang trước"
-              className="flex size-9 items-center justify-center rounded-full border border-[hsl(var(--hairline))] bg-muted/40 text-muted-foreground transition-transform duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex size-7 items-center justify-center rounded-lg border border-border text-ink-4 transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
             >
-              <ChevronLeft className="size-4" />
+              <ChevronLeft className="size-3.5" />
             </button>
             <button
               type="button"
               onClick={() => goToPage(currentPage + 1)}
               disabled={currentPage === totalPages}
               aria-label="Trang sau"
-              className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex size-7 items-center justify-center rounded-lg border border-border text-ink-4 transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
             >
-              <ChevronRight className="size-4" />
+              <ChevronRight className="size-3.5" />
             </button>
           </div>
         </div>
@@ -231,10 +231,10 @@ export function ShareholdersTabContent({
 export function ShareholdersTabContentSkeleton({ className }: { className?: string }) {
   return (
     <div className={cn("flex min-w-0 flex-col gap-4", className)}>
-      <div className="h-[148px] animate-pulse rounded-[18px] border border-border bg-card" />
+      <div className="h-[148px] animate-pulse rounded-card border border-border bg-card" />
       <div
         className={cn(
-          "h-[520px] animate-pulse rounded-[18px] border border-border bg-card",
+          "h-[520px] animate-pulse rounded-card border border-border bg-card",
           className
         )}
       />

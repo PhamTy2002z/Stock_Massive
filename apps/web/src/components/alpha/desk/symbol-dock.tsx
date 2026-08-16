@@ -83,21 +83,21 @@ export function SymbolDock({
     activeSymbol !== null && !symbols.some((entry) => entry.symbol === activeSymbol)
 
   return (
-    <Collapsible className={cn("shrink-0 border-b border-border/60 bg-background", className)}>
+    <Collapsible className={cn("shrink-0 border-b border-border bg-background", className)}>
       <div className="flex items-center gap-2 px-3 py-2">
         <div className="flex shrink-0 items-center gap-2 text-xs">
           <span className="font-medium">Watchlist</span>
           {unreadCount > 0 && (
             <span
               aria-label={`${unreadCount} unread Analyses`}
-              className="rounded-full bg-sky-500 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-white"
+              className="rounded-full bg-primary px-1.5 py-0.5 text-micro font-medium tabular-nums text-white"
             >
               {unreadCount}
             </span>
           )}
           <span
             aria-label={`${count} of ${cap} symbols`}
-            className="rounded-md border border-border/60 px-1.5 py-0.5 tabular-nums text-muted-foreground"
+            className="rounded-md border border-border px-1.5 py-0.5 tabular-nums text-muted-foreground"
           >
             {count}/{cap}
           </span>
@@ -140,7 +140,7 @@ export function SymbolDock({
           </ul>
         </div>
 
-        <CollapsibleTrigger className="group inline-flex shrink-0 items-center gap-1 rounded-md border border-border/60 px-2 py-1 text-xs hover:bg-muted">
+        <CollapsibleTrigger className="group inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted">
           Manage
           <ChevronDown className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180 motion-reduce:transition-none" />
         </CollapsibleTrigger>
@@ -149,7 +149,7 @@ export function SymbolDock({
       {/* Bounded and scrolling. The rail claims no height of its own, and the
           dock is the thing that decides how much of the screen it may take. */}
       <CollapsibleContent>
-        <div className="max-h-[50vh] overflow-y-auto border-t border-border/60 px-3 py-3">
+        <div className="max-h-[50vh] overflow-y-auto border-t border-border px-3 py-3">
           {children}
         </div>
       </CollapsibleContent>
@@ -191,7 +191,7 @@ function SymbolChip({
         "inline-flex items-center whitespace-nowrap rounded-md border text-xs",
         isActive
           ? "border-foreground/40 bg-muted font-medium"
-          : "border-border/60 text-muted-foreground",
+          : "border-border text-muted-foreground",
       )}
     >
       <button
@@ -214,7 +214,7 @@ function SymbolChip({
         {unread && (
           <span
             aria-label={`${symbol} has an unread Analysis`}
-            className="h-1.5 w-1.5 rounded-full bg-sky-500"
+            className="h-1.5 w-1.5 rounded-full bg-primary"
           />
         )}
       </button>
@@ -225,7 +225,7 @@ function SymbolChip({
           onClick={onOpenAnalysis}
           aria-label={`Open ${symbol} Analysis`}
           title={`Open ${symbol} Analysis`}
-          className="rounded-r-md border-l border-border/60 px-1.5 py-1 hover:bg-muted"
+          className="rounded-r-md border-l border-border px-1.5 py-1 hover:bg-muted"
         >
           <FileText className="h-3 w-3" />
         </button>

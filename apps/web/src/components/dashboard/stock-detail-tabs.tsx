@@ -55,7 +55,7 @@ export function StockDetailTabs({
             aria-selected={isActive}
             onClick={() => onChange?.(tab.value)}
             className={cn(
-              "-mb-px shrink-0 whitespace-nowrap border-b-2 pb-2 text-[13px] leading-[1.29] tracking-[-0.208px]",
+              "-mb-px shrink-0 whitespace-nowrap border-b-2 pb-2 text-meta",
               "transition-colors duration-150",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
               isActive

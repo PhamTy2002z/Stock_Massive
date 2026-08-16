@@ -22,24 +22,24 @@ const subTabs = [
     label: "Technical",
     icon: BarChart3,
     description: "Chỉ số kỹ thuật & thống kê giao dịch",
-    color: "text-blue-500",
-    bgColor: "bg-blue-500/10",
+    color: "text-floor",
+    bgColor: "bg-floor/10",
   },
   {
     value: "order-flow" as const,
     label: "Order Flow",
     icon: TrendingUp,
     description: "Phân tích dòng lệnh mua/bán theo phiên",
-    color: "text-emerald-500",
-    bgColor: "bg-emerald-500/10",
+    color: "text-positive",
+    bgColor: "bg-positive/10",
   },
   {
     value: "sector" as const,
     label: "Sector",
     icon: Building2,
     description: "So sánh với công ty cùng ngành",
-    color: "text-purple-500",
-    bgColor: "bg-purple-500/10",
+    color: "text-ceiling",
+    bgColor: "bg-ceiling/10",
   },
 ]
 
@@ -98,8 +98,8 @@ export function AdvancedSection({ symbol, className }: AdvancedSectionProps) {
                   "shadow-lg shadow-primary/5",
                 ],
                 !isActive && [
-                  "bg-muted/30 border border-border/50",
-                  "hover:bg-muted/50 hover:border-border",
+                  "bg-surface-sunken border border-border",
+                  "hover:bg-foreground/[0.06] hover:border-border",
                   "active:scale-[0.98]",
                 ]
               )}
@@ -144,7 +144,7 @@ export function AdvancedSection({ symbol, className }: AdvancedSectionProps) {
       </div>
 
       {/* Content Area */}
-      <div className="rounded-xl border border-border/60 bg-card/80 backdrop-blur-sm p-5 shadow-sm">
+      <div className="rounded-xl border border-border bg-card backdrop-blur-sm p-5 shadow-sm">
         {activeSubTab === "order-flow" && (
           <Suspense fallback={<SubtabSkeleton />}>
             <OrderFlowSubtab symbol={symbol} />
@@ -185,7 +185,7 @@ export function AdvancedSectionSkeleton() {
       </div>
 
       {/* Content Skeleton */}
-      <div className="rounded-xl border border-border/60 bg-card/50 p-5">
+      <div className="rounded-xl border border-border bg-card p-5">
         <SubtabSkeleton />
       </div>
     </section>

@@ -63,7 +63,7 @@ export function SettingsNav({
       className="hidden w-64 shrink-0 flex-col overflow-y-auto border-r border-border bg-sidebar md:flex"
     >
       <div className="border-b border-border px-5 py-5">
-        <h1 className="text-[17px] font-semibold leading-[1.24] tracking-[-0.374px]">
+        <h1 className="text-[1.05rem] font-semibold leading-[1.24]">
           Cài đặt
         </h1>
       </div>
@@ -74,7 +74,7 @@ export function SettingsNav({
             key={group.heading}
             className="border-b border-border px-3 py-4 last:border-b-0"
           >
-            <div className="px-2 text-[11px] font-medium uppercase leading-[1.3] tracking-[0.08em] text-muted-foreground">
+            <div className="px-2 text-micro font-medium uppercase leading-[1.3] tracking-[0.08em] text-muted-foreground">
               {group.heading}
             </div>
             <ul className="mt-2 space-y-0.5">
@@ -84,7 +84,7 @@ export function SettingsNav({
                     href={`#${item.id}`}
                     aria-current={active === item.id ? "true" : undefined}
                     className={cn(
-                      "block rounded-md px-2 py-1.5 text-[13px] leading-[1.43] tracking-[-0.208px] transition-colors",
+                      "block rounded-md px-2 py-1.5 text-meta transition-colors",
                       active === item.id
                         ? "bg-accent font-medium text-accent-foreground"
                         : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"

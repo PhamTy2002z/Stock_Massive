@@ -109,8 +109,8 @@ export function MetricComparison({
         barColor={WIDGET_PALETTE.series}
         trackColor={WIDGET_PALETTE.track}
         rowClassName="grid grid-cols-[minmax(44px,64px)_minmax(0,1fr)_minmax(72px,auto)] items-center gap-2 py-1.5"
-        labelClassName="truncate text-[13px] font-medium"
-        valueClassName="text-right text-[13px]"
+        labelClassName="truncate text-meta font-medium"
+        valueClassName="text-right text-meta"
       />
       {/* No hidden restatement of the rows: each row already carries its
           symbol and its figure as text, and the frame no longer walls the

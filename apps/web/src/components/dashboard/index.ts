@@ -38,6 +38,7 @@ export { FinanceTabContent, FinanceTabContentSkeleton } from "./finance-tab-cont
 export type { FinanceSubTab, PeriodType } from "./finance-tab-content"
 export { ShareholdersTabContent, ShareholdersTabContentSkeleton } from "./shareholders-tab-content"
 export { SectorPerformanceSection, SectorPerformanceSkeleton } from "./sector-performance"
+export { SectorHeatGrid, SectorHeatGridSkeleton } from "./sector-heat-grid"
 export { FundCertificates, FundCertificatesSkeleton } from "./fund-certificates"
 export { VN30OverviewTable, VN30OverviewTableSkeleton } from "./vn30-overview-table"
 export { StockDetailClient } from "./stock-detail-client"

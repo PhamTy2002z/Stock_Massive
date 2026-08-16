@@ -46,21 +46,21 @@ export const StockIndexCard = memo(function StockIndexCard({
   return (
     <Card
       className={cn(
-        "rounded-[18px] p-[18px] shadow-none hover:shadow-md transition-shadow cursor-pointer",
+        "rounded-card p-[14px] cursor-pointer",
         className
       )}
     >
-      <p className="text-[13px] font-semibold leading-tight tracking-[-0.224px] text-muted-foreground truncate">
+      <p className="truncate text-micro font-semibold uppercase tracking-[0.07em] text-ink-5">
         {name}
       </p>
 
-      <p className="mt-2 text-[30px] font-semibold leading-[1.1] tracking-[-0.6px] text-foreground tabular-nums">
+      <p className="mt-1.5 font-mono text-[1.34rem] font-semibold leading-[1.2] tracking-[-0.025em] text-foreground tabular-nums">
         {formattedValue}
       </p>
 
       <div
         className={cn(
-          "mt-1.5 flex items-center gap-1.5 text-[15px] leading-[1.47] tracking-[-0.374px] tabular-nums",
+          "mt-1 flex items-center gap-1.5 font-mono text-meta tabular-nums",
           trendClass
         )}
       >
@@ -90,7 +90,7 @@ export const StockIndexCard = memo(function StockIndexCard({
 
 export function StockIndexCardSkeleton({ className }: { className?: string }) {
   return (
-    <Card className={cn("rounded-[18px] p-[18px] shadow-none", className)}>
+    <Card className={cn("rounded-card p-[14px]", className)}>
       <div className="h-4 w-20 rounded bg-muted animate-pulse" />
       <div className="mt-2 h-8 w-32 rounded bg-muted animate-pulse" />
       <div className="mt-1.5 h-5 w-28 rounded bg-muted animate-pulse" />

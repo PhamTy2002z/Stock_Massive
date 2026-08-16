@@ -17,7 +17,7 @@ export function SurfaceCard({
   className?: string
 }) {
   return (
-    <div className={cn("min-w-0 rounded-[18px] border border-border bg-card p-[18px]", className)}>
+    <div className={cn("min-w-0 rounded-card border border-border bg-card p-[14px]", className)}>
       {children}
     </div>
   )
@@ -38,14 +38,17 @@ export function FilterChip({
       onClick={onClick}
       aria-pressed={isActive}
       className={cn(
-        "rounded-full bg-card text-[13px] leading-[1.29] tracking-[-0.224px]",
+        "rounded-pill bg-transparent text-control",
         "transition-transform duration-150 active:scale-95",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        // The active pill takes its extra weight from a 2px border, so the
-        // label never shifts by a pixel when selection moves between chips.
+        // Selection is a lifted plane, not a coloured outline: the teal is the
+        // filled action, and a bordered pill wearing it reads as one. Both
+        // states carry the same border and the same padding, so the label never
+        // shifts by a pixel when selection moves between chips.
+        "border px-[13px] py-[7px]",
         isActive
-          ? "border-2 border-interactive-strong px-[13px] py-1.5 font-semibold"
-          : "border border-border px-3.5 py-[7px] text-muted-foreground hover:text-foreground"
+          ? "border-transparent bg-foreground/[0.09] font-medium text-foreground"
+          : "border-border text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground"
       )}
     >
       {label}
@@ -69,7 +72,7 @@ export function RefreshButton({
       onClick={onClick}
       disabled={isRefreshing}
       title="Làm mới"
-      className="flex size-9 shrink-0 items-center justify-center rounded-full text-interactive transition-[background-color,transform] duration-150 hover:bg-muted active:scale-95 disabled:cursor-progress"
+      className="flex size-9 shrink-0 items-center justify-center rounded-full text-interactive transition-[background-color,transform] duration-150 hover:bg-foreground/[0.06] active:scale-95 disabled:cursor-progress"
     >
       <RefreshCw aria-hidden className={cn("size-[18px]", isRefreshing && "animate-spin")} />
       <span className="sr-only">Làm mới {label}</span>
@@ -89,7 +92,7 @@ export function SectionHeader({
 }) {
   return (
     <div className={cn("mb-3.5 flex flex-wrap items-center justify-between gap-4", className)}>
-      <h2 className="text-2xl font-semibold leading-[1.2] tracking-[-0.374px]">{title}</h2>
+      <h2 className="text-[1.05rem] font-medium leading-[1.2] tracking-[-0.015em] text-foreground">{title}</h2>
       {children && <div className="flex flex-wrap items-center gap-2">{children}</div>}
     </div>
   )

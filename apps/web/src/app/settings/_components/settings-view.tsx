@@ -40,7 +40,7 @@ export function SettingsView() {
             <h2 className="text-[28px] font-semibold leading-[1.14] tracking-[-0.5px]">
               Cài đặt hệ thống
             </h2>
-            <p className="mt-2 text-[15px] leading-[1.47] tracking-[-0.24px] text-muted-foreground">
+            <p className="mt-2 text-[0.95rem] leading-[1.47] tracking-[-0.24px] text-muted-foreground">
               Giao diện, tài khoản và các quy ước dữ liệu đang áp dụng.
             </p>
           </header>

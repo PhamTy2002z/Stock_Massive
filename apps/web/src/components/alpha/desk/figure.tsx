@@ -32,7 +32,7 @@ export function Figure({
       {unit && <span className="text-muted-foreground">{unit}</span>}
       {asOf && <span className="text-muted-foreground tabular-nums">as of {asOf}</span>}
       {stale && (
-        <span className="rounded border border-amber-500/40 px-1 text-[10px] text-amber-600 dark:text-amber-400">
+        <span className="rounded-md border border-caution/40 px-1 text-[10px] text-caution">
           stale
         </span>
       )}

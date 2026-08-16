@@ -57,7 +57,7 @@ function Chip({
       onClick={onClick}
       aria-pressed={isActive}
       className={cn(
-        "rounded-full px-[13px] py-1.5 text-[13px] leading-[1.29] tracking-[-0.208px]",
+        "rounded-full px-[13px] py-1.5 text-meta",
         "transition-transform duration-150 active:scale-95",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         isActive
@@ -82,9 +82,9 @@ function Frame({
   className?: string
 }) {
   return (
-    <div className={cn("min-w-0 rounded-[18px] border border-border bg-card p-[18px]", className)}>
+    <div className={cn("min-w-0 rounded-card border border-border bg-card p-[14px]", className)}>
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <span className="text-[13px] font-semibold leading-[1.29] tracking-[-0.208px] text-muted-foreground">
+        <span className="text-meta font-semibold leading-[1.29] text-muted-foreground">
           Diễn biến giá
         </span>
         <div className="flex gap-1.5">
@@ -105,7 +105,7 @@ function Frame({
 
 function Message({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-[220px] items-center justify-center text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+    <div className="flex h-[220px] items-center justify-center text-meta text-muted-foreground">
       {children}
     </div>
   )
@@ -199,7 +199,7 @@ export function StockPriceChart({ symbol, refPrice, className }: StockPriceChart
           {refPrice !== null && refPrice !== undefined && (
             <path
               d={`M0 ${y(refPrice).toFixed(1)}H${VIEW_W}`}
-              className="stroke-[#c99a00] dark:stroke-reference"
+              className="stroke-reference"
               strokeWidth="1"
               strokeDasharray="4 4"
               vectorEffect="non-scaling-stroke"
@@ -234,21 +234,21 @@ export function StockPriceChart({ symbol, refPrice, className }: StockPriceChart
         {refPrice !== null && refPrice !== undefined && (
           <span
             style={{ top: `${(y(refPrice) / VIEW_H) * 220 - 10}px` }}
-            className="absolute right-0 rounded-full border border-[hsl(var(--hairline))] bg-card px-2 py-0.5 text-[11px] leading-[1.3] tracking-[-0.11px] tabular-nums text-reference"
+            className="absolute right-0 rounded-full border border-hairline bg-card px-2 py-0.5 text-micro tabular-nums text-reference"
           >
             TC {Math.round(refPrice).toLocaleString("vi-VN")}
           </span>
         )}
       </div>
 
-      <div className="mt-1 flex justify-between text-[11px] leading-[1.3] tracking-[-0.11px] tabular-nums text-muted-foreground">
+      <div className="mt-1 flex justify-between text-micro tabular-nums text-muted-foreground">
         {axisLabels(points).map((label, i) => (
           <span key={`${label}-${i}`}>{label}</span>
         ))}
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2.5 border-t border-[hsl(var(--hairline))] pt-3">
-        <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+      <div className="mt-3 flex flex-wrap items-center gap-2.5 border-t border-hairline pt-3">
+        <span className="text-meta text-muted-foreground">
           {volumeLabel}
         </span>
         <svg
@@ -285,7 +285,7 @@ export function StockPriceChartSkeleton({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "h-[360px] min-w-0 animate-pulse rounded-[18px] border border-border bg-card",
+        "h-[360px] min-w-0 animate-pulse rounded-card border border-border bg-card",
         className
       )}
     />

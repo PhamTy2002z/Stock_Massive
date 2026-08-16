@@ -122,7 +122,7 @@ export function RelativePosition({
         />
       }
     >
-      <div className="flex items-baseline justify-between gap-3 text-[13px] tabular-nums">
+      <div className="flex items-baseline justify-between gap-3 text-meta tabular-nums">
         <span style={{ color: WIDGET_PALETTE.inkMuted }}>
           {reading.lowLabel}
         </span>

@@ -25,6 +25,7 @@ import { Transcript } from "./transcript"
 export function DeskSurface({
   dock,
   history,
+  opening,
   entries,
   activeSymbol,
   canCancel,
@@ -44,6 +45,8 @@ export function DeskSurface({
   dock: React.ReactNode
   /** History / Related Analysis, as a compact surface. Never a second rail. */
   history?: React.ReactNode
+  /** The first-run screen, assembled by the container so it can be live. */
+  opening?: React.ReactNode
   entries: TranscriptEntry[]
   activeSymbol: string | null
   canCancel: boolean
@@ -72,7 +75,7 @@ export function DeskSurface({
     <div className={cn("flex h-full min-h-0 w-full flex-col overflow-hidden", className)}>
       {dock}
 
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3 py-1.5 text-xs">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-2 text-meta">
         <p className="min-w-0 truncate text-muted-foreground">
           {activeSymbol ? (
             <>
@@ -80,7 +83,7 @@ export function DeskSurface({
                   the user can see. It organises the Analysis context and
                   nothing else — the Thread stays free-roaming. */}
               <span className="hidden sm:inline">Đang xem: </span>
-              <span className="font-medium text-foreground">{activeSymbol}</span>
+              <span className="font-mono font-medium text-foreground">{activeSymbol}</span>
             </>
           ) : (
             <span className="hidden sm:inline">Chưa chọn mã nào làm ngữ cảnh</span>
@@ -89,42 +92,59 @@ export function DeskSurface({
         <div className="flex shrink-0 items-center gap-1">{history}</div>
       </div>
 
-      <Transcript
-        entries={entries}
-        onRetry={onRetry}
-        onFlag={onFlag}
-        onUnflag={onUnflag}
-        flagFailedFor={flagFailedFor}
-        className="min-h-0 flex-1"
-      />
+      {/* Before the first question the whole cluster — greeting, opening copy
+          and the field — sits in the middle of the surface, the way the
+          reference opens a new conversation. Afterwards the transcript takes
+          the height and the composer returns to the floor.
 
-      {refusal && (
-        <div
-          role="alert"
-          className="flex shrink-0 items-start gap-2 border-t border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-600 dark:text-red-400"
-        >
-          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <p className="min-w-0 flex-1">{refusal}</p>
-          <button
-            type="button"
-            onClick={onDismissRefusal}
-            aria-label="Dismiss"
-            className="shrink-0 rounded p-0.5 hover:bg-red-500/10"
+          The composer stays in the same place in the tree through that change,
+          and only its container's justification moves: remounting it would
+          drop focus and discard what was half-typed at the exact moment the
+          conversation starts. */}
+      <div
+        className={cn(
+          "flex min-h-0 flex-1 flex-col",
+          entries.length === 0 && "justify-center"
+        )}
+      >
+        <Transcript
+          entries={entries}
+          opening={opening}
+          onRetry={onRetry}
+          onFlag={onFlag}
+          onUnflag={onUnflag}
+          flagFailedFor={flagFailedFor}
+          className={cn(entries.length === 0 ? "shrink-0" : "min-h-0 flex-1")}
+        />
+
+        {refusal && (
+          <div
+            role="alert"
+            className="flex shrink-0 items-start gap-2 border-t border-destructive/40 bg-destructive/[0.07] px-4 py-2.5 text-meta text-destructive"
           >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      )}
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <p className="min-w-0 flex-1">{refusal}</p>
+            <button
+              type="button"
+              onClick={onDismissRefusal}
+              aria-label="Dismiss"
+              className="shrink-0 rounded-md p-0.5 transition-colors hover:bg-destructive/15"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
 
-      <Composer
-        onSend={onSend}
-        onCancel={onCancel}
-        canCancel={canCancel}
-        isCancelling={isCancelling}
-        isSubmitting={isSubmitting}
-        activeSymbol={activeSymbol}
-        className="shrink-0"
-      />
+        <Composer
+          onSend={onSend}
+          onCancel={onCancel}
+          canCancel={canCancel}
+          isCancelling={isCancelling}
+          isSubmitting={isSubmitting}
+          activeSymbol={activeSymbol}
+          className="shrink-0"
+        />
+      </div>
     </div>
   )
 }

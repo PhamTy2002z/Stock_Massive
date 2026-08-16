@@ -14,7 +14,7 @@ interface VolumeTabContentProps {
 const baselines = [10, 20, 60]
 
 const legend = [
-  { color: "bg-[#c7c7cc]", label: "Bình thường" },
+  { color: "bg-ink-6", label: "Bình thường" },
   { color: "bg-reference", label: "Tăng cao 1,5–2×" },
   { color: "bg-caution", label: "Cao 2–3×" },
   { color: "bg-negative", label: "Rất cao >3×" },
@@ -43,7 +43,7 @@ function Chip({
       onClick={onClick}
       aria-pressed={isActive}
       className={cn(
-        "rounded-full text-[13px] leading-[1.29] tracking-[-0.208px]",
+        "rounded-full text-meta",
         "transition-transform duration-150 active:scale-95",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         isActive
@@ -69,18 +69,18 @@ function Stat({
 }) {
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      <span className="text-[13px] font-semibold leading-[1.29] tracking-[-0.208px] text-muted-foreground">
+      <span className="text-meta font-semibold leading-[1.29] text-muted-foreground">
         {label}
       </span>
       <span
         className={cn(
-          "text-2xl font-semibold leading-[1.2] tracking-[-0.374px] tabular-nums",
+          "text-2xl font-semibold leading-[1.2] tabular-nums",
           tone === "negative" && "text-negative"
         )}
       >
         {value}
       </span>
-      <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+      <span className="text-meta text-muted-foreground">
         {meta}
       </span>
     </div>
@@ -99,11 +99,11 @@ export function VolumeTabContent({ symbol }: VolumeTabContentProps) {
 
   if (slots.length === 0) {
     return (
-      <div className="min-w-0 rounded-[18px] border border-border bg-card p-[18px]">
-        <div className="text-[17px] font-semibold leading-[1.24] tracking-[-0.374px]">
+      <div className="min-w-0 rounded-card border border-border bg-card p-[14px]">
+        <div className="text-[1.05rem] font-semibold leading-[1.24]">
           Chưa có dữ liệu khối lượng
         </div>
-        <p className="mt-1 text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+        <p className="mt-1 text-meta text-muted-foreground">
           Dữ liệu khối lượng trong ngày chưa được thu thập cho {symbol}.
         </p>
       </div>
@@ -118,13 +118,13 @@ export function VolumeTabContent({ symbol }: VolumeTabContentProps) {
   const baseline = slots.reduce((sum, s) => sum + s.avg_volume, 0) / slots.length
 
   return (
-    <div className="min-w-0 rounded-[18px] border border-border bg-card p-[18px]">
+    <div className="min-w-0 rounded-card border border-border bg-card p-[14px]">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <div className="text-[17px] font-semibold leading-[1.24] tracking-[-0.374px]">
+          <div className="text-[1.05rem] font-semibold leading-[1.24]">
             Bất thường khối lượng
           </div>
-          <div className="mt-1 text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+          <div className="mt-1 text-meta text-muted-foreground">
             Nến 5 phút · so với trung bình cùng khung giờ {days} phiên
             {data?.latest_date ? ` · phiên ${data.latest_date}` : ""}
           </div>
@@ -160,7 +160,7 @@ export function VolumeTabContent({ symbol }: VolumeTabContentProps) {
         />
       </div>
 
-      <div className="mt-3.5 flex flex-wrap gap-4 border-t border-[hsl(var(--hairline))] pt-3.5 text-[13px] leading-[1.43] tracking-[-0.208px]">
+      <div className="mt-3.5 flex flex-wrap gap-4 border-t border-hairline pt-3.5 text-meta">
         {legend.map((item) => (
           <span key={item.label} className="flex items-center gap-[7px]">
             <span className={cn("size-2 rounded-sm", item.color)} />
@@ -173,7 +173,7 @@ export function VolumeTabContent({ symbol }: VolumeTabContentProps) {
         </span>
       </div>
 
-      <div className="mt-3.5 grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3.5 border-t border-[hsl(var(--hairline))] pt-3.5">
+      <div className="mt-3.5 grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3.5 border-t border-hairline pt-3.5">
         <Stat
           label="Cao nhất trong phiên"
           value={compact(peak.current_volume)}

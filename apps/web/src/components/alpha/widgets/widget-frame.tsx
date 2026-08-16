@@ -70,7 +70,7 @@ export function WidgetFrame({
   return (
     <figure
       className={cn(
-        "min-w-0 rounded-[18px] border border-border bg-card p-4",
+        "min-w-0 rounded-card border border-border bg-card p-4",
         // Reduced motion removes the transition rather than shortening it: a
         // fast animation is still an animation to a reader who asked for none.
         "motion-safe:transition-colors motion-reduce:transition-none",
@@ -79,11 +79,11 @@ export function WidgetFrame({
       style={{ color: WIDGET_PALETTE.ink }}
     >
       <figcaption className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <span className="text-[15px] font-semibold leading-[1.24] tracking-[-0.374px]">
+        <span className="text-[0.95rem] font-semibold">
           {title}
         </span>
         <span
-          className="text-[13px] leading-[1.43] tracking-[-0.208px]"
+          className="text-meta"
           style={{ color: WIDGET_PALETTE.inkMuted }}
         >
           Dữ liệu ngày {formatDataDate(asOf)}
@@ -103,7 +103,7 @@ export function WidgetFrame({
 
       {/* The reading, in words. Present whether or not the reader can see the
           picture, and never a restatement of the title. */}
-      <p className="mt-3 text-[13px] leading-[1.43] tracking-[-0.208px]">{summary}</p>
+      <p className="mt-3 text-meta">{summary}</p>
 
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <button
@@ -111,7 +111,7 @@ export function WidgetFrame({
           aria-expanded={showTable}
           aria-controls={tableId}
           onClick={() => setShowTable((open) => !open)}
-          className="rounded-md text-[13px] underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="rounded-md text-meta underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {showTable ? "Ẩn bảng dữ liệu" : "Xem bảng dữ liệu"}
         </button>
@@ -119,7 +119,7 @@ export function WidgetFrame({
           <button
             type="button"
             onClick={onExpand}
-            className="rounded-md text-[13px] underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="rounded-md text-meta underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             Mở rộng
           </button>
@@ -150,21 +150,21 @@ export function TooLittleData({
 }) {
   return (
     <figure
-      className="min-w-0 rounded-[18px] border border-border bg-card p-4"
+      className="min-w-0 rounded-card border border-border bg-card p-4"
       style={{ color: WIDGET_PALETTE.ink }}
     >
       <figcaption className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <span className="text-[15px] font-semibold leading-[1.24] tracking-[-0.374px]">
+        <span className="text-[0.95rem] font-semibold">
           {title}
         </span>
         <span
-          className="text-[13px] leading-[1.43]"
+          className="text-meta leading-[1.43]"
           style={{ color: WIDGET_PALETTE.inkMuted }}
         >
           Dữ liệu ngày {formatDataDate(asOf)}
         </span>
       </figcaption>
-      <ul className="mt-3 list-disc space-y-1 pl-5 text-[13px] leading-[1.43]">
+      <ul className="mt-3 list-disc space-y-1 pl-5 text-meta leading-[1.43]">
         {lines.map((line) => (
           <li key={line}>{line}</li>
         ))}

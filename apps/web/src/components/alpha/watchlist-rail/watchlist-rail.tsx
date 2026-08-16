@@ -39,7 +39,7 @@ export function WatchlistRail({ className }: { className?: string }) {
 
   if (isError || !data) {
     return (
-      <div className={cn("rounded-lg border border-border/60 p-4 text-sm", className)}>
+      <div className={cn("rounded-lg border border-border p-4 text-sm", className)}>
         <p className="text-muted-foreground">
           Chưa đọc được Watchlist:{" "}
           {error instanceof Error ? error.message : "lỗi không xác định"}.
@@ -47,7 +47,7 @@ export function WatchlistRail({ className }: { className?: string }) {
         <button
           type="button"
           onClick={() => refetch()}
-          className="mt-2 rounded-md border border-border/60 px-2 py-1 text-xs hover:bg-muted"
+          className="mt-2 rounded-md border border-border px-2 py-1 text-xs hover:bg-foreground/[0.06]"
         >
           Reload
         </button>
@@ -88,7 +88,7 @@ export function WatchlistRail({ className }: { className?: string }) {
       />
 
       {data.entries.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-border/60 p-4 text-center text-xs text-muted-foreground">
+        <p className="rounded-lg border border-dashed border-border p-4 text-center text-xs text-muted-foreground">
           Watchlist đang trống. Thêm một mã để hệ thống dựng Analysis mỗi phiên.
         </p>
       ) : (

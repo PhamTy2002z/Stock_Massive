@@ -34,7 +34,7 @@ export function MarketIndices({ className }: MarketIndicesProps) {
     <section className={cn("min-w-0", className)}>
       <SectionHeader title="Chỉ số thị trường">
         {updated && (
-          <span className="text-[13px] leading-[1.43] tracking-[-0.224px] text-muted-foreground">
+          <span className="text-meta text-muted-foreground">
             {updated.replace(", ", " · ")}
           </span>
         )}
@@ -61,8 +61,8 @@ interface MarketIndicesContentProps {
 function MarketIndicesContent({ indices }: MarketIndicesContentProps) {
   if (!indices || indices.length === 0) {
     return (
-      <div className="rounded-[18px] border border-border bg-card p-6 text-center">
-        <p className="text-[15px] leading-[1.47] tracking-[-0.374px] text-muted-foreground">
+      <div className="rounded-card border border-border bg-card p-6 text-center">
+        <p className="text-[0.95rem] text-muted-foreground">
           Không có dữ liệu chỉ số
         </p>
       </div>

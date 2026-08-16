@@ -5,8 +5,8 @@ import AuthFormFallback from "../auth-form-fallback"
 import LoginForm from "./login-form"
 
 export const metadata: Metadata = {
-  title: "Đăng nhập - Stock Massive",
-  description: "Đăng nhập vào tài khoản Stock Massive",
+  title: "Đăng nhập · VisgniteAI",
+  description: "Đăng nhập vào tài khoản VisgniteAI",
 }
 
 export default function LoginPage() {

@@ -14,17 +14,17 @@ const DIMENSION_CONFIG: Record<string, { label: string }> = {
 }
 
 function getScoreColor(score: number): string {
-  if (score >= 70) return "text-green-500"
-  if (score >= 50) return "text-yellow-500"
-  return "text-red-500"
+  if (score >= 70) return "text-positive"
+  if (score >= 50) return "text-caution"
+  return "text-negative"
 }
 
 function getProgressColor(score: number): string {
   // The top band matches the green its label already uses; it read as white
   // only because the bar was drawn for the old dark-only build.
   if (score >= 70) return "bg-positive"
-  if (score >= 50) return "bg-yellow-500"
-  return "bg-red-500"
+  if (score >= 50) return "bg-caution"
+  return "bg-negative"
 }
 
 export function ScoreBreakdown({ dimensions }: ScoreBreakdownProps) {
