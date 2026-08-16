@@ -1,81 +1,21 @@
 import { Suspense } from "react"
-import { dehydrate, HydrationBoundary, QueryClient } from "@tanstack/react-query"
-import { DashboardLayoutClient } from "@/components/layout/dashboard-layout-client"
-import {
-  MarketIndices,
-  MarketIndicesSkeleton,
-  SectorPerformanceSection,
-  SectorHeatGrid,
-  FundCertificates,
-  VN30OverviewTable,
-  VN30OverviewTableSkeleton,
-} from "@/components/dashboard"
-import {
-  fetchMarketIndicesServer,
-  fetchSectorPerformanceServer,
-} from "@/lib/api-server"
-import { queryKeys } from "@/lib/query-keys"
 
-async function prefetchData() {
-  const queryClient = new QueryClient()
+import { AppShell } from "@/components/shell/app-shell"
 
-  await Promise.all([
-    queryClient.prefetchQuery({
-      queryKey: queryKeys.marketIndices,
-      queryFn: fetchMarketIndicesServer,
-    }),
-    queryClient.prefetchQuery({
-      queryKey: queryKeys.sectorPerformance,
-      queryFn: fetchSectorPerformanceServer,
-    }),
-  ])
+/**
+ * The product, at one address.
+ *
+ * The surface reads the signed-in account's Watchlist and Threads, so there is
+ * nothing to prerender: a build-time snapshot would ship somebody else's.
+ */
+export const dynamic = "force-dynamic"
 
-  return dehydrate(queryClient)
-}
-
-function DashboardSkeleton() {
+export default function HomePage() {
   return (
-    <div className="flex flex-col gap-8">
-      <MarketIndicesSkeleton />
-      <VN30OverviewTableSkeleton />
-    </div>
-  )
-}
-
-export default async function Home() {
-  const dehydratedState = await prefetchData()
-
-  return (
-    <HydrationBoundary state={dehydratedState}>
-      <Suspense fallback={<DashboardLayoutClient><DashboardSkeleton /></DashboardLayoutClient>}>
-        <DashboardLayoutClient>
-          <div className="flex min-w-0 flex-col gap-8">
-            <MarketIndices />
-
-            <VN30OverviewTable />
-
-            {/* Every sector at once, before the two ranked lists narrow it to
-                the extremes: the wall answers how broad the session was, and
-                the cards under it answer who led and who dragged. */}
-            <SectorHeatGrid />
-
-            {/* Sector extremes and funds share one row: three readings of the
-                same session, each answering a different question. */}
-            <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-3.5">
-              <SectorPerformanceSection />
-              <FundCertificates />
-            </div>
-
-            <footer className="flex flex-wrap items-center justify-between gap-4 border-t border-border pt-4 text-xs leading-[1.6] tracking-[-0.12px] text-muted-foreground">
-              <span>
-                Dữ liệu chỉ mang tính tham khảo, không phải khuyến nghị đầu tư. Nguồn: HOSE,
-                HNX, UPCoM.
-              </span>
-              <span>© {new Date().getFullYear()} VisgniteAI</span>
-            </footer>
-          </div>
-        </DashboardLayoutClient>
-      </Suspense>
-    </HydrationBoundary>
+    // `useSearchParams` reads the `?symbol=` deep link, and Next requires a
+    // boundary around any component that does.
+    <Suspense>
+      <AppShell />
+    </Suspense>
   )
 }

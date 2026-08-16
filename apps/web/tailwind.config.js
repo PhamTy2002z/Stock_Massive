@@ -7,6 +7,18 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: {
+        // The reference's own stack, in its own order. Inter first, then the
+        // two faces a machine without it is most likely to have, and only then
+        // the platform default — falling straight through to `system-ui` would
+        // put the product on San Francisco or Segoe, which sit at a different
+        // width and reflow every label in the sidebar.
+        sans: [
+          'var(--font-inter)',
+          'Helvetica Neue',
+          'Arial',
+          'system-ui',
+          'sans-serif',
+        ],
         mono: ['var(--font-jetbrains-mono)', 'ui-monospace', 'monospace'],
         // Reserved for the greeting that opens a conversation, and nothing
         // else — see the note in app/layout.tsx.
