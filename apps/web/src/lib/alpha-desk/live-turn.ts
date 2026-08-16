@@ -80,6 +80,19 @@ export interface LiveTurn {
    * snapshot; nothing else clears it, because nothing else can.
    */
   needsResync: boolean
+  /**
+   * Whether a subscriber may open a stream on this id yet.
+   *
+   * False between generating the id and the create coming back. The id is the
+   * client's — it is the idempotency key, so it exists before the request — and
+   * subscribing to it early gets a `404`, which `EventSource` treats as failing
+   * the connection rather than as something to retry. The tab would then sit on
+   * a stream that will never speak, for a Turn that is running perfectly well.
+   *
+   * True from the start when reattaching: that Turn already exists, and waiting
+   * for an admission nobody is going to send would strand the reader.
+   */
+  subscribable: boolean
 }
 
 export const IDLE: LiveTurn = {
@@ -94,10 +107,14 @@ export const IDLE: LiveTurn = {
   messageId: null,
   appendedIndex: null,
   needsResync: false,
+  subscribable: false,
 }
 
 export type LiveTurnAction =
-  | { type: "start"; turnId: string; threadId: string }
+  // `subscribable` is true only for a reattach, where the Turn already exists.
+  | { type: "start"; turnId: string; threadId: string; subscribable?: boolean }
+  // The create came back: this id now names a Turn the backend will serve.
+  | { type: "admitted" }
   | { type: "event"; event: TurnEvent }
   | { type: "cancelling" }
   | { type: "resynced" }
@@ -135,7 +152,11 @@ export function liveTurnReducer(state: LiveTurn, action: LiveTurnAction): LiveTu
         turnId: action.turnId,
         threadId: action.threadId,
         phase: "starting",
+        subscribable: action.subscribable ?? false,
       }
+
+    case "admitted":
+      return state.turnId === null ? state : { ...state, subscribable: true }
 
     case "cancelling":
       // Immediate in the UI, and it keeps every block already received. The

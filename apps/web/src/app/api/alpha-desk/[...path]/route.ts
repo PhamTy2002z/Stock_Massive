@@ -79,6 +79,49 @@ interface RouteContext {
 }
 
 /**
+ * The origins this deployment answers on, as the operator names them.
+ *
+ * Comma-separated, and empty in development, where the address the browser used
+ * is derived below instead.
+ */
+const configuredOrigins = (): string[] =>
+  (process.env.APP_ORIGIN ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+
+/**
+ * The address the browser actually asked for, as this process can see it.
+ *
+ * **Not `nextUrl.origin`.** Next builds that from the address the server is
+ * bound to, not from the request: a Next process listening on `0.0.0.0:3000`
+ * behind a reverse proxy reports `http://localhost:3000` for a request the
+ * browser made to `https://app.example.com`, so an `Origin` check against it
+ * refuses every write the moment a proxy is put in front — which is precisely
+ * the deployment ADR-0013 asks for. That failure is invisible to a unit test on
+ * either side of the proxy and is why the end-to-end acceptance exists.
+ *
+ * `X-Forwarded-Host` and `Host` are safe to compare an `Origin` against because
+ * neither is attacker-controlled *for this app*: a cross-site request from
+ * `evil.example` still carries this app's host — that is where it was sent —
+ * while its `Origin` says `evil.example`, so the two disagree and the request
+ * is refused. A forged `Host` reaches an app that answers for that host and
+ * proves nothing about the session cookie.
+ */
+function requestedOrigin(request: NextRequest): string | null {
+  const host = (request.headers.get("x-forwarded-host") ?? request.headers.get("host"))
+    ?.split(",")[0]
+    ?.trim()
+  // No host header at all is not a browser. Falling back to the bound address
+  // keeps the check meaningful for anything speaking to this process directly.
+  if (!host) return request.nextUrl.origin
+  const proto =
+    request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() ??
+    request.nextUrl.protocol.replace(":", "")
+  return `${proto}://${host}`
+}
+
+/**
  * Whether a state-changing request came from this app.
  *
  * The session cookie is `SameSite=Lax`, which stops a cross-site `POST` from
@@ -89,13 +132,19 @@ interface RouteContext {
  * write is refused rather than trusted.
  */
 function sameOrigin(request: NextRequest): boolean {
-  const origin = request.headers.get("origin")
-  if (!origin) return false
+  const header = request.headers.get("origin")
+  if (!header) return false
+  let origin: string
   try {
-    return new URL(origin).origin === request.nextUrl.origin
+    origin = new URL(header).origin
   } catch {
     return false
   }
+
+  const allowed = configuredOrigins()
+  if (allowed.length > 0) return allowed.includes(origin)
+
+  return origin === requestedOrigin(request)
 }
 
 async function forward(request: NextRequest, path: string[]): Promise<NextResponse> {

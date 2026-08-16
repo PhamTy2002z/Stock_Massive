@@ -1,6 +1,6 @@
 "use client"
 
-import { ChevronDown } from "lucide-react"
+import { ChevronDown, FileText } from "lucide-react"
 
 import {
   Collapsible,
@@ -16,6 +16,13 @@ export interface DockSymbol {
   state: AnalysisState
   verdict: string | null
   unread: boolean
+  /**
+   * The session of the newest Analysis this symbol has, or null for one that
+   * has never been analysed. A `failed` symbol still has an older Analysis and
+   * still opens it — an empty cell tells the user there is nothing to see when
+   * a month of history exists (`docs/specs/0002` §3).
+   */
+  latestTradingDay: string | null
 }
 
 /**
@@ -46,6 +53,7 @@ export function SymbolDock({
   symbols,
   activeSymbol,
   onSelect,
+  onOpenAnalysis,
   tradingDay,
   count,
   cap,
@@ -55,6 +63,8 @@ export function SymbolDock({
   symbols: DockSymbol[]
   activeSymbol: string | null
   onSelect: (symbol: string | null) => void
+  /** Opening one renders it inline in the transcript and advances its badge. */
+  onOpenAnalysis: (symbol: string, tradingDay: string) => void
   tradingDay: string | null
   count: number
   cap: number
@@ -120,6 +130,11 @@ export function SymbolDock({
                 onSelect={() =>
                   onSelect(entry.symbol === activeSymbol ? null : entry.symbol)
                 }
+                onOpenAnalysis={
+                  entry.latestTradingDay === null
+                    ? undefined
+                    : () => onOpenAnalysis(entry.symbol, entry.latestTradingDay!)
+                }
               />
             ))}
           </ul>
@@ -142,6 +157,16 @@ export function SymbolDock({
   )
 }
 
+/**
+ * One chip, and the two different things a user can do with a symbol.
+ *
+ * Selecting changes the lens; opening the Analysis puts the artifact in the
+ * transcript. They are separate controls rather than one because they mean
+ * different things — the lens organises what the next answer is read against,
+ * and opening an Analysis is the act that advances that symbol's badge. A
+ * single control doing both would clear a badge every time someone changed the
+ * subject.
+ */
 function SymbolChip({
   symbol,
   isActive,
@@ -149,6 +174,7 @@ function SymbolChip({
   unread,
   state,
   onSelect,
+  onOpenAnalysis,
 }: {
   symbol: string
   isActive: boolean
@@ -156,19 +182,23 @@ function SymbolChip({
   unread?: boolean
   state?: AnalysisState
   onSelect: () => void
+  /** Absent for a symbol with no Analysis at all: there is nothing to open. */
+  onOpenAnalysis?: () => void
 }) {
   return (
-    <li>
+    <li
+      className={cn(
+        "inline-flex items-center whitespace-nowrap rounded-md border text-xs",
+        isActive
+          ? "border-foreground/40 bg-muted font-medium"
+          : "border-border/60 text-muted-foreground",
+      )}
+    >
       <button
         type="button"
         onClick={onSelect}
         aria-pressed={isActive}
-        className={cn(
-          "inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border px-2 py-1 text-xs",
-          isActive
-            ? "border-foreground/40 bg-muted font-medium"
-            : "border-border/60 text-muted-foreground hover:bg-muted",
-        )}
+        className="inline-flex items-center gap-1.5 rounded-l-md px-2 py-1 hover:bg-muted"
       >
         {/* The rail's own colour and the rail's own word for it, so a symbol
             never reads amber here and red three lines below. */}
@@ -188,6 +218,18 @@ function SymbolChip({
           />
         )}
       </button>
+
+      {onOpenAnalysis && (
+        <button
+          type="button"
+          onClick={onOpenAnalysis}
+          aria-label={`Open ${symbol} Analysis`}
+          title={`Open ${symbol} Analysis`}
+          className="rounded-r-md border-l border-border/60 px-1.5 py-1 hover:bg-muted"
+        >
+          <FileText className="h-3 w-3" />
+        </button>
+      )}
     </li>
   )
 }

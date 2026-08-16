@@ -19,6 +19,7 @@ Nguồn sự thật cho lệnh: `package.json` ở root, `apps/api/Makefile`, `a
 - Áp migration trong container bằng `pnpm db:migrate`. Tạo revision thì chạy `alembic revision --autogenerate -m "..."` tại `apps/api` với DB đang lên.
 - vnstock là điểm nghẽn quota: 20 req/phút khi thiếu `VNSTOCK_API_KEY`, 60 khi có. Các job nặng (`SECTOR_HISTORICAL_ENABLED`, `BACKFILL_ENABLED`) mặc định tắt vì lý do này.
 - Chạy nhiều worktree song song: đặt `API_PORT`/`WEB_PORT` khác nhau, và sửa `CORS_ORIGINS` cho khớp origin mới của web.
+- `pnpm test:e2e` tại `apps/web` là cổng nghiệm thu streaming của Alpha Desk: Playwright tự dựng FastAPI thật (`apps/api/tests/e2e/server.py`) và bản build production của Next, rồi lái bằng Chromium. Cần DB đã migrate và `pnpm exec playwright install chromium`. Chi tiết ở `docs/streaming-topology.md`.
 
 ## Quy tắc bắt buộc
 
