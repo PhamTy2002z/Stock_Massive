@@ -254,16 +254,11 @@ async def read_thread(
     )
 
 
-@router.delete("/threads/{thread_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_thread(
-    thread_id: uuid.UUID,
-    current_user: CurrentUser,
-    desk: Desk,
-) -> Response:
-    """Delete a Thread, its messages, its traces and its Turns. Not its Analyses."""
-    if not await desk.store.delete_thread(current_user.id, thread_id):
-        raise HTTPException(status_code=404, detail="Thread not found")
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+# Deleting a Thread is deliberately not here. `AgentPersistence.delete_thread`
+# exists and cascades to messages, traces and Turns (`docs/specs/0003` §10.6),
+# but neither #85 nor #86 asks for the route, nothing in `apps/web` calls one,
+# and `threads` is on the proxy's allowlist — so mounting it would put a
+# destructive verb on the wire ahead of the surface that means to offer it.
 
 
 # -- creating a Turn -------------------------------------------------------
@@ -311,7 +306,7 @@ async def create_turn(
 
     # Asked once the Thread is known to exist and to be this user's, so a
     # stranger's id cannot be used to probe how busy the service is.
-    desk.admission.admit(user_id=current_user.id)
+    await desk.admission.admit(user_id=current_user.id)
 
     try:
         handle = await desk.turns.create(
@@ -366,10 +361,19 @@ async def turn_events(
     is no window in which an event is in neither half — registration and
     snapshot capture are atomic with respect to the publisher.
     """
-    desk.subscriptions.check(user_id=user_id, turn_id=turn_id)
+    desk.subscriptions.check_user(user_id)
     subscriber = await desk.turns.subscribe(user_id, turn_id)
     if subscriber is None:
         raise HTTPException(status_code=404, detail="Turn not found")
+    try:
+        # Counted here rather than above, because a window keyed by Turn may
+        # only be spent by the Turn's owner. The subscriber is already
+        # registered with the publisher by this point, so a refusal closes it
+        # instead of leaving a queue nobody drains.
+        desk.subscriptions.check_turn(turn_id)
+    except Exception:
+        subscriber.close()
+        raise
 
     last_event_id = request.headers.get("Last-Event-ID")
     if last_event_id:

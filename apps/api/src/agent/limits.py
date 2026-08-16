@@ -71,22 +71,34 @@ class SubscriptionLimiter:
             settings.alpha_turn_subscribe_window if window is None else window
         )
 
-    def check(self, *, user_id: int, turn_id: uuid.UUID | str) -> None:
-        """Count this attempt against both windows, or refuse it.
+    def check_user(self, user_id: int) -> None:
+        """Count this attempt against the caller's own window, or refuse it.
 
-        Both are counted even when the first refuses, so a client hammering one
-        Turn is still visible in its own user window rather than hiding behind
-        the narrower limit.
+        Asked first, and before any database work: it is the only window a
+        caller can be held to before anything is known about what they asked
+        for, so it is what bounds the cost of an unknown Turn id.
         """
         redis = self._redis()
         if redis is None:
             return
-        user_result = self._limit(redis, "user", str(user_id), self._per_user)
-        turn_result = self._limit(redis, "turn", str(turn_id), self._per_turn)
-        if user_result is False:
+        if self._limit(redis, "user", str(user_id), self._per_user) is False:
             logger.warning("Subscription limit reached for user %s", user_id)
             raise SubscriptionThrottled("user")
-        if turn_result is False:
+
+    def check_turn(self, turn_id: uuid.UUID | str) -> None:
+        """Count this attempt against the Turn's window, or refuse it.
+
+        **Asked only once the Turn is known to be the caller's.** The window is
+        keyed by Turn rather than by user, so counting it before ownership was
+        resolved would let any signed-in account spend a stranger's budget by
+        naming their Turn id — the same "one connection taking the surface away
+        from the rest" this module exists to prevent, reintroduced through the
+        limiter itself.
+        """
+        redis = self._redis()
+        if redis is None:
+            return
+        if self._limit(redis, "turn", str(turn_id), self._per_turn) is False:
             logger.warning("Subscription limit reached for Turn %s", turn_id)
             raise SubscriptionThrottled("turn")
 
