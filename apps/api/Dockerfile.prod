@@ -57,5 +57,14 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # single concurrent connection — a second worker would disconnect the first mid-cycle.
 # Splitting the collector into its own container is what unlocks more workers
 # (docs/adr/0001).
+#
+# `--timeout-graceful-shutdown` is load-bearing for Alpha Desk. Uvicorn waits for
+# open connections before running the ASGI lifespan's shutdown, and an SSE
+# subscriber holds its connection for the length of the Turn — so with no timeout
+# the 30 seconds of Turn checkpointing (docs/adr/0013) would not begin until the
+# ten-minute deadline expired, by which point the deploy has already killed the
+# container. Ten seconds is long enough for ordinary requests to finish and short
+# enough that the checkpoint window fits inside the container's stop grace
+# (docs/streaming-topology.md).
 ENTRYPOINT ["./entrypoint.sh"]
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--timeout-graceful-shutdown", "10"]
