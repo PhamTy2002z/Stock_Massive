@@ -7,7 +7,7 @@ import { SettingsView } from "./_components/settings-view"
 export const dynamic = "force-dynamic"
 
 export const metadata: Metadata = {
-  title: "Cài đặt · Stock Massive",
+  title: "Cài đặt · VisgniteAI",
 }
 
 export default function SettingsPage() {

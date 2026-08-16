@@ -2,159 +2,157 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ---------------------------------------------------------------------------
+   VisgniteAI — the design system this app is built from.
+
+   The reference is a night surface. Not a dark *mode* bolted onto a light
+   design: the ground is #0c0c0c, the panels are lifted off it by a few percent
+   of luminance rather than by a rule, and the only chromatic thing that is not
+   data is a single teal.
+
+     #0c0c0c  ground        — the page, the composer's gradient, the scrollbar
+     #0f0f0e  panel         — sidebar and the right-hand inspector
+     #111110  raised        — cards on the page
+     #131312  sunken        — cards nested inside a panel
+     #1a1a19  menu          — popovers floating above everything
+     #1c1c1c  bubble        — what the user said
+     #78d0cd  teal          — the filled action, and nothing else
+     #fafafa → #6d6d6d      — the ink ladder, six steps, never pure white on a
+                              chart and never pure black anywhere
+
+   Two rules hold across the whole file.
+
+   The teal is rationed. One filled control per view, always ink-on-teal rather
+   than white-on-teal — the button reads as a lit surface with dark type, which
+   is the idiosyncratic part of this brand. It never carries body text: at
+   2.9:1 on the ground it fails contrast long before it fails taste.
+
+   Green and red are data, not brand. A board has to say up from down, and the
+   up colour (#4ec97a) is deliberately not the teal so a rising number never
+   reads as a control and a control never reads as a rising number. --------- */
+
 @layer base {
-  /* Light theme. The canvas is white and stays white — no gradient, no tint,
-     no atmospheric band. Hierarchy is a grey ladder, and the only chromatic
-     event is the emerald:
-
-       #ffffff canvas       — cards, nav, sidebar
-       #fafafa canvas-soft  — the page under them
-       #ededed hairline-cool / #dfdfdf hairline — fine chrome
-       #707070 ink-mute     — secondary copy
-       #171717 ink          — body text, never pure black
-       #3ecf8e emerald      — the filled action, and nothing else
-
-     Emerald is rationed to roughly one filled control per view, and it is
-     always set with ink on top rather than white: the button reads as a lit
-     surface with dark type, which is the idiosyncratic part of this brand. */
+  /* Night is the designed surface, so it is what `:root` carries. The light
+     theme below is the same system re-grounded, not a different design. */
   :root {
-    --background: 0 0% 98%;
-    --foreground: 0 0% 9%;
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 9%;
-    --primary: 153 60% 53%;
-    /* Ink on emerald. Never white — see the note above. */
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 96%;
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96%;
-    --muted-foreground: 0 0% 44%;
-    --accent: 0 0% 93%;
-    --accent-foreground: 0 0% 9%;
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 87%;
-    --input: 0 0% 87%;
-    --ring: 153 60% 53%;
-    /* Charts are the one place the reference allows the rare accents —
-       purple #6b01c2, yellow #ffdb13, violet #644fc1 — alongside the emerald.
-       They are chart points here and nowhere else. */
-    --chart-1: 153 60% 53%;
-    --chart-2: 355 73% 47%;
-    --chart-3: 273 99% 38%;
-    --chart-4: 51 100% 54%;
-    --chart-5: 251 48% 53%;
+    /* -- the surface ladder ------------------------------------------------ */
+    --surface-ground: 0 0% 5%;
+    --surface-panel: 60 3% 6%;
+    --surface-raised: 60 3% 7%;
+    --surface-sunken: 60 4% 8%;
+    --surface-menu: 60 2% 10%;
+    --surface-bubble: 0 0% 11%;
+
+    /* -- the ink ladder ---------------------------------------------------- */
+    --ink-1: 0 0% 98%;
+    --ink-2: 0 0% 92%;
+    --ink-3: 0 0% 77%;
+    --ink-4: 0 0% 62%;
+    --ink-5: 0 0% 54%;
+    --ink-6: 0 0% 43%;
+
+    /* -- shadcn semantics, mapped onto the ladders ------------------------- */
+    --background: var(--surface-ground);
+    --foreground: var(--ink-1);
+    --card: var(--surface-raised);
+    --card-foreground: var(--ink-2);
+    --popover: var(--surface-menu);
+    --popover-foreground: var(--ink-1);
+    /* #78d0cd. Ink on teal — never white, see the note above. */
+    --primary: 178 48% 64%;
+    --primary-foreground: 0 0% 5%;
+    --secondary: var(--surface-bubble);
+    --secondary-foreground: var(--ink-1);
+    --muted: var(--surface-sunken);
+    --muted-foreground: var(--ink-6);
+    --accent: 0 0% 14%;
+    --accent-foreground: var(--ink-1);
+    --destructive: 2 67% 63%;
+    --destructive-foreground: 0 0% 5%;
+    /* A hairline on this ground is a lifted white at ~7% alpha; flattened to an
+       opaque value so it composites identically over every surface step. */
+    --border: 0 0% 13%;
+    --input: 0 0% 17%;
+    --ring: 178 48% 64%;
+    --hairline: 0 0% 11%;
     --radius: 0.625rem;
-    --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 0 0% 9%;
-    --sidebar-primary: 153 60% 53%;
-    --sidebar-primary-foreground: 0 0% 9%;
-    --sidebar-accent: 0 0% 93%;
-    --sidebar-accent-foreground: 0 0% 9%;
-    --sidebar-border: 0 0% 87%;
-    --sidebar-ring: 153 60% 53%;
 
-    /* Market semantics. Green and red are data, not brand: a board has to say
-       up from down. They are deliberately not the brand emerald — the up
-       colour is a deeper, denser green so a rising number never reads as a
-       button and a button never reads as a rising number. */
-    --positive: 140 85% 26%;
-    --negative: 355 73% 47%;
-    /* Links and icon actions are ink, underlined, the way this brand writes
-       them. Emerald cannot carry text — at 2.7:1 on white it fails contrast
-       long before it fails taste — so it is reserved for filled surfaces. */
-    --interactive: 0 0% 9%;
-    --interactive-strong: 153 60% 53%;
-    --hairline: 0 0% 93%;
+    /* -- chrome ------------------------------------------------------------ */
+    --nav: var(--surface-panel);
+    --nav-foreground: var(--ink-2);
+    --sidebar-background: var(--surface-panel);
+    --sidebar-foreground: var(--ink-3);
+    --sidebar-primary: 178 48% 64%;
+    --sidebar-primary-foreground: 0 0% 5%;
+    --sidebar-accent: 0 0% 14%;
+    --sidebar-accent-foreground: var(--ink-1);
+    --sidebar-border: 0 0% 12%;
+    --sidebar-ring: 178 48% 64%;
 
-    /* The top bar is its own surface rather than a card, so the two themes can
-       disagree about it. */
-    --nav: 0 0% 100%;
-    --nav-foreground: 0 0% 9%;
+    /* -- market semantics -------------------------------------------------- */
+    /* #4ec97a / #e0645f. Data, not brand. */
+    --positive: 142 53% 55%;
+    --negative: 2 67% 63%;
+    /* The Vietnamese board convention: ceiling violet #b18cf0, reference yellow
+       #e8c454, floor cyan #5fc9d6. Tokens rather than inline hexes because all
+       three are tuned for a near-black board and go unreadable on a white one. */
+    --ceiling: 262 77% 75%;
+    --reference: 45 76% 62%;
+    --floor: 187 59% 61%;
+    --caution: 45 76% 62%;
 
-    /* The Vietnamese board convention — ceiling violet, reference yellow, floor
-       cyan — plus the amber that flags a stale figure. These were inline hexes
-       in five components; they are tokens now because all four are dark ink
-       chosen for a white board and go unreadable on a near-black one. */
-    --ceiling: 273 47% 46%;
-    --reference: 45 100% 24%;
-    --floor: 195 91% 26%;
-    --caution: 32 78% 46%;
+    /* Links and icon actions are ink; the teal is reserved for filled surfaces
+       and for the one accent stroke a selected row is allowed. */
+    --interactive: var(--ink-1);
+    --interactive-strong: 178 48% 64%;
+
+    /* -- charts ------------------------------------------------------------ */
+    /* Teal, red, violet, yellow, cyan — the reference's own five. */
+    --chart-1: 178 48% 64%;
+    --chart-2: 2 67% 63%;
+    --chart-3: 262 77% 75%;
+    --chart-4: 45 76% 62%;
+    --chart-5: 187 59% 61%;
   }
 
-  /* Dark theme, built from the same reference's night surfaces — the fill it
-     uses for code blocks, dashboard chrome and the inverted pricing tier:
+  /* Day. The same system re-grounded on paper: the ladders invert, the teal
+     darkens just enough to stay a surface rather than a highlighter, and the
+     market pair deepens so it still separates from the brand. */
+  .light {
+    --surface-ground: 40 10% 97%;
+    --surface-panel: 0 0% 100%;
+    --surface-raised: 0 0% 100%;
+    --surface-sunken: 40 8% 98%;
+    --surface-menu: 0 0% 100%;
+    --surface-bubble: 40 8% 94%;
 
-       #1c1c1c canvas-night      — the page
-       #202020 canvas-night-soft — cards and sidebar, lifted one step
-       #262626                   — menus floating above a card
-       #9a9a9a ink-mute-2        — secondary copy on night
-       #ffffff on-dark           — body text
+    --ink-1: 0 0% 9%;
+    --ink-2: 0 0% 15%;
+    --ink-3: 0 0% 30%;
+    --ink-4: 0 0% 42%;
+    --ink-5: 0 0% 48%;
+    --ink-6: 0 0% 55%;
 
-     The emerald keeps its exact value across both themes; only the ground it
-     sits on changes. It is still ink-on-emerald, still one filled control per
-     view, and still the only chromatic thing that is not data. */
-  .dark {
-    --background: 0 0% 11%;
-    --foreground: 0 0% 100%;
-    --card: 0 0% 13%;
-    --card-foreground: 0 0% 100%;
-    --popover: 0 0% 15%;
-    --popover-foreground: 0 0% 100%;
-    --primary: 153 60% 53%;
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 15%;
-    --secondary-foreground: 0 0% 100%;
-    --muted: 0 0% 15%;
-    --muted-foreground: 0 0% 60%;
-    --accent: 0 0% 18%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 3 100% 61%;
+    --primary: 178 44% 46%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 40 8% 92%;
+    --destructive: 2 72% 48%;
     --destructive-foreground: 0 0% 100%;
-    --border: 0 0% 18%;
-    --input: 0 0% 24%;
-    --ring: 153 60% 53%;
-    --chart-1: 153 60% 53%;
-    --chart-2: 3 100% 61%;
-    --chart-3: 273 65% 74%;
-    --chart-4: 51 100% 62%;
-    --chart-5: 251 60% 70%;
-    /* One step off the page, so the panel rests on it rather than cuts a hole
-       through it. */
-    --sidebar-background: 0 0% 13%;
-    --sidebar-foreground: 0 0% 88%;
-    --sidebar-primary: 153 60% 53%;
-    --sidebar-primary-foreground: 0 0% 9%;
-    --sidebar-accent: 0 0% 18%;
-    --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 0 0% 18%;
-    --sidebar-ring: 153 60% 53%;
+    --border: 40 6% 87%;
+    --input: 40 6% 85%;
+    --hairline: 40 6% 91%;
 
-    /* Data, not brand — and here the separation has to be enforced harder,
-       because a rising number and the brand emerald are both green. The up
-       colour stays denser and yellower than the emerald so the two never read
-       as the same thing. */
-    --positive: 140 62% 45%;
-    --negative: 3 100% 61%;
-    /* White, underlined, the way this brand writes a link. Emerald is kept off
-       text entirely so nothing green in a table can be mistaken for a price
-       that went up. */
-    --interactive: 0 0% 100%;
-    --interactive-strong: 153 60% 53%;
-    --hairline: 0 0% 16%;
+    --nav-foreground: var(--ink-1);
+    --sidebar-foreground: var(--ink-2);
+    --sidebar-accent: 40 8% 93%;
+    --sidebar-border: 40 6% 88%;
 
-    /* One step darker than the page — the bar separates by tone, not by rule. */
-    --nav: 0 0% 9%;
-    --nav-foreground: 0 0% 100%;
-
-    /* Same four hues, lifted to where they clear a black canvas. Hue is held
-       so the board still reads as the board. */
-    --ceiling: 273 65% 74%;
-    --reference: 45 88% 60%;
-    --floor: 195 75% 62%;
-    --caution: 32 85% 62%;
+    --positive: 142 62% 30%;
+    --negative: 2 72% 46%;
+    --ceiling: 262 55% 46%;
+    --reference: 42 92% 30%;
+    --floor: 187 72% 30%;
+    --caution: 32 78% 40%;
   }
 }
 
@@ -162,16 +160,108 @@
   * {
     @apply border-border;
   }
+
   body {
     @apply bg-background text-foreground;
+    /* The reference sets 15px as the body size — every ratio in the design
+       (.9rem nav rows, .86rem controls, .74rem eyebrow labels) is derived from
+       it, so it is stated once here rather than fought per component. */
+    font-size: 15px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* A scrollbar that reads as chrome rather than as a control: a lifted white
+     thumb inset from the track by the ground colour itself. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--foreground) / 0.09);
+    border-radius: 99px;
+    border: 3px solid hsl(var(--background));
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
   }
 }
 
-/* Sidebar animation optimization - prevent flicker */
+/* ---------------------------------------------------------------------------
+   Motion. Six keyframes carry the whole design: content fades, messages and
+   rows rise a few pixels, the thinking dots pulse, a price line draws itself
+   left to right, and a bar grows from its own left edge.
+
+   Every one of them is off under `prefers-reduced-motion` — declared once at
+   the end of the block rather than per animation. --------------------------- */
 @layer utilities {
+  @keyframes vg-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes vg-message-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  @keyframes vg-row-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  @keyframes vg-dot-pulse {
+    0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+    30% { opacity: 1; transform: translateY(-3px); }
+  }
+
+  @keyframes vg-draw-line {
+    from { stroke-dashoffset: 640; }
+    to { stroke-dashoffset: 0; }
+  }
+
+  @keyframes vg-bar-grow {
+    from { transform: scaleX(0); }
+    to { transform: scaleX(1); }
+  }
+
+  .animate-vg-fade-in { animation: vg-fade-in 0.3s ease both; }
+  .animate-vg-message-in { animation: vg-message-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) both; }
+  .animate-vg-row-in { animation: vg-row-in 0.16s ease both; }
+  .animate-vg-dot-pulse { animation: vg-dot-pulse 1.2s ease-in-out infinite; }
+
+  /* Draws the price line left to right, so a chart reads as time passing
+     rather than as a shape that was always there. */
+  .animate-vg-draw-line {
+    stroke-dasharray: 640;
+    animation: vg-draw-line 1.2s cubic-bezier(0.16, 1, 0.3, 1) 0.1s both;
+  }
+
+  .animate-vg-bar-grow {
+    transform-origin: left;
+    animation: vg-bar-grow 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-vg-fade-in,
+    .animate-vg-message-in,
+    .animate-vg-row-in,
+    .animate-vg-dot-pulse,
+    .animate-vg-draw-line,
+    .animate-vg-bar-grow,
+    .price-line-reveal,
+    .stock-detail-enter {
+      animation: none;
+    }
+  }
+}
+
+@layer utilities {
+  /* Sidebar animation optimization - prevent flicker */
   .sidebar-transition {
     transition-property: width, left, right, margin;
-    transition-duration: 300ms;
+    transition-duration: 340ms;
     transition-timing-function: theme('transitionTimingFunction.sidebar');
     will-change: width, left, right, margin;
   }
@@ -203,46 +293,24 @@
 
   /* Stock detail transitions */
   .stock-detail-enter {
-    animation: stockDetailFadeIn 0.3s ease-out;
+    animation: vg-message-in 0.3s ease-out;
   }
 
-  @keyframes stockDetailFadeIn {
-    from {
-      opacity: 0;
-      transform: translateY(8px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  /* Reveals the price line left to right, so the chart reads as time passing
-     rather than appearing all at once. Masked, so the fill travels with it. */
+  /* Reveals the price line left to right, masked so the fill travels with it. */
   .price-line-reveal {
     transform-origin: 0 0;
     animation: priceLineWipe 1.2s cubic-bezier(0.3, 0.7, 0.3, 1) 0.15s both;
   }
 
   @keyframes priceLineWipe {
-    from {
-      transform: scaleX(0);
-    }
-    to {
-      transform: scaleX(1);
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .price-line-reveal {
-      animation: none;
-    }
+    from { transform: scaleX(0); }
+    to { transform: scaleX(1); }
   }
 
   /* Custom thin scrollbar for financial tables */
   .scrollbar-thin {
     scrollbar-width: thin;
-    scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+    scrollbar-color: hsl(var(--foreground) / 0.12) transparent;
   }
 
   .scrollbar-thin::-webkit-scrollbar {
@@ -255,15 +323,14 @@
   }
 
   .scrollbar-thin::-webkit-scrollbar-thumb {
-    background-color: hsl(var(--muted-foreground) / 0.3);
+    background-color: hsl(var(--foreground) / 0.12);
+    border: 0;
     border-radius: 3px;
   }
 
   .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-    background-color: hsl(var(--muted-foreground) / 0.5);
+    background-color: hsl(var(--foreground) / 0.2);
   }
-
-  /* Performance Optimizations - Phase 4 */
 
   /* Global smooth scroll behavior */
   html {
@@ -306,59 +373,45 @@
 /* ---------------------------------------------------------------------------
    The Alpha Desk Widget registry palette (ADR-0012).
 
-   Defined here and nowhere else, and deliberately *not* inherited from the
-   chart layer above. Two defects were measured in the existing charts and a
-   shared layer would have carried both into every Widget: eight charts paint
-   their series pure white, and `--stock-up` / `--stock-down` are referenced in
-   three components without ever being defined. The registry therefore declares
-   its own up/down pair rather than borrowing one.
+   Still declared separately from the chart layer above, and for the same
+   reason: a Widget must never paint a series in the brand teal or in a market
+   green, because a neutral figure drawn in the up colour reads as a rising
+   number and a bar drawn in the brand colour reads as a control.
 
-   Three rules hold for every value below.
-
-   No series is pure white. A white line disappears on a light card, and the
-   fact that the app no longer forces the light theme does not make painting
-   one correct — it makes the failure intermittent, which is worse.
-
-   The series colour is neither the brand emerald nor a market red or green. A
-   neutral figure drawn in the up colour reads as a rising number, and a bar
-   drawn in the brand emerald reads as a control.
-
-   Colour never carries meaning alone. These tokens are the visual half; every
-   Widget also states the same thing in its textual summary and in its data
-   table, so a reader who cannot separate the hues loses nothing. --------- */
+   Colour never carries meaning alone here. These tokens are the visual half;
+   every Widget also states the same thing in its textual summary and in its
+   data table, so a reader who cannot separate the hues loses nothing. ------- */
 @layer base {
   :root {
+    --widget-surface: var(--surface-raised);
+    --widget-ink: 0 0% 94%;
+    --widget-ink-muted: 0 0% 66%;
+    /* The one categorical series colour: a blue that is neither the teal nor
+       the market pair. */
+    --widget-series: 213 84% 72%;
+    --widget-series-muted: 213 26% 40%;
+    --widget-up: 142 53% 55%;
+    --widget-down: 2 67% 63%;
+    --widget-neutral: 0 0% 62%;
+    --widget-track: 0 0% 18%;
+    --widget-grid: 0 0% 16%;
+    --widget-axis: 0 0% 62%;
+    /* The row or point the answer is actually about. */
+    --widget-focus: 178 48% 64%;
+  }
+
+  .light {
     --widget-surface: 0 0% 100%;
     --widget-ink: 0 0% 9%;
     --widget-ink-muted: 0 0% 38%;
-    /* The one categorical series colour: a blue that is not the emerald and
-       not the market pair, at 6.1:1 on the card. */
     --widget-series: 217 72% 40%;
     --widget-series-muted: 217 38% 80%;
-    --widget-up: 140 85% 24%;
-    --widget-down: 355 73% 40%;
+    --widget-up: 142 62% 26%;
+    --widget-down: 2 72% 42%;
     --widget-neutral: 0 0% 42%;
-    --widget-track: 0 0% 90%;
-    --widget-grid: 0 0% 88%;
+    --widget-track: 40 6% 90%;
+    --widget-grid: 40 6% 88%;
     --widget-axis: 0 0% 38%;
-    /* The row or point the answer is actually about. */
-    --widget-focus: 153 60% 30%;
-  }
-
-  .dark {
-    --widget-surface: 0 0% 13%;
-    /* Off pure white on purpose: 94% carries the same legibility and keeps the
-       "no series is #ffffff" rule true of the ink as well as of the marks. */
-    --widget-ink: 0 0% 94%;
-    --widget-ink-muted: 0 0% 66%;
-    --widget-series: 213 84% 72%;
-    --widget-series-muted: 213 26% 40%;
-    --widget-up: 140 62% 52%;
-    --widget-down: 3 90% 66%;
-    --widget-neutral: 0 0% 62%;
-    --widget-track: 0 0% 24%;
-    --widget-grid: 0 0% 22%;
-    --widget-axis: 0 0% 66%;
-    --widget-focus: 153 60% 58%;
+    --widget-focus: 178 44% 34%;
   }
 }
