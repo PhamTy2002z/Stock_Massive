@@ -29,6 +29,7 @@ export function AssistantMessage({
   view,
   messageId,
   flaggedReason = null,
+  flagFailed = false,
   onFlag,
   onUnflag,
   className,
@@ -36,6 +37,7 @@ export function AssistantMessage({
   view: AssistantView
   messageId?: number
   flaggedReason?: FlagReason | null
+  flagFailed?: boolean
   onFlag?: (messageId: number, reason: FlagReason) => void
   onUnflag?: (messageId: number) => void
   className?: string
@@ -54,6 +56,7 @@ export function AssistantMessage({
         <FlagAction
           messageId={messageId}
           reason={flaggedReason}
+          failed={flagFailed}
           onFlag={onFlag}
           onUnflag={onUnflag}
         />

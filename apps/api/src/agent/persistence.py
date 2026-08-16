@@ -355,10 +355,16 @@ class AgentPersistence:
 
         Writing the pair *replaces* whatever was there: a second flag on the
         same message is the reader correcting themselves, and accumulating both
-        would need the table ``docs/adr/0016`` refuses. ``None`` means the
+        would need the table ``docs/adr/0016`` refuses. Pressing the *same*
+        reason again writes nothing at all, stamp included. ``None`` means the
         message is not this user's to flag — the same answer as a message that
         does not exist, because a caller who can tell those apart has been told
         that an id exists.
+
+        The vocabulary is checked here as well as at the request boundary, and
+        both are load bearing: the schema's validator is what makes a bad label
+        a 422 instead of a 500, and this one is what stops any other caller —
+        a script, the ops lane — from writing a reason nothing can count.
 
         **This opens nothing.** No ticket, no notification, no suspension. The
         value is downstream and manual: a flag confirmed as a genuine failure
@@ -392,6 +398,13 @@ class AgentPersistence:
                 return None
             if reason is not None and row.role != "assistant":
                 raise UnflaggableMessage(message_id, row.role)
+            if row.flagged_reason == reason:
+                # Idempotent, and never a second stamp — the same rule
+                # ``_request_turn_cancel`` follows. Re-stamping an unchanged
+                # reason would move that flag out of one date window and into a
+                # later one, and the counts read by date range are exactly what
+                # the ops query reports.
+                return _message_record(row)
             row.flagged_reason = reason
             row.flagged_at = None if reason is None else datetime.now(timezone.utc)
             session.commit()

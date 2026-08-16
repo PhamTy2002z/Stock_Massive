@@ -121,5 +121,20 @@ export function useFlagMessage(threadId: string | null) {
     onSuccess: applyToThread,
   })
 
-  return { flag, unflag }
+  /**
+   * Which message's last write was rejected, if any.
+   *
+   * Read from the mutation's own `variables` rather than tracked in state,
+   * because those *are* the failed call's arguments and a second copy could
+   * disagree with them. One id rather than a set: a rejected write is answered
+   * by pressing again, and the answer to the previous failure is whatever the
+   * next attempt does.
+   */
+  const failedMessageId = flag.isError
+    ? flag.variables.messageId
+    : unflag.isError
+      ? unflag.variables
+      : null
+
+  return { flag, unflag, failedMessageId }
 }

@@ -137,13 +137,15 @@ export const FLAG_REASON_LABELS: Record<FlagReason, string> = {
   other: "Lý do khác",
 }
 
-/** The reasons this surface offers, in the order it offers them. */
-export const FLAG_REASONS: FlagReason[] = [
-  "wrong_figure",
-  "overreach",
-  "wrongly_refused",
-  "other",
-]
+/**
+ * The reasons this surface offers, in the order it offers them.
+ *
+ * Derived from the labels rather than listed a second time: the vocabulary is
+ * already spelled once in `FlagReason` and once by the backend on the column it
+ * validates, and a third in-app copy is a third place the four can disagree.
+ * Key order is insertion order, so the record above is also the running order.
+ */
+export const FLAG_REASONS = Object.keys(FLAG_REASON_LABELS) as FlagReason[]
 
 export const FLAG_COPY = {
   /** The control itself. Deliberately quiet: it sits under an answer, not in it. */
@@ -156,6 +158,13 @@ export const FLAG_COPY = {
   acknowledged:
     "Đã ghi nhận đánh dấu này. Nó được đọc khi rà soát chất lượng trả lời, và không mở yêu cầu xử lý nào.",
   remove: "Bỏ đánh dấu",
-  /** Shown when the write itself failed. The flag is not a Turn and has no retry. */
+  /**
+   * Said when the write itself failed.
+   *
+   * The counterpart to the acknowledgement, and the reason the flag is never
+   * shown optimistically: a mark that appeared and then quietly vanished would
+   * tell the reader their objection was recorded when it was not. Silence here
+   * is the same lie, so a rejected write says so.
+   */
   failed: "Chưa ghi được đánh dấu. Bạn thử lại giúp nhé.",
 } as const

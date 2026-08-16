@@ -144,6 +144,47 @@ describe("once a message is flagged", () => {
   })
 })
 
+describe("when the write is rejected", () => {
+  it("says so, rather than leaving the press unanswered", () => {
+    // The counterpart to the acknowledgement. Silence after a press reads as
+    // "recorded", which is the one thing a rejected write must not say.
+    render(
+      <FlagAction
+        messageId={7}
+        reason={null}
+        failed
+        onFlag={vi.fn()}
+        onUnflag={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/Chưa ghi được đánh dấu/)
+  })
+
+  it("does not also claim the flag was recorded", () => {
+    // A failed write against a message that still carries an older flag must
+    // not show both sentences at once — one of them would be false.
+    render(
+      <FlagAction
+        messageId={7}
+        reason="overreach"
+        failed
+        onFlag={vi.fn()}
+        onUnflag={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByText(/Đã ghi nhận/)).not.toBeInTheDocument()
+  })
+
+  it("still offers the reasons, because pressing again is the whole retry", () => {
+    action({ failed: true })
+    const menu = within(open())
+
+    expect(menu.getAllByRole("menuitemradio")).toHaveLength(4)
+  })
+})
+
 describe("the control itself", () => {
   it("stays out of the way until it is opened", () => {
     action()
