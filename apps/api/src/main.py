@@ -14,6 +14,7 @@ from src.agent.turns import sweep_interrupted_turns
 from src.alpha.analysis_router import router as analysis_router
 from src.alpha.router import router as watchlist_router
 from src.alpha.refusals import AlphaRefusal
+from src.alpha.widget_router import router as widget_router
 from src.auth.router import router as auth_router
 from src.core.config import get_settings
 from src.core.cache import CacheRefreshUnavailable
@@ -157,10 +158,14 @@ app.include_router(watchlist_router, prefix="/api/v1")
 # sits beside the Watchlist rather than under it: it never belonged to one
 # user's list, which is why removing a symbol deletes nothing.
 app.include_router(analysis_router, prefix="/api/v1")
+# A Widget's data is read back through the message that stores its descriptor,
+# so it belongs beside the transcript's own resources: the route answers "what
+# did this answer draw", not "what is FPT worth".
+app.include_router(widget_router, prefix="/api/v1")
 # Threads and Turns, mounted beside the Watchlist for the same reason: they are
 # one user's conversation rather than market data. The browser reaches them at
 # `/api/alpha-desk/threads/...` through the Next proxy, whose allowlist names
-# `threads` and `turns` as the two resources it will carry (docs/adr/0013).
+# `threads` and `turns` as two of the resources it will carry (docs/adr/0013).
 app.include_router(alpha_desk_router, prefix="/api/v1")
 
 
