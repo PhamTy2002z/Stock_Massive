@@ -38,7 +38,7 @@ function Panel({
   className?: string
 }) {
   return (
-    <div className={cn("rounded-[18px] border border-border bg-card p-[18px]", className)}>
+    <div className={cn("rounded-card border border-border bg-card p-[14px]", className)}>
       <div className="pb-1 text-[13px] font-semibold leading-[1.29] tracking-[-0.208px] text-muted-foreground">
         {title}
       </div>
@@ -145,8 +145,8 @@ export function StockProfileSidebar({ stock, className }: StockProfileSidebarPro
 export function StockProfileSidebarSkeleton({ className }: { className?: string }) {
   return (
     <div className={cn("flex flex-col gap-4", className)}>
-      <div className="h-[248px] animate-pulse rounded-[18px] border border-border bg-card" />
-      <div className="h-[196px] animate-pulse rounded-[18px] border border-border bg-card" />
+      <div className="h-[248px] animate-pulse rounded-card border border-border bg-card" />
+      <div className="h-[196px] animate-pulse rounded-card border border-border bg-card" />
     </div>
   )
 }

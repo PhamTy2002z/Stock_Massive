@@ -99,7 +99,7 @@ export function VolumeTabContent({ symbol }: VolumeTabContentProps) {
 
   if (slots.length === 0) {
     return (
-      <div className="min-w-0 rounded-[18px] border border-border bg-card p-[18px]">
+      <div className="min-w-0 rounded-card border border-border bg-card p-[14px]">
         <div className="text-[17px] font-semibold leading-[1.24] tracking-[-0.374px]">
           Chưa có dữ liệu khối lượng
         </div>
@@ -118,7 +118,7 @@ export function VolumeTabContent({ symbol }: VolumeTabContentProps) {
   const baseline = slots.reduce((sum, s) => sum + s.avg_volume, 0) / slots.length
 
   return (
-    <div className="min-w-0 rounded-[18px] border border-border bg-card p-[18px]">
+    <div className="min-w-0 rounded-card border border-border bg-card p-[14px]">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="text-[17px] font-semibold leading-[1.24] tracking-[-0.374px]">

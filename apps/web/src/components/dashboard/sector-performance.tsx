@@ -148,7 +148,7 @@ function SectorPerformanceSkeleton({ className }: { className?: string }) {
         <div
           key={i}
           className={cn(
-            "h-[340px] animate-pulse rounded-[18px] border border-border bg-card",
+            "h-[340px] animate-pulse rounded-card border border-border bg-card",
             className
           )}
         />

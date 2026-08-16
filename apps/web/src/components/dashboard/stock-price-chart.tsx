@@ -82,7 +82,7 @@ function Frame({
   className?: string
 }) {
   return (
-    <div className={cn("min-w-0 rounded-[18px] border border-border bg-card p-[18px]", className)}>
+    <div className={cn("min-w-0 rounded-card border border-border bg-card p-[14px]", className)}>
       <div className="flex flex-wrap items-center justify-between gap-4">
         <span className="text-[13px] font-semibold leading-[1.29] tracking-[-0.208px] text-muted-foreground">
           Diễn biến giá
@@ -285,7 +285,7 @@ export function StockPriceChartSkeleton({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "h-[360px] min-w-0 animate-pulse rounded-[18px] border border-border bg-card",
+        "h-[360px] min-w-0 animate-pulse rounded-card border border-border bg-card",
         className
       )}
     />

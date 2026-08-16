@@ -20,7 +20,7 @@ const shares = (value: number) =>
 
 function Card({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={cn("min-w-0 rounded-[18px] border border-border bg-card p-[18px]", className)}>
+    <div className={cn("min-w-0 rounded-card border border-border bg-card p-[14px]", className)}>
       {children}
     </div>
   )
@@ -90,7 +90,7 @@ export function OrderFlowTabContent({ symbol, className }: OrderFlowTabContentPr
   const { data, isLoading, isError, error, refetch, isFetching } = useIntradayOrderStats(symbol)
 
   if (isLoading) {
-    return <div className="h-[420px] animate-pulse rounded-[18px] border border-border bg-card" />
+    return <div className="h-[420px] animate-pulse rounded-card border border-border bg-card" />
   }
 
   if (isError || !data) {
@@ -134,7 +134,7 @@ export function OrderFlowTabContent({ symbol, className }: OrderFlowTabContentPr
           a dark tile in both themes — that is how it stands apart on a light
           page. On dark it steps up to the floating-surface tone instead, since
           the tile tone is what the page itself is already wearing. */}
-      <div className="min-w-0 rounded-[18px] bg-surface-menu p-[18px] text-foreground">
+      <div className="min-w-0 rounded-card bg-surface-menu p-[14px] text-foreground">
         <div className="flex flex-wrap items-center gap-3">
           <span
             className={cn(

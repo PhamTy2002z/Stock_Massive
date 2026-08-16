@@ -55,7 +55,7 @@ function Card({
   className?: string
 }) {
   return (
-    <div className={cn("min-w-0 rounded-[18px] border border-border bg-card p-[18px]", className)}>
+    <div className={cn("min-w-0 rounded-card border border-border bg-card p-[14px]", className)}>
       <div className="text-[13px] font-semibold leading-[1.29] tracking-[-0.208px] text-muted-foreground">
         {title}
       </div>
@@ -248,7 +248,7 @@ export function StockRangeCardsSkeleton({ className }: { className?: string }) {
       {[0, 1, 2].map((i) => (
         <div
           key={i}
-          className="h-[132px] animate-pulse rounded-[18px] border border-border bg-card"
+          className="h-[132px] animate-pulse rounded-card border border-border bg-card"
         />
       ))}
     </div>

@@ -62,7 +62,7 @@ export function WidgetExpand({ spec, data, onOpenChange }: WidgetExpandProps) {
 
             <Component spec={spec} data={data} expanded />
 
-            <details className="rounded-[18px] border border-border bg-card p-4 text-[13px]">
+            <details className="rounded-card border border-border bg-card p-4 text-[13px]">
               <summary className="cursor-pointer select-none">Xem cách tính</summary>
               <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1">
                 <dt className="text-muted-foreground">Trường dữ liệu</dt>

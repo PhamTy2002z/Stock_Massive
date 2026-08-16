@@ -17,7 +17,7 @@ export function SurfaceCard({
   className?: string
 }) {
   return (
-    <div className={cn("min-w-0 rounded-[18px] border border-border bg-card p-[18px]", className)}>
+    <div className={cn("min-w-0 rounded-card border border-border bg-card p-[14px]", className)}>
       {children}
     </div>
   )
