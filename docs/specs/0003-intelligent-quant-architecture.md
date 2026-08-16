@@ -239,9 +239,13 @@ ceiling.
 - **Eight tool-call rounds** per Turn, counted by round. On the ceiling, one further call
   with `tool_choice="none"` answers from what is there, plus a transcript line stating
   all eight lookup steps were used.
-- **Prompt injects only what no tool can supply**: identity (out of band), the
-  data-defined `trading_day`, market state as a short string, and the active symbol. The
-  Watchlist goes through `get_watchlist()`. **No figure is ever injected.**
+- **Prompt injects only what no tool can supply**: identity (out of band), today's
+  calendar date, the data-defined `trading_day`, market state as a short string, and the
+  active symbol. Today arrives for the same reason market state does — every tool reads
+  the store, and the store's newest session is precisely what "today" has to be told
+  apart from, so without it a question asked on a Sunday reads as one about a session
+  that does not exist (prompt 1.3.0). The Watchlist goes through `get_watchlist()`.
+  **No figure is ever injected.**
 - **Context trimming, in order**: keep recent Turns intact → replace old tool results
   with a one-line *called X with arguments Y* (results are stored whole in
   `agent_tool_call`, so this costs nothing in auditability) → past a threshold, one
@@ -700,6 +704,12 @@ Full contract: ADR-0014. The engineering surface:
 - **Retry**: immediately after readiness, then +5 minutes, then +30 minutes, inside the
   three-attempt ceiling. `auth_unavailable` is route-wide — pause the dispatcher and
   probe every 15 minutes rather than recording the same failure per symbol.
+  `missing_market_snapshot` is a wait rather than an attempt: the Trading Day is
+  market-wide while the Collector fills it symbol by symbol, so a run whose own session
+  has not arrived is deferred +20 minutes with its attempt refunded, and only becomes a
+  recorded failure past the 07:00 ICT availability deadline. Counted as attempts, three
+  would burn inside the hour and lock the pair out of a session whose data was minutes
+  away.
 - **Scheduler state and `next_attempt_at` live in Postgres**, so a restart before the
   deadline resumes rather than relying on the in-memory job status store.
 - **One Redis leaky bucket owns the vnstock account allowance** for every live path: ≥3s

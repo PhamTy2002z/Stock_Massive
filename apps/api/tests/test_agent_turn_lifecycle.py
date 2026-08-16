@@ -74,6 +74,7 @@ def runtime(user_id: int) -> RuntimeContext:
     return RuntimeContext(
         user_id=user_id,
         trading_day=TRADING_DAY,
+        today=TRADING_DAY,
         market_state=MarketState.POST_CLOSE,
         active_symbol="FPT",
     )

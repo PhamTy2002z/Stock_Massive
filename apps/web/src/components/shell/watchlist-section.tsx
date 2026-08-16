@@ -12,6 +12,7 @@ import { useRailMutations, useWatchlistRail } from "@/hooks/use-watchlist-rail"
 import { cn } from "@/lib/utils"
 
 import { useShell } from "./shell-state"
+import { STATE_DOT, stateSentence } from "./analysis-state"
 import { deltaClass, Figure, IconButton, price, QuietLine, signedPercent } from "./primitives"
 
 /**
@@ -26,6 +27,12 @@ import { deltaClass, Figure, IconButton, price, QuietLine, signedPercent } from 
  * Selecting a row sets the conversation's analysis context and nothing else.
  * It opens no Thread, closes none, and writes nothing to the Watchlist — the
  * only writes here are the explicit add and the explicit remove.
+ *
+ * Each row leads with its Analysis state as a coloured dot whose accessible
+ * name is the whole sentence (`./analysis-state`). A dot rather than the
+ * sentence itself because the row is one line and ten sentences would be a
+ * paragraph; the sentence rather than the state's name because two of the
+ * five states differ only in why they are waiting.
  */
 export function WatchlistSection() {
   const { state, dispatch } = useShell()
@@ -55,6 +62,10 @@ export function WatchlistSection() {
   const cap = rail.data?.cap ?? 0
   const count = rail.data?.count ?? 0
   const full = cap > 0 && count >= cap
+  // The session every row's state is about. One value for the whole list: the
+  // rail is answered for one Trading Day, and a per-row reading of it would
+  // let two rows disagree about which session they are describing.
+  const tradingDay = rail.data?.trading_day ?? null
 
   function submit(symbol: string) {
     const code = symbol.trim().toUpperCase()
@@ -143,6 +154,10 @@ export function WatchlistSection() {
           const quote = quotes.get(entry.symbol)
           const changePct = quote?.change_pct ?? null
           const active = state.contextSymbol === entry.symbol
+          // The sentence rather than the state's name: "Pending" beside a grey
+          // dot tells a reader who already sees a grey dot nothing, and the two
+          // waits this distinguishes are both `pending`.
+          const condition = stateSentence(entry.state, tradingDay, entry.failure)
 
           return (
             <div
@@ -159,8 +174,14 @@ export function WatchlistSection() {
                 type="button"
                 onClick={() => dispatch({ type: "context-symbol", symbol: entry.symbol })}
                 aria-pressed={active}
-                className="relative flex min-w-0 flex-1 items-center gap-2 py-1.5 pl-2.5 text-left"
+                className="relative flex min-w-0 flex-1 items-center gap-2 py-1.5 pl-2 text-left"
               >
+                <i
+                  role="img"
+                  aria-label={condition}
+                  title={condition}
+                  className={cn("block size-1.5 shrink-0 rounded-full", STATE_DOT[entry.state])}
+                />
                 <Figure className="w-10 shrink-0 text-control font-medium">
                   {entry.symbol}
                 </Figure>

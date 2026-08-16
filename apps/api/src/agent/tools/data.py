@@ -229,6 +229,11 @@ class StoreBackedTools:
                     ),
                 }
             return {
+                # An Analysis is dated to the session it was produced for, and
+                # that date belongs at the top for the same reason it does on
+                # the price series: a citation into `analysis.payload` finds no
+                # stamp of its own, and an undatable citation is refused.
+                "as_of": row.trading_day.isoformat(),
                 "analysis": {
                     "symbol": row.symbol,
                     "trading_day": row.trading_day.isoformat(),
@@ -286,6 +291,16 @@ class StoreBackedTools:
         self._cache_data_reference(descriptor, rows)
         return {
             "symbol": symbol,
+            # The session every figure below stopped being current at, and the
+            # reason it is a top-level key rather than something a reader infers
+            # from `summary.end`: the Recommendation Validator stamps a stored
+            # citation from `as_of` and refuses one it cannot date
+            # (`grounding.py`, `missing_as_of`). Without it every figure in
+            # `summary` — the last close, the change, the range — is a figure the
+            # model may narrate and the Gate will then block, which ends the
+            # Turn rather than the sentence. `screen_universe` has carried the
+            # same key since it shipped; this tool was the one that did not.
+            "as_of": rows[-1]["date"] if rows else None,
             "summary": {
                 "sessions": len(rows),
                 "start": rows[0]["date"] if rows else None,

@@ -63,11 +63,16 @@ from src.stocks.providers.normalize import VN_TZ
 from src.stocks.trading_day import latest_trading_day
 
 from .analysis_run import (
+    AVAILABILITY_DEADLINE_HOUR_ICT,
     MAX_ATTEMPTS_PER_SESSION,
+    SNAPSHOT_WAIT_MINUTES,
     RunStatus,
+    availability_deadline,
+    defer_run,
     mark_run_failed,
     mark_run_ready,
     published_analysis,
+    still_waiting_for_data,
     write_analysis,
 )
 from .models import Analysis, AnalysisRun, WatchlistEntry
@@ -97,13 +102,13 @@ AUTH_PROBE_MINUTES = 15
 # is the A2 sweep's business rather than this module's.
 CLAIMABLE = (RunStatus.PENDING.value, RunStatus.FAILED.value)
 
-# When an evening's Analyses have to be readable, in ICT, on the morning after
-# the Trading Day they are about. Declared here rather than beside the cohort
-# because this is the module that measures against it: the deadline changes no
-# behaviour at all — nothing is skipped, nothing is relabelled, and a run claimed
-# at 07:01 is produced exactly as one claimed at 23:00 — it only changes what an
-# evening is *called* once it is missed (``docs/adr/0014``, spec 0003 §11).
-AVAILABILITY_DEADLINE_HOUR_ICT = 7
+# The 07:00 ICT deadline is defined in `analysis_run`, because that is the
+# module that has to stop waiting on it, and re-exported through this one's
+# `__all__` because this is the module that measures against it. It changes no
+# behaviour at all — nothing is skipped, nothing is relabelled, and a run
+# claimed at 07:01 is produced exactly as one claimed at 23:00 — it only changes
+# what an evening is *called* once it is missed (``docs/adr/0014``, spec 0003
+# §11).
 
 
 @dataclass
@@ -111,9 +116,15 @@ class DrainReport:
     """What one pass of the dispatcher did, in the terms an operator reads.
 
     Mutable, and it is the pass's running tally rather than a summary built at
-    the end. One type instead of two: a tally and a report holding the same three
+    the end. One type instead of two: a tally and a report holding the same four
     lists would be the same fact in two shapes, and the second would exist only
     to be copied from the first.
+
+    ``deferred`` is the lane that produced nothing and failed nothing: the
+    symbol's session had not been collected yet and the run went back on the
+    queue with its attempt refunded. Counted apart from ``failed`` because an
+    operator reading a hundred failures goes looking for a defect, and a hundred
+    deferrals mean the Collector is simply still working.
 
     ``paused_until`` is set only where the route refused a credential, and it is
     the one outcome that says something about the system rather than about the
@@ -124,11 +135,17 @@ class DrainReport:
     produced: list[str] = field(default_factory=list)
     repaired: list[str] = field(default_factory=list)
     failed: list[str] = field(default_factory=list)
+    deferred: list[str] = field(default_factory=list)
     paused_until: datetime | None = None
 
     @property
     def claimed(self) -> int:
-        return len(self.produced) + len(self.repaired) + len(self.failed)
+        return (
+            len(self.produced)
+            + len(self.repaired)
+            + len(self.failed)
+            + len(self.deferred)
+        )
 
     def as_result(self) -> dict:
         return {
@@ -139,6 +156,7 @@ class DrainReport:
             "produced": list(self.produced),
             "repaired": list(self.repaired),
             "failed": list(self.failed),
+            "deferred": list(self.deferred),
             "paused_until": (
                 None if self.paused_until is None else self.paused_until.isoformat()
             ),
@@ -147,20 +165,6 @@ class DrainReport:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def availability_deadline(trading_day: date) -> datetime:
-    """07:00 ICT on the morning after this Trading Day.
-
-    The morning *after*, because the session it is about closes in the afternoon
-    and the pipeline runs through the evening. A deadline on the Trading Day
-    itself would be a deadline that had already passed before the data existed.
-    """
-    return datetime.combine(
-        trading_day + timedelta(days=1),
-        time(hour=AVAILABILITY_DEADLINE_HOUR_ICT),
-        tzinfo=VN_TZ,
-    )
 
 
 def cohort_report(
@@ -390,10 +394,26 @@ def _produce_claimed(
         # The time is read *after* the generation, not before it: what the
         # backoff is measured from is the moment this attempt gave up, and a
         # generation can take a minute or two of that gap on its own.
+        now = clock()
         if failure.code == "auth_unavailable":
-            return _pause_route(session, run, now=clock(), reason=failure.message)
+            return _pause_route(session, run, now=now, reason=failure.message)
+        if still_waiting_for_data(failure, run.trading_day, now):
+            # The Collector has not reached this symbol for this session yet.
+            # Deferred rather than failed, and the attempt refunded — see
+            # `defer_run`. Only this run waits: unlike a refused credential, a
+            # session nobody collected says something about one symbol, and the
+            # symbol behind it in the queue may well have been collected.
+            defer_run(
+                session,
+                run,
+                failure.code,
+                failure.message,
+                until=now + timedelta(minutes=SNAPSHOT_WAIT_MINUTES),
+            )
+            report.deferred.append(symbol)
+            return None
         mark_run_failed(session, run, failure.code, failure.message)
-        _schedule_retry(session, run, now=clock())
+        _schedule_retry(session, run, now=now)
         report.failed.append(symbol)
         return None
 

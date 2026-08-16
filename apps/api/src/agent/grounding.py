@@ -76,6 +76,19 @@ _EXEMPT_PATTERNS = (
     # An ISO Trading Day. The Gate validates the day it belongs to separately,
     # against the trusted runtime context rather than against a trace.
     re.compile(r"\d{4}-\d{2}-\d{2}"),
+    # The same Trading Day written the way its reader writes one: 14/08, or
+    # 14/08/2026. Exempt for exactly the reason the ISO form is — it is a date,
+    # not a figure — and it has to be, because the Contract answers in
+    # Vietnamese and tells the model to name the session it answered from. Left
+    # out, a date read as the two numbers either side of a slash makes the most
+    # ordinary sentence in the product unattributable, and the Turn ends rather
+    # than the sentence.
+    #
+    # The day and month ranges are checked so that this stays a date pattern.
+    # It still lets a small written fraction — "3/5 phiên" — through the
+    # attribution rule, and that is the accepted cost: figures in this system
+    # are field values, narrated as decimals, and none of them is a fraction.
+    re.compile(r"\b(?:0?[1-9]|[12]\d|3[01])/(?:0?[1-9]|1[0-2])(?:/\d{4})?\b"),
     # An ordered-list marker at the start of a line.
     re.compile(r"(?m)^[ \t]{0,3}\d+[.)](?=\s)"),
 )
@@ -307,6 +320,21 @@ def _numeric(literal: str) -> float | None:
     elif "," in text:
         whole, _, fraction = text.rpartition(",")
         text = f"{whole}.{fraction}" if len(fraction) != 3 else text.replace(",", "")
+    elif "." in text:
+        # The convention this product is read in: a dot groups thousands and a
+        # comma is the decimal separator, so "71.800" is seventy-one thousand
+        # eight hundred and not seventy-one point eight. Judged by the same
+        # three-digit test the comma branch above uses rather than by a locale
+        # setting nothing sets — and it has to be judged, because `float()`
+        # reads the dot as a decimal point and turns a share price into a
+        # `figure_mismatch` the writer cannot see anything wrong with.
+        #
+        # `_decimals` already applies this test to both separators, so a figure
+        # written this way was being compared to zero places and parsed to one:
+        # the two halves of the same comparison disagreed.
+        whole, _, fraction = text.rpartition(".")
+        if whole and len(fraction) == 3:
+            text = text.replace(".", "")
     try:
         return float(text)
     except ValueError:
