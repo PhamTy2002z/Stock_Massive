@@ -111,6 +111,11 @@ collapse on narrow viewports.
   run. Capped at **three attempts per symbol per session**, then locked until the next
   session. The third failure surfaces a human-readable reason — *"no session data for
   FPT"*, *"LLM route did not respond"* — never a stack trace.
+- **Waiting for this symbol's own session data is not an attempt.** The Trading Day is
+  established market-wide while the Collector fills it one symbol at a time, so a symbol
+  it has not reached yet shows as `pending` — *"đang chờ dữ liệu phiên 12/08 về cho mã
+  này"* — and is asked again every 20 minutes with nothing spent, until the 07:00 ICT
+  availability deadline turns it into the failure it has become.
 - **`unsupported`** is one state covering both a real delisting and an operator
   trimming the Universe, because v1 cannot tell them apart and does not pretend to. The
   symbol stays on the rail, its history stays readable, no new Analysis is produced, it

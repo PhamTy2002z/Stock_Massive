@@ -10,6 +10,8 @@ from pathlib import Path
 import pytest
 from sqlalchemy import delete
 
+from src.agent.context import TranscriptToolCall
+from src.agent.grounding import RecommendationValidator, TraceIndex
 from src.agent.tools.data import StoreBackedTools
 from src.alpha.models import Analysis, WatchlistEntry
 from src.auth.models import User
@@ -265,6 +267,47 @@ async def test_price_series_is_summarized_and_data_ref_reconstructs_after_ttl(st
     assert rebuilt == first
     assert len(rebuilt["series"]) == 3
     assert set(rebuilt["series"][0]) > {"date", "close_price"}
+
+
+@pytest.mark.asyncio
+async def test_every_figure_a_data_tool_returns_can_be_cited(stored_world):
+    """A tool result the Gate cannot date is a tool nobody may quote.
+
+    Not an assertion about a key. The Recommendation Validator stamps a stored
+    citation from the result's own ``as_of`` and raises ``missing_as_of`` where
+    there is none, and it raises *before* the block is published — so a summary
+    figure that cannot be dated does not lose its citation, it ends the Turn and
+    leaves the reader whatever sentences carried no numbers. This walks the real
+    result through the real Validator, because the two shipped disagreeing about
+    ``get_price_series`` for as long as both existed.
+    """
+    user_id, tools, _ = stored_world
+    catalog = tools.catalog(trace_writer=lambda _trace: None)
+
+    series = await catalog.dispatch(
+        "get_price_series", {"symbol": MEMBERS[0], "window_days": 10}, context(user_id)
+    )
+    analysis = await catalog.dispatch(
+        "get_analysis", {"symbol": MEMBERS[0]}, context(user_id)
+    )
+
+    close = series["summary"]["last_close_vnd"]
+    block = RecommendationValidator(trading_day=DAY).validate(
+        f"Giá đóng cửa phiên gần nhất là {close} đồng [ev:c1#summary.last_close_vnd].",
+        TraceIndex(
+            [
+                TranscriptToolCall(
+                    call_id="c1",
+                    name="get_price_series",
+                    arguments={"symbol": MEMBERS[0], "window_days": 10},
+                    result=series,
+                )
+            ]
+        ),
+    )
+
+    assert block.citations[0].as_of == series["sample"][-1]["date"]
+    assert analysis["as_of"] == DAY.isoformat()
 
 
 @pytest.mark.asyncio

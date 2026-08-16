@@ -25,6 +25,7 @@ from src.alpha.models import (
     AgentMessage,
     AgentThread,
     Analysis,
+    AnalysisRun,
     WatchlistEntry,
 )
 from src.alpha.watchlist import WATCHLIST_MAX_SYMBOLS
@@ -110,6 +111,14 @@ def account():
         ).scalar_one_or_none()
         if user is not None:
             session.execute(delete(WatchlistEntry).where(WatchlistEntry.user_id == user.id))
+            # An addition opens the on-demand lane, which writes an Analysis Run
+            # keyed by the pair rather than by the user — so deleting the account
+            # leaves it behind. Left behind, it is counted by every later cohort
+            # reading for the same Trading Day, and the dispatcher's deadline
+            # tests then see an evening with a failure nobody in them queued.
+            session.execute(
+                delete(AnalysisRun).where(AnalysisRun.symbol.in_(DECLARED))
+            )
             threads = session.execute(
                 select(AgentThread.id).where(AgentThread.user_id == user.id)
             ).scalars().all()

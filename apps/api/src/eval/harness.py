@@ -49,7 +49,7 @@ import logging
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
@@ -102,6 +102,17 @@ RUNS_PER_CASE = 3
 #: rather than the clock's answer. ``closed`` is the honest one for a frozen
 #: end-of-day store: every session in it has finished.
 FIXTURE_MARKET_STATE = MarketState.CLOSED
+
+#: How far today sits from the fixture's Trading Day. One day, and the clock is
+#: not asked, for the same reason the market state is a constant: a battery that
+#: read the wall clock would score a different exam every morning.
+#:
+#: One rather than zero because zero is the case the product almost never sees.
+#: The Trading Day is a settled session, ``closed`` says it has finished, and the
+#: reader asking about it is therefore asking on a later day — which is exactly
+#: the arrangement that produced "there is no data for today" answers before the
+#: date was injected at all. A fixture pinned to zero would leave that untested.
+FIXTURE_TODAY_OFFSET_DAYS = 1
 
 #: What a smoke route charges. Zero is a fact about the dev lane rather than a
 #: way around the ceiling — the reservation is still written, so the ledger path
@@ -786,6 +797,8 @@ class EvalHarness:
             runtime=RuntimeContext(
                 user_id=self.fixture.user_id,
                 trading_day=self.fixture.trading_day,
+                today=self.fixture.trading_day
+                + timedelta(days=FIXTURE_TODAY_OFFSET_DAYS),
                 market_state=FIXTURE_MARKET_STATE,
                 active_symbol=symbol,
             ),

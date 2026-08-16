@@ -26,7 +26,7 @@ creates on-demand runs.
 
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from enum import Enum
 
 from sqlalchemy import select, update
@@ -34,6 +34,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.core.config import get_settings
+from src.stocks.providers.normalize import VN_TZ
 from src.stocks.shared import validate_symbol
 from src.stocks.universe import build_universe
 
@@ -89,6 +90,35 @@ class RunOrigin(str, Enum):
 # Trading Day: a symbol whose session data never arrived will not start working
 # at midnight, and a fourth attempt would be the same failure re-read.
 MAX_ATTEMPTS_PER_SESSION = 3
+
+# The one production failure that is a statement about the clock rather than
+# about the symbol.
+#
+# A Trading Day is established market-wide, off the newest Snapshot the store
+# holds for *any* symbol, while the Collector fills the day one symbol at a time
+# against a provider quota. So the moment the first symbol of an evening lands,
+# every other symbol in the Universe has a Trading Day it does not yet have data
+# for — and asked to produce, each of them reports exactly this code. Spending
+# an attempt on that is spending it on the Collector not having got there yet:
+# three of them burn inside the hour, the pair locks, and the Analysis is never
+# produced for a session whose data arrived twenty minutes later.
+WAITING_FOR_DATA_CODE = "missing_market_snapshot"
+
+# How long such a run waits before asking again. Long enough that a symbol far
+# down the Collector's ordering is reached between two asks, short enough that
+# an evening still fills. It costs nothing to be wrong in either direction: the
+# stored-session check runs before any generation is reserved, so a deferral
+# never reaches the route and never spends budget.
+SNAPSHOT_WAIT_MINUTES = 20
+
+# When an evening's Analyses have to be readable, in ICT, on the morning after
+# the Trading Day they are about (``docs/adr/0014``, spec 0003 §11).
+#
+# Here rather than beside the dispatcher that reports against it, because this
+# is the module that has to stop waiting: past the deadline, a session that
+# still has not been collected for this symbol is no longer late data, and the
+# run records the failure it has been holding.
+AVAILABILITY_DEADLINE_HOUR_ICT = 7
 
 # Not one of the pipeline's failure codes, and deliberately outside that
 # taxonomy: those describe a production attempt reporting why it could not
@@ -265,6 +295,70 @@ def mark_run_ready(session: Session, run: AnalysisRun) -> None:
     session.commit()
 
 
+def availability_deadline(trading_day: date) -> datetime:
+    """07:00 ICT on the morning after this Trading Day.
+
+    The morning *after*, because the session it is about closes in the afternoon
+    and the pipeline runs through the evening. A deadline on the Trading Day
+    itself would be a deadline that had already passed before the data existed.
+    """
+    return datetime.combine(
+        trading_day + timedelta(days=1),
+        time(hour=AVAILABILITY_DEADLINE_HOUR_ICT),
+        tzinfo=VN_TZ,
+    )
+
+
+def still_waiting_for_data(
+    failure: ProductionFailure,
+    trading_day: date,
+    now: datetime,
+) -> bool:
+    """Whether this failure is the Collector being behind rather than a fault.
+
+    Both halves matter. A session this symbol has no data for is late data right
+    up to the availability deadline and a defect after it: past that hour the
+    evening is reported as it stands, and a run still saying "not yet" would
+    keep a symbol waiting for a session that is over.
+    """
+    return (
+        failure.code == WAITING_FOR_DATA_CODE
+        and now < availability_deadline(trading_day)
+    )
+
+
+def defer_run(
+    session: Session,
+    run: AnalysisRun,
+    code: str,
+    message: str,
+    *,
+    until: datetime,
+) -> None:
+    """Put the run back on the queue at a later time, without spending the attempt.
+
+    **The attempt is refunded, and it has to be.** The ceiling exists to stop a
+    pair being retried into the ground for its own reasons, and a session the
+    Collector has not reached yet is not one of them — counting these would lock
+    the symbol out of the very session whose data is on its way.
+
+    The status is ``pending`` rather than ``failed`` for the same reason
+    ``_pause_route`` uses it: nothing about this symbol failed. But the reason
+    is kept in ``error_code``, unlike there, because a run *is* waiting on
+    something a reader can be told about — ``_state_of`` renders a pending run
+    that carries a reason as pending *and* says why, and a symbol waiting with no
+    account of why is what the rail would otherwise show for twenty minutes.
+    """
+    run.status = RunStatus.PENDING.value
+    run.attempts = max((run.attempts or 1) - 1, 0)
+    run.started_at = None
+    run.finished_at = None
+    run.error_code = code
+    run.error_message = sanitized_reason(message)
+    run.next_attempt_at = until
+    session.commit()
+
+
 def mark_run_failed(
     session: Session,
     run: AnalysisRun,
@@ -353,6 +447,25 @@ def produce_analysis(
     try:
         draft = producer(symbol, trading_day)
     except ProductionFailure as failure:
+        # Read after the attempt, not before it: what the wait is measured from
+        # is the moment this one gave up.
+        now = _now()
+        if still_waiting_for_data(failure, trading_day, now):
+            defer_run(
+                session,
+                run,
+                failure.code,
+                failure.message,
+                until=now + timedelta(minutes=SNAPSHOT_WAIT_MINUTES),
+            )
+            return RunOutcome(
+                status=RunStatus.PENDING,
+                analysis=None,
+                produced=False,
+                attempts=run.attempts,
+                error_code=run.error_code,
+                error_message=run.error_message,
+            )
         mark_run_failed(session, run, failure.code, failure.message)
         return RunOutcome(
             status=RunStatus.FAILED,
