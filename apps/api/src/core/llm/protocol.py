@@ -30,6 +30,71 @@ class Role(str, Enum):
     TOOL = "tool"
 
 
+def _nullable(prop: Mapping[str, Any]) -> dict[str, Any]:
+    """Widen one property so that omitting it is expressible under strict mode.
+
+    Strict mode has no notion of an absent key, so an optional parameter is
+    spelled as one whose value may be null. An enum has to admit null too, or
+    the widened type and the enumerated values contradict each other.
+    """
+
+    widened = dict(prop)
+    declared = widened.get("type")
+    if isinstance(declared, str):
+        if declared == "null":
+            return widened
+        widened["type"] = [declared, "null"]
+    elif isinstance(declared, list):
+        if "null" in declared:
+            return widened
+        widened["type"] = [*declared, "null"]
+    else:
+        return widened
+
+    enum = widened.get("enum")
+    if isinstance(enum, Sequence) and not isinstance(enum, (str, bytes)):
+        if None not in enum:
+            widened["enum"] = [*enum, None]
+    return widened
+
+
+def strict_parameters(schema: Mapping[str, Any]) -> dict[str, Any]:
+    """Restate a parameter schema in the form strict mode actually accepts.
+
+    A route that honours ``strict`` refuses any object whose ``required`` omits
+    a declared property — the whole point of the mode is that the arguments
+    which arrive are the arguments that were described. Writing the tools the
+    other way round (``required`` naming only the mandatory keys) describes the
+    same intent but is rejected before a single token is generated, so the
+    translation happens here, at the one place a schema crosses onto the wire,
+    rather than in twelve tool definitions that would each have to remember it.
+    """
+
+    if not isinstance(schema, Mapping):
+        return schema
+
+    restated = dict(schema)
+    declared = restated.get("type")
+    kinds = declared if isinstance(declared, list) else [declared]
+
+    if "object" in kinds:
+        properties = {
+            name: strict_parameters(value)
+            for name, value in (restated.get("properties") or {}).items()
+        }
+        required = list(restated.get("required") or [])
+        for name in properties:
+            if name not in required:
+                properties[name] = _nullable(properties[name])
+        restated["properties"] = properties
+        restated["required"] = list(properties)
+        restated["additionalProperties"] = False
+    elif "array" in kinds and "items" in restated:
+        restated["items"] = strict_parameters(restated["items"])
+
+    return restated
+
+
 @dataclass(frozen=True)
 class ToolSchema:
     """One tool as the model sees it.
@@ -44,12 +109,15 @@ class ToolSchema:
     strict: bool = True
 
     def as_wire(self) -> dict[str, Any]:
+        parameters = dict(self.parameters)
         return {
             "type": "function",
             "function": {
                 "name": self.name,
                 "description": self.description,
-                "parameters": dict(self.parameters),
+                "parameters": (
+                    strict_parameters(parameters) if self.strict else parameters
+                ),
                 "strict": self.strict,
             },
         }
@@ -230,4 +298,5 @@ __all__ = [
     "ToolCall",
     "ToolSchema",
     "Usage",
+    "strict_parameters",
 ]
