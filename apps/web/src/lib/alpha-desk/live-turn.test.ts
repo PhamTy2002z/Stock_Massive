@@ -373,3 +373,50 @@ describe("an event from another Turn", () => {
     expect(stray.blocks).toEqual([])
   })
 })
+
+describe("when the stream may be opened", () => {
+  /**
+   * The Turn has to exist before anything subscribes to it.
+   *
+   * `EventSource` does not reconnect after a non-200 response — the spec calls
+   * that failing the connection — so a subscribe that raced the create and got
+   * a 404 leaves the surface watching a stream that will never speak. Found by
+   * the end-to-end acceptance (#92), where it happens on every send: the id is
+   * generated locally and the create is a network round trip behind it.
+   */
+  it("is not open on an id the backend has not admitted yet", () => {
+    const state = run(started)
+
+    expect(state.turnId).toBe(TURN)
+    expect(state.subscribable).toBe(false)
+  })
+
+  it("is open once the create came back", () => {
+    const state = run(started, { type: "admitted" })
+
+    expect(state.subscribable).toBe(true)
+  })
+
+  it("is open immediately when reattaching to a Turn that already exists", () => {
+    // A reload does not create anything: the Turn is on the backend already,
+    // and waiting for an admission that will never come would strand the tab.
+    const state = run({
+      type: "start",
+      turnId: TURN,
+      threadId: THREAD,
+      subscribable: true,
+    })
+
+    expect(state.subscribable).toBe(true)
+  })
+
+  it("closes again when the next Turn starts", () => {
+    const state = run(started, { type: "admitted" }, {
+      type: "start",
+      turnId: "another",
+      threadId: THREAD,
+    })
+
+    expect(state.subscribable).toBe(false)
+  })
+})

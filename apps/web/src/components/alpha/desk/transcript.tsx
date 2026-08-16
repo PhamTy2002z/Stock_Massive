@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react"
 
+import { AnalysisCard } from "@/components/alpha/analysis"
 import type { TranscriptEntry } from "@/lib/alpha-desk/transcript"
 import { cn } from "@/lib/utils"
 import { AssistantMessage } from "./assistant-message"
@@ -85,6 +86,16 @@ export function Transcript({
 
             if (entry.kind === "assistant") {
               return <AssistantMessage key={entry.key} view={entry.view} />
+            }
+
+            if (entry.kind === "analysis") {
+              return (
+                <AnalysisCard
+                  key={entry.key}
+                  symbol={entry.symbol}
+                  tradingDay={entry.tradingDay}
+                />
+              )
             }
 
             return <DraftMessage key={entry.key} entry={entry} onRetry={onRetry} />

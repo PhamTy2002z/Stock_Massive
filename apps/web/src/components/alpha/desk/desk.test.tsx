@@ -389,9 +389,16 @@ describe("the dock", () => {
     const onSelect = vi.fn()
     render(
       <SymbolDock
-        symbols={[{ symbol: "FPT", state: "ready", verdict: "hold", unread: false }]}
+        symbols={[{
+          symbol: "FPT",
+          state: "ready",
+          verdict: "hold",
+          unread: false,
+          latestTradingDay: "2026-08-14",
+        }]}
         activeSymbol={null}
         onSelect={onSelect}
+        onOpenAnalysis={vi.fn()}
         tradingDay="2026-08-14"
         count={1}
         cap={10}
@@ -400,17 +407,81 @@ describe("the dock", () => {
       </SymbolDock>,
     )
 
-    fireEvent.click(screen.getByRole("button", { name: /FPT/ }))
+    // The chip, not the control beside it: opening an Analysis is a different
+    // act from changing the lens and must not be reachable by the same click.
+    fireEvent.click(screen.getByRole("button", { name: /hold/ }))
 
     expect(onSelect).toHaveBeenCalledWith("FPT")
+  })
+
+  it("opens one specific Analysis, by symbol and by session", () => {
+    const onOpenAnalysis = vi.fn()
+    const onSelect = vi.fn()
+    render(
+      <SymbolDock
+        symbols={[{
+          symbol: "FPT",
+          state: "ready",
+          verdict: "hold",
+          unread: true,
+          latestTradingDay: "2026-08-14",
+        }]}
+        activeSymbol={null}
+        onSelect={onSelect}
+        onOpenAnalysis={onOpenAnalysis}
+        tradingDay="2026-08-14"
+        count={1}
+        cap={10}
+      >
+        <div />
+      </SymbolDock>,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Open FPT Analysis" }))
+
+    expect(onOpenAnalysis).toHaveBeenCalledWith("FPT", "2026-08-14")
+    // The badge advances because *this* Analysis was opened. Changing the lens
+    // would clear ten badges at once, so the two controls stay apart.
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it("offers nothing to open for a symbol that has never been analysed", () => {
+    render(
+      <SymbolDock
+        symbols={[{
+          symbol: "TCX",
+          state: "pending",
+          verdict: null,
+          unread: false,
+          latestTradingDay: null,
+        }]}
+        activeSymbol={null}
+        onSelect={vi.fn()}
+        onOpenAnalysis={vi.fn()}
+        tradingDay="2026-08-14"
+        count={1}
+        cap={10}
+      >
+        <div />
+      </SymbolDock>,
+    )
+
+    expect(screen.queryByRole("button", { name: /Open TCX Analysis/ })).toBeNull()
   })
 
   it("shows a deep-linked symbol as a lens that is not on the Watchlist", () => {
     render(
       <SymbolDock
-        symbols={[{ symbol: "FPT", state: "ready", verdict: "hold", unread: false }]}
+        symbols={[{
+          symbol: "FPT",
+          state: "ready",
+          verdict: "hold",
+          unread: false,
+          latestTradingDay: "2026-08-14",
+        }]}
         activeSymbol="HPG"
         onSelect={vi.fn()}
+        onOpenAnalysis={vi.fn()}
         tradingDay="2026-08-14"
         count={1}
         cap={10}
@@ -430,6 +501,7 @@ describe("the dock", () => {
         symbols={[]}
         activeSymbol={null}
         onSelect={vi.fn()}
+        onOpenAnalysis={vi.fn()}
         tradingDay={null}
         count={0}
         cap={10}
@@ -453,9 +525,16 @@ describe("the composer", () => {
       onSend,
       dock: (
         <SymbolDock
-          symbols={[{ symbol: "FPT", state: "producing", verdict: null, unread: false }]}
+          symbols={[{
+              symbol: "FPT",
+              state: "producing",
+              verdict: null,
+              unread: false,
+              latestTradingDay: null,
+            }]}
           activeSymbol="FPT"
           onSelect={vi.fn()}
+          onOpenAnalysis={vi.fn()}
           tradingDay="2026-08-14"
           count={1}
           cap={10}

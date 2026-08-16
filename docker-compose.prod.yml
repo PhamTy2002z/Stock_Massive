@@ -41,11 +41,19 @@ services:
       dockerfile: Dockerfile.prod
     container_name: stockmassive-api
     restart: unless-stopped
-    # Alpha Desk gives an active Turn 30 seconds to reach a safe checkpoint on
-    # shutdown (docs/adr/0013). The stop grace has to exceed that window, or the
-    # checkpoint it buys is killed before it lands and the Turn comes back as an
-    # interrupted one with less of its answer than it actually produced.
-    stop_grace_period: 45s
+    # Two windows in sequence, and the grace has to cover both
+    # (docs/streaming-topology.md).
+    #
+    # Uvicorn stops accepting, then waits `--timeout-graceful-shutdown` seconds
+    # for open connections before cancelling them; only then does the ASGI
+    # lifespan shut down, and Alpha Desk's 30 seconds of checkpointing happen
+    # inside *that*. An SSE subscriber holds its connection for as long as the
+    # Turn runs, so without the connection timeout the lifespan would not begin
+    # until the ten-minute deadline expired — and the deploy would SIGKILL the
+    # container long before any checkpoint was written.
+    #
+    # 10s of connection drain + 30s of checkpointing + margin.
+    stop_grace_period: 60s
     environment:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       # Which build answered — one of the Evidence Manifest's fields
@@ -96,6 +104,12 @@ services:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://api.yourdomain.com/api/v1}
     container_name: stockmassive-web
     restart: unless-stopped
+    # The Route Handler is a streaming BFF: while a Turn runs it holds one
+    # upstream response open and forwards its bytes. Nothing here needs
+    # checkpointing — the Turn belongs to the backend, not to this connection
+    # (docs/adr/0013) — but a proxied stream deserves the chance to end rather
+    # than being severed the instant a deploy starts.
+    stop_grace_period: 30s
     environment:
       # The authenticated route handlers call the API from inside the network.
       # Without this they fall back to the public build-time URL and hairpin out
@@ -110,8 +124,44 @@ services:
     networks:
       - stockmassive-network
 
+  # The outer proxy, opt-in the way `db` is: a deployment terminating TLS at a
+  # load balancer it already owns runs without this and satisfies the same
+  # contract in its own configuration (docs/streaming-topology.md).
+  #
+  # Caddy rather than nginx because the one setting that matters here is a
+  # default it already gets right: it does not buffer a proxied response body,
+  # and `flush_interval -1` states that rather than relying on it. nginx buffers
+  # every proxied response unless told otherwise, which turns an event stream
+  # into one delivery at the end of the Turn.
+  proxy:
+    profiles: ["proxy"]
+    image: caddy:2-alpine
+    container_name: stockmassive-proxy
+    restart: unless-stopped
+    # Longer than the web container's, because this connection is the outermost
+    # one: cutting it first would end a stream whose two inner hops were still
+    # being given time to finish it.
+    stop_grace_period: 45s
+    environment:
+      WEB_DOMAIN: ${WEB_DOMAIN:?WEB_DOMAIN is required by the proxy profile}
+      API_DOMAIN: ${API_DOMAIN:?API_DOMAIN is required by the proxy profile}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - web
+      - api
+    networks:
+      - stockmassive-network
+
 volumes:
   postgres_data:
+  caddy_data:
+  caddy_config:
 
 networks:
   stockmassive-network:

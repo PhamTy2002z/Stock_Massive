@@ -79,13 +79,17 @@ export function useLiveTurn(threadId: string | null): LiveTurnController {
   const queryClient = useQueryClient()
 
   const turnId = state.turnId
+  const subscribable = state.subscribable
   const settled = isSettled(state)
   const active = isActive(state) || state.phase === "cancelling"
 
   // -- the stream ---------------------------------------------------------
 
   useEffect(() => {
-    if (!turnId || settled) return
+    // Not before the backend has a Turn under this id. `EventSource` fails the
+    // connection on a non-200 rather than retrying, so a subscribe that raced
+    // the create would leave this tab watching a stream that never speaks.
+    if (!turnId || settled || !subscribable) return
 
     const source = new EventSource(turnStreamUrl(turnId))
     let probe: ReturnType<typeof setTimeout> | undefined
@@ -112,7 +116,13 @@ export function useLiveTurn(threadId: string | null): LiveTurnController {
       if (probe) return
       probe = setTimeout(() => {
         probe = undefined
-        void settleFromServer(turnId, dispatch)
+        // A Turn that is still running means the connection failed rather than
+        // the Turn ending, so this reopens it. `EventSource` retries a dropped
+        // connection itself but gives up on a refused one, and the two are the
+        // same thing to a reader watching an answer that stopped arriving.
+        void settleFromServer(turnId, dispatch).then((running) => {
+          if (running) setAttempt((previous) => previous + 1)
+        })
       }, ERROR_PROBE_MS)
     }
 
@@ -125,7 +135,7 @@ export function useLiveTurn(threadId: string | null): LiveTurnController {
       source.removeEventListener("error", onError)
       source.close()
     }
-  }, [turnId, settled, attempt])
+  }, [turnId, settled, subscribable, attempt])
 
   // A gap forces a fresh snapshot, and a fresh snapshot needs a fresh
   // connection. Clearing the flag first keeps this from firing twice.
@@ -176,6 +186,8 @@ export function useLiveTurn(threadId: string | null): LiveTurnController {
         setRefusal(error instanceof Error ? error : new Error(String(error)))
         return
       }
+      // The Turn exists now, so the stream may open on it.
+      dispatch({ type: "admitted" })
       // The user message is committed by the time the create returns, so the
       // transcript can show it without an optimistic copy that might not match.
       void queryClient.invalidateQueries({ queryKey: queryKeys.thread(threadId) })
@@ -209,7 +221,8 @@ export function useLiveTurn(threadId: string | null): LiveTurnController {
   }, [turnId, active])
 
   const attach = useCallback((id: string, thread: string) => {
-    dispatch({ type: "start", turnId: id, threadId: thread })
+    // Reattaching, so the Turn already exists and the stream may open at once.
+    dispatch({ type: "start", turnId: id, threadId: thread, subscribable: true })
   }, [])
 
   return {
@@ -229,22 +242,27 @@ export function useLiveTurn(threadId: string | null): LiveTurnController {
  *
  * Synthesised into the same terminal event the stream would have carried, so
  * the reducer has exactly one way to settle rather than two.
+ *
+ * Returns whether the Turn is still running, which is the caller's cue to
+ * reopen the stream rather than keep waiting on one that has stopped.
  */
 async function settleFromServer(
   turnId: string,
   dispatch: (action: LiveTurnAction) => void,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const turn = await fetchTurn(turnId)
-    if (turn.status === "admitted" || turn.status === "running") return
+    if (turn.status === "admitted" || turn.status === "running") return true
     dispatch({
       type: "settled",
       status: turn.status,
       terminalReason: turn.terminal_reason,
       messageId: turn.response_message_id,
     })
+    return false
   } catch {
     // The Turn is unreachable — signed out, or gone. The surface keeps what it
     // has rather than replacing a partial answer with an error.
+    return false
   }
 }
