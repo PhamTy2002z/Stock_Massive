@@ -39,7 +39,7 @@ export function FirstRun({
       className={cn("mx-auto w-full max-w-[760px] space-y-5 px-4 py-10", className)}
     >
       {heading ?? (
-        <h2 className="text-[clamp(1.24rem,2.1vw,1.6rem)] font-normal tracking-[-0.015em] text-foreground">
+        <h2 className="font-serif text-[clamp(1.6rem,2.7vw,2.15rem)] font-normal leading-[1.1] tracking-[-0.01em] text-ink-display">
           {FIRST_RUN.question}
         </h2>
       )}

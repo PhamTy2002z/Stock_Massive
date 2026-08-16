@@ -51,6 +51,8 @@
     /* #fafafa, #e6e2dc, #d3ccc4, #b3aaa0, #a29a8e, #8d8579. Only the top step
        is neutral: white reads as white on any ground, but a neutral grey on a
        warm one reads blue, so every step below it carries the ground's hue. */
+    /* #f2eee8 — display type only, one step above ink-1 and warmer than it. */
+    --ink-display: 36 28% 93%;
     --ink-1: 0 0% 98%;
     --ink-2: 36 17% 88%;
     --ink-3: 32 15% 80%;
@@ -135,6 +137,7 @@
     --surface-menu: 0 0% 100%;
     --surface-bubble: 40 8% 94%;
 
+    --ink-display: 36 14% 12%;
     --ink-1: 36 12% 10%;
     --ink-2: 36 10% 17%;
     --ink-3: 34 8% 31%;

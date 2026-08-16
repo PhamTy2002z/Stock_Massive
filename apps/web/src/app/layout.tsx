@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono, Newsreader } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { QueryProvider } from "@/components/providers/query-provider";
@@ -15,6 +15,21 @@ const inter = Inter({
 const jetBrainsMono = JetBrains_Mono({
   subsets: ["latin", "vietnamese"],
   variable: "--font-jetbrains-mono",
+});
+
+/**
+ * The one serif in the system, and it says one thing: the greeting that opens
+ * a new conversation. An optical-size face at display weight is what makes
+ * that line read as someone addressing you rather than as a heading — which is
+ * exactly why it is rationed to that line and never used for chrome.
+ *
+ * Vietnamese is in the subset because the greeting is Vietnamese; without it
+ * the diacritics would fall back mid-word to a different face.
+ */
+const newsreader = Newsreader({
+  subsets: ["latin", "vietnamese"],
+  weight: ["300", "400"],
+  variable: "--font-newsreader",
 });
 
 export const metadata: Metadata = {
@@ -33,7 +48,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="vi" suppressHydrationWarning>
-      <body className={`${inter.className} ${jetBrainsMono.variable}`}>
+      <body
+        className={`${inter.className} ${jetBrainsMono.variable} ${newsreader.variable}`}
+      >
         {/* Night is the design, not a mode: the VisgniteAI reference is drawn
             on #191815 and every surface step above it is defined against that
             ground, so a first visit lands there. The light theme is the same

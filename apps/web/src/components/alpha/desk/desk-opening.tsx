@@ -49,7 +49,10 @@ function Greeting() {
   return (
     <div className="flex items-center gap-3">
       <VisgniteMark className="h-[26px] w-[17px]" />
-      <h2 className="min-w-0 text-[clamp(1.24rem,2.1vw,1.6rem)] font-normal tracking-[-0.015em] text-foreground">
+      {/* The one serif line in the product. It is set at display size and in a
+          warm off-white because at this weight the body's neutral white goes
+          cold against the ground — see the note on the font in app/layout. */}
+      <h2 className="min-w-0 font-serif text-[clamp(1.6rem,2.7vw,2.15rem)] font-normal leading-[1.1] tracking-[-0.01em] text-ink-display">
         {partOfDay ? `${partOfDay}${name ? `, ${name}` : ""}` : FIRST_RUN.question}
       </h2>
     </div>
