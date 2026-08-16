@@ -55,7 +55,7 @@ import json
 import logging
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from enum import Enum
 from typing import Any
@@ -178,6 +178,17 @@ STOCK_360_SUBJECTS: Mapping[tuple[str, str], str] = {
 # model assertion — and ``docs/adr/0015`` does not let a model certify that it
 # passed a backend check. Being conservative here costs a user an occasional
 # second chart; being permissive costs every user the anti-spam rule.
+_VISUAL_PHRASES = (
+    "biểu đồ",
+    "đồ thị",
+    "chart",
+    "graph",
+    "vẽ",
+    "trực quan",
+    "visual",
+    "plot",
+)
+
 _SECOND_WIDGET_PHRASES = (
     "hai biểu đồ",
     "2 biểu đồ",
@@ -250,6 +261,10 @@ class WidgetSpec:
     as_of: str
     descriptor: Mapping[str, Any]
     tool_call_ids: tuple[str, ...]
+    # Whether the user asked for a picture. Not a preference: ``docs/adr/0012``
+    # makes failure asymmetric on the web side, and this is the only place the
+    # user's own words are available to answer it from.
+    requested: bool = False
 
     @property
     def descriptor_id(self) -> str:
@@ -266,6 +281,7 @@ class WidgetSpec:
             "descriptor": dict(self.descriptor),
             "descriptor_id": self.descriptor_id,
             "tool_call_ids": list(self.tool_call_ids),
+            "requested": self.requested,
         }
 
 
@@ -288,6 +304,20 @@ def user_requested_multiple(user_text: str) -> bool:
     """
     lowered = user_text.casefold()
     return any(phrase in lowered for phrase in _SECOND_WIDGET_PHRASES)
+
+
+def user_requested_visual(user_text: str) -> bool:
+    """Whether the user asked for a picture at all, in their own words.
+
+    Recorded on the spec because the *web* needs it and cannot work it out:
+    ``docs/adr/0012`` makes failure asymmetric — an agent-added Widget that
+    fails disappears without noise, and a user-requested one leaves a short
+    unavailable state with Retry, because the user is owed an answer to a
+    question they asked. Only the backend holds the user's text, so only the
+    backend can answer this honestly, and the model cannot set it.
+    """
+    lowered = user_text.casefold()
+    return any(phrase in lowered for phrase in _VISUAL_PHRASES)
 
 
 def extract_selections(text: str) -> tuple[str, tuple[WidgetSelection, ...]]:
@@ -349,9 +379,16 @@ class WidgetValidator:
     asked for a second visual.
     """
 
-    def __init__(self, *, trading_day: date, allow_second: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        trading_day: date,
+        allow_second: bool = False,
+        requested: bool = False,
+    ) -> None:
         self._trading_day = trading_day
         self._allow_second = allow_second
+        self._requested = requested
 
     def validate_all(
         self,
@@ -407,7 +444,9 @@ class WidgetValidator:
             BindingKind.SERIES: self._series,
             BindingKind.POSITION: self._position,
         }[definition.binding]
-        return builder(definition, selection, traces)
+        # Stamped once, here, rather than threaded through four builders that
+        # would each have to remember it.
+        return replace(builder(definition, selection, traces), requested=self._requested)
 
     # -- the four bindings -------------------------------------------------
 
@@ -844,4 +883,5 @@ __all__ = [
     "descriptor_id",
     "extract_selections",
     "user_requested_multiple",
+    "user_requested_visual",
 ]

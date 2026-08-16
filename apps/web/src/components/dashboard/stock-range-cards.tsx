@@ -1,5 +1,6 @@
 "use client"
 
+import { RangeTrack as SharedRangeTrack } from "@/components/charts"
 import { cn } from "@/lib/utils"
 
 interface StockRangeCardsProps {
@@ -63,19 +64,23 @@ function Card({
   )
 }
 
-/** Track with the current value marked against its low–high bounds. */
+/**
+ * Track with the current value marked against its low–high bounds.
+ *
+ * The drawing moved to `@/components/charts` so the Widget registry can reuse
+ * it with a palette of its own (ADR-0012). The colours this card has always
+ * used stay here, which is why it still renders exactly as it did.
+ */
 function RangeTrack({ percent }: { percent: number }) {
   return (
-    <div className="relative mt-2.5 h-1.5 rounded-full bg-[hsl(var(--hairline))]">
-      <span
-        style={{ width: `${percent}%` }}
-        className="absolute inset-y-0 left-0 rounded-full bg-border"
-      />
-      <span
-        style={{ left: `${percent}%` }}
-        className="absolute -top-[3px] -ml-1.5 size-3 rounded-full border-2 border-card bg-interactive"
-      />
-    </div>
+    <SharedRangeTrack
+      percent={percent}
+      className="mt-2.5"
+      fillColor="hsl(var(--border))"
+      trackColor="hsl(var(--hairline))"
+      markerColor="hsl(var(--interactive))"
+      markerRingColor="hsl(var(--card))"
+    />
   )
 }
 

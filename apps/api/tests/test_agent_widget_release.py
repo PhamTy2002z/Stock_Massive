@@ -306,4 +306,5 @@ async def test_the_stored_message_carries_the_descriptor_and_not_the_rows():
         "descriptor",
         "descriptor_id",
         "tool_call_ids",
+        "requested",
     }
