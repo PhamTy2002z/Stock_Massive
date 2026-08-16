@@ -69,7 +69,9 @@ function Greeting() {
 
   useEffect(() => setHour(new Date().getHours()), [])
 
-  const name = user?.full_name?.split(" ").at(-1) || user?.email?.split("@")[0] || null
+  // The whole name, not the last word of it. A Vietnamese name is read in full,
+  // and cutting it to the given name is a Western reading of the order.
+  const name = user?.full_name?.trim() || user?.email?.split("@")[0] || null
   const partOfDay =
     hour === null
       ? null
