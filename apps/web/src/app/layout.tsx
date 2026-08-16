@@ -7,29 +7,43 @@ import { QueryErrorBoundary } from "@/components/providers/query-error-boundary"
 import { ConnectionGate } from "@/components/providers/connection-gate";
 import { Toaster } from "@/components/ui/sonner";
 
+/**
+ * The body face, and the one every label in the product is set in.
+ *
+ * **Vietnamese is not optional in the subset.** Latin alone leaves the whole
+ * U+1EA0–U+1EF9 range unsubsetted, so every word carrying a diacritic — which
+ * in this product is most of them — falls back mid-sentence to the system sans.
+ * The result reads as two typefaces fighting inside one label, which is exactly
+ * the tell that a font was configured for an English product.
+ */
 const inter = Inter({
-  subsets: ["latin"],
+  subsets: ["latin", "vietnamese"],
   variable: "--font-inter",
+  display: "swap",
 });
 
+/** Every figure a reader might compare against another figure. */
 const jetBrainsMono = JetBrains_Mono({
   subsets: ["latin", "vietnamese"],
   variable: "--font-jetbrains-mono",
+  display: "swap",
 });
 
 /**
  * The one serif in the system, and it says one thing: the greeting that opens
- * a new conversation. An optical-size face at display weight is what makes
- * that line read as someone addressing you rather than as a heading — which is
- * exactly why it is rationed to that line and never used for chrome.
+ * a new conversation.
  *
- * Vietnamese is in the subset because the greeting is Vietnamese; without it
- * the diacritics would fall back mid-word to a different face.
+ * `opsz` is requested explicitly rather than left to the default instance. This
+ * face is drawn for a range of sizes, and the greeting is set at roughly 2rem —
+ * pinning a static cut would give it the thicker strokes and looser fit a
+ * caption-sized optical master is drawn with, which is precisely the difference
+ * between a display line and a heading.
  */
 const newsreader = Newsreader({
   subsets: ["latin", "vietnamese"],
-  weight: ["300", "400"],
+  axes: ["opsz"],
   variable: "--font-newsreader",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -47,10 +61,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="vi" suppressHydrationWarning>
-      <body
-        className={`${inter.className} ${jetBrainsMono.variable} ${newsreader.variable}`}
-      >
+    /* The three faces are declared as variables on the root and consumed by
+       Tailwind's own `sans` / `mono` / `serif` families, rather than one of them
+       being pinned to `body` with a class. That way a component asking for
+       `font-sans` and a component inheriting from the body resolve to the same
+       stack — with a class on the body those two answers can differ. */
+    <html
+      lang="vi"
+      suppressHydrationWarning
+      className={`${inter.variable} ${jetBrainsMono.variable} ${newsreader.variable}`}
+    >
+      <body>
         {/* Night is the design, not a mode: the VisgniteAI reference is drawn
             on #191815 and every surface step above it is defined against that
             ground, so a first visit lands there. The light theme is the same

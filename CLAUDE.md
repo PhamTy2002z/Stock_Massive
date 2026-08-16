@@ -5,7 +5,7 @@ Nền tảng dữ liệu chứng khoán Việt Nam (HOSE/HNX/UPCOM): `apps/api` 
 ## Cấu trúc
 
 - `apps/api` — FastAPI + SQLAlchemy + Alembic. Domain ở `src/stocks/` (`market`, `price`, `trading`, `financial`, `analytics`, `company`, `providers`); auth ở `src/auth/`; hạ tầng dùng chung (config, database, cache, redis, scheduler, vnstock client) ở `src/core/`.
-- `apps/web` — Next.js App Router + TypeScript, mã ở `src/` với route group `(auth)` / `(dashboard)`.
+- `apps/web` — Next.js App Router + TypeScript, mã ở `src/`. Sản phẩm là **một màn hình duy nhất** ở `/`: shell 3 vùng trong `src/components/shell/` (sidebar · cột chính · inspector phải). Ba view `chat` / `board` / `new` là state của shell chứ không phải route — đổi view không được làm mất câu đang gõ dở. Chỉ `(auth)` và `/settings` là trang riêng.
 - `docker-compose.yml` — stack dev: `db` (Postgres), `redis`, `api`; `web` chỉ lên khi bật profile `full`.
 
 Mỗi app tự quản dependency riêng — `apps/web` có `package.json` + lockfile riêng, script ở root chỉ là wrapper quanh `docker compose` và `pnpm --dir apps/web`. Root lockfile rỗng; đây không phải pnpm workspace.

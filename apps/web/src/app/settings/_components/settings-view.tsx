@@ -1,6 +1,10 @@
 "use client"
 
 import * as React from "react"
+import Link from "next/link"
+import { ArrowLeft } from "lucide-react"
+
+import { VisgniteWordmark } from "@/components/shared/visgnite-logo"
 
 import { AccountSection } from "./account-section"
 import { AppearanceSection } from "./appearance-section"
@@ -19,36 +23,54 @@ const NAV_GROUPS: SettingsNavGroup[] = [
 ]
 
 /**
- * Two columns filling the content box edge to edge: a rail flush against the
- * app sidebar, and a column that scrolls beside it with the content held to a
- * reading measure and centred in whatever width is left.
+ * Settings, as its own surface rather than a page inside the app chrome.
  *
- * The rail is deliberately not a card floating inside padding — it belongs to
- * the chrome, and the hairline between the two columns is the only thing
- * separating them.
+ * The shell is a single workspace with a conversation in it; hanging a settings
+ * screen off its main column would mean a sidebar full of Threads beside a form
+ * about time zones. So this replaces the shell for as long as it is open, and
+ * the one way back is the link at the top left — which is why that link is the
+ * first thing in the tab order.
+ *
+ * The page itself never scrolls: the rail and the content column each own their
+ * overflow, the same way every region of the shell does.
  */
 export function SettingsView() {
   const scrollRef = React.useRef<HTMLDivElement>(null)
 
   return (
-    <div className="flex h-full min-h-0">
-      <SettingsNav groups={NAV_GROUPS} scrollRef={scrollRef} />
+    <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background text-foreground">
+      <header className="flex flex-none items-center gap-3 border-b border-border px-5 py-3">
+        <Link
+          href="/"
+          className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-control text-ink-3 transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <ArrowLeft className="size-4" strokeWidth={1.7} />
+          Quay lại
+        </Link>
+        <span className="ml-auto">
+          <VisgniteWordmark />
+        </span>
+      </header>
 
-      <div ref={scrollRef} className="min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[760px] px-6 py-10 md:px-10 md:py-14">
-          <header className="mb-10">
-            <h2 className="text-[28px] font-semibold leading-[1.14] tracking-[-0.5px]">
-              Cài đặt hệ thống
-            </h2>
-            <p className="mt-2 text-[0.95rem] leading-[1.47] tracking-[-0.24px] text-muted-foreground">
-              Giao diện, tài khoản và các quy ước dữ liệu đang áp dụng.
-            </p>
-          </header>
+      <div className="flex min-h-0 flex-1">
+        <SettingsNav groups={NAV_GROUPS} scrollRef={scrollRef} />
 
-          <div className="space-y-14 pb-16">
-            <AppearanceSection />
-            <AccountSection />
-            <SystemSection />
+        <div ref={scrollRef} className="scrollbar-thin min-w-0 flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-[760px] px-6 py-10 md:px-10 md:py-14">
+            <header className="mb-10">
+              <h2 className="text-[28px] font-semibold leading-[1.14] tracking-[-0.5px]">
+                Cài đặt hệ thống
+              </h2>
+              <p className="mt-2 text-[0.95rem] leading-[1.47] tracking-[-0.24px] text-ink-4">
+                Giao diện, tài khoản và các quy ước dữ liệu đang áp dụng.
+              </p>
+            </header>
+
+            <div className="space-y-14 pb-16">
+              <AppearanceSection />
+              <AccountSection />
+              <SystemSection />
+            </div>
           </div>
         </div>
       </div>
