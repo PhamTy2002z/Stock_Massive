@@ -22,6 +22,7 @@ import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from typing import Any
 from urllib.parse import urlsplit
 
 from sqlalchemy import Engine, create_engine, delete, select
@@ -38,6 +39,7 @@ from src.core.database import Base
 from src.stocks import models as _stocks_models  # noqa: F401
 
 from .fixture import FixtureSeed
+from .news import news_by_symbol
 from .roles import FixtureRole, RoleContext, verify_roles
 from .tables import CAPTURED_TABLES, decode_row
 
@@ -133,6 +135,17 @@ class LoadedFixture:
 
     def symbol_for(self, role: FixtureRole) -> str:
         return self.seed.manifest.roles[role]
+
+    def news_for(self, symbol: str) -> tuple[Mapping[str, Any], ...]:
+        """This symbol's frozen news, in the raw shape ``NewsTools`` reads.
+
+        Every symbol but the injection seat answers with nothing, and nothing is
+        an answer: "no cleared news in this window" is what the fixture honestly
+        holds for them, and it is one of category E's own data gaps.
+        """
+        return news_by_symbol(self.seed.manifest.news).get(
+            symbol.strip().upper(), ()
+        )
 
 
 def load_fixture(

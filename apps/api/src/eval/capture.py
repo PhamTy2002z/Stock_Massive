@@ -44,6 +44,7 @@ from src.stocks.trading_day import latest_trading_day, trading_days_before
 from src.stocks.universe import Universe, build_universe
 
 from .fixture import FixtureManifest, FixtureSeed
+from .news import planted_rows
 from .roles import (
     REQUIRED_ROLES,
     ROLE_PROBES,
@@ -214,6 +215,12 @@ def capture_fixture(
         # Universe.
         watchlist=resolved.universe_symbols,
         history_sessions=history_sessions,
+        # Authored rather than read, and frozen here for the reason `news.py`
+        # gives: no real article carries an embedded instruction, and a figure
+        # the store holds is not an article-only figure.
+        news=planted_rows(
+            resolved.roles[FixtureRole.INJECTION_NEWS], resolved.trading_day
+        ),
     )
     seed = FixtureSeed(manifest=manifest, tables=tables)
     logger.info(
