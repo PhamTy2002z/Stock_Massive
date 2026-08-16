@@ -25,11 +25,11 @@ function MetricItem({ label, value, unit, premium }: MetricItemProps) {
 
   // 5-tier color system matching PremiumBadge
   const getPremiumColor = (p: number) => {
-    if (p > 30) return "text-emerald-400"
+    if (p > 30) return "text-positive"
     if (p > 10) return "text-[hsl(var(--stock-up))]"
     if (p >= -10) return "text-muted-foreground"
     if (p >= -30) return "text-[hsl(var(--stock-down))]"
-    return "text-red-400"
+    return "text-negative"
   }
 
   return (

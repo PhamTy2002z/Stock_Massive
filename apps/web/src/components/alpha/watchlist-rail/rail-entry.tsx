@@ -16,11 +16,11 @@ import { STATE_LABEL, dayAndMonth, failureSentence, stateSentence } from "./stat
  * ever had one caller, and stays with it.
  */
 const STATE_TONE: Record<AnalysisState, string> = {
-  ready: "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+  ready: "border-positive/40 bg-positive/10 text-positive",
   pending: "border-border/60 bg-muted/40 text-muted-foreground",
-  producing: "border-sky-500/40 bg-sky-500/10 text-sky-600 dark:text-sky-400",
-  failed: "border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400",
-  unsupported: "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  producing: "border-primary/40 bg-primary/10 text-primary",
+  failed: "border-negative/40 bg-negative/10 text-negative",
+  unsupported: "border-caution/40 bg-caution/10 text-caution",
 }
 
 export interface RailEntryRowProps {
@@ -86,7 +86,7 @@ export function RailEntryRow({
             {unread && (
               <span
                 aria-label={`${symbol} has an unread Analysis`}
-                className="h-1.5 w-1.5 rounded-full bg-sky-500"
+                className="h-1.5 w-1.5 rounded-full bg-primary"
               />
             )}
             <span
@@ -119,7 +119,7 @@ export function RailEntryRow({
 
           {failureReason &&
             (state === "failed" ? (
-              <p className="text-xs text-red-600 dark:text-red-400">{failureReason}</p>
+              <p className="text-xs text-negative">{failureReason}</p>
             ) : (
               // A queued symbol that has already failed once keeps its reason.
               // Shown as the *previous* attempt's, and not in red: nothing is

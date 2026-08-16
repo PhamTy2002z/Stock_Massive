@@ -66,7 +66,7 @@ function CustomTooltip({
           <span
             className={cn(
               "font-medium",
-              data.value >= 0 ? "text-green-600" : "text-red-600"
+              data.value >= 0 ? "text-positive" : "text-negative"
             )}
           >
             {data.value >= 0 ? "+" : ""}

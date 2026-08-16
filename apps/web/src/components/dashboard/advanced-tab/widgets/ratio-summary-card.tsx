@@ -29,9 +29,9 @@ function getRatioColor(
 ): string {
   if (value === null || !goodRange) return "text-foreground"
   const { min, max } = goodRange
-  if (min !== undefined && value < min) return "text-red-600 dark:text-red-400"
-  if (max !== undefined && value > max) return "text-red-600 dark:text-red-400"
-  return "text-green-600 dark:text-green-400"
+  if (min !== undefined && value < min) return "text-negative"
+  if (max !== undefined && value > max) return "text-negative"
+  return "text-positive"
 }
 
 export function RatioSummaryCard({ data, isLoading }: RatioSummaryCardProps) {

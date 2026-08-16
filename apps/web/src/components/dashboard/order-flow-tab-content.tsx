@@ -134,27 +134,27 @@ export function OrderFlowTabContent({ symbol, className }: OrderFlowTabContentPr
           a dark tile in both themes — that is how it stands apart on a light
           page. On dark it steps up to the floating-surface tone instead, since
           the tile tone is what the page itself is already wearing. */}
-      <div className="min-w-0 rounded-[18px] bg-[#272729] p-[18px] text-white dark:bg-popover">
+      <div className="min-w-0 rounded-[18px] bg-surface-menu p-[18px] text-foreground">
         <div className="flex flex-wrap items-center gap-3">
           <span
             className={cn(
               "flex items-center gap-[7px] rounded-full px-[11px] py-1 text-[13px] font-semibold leading-[1.29] tracking-[-0.208px]",
               buyDominant
-                ? "bg-[rgba(55,196,106,0.16)] text-[#37c46a]"
-                : "bg-[rgba(255,105,97,0.16)] text-[#ff6961]"
+                ? "bg-positive/[0.16] text-positive"
+                : "bg-negative/[0.16] text-negative"
             )}
           >
             <Trend aria-hidden className="size-3.5" />
             {buyDominant ? "Lực mua áp đảo" : "Lực bán áp đảo"}
           </span>
-          <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-[#cccccc]">
+          <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-ink-3">
             {sessionDate ? `Phiên ${sessionDate}` : "Phiên gần nhất"}
             {updated ? ` · cập nhật ${updated}` : ""}
           </span>
         </div>
         <p className="mt-3 text-pretty text-[17px] leading-[1.5] tracking-[-0.374px]">
           Bên mua chiếm{" "}
-          <strong className={cn("font-semibold", buyDominant && "text-[#37c46a]")}>
+          <strong className={cn("font-semibold", buyDominant && "text-positive")}>
             {decimal(buyVolumePct)}% khối lượng
           </strong>{" "}
           nhưng <strong className="font-semibold">{decimal(buyOrderPct)}% số lệnh</strong>
@@ -167,7 +167,7 @@ export function OrderFlowTabContent({ symbol, className }: OrderFlowTabContentPr
           )}
           . Khối lượng ròng{" "}
           <strong
-            className={cn("font-semibold", buyDominant ? "text-[#37c46a]" : "text-[#ff6961]")}
+            className={cn("font-semibold", buyDominant ? "text-positive" : "text-negative")}
           >
             {buyDominant ? "+" : "−"}
             {shares(Math.abs(data.net_volume))} CP

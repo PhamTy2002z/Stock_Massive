@@ -40,7 +40,7 @@ export function RailHeader({
         {unreadCount > 0 && (
           <span
             aria-label={`${unreadCount} unread Analyses`}
-            className="rounded-full bg-sky-500 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-white"
+            className="rounded-full bg-primary px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-white"
           >
             {unreadCount}
           </span>
@@ -54,7 +54,7 @@ export function RailHeader({
           // Over the cap is a real state: a symbol restored to the Universe
           // revives whether or not there is room, and the overflow stands.
           count > cap
-            ? "border-amber-500/40 bg-amber-500/5 text-amber-600 dark:text-amber-400"
+            ? "border-caution/40 bg-caution/5 text-caution"
             : "border-border/60 text-muted-foreground",
         )}
         aria-label={`${count} of ${cap} symbols`}

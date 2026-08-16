@@ -79,9 +79,9 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
             <span
               className={cn(
                 "font-medium",
-                data.anomaly_level === "very_high" && "text-red-500",
+                data.anomaly_level === "very_high" && "text-negative",
                 data.anomaly_level === "high" && "text-caution",
-                data.anomaly_level === "elevated" && "text-yellow-500"
+                data.anomaly_level === "elevated" && "text-caution"
               )}
             >
               {anomalyLabel}

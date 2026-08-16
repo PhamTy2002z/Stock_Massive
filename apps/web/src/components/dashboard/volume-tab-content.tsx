@@ -14,7 +14,7 @@ interface VolumeTabContentProps {
 const baselines = [10, 20, 60]
 
 const legend = [
-  { color: "bg-[#c7c7cc]", label: "Bình thường" },
+  { color: "bg-ink-6", label: "Bình thường" },
   { color: "bg-reference", label: "Tăng cao 1,5–2×" },
   { color: "bg-caution", label: "Cao 2–3×" },
   { color: "bg-negative", label: "Rất cao >3×" },

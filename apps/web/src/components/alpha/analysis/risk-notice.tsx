@@ -45,7 +45,7 @@ export function ArtifactRiskNotice({ className }: { className?: string }) {
       role="note"
       aria-label={CHROME.riskNotice}
       className={cn(
-        "flex gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 px-2 py-1.5 text-[11px] text-amber-700 dark:text-amber-400",
+        "flex gap-2 rounded-md border border-caution/40 bg-caution/5 px-2 py-1.5 text-[11px] text-caution",
         className,
       )}
     >

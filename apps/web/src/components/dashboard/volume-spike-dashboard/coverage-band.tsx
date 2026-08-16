@@ -34,7 +34,7 @@ export function CoverageBand({
         "rounded-lg border p-4 space-y-2",
         healthy
           ? "border-border/50 bg-card/50"
-          : "border-amber-500/40 bg-amber-500/5",
+          : "border-caution/40 bg-caution/5",
         className,
       )}
     >
@@ -48,9 +48,9 @@ export function CoverageBand({
         </span>
         <span className="inline-flex items-center gap-2">
           {coverage.state === "ready" ? (
-            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+            <CheckCircle2 className="h-4 w-4 text-positive" />
           ) : (
-            <AlertTriangle className="h-4 w-4 text-amber-500" />
+            <AlertTriangle className="h-4 w-4 text-caution" />
           )}
           <span>
             {coverageSentence(coverage.state, coverage.evaluated, coverage.total)}

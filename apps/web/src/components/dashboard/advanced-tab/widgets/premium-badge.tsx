@@ -19,9 +19,9 @@ const getPremiumStyles = (value: number) => {
   // Tier 1: Vượt trội (>30%)
   if (value > 30) {
     return {
-      bg: "bg-emerald-500/20",
-      text: "text-emerald-400",
-      border: "ring-1 ring-emerald-500/30",
+      bg: "bg-positive/20",
+      text: "text-positive",
+      border: "ring-1 ring-positive/30",
     }
   }
   // Tier 2: Tốt (+10% to +30%)
@@ -50,9 +50,9 @@ const getPremiumStyles = (value: number) => {
   }
   // Tier 5: Rất kém (<-30%)
   return {
-    bg: "bg-red-500/20",
-    text: "text-red-400",
-    border: "ring-1 ring-red-500/30",
+    bg: "bg-negative/20",
+    text: "text-negative",
+    border: "ring-1 ring-negative/30",
   }
 }
 

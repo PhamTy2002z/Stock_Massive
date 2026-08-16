@@ -199,7 +199,7 @@ export function StockPriceChart({ symbol, refPrice, className }: StockPriceChart
           {refPrice !== null && refPrice !== undefined && (
             <path
               d={`M0 ${y(refPrice).toFixed(1)}H${VIEW_W}`}
-              className="stroke-[#c99a00] dark:stroke-reference"
+              className="stroke-reference"
               strokeWidth="1"
               strokeDasharray="4 4"
               vectorEffect="non-scaling-stroke"

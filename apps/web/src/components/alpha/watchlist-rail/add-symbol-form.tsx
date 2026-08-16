@@ -63,12 +63,12 @@ export function AddSymbolForm({
       </form>
 
       {error && (
-        <p role="alert" className="text-xs text-red-600 dark:text-red-400">
+        <p role="alert" className="text-xs text-negative">
           {error}
         </p>
       )}
       {notice && (
-        <p role="status" className="text-xs text-amber-600 dark:text-amber-400">
+        <p role="status" className="text-xs text-caution">
           {notice}
         </p>
       )}
