@@ -63,8 +63,18 @@ export interface LiveTurn {
   blocks: ContentBlock[]
   widgets: WidgetSpec[]
   terminalReason: string | null
-  /** The canonical assistant message id, once the terminal event names one. */
+  /** The canonical assistant message id, once the transport names one. */
   messageId: number | null
+  /**
+   * The block a `content.block` event just appended, by index.
+   *
+   * Null after anything else — a snapshot, a start, an activity. The surface
+   * reveals a block only when it *arrived*, and this is the only place that can
+   * tell the difference: five blocks and six blocks a render later is one event
+   * or a snapshot depending on which action produced it, and a renderer
+   * comparing counts has to guess (`docs/specs/0002` §6).
+   */
+  appendedIndex: number | null
   /**
    * A gap was seen. The hook reopens the stream, which answers with a fresh
    * snapshot; nothing else clears it, because nothing else can.
@@ -82,6 +92,7 @@ export const IDLE: LiveTurn = {
   widgets: [],
   terminalReason: null,
   messageId: null,
+  appendedIndex: null,
   needsResync: false,
 }
 
@@ -175,7 +186,9 @@ function applyEvent(state: LiveTurn, event: TurnEvent): LiveTurn {
     return { ...state, needsResync: true }
   }
 
-  const advanced = { ...state, seq: event.seq }
+  // Every path but `content.block` appended nothing, and says so: a block that
+  // stayed on screen across an activity event is not arriving again.
+  const advanced = { ...state, seq: event.seq, appendedIndex: null }
 
   switch (event.type) {
     case "turn.activity":
@@ -188,6 +201,7 @@ function applyEvent(state: LiveTurn, event: TurnEvent): LiveTurn {
         // that work having produced something.
         activity: null,
         blocks: [...advanced.blocks, event.data.block as ContentBlock],
+        appendedIndex: advanced.blocks.length,
       }
 
     case "widget.ready":
@@ -219,6 +233,14 @@ function fromSnapshot(state: LiveTurn, event: TurnEvent): LiveTurn {
     blocks: [...data.blocks],
     widgets: [...data.widgets],
     terminalReason: data.terminal_reason ?? null,
+    // A snapshot restates; it does not deliver. Everything in it was already
+    // there, so nothing in it arrives.
+    appendedIndex: null,
+    // A terminal snapshot names the message that replaces this draft, exactly
+    // as the terminal event does. Without it a reader arriving after the Turn
+    // ended would hold a draft it could never hand over, and show the answer
+    // twice — once without its Risk Notice.
+    messageId: data.message_id ?? state.messageId,
     needsResync: false,
     phase: terminal
       ? phaseForStatus(data.status, data.blocks.length > 0)

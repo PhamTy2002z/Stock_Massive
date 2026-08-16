@@ -6,6 +6,8 @@ export { AddSymbolForm } from "./add-symbol-form"
 export { AnalysisPanel } from "./analysis-panel"
 export { SystemStatusLine } from "./status-line"
 export {
+  STATE_DOT,
+  STATE_LABEL,
   dayAndMonth,
   failureSentence,
   historyBoundaryNotice,

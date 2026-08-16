@@ -67,6 +67,8 @@ export interface SnapshotData {
   activity: ActivityPhase | null
   blocks: ContentBlock[]
   widgets: WidgetSpec[]
+  /** The canonical assistant message, once a terminal transaction wrote one. */
+  message_id: number | null
 }
 
 export interface TurnEvent {
