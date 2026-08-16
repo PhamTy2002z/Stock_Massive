@@ -159,6 +159,7 @@ def turn_request(**overrides) -> TurnRequest:
         runtime=RuntimeContext(
             user_id=7,
             trading_day=date(2026, 8, 14),
+            today=date(2026, 8, 16),
             market_state=MarketState.POST_CLOSE,
             active_symbol="FPT",
         ),
