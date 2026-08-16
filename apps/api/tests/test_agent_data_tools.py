@@ -402,3 +402,106 @@ def test_tool_package_has_no_provider_or_legacy_live_read_path():
         if isinstance(node, ast.ImportFrom) and node.module
     }
     assert news_imports.intersection(forbidden_modules) == {"src.core.vnstock_client"}
+
+
+def _real_sized_payload() -> dict:
+    """A stored Analysis the size the producer actually writes.
+
+    The other Analyses in this module carry `{"version": "new"}`, which is why
+    2,281 tests passed while `get_analysis` was failing on every real row: a
+    four-byte payload cannot break a four-kilobyte budget. The proportions here
+    are measured from the eval store — ~15.4 KB of evidence against ~1.9 KB of
+    judgment and ~0.3 KB of audit, ~17.9 KB in all.
+    """
+    field = {
+        "value": 12345.6789,
+        "unit": "vnd",
+        "asOf": "2026-08-14",
+        "health": {"state": "served", "sessionsUsed": 250},
+        "sanctionedReading": "Higher is a deeper traded value, not a better company.",
+    }
+    return {
+        "audit": {
+            "schemaVersion": 1,
+            "fieldProfileVersion": "v1",
+            "promptVersion": "1.3.0",
+            "model": "gpt-5.6-terra",
+            "route": "http://127.0.0.1:8317/v1",
+            "generatedAt": "2026-08-14T11:00:00+00:00",
+            "inputFingerprint": "0" * 64,
+        },
+        "evidence": {f"pack_{n}.field_{n}": dict(field) for n in range(80)},
+        "judgment": {
+            "verdictLine": "Giữ.",
+            "thesis": "Thanh khoản đủ dày, xu hướng chưa đổi." * 8,
+            "leadAxis": "trend",
+            "axes": [{"axis": f"axis_{n}", "reading": "Ổn định." * 12} for n in range(4)],
+        },
+        "citedFieldIds": [f"pack_{n}.field_{n}" for n in range(12)],
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_analysis_fits_the_tool_budget_and_says_what_it_withheld(stored_world):
+    """A real-sized Analysis comes back, and comes back whole minus its envelope.
+
+    The tool used to return `dict(row.payload)` — 17.9 KB against the catalog's
+    4 KB — so `ToolResultTooLarge` fired on every call and the loop never read
+    an Analysis at all. That is what put category B of the Eval Battery at 0/30
+    while every unit test here passed.
+
+    Asserted through the real dispatch rather than on the helper, because the
+    budget is enforced by the catalog and a helper that fits proves nothing
+    about the tool.
+    """
+    import json
+
+    from src.agent.tools.catalog import MAX_TOOL_RESULT_BYTES
+
+    user_id, tools, _ = stored_world
+    with get_sync_db() as session:
+        session.add(
+            Analysis(
+                symbol=MEMBERS[0],
+                trading_day=date(2026, 8, 12),
+                verdict="hold",
+                payload=_real_sized_payload(),
+                schema_version=1,
+            )
+        )
+
+    stored = len(json.dumps(_real_sized_payload()).encode())
+    assert stored > MAX_TOOL_RESULT_BYTES * 3, "the fixture stopped being real-sized"
+
+    result = await tools.catalog(trace_writer=lambda _trace: None).dispatch(
+        "get_analysis", {"symbol": MEMBERS[0], "date": "2026-08-12"}, context(user_id)
+    )
+
+    assert len(json.dumps(result).encode()) < MAX_TOOL_RESULT_BYTES
+
+    payload = result["analysis"]["payload"]
+    assert "evidence" not in payload
+    # The judgment is the thing only this row holds, so it is served whole.
+    assert payload["judgment"]["verdictLine"] == "Giữ."
+    assert len(payload["citedFieldIds"]) == 12
+    assert payload["audit"]["promptVersion"] == "1.3.0"
+    # The absence is announced, not left for the reader to infer.
+    assert "evidence" in result["withheld"]
+
+
+@pytest.mark.asyncio
+async def test_get_analysis_announces_nothing_when_there_was_no_envelope(stored_world):
+    """An Analysis with no `evidence` key withheld nothing, and says nothing.
+
+    The marker means *this row had an envelope and you are not seeing it*. On a
+    payload that never carried one it would be a claim about data that never
+    existed.
+    """
+    user_id, tools, _ = stored_world
+
+    result = await tools.catalog(trace_writer=lambda _trace: None).dispatch(
+        "get_analysis", {"symbol": MEMBERS[0]}, context(user_id)
+    )
+
+    assert result["analysis"]["payload"] == {"version": "new"}
+    assert "withheld" not in result
