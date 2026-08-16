@@ -279,6 +279,8 @@ def assemble_message(
     manifest: EvidenceManifest,
     citations: Sequence[Citation] = (),
     notice: RiskNotice | None = None,
+    widgets: Sequence[Mapping[str, Any]] = (),
+    widget_refusals: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """The canonical assistant message content, Notice and Manifest included.
 
@@ -286,6 +288,14 @@ def assemble_message(
     a message assembled anywhere else could omit the Risk Notice, and an
     omission is precisely what attaching it in the backend is supposed to make
     impossible.
+
+    ``widgets`` holds validated Widget *specs* — fixed-date retrieval
+    descriptors, never the series (``docs/adr/0012``), and there is no
+    ``widgets`` table for them to live in instead. ``widget_refusals`` holds only
+    the refusals that have somewhere better to send the reader — a chart Stock
+    360 already owns, and the deep link to it. Every other rejection is silent,
+    because a broken box teaches a reader nothing about a picture they never
+    asked for.
     """
     return {
         "text": text,
@@ -294,6 +304,8 @@ def assemble_message(
         "risk_notice": (notice or risk_notice()).as_wire(),
         "evidence_manifest": manifest.as_wire(),
         "sources_and_methods": list(sources_and_methods(citations)),
+        "widgets": [dict(widget) for widget in widgets],
+        "widget_refusals": [dict(refusal) for refusal in widget_refusals],
     }
 
 

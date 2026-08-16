@@ -1,5 +1,6 @@
 "use client"
 
+import { ComparisonBars } from "@/components/charts"
 import { useSectorPeers } from "@/hooks/use-sector-peers"
 import type { PeerMetrics, SectorMedian } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -81,10 +82,11 @@ export function StockValuationVsSector({ symbol, className }: StockValuationVsSe
 
       return {
         label,
-        value: format(value, isPercent),
-        peer: format(peer, isPercent),
-        width: `${Math.min(100, (value / scale) * 100)}%`,
-        medianAt: `${Math.min(100, (peer / scale) * 100)}%`,
+        display: format(value, isPercent),
+        trailing: `TV ${format(peer, isPercent)}`,
+        percent: Math.min(100, (value / scale) * 100),
+        markerPercent: Math.min(100, (peer / scale) * 100),
+        markerLabel: "Trung vị ngành",
       }
     })
     .filter((row): row is NonNullable<typeof row> => row !== null)
@@ -101,31 +103,18 @@ export function StockValuationVsSector({ symbol, className }: StockValuationVsSe
 
   return (
     <Shell peerCount={data.peers.length} sectorName={data.icb_name} className={className}>
-      {rows.map((row) => (
-        <div
-          key={row.label}
-          className="grid grid-cols-[110px_minmax(120px,1fr)_88px_96px] items-center gap-3.5 border-t border-[hsl(var(--hairline))] py-[11px]"
-        >
-          <span className="text-[15px] leading-[1.47] tracking-[-0.374px]">{row.label}</span>
-          <div className="relative h-1.5 rounded-full bg-[hsl(var(--hairline))]">
-            <span
-              style={{ width: row.width }}
-              className="absolute inset-y-0 left-0 rounded-full bg-foreground"
-            />
-            <span
-              style={{ left: row.medianAt }}
-              title="Trung vị ngành"
-              className="absolute -top-1 h-3.5 w-0.5 bg-muted-foreground"
-            />
-          </div>
-          <span className="text-right text-[15px] leading-[1.47] tracking-[-0.374px] tabular-nums">
-            {row.value}
-          </span>
-          <span className="text-right text-[13px] leading-[1.43] tracking-[-0.208px] tabular-nums text-muted-foreground">
-            TV {row.peer}
-          </span>
-        </div>
-      ))}
+      {/* The flattening above is this card's; the drawing is the shared leaf,
+          with the colours this card has always used passed into it. */}
+      <ComparisonBars
+        rows={rows}
+        barColor="hsl(var(--foreground))"
+        trackColor="hsl(var(--hairline))"
+        markerColor="hsl(var(--muted-foreground))"
+        rowClassName="grid grid-cols-[110px_minmax(120px,1fr)_88px_96px] items-center gap-3.5 border-t border-[hsl(var(--hairline))] py-[11px]"
+        labelClassName="text-[15px] leading-[1.47] tracking-[-0.374px]"
+        valueClassName="text-right text-[15px] leading-[1.47] tracking-[-0.374px]"
+        trailingClassName="text-right text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground"
+      />
     </Shell>
   )
 }

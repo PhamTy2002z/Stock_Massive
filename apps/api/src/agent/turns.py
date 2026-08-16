@@ -183,9 +183,15 @@ def draft_content(draft: TurnDraft) -> dict[str, Any]:
     reconnecting browser may render — it has not been through the Gate — and a
     checkpoint carrying it would be a route around the validator that nobody
     wrote on purpose.
+
+    ``widgets`` holds validated specs, under the same rule and for the same
+    reason: ``docs/adr/0012`` emits ``widget.ready`` only after the spec is
+    checkpointed, so a subscriber reconnecting on that event finds it already
+    here rather than racing the write that would have put it here.
     """
     return {
         "blocks": [block.as_wire() for block in draft.blocks],
+        "widgets": [widget.as_wire() for widget in draft.widgets],
         "rounds_used": draft.rounds_used,
         "tool_calls": len(draft.tool_calls),
     }
@@ -404,6 +410,8 @@ class TurnService:
                 terminal_reason=None,
                 citations=draft.citations,
                 outcomes=GateOutcome(grounding="in_progress"),
+                widgets=[widget.as_wire() for widget in draft.widgets],
+                widget_refusals=draft.widget_refusals,
             )
             if draft.blocks
             else None
@@ -421,6 +429,8 @@ class TurnService:
         citations: Sequence[Any] = (),
         outcomes: GateOutcome | None = None,
         provider_request_id: str | None = None,
+        widgets: Sequence[Mapping[str, Any]] = (),
+        widget_refusals: Sequence[Mapping[str, Any]] = (),
     ) -> dict[str, Any]:
         """One assistant message, Notice and Manifest attached by the backend."""
         manifest = build_manifest(
@@ -441,6 +451,8 @@ class TurnService:
             answer_kind=answer_kind,
             manifest=manifest,
             citations=citations,
+            widgets=widgets,
+            widget_refusals=widget_refusals,
         )
 
     async def _finish(self, running: RunningTurn, outcome: TurnOutcome) -> TurnRecord:
@@ -457,6 +469,8 @@ class TurnService:
                 citations=outcome.citations,
                 outcomes=_outcomes(outcome),
                 provider_request_id=outcome.provider_request_id,
+                widgets=[widget.as_wire() for widget in outcome.widgets],
+                widget_refusals=outcome.widget_refusals,
             )
             if outcome.blocks
             else None
@@ -473,6 +487,7 @@ class TurnService:
                     rounds_used=outcome.rounds_used,
                     tool_calls=outcome.tool_calls,
                     blocks=outcome.blocks,
+                    widgets=outcome.widgets,
                 )
             ),
             last_event_seq=running.publisher.next_seq,
@@ -511,6 +526,10 @@ class TurnService:
                 terminal_reason=terminal_reason,
                 citations=() if draft is None else draft.citations,
                 outcomes=GateOutcome(grounding="not_reached"),
+                widgets=(
+                    () if draft is None else [w.as_wire() for w in draft.widgets]
+                ),
+                widget_refusals=() if draft is None else draft.widget_refusals,
             )
             if blocks
             else None
