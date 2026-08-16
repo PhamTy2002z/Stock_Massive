@@ -35,3 +35,4 @@ Nguồn sự thật cho lệnh: `package.json` ở root, `apps/api/Makefile`, `a
 - **Issue tracker** — GitHub Issues của `PhamTy2002z/Stock_Massive`, thao tác qua `gh`. Chi tiết: `docs/agents/issue-tracker.md`.
 - **Triage labels** — 5 nhãn canonical mặc định: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. Chi tiết: `docs/agents/triage-labels.md`.
 - **Domain docs** — single-context: `CONTEXT.md` + `docs/adr/` ở root, do `/matt:domain-modeling` tạo khi có thuật ngữ hoặc quyết định cần chốt. Chi tiết: `docs/agents/domain.md`.
+- **Eval Battery** — `make eval` tách khỏi `make test` vì nó tốn tiền; chạy trên `EVAL_DATABASE_URL` riêng và không bao giờ ghi vào store của dev/prod. Quy trình đóng băng lại Eval Fixture: `docs/agents/eval-battery.md`.

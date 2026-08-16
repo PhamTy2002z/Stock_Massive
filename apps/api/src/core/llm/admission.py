@@ -39,6 +39,15 @@ USER_ROLLING_30D_MICRO_USD = 15_000_000
 USER_ACTIVE_TURNS = 1
 SYSTEM_ACTIVE_TURNS = 3
 PROBE_DAILY_MICRO_USD = 250_000
+# The hard ceiling on one Eval Battery run (``docs/adr/0016``). Enforced here
+# rather than by the harness counting its own spend, and that placement is the
+# whole point: it is the same locked transaction every other call passes
+# through, so a run cannot exceed it by racing itself, and there is no second
+# arithmetic that could disagree with the ledger about what has been spent.
+#
+# ~168 runs at roughly 6k input / 800 output is $2.5–3, which is about two gate
+# runs a month inside the $5 eval lane of ``docs/adr/0014``.
+EVAL_RUN_COST_MICRO_USD = 2_500_000
 ICT = ZoneInfo("Asia/Ho_Chi_Minh")
 
 
@@ -126,6 +135,40 @@ class BudgetRefusal(RuntimeError):
             "state": self.state,
             "reset_at": self.reset_at.isoformat() if self.reset_at else None,
         }
+
+
+#: Every reason a :class:`BudgetRefusal` can carry, as one closed set.
+#:
+#: The agent loop turns a refusal into a Turn's ``terminal_reason`` and ends the
+#: Turn where it is, so a caller holding only the finished Turn has a *string*
+#: and no exception to catch. Matching that string against a literal it chose
+#: itself is how a caller comes to recognise one refusal and sail past the rest:
+#: the Eval Battery did exactly that, stopping on ``eval_budget_exhausted`` while
+#: an exhausted lane let it run to the end and publish a score over Turns that
+#: never reached the model.
+#:
+#: Kept beside the refusals rather than at the reading end, and pinned by a test
+#: that scans this module for every reason actually raised — a set maintained by
+#: hand at a distance is the same failure one indirection later.
+BUDGET_REFUSAL_REASONS: frozenset[str] = frozenset(
+    {
+        "analysis_cost",
+        "analysis_input_per_call",
+        "analysis_output_per_call",
+        "eval_budget_exhausted",
+        "lane_budget_exhausted",
+        "probe_budget_exhausted",
+        "system_active_turns",
+        "turn_context_per_call",
+        "turn_cost",
+        "turn_input_total",
+        "turn_output_total",
+        "user_active_turn",
+        "user_spend_daily",
+        "user_spend_rolling_30d",
+        "user_turn_starts_daily",
+    }
+)
 
 
 class AdmissionLedger(Protocol):
@@ -246,11 +289,7 @@ class SpendAdmission:
                             ),
                         )
                 if candidate.owner.type is OwnerType.ANALYSIS_RUN:
-                    owner_cost = _charged_cost(
-                        session,
-                        LlmCallUsage.owner_type == candidate.owner.type.value,
-                        LlmCallUsage.owner_id == candidate.owner.id,
-                    )
+                    owner_cost = _owner_cost(session, candidate.owner)
                     if owner_cost + reserved > ANALYSIS_COST_MICRO_USD:
                         raise BudgetRefusal(
                             "analysis_cost",
@@ -294,6 +333,24 @@ class SpendAdmission:
                         day_start,
                         day_reset,
                     )
+                elif candidate.owner.type is OwnerType.EVAL_RUN:
+                    owner_cost = _owner_cost(session, candidate.owner)
+                    if owner_cost + reserved > EVAL_RUN_COST_MICRO_USD:
+                        # ``docs/adr/0016``: the harness stops and reports this.
+                        # It must never drop the remaining cases and publish a
+                        # score — a battery that truncates itself is a battery
+                        # that lies — so this refusal is fatal to the run rather
+                        # than something a case skips past.
+                        raise BudgetRefusal(
+                            "eval_budget_exhausted",
+                            "This Eval Battery run has exhausted its allowance.",
+                            operator_detail=(
+                                f"eval_run {candidate.owner.id} has {owner_cost} "
+                                f"micro-USD charged against "
+                                f"{EVAL_RUN_COST_MICRO_USD} and requested "
+                                f"{reserved} more"
+                            ),
+                        )
                 row = LlmCallUsage(
                     owner_type=candidate.owner.type.value,
                     owner_id=candidate.owner.id,
@@ -617,6 +674,20 @@ def _charged_cost(session: Session, *conditions: object) -> int:
     return int(value or 0)
 
 
+def _owner_cost(session: Session, owner: CallOwner) -> int:
+    """What this one owner has already been charged, across every lane.
+
+    Across every lane deliberately: a retried call is re-reserved against
+    ``emergency`` (see ``client.py``), and an owner ceiling that counted only
+    its own lane would let a retry storm walk past the ceiling it exists to be.
+    """
+    return _charged_cost(
+        session,
+        LlmCallUsage.owner_type == owner.type.value,
+        LlmCallUsage.owner_id == owner.id,
+    )
+
+
 def _owner_totals(session: Session, owner: CallOwner) -> tuple[int, int, int]:
     charged_cost = _charged_cost_expression()
     charged_input = case(
@@ -786,6 +857,8 @@ def _read_turn_state(
 
 
 __all__ = [
+    "BUDGET_REFUSAL_REASONS",
+    "EVAL_RUN_COST_MICRO_USD",
     "AdmissionLedger",
     "BudgetLane",
     "BudgetRefusal",

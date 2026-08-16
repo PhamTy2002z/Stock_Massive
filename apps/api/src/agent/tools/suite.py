@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Any
 
 from src.core.database import sync_session_factory
@@ -59,4 +60,25 @@ class IntelligentQuantCatalog:
         return ToolCatalog(registrations, trace_writer=trace_writer)
 
 
-__all__ = ["IntelligentQuantCatalog"]
+@lru_cache(maxsize=1)
+def tool_catalog_version() -> str:
+    """The deployed catalog's version, resolved without running a Turn.
+
+    The version is a hash of the tool *schemas*, which are static — so a caller
+    that only needs to record or compare it should not have to build a service
+    to find it out.  Two of them need exactly that and neither is a Turn: the
+    Eval Fixture pins the catalog it was frozen against (``docs/adr/0016``), and
+    the harness refuses to run when the pin and the deployment disagree.
+
+    Cached because the answer cannot change inside a process: the schemas are
+    declared at import.  Nothing is dispatched through this catalog — the trace
+    writer refuses — so it cannot become a second, untraced route to a tool.
+    """
+
+    def _no_dispatch(_trace):  # pragma: no cover - never reached
+        raise RuntimeError("this catalog exists to be versioned, not dispatched")
+
+    return IntelligentQuantCatalog().catalog(trace_writer=_no_dispatch).tool_catalog_version
+
+
+__all__ = ["IntelligentQuantCatalog", "tool_catalog_version"]
