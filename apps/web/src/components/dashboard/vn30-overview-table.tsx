@@ -166,8 +166,11 @@ export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
               ? "0 cổ phiếu"
               : `${start + 1}–${Math.min(start + ROWS_PER_PAGE, stocks.length)} trên ${stocks.length} cổ phiếu`}
           </span>
-          <div className="flex items-center gap-4">
-            <span className="text-meta text-muted-foreground">
+          {/* Both controls are the same quiet square. The teal "next" the v3
+              design used made paging read as the primary action on a page whose
+              primary action is reading the board. */}
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-meta text-muted-foreground">
               Trang {currentPage}/{totalPages}
             </span>
             <button
@@ -175,18 +178,18 @@ export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
               onClick={() => setPage(currentPage - 1)}
               disabled={currentPage === 1}
               aria-label="Trang trước"
-              className="flex size-9 items-center justify-center rounded-full border border-border bg-foreground/[0.04] text-muted-foreground transition-transform duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex size-7 items-center justify-center rounded-lg border border-border text-ink-4 transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
             >
-              <ChevronLeft className="size-4" />
+              <ChevronLeft className="size-3.5" />
             </button>
             <button
               type="button"
               onClick={() => setPage(currentPage + 1)}
               disabled={currentPage === totalPages}
               aria-label="Trang sau"
-              className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex size-7 items-center justify-center rounded-lg border border-border text-ink-4 transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
             >
-              <ChevronRight className="size-4" />
+              <ChevronRight className="size-3.5" />
             </button>
           </div>
         </div>

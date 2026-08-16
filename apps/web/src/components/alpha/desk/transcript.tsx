@@ -30,6 +30,7 @@ const FOLLOW_THRESHOLD_PX = 120
 
 export function Transcript({
   entries,
+  opening,
   onRetry,
   onFlag,
   onUnflag,
@@ -37,6 +38,12 @@ export function Transcript({
   className,
 }: {
   entries: TranscriptEntry[]
+  /**
+   * What an empty conversation opens on. Defaults to the first-run copy alone;
+   * the container passes the version with the greeting and the session glance,
+   * both of which need hooks this component must not own.
+   */
+  opening?: React.ReactNode
   onRetry: () => void
   /**
    * Flagging one canonical assistant message, and clearing it again.
@@ -79,7 +86,7 @@ export function Transcript({
       className={cn("scrollbar-thin overflow-y-auto overscroll-contain", className)}
     >
       {entries.length === 0 ? (
-        <FirstRun />
+        (opening ?? <FirstRun />)
       ) : (
         <div className="mx-auto w-full max-w-[760px] space-y-7 px-4 py-5">
           {entries.map((entry) => {

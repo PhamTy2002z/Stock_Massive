@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
-  <rect width="48" height="48" rx="10" fill="#0c0c0c"/>
+  <rect width="48" height="48" rx="10" fill="#191815"/>
   <g transform="translate(16.25 4.5) scale(0.804)">
     <defs>
       <linearGradient id="ramp" gradientUnits="userSpaceOnUse" x1="8" y1="0" x2="34.1" y2="28.9">

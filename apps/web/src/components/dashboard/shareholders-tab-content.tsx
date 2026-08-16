@@ -198,8 +198,8 @@ export function ShareholdersTabContent({
           <span className="text-meta text-muted-foreground">
             {startIndex + 1}–{endIndex} trên {totalItems} cổ đông
           </span>
-          <div className="flex items-center gap-3.5">
-            <span className="text-meta text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-meta text-muted-foreground">
               Trang {currentPage}/{totalPages}
             </span>
             <button
@@ -207,18 +207,18 @@ export function ShareholdersTabContent({
               onClick={() => goToPage(currentPage - 1)}
               disabled={currentPage === 1}
               aria-label="Trang trước"
-              className="flex size-9 items-center justify-center rounded-full border border-hairline bg-surface-sunken text-muted-foreground transition-transform duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex size-7 items-center justify-center rounded-lg border border-border text-ink-4 transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
             >
-              <ChevronLeft className="size-4" />
+              <ChevronLeft className="size-3.5" />
             </button>
             <button
               type="button"
               onClick={() => goToPage(currentPage + 1)}
               disabled={currentPage === totalPages}
               aria-label="Trang sau"
-              className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex size-7 items-center justify-center rounded-lg border border-border text-ink-4 transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
             >
-              <ChevronRight className="size-4" />
+              <ChevronRight className="size-3.5" />
             </button>
           </div>
         </div>
