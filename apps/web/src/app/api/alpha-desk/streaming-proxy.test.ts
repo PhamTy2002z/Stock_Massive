@@ -208,6 +208,38 @@ describe("an expired token", () => {
     expect(await response.json()).toEqual({ detail: "Not authenticated" })
   })
 
+  it("does not terminate a stream that is already open", async () => {
+    // Authentication happens once, before the response goes out. After that the
+    // handler is two sockets and nothing else, so an access token expiring
+    // mid-Turn cannot end a Turn — the *next* connection authenticates again.
+    const second = gate()
+    fetchMock.mockResolvedValue(
+      slowEventStream(
+        ["id: 1\nevent: turn.snapshot\ndata: {}\n\n", "id: 2\nevent: content.block\ndata: {}\n\n"],
+        [second.opened],
+      ),
+    )
+
+    const response = await GET(
+      request(`${ORIGIN}/api/alpha-desk/turns/abc/events`),
+      context(["turns", "abc", "events"]),
+    )
+    const reader = response.body!.getReader()
+    await reader.read()
+
+    // The session is gone as far as anything asking is concerned.
+    currentAccessToken.mockResolvedValue(undefined)
+    rotateAccessToken.mockResolvedValue(null)
+    second.open()
+
+    const next = await reader.read()
+    expect(new TextDecoder().decode(next.value)).toContain("event: content.block")
+    // Nothing re-asked, because there is nothing left to ask on this path.
+    expect(rotateAccessToken).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await reader.cancel()
+  })
+
   it("retries only once, so a route answering 401 twice is reported not looped", async () => {
     // A fresh Response per call: one instance cannot be read twice, and the
     // handler genuinely does make two calls.
@@ -261,7 +293,7 @@ describe("the buffered path", () => {
   })
 })
 
-describe("the resource allowlist, now that it carries four things", () => {
+describe("the resource allowlist, now that it carries the transport too", () => {
   it("carries threads and turns", async () => {
     fetchMock.mockResolvedValue(json({ threads: [] }))
 
