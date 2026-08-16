@@ -261,8 +261,7 @@ class EvalRunResult:
                     result.case.id
                     for result in self.results
                     for run in result.runs
-                    for check in run.score.results
-                    if check.check is Check.DIRECTION_LEXICON and check.failed
+                    if run.score.hard_failed
                 }
             )
         )
@@ -290,6 +289,10 @@ class EvalRunResult:
                 "by_surface": self._totals_over(
                     EvalSurface, lambda case: case.surface.value
                 ),
+                # The cross, because the two lanes share categories D and E and
+                # one total covering both is where a regression in the nightly
+                # artifact hides behind a healthy Turn lane.
+                "by_category_surface": self._category_by_surface(),
                 "complete": self.complete,
                 "stopped_reason": self.stopped_reason,
                 # Stored beside the counts because it overrides them. A reader
@@ -303,6 +306,27 @@ class EvalRunResult:
                 ),
             }
         )
+
+    def _category_by_surface(self) -> dict[str, dict[str, dict[str, int]]]:
+        """Every category, split by the lane each of its cases ran on.
+
+        Seeded from both enums for the same reason :meth:`_totals_over` is: a
+        lane that ran none of a category has to say ``0`` rather than be absent,
+        because absent and zero read the same and mean opposite things.
+        """
+        totals = {
+            category.value: {
+                surface.value: {"cases": 0, "runs": 0, "passed": 0}
+                for surface in EvalSurface
+            }
+            for category in EvalCategory
+        }
+        for result in self.results:
+            bucket = totals[result.case.category.value][result.case.surface.value]
+            bucket["cases"] += 1
+            bucket["runs"] += len(result.runs)
+            bucket["passed"] += result.passed_runs
+        return totals
 
     def _totals_over(
         self, keys: type[Enum], key_of: Callable[[EvalCase], str]

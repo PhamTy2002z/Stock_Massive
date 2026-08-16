@@ -273,7 +273,11 @@ class Settings(BaseSettings):
     # database thì `src/eval/store.py` từ chối chạy.
     eval_database_url: str = ""
     eval_fixture_dir: str = "eval/fixtures"
-    eval_report_dir: str = "docs/eval"
+    # Ở gốc repo chứ không phải trong `apps/api`. `make eval` chạy từ `apps/api`,
+    # nên "docs/eval" tương đối sẽ rơi vào `apps/api/docs/eval` — trong khi
+    # ADR-0016 yêu cầu report được commit ở `docs/eval/` cạnh chính ADR đó, để
+    # baseline có một lịch sử diff được ở nơi người đọc tìm tài liệu.
+    eval_report_dir: str = "../../docs/eval"
 
     # Tuyến dev mà chế độ `smoke` chạy trên đó — CLIProxyAPI cục bộ hoặc một
     # model dev — và nó không có giá trị gating vì không chạm tới model

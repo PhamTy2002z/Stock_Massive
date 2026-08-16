@@ -199,6 +199,21 @@ class DeterministicScore:
     def failures(self) -> tuple[CheckResult, ...]:
         return tuple(result for result in self.results if result.failed)
 
+    @property
+    def hard_failed(self) -> bool:
+        """Whether this run tripped the one failure that overrides every rate.
+
+        ``docs/adr/0016``: narrating a registered field **backwards in sign or
+        direction** is a hard fail at 1/3, even where its category is above
+        threshold. The direction lexicon is what a machine can decide of that,
+        and the rule lives here — on the score — rather than in whoever is
+        counting, so the two surfaces cannot come to disagree about it.
+        """
+        return any(
+            result.check is Check.DIRECTION_LEXICON and result.failed
+            for result in self.results
+        )
+
     def as_wire(self) -> dict[str, Any]:
         return {
             "case_id": self.case_id,
@@ -670,6 +685,19 @@ def _check_analysis_outcome(
     return CheckResult(Check.ANALYSIS_OUTCOME, True, "; ".join(checks))
 
 
+def _needs_an_artifact(check: Check, artifact: AnalysisArtifact) -> CheckResult | None:
+    """``inapplicable`` where there is no row to ask, and never a pass.
+
+    Shared by the three checks that read the published artifact, so that a
+    battery of failed productions reports three abstentions rather than three
+    clean sheets — and so the wording of that abstention cannot drift between
+    them, which is how one of the three would come to look like a pass.
+    """
+    if artifact.exists:
+        return None
+    return CheckResult(check, True, "no artifact was published", applicable=False)
+
+
 def _check_cited_profile(artifact: AnalysisArtifact) -> CheckResult:
     """Every cited id is one the active **Analysis Field Profile** names.
 
@@ -682,13 +710,9 @@ def _check_cited_profile(artifact: AnalysisArtifact) -> CheckResult:
     and travels beside the axes rather than inside one, so it is citable in
     every industry's profile without consuming a slot in any of them.
     """
-    if not artifact.exists:
-        return CheckResult(
-            Check.ANALYSIS_CITED_PROFILE,
-            True,
-            "no artifact was published",
-            applicable=False,
-        )
+    absent = _needs_an_artifact(Check.ANALYSIS_CITED_PROFILE, artifact)
+    if absent is not None:
+        return absent
     cited = artifact.cited_field_ids
     if not cited:
         # ``validate_fragment`` refuses an empty citation set, so an artifact
@@ -722,13 +746,9 @@ def _check_refused_not_cited(artifact: AnalysisArtifact) -> CheckResult:
     of what the system could not see, and that is the whole of its role — and it
     can never be what the verdict rests on.
     """
-    if not artifact.exists:
-        return CheckResult(
-            Check.ANALYSIS_REFUSED_FIELD,
-            True,
-            "no artifact was published",
-            applicable=False,
-        )
+    absent = _needs_an_artifact(Check.ANALYSIS_REFUSED_FIELD, artifact)
+    if absent is not None:
+        return absent
     refused = artifact.refused_field_ids
     leaned_on = sorted(refused.intersection(artifact.cited_field_ids))
     if leaned_on:
@@ -752,13 +772,9 @@ def _check_lead_axis(artifact: AnalysisArtifact) -> CheckResult:
     than trusted, because it is a second spelling of one fact and a payload
     where the two disagree is one no reader can lay out.
     """
-    if not artifact.exists:
-        return CheckResult(
-            Check.ANALYSIS_LEAD_AXIS,
-            True,
-            "no artifact was published",
-            applicable=False,
-        )
+    absent = _needs_an_artifact(Check.ANALYSIS_LEAD_AXIS, artifact)
+    if absent is not None:
+        return absent
     leads = artifact.leading_axes
     if len(leads) != 1:
         return CheckResult(

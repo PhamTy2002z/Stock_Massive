@@ -34,7 +34,9 @@ from pathlib import Path
 from .baseline import (
     CASE_EQUIVALENT_DRIFT,
     CategoryScore,
+    SurfaceScore,
     category_scores,
+    category_scores_by_surface,
     surface_scores,
     thresholds_as_prose,
 )
@@ -124,18 +126,17 @@ def _banners(result: EvalRunResult) -> list[str]:
 
     comparison = result.baseline
     if comparison is not None and comparison.baseline_reset:
-        previous = (
-            "there is no previous passing gate run"
-            if comparison.baseline is None
-            else "the previous baseline was frozen against "
-            f"`{comparison.baseline.fixture_version}`"
+        frozen = (
+            comparison.baseline.fixture_version
+            if comparison.baseline is not None
+            else "an unrecorded fixture"
         )
         lines.append(
             "> **`baseline_reset`.** This run is on fixture "
-            f"`{result.fixture_version}` and {previous}, so the previous "
-            "baseline is **void**. This pull request may not claim *no "
-            "regression*: comparing scores across two fixtures compares two "
-            "different exams."
+            f"`{result.fixture_version}` and the previous baseline was frozen "
+            f"against `{frozen}`, so that baseline is **void**. This pull "
+            "request may not claim *no regression*: comparing scores across two "
+            "fixtures compares two different exams."
         )
         lines.append("")
     if comparison is not None and comparison.drifted:
@@ -210,10 +211,28 @@ def _surface_table(result: EvalRunResult) -> list[str]:
     ]
     for score in surface_scores(result.category_totals):
         lines.append(
-            f"| {score.category} | {score.cases} | {score.runs} | "
+            f"| {score.surface} | {score.cases} | {score.runs} | "
             f"{score.passed} | {_pct(score)} |"
         )
     lines.append("")
+
+    shared = category_scores_by_surface(result.category_totals)
+    if shared:
+        lines.append(
+            "Where both lanes measure the same category, they are separated "
+            "below. A single total is where a regression in the nightly "
+            "artifact hides behind a healthy Turn lane."
+        )
+        lines.append("")
+        lines.append("| Category | Surface | Cases | Runs | Passes | Rate |")
+        lines.append("| --- | --- | ---: | ---: | ---: | ---: |")
+        for category, lanes in shared:
+            for score in lanes:
+                lines.append(
+                    f"| {category} | {score.surface} | {score.cases} | "
+                    f"{score.runs} | {score.passed} | {_pct(score)} |"
+                )
+        lines.append("")
     return lines
 
 
@@ -386,7 +405,7 @@ def _one_run(run: CaseRun) -> list[str]:
     return lines
 
 
-def _pct(score: CategoryScore) -> str:
+def _pct(score: CategoryScore | SurfaceScore) -> str:
     return "—" if not score.runs else f"{score.rate * 100:.0f}%"
 
 
