@@ -61,16 +61,15 @@ looks at the database the API serves from, and it looks with ``SELECT`` only.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy import Select, func, select
+from sqlalchemy.orm import InstrumentedAttribute, Session
 
 from src.alpha.models import (
-    FLAG_REASONS,
     TOOL_CALL_UNKNOWN_TOOL,
     TURN_INCOMPLETE,
     AgentMessage,
@@ -91,12 +90,12 @@ OPS_WINDOW_DAYS = 7
 #: for why an over-blocking Gate is what a sustained rate means.
 GROUNDING_FAILED_RATE_THRESHOLD = 0.05
 
-#: The bucket for a Turn that released no assistant message and therefore has no
-#: ``answer_kind`` at all — a deadline before the first block, a bare failure.
-#: Its own key rather than an omission, because the distribution sits beside the
-#: Turn count and a silently smaller total would be read as a smaller problem.
-#: Safe as a name: the three :class:`AnswerKind` values are ``analysis``,
-#: ``education`` and ``refusal``.
+#: The bucket for a Turn carrying no ``answer_kind`` at all — usually one that
+#: released no assistant message, after a deadline before the first block or a
+#: bare failure. Its own key rather than an omission, because the distribution
+#: sits beside the Turn count and a silently smaller total would be read as a
+#: smaller problem. Safe as a name: the three :class:`AnswerKind` values are
+#: ``analysis``, ``education`` and ``refusal``.
 NO_ANSWER_KIND = "none"
 
 
@@ -130,7 +129,8 @@ class OpsSnapshot:
     #: kept under its own key rather than dropped — unlike a flag reason, this
     #: is a distribution, and a dropped bucket would break the sum.
     answer_kinds: Mapping[str, int]
-    #: One key per reason in :data:`FLAG_REASONS`, present even at zero.
+    #: One key per reason in ``FLAG_REASONS``, present even at zero — except on
+    #: an unread store, where the mapping is empty rather than zeroed.
     flags: Mapping[str, int]
     #: Why there are no numbers, where there are none. The battery must not fail
     #: because the application store was unreachable — a gate run measures the
@@ -149,9 +149,25 @@ class OpsSnapshot:
         return self.grounding_failed / self.turns if self.turns else 0.0
 
     @property
+    def threshold_applies(self) -> bool:
+        """Whether the rule can be read against this window at all.
+
+        *5% of Turns over 7 days* is one sentence, and the span is half of it.
+        A month's traffic smooths the burst that distinguishes fabrication from
+        over-blocking, and a single day is noise — so a widened window is a
+        useful reading and **not** the quantity the rule decides on. Stated as a
+        property rather than left to the caller, because the caller that
+        forgot would print a verdict this module calls meaningless.
+        """
+        return self.window_days == OPS_WINDOW_DAYS
+
+    @property
     def reopens_category_b(self) -> bool:
         """Strictly above the threshold, which is what "above 5%" says."""
-        return self.grounding_failed_rate > GROUNDING_FAILED_RATE_THRESHOLD
+        return (
+            self.threshold_applies
+            and self.grounding_failed_rate > GROUNDING_FAILED_RATE_THRESHOLD
+        )
 
     @property
     def incomplete_total(self) -> int:
@@ -211,7 +227,9 @@ class OpsSnapshot:
             tool_calls=0,
             unknown_tool_calls={},
             answer_kinds={},
-            flags=dict.fromkeys(FLAG_REASONS, 0),
+            # Empty, not seeded with zeros. A zero here would say *nothing was
+            # flagged*, which is the one thing an unread store cannot say.
+            flags={},
             error=reason,
         )
 
@@ -229,136 +247,127 @@ def read_ops_snapshot(
 
     The window is **half-open** so two consecutive readings partition time
     rather than overlap at their shared instant, and every one of the five
-    signals uses the same bounds: a query where "over 7 days" meant something
-    slightly different per signal would produce a report whose lines cannot be
-    compared with each other.
+    signals is counted over the same span: a query where "over 7 days" meant
+    something slightly different per signal would produce a report whose lines
+    cannot be read against each other.
+
+    Two decisions are visible in the queries below rather than stated anywhere
+    else. ``grounding_failed`` is counted off ``terminal_reason`` and not off
+    the status — the reason is only ever written alongside ``incomplete``
+    (``src/agent/loop.py``), so restating the status would add a condition that
+    can only be redundant or wrong. And incomplete reasons exclude ``cancelled``
+    Turns, which carry a reason too and are not failures: the reader pressed
+    stop, and folding the two would put ``cancelled_by_user`` at the top of a
+    list of things to fix.
     """
-    since = now - timedelta(days=window_days)
+    window = _Window(now=now, window_days=window_days)
     return OpsSnapshot(
-        since=since,
-        until=now,
-        window_days=window_days,
-        turns=_turns(session, since, now),
-        grounding_failed=_grounding_failed(session, since, now),
-        incomplete_reasons=_incomplete_reasons(session, since, now),
-        tool_calls=_tool_calls(session, since, now),
-        unknown_tool_calls=_unknown_tool_calls(session, since, now),
-        answer_kinds=_answer_kinds(session, since, now),
-        flags=flag_counts_between(session, since=since, until=now),
-    )
-
-
-def _in_window(query, column, since: datetime, until: datetime):
-    return query.where(column >= since, column < until)
-
-
-def _turns(session: Session, since: datetime, until: datetime) -> int:
-    return int(
-        session.execute(
-            _in_window(
-                select(func.count(AgentTurn.id)), AgentTurn.started_at, since, until
-            )
-        ).scalar()
-        or 0
-    )
-
-
-def _grounding_failed(session: Session, since: datetime, until: datetime) -> int:
-    """Counted off ``terminal_reason`` rather than off the status.
-
-    The reason is the stable half. ``grounding_failed`` is only ever written
-    alongside ``incomplete`` (``src/agent/loop.py``), so restating the status
-    here would add a condition that can only ever be redundant or wrong.
-    """
-    return int(
-        session.execute(
-            _in_window(
-                select(func.count(AgentTurn.id)).where(
-                    AgentTurn.terminal_reason == GROUNDING_FAILED
-                ),
-                AgentTurn.started_at,
-                since,
-                until,
-            )
-        ).scalar()
-        or 0
-    )
-
-
-def _incomplete_reasons(
-    session: Session, since: datetime, until: datetime
-) -> dict[str, int]:
-    """Why Turns ended short, busiest first.
-
-    Only ``incomplete``. A ``cancelled`` Turn also carries a reason and it is
-    not a failure — the reader pressed stop — so folding the two would put
-    ``cancelled_by_user`` at the top of a list of things to fix.
-    """
-    rows = session.execute(
-        _in_window(
-            select(AgentTurn.terminal_reason, func.count()).where(
-                AgentTurn.status == TURN_INCOMPLETE,
-                AgentTurn.terminal_reason.is_not(None),
-            ),
+        since=window.since,
+        until=window.until,
+        window_days=window.window_days,
+        turns=window.count(session, AgentTurn.started_at),
+        grounding_failed=window.count(
+            session,
             AgentTurn.started_at,
-            since,
-            until,
-        ).group_by(AgentTurn.terminal_reason)
-    )
-    return _busiest_first(rows)
-
-
-def _tool_calls(session: Session, since: datetime, until: datetime) -> int:
-    return int(
-        session.execute(
-            _in_window(
-                select(func.count(AgentToolCall.id)),
-                AgentToolCall.started_at,
-                since,
-                until,
-            )
-        ).scalar()
-        or 0
-    )
-
-
-def _unknown_tool_calls(
-    session: Session, since: datetime, until: datetime
-) -> dict[str, int]:
-    rows = session.execute(
-        _in_window(
-            select(AgentToolCall.tool_name, func.count()).where(
-                AgentToolCall.status == TOOL_CALL_UNKNOWN_TOOL
-            ),
+            AgentTurn.terminal_reason == GROUNDING_FAILED,
+        ),
+        incomplete_reasons=window.tally(
+            session,
+            AgentTurn.terminal_reason,
+            AgentTurn.started_at,
+            AgentTurn.status == TURN_INCOMPLETE,
+            AgentTurn.terminal_reason.is_not(None),
+        ),
+        tool_calls=window.count(session, AgentToolCall.started_at),
+        unknown_tool_calls=window.tally(
+            session,
+            AgentToolCall.tool_name,
             AgentToolCall.started_at,
-            since,
-            until,
-        ).group_by(AgentToolCall.tool_name)
+            AgentToolCall.status == TOOL_CALL_UNKNOWN_TOOL,
+        ),
+        answer_kinds=_answer_kinds(session, window),
+        # Bounded on ``flagged_at``: a flag is written long after the message it
+        # is about, so placing it by the message's own timestamp would report it
+        # in the week the answer was given rather than the week somebody
+        # objected to it.
+        flags=flag_counts_between(session, since=window.since, until=window.until),
     )
-    return _busiest_first(rows)
 
 
-def _answer_kinds(
-    session: Session, since: datetime, until: datetime
-) -> dict[str, int]:
+class _Window:
+    """The half-open span every signal is counted over, and how to ask for it.
+
+    A type rather than three arguments threaded through six helpers. The span is
+    one idea — ``[since, until)`` and the number of days that made it — and the
+    whole value of this query is that every signal is counted over the same one,
+    which is easier to be sure of when there is one object to be sure about.
+
+    The *column* it bounds differs by signal, and that is not an inconsistency:
+    a Turn is placed in time by ``started_at`` and a flag by ``flagged_at``,
+    because a flag is written long after the message it is about.
+    """
+
+    __slots__ = ("since", "until", "window_days")
+
+    def __init__(self, *, now: datetime, window_days: int) -> None:
+        self.window_days = window_days
+        self.since = now - timedelta(days=window_days)
+        self.until = now
+
+    def bound(self, query: Select, column: InstrumentedAttribute) -> Select:
+        return query.where(column >= self.since, column < self.until)
+
+    def count(
+        self, session: Session, column: InstrumentedAttribute, *criteria: Any
+    ) -> int:
+        """How many rows of one table fall in the window, under ``criteria``.
+
+        The table comes from the column, so a caller cannot bound one table's
+        window while counting another's rows.
+        """
+        query = select(func.count()).select_from(column.class_)
+        if criteria:
+            query = query.where(*criteria)
+        return int(session.execute(self.bound(query, column)).scalar() or 0)
+
+    def tally(
+        self,
+        session: Session,
+        grouped: InstrumentedAttribute,
+        column: InstrumentedAttribute,
+        *criteria: Any,
+    ) -> dict[str, int]:
+        """One column's values and their counts in the window, busiest first."""
+        query = select(grouped, func.count()).where(*criteria)
+        rows = session.execute(self.bound(query, column).group_by(grouped))
+        return _busiest_first(rows)
+
+
+def _answer_kinds(session: Session, window: _Window) -> dict[str, int]:
     """The distribution over **Turns**, not over messages.
 
-    Over Turns because that is the population every other line of this report
-    is denominated in, and because a Turn is the thing a reader asked for. It
-    costs an outer join — ``response_message_id`` is nullable, and a Turn that
-    released no block never got a message — and buys a distribution that sums
-    to the Turn count printed above it.
+    Over Turns because that is the population every other line of this report is
+    denominated in, and because a Turn is the thing a reader asked for. It costs
+    an outer join — ``response_message_id`` is nullable, and a Turn that released
+    no block never got a message — and buys a distribution that sums to the Turn
+    count printed above it.
+
+    Its own function rather than a :meth:`_Window.tally` call: the join is what
+    makes it different, and a ``tally`` taking an optional join would be
+    carrying a parameter for one caller.
+
+    ``NO_ANSWER_KIND`` also collects an assistant message whose content somehow
+    lacks the key. Both are Turns with no ``answer_kind`` on them, which is
+    exactly what the bucket is named for.
     """
     kind = AgentMessage.content["answer_kind"].astext
+    query = (
+        select(kind, func.count())
+        .select_from(AgentTurn)
+        .outerjoin(AgentMessage, AgentMessage.id == AgentTurn.response_message_id)
+    )
     rows = session.execute(
-        _in_window(
-            select(kind, func.count()).select_from(AgentTurn).outerjoin(
-                AgentMessage, AgentMessage.id == AgentTurn.response_message_id
-            ),
-            AgentTurn.started_at,
-            since,
-            until,
-        ).group_by(kind)
+        window.bound(query, AgentTurn.started_at).group_by(kind)
     )
     counts = {value.value: 0 for value in AnswerKind}
     counts[NO_ANSWER_KIND] = 0
@@ -368,7 +377,7 @@ def _answer_kinds(
     return counts
 
 
-def _busiest_first(rows) -> dict[str, int]:
+def _busiest_first(rows: Iterable[tuple[Any, Any]]) -> dict[str, int]:
     """Ordered by count and then by name, so two readings sort the same way."""
     counted = {str(name): int(total) for name, total in rows}
     return dict(sorted(counted.items(), key=lambda item: (-item[1], item[0])))

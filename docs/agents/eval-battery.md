@@ -297,6 +297,14 @@ answers, so `make eval` writes two files and **stops**:
 | `<name>.rubric.md` | the reviewer | prompts, verbatim answers, the questions — **and no deterministic result** |
 | `<name>.json` | the machine | the run, so `rubric` can combine the two later |
 
+The JSON carries a `format` number, and **a record written in an older format is
+refused rather than read short**. That is not pedantry: `make eval-rubric`
+renders the report *entirely* from this file, so a field a newer build expects
+and an older file lacks becomes a document that is silently missing a section a
+reviewer would have merged on. Format 2 added the ops-query snapshot and the
+baseline row; a format-1 record left over from before this change has to be
+re-run rather than scored.
+
 **The report does not exist yet, and that is the blindness.** It carries the
 deterministic results, and a reviewer who has seen those is no longer scoring
 blind — so an instruction not to look is not a mechanism, and a missing file is.
@@ -454,8 +462,11 @@ anyway:
 | flag counts | the `flagged_reason` / `flagged_at` pair on `agent_message` |
 
 The window is half-open and configurable — `EVAL_OPS_WINDOW_DAYS`, or
-`--ops-window-days` on one run — and every signal uses the same bounds, so the
-lines of the report can be read against each other.
+`make eval-smoke EVAL_ARGS="--ops-window-days 30"` for one run — and every
+signal is counted over the same span,
+so the lines of the report can be read against each other. The *column* it is
+applied to differs: a Turn and a tool call are placed by `started_at`, a flag by
+`flagged_at`, because a flag is written long after the message it is about.
 
 **Its output is written into the Eval Report by the harness**, from a snapshot
 taken at the end of the run. Not fetched by the report writer: the gate report
@@ -483,15 +494,20 @@ answers. **That is over-blocking, and over-blocking is what category B measures.
 So the response is to reopen B — add cases from the flagged messages, per the
 flag loop below — and re-run. Nothing else changes.
 
-Two boundaries are deliberate: the comparison is **strictly above** 5%, because
-a rule firing at the boundary would reopen a category on an ordinary week; and
-an **empty window is not a breach**, because zero Turns is zero percent rather
-than an alarm about a service nobody used.
+Three boundaries are deliberate. The comparison is **strictly above** 5%,
+because a rule firing at the boundary would reopen a category on an ordinary
+week. An **empty window is not a breach**, because zero Turns is zero percent
+rather than an alarm about a service nobody used. And **a widened window gets no
+verdict at all** — the report prints the rate and says the threshold was not
+applied. A month smooths out the burst that separates fabrication from
+over-blocking, and a single day is noise, so a rate over any other span is a
+useful reading rather than the quantity this rule decides on.
 
 The denominator is **Turns**, which is why the `answer_kind` distribution is also
-counted over Turns and carries a `none` bucket for Turns that released no
-message. A distribution summing to less than the Turn count above it would be
-smallest exactly where Turns failed.
+counted over Turns and carries a `none` bucket for every Turn that has no
+`answer_kind` on it — usually one that released no message at all. A
+distribution summing to less than the Turn count above it would be smallest
+exactly where Turns failed.
 
 ### What it deliberately does not do
 

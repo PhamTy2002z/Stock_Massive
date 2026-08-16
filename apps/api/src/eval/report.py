@@ -37,14 +37,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from src.agent.ops import (
+    GROUNDING_FAILED_RATE_THRESHOLD,
+    OPS_WINDOW_DAYS,
+    OpsSnapshot,
+)
+
 from .baseline import (
     CASE_EQUIVALENT_DRIFT,
     SurfaceScore,
     category_scores_by_surface,
     surface_scores,
 )
-from src.agent.ops import GROUNDING_FAILED_RATE_THRESHOLD, OpsSnapshot
-
 from .cases import EvalSurface
 from .harness import EvalRunResult
 from .rubric import QUESTIONS, RubricScores
@@ -419,29 +423,66 @@ def _ops_section(ops: OpsSnapshot | None) -> list[str]:
     lines.append(f"One fixed read-only query over {window}. No table, no alerting.")
     lines.append("")
 
-    breached = "**above**" if ops.reopens_category_b else "at or below"
-    lines.append(
-        f"**`grounding_failed`: {ops.grounding_failed} of {ops.turns} Turns "
-        f"({_rate(ops.grounding_failed, ops.turns)})** — {breached} the "
-        f"{GROUNDING_FAILED_RATE_THRESHOLD:.0%} threshold."
-    )
-    lines.append("")
-    if ops.reopens_category_b:
-        lines.append(
-            "> **Category B is reopened.** A sustained share this high means "
-            "the Recommendation Gate is blocking answers that were right, not "
-            "that the model is fabricating — over-blocking is exactly what "
-            "category B measures. Add cases from the flagged messages and "
-            "re-run; nothing else changes."
-        )
-    else:
-        lines.append(
-            "Category B stands. The threshold exists to catch the Gate "
-            "refusing ordinary correct answers, which is how this product "
-            "would die quietly."
-        )
-    lines.append("")
+    lines.extend(_grounding_headline(ops))
+    lines.extend(_ops_tables(ops))
+    return lines
 
+
+def _grounding_headline(ops: OpsSnapshot) -> list[str]:
+    """The rate, and the verdict where the rule is entitled to give one.
+
+    Three readings, and only the last of them carries a verdict. **No Turn ran**
+    is not "at or below the threshold" — nothing was measured, and a window
+    claiming the bar was met is claiming a result it does not have. **A widened
+    window** is a useful reading and not the quantity the rule decides on: *5% of
+    Turns over 7 days* is one sentence and the span is half of it.
+    """
+    if not ops.turns:
+        return [
+            "**No Turn ran in this window**, so there is nothing to read the "
+            f"{GROUNDING_FAILED_RATE_THRESHOLD:.0%} `grounding_failed` "
+            "threshold against.",
+            "",
+        ]
+
+    reading = (
+        f"**`grounding_failed`: {ops.grounding_failed} of {ops.turns} Turns "
+        f"({_rate(ops.grounding_failed, ops.turns)})**"
+    )
+    if not ops.threshold_applies:
+        return [
+            f"{reading} — read over {ops.window_days} days rather than "
+            f"{OPS_WINDOW_DAYS}, so the "
+            f"{GROUNDING_FAILED_RATE_THRESHOLD:.0%} threshold is **not applied "
+            "here**. It is stated over seven days, and a different span is a "
+            "useful reading rather than the one the rule decides on.",
+            "",
+        ]
+
+    breached = "**above**" if ops.reopens_category_b else "at or below"
+    verdict_line = (
+        "> **Category B is reopened.** A sustained share this high means the "
+        "Recommendation Gate is blocking answers that were right, not that the "
+        "model is fabricating — over-blocking is exactly what category B "
+        "measures. Add cases from the flagged messages and re-run; nothing "
+        "else changes."
+        if ops.reopens_category_b
+        else "Category B stands. The threshold exists to catch the Gate "
+        "refusing ordinary correct answers, which is how this product would "
+        "die quietly."
+    )
+    return [
+        f"{reading} — {breached} the "
+        f"{GROUNDING_FAILED_RATE_THRESHOLD:.0%} threshold.",
+        "",
+        verdict_line,
+        "",
+    ]
+
+
+def _ops_tables(ops: OpsSnapshot) -> list[str]:
+    """The four distributions, each against the population it was counted over."""
+    lines: list[str] = []
     lines.extend(
         _ops_table(
             "Incomplete Turns, by reason",
@@ -457,8 +498,8 @@ def _ops_section(ops: OpsSnapshot | None) -> list[str]:
             "Tool",
             ops.unknown_tool_calls,
             ops.tool_calls,
-            f"No call in {ops.tool_calls} reached for a tool that does not "
-            "exist.",
+            "Nothing reached for a tool that does not exist, in "
+            f"{ops.tool_calls} calls.",
             note=(
                 "Also `docs/adr/0011`'s demand trigger: these names are the "
                 "evidence for whether sandboxed execution is ever worth "
@@ -482,19 +523,35 @@ def _ops_section(ops: OpsSnapshot | None) -> list[str]:
             ops.flags,
             ops.flags_total,
             "Nothing was flagged in this window.",
-            note=(
-                # The share column below is composition — which reason
-                # dominates, which is what drives the flag loop. The rate a
-                # reader wants first is against Turns, so it is stated rather
-                # than left to be worked out from two tables.
-                f"{ops.flags_total} flagged over {ops.turns} Turns "
-                f"({_rate(ops.flags_total, ops.turns)}). A flag confirmed as a "
-                "genuine failure becomes a new Eval Case, frozen with its "
-                "fixture. That is the only sanctioned way this battery grows."
-            ),
+            note=_flag_note(ops),
         )
     )
     return lines
+
+
+def _flag_note(ops: OpsSnapshot) -> str:
+    """Why flags matter, and — when there are any — how many.
+
+    The share column of the table below is *composition*: which reason
+    dominates, which is what drives the flag loop.
+
+    **A count and not a rate against Turns**, deliberately. A flag is placed in
+    time by ``flagged_at`` and a Turn by ``started_at``, so a flag inside this
+    window is often about an answer given outside it. Dividing one by the other
+    would print a percentage of two different populations, which is worse than
+    printing no percentage at all.
+    """
+    loop = (
+        "A flag confirmed as a genuine failure becomes a new Eval Case, frozen "
+        "with its fixture. That is the only sanctioned way this battery grows."
+    )
+    if not ops.flags_total:
+        return loop
+    return (
+        f"{ops.flags_total} flagged in this window — counted by when they were "
+        f"flagged, not by when the answer was given, so this is not a rate "
+        f"against the {ops.turns} Turns above. {loop}"
+    )
 
 
 def _ops_table(

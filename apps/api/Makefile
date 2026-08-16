@@ -28,14 +28,21 @@ test:
 # at the database the API serves from. The one exception is the fixed ops query
 # (src/agent/ops.py), which reads DATABASE_URL once at the end of a run, with
 # SELECT only, so that its output lands in the report ADR-0016 requires it in.
-# Override its window with --ops-window-days; the default is EVAL_OPS_WINDOW_DAYS.
+#
+# EVAL_ARGS is forwarded to the CLI, which is how the ops window is widened for
+# one run:
+#
+#   make eval-smoke EVAL_ARGS="--ops-window-days 30"
+#
+# Its default is EVAL_OPS_WINDOW_DAYS. The 5% threshold is only read at seven
+# days, and a report over any other window says so instead of a verdict.
 eval:
-	$(PYTHON) -m src.eval run --mode gate
+	$(PYTHON) -m src.eval run --mode gate $(EVAL_ARGS)
 
 # The dev route at zero cost. Proves the harness and the deterministic
 # assertions still work, and has no gating value.
 eval-smoke:
-	$(PYTHON) -m src.eval run --mode smoke
+	$(PYTHON) -m src.eval run --mode smoke $(EVAL_ARGS)
 
 # Freeze one Trading Day of the real store into a new seed. Reads DATABASE_URL
 # and writes a file; it never writes to the store.
