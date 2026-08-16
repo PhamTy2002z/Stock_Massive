@@ -46,7 +46,7 @@ export const StockIndexCard = memo(function StockIndexCard({
   return (
     <Card
       className={cn(
-        "rounded-[18px] p-[18px] shadow-none hover:shadow-md transition-shadow cursor-pointer",
+        "rounded-card p-[14px] cursor-pointer",
         className
       )}
     >
@@ -90,7 +90,7 @@ export const StockIndexCard = memo(function StockIndexCard({
 
 export function StockIndexCardSkeleton({ className }: { className?: string }) {
   return (
-    <Card className={cn("rounded-[18px] p-[18px] shadow-none", className)}>
+    <Card className={cn("rounded-card p-[14px]", className)}>
       <div className="h-4 w-20 rounded bg-muted animate-pulse" />
       <div className="mt-2 h-8 w-32 rounded bg-muted animate-pulse" />
       <div className="mt-1.5 h-5 w-28 rounded bg-muted animate-pulse" />

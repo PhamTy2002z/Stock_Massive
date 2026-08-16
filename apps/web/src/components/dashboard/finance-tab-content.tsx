@@ -174,7 +174,7 @@ export function FinanceTabContent({ symbol, className }: FinanceTabContentProps)
   const hasData = rows.length > 0 && periods.length > 0
 
   return (
-    <div className={cn("min-w-0 rounded-[18px] border border-border bg-card p-[18px]", className)}>
+    <div className={cn("min-w-0 rounded-card border border-border bg-card p-[14px]", className)}>
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap gap-2">
           {subTabs.map((tab) => (
@@ -257,7 +257,7 @@ export function FinanceTabContentSkeleton({ className }: { className?: string })
   return (
     <div
       className={cn(
-        "h-[520px] min-w-0 animate-pulse rounded-[18px] border border-border bg-card",
+        "h-[520px] min-w-0 animate-pulse rounded-card border border-border bg-card",
         className
       )}
     />

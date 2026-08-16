@@ -199,7 +199,7 @@ export function VN30OverviewTableSkeleton({ className }: { className?: string })
   return (
     <div className={cn("min-w-0", className)}>
       <div className="mb-3.5 h-8 w-48 animate-pulse rounded bg-muted" />
-      <div className="h-[520px] animate-pulse rounded-[18px] border border-border bg-card" />
+      <div className="h-[520px] animate-pulse rounded-card border border-border bg-card" />
     </div>
   )
 }

@@ -62,17 +62,6 @@ module.exports = {
         modal: '0 40px 90px rgba(0, 0, 0, 0.7)',
       },
       colors: {
-        auth: {
-          background: '#141619',
-          surface: '#1f2225',
-          'surface-muted': '#181b1e',
-          ink: '#0b0d0f',
-          muted: '#596273',
-          border: '#d8dde4',
-          orange: '#ff6500',
-          up: '#00bd7a',
-          down: '#f02237',
-        },
         // The surface ladder. Six steps, each one a few percent of luminance
         // off the one below it — the design separates planes by tone, not by
         // rules, so a component picks a step instead of drawing a border.

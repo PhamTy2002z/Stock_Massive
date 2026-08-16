@@ -47,7 +47,7 @@ export function SettingsPanel({
   footer?: React.ReactNode
 }) {
   return (
-    <div className="overflow-hidden rounded-[18px] border border-[hsl(var(--hairline))] bg-card">
+    <div className="overflow-hidden rounded-card border border-[hsl(var(--hairline))] bg-card">
       {children}
       {footer ? (
         <div className="border-t border-[hsl(var(--hairline))] bg-muted/40 px-5 py-3.5">

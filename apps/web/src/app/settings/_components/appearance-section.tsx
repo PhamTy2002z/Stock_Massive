@@ -59,7 +59,7 @@ function ThemePicker() {
  *  numbers, where up and down have to stay apart on both surfaces. */
 function QuotePreview() {
   return (
-    <div className="w-full rounded-[18px] border border-[hsl(var(--hairline))] bg-background p-4 md:w-[320px]">
+    <div className="w-full rounded-card border border-[hsl(var(--hairline))] bg-background p-4 md:w-[320px]">
       <div className="flex items-baseline justify-between">
         <span className="text-[15px] font-semibold leading-[1.24] tracking-[-0.374px]">
           VNM

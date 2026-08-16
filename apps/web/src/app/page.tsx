@@ -65,7 +65,7 @@ export default async function Home() {
                 Dữ liệu chỉ mang tính tham khảo, không phải khuyến nghị đầu tư. Nguồn: HOSE,
                 HNX, UPCoM.
               </span>
-              <span>© {new Date().getFullYear()} Stock Massive</span>
+              <span>© {new Date().getFullYear()} VisgniteAI</span>
             </footer>
           </div>
         </DashboardLayoutClient>

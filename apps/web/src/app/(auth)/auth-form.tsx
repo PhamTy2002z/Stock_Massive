@@ -1,12 +1,12 @@
 "use client"
 
-import Image from "next/image"
 import Link from "next/link"
 import { unstable_rethrow, useSearchParams } from "next/navigation"
 import { useState } from "react"
 import { Eye, EyeOff, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 
+import { VisgniteWordmark } from "@/components/shared/visgnite-logo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -68,23 +68,22 @@ export default function AuthForm({ mode, action }: AuthFormProps) {
   }
 
   return (
-    <main className="grid min-h-dvh bg-white lg:grid-cols-2">
-      <section className="relative flex min-h-dvh flex-col bg-white px-6 py-8 text-auth-ink sm:px-14 sm:py-10 lg:px-14">
+    <main className="grid min-h-dvh bg-background lg:grid-cols-2">
+      <section className="relative flex min-h-dvh flex-col bg-background px-6 py-8 text-foreground sm:px-14 sm:py-10 lg:px-14">
         <Link
           href="/"
-          className="flex w-fit items-center gap-3 rounded-md font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-auth-orange focus-visible:ring-offset-4"
+          className="flex w-fit items-center gap-3 rounded-md font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4"
         >
-          <Image src="/logo.png" alt="" width={30} height={26} className="h-7 w-8 object-contain" priority />
-          <span>Stock Massive</span>
+          <VisgniteWordmark className="text-[1.1rem]" />
         </Link>
 
         <div className="my-auto flex justify-center py-12">
           <div className="w-full max-w-[392px] animate-auth-up">
             <header className="mb-6">
-              <h1 className="text-[40px] font-bold leading-[1.12] tracking-[-0.04em] text-auth-ink">
+              <h1 className="text-[40px] font-bold leading-[1.12] tracking-[-0.04em] text-foreground">
                 {copy.title}
               </h1>
-              <p className="mt-2 max-w-[370px] text-base leading-6 text-auth-muted">
+              <p className="mt-2 max-w-[370px] text-base leading-6 text-ink-4">
                 {copy.description}
               </p>
             </header>
@@ -92,7 +91,7 @@ export default function AuthForm({ mode, action }: AuthFormProps) {
             <form action={onSubmit} className="space-y-4">
               {isRegister && (
                 <div className="space-y-2">
-                  <Label htmlFor="full_name" className="text-sm font-semibold text-auth-ink">
+                  <Label htmlFor="full_name" className="text-sm font-semibold text-foreground">
                     Họ và tên
                   </Label>
                   <Input
@@ -101,13 +100,13 @@ export default function AuthForm({ mode, action }: AuthFormProps) {
                     type="text"
                     autoComplete="name"
                     placeholder="Nguyễn Văn A"
-                    className="h-12 rounded-xl border-auth-border bg-white px-4 text-base text-auth-ink shadow-none placeholder:text-[#a5abb5] focus-visible:ring-auth-orange md:text-base"
+                    className="h-12 rounded-[10px] border-border bg-surface-sunken px-4 text-base text-foreground shadow-none placeholder:text-muted-foreground focus-visible:ring-ring md:text-base"
                   />
                 </div>
               )}
 
               <div className="space-y-2">
-                <Label htmlFor="email" className="text-sm font-semibold text-auth-ink">
+                <Label htmlFor="email" className="text-sm font-semibold text-foreground">
                   Email
                 </Label>
                 <Input
@@ -117,12 +116,12 @@ export default function AuthForm({ mode, action }: AuthFormProps) {
                   required
                   autoComplete="email"
                   placeholder="you@example.com"
-                  className="h-12 rounded-xl border-auth-border bg-white px-4 text-base text-auth-ink shadow-none placeholder:text-[#a5abb5] focus-visible:ring-auth-orange md:text-base"
+                  className="h-12 rounded-[10px] border-border bg-surface-sunken px-4 text-base text-foreground shadow-none placeholder:text-muted-foreground focus-visible:ring-ring md:text-base"
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="password" className="text-sm font-semibold text-auth-ink">
+                <Label htmlFor="password" className="text-sm font-semibold text-foreground">
                   Mật khẩu
                 </Label>
                 <div className="relative">
@@ -134,13 +133,13 @@ export default function AuthForm({ mode, action }: AuthFormProps) {
                     minLength={isRegister ? 8 : undefined}
                     autoComplete={isRegister ? "new-password" : "current-password"}
                     placeholder={isRegister ? "Tối thiểu 8 ký tự" : "Nhập mật khẩu"}
-                    className="h-12 rounded-xl border-auth-border bg-white px-4 pr-12 text-base text-auth-ink shadow-none placeholder:text-[#a5abb5] focus-visible:ring-auth-orange md:text-base"
+                    className="h-12 rounded-[10px] border-border bg-surface-sunken px-4 pr-12 text-base text-foreground shadow-none placeholder:text-muted-foreground focus-visible:ring-ring md:text-base"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword((visible) => !visible)}
                     aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
-                    className="absolute inset-y-0 right-1 flex w-11 items-center justify-center rounded-lg text-[#858d98] transition-colors hover:text-auth-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-auth-orange"
+                    className="absolute inset-y-0 right-1 flex w-11 items-center justify-center rounded-lg text-ink-5 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     {showPassword ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
                   </button>
@@ -150,18 +149,18 @@ export default function AuthForm({ mode, action }: AuthFormProps) {
               <Button
                 type="submit"
                 disabled={isLoading}
-                className="h-12 w-full rounded-full bg-auth-orange text-base font-semibold text-white shadow-none transition-colors hover:bg-[#e95d00] focus-visible:ring-2 focus-visible:ring-auth-orange focus-visible:ring-offset-2 active:bg-[#d95500]"
+                className="h-12 w-full rounded-full bg-primary text-base font-semibold text-primary-foreground shadow-none transition-[filter] hover:brightness-110 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:brightness-95"
               >
                 {isLoading && <Loader2 className="animate-spin" aria-hidden="true" />}
                 {isLoading ? copy.pending : copy.submit}
               </Button>
             </form>
 
-            <p className="mt-6 text-center text-base text-auth-muted">
+            <p className="mt-6 text-center text-base text-ink-4">
               {copy.footerText}{" "}
               <Link
                 href={copy.footerHref}
-                className="font-semibold text-auth-orange transition-colors hover:text-[#d95500] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-auth-orange focus-visible:ring-offset-2"
+                className="font-semibold text-primary underline-offset-4 transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               >
                 {copy.footerLink}
               </Link>
@@ -169,13 +168,13 @@ export default function AuthForm({ mode, action }: AuthFormProps) {
           </div>
         </div>
 
-        <footer className="flex items-center justify-between text-sm text-[#767e8a]">
-          <span>© 2026 Stock Massive</span>
+        <footer className="flex items-center justify-between text-sm text-ink-6">
+          <span>© 2026 VisgniteAI</span>
           <nav aria-label="Liên kết pháp lý" className="flex gap-6">
-            <Link href="/terms" className="hover:text-auth-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-auth-orange">
+            <Link href="/terms" className="hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
               Điều khoản
             </Link>
-            <Link href="/privacy" className="hover:text-auth-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-auth-orange">
+            <Link href="/privacy" className="hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
               Bảo mật
             </Link>
           </nav>

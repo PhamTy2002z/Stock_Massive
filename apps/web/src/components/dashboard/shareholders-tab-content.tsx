@@ -44,7 +44,7 @@ function Card({
   className?: string
 }) {
   return (
-    <div className={cn("min-w-0 rounded-[18px] border border-border bg-card p-[18px]", className)}>
+    <div className={cn("min-w-0 rounded-card border border-border bg-card p-[14px]", className)}>
       {children}
     </div>
   )
@@ -231,10 +231,10 @@ export function ShareholdersTabContent({
 export function ShareholdersTabContentSkeleton({ className }: { className?: string }) {
   return (
     <div className={cn("flex min-w-0 flex-col gap-4", className)}>
-      <div className="h-[148px] animate-pulse rounded-[18px] border border-border bg-card" />
+      <div className="h-[148px] animate-pulse rounded-card border border-border bg-card" />
       <div
         className={cn(
-          "h-[520px] animate-pulse rounded-[18px] border border-border bg-card",
+          "h-[520px] animate-pulse rounded-card border border-border bg-card",
           className
         )}
       />

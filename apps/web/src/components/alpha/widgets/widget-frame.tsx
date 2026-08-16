@@ -70,7 +70,7 @@ export function WidgetFrame({
   return (
     <figure
       className={cn(
-        "min-w-0 rounded-[18px] border border-border bg-card p-4",
+        "min-w-0 rounded-card border border-border bg-card p-4",
         // Reduced motion removes the transition rather than shortening it: a
         // fast animation is still an animation to a reader who asked for none.
         "motion-safe:transition-colors motion-reduce:transition-none",
@@ -150,7 +150,7 @@ export function TooLittleData({
 }) {
   return (
     <figure
-      className="min-w-0 rounded-[18px] border border-border bg-card p-4"
+      className="min-w-0 rounded-card border border-border bg-card p-4"
       style={{ color: WIDGET_PALETTE.ink }}
     >
       <figcaption className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
