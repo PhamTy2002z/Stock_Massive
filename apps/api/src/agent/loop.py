@@ -72,6 +72,7 @@ from src.core.llm import (
 )
 from src.core.llm.errors import MAX_TOOL_ATTEMPTS
 
+from .blocks import split_blocks
 from .context import (
     ConstructedContext,
     ContextBudget,
@@ -80,6 +81,15 @@ from .context import (
     TranscriptTurn,
     build_messages,
     estimate_tokens,
+)
+from .events import Activity, TurnPublisher
+from .grounding import (
+    GROUNDING_FAILED,
+    Citation,
+    GroundingFailure,
+    RecommendationValidator,
+    ReleasedBlock,
+    TraceIndex,
 )
 from .prompt import AnswerEvidence, AnswerKind, RuntimeContext, classify_answer_kind, render
 from .tools.catalog import ToolCatalog, ToolContext, refusal_reason
@@ -112,6 +122,25 @@ TOOL_EXHAUSTED_MESSAGE = (
     "this tool has already failed twice in this Turn and will not be called again; "
     "take a different approach or say what is missing"
 )
+
+# ``docs/adr/0013``'s timings, minus the Turn deadline, which belongs to the
+# lifecycle rather than to one loop: the deadline bounds a Turn including the
+# time it spends waiting for a slot, and this class only exists once it has one.
+#
+# The call timeout duplicates the transport's own by design. The transport's
+# guards one HTTP request; this one guards the whole call including retries, so
+# a route that answers slowly three times cannot quietly spend six minutes of a
+# ten-minute Turn.
+LLM_CALL_TIMEOUT_SECONDS = 120.0
+# Shorter than the call timeout, because a tool reads the local store or one
+# allowlisted news source: past this, waiting costs the Turn more than the
+# result is worth.
+TOOL_TIMEOUT_SECONDS = 30.0
+
+# The one tool whose activity is a search rather than a read. Kept as a name
+# check here because ``turn.activity`` may never expose a tool name — this maps
+# a name to a generic phase, which is the opposite of leaking one.
+NEWS_TOOL = "search_news"
 
 
 class TurnStatus(str, Enum):
@@ -175,6 +204,14 @@ class ToolCallIdMismatch(MalformedArguments):
     """
 
 
+class ToolTimeout(TimeoutError):
+    """One tool that did not answer inside its own, shorter deadline."""
+
+    def __init__(self, tool_name: str, seconds: float) -> None:
+        super().__init__(f"tool {tool_name} did not answer within {seconds:g}s")
+        self.tool_name = tool_name
+
+
 @dataclass(frozen=True)
 class TurnRequest:
     """One user message and everything needed to answer it."""
@@ -191,11 +228,34 @@ class TurnRequest:
 
 @dataclass(frozen=True)
 class TurnDraft:
-    """What has been produced so far, for checkpointing."""
+    """What has been produced so far, for checkpointing.
+
+    ``blocks`` rather than ``text`` is what a reconnecting browser renders: they
+    are the units that were *proven*, and a draft that carried unreleased prose
+    would put an unvalidated figure into the snapshot the Gate exists to keep
+    out of the stream.
+
+    ``boundary`` says this checkpoint is one of the moments ``docs/adr/0013``
+    names — an activity, a Widget, a cancellation, a terminal state — rather
+    than ordinary progress. The rate limiter that keeps checkpoints to at most
+    one a second reads it, and nothing else does.
+    """
 
     text: str | None
     rounds_used: int
     tool_calls: tuple[TranscriptToolCall, ...]
+    blocks: tuple[ReleasedBlock, ...] = ()
+    boundary: bool = False
+    # Classified from the same evidence the outcome will be, so a Turn the
+    # deadline kills before it returns one is still written under the answer
+    # kind it had earned rather than under a default.
+    answer_kind: AnswerKind = AnswerKind.EDUCATION
+
+    @property
+    def citations(self) -> tuple[Citation, ...]:
+        return tuple(
+            citation for block in self.blocks for citation in block.citations
+        )
 
 
 @dataclass(frozen=True)
@@ -211,6 +271,21 @@ class TurnOutcome:
     tool_calls: tuple[TranscriptToolCall, ...]
     usage: Usage
     summary_needed: bool = False
+    # The blocks that passed the Recommendation Gate and were emitted, in order.
+    blocks: tuple[ReleasedBlock, ...] = ()
+    # The route's id for the last call it answered, for the Evidence Manifest.
+    provider_request_id: str | None = None
+    # Which Gate condition refused, when one did. The Turn's terminal reason
+    # stays the stable ``grounding_failed``; this is the operator's detail and
+    # the ops query's dimension.
+    grounding_failure_code: str | None = None
+
+    @property
+    def citations(self) -> tuple[Citation, ...]:
+        """Every cited field of every released block, in the order emitted."""
+        return tuple(
+            citation for block in self.blocks for citation in block.citations
+        )
 
 
 Checkpoint = Callable[[TurnDraft], Awaitable[None] | None]
@@ -234,6 +309,9 @@ class _TurnState:
     universe_refusals: int = 0
     grounded_tool_calls: int = 0
     summary_needed: bool = False
+    blocks: list[ReleasedBlock] = field(default_factory=list)
+    request_id: str | None = None
+    grounding_failure_code: str | None = None
 
     def add_usage(self, usage: Usage | None) -> None:
         # ``None`` usage is not zero usage: a provider that supplied no evidence
@@ -256,11 +334,14 @@ class _TurnState:
             grounded_tool_calls=self.grounded_tool_calls,
         )
 
-    def draft(self) -> TurnDraft:
+    def draft(self, *, boundary: bool = False) -> TurnDraft:
         return TurnDraft(
             text=self.text,
             rounds_used=self.tool_rounds,
             tool_calls=tuple(self.calls),
+            blocks=tuple(self.blocks),
+            boundary=boundary,
+            answer_kind=classify_answer_kind(self.evidence()),
         )
 
 
@@ -361,6 +442,9 @@ class AgentLoop:
         slots: SessionSlots | None = None,
         max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
         checkpoint: Checkpoint | None = None,
+        publisher: TurnPublisher | None = None,
+        call_timeout_seconds: float = LLM_CALL_TIMEOUT_SECONDS,
+        tool_timeout_seconds: float = TOOL_TIMEOUT_SECONDS,
     ) -> None:
         self._client = client
         self._catalog = catalog
@@ -368,6 +452,9 @@ class AgentLoop:
         self._slots = slots or SessionSlots()
         self._max_output_tokens = max_output_tokens
         self._checkpoint = checkpoint
+        self._publisher = publisher
+        self._call_timeout = call_timeout_seconds
+        self._tool_timeout = tool_timeout_seconds
         # Resolved once, here. ``docs/adr/0008``: models split by workload and
         # never inside the loop, because an in-loop cheap-router split adds a
         # decision point whose quality cannot be measured until the Eval
@@ -394,7 +481,9 @@ class AgentLoop:
 
         for round_index in range(MAX_TOOL_ROUNDS + 1):
             if cancelled():
-                return await self._ended(TurnStatus.CANCELLED, "cancelled_by_user", state)
+                return await self._terminal(
+                    request, TurnStatus.CANCELLED, "cancelled_by_user", state
+                )
 
             final = round_index == MAX_TOOL_ROUNDS
             context = self._construct(system_prompt, request, state, final)
@@ -403,8 +492,16 @@ class AgentLoop:
             if final:
                 messages.append(ROUNDS_EXHAUSTED_MESSAGE)
 
+            await self._activity(Activity.ANALYZING, state)
             try:
                 completion = await self._complete(request, messages, context, final)
+            except TimeoutError:
+                # Its own reason, and its own ceiling: the transport's timeout
+                # covers one HTTP request, this one covers the call including
+                # every retry the client made inside it.
+                return await self._terminal(
+                    request, TurnStatus.INCOMPLETE, "llm_call_timeout", state
+                )
             except BudgetRefusal as refusal:
                 # No further LLM call, of any kind. The partial answer and the
                 # traces of what ran are what the user gets.
@@ -413,50 +510,72 @@ class AgentLoop:
                     request.request_message_id,
                     refusal.operator_detail or refusal.reason,
                 )
-                return await self._ended(TurnStatus.INCOMPLETE, refusal.reason, state)
+                return await self._terminal(
+                    request, TurnStatus.INCOMPLETE, refusal.reason, state
+                )
             except ModelRefusal as refusal:
                 state.add_usage(refusal.usage)
                 state.model_refused = True
                 state.text = refusal.refusal
-                return await self._ended(TurnStatus.COMPLETE, "model_refusal", state)
+                return await self._terminal(
+                    request, TurnStatus.COMPLETE, "model_refusal", state
+                )
             except AuthUnavailable:
                 # Never retried: a dead credential turns one failure into a run
                 # of identical ones. ``auth_unavailable`` is the stable reason
                 # the interactive surface renders as *re-auth needed*.
-                return await self._ended(TurnStatus.INCOMPLETE, "auth_unavailable", state)
+                return await self._terminal(
+                    request, TurnStatus.INCOMPLETE, "auth_unavailable", state
+                )
             except GatewayTimeout:
                 # Already retried with backoff inside the client; a third
                 # attempt here would silently double the tabled ceiling.
-                return await self._ended(TurnStatus.INCOMPLETE, "gateway_timeout", state)
+                return await self._terminal(
+                    request, TurnStatus.INCOMPLETE, "gateway_timeout", state
+                )
             except MalformedArguments:
                 # Counted and logged at the boundary. Nothing is disabled here.
                 raise
             except LLMError:
-                return await self._ended(TurnStatus.INCOMPLETE, "route_error", state)
+                return await self._terminal(
+                    request, TurnStatus.INCOMPLETE, "route_error", state
+                )
 
             state.add_usage(completion.usage)
+            if completion.request_id:
+                state.request_id = completion.request_id
             if completion.text:
                 state.text = completion.text
             await self._save(state)
 
             if final or not completion.tool_calls:
-                return await self._ended(
-                    TurnStatus.COMPLETE, None, state, rounds_exhausted=final
+                return await self._terminal(
+                    request, TurnStatus.COMPLETE, None, state, rounds_exhausted=final
                 )
 
             assert_distinct_ids(completion.tool_calls)
+            await self._activity(
+                Activity.SEARCHING
+                if any(call.name == NEWS_TOOL for call in completion.tool_calls)
+                else Activity.READING_DATA,
+                state,
+            )
             fatal = await self._round(
                 completion.tool_calls, request, tool_context, attempts, state
             )
             state.tool_rounds += 1
-            await self._save(state)
+            await self._save(state, boundary=True)
 
+            if isinstance(fatal, ToolTimeout):
+                return await self._terminal(
+                    request, TurnStatus.INCOMPLETE, "tool_timeout", state
+                )
             if isinstance(fatal, AuthUnavailable):
                 # A tool's own channel died — the news lane is the one that can.
                 # Same class, same behaviour: never retried, surfaced as re-auth
                 # needed, and the round's healthy siblings are already recorded.
-                return await self._ended(
-                    TurnStatus.INCOMPLETE, "auth_unavailable", state
+                return await self._terminal(
+                    request, TurnStatus.INCOMPLETE, "auth_unavailable", state
                 )
             if fatal is not None:
                 raise fatal
@@ -465,7 +584,9 @@ class AgentLoop:
             # Every tool is read-only, so there is nothing to roll back, and a
             # half-cancel path costs more than the call it would save.
             if cancelled():
-                return await self._ended(TurnStatus.CANCELLED, "cancelled_by_user", state)
+                return await self._terminal(
+                    request, TurnStatus.CANCELLED, "cancelled_by_user", state
+                )
 
         raise RuntimeError("the round loop ended without a terminal state")  # pragma: no cover
 
@@ -520,16 +641,19 @@ class AgentLoop:
             + (ROUNDS_EXHAUSTED_TOKENS if final else 0),
             output_tokens=self._max_output_tokens,
         )
-        return await self._client.complete(
-            CompletionRequest(
-                model=self._model,
-                messages=tuple(messages),
-                tools=self._catalog.tool_schemas,
-                tool_choice="none" if final else "auto",
-                parallel_tool_calls=True,
-                max_output_tokens=self._max_output_tokens,
+        return await asyncio.wait_for(
+            self._client.complete(
+                CompletionRequest(
+                    model=self._model,
+                    messages=tuple(messages),
+                    tools=self._catalog.tool_schemas,
+                    tool_choice="none" if final else "auto",
+                    parallel_tool_calls=True,
+                    max_output_tokens=self._max_output_tokens,
+                ),
+                spend,
             ),
-            spend,
+            self._call_timeout,
         )
 
     async def _round(
@@ -558,7 +682,13 @@ class AgentLoop:
         for call, outcome in pair_results(calls, outcomes):
             if isinstance(outcome, BaseException):
                 if isinstance(
-                    outcome, (MalformedArguments, AuthUnavailable, asyncio.CancelledError)
+                    outcome,
+                    (
+                        MalformedArguments,
+                        AuthUnavailable,
+                        ToolTimeout,
+                        asyncio.CancelledError,
+                    ),
                 ):
                     fatal = fatal or outcome
                     continue
@@ -583,16 +713,22 @@ class AgentLoop:
         tool_context: ToolContext,
         allowed: bool,
     ) -> tuple[str, Mapping[str, Any]]:
-        """Run one tool, carrying its own id back with its result."""
+        """Run one tool under its own deadline, carrying its id back with it."""
         if not allowed:
             return call.id, tool_error_result(call.id, call.name, TOOL_EXHAUSTED_MESSAGE)
-        result = await self._catalog.dispatch(
-            call.name,
-            call.arguments,
-            tool_context,
-            thread_id=request.thread_id,
-            request_message_id=request.request_message_id,
-        )
+        try:
+            result = await asyncio.wait_for(
+                self._catalog.dispatch(
+                    call.name,
+                    call.arguments,
+                    tool_context,
+                    thread_id=request.thread_id,
+                    request_message_id=request.request_message_id,
+                ),
+                self._tool_timeout,
+            )
+        except TimeoutError as exc:
+            raise ToolTimeout(call.name, self._tool_timeout) from exc
         return call.id, result
 
     @staticmethod
@@ -611,12 +747,86 @@ class AgentLoop:
         logger.warning("Tool %s failed: %s", call.name, error)
         return tool_error_result(call.id, call.name, str(error))
 
-    async def _save(self, state: _TurnState) -> None:
+    async def _save(self, state: _TurnState, *, boundary: bool = False) -> None:
         if self._checkpoint is None:
             return
-        saved = self._checkpoint(state.draft())
+        saved = self._checkpoint(state.draft(boundary=boundary))
         if inspect.isawaitable(saved):
             await saved
+
+    async def _activity(self, activity: Activity, state: _TurnState) -> None:
+        """Say what phase the Turn is in, and nothing about how.
+
+        No tool name, symbol, argument, raw result, prompt or reasoning: the
+        full detail stays in the Tool Call Trace, and the activity line is
+        ephemeral rather than a verbose tool history (``docs/adr/0013``).
+
+        An activity is also one of the four checkpoint boundaries that decision
+        names, so the draft is saved here past the once-a-second limiter: the
+        phase a reconnecting reader is shown has to match the phase the Turn is
+        actually in.
+        """
+        if self._publisher is None:
+            return
+        self._publisher.activity(activity)
+        await self._save(state, boundary=True)
+
+    async def _terminal(
+        self,
+        request: TurnRequest,
+        status: TurnStatus,
+        terminal_reason: str | None,
+        state: _TurnState,
+        rounds_exhausted: bool = False,
+    ) -> TurnOutcome:
+        """Release whatever the model produced, then end the Turn.
+
+        Every terminal path runs through here, including the ones that end
+        badly. A Turn that ran out of budget, lost its credential or was
+        cancelled still produced prose, and prose that has passed the Gate is
+        exactly what makes an ``incomplete`` useful rather than empty — the
+        difference ``docs/adr/0013`` draws between ``incomplete`` and ``failed``.
+        A model refusal reaches the user by the same route: it is an answer, and
+        an answer nobody is shown is not a refusal, it is a silence.
+
+        A block that cannot be proven overrides the status it was heading for:
+        the Turn becomes ``incomplete`` with the stable ``grounding_failed``,
+        whatever it was about to be.
+        """
+        try:
+            self._release(request, state)
+        except GroundingFailure as failure:
+            logger.info(
+                "Turn %s blocked a content block: %s",
+                request.request_message_id,
+                failure,
+            )
+            state.grounding_failure_code = failure.code
+            status, terminal_reason = TurnStatus.INCOMPLETE, GROUNDING_FAILED
+            rounds_exhausted = False
+        return await self._ended(status, terminal_reason, state, rounds_exhausted)
+
+    def _release(self, request: TurnRequest, state: _TurnState) -> None:
+        """Prove each block, then emit it. Never the other way round.
+
+        The ordering is not a convention this function happens to follow: the
+        publisher is reached only from inside the loop below, after
+        :meth:`RecommendationValidator.validate` has returned. A block that
+        fails raises out of here with nothing published, so there is no state in
+        which an invalid block was displayed and later retracted.
+
+        Blocks already released stay released. That is the point of failing per
+        block rather than per answer — the user keeps the part that was proven.
+        """
+        if not state.text:
+            return
+        validator = RecommendationValidator(trading_day=request.runtime.trading_day)
+        traces = TraceIndex(state.calls)
+        for raw in split_blocks(state.text):
+            block = validator.validate(raw, traces)
+            state.blocks.append(block)
+            if self._publisher is not None:
+                self._publisher.content_block(block.as_wire())
 
     async def _ended(
         self,
@@ -631,7 +841,7 @@ class AgentLoop:
         cancelled before its first model call: a Turn that leaves nothing
         behind is a Turn the user cannot be told anything about.
         """
-        await self._save(state)
+        await self._save(state, boundary=True)
         return TurnOutcome(
             status=status,
             terminal_reason=terminal_reason,
@@ -642,20 +852,26 @@ class AgentLoop:
             tool_calls=tuple(state.calls),
             usage=state.usage,
             summary_needed=state.summary_needed,
+            blocks=tuple(state.blocks),
+            provider_request_id=state.request_id,
+            grounding_failure_code=state.grounding_failure_code,
         )
 
 
 __all__ = [
     "DEFAULT_MAX_OUTPUT_TOKENS",
+    "LLM_CALL_TIMEOUT_SECONDS",
     "MAX_TOOL_ROUNDS",
     "ROUNDS_EXHAUSTED_MESSAGE",
     "ROUNDS_EXHAUSTED_NOTE",
     "ROUNDS_EXHAUSTED_TOKENS",
     "SESSION_CONCURRENCY",
+    "TOOL_TIMEOUT_SECONDS",
     "AgentLoop",
     "SessionCapacityExceeded",
     "SessionSlots",
     "ToolCallIdMismatch",
+    "ToolTimeout",
     "TurnDraft",
     "TurnOutcome",
     "TurnRequest",

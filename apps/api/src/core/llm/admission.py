@@ -14,7 +14,12 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
-from src.alpha.models import AgentThread, AgentTurn, LlmCallUsage
+from src.alpha.models import (
+    ACTIVE_TURN_STATUSES,
+    AgentThread,
+    AgentTurn,
+    LlmCallUsage,
+)
 
 from .config import LLMConfig, TokenPrices, Workload
 from .protocol import Usage
@@ -603,28 +608,45 @@ def _read_turn_state(
     called_at: datetime,
     owner_id: str,
 ) -> TurnState:
-    """Read current Turn counts inside the same locked admission transaction."""
+    """Read current Turn counts inside the same locked admission transaction.
+
+    **The start allowance is consumed at dispatch, not at admission** (ADR-0015):
+    refusals, provider model refusals and incomplete Turns count because they
+    consumed resources, while authentication, schema, origin, body-size and
+    admission failures rejected *before* dispatch do not.
+
+    That is why the count is over ``llm_call_usage`` rather than over
+    ``agent_turn``. A reservation row is written immediately before the network
+    call and only then, so its existence *is* the fact that a Turn dispatched —
+    where an ``agent_turn`` row exists from the create transaction onwards and
+    would charge a start to a Turn this very check is about to refuse.
+
+    The current owner is excluded and then added back, so the candidate counts
+    exactly once whether this is its first call or its eighth.
+    """
     day_start, day_reset = _ict_day(called_at)
-    starts = session.scalar(
-        select(func.count(AgentTurn.id))
-        .join(AgentThread, AgentThread.id == AgentTurn.thread_id)
-        .where(
-            AgentThread.user_id == user_id,
-            AgentTurn.started_at >= day_start,
-            AgentTurn.started_at < day_reset,
+    dispatched = session.scalar(
+        select(func.count(func.distinct(LlmCallUsage.owner_id))).where(
+            LlmCallUsage.owner_type == OwnerType.TURN_REQUEST_MESSAGE.value,
+            LlmCallUsage.user_id == user_id,
+            LlmCallUsage.owner_id != owner_id,
+            LlmCallUsage.provider_called_at >= day_start,
+            LlmCallUsage.provider_called_at < day_reset,
         )
     )
-    active = ("admitted", "running")
+    starts = int(dispatched or 0) + 1
     active_for_user = session.scalar(
         select(func.count(AgentTurn.id))
         .join(AgentThread, AgentThread.id == AgentTurn.thread_id)
         .where(
             AgentThread.user_id == user_id,
-            AgentTurn.status.in_(active),
+            AgentTurn.status.in_(ACTIVE_TURN_STATUSES),
         )
     )
     active_system = session.scalar(
-        select(func.count(AgentTurn.id)).where(AgentTurn.status.in_(active))
+        select(func.count(AgentTurn.id)).where(
+            AgentTurn.status.in_(ACTIVE_TURN_STATUSES)
+        )
     )
     return TurnState(
         starts_today=int(starts or 0),
