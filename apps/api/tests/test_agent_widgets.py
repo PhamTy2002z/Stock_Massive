@@ -310,6 +310,29 @@ def test_the_second_widget_allowance_is_read_off_the_users_own_words():
     assert not user_requested_multiple("")
 
 
+def test_a_negation_withdraws_the_request_rather_than_matching_it():
+    # Substring matching cannot tell a request from a refusal, and of the two
+    # readings the expensive one is treating a refusal as a request.
+    assert not user_requested_visual("đừng vẽ biểu đồ, chỉ cần chữ")
+    assert not user_requested_visual("không cần chart")
+    assert not user_requested_multiple("đừng cho tôi hai biểu đồ")
+    assert not user_requested_visual("answer without a chart")
+
+
+def test_a_slice_dated_past_the_turn_is_refused():
+    tomorrow = TraceIndex(
+        [
+            call("c1", "cross_sectional", cluster("FPT", as_of="2026-08-15", **{MOMENTUM: registered(MOMENTUM, 82.0)})),
+            call("c2", "cross_sectional", cluster("VCB", as_of="2026-08-15", **{MOMENTUM: registered(MOMENTUM, 41.5)})),
+        ]
+    )
+
+    with pytest.raises(WidgetRejected) as raised:
+        validator().validate(selection(f"metric_comparison|{REF}|X"), tomorrow)
+
+    assert raised.value.code == "future_slice"
+
+
 # -- what Stock 360 already owns -------------------------------------------
 
 
@@ -534,6 +557,46 @@ async def test_a_store_that_raises_becomes_the_unavailable_state_rather_than_an_
     )
 
     assert resolved["available"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_series_descriptor_is_named_into_one_column_before_it_is_returned():
+    class _Series(_Tools):
+        async def resolve_data_ref(self, reference):
+            return {
+                **dict(reference),
+                "series": [
+                    {"date": "2026-08-13", "close_price": 95_400, "volume": 1},
+                    {"date": "2026-08-14", "close_price": 96_100, "volume": 2},
+                ],
+                "available": True,
+                "unavailable_reason": None,
+            }
+
+    resolver = WidgetDataResolver(tools=_Series(), redis=None)
+
+    resolved = await resolver.resolve(
+        {
+            "kind": BindingKind.SERIES.value,
+            "as_of": TRADING_DAY.isoformat(),
+            "data_ref": {
+                "id": "ref-1",
+                "symbol": "FPT",
+                "start": "2026-08-13",
+                "end": TRADING_DAY.isoformat(),
+                "field": "ohlcv",
+            },
+        }
+    )
+
+    # A Data Reference is a store shape with five columns; a trend takes one
+    # series, and which column that is stays the server's decision.
+    assert resolved["series"] == [
+        {"date": "2026-08-13", "value": 95_400},
+        {"date": "2026-08-14", "value": 96_100},
+    ]
+    assert resolved["unit"] == "vnd"
+    assert resolved["available"] is True
 
 
 @pytest.mark.asyncio

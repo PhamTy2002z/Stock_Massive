@@ -68,16 +68,21 @@ describe.each(CASES)("$name", ({ render: renderCase }) => {
 
   it("states its reading in words as well as in the picture", () => {
     const { container } = render(renderCase())
-    const summary = container.querySelector("figure > p")
+    const summary = container.querySelector("figure > p:not(.sr-only)")
 
     expect(summary).not.toBeNull()
     expect(summary?.textContent?.length ?? 0).toBeGreaterThan(20)
   })
 
-  it("labels the picture for a screen reader", () => {
-    render(renderCase())
+  it("describes the picture for a screen reader without walling it off", () => {
+    const { container } = render(renderCase())
 
-    expect(screen.getByRole("img")).toHaveAccessibleName(/\S/)
+    // The description is a sibling, not an `aria-label` on a `role="img"`
+    // wrapper — that role makes every descendant presentational, which would
+    // hide the very rows a screen-reader user needs.
+    const description = container.querySelector("figure > p.sr-only")
+    expect(description?.textContent?.length ?? 0).toBeGreaterThan(20)
+    expect(container.querySelector('[role="img"]')).toBeNull()
   })
 
   it("offers a data table equivalent, operated from the keyboard", () => {
@@ -102,11 +107,16 @@ describe.each(CASES)("$name", ({ render: renderCase }) => {
     )
   })
 
-  it("keeps the table in the DOM so assistive technology reaches the figures", () => {
-    render(renderCase())
+  it("puts the reading outside the disclosure, and the table inside it", () => {
+    const { container } = render(renderCase())
 
-    // Hidden, not absent. The table is an equivalent rather than a fallback.
+    // A collapsed disclosure is out of the accessibility tree by design, and
+    // the button announces it. So what a screen-reader user must not have to
+    // open it for — the reading and the data date — sits outside.
+    expect(screen.queryByRole("table")).not.toBeInTheDocument()
     expect(screen.getByRole("table", { hidden: true })).toBeInTheDocument()
+    expect(container.querySelector("figure > p:not(.sr-only)")).not.toBeNull()
+    expect(screen.getByText(/Dữ liệu ngày/)).toBeVisible()
   })
 
   it("removes its transitions when the reader asks for reduced motion", () => {
@@ -122,7 +132,7 @@ describe.each(CASES)("$name", ({ render: renderCase }) => {
     // Every Widget is width-constrained at its root, so a long row shrinks or
     // wraps rather than pushing the transcript out.
     expect(container.querySelector("figure")?.className).toContain("min-w-0")
-    expect(container.querySelector('[role="img"]')?.className).toContain(
+    expect(container.querySelector("[data-widget-figure]")?.className).toContain(
       "overflow-hidden"
     )
   })
@@ -151,14 +161,14 @@ describe("metric_comparison", () => {
   it("names the leader and the laggard in its summary", () => {
     const { container } = render(<MetricComparison spec={spec()} data={crossSymbol()} />)
 
-    expect(container.querySelector("figure > p")?.textContent).toMatch(/FPT/)
-    expect(container.querySelector("figure > p")?.textContent).toMatch(/HPG/)
+    expect(container.querySelector("figure > p:not(.sr-only)")?.textContent).toMatch(/FPT/)
+    expect(container.querySelector("figure > p:not(.sr-only)")?.textContent).toMatch(/HPG/)
   })
 
   it("renders bullets rather than an empty chart when the slice is too thin", () => {
     render(<MetricComparison spec={spec()} data={unavailable()} />)
 
-    expect(screen.queryByRole("img")).not.toBeInTheDocument()
+    expect(document.querySelector("[data-widget-figure]")).toBeNull()
     expect(screen.getAllByRole("listitem").length).toBeGreaterThan(0)
     expect(screen.getByText(/Dữ liệu ngày/)).toBeInTheDocument()
   })
@@ -177,7 +187,7 @@ describe("metric_comparison", () => {
       />
     )
     const widths = Array.from(
-      container.querySelectorAll<HTMLElement>('[role="img"] span[style*="width"]')
+      container.querySelectorAll<HTMLElement>('[data-widget-figure] span[style*="width"]')
     ).map((node) => node.style.width)
 
     expect(widths).toEqual(["20%", "100%"])
@@ -210,10 +220,10 @@ describe("ranked_symbols", () => {
     )
 
     expect(
-      measurable.querySelectorAll('[role="img"] span[style*="width"]').length
+      measurable.querySelectorAll('[data-widget-figure] span[style*="width"]').length
     ).toBe(3)
     // A ratio has no zero to measure from, so it gets rank numbers and no bars.
-    expect(ratio.querySelectorAll('[role="img"] span[style*="width"]').length).toBe(0)
+    expect(ratio.querySelectorAll('[data-widget-figure] span[style*="width"]').length).toBe(0)
   })
 
   it("says how much of the matched set is shown", () => {
@@ -221,7 +231,7 @@ describe("ranked_symbols", () => {
       <RankedSymbols spec={spec({ name: "ranked_symbols" })} data={ranking()} />
     )
 
-    expect(container.querySelector("figure > p")?.textContent).toContain("3/30")
+    expect(container.querySelector("figure > p:not(.sr-only)")?.textContent).toContain("3/30")
   })
 })
 
@@ -249,7 +259,7 @@ describe("metric_trend", () => {
       />
     )
 
-    expect(screen.queryByRole("img")).not.toBeInTheDocument()
+    expect(document.querySelector("[data-widget-figure]")).toBeNull()
     expect(screen.getAllByRole("listitem")).toHaveLength(2)
   })
 })
@@ -260,7 +270,7 @@ describe("relative_position", () => {
       <RelativePosition spec={spec({ name: "relative_position" })} data={position()} />
     )
 
-    expect(container.querySelector("figure > p")?.textContent).toContain("82%")
+    expect(container.querySelector("figure > p:not(.sr-only)")?.textContent).toContain("82%")
   })
 
   it("states the value as text when there is no sanctioned range to place it in", () => {
@@ -275,7 +285,7 @@ describe("relative_position", () => {
       />
     )
 
-    expect(screen.queryByRole("img")).not.toBeInTheDocument()
+    expect(document.querySelector("[data-widget-figure]")).toBeNull()
     expect(screen.getByText(/Chưa có biên độ tham chiếu/)).toBeInTheDocument()
   })
 })

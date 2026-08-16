@@ -1,5 +1,8 @@
 "use client"
 
+import { cn } from "@/lib/utils"
+import { WIDGET_PALETTE } from "./palette"
+
 /**
  * The data-table equivalent every Widget carries.
  *
@@ -14,10 +17,18 @@ export interface WidgetTableProps {
   rows: (string | number)[][]
 }
 
+// Written out as literals rather than composed from `WIDGET_PALETTE`, because
+// Tailwind's arbitrary-value syntax is scanned as source text and a class built
+// from a variable is a class that never reaches the stylesheet. Both spellings
+// name the *same* custom property, which is the invariant that matters: the
+// value is still declared in exactly one place.
+const HEAD_CELL = "border-b border-[hsl(var(--widget-grid))] py-1.5 font-medium"
+const BODY_CELL = "border-b border-[hsl(var(--widget-grid))] py-1.5"
+
 export function WidgetTable({ caption, columns, rows }: WidgetTableProps) {
   return (
     <table className="w-full border-collapse text-[13px] leading-[1.43]">
-      <caption className="pb-2 text-left" style={{ color: "hsl(var(--widget-ink-muted))" }}>
+      <caption className="pb-2 text-left" style={{ color: WIDGET_PALETTE.inkMuted }}>
         {caption}
       </caption>
       <thead>
@@ -28,8 +39,8 @@ export function WidgetTable({ caption, columns, rows }: WidgetTableProps) {
               scope="col"
               className={
                 index === 0
-                  ? "border-b border-[hsl(var(--widget-grid))] py-1.5 text-left font-medium"
-                  : "border-b border-[hsl(var(--widget-grid))] py-1.5 text-right font-medium"
+                  ? cn(HEAD_CELL, "text-left")
+                  : cn(HEAD_CELL, "text-right")
               }
             >
               {column}
@@ -45,8 +56,8 @@ export function WidgetTable({ caption, columns, rows }: WidgetTableProps) {
                 key={columns[index] ?? index}
                 className={
                   index === 0
-                    ? "border-b border-[hsl(var(--widget-grid))] py-1.5 text-left"
-                    : "border-b border-[hsl(var(--widget-grid))] py-1.5 text-right tabular-nums"
+                    ? cn(BODY_CELL, "text-left")
+                    : cn(BODY_CELL, "text-right tabular-nums")
                 }
               >
                 {cell}

@@ -43,7 +43,7 @@ export function RankedSymbols({
   data,
   expanded,
   onExpand,
-}: WidgetProps<RankingData> & { onExpand?: () => void }) {
+}: WidgetProps<RankingData>) {
   const unit = COLUMN_UNITS[data.sort_by] ?? null
   const values = data.rows.map((row) => {
     const raw = row[data.sort_by]
@@ -100,7 +100,7 @@ export function RankedSymbols({
           >
             <span
               className="text-[13px] tabular-nums"
-              style={{ color: "hsl(var(--widget-ink-muted))" }}
+              style={{ color: WIDGET_PALETTE.inkMuted }}
             >
               {index + 1}
             </span>

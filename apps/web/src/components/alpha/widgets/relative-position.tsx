@@ -71,7 +71,7 @@ export function RelativePosition({
   data,
   expanded,
   onExpand,
-}: WidgetProps<CrossSymbolData> & { onExpand?: () => void }) {
+}: WidgetProps<CrossSymbolData>) {
   const point = data.points[0]
   const reading = data.available ? readPosition(data) : null
 
@@ -123,11 +123,11 @@ export function RelativePosition({
       }
     >
       <div className="flex items-baseline justify-between gap-3 text-[13px] tabular-nums">
-        <span style={{ color: "hsl(var(--widget-ink-muted))" }}>
+        <span style={{ color: WIDGET_PALETTE.inkMuted }}>
           {reading.lowLabel}
         </span>
         <span className="font-medium">{value}</span>
-        <span style={{ color: "hsl(var(--widget-ink-muted))" }}>
+        <span style={{ color: WIDGET_PALETTE.inkMuted }}>
           {reading.highLabel}
         </span>
       </div>

@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { cn } from "@/lib/utils"
+import { WIDGET_PALETTE } from "./palette"
 
 /**
  * What every Widget carries whatever it draws.
@@ -12,11 +13,13 @@ import { cn } from "@/lib/utils"
  * A component that forgot one would be a component that shipped a picture with
  * no reading beside it, and this frame is why that is not reachable.
  *
- * The table is not a fallback. It is the same data, always present in the DOM,
- * and toggling it changes nothing except which of the two is visible. That is
- * what makes it an *equivalent* rather than a consolation, and it is also why
- * assistive technology reaches the figures whether or not the reader ever finds
- * the button.
+ * The table is not a fallback. It is the same data, reached by an ordinary
+ * disclosure: `aria-expanded` and `aria-controls` on a real button, and
+ * `hidden` on the panel. Collapsed, it is out of the accessibility tree — which
+ * is what a disclosure is supposed to do, since the button already announces
+ * that it is there. What a screen-reader user must not have to open a
+ * disclosure for is the *reading*, and that is why the summary, the data date
+ * and each Widget's own per-row description sit outside it.
  */
 export interface WidgetFrameProps {
   title: string
@@ -73,7 +76,7 @@ export function WidgetFrame({
         "motion-safe:transition-colors motion-reduce:transition-none",
         className
       )}
-      style={{ color: "hsl(var(--widget-ink))" }}
+      style={{ color: WIDGET_PALETTE.ink }}
     >
       <figcaption className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <span className="text-[15px] font-semibold leading-[1.24] tracking-[-0.374px]">
@@ -81,17 +84,20 @@ export function WidgetFrame({
         </span>
         <span
           className="text-[13px] leading-[1.43] tracking-[-0.208px]"
-          style={{ color: "hsl(var(--widget-ink-muted))" }}
+          style={{ color: WIDGET_PALETTE.inkMuted }}
         >
           Dữ liệu ngày {formatDataDate(asOf)}
         </span>
       </figcaption>
 
-      <div
-        role="img"
-        aria-label={figureLabel}
-        className="mt-3 w-full min-w-0 overflow-hidden"
-      >
+      {/* The description is a sibling of the drawing rather than an
+          `aria-label` on a `role="img"` wrapper. `role="img"` makes every
+          descendant presentational, which would have hidden exactly the parts
+          worth reaching: the ranked list, and the per-symbol readings each
+          Widget writes for a screen reader. A described sibling gives the
+          reader the sentence *and* the content. */}
+      <p className="sr-only">{figureLabel}</p>
+      <div data-widget-figure className="mt-3 w-full min-w-0 overflow-hidden">
         {children}
       </div>
 
@@ -145,7 +151,7 @@ export function TooLittleData({
   return (
     <figure
       className="min-w-0 rounded-[18px] border border-border bg-card p-4"
-      style={{ color: "hsl(var(--widget-ink))" }}
+      style={{ color: WIDGET_PALETTE.ink }}
     >
       <figcaption className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <span className="text-[15px] font-semibold leading-[1.24] tracking-[-0.374px]">
@@ -153,7 +159,7 @@ export function TooLittleData({
         </span>
         <span
           className="text-[13px] leading-[1.43]"
-          style={{ color: "hsl(var(--widget-ink-muted))" }}
+          style={{ color: WIDGET_PALETTE.inkMuted }}
         >
           Dữ liệu ngày {formatDataDate(asOf)}
         </span>

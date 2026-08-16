@@ -369,7 +369,7 @@ class StoreBackedTools:
         """
         return await asyncio.to_thread(
             self._screen_universe,
-            ToolContext(user_id=0, trading_day=as_of),
+            as_of,
             {
                 "criteria": dict(criteria),
                 "sort_by": sort_by,
@@ -584,11 +584,20 @@ class StoreBackedTools:
     async def screen_universe(
         self, context: ToolContext, arguments: Mapping[str, Any]
     ) -> Mapping[str, Any]:
-        return await asyncio.to_thread(self._screen_universe, context, dict(arguments))
+        return await asyncio.to_thread(
+            self._screen_universe, context.trading_day, dict(arguments)
+        )
 
     def _screen_universe(
-        self, context: ToolContext, arguments: Mapping[str, Any]
+        self, trading_day: date, arguments: Mapping[str, Any]
     ) -> Mapping[str, Any]:
+        """Rank the Universe as it stood at the end of one Trading Day.
+
+        Takes the day rather than the whole Tool Context because the day is the
+        only thing it reads: a screen is the same ranking for every caller, so
+        the replay path (``docs/adr/0012``) has no user to supply and should not
+        have to invent one.
+        """
         criteria = dict(arguments.get("criteria") or {})
         sort_by = str(arguments.get("sort_by", "adtv_vnd"))
         order = str(arguments.get("order", "desc"))
@@ -604,14 +613,14 @@ class StoreBackedTools:
             raise ValueError("invalid screen ordering or limit")
         with self._session_factory() as session:
             symbols = self._universe_factory(session).symbols
-            market = self._latest_payloads(session, Capability.MARKET, symbols, context.trading_day)
+            market = self._latest_payloads(session, Capability.MARKET, symbols, trading_day)
             valuation = self._latest_payloads(
-                session, Capability.VALUATION, symbols, context.trading_day
+                session, Capability.VALUATION, symbols, trading_day
             )
             fundamental = self._latest_payloads(
-                session, Capability.FUNDAMENTAL, symbols, context.trading_day
+                session, Capability.FUNDAMENTAL, symbols, trading_day
             )
-            adtv = self._adtv(session, symbols, context.trading_day)
+            adtv = self._adtv(session, symbols, trading_day)
         rows = [
             {
                 "symbol": symbol,
@@ -642,7 +651,7 @@ class StoreBackedTools:
             # be cited, and cannot be replayed to the same slice a year later —
             # which is what ``docs/adr/0012`` asks a stored Widget descriptor to
             # do. Set before the budget loop below so its bytes are charged.
-            "as_of": context.trading_day.isoformat(),
+            "as_of": trading_day.isoformat(),
             "symbols": [],
         }
         for row in ranked[:limit]:
