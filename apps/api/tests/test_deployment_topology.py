@@ -119,6 +119,19 @@ class TestTheOuterProxy:
         # No read timeout: the response is open for as long as the Turn is.
         assert "read_timeout 0" in caddyfile
 
+    def test_compression_is_excluded_by_a_matcher_rather_than_by_placement(self):
+        caddyfile = CADDYFILE.read_text()
+
+        # `handle` scopes only what is inside it, so a bare site-level `encode`
+        # compresses the stream too — and a compressor filling its window holds
+        # the stream until the Turn ends. The exclusion has to be a matcher on
+        # `encode` itself, which is exactly the kind of detail that reads as
+        # correct and is not.
+        assert re.search(r"^\s*encode\s+zstd", caddyfile, re.MULTILINE) is None, (
+            "every `encode` must carry a matcher excluding the event-stream path"
+        )
+        assert caddyfile.count("encode @compressible") == 2
+
     def test_the_topology_is_written_down_where_the_next_reader_will_look(self):
         # Spec 0003 §14.4 is closed against this file, and ADR-0013 points at
         # it. A test rather than trust, because a deleted document is exactly

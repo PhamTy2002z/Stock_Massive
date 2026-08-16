@@ -31,6 +31,32 @@ export const HEALTH_LABEL: Record<Health, string> = {
 }
 
 /**
+ * How each health state is coloured, in one place.
+ *
+ * A figure's border, a figure's badge and a section's badge all say the same
+ * thing about the same three values, and three cascades over one union is how a
+ * degraded figure ends up amber in one spot and grey three lines below.
+ *
+ * Colour is never the only carrier: every one of these sits beside
+ * `HEALTH_LABEL`, because a state a reader can only get from a hue is a state
+ * some readers cannot get at all.
+ */
+export const HEALTH_TONE: Record<Health, { border: string; badge: string }> = {
+  ok: {
+    border: "border-l-emerald-500/50",
+    badge: "border-emerald-500/40 text-emerald-600 dark:text-emerald-400",
+  },
+  degraded: {
+    border: "border-l-amber-500/60",
+    badge: "border-amber-500/40 text-amber-600 dark:text-amber-400",
+  },
+  refused: {
+    border: "border-l-muted-foreground/40",
+    badge: "border-border text-muted-foreground",
+  },
+}
+
+/**
  * How much of the artifact an axis gets, expressed as its own word.
  *
  * Emphasis is visible as which tab opens and how much space an axis takes —
@@ -49,10 +75,12 @@ export const CHROME = {
   collapse: "Collapse",
   close: "Close",
   briefing: "Briefing",
-  thesis: "Thesis",
   priceZone: "Ordinary daily range",
   citations: "Citations",
   fieldIds: "Registered field ids",
+  windowHealth: "Window health",
+  limitLocked: "limit-locked",
+  riskNotice: "Risk notice",
   audit: "Audit",
   asOf: "as of",
   sessions: "sessions",

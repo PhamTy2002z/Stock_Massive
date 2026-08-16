@@ -159,8 +159,8 @@ export interface AnalysisArtifact {
   windowHealth: Record<string, unknown> | null
 }
 
-/** The band the only inline graphic draws, or null when there is none. */
-export interface PriceZoneBand {
+/** What the only inline graphic draws, or null when there is nothing to draw. */
+export interface PriceZoneExtent {
   lower: number
   upper: number
   anchor: number
@@ -173,14 +173,32 @@ export function buildArtifact(detail: AnalysisDetail): AnalysisArtifact {
   const judgment = isRecord(payload.judgment) ? payload.judgment : null
 
   const sections = sectionsByAxis(evidence?.sections)
-  const priceZone = figureView(evidence?.priceZone, new Set())
+
+  // Read once and reused: the citation filter and the rendered figures must be
+  // looking at the same figures, and building them twice is two answers to one
+  // question.
+  const priceZone = figureView(evidence?.priceZone)
+  const figures = new Map<Axis, FigureView[]>(
+    [...sections.entries()].map(([axis, section]) => [
+      axis,
+      section.figures
+        .map((figure) => figureView(figure))
+        .filter((figure): figure is FigureView => figure !== null),
+    ]),
+  )
 
   // Cited ids are filtered against the figures they name before anything reads
   // the count, so an id pointing at a refused figure — or at no figure at all —
   // cannot inflate what the artifact claims to rest on.
+  //
+  // The two conditions are `EvidenceFigure.citable`'s, verbatim: health is not
+  // refused *and* a value is present (`src/alpha/envelope.py`). A figure with no
+  // number is not evidence whatever its health says, and dropping the second
+  // half here would let the artifact count a citation the backend's own
+  // validator would have rejected.
   const usable = new Set(
-    [priceZone, ...[...sections.values()].flatMap((section) => section.figures)]
-      .filter((figure): figure is PayloadFigure => figure !== null)
+    [priceZone, ...[...figures.values()].flat()]
+      .filter((figure): figure is FigureView => figure !== null)
       .filter((figure) => figure.health !== "refused" && figure.value !== null)
       .map((figure) => figure.fieldId),
   )
@@ -202,9 +220,16 @@ export function buildArtifact(detail: AnalysisDetail): AnalysisArtifact {
     companyName: text(evidence?.companyName),
     exchange: text(evidence?.exchange),
     industry: text(evidence?.industry),
-    priceZone: figureView(evidence?.priceZone, citedSet),
+    priceZone: withCitations(priceZone, citedSet),
     axes: AXIS_ORDER.map((axis) =>
-      axisView(axis, sections.get(axis), judgments.get(axis), axis === lead, citedSet),
+      axisView(
+        axis,
+        sections.get(axis)?.health,
+        figures.get(axis) ?? [],
+        judgments.get(axis),
+        axis === lead,
+        citedSet,
+      ),
     ),
     leadAxis: lead,
     citationCount: cited.length,
@@ -223,7 +248,7 @@ export function buildArtifact(detail: AnalysisDetail): AnalysisArtifact {
  * band is the only inline graphic the artifact draws, and drawing one from a
  * half-present figure would put a shape on screen that stands for nothing.
  */
-export function priceZoneBand(zone: FigureView | null): PriceZoneBand | null {
+export function priceZoneExtent(zone: FigureView | null): PriceZoneExtent | null {
   if (zone === null || zone.health === "refused" || zone.value === null) return null
 
   const lower = number(zone.extras.lower_price)
@@ -291,7 +316,8 @@ function leadAxis(named: unknown, judgments: Map<Axis, PayloadAxisJudgment>): Ax
 
 function axisView(
   axis: Axis,
-  section: PayloadSection | undefined,
+  health: Health | undefined,
+  figures: FigureView[],
   judgment: PayloadAxisJudgment | undefined,
   isLead: boolean,
   cited: Set<string>,
@@ -302,17 +328,29 @@ function axisView(
     // An axis the payload never carried is refused rather than absent: the
     // template's membership is fixed, so the honest reading of a missing
     // section is that nothing in it could be used.
-    health: section?.health ?? "refused",
+    health: health ?? "refused",
     emphasis: isLead ? "lead" : emphasis === "lead" ? "support" : emphasis,
     emphasisReason: text(judgment?.emphasisReason),
     read: text(judgment?.read),
-    figures: (section?.figures ?? [])
-      .map((figure) => figureView(figure, cited))
-      .filter((figure): figure is FigureView => figure !== null),
+    figures: figures.map((figure) => withCitations(figure, cited) as FigureView),
   }
 }
 
-function figureView(raw: unknown, cited: Set<string>): FigureView | null {
+/**
+ * Whether the verdict rests on this figure, stamped once the list is known.
+ *
+ * Separate from building the figure because the citation list is filtered
+ * *against* the figures: they have to exist before anything can say which of
+ * them were cited.
+ */
+function withCitations(
+  figure: FigureView | null,
+  cited: Set<string>,
+): FigureView | null {
+  return figure === null ? null : { ...figure, cited: cited.has(figure.fieldId) }
+}
+
+function figureView(raw: unknown): FigureView | null {
   if (!isRecord(raw)) return null
   const fieldId = text(raw.fieldId)
   if (fieldId === null) return null
@@ -340,7 +378,8 @@ function figureView(raw: unknown, cited: Set<string>): FigureView | null {
     sessionsUsed: number(raw.sessionsUsed),
     windowDays: number(raw.windowDays),
     extras: isRecord(raw.extras) ? (raw.extras as Record<string, unknown>) : {},
-    cited: cited.has(fieldId),
+    // Stamped by `withCitations` once the filtered list exists.
+    cited: false,
   }
 }
 

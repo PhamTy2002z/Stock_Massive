@@ -34,8 +34,27 @@ beforeEach(() => {
 
 afterEach(cleanup)
 
+const PAYLOAD: AnalysisDetail = {
+  symbol: "FPT",
+  trading_day: "2026-08-12",
+  verdict: "accumulate",
+  schema_version: 1,
+  created_at: "2026-08-12T18:00:00+00:00",
+  payload: {
+    evidence: {
+      symbol: "FPT",
+      tradingDay: "2026-08-12",
+      sections: [{ axis: "technical", health: "ok", figures: [] }],
+    },
+    citedFieldIds: [],
+  },
+}
+
 describe("opening an Analysis", () => {
   it("advances the last-seen date for that symbol and that session only", () => {
+    analysis.isPending = false
+    analysis.data = PAYLOAD
+
     render(<AnalysisCard symbol="FPT" tradingDay="2026-08-12" />)
 
     expect(reportOpened).toHaveBeenCalledTimes(1)
@@ -43,6 +62,22 @@ describe("opening an Analysis", () => {
       symbol: "FPT",
       tradingDay: "2026-08-12",
     })
+  })
+
+  it("advances nothing while the Analysis is still loading", () => {
+    render(<AnalysisCard symbol="FPT" tradingDay="2026-08-12" />)
+
+    expect(reportOpened).not.toHaveBeenCalled()
+  })
+
+  it("advances nothing for an Analysis that could not be read", () => {
+    // The badge would clear for an artifact the user was never shown, and the
+    // one symbol whose Analysis is broken is the one it most needs to flag.
+    analysis.isPending = false
+
+    render(<AnalysisCard symbol="FPT" tradingDay="2026-08-12" />)
+
+    expect(reportOpened).not.toHaveBeenCalled()
   })
 
   it("says it is loading rather than rendering an empty artifact", () => {
@@ -60,21 +95,7 @@ describe("opening an Analysis", () => {
 
   it("renders the artifact once the payload is in hand", () => {
     analysis.isPending = false
-    analysis.data = {
-      symbol: "FPT",
-      trading_day: "2026-08-12",
-      verdict: "accumulate",
-      schema_version: 1,
-      created_at: "2026-08-12T18:00:00+00:00",
-      payload: {
-        evidence: {
-          symbol: "FPT",
-          tradingDay: "2026-08-12",
-          sections: [{ axis: "technical", health: "ok", figures: [] }],
-        },
-        citedFieldIds: [],
-      },
-    }
+    analysis.data = PAYLOAD
 
     render(<AnalysisCard symbol="FPT" tradingDay="2026-08-12" />)
 

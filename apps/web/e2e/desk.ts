@@ -12,8 +12,14 @@ import { expect, type APIRequestContext, type Page } from "@playwright/test"
 
 export const API_ORIGIN = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8010}`
 
-/** The Vietnamese sentence the backend attaches to every canonical message. */
-export const RISK_NOTICE = "Risk notice"
+/**
+ * The canonical assistant message's accessible name for its Risk Notice.
+ *
+ * The one thing on screen that only a *canonical* message carries: the backend
+ * attaches the notice in the terminal transaction, so seeing it is how the test
+ * knows the draft was replaced rather than added to.
+ */
+export const RISK_NOTICE = { role: "note" as const, name: "Risk notice" }
 
 export function newEmail(): string {
   return `e2e-${Date.now()}-${Math.floor(Math.random() * 1e6)}@example.com`

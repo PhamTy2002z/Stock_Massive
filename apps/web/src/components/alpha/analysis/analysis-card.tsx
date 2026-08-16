@@ -35,14 +35,19 @@ export function AnalysisCard({
   const analysis = useAnalysis(symbol, tradingDay)
   const { mutate: reportOpened } = useMarkAnalysisOpened()
 
-  useEffect(() => {
-    reportOpened({ symbol, tradingDay })
-  }, [symbol, tradingDay, reportOpened])
-
   const artifact = useMemo(
     () => (analysis.data ? buildArtifact(analysis.data) : null),
     [analysis.data],
   )
+
+  // Only once the Analysis is actually in hand. Firing on mount would advance
+  // the badge for an artifact that answered 404 or 500 — the user would have
+  // been shown nothing, and the one symbol whose Analysis is broken is the one
+  // the badge most needs to keep flagging.
+  const opened = artifact !== null
+  useEffect(() => {
+    if (opened) reportOpened({ symbol, tradingDay })
+  }, [opened, symbol, tradingDay, reportOpened])
 
   if (artifact === null) {
     return (

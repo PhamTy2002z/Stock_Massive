@@ -63,9 +63,10 @@ container long before any checkpoint was written. A Turn interrupted this way co
 as `incomplete` with the content it had reached — never as a Turn that lost its answer,
 and never as one left `running` forever (the startup sweep freezes those).
 
-The proxy's grace is the longest of the three because it holds the outermost connection:
-cutting it first would end a stream whose two inner hops were still being given time to
-finish it.
+The API's grace is the longest because it is the only hop with work to finish: the two
+windows above happen inside it. The proxy's is longer than the web container's because it
+holds the outermost connection — cutting that first would end a stream whose inner hop was
+still being given time to finish it.
 
 ## The trap this path already fell into
 

@@ -2,7 +2,14 @@
 
 import type { AxisView } from "@/lib/alpha-desk/analysis"
 import { cn } from "@/lib/utils"
-import { AXIS_LABEL, CHROME, EMPHASIS_LABEL, HEALTH_LABEL, NARRATION } from "./copy"
+import {
+  AXIS_LABEL,
+  CHROME,
+  EMPHASIS_LABEL,
+  HEALTH_LABEL,
+  HEALTH_TONE,
+  NARRATION,
+} from "./copy"
 import { FigureRow } from "./figure-row"
 
 /**
@@ -41,14 +48,7 @@ export function AxisPanel({
           {EMPHASIS_LABEL[axis.emphasis]}
         </span>
         <span
-          className={cn(
-            "rounded border px-1 text-[10px]",
-            axis.health === "ok"
-              ? "border-emerald-500/40 text-emerald-600 dark:text-emerald-400"
-              : axis.health === "degraded"
-                ? "border-amber-500/40 text-amber-600 dark:text-amber-400"
-                : "border-border text-muted-foreground",
-          )}
+          className={cn("rounded border px-1 text-[10px]", HEALTH_TONE[axis.health].badge)}
         >
           {HEALTH_LABEL[axis.health]}
         </span>

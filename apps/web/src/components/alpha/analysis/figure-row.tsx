@@ -3,7 +3,7 @@
 import { formatFieldValue, unitLabel } from "@/components/alpha/widgets/units"
 import type { FigureView } from "@/lib/alpha-desk/analysis"
 import { cn } from "@/lib/utils"
-import { CHROME, HEALTH_LABEL, NARRATION } from "./copy"
+import { CHROME, HEALTH_LABEL, HEALTH_TONE, NARRATION } from "./copy"
 
 /**
  * One figure, with everything a reader needs to weigh it.
@@ -40,11 +40,7 @@ export function FigureRow({
     <div
       className={cn(
         "space-y-1 border-l-2 py-1 pl-2",
-        refused
-          ? "border-l-muted-foreground/40"
-          : figure.health === "degraded"
-            ? "border-l-amber-500/60"
-            : "border-l-emerald-500/50",
+        HEALTH_TONE[figure.health].border,
         className,
       )}
     >
@@ -63,14 +59,7 @@ export function FigureRow({
           </span>
         )}
         <span
-          className={cn(
-            "rounded border px-1 text-[10px]",
-            refused
-              ? "border-border text-muted-foreground"
-              : figure.health === "degraded"
-                ? "border-amber-500/40 text-amber-600 dark:text-amber-400"
-                : "border-emerald-500/40 text-emerald-600 dark:text-emerald-400",
-          )}
+          className={cn("rounded border px-1 text-[10px]", HEALTH_TONE[figure.health].badge)}
         >
           {HEALTH_LABEL[figure.health]}
         </span>

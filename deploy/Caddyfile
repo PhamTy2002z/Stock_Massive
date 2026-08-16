@@ -19,14 +19,15 @@
 }
 
 {$WEB_DOMAIN} {
-	encode zstd gzip
-
-	# The Alpha Desk stream, before the compressing catch-all below it.
-	#
-	# `encode` is deliberately not applied here. A compressor that buffers to
-	# fill its window holds an event stream until the Turn ends, and the win on
-	# an SSE frame of a few hundred bytes is not worth the class of bug.
+	# The stream is excluded from compression by a matcher on `encode` itself.
+	# `handle` scopes only what is inside it, so a site-level `encode` would
+	# still compress the stream — and a compressor that buffers to fill its
+	# window holds an event stream until the Turn ends. The win on an SSE frame
+	# of a few hundred bytes is not worth the class of bug.
 	@stream path /api/alpha-desk/turns/*/events
+	@compressible not path /api/alpha-desk/turns/*/events
+	encode @compressible zstd gzip
+
 	handle @stream {
 		reverse_proxy web:3000 {
 			# -1 flushes every write straight through, which is what makes this
@@ -56,7 +57,10 @@
 # arrives here: it goes through the Next handler, which reaches FastAPI over the
 # internal network.
 {$API_DOMAIN} {
-	encode zstd gzip
+	# Same exclusion, for the same reason: the transport endpoints answer with an
+	# event stream even when they are reached directly.
+	@compressible not path /api/v1/turns/*/events
+	encode @compressible zstd gzip
 
 	handle {
 		reverse_proxy api:8000 {
