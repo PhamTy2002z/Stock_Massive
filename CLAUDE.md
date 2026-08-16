@@ -27,6 +27,7 @@ Nguồn sự thật cho lệnh: `package.json` ở root, `apps/api/Makefile`, `a
 - **Cổng kiểm tra trước khi báo xong** — backend: `make test` tại `apps/api`. Frontend: `pnpm type-check`, `pnpm lint`, `pnpm test`, `pnpm build` tại `apps/web`. Phần nào không chạy được thì nêu rõ phần đó.
 - **Commit** — Conventional Commits, mô tả thay đổi kỹ thuật. Giữ ngoài index: secrets, `.env`, dữ liệu nhạy cảm, dump database, file sinh tự động.
 - **Ngôn ngữ của artifact** — issue, comment, pull request (title + body), spec, ticket: viết bằng tiếng Anh. Trao đổi trực tiếp với người dùng vẫn bằng tiếng Việt.
+- **Eval gate** — pull request chạm System Prompt Contract, tool schema/`tool_catalog_version`, Signal Registry, Analysis Field Profile, `llm_model_*`, agent loop, hoặc Recommendation Validator **bắt buộc đính Eval Report** (run id, điểm từng category, diff so với baseline) trong body và không merge vào `develop` nếu thiếu. PR chỉ chạm UI, Collector hoặc Widget rendering thì không cần. Toàn bộ quy tắc: `docs/agents/eval-battery.md`.
 
 `apps/api/AGENTS.md` do vnstock tự sinh (hướng dẫn dựng môi trường vnstock), không phải quy ước của repo này.
 

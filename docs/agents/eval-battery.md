@@ -138,8 +138,8 @@ being designed out is not a crash — it is a green run: an old fixture passed
 through a new Signal Registry produces flattering scores at precisely the moment
 the registry changed.
 
-When `fixture_version` changes, the previous baseline is void (ADR-0016). That
-rule is enforced by process, not by this code; the report ticket owns it.
+When `fixture_version` changes, the previous baseline is void (ADR-0016). The
+run is marked `baseline_reset` — see [The baseline](#the-baseline).
 
 ## Running the battery
 
@@ -162,6 +162,33 @@ that lies. A case interrupted mid-way is dropped whole rather than scored on one
 run of three.
 
 Each case runs **three times** and all three outcomes are kept.
+
+### The two surfaces
+
+One run covers both. Turn cases go through the deployed `AgentLoop`; Analysis
+cases run the **nightly pipeline** over the same fixture — the same lifecycle,
+the same envelope, the same single strict structured-output call and the same
+semantic validation — inside the same `eval_run` and the same ceiling. Roughly
+ten Analysis cases, scored by D and E, and the report keeps the lanes apart in
+its totals and in its case sections.
+
+Two things about `src/eval/analysis_lane.py` are worth knowing before reading it:
+
+- **Its generations are charged to the `eval_run`, not to the Analysis Run.**
+  The redirect happens at the client boundary, and the production per-call
+  ceilings are asked *first*, on the spend the producer built — otherwise the
+  battery would admit an envelope the nightly pass refuses.
+- **The pair is cleared before each of the three runs.** Production is
+  idempotent per `(symbol, trading_day)` and the fixture carries the `analysis`
+  rows the real store held, so a lane that did not clear them would score one
+  generation three times and call it agreement.
+
+Three checks belong to that lane alone, and each re-decides something
+`validate_fragment` already enforced — an enforcement proved by the code that
+performs it is not proved: `citedFieldIds` is a subset of the **active Analysis
+Field Profile**, refused fields never support the verdict, and exactly one axis
+carries `lead`. A fourth records what the case expected the pipeline to do with
+its seat, which is how the data-gap category asks for a refusal by name.
 
 ## The thresholds, and what a failure has to say
 
@@ -383,10 +410,80 @@ The flag may be cleared once its case exists, and clearing it removes both
 columns. That is bookkeeping and not a resolution: nobody is told, because
 nobody was promised anything.
 
-## What is not built yet
+## The Eval Report
 
-- The Analysis-lane cases and their three extra checks — issue #97.
-- The report's baseline diff, `baseline_reset`, and the merge rule — issue #98.
-- The fixed ops query that reads `flag_counts` alongside `grounding_failed`,
-  `unknown_tool`, the `answer_kind` distribution and incomplete reasons — issue
-  #100. The write path and the counts it reads exist; the query itself does not.
+Every run writes `docs/eval/<date>-<prompt_version>.md` and stamps the path onto
+`eval_run.report_path`. A **smoke** run's report carries the mode and a short run
+id in its filename instead, so it can never occupy the name a baseline is read
+from.
+
+The report carries the run id, the mode, the route and exact model, the four
+versions, per-category scores with the two lanes separable, the diff against
+baseline, the reviewer's answers where a rubric sheet has been entered, and the
+**verbatim answers being judged**. That last one is not padding: it is one of
+ADR-0016's three defences against a rubber-stamped rubric, because the text a
+reviewer scored stays readable in the file.
+
+The report **renders** the verdict; it does not decide it. What the counts mean
+is `src/eval/verdict.py`'s, and whether this run may be a baseline for the next
+one is the baseline query's — both read the same totals, so the document and the
+table cannot come to different conclusions.
+
+## The baseline
+
+The baseline is the **most recent passing gate run**, resolved from `eval_run` by
+query (`src/eval/baseline.py`). Smoke runs and unfinished runs are excluded in
+SQL; the thresholds above are then applied in Python over the rows that come
+back, from `verdict.THRESHOLDS` rather than from a second copy — expressing that
+arithmetic over a JSONB column would put the same rule in a dialect nothing
+tests.
+
+Passing here is the **deterministic** half. The rubric's answers live beside the
+report rather than in `eval_run`, so a baseline is the last gate run the machine
+was satisfied with; a reviewer's "no" is carried into the pull request by the
+report, which is where the merge decision is made anyway.
+
+A run that recorded a **hard fail** — a registered field narrated backwards in
+sign — does not pass whatever its rates say, so it can never become a baseline.
+The case ids are stored in `eval_run.category_totals.hard_fails` and named above
+the category table in the report.
+
+- **A drop of two case-equivalents or more in any category is surfaced even
+  while the category is above threshold**, and **must be explained in prose in
+  the pull request**. It does not block the merge. A case-equivalent is a whole
+  case's worth of passing — the rate change scaled by the number of cases — so
+  the rule survives a battery that grew.
+- **When `fixture_version` changes the previous baseline is void.** The run is
+  marked `baseline_reset`, its report shows no diff at all, and **that pull
+  request may not claim "no regression"**: comparing scores across two fixtures
+  compares two different exams.
+
+## The merge rule
+
+There is no `.github/workflows` here, so this is a process rule rather than a
+workflow file nobody runs.
+
+**A pull request that touches any of the following must carry an Eval Report in
+its body — run id, per-category scores, and the diff against baseline — and must
+not merge into `develop` without one:**
+
+- the System Prompt Contract (`src/agent/prompt.py`, `prompt_version`);
+- tool schemas or `tool_catalog_version` (`src/agent/tools/`);
+- the Signal Registry (`src/stocks/signals/`);
+- the Analysis Field Profile (`src/alpha/field_profile.py`);
+- `llm_model_*` — the route or either model;
+- the agent loop (`src/agent/loop.py`);
+- the Recommendation Validator.
+
+**A pull request touching only UI, the Collector or Widget rendering needs no
+gate run.**
+
+Only a **complete gate run** may be attached. A smoke run has no gating value,
+and a run that stopped at its ceiling has no score.
+
+## What is left
+
+Nothing in ADR-0016's list. The fixture, the harness, the six categories, both
+surfaces, the rubric, the report, the baseline and the merge rule are all here.
+What remains is the thing none of it can do for itself: **one passing gate run**
+(issue #100), which is part of the definition of v1 done.
