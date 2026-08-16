@@ -277,11 +277,19 @@ Content arrives as **complete blocks** — a paragraph, a bullet group, a finish
 or a reconnect renders everything already present at once, with no staged replay.
 Reduced-motion removes the transition.
 
-While tools run, one **collapsed activity line** shows a generic phase —
-*Searching…*, *Reading data…*, *Analyzing…*, *Preparing visual…* — expandable to a
-compact user-facing summary of the semantic operation. It is **never a raw trace, and
-never a tool name, symbol, argument, or result.** The full detail stays in the **Tool
-Call Trace** as an audit surface.
+While tools run, a **collapsed activity trail** shows the work as a short list of
+steps: the phases already finished, then the one in flight — *Searching…*, *Reading
+data…*, *Analyzing…*, *Preparing visual…*, each expandable to a compact user-facing
+summary of the semantic operation. A finished step stays on screen in the past tense;
+only the step in flight is announced to assistive technology. Consecutive repeats of
+one phase are one step.
+
+The trail is **never a raw trace, and never a tool name, symbol, argument, or
+result** — the publisher sends a phase and only a phase, so the vocabulary on screen
+is those four words whatever the Turn actually called. The full detail stays in the
+**Tool Call Trace** as an audit surface. The trail is what *this tab watched happen*:
+a reconnect keeps the steps it saw, and a tab that joined a Turn late shows none
+rather than inventing the ones it missed.
 
 The harness must feel like it is *working*, not hung: the first block or activity line
 arrives well before completion, and a heartbeat keeps a quiet path observable.

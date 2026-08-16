@@ -60,6 +60,8 @@ export interface DraftEntry {
   key: string
   blocks: ContentBlock[]
   activity: ActivityPhase | null
+  /** The phases already finished, in order, so the work stays legible. */
+  steps: ActivityPhase[]
   phase: LivePhase
   terminalReason: string | null
   /**
@@ -180,6 +182,7 @@ export function buildTranscript(input: TranscriptInput): TranscriptEntry[] {
       key: `draft-${input.live.turnId}`,
       blocks: input.live.blocks,
       activity: input.live.activity,
+      steps: input.live.steps,
       phase: input.live.phase,
       terminalReason: input.live.terminalReason,
       appendedIndex: input.live.appendedIndex,

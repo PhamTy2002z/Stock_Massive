@@ -17,7 +17,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 
 import type { AssistantView, DraftEntry } from "@/lib/alpha-desk/transcript"
 import type { Citation, ContentBlock, RiskNotice } from "@/lib/alpha-desk/types"
-import { ActivityLine } from "./activity-line"
+import { ActivityTrail } from "./activity-line"
 import { AssistantMessage } from "./assistant-message"
 import { DraftMessage } from "./draft-message"
 
@@ -75,6 +75,7 @@ function draft(overrides: Partial<DraftEntry> = {}): DraftEntry {
     key: "draft-1",
     blocks: [],
     activity: null,
+    steps: [],
     phase: "running",
     terminalReason: null,
     appendedIndex: null,
@@ -137,30 +138,51 @@ describe("how an answer arrives", () => {
   })
 })
 
-describe("the activity line", () => {
+describe("the activity trail", () => {
   it("shows a generic phase while tools run", () => {
-    render(<ActivityLine phase="reading_data" />)
+    render(<ActivityTrail steps={[]} phase="reading_data" />)
 
     expect(screen.getByRole("status")).toHaveTextContent(/Đang đọc dữ liệu/)
   })
 
-  it("exposes no tool name, symbol, argument or result — collapsed or expanded", () => {
-    const { container } = render(<ActivityLine phase="searching" />)
+  it("keeps the steps it finished, in the order it finished them", () => {
+    render(<ActivityTrail steps={["searching", "reading_data"]} phase="analyzing" />)
 
-    fireEvent.click(screen.getByText("Details"))
+    const lines = screen.getAllByRole("button").map((row) => row.textContent)
+    expect(lines[0]).toMatch(/Đã tìm/)
+    expect(lines[1]).toMatch(/Đã đọc dữ liệu/)
+    expect(lines[2]).toMatch(/Đang phân tích/)
+  })
+
+  it("announces only the step in flight", () => {
+    // A finished step is not progress. Announcing each one would turn a quiet
+    // answer into a queue of interruptions for a screen reader.
+    const { container } = render(
+      <ActivityTrail steps={["searching", "reading_data"]} phase="analyzing" />,
+    )
+
+    expect(container.querySelectorAll("[role='status']")).toHaveLength(1)
+  })
+
+  it("draws nothing at all when there is no work to show", () => {
+    const { container } = render(<ActivityTrail steps={[]} phase={null} />)
+
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it("exposes no tool name, symbol, argument or result — collapsed or expanded", () => {
+    const { container } = render(
+      <ActivityTrail steps={["reading_data", "analyzing"]} phase="searching" />,
+    )
+
+    for (const row of screen.getAllByRole("button")) fireEvent.click(row)
 
     const markup = container.innerHTML
     for (const name of TOOL_NAMES) expect(markup).not.toContain(name)
-    // No ticker, no figure: either would mean the line was assembled from a
-    // call rather than from the phase the publisher named.
+    // No ticker, no figure: either would mean a line was assembled from a call
+    // rather than from the phase the publisher named.
     expect(container.textContent).not.toMatch(/\b[A-Z]{3}\b/)
     expect(container.textContent).not.toMatch(/\d/)
-  })
-
-  it("is one line and not a running list of steps", () => {
-    const { container } = render(<ActivityLine phase="analyzing" />)
-
-    expect(container.querySelectorAll("[role='status']")).toHaveLength(1)
   })
 })
 

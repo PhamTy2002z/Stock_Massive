@@ -17,28 +17,41 @@
 import type { ActivityPhase, FlagReason } from "./types"
 
 /**
- * What the collapsed line says, and what it says when opened.
+ * What a phase says while it runs, once it is done, and when it is opened.
  *
- * The phase is the whole vocabulary. `summary` describes the *kind* of work in
- * user language — it is not a longer trace, and expanding it must never become
- * the way a curious user learns the catalog. The Tool Call Trace is where the
- * detail lives, and it is an audit surface rather than part of the answer.
+ * The phase is the whole vocabulary — three sentences per phase, and there are
+ * four phases. `summary` describes the *kind* of work in user language: it is
+ * not a longer trace, and expanding it must never become the way a curious user
+ * learns the catalog. The Tool Call Trace is where the detail lives, and it is
+ * an audit surface rather than part of the answer.
+ *
+ * `done` is the same promise in the past tense. A finished step stays on screen
+ * under the ones after it, so it has to read as a completed fact rather than as
+ * a line that stopped moving — and it still names no tool, symbol, argument or
+ * result, because the publisher never sent one.
  */
-export const ACTIVITY_COPY: Record<ActivityPhase, { line: string; summary: string }> = {
+export const ACTIVITY_COPY: Record<
+  ActivityPhase,
+  { line: string; done: string; summary: string }
+> = {
   searching: {
     line: "Đang tìm…",
+    done: "Đã tìm trong các nguồn đã duyệt",
     summary: "Đang tìm trong các nguồn tin đã được duyệt cho câu hỏi này.",
   },
   reading_data: {
     line: "Đang đọc dữ liệu…",
+    done: "Đã đọc dữ liệu đã lưu",
     summary: "Đang đọc số liệu phiên gần nhất và các chỉ số đã đăng ký.",
   },
   analyzing: {
     line: "Đang phân tích…",
+    done: "Đã đối chiếu số liệu vừa đọc",
     summary: "Đang đối chiếu những gì vừa đọc trước khi trả lời.",
   },
   preparing_visual: {
     line: "Đang dựng hình…",
+    done: "Đã dựng hình minh hoạ",
     summary: "Đang chuẩn bị một hình minh hoạ cho phần trả lời.",
   },
 }

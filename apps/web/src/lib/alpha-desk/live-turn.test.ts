@@ -354,6 +354,71 @@ describe("the activity line", () => {
     expect(working.activity).toBe("searching")
     expect(answered.activity).toBeNull()
   })
+
+  it("keeps a finished phase as a step, in the order it finished", () => {
+    // The transport publishes where the Turn *is*; the trail of where it has
+    // been is assembled here, because nothing else sees every transition.
+    const state = run(
+      started,
+      snapshot(0),
+      event(1, "turn.activity", { phase: "searching" }),
+      event(2, "turn.activity", { phase: "reading_data" }),
+      event(3, "turn.activity", { phase: "analyzing" }),
+    )
+
+    expect(state.steps).toEqual(["searching", "reading_data"])
+    expect(state.activity).toBe("analyzing")
+  })
+
+  it("closes the running phase into the trail when a block lands", () => {
+    const state = run(
+      started,
+      snapshot(0),
+      event(1, "turn.activity", { phase: "reading_data" }),
+      event(2, "content.block", { block: block("kết quả") }),
+    )
+
+    expect(state.steps).toEqual(["reading_data"])
+    expect(state.activity).toBeNull()
+  })
+
+  it("collapses a phase re-announced back to back into one step", () => {
+    // Two reads in a row are one step called *reading data*, not two.
+    const state = run(
+      started,
+      snapshot(0),
+      event(1, "turn.activity", { phase: "reading_data" }),
+      event(2, "turn.activity", { phase: "reading_data" }),
+      event(3, "turn.activity", { phase: "analyzing" }),
+    )
+
+    expect(state.steps).toEqual(["reading_data"])
+  })
+
+  it("keeps the trail after the Turn ends, including one that ended early", () => {
+    // On a Turn that stopped early the trail is most of what the reader has to
+    // go on, so it outlives the running state.
+    const state = run(
+      started,
+      snapshot(0),
+      event(1, "turn.activity", { phase: "searching" }),
+      event(2, "turn.incomplete", { terminal_reason: "turn_deadline" }),
+    )
+
+    expect(state.steps).toEqual(["searching"])
+    expect(state.activity).toBeNull()
+  })
+
+  it("starts a new Turn with an empty trail", () => {
+    const state = run(
+      started,
+      snapshot(0),
+      event(1, "turn.activity", { phase: "searching" }),
+      { type: "start", turnId: "another", threadId: THREAD },
+    )
+
+    expect(state.steps).toEqual([])
+  })
 })
 
 describe("an event from another Turn", () => {
