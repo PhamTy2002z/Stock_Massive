@@ -119,7 +119,7 @@ function Nav() {
   const desk = useDesk()
 
   return (
-    <nav className="grid gap-px px-2.5">
+    <nav className="grid grid-cols-fit gap-px px-2.5">
       <NavRow
         icon={<Plus className="size-[17px] text-ink-4" strokeWidth={1.6} />}
         onClick={() => {
@@ -203,7 +203,7 @@ function ThreadList() {
   }
 
   return (
-    <div className="grid flex-none content-start gap-px px-2.5 pb-2.5">
+    <div className="grid grid-cols-fit flex-none content-start gap-px px-2.5 pb-2.5">
       {rows.map((row) => {
         const active = row.id === desk.threadId
         return (

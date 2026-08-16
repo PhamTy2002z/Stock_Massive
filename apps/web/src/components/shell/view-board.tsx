@@ -88,7 +88,7 @@ export function BoardView() {
       <div className="mx-auto grid max-w-[1180px] gap-3.5">
         <section aria-label="Chỉ số thị trường" className="grid gap-2.5 [grid-template-columns:repeat(auto-fit,minmax(200px,1fr))]">
           {(indices.data ?? []).map((index) => (
-            <Card key={index.symbol}>
+            <Card key={index.symbol} className="min-w-0">
               <div className="flex items-center gap-2">
                 <span className="text-micro font-semibold tracking-[0.07em] text-ink-4">
                   {index.name}
@@ -343,7 +343,7 @@ function SectorTile({
   return (
     <div
       title={name}
-      className="rounded-[10px] p-2.5 shadow-[inset_0_0_0_1px_hsl(var(--foreground)/0.05)]"
+      className="min-w-0 rounded-[10px] p-2.5 shadow-[inset_0_0_0_1px_hsl(var(--foreground)/0.05)]"
       style={{ backgroundColor: sectorTint(changePct, peak) }}
     >
       <div className="truncate text-meta text-ink-2">{name}</div>
@@ -403,7 +403,7 @@ function ForeignFlowCard() {
       <Figure className="mt-1.5 block text-[1.4rem] font-semibold tracking-[-0.02em] text-negative">
         −1.240 tỷ
       </Figure>
-      <div className="mt-2.5 grid gap-1.5">
+      <div className="mt-2.5 grid grid-cols-fit gap-1.5">
         {SAMPLE_FOREIGN.map((row, position) => (
           <div key={row.symbol} className="flex items-center gap-2.5 text-meta">
             <Figure className="w-10 shrink-0">{row.symbol}</Figure>
@@ -476,7 +476,7 @@ function Rankings({ rows }: { rows: Row[] }) {
             <span className="text-row text-ink-1">{group.title}</span>
             <span className="ml-auto text-micro text-ink-6">{group.unit}</span>
           </div>
-          <div className="mt-2.5 grid gap-0.5">
+          <div className="mt-2.5 grid grid-cols-fit gap-0.5">
             {group.rows.map((row) => (
               <button
                 key={row.symbol}

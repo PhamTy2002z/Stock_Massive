@@ -345,7 +345,7 @@ function MarketTab() {
           <div
             key={sector.icb_code}
             title={sector.icb_name}
-            className="rounded-[10px] px-2.5 py-2 shadow-[inset_0_0_0_1px_hsl(var(--foreground)/0.05)]"
+            className="min-w-0 rounded-[10px] px-2.5 py-2 shadow-[inset_0_0_0_1px_hsl(var(--foreground)/0.05)]"
             style={{ backgroundColor: sectorTint(sector.change_pct, sectorPeak) }}
           >
             <div className="truncate text-micro text-ink-2">{sector.icb_name}</div>
@@ -543,7 +543,7 @@ function SymbolTab() {
 
         <PanelCard>
           <Eyebrow>Cùng ngành{peers.data ? ` · ${peers.data.icb_name}` : ""}</Eyebrow>
-          <div className="mt-2 grid gap-0.5">
+          <div className="mt-2 grid grid-cols-fit gap-0.5">
             {(peers.data?.peers ?? [])
               .filter((peer) => peer.symbol !== symbol)
               .slice(0, 4)

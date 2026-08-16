@@ -138,7 +138,7 @@ export function WatchlistSection() {
         </div>
       )}
 
-      <div className="grid gap-px px-2.5">
+      <div className="grid grid-cols-fit gap-px px-2.5">
         {entries.map((entry) => {
           const quote = quotes.get(entry.symbol)
           const changePct = quote?.change_pct ?? null
