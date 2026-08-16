@@ -1,6 +1,6 @@
 # API Development Commands
 
-.PHONY: dev run test lint clean eval eval-smoke eval-fixture eval-fixture-load
+.PHONY: dev run test lint clean eval eval-smoke eval-fixture eval-fixture-load eval-rubric
 
 # Use venv python if exists
 PYTHON := $(shell if [ -d ".venv" ]; then echo ".venv/bin/python"; else echo "python"; fi)
@@ -42,6 +42,16 @@ eval-fixture:
 # Load the newest seed into the eval database and re-check its properties.
 eval-fixture-load:
 	$(PYTHON) -m src.eval load
+
+# Combine a filled blind rubric sheet with the run it was written from. Pass the
+# sheet a gate run left beside its report:
+#
+#   make eval-rubric SHEET=docs/eval/2026-08-16-1.2.0.rubric.md
+#
+# It touches no database. An unfinished sheet is refused rather than defaulted:
+# a default is a score nobody gave.
+eval-rubric:
+	$(PYTHON) -m src.eval rubric --sheet $(SHEET)
 
 # Run specific test file
 test-file:

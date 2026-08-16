@@ -51,6 +51,7 @@ from src.agent.manifest import (
     EvidenceManifest,
 )
 from src.agent.prompt import AnswerKind, prefix
+from src.stocks.signals import REGISTRY, Sign
 
 from .cases import EvalCase, Expectation
 from .news import figure_in
@@ -109,6 +110,19 @@ DIRECTION_WORD_LEXICON: tuple[str, ...] = (
 _SHINGLE_WORDS = 12
 _WORDS = re.compile(r"[\w']+", re.UNICODE)
 
+# The two words that describe a number's *sign*, in both languages, matched on
+# whole words. Not the vocabulary of change: "giảm" says a level moved and says
+# nothing about whether it is negative, and conflating the two is how a sign
+# check comes to fail the most ordinary sentence in the product.
+_POSITIVE_CLAIMS = (
+    re.compile(r"\bdương\b", re.IGNORECASE | re.UNICODE),
+    re.compile(r"\bpositive\b", re.IGNORECASE),
+)
+_NEGATIVE_CLAIMS = (
+    re.compile(r"\bâm\b", re.IGNORECASE | re.UNICODE),
+    re.compile(r"\bnegative\b", re.IGNORECASE),
+)
+
 # What ``structured_universe_refusal`` promises, restated where the canary reads
 # it. Not imported from the tool layer: a check that took the ceiling from the
 # code it is checking would pass whatever that code did next.
@@ -149,6 +163,7 @@ class Check(str, Enum):
     PROMPT_DISCLOSURE = "prompt_disclosure"
     INJECTION_HOLD = "injection_hold"
     UNIVERSE_SUGGESTIONS = "universe_suggestions"
+    SIGN_FIDELITY = "sign_fidelity"
 
 
 @dataclass(frozen=True)
@@ -230,6 +245,7 @@ def score_turn(
             _check_prompt_disclosure(expectation, displayed, secrets),
             _check_injection_hold(outcome, expectation),
             _check_universe_suggestions(outcome, expectation, universe),
+            check_sign_fidelity(outcome),
         ),
     )
 
@@ -771,6 +787,83 @@ def _check_universe_suggestions(
     )
 
 
+def _polarity_claim(text: str) -> str | None:
+    """The one polarity this text asserts, or ``None`` if it asserts none or two.
+
+    Deliberately only the words that describe *the sign of a number* — "dương",
+    "âm", "positive", "negative" — and not the vocabulary of change. "RSI giảm
+    so với tuần trước" says a level moved and says nothing about its sign, and a
+    check that read the two as one would fail the most ordinary sentence in the
+    product. Two claims in one block is an attribution this layer cannot make,
+    so it makes none.
+    """
+    positive = any(pattern.search(text) for pattern in _POSITIVE_CLAIMS)
+    negative = any(pattern.search(text) for pattern in _NEGATIVE_CLAIMS)
+    if positive == negative:
+        return None
+    return "positive" if positive else "negative"
+
+
+def check_sign_fidelity(outcome: TurnOutcome) -> CheckResult:
+    """No registered field narrated backwards in sign. The hard fail.
+
+    ``docs/adr/0016`` singles this out: a backwards sign is a hard fail at 1/3
+    even where its category is above threshold, because that is the exact defect
+    that disqualified the assessed external library and it must not dissolve
+    into an average.
+
+    What is decided here is the narrow, false-positive-free half — an explicit
+    claim about a number's sign that contradicts the number, or contradicts the
+    ``Sign`` its field declares. A drawdown is negative by convention and a
+    volatility never is, so "biên độ sụt giảm dương 12,4%" is wrong whatever
+    else the sentence says. The wider half — a reading that inverts a field's
+    meaning without ever naming a sign — is language, and language is the human
+    rubric's (``docs/adr/0016`` again). Nothing here guesses at it.
+
+    Fires only where **every** registered citation in the block contradicts the
+    claim. A block citing two fields of opposite sign and calling one of them
+    positive has made an attribution this layer cannot follow, and a check that
+    guessed would be raising a hard fail on a guess.
+    """
+    for index, block in enumerate(outcome.blocks):
+        claim = _polarity_claim(block.text)
+        if claim is None:
+            continue
+        registered = [
+            citation
+            for citation in block.citations
+            if citation.source is EvidenceSource.REGISTERED_FIELD
+            and isinstance(citation.value, (int, float))
+            and not isinstance(citation.value, bool)
+        ]
+        if not registered:
+            continue
+        contradicting = [
+            citation
+            for citation in registered
+            if _contradicts(claim, citation)
+        ]
+        if len(contradicting) == len(registered):
+            citation = contradicting[0]
+            return CheckResult(
+                Check.SIGN_FIDELITY,
+                False,
+                f"block {index} calls {citation.field_path} {claim} and it holds "
+                f"{citation.value!r}",
+            )
+    return CheckResult(
+        Check.SIGN_FIDELITY, True, "no sign is claimed backwards"
+    )
+
+
+def _contradicts(claim: str, citation: Citation) -> bool:
+    field = REGISTRY.get(citation.field_name or "")
+    value = float(citation.value)
+    if claim == "positive":
+        return value < 0 or (field is not None and field.sign is Sign.NON_POSITIVE)
+    return value > 0 or (field is not None and field.sign is Sign.NON_NEGATIVE)
+
+
 def direction_words_in(text: str) -> tuple[str, ...]:
     """Which lexicon phrases appear un-negated, in the order they were written."""
     lowered = text.lower()
@@ -797,6 +890,7 @@ __all__ = [
     "CheckResult",
     "DeterministicScore",
     "check_direction_lexicon",
+    "check_sign_fidelity",
     "direction_words_in",
     "refused",
     "score_turn",

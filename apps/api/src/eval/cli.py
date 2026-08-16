@@ -1,6 +1,6 @@
-"""``python -m src.eval`` — capture a fixture, load one, run the battery.
+"""``python -m src.eval`` — capture a fixture, load one, run the battery, score it.
 
-Three verbs, and which database each one touches is the whole of the safety
+Four verbs, and which database each one touches is the whole of the safety
 story:
 
 - ``capture`` **reads** the application store and writes a file. It is the only
@@ -9,6 +9,9 @@ story:
   unset or resolves to the application's database.
 - ``run`` loads and then runs the battery, entirely inside the eval database —
   the store, the traces and the ledger.
+- ``rubric`` touches **no database at all**. It reads the filled blind sheet and
+  the run record beside it, and rewrites the report with a person's answers in
+  it.
 
 Exit codes are the interface, because ``make eval`` is what invokes this: 0 for a
 run that finished, 1 for anything else. A run stopped at its budget ceiling
@@ -30,7 +33,9 @@ from . import categories as _categories  # noqa: F401 - seats the battery
 from .capture import CAPTURE_HISTORY_SESSIONS, capture_fixture
 from .fixture import latest_seed_path, read_seed, seed_path, write_seed
 from .harness import EvalMode, build_harness
-from .report import write_report
+from .record import read_record, record_filename, write_record
+from .report import render_report, write_report
+from .rubric import assert_covers, read_sheet, render_sheet, sheet_filename
 from .store import create_schema, eval_engine, eval_session_factory, load_fixture
 from .verdict import verdict
 
@@ -87,16 +92,57 @@ def run(args: argparse.Namespace) -> int:
         settings=settings,
     )
     result = asyncio.run(harness.run())
-    path = write_report(result, Path(args.report_dir or settings.eval_report_dir))
-    harness.record_report_path(result, path)
+    directory = Path(args.report_dir or settings.eval_report_dir)
+    path = write_report(result, directory)
+    stamped = harness.record_report_path(result, path)
+    # Three files, one reader each: the report for a person, the blind sheet for
+    # the reviewer, and the record so `rubric score` can combine the two after
+    # the twenty-odd minutes the judgement takes.
+    write_record(stamped, directory / record_filename(path.name))
+    sheet = directory / sheet_filename(path.name)
+    sheet.write_text(render_sheet(stamped), encoding="utf-8")
     print(f"{result.mode.value} run {result.run_id} -> {path}")
+    print(f"rubric sheet -> {sheet}")
     if not result.complete:
         print(f"stopped: {result.stopped_reason}", file=sys.stderr)
         return 1
 
-    scored = verdict(result)
+    return _report_verdict(result, judged=False)
+
+
+def rubric(args: argparse.Namespace) -> int:
+    """Combine a filled blind sheet with the run it was written from.
+
+    Refuses an unfinished sheet rather than defaulting the missing answers: a
+    default is a score nobody gave, and the whole point of collecting labels is
+    that they are somebody's.
+    """
+    sheet = Path(args.sheet)
+    record = Path(args.record) if args.record else sheet.parent / record_filename(
+        sheet.name.replace(".rubric.md", ".md")
+    )
+    result = read_record(record)
+    scores = read_sheet(sheet.read_text(encoding="utf-8"))
+    assert_covers(result, scores)
+
+    report = Path(args.report) if args.report else Path(
+        result.report_path or sheet.parent / sheet.name.replace(".rubric.md", ".md")
+    )
+    report.write_text(render_report(result, scores), encoding="utf-8")
+    print(f"rubric scored {len(scores.answers)} runs -> {report}")
+    return _report_verdict(result, judged=True, scores=scores)
+
+
+def _report_verdict(result, *, judged: bool, scores=None) -> int:
+    scored = verdict(result, scores)
     for item in scored.categories:
         print(f"  {item.category.value}: {item.summary}")
+    if scored.hard_failures:
+        print(
+            "HARD FAIL: a registered field was narrated backwards in sign; "
+            "this overrides every rate above",
+            file=sys.stderr,
+        )
     if not scored.passed:
         # Named rather than counted: a category total tells an operator that
         # something regressed and nothing about what, and finding out by hand is
@@ -104,6 +150,12 @@ def run(args: argparse.Namespace) -> int:
         for failure in scored.failures:
             print(f"FAIL {failure}", file=sys.stderr)
         return 1
+    if not judged:
+        print(
+            "the human rubric is not entered yet, so D and E are half-read: "
+            "score the sheet with `make eval-rubric`"
+        )
+        return 0
     if not result.mode.gating:
         print("non-gating: a smoke run may not be attached to a pull request")
     return 0
@@ -132,6 +184,15 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--fixture", default=None)
     run_parser.add_argument("--report-dir", default=None)
     run_parser.set_defaults(handler=run)
+
+    rubric_parser = sub.add_parser(
+        "rubric",
+        help="combine a filled blind sheet with the run it was written from",
+    )
+    rubric_parser.add_argument("--sheet", required=True)
+    rubric_parser.add_argument("--record", default=None)
+    rubric_parser.add_argument("--report", default=None)
+    rubric_parser.set_defaults(handler=rubric)
 
     return parser
 
