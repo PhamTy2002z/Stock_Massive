@@ -158,6 +158,7 @@ def request(user_text: str = "Lọc giúp tôi các mã thanh khoản nhất.") 
         runtime=RuntimeContext(
             user_id=7,
             trading_day=TRADING_DAY,
+            today=TRADING_DAY,
             market_state=MarketState.POST_CLOSE,
         ),
     )
