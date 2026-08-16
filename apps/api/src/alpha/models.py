@@ -239,6 +239,23 @@ class AgentThread(Base):
         return f"<AgentThread {self.id} user={self.user_id}>"
 
 
+# The four reason labels a flag may carry (``docs/adr/0016``). Declared where
+# the column is, for the same reason the Turn statuses are: the store, the
+# transport and the Eval Report all read one vocabulary, and a fifth label
+# invented in one of them would be a category nothing else can count.
+FLAG_WRONG_FIGURE = "wrong_figure"
+FLAG_OVERREACH = "overreach"
+FLAG_WRONGLY_REFUSED = "wrongly_refused"
+FLAG_OTHER = "other"
+
+FLAG_REASONS = (
+    FLAG_WRONG_FIGURE,
+    FLAG_OVERREACH,
+    FLAG_WRONGLY_REFUSED,
+    FLAG_OTHER,
+)
+
+
 class AgentMessage(Base):
     """One canonical, immutable message in a Thread.
 
@@ -246,9 +263,12 @@ class AgentMessage(Base):
     the validated **Widget** spec rides here, per the decision that a message
     stores the spec and never the chart data.
 
-    ``flagged_reason`` and ``flagged_at`` are both nullable and stay null in v1;
-    they exist for the evaluation lane to mark a message without rewriting the
-    transcript it is judging.
+    ``flagged_reason`` and ``flagged_at`` are the whole of v1's dispute surface.
+    They are a nullable pair on this row rather than a ``message_flag`` table
+    because a message carries at most one reason — re-flagging is a correction
+    and not a second opinion — and ``docs/adr/0016`` forbids a new table for
+    observability. They are also the one thing about this row that changes; the
+    message a flag is about is never rewritten by the flag.
     """
 
     __tablename__ = "agent_message"
@@ -271,6 +291,16 @@ class AgentMessage(Base):
 
     __table_args__ = (
         UniqueConstraint("thread_id", "seq", name="uq_agent_message_thread_seq"),
+        # The ops query counts flags by reason over a date range, and a flag is
+        # rare against a table that holds every message ever written. Partial,
+        # so the index is the size of the flags rather than of the transcript,
+        # and it costs nothing on the write path of an unflagged message.
+        Index(
+            "ix_agent_message_flagged",
+            "flagged_reason",
+            "flagged_at",
+            postgresql_where=text("flagged_reason IS NOT NULL"),
+        ),
     )
 
     def __repr__(self) -> str:
@@ -469,7 +499,8 @@ class EvalRun(Base):
     id = Column(Uuid, primary_key=True)
     started_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     finished_at = Column(DateTime(timezone=True), nullable=True)
-    # gate | exploratory
+    # smoke | gate (``src/eval/harness.py``). Only ``gate`` runs the production
+    # route and models, and only a gate run may be attached to a pull request.
     mode = Column(String(16), nullable=False)
     route = Column(String(64), nullable=False)
     model = Column(String(64), nullable=False)

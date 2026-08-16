@@ -12,7 +12,12 @@ import { describe, expect, it } from "vitest"
 
 import { IDLE, type LiveTurn } from "./live-turn"
 import { buildTranscript, type TranscriptInput } from "./transcript"
-import type { ContentBlock, EvidenceManifest, ThreadMessage } from "./types"
+import type {
+  ContentBlock,
+  EvidenceManifest,
+  FlagReason,
+  ThreadMessage,
+} from "./types"
 
 const THREAD = "11111111-1111-4111-8111-111111111111"
 const TURN = "22222222-2222-4222-8222-222222222222"
@@ -28,10 +33,16 @@ function userMessage(id: number, text: string): ThreadMessage {
     role: "user",
     content: { text },
     created_at: "2026-08-16T09:00:00Z",
+    flagged_reason: null,
+    flagged_at: null,
   }
 }
 
-function assistantMessage(id: number, text: string): ThreadMessage {
+function assistantMessage(
+  id: number,
+  text: string,
+  flag: FlagReason | null = null,
+): ThreadMessage {
   return {
     id,
     seq: id,
@@ -48,6 +59,8 @@ function assistantMessage(id: number, text: string): ThreadMessage {
       evidence_manifest: { answer_kind: "analysis" } as unknown as EvidenceManifest,
     },
     created_at: "2026-08-16T09:00:05Z",
+    flagged_reason: flag,
+    flagged_at: flag === null ? null : "2026-08-16T10:00:00Z",
   }
 }
 
@@ -81,6 +94,8 @@ describe("the canonical Thread", () => {
       role: "summary",
       content: { text: "earlier Turns, compacted" },
       created_at: "2026-08-16T09:00:00Z",
+      flagged_reason: null,
+      flagged_at: null,
     }
 
     expect(transcript({ messages: [summary] })).toHaveLength(0)
@@ -94,6 +109,22 @@ describe("the canonical Thread", () => {
     expect(entry.view.riskNotice?.text).toMatch(/Không phải khuyến nghị/)
   })
 
+  it("carries a flag already on the message, so a reopened Thread shows it", () => {
+    // Otherwise the action looks unpressed after a reload and the reader presses
+    // it a second time — which the backend would take as a correction.
+    const [entry] = transcript({
+      messages: [assistantMessage(1, "answer", "wrong_figure")],
+    })
+
+    expect(entry.kind === "assistant" && entry.flaggedReason).toBe("wrong_figure")
+  })
+
+  it("reports an unflagged message as null rather than as undefined", () => {
+    const [entry] = transcript({ messages: [assistantMessage(1, "answer")] })
+
+    expect(entry.kind === "assistant" && entry.flaggedReason).toBeNull()
+  })
+
   it("renders a stored message with no blocks as its prose rather than as a gap", () => {
     const bare: ThreadMessage = {
       id: 1,
@@ -101,6 +132,8 @@ describe("the canonical Thread", () => {
       role: "assistant",
       content: { text: "một câu trả lời" },
       created_at: "2026-08-16T09:00:00Z",
+      flagged_reason: null,
+      flagged_at: null,
     }
 
     const [entry] = transcript({ messages: [bare] })

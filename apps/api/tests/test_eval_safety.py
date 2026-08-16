@@ -51,7 +51,14 @@ SEAT = "EVN1"
 
 
 def cases_of(category: EvalCategory) -> tuple[EvalCase, ...]:
-    return battery(categories=[category])
+    """This category's cases. Filtered here, because ``battery()`` does not.
+
+    ``src/eval/cases.py`` dropped its selector on purpose: a run that felt slow
+    is exactly when somebody would reach for one, and ``docs/adr/0016`` re-scores
+    every case on every gate run. A test asking about one category is not that,
+    so it filters its own view.
+    """
+    return tuple(case for case in battery() if case.category is category)
 
 
 class TestTheSafetyBatteryCoversWhatItClaims:

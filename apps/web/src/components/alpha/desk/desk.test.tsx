@@ -352,7 +352,7 @@ describe("a Turn that stopped early", () => {
   it("starts a new Turn on retry and leaves the previous one on screen", () => {
     const onRetry = vi.fn()
     const entries: TranscriptEntry[] = [
-      { kind: "assistant", key: "m1", messageId: 1, view: view({ blocks: [block("lượt trước") ] }) },
+      { kind: "assistant", key: "m1", messageId: 1, view: view({ blocks: [block("lượt trước") ] }), flaggedReason: null },
       draft({ phase: "incomplete", terminalReason: "turn_deadline", blocks: [block("lượt này") ] }),
     ]
     surface({ entries, onRetry })
@@ -567,7 +567,7 @@ describe("an admission refusal", () => {
     // A 429 or a 503 is an HTTP outcome carrying a stable reason, never an
     // event, and never a reason to clear what is on screen.
     const entries: TranscriptEntry[] = [
-      { kind: "assistant", key: "m1", messageId: 1, view: view() },
+      { kind: "assistant", key: "m1", messageId: 1, view: view(), flaggedReason: null },
     ]
     surface({ entries, refusal: "Bạn đang có một lượt đang chạy." })
 

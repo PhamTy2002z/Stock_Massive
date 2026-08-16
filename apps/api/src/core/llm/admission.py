@@ -137,6 +137,40 @@ class BudgetRefusal(RuntimeError):
         }
 
 
+#: Every reason a :class:`BudgetRefusal` can carry, as one closed set.
+#:
+#: The agent loop turns a refusal into a Turn's ``terminal_reason`` and ends the
+#: Turn where it is, so a caller holding only the finished Turn has a *string*
+#: and no exception to catch. Matching that string against a literal it chose
+#: itself is how a caller comes to recognise one refusal and sail past the rest:
+#: the Eval Battery did exactly that, stopping on ``eval_budget_exhausted`` while
+#: an exhausted lane let it run to the end and publish a score over Turns that
+#: never reached the model.
+#:
+#: Kept beside the refusals rather than at the reading end, and pinned by a test
+#: that scans this module for every reason actually raised — a set maintained by
+#: hand at a distance is the same failure one indirection later.
+BUDGET_REFUSAL_REASONS: frozenset[str] = frozenset(
+    {
+        "analysis_cost",
+        "analysis_input_per_call",
+        "analysis_output_per_call",
+        "eval_budget_exhausted",
+        "lane_budget_exhausted",
+        "probe_budget_exhausted",
+        "system_active_turns",
+        "turn_context_per_call",
+        "turn_cost",
+        "turn_input_total",
+        "turn_output_total",
+        "user_active_turn",
+        "user_spend_daily",
+        "user_spend_rolling_30d",
+        "user_turn_starts_daily",
+    }
+)
+
+
 class AdmissionLedger(Protocol):
     """The transaction owner used by the guarded client."""
 
@@ -255,11 +289,7 @@ class SpendAdmission:
                             ),
                         )
                 if candidate.owner.type is OwnerType.ANALYSIS_RUN:
-                    owner_cost = _charged_cost(
-                        session,
-                        LlmCallUsage.owner_type == candidate.owner.type.value,
-                        LlmCallUsage.owner_id == candidate.owner.id,
-                    )
+                    owner_cost = _owner_cost(session, candidate.owner)
                     if owner_cost + reserved > ANALYSIS_COST_MICRO_USD:
                         raise BudgetRefusal(
                             "analysis_cost",
@@ -304,11 +334,7 @@ class SpendAdmission:
                         day_reset,
                     )
                 elif candidate.owner.type is OwnerType.EVAL_RUN:
-                    owner_cost = _charged_cost(
-                        session,
-                        LlmCallUsage.owner_type == candidate.owner.type.value,
-                        LlmCallUsage.owner_id == candidate.owner.id,
-                    )
+                    owner_cost = _owner_cost(session, candidate.owner)
                     if owner_cost + reserved > EVAL_RUN_COST_MICRO_USD:
                         # ``docs/adr/0016``: the harness stops and reports this.
                         # It must never drop the remaining cases and publish a
@@ -648,6 +674,20 @@ def _charged_cost(session: Session, *conditions: object) -> int:
     return int(value or 0)
 
 
+def _owner_cost(session: Session, owner: CallOwner) -> int:
+    """What this one owner has already been charged, across every lane.
+
+    Across every lane deliberately: a retried call is re-reserved against
+    ``emergency`` (see ``client.py``), and an owner ceiling that counted only
+    its own lane would let a retry storm walk past the ceiling it exists to be.
+    """
+    return _charged_cost(
+        session,
+        LlmCallUsage.owner_type == owner.type.value,
+        LlmCallUsage.owner_id == owner.id,
+    )
+
+
 def _owner_totals(session: Session, owner: CallOwner) -> tuple[int, int, int]:
     charged_cost = _charged_cost_expression()
     charged_input = case(
@@ -817,6 +857,7 @@ def _read_turn_state(
 
 
 __all__ = [
+    "BUDGET_REFUSAL_REASONS",
     "EVAL_RUN_COST_MICRO_USD",
     "AdmissionLedger",
     "BudgetLane",

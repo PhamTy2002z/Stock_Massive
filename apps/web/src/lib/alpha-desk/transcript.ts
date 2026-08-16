@@ -16,6 +16,7 @@ import type { LivePhase, LiveTurn } from "./live-turn"
 import type {
   ActivityPhase,
   ContentBlock,
+  FlagReason,
   RiskNotice,
   SourceAndMethod,
   ThreadMessage,
@@ -42,6 +43,16 @@ export interface AssistantEntry {
   key: string
   messageId: number
   view: AssistantView
+  /**
+   * The reason this message is already flagged with, or null.
+   *
+   * Projected here rather than read in the component, so that the one rule
+   * worth stating — **only a canonical assistant message can be flagged** — is
+   * expressed by which entry kind carries the field. A draft has no message id
+   * yet and a user's own question is not what the action is about, so neither
+   * has anywhere to put it.
+   */
+  flaggedReason: FlagReason | null
 }
 
 export interface DraftEntry {
@@ -144,6 +155,7 @@ export function buildTranscript(input: TranscriptInput): TranscriptEntry[] {
         key: `message-${message.id}`,
         messageId: message.id,
         view: assistantView(message),
+        flaggedReason: message.flagged_reason ?? null,
       })
     }
   }

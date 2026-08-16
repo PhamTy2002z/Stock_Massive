@@ -25,6 +25,19 @@ Everything a run writes lands in the eval database, the ledger included —
 `llm_call_usage` and `eval_run`. That is the same atomic reservation of
 ADR-0014 pointed at a different database, not a different mechanism.
 
+**The cost of that, stated rather than buried.** ADR-0014 puts a $5/month eval
+lane inside the $50 envelope. Because the ledger lives in the eval database, that
+lane is counted *there* — so eval spend does not appear in the production
+envelope, and dropping the eval database resets the lane. Two ceilings still
+bind a run honestly: the per-run **$2.5**, and the eval lane as accumulated in
+the eval database. What is lost is the single monthly view across all four lanes.
+
+This follows from issue #93's criterion — *the eval database is separate from dev
+and production, and running the battery cannot write to either* — which cannot be
+satisfied while writing the ledger to production. If the monthly view matters
+more than that criterion, the decision to revisit is this one, and it is a
+one-line change of session factory in `harness.build_harness`.
+
 Set it up once:
 
 ```bash
@@ -305,11 +318,75 @@ case with it; a hard-coded ticker would go on passing while quietly asking about
 a healthy symbol.
 
 **Cases are seeded once.** After that the battery grows only through the flag
-loop of ADR-0016 — a flagged message confirmed as a genuine failure becomes a
-new case, frozen with its fixture. **Nobody adds cases to improve a score**, and
-there is no workflow in this document that would let them.
+loop below. **Nobody adds cases to improve a score**, and no other workflow in
+this document would let them.
+
+## From a flagged message to a new Eval Case
+
+**This is the only sanctioned way the battery grows.** Cases are seeded once by
+the category tickets; after that, a case is added because the field produced a
+failure, never because a score wanted improving. `cases.register` exists so that
+adding one is a visible act in a diff.
+
+The action itself is deliberately small. A reader flags an assistant message with
+one of `wrong_figure | overreach | wrongly_refused | other`, which writes the
+nullable `flagged_reason` + `flagged_at` pair on `agent_message` — no table, no
+ticket, no notification, and nothing said to the reader beyond an acknowledgement
+(`docs/adr/0016`, `src/agent/flag_router.py`). Everything below is manual, and it
+is manual on purpose: the judgement in step 2 is exactly what an automated
+pipeline would get wrong.
+
+1. **Read the flags.** They are queryable by reason and by date range —
+   `AgentPersistence.flag_counts(since=…, until=…)`, which is also the count the
+   fixed ops query reports into the next Eval Report.
+
+2. **Re-read the message, and decide whether it is a genuine failure.**
+   *Replay means re-reading the Evidence Manifest, not reproducing the answer.*
+   The model is non-deterministic above temperature 0 and the store moves
+   nightly, so re-asking the question produces a different answer wearing the
+   same name. The Manifest is on the message, is immutable, and is kept
+   **indefinitely**; full Tool Call Traces keep a **90-day** window
+   (`TOOL_CALL_RETENTION_DAYS`). That asymmetry is what makes a flag from March
+   still answerable in August — and it is the limit to state openly rather than
+   hide: **a trace can be re-read, not re-run.**
+
+   A flag that turns out to be a disagreement rather than a defect stops here.
+   Nothing is written, and nothing is owed to the person who flagged it.
+
+3. **Name the category, from the six.** What went wrong decides it, not what the
+   reader typed: a figure that was never in the evidence is `A`, a refusal on a
+   legitimate question is `B`, an answer outside the four axes is `C`, a
+   misread of a registered field is `D`, a missing-data case answered as if the
+   data were there is `E`, and an instruction obeyed out of a document is `F`.
+
+4. **Find the fixture seat, never the ticker.** The failing symbol has some
+   property — below `min_sessions`, crossing the price-basis seam, densely
+   limit-locked, a bank — and the case is written against that `FixtureRole`.
+   A case naming `VCB` directly is a case that stops asking its question the
+   first time the fixture is re-frozen.
+
+   If no existing seat carries the property, the fixture is what has to change
+   before the case can: add the probe to `src/eval/roles.py`, re-freeze
+   (`make eval-fixture`), and note that a new `fixture_version` **voids the
+   previous baseline** (ADR-0016).
+
+5. **Register the case** in the category's module with the expectation the
+   deterministic layer is entitled to decide, and its `intent` written for the
+   reader of a future failure. Interpretation fidelity and contradictory-evidence
+   exposure stay with the human rubric; do not encode a guess at them.
+
+6. **Run `make eval` and check that the new case fails**, before anything is
+   changed to make it pass. A case added green proves only that it was written
+   after the fix.
+
+The flag may be cleared once its case exists, and clearing it removes both
+columns. That is bookkeeping and not a resolution: nobody is told, because
+nobody was promised anything.
 
 ## What is not built yet
 
 - The Analysis-lane cases and their three extra checks — issue #97.
 - The report's baseline diff, `baseline_reset`, and the merge rule — issue #98.
+- The fixed ops query that reads `flag_counts` alongside `grounding_failed`,
+  `unknown_tool`, the `answer_kind` distribution and incomplete reasons — issue
+  #100. The write path and the counts it reads exist; the query itself does not.

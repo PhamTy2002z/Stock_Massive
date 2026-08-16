@@ -3,6 +3,7 @@
 import { AlertCircle, X } from "lucide-react"
 
 import type { TranscriptEntry } from "@/lib/alpha-desk/transcript"
+import type { FlagReason } from "@/lib/alpha-desk/types"
 import { cn } from "@/lib/utils"
 import { Composer } from "./composer"
 import { Transcript } from "./transcript"
@@ -33,6 +34,9 @@ export function DeskSurface({
   onSend,
   onCancel,
   onRetry,
+  onFlag,
+  onUnflag,
+  flagFailedFor,
   onDismissRefusal,
   className,
 }: {
@@ -50,6 +54,17 @@ export function DeskSurface({
   onSend: (text: string) => void
   onCancel: () => void
   onRetry: () => void
+  /** The one dispute action v1 ships. Optional: without it, no control is drawn. */
+  onFlag?: (messageId: number, reason: FlagReason) => void
+  onUnflag?: (messageId: number) => void
+  /**
+   * The message whose last flag write was rejected.
+   *
+   * Beside the transcript rather than in the refusal strip below it: an
+   * admission refusal is about the Turn the user is waiting on, and a flag that
+   * did not save is about one answer they had already finished reading.
+   */
+  flagFailedFor?: number | null
   onDismissRefusal: () => void
   className?: string
 }) {
@@ -74,7 +89,14 @@ export function DeskSurface({
         <div className="flex shrink-0 items-center gap-1">{history}</div>
       </div>
 
-      <Transcript entries={entries} onRetry={onRetry} className="min-h-0 flex-1" />
+      <Transcript
+        entries={entries}
+        onRetry={onRetry}
+        onFlag={onFlag}
+        onUnflag={onUnflag}
+        flagFailedFor={flagFailedFor}
+        className="min-h-0 flex-1"
+      />
 
       {refusal && (
         <div

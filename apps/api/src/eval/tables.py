@@ -24,6 +24,7 @@ fixture's symbols would store a top-fifty that is not a top-fifty.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
@@ -140,8 +141,6 @@ def store_schema_version() -> str:
     Names and types, not defaults or indexes: what changes the meaning of a
     captured row is what it holds, and an index moving does not.
     """
-    import hashlib
-
     digest = hashlib.sha256()
     for table in sorted(CAPTURED_TABLES, key=lambda item: item.name):
         digest.update(table.name.encode("utf-8"))

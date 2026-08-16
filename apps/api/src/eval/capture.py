@@ -52,7 +52,7 @@ from .roles import (
     FixtureRole,
     RoleContext,
 )
-from .tables import CAPTURED_TABLES, encode_row
+from .tables import CAPTURED_TABLE_BY_NAME, CAPTURED_TABLES, encode_row
 from .versions import running_versions
 
 logger = logging.getLogger(__name__)
@@ -246,8 +246,6 @@ def _listed_outside(session: Session, members: Sequence[str]) -> tuple[str, ...]
 
 
 def _sorted_rows(table_name: str, rows) -> tuple[dict, ...]:
-    from .tables import CAPTURED_TABLE_BY_NAME
-
     table = CAPTURED_TABLE_BY_NAME[table_name]
     encoded = [encode_row(table, row) for row in rows]
     # Sorted by their own canonical encoding, so two captures of the same store
