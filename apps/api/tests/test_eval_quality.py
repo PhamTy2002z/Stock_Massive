@@ -36,7 +36,7 @@ from src.agent.loop import TurnOutcome, TurnStatus
 from src.agent.prompt import AnswerKind
 from src.core.llm import Usage
 from src.eval import categories as _seeded  # noqa: F401 - seats the battery
-from src.eval.cases import EvalCase, EvalCategory, battery
+from src.eval.cases import EvalCase, EvalCategory, EvalSurface, battery
 from src.eval.categories.quality import INDUSTRY_SEATS
 from src.eval.rubric import (
     JUDGED_CATEGORIES,
@@ -59,14 +59,24 @@ RSI = "indicator_pack.rsi_14"
 
 
 def cases_of(category: EvalCategory) -> tuple[EvalCase, ...]:
-    """This category's cases. Filtered here, because ``battery()`` does not.
+    """This category's **Turn-lane** cases. Filtered here, because ``battery()``
+    does not.
 
     ``src/eval/cases.py`` dropped its selector on purpose: a run that felt slow
     is exactly when somebody would reach for one, and ``docs/adr/0016`` re-scores
     every case on every gate run. A test asking about one category is not that,
     so it filters its own view.
+
+    The surface is part of that filter. D and E are scored on both lanes, and
+    the Analysis lane's ten cases (``src/eval/analysis_cases.py``) are counted
+    by the file that owns them — counting them here would make this file's
+    numbers move whenever that one grew.
     """
-    return tuple(case for case in battery() if case.category is category)
+    return tuple(
+        case
+        for case in battery()
+        if case.category is category and case.surface is EvalSurface.TURN
+    )
 
 
 class TestTheQualityBatteryCoversWhatItClaims:

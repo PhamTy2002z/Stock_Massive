@@ -28,6 +28,7 @@ from .admission import (
     SpendAdmission,
     SpendRequest,
     TurnState,
+    check_candidate_shape,
 )
 from .client import MissingSpendReservation, ReservedLLMClient, build_client
 from .config import (
@@ -109,6 +110,7 @@ __all__ = [
     "ToolError",
     "ToolSchema",
     "SpendRequest",
+    "check_candidate_shape",
     "TurnState",
     "Usage",
     "Workload",

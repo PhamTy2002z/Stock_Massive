@@ -363,25 +363,36 @@ class TestTheCeilingStopsTheRun:
         assert raised == set(BUDGET_REFUSAL_REASONS)
 
 
-class TestTheAnalysisLaneIsRefusedRatherThanAskedBlank:
+class TestASeatTheFixtureDoesNotFill:
     @pytest.mark.asyncio
-    async def test_an_analysis_case_is_refused_before_anything_is_spent(
-        self, harness, factory
+    async def test_a_case_naming_an_unseated_role_stops_the_run_before_it_pays(
+        self, harness, factory, seed
     ):
-        """Its input is a symbol, not a prompt; running it would ask nothing."""
+        """A case names a seat so a re-freeze moves it with the symbol.
+
+        The cost of that indirection is this check. A fixture that no longer
+        seats a role turns every case about it into a ``KeyError`` mid-run,
+        after the cases before it have been paid for.
+        """
         from src.eval.harness import EvalMisconfigured
 
-        analysis_case = EvalCase(
-            id="analysis-1",
-            category=EvalCategory.INTERPRETATION,
-            surface=EvalSurface.ANALYSIS,
-            prompt="",
-            role=FixtureRole.BANK,
+        built = harness()
+        without_bank = {
+            role: symbol
+            for role, symbol in seed.manifest.roles.items()
+            if role is not FixtureRole.BANK
+        }
+        built.fixture = replace(
+            built.fixture,
+            seed=replace(
+                seed, manifest=replace(seed.manifest, roles=without_bank)
+            ),
         )
-        with pytest.raises(EvalMisconfigured) as raised:
-            await harness().run([case("turn-ok"), analysis_case])
 
-        assert "analysis-1" in str(raised.value)
+        with pytest.raises(EvalMisconfigured) as raised:
+            await built.run([case("unseated-1", role=FixtureRole.BANK)])
+
+        assert "unseated-1" in str(raised.value)
         assert usage_rows(factory) == []
 
 
@@ -673,6 +684,102 @@ class TestTheFixturesOwnNewsReachesTheLoop:
         result = self.traced_news(factory, world.BANK)[-1]
         assert result["count"] == 0
         assert result["reason"] == "no_cleared_news_in_window"
+
+class TestTheBaselineIsResolvedFromTheTable:
+    """In SQL, from ``eval_run``, which is the other reason that table exists."""
+
+    def seat_previous_run(self, factory, *, fixture_version: str, mode="gate"):
+        import uuid as _uuid
+        from datetime import timedelta
+
+        from src.eval.verdict import THRESHOLDS
+
+        run_id = _uuid.uuid4()
+        session = factory()
+        with session.begin():
+            session.add(
+                EvalRun(
+                    id=run_id,
+                    started_at=datetime.now(timezone.utc) - timedelta(days=1),
+                    finished_at=datetime.now(timezone.utc) - timedelta(days=1),
+                    mode=mode,
+                    route="https://eval.example",
+                    model=SESSION_MODEL,
+                    prompt_version="v1",
+                    tool_catalog_version="tc-1",
+                    registry_version="reg-1",
+                    fixture_version=fixture_version,
+                    category_totals={
+                        "by_category": {
+                            category.value: {"cases": 4, "runs": 12, "passed": 12}
+                            for category in THRESHOLDS
+                        },
+                        "by_surface": {},
+                        "complete": True,
+                        "stopped_reason": None,
+                    },
+                    report_path="docs/eval/2026-08-13-v1.md",
+                )
+            )
+        session.close()
+        return run_id
+
+    @pytest.mark.asyncio
+    async def test_a_gate_run_is_read_against_the_last_passing_gate_run(
+        self, harness, factory, seed
+    ):
+        previous = self.seat_previous_run(
+            factory, fixture_version=seed.fixture_version
+        )
+        result = await harness().run([case("baseline-1")])
+
+        assert result.baseline is not None
+        assert result.baseline.baseline.run_id == previous
+        assert result.baseline.baseline_reset is False
+
+    @pytest.mark.asyncio
+    async def test_the_baseline_it_used_is_stored_on_the_row(
+        self, harness, factory, seed
+    ):
+        previous = self.seat_previous_run(
+            factory, fixture_version=seed.fixture_version
+        )
+        result = await harness().run([case("baseline-2")])
+
+        session = factory()
+        try:
+            stored = session.get(EvalRun, result.run_id).category_totals
+        finally:
+            session.close()
+        assert stored["baseline"]["baseline_run_id"] == str(previous)
+        assert stored["baseline"]["baseline_reset"] is False
+
+    @pytest.mark.asyncio
+    async def test_a_moved_fixture_voids_the_baseline(self, harness, factory):
+        self.seat_previous_run(factory, fixture_version="2020-01-01-oldfixture")
+        result = await harness().run([case("baseline-3")])
+
+        assert result.baseline.baseline_reset is True
+        assert result.baseline.diffs == ()
+
+    @pytest.mark.asyncio
+    async def test_a_smoke_run_is_compared_against_nothing(
+        self, harness, factory, seed
+    ):
+        self.seat_previous_run(factory, fixture_version=seed.fixture_version)
+        result = await harness(mode=EvalMode.SMOKE).run([case("baseline-4")])
+        assert result.baseline is None
+
+    @pytest.mark.asyncio
+    async def test_a_stopped_run_has_no_score_to_compare(
+        self, harness, factory, seed
+    ):
+        self.seat_previous_run(factory, fixture_version=seed.fixture_version)
+        result = await harness(configuration=config(output_price=COSTLY_PRICE)).run(
+            [case("baseline-5"), case("baseline-6")]
+        )
+        assert result.complete is False
+        assert result.baseline is None
 
 
 class TestNoLlmJudge:
