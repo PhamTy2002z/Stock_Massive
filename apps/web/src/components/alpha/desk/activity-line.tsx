@@ -34,8 +34,8 @@ export function ActivityLine({
   const copy = ACTIVITY_COPY[phase]
 
   return (
-    <Collapsible className={cn("rounded-md border border-border/60 bg-muted/30", className)}>
-      <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+    <Collapsible className={cn("overflow-hidden rounded-xl border border-border bg-surface-raised", className)}>
+      <div className="flex items-center gap-2 px-3 py-2.5 text-meta text-muted-foreground">
         <Loader2 className="h-3 w-3 shrink-0 animate-spin motion-reduce:animate-none" />
         {/* `status` rather than `alert`: it is progress, and a screen reader
             should hear it when it next pauses, not be interrupted by it. */}
@@ -44,13 +44,13 @@ export function ActivityLine({
         </span>
         {/* English, like every other control on this surface: the phase above
             it is the system narrating, and this is a button. */}
-        <CollapsibleTrigger className="group inline-flex shrink-0 items-center gap-1 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground">
+        <CollapsibleTrigger className="group inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors hover:bg-foreground/[0.06] hover:text-foreground">
           Details
           <ChevronDown className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180 motion-reduce:transition-none" />
         </CollapsibleTrigger>
       </div>
       <CollapsibleContent>
-        <p className="border-t border-border/60 px-3 py-2 text-xs text-muted-foreground">
+        <p className="border-t border-border px-3 py-2.5 text-meta text-muted-foreground">
           {copy.summary}
         </p>
       </CollapsibleContent>

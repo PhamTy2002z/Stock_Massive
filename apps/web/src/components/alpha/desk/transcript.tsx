@@ -81,14 +81,18 @@ export function Transcript({
       {entries.length === 0 ? (
         <FirstRun />
       ) : (
-        <div className="mx-auto w-full max-w-3xl space-y-4 p-4">
+        <div className="mx-auto w-full max-w-[760px] space-y-7 px-4 py-5">
           {entries.map((entry) => {
             if (entry.kind === "user") {
               return (
                 <div key={entry.key} className="flex justify-end">
+                  {/* The question is the one thing in a bubble, and it is the
+                      bubble surface rather than the muted one: on a near-black
+                      ground `bg-muted` sits a single percent off the page and
+                      the bubble stops reading as a bubble. */}
                   <p
                     className={cn(
-                      "max-w-[85%] whitespace-pre-wrap rounded-lg bg-muted px-3 py-2 text-sm",
+                      "max-w-[82%] animate-vg-message-in whitespace-pre-wrap rounded-2xl bg-surface-bubble px-[1.05em] py-[0.7em] text-[0.95rem] leading-[1.5] text-foreground",
                       entry.pending && "opacity-70",
                     )}
                   >

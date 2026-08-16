@@ -36,7 +36,7 @@ export function TurnStatus({
       <p
         role="status"
         className={cn(
-          "flex items-center gap-2 text-xs text-muted-foreground",
+          "flex items-center gap-2 text-meta text-muted-foreground",
           className,
         )}
       >
@@ -54,7 +54,7 @@ export function TurnStatus({
   return (
     <div
       className={cn(
-        "flex flex-wrap items-center gap-2 rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs",
+        "flex flex-wrap items-center gap-2 rounded-card border border-border bg-surface-raised px-3.5 py-2.5 text-meta",
         className,
       )}
     >
@@ -68,7 +68,7 @@ export function TurnStatus({
       <button
         type="button"
         onClick={onRetry}
-        className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border/60 bg-background px-2 py-1 hover:bg-muted"
+        className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-ink-3 transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
       >
         <RotateCw className="h-3 w-3" />
         Retry

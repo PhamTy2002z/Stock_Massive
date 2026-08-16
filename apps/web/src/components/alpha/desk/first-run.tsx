@@ -20,16 +20,16 @@ export function FirstRun({ className }: { className?: string }) {
   return (
     <section
       aria-label="Alpha Desk"
-      className={cn("mx-auto w-full max-w-2xl space-y-4 py-10", className)}
+      className={cn("mx-auto w-full max-w-[760px] space-y-5 px-4 py-14", className)}
     >
-      <h2 className="text-lg font-semibold tracking-tight">{FIRST_RUN.question}</h2>
+      <h2 className="text-[1.28rem] font-medium tracking-[-0.015em] text-foreground">{FIRST_RUN.question}</h2>
 
-      <div className="space-y-3 rounded-lg border border-dashed border-border/60 p-4 text-sm text-muted-foreground">
+      <div className="space-y-3 rounded-card border border-border bg-card p-4 text-control text-muted-foreground">
         <p>{FIRST_RUN.universeRule}</p>
         <p>{FIRST_RUN.scopeBoundary}</p>
       </div>
 
-      <p className="text-xs text-muted-foreground">{FIRST_RUN.hint}</p>
+      <p className="text-meta text-muted-foreground">{FIRST_RUN.hint}</p>
     </section>
   )
 }
