@@ -78,11 +78,26 @@ export function writeDeskSession(session: DeskSession): void {
  * The remembered Turn travels with the remembered Thread and never without it:
  * a Turn shown under a Thread it does not belong to would render a draft that
  * the transcript then refuses to reconcile.
+ *
+ * `?thread=` is the third entry point and the most specific of them: it is the
+ * sidebar menu's *Open in new tab*, and it names the conversation to open. It
+ * outranks `?symbol=` — a link that says which Thread to show is not asking for
+ * a new one — and it carries no Turn, because this tab has never subscribed to
+ * one and the transport publishes no way to ask which of a Thread's Turns is
+ * still running.
  */
 export function openingState(
   deepLinkedSymbol: string | null,
   session: DeskSession,
+  deepLinkedThreadId: string | null = null,
 ): { threadId: string | null; turnId: string | null; activeSymbol: string | null } {
+  if (deepLinkedThreadId !== null) {
+    return {
+      threadId: deepLinkedThreadId,
+      turnId: null,
+      activeSymbol: session.activeSymbol,
+    }
+  }
   if (deepLinkedSymbol !== null) {
     return { threadId: null, turnId: null, activeSymbol: deepLinkedSymbol }
   }
@@ -97,6 +112,21 @@ export function openingState(
 export function deepLinkedSymbol(raw: string | null): string | null {
   const trimmed = (raw ?? "").trim().toUpperCase()
   return /^[A-Z0-9]{3,10}$/.test(trimmed) ? trimmed : null
+}
+
+/**
+ * A `?thread=` value, or null.
+ *
+ * Checked against the shape a Thread id actually has, so a hand-edited URL
+ * becomes "no deep link" rather than a request for `/threads/../admin`. The
+ * backend refuses a Thread that is not the caller's anyway; this is what keeps
+ * the malformed case from ever being asked.
+ */
+export function deepLinkedThread(raw: string | null): string | null {
+  const trimmed = (raw ?? "").trim().toLowerCase()
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(trimmed)
+    ? trimmed
+    : null
 }
 
 function storage(): Storage | null {

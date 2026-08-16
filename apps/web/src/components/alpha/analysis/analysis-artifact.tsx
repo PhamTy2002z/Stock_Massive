@@ -13,7 +13,6 @@ import { AxisPanel } from "./axis-panel"
 import { Briefing } from "./briefing"
 import { AXIS_LABEL, CHROME } from "./copy"
 import { PriceZoneBand } from "./price-zone-band"
-import { ArtifactRiskNotice } from "./risk-notice"
 import { VerdictHeader } from "./verdict-header"
 
 /**
@@ -142,8 +141,6 @@ function InlineBody({ artifact }: { artifact: Artifact }) {
           {CHROME.deepDive}
         </Link>
       </p>
-
-      <ArtifactRiskNotice />
     </div>
   )
 }

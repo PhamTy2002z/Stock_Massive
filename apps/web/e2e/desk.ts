@@ -13,13 +13,17 @@ import { expect, type APIRequestContext, type Page } from "@playwright/test"
 export const API_ORIGIN = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8010}`
 
 /**
- * The canonical assistant message's accessible name for its Risk Notice.
+ * The one control only a *canonical* assistant message carries.
  *
- * The one thing on screen that only a *canonical* message carries: the backend
- * attaches the notice in the terminal transaction, so seeing it is how the test
- * knows the draft was replaced rather than added to.
+ * A flag names a message id, and the draft above it does not have one yet, so
+ * the flag control is mounted on the persisted message and nowhere else. Seeing
+ * it is how the test knows the draft was replaced rather than added to.
+ *
+ * It replaced the Risk Notice in this role when the notice was taken off the
+ * surface: the notice is still attached in the terminal transaction, it is just
+ * no longer something on screen to assert against.
  */
-export const RISK_NOTICE = { role: "note" as const, name: "Risk notice" }
+export const CANONICAL_MARK = { role: "button" as const, name: "Báo lỗi câu trả lời" }
 
 export function newEmail(): string {
   return `e2e-${Date.now()}-${Math.floor(Math.random() * 1e6)}@example.com`

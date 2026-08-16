@@ -39,6 +39,19 @@ class CreateThreadRequest(BaseModel):
     title: str | None = Field(default=None, max_length=200)
 
 
+class UpdateThreadRequest(BaseModel):
+    """What the sidebar's per-Thread menu may change: its name and its pin.
+
+    Both fields are optional and the router reads ``model_fields_set`` rather
+    than the values, because an absent ``title`` and a ``null`` one are
+    different requests: one leaves the name alone, the other clears it so the
+    Thread falls back to its timestamped name.
+    """
+
+    title: str | None = Field(default=None, max_length=200)
+    pinned: bool | None = Field(default=None)
+
+
 class FlagMessageRequest(BaseModel):
     """One reason label, checked against the vocabulary the column declares.
 
@@ -91,6 +104,10 @@ class ThreadResponse(BaseModel):
     title: str | None
     # Every symbol this Thread has touched. A Thread is never owned by one.
     symbols: list[str]
+    # When the user pinned it, or null. The list arrives already ordered with
+    # the pinned group first; this is carried so the sidebar can *label* that
+    # group rather than have to sort it.
+    pinned_at: datetime | None
     created_at: datetime
     updated_at: datetime
 

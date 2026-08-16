@@ -4,10 +4,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import {
   createThread,
+  deleteThread,
   fetchThread,
   flagMessage,
   listThreads,
   unflagMessage,
+  updateThread,
 } from "@/lib/alpha-desk/api"
 import type {
   FlagReason,
@@ -71,6 +73,91 @@ export function useCreateThread() {
       } satisfies ThreadDetail)
       void queryClient.invalidateQueries({ queryKey: queryKeys.threads })
     },
+  })
+}
+
+/**
+ * Rename a Thread or pin it — the writes the sidebar's per-Thread menu makes.
+ *
+ * The answer is written straight into the cached list rather than refetched.
+ * The response *is* the row the list holds, and the ordering the backend
+ * applies is the thing that changed, so the list is re-sorted the same way it
+ * arrives sorted: pinned group first, then by last touched.
+ *
+ * The open Thread's own cache entry is patched too, because the top bar names
+ * it from there and a rename that left the header stale would look like it
+ * failed.
+ */
+export function useUpdateThread() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      threadId,
+      ...patch
+    }: {
+      threadId: string
+      title?: string | null
+      pinned?: boolean
+    }) => updateThread(threadId, patch),
+    onSuccess: (updated) => {
+      queryClient.setQueryData<{ threads: Thread[] }>(queryKeys.threads, (cached) =>
+        cached === undefined
+          ? cached
+          : {
+              threads: sortThreads(
+                cached.threads.map((row) => (row.id === updated.id ? updated : row)),
+              ),
+            },
+      )
+      queryClient.setQueryData<ThreadDetail>(queryKeys.thread(updated.id), (thread) =>
+        thread === undefined ? thread : { ...thread, ...updated },
+      )
+    },
+  })
+}
+
+/**
+ * Delete a Thread and its transcript.
+ *
+ * Not optimistic, and not reversible: the row is dropped from the list once the
+ * backend has actually dropped it, because a Thread that vanished and came back
+ * on a failed request would read as data loss rather than as an error.
+ *
+ * The Thread's own cache entry is removed rather than left behind — a stale
+ * transcript under a deleted id is the thing a reopened tab would render.
+ */
+export function useDeleteThread() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (threadId: string) => deleteThread(threadId),
+    onSuccess: (_answer, threadId) => {
+      queryClient.setQueryData<{ threads: Thread[] }>(queryKeys.threads, (cached) =>
+        cached === undefined
+          ? cached
+          : { threads: cached.threads.filter((row) => row.id !== threadId) },
+      )
+      queryClient.removeQueries({ queryKey: queryKeys.thread(threadId) })
+    },
+  })
+}
+
+/**
+ * The order the API answers in, applied to a list this client just changed.
+ *
+ * A copy of the backend's ordering, and the only one: it exists so that pinning
+ * moves a row *now* rather than on the next fetch. Everywhere else the list is
+ * rendered in the order it arrived.
+ */
+function sortThreads(threads: Thread[]): Thread[] {
+  return [...threads].sort((left, right) => {
+    if (left.pinned_at !== right.pinned_at) {
+      if (left.pinned_at === null) return 1
+      if (right.pinned_at === null) return -1
+      return right.pinned_at.localeCompare(left.pinned_at)
+    }
+    return right.updated_at.localeCompare(left.updated_at)
   })
 }
 

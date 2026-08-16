@@ -12,9 +12,10 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from types import EllipsisType
 from typing import Any, TypeVar
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -104,6 +105,7 @@ class ThreadRecord:
     user_id: int
     title: str | None
     symbols: tuple[str, ...]
+    pinned_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
@@ -228,6 +230,7 @@ def _thread_record(row: AgentThread) -> ThreadRecord:
         user_id=row.user_id,
         title=row.title,
         symbols=tuple(row.symbols or ()),
+        pinned_at=row.pinned_at,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -331,6 +334,11 @@ class AgentPersistence:
                 select(AgentThread)
                 .where(AgentThread.user_id == user_id)
                 .order_by(
+                    # Pinned first, and inside that group in the order they were
+                    # pinned. Ordering happens here rather than in the sidebar
+                    # because every reader of this list wants the same order,
+                    # and a client that sorted it could disagree with the next.
+                    AgentThread.pinned_at.desc().nullslast(),
                     AgentThread.updated_at.desc(),
                     AgentThread.created_at.desc(),
                     AgentThread.id.desc(),
@@ -468,6 +476,67 @@ class AgentPersistence:
     ) -> dict[str, int]:
         with self._session_factory() as session:
             return flag_counts_between(session, since=since, until=until)
+
+    async def update_thread(
+        self,
+        user_id: int,
+        thread_id: uuid.UUID | str,
+        *,
+        title: str | None | EllipsisType = ...,
+        pinned: bool | EllipsisType = ...,
+    ) -> ThreadRecord | None:
+        """Rename a Thread, pin it, or both. ``None`` if it is not this user's.
+
+        ``...`` means *not asked for* and ``None`` means *clear it*, because
+        those are two different requests: a rename to nothing puts the Thread
+        back under its timestamped name, while a pin that carried no title must
+        not erase one.
+
+        **``updated_at`` is preserved.** The column carries when the
+        conversation was last worked in, and it is what the list is ordered by;
+        letting the column's ``onupdate`` fire here would send a Thread to the
+        top of the sidebar because somebody corrected its spelling. Naming the
+        column in ``SET`` as its own value is what suppresses that default —
+        which is also why this is a Core ``UPDATE`` and not an ORM attribute
+        assignment: the unit of work re-applies ``onupdate`` for a column it
+        thinks nothing wrote.
+        """
+        return await asyncio.to_thread(
+            self._update_thread, user_id, _uuid(thread_id), title, pinned
+        )
+
+    def _update_thread(
+        self,
+        user_id: int,
+        thread_id: uuid.UUID,
+        title: str | None | EllipsisType,
+        pinned: bool | EllipsisType,
+    ) -> ThreadRecord | None:
+        with self._session_factory() as session:
+            # Named as itself, so the column's `onupdate` does not fire.
+            values: dict[str, Any] = {"updated_at": AgentThread.updated_at}
+            if not isinstance(title, EllipsisType):
+                cleaned = title.strip() if title is not None else None
+                values["title"] = cleaned[:255] if cleaned else None
+            if not isinstance(pinned, EllipsisType):
+                # Re-pinning an already pinned Thread keeps its original stamp,
+                # so pressing Pin twice does not reorder the pinned group.
+                values["pinned_at"] = (
+                    func.coalesce(AgentThread.pinned_at, func.now())
+                    if pinned
+                    else None
+                )
+
+            owned = (
+                AgentThread.id == thread_id,
+                AgentThread.user_id == user_id,
+            )
+            result = session.execute(update(AgentThread).where(*owned).values(**values))
+            if not result.rowcount:
+                return None
+            session.commit()
+            row = session.execute(select(AgentThread).where(*owned)).scalar_one()
+            return _thread_record(row)
 
     async def delete_thread(self, user_id: int, thread_id: uuid.UUID | str) -> bool:
         return await asyncio.to_thread(

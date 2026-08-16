@@ -174,6 +174,14 @@ export interface Thread {
   title: string | null
   /** Every symbol the Thread has touched. It is never owned by one. */
   symbols: string[]
+  /**
+   * When the user pinned it, or null.
+   *
+   * The list arrives already ordered with the pinned group first, so this is
+   * read to *label* that group and to say which way the menu's Pin toggles —
+   * never to re-sort what the backend already sorted.
+   */
+  pinned_at: string | null
   created_at: string
   updated_at: string
 }

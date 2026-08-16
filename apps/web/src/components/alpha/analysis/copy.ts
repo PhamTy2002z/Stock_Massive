@@ -80,7 +80,6 @@ export const CHROME = {
   fieldIds: "Registered field ids",
   windowHealth: "Window health",
   limitLocked: "limit-locked",
-  riskNotice: "Risk notice",
   audit: "Audit",
   asOf: "as of",
   sessions: "sessions",

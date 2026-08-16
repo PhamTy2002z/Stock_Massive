@@ -16,7 +16,6 @@ import { buildArtifact, type AnalysisPayload } from "@/lib/alpha-desk/analysis"
 import type { AnalysisDetail } from "@/lib/alpha"
 import { AnalysisArtifact } from "./analysis-artifact"
 import { Briefing } from "./briefing"
-import { RISK_NOTICE_TEXT } from "./risk-notice"
 
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => mobile.value }))
 
@@ -224,11 +223,10 @@ describe("the inline treatment", () => {
     )
   })
 
-  it("carries the Risk Notice without being asked", () => {
+  it("draws no Risk Notice", () => {
     render(<AnalysisArtifact artifact={artifact()} />)
 
-    const notice = screen.getByRole("note", { name: "Risk notice" })
-    expect(notice).toHaveTextContent(RISK_NOTICE_TEXT)
+    expect(screen.queryByRole("note", { name: "Risk notice" })).not.toBeInTheDocument()
   })
 
   it("deep-links to the screen that owns every other chart", () => {
@@ -343,12 +341,10 @@ describe("the expanded treatment", () => {
     expect(screen.getByText(/20 \/ 20 sessions/)).toBeInTheDocument()
   })
 
-  it("carries the Risk Notice here too", () => {
+  it("draws no Risk Notice here either", () => {
     render(<Briefing artifact={artifact()} />)
 
-    expect(screen.getByRole("note", { name: "Risk notice" })).toHaveTextContent(
-      RISK_NOTICE_TEXT,
-    )
+    expect(screen.queryByRole("note", { name: "Risk notice" })).not.toBeInTheDocument()
   })
 
   it("keeps the honesty states visible here too", () => {
