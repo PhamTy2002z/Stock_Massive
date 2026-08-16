@@ -302,3 +302,63 @@
     opacity: 0.7;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   The Alpha Desk Widget registry palette (ADR-0012).
+
+   Defined here and nowhere else, and deliberately *not* inherited from the
+   chart layer above. Two defects were measured in the existing charts and a
+   shared layer would have carried both into every Widget: eight charts paint
+   their series pure white, and `--stock-up` / `--stock-down` are referenced in
+   three components without ever being defined. The registry therefore declares
+   its own up/down pair rather than borrowing one.
+
+   Three rules hold for every value below.
+
+   No series is pure white. A white line disappears on a light card, and the
+   fact that the app no longer forces the light theme does not make painting
+   one correct — it makes the failure intermittent, which is worse.
+
+   The series colour is neither the brand emerald nor a market red or green. A
+   neutral figure drawn in the up colour reads as a rising number, and a bar
+   drawn in the brand emerald reads as a control.
+
+   Colour never carries meaning alone. These tokens are the visual half; every
+   Widget also states the same thing in its textual summary and in its data
+   table, so a reader who cannot separate the hues loses nothing. --------- */
+@layer base {
+  :root {
+    --widget-surface: 0 0% 100%;
+    --widget-ink: 0 0% 9%;
+    --widget-ink-muted: 0 0% 38%;
+    /* The one categorical series colour: a blue that is not the emerald and
+       not the market pair, at 6.1:1 on the card. */
+    --widget-series: 217 72% 40%;
+    --widget-series-muted: 217 38% 80%;
+    --widget-up: 140 85% 24%;
+    --widget-down: 355 73% 40%;
+    --widget-neutral: 0 0% 42%;
+    --widget-track: 0 0% 90%;
+    --widget-grid: 0 0% 88%;
+    --widget-axis: 0 0% 38%;
+    /* The row or point the answer is actually about. */
+    --widget-focus: 153 60% 30%;
+  }
+
+  .dark {
+    --widget-surface: 0 0% 13%;
+    /* Off pure white on purpose: 94% carries the same legibility and keeps the
+       "no series is #ffffff" rule true of the ink as well as of the marks. */
+    --widget-ink: 0 0% 94%;
+    --widget-ink-muted: 0 0% 66%;
+    --widget-series: 213 84% 72%;
+    --widget-series-muted: 213 26% 40%;
+    --widget-up: 140 62% 52%;
+    --widget-down: 3 90% 66%;
+    --widget-neutral: 0 0% 62%;
+    --widget-track: 0 0% 24%;
+    --widget-grid: 0 0% 22%;
+    --widget-axis: 0 0% 66%;
+    --widget-focus: 153 60% 58%;
+  }
+}

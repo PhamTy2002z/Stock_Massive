@@ -20,7 +20,15 @@ that it passed any validator.
 
 The prompt's sections are fixed: mission and non-goals; non-overridable scope,
 privacy, provenance, and safety invariants; the **Recommendation Gate**; tool-use
-policy; output protocol; voice and interaction style; trusted runtime context.
+policy; output protocol; voice and interaction style; **visual evidence**; trusted
+runtime context.
+
+A section is added only by amending that list, in the same commit as the prose and
+the `prompt_version` bump. That is how *visual evidence* arrived at 1.2.0: ADR-0012
+puts the Widget selection in the output contract rather than in a thirteenth tool,
+precisely so `tool_catalog_version` does not move, and a selection the model is
+expected to write has to be described somewhere it can read. Trusted runtime context
+stays last whatever is added, because everything above it is the cacheable prefix.
 
 When instructions conflict, precedence is: (1) security, privacy, scope, and evidence
 invariants; (2) correctness, freshness, and data limitations; (3) the Recommendation

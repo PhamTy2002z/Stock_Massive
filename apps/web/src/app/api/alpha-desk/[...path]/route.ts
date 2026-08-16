@@ -23,7 +23,10 @@ import { currentAccessToken, rotateAccessToken } from "@/lib/auth/bearer"
  */
 
 // The resources this proxy will carry, matched on the first path segment.
-const FORWARDED_RESOURCES = new Set(["watchlist", "analyses"])
+// `widgets` reads back the fixed slice a stored Widget descriptor names;
+// upstream serves one only when it hangs off a message the caller owns, so
+// adding it here widens the proxy without widening what anyone can reach.
+const FORWARDED_RESOURCES = new Set(["watchlist", "analyses", "widgets"])
 
 const upstreamBase = () =>
   process.env.INTERNAL_API_URL ||
