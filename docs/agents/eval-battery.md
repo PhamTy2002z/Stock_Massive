@@ -114,8 +114,8 @@ being designed out is not a crash — it is a green run: an old fixture passed
 through a new Signal Registry produces flattering scores at precisely the moment
 the registry changed.
 
-When `fixture_version` changes, the previous baseline is void (ADR-0016). That
-rule is enforced by process, not by this code; the report ticket owns it.
+When `fixture_version` changes, the previous baseline is void (ADR-0016). The
+run is marked `baseline_reset` — see [The baseline](#the-baseline).
 
 ## Running the battery
 
@@ -136,16 +136,44 @@ no score: a battery that truncates itself and publishes a total is a battery
 that lies. A case interrupted mid-way is dropped whole rather than scored on one
 run of three.
 
-Each case runs **three times** and all three outcomes are kept. What the
-thresholds are — 3/3 for the safety categories, a rate for the quality ones, and
-the hard fail on a backwards sign — belongs with those categories.
+Each case runs **three times** and all three outcomes are kept. The thresholds
+live in `src/eval/baseline.py`: **A, C and F at 3/3**, **B ≥ 90%**, **D and E ≥
+85%**, and the hard fail on a backwards sign overrides every rate.
+
+### The two surfaces
+
+One run covers both. Turn cases go through the deployed `AgentLoop`; Analysis
+cases run the **nightly pipeline** over the same fixture — the same lifecycle,
+the same envelope, the same single strict structured-output call and the same
+semantic validation — inside the same `eval_run` and the same ceiling. Roughly
+ten Analysis cases, scored by D and E, and the report keeps the lanes apart in
+its totals and in its case sections.
+
+Two things about `src/eval/analysis_lane.py` are worth knowing before reading it:
+
+- **Its generations are charged to the `eval_run`, not to the Analysis Run.**
+  The redirect happens at the client boundary, and the production per-call
+  ceilings are asked *first*, on the spend the producer built — otherwise the
+  battery would admit an envelope the nightly pass refuses.
+- **The pair is cleared before each of the three runs.** Production is
+  idempotent per `(symbol, trading_day)` and the fixture carries the `analysis`
+  rows the real store held, so a lane that did not clear them would score one
+  generation three times and call it agreement.
+
+Three checks belong to that lane alone, and each re-decides something
+`validate_fragment` already enforced — an enforcement proved by the code that
+performs it is not proved: `citedFieldIds` is a subset of the **active Analysis
+Field Profile**, refused fields never support the verdict, and exactly one axis
+carries `lead`.
 
 ## What the machine decides, and what it must not
 
-The deterministic layer (`src/eval/scoring.py`) decides six things: block
-structure, Evidence Manifest validity, `citedFieldIds` re-resolved against the
-Turn's own traces, `answer_kind`, refusal presence, and a direction-word
-lexicon inside `descriptive` answers.
+The deterministic layer (`src/eval/scoring.py`) decides six things on the Turn
+lane: block structure, Evidence Manifest validity, `citedFieldIds` re-resolved
+against the Turn's own traces, `answer_kind`, refusal presence, and a
+direction-word lexicon inside `descriptive` answers. On the Analysis lane it
+decides the three checks above, what the case expected the pipeline to do with
+that seat, and the same direction lexicon over the artifact's prose.
 
 **There is no LLM judge, anywhere in the scoring path**, and there is a test
 that says so structurally rather than a promise in a docstring. An uncalibrated
@@ -157,10 +185,76 @@ here guesses at them.
 An individual case is an **Eval Case** and is never called a probe: **Capability
 Probe** already means the boot-time LLM route contract test.
 
+## The Eval Report
+
+Every run writes `docs/eval/<date>-<prompt_version>.md` and stamps the path onto
+`eval_run.report_path`. A **smoke** run's report carries the mode and a short run
+id in its filename instead, so it can never occupy the name a baseline is read
+from.
+
+The report carries the run id, the mode, the route and exact model, the four
+versions, per-category scores with the two lanes separable, the diff against
+baseline, the three rubric questions, and the **verbatim answers being judged**.
+That last one is not padding: it is one of ADR-0016's three defences against a
+rubber-stamped rubric, because the text a reviewer scored stays readable in the
+file.
+
+Two things the report does **not** decide. It shows deterministic passes only —
+the human rubric's scores enter the same thresholds in the pull request, not in
+`eval_run` — and it never marks a run "passed": that word belongs to the
+baseline query, which is arithmetic over the same totals.
+
+## The baseline
+
+The baseline is the **most recent passing gate run**, resolved from `eval_run` by
+query (`src/eval/baseline.py`). Smoke runs and unfinished runs are excluded in
+SQL; the per-category thresholds are applied in Python over the rows that come
+back, because expressing them over JSONB would be a second copy of the same
+rule in a dialect nothing tests.
+
+A run that recorded a **hard fail** — a registered field narrated backwards in
+sign or direction, at 1/3 — does not pass whatever its rates say, so it can
+never become a baseline. The case ids are stored in
+`eval_run.category_totals.hard_fails` and named at the top of the report.
+
+- **A drop of two case-equivalents or more in any category is surfaced even
+  while the category is above threshold**, and **must be explained in prose in
+  the pull request**. It does not block the merge. A case-equivalent is a whole
+  case's worth of passing — the rate change scaled by the number of cases — so
+  the rule survives a battery that grew.
+- **When `fixture_version` changes the previous baseline is void.** The run is
+  marked `baseline_reset`, its report shows no diff at all, and **that pull
+  request may not claim "no regression"**: comparing scores across two fixtures
+  compares two different exams.
+
+## The merge rule
+
+There is no `.github/workflows` here, so this is a process rule rather than a
+workflow file nobody runs.
+
+**A pull request that touches any of the following must carry an Eval Report in
+its body — run id, per-category scores, and the diff against baseline — and must
+not merge into `develop` without one:**
+
+- the System Prompt Contract (`src/agent/prompt.py`, `prompt_version`);
+- tool schemas or `tool_catalog_version` (`src/agent/tools/`);
+- the Signal Registry (`src/stocks/signals/`);
+- the Analysis Field Profile (`src/alpha/field_profile.py`);
+- `llm_model_*` — the route or either model;
+- the agent loop (`src/agent/loop.py`);
+- the Recommendation Validator.
+
+**A pull request touching only UI, the Collector or Widget rendering needs no
+gate run.**
+
+Only a **complete gate run** may be attached. A smoke run has no gating value,
+and a run that stopped at its ceiling has no score.
+
 ## What is not built yet
 
-- The ~56 cases themselves, across the six categories — issues #95, #96, #97.
-- The report's baseline diff, `baseline_reset`, and the merge rule — issue #98.
+- The Turn lane's cases across the safety and false-refusal categories —
+  issues #95 and #96. The Analysis lane's ten are seated
+  (`src/eval/analysis_cases.py`).
 
-Until cases are registered, `make eval` runs a battery of nothing and says so in
-its report rather than reporting a clean sheet.
+Until the rest are registered, those categories report `∅` in the report rather
+than a clean sheet, and a run missing a category cannot be a baseline.
