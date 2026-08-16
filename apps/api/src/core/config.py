@@ -263,6 +263,28 @@ class Settings(BaseSettings):
     llm_budget_emergency_usd: float = 5.0
     llm_budget_eval_usd: float = 5.0
 
+    # Eval Battery (src/eval/, docs/adr/0016). Không có giá trị mặc định nào ở
+    # đây trỏ vào database đang phục vụ: pin chạy battery phải là một hành động
+    # cố ý, và một mặc định rỗng từ chối thẳng còn hơn một mặc định tiện tay ghi
+    # đè lên store của dev.
+    #
+    # `eval_database_url` là database riêng mà Eval Fixture được nạp vào. Battery
+    # không đọc và không ghi vào `database_url`; nếu hai URL trỏ cùng một
+    # database thì `src/eval/store.py` từ chối chạy.
+    eval_database_url: str = ""
+    eval_fixture_dir: str = "eval/fixtures"
+    eval_report_dir: str = "docs/eval"
+
+    # Tuyến dev mà chế độ `smoke` chạy trên đó — CLIProxyAPI cục bộ hoặc một
+    # model dev — và nó không có giá trị gating vì không chạm tới model
+    # production. Giá bằng 0 là sự thật về tuyến này chứ không phải một cách lách
+    # trần: một lần chạy smoke không tiêu tiền, nên nó chứng minh harness còn
+    # sống mà không tiêu vào lane $5.
+    eval_smoke_base_url: str = ""
+    eval_smoke_api_key: str = ""
+    eval_smoke_model_batch: str = ""
+    eval_smoke_model_session: str = ""
+
     # Rate Limiting
     rate_limit_enabled: bool = True
     rate_limit_standard_max: int = 100  # requests per window
