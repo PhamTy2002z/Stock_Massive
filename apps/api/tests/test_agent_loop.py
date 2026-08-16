@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from datetime import date
 from types import MappingProxyType
 
@@ -718,3 +719,111 @@ async def test_a_news_result_that_found_nothing_is_not_grounded_evidence():
     assert (
         await loop(found, catalog(spec("search_news", some_news))).run(turn_request())
     ).answer_kind is AnswerKind.ANALYSIS
+
+
+# --- deadlines and the release path (#81, #82) ----------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_call_that_never_answers_ends_the_turn_with_its_own_reason():
+    class SilentClient(FakeClient):
+        async def complete(self, request, spend=None):
+            self.requests.append(request)
+            await asyncio.sleep(5)
+            return answer()
+
+    outcome = await loop(SilentClient(), call_timeout_seconds=0.01).run(turn_request())
+
+    assert outcome.status is TurnStatus.INCOMPLETE
+    assert outcome.terminal_reason == "llm_call_timeout"
+
+
+@pytest.mark.asyncio
+async def test_a_tool_that_never_answers_ends_the_turn_with_its_own_reason():
+    async def sleepy(_context: ToolContext, _arguments: dict) -> dict:
+        await asyncio.sleep(5)
+        return {"ok": True}
+
+    client = FakeClient([wants("sleepy"), answer()])
+    agent = loop(
+        client,
+        catalog(spec("sleepy", sleepy), spec("get_analysis", _ok)),
+        tool_timeout_seconds=0.01,
+    )
+
+    outcome = await agent.run(turn_request())
+
+    assert outcome.status is TurnStatus.INCOMPLETE
+    assert outcome.terminal_reason == "tool_timeout"
+    assert len(client.requests) == 1  # no further round after the timeout
+
+
+@pytest.mark.asyncio
+async def test_a_slow_tool_beside_a_healthy_one_keeps_the_healthy_result():
+    async def sleepy(_context: ToolContext, _arguments: dict) -> dict:
+        await asyncio.sleep(5)
+        return {"ok": True}
+
+    client = FakeClient(
+        [
+            Completion(
+                model=SESSION_MODEL,
+                tool_calls=(
+                    ToolCall(id="a", name="get_analysis", arguments={"symbol": "FPT"}, output_index=0),
+                    ToolCall(id="b", name="sleepy", arguments={"symbol": "FPT"}, output_index=1),
+                ),
+                usage=Usage(input_tokens=10, output_tokens=5),
+            ),
+            answer(),
+        ]
+    )
+    agent = loop(
+        client,
+        catalog(spec("get_analysis", _ok), spec("sleepy", sleepy)),
+        tool_timeout_seconds=0.01,
+    )
+
+    outcome = await agent.run(turn_request())
+
+    assert outcome.terminal_reason == "tool_timeout"
+    assert [call.name for call in outcome.tool_calls] == ["get_analysis"]
+
+
+@pytest.mark.asyncio
+async def test_the_activity_line_marks_each_round_without_naming_a_tool():
+    from src.agent.events import Activity, EventType, TurnPublisher
+
+    published = TurnPublisher(uuid.uuid4())
+    subscriber = published.subscribe()
+    client = FakeClient([wants("get_analysis"), answer("Kết luận.")])
+
+    await loop(client, publisher=published).run(turn_request())
+    published.terminal(EventType.COMPLETED, status="complete", terminal_reason=None)
+
+    seen = [event async for event in subscriber.events()]
+    activities = [event for event in seen if event.type is EventType.ACTIVITY]
+    assert [event.data["phase"] for event in activities] == [
+        Activity.ANALYZING.value,
+        Activity.READING_DATA.value,
+        Activity.ANALYZING.value,
+    ]
+    # The phase is all it says: no tool name, symbol, argument or result.
+    assert all(set(event.data) == {"phase"} for event in activities)
+
+
+@pytest.mark.asyncio
+async def test_a_news_round_reads_as_searching_rather_than_reading_data():
+    from src.agent.events import Activity, EventType, TurnPublisher
+
+    published = TurnPublisher(uuid.uuid4())
+    subscriber = published.subscribe()
+    client = FakeClient([wants("search_news"), answer("Kết luận.")])
+    agent = loop(client, catalog(spec("search_news", _ok)), publisher=published)
+
+    await agent.run(turn_request())
+    published.terminal(EventType.COMPLETED, status="complete", terminal_reason=None)
+
+    seen = [event async for event in subscriber.events()]
+    assert Activity.SEARCHING.value in [
+        event.data["phase"] for event in seen if event.type is EventType.ACTIVITY
+    ]

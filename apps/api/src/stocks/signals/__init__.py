@@ -190,6 +190,7 @@ from .registry import (
     VOLATILITY_REGIME_Z,
     fields_of_kind,
     registered_field,
+    registry_version,
     signal_fields,
 )
 from .risk import (
@@ -381,6 +382,7 @@ __all__ = [
     "REALIZED_VOLATILITY_MIN_SESSIONS",
     "realized_volatility_reading",
     "registered_field",
+    "registry_version",
     "REGISTRY",
     "RELATIVE_STRENGTH",
     "RELATIVE_STRENGTH_BENCHMARK",
