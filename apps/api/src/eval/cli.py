@@ -26,11 +26,13 @@ from pathlib import Path
 
 from src.core.config import get_settings
 
+from . import categories as _categories  # noqa: F401 - seats the battery
 from .capture import CAPTURE_HISTORY_SESSIONS, capture_fixture
 from .fixture import latest_seed_path, read_seed, seed_path, write_seed
 from .harness import EvalMode, build_harness
 from .report import write_report
 from .store import create_schema, eval_engine, eval_session_factory, load_fixture
+from .verdict import verdict
 
 logger = logging.getLogger("src.eval")
 
@@ -90,6 +92,17 @@ def run(args: argparse.Namespace) -> int:
     print(f"{result.mode.value} run {result.run_id} -> {path}")
     if not result.complete:
         print(f"stopped: {result.stopped_reason}", file=sys.stderr)
+        return 1
+
+    scored = verdict(result)
+    for item in scored.categories:
+        print(f"  {item.category.value}: {item.summary}")
+    if not scored.passed:
+        # Named rather than counted: a category total tells an operator that
+        # something regressed and nothing about what, and finding out by hand is
+        # the next thing they would do anyway.
+        for failure in scored.failures:
+            print(f"FAIL {failure}", file=sys.stderr)
         return 1
     if not result.mode.gating:
         print("non-gating: a smoke run may not be attached to a pull request")

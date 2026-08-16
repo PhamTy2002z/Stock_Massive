@@ -20,6 +20,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .harness import EvalRunResult
+from .verdict import verdict
 
 
 def report_filename(result: EvalRunResult) -> str:
@@ -77,16 +78,32 @@ def render_report(result: EvalRunResult) -> str:
     lines.append("")
 
     totals = result.category_totals
+    scored = verdict(result)
     lines.append("## Categories")
     lines.append("")
-    lines.append("| Category | Cases | Runs | Deterministic passes |")
-    lines.append("| --- | ---: | ---: | ---: |")
-    for category, bucket in totals["by_category"].items():
+    lines.append("| Category | Cases | Runs | Passes | Rule | Verdict |")
+    lines.append("| --- | ---: | ---: | ---: | --- | --- |")
+    for item in scored.categories:
+        rule = "3/3" if item.every_run else f"≥ {item.threshold:.0%}"
+        mark = "pass" if item.met else ("—" if not item.runs else "**FAIL**")
         lines.append(
-            f"| {category} | {bucket['cases']} | {bucket['runs']} | "
-            f"{bucket['passed']} |"
+            f"| {item.category.value} | {item.cases} | {item.runs} | "
+            f"{item.passed} | {rule} | {mark} |"
         )
     lines.append("")
+
+    # A category total is not actionable. What a reader does next is open the
+    # case that broke, so the case, the run and the property are here rather
+    # than only in the per-case section below.
+    if scored.failures:
+        lines.append("### What broke")
+        lines.append("")
+        for failure in scored.failures:
+            lines.append(f"- {failure}")
+        lines.append("")
+    elif scored.passed:
+        lines.append("Every category met its rule.")
+        lines.append("")
 
     lines.append("## Surfaces")
     lines.append("")
@@ -118,13 +135,14 @@ def render_report(result: EvalRunResult) -> str:
         if case.intent:
             lines.append(f"*{case.intent}*")
             lines.append("")
-        if case.prompt:
-            lines.append("> " + case.prompt.replace("\n", "\n> "))
+        asked = case_result.prompt or case.prompt
+        if asked:
+            lines.append("> " + asked.replace("\n", "\n> "))
             lines.append("")
         for run in case_result.runs:
-            verdict = "pass" if run.passed else "FAIL"
+            mark = "pass" if run.passed else "FAIL"
             lines.append(
-                f"**Run {run.run_index + 1} — {verdict}** "
+                f"**Run {run.run_index + 1} — {mark}** "
                 f"(`{run.status}`/`{run.terminal_reason or 'none'}`, "
                 f"`{run.answer_kind}`)"
             )
@@ -132,8 +150,8 @@ def render_report(result: EvalRunResult) -> str:
             for check in run.score.results:
                 if not check.applicable:
                     continue
-                mark = "✓" if check.passed else "✗"
-                lines.append(f"- {mark} `{check.check.value}` — {check.detail}")
+                tick = "✓" if check.passed else "✗"
+                lines.append(f"- {tick} `{check.check.value}` — {check.detail}")
             lines.append("")
             lines.append("<details><summary>Answer as shown</summary>")
             lines.append("")
