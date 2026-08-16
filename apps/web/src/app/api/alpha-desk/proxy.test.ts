@@ -24,6 +24,24 @@ function context(path: string[]) {
 }
 
 describe("the resource allowlist", () => {
+  it("carries the flag action, which is a write on a message the user owns", async () => {
+    // Not a 404: `messages` is on the allowlist for the flag of ADR-0016.
+    // Upstream still resolves the Thread's owner, so widening the proxy here
+    // widens nothing anybody can reach.
+    const response = await POST(
+      request(`${ORIGIN}/api/alpha-desk/messages/7/flag`, {
+        method: "POST",
+        headers: { origin: "https://evil.example" },
+        body: JSON.stringify({ reason: "wrong_figure" }),
+      }),
+      context(["messages", "7", "flag"]),
+    )
+
+    // Refused for the origin rather than for the resource, which is what shows
+    // the path itself got through the allowlist.
+    expect(response.status).toBe(403)
+  })
+
   it("refuses a path it was never meant to carry", async () => {
     // Without this, a signed-in user's token reaches every route they could
     // type — the operational ones behind the admin check included.

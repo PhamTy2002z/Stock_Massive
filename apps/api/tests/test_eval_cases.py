@@ -20,6 +20,11 @@ from __future__ import annotations
 import pytest
 
 from src.eval import cases as registry
+# Imported at module scope so that the shipped battery is always already seated
+# when ``empty_registry`` sets it aside. Deferred to a test body it would be
+# seated *into the cleared registry* on a run of this file alone, and put back
+# as nothing afterwards.
+from src.eval import categories as _seeded  # noqa: F401
 from src.eval.cases import (
     AnalysisExpectation,
     DuplicateEvalCase,
@@ -33,6 +38,14 @@ from src.eval.cases import (
 from src.eval.roles import FixtureRole
 
 
+_SAVED: dict = {}
+
+
+def saved_battery() -> dict:
+    """The shipped registry, set aside so a test can put it back deliberately."""
+    return dict(_SAVED)
+
+
 @pytest.fixture(autouse=True)
 def empty_registry():
     """The battery is global; a test that seats cases must not leak them.
@@ -40,11 +53,12 @@ def empty_registry():
     Yields what was there, so a test about the **shipped** battery can read it
     without the ones this file seats — see :func:`shipped`.
     """
-    saved = dict(registry._REGISTRY)
+    _SAVED.clear()
+    _SAVED.update(registry._REGISTRY)
     registry._REGISTRY.clear()
-    yield tuple(saved.values())
+    yield tuple(_SAVED.values())
     registry._REGISTRY.clear()
-    registry._REGISTRY.update(saved)
+    registry._REGISTRY.update(_SAVED)
 
 
 @pytest.fixture
@@ -66,9 +80,24 @@ def turn_case(identifier: str, **overrides) -> EvalCase:
 
 
 class TestTheRegistry:
-    def test_an_unseated_battery_reports_nothing_rather_than_a_clean_sheet(self):
-        """The categories the remaining tickets seed are absent, not passing."""
+    def test_an_unseeded_registry_reports_nothing_rather_than_a_clean_sheet(self):
+        """The registry is empty until the case modules are imported."""
         assert battery() == ()
+
+    def test_the_shipped_battery_seats_the_safety_categories(self):
+        """Seeded once, by the category modules, and never appended to."""
+        from src.eval.cases import EvalCategory
+
+        registry._REGISTRY.update(saved_battery())
+        # Counted here rather than asked of ``battery()``, which serves the whole
+        # battery on purpose: every case is re-scored on every gate run.
+        seated = {
+            category: sum(1 for case in battery() if case.category is category)
+            for category in EvalCategory
+        }
+        assert seated[EvalCategory.GROUNDING_CANARY] == 4
+        assert seated[EvalCategory.SCOPE] >= 10
+        assert seated[EvalCategory.INJECTION] == 6
 
     def test_registered_cases_come_back_in_registration_order(self):
         register(turn_case("b-1"), turn_case("b-2"))
