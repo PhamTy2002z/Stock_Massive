@@ -455,7 +455,7 @@ class TestSpendAdmission:
         """
         from src.core.llm.admission import (
             ANALYSIS_INPUT_PER_CALL,
-            _check_candidate_shape,
+            check_candidate_shape,
         )
 
         huge = replace(
@@ -465,7 +465,7 @@ class TestSpendAdmission:
 
         assert spend.input_tokens > ANALYSIS_INPUT_PER_CALL
         with pytest.raises(BudgetRefusal) as refused:
-            _check_candidate_shape(spend)
+            check_candidate_shape(spend)
         assert refused.value.reason == "analysis_input_per_call"
 
     @pytest.mark.asyncio

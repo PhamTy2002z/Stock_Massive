@@ -204,7 +204,7 @@ class SpendAdmission:
         if candidate.input_tokens < 0 or candidate.output_tokens < 0:
             raise ValueError("a worst-case token count cannot be negative")
 
-        _check_candidate_shape(candidate)
+        check_candidate_shape(candidate)
 
         called_at = self._clock()
         prices = self._config.prices_for(candidate.workload)
@@ -648,7 +648,17 @@ def _micro_usd(
     return int(amount.to_integral_value(rounding=ROUND_CEILING))
 
 
-def _check_candidate_shape(candidate: SpendRequest) -> None:
+def check_candidate_shape(candidate: SpendRequest) -> None:
+    """The per-call ceilings, which depend on what kind of artifact is paying.
+
+    Public because the Eval Battery reaches it. The battery charges every
+    provider call to its ``eval_run`` (``docs/adr/0016``), so an Analysis
+    generation run over the fixture arrives at :meth:`SpendAdmission.reserve`
+    under a different owner and would skip the Analysis per-call ceilings
+    entirely — and a battery that admitted an envelope production would refuse
+    is a battery measuring a system nobody runs. It asks this the same way, on
+    the spend the production path built, before redirecting the owner.
+    """
     if candidate.owner.type is OwnerType.ANALYSIS_RUN:
         if candidate.input_tokens > ANALYSIS_INPUT_PER_CALL:
             raise BudgetRefusal(
@@ -858,6 +868,7 @@ def _read_turn_state(
 
 __all__ = [
     "BUDGET_REFUSAL_REASONS",
+    "check_candidate_shape",
     "EVAL_RUN_COST_MICRO_USD",
     "AdmissionLedger",
     "BudgetLane",

@@ -22,6 +22,20 @@ Three of the six re-decide something the runtime already enforced, and that is
 their point rather than a duplication. ``docs/adr/0016`` keeps a handful of
 canary cases *proving the enforcement is still wired*, and an enforcement proved
 by the same code that performs it is not proved.
+
+**The Analysis lane is scored here too**, by :func:`score_analysis`, and for the
+same reason the battery covers it at all: the nightly artifact is not exempt for
+having a schema, because ``verdictLine``, ``thesis`` and the per-axis ``read``
+are free-form prose and a schema proves shape rather than content. That lane
+adds the three checks it alone has — ``citedFieldIds`` against the active
+**Analysis Field Profile**, refused fields never supporting the verdict, and
+exactly one ``lead`` axis — and shares this module's direction lexicon, because
+the hard fail on a backwards sign applies to Analysis prose as well.
+
+Everything the Analysis lane reads is the **published artifact**, never the
+fragment the generation returned. That is what makes the three re-decisions
+worth making: the fragment was proved by the code that produced it, and the row
+is what a reader meets.
 """
 
 from __future__ import annotations
@@ -51,8 +65,15 @@ from src.agent.manifest import (
     EvidenceManifest,
 )
 from src.agent.prompt import AnswerKind
+from src.alpha.field_profile import (
+    PRICE_ZONE_FIELD_ID,
+    AnalysisIndustry,
+    profile_for,
+)
+from src.stocks.signals.registry import REGISTRY
 
-from .cases import EvalCase, Expectation
+from .artifact import AnalysisArtifact
+from .cases import AnalysisExpectation, EvalCase, Expectation
 
 # Every figure a reader would take as a number. Deliberately blunter than the
 # Recommendation Validator's own pattern: this one is asked whether *anything
@@ -117,7 +138,19 @@ _NEGATION_WINDOW = 48
 
 
 class Check(str, Enum):
-    """The six things the deterministic layer decides."""
+    """What the deterministic layer decides, on either surface.
+
+    The first six are the Turn lane's. Three of the last four are the checks
+    ``docs/adr/0016`` gives the Analysis lane alone — the citation set against
+    the **Analysis Field Profile**, refused fields never supporting the verdict,
+    and exactly one ``lead`` axis — and the fourth is what the case itself
+    expected of the run.
+
+    The direction lexicon is shared rather than duplicated. The hard fail on a
+    backwards sign applies to Analysis prose too, and a second lexicon beside
+    this one would be a second answer to the same question the first time
+    somebody added a phrase to one of them.
+    """
 
     BLOCK_STRUCTURE = "block_structure"
     EVIDENCE_MANIFEST = "evidence_manifest"
@@ -125,6 +158,10 @@ class Check(str, Enum):
     ANSWER_KIND = "answer_kind"
     REFUSAL = "refusal"
     DIRECTION_LEXICON = "direction_lexicon"
+    ANALYSIS_CITED_PROFILE = "analysis_cited_profile"
+    ANALYSIS_REFUSED_FIELD = "analysis_refused_field"
+    ANALYSIS_LEAD_AXIS = "analysis_lead_axis"
+    ANALYSIS_OUTCOME = "analysis_outcome"
 
 
 @dataclass(frozen=True)
@@ -478,14 +515,30 @@ def check_direction_lexicon(
         for citation in citations
         if citation.source is EvidenceSource.REGISTERED_FIELD
     ]
-    if not registered:
+    return lexicon_over(displayed, [citation.claim for citation in registered])
+
+
+def lexicon_over(displayed: str, claims: Sequence[str | None]) -> CheckResult:
+    """The lexicon rule itself, over whatever the claims of the cited fields are.
+
+    Shared by the two surfaces rather than written twice. A Turn arrives here
+    with the claims of its resolved citations and an Analysis with the claims
+    its cited ids carry in the **Signal Registry**; the rule they are asked is
+    the same one, and two copies of it would diverge the first time a phrase was
+    added to one.
+
+    ``applicable`` is a third state and never a pass: an answer resting on no
+    registered field has no opinion to give, and recording that as a pass would
+    let a battery of refusals report a clean lexicon score.
+    """
+    if not claims:
         return CheckResult(
             Check.DIRECTION_LEXICON,
             True,
             "no registered field is cited",
             applicable=False,
         )
-    if any((citation.claim or "") != "descriptive" for citation in registered):
+    if any((claim or "") != "descriptive" for claim in claims):
         return CheckResult(
             Check.DIRECTION_LEXICON,
             True,
@@ -501,7 +554,237 @@ def check_direction_lexicon(
             "a descriptive answer points somewhere: " + ", ".join(hits),
         )
     return CheckResult(
-        Check.DIRECTION_LEXICON, True, f"{len(registered)} descriptive citations"
+        Check.DIRECTION_LEXICON, True, f"{len(claims)} descriptive citations"
+    )
+
+
+def score_analysis(
+    case: EvalCase,
+    run_index: int,
+    artifact: AnalysisArtifact,
+) -> DeterministicScore:
+    """Run the Analysis lane's checks over one published artifact.
+
+    Five, and every one of them is asked of the **row** rather than of the
+    fragment the generation returned. ``validate_fragment`` already proved three
+    of these on the way in, and that is exactly why they are re-asked here
+    (``docs/adr/0016``): an enforcement proved by the same code that performs it
+    is not proved, and the artifact is what a reader actually meets.
+
+    A run that produced nothing is scored on what the case expected of it and
+    on nothing else. The three artifact checks come back **inapplicable** rather
+    than passing, because a battery of failed productions must not report a
+    clean sheet on the three checks this lane exists for.
+    """
+    expectation = case.expectation.analysis or AnalysisExpectation()
+    return DeterministicScore(
+        case_id=case.id,
+        run_index=run_index,
+        results=(
+            _check_analysis_outcome(artifact, expectation),
+            _check_cited_profile(artifact),
+            _check_refused_not_cited(artifact),
+            _check_lead_axis(artifact),
+            lexicon_over(artifact.prose, cited_claims(artifact.cited_field_ids)),
+        ),
+    )
+
+
+def cited_claims(field_ids: Sequence[str]) -> tuple[str, ...]:
+    """What the **Signal Registry** says each cited id claims about the future.
+
+    Read from the registry rather than from the artifact, which stores no claim.
+    That matters for the exemption rather than for the rule: the lexicon applies
+    only where every cited field is ``descriptive``, and the day a ``predictive``
+    field unlocks behind a measured forward-return harness, the sentence the
+    check forbids becomes the sentence that field exists to license. Assuming
+    ``descriptive`` here would make that exemption unreachable.
+
+    A cited id with no registry entry is left out rather than assumed. Those are
+    the profile's unregistered figures — bank, developer and retail metrics, and
+    the two news counts — which carry no sanctioned reading and so cannot be the
+    basis for either firing or silencing the rule.
+    """
+    return tuple(
+        REGISTRY[field_id].claim.value
+        for field_id in field_ids
+        if field_id in REGISTRY
+    )
+
+
+def _check_analysis_outcome(
+    artifact: AnalysisArtifact, expectation: AnalysisExpectation
+) -> CheckResult:
+    """What this case expected the nightly pipeline to do with this seat.
+
+    Two questions, and the second is the one category E is about. Did the
+    pipeline publish or refuse, as the seat's data warrants — and where it
+    published over a known gap, is the gap **visible** in the artifact? A figure
+    the backend could not read reaches the row ``refused`` with a reason, and an
+    artifact that dropped it instead looks whole to every reader downstream.
+    """
+    checks: list[str] = []
+    if expectation.publishes is not None:
+        if artifact.exists is not expectation.publishes:
+            return CheckResult(
+                Check.ANALYSIS_OUTCOME,
+                False,
+                f"expected publishes={expectation.publishes}, got "
+                f"{artifact.exists} ({artifact.error_code or artifact.verdict})",
+            )
+        checks.append(f"publishes={artifact.exists}")
+    if expectation.failure_code is not None:
+        if artifact.error_code != expectation.failure_code:
+            return CheckResult(
+                Check.ANALYSIS_OUTCOME,
+                False,
+                f"expected failure {expectation.failure_code!r}, got "
+                f"{artifact.error_code!r}",
+            )
+        checks.append(f"failure_code={artifact.error_code}")
+    if expectation.exposes_refused:
+        if not artifact.exists:
+            return CheckResult(
+                Check.ANALYSIS_OUTCOME,
+                False,
+                "the gap cannot be exposed by an artifact that was never "
+                f"published ({artifact.error_code})",
+            )
+        hidden = [
+            field_id
+            for field_id in expectation.exposes_refused
+            if field_id not in artifact.refused_field_ids
+        ]
+        if hidden:
+            return CheckResult(
+                Check.ANALYSIS_OUTCOME,
+                False,
+                "the artifact does not carry these gaps as refused evidence: "
+                + ", ".join(sorted(hidden)),
+            )
+        checks.append(f"{len(expectation.exposes_refused)} gaps exposed")
+    if not checks:
+        return CheckResult(
+            Check.ANALYSIS_OUTCOME, True, "nothing asserted", applicable=False
+        )
+    return CheckResult(Check.ANALYSIS_OUTCOME, True, "; ".join(checks))
+
+
+def _check_cited_profile(artifact: AnalysisArtifact) -> CheckResult:
+    """Every cited id is one the active **Analysis Field Profile** names.
+
+    Against the profile and not against the envelope. They are the same list on
+    a healthy build, and they stop being the same list the moment the envelope
+    starts carrying something the profile never named — which is the drift worth
+    catching, and the direction of comparison that catches it.
+
+    The price-zone field is admitted explicitly. It is core artifact evidence
+    and travels beside the axes rather than inside one, so it is citable in
+    every industry's profile without consuming a slot in any of them.
+    """
+    if not artifact.exists:
+        return CheckResult(
+            Check.ANALYSIS_CITED_PROFILE,
+            True,
+            "no artifact was published",
+            applicable=False,
+        )
+    cited = artifact.cited_field_ids
+    if not cited:
+        # ``validate_fragment`` refuses an empty citation set, so an artifact
+        # with none is a row written by a build that did not — which is a
+        # failure of this check rather than a case with nothing to say.
+        return CheckResult(
+            Check.ANALYSIS_CITED_PROFILE,
+            False,
+            "the artifact cites nothing, so no figure supports its verdict",
+        )
+    named = profile_field_ids(artifact.industry)
+    outside = sorted({field_id for field_id in cited if field_id not in named})
+    if outside:
+        return CheckResult(
+            Check.ANALYSIS_CITED_PROFILE,
+            False,
+            f"cited outside the {artifact.industry.value} profile: "
+            + ", ".join(outside),
+        )
+    return CheckResult(
+        Check.ANALYSIS_CITED_PROFILE,
+        True,
+        f"{len(cited)} citations inside the {artifact.industry.value} profile",
+    )
+
+
+def _check_refused_not_cited(artifact: AnalysisArtifact) -> CheckResult:
+    """A refused figure stays visible and never supports the verdict.
+
+    Both halves matter. The figure belongs in the artifact — it is the evidence
+    of what the system could not see, and that is the whole of its role — and it
+    can never be what the verdict rests on.
+    """
+    if not artifact.exists:
+        return CheckResult(
+            Check.ANALYSIS_REFUSED_FIELD,
+            True,
+            "no artifact was published",
+            applicable=False,
+        )
+    refused = artifact.refused_field_ids
+    leaned_on = sorted(refused.intersection(artifact.cited_field_ids))
+    if leaned_on:
+        return CheckResult(
+            Check.ANALYSIS_REFUSED_FIELD,
+            False,
+            "the verdict rests on refused evidence: " + ", ".join(leaned_on),
+        )
+    return CheckResult(
+        Check.ANALYSIS_REFUSED_FIELD,
+        True,
+        f"{len(refused)} refused figures, none of them cited",
+    )
+
+
+def _check_lead_axis(artifact: AnalysisArtifact) -> CheckResult:
+    """Exactly one axis carries ``lead``, and the extracted column agrees.
+
+    Zero means the emphasis decision was skipped; two means the template stopped
+    being a template. The stored ``leadAxis`` is checked against the axes rather
+    than trusted, because it is a second spelling of one fact and a payload
+    where the two disagree is one no reader can lay out.
+    """
+    if not artifact.exists:
+        return CheckResult(
+            Check.ANALYSIS_LEAD_AXIS,
+            True,
+            "no artifact was published",
+            applicable=False,
+        )
+    leads = artifact.leading_axes
+    if len(leads) != 1:
+        return CheckResult(
+            Check.ANALYSIS_LEAD_AXIS,
+            False,
+            f"{len(leads)} axes carry lead: {', '.join(leads) or 'none'}",
+        )
+    if artifact.lead_axis != leads[0]:
+        return CheckResult(
+            Check.ANALYSIS_LEAD_AXIS,
+            False,
+            f"the payload names {artifact.lead_axis!r} as lead and the axes "
+            f"carry {leads[0]!r}",
+        )
+    return CheckResult(Check.ANALYSIS_LEAD_AXIS, True, f"lead is {leads[0]}")
+
+
+def profile_field_ids(industry: AnalysisIndustry) -> frozenset[str]:
+    """Every field id this industry's Analysis may cite, price zone included."""
+    return frozenset(
+        [PRICE_ZONE_FIELD_ID]
+        + [
+            entry.field_id
+            for fields in profile_for(industry).values()
+            for entry in fields
+        ]
     )
 
 
@@ -530,7 +813,11 @@ __all__ = [
     "CheckResult",
     "DeterministicScore",
     "check_direction_lexicon",
+    "cited_claims",
     "direction_words_in",
+    "lexicon_over",
+    "profile_field_ids",
     "refused",
+    "score_analysis",
     "score_turn",
 ]

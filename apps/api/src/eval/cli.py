@@ -93,6 +93,23 @@ def run(args: argparse.Namespace) -> int:
         return 1
     if not result.mode.gating:
         print("non-gating: a smoke run may not be attached to a pull request")
+        return 0
+
+    # Printed as well as written. The two things a pull request owes prose about
+    # are exactly the two a reader skims past in a long Markdown file, and the
+    # person who has to write that prose is standing at this terminal.
+    comparison = result.baseline
+    if comparison is not None and comparison.baseline_reset:
+        print(
+            "baseline_reset: the previous baseline is void, so this pull "
+            "request may not claim no regression"
+        )
+    for diff in comparison.drifted if comparison is not None else ():
+        print(
+            f"drift: category {diff.category} lost "
+            f"{abs(diff.case_equivalents):.2f} case-equivalents — explain it in "
+            "the pull request"
+        )
     return 0
 
 

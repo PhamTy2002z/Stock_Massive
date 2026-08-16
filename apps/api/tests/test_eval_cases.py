@@ -8,6 +8,11 @@ attributed failure unattributable, so the registry refuses the second.
 *A case names a fixture seat, not a ticker.* A re-freeze moves the symbol below
 ``min_sessions``; a case that had hard-coded the old one would go on passing
 while silently asking about a healthy symbol.
+
+And one about the battery as shipped: the Analysis lane's ten cases are read off
+the **registry** rather than off the module that writes them, because the
+registry is what a run reads. A case module nobody imported is a case that left
+the exam, and the report would show that category shrink without a word.
 """
 
 from __future__ import annotations
@@ -16,10 +21,12 @@ import pytest
 
 from src.eval import cases as registry
 from src.eval.cases import (
+    AnalysisExpectation,
     DuplicateEvalCase,
     EvalCase,
     EvalCategory,
     EvalSurface,
+    Expectation,
     battery,
     register,
 )
@@ -28,12 +35,22 @@ from src.eval.roles import FixtureRole
 
 @pytest.fixture(autouse=True)
 def empty_registry():
-    """The battery is global; a test that seats cases must not leak them."""
+    """The battery is global; a test that seats cases must not leak them.
+
+    Yields what was there, so a test about the **shipped** battery can read it
+    without the ones this file seats — see :func:`shipped`.
+    """
     saved = dict(registry._REGISTRY)
     registry._REGISTRY.clear()
-    yield
+    yield tuple(saved.values())
     registry._REGISTRY.clear()
     registry._REGISTRY.update(saved)
+
+
+@pytest.fixture
+def shipped(empty_registry):
+    """Every case the package seats when it is imported."""
+    return empty_registry
 
 
 def turn_case(identifier: str, **overrides) -> EvalCase:
@@ -49,9 +66,8 @@ def turn_case(identifier: str, **overrides) -> EvalCase:
 
 
 class TestTheRegistry:
-    def test_the_shipped_registry_is_empty_until_the_category_tickets_seed_it(self):
-        """An empty battery reports nothing rather than a clean sheet."""
-        registry._REGISTRY.update({})
+    def test_an_unseated_battery_reports_nothing_rather_than_a_clean_sheet(self):
+        """The categories the remaining tickets seed are absent, not passing."""
         assert battery() == ()
 
     def test_registered_cases_come_back_in_registration_order(self):
@@ -92,9 +108,99 @@ class TestTheCaseShape:
                 role=None,
             )
 
+    def test_an_analysis_case_with_no_analysis_expectation_asserts_nothing(self):
+        """A case is a question, and this one has lost it.
+
+        With only the surface set it still runs the three lane checks, so it
+        would sit in the battery reporting passes while asserting nothing about
+        what the pipeline was supposed to do with that seat.
+        """
+        with pytest.raises(ValueError):
+            EvalCase(
+                id="a-3",
+                category=EvalCategory.DATA_GAP,
+                surface=EvalSurface.ANALYSIS,
+                prompt="",
+                role=FixtureRole.BANK,
+            )
+
+    def test_a_turn_case_carrying_an_analysis_expectation_is_refused(self):
+        """Nothing a Turn produces could satisfy or fail it."""
+        with pytest.raises(ValueError):
+            turn_case(
+                "a-4",
+                expectation=Expectation(
+                    analysis=AnalysisExpectation(publishes=True)
+                ),
+            )
+
     def test_a_case_without_an_id_has_nothing_to_fail_under(self):
         with pytest.raises(ValueError):
             turn_case("   ")
+
+
+class TestTheAnalysisLaneIsSeated:
+    """The ten cases ``docs/adr/0016`` gives the second surface.
+
+    Read off the registry rather than off the module, because what the battery
+    runs is the registry: a case module nobody imported is a case that left the
+    exam, and the report would show its category total shrink without a word.
+    """
+
+    def test_the_shipped_battery_seats_the_analysis_lane(self, shipped):
+        analysis = [
+            item for item in shipped if item.surface is EvalSurface.ANALYSIS
+        ]
+        assert len(analysis) == 10
+
+    def test_every_analysis_case_is_scored_by_d_or_e(self, shipped):
+        """The nightly artifact fails at interpretation and at data gaps.
+
+        The safety categories are the Turn lane's: there is no prompt to be
+        off-topic about and no system prompt to extract.
+        """
+        categories = {
+            item.category
+            for item in shipped
+            if item.surface is EvalSurface.ANALYSIS
+        }
+        assert categories == {EvalCategory.INTERPRETATION, EvalCategory.DATA_GAP}
+
+    def test_interpretation_runs_across_the_four_field_profiles(self, shipped):
+        """Emphasis and field membership differ by industry."""
+        seats = {
+            item.role
+            for item in shipped
+            if item.surface is EvalSurface.ANALYSIS
+            and item.category is EvalCategory.INTERPRETATION
+        }
+        assert seats == {
+            FixtureRole.BANK,
+            FixtureRole.REAL_ESTATE,
+            FixtureRole.RETAIL,
+            FixtureRole.ORDINARY,
+        }
+
+    def test_the_data_gap_cases_cover_all_three_deliberate_bad_seats(self, shipped):
+        seats = {
+            item.role
+            for item in shipped
+            if item.surface is EvalSurface.ANALYSIS
+            and item.category is EvalCategory.DATA_GAP
+        }
+        assert {
+            FixtureRole.BELOW_MIN_SESSIONS,
+            FixtureRole.PRICE_BASIS_SEAM,
+            FixtureRole.LIMIT_LOCK_DENSE,
+        } <= seats
+
+    def test_every_analysis_case_says_what_it_is_for(self, shipped):
+        """A failure a reader cannot attribute is a failure nobody acts on."""
+        assert all(
+            item.intent.strip()
+            for item in shipped
+            if item.surface is EvalSurface.ANALYSIS
+        )
 
 
 class TestTheSafetyCategories:

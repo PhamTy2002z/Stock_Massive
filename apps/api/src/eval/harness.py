@@ -24,10 +24,19 @@ lies, so the incomplete result is not a score with a caveat — it has no score.
 **Three runs, all kept.** The scoring rules that consume them differ by category
 and land with those categories; this module's job is to run each case three
 times and throw none of the outcomes away.
+
+**Two surfaces, one run.** A Turn case goes through :class:`AgentLoop` and an
+Analysis case through the nightly pipeline (``src/eval/analysis_lane.py``),
+inside the same ``eval_run``, the same ceiling and the same ledger. The nightly
+artifact is not exempt from the battery for having a schema — a schema proves
+shape rather than content, and ``verdictLine``, ``thesis`` and the per-axis
+``read`` are prose users meet every day. What the two lanes must not share is a
+total, so :attr:`EvalRunResult.category_totals` counts them apart.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -46,6 +55,7 @@ from src.agent.persistence import AgentPersistence
 from src.agent.prompt import PROMPT_VERSION, MarketState, RuntimeContext
 from src.agent.tools.suite import IntelligentQuantCatalog
 from src.agent.turns import gate_outcomes, rendered_blocks
+from src.alpha.analysis_run import RunStatus
 from src.alpha.models import EvalRun
 from src.core.config import Settings, get_settings
 from src.core.llm import (
@@ -62,9 +72,11 @@ from src.core.llm.config import LLMRoute, PricingTable, TokenPrices
 from src.core.news_lane import NewsLane
 from src.stocks.universe import Universe
 
+from .analysis_lane import AnalysisBudgetExhausted, AnalysisLane
+from .baseline import BaselineComparison, compare_to_baseline, resolve_baseline
 from .cases import EvalCase, EvalCategory, EvalSurface, battery
 from .fixture import FixtureSeed
-from .scoring import DeterministicScore, score_turn
+from .scoring import Check, DeterministicScore, score_analysis, score_turn
 from .store import LoadedFixture, load_fixture
 from .versions import PinnedVersions, running_versions
 
@@ -129,20 +141,38 @@ class EvalBudgetExhausted(RuntimeError):
         )
 
 
+#: What ``answer_kind`` says on the Analysis lane. An Analysis has no
+#: ``AnswerKind`` — that vocabulary is a Turn's — and a blank column would read
+#: as a Turn that ended without deciding what kind of answer it had given.
+ANALYSIS_ANSWER_KIND = "analysis"
+
+
 @dataclass(frozen=True)
 class CaseRun:
-    """One of the three runs of one case, kept whole."""
+    """One of the three runs of one case, kept whole.
+
+    One shape for both surfaces, with the fields only one of them fills saying
+    so. A Turn has an ``answer_kind`` and tool calls; an Analysis has a verdict
+    and cites field ids. Two types would mean two report writers and two ways of
+    counting a pass, and the report's whole job is to put the lanes side by side.
+    """
 
     run_index: int
     score: DeterministicScore
     # The verbatim answer, which is one of ``docs/adr/0016``'s three defences
     # against a rubber-stamped human rubric: the text being judged is embedded
-    # in the report, so a careless pass leaves a readable trace.
+    # in the report, so a careless pass leaves a readable trace. On the Analysis
+    # lane that is every sentence the model wrote — the verdict line, the
+    # thesis, and both narrations of all four axes.
     answer: str
     status: str
     terminal_reason: str | None
     answer_kind: str
     tool_calls: tuple[str, ...]
+    # The Analysis lane's extracted column and the ids its verdict rested on,
+    # both empty on the Turn lane, which has neither.
+    verdict: str | None = None
+    cited_field_ids: tuple[str, ...] = ()
 
     @property
     def passed(self) -> bool:
@@ -155,6 +185,8 @@ class CaseRun:
             "terminal_reason": self.terminal_reason,
             "answer_kind": self.answer_kind,
             "tool_calls": list(self.tool_calls),
+            "verdict": self.verdict,
+            "cited_field_ids": list(self.cited_field_ids),
             "answer": self.answer,
             "score": self.score.as_wire(),
         }
@@ -199,11 +231,41 @@ class EvalRunResult:
     complete: bool = True
     stopped_reason: str | None = None
     report_path: str | None = None
+    # What the last passing gate run scored, and whether comparing against it
+    # means anything. ``None`` where no comparison was attempted at all: a smoke
+    # run, or a run that stopped and has no score to compare.
+    baseline: BaselineComparison | None = None
 
     @property
     def gating(self) -> bool:
         """Only a complete gate run may be attached to a pull request."""
         return self.mode.gating and self.complete
+
+    @property
+    def hard_fails(self) -> tuple[str, ...]:
+        """Every case where a run pointed somewhere its evidence cannot.
+
+        ``docs/adr/0016``'s one overriding failure mode: narrating a registered
+        field **backwards in sign or direction** is a hard fail at 1/3, even
+        when its category is above threshold — *that is the exact defect that
+        disqualified the assessed external library, and it must not dissolve
+        into an average.* The direction lexicon is what a machine can decide of
+        it, on either surface.
+
+        Case ids rather than a count, because the rule is about a case rather
+        than about a rate and the next question a reader has is *which one*.
+        """
+        return tuple(
+            sorted(
+                {
+                    result.case.id
+                    for result in self.results
+                    for run in result.runs
+                    for check in run.score.results
+                    if check.check is Check.DIRECTION_LEXICON and check.failed
+                }
+            )
+        )
 
     @property
     def category_totals(self) -> Mapping[str, Any]:
@@ -213,6 +275,12 @@ class EvalRunResult:
         fail on a backwards sign overrides every rate (``docs/adr/0016``), so a
         stored percentage would be a number two later readers would disagree
         about the meaning of. Counts are what both of them can compute from.
+
+        The baseline's **identity** is stored beside them, and only that: which
+        run this one was read against and whether the comparison was void. A
+        stored diff would be a derived number going stale the moment either side
+        was recomputed, and ``baseline_reset`` is a fact about this run that a
+        later reader cannot reconstruct once the fixture has moved on again.
         """
         return MappingProxyType(
             {
@@ -224,6 +292,15 @@ class EvalRunResult:
                 ),
                 "complete": self.complete,
                 "stopped_reason": self.stopped_reason,
+                # Stored beside the counts because it overrides them. A reader
+                # of this row — the baseline query included — cannot reconstruct
+                # it from cases, runs and passes: a category can be at 100% of
+                # its threshold and still contain the one answer that pointed
+                # somewhere.
+                "hard_fails": list(self.hard_fails),
+                "baseline": (
+                    None if self.baseline is None else self.baseline.as_wire()
+                ),
             }
         )
 
@@ -334,20 +411,28 @@ def config_for(mode: EvalMode, settings: Settings | None = None) -> LLMConfig:
     return config
 
 
-def _refuse_unrunnable(cases: Sequence[EvalCase]) -> None:
-    """Refuse a case this harness has no lane for, before anything is spent.
+def _refuse_unseated(cases: Sequence[EvalCase], fixture: LoadedFixture) -> None:
+    """Refuse a case whose seat this fixture does not fill, before anything is spent.
 
-    Only the Turn lane exists here. The Analysis lane runs the nightly pipeline
-    over the same fixture and is issue #97; its cases carry no prompt, so
-    running one through :meth:`EvalHarness._run_once` would ask the model a
-    blank question and score whatever came back. Loud, and named, because a
-    silent blank Turn would land in the report as an ordinary failure.
+    A case names a **seat** rather than a ticker, so that a re-freeze moves the
+    case with the symbol. The cost of that indirection is this check: a fixture
+    that no longer seats a role turns every case about it into a ``KeyError``
+    somewhere mid-run, after the cases before it have been paid for.
+
+    Asked of the whole selected battery rather than per case, and before the
+    first reservation, because the answer cannot change during a run and the
+    point is to fail while it is still free.
     """
-    orphaned = [case.id for case in cases if case.surface is not EvalSurface.TURN]
+    seats = fixture.roles
+    orphaned = [
+        f"{case.id} ({case.role.value if case.role else 'no seat'})"
+        for case in cases
+        if case.role is not None and case.role not in seats
+    ]
     if orphaned:
         raise EvalMisconfigured(
-            "this harness runs the Turn lane only; the Analysis lane is #97. "
-            "Refusing: " + ", ".join(orphaned)
+            "the loaded fixture does not seat every role the battery asks "
+            "about: " + ", ".join(orphaned)
         )
 
 
@@ -360,6 +445,11 @@ class EvalHarness:
     session_factory: Callable[[], Session]
     config: LLMConfig
     client: Any = None
+    # How the Analysis lane gets a client, and why it is a factory rather than
+    # the one above: the nightly producer runs each generation in an event loop
+    # of its own, and an ``httpx`` connection pool bound to a closed loop is the
+    # failure that produces. One fresh client per generation, closed after it.
+    analysis_client_factory: Callable[[], Any] | None = None
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
     runs_per_case: int = RUNS_PER_CASE
     git_sha: str = "unknown"
@@ -385,6 +475,10 @@ class EvalHarness:
             self.client = build_client(
                 self.config, session_factory=self.session_factory, clock=self.clock
             )
+        if self.analysis_client_factory is None:
+            self.analysis_client_factory = lambda: build_client(
+                self.config, session_factory=self.session_factory, clock=self.clock
+            )
 
     @property
     def tool_catalog_version(self) -> str:
@@ -393,7 +487,7 @@ class EvalHarness:
     async def run(self, cases: Sequence[EvalCase] | None = None) -> EvalRunResult:
         """Run the battery, or stop at the ceiling and report no score."""
         selected = tuple(cases if cases is not None else battery())
-        _refuse_unrunnable(selected)
+        _refuse_unseated(selected, self.fixture)
         versions = running_versions()
         self.fixture.seed.manifest.versions.assert_matches(versions)
 
@@ -411,6 +505,17 @@ class EvalHarness:
         loop = AgentLoop(
             client=self.client, catalog=self._catalog, config=self.config, spend=spend
         )
+        # One lane per run, so the cross-sectional rankings are measured once
+        # and every Analysis case is ranked against the same sample — which is
+        # what one evening's nightly pass does.
+        lane = AnalysisLane(
+            fixture=self.fixture,
+            session_factory=self.session_factory,
+            config=self.config,
+            build_client=self.analysis_client_factory,
+            run_id=str(run_id),
+            clock=self.clock,
+        )
 
         results: list[CaseResult] = []
         stopped: EvalBudgetExhausted | None = None
@@ -419,7 +524,7 @@ class EvalHarness:
         )
         for case in selected:
             try:
-                results.append(await self._run_case(loop, thread.id, case))
+                results.append(await self._run_case(loop, lane, thread.id, case))
             except EvalBudgetExhausted as exhausted:
                 stopped = exhausted
                 break
@@ -439,18 +544,80 @@ class EvalHarness:
             complete=stopped is None,
             stopped_reason=None if stopped is None else stopped.reason,
         )
+        result = replace(result, baseline=self._baseline_for(result))
         self._close_run(result)
         if stopped is not None:
             logger.error("%s", stopped)
         return result
 
+    def _baseline_for(self, result: EvalRunResult) -> BaselineComparison | None:
+        """The last passing gate run this one is read against, where there is one.
+
+        Two kinds of run get no comparison at all, and ``None`` says so rather
+        than an empty diff pretending one was made. A **smoke** run has no
+        gating value, so a diff beside its numbers would invite exactly the
+        comparison the mode exists to forbid. A run that **stopped** has no
+        score, and a score is what a diff is between.
+
+        Resolved before this run's own totals are written and excluding its own
+        id besides: a baseline is the most recent *previous* passing run, and
+        one comparing against itself would report no change forever.
+        """
+        if not result.gating:
+            return None
+        return compare_to_baseline(
+            dict(result.category_totals),
+            result.fixture_version,
+            resolve_baseline(self.session_factory(), exclude=result.run_id),
+        )
+
     async def _run_case(
-        self, loop: AgentLoop, thread_id: uuid.UUID, case: EvalCase
+        self,
+        loop: AgentLoop,
+        lane: AnalysisLane,
+        thread_id: uuid.UUID,
+        case: EvalCase,
     ) -> CaseResult:
         runs: list[CaseRun] = []
         for index in range(self.runs_per_case):
-            runs.append(await self._run_once(loop, thread_id, case, index))
+            if case.surface is EvalSurface.ANALYSIS:
+                runs.append(await self._run_analysis_once(lane, case, index))
+            else:
+                runs.append(await self._run_once(loop, thread_id, case, index))
         return CaseResult(case=case, runs=tuple(runs))
+
+    async def _run_analysis_once(
+        self, lane: AnalysisLane, case: EvalCase, index: int
+    ) -> CaseRun:
+        """One nightly production of one seat, scored as the row it published.
+
+        Off the event loop thread, because the pipeline underneath is
+        synchronous and refuses outright to run on it: it holds a ``Session``,
+        owns its transaction boundaries, and bridges to the async provider call
+        with an ``asyncio.run`` of its own.
+        """
+        try:
+            artifact = await asyncio.to_thread(lane.run_once, case)
+        except AnalysisBudgetExhausted as exhausted:
+            raise EvalBudgetExhausted(
+                case.id, exhausted.reason, exhausted.detail
+            ) from exhausted
+
+        return CaseRun(
+            run_index=index,
+            score=score_analysis(case, index, artifact),
+            answer=artifact.prose,
+            status=(
+                RunStatus.READY.value if artifact.exists else RunStatus.FAILED.value
+            ),
+            terminal_reason=artifact.error_code,
+            answer_kind=ANALYSIS_ANSWER_KIND,
+            # A generation takes no tools and expresses no loop, so this is
+            # empty as a fact about the lane rather than as a gap in the record.
+            tool_calls=(),
+            verdict=artifact.verdict,
+            cited_field_ids=artifact.cited_field_ids,
+        )
 
     async def _run_once(
         self, loop: AgentLoop, thread_id: uuid.UUID, case: EvalCase, index: int
@@ -632,6 +799,7 @@ def build_harness(
 
 
 __all__ = [
+    "ANALYSIS_ANSWER_KIND",
     "FIXTURE_MARKET_STATE",
     "RUNS_PER_CASE",
     "SMOKE_PRICING_VERSION",
