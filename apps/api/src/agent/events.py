@@ -194,6 +194,12 @@ class TurnPublisher:
         self._activity: Activity | None = None
         self._status = TURN_RUNNING
         self._terminal_reason: str | None = None
+        # The canonical assistant message, once the terminal transaction has
+        # written one. It rides the snapshot as well as the terminal event so
+        # that a reader arriving *after* the Turn ended learns the same fact a
+        # reader who watched it end already knows: which message replaces the
+        # draft it is holding. Without it that reader shows both.
+        self._message_id: int | None = None
 
     @property
     def seq(self) -> int:
@@ -277,6 +283,8 @@ class TurnPublisher:
         self._status = status
         self._terminal_reason = terminal_reason
         payload = {"status": status, "terminal_reason": terminal_reason, **(data or {})}
+        message_id = payload.get("message_id")
+        self._message_id = message_id if isinstance(message_id, int) else None
         event = self.publish(event_type, payload)
         for subscriber in self._subscribers:
             subscriber.close()
@@ -300,6 +308,7 @@ class TurnPublisher:
                 "activity": None if self._activity is None else self._activity.value,
                 "blocks": [dict(block) for block in self._blocks],
                 "widgets": [dict(widget) for widget in self._widgets],
+                "message_id": self._message_id,
             },
         )
         subscriber = Subscriber(snapshot, queue_size=self._queue_size)
@@ -360,6 +369,7 @@ def snapshot_from_draft(
     status: str,
     terminal_reason: str | None,
     through_seq: int,
+    message_id: int | None = None,
 ) -> TurnEvent:
     """The snapshot a subscriber gets for a Turn no publisher is holding.
 
@@ -384,6 +394,7 @@ def snapshot_from_draft(
             "activity": None,
             "blocks": [dict(block) for block in blocks],
             "widgets": [dict(widget) for widget in widgets],
+            "message_id": message_id,
         },
     )
 

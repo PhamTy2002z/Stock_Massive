@@ -7,9 +7,13 @@ import { cn } from "@/lib/utils"
 import { STATE_LABEL, dayAndMonth, failureSentence, stateSentence } from "./state-copy"
 
 /**
- * The five states, each with its own colour, so they are told apart before they
- * are read. `unsupported` is deliberately not red: it is a fact about the
- * Universe, not a failure of anything.
+ * The five states as a badge — border, fill and text — so they are told apart
+ * before they are read.
+ *
+ * The dot form of the same vocabulary lives in `state-copy.ts`, because the
+ * Alpha Desk dock shows these five states too and a second palette would mean
+ * one symbol reading amber there and red here. This fuller treatment has only
+ * ever had one caller, and stays with it.
  */
 const STATE_TONE: Record<AnalysisState, string> = {
   ready: "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",

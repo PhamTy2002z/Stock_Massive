@@ -572,6 +572,7 @@ class TurnService:
             status=record.status,
             terminal_reason=record.terminal_reason,
             through_seq=record.last_event_seq,
+            message_id=record.response_message_id,
         )
         subscriber = Subscriber(snapshot)
         subscriber.close()
