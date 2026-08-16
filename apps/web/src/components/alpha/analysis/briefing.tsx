@@ -8,7 +8,6 @@ import { cn } from "@/lib/utils"
 import { AxisPanel } from "./axis-panel"
 import { CHROME, NARRATION } from "./copy"
 import { PriceZoneBand } from "./price-zone-band"
-import { ArtifactRiskNotice } from "./risk-notice"
 import { VerdictHeader } from "./verdict-header"
 
 /**
@@ -76,8 +75,6 @@ export function Briefing({
           {CHROME.deepDive}
         </Link>
       </p>
-
-      <ArtifactRiskNotice />
 
       <Audit artifact={artifact} />
     </div>
