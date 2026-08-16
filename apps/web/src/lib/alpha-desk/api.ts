@@ -9,52 +9,26 @@
  * `fetchApi` stays unchanged, deliberately — retro-fitting auth onto the app's
  * twenty-five existing hooks is its own effort (ADR-0013).
  *
+ * The request itself is `alphaFetch` from `@/lib/alpha`: the rail and the
+ * conversation are the same origin, the same session and the same refusal body,
+ * so they read it once. What is here is the conversation's own paths and the
+ * shape each one sends.
+ *
  * **Admission outcomes arrive here, not in the stream.** A `429` or a `503`
  * from the create call is an ordinary HTTP failure carrying its stable reason,
  * and the caller reads it from the thrown refusal rather than waiting for an
  * event that is never coming.
  */
 
-import { AlphaRefusalError } from "@/lib/alpha"
+import { alphaFetch } from "@/lib/alpha"
 
 import type { CreatedTurn, Thread, ThreadDetail, Turn } from "./types"
 
 const BASE = "/api/alpha-desk"
 
-async function refusalFrom(response: Response): Promise<AlphaRefusalError> {
-  try {
-    const body = await response.json()
-    const detail = body?.detail
-    if (detail && typeof detail === "object" && typeof detail.message === "string") {
-      return new AlphaRefusalError(response.status, detail.reason ?? null, detail.message)
-    }
-    if (typeof detail === "string" && detail) {
-      return new AlphaRefusalError(response.status, null, detail)
-    }
-  } catch {
-    // Not JSON — a proxy error or an outage. Fall through to the status line.
-  }
-  return new AlphaRefusalError(
-    response.status,
-    null,
-    `Alpha Desk error: ${response.statusText || response.status}`,
-  )
-}
-
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${BASE}${path}`, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers },
-    credentials: "same-origin",
-  })
-  if (!response.ok) throw await refusalFrom(response)
-  if (response.status === 204) return undefined as T
-  return (await response.json()) as T
-}
-
 /** Open a Thread. Free-roaming: it is not opened against a symbol. */
 export function createThread(title?: string | null): Promise<Thread> {
-  return call<Thread>("/threads", {
+  return alphaFetch<Thread>("/threads", {
     method: "POST",
     body: JSON.stringify({ title: title ?? null }),
   })
@@ -62,12 +36,12 @@ export function createThread(title?: string | null): Promise<Thread> {
 
 /** This user's Threads, most recently touched first. Secondary retrieval only. */
 export function listThreads(): Promise<{ threads: Thread[] }> {
-  return call<{ threads: Thread[] }>("/threads")
+  return alphaFetch<{ threads: Thread[] }>("/threads")
 }
 
 /** One Thread and its canonical transcript. */
 export function fetchThread(threadId: string): Promise<ThreadDetail> {
-  return call<ThreadDetail>(`/threads/${encodeURIComponent(threadId)}`)
+  return alphaFetch<ThreadDetail>(`/threads/${encodeURIComponent(threadId)}`)
 }
 
 export interface CreateTurnInput {
@@ -89,7 +63,7 @@ export interface CreateTurnInput {
  * exists instead of starting a second one.
  */
 export function createTurn(input: CreateTurnInput): Promise<CreatedTurn> {
-  return call<CreatedTurn>(`/threads/${encodeURIComponent(input.threadId)}/turns`, {
+  return alphaFetch<CreatedTurn>(`/threads/${encodeURIComponent(input.threadId)}/turns`, {
     method: "POST",
     body: JSON.stringify({
       turn_id: input.turnId,
@@ -103,12 +77,12 @@ export function createTurn(input: CreateTurnInput): Promise<CreatedTurn> {
 
 /** Idempotent. A second cancel returns the same answer and dispatches nothing. */
 export function cancelTurn(turnId: string): Promise<Turn> {
-  return call<Turn>(`/turns/${encodeURIComponent(turnId)}/cancel`, { method: "POST" })
+  return alphaFetch<Turn>(`/turns/${encodeURIComponent(turnId)}/cancel`, { method: "POST" })
 }
 
 /** One Turn's current state, for a caller that has not opened a stream. */
 export function fetchTurn(turnId: string): Promise<Turn> {
-  return call<Turn>(`/turns/${encodeURIComponent(turnId)}`)
+  return alphaFetch<Turn>(`/turns/${encodeURIComponent(turnId)}`)
 }
 
 /** Where the browser's `EventSource` points. Same origin, so cookies travel. */

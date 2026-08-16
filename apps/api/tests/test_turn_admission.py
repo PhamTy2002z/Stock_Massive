@@ -17,6 +17,7 @@ from types import MappingProxyType
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from src.agent.admission import (
     ADMISSION_STATUS,
@@ -65,7 +66,15 @@ def llm_config(**overrides) -> LLMConfig:
 
 
 def spend_admission(config: LLMConfig, state: TurnState) -> SpendAdmission:
-    engine = create_engine("sqlite://")
+    # One connection shared across threads. The ledger is synchronous
+    # SQLAlchemy, so admission runs it through `asyncio.to_thread` rather than
+    # blocking every open stream in the process — and SQLite's default
+    # in-memory pooling would hand that worker thread a second, empty database.
+    engine = create_engine(
+        "sqlite://",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
     LlmCallUsage.__table__.create(engine)
     return SpendAdmission(
         config,
@@ -88,24 +97,26 @@ def admission(
 
 
 class TestTheUserCeilings:
-    def test_an_idle_user_inside_every_allowance_is_admitted(self):
-        admission().admit(user_id=7)
+    pytestmark = pytest.mark.asyncio
 
-    def test_a_user_already_holding_an_active_turn_is_refused(self):
+    async def test_an_idle_user_inside_every_allowance_is_admitted(self):
+        await admission().admit(user_id=7)
+
+    async def test_a_user_already_holding_an_active_turn_is_refused(self):
         # The row for *this* Turn does not exist yet, so the ceiling is met at
         # the limit rather than past it. Comparing the way `reserve` does would
         # admit a second concurrent Turn for every user.
         with pytest.raises(TurnRefused) as refused:
-            admission(
+            await admission(
                 state=TurnState(starts_today=1, active_for_user=1, active_system=1)
             ).admit(user_id=7)
 
         assert refused.value.reason == "user_active_turn"
         assert refused.value.status_code == 429
 
-    def test_an_exhausted_daily_start_allowance_is_refused(self):
+    async def test_an_exhausted_daily_start_allowance_is_refused(self):
         with pytest.raises(TurnRefused) as refused:
-            admission(
+            await admission(
                 state=TurnState(starts_today=21, active_for_user=0, active_system=0)
             ).admit(user_id=7)
 
@@ -117,34 +128,31 @@ class TestTheUserCeilings:
 
 
 class TestTheServiceCeilings:
-    def test_a_full_system_is_a_503_under_the_reason_admission_already_uses(self):
+    pytestmark = pytest.mark.asyncio
+
+    async def test_a_full_system_is_a_503_under_the_reason_admission_already_uses(self):
         with pytest.raises(TurnRefused) as refused:
-            admission(
+            await admission(
                 state=TurnState(starts_today=1, active_for_user=0, active_system=3)
             ).admit(user_id=7)
 
         assert refused.value.reason == "system_active_turns"
         assert refused.value.status_code == 503
 
-    def test_a_full_semaphore_is_refused_without_reading_the_ledger_at_all(self):
+    async def test_a_full_semaphore_is_refused_without_reading_the_ledger_at_all(self):
         # The in-process semaphore and the database count answer the same
         # question from two sides, and the route must not open a stream on a
         # Turn that would immediately meet a closed door.
         slots = SessionSlots(limit=1)
 
-        async def occupy():
-            async with slots.occupy():
-                with pytest.raises(TurnRefused) as refused:
-                    admission(slots=slots).admit(user_id=7)
-                return refused.value
+        async with slots.occupy():
+            with pytest.raises(TurnRefused) as refused:
+                await admission(slots=slots).admit(user_id=7)
 
-        import asyncio
+        assert refused.value.reason == "system_active_turns"
+        assert refused.value.status_code == 503
 
-        failure = asyncio.run(occupy())
-        assert failure.reason == "system_active_turns"
-        assert failure.status_code == 503
-
-    def test_an_exhausted_lane_is_a_service_failure_rather_than_a_user_one(self):
+    async def test_an_exhausted_lane_is_a_service_failure_rather_than_a_user_one(self):
         starved = llm_config(
             lanes=BudgetLanes(
                 monthly_envelope_usd=50,
@@ -155,7 +163,7 @@ class TestTheServiceCeilings:
             )
         )
         with pytest.raises(TurnRefused) as refused:
-            admission(config=starved).admit(user_id=7)
+            await admission(config=starved).admit(user_id=7)
 
         assert refused.value.reason == "lane_budget_exhausted"
         assert refused.value.status_code == 503

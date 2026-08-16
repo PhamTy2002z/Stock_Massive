@@ -174,12 +174,3 @@ export interface CreatedTurn extends Turn {
   /** False when the id was already known: nothing was created, nothing started. */
   created: boolean
 }
-
-export function isTerminalEvent(type: TurnEventType): boolean {
-  return (
-    type === "turn.completed" ||
-    type === "turn.incomplete" ||
-    type === "turn.failed" ||
-    type === "turn.cancelled"
-  )
-}

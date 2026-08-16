@@ -30,7 +30,7 @@ from sqlalchemy import delete, select
 from src.agent.admission import TurnAdmission
 from src.agent.events import Activity, EventType
 from src.agent.grounding import BlockKind, ReleasedBlock
-from src.agent.limits import SubscriptionLimiter
+from src.agent.limits import SubscriptionLimiter, SubscriptionThrottled
 from src.agent.loop import SessionSlots, TurnOutcome, TurnStatus
 from src.agent.persistence import AgentPersistence
 from src.agent.prompt import AnswerKind
@@ -705,20 +705,49 @@ class TestTheSubscriptionLimiter:
         # dispatches nothing, so it is not a Turn start.
         assert len(desk.ledger.checked) == 1
 
+    async def test_a_strangers_turn_never_spends_that_turns_window(
+        self, client, auth, desk, other_account
+    ):
+        # The per-Turn window is keyed by Turn, so counting it before ownership
+        # was resolved would let any signed-in account exhaust it by naming
+        # somebody else's Turn id — the very failure this limiter exists to
+        # prevent, reintroduced through the limiter.
+        thread_id = await open_thread(client, auth)
+        turn_id = str(uuid.uuid4())
+        await start_turn(client, auth, thread_id, turn_id=turn_id)
+        await asyncio.wait_for(desk.control.started.wait(), 2)
+        desk.control.finish()
+        await _settle(desk, turn_id)
+
+        counter = _CountingLimiter(limit=10)
+        desk.service.subscriptions = counter
+        stranger = await authenticate(client, other_account)
+        refused = await client.get(f"{API}/turns/{turn_id}/events", headers=stranger)
+        allowed = await client.get(f"{API}/turns/{turn_id}/events", headers=auth)
+
+        assert refused.status_code == 404
+        assert allowed.status_code == 200
+        # The stranger's attempt was counted against the stranger, and against
+        # no Turn at all.
+        assert len(counter.users) == 2
+        assert counter.turns == [turn_id]
+
 
 class _CountingLimiter:
     """A limiter with no Redis behind it, so the count is the test's."""
 
     def __init__(self, *, limit: int) -> None:
         self._limit = limit
-        self._seen = 0
+        self.users: list[int] = []
+        self.turns: list[str] = []
 
-    def check(self, *, user_id: int, turn_id) -> None:
-        from src.agent.limits import SubscriptionThrottled
+    def check_user(self, user_id: int) -> None:
+        self.users.append(user_id)
+        if len(self.users) > self._limit:
+            raise SubscriptionThrottled("user")
 
-        self._seen += 1
-        if self._seen > self._limit:
-            raise SubscriptionThrottled("turn")
+    def check_turn(self, turn_id) -> None:
+        self.turns.append(str(turn_id))
 
 
 # -- cancel ----------------------------------------------------------------
