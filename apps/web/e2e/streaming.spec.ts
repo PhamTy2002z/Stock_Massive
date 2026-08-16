@@ -32,7 +32,7 @@ test.beforeEach(async ({ page, request }) => {
   email = newEmail()
   await resetTurn(request)
   await signUp(page, email)
-  await page.goto("/alpha-desk")
+  await page.goto("/")
   await expect(page.getByLabel("Ask Alpha Desk")).toBeVisible()
 })
 
