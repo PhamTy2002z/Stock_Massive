@@ -41,7 +41,7 @@ def context(**overrides) -> RuntimeContext:
     return RuntimeContext(**base)
 
 
-def test_the_seven_sections_render_in_the_fixed_order():
+def test_the_sections_render_in_the_fixed_order():
     keys = [section.key for section in SECTIONS]
 
     assert keys == [
@@ -51,8 +51,12 @@ def test_the_seven_sections_render_in_the_fixed_order():
         "tool_use",
         "output_protocol",
         "voice",
+        "visual_evidence",
         "runtime_context",
     ]
+    # The trusted runtime context stays last whatever is added, because
+    # everything above it is the cacheable prefix.
+    assert keys[-1] == "runtime_context"
 
     rendered = render(context())
     positions = [rendered.index(f"## {section.title}") for section in SECTIONS]
@@ -123,7 +127,7 @@ def test_no_figure_watchlist_or_tool_result_can_reach_the_prompt():
 
     rendered = render(context())
     for absent in ("watchlist", "Watchlist", "tool_call_id:", "price:"):
-        assert absent not in rendered.split("## 7.")[1]
+        assert absent not in rendered.split("## 8.")[1]
 
 
 def test_the_rendered_prompt_is_byte_stable_and_the_prefix_does_not_move():
@@ -139,8 +143,9 @@ def test_the_rendered_prompt_is_byte_stable_and_the_prefix_does_not_move():
 
 def test_the_hash_is_exported_and_changes_when_the_prose_changes():
     # Bumped with the prose it names: 1.1.0 added the evidence-reference
-    # protocol the Recommendation Validator reads (#82).
-    assert PROMPT_VERSION == "1.1.0"
+    # protocol the Recommendation Validator reads (#82), and 1.2.0 added the
+    # Widget selection protocol the Widget validator reads (#89).
+    assert PROMPT_VERSION == "1.2.0"
     assert PROMPT_HASH == contract_hash()
 
     edited = tuple(
@@ -151,7 +156,7 @@ def test_the_hash_is_exported_and_changes_when_the_prose_changes():
     )
 
     assert contract_hash(edited) != PROMPT_HASH
-    assert contract_hash(SECTIONS, version="1.1.1") != PROMPT_HASH
+    assert contract_hash(SECTIONS, version="1.2.1") != PROMPT_HASH
 
 
 def test_the_cache_key_carries_model_version_hash_and_catalog_version():
