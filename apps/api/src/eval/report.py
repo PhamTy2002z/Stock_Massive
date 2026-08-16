@@ -20,6 +20,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .harness import EvalRunResult
+from .rubric import QUESTIONS
 from .verdict import verdict
 
 
@@ -36,7 +37,7 @@ def report_filename(result: EvalRunResult) -> str:
     return f"{day}-{result.prompt_version}-{result.mode.value}-{str(result.run_id)[:8]}.md"
 
 
-def render_report(result: EvalRunResult) -> str:
+def render_report(result: EvalRunResult, scores=None) -> str:
     lines: list[str] = []
     lines.append(f"# Eval Report — {result.started_at.date().isoformat()}")
     lines.append("")
@@ -78,7 +79,16 @@ def render_report(result: EvalRunResult) -> str:
     lines.append("")
 
     totals = result.category_totals
-    scored = verdict(result)
+    scored = verdict(result, scores)
+    if not scored.judged:
+        lines.append(
+            "> **The human rubric has not been entered.** D and E are shown on "
+            "their deterministic half alone, which is not the reading "
+            "`docs/adr/0016` gates on: run `make eval-rubric` and score the "
+            "sheet beside this file."
+        )
+        lines.append("")
+
     lines.append("## Categories")
     lines.append("")
     lines.append("| Category | Cases | Runs | Passes | Rule | Verdict |")
@@ -91,6 +101,16 @@ def render_report(result: EvalRunResult) -> str:
             f"{item.passed} | {rule} | {mark} |"
         )
     lines.append("")
+
+    # Loud, and above the per-category detail, because it overrides all of it.
+    if scored.hard_failures:
+        lines.append(
+            "> **HARD FAIL — a registered field was narrated backwards in "
+            "sign.** This overrides every rate above: it is the exact defect "
+            "that disqualified the assessed external library, and it does not "
+            "dissolve into an average."
+        )
+        lines.append("")
 
     # A category total is not actionable. What a reader does next is open the
     # case that broke, so the case, the run and the property are here rather
@@ -152,6 +172,18 @@ def render_report(result: EvalRunResult) -> str:
                     continue
                 tick = "✓" if check.passed else "✗"
                 lines.append(f"- {tick} `{check.check.value}` — {check.detail}")
+            given = (
+                scores.for_run(case.id, run.run_index) if scores is not None else None
+            )
+            for question in QUESTIONS if given else ():
+                if question.key not in given:
+                    continue
+                answered = given[question.key]
+                tick = "✓" if question.passed(answered) else "✗"
+                lines.append(
+                    f"- {tick} `rubric.{question.key}` — "
+                    f"{'yes' if answered else 'no'}: {question.text}"
+                )
             lines.append("")
             lines.append("<details><summary>Answer as shown</summary>")
             lines.append("")
@@ -165,10 +197,10 @@ def render_report(result: EvalRunResult) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def write_report(result: EvalRunResult, directory: Path) -> Path:
+def write_report(result: EvalRunResult, directory: Path, scores=None) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / report_filename(result)
-    path.write_text(render_report(result), encoding="utf-8")
+    path.write_text(render_report(result, scores), encoding="utf-8")
     return path
 
 
