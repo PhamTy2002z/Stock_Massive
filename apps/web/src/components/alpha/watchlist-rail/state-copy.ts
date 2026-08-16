@@ -46,6 +46,23 @@ export const STATE_LABEL: Record<AnalysisState, string> = {
 }
 
 /**
+ * The colour each state carries, as a dot.
+ *
+ * Here rather than in the row that first needed it, because the rail and the
+ * Alpha Desk dock both show these five states and a second palette would mean
+ * the same symbol reading amber in one place and red in the other.
+ * `unsupported` is deliberately not red: it is a fact about the Universe, not a
+ * failure of anything.
+ */
+export const STATE_DOT: Record<AnalysisState, string> = {
+  ready: "bg-emerald-500",
+  pending: "bg-muted-foreground/40",
+  producing: "bg-sky-500",
+  failed: "bg-red-500",
+  unsupported: "bg-amber-500",
+}
+
+/**
  * Why a symbol is in the state it is in, as a sentence a person reads.
  *
  * Every state gets one, including the healthy ones. A rail that only explains

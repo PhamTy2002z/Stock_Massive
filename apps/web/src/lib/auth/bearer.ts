@@ -2,6 +2,7 @@ import "server-only"
 
 import { AuthApiError, refresh } from "./api"
 import { clearSessionCookies, getAccessToken, getRefreshToken, setSessionCookies } from "./session"
+import { singleFlight } from "./single-flight"
 
 /**
  * The access token to send upstream, and how to get a fresh one after a 401.
@@ -20,21 +21,6 @@ export async function currentAccessToken(): Promise<string | undefined> {
 }
 
 /**
- * The rotation in flight, if there is one.
- *
- * The refresh token rotates: exchanging it invalidates it. The rail polls
- * alongside history, detail and opened requests, so several of them can meet a
- * `401` in the same instant — and without this, each would exchange the same
- * token. The first wins, the rest are handed a token the API has already
- * retired, and their `401` clears the cookies and signs the user out mid-poll.
- *
- * Process-local, which is the whole of the guarantee and worth stating: two Next
- * instances behind a load balancer would still race. That is acceptable at this
- * size and would need a shared lock, not a bigger variable, to fix.
- */
-let inFlight: Promise<string | null> | null = null
-
-/**
  * Exchange the refresh cookie for a new pair, or null when there is no session.
  *
  * Only callable where cookies are writable — route handlers and server actions.
@@ -42,17 +28,15 @@ let inFlight: Promise<string | null> | null = null
  * leaving a dead refresh token behind makes every later request pay for the
  * same failed exchange.
  *
- * Concurrent callers share one exchange. They are asking the same question of
- * the same cookie, so there is one answer.
+ * Concurrent callers share one exchange, through the process-local single
+ * flight in `./single-flight`. They are asking the same question of the same
+ * cookie, so there is one answer — and because the refresh token rotates, a
+ * second exchange would hand its caller a token the API has already retired.
+ * The rail already polls alongside history and detail; Alpha Desk adds a
+ * subscribe from every open tab, so several callers meeting one `401` together
+ * is the ordinary case rather than the unlucky one.
  */
-export async function rotateAccessToken(): Promise<string | null> {
-  if (inFlight) return inFlight
-
-  inFlight = exchange().finally(() => {
-    inFlight = null
-  })
-  return inFlight
-}
+export const rotateAccessToken: () => Promise<string | null> = singleFlight(exchange)
 
 async function exchange(): Promise<string | null> {
   const refreshToken = await getRefreshToken()

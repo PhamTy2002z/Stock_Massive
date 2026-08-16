@@ -87,4 +87,11 @@ export const queryKeys = {
   analysis: (symbol: string, tradingDay: string) =>
     ["alpha", "analyses", symbol, tradingDay] as const,
 
+  // The conversation, under the same root as the rail because they are one
+  // screen: a Turn that discussed a symbol changes what the rail should show.
+  // The *live* Turn is deliberately absent — it has its own reducer, and only
+  // the canonical Thread is a query (ADR-0013).
+  threads: ["alpha", "threads"] as const,
+  thread: (threadId: string) => ["alpha", "threads", threadId] as const,
+
 } as const

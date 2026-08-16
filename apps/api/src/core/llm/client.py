@@ -39,6 +39,17 @@ class ReservedLLMClient:
         self._transport = transport
         self._admission = admission
 
+    @property
+    def admission(self) -> AdmissionLedger:
+        """The ledger every call is reserved against.
+
+        Exposed for one caller: the transport's ``POST`` has to ask the same
+        ledger the same ceiling questions *before* a Turn exists, and a second
+        ledger built beside this one could read a different configuration
+        (``docs/adr/0013``, ``docs/adr/0014``).
+        """
+        return self._admission
+
     async def aclose(self) -> None:
         close = getattr(self._transport, "aclose", None)
         if close is not None:
