@@ -78,12 +78,17 @@ function CustomTooltip({
   )
 }
 
-interface ChartProps {
+export interface ChartProps {
   data: { name: string; value: number; isGainer: boolean }[]
   isPlaceholderData?: boolean
 }
 
-const SectorHistoricalChart = memo(
+/**
+ * The one leaf on this surface that was already generic — it takes series and
+ * draws them, and ADR-0012 notes it was a single export away from being
+ * reusable. This is that export.
+ */
+export const SectorHistoricalChart = memo(
   function SectorHistoricalChart({ data, isPlaceholderData = false }: ChartProps) {
     if (data.length === 0) {
       return (

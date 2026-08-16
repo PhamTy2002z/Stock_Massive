@@ -99,6 +99,7 @@ from .widgets import (
     WidgetValidator,
     extract_selections,
     user_requested_multiple,
+    user_requested_visual,
 )
 
 logger = logging.getLogger(__name__)
@@ -888,6 +889,7 @@ class AgentLoop:
         validator = WidgetValidator(
             trading_day=request.runtime.trading_day,
             allow_second=user_requested_multiple(request.user_text),
+            requested=user_requested_visual(request.user_text),
         )
         specs, rejections = validator.validate_all(selections, TraceIndex(state.calls))
         state.widgets.extend(specs)

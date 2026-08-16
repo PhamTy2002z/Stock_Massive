@@ -24,6 +24,7 @@ from src.agent.widgets import (
     descriptor_id,
     extract_selections,
     user_requested_multiple,
+    user_requested_visual,
 )
 
 TRADING_DAY = date(2026, 8, 14)
@@ -281,6 +282,24 @@ def test_a_second_widget_is_rejected_unless_the_user_asked_for_one():
 
     assert len(allowed) == 2
     assert none_rejected == ()
+
+
+def test_whether_the_user_asked_for_a_picture_rides_on_the_spec():
+    # ``docs/adr/0012`` makes failure asymmetric on the web side, and only the
+    # backend holds the user's text, so only the backend can answer this.
+    assert user_requested_visual("vẽ giúp tôi biểu đồ động lượng")
+    assert user_requested_visual("plot the momentum for me")
+    assert not user_requested_visual("FPT đang ở vùng nào?")
+
+    asked = WidgetValidator(trading_day=TRADING_DAY, requested=True).validate(
+        selection(f"metric_comparison|{REF}|X"), comparison_traces()
+    )
+    offered = validator().validate(
+        selection(f"metric_comparison|{REF}|X"), comparison_traces()
+    )
+
+    assert asked.as_wire()["requested"] is True
+    assert offered.as_wire()["requested"] is False
 
 
 def test_the_second_widget_allowance_is_read_off_the_users_own_words():

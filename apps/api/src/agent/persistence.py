@@ -300,6 +300,26 @@ class AgentPersistence:
                 messages=tuple(_message_record(message) for message in messages),
             )
 
+    async def read_message(self, user_id: int, message_id: int) -> MessageRecord | None:
+        """One transcript row, but only if this user owns the Thread it is in.
+
+        Ownership is a join for the same reason :meth:`_owned_turn` joins:
+        ``agent_message`` has no ``user_id`` and should not grow one. The Widget
+        replay route is the caller, and it resolves the descriptor *stored on
+        the message* rather than one the client sent — so a reader can only ever
+        get back the slice their own answer was written against.
+        """
+        return await asyncio.to_thread(self._read_message, user_id, message_id)
+
+    def _read_message(self, user_id: int, message_id: int) -> MessageRecord | None:
+        with self._session_factory() as session:
+            row = session.execute(
+                select(AgentMessage)
+                .join(AgentThread, AgentThread.id == AgentMessage.thread_id)
+                .where(AgentMessage.id == message_id, AgentThread.user_id == user_id)
+            ).scalar_one_or_none()
+            return None if row is None else _message_record(row)
+
     async def delete_thread(self, user_id: int, thread_id: uuid.UUID | str) -> bool:
         return await asyncio.to_thread(
             self._delete_thread, user_id, _uuid(thread_id)
