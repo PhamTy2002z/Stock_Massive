@@ -24,6 +24,18 @@ module.exports = {
         // else — see the note in app/layout.tsx.
         serif: ['var(--font-newsreader)', 'Georgia', 'Times New Roman', 'serif'],
       },
+      gridTemplateColumns: {
+        // One column that is allowed to be narrower than its widest item.
+        //
+        // A grid with no explicit template sizes its implicit track from the
+        // items' max-content, and a track is never clamped to the container it
+        // overflows. So a single long company name widens the column past its
+        // card, every `truncate` inside it stops truncating because there is
+        // nothing left to truncate against, and the row paints over whatever
+        // sits to its right. `minmax(0, 1fr)` is the fix, and it is needed on
+        // every vertical list whose rows carry text that must clip.
+        fit: 'minmax(0, 1fr)',
+      },
       fontSize: {
         // The reference's own steps, all derived from a 15px body. Named rather
         // than written as arbitrary values so a card eyebrow is the same size
