@@ -273,10 +273,18 @@ class TestAMovedFixtureVoidsTheBaseline:
         assert comparison.baseline_reset
         assert comparison.diffs == ()
 
-    def test_a_first_run_with_no_history_is_also_a_reset(self):
+    def test_a_first_run_with_no_history_establishes_rather_than_resets(self):
+        """A reset warns off a claim; a first run was never in a position to make one.
+
+        ``docs/adr/0016`` ties `baseline_reset` to one thing — *when
+        `fixture_version` changes the previous baseline is void*. Marking the
+        first-ever gate run as well would put "may not claim no regression" on a
+        report that in the same breath says it establishes the baseline.
+        """
         comparison = compare_to_baseline(a_passing_run(), FIXTURE, None)
-        assert comparison.baseline_reset
+        assert not comparison.baseline_reset
         assert comparison.baseline is None
+        assert comparison.diffs == ()
 
     def test_the_same_fixture_compares_normally(self):
         comparison = compare_to_baseline(

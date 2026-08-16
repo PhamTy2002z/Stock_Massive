@@ -230,6 +230,36 @@ class TestTheTwoLanesAreSeparable:
         assert "verdict `hold`" in rendered
         assert "`price_zone.ordinary_range_pct`" in rendered
 
+    def test_a_category_both_lanes_measure_is_split_between_them(self):
+        """One total for D is where the nightly artifact's regression hides."""
+        turn_d = turn_result("d-turn")
+        rendered = render_report(
+            a_run(
+                results=(
+                    CaseResult(
+                        case=EvalCase(
+                            id="d-turn",
+                            category=EvalCategory.INTERPRETATION,
+                            surface=EvalSurface.TURN,
+                            prompt="RSI của mã này nói lên điều gì?",
+                            role=FixtureRole.ORDINARY,
+                        ),
+                        runs=turn_d.runs,
+                    ),
+                    analysis_result("d-analysis"),
+                )
+            )
+        )
+        split = rendered.split("## Surfaces")[1].split("## Baseline")[0]
+        assert "| D | turn | 1 | 3 |" in split
+        assert "| D | analysis | 1 | 3 |" in split
+
+    def test_a_category_only_one_lane_measures_is_not_split(self):
+        """A row saying `analysis 0/0` beside every safety category is noise."""
+        rendered = render_report(a_run(results=(turn_result(),)))
+        surfaces = rendered.split("## Surfaces")[1].split("## Baseline")[0]
+        assert "| B | turn |" not in surfaces
+
 
 class TestTheDiffAgainstBaseline:
     def test_a_steady_category_reports_no_drift(self):
@@ -274,10 +304,13 @@ class TestAMovedFixtureVoidsTheClaim:
         assert "may not claim *no regression*" in rendered
         assert "Δ case-equivalents" not in rendered
 
-    def test_a_first_ever_run_establishes_the_baseline_rather_than_failing(self):
+    def test_a_first_ever_run_establishes_the_baseline_rather_than_resetting(self):
+        """And the document must not say both things at once."""
         comparison = compare_to_baseline(totals_with(), FIXTURE, None)
         rendered = render_report(a_run(baseline=comparison))
         assert "no previous passing gate run" in rendered
+        assert "baseline_reset" not in rendered
+        assert "may not claim" not in rendered
 
 
 class TestASmokeReportCannotBecomeABaseline:
@@ -378,6 +411,22 @@ class TestTheHumanRubricIsInTheDocument:
     def test_a_run_with_no_quality_cases_asks_for_no_rubric(self):
         rendered = render_report(a_run(results=(turn_result(),)))
         assert "## Human rubric" not in rendered
+
+
+def test_the_report_directory_is_the_repos_and_not_apps_apis():
+    """`make eval` runs from `apps/api`, and the reports belong at the root.
+
+    A relative `docs/eval` resolves to `apps/api/docs/eval` from there — a
+    directory nobody reads, beside no ADR, and not the diffable history
+    `docs/adr/0016` asks the baseline to have.
+    """
+    from pathlib import Path
+
+    from src.core.config import Settings
+
+    # The suite runs from `apps/api`, which is also where `make eval` runs.
+    resolved = (Path.cwd() / Settings().eval_report_dir).resolve()
+    assert resolved == (Path.cwd().parent.parent / "docs" / "eval").resolve()
 
 
 def test_an_empty_battery_reports_nothing_rather_than_a_clean_sheet():

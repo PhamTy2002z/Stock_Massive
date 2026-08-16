@@ -26,7 +26,7 @@ database is disposable precisely so that clearing them costs nothing.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timezone
 
@@ -35,6 +35,7 @@ from sqlalchemy.orm import Session
 
 from src.alpha.analysis_run import RunOrigin, RunStatus, produce_analysis
 from src.alpha.models import Analysis, AnalysisRun
+from src.alpha.producer import Producer
 from src.alpha.production import analysis_producer
 from src.core.llm import (
     BudgetLane,
@@ -48,7 +49,6 @@ from src.core.llm import (
     SpendRequest,
     check_candidate_shape,
 )
-from src.stocks.signals.serving import CrossSection
 
 from .artifact import AnalysisArtifact
 from .cases import EvalCase
@@ -142,16 +142,24 @@ class AnalysisLane:
     config: LLMConfig
     build_client: Callable[[], LLMClient]
     run_id: str
-    # Set once per lane and shared by every case, exactly as one evening's
-    # nightly pass shares them: a percentile is a position within a sample, so
-    # measuring it per case would rank each symbol against a sample measured at
-    # a different moment.
-    cross_sections: Mapping[str, CrossSection] | None = None
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
-    _client: EvalOwnedClient = field(default=None, init=False, repr=False)
+    _client: "EvalOwnedClient | None" = field(default=None, init=False, repr=False)
+    _produce: "Producer | None" = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._client = EvalOwnedClient(self.build_client, self.run_id)
+        # **One producer for the whole lane**, which is what makes the
+        # cross-sectional rankings a per-cohort measurement rather than a
+        # per-case one. A percentile is a position within a sample; measured
+        # again for every case it would rank each symbol against a sample cut at
+        # a different moment, and the producer's own cache — which is scoped to
+        # the instance — is where that reuse lives.
+        self._produce = analysis_producer(
+            client=self._client,
+            config=self.config,
+            session_factory=self.session_factory,
+            clock=self.clock,
+        )
 
     @property
     def trading_day(self) -> date:
@@ -180,7 +188,7 @@ class AnalysisLane:
                 session,
                 symbol,
                 self.trading_day,
-                self._producer(),
+                self._produce,
                 origin=RunOrigin.NIGHTLY,
             )
         finally:
@@ -206,15 +214,6 @@ class AnalysisLane:
             trading_day=self.trading_day,
             error_code=outcome.error_code,
             error_message=outcome.error_message,
-        )
-
-    def _producer(self):
-        return analysis_producer(
-            client=self._client,
-            config=self.config,
-            session_factory=self.session_factory,
-            clock=self.clock,
-            cross_sections=self.cross_sections,
         )
 
     def _clear_pair(self, symbol: str) -> None:

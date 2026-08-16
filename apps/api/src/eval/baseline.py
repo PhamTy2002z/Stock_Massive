@@ -12,8 +12,9 @@ so silence is not an option.
 **A moved ``fixture_version`` voids the baseline.** The first run on a new
 fixture is marked ``baseline_reset`` and its pull request may not claim "no
 regression", because comparing scores across two fixtures compares two different
-exams. A run with no history at all is a reset for the same reason: there is
-nothing to have not regressed against.
+exams. A run with **no** history is a different thing and is not marked: it
+establishes the baseline, and nothing regressed because there was nothing to
+regress from.
 
 **What "passing" means here, stated rather than implied.** These are the
 deterministic totals — the ones a machine decided. The blind human rubric scores
@@ -61,12 +62,6 @@ CATEGORY_THRESHOLDS: Mapping[EvalCategory, float] = MappingProxyType(
 #: and that is the unit the ADR states the rule in.
 CASE_EQUIVALENT_DRIFT = 2
 
-#: How many gate runs back the search for a baseline goes. Bounded because the
-#: pass mark is arithmetic over a JSONB column and is applied in Python — see
-#: :func:`resolve_baseline` — and unbounded it would read the whole table to
-#: answer a question about the last few runs.
-BASELINE_SEARCH_DEPTH = 50
-
 
 @dataclass(frozen=True)
 class CategoryScore:
@@ -112,6 +107,26 @@ class CategoryScore:
         if not self.cases or not self.runs:
             return False
         return self.rate >= self.threshold
+
+
+@dataclass(frozen=True)
+class SurfaceScore:
+    """One lane's counts, with no threshold to meet.
+
+    Its own type rather than a :class:`CategoryScore` holding ``"turn"``.
+    ``docs/adr/0016`` sets thresholds per **category**, not per surface — asked
+    of a lane, ``threshold`` has no answer, and a shared type would have to
+    invent one. This one cannot be asked.
+    """
+
+    surface: str
+    cases: int
+    runs: int
+    passed: int
+
+    @property
+    def rate(self) -> float:
+        return self.passed / self.runs if self.runs else 0.0
 
 
 @dataclass(frozen=True)
@@ -174,9 +189,20 @@ class CategoryDiff:
 class BaselineComparison:
     """What this run is worth beside the last passing one, or why it is not.
 
-    ``baseline_reset`` and an empty ``diffs`` travel together on purpose. A run
-    on a new fixture has no comparison to show, and showing one anyway is how a
-    pull request comes to claim "no regression" against a different exam.
+    Three states, and the third is why ``baseline_reset`` is not simply "there
+    is no diff":
+
+    - a comparison, with ``diffs`` and no reset;
+    - **``baseline_reset``** — a baseline exists and the fixture moved under it,
+      so the numbers are not comparable and this pull request may not claim *no
+      regression*;
+    - **no baseline at all** — the first gate run, which *establishes* the
+      baseline. Nothing regressed because there is nothing to have regressed
+      from, and calling that a reset would put a warning about a void comparison
+      on a run that never had one.
+
+    ``diffs`` is empty in both of the last two, because showing numbers is how a
+    pull request comes to claim no regression against a different exam.
     """
 
     baseline: Baseline | None
@@ -237,6 +263,10 @@ def resolve_baseline(
     not depend on anybody remembering it — a smoke run does not exercise the
     production model, so a report compared against one compares against nothing.
 
+    The session is the caller's: it opened it and it closes it, as everywhere
+    else in this package. A callee that closed a handle it was lent is a callee
+    the caller cannot use twice.
+
     The pass mark itself is applied in Python over the rows that come back.
     Expressing per-category rate arithmetic over a JSONB column in SQL would put
     a second copy of ``CATEGORY_THRESHOLDS`` in a dialect nobody tests, and the
@@ -249,25 +279,21 @@ def resolve_baseline(
             EvalRun.finished_at.is_not(None),
         )
         .order_by(EvalRun.started_at.desc(), EvalRun.id.desc())
-        .limit(BASELINE_SEARCH_DEPTH)
     )
     if exclude is not None:
         query = query.where(EvalRun.id != exclude)
 
-    try:
-        for row in session.execute(query).scalars():
-            totals = dict(row.category_totals or {})
-            if run_passes(totals):
-                return Baseline(
-                    run_id=row.id,
-                    started_at=row.started_at,
-                    prompt_version=row.prompt_version,
-                    fixture_version=row.fixture_version,
-                    category_totals=totals,
-                    report_path=row.report_path,
-                )
-    finally:
-        session.close()
+    for row in session.execute(query).scalars():
+        totals = dict(row.category_totals or {})
+        if run_passes(totals):
+            return Baseline(
+                run_id=row.id,
+                started_at=row.started_at,
+                prompt_version=row.prompt_version,
+                fixture_version=row.fixture_version,
+                category_totals=totals,
+                report_path=row.report_path,
+            )
     return None
 
 
@@ -276,8 +302,16 @@ def compare_to_baseline(
     fixture_version: str,
     baseline: Baseline | None,
 ) -> BaselineComparison:
-    """This run against the last passing one, or a stated reason there is none."""
-    if baseline is None or baseline.fixture_version != fixture_version:
+    """This run against the last passing one, or a stated reason there is none.
+
+    ``baseline_reset`` is reserved for the case ``docs/adr/0016`` gives it: *when
+    ``fixture_version`` changes the previous baseline is void.* A first-ever gate
+    run is not that — it establishes the baseline — and marking it reset would
+    warn a pull request off a claim it was never in a position to make.
+    """
+    if baseline is None:
+        return BaselineComparison(baseline=None, baseline_reset=False)
+    if baseline.fixture_version != fixture_version:
         return BaselineComparison(baseline=baseline, baseline_reset=True)
     return BaselineComparison(
         baseline=baseline,
@@ -300,11 +334,48 @@ def category_scores(category_totals: Mapping[str, Any]) -> tuple[CategoryScore, 
     )
 
 
-def surface_scores(category_totals: Mapping[str, Any]) -> tuple[CategoryScore, ...]:
+def surface_scores(category_totals: Mapping[str, Any]) -> tuple[SurfaceScore, ...]:
     """The two lanes as scores, so a reader can take the run apart by surface."""
     buckets = category_totals.get("by_surface") or {}
     return tuple(
-        _bucket_score(name, buckets.get(name) or {}) for name in sorted(buckets)
+        SurfaceScore(
+            surface=name,
+            cases=int((buckets.get(name) or {}).get("cases", 0) or 0),
+            runs=int((buckets.get(name) or {}).get("runs", 0) or 0),
+            passed=int((buckets.get(name) or {}).get("passed", 0) or 0),
+        )
+        for name in sorted(buckets)
+    )
+
+
+def category_scores_by_surface(
+    category_totals: Mapping[str, Any],
+) -> tuple[tuple[str, tuple[SurfaceScore, ...]], ...]:
+    """Each category split by the lane it was measured on, where both ran it.
+
+    The two lanes share D and E, and a category total covering both is where a
+    regression in the nightly artifact hides behind a healthy Turn lane. Only
+    categories a second lane actually touched are returned: a row saying
+    ``analysis 0/0`` beside every safety category would be four lines of noise
+    about a surface those categories are not asked of.
+    """
+    split = category_totals.get("by_category_surface") or {}
+    return tuple(
+        (
+            category,
+            tuple(
+                SurfaceScore(
+                    surface=surface,
+                    cases=int((bucket or {}).get("cases", 0) or 0),
+                    runs=int((bucket or {}).get("runs", 0) or 0),
+                    passed=int((bucket or {}).get("passed", 0) or 0),
+                )
+                for surface, bucket in sorted(lanes.items())
+                if (bucket or {}).get("cases")
+            ),
+        )
+        for category, lanes in sorted(split.items())
+        if sum(1 for bucket in lanes.values() if (bucket or {}).get("cases")) > 1
     )
 
 
@@ -337,14 +408,15 @@ def thresholds_as_prose() -> Sequence[str]:
 
 
 __all__ = [
-    "BASELINE_SEARCH_DEPTH",
     "CASE_EQUIVALENT_DRIFT",
     "CATEGORY_THRESHOLDS",
     "Baseline",
     "BaselineComparison",
     "CategoryDiff",
     "CategoryScore",
+    "SurfaceScore",
     "category_scores",
+    "category_scores_by_surface",
     "compare_to_baseline",
     "resolve_baseline",
     "run_passes",
