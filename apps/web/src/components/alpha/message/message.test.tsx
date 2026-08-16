@@ -165,28 +165,21 @@ describe("the activity line", () => {
 })
 
 describe("the Risk Notice", () => {
-  it("renders on a completed assistant message", () => {
+  // Still attached by the backend and still parsed into the view; simply not a
+  // thing this surface draws. The assertions are that it stays off screen —
+  // both the canonical wording and the renderer's own fallback.
+  it("is not rendered on a completed assistant message", () => {
     render(<AssistantMessage view={view()} />)
 
-    expect(screen.getByLabelText("Risk notice")).toHaveTextContent(
-      /không phải khuyến nghị đầu tư/i,
-    )
+    expect(screen.queryByLabelText("Risk notice")).not.toBeInTheDocument()
+    expect(screen.queryByText(NOTICE.text)).not.toBeInTheDocument()
   })
 
-  it("renders on a usefully incomplete one too", () => {
-    // An incomplete Turn with content writes a canonical message like any
-    // other, and the notice is exactly as owed there.
-    render(<AssistantMessage view={view({ blocks: [block("một phần")] })} />)
-
-    expect(screen.getByLabelText("Risk notice")).toBeInTheDocument()
-  })
-
-  it("is displayed by the renderer, so model prose cannot stand in for it", () => {
+  it("puts no stand-in on screen when the message carries none", () => {
     render(<AssistantMessage view={view({ riskNotice: null })} />)
 
-    const notice = screen.getByLabelText("Risk notice")
-    expect(notice).toHaveTextContent(/Chưa đọc được Risk Notice/)
-    expect(notice).not.toHaveTextContent(NOTICE.text)
+    expect(screen.queryByLabelText("Risk notice")).not.toBeInTheDocument()
+    expect(screen.queryByText(/Chưa đọc được Risk Notice/)).not.toBeInTheDocument()
   })
 })
 

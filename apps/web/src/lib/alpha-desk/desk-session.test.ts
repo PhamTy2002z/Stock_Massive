@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it } from "vitest"
 
 import {
   deepLinkedSymbol,
+  deepLinkedThread,
   openingState,
   readDeskSession,
   writeDeskSession,
@@ -97,6 +98,37 @@ describe("what the surface opens onto", () => {
 
   it("drops a remembered Turn whose Thread is gone", () => {
     expect(openingState(null, { threadId: null, turnId: "turn-1", activeSymbol: null }).turnId).toBeNull()
+  })
+
+  it("opens the Thread a `?thread=` link names, over what this tab remembered", () => {
+    // *Open in new tab* from the sidebar menu. The new tab has subscribed to
+    // nothing, so it carries no Turn — but the lens is a workspace setting and
+    // survives.
+    expect(openingState(null, remembered, "thread-2")).toEqual({
+      threadId: "thread-2",
+      turnId: null,
+      activeSymbol: "FPT",
+    })
+  })
+
+  it("lets a named Thread outrank a deep-linked symbol", () => {
+    // A link that says which conversation to show is not asking for a new one.
+    expect(openingState("HPG", remembered, "thread-2").threadId).toBe("thread-2")
+  })
+})
+
+describe("the deep-linked Thread", () => {
+  it("takes an id shaped like one, however it was cased", () => {
+    expect(deepLinkedThread(" 6F1C2B84-9A0D-4E77-B3F5-2C8A1D4E7B90 ")).toBe(
+      "6f1c2b84-9a0d-4e77-b3f5-2c8a1d4e7b90",
+    )
+  })
+
+  it("ignores anything else, so a hand-edited URL is simply not a deep link", () => {
+    expect(deepLinkedThread(null)).toBeNull()
+    expect(deepLinkedThread("")).toBeNull()
+    expect(deepLinkedThread("../admin")).toBeNull()
+    expect(deepLinkedThread("thread-1")).toBeNull()
   })
 })
 

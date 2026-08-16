@@ -849,6 +849,122 @@ class TestThreads:
         assert first.json()["thread_id"] == second.json()["thread_id"] == thread_id
 
 
+class TestTheThreadMenu:
+    """Rename, pin and delete — the three writes the sidebar's menu makes.
+
+    Integration for the same reason the rest of this module is: all three are
+    statements about owner-scoped rows, and the interesting half of rename is
+    what it does *not* write.
+    """
+
+    pytestmark = pytest.mark.asyncio
+
+    async def test_rename_writes_the_title_and_leaves_the_order_alone(
+        self, client, auth, desk
+    ):
+        older = await open_thread(client, auth)
+        newer = await open_thread(client, auth)
+
+        renamed = await client.patch(
+            f"{API}/threads/{older}", json={"title": "  Xu hướng STB  "}, headers=auth
+        )
+
+        assert renamed.status_code == 200
+        # Trimmed on the way in: a name is what the user typed, without the
+        # whitespace their paste brought with it.
+        assert renamed.json()["title"] == "Xu hướng STB"
+        listed = await client.get(f"{API}/threads", headers=auth)
+        # `updated_at` is when the conversation was last worked in. Renaming is
+        # not working in it, so the Thread stays where it was.
+        assert [row["id"] for row in listed.json()["threads"]][:2] == [newer, older]
+
+    async def test_an_empty_title_clears_it_rather_than_storing_blank(
+        self, client, auth, desk
+    ):
+        thread_id = await open_thread(client, auth)
+        await client.patch(f"{API}/threads/{thread_id}", json={"title": "Tạm"}, headers=auth)
+
+        cleared = await client.patch(
+            f"{API}/threads/{thread_id}", json={"title": "   "}, headers=auth
+        )
+
+        assert cleared.status_code == 200
+        assert cleared.json()["title"] is None
+
+    async def test_pinning_lifts_a_thread_above_newer_ones_and_unpinning_drops_it(
+        self, client, auth, desk
+    ):
+        older = await open_thread(client, auth)
+        newer = await open_thread(client, auth)
+
+        pinned = await client.patch(
+            f"{API}/threads/{older}", json={"pinned": True}, headers=auth
+        )
+        after_pin = await client.get(f"{API}/threads", headers=auth)
+
+        assert pinned.status_code == 200
+        assert pinned.json()["pinned_at"] is not None
+        assert [row["id"] for row in after_pin.json()["threads"]][:2] == [older, newer]
+
+        await client.patch(f"{API}/threads/{older}", json={"pinned": False}, headers=auth)
+        after_unpin = await client.get(f"{API}/threads", headers=auth)
+
+        assert [row["id"] for row in after_unpin.json()["threads"]][:2] == [newer, older]
+
+    async def test_a_pin_carries_no_title_and_a_rename_does_not_unpin(
+        self, client, auth, desk
+    ):
+        thread_id = await open_thread(client, auth)
+        await client.patch(
+            f"{API}/threads/{thread_id}", json={"title": "Giữ tên"}, headers=auth
+        )
+
+        pinned = await client.patch(
+            f"{API}/threads/{thread_id}", json={"pinned": True}, headers=auth
+        )
+        renamed = await client.patch(
+            f"{API}/threads/{thread_id}", json={"title": "Tên mới"}, headers=auth
+        )
+
+        assert pinned.json()["title"] == "Giữ tên"
+        assert renamed.json()["pinned_at"] == pinned.json()["pinned_at"]
+
+    async def test_delete_takes_the_transcript_with_it(self, client, auth, desk):
+        thread_id = await open_thread(client, auth)
+        turn_id = str(uuid.uuid4())
+        desk.control.says("VCB đóng cửa ở 62.0")
+        await start_turn(client, auth, thread_id, turn_id=turn_id, text="VCB?")
+        await asyncio.wait_for(desk.control.started.wait(), 2)
+        desk.control.finish()
+        await _settle(desk, turn_id)
+
+        removed = await client.delete(f"{API}/threads/{thread_id}", headers=auth)
+
+        assert removed.status_code == 204
+        assert (await client.get(f"{API}/threads/{thread_id}", headers=auth)).status_code == 404
+        with get_sync_db() as session:
+            left = session.execute(
+                select(AgentMessage).where(AgentMessage.thread_id == uuid.UUID(thread_id))
+            ).scalars().all()
+        assert left == []
+
+    async def test_a_stranger_can_neither_rename_nor_delete(
+        self, client, auth, desk, other_account
+    ):
+        thread_id = await open_thread(client, auth)
+        stranger = await authenticate(client, other_account)
+
+        renamed = await client.patch(
+            f"{API}/threads/{thread_id}", json={"title": "của tôi"}, headers=stranger
+        )
+        removed = await client.delete(f"{API}/threads/{thread_id}", headers=stranger)
+
+        # 404 rather than 403, for the reason the read route gives.
+        assert renamed.status_code == 404
+        assert removed.status_code == 404
+        assert (await client.get(f"{API}/threads/{thread_id}", headers=auth)).status_code == 200
+
+
 class TestWhatTheSubscribeEndpointDependsOn:
     """``docs/specs/0003`` §10.5, and the limiter ``docs/adr/0013`` forbids.
 

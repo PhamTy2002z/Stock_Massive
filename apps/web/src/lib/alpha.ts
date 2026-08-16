@@ -186,6 +186,23 @@ export async function alphaFetch<T>(path: string, init?: RequestInit): Promise<T
   return response.json() as Promise<T>
 }
 
+/**
+ * The same request, for a route whose success is a status and no body.
+ *
+ * Separate rather than a flag on {@link alphaFetch}, because the difference is
+ * in the return type: a caller of that one is handed a parsed answer, and
+ * `response.json()` on a `204` throws before any caller sees it.
+ */
+export async function alphaSend(path: string, init?: RequestInit): Promise<void> {
+  const response = await fetch(`${ALPHA_BASE}${path}`, {
+    ...init,
+    headers: { "Content-Type": "application/json", ...init?.headers },
+    credentials: "same-origin",
+  })
+
+  if (!response.ok) throw await readRefusal(response)
+}
+
 /** The whole rail in one request: the session, the cap, and every symbol's state. */
 export function fetchRail(): Promise<Rail> {
   return alphaFetch<Rail>("/watchlist/rail")
