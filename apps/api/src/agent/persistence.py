@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from src.alpha.models import (
     ACTIVE_TURN_STATUSES,
+    FLAG_REASONS,
     TURN_ADMITTED,
     TURN_COMPLETE,
     TURN_INCOMPLETE,
@@ -52,6 +53,11 @@ class MessageRecord:
     role: str
     content: Mapping[str, Any]
     created_at: datetime
+    # The whole of v1's dispute surface, and null on almost every message.
+    # Carried on the record rather than fetched separately so that a reopened
+    # Thread renders what was already flagged from the read it already does.
+    flagged_reason: str | None = None
+    flagged_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -120,6 +126,24 @@ class TurnCreation:
     created: bool
 
 
+class UnflaggableMessage(ValueError):
+    """The message exists and is the caller's, and is still not flaggable.
+
+    Separate from "not found" on purpose. A user's own question and a context
+    summary are both real rows this caller owns, so answering 404 would say
+    something false; the flag is an action on what the *assistant* said, and
+    that is the sentence this exception carries. The transport maps it to 409.
+    """
+
+    def __init__(self, message_id: int, role: str) -> None:
+        super().__init__(
+            f"Message {message_id} has role {role!r}; only an assistant message "
+            "can be flagged"
+        )
+        self.message_id = message_id
+        self.role = role
+
+
 class TurnPayloadConflict(ValueError):
     """The same Turn id was submitted with a different payload.
 
@@ -179,6 +203,8 @@ def _message_record(row: AgentMessage) -> MessageRecord:
         role=row.role,
         content=dict(row.content),
         created_at=row.created_at,
+        flagged_reason=row.flagged_reason,
+        flagged_at=row.flagged_at,
     )
 
 
@@ -319,6 +345,95 @@ class AgentPersistence:
                 .where(AgentMessage.id == message_id, AgentThread.user_id == user_id)
             ).scalar_one_or_none()
             return None if row is None else _message_record(row)
+
+    # -- flagging a message (#99) -----------------------------------------
+
+    async def flag_message(
+        self, user_id: int, message_id: int, *, reason: str
+    ) -> MessageRecord | None:
+        """Mark one assistant message with one reason. Idempotent per message.
+
+        Writing the pair *replaces* whatever was there: a second flag on the
+        same message is the reader correcting themselves, and accumulating both
+        would need the table ``docs/adr/0016`` refuses. ``None`` means the
+        message is not this user's to flag — the same answer as a message that
+        does not exist, because a caller who can tell those apart has been told
+        that an id exists.
+
+        **This opens nothing.** No ticket, no notification, no suspension. The
+        value is downstream and manual: a flag confirmed as a genuine failure
+        becomes a new Eval Case, frozen with its fixture.
+        """
+        if reason not in FLAG_REASONS:
+            raise ValueError(
+                f"{reason!r} is not a flag reason; expected one of "
+                f"{', '.join(FLAG_REASONS)}"
+            )
+        return await asyncio.to_thread(self._set_flag, user_id, message_id, reason)
+
+    async def unflag_message(
+        self, user_id: int, message_id: int
+    ) -> MessageRecord | None:
+        """Clear both columns. Never one of them."""
+        return await asyncio.to_thread(self._set_flag, user_id, message_id, None)
+
+    def _set_flag(
+        self, user_id: int, message_id: int, reason: str | None
+    ) -> MessageRecord | None:
+        with self._session_factory() as session:
+            row = session.execute(
+                # Ownership is the same join ``_read_message`` uses:
+                # ``agent_message`` has no ``user_id`` and should not grow one.
+                select(AgentMessage)
+                .join(AgentThread, AgentThread.id == AgentMessage.thread_id)
+                .where(AgentMessage.id == message_id, AgentThread.user_id == user_id)
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            if reason is not None and row.role != "assistant":
+                raise UnflaggableMessage(message_id, row.role)
+            row.flagged_reason = reason
+            row.flagged_at = None if reason is None else datetime.now(timezone.utc)
+            session.commit()
+            return _message_record(row)
+
+    async def flag_counts(
+        self,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> dict[str, int]:
+        """How many messages carry each reason, over a half-open window.
+
+        Service-wide and not scoped to a user: this is the field signal the
+        fixed ops query reads, and it is reconciled against the battery rather
+        than shown to anybody. Every reason is a key even at zero — a report
+        that omits a reason nobody chose reads as a reason nobody can choose.
+        """
+        return await asyncio.to_thread(self._flag_counts, since, until)
+
+    def _flag_counts(
+        self, since: datetime | None, until: datetime | None
+    ) -> dict[str, int]:
+        counts = dict.fromkeys(FLAG_REASONS, 0)
+        with self._session_factory() as session:
+            query = select(
+                AgentMessage.flagged_reason, func.count()
+            ).where(AgentMessage.flagged_reason.is_not(None))
+            if since is not None:
+                query = query.where(AgentMessage.flagged_at >= since)
+            if until is not None:
+                query = query.where(AgentMessage.flagged_at < until)
+            for reason, total in session.execute(
+                query.group_by(AgentMessage.flagged_reason)
+            ):
+                # A reason outside the vocabulary cannot be written through
+                # this module, and a row carrying one would be a fact about the
+                # database rather than a category — so it is left out of the
+                # count rather than silently folded into ``other``.
+                if reason in counts:
+                    counts[reason] = int(total)
+        return counts
 
     async def delete_thread(self, user_id: int, thread_id: uuid.UUID | str) -> bool:
         return await asyncio.to_thread(
@@ -775,6 +890,7 @@ class AgentPersistence:
 
 __all__ = [
     "ACTIVE_TURN_STATUSES",
+    "FLAG_REASONS",
     "INTERRUPTED_REASON",
     "TURN_ADMITTED",
     "TURN_COMPLETE",
@@ -788,4 +904,5 @@ __all__ = [
     "TurnCreation",
     "TurnPayloadConflict",
     "TurnRecord",
+    "UnflaggableMessage",
 ]

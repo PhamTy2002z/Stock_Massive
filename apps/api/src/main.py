@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from src.agent.flag_router import router as message_flag_router
 from src.agent.router import router as alpha_desk_router
 from src.agent.service import close_alpha_desk
 from src.agent.turns import sweep_interrupted_turns
@@ -168,6 +169,10 @@ app.include_router(widget_router, prefix="/api/v1")
 # `/api/alpha-desk/threads/...` through the Next proxy, whose allowlist names
 # `threads` and `turns` as the two resources it will carry (docs/adr/0013).
 app.include_router(alpha_desk_router, prefix="/api/v1")
+# Flagging a message is not a Turn — it admits nothing and reaches no model — so
+# it is mounted separately and takes only the store. It must stay possible on a
+# transcript the model route is too broke or too broken to add to.
+app.include_router(message_flag_router, prefix="/api/v1")
 
 
 @app.exception_handler(AlphaRefusal)

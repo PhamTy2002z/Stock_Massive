@@ -14,7 +14,7 @@
  * control label rather than a sentence.
  */
 
-import type { ActivityPhase } from "./types"
+import type { ActivityPhase, FlagReason } from "./types"
 
 /**
  * What the collapsed line says, and what it says when opened.
@@ -110,3 +110,52 @@ export const FIRST_RUN = {
  * two different things happening.
  */
 export const CANCELLING_LABEL = "Cancelling…"
+
+/**
+ * What flagging a message says, and — the load-bearing half — what it does not.
+ *
+ * V1 has **no dispute workflow** (`docs/adr/0016`). One action carries a
+ * `message_id` and a reason label; it opens no ticket, notifies nobody and
+ * suspends no account. So the acknowledgement states what was recorded and
+ * stops there. A sentence like *"chúng tôi sẽ phản hồi"* would be a promise the
+ * system has no mechanism to keep, and the reader would be waiting for a reply
+ * that is never coming — which is worse than an action that admits its limit.
+ *
+ * What the flag is actually for is said plainly instead: it is read when the
+ * answers are reviewed. That is true — a flag confirmed as a genuine failure
+ * becomes a new Eval Case — and it promises this reader nothing.
+ *
+ * The four labels are the reader's vocabulary rather than the column's, so they
+ * describe what went wrong in the answer and never name a mechanism: nobody
+ * flags an answer for *grounding failure*, they flag it because the number is
+ * wrong.
+ */
+export const FLAG_REASON_LABELS: Record<FlagReason, string> = {
+  wrong_figure: "Số liệu sai",
+  overreach: "Kết luận đi quá dữ liệu",
+  wrongly_refused: "Từ chối trả lời không đúng",
+  other: "Lý do khác",
+}
+
+/** The reasons this surface offers, in the order it offers them. */
+export const FLAG_REASONS: FlagReason[] = [
+  "wrong_figure",
+  "overreach",
+  "wrongly_refused",
+  "other",
+]
+
+export const FLAG_COPY = {
+  /** The control itself. Deliberately quiet: it sits under an answer, not in it. */
+  action: "Báo lỗi câu trả lời",
+  prompt: "Phần nào chưa đúng?",
+  /**
+   * Said once the pair is written. It records, and it promises nothing —
+   * no ticket number, no reply, no deadline.
+   */
+  acknowledged:
+    "Đã ghi nhận đánh dấu này. Nó được đọc khi rà soát chất lượng trả lời, và không mở yêu cầu xử lý nào.",
+  remove: "Bỏ đánh dấu",
+  /** Shown when the write itself failed. The flag is not a Turn and has no retry. */
+  failed: "Chưa ghi được đánh dấu. Bạn thử lại giúp nhé.",
+} as const

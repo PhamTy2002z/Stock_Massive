@@ -15,6 +15,7 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 from src.agent.turns import MAX_USER_INPUT_BYTES
+from src.alpha.models import FLAG_REASONS
 from src.stocks.shared import validate_symbol
 
 
@@ -38,12 +39,51 @@ class CreateThreadRequest(BaseModel):
     title: str | None = Field(default=None, max_length=200)
 
 
+class FlagMessageRequest(BaseModel):
+    """One reason label, checked against the vocabulary the column declares.
+
+    Validated against :data:`FLAG_REASONS` rather than restated as an enum
+    here, for the reason this module's docstring gives: a second spelling of
+    the four labels is a second place they can disagree, and the count in the
+    Eval Report would then be over a category the store cannot write.
+
+    **There is no free-text field, and that is deliberate.** A comment box is a
+    promise that somebody reads it, and v1 has no dispute workflow to read one
+    (``docs/adr/0016``). The label is what the ops query counts; the transcript
+    and its Evidence Manifest are what a reviewer re-reads.
+    """
+
+    reason: str
+
+    @field_validator("reason")
+    @classmethod
+    def _within_the_vocabulary(cls, value: str) -> str:
+        if value not in FLAG_REASONS:
+            raise ValueError(
+                f"reason must be one of: {', '.join(FLAG_REASONS)}"
+            )
+        return value
+
+
+class MessageFlagResponse(BaseModel):
+    """A message's flag after a write. Both fields are set, or neither is."""
+
+    message_id: int
+    flagged_reason: str | None
+    flagged_at: datetime | None
+
+
 class MessageResponse(BaseModel):
     id: int
     seq: int
     role: str
     content: dict[str, Any]
     created_at: datetime
+    # Carried on the transcript so a reopened Thread shows what was already
+    # flagged, rather than an action that looks unpressed. Null on almost every
+    # message.
+    flagged_reason: str | None = None
+    flagged_at: datetime | None = None
 
 
 class ThreadResponse(BaseModel):
@@ -133,6 +173,8 @@ __all__ = [
     "CreateThreadRequest",
     "CreateTurnRequest",
     "CreatedTurnResponse",
+    "FlagMessageRequest",
+    "MessageFlagResponse",
     "MessageResponse",
     "ThreadDetailResponse",
     "ThreadListResponse",
