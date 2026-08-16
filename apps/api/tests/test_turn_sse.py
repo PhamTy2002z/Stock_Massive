@@ -159,6 +159,33 @@ class TestTheStream:
         assert snapshot["data"]["status"] == "complete"
         assert snapshot["data"]["blocks"] == [{"text": "done"}]
 
+    async def test_a_terminal_snapshot_names_the_message_that_replaces_the_draft(self):
+        # The reader that watched the Turn end learned the message id from the
+        # terminal event; the reader that arrives afterwards gets only this
+        # snapshot. Without the id on it, that reader holds a draft it can never
+        # hand over and renders the answer twice — the second copy without the
+        # Risk Notice, which lives on the canonical message alone.
+        published = TurnPublisher(TURN)
+        published.content_block({"text": "done"})
+        published.terminal(
+            EventType.COMPLETED,
+            status="complete",
+            terminal_reason=None,
+            data={"message_id": 42},
+        )
+
+        snapshot = json.loads(parse(encode(published.subscribe().snapshot))["data"])
+
+        assert snapshot["data"]["message_id"] == 42
+
+    async def test_a_running_turn_has_no_message_to_name_yet(self):
+        published = TurnPublisher(TURN)
+        published.content_block({"text": "so far"})
+
+        snapshot = json.loads(parse(encode(published.subscribe().snapshot))["data"])
+
+        assert snapshot["data"]["message_id"] is None
+
     async def test_a_reader_that_walks_away_leaves_the_publisher_unblocked(self):
         published = TurnPublisher(TURN)
         subscriber = published.subscribe()

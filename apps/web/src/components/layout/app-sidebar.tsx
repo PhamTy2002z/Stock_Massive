@@ -8,6 +8,7 @@ import {
   Gauge,
   ListChecks,
   Map,
+  MessagesSquare,
 } from "lucide-react"
 import {
   Sidebar,
@@ -29,6 +30,9 @@ type NavItem = {
 // the user opens a group, moves to read it, drifts 2px off the overlay and loses
 // everything. Grouping is expressed with separators, nothing unfolds.
 const navGroups: NavItem[][] = [
+  // Alpha Desk first: the existing tabs are for looking up numbers, and this
+  // is the one for asking what to do about them (`docs/specs/0002` §1).
+  [{ title: "Alpha Desk", url: "/alpha-desk", icon: MessagesSquare }],
   [{ title: "Market Map", url: "/", icon: Map }],
   [
     { title: "Stock 360", url: "/analytics/deep-dive", icon: Gauge },

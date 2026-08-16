@@ -45,6 +45,7 @@ function snapshot(
     activity: string | null
     blocks: ContentBlock[]
     widgets: unknown[]
+    message_id: number | null
   }> = {},
 ): LiveTurnAction {
   return event(through, "turn.snapshot", {
@@ -54,6 +55,7 @@ function snapshot(
     activity: null,
     blocks: [],
     widgets: [],
+    message_id: null,
     ...overrides,
   })
 }
@@ -143,6 +145,65 @@ describe("a snapshot", () => {
     const state = run(started, snapshot(0), { type: "cancelling" }, snapshot(1))
 
     expect(state.phase).toBe("cancelling")
+  })
+})
+
+describe("which block just arrived", () => {
+  it("names the one a content event delivered, so only that one is revealed", () => {
+    const state = run(
+      started,
+      snapshot(0),
+      event(1, "content.block", { block: block("một") }),
+      event(2, "content.block", { block: block("hai") }),
+    )
+
+    expect(state.appendedIndex).toBe(1)
+  })
+
+  it("names none after a snapshot, however many blocks it restated", () => {
+    // A reconnect and a reopened Thread render everything present at once. A
+    // renderer comparing block counts between frames cannot tell a snapshot of
+    // one block from an event delivering one, so the reducer says which it was.
+    const state = run(started, snapshot(4, { blocks: [block("một")] }))
+
+    expect(state.blocks).toHaveLength(1)
+    expect(state.appendedIndex).toBeNull()
+  })
+
+  it("names none after an activity, so a block on screen does not re-arrive", () => {
+    const state = run(
+      started,
+      snapshot(0),
+      event(1, "content.block", { block: block("một") }),
+      event(2, "turn.activity", { phase: "analyzing" }),
+    )
+
+    expect(state.appendedIndex).toBeNull()
+  })
+})
+
+describe("a terminal snapshot", () => {
+  it("names the message that replaces the draft, as the terminal event does", () => {
+    // A reader arriving *after* the Turn ended gets a snapshot rather than a
+    // terminal event. Without the id it would hold a draft it could never hand
+    // over, and the answer would render twice — once without its Risk Notice.
+    const state = run(
+      started,
+      snapshot(3, { status: "complete", blocks: [block("xong")], message_id: 42 }),
+    )
+
+    expect(state.phase).toBe("completed")
+    expect(state.messageId).toBe(42)
+  })
+
+  it("leaves a message id the stream already gave alone", () => {
+    const settled = run(
+      started,
+      snapshot(0),
+      event(1, "turn.completed", { terminal_reason: null, message_id: 7 }),
+    )
+
+    expect(liveTurnReducer(settled, snapshot(1, { status: "complete" })).messageId).toBe(7)
   })
 })
 
