@@ -17,6 +17,11 @@ build/
 # every branch conflict with itself
 *.tsbuildinfo
 
+# Playwright's run artefacts from the streaming acceptance: traces and reports,
+# regenerated on every run
+apps/web/test-results/
+apps/web/playwright-report/
+
 # Environment
 .env
 .env.local

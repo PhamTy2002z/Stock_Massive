@@ -880,6 +880,29 @@ Genuinely undecided. None blocks a build session from starting A1, A2, or A3.
    production model family. Blocks: A5 completion, not A5 start.
 4. **`docker-compose.prod.yml`'s outer proxy and internal API URL.** ADR-0013 states the
    requirement; the concrete deployment topology is not chosen. Blocks: A6 completion.
+
+   **Settled at A6 implementation, and written down in `docs/streaming-topology.md`.**
+   The topology is `browser → Caddy → Next → FastAPI`, with the outer proxy opt-in under
+   a compose profile the way the self-hosted database already is: a deployment
+   terminating TLS at a load balancer it owns runs without it and owes the same contract
+   in its own configuration. Caddy rather than nginx because the setting that matters is
+   a default it already gets right — it does not buffer a proxied body — and
+   `flush_interval -1` states that rather than relying on it. The web container reaches
+   FastAPI over `INTERNAL_API_URL` on the internal network; the API stays published
+   because everything outside Alpha Desk calls it from the browser directly.
+
+   Two things the build found that the requirement did not name. **The shutdown windows
+   run in sequence**: uvicorn drains open connections *before* the ASGI lifespan shuts
+   down, and an SSE subscriber holds its connection for the length of the Turn — so
+   without `--timeout-graceful-shutdown` the thirty seconds of checkpointing never begin,
+   and every deploy kills Turns between checkpoints. The stop grace covers 10s of drain
+   plus 30s of checkpointing plus margin, and `tests/test_deployment_topology.py` asserts
+   that arithmetic across the three files it lives in. And **`request.nextUrl.origin` is
+   the address Next is bound to rather than the one the browser asked for**, so the
+   proxy's cross-origin check reads `X-Forwarded-Host`/`Host` — or `APP_ORIGIN` where the
+   operator names it — instead: checking against `nextUrl` refuses every Alpha Desk write
+   the moment a proxy is put in front. The end-to-end acceptance found that on its first
+   run, which is the argument for the acceptance.
 5. **Whether an operator may pin a symbol into the cohort's fifty places.** Carried over
    from spec 0001 and still assumed **no**. Blocks: nothing.
 

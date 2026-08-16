@@ -1,0 +1,71 @@
+# The outer proxy, configured for one thing above all: it must not buffer.
+#
+# Alpha Desk streams a Turn as `text/event-stream` for up to ten minutes
+# (docs/adr/0013). Every hop between the browser and FastAPI has to carry those
+# bytes as they are produced, keep the connection open for longer than the
+# ten-minute deadline plus margin, and synthesize no `Content-Length`. A hop
+# that buffers is indistinguishable from a hop that is hung — which is exactly
+# what the end-to-end test in `apps/web/e2e/streaming.spec.ts` tells apart.
+#
+# Started with `docker compose -f docker-compose.prod.yml --profile proxy up -d`.
+# A deployment that terminates TLS somewhere else does not run this file, and
+# owes the same four properties in its own configuration
+# (docs/streaming-topology.md).
+
+{
+	# Caddy obtains and renews certificates itself; this address is where the CA
+	# sends expiry warnings.
+	email {$ACME_EMAIL:ops@example.com}
+}
+
+{$WEB_DOMAIN} {
+	encode zstd gzip
+
+	# The Alpha Desk stream, before the compressing catch-all below it.
+	#
+	# `encode` is deliberately not applied here. A compressor that buffers to
+	# fill its window holds an event stream until the Turn ends, and the win on
+	# an SSE frame of a few hundred bytes is not worth the class of bug.
+	@stream path /api/alpha-desk/turns/*/events
+	handle @stream {
+		reverse_proxy web:3000 {
+			# -1 flushes every write straight through, which is what makes this
+			# a stream rather than a delivery.
+			flush_interval -1
+			transport http {
+				# No read timeout: the response is open for as long as the Turn
+				# is, and a Turn may run for the whole ten-minute deadline.
+				read_timeout 0
+				write_timeout 0
+				dial_timeout 5s
+			}
+		}
+	}
+
+	handle {
+		reverse_proxy web:3000 {
+			transport http {
+				dial_timeout 5s
+			}
+		}
+	}
+}
+
+# The API is reachable publicly because the browser calls it directly for
+# everything outside Alpha Desk (`NEXT_PUBLIC_API_URL`). Alpha Desk itself never
+# arrives here: it goes through the Next handler, which reaches FastAPI over the
+# internal network.
+{$API_DOMAIN} {
+	encode zstd gzip
+
+	handle {
+		reverse_proxy api:8000 {
+			flush_interval -1
+			transport http {
+				read_timeout 0
+				write_timeout 0
+				dial_timeout 5s
+			}
+		}
+	}
+}
