@@ -7,8 +7,8 @@ contains no check that a model could be said to have passed.
 
 Three things are proven here rather than asserted in prose.
 
-**Nothing but four typed values can reach the prompt.**  :func:`render` accepts a
-:class:`RuntimeContext` whose fields are an ``int``, a ``date``, a
+**Nothing but five typed values can reach the prompt.**  :func:`render` accepts a
+:class:`RuntimeContext` whose fields are an ``int``, two ``date``s, a
 :class:`MarketState` and a validated symbol.  There is no string field, so there
 is no hole a figure, a Watchlist entry, a tool result or user prose could be
 poured into — and :data:`_STATIC_TEXT` is built by concatenation with no
@@ -19,7 +19,7 @@ itself, so an edit that forgets to bump :data:`PROMPT_VERSION` still changes the
 hash the Evidence Manifest records and the cache key derives from.
 
 **The cacheable prefix is genuinely stable.**  Every section is identical for
-every Turn; only the four values appended after the last one vary.
+every Turn; only the five values appended after the last one vary.
 :func:`prefix` returns exactly the stable part, so a cache key built from it
 cannot silently include today's Trading Day.
 """
@@ -75,10 +75,23 @@ class RuntimeContext:
     ``ToolContext`` carries, plus market state — which is injected for the one
     reason given in section 7: without it the model calls yesterday's close
     "the current price", and no tool can catch that sentence.
+
+    ``today`` is injected for the same kind of reason and no other. The Trading
+    Day is the session the *store* is dated to, and on a Sunday it is Friday's;
+    a model holding only that has no way to resolve the word "today" in a
+    question, and what it produces instead is an answer saying the session the
+    user asked about does not exist. No tool can supply the calendar date
+    either: every one of them reads the store, and the store's newest session is
+    the value being disambiguated.
+
+    A date and never a timestamp. A clock here would void the cacheable prefix
+    on every Turn, and it would invite an answer to be precise about a minute
+    that the end-of-day data behind it is not.
     """
 
     user_id: int
     trading_day: date
+    today: date
     market_state: MarketState
     active_symbol: str | None = None
 
@@ -87,6 +100,8 @@ class RuntimeContext:
             raise TypeError("identity is injected as a user id, out of band")
         if not isinstance(self.trading_day, date):
             raise TypeError("trading_day must be a date")
+        if not isinstance(self.today, date):
+            raise TypeError("today must be a date")
         if not isinstance(self.market_state, MarketState):
             raise TypeError("market_state must be a MarketState")
         if self.active_symbol is not None:
@@ -159,15 +174,19 @@ def prefix() -> str:
 
 
 def render(context: RuntimeContext) -> str:
-    """The whole system prompt: the stable prefix, then the four values.
+    """The whole system prompt: the stable prefix, then the five values.
 
     Byte-stable for the same version and the same context, because the only
-    variable part is four values rendered from typed fields in a fixed order.
+    variable part is five values rendered from typed fields in a fixed order.
     """
     if not isinstance(context, RuntimeContext):
         raise TypeError("the system prompt renders only a RuntimeContext")
     lines = (
         f"- user_id: {context.user_id}",
+        # Ordered the way the question arrives: what day it is, then how far the
+        # data reaches, then what the exchange is doing. A reader that meets
+        # `trading_day` first has already had to guess whether it means today.
+        f"- today: {context.today.isoformat()}",
         f"- trading_day: {context.trading_day.isoformat()}",
         f"- market_state: {context.market_state.value}",
         f"- active_symbol: {context.active_symbol or 'none'}",

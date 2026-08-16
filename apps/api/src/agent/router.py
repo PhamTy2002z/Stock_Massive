@@ -265,7 +265,13 @@ async def read_thread(
 
 
 async def _runtime(user_id: int, active_symbol: str | None) -> RuntimeContext:
-    """The four trusted values, and nothing else, for one Turn."""
+    """The five trusted values, and nothing else, for one Turn.
+
+    Both dates are read off the same instant, and that instant is the one in
+    Vietnam: a Turn opened at 00:30 ICT is asked on a day that is still
+    yesterday in UTC, and these two values are compared against each other by
+    whoever answers.
+    """
     now = datetime.now(ICT)
     trading_day = await in_sync_session(
         lambda session: resolve_trading_day(session, fallback=now.date())
@@ -273,6 +279,7 @@ async def _runtime(user_id: int, active_symbol: str | None) -> RuntimeContext:
     return RuntimeContext(
         user_id=user_id,
         trading_day=trading_day,
+        today=now.date(),
         market_state=market_state_at(now),
         active_symbol=active_symbol,
     )
