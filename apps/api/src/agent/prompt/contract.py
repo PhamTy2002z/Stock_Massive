@@ -18,10 +18,10 @@ formatting call anywhere in the module.
 itself, so an edit that forgets to bump :data:`PROMPT_VERSION` still changes the
 hash the Evidence Manifest records and the cache key derives from.
 
-**The cacheable prefix is genuinely stable.**  Sections 1 to 7 are identical for
-every Turn; only the four values appended after section 7 vary.  :func:`prefix`
-returns exactly the stable part, so a cache key built from it cannot silently
-include today's Trading Day.
+**The cacheable prefix is genuinely stable.**  Every section is identical for
+every Turn; only the four values appended after the last one vary.
+:func:`prefix` returns exactly the stable part, so a cache key built from it
+cannot silently include today's Trading Day.
 """
 
 from __future__ import annotations
@@ -126,7 +126,7 @@ _assert_no_formatting_hole(SECTIONS)
 
 
 def _static_text(sections: Sequence[PromptSection] = SECTIONS) -> str:
-    """The seven sections, in order, with no runtime value anywhere."""
+    """Every section, in order, with no runtime value anywhere."""
     return "\n\n".join(f"## {section.title}\n\n{section.body}" for section in sections)
 
 

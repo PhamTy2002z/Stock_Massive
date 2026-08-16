@@ -17,13 +17,18 @@ from src.core.database import sync_session_factory
 from src.core.redis import get_redis
 from src.stocks.models import ListingRoster, ProviderSnapshot
 from src.stocks.providers import Capability, SnapshotStore, main_source
-from src.stocks.signals import ADTV_MONEY, FOREIGN_ROOM_PCT, serve_field
+from src.stocks.signals import (
+    ADTV_MONEY,
+    FOREIGN_ROOM_PCT,
+    registered_field,
+    serve_field,
+)
 from src.stocks.signals.fundamentals import FUNDAMENTAL_STALE_DAYS
 from src.stocks.shared import validate_symbol
 from src.stocks.universe import Universe, build_universe
 
 from .catalog import MAX_TOOL_RESULT_BYTES, ToolCatalog, ToolContext, ToolSpec, serialized_size
-from .fields import REGISTERED_FIELD_VALUES_KEY
+from .fields import REGISTERED_FIELD_VALUES_KEY, sanctioned_interpretation
 from .scope import adtv_by_symbol, structured_universe_refusal
 
 DATA_REFERENCE_TTL_SECONDS = 24 * 60 * 60
@@ -39,6 +44,20 @@ def _object_schema(properties: Mapping[str, Any], required: Sequence[str] = ()) 
         "properties": dict(properties),
         "required": list(required),
         "additionalProperties": False,
+    }
+
+
+def availability(present: bool) -> dict[str, Any]:
+    """Say whether a fixed slice could be rebuilt, in one shape.
+
+    Shared by every replay path (``docs/adr/0012``) so that a caller branches on
+    one key rather than on four different emptinesses — no rows, no value, no
+    symbols, no window. The reason is stable and branchable; the surface writes
+    the sentence.
+    """
+    return {
+        "available": present,
+        "unavailable_reason": None if present else "slice_unavailable",
     }
 
 
@@ -298,6 +317,16 @@ class StoreBackedTools:
         return await asyncio.to_thread(self._resolve_data_ref, dict(reference))
 
     def _resolve_data_ref(self, reference: Mapping[str, Any]) -> Mapping[str, Any]:
+        """The fixed slice a Data Reference names, from Redis or from the store.
+
+        The 24-hour Redis entry is a hot cache and nothing more. Past it the
+        same window is rebuilt from the store, which is sound because EOD data
+        is settled — the reconstruction is that window, never today's.
+
+        A window that no longer reconstructs answers ``available: False`` rather
+        than an empty series (``docs/adr/0012``): an empty chart and a chart of
+        nothing look identical to a reader and mean different things.
+        """
         descriptor = {
             "symbol": validate_symbol(str(reference["symbol"])),
             "start": date.fromisoformat(str(reference["start"])).isoformat(),
@@ -318,9 +347,90 @@ class StoreBackedTools:
                 end=date.fromisoformat(descriptor["end"]),
             )
             rows = self._price_rows(series.snapshots)
-        payload = {**descriptor, "series": rows}
+        payload = {**descriptor, "series": rows, **availability(bool(rows))}
         self._redis_set(self._reference_key(expected), payload)
         return payload
+
+    async def replay_screen(
+        self,
+        *,
+        criteria: Mapping[str, Any],
+        sort_by: str,
+        order: str,
+        limit: int,
+        as_of: date,
+    ) -> Mapping[str, Any]:
+        """Re-run one screen at the day it was originally run.
+
+        The seam a Widget descriptor replays through (``docs/adr/0012``). A
+        stored ranking would put a copy of the Universe in every message that
+        ever ordered it; the *question* is small, and against a settled store it
+        answers the same way.
+        """
+        return await asyncio.to_thread(
+            self._screen_universe,
+            ToolContext(user_id=0, trading_day=as_of),
+            {
+                "criteria": dict(criteria),
+                "sort_by": sort_by,
+                "order": order,
+                "limit": limit,
+            },
+        )
+
+    async def replay_field(
+        self,
+        *,
+        symbols: Sequence[str],
+        field_name: str,
+        as_of: date,
+    ) -> Mapping[str, Any]:
+        """Recompute one registered field for several symbols, at a fixed day.
+
+        The other half of Widget replay. A stored Widget keeps the field, the
+        symbols and the day; this turns that back into values, and it computes
+        them the same way the tool layer did — through the Signal Registry, at
+        the day the answer was dated to, never at today's.
+        """
+        return await asyncio.to_thread(
+            self._replay_field, tuple(symbols), field_name, as_of
+        )
+
+    def _replay_field(
+        self, symbols: Sequence[str], field_name: str, as_of: date
+    ) -> Mapping[str, Any]:
+        declared = registered_field(field_name)
+        points: list[dict[str, Any]] = []
+        with self._session_factory() as session:
+            peers = self._universe_factory(session).symbols
+            for symbol in symbols:
+                answer = serve_field(
+                    session,
+                    validate_symbol(symbol),
+                    declared,
+                    end=as_of,
+                    peers=peers,
+                )
+                points.append(
+                    {
+                        "symbol": validate_symbol(symbol),
+                        "value": answer.value,
+                        "details": dict(answer.extras),
+                        "refusal": (
+                            answer.refusal.value if answer.refusal is not None else None
+                        ),
+                    }
+                )
+        present = any(point["value"] is not None for point in points)
+        return {
+            "field": declared.name,
+            "unit": declared.unit.value,
+            "sign": declared.sign.value,
+            "interpretation": sanctioned_interpretation(declared),
+            "as_of": as_of.isoformat(),
+            "points": points,
+            **availability(present),
+        }
 
     async def get_financials(
         self, context: ToolContext, arguments: Mapping[str, Any]
@@ -528,6 +638,11 @@ class StoreBackedTools:
             "truncated": bool(ranked),
             "sort_by": sort_by,
             "order": order,
+            # The day the ranking is *of*. A screen answered without one cannot
+            # be cited, and cannot be replayed to the same slice a year later —
+            # which is what ``docs/adr/0012`` asks a stored Widget descriptor to
+            # do. Set before the budget loop below so its bytes are charged.
+            "as_of": context.trading_day.isoformat(),
             "symbols": [],
         }
         for row in ranked[:limit]:
@@ -667,6 +782,10 @@ class StoreBackedTools:
             "end": reference["end"],
             "field": reference["field"],
             "series": list(rows),
+            # The same shape the reconstruction produces, because the cache is a
+            # copy of the store's answer rather than a second kind of answer: a
+            # reader must not be able to tell a hit from a miss.
+            **availability(bool(rows)),
         }
         self._redis_set(self._reference_key(str(reference["id"])), payload)
 

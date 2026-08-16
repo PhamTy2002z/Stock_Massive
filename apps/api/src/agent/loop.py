@@ -93,6 +93,13 @@ from .grounding import (
 )
 from .prompt import AnswerEvidence, AnswerKind, RuntimeContext, classify_answer_kind, render
 from .tools.catalog import ToolCatalog, ToolContext, refusal_reason
+from .widgets import (
+    WidgetSelection,
+    WidgetSpec,
+    WidgetValidator,
+    extract_selections,
+    user_requested_multiple,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +252,12 @@ class TurnDraft:
     rounds_used: int
     tool_calls: tuple[TranscriptToolCall, ...]
     blocks: tuple[ReleasedBlock, ...] = ()
+    # The Widget specs that passed validation, in the order selected. Present
+    # in the draft for the same reason the blocks are: a reconnecting browser
+    # renders the checkpoint, and ``widget.ready`` is emitted only *after* the
+    # spec is in one (``docs/adr/0012``).
+    widgets: tuple[WidgetSpec, ...] = ()
+    widget_refusals: tuple[Mapping[str, Any], ...] = ()
     boundary: bool = False
     # Classified from the same evidence the outcome will be, so a Turn the
     # deadline kills before it returns one is still written under the answer
@@ -273,6 +286,9 @@ class TurnOutcome:
     summary_needed: bool = False
     # The blocks that passed the Recommendation Gate and were emitted, in order.
     blocks: tuple[ReleasedBlock, ...] = ()
+    # The Widget specs that passed validation, and the refusals worth showing.
+    widgets: tuple[WidgetSpec, ...] = ()
+    widget_refusals: tuple[Mapping[str, Any], ...] = ()
     # The route's id for the last call it answered, for the Evidence Manifest.
     provider_request_id: str | None = None
     # Which Gate condition refused, when one did. The Turn's terminal reason
@@ -310,6 +326,8 @@ class _TurnState:
     grounded_tool_calls: int = 0
     summary_needed: bool = False
     blocks: list[ReleasedBlock] = field(default_factory=list)
+    widgets: list[WidgetSpec] = field(default_factory=list)
+    widget_refusals: list[Mapping[str, Any]] = field(default_factory=list)
     request_id: str | None = None
     grounding_failure_code: str | None = None
 
@@ -340,6 +358,8 @@ class _TurnState:
             rounds_used=self.tool_rounds,
             tool_calls=tuple(self.calls),
             blocks=tuple(self.blocks),
+            widgets=tuple(self.widgets),
+            widget_refusals=tuple(self.widget_refusals),
             boundary=boundary,
             answer_kind=classify_answer_kind(self.evidence()),
         )
@@ -794,7 +814,7 @@ class AgentLoop:
         whatever it was about to be.
         """
         try:
-            self._release(request, state)
+            selections = self._release(request, state)
         except GroundingFailure as failure:
             logger.info(
                 "Turn %s blocked a content block: %s",
@@ -804,9 +824,16 @@ class AgentLoop:
             state.grounding_failure_code = failure.code
             status, terminal_reason = TurnStatus.INCOMPLETE, GROUNDING_FAILED
             rounds_exhausted = False
+        else:
+            # Only a Turn whose text survived the Gate gets a picture. A blocked
+            # answer has nothing to illustrate, and illustrating it anyway would
+            # put the figure back on screen that the Gate just kept off it.
+            await self._release_widgets(request, state, selections)
         return await self._ended(status, terminal_reason, state, rounds_exhausted)
 
-    def _release(self, request: TurnRequest, state: _TurnState) -> None:
+    def _release(
+        self, request: TurnRequest, state: _TurnState
+    ) -> tuple[WidgetSelection, ...]:
         """Prove each block, then emit it. Never the other way round.
 
         The ordering is not a convention this function happens to follow: the
@@ -817,16 +844,62 @@ class AgentLoop:
 
         Blocks already released stay released. That is the point of failing per
         block rather than per answer — the user keeps the part that was proven.
+
+        Widget markers come out *before* the split, and that ordering is load
+        bearing twice over: the Recommendation Validator never sees one, so a
+        selection can never be mistaken for the evidence reference attributing
+        the figure in front of it; and a selection that is later rejected has
+        already been removed from what the reader sees, so a dropped Widget
+        leaves no stray marker in the prose.
         """
         if not state.text:
-            return
+            return ()
+        answer, selections = extract_selections(state.text)
         validator = RecommendationValidator(trading_day=request.runtime.trading_day)
         traces = TraceIndex(state.calls)
-        for raw in split_blocks(state.text):
+        for raw in split_blocks(answer):
             block = validator.validate(raw, traces)
             state.blocks.append(block)
             if self._publisher is not None:
                 self._publisher.content_block(block.as_wire())
+        return selections
+
+    async def _release_widgets(
+        self,
+        request: TurnRequest,
+        state: _TurnState,
+        selections: Sequence[WidgetSelection],
+    ) -> None:
+        """Validate, checkpoint, then announce — in that order and no other.
+
+        ``docs/adr/0012`` puts ``widget.ready`` after both, so a subscriber that
+        acts on the event finds the spec already in the checkpoint it would
+        reconnect to. Getting this the other way round would produce an event
+        pointing at a spec that does not exist yet, which is precisely the race
+        a reconnecting browser would hit and nobody else would.
+
+        A rejection is not an error path. The text answer is already released
+        and stays complete; the picture is simply missed, which is the whole
+        argument for a named registry over a chart grammar.
+        """
+        if not selections:
+            return
+        await self._activity(Activity.PREPARING_VISUAL, state)
+        validator = WidgetValidator(
+            trading_day=request.runtime.trading_day,
+            allow_second=user_requested_multiple(request.user_text),
+        )
+        specs, rejections = validator.validate_all(selections, TraceIndex(state.calls))
+        state.widgets.extend(specs)
+        state.widget_refusals.extend(
+            rejection.as_wire() for rejection in rejections if rejection.deep_link
+        )
+        if not specs and not state.widget_refusals:
+            return
+        await self._save(state, boundary=True)
+        if self._publisher is not None:
+            for spec in specs:
+                self._publisher.widget_ready(spec.as_wire())
 
     async def _ended(
         self,
@@ -853,6 +926,8 @@ class AgentLoop:
             usage=state.usage,
             summary_needed=state.summary_needed,
             blocks=tuple(state.blocks),
+            widgets=tuple(state.widgets),
+            widget_refusals=tuple(state.widget_refusals),
             provider_request_id=state.request_id,
             grounding_failure_code=state.grounding_failure_code,
         )
