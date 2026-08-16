@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test"
 
 import {
   API_ORIGIN,
-  RISK_NOTICE,
+  CANONICAL_MARK,
   ask,
   churn,
   finish,
@@ -154,7 +154,7 @@ test("a subscriber that stops reading is dropped, and the Turn finishes anyway",
 
   // The Turn reached its terminal state and the canonical message replaced the
   // draft, while a subscriber sat there not reading a byte.
-  await expect(page.getByRole(RISK_NOTICE.role, { name: RISK_NOTICE.name })).toBeVisible({
+  await expect(page.getByRole(CANONICAL_MARK.role, { name: CANONICAL_MARK.name })).toBeVisible({
     timeout: 20_000,
   })
   expect(Date.now() - startedAt).toBeLessThan(20_000)
@@ -188,13 +188,13 @@ test("the terminal event refetches the Thread and replaces the draft", async ({
   await say(request, "khối đầu tiên")
   await expect(page.getByText("khối đầu tiên")).toBeVisible()
 
-  // The draft carries no Risk Notice; only the canonical message does, because
-  // the backend attaches it in the terminal transaction.
-  await expect(page.getByRole(RISK_NOTICE.role, { name: RISK_NOTICE.name })).toHaveCount(0)
+  // The draft carries no flag control; only the persisted message does, because
+  // a flag names a message id and the draft has none yet.
+  await expect(page.getByRole(CANONICAL_MARK.role, { name: CANONICAL_MARK.name })).toHaveCount(0)
 
   await finish(request)
 
-  await expect(page.getByRole(RISK_NOTICE.role, { name: RISK_NOTICE.name })).toBeVisible({
+  await expect(page.getByRole(CANONICAL_MARK.role, { name: CANONICAL_MARK.name })).toBeVisible({
     timeout: 20_000,
   })
   // Replaced, not appended to: one copy of the block, not two.
