@@ -336,7 +336,7 @@ class AgentToolCall(Base):
     arguments = Column(JSONB, nullable=False)
     result = Column(JSONB, nullable=True)
     # ok | tool_error | timeout | unknown_tool
-    status = Column(String(16), nullable=False)
+    status = Column(String(16), nullable=False)  # see TOOL_CALL_* below
     error = Column(String(500), nullable=True)
     latency_ms = Column(Integer, nullable=True)
     prompt_tokens = Column(Integer, nullable=True)
@@ -352,6 +352,20 @@ class AgentToolCall(Base):
 
     def __repr__(self) -> str:
         return f"<AgentToolCall {self.tool_name} {self.status}>"
+
+
+# The one value of ``agent_tool_call.status`` that something other than the
+# catalog reads, named where the column is declared so the reader and the writer
+# cannot spell it differently. It is also ``docs/adr/0011``'s demand trigger — a
+# model reaching for a tool that does not exist is the evidence for whether
+# sandboxed execution is ever needed — which is why the fixed ops query counts
+# it by tool name rather than only totalling it.
+#
+# The other three stay as the literals ``src/agent/tools/catalog.py`` writes.
+# Naming them here would leave three constants with no reader, and adopting them
+# in the catalog is an edit inside ``src/agent/tools/``, which ``docs/adr/0016``
+# makes any pull request carry an Eval Report for.
+TOOL_CALL_UNKNOWN_TOOL = "unknown_tool"
 
 
 # The five states of ``agent_turn.status``, named where the column is declared so

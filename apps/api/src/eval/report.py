@@ -24,11 +24,24 @@ reader comparing two reports must not be able to mistake it for one that did.
 two fixtures compares two different exams, so the pull request may not claim
 *no regression* — and the way to be sure it does not is to give it no numbers
 to claim it with.
+
+**The fixed ops query's output is in the file, written here.** ``docs/adr/0016``
+requires the field reading to appear in the next Eval Report, and the point of
+that requirement is reconciliation: the battery scores a frozen fixture and says
+nothing about what live traffic did, so the two numbers only ever meet on this
+page. Rendered from the snapshot the run carried rather than fetched now, and
+never pasted in by hand.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+
+from src.agent.ops import (
+    GROUNDING_FAILED_RATE_THRESHOLD,
+    OPS_WINDOW_DAYS,
+    OpsSnapshot,
+)
 
 from .baseline import (
     CASE_EQUIVALENT_DRIFT,
@@ -152,6 +165,7 @@ def render_report(
 
     lines.extend(_surface_section(totals))
     lines.extend(_baseline_section(result))
+    lines.extend(_ops_section(result.ops))
 
     lines.append("## Cases")
     lines.append("")
@@ -365,6 +379,214 @@ def _baseline_section(result: EvalRunResult) -> list[str]:
         )
         lines.append("")
     return lines
+
+
+def _ops_section(ops: OpsSnapshot | None) -> list[str]:
+    """What the live service did, beside what the fixture measured.
+
+    ``docs/adr/0016``'s fixed ops query, output required here so that *the
+    battery and the field are reconciled instead of drifting apart*. A gate run
+    can be green over a frozen exam while production quietly blocks one answer
+    in five, and this section is the only place a reader would find out.
+
+    The threshold line comes first and reads as a sentence, because it is the
+    one number in this document a person is asked to act on: **``grounding_failed``
+    above 5% of Turns over 7 days reopens category B.** No alerting sits behind
+    it — one developer and no rotation means an alert would be noise — so being
+    legible on the page is the whole of the mechanism.
+    """
+    lines = ["## The field", ""]
+    if ops is None:
+        lines.append(
+            "The fixed ops query did not run. Its output is required here by "
+            "`docs/adr/0016`, so a report without it is a report that was "
+            "assembled by hand or by an older build."
+        )
+        lines.append("")
+        return lines
+
+    window = (
+        f"`{ops.since.isoformat()}` to `{ops.until.isoformat()}` "
+        f"({ops.window_days} days)"
+    )
+    if not ops.readable:
+        lines.append(
+            f"**The application store could not be read**, so the field is "
+            f"unknown over {window} rather than quiet: `{ops.error}`. The "
+            "scores above are unaffected — they are measured on the eval "
+            "database — but nothing here has been reconciled against "
+            "production."
+        )
+        lines.append("")
+        return lines
+
+    lines.append(f"One fixed read-only query over {window}. No table, no alerting.")
+    lines.append("")
+
+    lines.extend(_grounding_headline(ops))
+    lines.extend(_ops_tables(ops))
+    return lines
+
+
+def _grounding_headline(ops: OpsSnapshot) -> list[str]:
+    """The rate, and the verdict where the rule is entitled to give one.
+
+    Three readings, and only the last of them carries a verdict. **No Turn ran**
+    is not "at or below the threshold" — nothing was measured, and a window
+    claiming the bar was met is claiming a result it does not have. **A widened
+    window** is a useful reading and not the quantity the rule decides on: *5% of
+    Turns over 7 days* is one sentence and the span is half of it.
+    """
+    if not ops.turns:
+        return [
+            "**No Turn ran in this window**, so there is nothing to read the "
+            f"{GROUNDING_FAILED_RATE_THRESHOLD:.0%} `grounding_failed` "
+            "threshold against.",
+            "",
+        ]
+
+    reading = (
+        f"**`grounding_failed`: {ops.grounding_failed} of {ops.turns} Turns "
+        f"({_rate(ops.grounding_failed, ops.turns)})**"
+    )
+    if not ops.threshold_applies:
+        return [
+            f"{reading} — read over {ops.window_days} days rather than "
+            f"{OPS_WINDOW_DAYS}, so the "
+            f"{GROUNDING_FAILED_RATE_THRESHOLD:.0%} threshold is **not applied "
+            "here**. It is stated over seven days, and a different span is a "
+            "useful reading rather than the one the rule decides on.",
+            "",
+        ]
+
+    breached = "**above**" if ops.reopens_category_b else "at or below"
+    verdict_line = (
+        "> **Category B is reopened.** A sustained share this high means the "
+        "Recommendation Gate is blocking answers that were right, not that the "
+        "model is fabricating — over-blocking is exactly what category B "
+        "measures. Add cases from the flagged messages and re-run; nothing "
+        "else changes."
+        if ops.reopens_category_b
+        else "Category B stands. The threshold exists to catch the Gate "
+        "refusing ordinary correct answers, which is how this product would "
+        "die quietly."
+    )
+    return [
+        f"{reading} — {breached} the "
+        f"{GROUNDING_FAILED_RATE_THRESHOLD:.0%} threshold.",
+        "",
+        verdict_line,
+        "",
+    ]
+
+
+def _ops_tables(ops: OpsSnapshot) -> list[str]:
+    """The four distributions, each against the population it was counted over."""
+    lines: list[str] = []
+    lines.extend(
+        _ops_table(
+            "Incomplete Turns, by reason",
+            "Reason",
+            ops.incomplete_reasons,
+            ops.turns,
+            "No Turn ended incomplete in this window.",
+        )
+    )
+    lines.extend(
+        _ops_table(
+            "`unknown_tool`, by the tool that was asked for",
+            "Tool",
+            ops.unknown_tool_calls,
+            ops.tool_calls,
+            "Nothing reached for a tool that does not exist, in "
+            f"{ops.tool_calls} calls.",
+            note=(
+                "Also `docs/adr/0011`'s demand trigger: these names are the "
+                "evidence for whether sandboxed execution is ever worth "
+                "revisiting."
+            ),
+        )
+    )
+    lines.extend(
+        _ops_table(
+            "`answer_kind`, over Turns",
+            "Kind",
+            ops.answer_kinds,
+            ops.turns,
+            "No Turn ran in this window.",
+        )
+    )
+    lines.extend(
+        _ops_table(
+            "Flagged messages, by reason",
+            "Reason",
+            ops.flags,
+            ops.flags_total,
+            "Nothing was flagged in this window.",
+            note=_flag_note(ops),
+        )
+    )
+    return lines
+
+
+def _flag_note(ops: OpsSnapshot) -> str:
+    """Why flags matter, and — when there are any — how many.
+
+    The share column of the table below is *composition*: which reason
+    dominates, which is what drives the flag loop.
+
+    **A count and not a rate against Turns**, deliberately. A flag is placed in
+    time by ``flagged_at`` and a Turn by ``started_at``, so a flag inside this
+    window is often about an answer given outside it. Dividing one by the other
+    would print a percentage of two different populations, which is worse than
+    printing no percentage at all.
+    """
+    loop = (
+        "A flag confirmed as a genuine failure becomes a new Eval Case, frozen "
+        "with its fixture. That is the only sanctioned way this battery grows."
+    )
+    if not ops.flags_total:
+        return loop
+    return (
+        f"{ops.flags_total} flagged in this window — counted by when they were "
+        f"flagged, not by when the answer was given, so this is not a rate "
+        f"against the {ops.turns} Turns above. {loop}"
+    )
+
+
+def _ops_table(
+    title: str,
+    heading: str,
+    counts,
+    total: int,
+    empty: str,
+    *,
+    note: str | None = None,
+) -> list[str]:
+    """One signal, with its share of the population it was counted over.
+
+    The share is here rather than left to the reader because every one of these
+    counts is meaningless without its denominator — three unknown tool calls is
+    a curiosity out of four thousand and an emergency out of twelve.
+    """
+    lines = [f"### {title}", ""]
+    if note:
+        lines.append(note)
+        lines.append("")
+    if not any(counts.values()):
+        lines.append(empty)
+        lines.append("")
+        return lines
+    lines.append(f"| {heading} | Count | Share |")
+    lines.append("| --- | ---: | ---: |")
+    for name, count in counts.items():
+        lines.append(f"| `{name}` | {count} | {_rate(count, total)} |")
+    lines.append("")
+    return lines
+
+
+def _rate(part: int, whole: int) -> str:
+    return "—" if not whole else f"{part / whole * 100:.1f}%"
 
 
 def _pct(score) -> str:
