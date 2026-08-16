@@ -14,7 +14,7 @@ import {
   writeDeskSession,
 } from "@/lib/alpha-desk/desk-session"
 import { isActive, isSettled } from "@/lib/alpha-desk/live-turn"
-import { buildTranscript } from "@/lib/alpha-desk/transcript"
+import { buildTranscript, type OpenedAnalysis } from "@/lib/alpha-desk/transcript"
 import { DeskSurface } from "./desk-surface"
 import { HistoryMenu } from "./history-menu"
 import { SymbolDock, type DockSymbol } from "./symbol-dock"
@@ -57,6 +57,11 @@ export function AlphaDesk() {
   // refusal because it is a different failure: nothing was admitted, and there
   // is no Turn to retry.
   const [threadError, setThreadError] = useState<string | null>(null)
+  // The Analyses opened into the conversation on screen. Client state rather
+  // than a persisted resource: an artifact is a thing the reader put in front
+  // of themselves, not a message anybody sent, and it belongs to the Thread
+  // they were reading when they opened it.
+  const [openedAnalyses, setOpenedAnalyses] = useState<OpenedAnalysis[]>([])
 
   const thread = useThread(threadId)
   const turn = useLiveTurn(threadId)
@@ -151,9 +156,33 @@ export function AlphaDesk() {
         messages,
         live: turn.state,
         pendingUserText: unconfirmedQuestion,
+        openedAnalyses,
       }),
-    [threadId, messages, turn.state, unconfirmedQuestion],
+    [threadId, messages, turn.state, unconfirmedQuestion, openedAnalyses],
   )
+
+  // Read through a ref so opening an Analysis does not re-create the callback
+  // on every message that lands — the dock would re-render for each block of a
+  // streaming answer otherwise.
+  const messagesRef = useRef(messages)
+  messagesRef.current = messages
+
+  // Opening an Analysis anchors it under whatever the conversation had reached,
+  // so the evening's reading keeps its order as answers land underneath. The
+  // same pair opened twice moves nothing: it is already on screen, and a second
+  // copy would be the same artifact twice.
+  const openAnalysis = useCallback((symbol: string, tradingDay: string) => {
+    setOpenedAnalyses((opened) => {
+      if (opened.some((one) => one.symbol === symbol && one.tradingDay === tradingDay)) {
+        return opened
+      }
+      const afterSeq = messagesRef.current.reduce(
+        (highest, message) => Math.max(highest, message.seq),
+        0,
+      )
+      return [...opened, { symbol, tradingDay, afterSeq }]
+    })
+  }, [])
 
   const lastQuestion = useMemo(() => {
     for (let index = entries.length - 1; index >= 0; index -= 1) {
@@ -181,6 +210,7 @@ export function AlphaDesk() {
         state: entry.state,
         verdict: entry.latest?.verdict ?? null,
         unread: entry.unread,
+        latestTradingDay: entry.latest?.trading_day ?? null,
       })),
     [rail.data],
   )
@@ -192,6 +222,7 @@ export function AlphaDesk() {
       // Only the lens moves. No Thread is opened, none is closed, and nothing
       // is added to the Watchlist.
       onSelect={setActiveSymbol}
+      onOpenAnalysis={openAnalysis}
       tradingDay={rail.data?.trading_day ?? null}
       count={rail.data?.count ?? 0}
       cap={rail.data?.cap ?? 0}
@@ -200,10 +231,14 @@ export function AlphaDesk() {
     </SymbolDock>
   )
 
+  // Both of these leave the conversation the artifacts were opened into, so
+  // they leave with it: an Analysis anchored under message 4 of another Thread
+  // has no place to sit here.
   const openThread = useCallback((id: string) => {
     setThreadId(id)
     setUnconfirmedQuestion(null)
     setThreadError(null)
+    setOpenedAnalyses([])
   }, [])
 
   const { clearRefusal, reset } = turn
@@ -211,6 +246,7 @@ export function AlphaDesk() {
     setThreadId(null)
     setUnconfirmedQuestion(null)
     setThreadError(null)
+    setOpenedAnalyses([])
     reset()
   }, [reset])
 

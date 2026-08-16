@@ -158,8 +158,20 @@ existing hooks is its own effort.
   `docker-compose.prod.yml` has no outer proxy configuration and does not give the
   web container an internal API URL — the build must add that internal route rather
   than silently falling back to the public build-time URL.
+
+  **Chosen at A6 and recorded in `docs/streaming-topology.md`**: `browser → Caddy →
+  Next → FastAPI`, the outer proxy opt-in under a compose profile, the web container
+  reaching FastAPI over `INTERNAL_API_URL`. Two consequences the paragraph above did
+  not name, both found by the acceptance below. Uvicorn drains open connections
+  *before* the ASGI lifespan shuts down, and an SSE subscriber's connection is open
+  for the length of the Turn — so the drain has to be bounded or the 30-second
+  checkpoint window never begins. And `request.nextUrl.origin` is the address Next is
+  bound to rather than the one the browser asked for, so the handler's cross-origin
+  check reads `X-Forwarded-Host`/`Host`; checking against `nextUrl` refuses every
+  Alpha Desk write the moment a proxy is put in front.
 - **Streaming is accepted only against an end-to-end test through the real browser →
   Next → FastAPI path**: first block and a 15-second heartbeat arrive before
   completion, a reconnect begins with an ordered snapshot and duplicates nothing, a
   slow subscriber cannot slow the Turn, and the terminal refetch yields the canonical
-  message. Any future CDN or reverse proxy passes the same test.
+  message. Any future CDN or reverse proxy passes the same test. It lives in
+  `apps/web/e2e/streaming.spec.ts` and runs with `pnpm test:e2e`.
