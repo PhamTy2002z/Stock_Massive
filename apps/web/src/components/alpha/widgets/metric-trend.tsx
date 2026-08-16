@@ -1,6 +1,6 @@
 "use client"
 
-import { WIDGET_PALETTE } from "./palette"
+import { WIDGET_PALETTE, directionLabel, directionOf } from "./palette"
 import type { SeriesData, WidgetProps } from "./types"
 import { TooLittleData, WidgetFrame } from "./widget-frame"
 import { WidgetTable } from "./widget-table"
@@ -31,7 +31,7 @@ export function MetricTrend({
   data,
   expanded,
   onExpand,
-}: WidgetProps<SeriesData> & { onExpand?: () => void }) {
+}: WidgetProps<SeriesData>) {
   const present = data.series.filter(
     (point): point is { date: string; value: number } => point.value !== null
   )
@@ -67,7 +67,9 @@ export function MetricTrend({
     })
     .join(" ")
 
-  const direction = last > first ? "tăng" : last < first ? "giảm" : "đi ngang"
+  // The same reading of a sign the rest of the registry uses, rather than a
+  // third wording of it three files apart.
+  const direction = directionLabel(directionOf(last - first))
 
   return (
     <WidgetFrame
@@ -124,7 +126,7 @@ export function MetricTrend({
       </svg>
       <div
         className="mt-1 flex justify-between text-[11px] tabular-nums"
-        style={{ color: "hsl(var(--widget-ink-muted))" }}
+        style={{ color: WIDGET_PALETTE.inkMuted }}
       >
         <span>{present[0].date}</span>
         <span>{present[present.length - 1].date}</span>

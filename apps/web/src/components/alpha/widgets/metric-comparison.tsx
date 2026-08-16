@@ -32,7 +32,7 @@ export function MetricComparison({
   data,
   expanded,
   onExpand,
-}: WidgetProps<CrossSymbolData> & { onExpand?: () => void }) {
+}: WidgetProps<CrossSymbolData>) {
   const present = data.points.filter((point) => point.value !== null)
 
   // One bar is not a comparison, and an empty axis is not an answer.
@@ -108,19 +108,14 @@ export function MetricComparison({
         rows={rows}
         barColor={WIDGET_PALETTE.series}
         trackColor={WIDGET_PALETTE.track}
-        emphasisColor={WIDGET_PALETTE.focus}
         rowClassName="grid grid-cols-[minmax(44px,64px)_minmax(0,1fr)_minmax(72px,auto)] items-center gap-2 py-1.5"
         labelClassName="truncate text-[13px] font-medium"
         valueClassName="text-right text-[13px]"
       />
-      <ul className="sr-only">
-        {present.map((point) => (
-          <li key={point.symbol}>
-            {point.symbol}: {formatFieldValue(point.value, data.unit)},{" "}
-            {directionLabel(directionOf(point.value))}
-          </li>
-        ))}
-      </ul>
+      {/* No hidden restatement of the rows: each row already carries its
+          symbol and its figure as text, and the frame no longer walls the
+          drawing off behind `role="img"`. A second copy would only make a
+          screen reader read every bar twice. */}
       {signed && (
         // The direction key, in words rather than in swatches.
         <p className="sr-only">
@@ -132,7 +127,7 @@ export function MetricComparison({
   )
 }
 
-export function unavailableLines(data: CrossSymbolData): string[] {
+function unavailableLines(data: CrossSymbolData): string[] {
   const lines = data.points.map((point) =>
     point.value === null
       ? `${point.symbol}: chưa đủ dữ liệu${point.refusal ? ` (${point.refusal})` : ""}`

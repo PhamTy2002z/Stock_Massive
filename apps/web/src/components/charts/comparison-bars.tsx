@@ -29,8 +29,6 @@ export interface ComparisonRow {
   markerLabel?: string
   /** Secondary text at the end of the row. */
   trailing?: string
-  /** Marks the row the answer is about. */
-  emphasis?: boolean
   /** Overrides the bar colour for this row alone — a signed field needs it. */
   color?: string
 }
@@ -43,8 +41,6 @@ export interface ComparisonBarsProps {
   trackColor: string
   /** CSS colour for the reference tick, when a row carries one. */
   markerColor?: string
-  /** CSS colour for a row marked `emphasis`. */
-  emphasisColor?: string
   className?: string
   rowClassName?: string
   labelClassName?: string
@@ -57,7 +53,6 @@ export function ComparisonBars({
   barColor,
   trackColor,
   markerColor,
-  emphasisColor,
   className,
   rowClassName,
   labelClassName,
@@ -76,10 +71,7 @@ export function ComparisonBars({
             <span
               style={{
                 width: `${row.percent}%`,
-                backgroundColor:
-                  row.emphasis && emphasisColor
-                    ? emphasisColor
-                    : (row.color ?? barColor),
+                backgroundColor: row.color ?? barColor,
               }}
               className="absolute inset-y-0 left-0 rounded-full"
             />

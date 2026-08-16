@@ -96,6 +96,8 @@ export type WidgetData = CrossSymbolData | RankingData | SeriesData
 export interface WidgetProps<TData extends WidgetData> {
   spec: WidgetSpec
   data: TData
-  /** Rendered inside the expanded view, which is the only place it opens. */
+  /** Set inside the expanded view, which is the only place it is set. */
   expanded?: boolean
+  /** Opens the expanded view. Absent inside it, so it cannot nest. */
+  onExpand?: () => void
 }

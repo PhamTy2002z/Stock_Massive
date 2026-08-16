@@ -56,20 +56,33 @@ export function WidgetSlot({ spec, resolve, onExpand, className }: WidgetSlotPro
   )
   const [data, setData] = React.useState<WidgetData | null>(null)
 
+  // The effect fetches, and what it must fetch again for is a *different
+  // slice* — not a different object holding the same one. A transcript
+  // re-renders constantly while a Turn streams, and both the parsed spec and an
+  // inline `widgetResolverFor(messageId)` get a fresh identity on every one of
+  // those renders. Keyed on identity, the fetch would fire again on its own
+  // result, forever. So the identity of the work is spelled out instead: the
+  // registry pair plus the descriptor id, which is a hash of the descriptor
+  // and therefore already the name of exactly one fixed slice.
+  const slice = parsed ? `${parsed.name}@${parsed.version}#${parsed.descriptor_id}` : null
+  const latest = React.useRef({ parsed, entry, resolve })
+  latest.current = { parsed, entry, resolve }
+
   React.useEffect(() => {
-    if (!parsed || !entry) {
+    const { parsed: spec_, entry: entry_, resolve: resolve_ } = latest.current
+    if (!spec_ || !entry_) {
       setState("missing")
       return
     }
     let live = true
     setState("loading")
-    resolve(parsed)
+    resolve_(spec_)
       .then((resolved) => {
         if (!live) return
         // The registry's own pairing check. A descriptor kind that does not
         // match the component's is a spec and a build that disagree, and
         // rendering it anyway is how a ranking ends up drawn as a line.
-        if (resolved.kind !== entry.kind) {
+        if (resolved.kind !== entry_.kind) {
           setState("failed")
           return
         }
@@ -82,7 +95,7 @@ export function WidgetSlot({ spec, resolve, onExpand, className }: WidgetSlotPro
     return () => {
       live = false
     }
-  }, [parsed, entry, resolve, attempt])
+  }, [slice, attempt])
 
   // An unknown Widget leaves the text answer alone and says nothing. This is
   // the degradation ADR-0012 asks for, and it is one return statement.

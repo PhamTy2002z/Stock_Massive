@@ -8,11 +8,12 @@
  * always the same: the text answer survives, and nothing throws.
  */
 
+import * as React from "react"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { crossSymbol, ranking, spec } from "./fixtures"
-import { MessageWidgets } from "./message-widgets"
+import { MAX_WIDGETS_PER_ANSWER, MessageWidgets } from "./message-widgets"
 import { lookupWidget, supportedWidgets } from "./registry"
 import { parseWidgetRefusals, parseWidgetSpec, parseWidgetSpecs } from "./spec"
 import type { WidgetData, WidgetSpec } from "./types"
@@ -97,7 +98,7 @@ describe("the slot", () => {
     expect(screen.getByText(TEXT)).toBeInTheDocument()
     expect(screen.getByTestId("widget-placeholder")).toBeInTheDocument()
 
-    expect(await screen.findByRole("img")).toBeInTheDocument()
+    expect(await screen.findByRole("figure")).toBeInTheDocument()
     expect(screen.queryByTestId("widget-placeholder")).not.toBeInTheDocument()
     expect(screen.getByText(TEXT)).toBeInTheDocument()
   })
@@ -110,7 +111,7 @@ describe("the slot", () => {
     )
 
     expect(screen.getByText(TEXT)).toBeInTheDocument()
-    expect(screen.queryByRole("img")).not.toBeInTheDocument()
+    expect(screen.queryByRole("figure")).not.toBeInTheDocument()
     expect(screen.queryByTestId("widget-placeholder")).not.toBeInTheDocument()
   })
 
@@ -122,7 +123,7 @@ describe("the slot", () => {
     )
 
     expect(screen.getByText(TEXT)).toBeInTheDocument()
-    expect(screen.queryByRole("img")).not.toBeInTheDocument()
+    expect(screen.queryByRole("figure")).not.toBeInTheDocument()
   })
 
   it("refuses to draw data whose kind does not match the component", async () => {
@@ -137,7 +138,7 @@ describe("the slot", () => {
     await waitFor(() =>
       expect(screen.queryByTestId("widget-placeholder")).not.toBeInTheDocument()
     )
-    expect(screen.queryByRole("img")).not.toBeInTheDocument()
+    expect(screen.queryByRole("figure")).not.toBeInTheDocument()
     expect(screen.getByText(TEXT)).toBeInTheDocument()
   })
 
@@ -179,8 +180,31 @@ describe("the slot", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Thử lại" }))
 
-    expect(await screen.findByRole("img")).toBeInTheDocument()
+    expect(await screen.findByRole("figure")).toBeInTheDocument()
     expect(attempts).toBe(2)
+  })
+
+  it("resolves once even when the caller rebuilds its resolver every render", async () => {
+    const calls = { count: 0 }
+    function Host() {
+      const [, bump] = React.useState(0)
+      React.useEffect(() => {
+        // A parent that re-renders for its own reasons — a streaming
+        // transcript does this constantly.
+        bump(1)
+      }, [])
+      // Built inline, which is the natural way to write it. Keyed on the
+      // function's identity, this would refetch on its own result forever.
+      const resolve = async (): Promise<WidgetData> => {
+        calls.count += 1
+        return crossSymbol()
+      }
+      return <WidgetSlot spec={spec()} resolve={resolve} />
+    }
+    render(<Host />)
+
+    await screen.findByRole("figure")
+    await waitFor(() => expect(calls.count).toBe(1))
   })
 
   it("resolves the spec's own descriptor, so a reopened Thread is a record", async () => {
@@ -192,7 +216,7 @@ describe("the slot", () => {
       />
     )
 
-    await screen.findByRole("img")
+    await screen.findByRole("figure")
 
     // The slot hands the resolver the persisted spec and nothing of its own,
     // so there is no parameter through which today could be asked for.
@@ -204,7 +228,11 @@ describe("the slot", () => {
 })
 
 describe("the answer's Widgets", () => {
-  it("renders one Widget per answer by default", async () => {
+  it("renders what the server admitted, which is the one-or-two ruling", async () => {
+    // One Widget per answer, and two only where the user asked for two, is
+    // decided by `apps/api` before anything is persisted — it is the only side
+    // holding the user's text. A message carrying two carries two because the
+    // user asked; the transcript does not re-litigate that.
     render(
       <MessageWidgets
         messageId={1}
@@ -213,23 +241,25 @@ describe("the answer's Widgets", () => {
       />
     )
 
-    await screen.findByRole("img")
-    expect(screen.getAllByRole("img")).toHaveLength(1)
+    await waitFor(() => expect(screen.getAllByRole("figure")).toHaveLength(2))
   })
 
-  it("renders a second only where the user asked for one", async () => {
+  it("bounds an absurd message rather than spraying the transcript", async () => {
     render(
       <MessageWidgets
         messageId={1}
         widgets={[
-          spec({ requested: true }),
-          spec({ requested: true, descriptor_id: "second" }),
+          spec(),
+          spec({ descriptor_id: "second" }),
+          spec({ descriptor_id: "third" }),
+          spec({ descriptor_id: "fourth" }),
         ]}
         resolve={resolvesTo(crossSymbol())}
       />
     )
 
-    await waitFor(() => expect(screen.getAllByRole("img")).toHaveLength(2))
+    await screen.findAllByRole("figure")
+    expect(screen.getAllByRole("figure")).toHaveLength(MAX_WIDGETS_PER_ANSWER)
   })
 
   it("offers the existing screen when the chart is one Stock 360 owns", () => {

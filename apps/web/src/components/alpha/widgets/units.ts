@@ -5,6 +5,10 @@
  * validated spec — and this module only decides how many digits and which
  * suffix. Nothing here converts: a Widget that rescaled a figure would be a
  * Widget changing a unit, which is exactly what ADR-0012 keeps on the server.
+ *
+ * One record rather than two switches over the same strings. Two cascades on
+ * one union is how a unit ends up formatted here and labelled as something else
+ * three lines down, and the pair is what a reader actually sees together.
  */
 
 const VND_SCALES: [number, string][] = [
@@ -20,56 +24,50 @@ function decimals(value: number, digits: number): string {
   })
 }
 
+function money(value: number): string {
+  const scale = VND_SCALES.find(([bound]) => Math.abs(value) >= bound)
+  return scale ? `${decimals(value / scale[0], 2)} ${scale[1]}` : `${decimals(value, 0)} đ`
+}
+
+interface UnitStyle {
+  /** How one value of this unit is written out. */
+  format: (value: number) => string
+  /** The short form an axis or a column header carries. */
+  label: string
+}
+
+/** Every unit the Signal Registry declares, and how each is read. */
+const UNITS: Record<string, UnitStyle> = {
+  percent: { format: (v) => `${decimals(v, 2)}%`, label: "%" },
+  percent_annualized: { format: (v) => `${decimals(v, 2)}%`, label: "%/năm" },
+  percent_per_billion_vnd: {
+    format: (v) => `${decimals(v, 4)}%/tỷ`,
+    label: "%/tỷ đồng",
+  },
+  // Already a 0–100 rank, so the axis says what it is rather than the figure.
+  percentile: { format: (v) => decimals(v, 1), label: "phân vị" },
+  index_0_100: { format: (v) => decimals(v, 1), label: "chỉ số 0–100" },
+  z_score: { format: (v) => decimals(v, 2), label: "z" },
+  ratio: { format: (v) => decimals(v, 2), label: "lần" },
+  sessions: { format: (v) => `${decimals(v, 0)} phiên`, label: "phiên" },
+  shares: { format: (v) => `${decimals(v, 0)} cp`, label: "cp" },
+  vnd: { format: money, label: "đồng" },
+}
+
+/** What an unrecognised unit falls back to, so a new one is legible on sight. */
+const UNKNOWN: UnitStyle = { format: (v) => decimals(v, 2), label: "" }
+
+function styleOf(unit: string | null): UnitStyle {
+  return (unit && UNITS[unit]) || UNKNOWN
+}
+
 export function formatFieldValue(value: number | null, unit: string | null): string {
   if (value === null || Number.isNaN(value)) return "—"
-  switch (unit) {
-    case "percent":
-    case "percent_annualized":
-      return `${decimals(value, 2)}%`
-    case "percentile":
-      return `${decimals(value, 1)}` // already a 0–100 rank; the axis says so
-    case "index_0_100":
-      return decimals(value, 1)
-    case "ratio":
-    case "z_score":
-      return decimals(value, 2)
-    case "sessions":
-      return `${decimals(value, 0)} phiên`
-    case "shares":
-      return `${decimals(value, 0)} cp`
-    case "vnd": {
-      const scale = VND_SCALES.find(([bound]) => Math.abs(value) >= bound)
-      return scale
-        ? `${decimals(value / scale[0], 2)} ${scale[1]}`
-        : `${decimals(value, 0)} đ`
-    }
-    default:
-      return decimals(value, 2)
-  }
+  return styleOf(unit).format(value)
 }
 
 /** The unit as a short axis label, for the picture rather than the figure. */
 export function unitLabel(unit: string | null): string {
-  switch (unit) {
-    case "percent":
-      return "%"
-    case "percent_annualized":
-      return "%/năm"
-    case "percentile":
-      return "phân vị"
-    case "index_0_100":
-      return "chỉ số 0–100"
-    case "z_score":
-      return "z"
-    case "ratio":
-      return "lần"
-    case "sessions":
-      return "phiên"
-    case "shares":
-      return "cp"
-    case "vnd":
-      return "đồng"
-    default:
-      return unit ?? ""
-  }
+  const style = styleOf(unit)
+  return style === UNKNOWN ? (unit ?? "") : style.label
 }

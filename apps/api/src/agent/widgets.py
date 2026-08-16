@@ -62,7 +62,9 @@ from typing import Any
 
 from src.stocks.signals import registered_field
 
+from .context import TranscriptToolCall
 from .grounding import Citation, EvidenceRef, EvidenceSource, GroundingFailure, TraceIndex
+from .tools.data import availability
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +180,14 @@ STOCK_360_SUBJECTS: Mapping[tuple[str, str], str] = {
 # model assertion — and ``docs/adr/0015`` does not let a model certify that it
 # passed a backend check. Being conservative here costs a user an occasional
 # second chart; being permissive costs every user the anti-spam rule.
+# What turns a mention of a chart into a refusal of one. Substring matching
+# cannot tell "vẽ biểu đồ" from "đừng vẽ biểu đồ", and of the two readings the
+# expensive one is treating a refusal as a request: it raises the Widget ceiling
+# and it turns a silent failure into a *Retry* box for something nobody wanted.
+# So a negation anywhere in the message withdraws the request, which errs
+# towards drawing less.
+_NEGATIONS = ("đừng", "không", "khỏi", "chớ", "no chart", "without a chart", "don't")
+
 _VISUAL_PHRASES = (
     "biểu đồ",
     "đồ thị",
@@ -296,14 +306,29 @@ def descriptor_id(descriptor: Mapping[str, Any]) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:24]
 
 
+def _asks_for(user_text: str, phrases: Sequence[str]) -> bool:
+    """Whether the user's own words ask for one of these things.
+
+    Substring matching over a closed list, and a negation anywhere withdraws
+    the ask. Both halves are deliberately blunt: the alternative is a model
+    assertion, and ``docs/adr/0015`` does not let a model certify that it
+    passed a backend check. Erring towards "no" costs a reader an occasional
+    chart; erring towards "yes" spends the anti-spam rule on a message that
+    said not to.
+    """
+    lowered = user_text.casefold()
+    if any(negation in lowered for negation in _NEGATIONS):
+        return False
+    return any(phrase in lowered for phrase in phrases)
+
+
 def user_requested_multiple(user_text: str) -> bool:
     """Whether this Turn's user text explicitly asked for more than one visual.
 
     Read off the user's own words, which is the only signal the backend owns.
     The model cannot set it, and there is no field it could set.
     """
-    lowered = user_text.casefold()
-    return any(phrase in lowered for phrase in _SECOND_WIDGET_PHRASES)
+    return _asks_for(user_text, _SECOND_WIDGET_PHRASES)
 
 
 def user_requested_visual(user_text: str) -> bool:
@@ -316,8 +341,7 @@ def user_requested_visual(user_text: str) -> bool:
     question they asked. Only the backend holds the user's text, so only the
     backend can answer this honestly, and the model cannot set it.
     """
-    lowered = user_text.casefold()
-    return any(phrase in lowered for phrase in _VISUAL_PHRASES)
+    return _asks_for(user_text, _VISUAL_PHRASES)
 
 
 def extract_selections(text: str) -> tuple[str, tuple[WidgetSelection, ...]]:
@@ -444,9 +468,33 @@ class WidgetValidator:
             BindingKind.SERIES: self._series,
             BindingKind.POSITION: self._position,
         }[definition.binding]
+        spec = builder(definition, selection, traces)
+        self._refuse_future_slice(spec)
         # Stamped once, here, rather than threaded through four builders that
         # would each have to remember it.
-        return replace(builder(definition, selection, traces), requested=self._requested)
+        return replace(spec, requested=self._requested)
+
+    def _refuse_future_slice(self, spec: WidgetSpec) -> None:
+        """A picture cannot be dated past the Turn that drew it.
+
+        The bindings all take their date off the trace, so this is not a check
+        against the model — it is a check against a tool result, a clock or a
+        store that disagrees with the Trading Day this Turn was admitted for. A
+        chart dated tomorrow is the one staleness failure that looks like
+        freshness, so it is refused rather than drawn.
+        """
+        try:
+            dated = date.fromisoformat(spec.as_of)
+        except ValueError:
+            raise WidgetRejected(
+                "missing_as_of", f"{spec.as_of!r} is not a Trading Day"
+            ) from None
+        if dated > self._trading_day:
+            raise WidgetRejected(
+                "future_slice",
+                f"the selection is dated {dated.isoformat()} but this Turn is dated "
+                f"{self._trading_day.isoformat()}",
+            )
 
     # -- the four bindings -------------------------------------------------
 
@@ -705,7 +753,7 @@ class WidgetValidator:
     @staticmethod
     def _descriptor_binding(
         ref: EvidenceRef, traces: TraceIndex
-    ) -> tuple[Any, Any]:
+    ) -> tuple[TranscriptToolCall, Any]:
         try:
             return traces.resolve_descriptor(ref)
         except GroundingFailure as failure:
@@ -744,8 +792,19 @@ class WidgetDataResolver:
     is only sound because EOD data is settled, which is exactly why the
     descriptor pins a day rather than saying ``latest``.
 
-    Nothing here reads today. A reopened Thread resolves the day the descriptor
-    carries, and *update with new data* is a new Turn.
+    Nothing here chooses a day. A reopened Thread resolves the day the
+    descriptor carries, and *update with new data* is a new Turn.
+
+    **One thing is not pinned, and it is worth stating rather than implying.**
+    A cross-sectional field — anything whose unit is ``percentile`` — is a rank
+    *within the Universe*, and ``build_universe`` has no as-of dimension
+    anywhere in this codebase: ADR-0001 defines the Universe as the active
+    cohort, full stop. So a percentile replayed after the cache expires is the
+    old day's figures ranked against the current cohort. The window, the field
+    and the symbols are the ones the answer was written with; the peer set is
+    today's. Giving the Universe a temporal dimension is a change to ADR-0001
+    rather than to this module, so it is named here instead of quietly
+    approximated.
     """
 
     def __init__(
@@ -775,11 +834,7 @@ class WidgetDataResolver:
             # throws while re-reading a year-old answer, which is the failure
             # ``docs/adr/0012`` refuses on both sides of persistence.
             logger.info("A Widget slice could not be reconstructed: %s", exc)
-            return {
-                **_descriptor_echo(descriptor),
-                "available": False,
-                "unavailable_reason": "slice_unavailable",
-            }
+            return {**_descriptor_echo(descriptor), **availability(False)}
         self._cache_set(key, payload)
         return payload
 
@@ -818,12 +873,15 @@ class WidgetDataResolver:
                 "sort_by": screen.get("sort_by"),
                 "order": screen.get("order"),
                 "matched_count": screen.get("matched_count"),
-                "available": bool(rows),
-                "unavailable_reason": None if rows else "slice_unavailable",
+                **availability(bool(rows)),
             }
         if kind == BindingKind.SERIES.value:
-            resolved = await self._tools.resolve_data_ref(dict(descriptor["data_ref"]))
-            return {**_descriptor_echo(descriptor), **resolved}
+            reference = dict(descriptor["data_ref"])
+            resolved = await self._tools.resolve_data_ref(reference)
+            return {
+                **_descriptor_echo(descriptor),
+                **_series_points(resolved, str(reference.get("field") or "")),
+            }
         raise WidgetRejected("unknown_descriptor", f"{kind!r} is not a Widget binding")
 
     def _cache_get(self, key: str) -> Mapping[str, Any] | None:
@@ -851,6 +909,32 @@ class WidgetDataResolver:
             )
         except Exception:  # noqa: BLE001 - the store already answered
             return
+
+
+def _series_points(resolved: Mapping[str, Any], field: str) -> dict[str, Any]:
+    """One `(date, value)` series, whatever column the store answered with.
+
+    A Data Reference is a *store* shape — the OHLCV one carries five columns —
+    and a trend Widget takes one series. Naming the column here rather than in
+    the component is the same rule as everywhere else in this module: the server
+    decides what a Widget is looking at, and the component draws what it is
+    given.
+    """
+    rows = resolved.get("series") or ()
+    column = "close_price" if field == "ohlcv" else "value"
+    points = [
+        {"date": row.get("date"), "value": row.get(column)}
+        for row in rows
+        if isinstance(row, Mapping)
+    ]
+    present = any(point["value"] is not None for point in points)
+    return {
+        "field": field,
+        # A price series is dong; a registered field brings its own declaration.
+        "unit": "vnd" if field == "ohlcv" else registered_field(field).unit.value,
+        "series": points,
+        **availability(present),
+    }
 
 
 def _descriptor_echo(descriptor: Mapping[str, Any]) -> dict[str, Any]:

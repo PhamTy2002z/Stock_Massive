@@ -13,11 +13,15 @@ import { WidgetSlot } from "./widget-slot"
  * The transcript mounts this once per assistant message and hands it the raw
  * message content. It owns three things the individual slots cannot:
  *
- * **The ceiling.** At most one Widget per answer, two only where the backend
- * recorded that the user asked for a second. `apps/api` already enforced this
- * before persisting; enforcing it again here costs one `slice` and means a
- * message written by an older build — or by a bug — cannot spray a transcript
- * with pictures.
+ * **The ceiling.** One Widget per answer, and a second only where the user
+ * asked for two. That rule is decided by `apps/api`, which is the only side
+ * holding the user's text, and it is applied *before* the specs are persisted —
+ * so a message can never legitimately carry more than the answer was allowed.
+ * What is left for here is a hard bound, not a second opinion: an older build's
+ * message, or a bug, must not be able to spray a transcript with pictures. The
+ * bound is deliberately not re-derived from `requested`, which records whether
+ * the user asked for *a* visual and would say nothing about whether they asked
+ * for *two*.
  *
  * **Expand.** One dialog for the whole message rather than one per slot, so two
  * Widgets cannot both be open and the expanded view always shows the data the
@@ -27,6 +31,15 @@ import { WidgetSlot } from "./widget-slot"
  * chart is the one refusal worth showing: it is not a broken picture, it is a
  * pointer to the screen that has the real one.
  */
+/**
+ * The most any answer may draw, whatever it was persisted carrying.
+ *
+ * Two, because two is what the server's own ceiling allows at its most
+ * permissive. This is the backstop; the one-versus-two decision is the
+ * server's.
+ */
+export const MAX_WIDGETS_PER_ANSWER = 2
+
 export interface MessageWidgetsProps {
   /** The assistant message's `id`, which is how its data is read back. */
   messageId: number
@@ -51,8 +64,7 @@ export function MessageWidgets({
     data: WidgetData
   } | null>(null)
 
-  const ceiling = specs.some((spec) => spec.requested) ? 2 : 1
-  const shown = specs.slice(0, ceiling)
+  const shown = specs.slice(0, MAX_WIDGETS_PER_ANSWER)
 
   if (shown.length === 0 && links.length === 0) return null
 
