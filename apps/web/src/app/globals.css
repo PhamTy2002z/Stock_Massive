@@ -174,12 +174,27 @@
   }
 
   body {
-    @apply bg-background text-foreground;
+    /* `font-sans` rather than a face pinned by class in the layout: a component
+       asking for `font-sans` and a component inheriting from the body then
+       resolve to the same stack, which they cannot if the two are declared in
+       different places. */
+    @apply bg-background font-sans text-foreground;
     /* The reference sets 15px as the body size — every ratio in the design
        (.9rem nav rows, .86rem controls, .74rem eyebrow labels) is derived from
        it, so it is stated once here rather than fought per component. */
     font-size: 15px;
+    /* Both halves of the pair. On a near-black ground the default rendering
+       thickens light type until it blooms, and the two properties cover the two
+       engines that do it. */
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Figures are compared down a column far more often than they are read in a
+     sentence here, so the mono face gets its tabular set — proportional digits
+     make a price column jitter one pixel per row. */
+  .font-mono {
+    font-variant-numeric: tabular-nums;
   }
 
   /* A scrollbar that reads as chrome rather than as a control: a lifted white
