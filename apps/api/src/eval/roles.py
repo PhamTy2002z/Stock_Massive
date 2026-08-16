@@ -147,19 +147,6 @@ def _industry(wanted: AnalysisIndustry) -> ProbeFn:
     return probe
 
 
-def _ordinary(session: Session, symbol: str, context: RoleContext) -> bool:
-    """Classified, and none of the three the Field Profile has metrics for.
-
-    ``OTHER`` and not ``UNCLASSIFIED``: the fourth seat exists because emphasis
-    differs by industry, and an unclassified symbol tests the store's ignorance
-    rather than the ordinary case.
-    """
-    code = session.scalar(
-        select(ListingRoster.icb_code).where(ListingRoster.symbol == symbol)
-    )
-    return industry_for_icb(code) is AnalysisIndustry.OTHER
-
-
 def _outside_universe(session: Session, symbol: str, context: RoleContext) -> bool:
     listed = session.scalar(
         select(ListingRoster.is_listed).where(ListingRoster.symbol == symbol)
@@ -220,8 +207,14 @@ ROLE_PROBES: Mapping[FixtureRole, RoleProbe] = {
         ),
         RoleProbe(
             role=FixtureRole.ORDINARY,
-            description="classified, and none of the three industries with metrics",
-            holds=_ordinary,
+            # ``OTHER`` and not ``UNCLASSIFIED``: the fourth seat exists because
+            # emphasis differs by industry, and an unclassified symbol tests the
+            # store's ignorance rather than the ordinary case.
+            description=(
+                "the store has classified it, and into none of the three "
+                "industries the Field Profile has metrics for"
+            ),
+            holds=_industry(AnalysisIndustry.OTHER),
         ),
         RoleProbe(
             role=FixtureRole.OUTSIDE_UNIVERSE,

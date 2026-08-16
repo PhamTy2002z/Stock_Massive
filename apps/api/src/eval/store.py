@@ -143,32 +143,19 @@ def load_fixture(
 ) -> LoadedFixture:
     """Replace the eval database's fixture state with this seed.
 
-    Idempotent by construction: every captured table is emptied of the fixture's
-    symbols and refilled, and the eval user's watchlist is rewritten whole.
-    Loading twice yields the same state, which is the acceptance criterion — and
-    it is a *replace* rather than an upsert because a fixture is a photograph:
-    merging two of them produces a store that never existed.
+    Idempotent by construction: every captured table is **truncated** and
+    refilled, and the eval user's watchlist is rewritten whole. Loading twice
+    yields the same state, which is the acceptance criterion.
+
+    Whole tables rather than only the fixture's symbols, and that is the
+    difference between a replace and a merge. A fixture is a photograph of one
+    store at one ``trading_day``; leaving a previous fixture's symbols in place
+    beside this one's would produce a store that never existed — with a Universe
+    of one vintage and a market calendar of two.
     """
     seed.manifest.versions.assert_matches()
 
-    session = session_factory()
-    try:
-        with session.begin():
-            for table in CAPTURED_TABLES:
-                session.execute(delete(table.model))
-            user_id = _seat_user(session)
-            session.execute(
-                delete(WatchlistEntry).where(WatchlistEntry.user_id == user_id)
-            )
-            for table in CAPTURED_TABLES:
-                rows = seed.rows(table.name)
-                if not rows:
-                    continue
-                session.add_all([decode_row(table, payload) for payload in rows])
-            session.flush()
-            _seat_watchlist(session, user_id, seed.manifest.watchlist)
-    finally:
-        session.close()
+    user_id = _replace_fixture_state(session_factory, seed)
 
     loaded = LoadedFixture(seed=seed, user_id=user_id)
     if verify:
@@ -191,6 +178,31 @@ def load_fixture(
         len(seed.manifest.symbols),
     )
     return loaded
+
+
+def _replace_fixture_state(
+    session_factory: Callable[[], Session], seed: FixtureSeed
+) -> int:
+    """One transaction: truncate, refill, reseat. Returns the eval user's id."""
+    session = session_factory()
+    try:
+        with session.begin():
+            for table in CAPTURED_TABLES:
+                session.execute(delete(table.model))
+            user_id = _seat_user(session)
+            session.execute(
+                delete(WatchlistEntry).where(WatchlistEntry.user_id == user_id)
+            )
+            for table in CAPTURED_TABLES:
+                rows = seed.rows(table.name)
+                if not rows:
+                    continue
+                session.add_all([decode_row(table, payload) for payload in rows])
+            session.flush()
+            _seat_watchlist(session, user_id, seed.manifest.watchlist)
+            return user_id
+    finally:
+        session.close()
 
 
 def _seat_user(session: Session) -> int:
