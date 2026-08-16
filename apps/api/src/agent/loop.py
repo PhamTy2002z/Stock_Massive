@@ -252,6 +252,44 @@ class TurnRequest:
 
 
 @dataclass(frozen=True)
+class SpendIdentity:
+    """Which durable artifact this loop's provider calls are charged to.
+
+    ``docs/adr/0014`` requires every provider call to name an owner with a
+    non-null id, and there are two artifacts that can be that owner for a run of
+    *this* loop: the user's request message, which is a Turn, and an
+    ``eval_run``, which is the Eval Battery running the very same loop over the
+    frozen fixture (``docs/adr/0016``).
+
+    A parameter rather than a branch inside :meth:`AgentLoop._complete`, because
+    the alternative to a seam here is an eval-only code path through the agent
+    loop — and a battery that exercises a different loop from the one that
+    answers users measures the wrong thing.
+
+    ``charge_to_user`` is off for the battery deliberately. The eval user is a
+    fixture actor rather than a customer; charging it the per-user daily Turn
+    allowance would refuse the battery on its twenty-first case for a reason
+    that has nothing to do with what the battery is measuring.
+    """
+
+    owner_type: OwnerType = OwnerType.TURN_REQUEST_MESSAGE
+    lane: BudgetLane = BudgetLane.TURN
+    owner_id: str | None = None
+    charge_to_user: bool = True
+
+    def owner(self, request: "TurnRequest") -> CallOwner:
+        return CallOwner(
+            type=self.owner_type,
+            id=self.owner_id or str(request.request_message_id),
+            user_id=request.user_id if self.charge_to_user else None,
+        )
+
+
+#: What a Turn served to a user is charged to, and the default everywhere.
+TURN_SPEND = SpendIdentity()
+
+
+@dataclass(frozen=True)
 class TurnDraft:
     """What has been produced so far, for checkpointing.
 
@@ -483,7 +521,9 @@ class AgentLoop:
         publisher: TurnPublisher | None = None,
         call_timeout_seconds: float = LLM_CALL_TIMEOUT_SECONDS,
         tool_timeout_seconds: float = TOOL_TIMEOUT_SECONDS,
+        spend: SpendIdentity = TURN_SPEND,
     ) -> None:
+        self._spend = spend
         self._client = client
         self._catalog = catalog
         self._budget = budget or ContextBudget()
@@ -668,12 +708,8 @@ class AgentLoop:
         the network call; the loop's job is to name the worst case honestly.
         """
         spend = SpendRequest(
-            owner=CallOwner(
-                type=OwnerType.TURN_REQUEST_MESSAGE,
-                id=str(request.request_message_id),
-                user_id=request.user_id,
-            ),
-            lane=BudgetLane.TURN,
+            owner=self._spend.owner(request),
+            lane=self._spend.lane,
             workload=Workload.SESSION,
             input_tokens=context.estimated_tokens
             + (ROUNDS_EXHAUSTED_TOKENS if final else 0),
@@ -961,9 +997,11 @@ __all__ = [
     "ROUNDS_EXHAUSTED_TOKENS",
     "SESSION_CONCURRENCY",
     "TOOL_TIMEOUT_SECONDS",
+    "TURN_SPEND",
     "AgentLoop",
     "SessionCapacityExceeded",
     "SessionSlots",
+    "SpendIdentity",
     "ToolCallIdMismatch",
     "ToolTimeout",
     "TurnDraft",
