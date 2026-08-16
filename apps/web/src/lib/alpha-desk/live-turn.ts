@@ -317,3 +317,29 @@ export function isSettled(state: LiveTurn): boolean {
 export function isActive(state: LiveTurn): boolean {
   return state.phase === "starting" || state.phase === "running"
 }
+
+/**
+ * What "ask this again" means for one question in the transcript.
+ *
+ * Three answers, and the distinction between the first two is what a Turn id
+ * records. Asking the *last* question again after its Turn hung, failed or was
+ * cancelled is a second attempt, and goes out with `retry_of_turn_id` so the
+ * two are linked. Asking an earlier one — or the last one after it was answered
+ * — is a new question that happens to repeat one, and claiming it retried a
+ * Turn that already answered would make the lifecycle say something false.
+ *
+ * `"nothing"` while a Turn is in flight: the composer offers Stop rather than
+ * Send for that stretch, and a resend slipping past it opens a second Turn
+ * behind the one on screen.
+ */
+export function resendPlan(
+  state: LiveTurn,
+  isLastQuestion: boolean,
+): "retry" | "submit" | "nothing" {
+  if (isActive(state)) return "nothing"
+  const endedBadly =
+    state.phase === "failed" ||
+    state.phase === "incomplete" ||
+    state.phase === "cancelled"
+  return isLastQuestion && endedBadly ? "retry" : "submit"
+}

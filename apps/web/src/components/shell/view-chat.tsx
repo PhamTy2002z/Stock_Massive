@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useRef } from "react"
-import { AlertCircle, X } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { AlertCircle, Check, Copy, Pencil, RotateCcw, X } from "lucide-react"
 
 import { AnalysisCard } from "@/components/alpha/analysis"
 import { AssistantMessage } from "@/components/alpha/message/assistant-message"
@@ -64,22 +64,7 @@ export function ChatView() {
         <div className="mx-auto w-full max-w-[760px] space-y-7 py-5">
           {desk.entries.map((entry) => {
             if (entry.kind === "user") {
-              return (
-                <div key={entry.key} className="flex justify-end">
-                  {/* The question is the one thing in a bubble, and it is the
-                      bubble surface rather than the muted one: on this ground
-                      `bg-muted` sits a percent off the page and stops reading
-                      as a bubble at all. */}
-                  <p
-                    className={cn(
-                      "max-w-[82%] animate-vg-message-in whitespace-pre-wrap rounded-2xl bg-surface-bubble px-[1.05em] py-[0.7em] text-[0.95rem] leading-[1.5] text-foreground",
-                      entry.pending && "opacity-70",
-                    )}
-                  >
-                    {entry.text}
-                  </p>
-                </div>
-              )
+              return <UserMessage key={entry.key} text={entry.text} pending={entry.pending} />
             }
 
             if (entry.kind === "assistant") {
@@ -150,6 +135,90 @@ export function ChatView() {
         </div>
       </div>
     </>
+  )
+}
+
+/**
+ * One question the user asked, and the three things they can do with it again.
+ *
+ * The actions sit under the bubble and appear on hover or on focus. Copy is the
+ * text itself; Sửa offers it back to the composer *unsent*, which is the same
+ * contract a question offered by a panel has (`shell-state`, `ask`); Gửi lại
+ * asks it again, and on the last question of a Turn that ended badly that is a
+ * linked retry rather than a fresh Turn (`desk-state`, `resend`).
+ *
+ * **Sửa edits nothing.** A message is immutable in the store, so putting the
+ * sentence back in the field is the honest version of editing it: what leaves
+ * is a new question, and the one already asked stays in the transcript where
+ * the answer under it can still be read against it.
+ *
+ * The row is mounted always and revealed with opacity — mounting on hover puts
+ * it out of reach of a keyboard, and makes it appear under a pointer that had
+ * already arrived.
+ */
+function UserMessage({ text, pending }: { text: string; pending: boolean }) {
+  const desk = useDesk()
+  const { dispatch } = useShell()
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!copied) return
+    const timer = window.setTimeout(() => setCopied(false), 1600)
+    return () => window.clearTimeout(timer)
+  }, [copied])
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+    } catch {
+      // A browser that refuses the clipboard — no permission, an insecure
+      // origin — is not something to report as an error over one sentence the
+      // user can still select by hand.
+    }
+  }
+
+  return (
+    <div className="group/msg flex flex-col items-end gap-1">
+      {/* The question is the one thing in a bubble, and it is the bubble
+          surface rather than the muted one: on this ground `bg-muted` sits a
+          percent off the page and stops reading as a bubble at all. */}
+      <p
+        className={cn(
+          "max-w-[82%] animate-vg-message-in whitespace-pre-wrap rounded-2xl bg-surface-bubble px-[1.05em] py-[0.7em] text-[0.95rem] leading-[1.5] text-foreground",
+          pending && "opacity-70",
+        )}
+      >
+        {text}
+      </p>
+
+      {/* Nothing to act on until the question exists on the backend: a pending
+          bubble is a sentence this tab has not yet been told was written. */}
+      {!pending && (
+        <div className="flex items-center gap-0.5 pr-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover/msg:opacity-100">
+          <IconButton label={copied ? "Đã sao chép" : "Sao chép"} size="sm" onClick={() => void copy()}>
+            {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+          </IconButton>
+          <IconButton
+            label="Sửa câu hỏi"
+            size="sm"
+            onClick={() => dispatch({ type: "ask", text })}
+          >
+            <Pencil className="size-3.5" />
+          </IconButton>
+          <IconButton
+            label="Gửi lại"
+            size="sm"
+            // A Turn is running: the composer offers Stop rather than Send for
+            // this stretch, and this control says the same thing by going inert.
+            disabled={desk.canCancel}
+            onClick={() => desk.resend(text)}
+          >
+            <RotateCcw className="size-3.5" />
+          </IconButton>
+        </div>
+      )}
+    </div>
   )
 }
 
