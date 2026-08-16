@@ -279,6 +279,15 @@ class Settings(BaseSettings):
     # baseline có một lịch sử diff được ở nơi người đọc tìm tài liệu.
     eval_report_dir: str = "../../docs/eval"
 
+    # Cửa sổ mà ops query cố định đọc năm tín hiệu hiện trường, tính bằng ngày
+    # (`src/agent/ops.py`, ADR-0016). Cấu hình được vì một triển khai có lưu
+    # lượng khác có thể cần cửa sổ rộng hơn để con số nói lên điều gì đó. Ngưỡng
+    # 5% thì **không** cấu hình được: "5% số Turn trong 7 ngày" là một câu, và
+    # một tỷ lệ đo trên khoảng khác không còn là đại lượng mà quy tắc nói tới —
+    # nên khi đổi số này, dòng ngưỡng trong Eval Report cũng nói rõ nó đang đọc
+    # trên cửa sổ nào.
+    eval_ops_window_days: int = 7
+
     # Tuyến dev mà chế độ `smoke` chạy trên đó — CLIProxyAPI cục bộ hoặc một
     # model dev — và nó không có giá trị gating vì không chạm tới model
     # production. Giá bằng 0 là sự thật về tuyến này chứ không phải một cách lách

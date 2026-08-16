@@ -20,10 +20,11 @@ one to assert on a heading would be a slower test asserting the same thing.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from src.agent.ops import NO_ANSWER_KIND, OPS_WINDOW_DAYS, OpsSnapshot
 from src.eval.baseline import Baseline, BaselineComparison, compare_to_baseline
 from src.eval.cases import (
     AnalysisExpectation,
@@ -126,6 +127,52 @@ def analysis_result(case_id: str = "analysis-d-bank") -> CaseResult:
     )
 
 
+def a_registered_turn_case() -> str:
+    """The id of a real category-B Turn case this build seats.
+
+    Needed only by the round-trip tests: a record is refused when it names a
+    case the registry does not hold, so a synthetic id cannot travel through
+    one. Read from the battery rather than written down, because a hard-coded
+    id here would be a second place the case list has to be kept true.
+    """
+    from src.eval import categories as _seeded  # noqa: F401 - seats the battery
+    from src.eval.cases import battery
+
+    return next(
+        case.id
+        for case in battery()
+        if case.category is EvalCategory.FALSE_REFUSAL
+        and case.surface is EvalSurface.TURN
+    )
+
+
+def an_ops(*, turns: int = 100, grounding_failed: int = 1) -> OpsSnapshot:
+    """A week of live traffic, with one of each signal in it."""
+    healthy = turns - grounding_failed
+    return OpsSnapshot(
+        since=FINISHED - timedelta(days=OPS_WINDOW_DAYS),
+        until=FINISHED,
+        window_days=OPS_WINDOW_DAYS,
+        turns=turns,
+        grounding_failed=grounding_failed,
+        incomplete_reasons={"grounding_failed": grounding_failed},
+        tool_calls=400,
+        unknown_tool_calls={"run_python": 2},
+        answer_kinds={
+            "analysis": 60,
+            "education": healthy - 60 - 5,
+            "refusal": 5,
+            NO_ANSWER_KIND: grounding_failed,
+        },
+        flags={
+            "wrong_figure": 3,
+            "overreach": 1,
+            "wrongly_refused": 0,
+            "other": 0,
+        },
+    )
+
+
 def a_run(
     *,
     mode: EvalMode = EvalMode.GATE,
@@ -134,6 +181,7 @@ def a_run(
     stopped_reason: str | None = None,
     baseline: BaselineComparison | None = None,
     fixture_version: str = FIXTURE,
+    ops: OpsSnapshot | None = None,
 ) -> EvalRunResult:
     return EvalRunResult(
         run_id=uuid.UUID(int=7),
@@ -149,6 +197,7 @@ def a_run(
         complete=complete,
         stopped_reason=stopped_reason,
         baseline=baseline,
+        ops=ops,
     )
 
 
@@ -418,6 +467,192 @@ class TestTheHumanRubricIsInTheDocument:
         rendered = render_report(a_run(results=(analysis_result(),)), scores)
         assert "`rubric.sanctioned`" in rendered
         assert "The human rubric has not been entered" not in rendered
+
+
+class TestTheFixedOpsQueryIsInTheReport:
+    """`docs/adr/0016`: the field reading appears here, or it appears nowhere.
+
+    The battery scores a frozen fixture and says nothing about live traffic, so
+    the two only ever meet on this page. The requirement is that the harness
+    writes it — a section a person pastes in is a section that stops being
+    pasted in the first busy week.
+    """
+
+    def test_the_threshold_its_reading_and_its_meaning_are_all_on_the_page(self):
+        rendered = render_report(a_run(results=(turn_result(),), ops=an_ops()))
+
+        assert "## The field" in rendered
+        assert "No table, no alerting." in rendered
+        # The count, the denominator and the rate, because a count alone is not
+        # a thing the 5% rule can be read against.
+        assert "`grounding_failed`: 1 of 100 Turns (1.0%)" in rendered
+        assert "at or below the 5% threshold" in rendered
+        assert "Category B stands." in rendered
+
+    def test_above_the_threshold_the_report_says_category_b_is_reopened(self):
+        rendered = render_report(
+            a_run(results=(turn_result(),), ops=an_ops(turns=100, grounding_failed=6))
+        )
+
+        assert "**above** the 5% threshold" in rendered
+        assert "**Category B is reopened.**" in rendered
+        # The reading a person would otherwise get backwards.
+        assert "blocking answers that were right" in rendered
+
+    def test_all_five_signals_are_rendered_with_their_denominators(self):
+        rendered = render_report(a_run(results=(turn_result(),), ops=an_ops()))
+
+        assert "Incomplete Turns, by reason" in rendered
+        assert "| `grounding_failed` | 1 | 1.0% |" in rendered
+        assert "`unknown_tool`, by the tool that was asked for" in rendered
+        assert "| `run_python` | 2 | 0.5% |" in rendered
+        assert "`answer_kind`, over Turns" in rendered
+        assert "| `analysis` | 60 | 60.0% |" in rendered
+        assert "Flagged messages, by reason" in rendered
+        assert "| `wrong_figure` | 3 |" in rendered
+
+    def test_a_widened_window_prints_the_rate_and_withholds_the_verdict(self):
+        """The module calls a rate over another span meaningless; so must the page."""
+        from dataclasses import replace
+
+        wide = replace(an_ops(turns=100, grounding_failed=20), window_days=30)
+
+        rendered = render_report(a_run(results=(turn_result(),), ops=wide))
+
+        assert "20.0%" in rendered
+        assert "**not applied here**" in rendered
+        assert "Category B is reopened" not in rendered
+
+    def test_a_window_with_no_traffic_claims_no_result_from_the_threshold(self):
+        """Nothing measured is not "the bar was met"."""
+        quiet = OpsSnapshot(
+            since=FINISHED - timedelta(days=OPS_WINDOW_DAYS),
+            until=FINISHED,
+            window_days=OPS_WINDOW_DAYS,
+            turns=0,
+            grounding_failed=0,
+            incomplete_reasons={},
+            tool_calls=0,
+            unknown_tool_calls={},
+            answer_kinds=dict.fromkeys(("analysis", "education", "refusal"), 0),
+            flags=dict.fromkeys(("wrong_figure", "other"), 0),
+        )
+
+        rendered = render_report(a_run(results=(turn_result(),), ops=quiet))
+
+        assert "**No Turn ran in this window**" in rendered
+        assert "at or below the 5% threshold" not in rendered
+        assert "Category B stands." not in rendered
+
+    def test_an_unread_store_says_why_rather_than_showing_zeros(self):
+        """Zeros for a store nobody read is the lie in the other direction."""
+        rendered = render_report(
+            a_run(
+                results=(turn_result(),),
+                ops=OpsSnapshot.unreadable(
+                    "OperationalError: connection refused", now=FINISHED
+                ),
+            )
+        )
+
+        assert "The application store could not be read" in rendered
+        assert "connection refused" in rendered
+        assert "Category B stands." not in rendered
+
+    def test_a_report_without_the_query_at_all_says_it_is_incomplete(self):
+        """`ops=None` means an older build or a hand-assembled document."""
+        rendered = render_report(a_run(results=(turn_result(),)))
+
+        assert "The fixed ops query did not run." in rendered
+
+
+class TestTheReportARubricWritesIsTheOneAPullRequestCarries:
+    """The gate report is written from the record, hours later. It must be whole.
+
+    `make eval` deliberately writes no report for a judged run — that is the
+    blindness — so the document a pull request attaches is rendered by
+    `make eval-rubric` out of `<name>.json`. Anything the record drops is
+    missing from the only artifact the merge rule reads.
+    """
+
+    def record_roundtrip(self, result, tmp_path):
+        from src.eval.record import read_record, write_record
+
+        return read_record(write_record(result, tmp_path / "record.json"))
+
+    def a_recorded_run(self, **kwargs) -> EvalRunResult:
+        """A run whose case id this build actually seats.
+
+        A record stores what happened and never what the case *was* — cases are
+        code, and a record naming one the registry does not hold is refused. So
+        these round trips have to be about a real case, unlike the rendering
+        tests above.
+        """
+        return a_run(results=(turn_result(a_registered_turn_case()),), **kwargs)
+
+    def test_the_baseline_diff_the_merge_rule_asks_for_survives(self, tmp_path):
+        totals = totals_with(B=(10, 30, 30))
+        result = self.a_recorded_run(
+            baseline=compare_to_baseline(
+                totals_with(B=(10, 30, 27)), FIXTURE, a_baseline(totals)
+            ),
+        )
+
+        rendered = render_report(self.record_roundtrip(result, tmp_path))
+
+        assert str(uuid.UUID(int=3)) in rendered
+        assert "the most recent passing gate run" in rendered
+        assert "| B |" in rendered
+
+    def test_a_void_baseline_is_still_void_after_the_round_trip(self, tmp_path):
+        """The one claim a `baseline_reset` pull request may not make."""
+        result = self.a_recorded_run(
+            baseline=compare_to_baseline(
+                totals_with(B=(10, 30, 30)),
+                "2026-08-15-newfixture",
+                a_baseline(totals_with(B=(10, 30, 30))),
+            ),
+            fixture_version="2026-08-15-newfixture",
+        )
+
+        rendered = render_report(self.record_roundtrip(result, tmp_path))
+
+        assert "`baseline_reset`" in rendered
+        assert "may not claim *no regression*" in rendered
+
+    def test_the_ops_reading_is_the_one_the_run_took(self, tmp_path):
+        """Not a fresh window measured whenever the rubric got scored."""
+        result = self.a_recorded_run(ops=an_ops())
+
+        restored = self.record_roundtrip(result, tmp_path)
+
+        assert restored.ops.since == result.ops.since
+        assert restored.ops.until == result.ops.until
+        assert restored.ops.grounding_failed == 1
+        assert "`grounding_failed`: 1 of 100 Turns" in render_report(restored)
+
+    def test_a_smoke_run_still_has_no_baseline_to_compare_against(self, tmp_path):
+        result = self.a_recorded_run(mode=EvalMode.SMOKE)
+
+        restored = self.record_roundtrip(result, tmp_path)
+
+        assert restored.baseline is None
+        assert "No comparison was made." in render_report(restored)
+
+    def test_a_version_one_record_is_refused_rather_than_read_short(self, tmp_path):
+        """It would render a document missing the diff, and look complete."""
+        import json
+
+        from src.eval.record import RecordUnreadable, as_wire, read_record
+
+        payload = as_wire(self.a_recorded_run(ops=an_ops()))
+        payload["format"] = 1
+        payload.pop("ops")
+        path = tmp_path / "record.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+        with pytest.raises(RecordUnreadable):
+            read_record(path)
 
 
 def test_the_report_directory_is_the_repos_and_not_apps_apis():

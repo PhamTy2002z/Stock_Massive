@@ -32,6 +32,14 @@ artifact is not exempt from the battery for having a schema — a schema proves
 shape rather than content, and ``verdictLine``, ``thesis`` and the per-axis
 ``read`` are prose users meet every day. What the two lanes must not share is a
 total, so :attr:`EvalRunResult.category_totals` counts them apart.
+
+**The field is read once, at the end, and never written to.** ``docs/adr/0016``
+requires the fixed ops query's output to appear in the Eval Report, so the run
+takes one read-only snapshot of the *application* store (``src/agent/ops.py``)
+and carries it on the result. This is the only part of a battery run that opens
+``DATABASE_URL`` at all, and a store it cannot reach produces a snapshot saying
+so rather than a failed run: the battery measures a frozen fixture, and the
+field reading sits beside that score as a reconciliation rather than inside it.
 """
 
 from __future__ import annotations
@@ -51,6 +59,7 @@ from sqlalchemy.orm import Session
 
 from src.agent.loop import AgentLoop, SpendIdentity, TurnOutcome, TurnRequest
 from src.agent.manifest import EvidenceManifest, assemble_message, build_manifest
+from src.agent.ops import OPS_WINDOW_DAYS, OpsSnapshot, read_ops_snapshot
 from src.agent.persistence import AgentPersistence
 from src.agent.prompt import PROMPT_VERSION, MarketState, RuntimeContext
 from src.agent.tools.suite import IntelligentQuantCatalog
@@ -241,6 +250,12 @@ class EvalRunResult:
     # means anything. ``None`` where no comparison was attempted at all: a smoke
     # run, or a run that stopped and has no score to compare.
     baseline: BaselineComparison | None = None
+    # The fixed ops query's reading of the live service, taken once at the end
+    # of the run. ``docs/adr/0016`` requires it in the report, so it rides on
+    # the result rather than being fetched by the report writer: the document is
+    # written by a second command, minutes or hours later, and a window measured
+    # then would be a different window from the one the run happened in.
+    ops: OpsSnapshot | None = None
 
     @property
     def gating(self) -> bool:
@@ -509,6 +524,12 @@ class EvalHarness:
     # of its own, and an ``httpx`` connection pool bound to a closed loop is the
     # failure that produces. One fresh client per generation, closed after it.
     analysis_client_factory: Callable[[], Any] | None = None
+    # How the fixed ops query reaches the **application** store, which is the
+    # only database in this file that is not the eval one. Left unset in
+    # production and resolved lazily, so importing this module does not open a
+    # connection to the store the API serves from.
+    ops_session_factory: Callable[[], Session] | None = None
+    ops_window_days: int = OPS_WINDOW_DAYS
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
     runs_per_case: int = RUNS_PER_CASE
     git_sha: str = "unknown"
@@ -619,11 +640,47 @@ class EvalHarness:
             complete=stopped is None,
             stopped_reason=None if stopped is None else stopped.reason,
         )
-        result = replace(result, baseline=self._baseline_for(result))
+        result = replace(
+            result,
+            baseline=self._baseline_for(result),
+            ops=self._read_ops(finished_at),
+        )
         self._close_run(result)
         if stopped is not None:
             logger.error("%s", stopped)
         return result
+
+    def _read_ops(self, now: datetime) -> OpsSnapshot:
+        """One read-only look at the live service, and never a reason to fail.
+
+        Taken even for a stopped run and even for a smoke one. The reading is
+        about the *field*, so it is equally true whichever mode produced the
+        report, and a stopped run is exactly when somebody wants to know what
+        production has been doing.
+
+        Every failure is caught. An unreachable application store is a fact
+        about this machine's configuration and not about the battery, and a run
+        that discarded its scores because a second database was down would be
+        throwing away the expensive half to protect the cheap one. What is
+        refused is the *other* silence: the snapshot carries the reason, and the
+        report prints it where the numbers would have been.
+        """
+        try:
+            factory = self.ops_session_factory or _application_session_factory()
+            session = factory()
+            try:
+                return read_ops_snapshot(
+                    session, now=now, window_days=self.ops_window_days
+                )
+            finally:
+                session.close()
+        except Exception as failure:  # noqa: BLE001 - see the docstring
+            logger.warning("the ops query could not read the application store: %s", failure)
+            return OpsSnapshot.unreadable(
+                f"{type(failure).__name__}: {failure}",
+                now=now,
+                window_days=self.ops_window_days,
+            )
 
     def _baseline_for(self, result: EvalRunResult) -> BaselineComparison | None:
         """The last passing gate run this one is read against, where there is one.
@@ -866,6 +923,18 @@ class EvalHarness:
         return stamped
 
 
+def _application_session_factory() -> Callable[[], Session]:
+    """The store the API serves from, imported at the moment it is needed.
+
+    Lazily, and only here. Every other database this package touches is the eval
+    one, and a module-level import would make ``src.eval`` construct the
+    application engine simply by being read.
+    """
+    from src.core.database import sync_session_factory
+
+    return sync_session_factory
+
+
 def build_harness(
     *,
     mode: EvalMode,
@@ -875,6 +944,8 @@ def build_harness(
     config: LLMConfig | None = None,
     client: Any = None,
     git_sha: str | None = None,
+    ops_session_factory: Callable[[], Session] | None = None,
+    ops_window_days: int | None = None,
 ) -> EvalHarness:
     """Load the fixture and compose everything one run needs."""
     settings = settings or get_settings()
@@ -886,6 +957,12 @@ def build_harness(
         config=config or config_for(mode, settings),
         client=client,
         git_sha=git_sha or settings.git_sha,
+        ops_session_factory=ops_session_factory,
+        ops_window_days=(
+            ops_window_days
+            if ops_window_days is not None
+            else settings.eval_ops_window_days
+        ),
     )
 
 
