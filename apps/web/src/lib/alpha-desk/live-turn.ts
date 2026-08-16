@@ -60,6 +60,24 @@ export interface LiveTurn {
   /** The highest `seq` applied. Also what a duplicate is measured against. */
   seq: number
   activity: ActivityPhase | null
+  /**
+   * The phases this Turn has already finished, in the order it finished them.
+   *
+   * The transport publishes *where the Turn is*, never where it has been, so
+   * the trail is assembled here: a phase leaves `activity` when the next one
+   * starts, when a block arrives, or when the Turn ends, and that is the moment
+   * it becomes a step the reader can still see.
+   *
+   * It stays semantic for exactly the reason the live line does — the publisher
+   * sends a phase and only a phase, so there is no tool name, symbol, argument
+   * or result to leak (`docs/specs/0002` §6, §9). Consecutive repeats collapse:
+   * two reads in a row are one step called *reading data*, not two.
+   *
+   * Empty after a reconnect. A snapshot is the state of the answer rather than
+   * a history of it, so a tab that joined late shows the steps from where it
+   * joined instead of inventing the ones it missed.
+   */
+  steps: ActivityPhase[]
   blocks: ContentBlock[]
   widgets: WidgetSpec[]
   terminalReason: string | null
@@ -101,6 +119,7 @@ export const IDLE: LiveTurn = {
   phase: "idle",
   seq: 0,
   activity: null,
+  steps: [],
   blocks: [],
   widgets: [],
   terminalReason: null,
@@ -186,6 +205,7 @@ export function liveTurnReducer(state: LiveTurn, action: LiveTurnAction): LiveTu
             ...state,
             phase: phaseForStatus(action.status, state.blocks.length > 0),
             activity: null,
+            steps: closing(state),
             terminalReason: action.terminalReason,
             messageId: action.messageId,
             needsResync: false,
@@ -220,8 +240,14 @@ function applyEvent(state: LiveTurn, event: TurnEvent): LiveTurn {
   const advanced = { ...state, seq: event.seq, appendedIndex: null }
 
   switch (event.type) {
-    case "turn.activity":
-      return { ...advanced, activity: (event.data.phase as ActivityPhase) ?? null }
+    case "turn.activity": {
+      const next = (event.data.phase as ActivityPhase) ?? null
+      // The phase being replaced is a phase that finished, so it moves to the
+      // trail. Re-announcing the same phase is the same step continuing.
+      return next === state.activity
+        ? advanced
+        : { ...advanced, activity: next, steps: closing(state) }
+    }
 
     case "content.block":
       return {
@@ -229,6 +255,7 @@ function applyEvent(state: LiveTurn, event: TurnEvent): LiveTurn {
         // The activity line belongs to work in progress; a block arriving is
         // that work having produced something.
         activity: null,
+        steps: closing(state),
         blocks: [...advanced.blocks, event.data.block as ContentBlock],
         appendedIndex: advanced.blocks.length,
       }
@@ -244,11 +271,25 @@ function applyEvent(state: LiveTurn, event: TurnEvent): LiveTurn {
             ...advanced,
             phase,
             activity: null,
+            steps: closing(state),
             terminalReason: (event.data.terminal_reason as string | null) ?? null,
             messageId: (event.data.message_id as number | null) ?? null,
           }
     }
   }
+}
+
+/**
+ * The trail with whatever is on the live line folded into it.
+ *
+ * Called at every point a phase stops being current — the next activity, a
+ * block, a terminal event — so the step the reader was watching becomes the
+ * step they can still see. A no-op when nothing was running.
+ */
+function closing(state: LiveTurn): ActivityPhase[] {
+  if (state.activity === null) return state.steps
+  if (state.steps[state.steps.length - 1] === state.activity) return state.steps
+  return [...state.steps, state.activity]
 }
 
 function fromSnapshot(state: LiveTurn, event: TurnEvent): LiveTurn {
@@ -261,6 +302,10 @@ function fromSnapshot(state: LiveTurn, event: TurnEvent): LiveTurn {
     // merging it would duplicate every block on every reconnect.
     seq: data.through_seq,
     activity: data.activity ?? null,
+    // Kept rather than rebuilt: a snapshot carries where the Turn *is*, and the
+    // trail is what this tab watched happen. A reconnect mid-Turn keeps the
+    // steps it saw; a tab that joined late simply has none to show.
+    steps: state.steps,
     blocks: [...data.blocks],
     widgets: [...data.widgets],
     terminalReason: data.terminal_reason ?? null,

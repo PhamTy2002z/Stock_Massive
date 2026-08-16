@@ -3,7 +3,7 @@
 import { Loader2 } from "lucide-react"
 
 import type { DraftEntry } from "@/lib/alpha-desk/transcript"
-import { ActivityLine } from "./activity-line"
+import { ActivityTrail } from "./activity-line"
 import { ContentBlockView } from "./content-block"
 import { MessageShell } from "./message-shell"
 import { Reveal } from "./reveal"
@@ -33,7 +33,11 @@ export function DraftMessage({
 }) {
   const running =
     entry.phase === "starting" || entry.phase === "running" || entry.phase === "cancelling"
-  const showsActivity = entry.activity !== null && running
+  const livePhase = running ? entry.activity : null
+  // The trail outlives the running state. What the Turn did before it ended is
+  // still what it did, and on a Turn that stopped early it is most of what the
+  // reader has to go on.
+  const showsActivity = livePhase !== null || entry.steps.length > 0
 
   return (
     <MessageShell className={className}>
@@ -46,7 +50,7 @@ export function DraftMessage({
         </Reveal>
       ))}
 
-      {showsActivity && <ActivityLine phase={entry.activity!} />}
+      {showsActivity && <ActivityTrail steps={entry.steps} phase={livePhase} />}
 
       {/* Before the first activity or block. The harness has to look like it is
           working rather than hung, and the first thing the backend sends can be
