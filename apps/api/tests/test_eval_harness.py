@@ -57,6 +57,7 @@ from src.eval.harness import (
     EvalMode,
     smoke_config,
 )
+from src.eval.news import PLANTED_NEWS, figure_in
 from src.eval.report import render_report, report_filename, write_report
 from src.eval.roles import FixtureRole
 from src.eval.store import create_schema, eval_engine, load_fixture
@@ -576,6 +577,102 @@ class TestTheToolLayerIsTheRealOne:
         finally:
             session.close()
         assert ("get_price_series", "ok") in traced
+
+
+class TestTheFixturesOwnNewsReachesTheLoop:
+    """Category F is only worth running if the article gets to the model.
+
+    Three ways it could silently not: the lane failing closed with no Redis, the
+    sanitiser dropping an uncleared source, and the news window measured from
+    the wall clock rather than from the fixture's frozen Trading Day. Each would
+    leave six green injection cases over an article nobody saw.
+    """
+
+    @staticmethod
+    def news_call(symbol: str, window_days: int = 7):
+        return ScriptedTransport(
+            [
+                Completion(
+                    model=SESSION_MODEL,
+                    tool_calls=(
+                        ToolCall(
+                            id="call_0",
+                            name="search_news",
+                            arguments={"symbol": symbol, "window_days": window_days},
+                            output_index=0,
+                        ),
+                    ),
+                    usage=Usage(input_tokens=0, output_tokens=1),
+                ),
+                Completion(
+                    model=SESSION_MODEL,
+                    text="Bản tin có kèm chỉ dẫn; tôi ghi nhận và không làm theo.",
+                    usage=Usage(input_tokens=0, output_tokens=1),
+                ),
+            ]
+        )
+
+    @staticmethod
+    def traced_news(factory, symbol: str) -> list[dict]:
+        """This symbol's news traces, newest last.
+
+        Filtered by symbol because the eval database outlives one test: the
+        traces of every case in the module are still in it, and reading the
+        first row would read whichever test ran first.
+        """
+        from src.alpha.models import AgentToolCall
+
+        session = factory()
+        try:
+            return [
+                row.result
+                for row in session.execute(
+                    select(AgentToolCall)
+                    .where(AgentToolCall.tool_name == "search_news")
+                    .order_by(AgentToolCall.id)
+                ).scalars()
+                if (row.arguments or {}).get("symbol") == symbol
+            ]
+        finally:
+            session.close()
+
+    @pytest.mark.asyncio
+    async def test_the_planted_articles_are_served_through_the_real_tool(
+        self, harness, factory, seed
+    ):
+        symbol = seed.manifest.roles[FixtureRole.INJECTION_NEWS]
+        built = harness(transport=self.news_call(symbol))
+        await built.run(
+            [case("news-1", role=FixtureRole.INJECTION_NEWS)]
+        )
+
+        results = self.traced_news(factory, symbol)
+        assert results, "the battery never reached search_news"
+        assert results[-1]["count"] == len(PLANTED_NEWS)
+        served = " ".join(
+            item["untrusted_evidence"]["content"] for item in results[-1]["items"]
+        )
+        assert figure_in(served)
+
+    @pytest.mark.asyncio
+    async def test_the_narrowest_window_still_holds_them(self, harness, factory, seed):
+        """The clock is the fixture's day, so a one-day window is not empty."""
+        symbol = seed.manifest.roles[FixtureRole.INJECTION_NEWS]
+        built = harness(transport=self.news_call(symbol, window_days=1))
+        await built.run([case("news-2", role=FixtureRole.INJECTION_NEWS)])
+
+        assert self.traced_news(factory, symbol)[-1]["count"] == len(PLANTED_NEWS)
+
+    @pytest.mark.asyncio
+    async def test_every_other_symbol_answers_with_no_news(
+        self, harness, factory, seed
+    ):
+        built = harness(transport=self.news_call(world.BANK))
+        await built.run([case("news-3", role=FixtureRole.BANK)])
+
+        result = self.traced_news(factory, world.BANK)[-1]
+        assert result["count"] == 0
+        assert result["reason"] == "no_cleared_news_in_window"
 
 
 class TestNoLlmJudge:

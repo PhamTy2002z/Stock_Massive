@@ -32,7 +32,7 @@ import logging
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
@@ -60,6 +60,7 @@ from src.core.llm import (
 )
 from src.core.llm.config import LLMRoute, PricingTable, TokenPrices
 from src.core.news_lane import NewsLane
+from src.stocks.providers.normalize import VN_TZ
 from src.stocks.universe import Universe
 
 from .cases import EvalCase, EvalCategory, EvalSurface, battery
@@ -166,6 +167,10 @@ class CaseResult:
 
     case: EvalCase
     runs: tuple[CaseRun, ...]
+    # What the user actually typed, with the fixture's own ticker in place of
+    # the seat. Kept because it is what a human reviewer scores against, and a
+    # template is not a question anybody was asked.
+    prompt: str = ""
 
     @property
     def passed_runs(self) -> int:
@@ -176,7 +181,7 @@ class CaseResult:
             "case_id": self.case.id,
             "category": self.case.category.value,
             "surface": self.case.surface.value,
-            "prompt": self.case.prompt,
+            "prompt": self.prompt or self.case.prompt,
             "intent": self.case.intent,
             "runs": [run.as_wire() for run in self.runs],
         }
@@ -250,7 +255,7 @@ class EvalRunResult:
 
 
 class InProcessCache:
-    """The Data Reference cache, kept inside the run.
+    """The Data Reference and news cache, kept inside the run.
 
     ``docs/adr/0012``'s fixed-date descriptors are written to Redis so a Widget
     can be replayed a year later. A battery has no year later — it has one
@@ -258,6 +263,12 @@ class InProcessCache:
     a cache the application serves from. Substituting a cache is not
     substituting the behaviour under test: the descriptor written here is the
     one the tool wrote.
+
+    ``NewsLane`` speaks the same three verbs to it — a get, a ``nx`` set for the
+    single flight, and a compare-and-delete script — so they are answered here
+    rather than by a second lookalike object. The TTLs are ignored on purpose:
+    expiry inside one battery run would be the clock deciding what a case asked,
+    which is the thing :data:`FIXTURE_MARKET_STATE` exists to prevent.
     """
 
     def __init__(self) -> None:
@@ -266,19 +277,37 @@ class InProcessCache:
     def get(self, key: str) -> str | None:
         return self._values.get(key)
 
-    def set(self, key: str, value: str, ex: int | None = None) -> bool:
+    def set(
+        self,
+        key: str,
+        value: str,
+        ex: int | None = None,
+        nx: bool = False,
+    ) -> bool:
+        if nx and key in self._values:
+            return False
         self._values[key] = value
         return True
 
+    def delete(self, key: str) -> int:
+        return 1 if self._values.pop(key, None) is not None else 0
 
-def _no_news(symbol: str) -> Sequence[Mapping[str, Any]]:  # pragma: no cover
-    """Never reached: the lane refuses before a fetch is attempted.
+    def eval(self, script: str, keys: list[str] | None = None, args=None, *rest):
+        """The one script the news lane runs: release a lock this holder owns.
 
-    Present so that no configuration of this harness can end up holding the
-    live VCI fetcher. A battery that read today's news would be a battery on
-    live data, which is the one thing the frozen fixture exists to prevent.
-    """
-    return ()
+        Matched by behaviour rather than by parsing Lua — there is exactly one
+        script reaching this object, and a Lua interpreter here would be a
+        second implementation of something Redis already owns.
+        """
+        if keys is None:  # redis-py's positional form: eval(script, n, *keys, *args)
+            count = int(rest[0]) if rest else 0
+            keys = list(rest[1 : 1 + count])
+            args = list(rest[1 + count :])
+        token = (args or [None])[0]
+        for key in keys:
+            if self._values.get(key) == token:
+                return self.delete(key)
+        return 0
 
 
 def smoke_config(settings: Settings | None = None) -> LLMConfig:
@@ -369,17 +398,21 @@ class EvalHarness:
     def __post_init__(self) -> None:
         universe = Universe(explicit=tuple(self.fixture.seed.manifest.universe_symbols))
         self._store = AgentPersistence(session_factory=self.session_factory)
+        cache = InProcessCache()
         self._catalog = IntelligentQuantCatalog(
             session_factory=self.session_factory,
-            redis=InProcessCache(),
+            redis=cache,
             universe_factory=lambda _session: universe,
-            # No Redis means no cache, no single flight and no lane, and the
-            # lane fails closed rather than making the unbounded live call. The
-            # fixture's own news lands with the injection category (#95); until
-            # then "news refused" is the fixture's honest answer and is itself
-            # one of category E's data gaps.
-            news_lane=NewsLane(redis_factory=lambda: None),
-            fetch_news=_no_news,
+            # The real lane, bounded by the real mechanism, over the run's own
+            # cache. Its clock is frozen so that nothing inside a run goes
+            # stale: a battery whose news answer depended on how long the run
+            # had been going would be measuring the run's duration.
+            news_lane=NewsLane(redis_factory=lambda: cache, clock=lambda: 0.0),
+            # The fixture's planted articles, in the raw shape a provider row
+            # arrives in, so that ``search_news`` sanitises them itself. Every
+            # symbol but the injection seat answers with nothing.
+            fetch_news=self.fixture.news_for,
+            news_now=self._news_now,
         ).catalog(trace_writer=self._store.record_tool_call)
         if self.client is None:
             self.client = build_client(
@@ -389,6 +422,18 @@ class EvalHarness:
     @property
     def tool_catalog_version(self) -> str:
         return str(self._catalog.tool_catalog_version)
+
+    def _news_now(self) -> datetime:
+        """The end of the fixture's own Trading Day, as "now" for a news window.
+
+        The last instant of the frozen day rather than the wall clock: every
+        planted article is published inside that day, so the narrowest window a
+        case can ask for still contains them, and it contains exactly the same
+        ones a year from now.
+        """
+        return datetime.combine(
+            self.fixture.trading_day, time.max, tzinfo=VN_TZ
+        ).astimezone(timezone.utc)
 
     async def run(self, cases: Sequence[EvalCase] | None = None) -> EvalRunResult:
         """Run the battery, or stop at the ceiling and report no score."""
@@ -447,28 +492,37 @@ class EvalHarness:
     async def _run_case(
         self, loop: AgentLoop, thread_id: uuid.UUID, case: EvalCase
     ) -> CaseResult:
-        runs: list[CaseRun] = []
-        for index in range(self.runs_per_case):
-            runs.append(await self._run_once(loop, thread_id, case, index))
-        return CaseResult(case=case, runs=tuple(runs))
-
-    async def _run_once(
-        self, loop: AgentLoop, thread_id: uuid.UUID, case: EvalCase, index: int
-    ) -> CaseRun:
         symbol = (
             self.fixture.symbol_for(case.role) if case.role is not None else None
         )
+        prompt = case.render(symbol)
+        runs: list[CaseRun] = []
+        for index in range(self.runs_per_case):
+            runs.append(
+                await self._run_once(loop, thread_id, case, index, symbol, prompt)
+            )
+        return CaseResult(case=case, runs=tuple(runs), prompt=prompt)
+
+    async def _run_once(
+        self,
+        loop: AgentLoop,
+        thread_id: uuid.UUID,
+        case: EvalCase,
+        index: int,
+        symbol: str | None,
+        prompt: str,
+    ) -> CaseRun:
         message = await self._store.append_message(
             thread_id,
             role="user",
-            content={"text": case.prompt, "eval_case": case.id, "run": index},
+            content={"text": prompt, "eval_case": case.id, "run": index},
             symbols=(symbol,) if symbol else (),
         )
         request = TurnRequest(
             thread_id=thread_id,
             request_message_id=message.id,
             user_id=self.fixture.user_id,
-            user_text=case.prompt,
+            user_text=prompt,
             runtime=RuntimeContext(
                 user_id=self.fixture.user_id,
                 trading_day=self.fixture.trading_day,
@@ -508,6 +562,7 @@ class EvalHarness:
                 manifest=manifest,
                 message=assembled,
                 secrets=self._secrets(),
+                universe=self.fixture.universe,
             ),
             answer=str(assembled.get("text", "")),
             status=outcome.status.value,

@@ -1,6 +1,6 @@
-"""``python -m src.eval`` — capture a fixture, load one, run the battery.
+"""``python -m src.eval`` — capture a fixture, load one, run the battery, score it.
 
-Three verbs, and which database each one touches is the whole of the safety
+Four verbs, and which database each one touches is the whole of the safety
 story:
 
 - ``capture`` **reads** the application store and writes a file. It is the only
@@ -9,10 +9,20 @@ story:
   unset or resolves to the application's database.
 - ``run`` loads and then runs the battery, entirely inside the eval database —
   the store, the traces and the ledger.
+- ``rubric`` touches **no database at all**. It reads the filled blind sheet and
+  the run record beside it, and rewrites the report with a person's answers in
+  it.
 
-Exit codes are the interface, because ``make eval`` is what invokes this: 0 for a
-run that finished, 1 for anything else. A run stopped at its budget ceiling
-exits 1 and says so, because it produced no score.
+Exit codes are the interface, because ``make eval`` is what invokes this: 0
+where there is nothing to act on, 1 where there is. A run stopped at its budget
+ceiling exits 1, because it produced no score; a run that finished and failed a
+threshold exits 1 too, and names what broke on stderr.
+
+A finished ``gate`` run with judged cases exits 0 and writes **no report**. That
+is not an omission: the report carries the deterministic results, and a reviewer
+who has seen those is no longer scoring blind. The report is written by
+``rubric``, from the reviewer's own answers — so the artifact a pull request
+attaches does not exist until the judgement is done.
 """
 
 from __future__ import annotations
@@ -26,11 +36,23 @@ from pathlib import Path
 
 from src.core.config import get_settings
 
+from . import categories as _categories  # noqa: F401 - seats the battery
 from .capture import CAPTURE_HISTORY_SESSIONS, capture_fixture
 from .fixture import latest_seed_path, read_seed, seed_path, write_seed
-from .harness import EvalMode, build_harness
-from .report import write_report
+from .harness import EvalMode, EvalRunResult, build_harness
+from .record import read_record, record_filename, write_record
+from .report import report_filename, write_report
+from .rubric import (
+    RubricScores,
+    assert_covers,
+    judged_results,
+    read_sheet,
+    render_sheet,
+    report_filename_for,
+    sheet_filename,
+)
 from .store import create_schema, eval_engine, eval_session_factory, load_fixture
+from .verdict import HARD_FAIL_NOTICE, verdict
 
 logger = logging.getLogger("src.eval")
 
@@ -85,13 +107,80 @@ def run(args: argparse.Namespace) -> int:
         settings=settings,
     )
     result = asyncio.run(harness.run())
-    path = write_report(result, Path(args.report_dir or settings.eval_report_dir))
-    harness.record_report_path(result, path)
-    print(f"{result.mode.value} run {result.run_id} -> {path}")
+    directory = Path(args.report_dir or settings.eval_report_dir)
+    name = report_filename(result)
+    stamped = harness.record_report_path(result, directory / name)
+
+    # Three files, one reader each: the record for the machine, the blind sheet
+    # for the reviewer, and the report for a person.
+    directory.mkdir(parents=True, exist_ok=True)
+    write_record(stamped, directory / record_filename(name))
+    sheet = directory / sheet_filename(name)
+    sheet.write_text(render_sheet(stamped), encoding="utf-8")
+    print(f"{result.mode.value} run {result.run_id}")
+    print(f"rubric sheet -> {sheet}")
+
     if not result.complete:
+        # A stopped run has no score to be blind about, and its report is the
+        # loudest thing it leaves behind.
+        write_report(stamped, directory)
         print(f"stopped: {result.stopped_reason}", file=sys.stderr)
         return 1
-    if not result.mode.gating:
+
+    if judged_results(stamped):
+        # **The report is not written yet, and that is the blindness.** A
+        # reviewer with the deterministic results in front of them is no longer
+        # scoring blind, and an instruction not to look is not a mechanism. The
+        # thing a pull request attaches does not exist until the judgement is
+        # done — which is also what stops a gate run being called passing with
+        # D and E unjudged.
+        print(
+            f"no report yet: score {sheet.name} and run `make eval-rubric "
+            f"SHEET={sheet}` — the report is written from your answers"
+        )
+        return 0
+
+    write_report(stamped, directory)
+    print(f"report -> {directory / name}")
+    return _report_verdict(stamped, judged=True)
+
+
+def rubric(args: argparse.Namespace) -> int:
+    """Score a filled blind sheet, and write the report it unlocks.
+
+    Refuses an unfinished sheet rather than defaulting the missing answers: a
+    default is a score nobody gave, and the whole point of collecting labels is
+    that they are somebody's.
+    """
+    sheet = Path(args.sheet)
+    report_name = report_filename_for(sheet.name)
+    record = Path(args.record or sheet.parent / record_filename(report_name))
+    result = read_record(record)
+    scores = read_sheet(sheet.read_text(encoding="utf-8"))
+    assert_covers(result, scores)
+
+    directory = Path(args.report).parent if args.report else sheet.parent
+    path = write_report(result, directory, scores)
+    print(f"rubric scored {len(scores.answers)} cases -> {path}")
+    return _report_verdict(result, judged=True, scores=scores)
+
+
+def _report_verdict(
+    result: EvalRunResult, *, judged: bool, scores: RubricScores | None = None
+) -> int:
+    scored = verdict(result, scores)
+    for item in scored.categories:
+        print(f"  {item.category.value}: {item.summary}")
+    if scored.hard_failures:
+        print(HARD_FAIL_NOTICE, file=sys.stderr)
+    if not scored.passed:
+        # Named rather than counted: a category total tells an operator that
+        # something regressed and nothing about what, and finding out by hand is
+        # the next thing they would do anyway.
+        for failure in scored.failures:
+            print(f"FAIL {failure}", file=sys.stderr)
+        return 1
+    if judged and not result.mode.gating:
         print("non-gating: a smoke run may not be attached to a pull request")
     return 0
 
@@ -119,6 +208,15 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--fixture", default=None)
     run_parser.add_argument("--report-dir", default=None)
     run_parser.set_defaults(handler=run)
+
+    rubric_parser = sub.add_parser(
+        "rubric",
+        help="combine a filled blind sheet with the run it was written from",
+    )
+    rubric_parser.add_argument("--sheet", required=True)
+    rubric_parser.add_argument("--record", default=None)
+    rubric_parser.add_argument("--report", default=None)
+    rubric_parser.set_defaults(handler=rubric)
 
     return parser
 
