@@ -376,18 +376,6 @@ class TurnService:
         finally:
             self._running.pop(turn_id, None)
 
-    @staticmethod
-    def _rendered(blocks: Sequence[ReleasedBlock]) -> tuple[list[dict[str, Any]], str]:
-        """The two forms every assistant message needs, derived once.
-
-        Three call sites wanted the same pair — checkpoint, terminal, and the
-        bare terminal — and the third had already drifted to reading the text
-        back out of the wire form it had just written.
-        """
-        return (
-            [block.as_wire() for block in blocks],
-            "\n\n".join(block.text for block in blocks),
-        )
 
     def _checkpoint_payload(self, draft: TurnDraft) -> dict[str, Any]:
         """One checkpoint: the proven blocks, and the message they would form.
@@ -400,7 +388,7 @@ class TurnService:
         Manifest.
         """
         payload = draft_content(draft)
-        blocks, text = self._rendered(draft.blocks)
+        blocks, text = rendered_blocks(draft.blocks)
         payload["message"] = (
             self._message(
                 blocks=blocks,
@@ -458,7 +446,7 @@ class TurnService:
     async def _finish(self, running: RunningTurn, outcome: TurnOutcome) -> TurnRecord:
         """The one terminal transaction, then the terminal event."""
         status, terminal_reason = _terminal_state(running, outcome)
-        blocks, text = self._rendered(outcome.blocks)
+        blocks, text = rendered_blocks(outcome.blocks)
         message = (
             self._message(
                 blocks=blocks,
@@ -467,7 +455,7 @@ class TurnService:
                 status=status,
                 terminal_reason=terminal_reason,
                 citations=outcome.citations,
-                outcomes=_outcomes(outcome),
+                outcomes=gate_outcomes(outcome),
                 provider_request_id=outcome.provider_request_id,
                 widgets=[widget.as_wire() for widget in outcome.widgets],
                 widget_refusals=outcome.widget_refusals,
@@ -514,7 +502,7 @@ class TurnService:
         difference between ``incomplete`` and ``failed``.
         """
         draft = running.draft
-        blocks, text = self._rendered(() if draft is None else draft.blocks)
+        blocks, text = rendered_blocks(() if draft is None else draft.blocks)
         message = (
             self._message(
                 blocks=blocks,
@@ -663,7 +651,25 @@ def _terminal_state(running: RunningTurn, outcome: TurnOutcome) -> tuple[str, st
     return outcome.status.value, outcome.terminal_reason
 
 
-def _outcomes(outcome: TurnOutcome) -> GateOutcome:
+def rendered_blocks(
+    blocks: Sequence[ReleasedBlock],
+) -> tuple[list[dict[str, Any]], str]:
+    """The two forms every assistant message needs, derived once.
+
+    Three call sites wanted the same pair — checkpoint, terminal, and the bare
+    terminal — and the third had already drifted to reading the text back out of
+    the wire form it had just written. Module level rather than a method,
+    because the Eval Battery assembles the *same* message a user would have
+    received (``docs/adr/0016``): a lookalike built beside this one is the way
+    the battery comes to score a shape nobody is served.
+    """
+    return (
+        [block.as_wire() for block in blocks],
+        "\n\n".join(block.text for block in blocks),
+    )
+
+
+def gate_outcomes(outcome: TurnOutcome) -> GateOutcome:
     """What the three validators decided, in the Manifest's own vocabulary."""
     blocked = outcome.terminal_reason == GROUNDING_FAILED
     recommendation = "not_applicable"
@@ -697,5 +703,7 @@ __all__ = [
     "assert_input_within_cap",
     "draft_content",
     "frozen_message",
+    "gate_outcomes",
+    "rendered_blocks",
     "sweep_interrupted_turns",
 ]
