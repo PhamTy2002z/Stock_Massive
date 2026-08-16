@@ -1,0 +1,314 @@
+/**
+ * The replay contract, as the browser has to honour it.
+ *
+ * ADR-0013 states it in three sentences — a snapshot replaces, a duplicate is
+ * ignored, a gap forces a fresh snapshot — and every one of them is a rule
+ * about a sequence of events rather than about React, which is why the reducer
+ * is pure and why this file needs no DOM.
+ */
+
+import { describe, expect, it } from "vitest"
+
+import {
+  IDLE,
+  isActive,
+  isSettled,
+  liveTurnReducer,
+  type LiveTurn,
+  type LiveTurnAction,
+} from "./live-turn"
+import type { ContentBlock, TurnEvent, TurnEventType } from "./types"
+
+const TURN = "11111111-2222-3333-4444-555555555555"
+const THREAD = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+function block(text: string): ContentBlock {
+  return { kind: "prose", text, symbol: null, trading_day: null, citations: [] }
+}
+
+function event(
+  seq: number,
+  type: TurnEventType,
+  data: Record<string, unknown> = {},
+): LiveTurnAction {
+  return {
+    type: "event",
+    event: { version: 1, seq, type, turn_id: TURN, data } as TurnEvent,
+  }
+}
+
+function snapshot(
+  through: number,
+  overrides: Partial<{
+    status: string
+    terminal_reason: string | null
+    activity: string | null
+    blocks: ContentBlock[]
+    widgets: unknown[]
+  }> = {},
+): LiveTurnAction {
+  return event(through, "turn.snapshot", {
+    through_seq: through,
+    status: "running",
+    terminal_reason: null,
+    activity: null,
+    blocks: [],
+    widgets: [],
+    ...overrides,
+  })
+}
+
+function run(...actions: LiveTurnAction[]): LiveTurn {
+  return actions.reduce(liveTurnReducer, IDLE)
+}
+
+const started: LiveTurnAction = { type: "start", turnId: TURN, threadId: THREAD }
+
+describe("starting a Turn", () => {
+  it("begins from nothing, so the previous answer is not shown twice", () => {
+    // The finished Turn is already a canonical message in the transcript.
+    const carried = run(started, snapshot(0), event(1, "content.block", { block: block("cũ") }))
+
+    const fresh = liveTurnReducer(carried, {
+      type: "start",
+      turnId: "another",
+      threadId: THREAD,
+    })
+
+    expect(fresh.blocks).toEqual([])
+    expect(fresh.seq).toBe(0)
+    expect(fresh.phase).toBe("starting")
+    expect(fresh.turnId).toBe("another")
+  })
+})
+
+describe("a snapshot", () => {
+  it("replaces the projection instead of merging into it", () => {
+    // Merging would duplicate every block on every reconnect.
+    const state = run(
+      started,
+      snapshot(0),
+      event(1, "content.block", { block: block("một") }),
+      snapshot(2, { blocks: [block("một"), block("hai")] }),
+    )
+
+    expect(state.blocks.map((entry) => entry.text)).toEqual(["một", "hai"])
+    expect(state.seq).toBe(2)
+  })
+
+  it("carries the sequence forward so the stream resumes past it", () => {
+    const state = run(started, snapshot(7, { blocks: [block("đã có")] }))
+
+    const next = liveTurnReducer(state, event(8, "content.block", { block: block("mới") }))
+
+    expect(next.blocks.map((entry) => entry.text)).toEqual(["đã có", "mới"])
+    expect(next.seq).toBe(8)
+  })
+
+  it("settles a Turn that was already terminal when the reader arrived", () => {
+    // A fast Turn must not look like a dead one.
+    const state = run(
+      started,
+      snapshot(3, { status: "complete", blocks: [block("xong")] }),
+    )
+
+    expect(state.phase).toBe("completed")
+    expect(isSettled(state)).toBe(true)
+    expect(state.blocks).toHaveLength(1)
+  })
+
+  it("reads an incomplete Turn with content as a partial answer, not a failure", () => {
+    const partial = run(
+      started,
+      snapshot(3, {
+        status: "incomplete",
+        terminal_reason: "turn_deadline",
+        blocks: [block("một phần"), block("thứ hai")],
+      }),
+    )
+    const empty = run(
+      started,
+      snapshot(1, { status: "incomplete", terminal_reason: "turn_failed" }),
+    )
+
+    // The UI never replaces useful content with a full-screen error, so the
+    // two have to be different states rather than one status with a caveat.
+    expect(partial.phase).toBe("incomplete")
+    expect(partial.terminalReason).toBe("turn_deadline")
+    expect(empty.phase).toBe("failed")
+  })
+
+  it("does not take a pressed stop button back", () => {
+    // The snapshot honestly says `running`, and the user honestly pressed stop.
+    const state = run(started, snapshot(0), { type: "cancelling" }, snapshot(1))
+
+    expect(state.phase).toBe("cancelling")
+  })
+})
+
+describe("a duplicate", () => {
+  it("is ignored rather than applied a second time", () => {
+    const state = run(
+      started,
+      snapshot(0),
+      event(1, "content.block", { block: block("một") }),
+      event(1, "content.block", { block: block("một") }),
+    )
+
+    expect(state.blocks).toHaveLength(1)
+    expect(state.seq).toBe(1)
+  })
+
+  it("is ignored when a reconnect redelivers everything below the snapshot", () => {
+    const state = run(
+      started,
+      snapshot(4, { blocks: [block("một"), block("hai")] }),
+      event(3, "content.block", { block: block("hai") }),
+      event(4, "turn.activity", { phase: "analyzing" }),
+    )
+
+    expect(state.blocks).toHaveLength(2)
+    expect(state.activity).toBeNull()
+  })
+})
+
+describe("a gap", () => {
+  it("is not patched over — it asks for a fresh snapshot", () => {
+    const state = run(
+      started,
+      snapshot(0),
+      event(1, "content.block", { block: block("một") }),
+      event(3, "content.block", { block: block("ba") }),
+    )
+
+    // The missing event cannot be reconstructed from what is here, so nothing
+    // pretends it can be.
+    expect(state.needsResync).toBe(true)
+    expect(state.blocks.map((entry) => entry.text)).toEqual(["một"])
+    expect(state.seq).toBe(1)
+  })
+
+  it("is cleared only by the snapshot that answers it", () => {
+    const gapped = run(
+      started,
+      snapshot(0),
+      event(2, "content.block", { block: block("hai") }),
+    )
+
+    const resynced = liveTurnReducer(
+      liveTurnReducer(gapped, { type: "resynced" }),
+      snapshot(2, { blocks: [block("một"), block("hai")] }),
+    )
+
+    expect(resynced.needsResync).toBe(false)
+    expect(resynced.blocks).toHaveLength(2)
+    expect(resynced.seq).toBe(2)
+  })
+
+  it("treats an unparseable frame the same way, because it is the same thing", () => {
+    const state = run(started, snapshot(0), { type: "gap" })
+
+    expect(state.needsResync).toBe(true)
+  })
+})
+
+describe("the four terminal meanings", () => {
+  const cases: Array<[TurnEventType, LiveTurn["phase"]]> = [
+    ["turn.completed", "completed"],
+    ["turn.incomplete", "incomplete"],
+    ["turn.failed", "failed"],
+    ["turn.cancelled", "cancelled"],
+  ]
+
+  it.each(cases)("%s settles as %s", (type, phase) => {
+    const state = run(
+      started,
+      snapshot(0),
+      event(1, type, { status: "x", terminal_reason: "why", message_id: 42 }),
+    )
+
+    expect(state.phase).toBe(phase)
+    expect(state.terminalReason).toBe("why")
+    // The message the client refetches the Thread for.
+    expect(state.messageId).toBe(42)
+    expect(isActive(state)).toBe(false)
+  })
+
+  it("keeps every block a cancelled Turn had already delivered", () => {
+    const state = run(
+      started,
+      snapshot(0),
+      event(1, "content.block", { block: block("giữ lại") }),
+      { type: "cancelling" },
+      event(2, "turn.cancelled", { terminal_reason: "cancelled_by_user" }),
+    )
+
+    expect(state.phase).toBe("cancelled")
+    expect(state.blocks.map((entry) => entry.text)).toEqual(["giữ lại"])
+  })
+})
+
+describe("settling from the Turn row", () => {
+  it("applies whatever the sequence says, because the stream stopped speaking", () => {
+    // The row is authoritative precisely when the stream is not, so holding
+    // this to a rule about stream ordering would leave the UI spinning.
+    const state = run(
+      started,
+      snapshot(9, { blocks: [block("một phần")] }),
+      {
+        type: "settled",
+        status: "incomplete",
+        terminalReason: "interrupted_restart",
+        messageId: 7,
+      },
+    )
+
+    expect(state.phase).toBe("incomplete")
+    expect(state.terminalReason).toBe("interrupted_restart")
+    expect(state.blocks).toHaveLength(1)
+  })
+
+  it("cannot overwrite a terminal state the stream already delivered", () => {
+    const state = run(
+      started,
+      snapshot(0),
+      event(1, "turn.completed", { terminal_reason: null, message_id: 3 }),
+      { type: "settled", status: "incomplete", terminalReason: "late", messageId: 9 },
+    )
+
+    expect(state.phase).toBe("completed")
+    expect(state.messageId).toBe(3)
+  })
+})
+
+describe("the activity line", () => {
+  it("shows a phase while tools run and clears when a block lands", () => {
+    const working = run(started, snapshot(0), event(1, "turn.activity", { phase: "searching" }))
+    const answered = liveTurnReducer(
+      working,
+      event(2, "content.block", { block: block("kết quả") }),
+    )
+
+    expect(working.activity).toBe("searching")
+    expect(answered.activity).toBeNull()
+  })
+})
+
+describe("an event from another Turn", () => {
+  it("is dropped, so a retry's stream cannot write into the new one", () => {
+    const state = run(started, snapshot(0))
+
+    const stray = liveTurnReducer(state, {
+      type: "event",
+      event: {
+        version: 1,
+        seq: 1,
+        type: "content.block",
+        turn_id: "a-different-turn",
+        data: { block: block("của Turn khác") },
+      },
+    })
+
+    expect(stray.blocks).toEqual([])
+  })
+})
