@@ -135,12 +135,38 @@ export interface UserContent {
   symbols?: string[]
 }
 
+/**
+ * The four reason labels a flag may carry — the whole of v1's dispute
+ * vocabulary (`docs/adr/0016`).
+ *
+ * Written out rather than derived from the API, because the backend validates
+ * against its own copy on the column: the two have to stop agreeing at compile
+ * time here, not at runtime in front of a reader.
+ */
+export type FlagReason = "wrong_figure" | "overreach" | "wrongly_refused" | "other"
+
+/**
+ * One message's flag, as the write endpoints answer it.
+ *
+ * Both fields move together: a message carries a reason and a stamp, or
+ * neither. There is no third state, and there is no id of a ticket that was
+ * opened — because no ticket is opened.
+ */
+export interface MessageFlag {
+  message_id: number
+  flagged_reason: FlagReason | null
+  flagged_at: string | null
+}
+
 export interface ThreadMessage {
   id: number
   seq: number
   role: "user" | "assistant" | "summary"
   content: Partial<AssistantContent> & Partial<UserContent> & Record<string, unknown>
   created_at: string
+  /** Null on almost every message. Carried so a reopened Thread shows the flag. */
+  flagged_reason: FlagReason | null
+  flagged_at: string | null
 }
 
 export interface Thread {

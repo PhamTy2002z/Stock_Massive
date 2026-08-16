@@ -41,13 +41,17 @@ import { currentAccessToken, rotateAccessToken } from "@/lib/auth/bearer"
 // and `analyses` are the Watchlist rail and the Analyses behind it. `widgets`
 // reads back the fixed slice a stored Widget descriptor names; upstream serves
 // one only when it hangs off a message the caller owns, so adding it here
-// widens the proxy without widening what anyone can reach.
+// widens the proxy without widening what anyone can reach. `messages` is the
+// flag action of ADR-0016 and nothing else: upstream mounts `POST` and `DELETE`
+// on `/messages/{id}/flag` alone, and both resolve ownership through the
+// Thread, so the same argument covers it.
 const FORWARDED_RESOURCES = new Set([
   "watchlist",
   "analyses",
   "widgets",
   "threads",
   "turns",
+  "messages",
 ])
 
 const EVENT_STREAM = "text/event-stream"

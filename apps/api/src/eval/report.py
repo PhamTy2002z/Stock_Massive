@@ -30,6 +30,14 @@ def report_filename(result: EvalRunResult) -> str:
     A smoke run has no gating value, so its report must not be able to occupy
     the name a baseline is read from. It carries the mode and a short run id
     instead.
+
+    The gate name is ``docs/adr/0016``'s, verbatim, and it is not unique: two
+    gate runs on one day at one ``prompt_version`` write the same file, and the
+    earlier run's ``eval_run.report_path`` then points at the later run's
+    report. Left as the ADR states it rather than quietly disambiguated,
+    because the merge rule reads reports by that name — deciding what a
+    same-day re-run means for the baseline is the report ticket's (#98), and
+    inventing an answer here would be answering it in the wrong place.
     """
     day = result.started_at.date().isoformat()
     if result.mode.gating:

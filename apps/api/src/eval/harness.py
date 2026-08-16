@@ -31,7 +31,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, time, timezone
 from enum import Enum
 from pathlib import Path
@@ -43,12 +43,13 @@ from sqlalchemy.orm import Session
 from src.agent.loop import AgentLoop, SpendIdentity, TurnOutcome, TurnRequest
 from src.agent.manifest import EvidenceManifest, assemble_message, build_manifest
 from src.agent.persistence import AgentPersistence
-from src.agent.prompt import MarketState, RuntimeContext
+from src.agent.prompt import PROMPT_VERSION, MarketState, RuntimeContext
 from src.agent.tools.suite import IntelligentQuantCatalog
 from src.agent.turns import gate_outcomes, rendered_blocks
 from src.alpha.models import EvalRun
 from src.core.config import Settings, get_settings
 from src.core.llm import (
+    BUDGET_REFUSAL_REASONS,
     BudgetLane,
     BudgetRefusal,
     LLMConfig,
@@ -108,16 +109,24 @@ class EvalMisconfigured(RuntimeError):
 
 
 class EvalBudgetExhausted(RuntimeError):
-    """The run stopped at its ceiling. There is no score, by design."""
+    """A case could not be funded, so the run stopped. There is no score.
 
-    reason = "eval_budget_exhausted"
+    Carries **which** ceiling bound, not a single fixed string. The $2.5 per-run
+    ceiling of ``docs/adr/0016`` is the one this ticket is about, but the $5
+    monthly eval lane of ``docs/adr/0014`` sits above it and an exhausted lane
+    refuses the same call for a different reason. Recognising only
+    ``eval_budget_exhausted`` would let the battery run to the end and publish a
+    full score over Turns that never reached the model — which is the exact lie
+    the ADR forbids, arrived at from the other direction.
+    """
 
-    def __init__(self, case_id: str, detail: str) -> None:
+    def __init__(self, case_id: str, reason: str, detail: str) -> None:
         self.case_id = case_id
+        self.reason = reason
         self.detail = detail
         super().__init__(
-            f"eval_budget_exhausted at case {case_id}: {detail}. The run stopped "
-            "rather than dropping the remaining cases and reporting a score."
+            f"{reason} at case {case_id}: {detail}. The run stopped rather than "
+            "dropping the remaining cases and reporting a score."
         )
 
 
@@ -210,31 +219,35 @@ class EvalRunResult:
         stored percentage would be a number two later readers would disagree
         about the meaning of. Counts are what both of them can compute from.
         """
-        totals: dict[str, dict[str, int]] = {
-            category.value: {"cases": 0, "runs": 0, "passed": 0}
-            for category in EvalCategory
-        }
-        for result in self.results:
-            bucket = totals[result.case.category.value]
-            bucket["cases"] += 1
-            bucket["runs"] += len(result.runs)
-            bucket["passed"] += result.passed_runs
         return MappingProxyType(
             {
-                "by_category": totals,
-                "by_surface": self._surface_totals(),
+                "by_category": self._totals_over(
+                    EvalCategory, lambda case: case.category.value
+                ),
+                "by_surface": self._totals_over(
+                    EvalSurface, lambda case: case.surface.value
+                ),
                 "complete": self.complete,
                 "stopped_reason": self.stopped_reason,
             }
         )
 
-    def _surface_totals(self) -> dict[str, dict[str, int]]:
+    def _totals_over(
+        self, keys: type[Enum], key_of: Callable[[EvalCase], str]
+    ) -> dict[str, dict[str, int]]:
+        """Cases, runs and passes bucketed by one dimension.
+
+        Seeded from the whole enum rather than from the results, so a category
+        nobody ran reports ``0`` instead of being absent. A missing key and a
+        zero read the same to a careless eye and mean opposite things: one is a
+        category that failed everything, the other is a category the run never
+        reached.
+        """
         totals = {
-            surface.value: {"cases": 0, "runs": 0, "passed": 0}
-            for surface in EvalSurface
+            key.value: {"cases": 0, "runs": 0, "passed": 0} for key in keys
         }
         for result in self.results:
-            bucket = totals[result.case.surface.value]
+            bucket = totals[key_of(result.case)]
             bucket["cases"] += 1
             bucket["runs"] += len(result.runs)
             bucket["passed"] += result.passed_runs
@@ -350,6 +363,23 @@ def config_for(mode: EvalMode, settings: Settings | None = None) -> LLMConfig:
     return config
 
 
+def _refuse_unrunnable(cases: Sequence[EvalCase]) -> None:
+    """Refuse a case this harness has no lane for, before anything is spent.
+
+    Only the Turn lane exists here. The Analysis lane runs the nightly pipeline
+    over the same fixture and is issue #97; its cases carry no prompt, so
+    running one through :meth:`EvalHarness._run_once` would ask the model a
+    blank question and score whatever came back. Loud, and named, because a
+    silent blank Turn would land in the report as an ordinary failure.
+    """
+    orphaned = [case.id for case in cases if case.surface is not EvalSurface.TURN]
+    if orphaned:
+        raise EvalMisconfigured(
+            "this harness runs the Turn lane only; the Analysis lane is #97. "
+            "Refusing: " + ", ".join(orphaned)
+        )
+
+
 @dataclass
 class EvalHarness:
     """One battery run, from the loaded fixture to the written ``eval_run``."""
@@ -408,6 +438,7 @@ class EvalHarness:
     async def run(self, cases: Sequence[EvalCase] | None = None) -> EvalRunResult:
         """Run the battery, or stop at the ceiling and report no score."""
         selected = tuple(cases if cases is not None else battery())
+        _refuse_unrunnable(selected)
         versions = running_versions()
         self.fixture.seed.manifest.versions.assert_matches(versions)
 
@@ -445,7 +476,7 @@ class EvalHarness:
             route=self.config.route.base_url,
             model=model,
             versions=versions,
-            prompt_version=_prompt_version(),
+            prompt_version=PROMPT_VERSION,
             fixture_version=self.fixture.fixture_version,
             started_at=started_at,
             finished_at=finished_at,
@@ -502,17 +533,23 @@ class EvalHarness:
         try:
             outcome = await loop.run(request)
         except BudgetRefusal as refusal:
-            if refusal.reason != EvalBudgetExhausted.reason:
-                raise
-            raise EvalBudgetExhausted(case.id, refusal.operator_detail) from refusal
+            raise EvalBudgetExhausted(
+                case.id, refusal.reason, refusal.operator_detail or refusal.message
+            ) from refusal
 
         # The loop swallows a budget refusal into an ``incomplete`` Turn rather
         # than raising — a Turn that cannot fund its next call ends where it is.
         # For a user that is the right answer; for the battery it is the run
         # stopping, because the case that ended early was not measured.
-        if outcome.terminal_reason == EvalBudgetExhausted.reason:
+        #
+        # Matched against the ledger's own closed set rather than against a
+        # string chosen here. Any ceiling that refuses a call leaves a case
+        # unmeasured, and which one bound is not this module's to decide.
+        if outcome.terminal_reason in BUDGET_REFUSAL_REASONS:
             raise EvalBudgetExhausted(
-                case.id, "the loop ended the case without funding its next call"
+                case.id,
+                str(outcome.terminal_reason),
+                "the loop ended the case without funding its next call",
             )
 
         manifest, assembled = self._assemble(outcome)
@@ -593,7 +630,7 @@ class EvalHarness:
                         mode=self.mode.value,
                         route=self.config.route.base_url,
                         model=model,
-                        prompt_version=_prompt_version(),
+                        prompt_version=PROMPT_VERSION,
                         tool_catalog_version=self.tool_catalog_version,
                         registry_version=versions.registry_version,
                         fixture_version=self.fixture.fixture_version,
@@ -621,17 +658,9 @@ class EvalHarness:
 
     def record_report_path(self, result: EvalRunResult, path: Path) -> EvalRunResult:
         """Stamp the written report onto the run, in the result and the row."""
-        from dataclasses import replace
-
         stamped = replace(result, report_path=str(path))
         self._close_run(stamped)
         return stamped
-
-
-def _prompt_version() -> str:
-    from src.agent.prompt import PROMPT_VERSION
-
-    return PROMPT_VERSION
 
 
 def build_harness(

@@ -20,7 +20,6 @@ diff rather than a line appended to a list.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -215,20 +214,14 @@ def register(*cases: EvalCase) -> tuple[EvalCase, ...]:
     return cases
 
 
-def battery(
-    *,
-    categories: Iterable[EvalCategory] | None = None,
-    surfaces: Iterable[EvalSurface] | None = None,
-) -> tuple[EvalCase, ...]:
-    """The registered cases, in registration order, optionally narrowed."""
-    wanted = set(categories) if categories is not None else None
-    surface = set(surfaces) if surfaces is not None else None
-    return tuple(
-        case
-        for case in _REGISTRY.values()
-        if (wanted is None or case.category in wanted)
-        and (surface is None or case.surface in surface)
-    )
+def battery() -> tuple[EvalCase, ...]:
+    """Every registered case, in registration order.
+
+    Unfiltered, and deliberately so. ``docs/adr/0016`` re-scores **all** D/E
+    cases on every gate run rather than only the ones that changed, and a
+    selector here would be the first thing reached for on a run that felt slow.
+    """
+    return tuple(_REGISTRY.values())
 
 
 __all__ = [

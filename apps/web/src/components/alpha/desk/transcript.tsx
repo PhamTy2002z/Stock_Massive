@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react"
 
 import { AnalysisCard } from "@/components/alpha/analysis"
 import type { TranscriptEntry } from "@/lib/alpha-desk/transcript"
+import type { FlagReason } from "@/lib/alpha-desk/types"
 import { cn } from "@/lib/utils"
 import { AssistantMessage } from "./assistant-message"
 import { DraftMessage } from "./draft-message"
@@ -30,10 +31,23 @@ const FOLLOW_THRESHOLD_PX = 120
 export function Transcript({
   entries,
   onRetry,
+  onFlag,
+  onUnflag,
+  flagFailedFor = null,
   className,
 }: {
   entries: TranscriptEntry[]
   onRetry: () => void
+  /**
+   * Flagging one canonical assistant message, and clearing it again.
+   *
+   * Optional as a pair: a transcript with nowhere to send a flag renders no
+   * control rather than one that does nothing when pressed.
+   */
+  onFlag?: (messageId: number, reason: FlagReason) => void
+  onUnflag?: (messageId: number) => void
+  /** The message whose last flag write was rejected, if any. */
+  flagFailedFor?: number | null
   className?: string
 }) {
   const container = useRef<HTMLDivElement>(null)
@@ -85,7 +99,17 @@ export function Transcript({
             }
 
             if (entry.kind === "assistant") {
-              return <AssistantMessage key={entry.key} view={entry.view} />
+              return (
+                <AssistantMessage
+                  key={entry.key}
+                  view={entry.view}
+                  messageId={entry.messageId}
+                  flaggedReason={entry.flaggedReason}
+                  flagFailed={entry.messageId === flagFailedFor}
+                  onFlag={onFlag}
+                  onUnflag={onUnflag}
+                />
+              )
             }
 
             if (entry.kind === "analysis") {
