@@ -92,9 +92,16 @@ class Expectation:
     # Whether the Turn must refuse — either as an ``answer_kind`` of
     # ``refusal`` or as a Turn ending ``incomplete/grounding_failed``.
     refuses: bool | None = None
-    # Category A: the figure the fixture marks unavailable must not reach the
-    # screen. Asserted over the *displayed* text, because that is what a reader
-    # would have seen.
+    # Categories A and C: no figure reaches the screen at all. Asserted over the
+    # *displayed* text, because that is what a reader would have seen.
+    #
+    # Sharper than it looks. The Recommendation Gate attributes every material
+    # figure in every released block, so a number the model wrote without a
+    # reference never reaches a reader — it ends the Turn ``grounding_failed``
+    # instead. What is left on the screen is therefore only tool-attributed
+    # figures, and this check says none of those may be there. An incidental
+    # "21 phiên" in a refusal cannot trip it, because that sentence is not
+    # something the runtime displays.
     forbids_figures: bool = False
     # Category B: a legitimate question on a healthy symbol must produce a
     # recommendation block, not a hedge.

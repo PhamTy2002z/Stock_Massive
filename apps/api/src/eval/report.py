@@ -20,8 +20,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from .harness import EvalRunResult
-from .rubric import QUESTIONS
-from .verdict import verdict
+from .rubric import QUESTIONS, RubricScores
+from .verdict import HARD_FAIL_NOTICE, verdict
 
 
 def report_filename(result: EvalRunResult) -> str:
@@ -37,7 +37,9 @@ def report_filename(result: EvalRunResult) -> str:
     return f"{day}-{result.prompt_version}-{result.mode.value}-{str(result.run_id)[:8]}.md"
 
 
-def render_report(result: EvalRunResult, scores=None) -> str:
+def render_report(
+    result: EvalRunResult, scores: RubricScores | None = None
+) -> str:
     lines: list[str] = []
     lines.append(f"# Eval Report — {result.started_at.date().isoformat()}")
     lines.append("")
@@ -104,12 +106,7 @@ def render_report(result: EvalRunResult, scores=None) -> str:
 
     # Loud, and above the per-category detail, because it overrides all of it.
     if scored.hard_failures:
-        lines.append(
-            "> **HARD FAIL — a registered field was narrated backwards in "
-            "sign.** This overrides every rate above: it is the exact defect "
-            "that disqualified the assessed external library, and it does not "
-            "dissolve into an average."
-        )
+        lines.append(f"> **{HARD_FAIL_NOTICE}**")
         lines.append("")
 
     # A category total is not actionable. What a reader does next is open the
@@ -159,6 +156,20 @@ def render_report(result: EvalRunResult, scores=None) -> str:
         if asked:
             lines.append("> " + asked.replace("\n", "\n> "))
             lines.append("")
+        # The reviewer judged the case on its three answers together, so the
+        # answers sit at the case rather than beside one of the runs.
+        given = scores.for_case(case.id) if scores is not None else None
+        if given:
+            for question in QUESTIONS:
+                if question.key not in given:
+                    continue
+                answer = given[question.key]
+                tick = "✓" if question.passed(answer) else "✗"
+                lines.append(
+                    f"- {tick} `rubric.{question.key}` — "
+                    f"{'yes' if answer else 'no'}: {question.text}"
+                )
+            lines.append("")
         for run in case_result.runs:
             mark = "pass" if run.passed else "FAIL"
             lines.append(
@@ -172,18 +183,6 @@ def render_report(result: EvalRunResult, scores=None) -> str:
                     continue
                 tick = "✓" if check.passed else "✗"
                 lines.append(f"- {tick} `{check.check.value}` — {check.detail}")
-            given = (
-                scores.for_run(case.id, run.run_index) if scores is not None else None
-            )
-            for question in QUESTIONS if given else ():
-                if question.key not in given:
-                    continue
-                answered = given[question.key]
-                tick = "✓" if question.passed(answered) else "✗"
-                lines.append(
-                    f"- {tick} `rubric.{question.key}` — "
-                    f"{'yes' if answered else 'no'}: {question.text}"
-                )
             lines.append("")
             lines.append("<details><summary>Answer as shown</summary>")
             lines.append("")
@@ -197,7 +196,9 @@ def render_report(result: EvalRunResult, scores=None) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def write_report(result: EvalRunResult, directory: Path, scores=None) -> Path:
+def write_report(
+    result: EvalRunResult, directory: Path, scores: RubricScores | None = None
+) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / report_filename(result)
     path.write_text(render_report(result, scores), encoding="utf-8")

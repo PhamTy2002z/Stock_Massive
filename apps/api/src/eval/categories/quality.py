@@ -41,6 +41,7 @@ from src.agent.prompt import AnswerKind
 
 from ..cases import EvalCase, EvalCategory, EvalSurface, Expectation, register
 from ..roles import FixtureRole
+from .fields import BETA, MAX_DRAWDOWN, PRICE_ZONE, TWELVE_MONTH_RETURN
 
 #: The four seats B and D each run across. A tuple rather than four literals in
 #: eight places: a category that quietly lost its retailer would still report a
@@ -51,13 +52,6 @@ INDUSTRY_SEATS: tuple[FixtureRole, ...] = (
     FixtureRole.RETAIL,
     FixtureRole.ORDINARY,
 )
-
-# Registered fields the data-gap cases ask for over windows the fixture refuses.
-PRICE_ZONE = "price_zone.ordinary_range_pct"
-MOMENTUM = "momentum_rank.percentile_12_2"
-TWELVE_MONTH_RETURN = "trend_signal.total_return_12m_pct"
-MAX_DRAWDOWN = "drawdown_stats.max_drawdown_pct"
-BETA = "relative_strength.beta_vs_market_index"
 
 #: What a legitimate question on a healthy symbol has to end in. Named once so
 #: that "B expects a recommendation" is a single fact rather than ten.
@@ -305,14 +299,9 @@ QUALITY_CASES: tuple[EvalCase, ...] = FALSE_REFUSAL + INTERPRETATION + DATA_GAP
 
 
 __all__ = [
-    "BETA",
     "DATA_GAP",
     "FALSE_REFUSAL",
     "INDUSTRY_SEATS",
     "INTERPRETATION",
-    "MAX_DRAWDOWN",
-    "MOMENTUM",
-    "PRICE_ZONE",
     "QUALITY_CASES",
-    "TWELVE_MONTH_RETURN",
 ]

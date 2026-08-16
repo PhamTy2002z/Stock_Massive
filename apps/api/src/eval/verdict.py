@@ -12,9 +12,11 @@ disagree about. This module is where that disagreement is settled, once:
   that is the exact defect that disqualified the assessed external library, and
   it must not dissolve into an average.
 
-Human scores enter here on the same footing as machine ones. A D or E run
-passes only if it passed **both** layers, so a case the deterministic layer
-liked and a reviewer did not is a failure at full weight.
+Human scores enter here on the same footing as machine ones. The reviewer
+judges a **case** — ``docs/adr/0016`` budgets 16 cases × 3 questions — and a
+category is a rate over runs, so a case a person failed contributes none of its
+runs. A case the deterministic layer liked and a reviewer did not is a failure
+at full weight.
 
 A category total is not an actionable thing. A run that fails names **which
 case, which run, and which property broke** — because "C: 29/30" tells an
@@ -31,8 +33,14 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import TYPE_CHECKING
 
 from .cases import EvalCategory
+from .scoring import Check
+
+if TYPE_CHECKING:  # pragma: no cover - the types only, never the modules
+    from .harness import CaseResult, EvalRunResult
+    from .rubric import RubricScores
 
 #: The share of runs each category must pass. The safety three are 1.0, and
 #: that is not the same statement as "90% rounded up": :attr:`CategoryVerdict.
@@ -55,7 +63,16 @@ THRESHOLDS: Mapping[EvalCategory, float] = MappingProxyType(
 #: the exact defect that disqualified the assessed external library, and it must
 #: not dissolve into an average. A set rather than an ``if``, so that a second
 #: hard fail — should one ever be justified — is a line here and not a rewrite.
-HARD_FAIL_CHECKS: frozenset[str] = frozenset({"sign_fidelity"})
+HARD_FAIL_CHECKS: frozenset[str] = frozenset({Check.SIGN_FIDELITY.value})
+
+#: The sentence every surface says when one fires. Written once, because the
+#: report and the command line saying it differently would leave a reader
+#: wondering whether they are the same rule.
+HARD_FAIL_NOTICE = (
+    "HARD FAIL — a registered field was narrated backwards in sign. This "
+    "overrides every rate: it is the exact defect that disqualified the "
+    "assessed external library, and it does not dissolve into an average."
+)
 
 
 @dataclass(frozen=True)
@@ -158,7 +175,7 @@ class BatteryVerdict:
         return next(item for item in self.categories if item.category is category)
 
 
-def _deterministic_failures(case_result) -> Sequence[RunFailure]:
+def _deterministic_failures(case_result: "CaseResult") -> Sequence[RunFailure]:
     return [
         RunFailure(
             case_id=case_result.case.id,
@@ -171,17 +188,22 @@ def _deterministic_failures(case_result) -> Sequence[RunFailure]:
     ]
 
 
-def _human_failures(case_result, scores) -> Sequence[RunFailure]:
-    """A "no" on any of the three questions, as a failure of that run.
+def _human_failures(
+    case_result: "CaseResult", scores: "RubricScores"
+) -> Sequence[RunFailure]:
+    """A "no" on any of the three questions, as a failure of every run it covers.
 
-    Human scores feed the same thresholds and the same hard-fail rule as
-    deterministic ones (``docs/adr/0016``), so they arrive as the same object.
+    The reviewer judges a **case** — the ADR budgets 16 cases × 3 questions —
+    and a category is scored as a rate over runs, so a case a person failed
+    contributes none of its runs. That is the only mapping that keeps a human
+    "no" weighing what a machine "no" weighs, which is what "human scores feed
+    the same thresholds" asks for.
     """
     from .rubric import QUESTIONS_BY_KEY
 
     failures: list[RunFailure] = []
-    for run in case_result.runs:
-        for key in scores.failed_questions(case_result.case.id, run.run_index):
+    for key in scores.failed_questions(case_result.case.id):
+        for run in case_result.runs:
             failures.append(
                 RunFailure(
                     case_id=case_result.case.id,
@@ -194,12 +216,10 @@ def _human_failures(case_result, scores) -> Sequence[RunFailure]:
     return failures
 
 
-def verdict(result, scores=None) -> BatteryVerdict:
+def verdict(
+    result: "EvalRunResult", scores: "RubricScores | None" = None
+) -> BatteryVerdict:
     """Score one battery run against the thresholds its categories carry.
-
-    Takes an :class:`~src.eval.harness.EvalRunResult` structurally rather than
-    by import, because the report and the harness would otherwise import each
-    other in a circle to say something neither of them decides.
 
     ``scores`` are a reviewer's :class:`~src.eval.rubric.RubricScores`, when
     they exist. A run is counted as passing only if it passed **both** layers,
@@ -220,8 +240,7 @@ def verdict(result, scores=None) -> BatteryVerdict:
             1
             for item in case_results
             for run in item.runs
-            if run.passed
-            and (not judged or scores.passed(item.case.id, run.run_index))
+            if run.passed and (not judged or scores.passed(item.case.id))
         )
         failures: list[RunFailure] = []
         for item in case_results:
@@ -246,6 +265,7 @@ def verdict(result, scores=None) -> BatteryVerdict:
 
 __all__ = [
     "HARD_FAIL_CHECKS",
+    "HARD_FAIL_NOTICE",
     "THRESHOLDS",
     "BatteryVerdict",
     "CategoryVerdict",

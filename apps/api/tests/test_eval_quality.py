@@ -298,10 +298,10 @@ def answered(sheet: str, **overrides) -> str:
     """Fill every question with its *passing* answer, then override named ones.
 
     Passing rather than ``yes``: question three asks whether something was
-    omitted, so a sheet of yeses is a sheet of one failure per run — which is
+    omitted, so a sheet of yeses is a sheet of one failure per case — which is
     the confusion this helper exists to keep out of the tests below.
 
-    An override lands on the first run in the sheet, which is run 1.
+    An override lands on the first case in the sheet.
     """
     filled = sheet
     for question in QUESTIONS:
@@ -353,11 +353,15 @@ class TestTheBlindSheet:
         assert "Câu trả lời 0" in sheet
         assert "Câu trả lời 1" in sheet
 
-    def test_it_covers_every_run_of_every_judged_case(self, result):
+    def test_it_covers_every_judged_case_and_shows_all_of_its_runs(self, result):
+        """Three questions per case, and every run of that case beneath them."""
         sheet = sheet_for(result)
-        assert "`d-case` — run 1" in sheet
-        assert "`d-case` — run 2" in sheet
-        assert "`e-case` — run 1" in sheet
+        assert "### `d-case`" in sheet
+        assert "### `e-case`" in sheet
+        assert sheet.count("**Run 1**") == 2
+        assert sheet.count("**Run 2**") == 1
+        # The ADR budgets 16 cases x 3 questions, not 16 cases x 3 runs x 3.
+        assert sheet.count("- cited = ?") == 2
 
     def test_it_does_not_ask_about_the_categories_a_machine_settled(self, result):
         assert JUDGED_CATEGORIES == {
@@ -380,7 +384,7 @@ class TestReadingAFilledSheet:
     def test_an_unfinished_sheet_is_refused_rather_than_defaulted(self, result):
         with pytest.raises(RubricIncomplete) as raised:
             read_sheet(sheet_for(result))
-        assert len(raised.value.missing) == 2 * len(QUESTIONS)
+        assert len(raised.value.missing) == len(QUESTIONS)
 
     def test_one_missing_answer_is_still_unfinished(self, result):
         sheet = answered(sheet_for(result))
@@ -388,32 +392,38 @@ class TestReadingAFilledSheet:
         with pytest.raises(RubricIncomplete):
             read_sheet(sheet)
 
-    def test_a_finished_sheet_reads_back_run_by_run(self, result):
+    def test_a_finished_sheet_reads_back_case_by_case(self, result):
         scores = read_sheet(answered(sheet_for(result)))
-        assert scores.for_run("d-case", 0) == {
+        assert scores.for_case("d-case") == {
             "cited": True,
             "sanctioned": True,
             "contradiction": False,
         }
-        assert scores.passed("d-case", 0)
+        assert scores.passed("d-case")
 
     def test_the_omission_question_passes_on_no(self, result):
         """Question three asks whether something was left out, so yes is a fail."""
         scores = read_sheet(answered(sheet_for(result), contradiction="yes"))
-        assert scores.failed_questions("d-case", 0) == ("contradiction",)
-        assert scores.failed_questions("d-case", 1) == ()
+        assert scores.failed_questions("d-case") == ("contradiction",)
+        assert not scores.passed("d-case")
 
     def test_a_sheet_that_skipped_a_case_is_refused(self, result):
-        filled = answered(sheet_for(result))
-        trimmed = filled.split("### `d-case` — run 2")[0]
-        scores = read_sheet(trimmed)
-        with pytest.raises(RubricMismatch):
-            assert_covers(result, scores)
+        two_cases = battery_result(
+            [
+                ("d-case", EvalCategory.INTERPRETATION, [run(True, 0)]),
+                ("e-case", EvalCategory.DATA_GAP, [run(True, 0)]),
+            ]
+        )
+        filled = answered(sheet_for(two_cases))
+        scores = read_sheet(filled.split("### `e-case`")[0])
+        with pytest.raises(RubricMismatch) as raised:
+            assert_covers(two_cases, scores)
+        assert "e-case" in str(raised.value)
 
     def test_a_sheet_scoring_a_case_that_did_not_run_is_refused(self, result):
         filled = answered(sheet_for(result))
         filled += (
-            "\n### `ghost-case` — run 1\n\n"
+            "\n### `ghost-case`\n\n"
             "- cited = yes\n- sanctioned = yes\n- contradiction = no\n"
         )
         with pytest.raises(RubricMismatch):
@@ -423,31 +433,41 @@ class TestReadingAFilledSheet:
 class TestHumanScoresWeighWhatMachineScoresWeigh:
     @pytest.fixture
     def result(self):
+        """Two D cases the deterministic layer liked, three runs each."""
         return battery_result(
             [
                 (
-                    "d-case",
+                    "d-first",
                     EvalCategory.INTERPRETATION,
                     [run(True, index) for index in range(3)],
-                )
+                ),
+                (
+                    "d-second",
+                    EvalCategory.INTERPRETATION,
+                    [run(True, index) for index in range(3)],
+                ),
             ]
         )
 
-    def test_a_run_the_machine_liked_and_a_person_did_not_is_a_failure(self, result):
+    def test_a_case_the_machine_liked_and_a_person_did_not_is_a_failure(self, result):
+        """The reviewer judges the case, so a failed case contributes no runs."""
         scores = read_sheet(answered(sheet_for(result), sanctioned="no"))
         scored = verdict(result, scores)
         category = scored.by_category(EvalCategory.INTERPRETATION)
 
-        assert category.passed == 2
-        assert category.rate == pytest.approx(2 / 3)
+        assert category.passed == 3
+        assert category.rate == pytest.approx(0.5)
         assert not category.met
 
     def test_the_failure_names_the_question_and_says_a_person_decided_it(
         self, result
     ):
         scores = read_sheet(answered(sheet_for(result), cited="no"))
-        (failure,) = verdict(result, scores).failures
+        failures = verdict(result, scores).failures
 
+        assert {failure.case_id for failure in failures} == {"d-first"}
+        assert len(failures) == 3, "one per run of the case the reviewer failed"
+        failure = failures[0]
         assert failure.check == "rubric.cited"
         assert failure.human
         assert "rubric" in str(failure)
@@ -490,13 +510,16 @@ class TestTheRubricCommand:
 
     @pytest.fixture
     def artifacts(self, tmp_path):
+        """What a finished `make eval` leaves: a record and a sheet, no report."""
         from src.eval.record import record_filename, write_record
+        from src.eval.report import report_filename
 
         result = _real_run_result()
-        write_record(result, tmp_path / record_filename("report.md"))
-        sheet = tmp_path / sheet_filename("report.md")
+        name = report_filename(result)
+        write_record(result, tmp_path / record_filename(name))
+        sheet = tmp_path / sheet_filename(name)
         sheet.write_text(render_sheet(result), encoding="utf-8")
-        return result, sheet, tmp_path / "report.md"
+        return result, sheet, tmp_path / name
 
     def test_an_unfinished_sheet_exits_non_zero_and_writes_no_report(
         self, artifacts, capsys
@@ -507,6 +530,23 @@ class TestTheRubricCommand:
         assert main(["rubric", "--sheet", str(sheet)]) == 1
         assert not report.exists()
         assert "unanswered" in capsys.readouterr().err
+
+    def test_the_sheet_is_the_only_artifact_until_it_is_scored(self, artifacts):
+        """Blindness is a missing file, not a sentence asking nicely.
+
+        `make eval` writes the record and the sheet; the report — which carries
+        the deterministic results, and which is the thing a pull request
+        attaches — is written by `rubric` from the reviewer's own answers.
+        """
+        _result, sheet, report = artifacts
+        assert sheet.exists()
+        assert not report.exists()
+
+        from src.eval.cli import main
+
+        sheet.write_text(answered(sheet.read_text(encoding="utf-8")), encoding="utf-8")
+        main(["rubric", "--sheet", str(sheet)])
+        assert report.exists()
 
     def test_a_finished_sheet_rewrites_the_report_with_the_answers_in_it(
         self, artifacts

@@ -15,7 +15,8 @@ score, and there is no documented workflow that would let them.
 
 from __future__ import annotations
 
+from . import fields  # noqa: F401  - validates every field name the cases use
 from . import quality  # noqa: F401  - imported for its registration side effect
 from . import safety  # noqa: F401  - imported for its registration side effect
 
-__all__ = ["quality", "safety"]
+__all__ = ["fields", "quality", "safety"]
