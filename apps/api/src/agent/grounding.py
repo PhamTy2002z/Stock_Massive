@@ -164,6 +164,14 @@ class Citation:
     contradictory: bool = False
     zone_label: str | None = None
     reference_price: bool = False
+    # The Signal Registry declaration this citation resolved through, when it
+    # resolved through one. ``field_path`` cannot be reduced back to it: a
+    # registered field's own name is dotted, so the path does not split into a
+    # name and a remainder without consulting what the call actually served.
+    # ADR-0012's Widget descriptor needs the bare name to reconstruct the same
+    # slice a year later, so the resolution that already worked it out keeps it
+    # rather than making a second reader guess.
+    field_name: str | None = None
 
     @property
     def window_health_refusal(self) -> str | None:
@@ -191,6 +199,7 @@ class Citation:
             "contradictory": self.contradictory,
             "zone_label": self.zone_label,
             "reference_price": self.reference_price,
+            "field_name": self.field_name,
         }
 
 
@@ -338,6 +347,16 @@ class TraceIndex:
     def call_ids(self) -> tuple[str, ...]:
         return tuple(self._calls)
 
+    def call(self, call_id: str) -> TranscriptToolCall | None:
+        """One of this Turn's calls, by the id the model referred to it by.
+
+        ``None`` rather than a failure, because the callers that want the call
+        itself — rather than a figure out of it — are asking a question that has
+        a legitimate negative answer: which symbol did this call answer about,
+        and is this call one of the ones already drawn elsewhere.
+        """
+        return self._calls.get(call_id)
+
     def admitted_symbols(self) -> frozenset[str]:
         """Every symbol a tool answered about without a Universe refusal.
 
@@ -356,7 +375,31 @@ class TraceIndex:
                 admitted.add(symbol.upper())
         return frozenset(admitted)
 
+    def resolve_descriptor(self, ref: EvidenceRef) -> tuple[TranscriptToolCall, Any]:
+        """The raw leaf a reference points at, with no citation semantics.
+
+        A Widget binds to two different kinds of thing (``docs/adr/0012``). One
+        is a *figure*, and it goes through :meth:`resolve` because a figure has
+        to arrive with the unit and the sanctioned reading the Recommendation
+        Validator would attach to it. The other is a *retrieval descriptor* —
+        a Data Reference, or the arguments a screen was run with — which
+        carries no unit and no interpretation and is not a citation at all.
+        Pushing the second through :meth:`resolve` would make it fail on the
+        ``as_of`` a descriptor legitimately does not have, so it resolves here
+        instead: same index, same Turn, same "another Turn's calls are not in
+        here" property, and no invented citation.
+        """
+        call = self._require(ref)
+        result = call.result
+        leaf, _container = _walk(result, [part for part in ref.field_path.split(".") if part], ref)
+        return call, leaf
+
     def resolve(self, ref: EvidenceRef) -> Citation:
+        call = self._require(ref)
+        return self._citation(call, call.result, ref)
+
+    def _require(self, ref: EvidenceRef) -> TranscriptToolCall:
+        """The call a reference names, or the reason it cannot be cited."""
         call = self._calls.get(ref.call_id)
         if call is None:
             raise GroundingFailure(
@@ -375,7 +418,7 @@ class TraceIndex:
                 "refused_tool_call",
                 f"tool call {ref.call_id!r} answered {refused!r} and carries no figure",
             )
-        return self._citation(call, result, ref)
+        return call
 
     def _citation(
         self,
@@ -481,6 +524,7 @@ class TraceIndex:
             stale=bool(serialized.get("degraded_reason")),
             source=EvidenceSource.REGISTERED_FIELD,
             window_health=health if isinstance(health, Mapping) else None,
+            field_name=name,
         )
 
     @staticmethod

@@ -37,9 +37,18 @@ import { currentAccessToken, rotateAccessToken } from "@/lib/auth/bearer"
  */
 
 // The resources this proxy will carry, matched on the first path segment.
-// `threads` and `turns` are the Alpha Desk transport (ADR-0013); the other two
-// are the Watchlist rail and the Analyses behind it.
-const FORWARDED_RESOURCES = new Set(["watchlist", "analyses", "threads", "turns"])
+// `threads` and `turns` are the Alpha Desk transport (ADR-0013); `watchlist` and
+// `analyses` are the rail and the Analyses behind it; `widgets` reads back the
+// fixed slice a stored Widget descriptor names, and upstream serves one only
+// when it hangs off a message the caller owns — so naming it here widens the
+// proxy without widening what anyone can reach.
+const FORWARDED_RESOURCES = new Set([
+  "watchlist",
+  "analyses",
+  "widgets",
+  "threads",
+  "turns",
+])
 
 const EVENT_STREAM = "text/event-stream"
 
