@@ -57,6 +57,11 @@ export function NewConversationView() {
  * The hour is read after mount. Rendered on the server it would state whichever
  * part of the day the *server* is in, and the first client frame would disagree
  * with it — a hydration mismatch over a pleasantry.
+ *
+ * **This one line is in English, and it is the only one.** The rest of the
+ * product speaks Vietnamese; the greeting is set in the serif display face
+ * where the Vietnamese diacritics sit unevenly at this size, so it is left as
+ * `Morning, <name>`.
  */
 function Greeting() {
   const { user } = useAuth()
@@ -69,10 +74,10 @@ function Greeting() {
     hour === null
       ? null
       : hour < 12
-        ? "Chào buổi sáng"
+        ? "Morning"
         : hour < 17
-          ? "Chào buổi chiều"
-          : "Chào buổi tối"
+          ? "Afternoon"
+          : "Evening"
 
   return (
     <div className="flex items-center justify-center gap-3">
