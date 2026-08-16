@@ -8,6 +8,9 @@ module.exports = {
     extend: {
       fontFamily: {
         mono: ['var(--font-jetbrains-mono)', 'ui-monospace', 'monospace'],
+        // Reserved for the greeting that opens a conversation, and nothing
+        // else — see the note in app/layout.tsx.
+        serif: ['var(--font-newsreader)', 'Georgia', 'Times New Roman', 'serif'],
       },
       fontSize: {
         // The reference's own steps, all derived from a 15px body. Named rather
@@ -77,6 +80,9 @@ module.exports = {
         // The ink ladder. `ink-1` is body copy and `ink-6` is the quietest
         // label the design allows; nothing sits below it.
         ink: {
+          // A warm off-white above ink-1, for display type only: at 2rem the
+          // neutral white the body uses turns cold against this ground.
+          display: 'hsl(var(--ink-display))',
           1: 'hsl(var(--ink-1))',
           2: 'hsl(var(--ink-2))',
           3: 'hsl(var(--ink-3))',
