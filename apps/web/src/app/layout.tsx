@@ -18,11 +18,11 @@ const jetBrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Stock Massive",
-  description: "Stock analysis platform with real-time charting",
+  title: "VisgniteAI",
+  description: "Trợ lý phân tích chứng khoán Việt Nam — HOSE, HNX, UPCOM",
   icons: {
-    icon: "/logo.png",
-    apple: "/logo.png",
+    icon: "/visgnite-mark.svg",
+    apple: "/visgnite-mark.svg",
   },
 };
 
@@ -34,17 +34,14 @@ export default function RootLayout({
   return (
     <html lang="vi" suppressHydrationWarning>
       <body className={`${inter.className} ${jetBrainsMono.variable}`}>
-        {/* forcedTheme is gone now that ThemeToggle ships: it was only ever
-            there because a browser holding a stale "dark" in localStorage had
-            no way back to the light v3 design. There is a way back now, and
-            dark is a designed surface rather than a leftover.
-
-            defaultTheme stays "light" rather than "system" so a first visit
-            still lands on the light design; "system" is a choice the user
-            makes in the toggle, which is why enableSystem is on. */}
+        {/* Night is the design, not a mode: the VisgniteAI reference is drawn
+            on #0c0c0c and every surface step above it is defined against that
+            ground, so a first visit lands there. The light theme is the same
+            system re-grounded on paper and stays a choice the user makes in
+            the toggle — which is why enableSystem is still on. */}
         <ThemeProvider
           attribute="class"
-          defaultTheme="light"
+          defaultTheme="dark"
           enableSystem
           disableTransitionOnChange
         >

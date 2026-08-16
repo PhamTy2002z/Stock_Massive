@@ -27,8 +27,9 @@ import {
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
-// 224px expanded / 60px rail — the rail metrics the design system specifies.
-const SIDEBAR_WIDTH = "14rem"
+// 274px expanded / 60px rail — the VisgniteAI reference draws its sidebar at
+// 274px, which is what the watchlist rows and the chat titles are laid out for.
+const SIDEBAR_WIDTH = "17.125rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3.75rem"
 // How far down the viewport the sidebar starts. Layouts that put a full-width
@@ -622,7 +623,7 @@ const SidebarHeader = React.forwardRef<
     <div
       ref={ref}
       data-sidebar="header"
-      className={cn("flex flex-col gap-2 p-2", className)}
+      className={cn("flex flex-col gap-2 px-[10px] pb-2.5 pt-4 group-data-[collapsible=icon]:px-2", className)}
       {...props}
     />
   )
@@ -637,7 +638,7 @@ const SidebarFooter = React.forwardRef<
     <div
       ref={ref}
       data-sidebar="footer"
-      className={cn("flex flex-col gap-2 p-2 group-data-[collapsible=icon]:p-1", className)}
+      className={cn("flex flex-col gap-2 border-t border-sidebar-border p-2 group-data-[collapsible=icon]:p-1", className)}
       {...props}
     />
   )
@@ -776,7 +777,7 @@ const SidebarMenuItem = React.forwardRef<
 SidebarMenuItem.displayName = "SidebarMenuItem"
 
 const sidebarMenuButtonVariants = cva(
-  "peer/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm outline-none ring-sidebar-ring transition-all duration-[180ms] ease-sidebar hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 group-has-[[data-sidebar=menu-action]]/menu-item:pr-8 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground data-[state=open]:hover:bg-sidebar-accent data-[state=open]:hover:text-sidebar-accent-foreground [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:transition-transform [&>svg]:duration-200",
+  "peer/menu-button flex w-full items-center gap-[0.7rem] overflow-hidden rounded-lg px-[0.6rem] py-[0.55rem] text-left text-row outline-none ring-sidebar-ring transition-all duration-[180ms] ease-sidebar hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 group-has-[[data-sidebar=menu-action]]/menu-item:pr-8 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground data-[state=open]:hover:bg-sidebar-accent data-[state=open]:hover:text-sidebar-accent-foreground [&>span:last-child]:truncate [&>svg]:size-[17px] [&>svg]:shrink-0 [&>svg]:transition-transform [&>svg]:duration-200",
   {
     variants: {
       variant: {
@@ -785,7 +786,7 @@ const sidebarMenuButtonVariants = cva(
           "bg-background shadow-[0_0_0_1px_hsl(var(--sidebar-border))] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-[0_0_0_1px_hsl(var(--sidebar-accent))]",
       },
       size: {
-        default: "h-8 text-sm group-data-[collapsible=icon]:!size-8 group-data-[collapsible=icon]:!p-2",
+        default: "min-h-9 text-row group-data-[collapsible=icon]:!size-9 group-data-[collapsible=icon]:!p-2",
         sm: "h-7 text-xs group-data-[collapsible=icon]:!size-7 group-data-[collapsible=icon]:!p-1.5",
         lg: "h-12 text-sm group-data-[collapsible=icon]:!size-10 group-data-[collapsible=icon]:!p-1 group-data-[collapsible=icon]:justify-center",
       },
