@@ -62,7 +62,38 @@ export interface DraftEntry {
   appendedIndex: number | null
 }
 
-export type TranscriptEntry = UserEntry | AssistantEntry | DraftEntry
+/**
+ * One Analysis the user opened, sitting where they opened it.
+ *
+ * An Analysis is an artifact rather than a page (`docs/specs/0002` §5), so
+ * opening one puts a row in the transcript instead of navigating away from it.
+ * The row carries only the pair that identifies the Analysis; the artifact
+ * reads itself, because a payload threaded through this projection would be a
+ * second copy of a resource TanStack Query already owns.
+ */
+export interface AnalysisEntry {
+  kind: "analysis"
+  key: string
+  symbol: string
+  tradingDay: string
+}
+
+export type TranscriptEntry = UserEntry | AssistantEntry | DraftEntry | AnalysisEntry
+
+/** An Analysis the user opened, and where in the conversation they were. */
+export interface OpenedAnalysis {
+  symbol: string
+  tradingDay: string
+  /**
+   * The `seq` of the newest message when it was opened; 0 for an empty Thread.
+   *
+   * An artifact opened before a question belongs above that question, and one
+   * opened after the answer belongs under it. Anchoring to a sequence is what
+   * keeps that true as the Thread grows underneath — appending them all at the
+   * end would reorder the evening's reading every time an answer landed.
+   */
+  afterSeq: number
+}
 
 export interface TranscriptInput {
   /** The Thread on screen. A draft belonging to another one is not shown. */
@@ -71,13 +102,33 @@ export interface TranscriptInput {
   live: LiveTurn
   /** What the user just sent, while the create is still in flight. */
   pendingUserText: string | null
+  /** Analyses opened into this Thread, in the order they were opened. */
+  openedAnalyses?: OpenedAnalysis[]
 }
 
 export function buildTranscript(input: TranscriptInput): TranscriptEntry[] {
   const ordered = [...input.messages].sort((left, right) => left.seq - right.seq)
   const entries: TranscriptEntry[] = []
+  const pendingArtifacts = [...(input.openedAnalyses ?? [])]
+
+  /** Every artifact anchored at or before this point in the conversation. */
+  function flushArtifactsBefore(seq: number | null): void {
+    while (
+      pendingArtifacts.length > 0 &&
+      (seq === null || pendingArtifacts[0].afterSeq < seq)
+    ) {
+      const opened = pendingArtifacts.shift()!
+      entries.push({
+        kind: "analysis",
+        key: `analysis-${opened.symbol}-${opened.tradingDay}`,
+        symbol: opened.symbol,
+        tradingDay: opened.tradingDay,
+      })
+    }
+  }
 
   for (const message of ordered) {
+    flushArtifactsBefore(message.seq)
     if (message.role === "user") {
       entries.push({
         kind: "user",
@@ -96,6 +147,8 @@ export function buildTranscript(input: TranscriptInput): TranscriptEntry[] {
       })
     }
   }
+
+  flushArtifactsBefore(null)
 
   const last = ordered[ordered.length - 1]
   const committed =
