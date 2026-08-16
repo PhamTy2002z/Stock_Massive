@@ -18,6 +18,13 @@ import { cn } from "@/lib/utils"
  * the canonical text. A stored message with no notice reached the transcript
  * through some path that bypassed `assemble_message`, and printing the real
  * wording there would claim the backend attached something it did not.
+ *
+ * `notice.meanings` is not rendered. It carries the four `RiskMeaning` enum
+ * values (`apps/api/src/agent/manifest.py`) that a *translation* is checked
+ * against, so that verifying a locale needs a set comparison rather than a
+ * reader. They are machine labels — `analytical_purpose`, `no_personal_advice`
+ * — and showing them puts identifiers on screen under a notice whose whole job
+ * is to be read.
  */
 const MISSING =
   "Chưa đọc được Risk Notice cho câu trả lời này. Nội dung không phải khuyến nghị đầu tư."
@@ -39,15 +46,8 @@ export function RiskNoticePanel({
       )}
     >
       <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-      <div className="min-w-0 space-y-1">
+      <div className="min-w-0">
         <p>{notice ? notice.text : MISSING}</p>
-        {notice && notice.meanings.length > 0 && (
-          <ul className="list-disc space-y-0.5 pl-4 text-amber-700/80 dark:text-amber-400/80">
-            {notice.meanings.map((meaning) => (
-              <li key={meaning}>{meaning}</li>
-            ))}
-          </ul>
-        )}
       </div>
     </div>
   )

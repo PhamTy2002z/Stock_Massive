@@ -195,9 +195,18 @@ def _turn_messages(
         )
         for call in calls:
             if call.call_id in collapsed:
-                content = f"called {call.name} with arguments {_compact(call.arguments)}"
+                body = f"called {call.name} with arguments {_compact(call.arguments)}"
             else:
-                content = _compact(call.result or {})
+                body = _compact(call.result or {})
+            # The identifier goes in the body, not only in ``tool_call_id``.
+            # Every figure has to carry the call it came from (the Evidence
+            # section of the System Prompt Contract), so the model has to be
+            # able to read that identifier back — and the wire field is
+            # addressed to the *route*, which is free to consume it for
+            # correlation and never show it to the model. Gateways do exactly
+            # that, and the whole Turn then fails Grounding on identifiers the
+            # model had no choice but to invent.
+            content = f"tool_call_id: {call.call_id}\n{body}"
             messages.append(
                 Message(
                     role=Role.TOOL,
