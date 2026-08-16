@@ -30,6 +30,7 @@ import pytest
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from src.agent.ops import OPS_WINDOW_DAYS
 from src.alpha.models import EvalRun, LlmCallUsage
 from src.core.llm import (
     Completion,
@@ -197,7 +198,13 @@ def factory(target_engine):
 
 @pytest.fixture
 def harness(factory, seed):
-    def build(*, mode: EvalMode = EvalMode.GATE, configuration=None, transport=None):
+    def build(
+        *,
+        mode: EvalMode = EvalMode.GATE,
+        configuration=None,
+        transport=None,
+        ops_session_factory=None,
+    ):
         resolved = configuration or config()
         scripted = transport or ScriptedTransport()
         return EvalHarness(
@@ -207,6 +214,11 @@ def harness(factory, seed):
             config=resolved,
             client=client_for(factory, resolved, scripted),
             git_sha="eval-test",
+            # Pointed somewhere on purpose. Left unset, the fixed ops query
+            # resolves the *application* store — so every test in this file
+            # would quietly open the dev database at the end of a run, for a
+            # reading none of them assert on.
+            ops_session_factory=ops_session_factory or factory,
         )
 
     return build
@@ -780,6 +792,63 @@ class TestTheBaselineIsResolvedFromTheTable:
         )
         assert result.complete is False
         assert result.baseline is None
+
+
+class TestTheFieldIsReadOnceAtTheEnd:
+    """The fixed ops query, taken by the run so the report cannot omit it.
+
+    `docs/adr/0016` requires the field reading in the next Eval Report, and the
+    report is written by a *second* command against a *different* database. So
+    the run is where the reading has to happen: anything later would measure a
+    window the run did not happen in, and anything the harness does not carry is
+    something a person has to remember to paste.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_run_carries_a_snapshot_of_the_window_it_finished_in(
+        self, harness, factory
+    ):
+        result = await harness().run([case("ops-1")])
+
+        assert result.ops is not None
+        assert result.ops.readable
+        assert result.ops.until == result.finished_at
+        assert result.ops.window_days == OPS_WINDOW_DAYS
+
+    @pytest.mark.asyncio
+    async def test_a_smoke_run_reads_the_field_too(self, harness):
+        """The field is the field whichever mode was pointed at the fixture."""
+        result = await harness(mode=EvalMode.SMOKE).run([case("ops-2")])
+        assert result.ops is not None
+
+    @pytest.mark.asyncio
+    async def test_a_stopped_run_still_reads_it(self, harness):
+        """A run that produced no score is exactly when production is worth a look."""
+        result = await harness(configuration=config(output_price=COSTLY_PRICE)).run(
+            [case("ops-3"), case("ops-4")]
+        )
+
+        assert result.complete is False
+        assert result.ops is not None
+
+    @pytest.mark.asyncio
+    async def test_an_unreachable_store_costs_the_reading_and_never_the_run(
+        self, harness
+    ):
+        """The expensive half is not discarded to protect the cheap one.
+
+        And the failure is carried rather than swallowed: a snapshot of zeros
+        would read as a quiet week instead of an unread database.
+        """
+
+        def refuses():
+            raise RuntimeError("connection refused")
+
+        result = await harness(ops_session_factory=refuses).run([case("ops-5")])
+
+        assert result.results  # the battery still produced its scores
+        assert result.ops.readable is False
+        assert "connection refused" in result.ops.error
 
 
 class TestNoLlmJudge:

@@ -45,6 +45,44 @@ TOOL_CALL_RETENTION_DAYS = 90
 INTERRUPTED_REASON = "interrupted_restart"
 
 
+def flag_counts_between(
+    session: Session,
+    *,
+    since: datetime | None = None,
+    until: datetime | None = None,
+) -> dict[str, int]:
+    """How many messages carry each reason, over a half-open window.
+
+    A module-level function over a lent session rather than only a method,
+    because it has two callers that reach the database differently: the agent
+    path through :meth:`AgentPersistence.flag_counts`, and the fixed ops query
+    (``src/agent/ops.py``) which is already holding a read-only session onto the
+    application store. One implementation, because a second copy is the one that
+    would stop agreeing about what a window includes.
+
+    Every reason is a key even at zero — a report that omits a reason nobody
+    chose reads as a reason nobody can choose.
+    """
+    counts = dict.fromkeys(FLAG_REASONS, 0)
+    query = select(AgentMessage.flagged_reason, func.count()).where(
+        AgentMessage.flagged_reason.is_not(None)
+    )
+    if since is not None:
+        query = query.where(AgentMessage.flagged_at >= since)
+    if until is not None:
+        query = query.where(AgentMessage.flagged_at < until)
+    for reason, total in session.execute(
+        query.group_by(AgentMessage.flagged_reason)
+    ):
+        # A reason outside the vocabulary cannot be written through this module,
+        # and a row carrying one would be a fact about the database rather than
+        # a category — so it is left out of the count rather than silently
+        # folded into ``other``.
+        if reason in counts:
+            counts[reason] = int(total)
+    return counts
+
+
 @dataclass(frozen=True)
 class MessageRecord:
     id: int
@@ -420,33 +458,16 @@ class AgentPersistence:
 
         Service-wide and not scoped to a user: this is the field signal the
         fixed ops query reads, and it is reconciled against the battery rather
-        than shown to anybody. Every reason is a key even at zero — a report
-        that omits a reason nobody chose reads as a reason nobody can choose.
+        than shown to anybody. The counting itself is
+        :func:`flag_counts_between`, which the ops query calls directly.
         """
         return await asyncio.to_thread(self._flag_counts, since, until)
 
     def _flag_counts(
         self, since: datetime | None, until: datetime | None
     ) -> dict[str, int]:
-        counts = dict.fromkeys(FLAG_REASONS, 0)
         with self._session_factory() as session:
-            query = select(
-                AgentMessage.flagged_reason, func.count()
-            ).where(AgentMessage.flagged_reason.is_not(None))
-            if since is not None:
-                query = query.where(AgentMessage.flagged_at >= since)
-            if until is not None:
-                query = query.where(AgentMessage.flagged_at < until)
-            for reason, total in session.execute(
-                query.group_by(AgentMessage.flagged_reason)
-            ):
-                # A reason outside the vocabulary cannot be written through
-                # this module, and a row carrying one would be a fact about the
-                # database rather than a category — so it is left out of the
-                # count rather than silently folded into ``other``.
-                if reason in counts:
-                    counts[reason] = int(total)
-        return counts
+            return flag_counts_between(session, since=since, until=until)
 
     async def delete_thread(self, user_id: int, thread_id: uuid.UUID | str) -> bool:
         return await asyncio.to_thread(
@@ -918,4 +939,5 @@ __all__ = [
     "TurnPayloadConflict",
     "TurnRecord",
     "UnflaggableMessage",
+    "flag_counts_between",
 ]

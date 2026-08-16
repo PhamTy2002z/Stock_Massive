@@ -12,10 +12,15 @@ to re-freeze a fixture**, and **which database each command is allowed to touch*
 | --- | --- | --- |
 | `make eval-fixture` | `DATABASE_URL` | a seed file only |
 | `make eval-fixture-load` | the seed file | `EVAL_DATABASE_URL` |
-| `make eval` / `make eval-smoke` | the seed file, `EVAL_DATABASE_URL` | `EVAL_DATABASE_URL` |
+| `make eval` / `make eval-smoke` | the seed file, `EVAL_DATABASE_URL`, and `DATABASE_URL` once at the end | `EVAL_DATABASE_URL` |
 | `make eval-rubric` | the report's own files | those files only |
 
-**Running the battery cannot write to dev or production.** `EVAL_DATABASE_URL`
+That last read of `DATABASE_URL` is the [fixed ops query](#the-fixed-ops-query),
+which ADR-0016 requires in the report. It is one `SELECT` pass, it takes nothing
+but counts, and a store it cannot reach costs the reading rather than the run.
+
+**Running the battery cannot write to dev or production.** The ops query is
+read-only and everything else is scoped to the eval database. `EVAL_DATABASE_URL`
 must be set and must not resolve to the same host, port and database name as
 `DATABASE_URL`; the code refuses otherwise, and it compares destinations rather
 than strings, so the same database spelled with a different driver is still
@@ -419,8 +424,9 @@ from.
 
 The report carries the run id, the mode, the route and exact model, the four
 versions, per-category scores with the two lanes separable, the diff against
-baseline, the reviewer's answers where a rubric sheet has been entered, and the
-**verbatim answers being judged**. That last one is not padding: it is one of
+baseline, the reviewer's answers where a rubric sheet has been entered, the
+**verbatim answers being judged**, and the fixed ops query's output. The
+verbatim answers are not padding: they are one of
 ADR-0016's three defences against a rubber-stamped rubric, because the text a
 reviewer scored stays readable in the file.
 
@@ -428,6 +434,76 @@ The report **renders** the verdict; it does not decide it. What the counts mean
 is `src/eval/verdict.py`'s, and whether this run may be a baseline for the next
 one is the baseline query's — both read the same totals, so the document and the
 table cannot come to different conclusions.
+
+Every report also carries a **The field** section, which is the ops query below.
+
+## The fixed ops query
+
+`src/agent/ops.py`. One query, read-only, over the database the API serves from.
+**No new table and no automatic alerting** — one developer and no on-call
+rotation means an alert would be noise, and a metrics table would be a second
+store to keep true. Every signal it needs is already on a row the product writes
+anyway:
+
+| Signal | Where it already lives |
+| --- | --- |
+| `grounding_failed` | `agent_turn.terminal_reason` |
+| incomplete reasons | `agent_turn.terminal_reason` where the Turn ended `incomplete` |
+| `unknown_tool` | `agent_tool_call.status`, counted **by tool name** |
+| the `answer_kind` distribution | `agent_message.content`, joined from `agent_turn.response_message_id` |
+| flag counts | the `flagged_reason` / `flagged_at` pair on `agent_message` |
+
+The window is half-open and configurable — `EVAL_OPS_WINDOW_DAYS`, or
+`--ops-window-days` on one run — and every signal uses the same bounds, so the
+lines of the report can be read against each other.
+
+**Its output is written into the Eval Report by the harness**, from a snapshot
+taken at the end of the run. Not fetched by the report writer: the gate report
+is rendered by `make eval-rubric`, hours later, and a window measured then would
+not be the window the run happened in. Not pasted in by hand either — a section
+a person pastes is a section that stops being pasted the first busy week. That
+placement is the whole point: the battery scores a **frozen fixture** and says
+nothing about live traffic, so the two only ever meet on that page.
+
+### The one threshold, and what it means
+
+**`grounding_failed` above 5% of Turns over 7 days reopens category B.**
+
+Read by eye, on the report, by whoever ran the battery. It is not an alert and
+it does not gate a merge.
+
+The direction is the part worth stating, because the number looks like it should
+mean the opposite. The Recommendation Gate blocks any figure it cannot attribute
+to a tool reference, and a blocked figure ends the Turn
+`incomplete/grounding_failed` rather than reaching a reader. So a rising rate is
+ambiguous on its face — more fabrication, or more over-blocking? A *sustained*
+one-in-twenty resolves it: fabrication is bursty and tracks a prompt or model
+change, while a persistent rate says the Gate is refusing ordinary correct
+answers. **That is over-blocking, and over-blocking is what category B measures.**
+So the response is to reopen B — add cases from the flagged messages, per the
+flag loop below — and re-run. Nothing else changes.
+
+Two boundaries are deliberate: the comparison is **strictly above** 5%, because
+a rule firing at the boundary would reopen a category on an ordinary week; and
+an **empty window is not a breach**, because zero Turns is zero percent rather
+than an alarm about a service nobody used.
+
+The denominator is **Turns**, which is why the `answer_kind` distribution is also
+counted over Turns and carries a `none` bucket for Turns that released no
+message. A distribution summing to less than the Turn count above it would be
+smallest exactly where Turns failed.
+
+### What it deliberately does not do
+
+**It adds no index.** `agent_turn` carries only `(thread_id, started_at)`, so a
+service-wide seven-day scan is sequential. That is the right trade for a query
+run about twice a month: an index is a cost on every Turn ever written, paid
+forever, to speed up a report. Revisit when the scan is slow enough to notice —
+a fact about row counts, not a prediction. (The flag half already has its partial
+index, because that one is nearly free: it is the size of the flags.)
+
+**It never writes.** It is the only part of a battery run that opens
+`DATABASE_URL`, and it opens it with `SELECT`.
 
 ## The baseline
 
@@ -481,9 +557,63 @@ gate run.**
 Only a **complete gate run** may be attached. A smoke run has no gating value,
 and a run that stopped at its ceiling has no score.
 
-## What is left
+## The first gate run
 
-Nothing in ADR-0016's list. The fixture, the harness, the six categories, both
-surfaces, the rubric, the report, the baseline and the merge rule are all here.
-What remains is the thing none of it can do for itself: **one passing gate run**
-(issue #100), which is part of the definition of v1 done.
+Every mechanism ADR-0016 names is built — the fixture, the harness, the six
+categories, both surfaces, the rubric, the report, the baseline, the merge rule
+and the ops query. What remains is the thing none of it can do for itself: **one
+passing gate run**, which is part of the definition of v1 done. It is the first
+run, so it is also the first baseline, and it must pass **on its own terms**.
+
+### What it needs before it can start
+
+Four things, and the run refuses loudly rather than half-running without any of
+them:
+
+1. **A store with market data in it.** The fixture is captured from
+   `DATABASE_URL`, by property (see above), and a store that cannot fill a seat
+   produces a refusal rather than a fixture. `listing_roster`,
+   `provider_snapshots`, `corporate_actions` and `analysis` all have to be
+   populated for the day being frozen.
+2. **`EVAL_DATABASE_URL`**, pointing somewhere that is not `DATABASE_URL`.
+3. **The production route** — `LLM_BASE_URL` and `LLM_API_KEY`. A gate run on
+   the dev route is a smoke run wearing the wrong name, and `config_for` refuses
+   it.
+4. **A person, for 20–30 minutes**, to score the D/E rubric blind. This one
+   cannot be delegated to the machine by design: the report the pull request
+   attaches does not exist until the sheet is scored.
+
+### The sequence
+
+```bash
+cd apps/api
+make eval-fixture            # freeze one Trading Day; commit the seed it writes
+make eval-fixture-load       # load it, re-checking its properties
+make eval-smoke              # free rehearsal: proves the harness still works
+make eval                    # the real thing — production route, ~$2.5
+# score docs/eval/<name>.rubric.md by hand, blind
+make eval-rubric SHEET=docs/eval/<name>.rubric.md
+```
+
+`make eval` runs ~47 Turn cases and 10 Analysis cases at three runs each inside
+the $2.5 ceiling, writes the `eval_run` row, and leaves the record and the blind
+sheet. It writes **no report** — that is the blindness. `make eval-rubric`
+writes it, from the reviewer's own answers, and exits non-zero if a category
+missed its bar.
+
+Then commit the report under `docs/eval/` and check that it contains the **The
+field** section: a report without the ops-query output does not satisfy
+ADR-0016.
+
+### What passing means, and what to do when it does not
+
+A, C and F at 3/3; B ≥ 90%; D and E ≥ 85%; no backwards-sign hard fail. The
+report says which of those broke, and names the case, the run and the property.
+
+**If it does not pass, the finding is the deliverable.** Name the failing cases,
+diagnose the cause, and give the fix to whichever component failed — the
+Contract, the tool layer, the registry, the validator. **The score is not
+adjusted, and no case is removed or rewritten to reach a passing number.** A
+battery edited until it went green has measured nothing, and this is the one run
+where that temptation is strongest, because it is the run standing between v1
+and shipping.
