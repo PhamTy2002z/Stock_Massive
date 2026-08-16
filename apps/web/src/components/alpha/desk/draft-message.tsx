@@ -52,7 +52,7 @@ export function DraftMessage({
           working rather than hung, and the first thing the backend sends can be
           a moment away. */}
       {running && !showsActivity && entry.blocks.length === 0 && (
-        <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
+        <p role="status" className="flex items-center gap-2 text-meta text-muted-foreground">
           <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" />
           Đang chuẩn bị…
         </p>

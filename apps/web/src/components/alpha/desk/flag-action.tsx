@@ -92,9 +92,9 @@ export function FlagAction({
           aria-label={FLAG_COPY.action}
           title={FLAG_COPY.action}
           className={cn(
-            "inline-flex items-center gap-1 rounded p-1 text-xs text-muted-foreground",
-            "hover:bg-muted hover:text-foreground",
-            reason !== null && "text-amber-600 dark:text-amber-500",
+            "inline-flex items-center gap-1 rounded-md p-1 text-meta text-muted-foreground transition-colors",
+            "hover:bg-foreground/[0.06] hover:text-foreground",
+            reason !== null && "text-caution",
           )}
         >
           <Flag className="h-3.5 w-3.5" aria-hidden />
@@ -104,12 +104,12 @@ export function FlagAction({
           // The write was rejected, so nothing was recorded and the surface
           // says so. Announced, because the reader pressed something and the
           // answer is that it did not take.
-          <p role="alert" className="min-w-0 text-xs text-red-600 dark:text-red-400">
+          <p role="alert" className="min-w-0 text-meta text-destructive">
             {FLAG_COPY.failed}
           </p>
         ) : (
           reason !== null && (
-            <p className="min-w-0 text-xs text-muted-foreground">
+            <p className="min-w-0 text-meta text-muted-foreground">
               <span className="font-medium text-foreground">
                 {FLAG_REASON_LABELS[reason]}
               </span>
@@ -126,9 +126,9 @@ export function FlagAction({
         <div
           role="menu"
           aria-label={FLAG_COPY.prompt}
-          className="absolute left-0 top-7 z-10 w-56 rounded-md border border-border/60 bg-popover p-1 shadow-md"
+          className="absolute left-0 top-7 z-10 w-56 rounded-[14px] border border-border bg-popover p-1.5 shadow-menu"
         >
-          <p className="px-2 py-1 text-xs text-muted-foreground">{FLAG_COPY.prompt}</p>
+          <p className="px-2.5 py-1.5 text-meta text-muted-foreground">{FLAG_COPY.prompt}</p>
 
           {FLAG_REASONS.map((candidate) => (
             <button
@@ -138,7 +138,7 @@ export function FlagAction({
               aria-checked={candidate === reason}
               onClick={() => choose(candidate)}
               className={cn(
-                "flex w-full items-center rounded px-2 py-1.5 text-left text-xs hover:bg-muted",
+                "flex w-full items-center rounded-[9px] px-2.5 py-2 text-left text-meta transition-colors hover:bg-foreground/[0.06]",
                 candidate === reason && "font-medium text-foreground",
               )}
             >
@@ -151,7 +151,7 @@ export function FlagAction({
               type="button"
               role="menuitem"
               onClick={clear}
-              className="mt-1 flex w-full items-center rounded border-t border-border/60 px-2 pt-2 pb-1.5 text-left text-xs text-muted-foreground hover:bg-muted"
+              className="mt-1 flex w-full items-center rounded-lg border-t border-border px-2.5 pb-1.5 pt-2 text-left text-meta text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
             >
               {FLAG_COPY.remove}
             </button>

@@ -41,7 +41,7 @@ export function RiskNoticePanel({
       role="note"
       aria-label="Risk notice"
       className={cn(
-        "flex gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400",
+        "flex gap-2 rounded-card border border-caution/35 bg-caution/[0.06] px-3.5 py-2.5 text-meta text-caution",
         className,
       )}
     >
