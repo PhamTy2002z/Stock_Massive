@@ -153,7 +153,7 @@ export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
             ))}
           </div>
         ) : visible.length === 0 ? (
-          <p className="py-8 text-center text-[15px] leading-[1.47] tracking-[-0.374px] text-muted-foreground">
+          <p className="py-8 text-center text-[0.95rem] text-muted-foreground">
             Chưa có dữ liệu rổ VN30 cho phiên này.
           </p>
         ) : (
@@ -161,13 +161,13 @@ export function VN30OverviewTable({ className }: VN30OverviewTableProps) {
         )}
 
         <div className="mt-1.5 flex min-w-[700px] flex-wrap items-center justify-between gap-6 border-t border-border pt-4">
-          <span className="text-[13px] leading-[1.43] tracking-[-0.224px] text-muted-foreground">
+          <span className="text-meta text-muted-foreground">
             {stocks.length === 0
               ? "0 cổ phiếu"
               : `${start + 1}–${Math.min(start + ROWS_PER_PAGE, stocks.length)} trên ${stocks.length} cổ phiếu`}
           </span>
           <div className="flex items-center gap-4">
-            <span className="text-[13px] leading-[1.43] tracking-[-0.224px] text-muted-foreground">
+            <span className="text-meta text-muted-foreground">
               Trang {currentPage}/{totalPages}
             </span>
             <button

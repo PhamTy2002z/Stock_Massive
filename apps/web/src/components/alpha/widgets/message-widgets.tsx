@@ -80,7 +80,7 @@ export function MessageWidgets({
         />
       ))}
       {links.map((refusal) => (
-        <p key={refusal.deep_link} className="mt-3 text-[13px]">
+        <p key={refusal.deep_link} className="mt-3 text-meta">
           <Link
             href={refusal.deep_link as string}
             className="underline underline-offset-2"

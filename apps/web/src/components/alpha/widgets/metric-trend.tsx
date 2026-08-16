@@ -125,7 +125,7 @@ export function MetricTrend({
         />
       </svg>
       <div
-        className="mt-1 flex justify-between text-[11px] tabular-nums"
+        className="mt-1 flex justify-between text-micro tabular-nums"
         style={{ color: WIDGET_PALETTE.inkMuted }}
       >
         <span>{present[0].date}</span>

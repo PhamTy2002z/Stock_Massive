@@ -91,7 +91,7 @@ export function RailEntryRow({
             )}
             <span
               className={cn(
-                "rounded border px-1.5 py-0.5 text-[11px] font-medium",
+                "rounded border px-1.5 py-0.5 text-micro font-medium",
                 STATE_TONE[state],
               )}
             >

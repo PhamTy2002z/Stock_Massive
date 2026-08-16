@@ -55,13 +55,13 @@ export function AxisPanel({
       </div>
 
       {axis.read ? (
-        <p className="text-[13px] leading-relaxed">{axis.read}</p>
+        <p className="text-meta leading-relaxed">{axis.read}</p>
       ) : (
-        <p className="text-[13px] text-muted-foreground">{NARRATION.noRead}</p>
+        <p className="text-meta text-muted-foreground">{NARRATION.noRead}</p>
       )}
 
       {axis.emphasisReason && (
-        <p className="text-[11px] text-muted-foreground">{axis.emphasisReason}</p>
+        <p className="text-micro text-muted-foreground">{axis.emphasisReason}</p>
       )}
 
       {axis.figures.length > 0 ? (
@@ -75,7 +75,7 @@ export function AxisPanel({
           ))}
         </div>
       ) : (
-        <p className="text-[11px] text-muted-foreground">{CHROME.noFigures}</p>
+        <p className="text-micro text-muted-foreground">{CHROME.noFigures}</p>
       )}
     </section>
   )

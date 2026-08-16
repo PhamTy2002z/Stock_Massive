@@ -68,7 +68,7 @@ export function Briefing({
 
       <CitedFields artifact={artifact} />
 
-      <p className="text-[11px]">
+      <p className="text-micro">
         <Link
           href={`/analytics/deep-dive?symbol=${encodeURIComponent(artifact.symbol)}`}
           className="underline underline-offset-2"
@@ -111,15 +111,15 @@ function WindowHealth({ artifact }: { artifact: AnalysisArtifact }) {
 
   return (
     <div className="space-y-1">
-      <p className="text-[11px] font-medium">{CHROME.windowHealth}</p>
-      <p className="text-[11px] tabular-nums text-muted-foreground">
+      <p className="text-micro font-medium">{CHROME.windowHealth}</p>
+      <p className="text-micro tabular-nums text-muted-foreground">
         {sessions ?? "—"} / {window ?? "—"} {CHROME.sessions}
         {limitLocked !== null && limitLocked > 0
           ? ` · ${limitLocked} ${CHROME.limitLocked}`
           : ""}
       </p>
       {degradations.length > 0 && (
-        <ul className="space-y-0.5 text-[11px] text-muted-foreground">
+        <ul className="space-y-0.5 text-micro text-muted-foreground">
           {degradations.map((code) => (
             <li key={code}>{signalIssueSentence(code)}</li>
           ))}
@@ -145,7 +145,7 @@ function CitedFields({ artifact }: { artifact: AnalysisArtifact }) {
 
   return (
     <div className="space-y-1">
-      <p className="text-[11px] font-medium">{CHROME.fieldIds}</p>
+      <p className="text-micro font-medium">{CHROME.fieldIds}</p>
       <ul className="flex flex-wrap gap-1" aria-label={CHROME.fieldIds}>
         {artifact.citedFieldIds.map((fieldId) => (
           <li

@@ -33,18 +33,18 @@ export function VerdictHeader({
         <span className="text-xs tabular-nums text-muted-foreground">
           {artifact.tradingDay}
         </span>
-        <span className="text-[11px] tabular-nums text-muted-foreground">
+        <span className="text-micro tabular-nums text-muted-foreground">
           · {CHROME.citations} {artifact.citationCount}
         </span>
         {/* Several template versions are in circulation across days, so the one
             on screen is identifiable rather than assumed. */}
-        <span className="text-[11px] text-muted-foreground">
+        <span className="text-micro text-muted-foreground">
           · {CHROME.template} v{artifact.schemaVersion}
         </span>
       </div>
 
       {artifact.verdictLine && (
-        <p className="text-[13px] leading-relaxed">{artifact.verdictLine}</p>
+        <p className="text-meta leading-relaxed">{artifact.verdictLine}</p>
       )}
     </div>
   )

@@ -35,16 +35,16 @@ export function FundCertificates({ className }: { className?: string }) {
   return (
     <SurfaceCard className={className}>
       <div className="flex flex-wrap items-baseline justify-between gap-4 pb-2">
-        <span className="text-[17px] font-semibold leading-[1.24] tracking-[-0.374px]">
+        <span className="text-[1.05rem] font-semibold leading-[1.24]">
           Chứng chỉ quỹ
         </span>
-        <span className="text-[13px] leading-[1.43] tracking-[-0.224px] text-muted-foreground">
+        <span className="text-meta text-muted-foreground">
           NAV/CCQ
         </span>
       </div>
 
       {funds.length === 0 ? (
-        <p className="border-t border-hairline py-4 text-[13px] leading-[1.43] tracking-[-0.224px] text-muted-foreground">
+        <p className="border-t border-hairline py-4 text-meta text-muted-foreground">
           Chưa có dữ liệu chứng chỉ quỹ.
         </p>
       ) : (
@@ -56,15 +56,15 @@ export function FundCertificates({ className }: { className?: string }) {
               key={fund.symbol}
               className="grid grid-cols-[1fr_auto_auto] items-center gap-4 border-t border-hairline py-2.5"
             >
-              <span className="truncate text-[15px] font-semibold leading-[1.24] tracking-[-0.374px]">
+              <span className="truncate text-[0.95rem] font-semibold">
                 {fund.symbol}
               </span>
-              <span className="text-[15px] leading-[1.47] tracking-[-0.374px] tabular-nums">
+              <span className="text-[0.95rem] tabular-nums">
                 {formatNav(fund.nav)}
               </span>
               <span
                 className={cn(
-                  "min-w-[72px] text-right text-[15px] leading-[1.47] tracking-[-0.374px] tabular-nums",
+                  "min-w-[72px] text-right text-[0.95rem] tabular-nums",
                   change === null
                     ? "text-muted-foreground"
                     : change >= 0

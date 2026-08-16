@@ -69,7 +69,7 @@ export function AnalysisPanel({
                 onClick={() => setSelected(row.trading_day)}
                 aria-current={row.trading_day === selected}
                 className={cn(
-                  "rounded border px-1.5 py-0.5 text-[11px] tabular-nums",
+                  "rounded border px-1.5 py-0.5 text-micro tabular-nums",
                   row.trading_day === selected
                     ? "border-foreground/40 bg-muted font-medium"
                     : "border-border text-muted-foreground hover:bg-foreground/[0.06]",
@@ -79,7 +79,7 @@ export function AnalysisPanel({
               </button>
             ))}
           </div>
-          {boundary && <p className="text-[11px] text-muted-foreground">{boundary}</p>}
+          {boundary && <p className="text-micro text-muted-foreground">{boundary}</p>}
         </div>
       ) : (
         <p className="text-xs text-muted-foreground">

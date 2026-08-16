@@ -121,7 +121,7 @@ export function WidgetSlot({ spec, resolve, onExpand, className }: WidgetSlotPro
       <div
         role="status"
         className={cn(
-          "rounded-card border border-border bg-card p-4 text-[13px]",
+          "rounded-card border border-border bg-card p-4 text-meta",
           className
         )}
       >
