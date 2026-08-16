@@ -44,7 +44,7 @@ function Split({
 
   return (
     <div className="mt-4">
-      <div className="flex items-baseline justify-between gap-3 text-[13px] leading-[1.43] tracking-[-0.208px]">
+      <div className="flex items-baseline justify-between gap-3 text-meta">
         <span className="text-muted-foreground">{label}</span>
         <span className="tabular-nums">
           <span className="text-positive">Mua {decimal(buyPct)}%</span>{" "}
@@ -56,7 +56,7 @@ function Split({
         <span style={{ flex: buy || 1 }} className="rounded-full bg-positive" />
         <span style={{ flex: sell || 1 }} className="rounded-full bg-negative" />
       </div>
-      <div className="mt-1.5 text-[13px] leading-[1.43] tracking-[-0.208px] tabular-nums text-muted-foreground">
+      <div className="mt-1.5 text-meta tabular-nums text-muted-foreground">
         {unit(buy)} / {unit(sell)}
       </div>
     </div>
@@ -66,12 +66,12 @@ function Split({
 function Stat({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
-      <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+      <span className="text-meta text-muted-foreground">
         {label}
       </span>
       <span
         className={cn(
-          "text-[17px] font-semibold leading-[1.35] tracking-[-0.374px] tabular-nums",
+          "text-[1.05rem] font-semibold leading-[1.35] tabular-nums",
           tone
         )}
       >
@@ -96,10 +96,10 @@ export function OrderFlowTabContent({ symbol, className }: OrderFlowTabContentPr
   if (isError || !data) {
     return (
       <Card className={className}>
-        <div className="text-[17px] font-semibold leading-[1.24] tracking-[-0.374px]">
+        <div className="text-[1.05rem] font-semibold leading-[1.24]">
           Chưa có dữ liệu dòng lệnh
         </div>
-        <p className="mt-1 text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+        <p className="mt-1 text-meta text-muted-foreground">
           {error instanceof Error
             ? error.message
             : `Phiên gần nhất của ${symbol} chưa được thu thập.`}
@@ -138,7 +138,7 @@ export function OrderFlowTabContent({ symbol, className }: OrderFlowTabContentPr
         <div className="flex flex-wrap items-center gap-3">
           <span
             className={cn(
-              "flex items-center gap-[7px] rounded-full px-[11px] py-1 text-[13px] font-semibold leading-[1.29] tracking-[-0.208px]",
+              "flex items-center gap-[7px] rounded-full px-[11px] py-1 text-meta font-semibold leading-[1.29]",
               buyDominant
                 ? "bg-positive/[0.16] text-positive"
                 : "bg-negative/[0.16] text-negative"
@@ -147,12 +147,12 @@ export function OrderFlowTabContent({ symbol, className }: OrderFlowTabContentPr
             <Trend aria-hidden className="size-3.5" />
             {buyDominant ? "Lực mua áp đảo" : "Lực bán áp đảo"}
           </span>
-          <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-ink-3">
+          <span className="text-meta text-ink-3">
             {sessionDate ? `Phiên ${sessionDate}` : "Phiên gần nhất"}
             {updated ? ` · cập nhật ${updated}` : ""}
           </span>
         </div>
-        <p className="mt-3 text-pretty text-[17px] leading-[1.5] tracking-[-0.374px]">
+        <p className="mt-3 text-pretty text-[1.05rem] leading-[1.5]">
           Bên mua chiếm{" "}
           <strong className={cn("font-semibold", buyDominant && "text-positive")}>
             {decimal(buyVolumePct)}% khối lượng
@@ -178,7 +178,7 @@ export function OrderFlowTabContent({ symbol, className }: OrderFlowTabContentPr
 
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <span className="text-[17px] font-semibold leading-[1.24] tracking-[-0.374px]">
+          <span className="text-[1.05rem] font-semibold leading-[1.24]">
             Mua và bán trên hai thước đo
           </span>
           <button

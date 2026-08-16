@@ -49,7 +49,7 @@ export function FigureRow({
         <span className="text-sm font-semibold tabular-nums">
           {formatFieldValue(figure.value, figure.unit)}
         </span>
-        {unit && <span className="text-[11px] text-muted-foreground">{unit}</span>}
+        {unit && <span className="text-micro text-muted-foreground">{unit}</span>}
         {figure.cited && (
           <span
             className="rounded border border-primary/40 px-1 text-[10px] text-primary"
@@ -65,7 +65,7 @@ export function FigureRow({
         </span>
       </div>
 
-      <p className="flex flex-wrap gap-x-2 text-[11px] text-muted-foreground">
+      <p className="flex flex-wrap gap-x-2 text-micro text-muted-foreground">
         {figure.kind && <span>{figure.kind}</span>}
         {figure.source && <span>· {figure.source}</span>}
         <span>
@@ -84,13 +84,13 @@ export function FigureRow({
       </p>
 
       {figure.interpretation && (
-        <p className="text-[11px] leading-snug text-muted-foreground">
+        <p className="text-micro leading-snug text-muted-foreground">
           {figure.interpretation}
         </p>
       )}
 
       {figure.reason && (
-        <p className="text-[11px] leading-snug">
+        <p className="text-micro leading-snug">
           {figure.reason}
           {refused && (
             <span className="text-muted-foreground"> · {NARRATION.refusedIsEvidence}</span>

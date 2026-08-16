@@ -40,7 +40,7 @@ export function RailHeader({
         {unreadCount > 0 && (
           <span
             aria-label={`${unreadCount} unread Analyses`}
-            className="rounded-full bg-primary px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-primary-foreground"
+            className="rounded-full bg-primary px-1.5 py-0.5 text-micro font-medium tabular-nums text-primary-foreground"
           >
             {unreadCount}
           </span>

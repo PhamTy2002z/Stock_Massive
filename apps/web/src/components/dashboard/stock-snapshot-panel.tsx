@@ -140,7 +140,7 @@ function fundamentalFigures(data: FundamentalSnapshotData): Figure[] {
 /** What this part is dated by, how old it is, and who published it. */
 function Provenance({ meta, stampLabel }: { meta: SnapshotSectionMeta; stampLabel: string }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] leading-[1.29] text-muted-foreground">
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta leading-[1.29] text-muted-foreground">
       <span className="rounded-full border border-border px-2 py-0.5 font-medium text-foreground">
         {meta.source}
       </span>
@@ -182,13 +182,13 @@ function CapabilityBlock<TData>({
   return (
     <div className="border-t border-border pt-3.5 first:border-t-0 first:pt-0">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h3 className="text-sm font-semibold leading-[1.29] tracking-[-0.208px]">{title}</h3>
+        <h3 className="text-sm font-semibold leading-[1.29]">{title}</h3>
         {section ? (
           <Provenance meta={section} stampLabel={stampLabel} />
         ) : (
           // Absent is not the same as empty: the symbol is watched, this part of
           // it simply has not been collected yet.
-          <span className="text-[13px] leading-[1.29] text-muted-foreground">Chưa thu thập</span>
+          <span className="text-meta leading-[1.29] text-muted-foreground">Chưa thu thập</span>
         )}
       </div>
 
@@ -223,7 +223,7 @@ function PanelShell({
         <h2 className="text-base font-semibold leading-[1.25] tracking-[-0.31px]">
           Dữ liệu đã thu thập
         </h2>
-        <span className="text-[13px] leading-[1.29] text-muted-foreground">{symbol}</span>
+        <span className="text-meta leading-[1.29] text-muted-foreground">{symbol}</span>
       </div>
       {children}
     </SurfaceCard>
@@ -274,7 +274,7 @@ export function StockSnapshotPanel({
   if (data === null) {
     return (
       <PanelShell symbol={symbol} className={className}>
-        <p className="mt-2.5 text-[13px] leading-[1.4] text-muted-foreground">
+        <p className="mt-2.5 text-meta leading-[1.4] text-muted-foreground">
           {symbol} không nằm trong tập mã hệ thống thu thập sau mỗi phiên, nên chưa
           có số liệu nào được lưu kèm tuổi dữ liệu cho mã này.
         </p>

@@ -58,7 +58,7 @@ export function AnalysisArtifact({
           type="button"
           onClick={() => setExpanded((open) => !open)}
           aria-expanded={expanded}
-          className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] hover:bg-foreground/[0.06]"
+          className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-micro hover:bg-foreground/[0.06]"
         >
           {expanded ? (
             <Minimize2 className="h-3 w-3" />
@@ -104,7 +104,7 @@ function InlineBody({ artifact }: { artifact: Artifact }) {
             <TabsTrigger
               key={axis.axis}
               value={axis.axis}
-              className="px-2 py-1 text-[11px]"
+              className="px-2 py-1 text-micro"
             >
               {AXIS_LABEL[axis.axis]}
             </TabsTrigger>
@@ -134,7 +134,7 @@ function InlineBody({ artifact }: { artifact: Artifact }) {
           want is Stock 360's, and this is the pointer to it. Inline as well as
           expanded, because a reader who never expands still asked the question.
           */}
-      <p className="text-[11px]">
+      <p className="text-micro">
         <Link
           href={`/analytics/deep-dive?symbol=${encodeURIComponent(artifact.symbol)}`}
           className="underline underline-offset-2"

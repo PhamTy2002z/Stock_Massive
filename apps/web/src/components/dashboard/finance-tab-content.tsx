@@ -67,7 +67,7 @@ function Pill({
       onClick={onClick}
       aria-pressed={isActive}
       className={cn(
-        "rounded-full text-[13px] leading-[1.29] tracking-[-0.208px]",
+        "rounded-full text-meta",
         "transition-transform duration-150 active:scale-95",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         isActive
@@ -87,7 +87,7 @@ function FinancialTable({ data, periods }: { data: ApiRow[]; periods: string[] }
     <div className="mt-1.5 overflow-x-auto">
       <div
         style={{ gridTemplateColumns: columns }}
-        className="grid min-w-[680px] items-center gap-3.5 py-3 text-[13px] font-semibold leading-[1.29] tracking-[-0.208px] text-muted-foreground"
+        className="grid min-w-[680px] items-center gap-3.5 py-3 text-meta font-semibold leading-[1.29] text-muted-foreground"
       >
         <span>Chỉ tiêu</span>
         {periods.map((period) => (
@@ -113,7 +113,7 @@ function FinancialTable({ data, periods }: { data: ApiRow[]; periods: string[] }
             <span
               style={{ paddingLeft: row.level ? `${row.level * 16}px` : undefined }}
               className={cn(
-                "text-[15px] leading-[1.47] tracking-[-0.374px]",
+                "text-[0.95rem]",
                 isStrong && "font-semibold"
               )}
             >
@@ -125,7 +125,7 @@ function FinancialTable({ data, periods }: { data: ApiRow[]; periods: string[] }
                 <span
                   key={period}
                   className={cn(
-                    "text-right text-[15px] leading-[1.47] tracking-[-0.374px] tabular-nums",
+                    "text-right text-[0.95rem] tabular-nums",
                     isStrong && "font-semibold",
                     tone === "negative" && "text-negative",
                     (tone === "empty" || tone === "zero") && "text-muted-foreground"
@@ -188,7 +188,7 @@ export function FinanceTabContent({ symbol, className }: FinanceTabContentProps)
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+          <span className="text-meta text-muted-foreground">
             Đơn vị: {response?.unit ?? "—"}
           </span>
           <div className="flex gap-1.5">
@@ -207,7 +207,7 @@ export function FinanceTabContent({ symbol, className }: FinanceTabContentProps)
       </div>
 
       <div className="mt-3.5 flex flex-wrap items-center justify-between gap-4 border-t border-hairline pt-3.5">
-        <label className="flex cursor-pointer select-none items-center gap-2 text-[13px] leading-[1.43] tracking-[-0.208px]">
+        <label className="flex cursor-pointer select-none items-center gap-2 text-meta">
           <input
             type="checkbox"
             checked={hideEmpty}
@@ -216,7 +216,7 @@ export function FinanceTabContent({ symbol, className }: FinanceTabContentProps)
           />
           Ẩn dòng chưa công bố
         </label>
-        <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+        <span className="text-meta text-muted-foreground">
           {hiddenCount > 0
             ? `${hiddenCount} dòng chưa công bố đang được ẩn`
             : `Hiển thị tất cả ${allRows.length} dòng`}
@@ -232,7 +232,7 @@ export function FinanceTabContent({ symbol, className }: FinanceTabContentProps)
       ) : hasData ? (
         <>
           <FinancialTable data={rows} periods={periods} />
-          <div className="mt-3.5 flex flex-wrap gap-4 border-t border-hairline pt-3.5 text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+          <div className="mt-3.5 flex flex-wrap gap-4 border-t border-hairline pt-3.5 text-meta text-muted-foreground">
             <span>— chưa công bố</span>
             <span>0,0 giá trị bằng không thực tế</span>
             <span>Số âm hiển thị dấu trừ thay vì ngoặc đơn</span>
@@ -240,10 +240,10 @@ export function FinanceTabContent({ symbol, className }: FinanceTabContentProps)
         </>
       ) : (
         <div className="py-8 text-center">
-          <p className="text-[15px] leading-[1.47] tracking-[-0.374px]">
+          <p className="text-[0.95rem]">
             Chưa có dữ liệu báo cáo tài chính cho {symbol}
           </p>
-          <p className="mt-1 text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+          <p className="mt-1 text-meta text-muted-foreground">
             Nguồn dữ liệu không trả về kỳ báo cáo nào cho lựa chọn hiện tại.
           </p>
         </div>

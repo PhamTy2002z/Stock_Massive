@@ -86,7 +86,7 @@ export function PriceZoneBand({
         />
       </svg>
 
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-micro text-muted-foreground">
         {priceZoneSentence(band.halfWidthPct)} {scaleNote(band.halfWidthPct)}{" "}
         {CHROME.asOf} <span className="tabular-nums">{zone?.asOf ?? "—"}</span> ·{" "}
         {anchor}

@@ -38,7 +38,7 @@ function ThemePicker() {
             aria-checked={selected}
             onClick={() => setTheme(value)}
             className={cn(
-              "flex flex-1 items-center justify-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] font-medium leading-[1.29] tracking-[-0.208px] outline-none transition-[background-color,color,transform] duration-150 focus-visible:ring-2 focus-visible:ring-interactive-strong active:scale-95 md:flex-none",
+              "flex flex-1 items-center justify-center gap-1.5 rounded-full px-3.5 py-1.5 text-meta font-medium leading-[1.29] outline-none transition-[background-color,color,transform] duration-150 focus-visible:ring-2 focus-visible:ring-interactive-strong active:scale-95 md:flex-none",
               selected
                 // Ink on emerald, never white — the filled control is a lit
                 // surface with dark type, not a coloured chip.
@@ -61,22 +61,22 @@ function QuotePreview() {
   return (
     <div className="w-full rounded-card border border-hairline bg-background p-4 md:w-[320px]">
       <div className="flex items-baseline justify-between">
-        <span className="text-[15px] font-semibold leading-[1.24] tracking-[-0.374px]">
+        <span className="text-[0.95rem] font-semibold">
           VNM
         </span>
-        <span className="text-[11px] leading-[1.3] tracking-[-0.11px] text-muted-foreground">
+        <span className="text-micro text-muted-foreground">
           HOSE
         </span>
       </div>
       <div className="mt-2 flex items-baseline gap-2">
-        <span className="text-[21px] font-semibold leading-[1.19] tracking-[-0.374px] tabular-nums">
+        <span className="text-[21px] font-semibold leading-[1.19] tabular-nums">
           64.200
         </span>
-        <span className="text-[13px] font-semibold leading-[1.29] tracking-[-0.208px] tabular-nums text-positive">
+        <span className="text-meta font-semibold leading-[1.29] tabular-nums text-positive">
           +1,42%
         </span>
       </div>
-      <div className="mt-2 flex items-center gap-3 text-[11px] leading-[1.3] tracking-[-0.11px] tabular-nums">
+      <div className="mt-2 flex items-center gap-3 text-micro tabular-nums">
         <span className="text-ceiling">Trần 68.650</span>
         <span className="text-floor">Sàn 59.750</span>
       </div>
@@ -93,7 +93,7 @@ export function AppearanceSection() {
     >
       <SettingsPanel
         footer={
-          <p className="text-[11px] leading-[1.3] tracking-[-0.11px] text-muted-foreground">
+          <p className="text-micro text-muted-foreground">
             Lựa chọn được lưu ngay khi bấm — không có bước xác nhận.
           </p>
         }

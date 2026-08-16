@@ -27,7 +27,7 @@ const BODY_CELL = "border-b border-[hsl(var(--widget-grid))] py-1.5"
 
 export function WidgetTable({ caption, columns, rows }: WidgetTableProps) {
   return (
-    <table className="w-full border-collapse text-[13px] leading-[1.43]">
+    <table className="w-full border-collapse text-meta leading-[1.43]">
       <caption className="pb-2 text-left" style={{ color: WIDGET_PALETTE.inkMuted }}>
         {caption}
       </caption>

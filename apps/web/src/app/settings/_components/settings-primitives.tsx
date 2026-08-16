@@ -26,11 +26,11 @@ export function SettingsSection({
     /* Sections scroll inside their own column rather than the page, so the
        anchor only needs to clear its own top padding. */
     <section id={id} className="scroll-mt-8">
-      <h2 className="text-[21px] font-semibold leading-[1.19] tracking-[-0.374px]">
+      <h2 className="text-[21px] font-semibold leading-[1.19]">
         {title}
       </h2>
       {description ? (
-        <p className="mt-1 text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+        <p className="mt-1 text-meta text-muted-foreground">
           {description}
         </p>
       ) : null}
@@ -79,11 +79,11 @@ export function SettingsRow({
       )}
     >
       <div className="min-w-0 md:max-w-[46%]">
-        <div className="text-[15px] font-semibold leading-[1.24] tracking-[-0.374px]">
+        <div className="text-[0.95rem] font-semibold">
           {label}
         </div>
         {description ? (
-          <p className="mt-0.5 text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+          <p className="mt-0.5 text-meta text-muted-foreground">
             {description}
           </p>
         ) : null}
@@ -99,7 +99,7 @@ export function SettingsRow({
  */
 export function ReadOnlyField({ value }: { value: string }) {
   return (
-    <div className="w-full truncate rounded-lg border border-border bg-background px-3 py-2 text-[13px] leading-[1.43] tracking-[-0.208px] tabular-nums text-muted-foreground md:w-[320px]">
+    <div className="w-full truncate rounded-lg border border-border bg-background px-3 py-2 text-meta tabular-nums text-muted-foreground md:w-[320px]">
       {value}
     </div>
   )

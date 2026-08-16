@@ -44,11 +44,11 @@ function Shell({
       className={cn("min-w-0 rounded-card border border-border bg-card p-[14px]", className)}
     >
       <div className="flex flex-wrap items-baseline justify-between gap-4 pb-1.5">
-        <span className="text-[17px] font-semibold leading-[1.24] tracking-[-0.374px]">
+        <span className="text-[1.05rem] font-semibold leading-[1.24]">
           Định giá so với ngành{sectorName ? ` ${sectorName}` : ""}
         </span>
         {peerCount !== null && (
-          <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+          <span className="text-meta text-muted-foreground">
             Trung vị {peerCount} mã cùng ngành
           </span>
         )}
@@ -94,7 +94,7 @@ export function StockValuationVsSector({ symbol, className }: StockValuationVsSe
   if (rows.length === 0) {
     return (
       <Shell peerCount={null} sectorName={data.icb_name} className={className}>
-        <div className="py-2 text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+        <div className="py-2 text-meta text-muted-foreground">
           Chưa có chỉ số định giá nào công bố đủ để so với trung vị ngành.
         </div>
       </Shell>
@@ -111,9 +111,9 @@ export function StockValuationVsSector({ symbol, className }: StockValuationVsSe
         trackColor="hsl(var(--hairline))"
         markerColor="hsl(var(--muted-foreground))"
         rowClassName="grid grid-cols-[110px_minmax(120px,1fr)_88px_96px] items-center gap-3.5 border-t border-hairline py-[11px]"
-        labelClassName="text-[15px] leading-[1.47] tracking-[-0.374px]"
-        valueClassName="text-right text-[15px] leading-[1.47] tracking-[-0.374px]"
-        trailingClassName="text-right text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground"
+        labelClassName="text-[0.95rem]"
+        valueClassName="text-right text-[0.95rem]"
+        trailingClassName="text-right text-meta text-muted-foreground"
       />
     </Shell>
   )

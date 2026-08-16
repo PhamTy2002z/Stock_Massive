@@ -61,10 +61,10 @@ export function StockValuationHistory({
   return (
     <SurfaceCard className={className}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h2 className="text-[17px] font-semibold leading-[1.24] tracking-[-0.374px]">
+        <h2 className="text-[1.05rem] font-semibold leading-[1.24]">
           Định giá theo thời gian
         </h2>
-        <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+        <span className="text-meta text-muted-foreground">
           {data.points.length} phiên · {data.points[data.points.length - 1].source}
           {data.age_seconds !== null && ` · ${formatDataAge(data.age_seconds)} trước`}
           {data.stale && " · quá cũ"}
