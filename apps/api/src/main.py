@@ -8,6 +8,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from src.agent.router import router as alpha_desk_router
+from src.agent.service import close_alpha_desk
 from src.agent.turns import sweep_interrupted_turns
 from src.alpha.analysis_router import router as analysis_router
 from src.alpha.router import router as watchlist_router
@@ -114,7 +116,12 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Scheduler disabled by config")
         yield
-    # Shutdown: dispose database engine
+    # Shutdown. Active Turns get their thirty seconds to reach a safe
+    # checkpoint before the pool goes away, because the checkpoint that window
+    # buys is written through it (docs/adr/0013). Whatever does not make it is
+    # left for the startup sweep, which is the same honest `incomplete` a crash
+    # would have produced.
+    await close_alpha_desk()
     await engine.dispose()
 
 
@@ -150,6 +157,11 @@ app.include_router(watchlist_router, prefix="/api/v1")
 # sits beside the Watchlist rather than under it: it never belonged to one
 # user's list, which is why removing a symbol deletes nothing.
 app.include_router(analysis_router, prefix="/api/v1")
+# Threads and Turns, mounted beside the Watchlist for the same reason: they are
+# one user's conversation rather than market data. The browser reaches them at
+# `/api/alpha-desk/threads/...` through the Next proxy, whose allowlist names
+# `threads` and `turns` as the two resources it will carry (docs/adr/0013).
+app.include_router(alpha_desk_router, prefix="/api/v1")
 
 
 @app.exception_handler(AlphaRefusal)
