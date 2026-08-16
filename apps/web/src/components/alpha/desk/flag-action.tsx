@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils"
 export function FlagAction({
   messageId,
   reason,
+  failed = false,
   onFlag,
   onUnflag,
   className,
@@ -39,6 +40,8 @@ export function FlagAction({
   messageId: number
   /** The reason already stored on this message, or null. */
   reason: FlagReason | null
+  /** The last write against *this* message was rejected. Never optimistic. */
+  failed?: boolean
   onFlag: (messageId: number, reason: FlagReason) => void
   onUnflag: (messageId: number) => void
   className?: string
@@ -97,16 +100,25 @@ export function FlagAction({
           <Flag className="h-3.5 w-3.5" aria-hidden />
         </button>
 
-        {reason !== null && (
-          <p className="min-w-0 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">
-              {FLAG_REASON_LABELS[reason]}
-            </span>
-            {" — "}
-            {/* States what was recorded, and stops. No ticket number, no
-                deadline, and nothing about anybody getting back to them. */}
-            {FLAG_COPY.acknowledged}
+        {failed ? (
+          // The write was rejected, so nothing was recorded and the surface
+          // says so. Announced, because the reader pressed something and the
+          // answer is that it did not take.
+          <p role="alert" className="min-w-0 text-xs text-red-600 dark:text-red-400">
+            {FLAG_COPY.failed}
           </p>
+        ) : (
+          reason !== null && (
+            <p className="min-w-0 text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">
+                {FLAG_REASON_LABELS[reason]}
+              </span>
+              {" — "}
+              {/* States what was recorded, and stops. No ticket number, no
+                  deadline, and nothing about anybody getting back to them. */}
+              {FLAG_COPY.acknowledged}
+            </p>
+          )
         )}
       </div>
 

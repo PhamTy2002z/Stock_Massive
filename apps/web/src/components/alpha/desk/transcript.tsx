@@ -33,6 +33,7 @@ export function Transcript({
   onRetry,
   onFlag,
   onUnflag,
+  flagFailedFor = null,
   className,
 }: {
   entries: TranscriptEntry[]
@@ -45,6 +46,8 @@ export function Transcript({
    */
   onFlag?: (messageId: number, reason: FlagReason) => void
   onUnflag?: (messageId: number) => void
+  /** The message whose last flag write was rejected, if any. */
+  flagFailedFor?: number | null
   className?: string
 }) {
   const container = useRef<HTMLDivElement>(null)
@@ -102,6 +105,7 @@ export function Transcript({
                   view={entry.view}
                   messageId={entry.messageId}
                   flaggedReason={entry.flaggedReason}
+                  flagFailed={entry.messageId === flagFailedFor}
                   onFlag={onFlag}
                   onUnflag={onUnflag}
                 />

@@ -36,6 +36,7 @@ export function DeskSurface({
   onRetry,
   onFlag,
   onUnflag,
+  flagFailedFor,
   onDismissRefusal,
   className,
 }: {
@@ -56,6 +57,14 @@ export function DeskSurface({
   /** The one dispute action v1 ships. Optional: without it, no control is drawn. */
   onFlag?: (messageId: number, reason: FlagReason) => void
   onUnflag?: (messageId: number) => void
+  /**
+   * The message whose last flag write was rejected.
+   *
+   * Beside the transcript rather than in the refusal strip below it: an
+   * admission refusal is about the Turn the user is waiting on, and a flag that
+   * did not save is about one answer they had already finished reading.
+   */
+  flagFailedFor?: number | null
   onDismissRefusal: () => void
   className?: string
 }) {
@@ -85,6 +94,7 @@ export function DeskSurface({
         onRetry={onRetry}
         onFlag={onFlag}
         onUnflag={onUnflag}
+        flagFailedFor={flagFailedFor}
         className="min-h-0 flex-1"
       />
 

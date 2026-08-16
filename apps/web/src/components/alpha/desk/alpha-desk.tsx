@@ -291,6 +291,7 @@ export function AlphaDesk() {
       onRetry={onRetry}
       onFlag={onFlag}
       onUnflag={onUnflag}
+      flagFailedFor={flagging.failedMessageId}
       onDismissRefusal={dismissRefusal}
     />
   )

@@ -127,6 +127,21 @@ async def test_flagging_writes_the_pair_and_re_flagging_replaces_it(owner):
 
 
 @pytest.mark.asyncio
+async def test_pressing_the_same_reason_again_does_not_move_the_stamp(owner):
+    store = persistence()
+    _, _, answer = await _answered_thread(store, owner)
+
+    first = await store.flag_message(owner, answer.id, reason="wrong_figure")
+    repeat = await store.flag_message(owner, answer.id, reason="wrong_figure")
+
+    # Nothing changed, so nothing is written. A fresh stamp would move this flag
+    # out of the week it was raised in and into the week it was re-pressed —
+    # and the counts are read by date range.
+    assert repeat.flagged_at == first.flagged_at
+    assert repeat.flagged_reason == "wrong_figure"
+
+
+@pytest.mark.asyncio
 async def test_unflagging_clears_both_columns(owner):
     store = persistence()
     _, _, answer = await _answered_thread(store, owner)
