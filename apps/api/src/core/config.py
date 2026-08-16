@@ -270,6 +270,15 @@ class Settings(BaseSettings):
     rate_limit_heavy_max: int = 20  # requests per window
     rate_limit_heavy_window: int = 60  # seconds
 
+    # Đăng ký và kết nối lại một Turn có bộ đếm riêng, tính theo user và theo
+    # Turn chứ không theo IP (docs/adr/0013). Sau proxy Next mọi user chung một
+    # IP, nên limiter `heavy` sẽ chặn tất cả cùng lúc ngay đợt reconnect đầu.
+    # Trần rộng hơn `heavy` một cách có chủ ý: EventSource tự kết nối lại sau
+    # khoảng ba giây, nên một mạng chập chờn sinh ra nhiều lần thử hợp lệ.
+    alpha_turn_subscribe_user_max: int = 60  # lượt/cửa sổ, mỗi user
+    alpha_turn_subscribe_turn_max: int = 30  # lượt/cửa sổ, mỗi Turn
+    alpha_turn_subscribe_window: int = 60  # giây
+
     # Sector Historical Performance Job
     # Disabled until a persisted cache exists; otherwise every restart after
     # 15:45 retries a broad vnstock scan and starves interactive requests.

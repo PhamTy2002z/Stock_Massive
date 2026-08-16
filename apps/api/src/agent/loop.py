@@ -181,6 +181,23 @@ class SessionSlots:
         self._limit = limit
         self._semaphore = asyncio.Semaphore(limit)
 
+    @property
+    def limit(self) -> int:
+        return self._limit
+
+    @property
+    def full(self) -> bool:
+        """Whether a Turn asking for a slot right now would be refused.
+
+        Read without taking one, for admission: the ``POST`` has to answer 503
+        *before* a stream opens rather than let the refusal surface as a
+        terminal event seconds later. It is a sample and not a reservation — a
+        Turn admitted here still meets :meth:`occupy`, and losing that race ends
+        the Turn honestly, where losing this one would only have cost a round
+        trip.
+        """
+        return self._semaphore.locked()
+
     @asynccontextmanager
     async def occupy(self):
         # ``locked()`` is true exactly when no permit is left, and no await sits
