@@ -4,7 +4,13 @@ import { Loader2, RotateCw, X } from "lucide-react"
 
 import type { AnalysisState, RailEntry } from "@/lib/alpha"
 import { cn } from "@/lib/utils"
-import { STATE_LABEL, dayAndMonth, failureSentence, stateSentence } from "./state-copy"
+import {
+  STATE_LABEL,
+  dayAndMonth,
+  failureSentence,
+  stateSentence,
+  waitingForSessionData,
+} from "./state-copy"
 
 /**
  * The five states as a badge — border, fill and text — so they are told apart
@@ -61,7 +67,10 @@ export function RailEntryRow({
   children,
 }: RailEntryRowProps) {
   const { symbol, state, latest, failure, unread } = entry
-  const failureReason = failure ? failureSentence(failure) : null
+  const waiting = waitingForSessionData(state, failure)
+  // A wait already said in full by the state sentence needs no second line
+  // repeating it as though an attempt had failed.
+  const failureReason = failure && !waiting ? failureSentence(failure) : null
   const canRetry = state === "failed" && tradingDay !== null && !failure?.exhausted
 
   return (
@@ -100,7 +109,7 @@ export function RailEntryRow({
           </div>
 
           <p className="text-xs text-muted-foreground">
-            {stateSentence(state, tradingDay)}
+            {stateSentence(state, tradingDay, failure)}
           </p>
 
           {latest ? (
