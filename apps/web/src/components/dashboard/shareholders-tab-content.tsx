@@ -163,7 +163,7 @@ export function ShareholdersTabContent({
             <div
               key={shareholder.id || `${shareholder.name}-${startIndex + index}`}
               style={{ gridTemplateColumns: columns }}
-              className="grid min-w-[620px] items-center gap-3.5 border-t border-[hsl(var(--hairline))] py-[11px]"
+              className="grid min-w-[620px] items-center gap-3.5 border-t border-hairline py-[11px]"
             >
               <span className="truncate text-[15px] leading-[1.47] tracking-[-0.374px]">
                 {shareholder.name}
@@ -194,7 +194,7 @@ export function ShareholdersTabContent({
           )
         })}
 
-        <div className="mt-1.5 flex min-w-[620px] flex-wrap items-center justify-between gap-6 border-t border-[hsl(var(--hairline))] pt-4">
+        <div className="mt-1.5 flex min-w-[620px] flex-wrap items-center justify-between gap-6 border-t border-hairline pt-4">
           <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
             {startIndex + 1}–{endIndex} trên {totalItems} cổ đông
           </span>
@@ -207,7 +207,7 @@ export function ShareholdersTabContent({
               onClick={() => goToPage(currentPage - 1)}
               disabled={currentPage === 1}
               aria-label="Trang trước"
-              className="flex size-9 items-center justify-center rounded-full border border-[hsl(var(--hairline))] bg-muted/40 text-muted-foreground transition-transform duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex size-9 items-center justify-center rounded-full border border-hairline bg-surface-sunken text-muted-foreground transition-transform duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <ChevronLeft className="size-4" />
             </button>

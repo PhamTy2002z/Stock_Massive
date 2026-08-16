@@ -26,7 +26,7 @@ function ThemePicker() {
     <div
       role="radiogroup"
       aria-label="Chế độ màu"
-      className="flex w-full gap-1 rounded-full border border-[hsl(var(--hairline))] bg-muted/60 p-1 md:w-auto"
+      className="flex w-full gap-1 rounded-full border border-hairline bg-surface-sunken p-1 md:w-auto"
     >
       {MODES.map(({ value, label, icon: Icon }) => {
         const selected = mounted && theme === value
@@ -59,7 +59,7 @@ function ThemePicker() {
  *  numbers, where up and down have to stay apart on both surfaces. */
 function QuotePreview() {
   return (
-    <div className="w-full rounded-card border border-[hsl(var(--hairline))] bg-background p-4 md:w-[320px]">
+    <div className="w-full rounded-card border border-hairline bg-background p-4 md:w-[320px]">
       <div className="flex items-baseline justify-between">
         <span className="text-[15px] font-semibold leading-[1.24] tracking-[-0.374px]">
           VNM

@@ -106,8 +106,8 @@ function FinancialTable({ data, periods }: { data: ApiRow[]; periods: string[] }
             key={row.id}
             style={{ gridTemplateColumns: columns }}
             className={cn(
-              "grid min-w-[680px] items-center gap-3.5 border-t border-[hsl(var(--hairline))] py-[11px]",
-              index % 2 === 1 && "bg-muted/40"
+              "grid min-w-[680px] items-center gap-3.5 border-t border-hairline py-[11px]",
+              index % 2 === 1 && "bg-surface-sunken"
             )}
           >
             <span
@@ -206,7 +206,7 @@ export function FinanceTabContent({ symbol, className }: FinanceTabContentProps)
         </div>
       </div>
 
-      <div className="mt-3.5 flex flex-wrap items-center justify-between gap-4 border-t border-[hsl(var(--hairline))] pt-3.5">
+      <div className="mt-3.5 flex flex-wrap items-center justify-between gap-4 border-t border-hairline pt-3.5">
         <label className="flex cursor-pointer select-none items-center gap-2 text-[13px] leading-[1.43] tracking-[-0.208px]">
           <input
             type="checkbox"
@@ -232,7 +232,7 @@ export function FinanceTabContent({ symbol, className }: FinanceTabContentProps)
       ) : hasData ? (
         <>
           <FinancialTable data={rows} periods={periods} />
-          <div className="mt-3.5 flex flex-wrap gap-4 border-t border-[hsl(var(--hairline))] pt-3.5 text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
+          <div className="mt-3.5 flex flex-wrap gap-4 border-t border-hairline pt-3.5 text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
             <span>— chưa công bố</span>
             <span>0,0 giá trị bằng không thực tế</span>
             <span>Số âm hiển thị dấu trừ thay vì ngoặc đơn</span>

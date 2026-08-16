@@ -46,12 +46,12 @@ export function AddSymbolForm({
           placeholder="Add symbol"
           aria-label="Add symbol"
           maxLength={32}
-          className="h-9 min-w-0 flex-1 rounded-md border border-border/60 bg-background px-3 text-sm uppercase placeholder:normal-case placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          className="h-9 min-w-0 flex-1 rounded-md border border-border bg-background px-3 text-sm uppercase placeholder:normal-case placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
         />
         <button
           type="submit"
           disabled={isAdding || !symbol.trim()}
-          className="inline-flex h-9 items-center gap-1 rounded-md border border-border/60 px-3 text-sm hover:bg-muted disabled:opacity-50"
+          className="inline-flex h-9 items-center gap-1 rounded-md border border-border px-3 text-sm hover:bg-foreground/[0.06] disabled:opacity-50"
         >
           {isAdding ? (
             <Loader2 className="h-4 w-4 animate-spin" />

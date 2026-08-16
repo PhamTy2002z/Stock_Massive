@@ -206,7 +206,7 @@ export function OrderFlowTabContent({ symbol, className }: OrderFlowTabContentPr
           unit={(v) => `${v.toLocaleString("vi-VN")} lệnh`}
         />
 
-        <div className="mt-[18px] grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3.5 border-t border-[hsl(var(--hairline))] pt-4">
+        <div className="mt-[18px] grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3.5 border-t border-hairline pt-4">
           <Stat
             label="Số lệnh mua / bán"
             value={`${data.buy_orders.toLocaleString("vi-VN")} / ${data.sell_orders.toLocaleString("vi-VN")}`}

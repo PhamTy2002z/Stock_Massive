@@ -49,7 +49,7 @@ function Panel({
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 border-t border-[hsl(var(--hairline))] py-[9px]">
+    <div className="flex items-baseline justify-between gap-3 border-t border-hairline py-[9px]">
       <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
         {label}
       </span>
@@ -84,7 +84,7 @@ function PeerList({ symbol }: { symbol: string }) {
           <Link
             key={peer.symbol}
             href={`/analytics/deep-dive?symbol=${encodeURIComponent(peer.symbol)}`}
-            className="flex items-baseline justify-between gap-3 border-t border-[hsl(var(--hairline))] py-[9px] transition-colors hover:bg-muted/50"
+            className="flex items-baseline justify-between gap-3 border-t border-hairline py-[9px] transition-colors hover:bg-foreground/[0.06]"
           >
             <span className="text-[15px] font-semibold leading-[1.24] tracking-[-0.374px]">
               {peer.symbol}

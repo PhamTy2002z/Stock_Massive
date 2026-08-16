@@ -41,7 +41,7 @@ export function HealthScoreCard({ symbol, className }: HealthScoreCardProps) {
           {/* Score Details */}
           <div className="space-y-6">
             {/* Overall Score */}
-            <div className="text-center p-4 bg-muted/30 rounded-lg">
+            <div className="text-center p-4 bg-surface-sunken rounded-lg">
               <div className="text-sm text-muted-foreground">Overall Score</div>
               <div className={cn(
                 "text-4xl font-bold tabular-nums",
@@ -68,7 +68,7 @@ export function HealthScoreCard({ symbol, className }: HealthScoreCardProps) {
         </div>
 
         {/* Last Updated */}
-        <div className="flex items-center gap-2 text-xs text-muted-foreground mt-4 pt-4 border-t border-border/50">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground mt-4 pt-4 border-t border-border">
           <Clock className="h-3 w-3" />
           <span>Last updated: {formatDistanceToNow(dataUpdatedAt)} ago</span>
           <Button

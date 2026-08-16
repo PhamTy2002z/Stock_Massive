@@ -17,7 +17,7 @@ import { STATE_LABEL, dayAndMonth, failureSentence, stateSentence } from "./stat
  */
 const STATE_TONE: Record<AnalysisState, string> = {
   ready: "border-positive/40 bg-positive/10 text-positive",
-  pending: "border-border/60 bg-muted/40 text-muted-foreground",
+  pending: "border-border bg-foreground/[0.04] text-muted-foreground",
   producing: "border-primary/40 bg-primary/10 text-primary",
   failed: "border-negative/40 bg-negative/10 text-negative",
   unsupported: "border-caution/40 bg-caution/10 text-caution",
@@ -65,7 +65,7 @@ export function RailEntryRow({
   const canRetry = state === "failed" && tradingDay !== null && !failure?.exhausted
 
   return (
-    <li className="rounded-lg border border-border/60 bg-card/50 p-3">
+    <li className="rounded-lg border border-border bg-card p-3">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 space-y-1">
           <div className="flex items-center gap-2">
@@ -143,7 +143,7 @@ export function RailEntryRow({
               type="button"
               onClick={() => onRetry(symbol, tradingDay!)}
               disabled={isRetrying}
-              className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-foreground/[0.06] disabled:opacity-50"
               aria-label={`Retry ${symbol}`}
             >
               <RotateCw className={cn("h-3 w-3", isRetrying && "animate-spin")} />
@@ -154,7 +154,7 @@ export function RailEntryRow({
             type="button"
             onClick={() => onRemove(symbol)}
             disabled={isRemoving}
-            className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+            className="rounded-md p-1 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-50"
             aria-label={`Remove ${symbol}`}
           >
             {isRemoving ? (

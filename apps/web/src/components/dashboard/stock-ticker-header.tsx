@@ -63,7 +63,7 @@ function SessionBadge({ updatedAt }: { updatedAt?: number }) {
   if (!session) return null
 
   return (
-    <span className="flex items-center gap-1.5 rounded-full border border-[hsl(var(--hairline))] bg-card px-2.5 py-[3px] text-[12px] font-normal tracking-[-0.12px] text-muted-foreground">
+    <span className="flex items-center gap-1.5 rounded-full border border-hairline bg-card px-2.5 py-[3px] text-[12px] font-normal tracking-[-0.12px] text-muted-foreground">
       <span
         className={cn(
           "size-1.5 rounded-full",

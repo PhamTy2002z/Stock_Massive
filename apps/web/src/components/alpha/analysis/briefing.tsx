@@ -150,7 +150,7 @@ function CitedFields({ artifact }: { artifact: AnalysisArtifact }) {
         {artifact.citedFieldIds.map((fieldId) => (
           <li
             key={fieldId}
-            className="rounded border border-border/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+            className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
           >
             {fieldId}
           </li>

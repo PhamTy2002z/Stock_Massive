@@ -55,7 +55,7 @@ export function SectorOverviewCard({
   targetPremium,
 }: SectorOverviewCardProps) {
   return (
-    <Card className="bg-muted/30 border-border/50">
+    <Card className="bg-surface-sunken border-border">
       <CardContent className="p-4">
         {/* Header with ICB info */}
         <div className="flex items-center gap-3 mb-4">

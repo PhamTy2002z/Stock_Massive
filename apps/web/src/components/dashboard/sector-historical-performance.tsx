@@ -58,7 +58,7 @@ function CustomTooltip({
   const data = payload[0].payload
 
   return (
-    <Card className="shadow-lg border-border/50">
+    <Card className="shadow-lg border-border">
       <CardContent className="p-3 space-y-1">
         <p className="font-semibold text-sm">{data.name}</p>
         <div className="flex justify-between gap-4 text-xs">

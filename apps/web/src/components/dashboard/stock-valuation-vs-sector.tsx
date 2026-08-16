@@ -110,7 +110,7 @@ export function StockValuationVsSector({ symbol, className }: StockValuationVsSe
         barColor="hsl(var(--foreground))"
         trackColor="hsl(var(--hairline))"
         markerColor="hsl(var(--muted-foreground))"
-        rowClassName="grid grid-cols-[110px_minmax(120px,1fr)_88px_96px] items-center gap-3.5 border-t border-[hsl(var(--hairline))] py-[11px]"
+        rowClassName="grid grid-cols-[110px_minmax(120px,1fr)_88px_96px] items-center gap-3.5 border-t border-hairline py-[11px]"
         labelClassName="text-[15px] leading-[1.47] tracking-[-0.374px]"
         valueClassName="text-right text-[15px] leading-[1.47] tracking-[-0.374px]"
         trailingClassName="text-right text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground"
