@@ -23,6 +23,7 @@ from types import MappingProxyType
 
 import pytest
 import pytest_asyncio
+from fastapi.dependencies.utils import get_dependant
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, select
 
@@ -33,7 +34,13 @@ from src.agent.limits import SubscriptionLimiter
 from src.agent.loop import SessionSlots, TurnOutcome, TurnStatus
 from src.agent.persistence import AgentPersistence
 from src.agent.prompt import AnswerKind
-from src.agent.router import desk as desk_dependency, history_of
+from src.agent.router import (
+    desk as desk_dependency,
+    history_of,
+    router as alpha_desk_router,
+    streaming_user_id,
+    turn_events,
+)
 from src.agent.service import AlphaDeskService
 from src.agent.turns import TurnService
 from src.alpha.models import (
@@ -44,7 +51,7 @@ from src.alpha.models import (
     LlmCallUsage,
 )
 from src.auth.models import RefreshToken, User
-from src.core.database import Base, engine, get_sync_db, sync_engine
+from src.core.database import Base, engine, get_db, get_sync_db, sync_engine
 from src.core.llm import (
     BudgetLanes,
     BudgetRefusal,
@@ -55,6 +62,7 @@ from src.core.llm import (
     Usage,
     Workload,
 )
+from src.core.ratelimit import heavy_rate_limit, standard_rate_limit
 from src.main import app
 
 API = "/api/v1"
@@ -812,6 +820,36 @@ class TestThreads:
         assert first.json()["thread_id"] == second.json()["thread_id"] == thread_id
 
 
+class TestWhatTheSubscribeEndpointDependsOn:
+    """``docs/specs/0003`` §10.5, and the limiter ``docs/adr/0013`` forbids.
+
+    Both are properties of what the endpoint *declares* rather than of what one
+    request happens to do, and a declaration is what drifts: a later hand adding
+    ``CurrentUser`` here for symmetry with the other routes would reintroduce a
+    session whose scope is the response, and the response is the Turn.
+    """
+
+    def test_subscribing_holds_no_session_and_no_ip_based_limiter(self):
+        # Behind the Next proxy every user shares one IP, so the first reconnect
+        # burst on the `heavy` limiter would rate-limit everybody at once. The
+        # per-user and per-Turn counter in `src.agent.limits` is what stands
+        # here instead, and it is asked inside the endpoint rather than as a
+        # dependency — which is why this asserts an absence.
+        calls = _dependency_calls(turn_events)
+
+        assert heavy_rate_limit not in calls
+        assert standard_rate_limit not in calls
+        # `get_db` is the other thing that must not be here: its scope ends when
+        # the *response* does, which for this route is when the Turn does. The
+        # caller is resolved by `streaming_user_id`, which opens and closes its
+        # own session before anything streams.
+        assert get_db not in calls
+        assert streaming_user_id in calls
+        # Nothing is smuggled in at the router either, which would apply to
+        # every endpoint mounted on it including this one.
+        assert alpha_desk_router.dependencies == []
+
+
 class TestTheHistoryHandedToTheLoop:
     def test_a_turn_that_never_answered_still_reads_as_a_question(self):
         from src.agent.persistence import MessageRecord
@@ -838,6 +876,23 @@ async def _first_event(lines) -> dict:
         if line.startswith("data: "):
             return json.loads(line[len("data: ") :])
     raise AssertionError("the stream ended before it carried an event")
+
+
+def _dependency_calls(endpoint) -> set:
+    """Every callable FastAPI resolves before it enters this endpoint.
+
+    Taken from the endpoint's own signature rather than from a mounted route,
+    because that is where the property lives: a dependency declared here is
+    resolved for every request and torn down only when the response ends.
+    """
+    found: set = set()
+    pending = list(get_dependant(path="/", call=endpoint).dependencies)
+    while pending:
+        dependant = pending.pop()
+        if dependant.call is not None:
+            found.add(dependant.call)
+        pending.extend(dependant.dependencies)
+    return found
 
 
 async def _settle(desk: Desk, turn_id: str):
