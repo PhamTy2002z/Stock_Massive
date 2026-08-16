@@ -26,6 +26,7 @@ by the same code that performs it is not proved.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -334,8 +335,6 @@ def _check_manifest(
 
 
 def _encoded(manifest: EvidenceManifest) -> str:
-    import json
-
     return json.dumps(manifest.as_wire(), ensure_ascii=False, default=str)
 
 

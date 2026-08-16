@@ -24,6 +24,19 @@ Everything a run writes lands in the eval database, the ledger included —
 `llm_call_usage` and `eval_run`. That is the same atomic reservation of
 ADR-0014 pointed at a different database, not a different mechanism.
 
+**The cost of that, stated rather than buried.** ADR-0014 puts a $5/month eval
+lane inside the $50 envelope. Because the ledger lives in the eval database, that
+lane is counted *there* — so eval spend does not appear in the production
+envelope, and dropping the eval database resets the lane. Two ceilings still
+bind a run honestly: the per-run **$2.5**, and the eval lane as accumulated in
+the eval database. What is lost is the single monthly view across all four lanes.
+
+This follows from issue #93's criterion — *the eval database is separate from dev
+and production, and running the battery cannot write to either* — which cannot be
+satisfied while writing the ledger to production. If the monthly view matters
+more than that criterion, the decision to revisit is this one, and it is a
+one-line change of session factory in `harness.build_harness`.
+
 Set it up once:
 
 ```bash

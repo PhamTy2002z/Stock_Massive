@@ -63,23 +63,17 @@ class TestTheRegistry:
         with pytest.raises(DuplicateEvalCase):
             register(turn_case("dup"))
 
-    def test_the_battery_narrows_by_category_and_by_surface(self):
+    def test_the_battery_is_unfiltered(self):
+        """All D/E cases are re-scored on every gate run, not only the changed.
+
+        So there is no selector: the one that felt convenient is the one reached
+        for on a run that felt slow.
+        """
         register(
             turn_case("q-1", category=EvalCategory.DATA_GAP),
             turn_case("q-2", category=EvalCategory.SCOPE),
-            EvalCase(
-                id="a-1",
-                category=EvalCategory.DATA_GAP,
-                surface=EvalSurface.ANALYSIS,
-                prompt="",
-                role=FixtureRole.LIMIT_LOCK_DENSE,
-            ),
         )
-        assert [c.id for c in battery(categories=[EvalCategory.DATA_GAP])] == [
-            "q-1",
-            "a-1",
-        ]
-        assert [c.id for c in battery(surfaces=[EvalSurface.ANALYSIS])] == ["a-1"]
+        assert [c.id for c in battery()] == ["q-1", "q-2"]
 
 
 class TestTheCaseShape:

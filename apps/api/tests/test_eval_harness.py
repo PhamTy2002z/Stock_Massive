@@ -318,6 +318,71 @@ class TestTheCeilingStopsTheRun:
         assert "eval_budget_exhausted" in rendered
         assert "did not finish" in rendered
 
+    @pytest.mark.asyncio
+    async def test_an_exhausted_lane_stops_the_run_just_as_the_ceiling_does(
+        self, harness
+    ):
+        """The $5 lane sits above the per-run ceiling and refuses first.
+
+        Recognising only ``eval_budget_exhausted`` would let the battery run to
+        the end and publish a full score over Turns that never reached the
+        model — the ADR's lie, arrived at from the other direction.
+        """
+        starved = config(output_price=COSTLY_PRICE, eval_usd=0.0)
+        result = await harness(configuration=starved).run(
+            [case("lane-1"), case("lane-2")]
+        )
+
+        assert result.complete is False
+        assert result.stopped_reason == "lane_budget_exhausted"
+        assert result.results == ()
+        assert result.gating is False
+
+    def test_every_reason_the_ledger_raises_is_in_the_closed_set(self):
+        """The set the harness matches against is pinned to the refusals.
+
+        Maintained by hand at a distance it would drift the first time a ceiling
+        was added — and the drift is silent, because the battery would simply
+        stop noticing that ceiling.
+        """
+        import ast
+
+        from src.core.llm import BUDGET_REFUSAL_REASONS
+
+        tree = ast.parse(Path("src/core/llm/admission.py").read_text())
+        raised = {
+            node.args[0].value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "BudgetRefusal"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+        }
+        assert raised == set(BUDGET_REFUSAL_REASONS)
+
+
+class TestTheAnalysisLaneIsRefusedRatherThanAskedBlank:
+    @pytest.mark.asyncio
+    async def test_an_analysis_case_is_refused_before_anything_is_spent(
+        self, harness, factory
+    ):
+        """Its input is a symbol, not a prompt; running it would ask nothing."""
+        from src.eval.harness import EvalMisconfigured
+
+        analysis_case = EvalCase(
+            id="analysis-1",
+            category=EvalCategory.INTERPRETATION,
+            surface=EvalSurface.ANALYSIS,
+            prompt="",
+            role=FixtureRole.BANK,
+        )
+        with pytest.raises(EvalMisconfigured) as raised:
+            await harness().run([case("turn-ok"), analysis_case])
+
+        assert "analysis-1" in str(raised.value)
+        assert usage_rows(factory) == []
+
 
 class TestTheRunRow:
     @pytest.mark.asyncio
@@ -407,6 +472,41 @@ class TestSmokeIsFreeAndNonGating:
         with pytest.raises(EvalMisconfigured) as raised:
             smoke_config(Settings(eval_smoke_base_url=""))
         assert "EVAL_SMOKE_BASE_URL" in str(raised.value)
+
+    def test_smoke_and_gate_never_resolve_to_the_same_route(self):
+        """A smoke run that reached the production model would be a paid run.
+
+        Which is worse than it sounds: it would also carry gating weight it has
+        not earned, because a reader comparing two reports sees the model name
+        and not the mode that chose it.
+        """
+        from src.core.config import Settings
+        from src.eval.harness import config_for
+
+        settings = Settings(
+            llm_base_url="https://production.example",
+            llm_model_session="production-session",
+            llm_model_batch="production-batch",
+            eval_smoke_base_url="http://localhost:8317",
+            eval_smoke_model_session="dev-session",
+            eval_smoke_model_batch="dev-batch",
+        )
+        gate = config_for(EvalMode.GATE, settings)
+        smoke = config_for(EvalMode.SMOKE, settings)
+
+        assert gate.route.base_url == "https://production.example"
+        assert gate.model_for(Workload.SESSION) == "production-session"
+        assert smoke.route.base_url == "http://localhost:8317"
+        assert smoke.model_for(Workload.SESSION) == "dev-session"
+        assert smoke.pricing.version == SMOKE_PRICING_VERSION
+
+    def test_a_gate_run_without_the_production_route_refuses(self):
+        from src.core.config import Settings
+        from src.eval.harness import EvalMisconfigured, config_for
+
+        with pytest.raises(EvalMisconfigured) as raised:
+            config_for(EvalMode.GATE, Settings(llm_base_url=""))
+        assert "LLM_BASE_URL" in str(raised.value)
 
 
 class TestTheFixtureGatesTheBattery:

@@ -469,7 +469,8 @@ class EvalRun(Base):
     id = Column(Uuid, primary_key=True)
     started_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     finished_at = Column(DateTime(timezone=True), nullable=True)
-    # gate | exploratory
+    # smoke | gate (``src/eval/harness.py``). Only ``gate`` runs the production
+    # route and models, and only a gate run may be attached to a pull request.
     mode = Column(String(16), nullable=False)
     route = Column(String(64), nullable=False)
     model = Column(String(64), nullable=False)
