@@ -5,6 +5,7 @@ import {
   MarketIndices,
   MarketIndicesSkeleton,
   SectorPerformanceSection,
+  SectorHeatGrid,
   FundCertificates,
   VN30OverviewTable,
   VN30OverviewTableSkeleton,
@@ -52,6 +53,11 @@ export default async function Home() {
             <MarketIndices />
 
             <VN30OverviewTable />
+
+            {/* Every sector at once, before the two ranked lists narrow it to
+                the extremes: the wall answers how broad the session was, and
+                the cards under it answer who led and who dragged. */}
+            <SectorHeatGrid />
 
             {/* Sector extremes and funds share one row: three readings of the
                 same session, each answering a different question. */}

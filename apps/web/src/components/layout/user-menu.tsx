@@ -63,7 +63,7 @@ export function UserMenu() {
         >
           <Avatar className="size-[26px] shrink-0 rounded-full">
             <AvatarImage src={userAvatar} alt={userName} />
-            <AvatarFallback className="rounded-full bg-[linear-gradient(120deg,#e8c454,#78d0cd)] text-[0.76rem] font-semibold text-[#0c0c0c]">
+            <AvatarFallback className="rounded-full bg-[linear-gradient(120deg,#e8c454,#78d0cd)] text-[0.76rem] font-semibold text-[#191815]">
               {userInitials}
             </AvatarFallback>
           </Avatar>

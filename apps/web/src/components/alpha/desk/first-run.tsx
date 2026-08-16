@@ -15,14 +15,34 @@ import { cn } from "@/lib/utils"
  * the ones a given symbol has no data for. A refusal names what is available at
  * the moment it matters, which is the only moment the list is accurate
  * (ADR-0011).
+ *
+ * `heading` and `glance` are what the reference wraps that in — a greeting and
+ * a look at where the market stands. Both are injected rather than fetched
+ * here, because both need hooks and this component is rendered by a transcript
+ * that is deliberately presentational; without them the surface still opens on
+ * its question and its two rules, which is the part that matters.
  */
-export function FirstRun({ className }: { className?: string }) {
+export function FirstRun({
+  heading,
+  glance,
+  className,
+}: {
+  /** Replaces the opening question — the container passes a greeting. */
+  heading?: React.ReactNode
+  /** A quiet line under the copy: where the indices stand right now. */
+  glance?: React.ReactNode
+  className?: string
+}) {
   return (
     <section
       aria-label="Alpha Desk"
-      className={cn("mx-auto w-full max-w-[760px] space-y-5 px-4 py-14", className)}
+      className={cn("mx-auto w-full max-w-[760px] space-y-5 px-4 py-10", className)}
     >
-      <h2 className="text-[1.28rem] font-medium tracking-[-0.015em] text-foreground">{FIRST_RUN.question}</h2>
+      {heading ?? (
+        <h2 className="text-[clamp(1.24rem,2.1vw,1.6rem)] font-normal tracking-[-0.015em] text-foreground">
+          {FIRST_RUN.question}
+        </h2>
+      )}
 
       <div className="space-y-3 rounded-card border border-border bg-card p-4 text-control text-muted-foreground">
         <p>{FIRST_RUN.universeRule}</p>
@@ -30,6 +50,8 @@ export function FirstRun({ className }: { className?: string }) {
       </div>
 
       <p className="text-meta text-muted-foreground">{FIRST_RUN.hint}</p>
+
+      {glance}
     </section>
   )
 }
