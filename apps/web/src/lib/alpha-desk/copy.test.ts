@@ -12,10 +12,13 @@ import { describe, expect, it } from "vitest"
 import {
   ACTIVITY_COPY,
   FIRST_RUN,
+  FLAG_COPY,
+  FLAG_REASONS,
+  FLAG_REASON_LABELS,
   KNOWN_TERMINAL_REASONS,
   terminalSentence,
 } from "./copy"
-import type { ActivityPhase } from "./types"
+import type { ActivityPhase, FlagReason } from "./types"
 
 // The v1 catalog, as `apps/api/src/agent/tools/` registers it. Listed here
 // rather than imported because the point of the assertion is that these names
@@ -78,6 +81,43 @@ describe("a Turn that stopped early", () => {
 
   it("says something rather than nothing when the reason is absent", () => {
     expect(terminalSentence(null).length).toBeGreaterThan(0)
+  })
+})
+
+describe("flagging a message", () => {
+  // The vocabulary `agent_message.flagged_reason` accepts, written out because
+  // the point of the assertion is that the surface offers these four and not a
+  // fifth of its own.
+  const STORED_REASONS: FlagReason[] = [
+    "wrong_figure",
+    "overreach",
+    "wrongly_refused",
+    "other",
+  ]
+
+  it("has a label for every reason the column can hold, and no extra one", () => {
+    expect(FLAG_REASONS).toEqual(STORED_REASONS)
+    expect(Object.keys(FLAG_REASON_LABELS).sort()).toEqual([...STORED_REASONS].sort())
+  })
+
+  it("labels them in the reader's language rather than by the stored code", () => {
+    for (const reason of STORED_REASONS) {
+      expect(FLAG_REASON_LABELS[reason]).not.toContain("_")
+      expect(FLAG_REASON_LABELS[reason].length).toBeGreaterThan(0)
+    }
+  })
+
+  it("acknowledges the flag and promises no follow-up", () => {
+    // V1 has no dispute workflow (ADR-0016). A sentence implying a ticket, a
+    // reply or a deadline would be a promise with nothing behind it.
+    expect(FLAG_COPY.acknowledged).toMatch(/Đã ghi nhận/)
+    expect(FLAG_COPY.acknowledged).not.toMatch(
+      /sẽ liên hệ|sẽ phản hồi|mã yêu cầu|ticket|trong vòng/i,
+    )
+  })
+
+  it("says what the flag is not, rather than leaving the reader to assume", () => {
+    expect(FLAG_COPY.acknowledged).toMatch(/không mở yêu cầu/)
   })
 })
 

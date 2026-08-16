@@ -17,7 +17,14 @@
 
 import { AlphaRefusalError } from "@/lib/alpha"
 
-import type { CreatedTurn, Thread, ThreadDetail, Turn } from "./types"
+import type {
+  CreatedTurn,
+  FlagReason,
+  MessageFlag,
+  Thread,
+  ThreadDetail,
+  Turn,
+} from "./types"
 
 const BASE = "/api/alpha-desk"
 
@@ -109,6 +116,28 @@ export function cancelTurn(turnId: string): Promise<Turn> {
 /** One Turn's current state, for a caller that has not opened a stream. */
 export function fetchTurn(turnId: string): Promise<Turn> {
   return call<Turn>(`/turns/${encodeURIComponent(turnId)}`)
+}
+
+/**
+ * Flag one assistant message with one reason.
+ *
+ * Idempotent per message: a second call replaces the reason rather than adding
+ * a second flag, because the backend writes a pair of columns and not a row in
+ * a table it does not have (`docs/adr/0016`).
+ *
+ * **It opens nothing.** There is no ticket id in the answer to render, and the
+ * surface must not invent one — the response carries the flag and nothing else.
+ */
+export function flagMessage(messageId: number, reason: FlagReason): Promise<MessageFlag> {
+  return call<MessageFlag>(`/messages/${messageId}/flag`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  })
+}
+
+/** Clear the flag. Both columns, never one of them. */
+export function unflagMessage(messageId: number): Promise<MessageFlag> {
+  return call<MessageFlag>(`/messages/${messageId}/flag`, { method: "DELETE" })
 }
 
 /** Where the browser's `EventSource` points. Same origin, so cookies travel. */
