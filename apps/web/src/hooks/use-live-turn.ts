@@ -54,14 +54,21 @@ const EVENT_TYPES: TurnEventType[] = [
 // seconds) gets to try first, so an ordinary blip costs no request at all.
 const ERROR_PROBE_MS = 4000
 
+/** What the composer hands over: the question, and the lens it was asked under. */
+export interface TurnInput {
+  text: string
+  symbols?: string[]
+  activeSymbol?: string | null
+}
+
 export interface LiveTurnController {
   state: LiveTurn
   /** Admit a Turn under an id generated here, before the request goes out. */
-  send: (input: { text: string; symbols?: string[]; activeSymbol?: string | null }) => Promise<void>
+  send: (input: TurnInput) => Promise<void>
   /** Immediate in the UI, and it keeps every block already received. */
   cancel: () => Promise<void>
   /** A new Turn pointing at the old one. The previous Turn stays untouched. */
-  retry: (input: { text: string; symbols?: string[]; activeSymbol?: string | null }) => Promise<void>
+  retry: (input: TurnInput) => Promise<void>
   /** The admission refusal, when the last create was refused. */
   refusal: Error | null
   clearRefusal: () => void
@@ -150,10 +157,7 @@ export function useLiveTurn(threadId: string | null): LiveTurnController {
   // -- the three actions --------------------------------------------------
 
   const start = useCallback(
-    async (
-      input: { text: string; symbols?: string[]; activeSymbol?: string | null },
-      retryOfTurnId: string | null,
-    ) => {
+    async (input: TurnInput, retryOfTurnId: string | null) => {
       if (!threadId) return
       // Generated before the request, so a retried admission on a flaky network
       // resolves to the same Turn instead of starting a second one.
@@ -183,17 +187,12 @@ export function useLiveTurn(threadId: string | null): LiveTurnController {
     [threadId, queryClient],
   )
 
-  const send = useCallback(
-    (input: { text: string; symbols?: string[]; activeSymbol?: string | null }) =>
-      start(input, null),
-    [start],
-  )
+  const send = useCallback((input: TurnInput) => start(input, null), [start])
 
   const retry = useCallback(
-    (input: { text: string; symbols?: string[]; activeSymbol?: string | null }) =>
-      // A retry is a new Turn carrying `retry_of_turn_id`; the previous Turn,
-      // its spend, its message and its traces stay immutable.
-      start(input, state.turnId),
+    // A retry is a new Turn carrying `retry_of_turn_id`; the previous Turn, its
+    // spend, its message and its traces stay immutable.
+    (input: TurnInput) => start(input, state.turnId),
     [start, state.turnId],
   )
 

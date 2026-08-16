@@ -27,13 +27,13 @@
  * rules is a statement about a sequence of events rather than about React.
  */
 
-import {
-  isTerminalEvent,
-  type ActivityPhase,
-  type ContentBlock,
-  type SnapshotData,
-  type TurnEvent,
-  type WidgetSpec,
+import type {
+  ActivityPhase,
+  ContentBlock,
+  SnapshotData,
+  TurnEvent,
+  TurnEventType,
+  WidgetSpec,
 } from "./types"
 
 /**
@@ -117,7 +117,15 @@ export type LiveTurnAction =
       messageId: number | null
     }
 
-const TERMINAL_PHASE: Record<string, LivePhase> = {
+/**
+ * The four terminal event types, and the phase each one means.
+ *
+ * Also the only list of them this module keeps: asking whether an event is
+ * terminal and asking what it means are the same question, so a lookup that
+ * misses answers both at once. Two lists could disagree, and the one that
+ * disagreed would leave a finished Turn rendering as a running one.
+ */
+const TERMINAL_PHASE: Partial<Record<TurnEventType, LivePhase>> = {
   "turn.completed": "completed",
   "turn.incomplete": "incomplete",
   "turn.failed": "failed",
@@ -207,16 +215,18 @@ function applyEvent(state: LiveTurn, event: TurnEvent): LiveTurn {
     case "widget.ready":
       return { ...advanced, widgets: [...advanced.widgets, event.data.widget as WidgetSpec] }
 
-    default:
-      return isTerminalEvent(event.type)
-        ? {
+    default: {
+      const phase = TERMINAL_PHASE[event.type]
+      return phase === undefined
+        ? advanced
+        : {
             ...advanced,
-            phase: TERMINAL_PHASE[event.type],
+            phase,
             activity: null,
             terminalReason: (event.data.terminal_reason as string | null) ?? null,
             messageId: (event.data.message_id as number | null) ?? null,
           }
-        : advanced
+    }
   }
 }
 

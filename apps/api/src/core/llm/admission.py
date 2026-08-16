@@ -211,23 +211,14 @@ class SpendAdmission:
                         called_at = dispatch_at
                         break
                     called_at = dispatch_at
-                lane_limit = _lane_limit_micro_usd(self._config, candidate.lane)
-                lane_spent = _charged_cost(
+                lane_spent, lane_limit = _assert_lane_headroom(
                     session,
-                    LlmCallUsage.lane == candidate.lane.value,
-                    LlmCallUsage.provider_called_at >= month_start,
-                    LlmCallUsage.provider_called_at < month_reset,
+                    config=self._config,
+                    lane=candidate.lane,
+                    reserved=reserved,
+                    month_start=month_start,
+                    month_reset=month_reset,
                 )
-                if lane_spent + reserved > lane_limit:
-                    raise BudgetRefusal(
-                        "lane_budget_exhausted",
-                        "This service lane is unavailable until its allowance resets.",
-                        reset_at=month_reset,
-                        operator_detail=(
-                            f"{candidate.lane.value} lane has {lane_spent} micro-USD "
-                            f"charged against {lane_limit}; request is {reserved}"
-                        ),
-                    )
                 if candidate.owner.type is OwnerType.CAPABILITY_PROBE:
                     probe_spent = _charged_cost(
                         session,
@@ -370,91 +361,28 @@ class SpendAdmission:
 
         session = self._session_factory()
         try:
-            lane_limit = _lane_limit_micro_usd(self._config, BudgetLane.TURN)
-            lane_spent = _charged_cost(
+            _assert_lane_headroom(
                 session,
-                LlmCallUsage.lane == BudgetLane.TURN.value,
-                LlmCallUsage.provider_called_at >= month_start,
-                LlmCallUsage.provider_called_at < month_reset,
+                config=self._config,
+                lane=BudgetLane.TURN,
+                reserved=reserved,
+                month_start=month_start,
+                month_reset=month_reset,
             )
-            if lane_spent + reserved > lane_limit:
-                raise BudgetRefusal(
-                    "lane_budget_exhausted",
-                    "This service lane is unavailable until its allowance resets.",
-                    reset_at=month_reset,
-                    operator_detail=(
-                        f"turn lane has {lane_spent} micro-USD charged against "
-                        f"{lane_limit}; one further call needs {reserved}"
-                    ),
-                )
-
             # The candidate's own owner id does not exist yet, so nothing is
             # excluded and nothing is added back: ``starts_today`` already
-            # counts this prospective Turn, and the two active counts do not.
-            state = self._turn_state_reader(session, user_id, called_at, "")
-            if state.starts_today > USER_TURN_STARTS_PER_DAY:
-                raise BudgetRefusal(
-                    "user_turn_starts_daily",
-                    "Your daily Turn allowance has been exhausted.",
-                    reset_at=day_reset,
-                )
-            if state.active_for_user >= USER_ACTIVE_TURNS:
-                raise BudgetRefusal(
-                    "user_active_turn",
-                    "Another Turn is already active for this account.",
-                    state="capacity_exhausted",
-                )
-            if state.active_system >= SYSTEM_ACTIVE_TURNS:
-                raise BudgetRefusal(
-                    "system_active_turns",
-                    "The service is at its active Turn capacity.",
-                    state="capacity_exhausted",
-                )
-
-            daily = _charged_cost(
+            # counts this prospective Turn, and the two active counts do not —
+            # which is what ``pending=1`` says.
+            _assert_user_ceilings(
                 session,
-                LlmCallUsage.user_id == user_id,
-                LlmCallUsage.owner_type == OwnerType.TURN_REQUEST_MESSAGE.value,
-                LlmCallUsage.provider_called_at >= day_start,
-                LlmCallUsage.provider_called_at < day_reset,
+                state=self._turn_state_reader(session, user_id, called_at, ""),
+                user_id=user_id,
+                reserved=reserved,
+                called_at=called_at,
+                day_start=day_start,
+                day_reset=day_reset,
+                pending=1,
             )
-            if daily + reserved > USER_DAILY_MICRO_USD:
-                raise BudgetRefusal(
-                    "user_spend_daily",
-                    "Your daily generation allowance has been exhausted.",
-                    reset_at=day_reset,
-                    operator_detail=(
-                        f"user {user_id} has {daily} micro-USD charged today and "
-                        f"one further call needs {reserved}"
-                    ),
-                )
-
-            rolling_start = called_at - timedelta(days=30)
-            rolling = _charged_cost(
-                session,
-                LlmCallUsage.user_id == user_id,
-                LlmCallUsage.owner_type == OwnerType.TURN_REQUEST_MESSAGE.value,
-                LlmCallUsage.provider_called_at > rolling_start,
-                LlmCallUsage.provider_called_at <= called_at,
-            )
-            if rolling + reserved > USER_ROLLING_30D_MICRO_USD:
-                raise BudgetRefusal(
-                    "user_spend_rolling_30d",
-                    "Your rolling generation allowance has been exhausted.",
-                    reset_at=_rolling_reset_at(
-                        session,
-                        user_id=user_id,
-                        rolling_start=rolling_start,
-                        called_at=called_at,
-                        amount_to_release=(
-                            rolling + reserved - USER_ROLLING_30D_MICRO_USD
-                        ),
-                    ),
-                    operator_detail=(
-                        f"user {user_id} has {rolling} micro-USD charged in 30 days "
-                        f"and one further call needs {reserved}"
-                    ),
-                )
         finally:
             session.close()
 
@@ -469,76 +397,23 @@ class SpendAdmission:
     ) -> None:
         user_id = candidate.owner.user_id
         assert user_id is not None
-        state = self._turn_state_reader(
+        # ``pending=0``: this Turn's ``agent_turn`` row was committed before
+        # execution began, so the active counts already include it.
+        _assert_user_ceilings(
             session,
-            user_id,
-            called_at,
-            candidate.owner.id,
-        )
-        if state.starts_today > USER_TURN_STARTS_PER_DAY:
-            raise BudgetRefusal(
-                "user_turn_starts_daily",
-                "Your daily Turn allowance has been exhausted.",
-                reset_at=day_reset,
-            )
-        if state.active_for_user > USER_ACTIVE_TURNS:
-            raise BudgetRefusal(
-                "user_active_turn",
-                "Another Turn is already active for this account.",
-                state="capacity_exhausted",
-            )
-        if state.active_system > SYSTEM_ACTIVE_TURNS:
-            raise BudgetRefusal(
-                "system_active_turns",
-                "The service is at its active Turn capacity.",
-                state="capacity_exhausted",
-            )
-
-        daily = _charged_cost(
-            session,
-            LlmCallUsage.user_id == user_id,
-            LlmCallUsage.owner_type == OwnerType.TURN_REQUEST_MESSAGE.value,
-            LlmCallUsage.provider_called_at >= day_start,
-            LlmCallUsage.provider_called_at < day_reset,
-        )
-        if daily + reserved > USER_DAILY_MICRO_USD:
-            raise BudgetRefusal(
-                "user_spend_daily",
-                "Your daily generation allowance has been exhausted.",
-                reset_at=day_reset,
-                operator_detail=(
-                    f"user {user_id} has {daily} micro-USD charged today and "
-                    f"requested {reserved} more"
-                ),
-            )
-
-        rolling_start = called_at - timedelta(days=30)
-        rolling = _charged_cost(
-            session,
-            LlmCallUsage.user_id == user_id,
-            LlmCallUsage.owner_type == OwnerType.TURN_REQUEST_MESSAGE.value,
-            LlmCallUsage.provider_called_at > rolling_start,
-            LlmCallUsage.provider_called_at <= called_at,
-        )
-        if rolling + reserved > USER_ROLLING_30D_MICRO_USD:
-            reset_at = _rolling_reset_at(
+            state=self._turn_state_reader(
                 session,
-                user_id=user_id,
-                rolling_start=rolling_start,
-                called_at=called_at,
-                amount_to_release=(
-                    rolling + reserved - USER_ROLLING_30D_MICRO_USD
-                ),
-            )
-            raise BudgetRefusal(
-                "user_spend_rolling_30d",
-                "Your rolling generation allowance has been exhausted.",
-                reset_at=reset_at,
-                operator_detail=(
-                    f"user {user_id} has {rolling} micro-USD charged in 30 days "
-                    f"and requested {reserved} more"
-                ),
-            )
+                user_id,
+                called_at,
+                candidate.owner.id,
+            ),
+            user_id=user_id,
+            reserved=reserved,
+            called_at=called_at,
+            day_start=day_start,
+            day_reset=day_reset,
+            pending=0,
+        )
 
     def reconcile(self, reservation: Reservation, usage: Usage) -> None:
         session = self._session_factory()
@@ -570,6 +445,127 @@ class SpendAdmission:
                 row.reconciled_at = self._clock()
         finally:
             session.close()
+
+
+def _assert_lane_headroom(
+    session: Session,
+    *,
+    config: LLMConfig,
+    lane: BudgetLane,
+    reserved: int,
+    month_start: datetime,
+    month_reset: datetime,
+) -> tuple[int, int]:
+    """The lane's monthly ceiling, asked once for both callers.
+
+    :meth:`SpendAdmission.reserve` asks it under an advisory lock immediately
+    before writing a row; :meth:`SpendAdmission.preflight_turn` asks it with no
+    lock at all, because it writes nothing. The *question* is the same one, and
+    two copies of it would be two places to edit a ceiling and one place to
+    forget — which would make the ``POST`` admit exactly what dispatch refuses.
+    """
+    limit = _lane_limit_micro_usd(config, lane)
+    spent = _charged_cost(
+        session,
+        LlmCallUsage.lane == lane.value,
+        LlmCallUsage.provider_called_at >= month_start,
+        LlmCallUsage.provider_called_at < month_reset,
+    )
+    if spent + reserved > limit:
+        raise BudgetRefusal(
+            "lane_budget_exhausted",
+            "This service lane is unavailable until its allowance resets.",
+            reset_at=month_reset,
+            operator_detail=(
+                f"{lane.value} lane has {spent} micro-USD charged against "
+                f"{limit}; this request needs {reserved}"
+            ),
+        )
+    return spent, limit
+
+
+def _assert_user_ceilings(
+    session: Session,
+    *,
+    state: TurnState,
+    user_id: int,
+    reserved: int,
+    called_at: datetime,
+    day_start: datetime,
+    day_reset: datetime,
+    pending: int,
+) -> None:
+    """The five per-user ceilings of ``docs/adr/0014``, in one place.
+
+    Asked twice with one difference. At admission no ``agent_turn`` row exists
+    yet, so the prospective Turn has to be added to the two active counts;
+    at reservation the row was committed before execution began, so it is
+    already in them. ``pending`` is that difference, and making it a parameter
+    is what keeps the two paths from drifting into disagreeing about who may
+    start a Turn — an admission that let through what dispatch then refused
+    would produce an ``incomplete`` Turn with nothing in it.
+    """
+    if state.starts_today > USER_TURN_STARTS_PER_DAY:
+        raise BudgetRefusal(
+            "user_turn_starts_daily",
+            "Your daily Turn allowance has been exhausted.",
+            reset_at=day_reset,
+        )
+    if state.active_for_user + pending > USER_ACTIVE_TURNS:
+        raise BudgetRefusal(
+            "user_active_turn",
+            "Another Turn is already active for this account.",
+            state="capacity_exhausted",
+        )
+    if state.active_system + pending > SYSTEM_ACTIVE_TURNS:
+        raise BudgetRefusal(
+            "system_active_turns",
+            "The service is at its active Turn capacity.",
+            state="capacity_exhausted",
+        )
+
+    daily = _charged_cost(
+        session,
+        LlmCallUsage.user_id == user_id,
+        LlmCallUsage.owner_type == OwnerType.TURN_REQUEST_MESSAGE.value,
+        LlmCallUsage.provider_called_at >= day_start,
+        LlmCallUsage.provider_called_at < day_reset,
+    )
+    if daily + reserved > USER_DAILY_MICRO_USD:
+        raise BudgetRefusal(
+            "user_spend_daily",
+            "Your daily generation allowance has been exhausted.",
+            reset_at=day_reset,
+            operator_detail=(
+                f"user {user_id} has {daily} micro-USD charged today and "
+                f"this request needs {reserved}"
+            ),
+        )
+
+    rolling_start = called_at - timedelta(days=30)
+    rolling = _charged_cost(
+        session,
+        LlmCallUsage.user_id == user_id,
+        LlmCallUsage.owner_type == OwnerType.TURN_REQUEST_MESSAGE.value,
+        LlmCallUsage.provider_called_at > rolling_start,
+        LlmCallUsage.provider_called_at <= called_at,
+    )
+    if rolling + reserved > USER_ROLLING_30D_MICRO_USD:
+        raise BudgetRefusal(
+            "user_spend_rolling_30d",
+            "Your rolling generation allowance has been exhausted.",
+            reset_at=_rolling_reset_at(
+                session,
+                user_id=user_id,
+                rolling_start=rolling_start,
+                called_at=called_at,
+                amount_to_release=rolling + reserved - USER_ROLLING_30D_MICRO_USD,
+            ),
+            operator_detail=(
+                f"user {user_id} has {rolling} micro-USD charged in 30 days "
+                f"and this request needs {reserved}"
+            ),
+        )
 
 
 def _micro_usd(

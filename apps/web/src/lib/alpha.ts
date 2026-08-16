@@ -166,7 +166,16 @@ async function readRefusal(response: Response): Promise<AlphaRefusalError> {
   )
 }
 
-async function alphaFetch<T>(path: string, init?: RequestInit): Promise<T> {
+/**
+ * One request against the Alpha Desk proxy, and one way to read its refusal.
+ *
+ * Exported rather than private, because the conversation client in
+ * `./alpha-desk/api.ts` calls the same origin, carries the same session, and
+ * reads the same `{ detail: { reason, message } }` body. A second copy there
+ * would be a second place for the refusal shape to be got wrong — and that
+ * shape is the part every caller branches on.
+ */
+export async function alphaFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${ALPHA_BASE}${path}`, {
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },

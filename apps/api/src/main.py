@@ -171,11 +171,20 @@ app.include_router(alpha_desk_router, prefix="/api/v1")
 
 @app.exception_handler(AlphaRefusal)
 async def alpha_refusal_handler(request: Request, exc: AlphaRefusal):
-    """An Alpha Desk request refused for a named reason (`src/alpha/refusals.py`)."""
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"detail": {"reason": exc.reason, "message": exc.message}},
-    )
+    """An Alpha Desk request refused for a named reason (`src/alpha/refusals.py`).
+
+    A refusal that knows when its allowance resets says so. `reset_at` is the
+    actionable half of a 429 — a rule the caller can act on has a moment it
+    stops applying — and the refusals that have no such moment simply omit the
+    key rather than carry a guess: `docs/adr/0013` is deliberate that a capacity
+    refusal carries no retry hint, because the only number that could go there
+    would be a guess at when someone else's Turn ends.
+    """
+    detail = {"reason": exc.reason, "message": exc.message}
+    reset_at = getattr(exc, "reset_at", None)
+    if reset_at is not None:
+        detail["reset_at"] = reset_at.isoformat()
+    return JSONResponse(status_code=exc.status_code, content={"detail": detail})
 
 
 @app.exception_handler(StockServiceError)
