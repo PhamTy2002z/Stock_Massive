@@ -103,7 +103,7 @@ export function fetchTurn(turnId: string): Promise<Turn> {
  * surface must not invent one — the response carries the flag and nothing else.
  */
 export function flagMessage(messageId: number, reason: FlagReason): Promise<MessageFlag> {
-  return call<MessageFlag>(`/messages/${messageId}/flag`, {
+  return alphaFetch<MessageFlag>(`/messages/${messageId}/flag`, {
     method: "POST",
     body: JSON.stringify({ reason }),
   })
@@ -111,7 +111,7 @@ export function flagMessage(messageId: number, reason: FlagReason): Promise<Mess
 
 /** Clear the flag. Both columns, never one of them. */
 export function unflagMessage(messageId: number): Promise<MessageFlag> {
-  return call<MessageFlag>(`/messages/${messageId}/flag`, { method: "DELETE" })
+  return alphaFetch<MessageFlag>(`/messages/${messageId}/flag`, { method: "DELETE" })
 }
 
 /** Where the browser's `EventSource` points. Same origin, so cookies travel. */
