@@ -3,12 +3,15 @@
 Four verbs, and which database each one touches is the whole of the safety
 story:
 
-- ``capture`` **reads** the application store and writes a file. It is the only
-  verb that opens ``DATABASE_URL`` at all, and it never writes to it.
+- ``capture`` **reads** the application store and writes a file. It never writes
+  to ``DATABASE_URL``.
 - ``load`` writes the fixture into ``EVAL_DATABASE_URL``, and refuses if that is
   unset or resolves to the application's database.
 - ``run`` loads and then runs the battery, entirely inside the eval database —
-  the store, the traces and the ledger.
+  the store, the traces and the ledger. It opens ``DATABASE_URL`` once, at the
+  end and read-only, for the fixed ops query whose output ``docs/adr/0016``
+  requires in the report. A store it cannot reach costs the reading, never the
+  run.
 - ``rubric`` touches **no database at all**. It reads the filled blind sheet and
   the run record beside it, and rewrites the report with a person's answers in
   it.
@@ -105,6 +108,7 @@ def run(args: argparse.Namespace) -> int:
         seed=seed,
         session_factory=_eval_factory(),
         settings=settings,
+        ops_window_days=args.ops_window_days,
     )
     result = asyncio.run(harness.run())
     directory = Path(args.report_dir or settings.eval_report_dir)
@@ -226,6 +230,16 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--mode", choices=[mode.value for mode in EvalMode], required=True)
     run_parser.add_argument("--fixture", default=None)
     run_parser.add_argument("--report-dir", default=None)
+    run_parser.add_argument(
+        "--ops-window-days",
+        type=int,
+        default=None,
+        help=(
+            "how many days of live traffic the fixed ops query reads; defaults "
+            "to EVAL_OPS_WINDOW_DAYS. The 5%% grounding_failed threshold is "
+            "stated over 7 days, so widening this widens what it is read over"
+        ),
+    )
     run_parser.set_defaults(handler=run)
 
     rubric_parser = sub.add_parser(

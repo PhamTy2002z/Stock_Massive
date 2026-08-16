@@ -25,7 +25,10 @@ test:
 # only a gate run may be attached to a pull request.
 #
 # Everything below reads EVAL_DATABASE_URL and refuses if it is unset or points
-# at the database the API serves from.
+# at the database the API serves from. The one exception is the fixed ops query
+# (src/agent/ops.py), which reads DATABASE_URL once at the end of a run, with
+# SELECT only, so that its output lands in the report ADR-0016 requires it in.
+# Override its window with --ops-window-days; the default is EVAL_OPS_WINDOW_DAYS.
 eval:
 	$(PYTHON) -m src.eval run --mode gate
 

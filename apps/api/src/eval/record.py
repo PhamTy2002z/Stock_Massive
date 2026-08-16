@@ -18,25 +18,43 @@ is where per-case detail was already meant to live.
 The record stores what happened, never what the case *was*. Cases are code, so
 they are looked up in the registry by id on read — and a record naming a case
 this build no longer registers is refused rather than silently scored short.
+
+Two things on the record are not case results, and both are here because the
+**report a pull request attaches is written by ``rubric``**, from this file,
+long after the run and against a different database:
+
+- the **baseline** the run was read against, so the diff the merge rule asks for
+  survives into that document. What is stored is the baseline *row*, not the
+  computed diff: the diff is derived from two sets of totals that are both in
+  hand on read, and a stored derivation is one that can go stale.
+- the **ops-query snapshot**, so the field reading is the one taken during the
+  run rather than a fresh window measured whenever somebody got around to
+  scoring the rubric.
 """
 
 from __future__ import annotations
 
 import json
 import uuid
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from src.agent.ops import OpsSnapshot
 from src.agent.prompt import AnswerKind
 
+from .baseline import Baseline, compare_to_baseline
 from .cases import EvalCase, battery
 from .harness import CaseResult, CaseRun, EvalMode, EvalRunResult
 from .scoring import Check, CheckResult, DeterministicScore
 from .versions import PinnedVersions
 
-#: Bumped when a reader would have to parse the file differently.
-RECORD_FORMAT_VERSION = 1
+#: Bumped when a reader would have to parse the file differently. Version 2 adds
+#: the baseline and the ops-query snapshot, both of which the report is rendered
+#: from — a version-1 record would produce a document silently missing the diff
+#: the merge rule asks for, so it is refused rather than read short.
+RECORD_FORMAT_VERSION = 2
 
 
 class RecordUnreadable(RuntimeError):
@@ -58,7 +76,28 @@ def as_wire(result: EvalRunResult) -> dict[str, Any]:
         "complete": result.complete,
         "stopped_reason": result.stopped_reason,
         "report_path": result.report_path,
+        # The baseline row rather than the comparison. Whether a comparison was
+        # made at all is a property of this run — gate, and complete — so it is
+        # re-decided on read instead of being stored as a second flag that could
+        # disagree with the mode beside it.
+        "baseline": _baseline_wire(result),
+        "ops": None if result.ops is None else result.ops.as_wire(),
         "results": [item.as_wire() for item in result.results],
+    }
+
+
+def _baseline_wire(result: EvalRunResult) -> dict[str, Any] | None:
+    comparison = result.baseline
+    if comparison is None or comparison.baseline is None:
+        return None
+    baseline = comparison.baseline
+    return {
+        "run_id": str(baseline.run_id),
+        "started_at": baseline.started_at.isoformat(),
+        "prompt_version": baseline.prompt_version,
+        "fixture_version": baseline.fixture_version,
+        "category_totals": dict(baseline.category_totals),
+        "report_path": baseline.report_path,
     }
 
 
@@ -80,7 +119,7 @@ def from_wire(payload: dict[str, Any]) -> EvalRunResult:
             f"format {RECORD_FORMAT_VERSION}"
         )
     registered = {case.id: case for case in battery()}
-    return EvalRunResult(
+    result = EvalRunResult(
         run_id=uuid.UUID(payload["run_id"]),
         mode=EvalMode(payload["mode"]),
         route=payload["route"],
@@ -95,6 +134,37 @@ def from_wire(payload: dict[str, Any]) -> EvalRunResult:
         ),
         complete=bool(payload.get("complete", True)),
         stopped_reason=payload.get("stopped_reason"),
+        report_path=payload.get("report_path"),
+        ops=(
+            None
+            if payload.get("ops") is None
+            else OpsSnapshot.from_wire(payload["ops"])
+        ),
+    )
+    if not result.gating:
+        # The same rule ``EvalHarness._baseline_for`` applies, asked again
+        # rather than stored: a smoke run has no gating value to compare with,
+        # and a run that stopped has no score for a diff to be between.
+        return result
+    return replace(
+        result,
+        baseline=compare_to_baseline(
+            dict(result.category_totals),
+            result.fixture_version,
+            _baseline(payload.get("baseline")),
+        ),
+    )
+
+
+def _baseline(payload: dict[str, Any] | None) -> Baseline | None:
+    if not payload:
+        return None
+    return Baseline(
+        run_id=uuid.UUID(payload["run_id"]),
+        started_at=datetime.fromisoformat(payload["started_at"]),
+        prompt_version=payload["prompt_version"],
+        fixture_version=payload["fixture_version"],
+        category_totals=dict(payload.get("category_totals") or {}),
         report_path=payload.get("report_path"),
     )
 

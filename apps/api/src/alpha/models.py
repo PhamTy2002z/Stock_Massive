@@ -336,7 +336,7 @@ class AgentToolCall(Base):
     arguments = Column(JSONB, nullable=False)
     result = Column(JSONB, nullable=True)
     # ok | tool_error | timeout | unknown_tool
-    status = Column(String(16), nullable=False)
+    status = Column(String(16), nullable=False)  # see TOOL_CALL_* below
     error = Column(String(500), nullable=True)
     latency_ms = Column(Integer, nullable=True)
     prompt_tokens = Column(Integer, nullable=True)
@@ -352,6 +352,28 @@ class AgentToolCall(Base):
 
     def __repr__(self) -> str:
         return f"<AgentToolCall {self.tool_name} {self.status}>"
+
+
+# The four states of ``agent_tool_call.status``, named for the same reason the
+# Turn statuses below are: the catalog writes them and the fixed ops query counts
+# them, and two modules spelling ``"unknown_tool"`` by hand is how one of them
+# ends up spelling it differently. ``TOOL_CALL_TIMEOUT`` is declared and not yet
+# written by the catalog — it is part of the column's vocabulary rather than a
+# promise that a row carries it.
+TOOL_CALL_OK = "ok"
+TOOL_CALL_ERROR = "tool_error"
+TOOL_CALL_TIMEOUT = "timeout"
+# Also ``docs/adr/0011``'s demand trigger: a model reaching for a tool that does
+# not exist is the evidence for whether sandboxed execution is ever needed, so
+# this one is counted by tool name rather than only totalled.
+TOOL_CALL_UNKNOWN_TOOL = "unknown_tool"
+
+TOOL_CALL_STATUSES = (
+    TOOL_CALL_OK,
+    TOOL_CALL_ERROR,
+    TOOL_CALL_TIMEOUT,
+    TOOL_CALL_UNKNOWN_TOOL,
+)
 
 
 # The five states of ``agent_turn.status``, named where the column is declared so
