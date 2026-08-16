@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   AXIS_ORDER,
   buildArtifact,
-  priceZoneBand,
+  priceZoneExtent,
   type AnalysisPayload,
   type PayloadFigure,
 } from "./analysis"
@@ -312,7 +312,7 @@ describe("older schema versions still render", () => {
 describe("the price-zone band", () => {
   it("reads the two prices and the anchor off the figure's extras", () => {
     const artifact = buildArtifact(detail())
-    const band = priceZoneBand(artifact.priceZone)
+    const band = priceZoneExtent(artifact.priceZone)
 
     expect(band).toEqual({
       lower: 97_900,
@@ -340,6 +340,6 @@ describe("the price-zone band", () => {
     )
 
     expect(artifact.priceZone?.health).toBe("refused")
-    expect(priceZoneBand(artifact.priceZone)).toBeNull()
+    expect(priceZoneExtent(artifact.priceZone)).toBeNull()
   })
 })

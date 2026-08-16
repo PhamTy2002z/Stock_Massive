@@ -3,10 +3,8 @@
 import { useEffect, useState } from "react"
 import { Loader2 } from "lucide-react"
 
-import { AnalysisArtifact } from "@/components/alpha/analysis"
-import { useAnalysis, useAnalysisHistory, useMarkAnalysisOpened } from "@/hooks/use-analysis"
-import { buildArtifact } from "@/lib/alpha-desk/analysis"
-import type { AnalysisDetail } from "@/lib/alpha"
+import { AnalysisCard } from "@/components/alpha/analysis"
+import { useAnalysisHistory } from "@/hooks/use-analysis"
 import { cn } from "@/lib/utils"
 import { dayAndMonth, historyBoundaryNotice } from "./state-copy"
 
@@ -20,12 +18,14 @@ import { dayAndMonth, historyBoundaryNotice } from "./state-copy"
  * axes in one order — would then hold on one screen and not the other.
  *
  * What the rail adds is history: which sessions exist, and how far back the
- * browsing window reaches.
+ * browsing window reaches. Reading one is `AnalysisCard`'s, which is also what
+ * advances the user's last-seen date — the rail does not report an opening of
+ * its own, because two reporters is two chances to advance a badge for an
+ * Analysis nobody was shown.
  *
- * Opening one is what advances the user's last-seen date. Expanding the row
- * selects the newest, which is the evening's loop in one click; picking an
- * older one from the list marks that one too, and never moves the date
- * backwards.
+ * Expanding the row selects the newest, which is the evening's loop in one
+ * click; picking an older one from the list opens that one too, and the date
+ * never moves backwards.
  */
 export function AnalysisPanel({
   symbol,
@@ -39,8 +39,6 @@ export function AnalysisPanel({
 }) {
   const history = useAnalysisHistory(symbol)
   const [selected, setSelected] = useState<string | null>(initialTradingDay)
-  const analysis = useAnalysis(symbol, selected)
-  const markOpened = useMarkAnalysisOpened()
 
   // Fall back to the newest the history knows about, for a symbol whose rail
   // entry carried none — a `failed` cell whose last Analysis is older than the
@@ -49,11 +47,6 @@ export function AnalysisPanel({
   useEffect(() => {
     if (selected === null && newest !== null) setSelected(newest)
   }, [selected, newest])
-
-  const { mutate: reportOpened } = markOpened
-  useEffect(() => {
-    if (selected) reportOpened({ symbol, tradingDay: selected })
-  }, [symbol, selected, reportOpened])
 
   const boundary = history.data
     ? historyBoundaryNotice(history.data.depth, history.data.older_exist)
@@ -94,26 +87,7 @@ export function AnalysisPanel({
         </p>
       )}
 
-      {selected && <AnalysisView pending={analysis.isPending} data={analysis.data} />}
+      {selected && <AnalysisCard symbol={symbol} tradingDay={selected} />}
     </div>
   )
-}
-
-function AnalysisView({
-  pending,
-  data,
-}: {
-  pending: boolean
-  data: AnalysisDetail | undefined
-}) {
-  if (pending) {
-    return (
-      <p className="flex items-center gap-2 text-xs text-muted-foreground">
-        <Loader2 className="h-3 w-3 animate-spin" /> Đang tải Analysis…
-      </p>
-    )
-  }
-  if (!data) return null
-
-  return <AnalysisArtifact artifact={buildArtifact(data)} />
 }

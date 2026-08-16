@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import Link from "next/link"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { Maximize2, Minimize2, X } from "lucide-react"
 
@@ -12,6 +13,7 @@ import { AxisPanel } from "./axis-panel"
 import { Briefing } from "./briefing"
 import { AXIS_LABEL, CHROME } from "./copy"
 import { PriceZoneBand } from "./price-zone-band"
+import { ArtifactRiskNotice } from "./risk-notice"
 import { VerdictHeader } from "./verdict-header"
 
 /**
@@ -112,17 +114,40 @@ function InlineBody({ artifact }: { artifact: Artifact }) {
         {artifact.axes.map((axis) => (
           <TabsContent key={axis.axis} value={axis.axis} className="mt-2">
             {/* Bounded, and scrolling inside itself rather than growing the
-                transcript. The height is the artifact's promise: ten of these
-                in one Thread stay scrollable. */}
-            <div className="scrollbar-thin max-h-64 overflow-y-auto pr-1">
+                transcript. The lead axis is given more of that height, which is
+                the other half of what emphasis buys (`docs/specs/0002` §5); the
+                bound itself is the artifact's promise that ten of these in one
+                Thread stay scrollable. */}
+            <div
+              className={cn(
+                "scrollbar-thin overflow-y-auto pr-1",
+                axis.emphasis === "lead" ? "max-h-96" : "max-h-64",
+              )}
+            >
               <AxisPanel axis={axis} />
             </div>
           </TabsContent>
         ))}
       </Tabs>
+
+      {/* The band is the only graphic here; every other chart the reader might
+          want is Stock 360's, and this is the pointer to it. Inline as well as
+          expanded, because a reader who never expands still asked the question.
+          */}
+      <p className="text-[11px]">
+        <Link
+          href={`/analytics/deep-dive?symbol=${encodeURIComponent(artifact.symbol)}`}
+          className="underline underline-offset-2"
+        >
+          {CHROME.deepDive}
+        </Link>
+      </p>
+
+      <ArtifactRiskNotice />
     </div>
   )
 }
+
 
 function ExpandedOverlay({
   artifact,

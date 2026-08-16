@@ -16,6 +16,7 @@ import { buildArtifact, type AnalysisPayload } from "@/lib/alpha-desk/analysis"
 import type { AnalysisDetail } from "@/lib/alpha"
 import { AnalysisArtifact } from "./analysis-artifact"
 import { Briefing } from "./briefing"
+import { RISK_NOTICE_TEXT } from "./risk-notice"
 
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => mobile.value }))
 
@@ -206,7 +207,37 @@ describe("the inline treatment", () => {
   it("stays bounded so ten of them are still scrollable", () => {
     const { container } = render(<AnalysisArtifact artifact={artifact()} />)
 
-    expect(container.querySelector(".max-h-64")).not.toBeNull()
+    expect(container.querySelector("[class*='max-h-']")).not.toBeNull()
+  })
+
+  it("gives the lead axis more of that height than the others", () => {
+    // The other half of what emphasis buys: which tab opens, and how much space
+    // an axis gets. Never a reordering.
+    render(<AnalysisArtifact artifact={artifact()} />)
+
+    const lead = screen.getByRole("tabpanel").firstElementChild
+    expect(lead?.className).toContain("max-h-96")
+
+    fireEvent.focus(screen.getByRole("tab", { name: "Technical" }))
+    expect(screen.getByRole("tabpanel").firstElementChild?.className).toContain(
+      "max-h-64",
+    )
+  })
+
+  it("carries the Risk Notice without being asked", () => {
+    render(<AnalysisArtifact artifact={artifact()} />)
+
+    const notice = screen.getByRole("note", { name: "Risk notice" })
+    expect(notice).toHaveTextContent(RISK_NOTICE_TEXT)
+  })
+
+  it("deep-links to the screen that owns every other chart", () => {
+    render(<AnalysisArtifact artifact={artifact()} />)
+
+    expect(screen.getByRole("link", { name: /deep dive/i })).toHaveAttribute(
+      "href",
+      "/analytics/deep-dive?symbol=FPT",
+    )
   })
 
   it("keeps a refused figure visible with its reason, not behind a tooltip", () => {
@@ -293,6 +324,31 @@ describe("the expanded treatment", () => {
     // Refused, so it is not a citation in either treatment. The field id still
     // appears beside its own figure — what it may not do is stand as support.
     expect(within(ids).queryByText("factor_percentiles.roe_percentile")).toBeNull()
+  })
+
+  it("gives the lead axis the full width", () => {
+    render(<Briefing artifact={artifact()} />)
+
+    const lead = screen.getByRole("region", { name: "Money flow" })
+    expect(lead.className).toContain("sm:col-span-2")
+    expect(
+      screen.getByRole("region", { name: "Technical" }).className,
+    ).not.toContain("col-span-2")
+  })
+
+  it("shows the window the price zone was read over", () => {
+    render(<Briefing artifact={artifact()} />)
+
+    expect(screen.getByText("Window health")).toBeInTheDocument()
+    expect(screen.getByText(/20 \/ 20 sessions/)).toBeInTheDocument()
+  })
+
+  it("carries the Risk Notice here too", () => {
+    render(<Briefing artifact={artifact()} />)
+
+    expect(screen.getByRole("note", { name: "Risk notice" })).toHaveTextContent(
+      RISK_NOTICE_TEXT,
+    )
   })
 
   it("keeps the honesty states visible here too", () => {
