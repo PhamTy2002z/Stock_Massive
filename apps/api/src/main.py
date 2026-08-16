@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from src.agent.turns import sweep_interrupted_turns
 from src.alpha.analysis_router import router as analysis_router
 from src.alpha.router import router as watchlist_router
 from src.alpha.refusals import AlphaRefusal
@@ -85,6 +86,16 @@ async def lifespan(app: FastAPI):
     # The paid route contract comes after the local Universe and budget checks
     # and before the scheduler can create any workload that depends on it.
     await run_capability_probe_at_startup(llm_config)
+
+    # Any Turn a crash or a deploy left active is frozen here, from its own
+    # checkpoint, and marked incomplete (docs/adr/0013). V1 never resumes model
+    # or tool execution after a restart: replaying a non-deterministic model
+    # against a store that has moved overnight would produce a plausible
+    # continuation rather than the answer that was interrupted. Unconditional,
+    # and not behind `alpha_desk_enabled` — a deployment that switched Alpha
+    # Desk off is exactly the one that would otherwise leave Turns stuck active
+    # for good.
+    await sweep_interrupted_turns()
 
     if settings.scheduler_enabled:
         async with AsyncScheduler() as scheduler:

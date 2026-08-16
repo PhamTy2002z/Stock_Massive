@@ -324,6 +324,22 @@ class AgentToolCall(Base):
         return f"<AgentToolCall {self.tool_name} {self.status}>"
 
 
+# The five states of ``agent_turn.status``, named where the column is declared so
+# that the lifecycle, the transport and spend admission all read one vocabulary.
+# Three modules spelling ``"running"`` by hand is how one of them ends up
+# spelling it differently.
+TURN_ADMITTED = "admitted"
+TURN_RUNNING = "running"
+TURN_COMPLETE = "complete"
+TURN_INCOMPLETE = "incomplete"
+TURN_CANCELLED = "cancelled"
+
+# A Turn is *active* while it has not reached a terminal state. Admission counts
+# these; the publisher keeps a stream open for these; the startup sweep freezes
+# exactly these.
+ACTIVE_TURN_STATUSES = (TURN_ADMITTED, TURN_RUNNING)
+
+
 class AgentTurn(Base):
     """The lifecycle of one **Turn**, and the draft checkpointed inside it.
 

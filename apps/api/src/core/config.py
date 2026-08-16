@@ -227,6 +227,12 @@ class Settings(BaseSettings):
     # turns this off by name; no code path guesses that pytest is running.
     llm_capability_probe_enabled: bool = True
 
+    # Bản build nào đã trả lời — một trong các trường của Evidence Manifest
+    # (docs/adr/0015). Chỉ image build mới biết SHA, nên nó vào bằng biến môi
+    # trường; mặc định "unknown" là câu trả lời trung thực cho một lần chạy cục
+    # bộ, và trung thực hơn hẳn một chuỗi đoán được từ thư mục làm việc.
+    git_sha: str = "unknown"
+
     # Khối giá mà Budget Validation đọc lúc khởi động. Đơn vị USD trên một
     # triệu token, khai riêng cho từng workload: batch và interactive là hai
     # model khác nhau với giá khác nhau, một khối dùng chung sẽ định sai giá

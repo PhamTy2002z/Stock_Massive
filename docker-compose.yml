@@ -44,8 +44,12 @@ services:
     build:
       context: ./apps/api
       dockerfile: Dockerfile
+    # Matches production: an active Turn gets 30 seconds to checkpoint, so the
+    # grace period has to be longer than that (docs/adr/0013).
+    stop_grace_period: 45s
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/stockmassive}
+      GIT_SHA: ${GIT_SHA:-unknown}
       AUTH_SECRET: ${AUTH_SECRET:-dev-secret-change-in-production}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}

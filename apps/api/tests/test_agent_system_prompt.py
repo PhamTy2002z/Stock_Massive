@@ -138,7 +138,9 @@ def test_the_rendered_prompt_is_byte_stable_and_the_prefix_does_not_move():
 
 
 def test_the_hash_is_exported_and_changes_when_the_prose_changes():
-    assert PROMPT_VERSION == "1.0.0"
+    # Bumped with the prose it names: 1.1.0 added the evidence-reference
+    # protocol the Recommendation Validator reads (#82).
+    assert PROMPT_VERSION == "1.1.0"
     assert PROMPT_HASH == contract_hash()
 
     edited = tuple(
@@ -149,7 +151,7 @@ def test_the_hash_is_exported_and_changes_when_the_prose_changes():
     )
 
     assert contract_hash(edited) != PROMPT_HASH
-    assert contract_hash(SECTIONS, version="1.0.1") != PROMPT_HASH
+    assert contract_hash(SECTIONS, version="1.1.1") != PROMPT_HASH
 
 
 def test_the_cache_key_carries_model_version_hash_and_catalog_version():

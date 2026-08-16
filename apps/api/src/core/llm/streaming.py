@@ -61,6 +61,10 @@ class StreamAssembler:
     text_parts: list[str] = field(default_factory=list)
     finish_reason: str = "stop"
     model: str = ""
+    # The route's id for this call, first writer wins for the same reason the
+    # tool-call id does: a route that repeats it on every chunk must not be able
+    # to change it midway.
+    request_id: str | None = None
     refusal: str | None = None
     usage_payload: dict[str, Any] | None = None
     _calls: dict[int, _PartialToolCall] = field(default_factory=dict)
@@ -71,6 +75,8 @@ class StreamAssembler:
 
         if chunk.get("model"):
             self.model = str(chunk["model"])
+        if chunk.get("id") and self.request_id is None:
+            self.request_id = str(chunk["id"])
         if chunk.get("usage"):
             self.usage_payload = chunk["usage"]
 
