@@ -18,19 +18,35 @@ export function Figure({
   unit,
   asOf,
   stale,
+  sourceName,
+  retrievedAt,
   className,
 }: {
   value: unknown
   unit: string | null
   asOf: string | null
   stale: boolean
+  sourceName?: string | null
+  retrievedAt?: string | null
   className?: string
 }) {
   return (
     <span className={cn("flex flex-wrap items-baseline gap-x-2", className)}>
       <span className="font-medium tabular-nums">{displayValue(value)}</span>
       {unit && <span className="text-muted-foreground">{unit}</span>}
-      {asOf && <span className="text-muted-foreground tabular-nums">as of {asOf}</span>}
+      {sourceName ? (
+        <>
+          <span className="rounded-md border border-caution/40 px-1 text-[10px] text-caution">
+            Nguồn ngoài · chưa kiểm chứng
+          </span>
+          <span className="text-muted-foreground">
+            {sourceName}
+            {retrievedAt ? ` · retrieved ${retrievedAt}` : ""}
+          </span>
+        </>
+      ) : (
+        asOf && <span className="text-muted-foreground tabular-nums">as of {asOf}</span>
+      )}
       {stale && (
         <span className="rounded-md border border-caution/40 px-1 text-[10px] text-caution">
           stale

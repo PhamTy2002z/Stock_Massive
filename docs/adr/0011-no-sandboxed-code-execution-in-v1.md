@@ -1,5 +1,9 @@
 # Sandboxed code execution is out of v1, and the reopening triggers are named
 
+**Status: superseded by ADR-0019.** The demand and security analysis below is
+retained as historical context; the implementation decision now lives in
+`0019-networkless-container-executor-for-derived-evidence.md`.
+
 The agent may not author or run code. There is no `run_python` tool, no executor
 service, and no stub. One seam is kept because it already exists for another
 reason, and two triggers would reopen the question.

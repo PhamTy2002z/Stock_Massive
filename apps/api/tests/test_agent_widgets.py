@@ -87,13 +87,13 @@ def test_the_contract_gained_its_widget_section_and_the_catalog_did_not_move():
         )
     )
 
-    assert PROMPT_VERSION == "1.2.0"
+    assert PROMPT_VERSION == "1.3.0"
     assert "## 7. Visual evidence" in rendered
     for name in WIDGET_REGISTRY:
         assert name.replace("_", " ") in rendered
-    # The registry is described, and the twelve-tool catalog is not touched by
-    # describing it: the selection rides the output contract, not a thirteenth
-    # tool, precisely so that ``tool_catalog_version`` does not move.
+    # The registry is described without adding a visualization tool: the
+    # selection rides the output contract, so this section itself does not move
+    # ``tool_catalog_version``.
     assert "you name one of the visuals this system already owns" in rendered.casefold()
 
 

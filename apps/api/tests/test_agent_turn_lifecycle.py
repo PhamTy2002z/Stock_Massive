@@ -699,7 +699,7 @@ async def _grounded(_context, arguments):
 
 
 @pytest.mark.asyncio
-async def test_a_blocked_block_ends_the_turn_and_keeps_what_was_proven(owner):
+async def test_an_unverified_prose_block_completes_with_a_downgrade_label(owner):
     thread_id = await thread_for(owner)
     client = FakeClient(
         [
@@ -725,23 +725,22 @@ async def test_a_blocked_block_ends_the_turn_and_keeps_what_was_proven(owner):
     published = [event async for event in subscriber.events()]
 
     record = await store().read_turn(owner, turn_id)
-    assert record.status == TURN_INCOMPLETE
-    assert record.terminal_reason == "grounding_failed"
+    assert record.status == TURN_COMPLETE
+    assert record.terminal_reason is None
 
-    # The one proven block was emitted; the unprovable one never was, so there
-    # is nothing to retract.
+    # Both blocks are emitted whole; the second carries the literals the client
+    # must label rather than converting the Turn into a refusal.
     blocks = [event for event in published if event.type is EventType.CONTENT_BLOCK]
-    assert len(blocks) == 1
+    assert len(blocks) == 2
     assert blocks[0].data["block"]["text"] == "Giá đóng cửa 95.4."
-    assert published[-1].type is EventType.INCOMPLETE
+    assert blocks[1].data["block"]["unverified_figures"] == ["61.2"]
+    assert published[-1].type is EventType.COMPLETED
 
     assistant = [row for row in messages_of(thread_id) if row.role == "assistant"][0]
-    assert assistant.content["text"] == "Giá đóng cửa 95.4."
-    assert "61.2" not in assistant.content["text"]
-    assert assistant.content["evidence_manifest"]["outcomes"]["grounding"] == "blocked"
-    assert assistant.content["evidence_manifest"]["outcomes"]["failure_code"] == (
-        "unreferenced_figure"
-    )
+    assert "61.2" in assistant.content["text"]
+    assert assistant.content["blocks"][1]["unverified_figures"] == ["61.2"]
+    assert assistant.content["evidence_manifest"]["outcomes"]["grounding"] == "passed"
+    assert assistant.content["evidence_manifest"]["outcomes"]["failure_code"] is None
     assert handle.publisher.blocks[0]["text"] == "Giá đóng cửa 95.4."
 
 

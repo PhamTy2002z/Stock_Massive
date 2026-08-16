@@ -227,6 +227,27 @@ class Settings(BaseSettings):
     # turns this off by name; no code path guesses that pytest is running.
     llm_capability_probe_enabled: bool = True
 
+    # Open-web tools use their own Redis lane and Tavily credential. They are
+    # off by default because each enabled Turn can spend external-provider
+    # allowance independently of the vnstock account arbiter.
+    tavily_api_key: str = ""
+    web_tools_enabled: bool = False
+    web_fetch_max_bytes: int = 512 * 1024
+    web_domain_denylist: str = ""
+
+    # Optional Model Context Protocol servers. The JSON object is keyed by the
+    # stable server name recorded in tool names and the Evidence Manifest.
+    # Eval runs pin this off so a server's availability cannot move a fixture.
+    mcp_enabled: bool = False
+    mcp_servers: str = "{}"
+
+    # Isolated ad-hoc computation. The API and the networkless executor share
+    # only a named-volume request queue; no Docker socket or source tree crosses
+    # the boundary.
+    executor_enabled: bool = False
+    executor_queue_dir: str = "/var/run/stock-massive-executor"
+    executor_timeout_seconds: float = 10.0
+
     # Bản build nào đã trả lời — một trong các trường của Evidence Manifest
     # (docs/adr/0015). Chỉ image build mới biết SHA, nên nó vào bằng biến môi
     # trường; mặc định "unknown" là câu trả lời trung thực cho một lần chạy cục

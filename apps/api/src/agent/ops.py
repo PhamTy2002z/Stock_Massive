@@ -7,8 +7,9 @@ are noise, and a metrics table is a second store to keep true. Every signal that
 would justify one already exists on rows the product writes anyway:
 
 - ``grounding_failed`` in the Turn lifecycle (``agent_turn.terminal_reason``);
-- ``unknown_tool`` in ``agent_tool_call``, which is also ``docs/adr/0011``'s
-  demand trigger for sandboxed execution;
+- ``unknown_tool`` in ``agent_tool_call``, showing expected but unavailable
+  capabilities;
+- downgrade labels inside released assistant-message blocks;
 - the ``answer_kind`` distribution, inside the assistant message's content;
 - incomplete reasons (``agent_turn.terminal_reason`` where the Turn ended
   ``incomplete``);
@@ -66,7 +67,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, select, text
 from sqlalchemy.orm import InstrumentedAttribute, Session
 
 from src.alpha.models import (
@@ -114,15 +115,18 @@ class OpsSnapshot:
     #: Every ``agent_turn`` row started inside the window. The denominator.
     turns: int
     grounding_failed: int
+    #: Released content blocks, the denominator for downgrade telemetry.
+    blocks: int
+    #: Prose blocks carrying at least one unverified figure.
+    downgraded_blocks: int
     #: ``terminal_reason`` counts for Turns that ended ``incomplete``, busiest
     #: first. ``grounding_failed`` appears here too, and that is not double
     #: counting — it is the same fact seen from the reason side.
     incomplete_reasons: Mapping[str, int]
     #: Every tool call attempted in the window, so the unknown ones have a scale.
     tool_calls: int
-    #: ``unknown_tool`` calls by the name the model reached for. ``docs/adr/0011``
-    #: asks *which* tool, not how many: the names are the evidence for whether
-    #: sandboxed execution is ever worth revisiting.
+    #: ``unknown_tool`` calls by the name the model reached for, so capability
+    #: gaps remain visible after the executor decision in ADR-0019.
     unknown_tool_calls: Mapping[str, int]
     #: One key per :class:`AnswerKind`, plus :data:`NO_ANSWER_KIND`, summing to
     #: :attr:`turns`. A value the store holds and this build does not know is
@@ -147,6 +151,11 @@ class OpsSnapshot:
     def grounding_failed_rate(self) -> float:
         """The share of Turns the Gate blocked. Zero over an empty window."""
         return self.grounding_failed / self.turns if self.turns else 0.0
+
+    @property
+    def downgraded_block_rate(self) -> float:
+        """The share of released blocks shown with an unverified-figure label."""
+        return self.downgraded_blocks / self.blocks if self.blocks else 0.0
 
     @property
     def threshold_applies(self) -> bool:
@@ -188,6 +197,8 @@ class OpsSnapshot:
             "window_days": self.window_days,
             "turns": self.turns,
             "grounding_failed": self.grounding_failed,
+            "blocks": self.blocks,
+            "downgraded_blocks": self.downgraded_blocks,
             "incomplete_reasons": dict(self.incomplete_reasons),
             "tool_calls": self.tool_calls,
             "unknown_tool_calls": dict(self.unknown_tool_calls),
@@ -204,6 +215,8 @@ class OpsSnapshot:
             window_days=int(payload["window_days"]),
             turns=int(payload.get("turns", 0)),
             grounding_failed=int(payload.get("grounding_failed", 0)),
+            blocks=int(payload.get("blocks", 0)),
+            downgraded_blocks=int(payload.get("downgraded_blocks", 0)),
             incomplete_reasons=dict(payload.get("incomplete_reasons") or {}),
             tool_calls=int(payload.get("tool_calls", 0)),
             unknown_tool_calls=dict(payload.get("unknown_tool_calls") or {}),
@@ -223,6 +236,8 @@ class OpsSnapshot:
             window_days=window_days,
             turns=0,
             grounding_failed=0,
+            blocks=0,
+            downgraded_blocks=0,
             incomplete_reasons={},
             tool_calls=0,
             unknown_tool_calls={},
@@ -261,6 +276,7 @@ def read_ops_snapshot(
     list of things to fix.
     """
     window = _Window(now=now, window_days=window_days)
+    blocks, downgraded_blocks = _block_counts(session, window)
     return OpsSnapshot(
         since=window.since,
         until=window.until,
@@ -271,6 +287,8 @@ def read_ops_snapshot(
             AgentTurn.started_at,
             AgentTurn.terminal_reason == GROUNDING_FAILED,
         ),
+        blocks=blocks,
+        downgraded_blocks=downgraded_blocks,
         incomplete_reasons=window.tally(
             session,
             AgentTurn.terminal_reason,
@@ -292,6 +310,39 @@ def read_ops_snapshot(
         # objected to it.
         flags=flag_counts_between(session, since=window.since, until=window.until),
     )
+
+
+def _block_counts(session: Session, window: _Window) -> tuple[int, int]:
+    """Count released blocks and the subset carrying downgrade labels.
+
+    Blocks live inside the canonical assistant-message JSON rather than in a
+    second metrics table. PostgreSQL expands only messages belonging to Turns
+    in the same half-open ops window; a message with no blocks contributes
+    nothing, and a block without the additive key is an ordinary block.
+    """
+    row = session.execute(
+        text(
+            """
+            SELECT
+              count(*) AS blocks,
+              count(*) FILTER (
+                WHERE jsonb_array_length(
+                  coalesce(block.value -> 'unverified_figures', '[]'::jsonb)
+                ) > 0
+              ) AS downgraded_blocks
+            FROM agent_turn AS turn_row
+            JOIN agent_message AS message
+              ON message.id = turn_row.response_message_id
+            CROSS JOIN LATERAL jsonb_array_elements(
+              coalesce(message.content -> 'blocks', '[]'::jsonb)
+            ) AS block(value)
+            WHERE turn_row.started_at >= :since
+              AND turn_row.started_at < :until
+            """
+        ),
+        {"since": window.since, "until": window.until},
+    ).one()
+    return int(row.blocks or 0), int(row.downgraded_blocks or 0)
 
 
 class _Window:

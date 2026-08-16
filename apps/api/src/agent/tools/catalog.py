@@ -42,6 +42,7 @@ class ToolDataAccess(str, Enum):
 
     STORE_ONLY = "store_only"
     NEWS_PROVIDER = "news_provider"
+    EXTERNAL = "external"
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,9 @@ class ToolSpec:
     data_access: ToolDataAccess = ToolDataAccess.STORE_ONLY
     registered_fields: tuple[str, ...] = ()
     shared_window_health: bool = False
+    # MCP discovery is deployment state, recorded separately. Including those
+    # schemas here would make the core fixture pin move when a server blinked.
+    versioned: bool = True
 
     def schema(self) -> ToolSchema:
         field_descriptions = [
@@ -153,21 +157,25 @@ class ToolCatalog:
         registrations: Sequence[ToolSpec],
         *,
         trace_writer: TraceWriter,
+        mcp_servers_version: str = "disabled",
     ) -> None:
         indexed: dict[str, ToolSpec] = {}
         for registration in registrations:
             if registration.name in indexed:
                 raise ValueError(f"tool {registration.name} is registered twice")
-            if (
-                registration.data_access is ToolDataAccess.NEWS_PROVIDER
-                and registration.name != "search_news"
+            if registration.data_access is ToolDataAccess.NEWS_PROVIDER and (
+                registration.name != "search_news"
             ):
                 raise ValueError("search_news is the only Provider Source exception")
             indexed[registration.name] = registration
         self._registrations = indexed
         self._trace_writer = trace_writer
         self.tool_schemas = tuple(item.schema() for item in registrations)
-        stable_surface = [schema.as_wire() for schema in self.tool_schemas]
+        stable_surface = [
+            registration.schema().as_wire()
+            for registration in registrations
+            if registration.versioned
+        ]
         encoded = json.dumps(
             stable_surface,
             ensure_ascii=True,
@@ -175,10 +183,19 @@ class ToolCatalog:
             sort_keys=True,
         ).encode("utf-8")
         self.tool_catalog_version = hashlib.sha256(encoded).hexdigest()[:16]
+        self.mcp_servers_version = mcp_servers_version
 
     @property
     def names(self) -> tuple[str, ...]:
         return tuple(self._registrations)
+
+    def is_external(self, tool_name: str) -> bool:
+        """Whether one call spends the Turn's optional external-tool budget."""
+        registration = self._registrations.get(tool_name)
+        return bool(
+            registration is not None
+            and registration.data_access is ToolDataAccess.EXTERNAL
+        )
 
     async def dispatch(
         self,

@@ -25,6 +25,7 @@ spec.loader.exec_module(models)
 from src.auth.models import RefreshToken, User  # noqa: E402,F401
 from src.alpha.models import (  # noqa: E402,F401
     AgentMessage,
+    AgentKnowledge,
     AgentThread,
     AgentToolCall,
     AgentTurn,

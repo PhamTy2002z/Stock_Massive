@@ -143,9 +143,10 @@ def test_the_rendered_prompt_is_byte_stable_and_the_prefix_does_not_move():
 
 def test_the_hash_is_exported_and_changes_when_the_prose_changes():
     # Bumped with the prose it names: 1.1.0 added the evidence-reference
-    # protocol the Recommendation Validator reads (#82), and 1.2.0 added the
-    # Widget selection protocol the Widget validator reads (#89).
-    assert PROMPT_VERSION == "1.2.0"
+    # protocol the Recommendation Validator reads (#82), 1.2.0 added the Widget
+    # selection protocol (#89), and 1.3.0 classifies downgraded/external/derived
+    # evidence without weakening the Recommendation Gate.
+    assert PROMPT_VERSION == "1.3.0"
     assert PROMPT_HASH == contract_hash()
 
     edited = tuple(

@@ -33,18 +33,22 @@ is enforced by the database rather than by the code that writes it:
 from sqlalchemy import (
     BigInteger,
     Column,
+    Computed,
+    DDL,
     Date,
     DateTime,
     ForeignKey,
     Index,
+    Identity,
     Integer,
     Numeric,
     String,
     Text,
     UniqueConstraint,
     Uuid,
+    event,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR
 from sqlalchemy.sql import func, text
 
 from src.core.database import Base
@@ -359,11 +363,79 @@ class AgentToolCall(Base):
         return f"<AgentToolCall {self.tool_name} {self.status}>"
 
 
+class AgentKnowledge(Base):
+    """One deliberately remembered external claim with its original source."""
+
+    __tablename__ = "agent_knowledge"
+
+    id = Column(BigInteger, Identity(always=True), primary_key=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    symbol = Column(String(20), nullable=True)
+    title = Column(Text, nullable=False)
+    body = Column(Text, nullable=False)
+    source_url = Column(Text, nullable=False)
+    source_name = Column(Text, nullable=False)
+    retrieved_at = Column(DateTime(timezone=True), nullable=False)
+    as_of = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    tsv = Column(
+        TSVECTOR,
+        Computed(
+            "to_tsvector('simple', immutable_unaccent("
+            "coalesce(title, '') || ' ' || coalesce(body, '')"
+            "))",
+            persisted=True,
+        ),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        Index("ix_agent_knowledge_user", "user_id"),
+        Index("ix_agent_knowledge_tsv", "tsv", postgresql_using="gin"),
+        Index(
+            "ix_agent_knowledge_title_trgm",
+            text("immutable_unaccent(lower(title)) gin_trgm_ops"),
+            postgresql_using="gin",
+        ),
+    )
+
+
+# `Base.metadata.create_all` is a test-only schema path in this repository. It
+# still has to create the same generated column as Alembic, which requires the
+# extensions and immutable wrapper to exist before this table is compiled.
+event.listen(
+    AgentKnowledge.__table__,
+    "before_create",
+    DDL("CREATE EXTENSION IF NOT EXISTS unaccent"),
+)
+event.listen(
+    AgentKnowledge.__table__,
+    "before_create",
+    DDL("CREATE EXTENSION IF NOT EXISTS pg_trgm"),
+)
+event.listen(
+    AgentKnowledge.__table__,
+    "before_create",
+    DDL(
+        """
+        CREATE OR REPLACE FUNCTION public.immutable_unaccent(text)
+        RETURNS text LANGUAGE sql IMMUTABLE PARALLEL SAFE STRICT
+        AS $$ SELECT public.unaccent('public.unaccent', $1) $$
+        """
+    ),
+)
+
+
 # The one value of ``agent_tool_call.status`` that something other than the
 # catalog reads, named where the column is declared so the reader and the writer
 # cannot spell it differently. It is also ``docs/adr/0011``'s demand trigger — a
 # model reaching for a tool that does not exist is the evidence for whether
 # sandboxed execution is ever needed — which is why the fixed ops query counts
+# the currently enabled catalog lacks — which is why the fixed ops query counts
 # it by tool name rather than only totalling it.
 #
 # The other three stay as the literals ``src/agent/tools/catalog.py`` writes.

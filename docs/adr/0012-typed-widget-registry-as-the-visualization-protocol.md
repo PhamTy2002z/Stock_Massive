@@ -95,9 +95,9 @@ text answer stays readable and the Widget shows a compact unavailable state.
 
 - **A free-form chart specification the web renders.** Rejected above: it hands the
   model the units and fails at render time.
-- **A sandbox producing an image.** Rejected by ADR-0011, and it would additionally
-  produce an artifact with no data table, no keyboard operation, and no
-  screen-reader path.
+- **A sandbox producing an image.** Still rejected after ADR-0019: `run_python`
+  returns bounded JSON only. A rendered artifact would have no required data table,
+  keyboard operation, or screen-reader path.
 - **Reusing the existing dashboard cards directly as widgets.** Rejected: they are
   response-typed and fetch their own data, so a widget built on one would re-query
   today's numbers inside a historical answer — the exact staleness bug this ADR

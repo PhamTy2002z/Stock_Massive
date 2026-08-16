@@ -168,6 +168,7 @@ class EvidenceManifest:
     route: str
     provider_request_id: str | None
     tool_catalog_version: str
+    mcp_servers_version: str
     registry_version: str
     risk_notice_version: str
     answer_kind: AnswerKind
@@ -186,6 +187,7 @@ class EvidenceManifest:
             "route": self.route,
             "provider_request_id": self.provider_request_id,
             "tool_catalog_version": self.tool_catalog_version,
+            "mcp_servers_version": self.mcp_servers_version,
             "registry_version": self.registry_version,
             "risk_notice_version": self.risk_notice_version,
             "answer_kind": self.answer_kind.value,
@@ -203,6 +205,7 @@ def build_manifest(
     route: str,
     provider_request_id: str | None,
     tool_catalog_version: str,
+    mcp_servers_version: str = "disabled",
     answer_kind: AnswerKind,
     status: str,
     terminal_reason: str | None,
@@ -225,6 +228,7 @@ def build_manifest(
         route=route,
         provider_request_id=provider_request_id,
         tool_catalog_version=tool_catalog_version,
+        mcp_servers_version=mcp_servers_version,
         registry_version=registry_version(),
         risk_notice_version=RISK_NOTICE_VERSION,
         answer_kind=answer_kind,

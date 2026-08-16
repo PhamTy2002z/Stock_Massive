@@ -81,6 +81,7 @@ def test_the_manifest_carries_every_field_a_dispute_needs():
     assert wire["route"] == "https://route.example"
     assert wire["provider_request_id"] == "req_123"
     assert wire["tool_catalog_version"] == "abc123"
+    assert wire["mcp_servers_version"] == "disabled"
     assert wire["registry_version"]
     assert wire["risk_notice_version"] == RISK_NOTICE_VERSION
     assert wire["answer_kind"] == "analysis"

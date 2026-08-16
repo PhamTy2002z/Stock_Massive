@@ -144,11 +144,13 @@ These terms fix what the agent may reach, what it may say, and what survives an
 answer once it is disputed.
 
 **Tool Catalog**:
-The twelve semantic tools that are the agent's entire reach into `apps/api` — six
-data, five computation clusters, one identity-scoped. Semantic, not a wrapper set:
-an endpoint's name and parameters are shaped for a page's data needs, a tool's for a
-model to choose correctly. It is versioned, because its schemas are part of the
-cacheable prompt prefix and part of what an Eval Fixture was frozen against.
+The model-visible set of semantic capabilities available in one deployment. Its
+internal core is stable; optional external capabilities may join it when their lanes
+are enabled and healthy. Semantic, not a wrapper set: an endpoint's name and
+parameters are shaped for a page's data needs, a tool's for a model to choose
+correctly. The internal core is versioned independently from the currently connected
+external servers, because the core schemas are part of the cacheable prompt prefix
+and part of what an Eval Fixture was frozen against.
 _Avoid_: tools, API surface, function set
 
 **Tool Context**:
@@ -162,8 +164,9 @@ _Avoid_: user param, session, auth context
 A handle to a series a tool declined to return — symbol, range, field, fixed date —
 which the visualization layer resolves through the authenticated boundary. `data_ref`
 in code. It exists because the model may receive summary statistics and never raw
-bars; it is also the no-network data-in mechanism a future sandbox would need, which
-is why it is kept even though code execution is out.
+bars. When a bounded computation needs series data, the authenticated application
+must resolve that handle and pass explicit JSON into the networkless executor; the
+executor may never resolve it by reaching the application or database itself.
 _Avoid_: series id, pointer, cache key
 
 **Structured Refusal**:
@@ -185,11 +188,27 @@ _Avoid_: system prompt, instructions, persona
 The set of conditions a recommendation block must satisfy before it may be released:
 Universe membership, an explicit Trading Day and reference price, price zones that are
 registered fields computed in code, **Window Health** that is not a refusal, at least
-one cited suitable field with material contradictory evidence exposed, full metadata on
-every cited field, and news never as a sole directional basis. A block that fails is
-never displayed and flagged afterwards — the Turn ends `incomplete` with reason
-`grounding_failed`.
+one cited suitable field with material contradictory evidence exposed, full metadata
+on every cited field, and unregistered evidence never as a sole directional basis. A
+recommendation block that fails is never displayed and flagged afterwards — the Turn
+ends `incomplete` with reason `grounding_failed`. An ordinary prose block with an
+unattributed figure is released with a visible downgrade instead; a figure that
+contradicts its cited evidence remains a failure in every block.
 _Avoid_: guardrail, safety check, validation
+
+**External Claim**:
+A claim retrieved from an open web source, MCP server, or the Knowledge Store. It
+retains its source and retrieval time and remains unverified however many times it is
+stored or recalled. It may inform prose but cannot independently establish a
+recommendation, reference price, or price zone.
+_Avoid_: verified fact, registered evidence, Provider Source data
+
+**Derived Evidence**:
+A result produced by ad-hoc isolated computation over explicit inputs. It records
+that the arithmetic ran, not that the method passed the Signal Registry's suitability
+and calibration bar. It may inform prose but cannot independently establish a
+recommendation, reference price, or price zone.
+_Avoid_: registered field, computed signal, proven result
 
 **Risk Notice**:
 The versioned notice the backend attaches to every completed or useful incomplete

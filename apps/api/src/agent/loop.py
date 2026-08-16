@@ -149,6 +149,12 @@ TOOL_TIMEOUT_SECONDS = 30.0
 # check here because ``turn.activity`` may never expose a tool name — this maps
 # a name to a generic phase, which is the opposite of leaking one.
 NEWS_TOOL = "search_news"
+WEB_TOOLS = frozenset({"web_search", "fetch_url"})
+MAX_EXTERNAL_TOOL_CALLS = 6
+EXTERNAL_TOOL_EXHAUSTED_MESSAGE = (
+    "This Turn has reached its external-tool call limit. Answer from the evidence "
+    "already gathered."
+)
 
 
 class TurnStatus(str, Enum):
@@ -351,6 +357,9 @@ class TurnOutcome:
     # stays the stable ``grounding_failed``; this is the operator's detail and
     # the ops query's dimension.
     grounding_failure_code: str | None = None
+    # Prose blocks released with one or more figures the Turn could not
+    # attribute. Recommendations never contribute: they are blocked instead.
+    downgraded_blocks: int = 0
 
     @property
     def citations(self) -> tuple[Citation, ...]:
@@ -386,6 +395,7 @@ class _TurnState:
     widget_refusals: list[Mapping[str, Any]] = field(default_factory=list)
     request_id: str | None = None
     grounding_failure_code: str | None = None
+    external_tool_calls: int = 0
 
     def add_usage(self, usage: Usage | None) -> None:
         # ``None`` usage is not zero usage: a provider that supplied no evidence
@@ -634,7 +644,10 @@ class AgentLoop:
             assert_distinct_ids(completion.tool_calls)
             await self._activity(
                 Activity.SEARCHING
-                if any(call.name == NEWS_TOOL for call in completion.tool_calls)
+                if any(
+                    call.name == NEWS_TOOL or call.name in WEB_TOOLS
+                    for call in completion.tool_calls
+                )
                 else Activity.READING_DATA,
                 state,
             )
@@ -745,10 +758,22 @@ class AgentLoop:
         reads that succeeded beside it.
         """
         admitted = admit_round(calls, attempts)
+        denials: list[str | None] = []
+        bounded: list[bool] = []
+        for call, allowed in zip(calls, admitted):
+            denial = None
+            if allowed and self._catalog.is_external(call.name):
+                if state.external_tool_calls >= MAX_EXTERNAL_TOOL_CALLS:
+                    allowed = False
+                    denial = EXTERNAL_TOOL_EXHAUSTED_MESSAGE
+                else:
+                    state.external_tool_calls += 1
+            bounded.append(allowed)
+            denials.append(denial)
         outcomes = await asyncio.gather(
             *(
-                self._dispatch(call, request, tool_context, allowed)
-                for call, allowed in zip(calls, admitted)
+                self._dispatch(call, request, tool_context, allowed, denial)
+                for call, allowed, denial in zip(calls, bounded, denials)
             ),
             return_exceptions=True,
         )
@@ -786,10 +811,13 @@ class AgentLoop:
         request: TurnRequest,
         tool_context: ToolContext,
         allowed: bool,
+        denial: str | None = None,
     ) -> tuple[str, Mapping[str, Any]]:
         """Run one tool under its own deadline, carrying its id back with it."""
         if not allowed:
-            return call.id, tool_error_result(call.id, call.name, TOOL_EXHAUSTED_MESSAGE)
+            return call.id, tool_error_result(
+                call.id, call.name, denial or TOOL_EXHAUSTED_MESSAGE
+            )
         try:
             result = await asyncio.wait_for(
                 self._catalog.dispatch(
@@ -985,12 +1013,16 @@ class AgentLoop:
             widget_refusals=tuple(state.widget_refusals),
             provider_request_id=state.request_id,
             grounding_failure_code=state.grounding_failure_code,
+            downgraded_blocks=sum(
+                bool(block.unverified_figures) for block in state.blocks
+            ),
         )
 
 
 __all__ = [
     "DEFAULT_MAX_OUTPUT_TOKENS",
     "LLM_CALL_TIMEOUT_SECONDS",
+    "MAX_EXTERNAL_TOOL_CALLS",
     "MAX_TOOL_ROUNDS",
     "ROUNDS_EXHAUSTED_MESSAGE",
     "ROUNDS_EXHAUSTED_NOTE",

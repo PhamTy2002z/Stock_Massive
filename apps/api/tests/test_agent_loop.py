@@ -12,6 +12,8 @@ import pytest
 
 from src.agent.context import ContextBudget
 from src.agent.loop import (
+    EXTERNAL_TOOL_EXHAUSTED_MESSAGE,
+    MAX_EXTERNAL_TOOL_CALLS,
     MAX_TOOL_ROUNDS,
     ROUNDS_EXHAUSTED_NOTE,
     SESSION_CONCURRENCY,
@@ -26,7 +28,7 @@ from src.agent.loop import (
     pair_results,
 )
 from src.agent.prompt import AnswerKind, MarketState, RuntimeContext
-from src.agent.tools.catalog import ToolCatalog, ToolContext, ToolSpec
+from src.agent.tools.catalog import ToolCatalog, ToolContext, ToolDataAccess, ToolSpec
 from src.alpha.refusals import AlphaRefusal
 from src.core.llm import (
     AuthUnavailable,
@@ -401,6 +403,32 @@ async def test_three_parallel_calls_to_one_healthy_tool_all_dispatch():
     assert sorted(dispatched) == ["FPT", "HPG", "VCB"]
     assert len(outcome.tool_calls) == 3
     assert all("error" not in call.result for call in outcome.tool_calls)
+
+
+@pytest.mark.asyncio
+async def test_external_calls_share_one_turn_budget_across_parallel_fan_out():
+    dispatched: list[str] = []
+
+    async def external(_context: ToolContext, arguments: dict) -> dict:
+        dispatched.append(str(arguments.get("symbol")))
+        return {"external_claim": {"claim_class": "external_claim", "result": 1}}
+
+    external_spec = ToolSpec(
+        name="external_lookup",
+        description="A test external capability.",
+        parameters={"type": "object", "properties": {"symbol": {"type": "string"}}},
+        callable=external,
+        data_access=ToolDataAccess.EXTERNAL,
+    )
+    names = ("external_lookup",) * (MAX_EXTERNAL_TOOL_CALLS + 1)
+    client = FakeClient([wants(*names), answer()])
+
+    outcome = await loop(client, catalog(external_spec)).run(turn_request())
+
+    assert len(dispatched) == MAX_EXTERNAL_TOOL_CALLS
+    refused = outcome.tool_calls[-1].result
+    assert refused["status"] == "tool_error"
+    assert refused["error"] == EXTERNAL_TOOL_EXHAUSTED_MESSAGE
 
 
 @pytest.mark.asyncio

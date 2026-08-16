@@ -171,8 +171,8 @@ exams.
   ($10 / $30 / $5 / $5) are recorded in ADR-0014.
 - **Production observability adds no tables and no automatic alerting.** One developer
   and no on-call rotation means alerts would be noise. Every needed signal exists
-  already: `grounding_failed` in the Turn lifecycle, `unknown_tool` in
-  `agent_tool_call` (also ADR-0011's demand trigger), the `answer_kind` distribution,
+  already: `grounding_failed` in the Turn lifecycle, downgrade labels in released
+  blocks, `unknown_tool` in `agent_tool_call`, the `answer_kind` distribution,
   incomplete reasons, and flagged-message counts. They are read through one fixed ops
   query and **must appear in the next Eval Report**, so the battery and the field are
   reconciled. One threshold is read by eye: `grounding_failed` above **5% of Turns over

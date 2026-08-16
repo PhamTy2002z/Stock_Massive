@@ -28,6 +28,14 @@ export type ActivityPhase = "searching" | "reading_data" | "analyzing" | "prepar
 /** Terminal Turn statuses, as `agent_turn.status` spells them. */
 export type TurnStatus = "admitted" | "running" | "complete" | "incomplete" | "cancelled"
 
+export type CitationSource =
+  | "registered_field"
+  | "stored"
+  | "source_claim"
+  | "external_claim"
+  | "derived"
+  | "user_input"
+
 export interface Citation {
   tool_call_id: string
   tool_name: string
@@ -39,7 +47,7 @@ export interface Citation {
   provenance: string
   as_of: string | null
   stale: boolean
-  source: string
+  source: CitationSource
   window_health: Record<string, unknown> | null
   contradictory: boolean
   zone_label: string | null
@@ -53,6 +61,8 @@ export interface ContentBlock {
   symbol: string | null
   trading_day: string | null
   citations: Citation[]
+  /** Additive in prompt contract 1.3; absent on messages stored by older builds. */
+  unverified_figures?: string[]
 }
 
 /** A validated Widget spec. The registry itself is #89's; this is its envelope. */

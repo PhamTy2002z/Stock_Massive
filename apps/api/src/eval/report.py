@@ -424,6 +424,13 @@ def _ops_section(ops: OpsSnapshot | None) -> list[str]:
     lines.append("")
 
     lines.extend(_grounding_headline(ops))
+    lines.append(
+        f"**Downgraded prose blocks: {ops.downgraded_blocks} of {ops.blocks} "
+        f"released blocks ({_rate(ops.downgraded_blocks, ops.blocks)})**. These "
+        "blocks were shown with an explicit unverified-figure warning rather "
+        "than being silently accepted or ending the Turn."
+    )
+    lines.append("")
     lines.extend(_ops_tables(ops))
     return lines
 
@@ -501,9 +508,8 @@ def _ops_tables(ops: OpsSnapshot) -> list[str]:
             "Nothing reached for a tool that does not exist, in "
             f"{ops.tool_calls} calls.",
             note=(
-                "Also `docs/adr/0011`'s demand trigger: these names are the "
-                "evidence for whether sandboxed execution is ever worth "
-                "revisiting."
+                "These names expose capabilities the model expected but the "
+                "currently enabled catalog did not provide."
             ),
         )
     )

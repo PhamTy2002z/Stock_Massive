@@ -261,6 +261,7 @@ class TurnService:
         loop_factory: LoopFactory,
         config: LLMConfig,
         tool_catalog_version: str,
+        mcp_servers_version: str = "disabled",
         git_sha: str | None = None,
         deadline_seconds: float = TURN_DEADLINE_SECONDS,
         shutdown_seconds: float = GRACEFUL_SHUTDOWN_SECONDS,
@@ -269,6 +270,7 @@ class TurnService:
         self._loop_factory = loop_factory
         self._config = config
         self._tool_catalog_version = tool_catalog_version
+        self._mcp_servers_version = mcp_servers_version
         # Read from configuration rather than defaulted to a literal: a Manifest
         # that records "unknown" for every answer records nothing anyone can
         # dispute, and the deployment is the only thing that knows the SHA.
@@ -427,6 +429,7 @@ class TurnService:
             route=self._config.route.base_url,
             provider_request_id=provider_request_id,
             tool_catalog_version=self._tool_catalog_version,
+            mcp_servers_version=self._mcp_servers_version,
             answer_kind=answer_kind,
             status=status,
             terminal_reason=terminal_reason,

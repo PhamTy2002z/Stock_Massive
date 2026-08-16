@@ -87,11 +87,13 @@ a prompt rule, and prompt rules are not authorization.
   refusal, a unit and sign convention on every field, limit-lock days counted and
   excluded and reported, band regime dated per bar, and sub-3-session horizons
   flagged as not round-trip actionable under T+2.
-- `data_ref` is also the no-network data-in mechanism a sandbox would need, which
-  is the one seam ADR-0011 keeps for free.
-- A thirteenth tool is a catalog change, not an implementation detail: it changes
+- `data_ref` is also the authenticated data-in seam for ADR-0019's networkless
+  executor. The API resolves it before passing explicit JSON across the queue.
+- A stable core tool is a catalog change, not an implementation detail: it changes
   `tool_catalog_version`, which invalidates the cacheable prompt prefix and, under
-  ADR-0016, requires a gate run on the pull request.
+  ADR-0016, requires a gate run. Discovered MCP schemas are the named exception:
+  they move `mcp_servers_version` instead so a server outage cannot rewrite the
+  frozen core contract.
 - A model reaching for a tool that does not exist is recorded as
-  `status = 'unknown_tool'` in `agent_tool_call`. That is the free demand signal
-  ADR-0011 measures against, so the twelve-tool ceiling stays falsifiable.
+  `status = 'unknown_tool'` in `agent_tool_call`. It remains a free capability-gap
+  signal even though ADR-0019 superseded the fixed twelve-tool ceiling.

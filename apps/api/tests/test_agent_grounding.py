@@ -128,21 +128,30 @@ RECOMMENDATION = (
 # --- attribution -----------------------------------------------------------
 
 
-def test_a_material_figure_with_no_reference_is_never_released():
-    with pytest.raises(GroundingFailure) as raised:
-        validator().validate("RSI hiện ở 61.2, khá cao.", standard_traces())
+def test_a_material_figure_with_no_reference_downgrades_prose():
+    block = validator().validate("RSI hiện ở 61.2, khá cao.", standard_traces())
 
-    assert raised.value.code == "unreferenced_figure"
-    assert raised.value.reason == GROUNDING_FAILED
+    assert block.kind is BlockKind.PROSE
+    assert block.unverified_figures == ("61.2",)
 
 
 def test_one_reference_cannot_attribute_two_figures():
-    text = f"RSI 61.2 và giá 95.4 [ev:c1#registered_fields.{RSI}.value]."
+    text = f"RSI 61.2 và ngưỡng 61.2 [ev:c1#registered_fields.{RSI}.value]."
+
+    block = validator().validate(text, standard_traces())
+
+    assert block.unverified_figures == ("61.2",)
+    assert len(block.citations) == 1
+
+
+def test_a_recommendation_with_an_unreferenced_figure_is_still_blocked():
+    text = f"{RECOMMENDATION} Mục tiêu 110."
 
     with pytest.raises(GroundingFailure) as raised:
         validator().validate(text, standard_traces())
 
     assert raised.value.code == "unreferenced_figure"
+    assert raised.value.reason == GROUNDING_FAILED
 
 
 def test_a_trading_day_and_a_list_number_are_not_material_figures():
@@ -251,6 +260,28 @@ def test_a_news_figure_is_marked_as_an_unverified_source_claim():
 
     assert citation.source is EvidenceSource.SOURCE_CLAIM
     assert citation.provenance == "CafeF"
+
+
+def test_an_open_web_figure_remains_an_external_claim():
+    index = traces(
+        web={
+            "results": [
+                {
+                    "title": "Leadership",
+                    "value": 2026,
+                    "source": "Example Exchange",
+                    "retrieved_at": "2026-08-17T00:00:00+00:00",
+                    "claim_class": "external_claim",
+                }
+            ]
+        }
+    )
+
+    citation = index.resolve(EvidenceRef("web", "results.0.value"))
+
+    assert citation.source is EvidenceSource.EXTERNAL_CLAIM
+    assert citation.provenance == "Example Exchange"
+    assert citation.as_of == "2026-08-17T00:00:00+00:00"
 
 
 def test_a_user_supplied_number_is_marked_user_input_and_needs_no_trace():

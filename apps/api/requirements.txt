@@ -18,6 +18,7 @@ email-validator>=2.0.0
 
 # Utils
 httpx>=0.25.0
+mcp>=2.0.0,<3.0.0
 python-multipart>=0.0.6
 tenacity>=8.2.0
 

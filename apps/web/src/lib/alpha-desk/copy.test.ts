@@ -129,7 +129,7 @@ describe("the first run", () => {
 
   it("states the scope boundary in user language", () => {
     expect(FIRST_RUN.scopeBoundary).toMatch(/bốn trục/)
-    expect(FIRST_RUN.scopeBoundary).toMatch(/không tính toán tuỳ ý/)
+    expect(FIRST_RUN.scopeBoundary).toMatch(/dữ liệu dẫn xuất có cảnh báo/)
   })
 
   it("publishes no catalog", () => {
