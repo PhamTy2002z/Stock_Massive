@@ -8,6 +8,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import type { Citation, ContentBlock } from "@/lib/alpha-desk/types"
+import { UNVERIFIED_FIGURES_COPY } from "@/lib/alpha-desk/copy"
 import { cn } from "@/lib/utils"
 import { Figure } from "./figure"
 
@@ -62,6 +63,16 @@ export function ContentBlockView({
           disagree. */}
       <p className="whitespace-pre-wrap text-[0.95rem] leading-[1.62]">{block.text}</p>
 
+      {(block.unverified_figures?.length ?? 0) > 0 && (
+        <p
+          role="note"
+          className="rounded-lg border border-caution/35 bg-caution/5 px-2.5 py-2 text-meta text-caution"
+        >
+          <span className="font-semibold">{UNVERIFIED_FIGURES_COPY.label}.</span>{" "}
+          {UNVERIFIED_FIGURES_COPY.detail(block.unverified_figures ?? [])}
+        </p>
+      )}
+
       {block.citations.length > 0 && <Figures citations={block.citations} />}
     </div>
   )
@@ -78,6 +89,12 @@ function Figures({ citations }: { citations: Citation[] }) {
               unit={citation.unit}
               asOf={citation.as_of}
               stale={citation.stale}
+              sourceName={
+                citation.source === "external_claim" ? citation.provenance : null
+              }
+              retrievedAt={
+                citation.source === "external_claim" ? citation.as_of : null
+              }
             />
           </li>
         ))}
@@ -97,8 +114,13 @@ function Figures({ citations }: { citations: Citation[] }) {
               </dt>
               {citation.interpretation && <dd>{citation.interpretation}</dd>}
               <dd className="text-muted-foreground">
-                Source: {citation.source}
-                {citation.provenance ? ` · ${citation.provenance}` : ""}
+                {citation.source === "external_claim"
+                  ? `Source: ${citation.provenance}${
+                      citation.as_of ? ` · retrieved ${citation.as_of}` : ""
+                    }`
+                  : `Source: ${citation.source}${
+                      citation.provenance ? ` · ${citation.provenance}` : ""
+                    }`}
               </dd>
             </div>
           ))}

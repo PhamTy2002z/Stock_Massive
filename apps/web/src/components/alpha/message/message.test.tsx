@@ -56,7 +56,7 @@ function citation(overrides: Partial<Citation> = {}): Citation {
     provenance: "registry",
     as_of: "2026-08-14",
     stale: false,
-    source: "computed",
+    source: "registered_field",
     window_health: null,
     contradictory: false,
     zone_label: null,
@@ -93,6 +93,47 @@ function view(overrides: Partial<AssistantView> = {}): AssistantView {
 }
 
 describe("how an answer arrives", () => {
+  it("labels an unverified prose figure without hiding its block", () => {
+    render(
+      <AssistantMessage
+        view={view({
+          blocks: [
+            {
+              ...block("Chủ tịch được bổ nhiệm năm 2024."),
+              unverified_figures: ["2024"],
+            },
+          ],
+        })}
+      />,
+    )
+
+    expect(screen.getByText("Chủ tịch được bổ nhiệm năm 2024.")).toBeInTheDocument()
+    expect(screen.getByRole("note")).toHaveTextContent("Số liệu chưa kiểm chứng")
+    expect(screen.getByRole("note")).toHaveTextContent("2024")
+  })
+
+  it("names an external source and when it was retrieved", () => {
+    render(
+      <AssistantMessage
+        view={view({
+          blocks: [
+            block("Ban lãnh đạo hiện tại.", [
+              citation({
+                source: "external_claim",
+                provenance: "HOSE",
+                as_of: "2026-08-17T08:00:00+07:00",
+              }),
+            ]),
+          ],
+        })}
+      />,
+    )
+
+    expect(screen.getAllByText(/HOSE/).length).toBeGreaterThan(0)
+    expect(screen.getByText("Nguồn ngoài · chưa kiểm chứng")).toBeInTheDocument()
+    expect(screen.getAllByText(/retrieved 2026-08-17/).length).toBeGreaterThan(0)
+  })
+
   it("shows a block whole, with a fade rather than a typewriter", () => {
     // The backend buffers deltas into Markdown-safe units, so the block is
     // complete when it lands. Revealing it letter by letter would put back an

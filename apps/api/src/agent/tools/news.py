@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import re
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timedelta, timezone
-from html.parser import HTMLParser
 from typing import Any
 
 from src.core.database import sync_session_factory
@@ -24,6 +22,7 @@ from .catalog import (
     ToolSpec,
     serialized_size,
 )
+from ._html import _TextExtractor, visible_text
 from .data import SessionFactory, UniverseFactory, _object_schema
 from .scope import structured_universe_refusal
 
@@ -52,35 +51,8 @@ NewsFetcher = Callable[[str], Sequence[Mapping[str, Any]]]
 Clock = Callable[[], datetime]
 
 
-class _TextExtractor(HTMLParser):
-    """Keep visible text and discard active elements with their contents."""
-
-    _SUPPRESSED = frozenset({"script", "style", "template", "noscript"})
-
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self._suppression_depth = 0
-        self.parts: list[str] = []
-
-    def handle_starttag(self, tag: str, _attrs: list[tuple[str, str | None]]) -> None:
-        if tag.lower() in self._SUPPRESSED:
-            self._suppression_depth += 1
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag.lower() in self._SUPPRESSED and self._suppression_depth:
-            self._suppression_depth -= 1
-
-    def handle_data(self, data: str) -> None:
-        if self._suppression_depth == 0:
-            self.parts.append(data)
-
-
 def _visible_text(value: Any, limit: int) -> str:
-    parser = _TextExtractor()
-    parser.feed("" if value is None else str(value))
-    parser.close()
-    compact = re.sub(r"\s+", " ", " ".join(parser.parts)).strip()
-    return compact[:limit]
+    return visible_text(value, limit)
 
 
 def _publication_time(value: Any) -> datetime | None:

@@ -128,6 +128,7 @@ def build_alpha_desk(
             loop_factory=loop_factory,
             config=resolved,
             tool_catalog_version=catalog.tool_catalog_version,
+            mcp_servers_version=catalog.mcp_servers_version,
         ),
         admission=TurnAdmission(client.admission, slots=slots),
         subscriptions=SubscriptionLimiter(),

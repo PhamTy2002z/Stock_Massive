@@ -16,6 +16,11 @@
 
 import type { ActivityPhase, FlagReason } from "./types"
 
+export const UNVERIFIED_FIGURES_COPY = {
+  label: "Số liệu chưa kiểm chứng",
+  detail: (figures: string[]) => `Chưa có nguồn đối chiếu cho: ${figures.join(", ")}.`,
+} as const
+
 /**
  * What a phase says while it runs, once it is done, and when it is opened.
  *
@@ -97,19 +102,19 @@ export const KNOWN_TERMINAL_REASONS = Object.keys(TERMINAL_REASONS)
  * Two things, both explicit, and neither of them a feature tour: the
  * Universe-vs-Watchlist rule, because a user who believes the Watchlist gates
  * the agent will spend a slot to ask one question; and the scope boundary in
- * user language, because "no ad-hoc computation" is the refusal they will
- * otherwise meet without warning.
+ * user language, because the difference between registered analysis and a
+ * derived calculation is important before either one appears in an answer.
  *
  * **The catalog is not published.** Listing what the agent can compute would
  * turn the empty state into a menu, and a menu is a promise about every item on
- * it. A refusal teaches the detail at the moment it matters (ADR-0011).
+ * it. A refusal teaches the detail at the moment it matters (ADR-0019).
  */
 export const FIRST_RUN = {
   question: "Hôm nay bạn muốn hỏi gì về danh mục của mình?",
   universeRule:
     "Bạn có thể hỏi về bất kỳ mã nào trong Universe. Watchlist chỉ quyết định mã nào được dựng Analysis mỗi phiên — nó không giới hạn câu hỏi.",
   scopeBoundary:
-    "Phạm vi là phân tích bốn trục cho các mã trong Watchlist, dựa trên những chỉ số đã đăng ký. Hệ thống không tính toán tuỳ ý theo yêu cầu, và không đưa ra khuyến nghị phân bổ vốn hay đòn bẩy.",
+    "Phạm vi là phân tích bốn trục cho các mã trong Watchlist, dựa trên những chỉ số đã đăng ký. Phép tính tuỳ biến chỉ là dữ liệu dẫn xuất có cảnh báo, và hệ thống không đưa ra khuyến nghị phân bổ vốn hay đòn bẩy.",
   hint: "Ví dụ: hỏi vì sao một mã được đánh giá như vậy trong phiên gần nhất.",
 } as const
 

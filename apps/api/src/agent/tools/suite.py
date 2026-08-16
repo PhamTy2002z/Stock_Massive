@@ -1,4 +1,4 @@
-"""Composition root for the fixed twelve-tool model-visible catalog."""
+"""Composition root for the stable core and enabled optional agent tools."""
 
 from __future__ import annotations
 
@@ -6,13 +6,19 @@ from functools import lru_cache
 from typing import Any
 
 from src.core.database import sync_session_factory
+from src.core.config import Settings, get_settings
 from src.core.news_lane import NewsLane
+from src.core.web_lane import WebLane
 from src.stocks.universe import build_universe
+from src.agent.mcp.registry import MCPRegistry, mcp_registry
 
 from .catalog import ToolCatalog
 from .computations import ComputationTools
+from .compute import ComputeTools
 from .data import SessionFactory, StoreBackedTools, UniverseFactory
 from .news import Clock, NewsFetcher, NewsTools, _fetch_vci_news
+from .knowledge import KnowledgeTools
+from .web import WebTools
 
 
 class IntelligentQuantCatalog:
@@ -32,7 +38,12 @@ class IntelligentQuantCatalog:
         # make the same fixture a different exam every week until its articles
         # aged out of every window entirely.
         news_now: Clock | None = None,
+        settings: Settings | None = None,
+        web_lane: WebLane | None = None,
+        mcp: MCPRegistry | None = None,
     ) -> None:
+        self.settings = settings or get_settings()
+        self.mcp = mcp or mcp_registry()
         self.data = StoreBackedTools(
             session_factory=session_factory,
             redis=redis,
@@ -49,22 +60,41 @@ class IntelligentQuantCatalog:
             session_factory=session_factory,
             universe_factory=universe_factory,
         )
+        self.knowledge = KnowledgeTools(session_factory=session_factory)
+        self.compute = ComputeTools()
+        self.web = WebTools(
+            settings=self.settings,
+            lane=web_lane
+            or WebLane(redis_factory=(lambda: redis) if redis is not None else None),
+        )
 
     def catalog(self, *, trace_writer) -> ToolCatalog:
         stored = {registration.name: registration for registration in self.data.registrations()}
         news = self.news.registrations()
         computations = self.computations.registrations()
+        knowledge = self.knowledge.registrations()
+        mcp_tools = self.mcp.registrations() if self.settings.mcp_enabled else ()
+        executor = self.compute.registrations() if self.settings.executor_enabled else ()
+        web = self.web.registrations() if self.settings.web_tools_enabled else ()
         registrations = (
             stored["get_analysis"],
             stored["get_price_series"],
             stored["get_financials"],
             stored["get_company_profile"],
             *news,
+            *web,
+            *knowledge,
+            *mcp_tools,
+            *executor,
             stored["screen_universe"],
             *computations,
             stored["get_watchlist"],
         )
-        return ToolCatalog(registrations, trace_writer=trace_writer)
+        return ToolCatalog(
+            registrations,
+            trace_writer=trace_writer,
+            mcp_servers_version=self.mcp.version,
+        )
 
 
 @lru_cache(maxsize=1)

@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from src.agent.flag_router import router as message_flag_router
 from src.agent.router import router as alpha_desk_router
 from src.agent.service import close_alpha_desk
+from src.agent.mcp import close_mcp_registry, initialize_mcp_registry
 from src.agent.turns import sweep_interrupted_turns
 from src.alpha.analysis_router import router as analysis_router
 from src.alpha.router import router as watchlist_router
@@ -91,6 +92,11 @@ async def lifespan(app: FastAPI):
     # and before the scheduler can create any workload that depends on it.
     await run_capability_probe_at_startup(llm_config)
 
+    # MCP discovery is deployment state, not part of the frozen internal Tool
+    # Catalog. Discover before the first lazy Alpha Desk service is built so its
+    # catalog and Evidence Manifest see one consistent healthy-server snapshot.
+    await initialize_mcp_registry()
+
     # Any Turn a crash or a deploy left active is frozen here, from its own
     # checkpoint, and marked incomplete (docs/adr/0013). V1 never resumes model
     # or tool execution after a restart: replaying a non-deterministic model
@@ -124,6 +130,7 @@ async def lifespan(app: FastAPI):
     # left for the startup sweep, which is the same honest `incomplete` a crash
     # would have produced.
     await close_alpha_desk()
+    await close_mcp_registry()
     await engine.dispose()
 
 

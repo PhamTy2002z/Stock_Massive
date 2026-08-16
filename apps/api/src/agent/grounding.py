@@ -96,6 +96,13 @@ class EvidenceSource(str, Enum):
     STORED = "stored"
     # Found only in news. Unverified, and never a basis on its own.
     SOURCE_CLAIM = "source_claim"
+    # Retrieved from an open web source, MCP server, or the Knowledge Store.
+    # Persistence does not promote it: the source remains external and
+    # unsuitable as the sole basis for a recommendation or price zone.
+    EXTERNAL_CLAIM = "external_claim"
+    # Produced by the isolated executor. It is reproducible arithmetic, but it
+    # did not pass the Signal Registry's calibration and suitability bar.
+    DERIVED = "derived"
     # Supplied by the user in this conversation.
     USER_INPUT = "user_input"
 
@@ -212,6 +219,11 @@ class ReleasedBlock:
     citations: tuple[Citation, ...]
     symbol: str | None = None
     trading_day: str | None = None
+    #: Figures stated in this block that no reference in the Turn attributes.
+    #: Always empty on a recommendation — that kind refuses rather than labels.
+    #: The literals as written, because the renderer's label names them and a
+    #: reader has to be able to find them in the sentence they are reading.
+    unverified_figures: tuple[str, ...] = ()
 
     def as_wire(self) -> dict[str, Any]:
         return {
@@ -220,6 +232,7 @@ class ReleasedBlock:
             "symbol": self.symbol,
             "trading_day": self.trading_day,
             "citations": [citation.as_wire() for citation in self.citations],
+            "unverified_figures": list(self.unverified_figures),
         }
 
 
@@ -253,7 +266,10 @@ def _material_numbers(text: str) -> tuple[tuple[int, int, str], ...]:
         start, end = match.span()
         if any(low <= start < high for low, high in exempt):
             continue
-        found.append((start, end, match.group()))
+        # The permissive scanner includes sentence punctuation so it can read
+        # both Vietnamese and machine separator conventions. Punctuation is
+        # not part of the literal shown in an unverified-figure label.
+        found.append((start, end, match.group().rstrip(".,")))
     return tuple(found)
 
 
@@ -430,8 +446,16 @@ class TraceIndex:
         if parts and parts[0] == "registered_fields":
             return self._registered(call, result, ref, parts)
         leaf, container = _walk(result, parts, ref)
-        if "untrusted_evidence" in parts:
-            return self._source_claim(call, ref, leaf, container)
+        stamped = _claim_container(result, parts)
+        if stamped is None:
+            stamped = leaf if isinstance(leaf, Mapping) else container
+        claim_class = stamped.get("claim_class") if isinstance(stamped, Mapping) else None
+        if "untrusted_evidence" in parts or claim_class in {
+            EvidenceSource.SOURCE_CLAIM.value,
+            EvidenceSource.EXTERNAL_CLAIM.value,
+            EvidenceSource.DERIVED.value,
+        }:
+            return self._untrusted_claim(call, ref, leaf, stamped)
         return self._stored(call, result, ref, leaf, container)
 
     def _registered(
@@ -528,14 +552,16 @@ class TraceIndex:
         )
 
     @staticmethod
-    def _source_claim(
+    def _untrusted_claim(
         call: TranscriptToolCall,
         ref: EvidenceRef,
         leaf: Any,
         container: Mapping[str, Any] | None,
     ) -> Citation:
         item = container if isinstance(container, Mapping) else {}
-        if item.get("claim_class") != EvidenceSource.SOURCE_CLAIM.value:
+        try:
+            source = EvidenceSource(str(item.get("claim_class")))
+        except ValueError as exc:
             # Reached only if the news tool's own envelope changed shape. It is
             # a failure rather than a default, because defaulting here would
             # quietly promote an untrusted claim to a stored figure.
@@ -543,6 +569,15 @@ class TraceIndex:
                 "unclassified_claim",
                 f"{ref.field_path!r} is inside untrusted evidence that declares no "
                 "claim class",
+            ) from exc
+        if source not in {
+            EvidenceSource.SOURCE_CLAIM,
+            EvidenceSource.EXTERNAL_CLAIM,
+            EvidenceSource.DERIVED,
+        }:
+            raise GroundingFailure(
+                "unclassified_claim",
+                f"{ref.field_path!r} declares unsupported claim class {source.value!r}",
             )
         return Citation(
             call_id=ref.call_id,
@@ -552,10 +587,16 @@ class TraceIndex:
             unit=None,
             interpretation=None,
             claim=None,
-            provenance=str(item.get("source") or "news"),
-            as_of=str(item.get("published_at") or "") or None,
+            provenance=str(item.get("source") or item.get("source_name") or call.name),
+            as_of=str(
+                item.get("published_at")
+                or item.get("retrieved_at")
+                or item.get("as_of")
+                or ""
+            )
+            or None,
             stale=False,
-            source=EvidenceSource.SOURCE_CLAIM,
+            source=source,
         )
 
     @staticmethod
@@ -626,6 +667,29 @@ def _walk(
     return current, container
 
 
+def _claim_container(
+    result: Mapping[str, Any], parts: Sequence[str]
+) -> Mapping[str, Any] | None:
+    """The nearest ancestor that declares a claim class, if one exists."""
+    current: Any = result
+    found: Mapping[str, Any] | None = (
+        result if result.get("claim_class") is not None else None
+    )
+    for part in parts:
+        if isinstance(current, Mapping) and part in current:
+            current = current[part]
+        elif isinstance(current, Sequence) and not isinstance(current, (str, bytes)):
+            try:
+                current = current[int(part)]
+            except (ValueError, IndexError):
+                return found
+        else:
+            return found
+        if isinstance(current, Mapping) and current.get("claim_class") is not None:
+            found = current
+    return found
+
+
 def _last_session(health: Any) -> str | None:
     if isinstance(health, Mapping):
         last = health.get("last_session")
@@ -646,13 +710,19 @@ class RecommendationValidator:
         self._trading_day = trading_day
 
     def validate(self, text: str, traces: TraceIndex) -> ReleasedBlock:
-        """Prove one block, or refuse it. Never both, and never afterwards."""
+        """Prove one block, label what it could not prove, or refuse it.
+
+        Prose is never refused for a figure it failed to attribute: the figure
+        travels on the block as ``unverified_figures`` and the renderer says so
+        (``docs/adr/0018``). A recommendation still is — an action carrying a
+        number nobody can check is the one output where the label is not enough.
+        """
         markers = _markers(text)
         cited: dict[int, Citation] = {}
         for index, marker in enumerate(markers):
             if marker.kind != "rec":
                 cited[index] = self._cite(marker, traces)
-        self._match_figures(text, markers, cited)
+        unverified = self._match_figures(text, markers, cited)
         citations = tuple(cited[index] for index in sorted(cited))
 
         recommendation = next((m for m in markers if m.kind == "rec"), None)
@@ -661,6 +731,13 @@ class RecommendationValidator:
                 text=display_text(text),
                 kind=BlockKind.PROSE,
                 citations=citations,
+                unverified_figures=unverified,
+            )
+        if unverified:
+            raise GroundingFailure(
+                "unreferenced_figure",
+                f"a recommendation states {unverified[0]!r} with no evidence "
+                "reference attributing it",
             )
         symbol, trading_day = self._declaration(recommendation.body)
         self._gate(symbol, citations, traces)
@@ -700,43 +777,48 @@ class RecommendationValidator:
         text: str,
         markers: Sequence[_Marker],
         cited: Mapping[int, Citation],
-    ) -> None:
+    ) -> tuple[str, ...]:
         """Attribute every material figure, and check it against its trace.
 
-        Two failures are caught here and they are different failures. A figure
-        with no reference after it was never attributed at all. A figure whose
-        reference resolves to a different number was attributed to evidence that
-        does not say what the sentence says — which is the confident false
-        figure the whole design exists to prevent, and the one case a prompt
-        cannot catch.
+        Two failures are found here and they are different failures, which is
+        why only one of them raises.
+
+        A figure whose reference resolves to a different number was attributed
+        to evidence that does not say what the sentence says. That is the
+        confident false figure the whole design exists to prevent, and the one
+        case a prompt cannot catch — it raises, always, in prose as much as in
+        a recommendation.
+
+        A figure with **no** reference after it was never attributed at all.
+        That is a weaker claim: the sentence may be right, and the model simply
+        had nothing in the Turn to point at. It is returned rather than raised,
+        and the caller decides — prose carries it to the reader under a label,
+        a recommendation still refuses it.
         """
         positions = sorted((marker.start, index) for index, marker in enumerate(markers))
         numbers = _material_numbers(text)
+        unattributed: list[str] = []
         for order, (_start, end, literal) in enumerate(numbers):
             attributed = next(
                 ((start, index) for start, index in positions if start >= end), None
             )
             if attributed is None:
-                raise GroundingFailure(
-                    "unreferenced_figure",
-                    f"the figure {literal!r} is stated with no evidence reference "
-                    "after it",
-                )
+                # Stated with no evidence reference after it.
+                unattributed.append(literal)
+                continue
             start, index = attributed
             following = numbers[order + 1][0] if order + 1 < len(numbers) else None
             if following is not None and following < start:
-                raise GroundingFailure(
-                    "unreferenced_figure",
-                    f"the figure {literal!r} is followed by another figure before any "
-                    "evidence reference, so it is not attributed",
-                )
+                # Followed by another figure before any reference, so the one
+                # reference that exists cannot be said to belong to this one.
+                unattributed.append(literal)
+                continue
             citation = cited.get(index)
             if citation is None:
-                raise GroundingFailure(
-                    "unreferenced_figure",
-                    f"the figure {literal!r} is attributed to a recommendation "
-                    "declaration rather than to evidence",
-                )
+                # The nearest marker is the recommendation declaration, which
+                # names a symbol and a Trading Day rather than evidence.
+                unattributed.append(literal)
+                continue
             if citation.source is EvidenceSource.USER_INPUT:
                 # The user's own number needs no trace; it is marked instead, so
                 # nothing downstream can mistake it for something the system
@@ -748,6 +830,7 @@ class RecommendationValidator:
                     f"the block states {literal!r} but {citation.field_path} in tool "
                     f"call {citation.call_id!r} holds {citation.value!r}",
                 )
+        return tuple(unattributed)
 
     def _declaration(self, body: str) -> tuple[str, date]:
         symbol, separator, day = body.partition("@")
@@ -801,7 +884,11 @@ class RecommendationValidator:
                 "the recommendation names no price zone",
             )
         for zone in zones:
-            if zone.source is EvidenceSource.SOURCE_CLAIM:
+            if zone.source in {
+                EvidenceSource.SOURCE_CLAIM,
+                EvidenceSource.EXTERNAL_CLAIM,
+                EvidenceSource.DERIVED,
+            }:
                 # Left to condition 7, which is the precise diagnosis: this is
                 # news carrying a price zone, not a computation that failed to
                 # be registered.
@@ -880,19 +967,23 @@ class RecommendationValidator:
                     f"{citation.field_path} is cited without {', '.join(missing)}",
                 )
 
-        # 7. News is not the sole directional basis. Conditions 2 and 3 hand a
-        #    source claim down to here rather than refusing it themselves,
+        # 7. Unregistered evidence is not a directional basis. Conditions 2
+        #    and 3 hand an untrusted claim down to here rather than refusing it,
         #    because "the price zone is not registered" is the wrong sentence
         #    for a number that came out of a news article: the failure is the
         #    source, and this is the condition that says so.
         for citation in citations:
-            if citation.source is not EvidenceSource.SOURCE_CLAIM:
+            if citation.source not in {
+                EvidenceSource.SOURCE_CLAIM,
+                EvidenceSource.EXTERNAL_CLAIM,
+                EvidenceSource.DERIVED,
+            }:
                 continue
             if citation.reference_price or citation.zone_label is not None:
                 raise GroundingFailure(
                     "news_only_basis",
-                    "a price zone or reference price rests on news alone, which is an "
-                    "unverified source claim",
+                    "a price zone or reference price rests on unregistered evidence "
+                    "alone",
                 )
 
 

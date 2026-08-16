@@ -117,11 +117,14 @@ class _World:
         created_at: datetime = INSIDE,
         flagged_reason: str | None = None,
         flagged_at: datetime | None = None,
+        blocks: list[dict] | None = None,
     ) -> int:
         self._seq += 1
         content: dict = {"text": "x"}
         if answer_kind is not None:
             content["answer_kind"] = answer_kind
+        if blocks is not None:
+            content["blocks"] = blocks
         with self.session() as session:
             row = AgentMessage(
                 thread_id=self.thread_id,
@@ -144,10 +147,11 @@ class _World:
         started_at: datetime = INSIDE,
         answer_kind: str | None = AnswerKind.ANALYSIS.value,
         with_message: bool = True,
+        blocks: list[dict] | None = None,
     ) -> None:
         request_id = self.message(role="user", answer_kind=None, created_at=started_at)
         response_id = (
-            self.message(answer_kind=answer_kind, created_at=started_at)
+            self.message(answer_kind=answer_kind, created_at=started_at, blocks=blocks)
             if with_message
             else None
         )
@@ -224,6 +228,22 @@ def test_the_window_is_configurable(world):
 
     assert snapshot(world).turns == 0
     assert snapshot(world, window_days=OPS_WINDOW_DAYS + 3).turns == 1
+
+
+def test_released_blocks_and_visible_downgrades_are_counted_from_messages(world):
+    world.turn(
+        blocks=[
+            {"text": "Doanh thu là 10 tỷ.", "unverified_figures": ["10"]},
+            {"text": "Không có số liệu."},
+        ]
+    )
+    world.turn(blocks=[{"text": "Ngoài cửa sổ", "unverified_figures": ["1"]}], started_at=OUTSIDE)
+
+    reading = snapshot(world)
+
+    assert reading.blocks == 2
+    assert reading.downgraded_blocks == 1
+    assert reading.downgraded_block_rate == pytest.approx(0.5)
 
 
 def test_the_configured_default_is_the_window_the_threshold_is_stated_over():
@@ -364,7 +384,7 @@ def test_incomplete_reasons_are_counted_by_reason_and_only_for_incomplete_turns(
 
 
 def test_unknown_tool_is_counted_by_the_name_that_was_asked_for(world):
-    """ADR-0011's demand trigger is *which* tool, not how many."""
+    """Capability gaps retain both the requested name and its frequency."""
     world.tool_call(status=TOOL_CALL_UNKNOWN_TOOL, tool_name="run_python")
     world.tool_call(status=TOOL_CALL_UNKNOWN_TOOL, tool_name="run_python")
     world.tool_call(status=TOOL_CALL_UNKNOWN_TOOL, tool_name="backtest")
@@ -392,4 +412,3 @@ def test_the_query_writes_nothing(world):
     before = totals()
     snapshot(world)
     assert totals() == before
-
