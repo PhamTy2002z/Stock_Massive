@@ -39,7 +39,9 @@ const NOTICE: RiskNotice = {
   version: "risk-notice/1",
   locale: "vi",
   text: "Đây không phải khuyến nghị đầu tư.",
-  meanings: ["Không đảm bảo lợi nhuận."],
+  // The enum values the backend sends, not prose: they exist so a translation
+  // can be checked against a required set, and they are never displayed.
+  meanings: ["analytical_purpose", "no_personal_advice"],
 }
 
 function citation(overrides: Partial<Citation> = {}): Citation {

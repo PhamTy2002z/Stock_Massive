@@ -19,6 +19,16 @@ from src.core.llm.protocol import Role
 SYSTEM_PROMPT = "## 1. Mission\n\nYou are Alpha Desk."
 
 
+def result_body(message) -> str:
+    """A tool message without the identifier line every one of them carries."""
+    _identifier, _, body = message.content.partition("\n")
+    return body
+
+
+def is_collapsed(message) -> bool:
+    return result_body(message).startswith("called ")
+
+
 def call(index: int, *, size: int = 1200) -> TranscriptToolCall:
     return TranscriptToolCall(
         call_id=f"call_{index}",
@@ -126,12 +136,13 @@ def test_rung_two_replaces_old_results_with_called_x_with_arguments_y():
     collapsed = [
         m
         for m in result.messages
-        if m.role is Role.TOOL and m.content.startswith("called ")
+        if m.role is Role.TOOL and is_collapsed(m)
     ]
     assert collapsed
-    assert collapsed[0].content == (
+    assert result_body(collapsed[0]) == (
         'called get_price_series with arguments {"symbol":"FPT","window_days":90}'
     )
+    assert collapsed[0].content.startswith(f"tool_call_id: {collapsed[0].tool_call_id}\n")
     # The full results are still readable in agent_tool_call; the transcript is
     # a working context, not the record.
     assert collapsed[0].tool_call_id.startswith("call_")
@@ -144,8 +155,8 @@ def test_the_most_recent_turns_keep_their_results_while_older_ones_collapse():
 
     tools = [m for m in result.messages if m.role is Role.TOOL]
     newest = tools[-4:]
-    assert all(not m.content.startswith("called ") for m in newest)
-    assert any(m.content.startswith("called ") for m in tools[:-4])
+    assert all(not is_collapsed(m) for m in newest)
+    assert any(is_collapsed(m) for m in tools[:-4])
 
 
 def test_past_the_threshold_the_function_reports_that_a_summary_is_needed():
@@ -235,8 +246,8 @@ def test_one_turn_that_outgrows_the_ceiling_collapses_its_own_results():
     # Even inside one Turn the collapse runs oldest first, so the round the
     # model is about to answer from is the last evidence to be given up.
     tools = [m for m in result.messages if m.role is Role.TOOL]
-    assert not tools[-1].content.startswith("called ")
-    assert tools[0].content.startswith("called ")
+    assert not is_collapsed(tools[-1])
+    assert is_collapsed(tools[0])
 
 
 def test_a_context_that_cannot_be_made_to_fit_fails_loudly():

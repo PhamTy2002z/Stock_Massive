@@ -112,6 +112,25 @@ def refusal_reason(result: Mapping[str, Any]) -> str | None:
     return None
 
 
+def omit_nulls(arguments: Mapping[str, Any]) -> dict[str, Any]:
+    """Read an explicit null as the absence it stands for.
+
+    Strict mode cannot express an absent key, so an optional parameter reaches
+    the loop as one whose value is null (``core.llm.protocol.strict_parameters``).
+    Every tool here was written against the omission that predates it — a
+    default applies when the key is not there — so the two spellings are
+    reconciled once, at the boundary, rather than in each tool's argument
+    handling. The trace records what the tool actually ran on, which is this.
+    """
+
+    cleaned: dict[str, Any] = {}
+    for key, value in arguments.items():
+        if value is None:
+            continue
+        cleaned[key] = omit_nulls(value) if isinstance(value, Mapping) else value
+    return cleaned
+
+
 def serialized_size(value: Mapping[str, Any]) -> int:
     """The exact compact UTF-8 size charged against the response budget."""
 
@@ -174,6 +193,7 @@ class ToolCatalog:
     ) -> Mapping[str, Any]:
         """Run one registered tool, or return an actionable unknown-tool result."""
 
+        arguments = omit_nulls(arguments)
         started = time.perf_counter()
         registration = self._registrations.get(tool_name)
         if registration is None:
