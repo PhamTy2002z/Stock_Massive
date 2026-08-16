@@ -27,6 +27,7 @@ const desk = {
   submit: vi.fn(),
   cancel: vi.fn(),
   retry: vi.fn(),
+  resend: vi.fn(),
   flag: vi.fn(),
   unflag: vi.fn(),
   dismissRefusal: vi.fn(),
@@ -60,6 +61,7 @@ beforeEach(() => {
   desk.refusal = null
   desk.submit.mockClear()
   desk.cancel.mockClear()
+  desk.resend.mockClear()
 })
 
 /** A window the reducer can decide against. jsdom defaults to 1024 × 768. */
@@ -268,6 +270,49 @@ describe("the composer", () => {
     fireEvent.click(screen.getByRole("button", { name: /Bỏ ngữ cảnh/ }))
 
     expect(shell.state.contextSymbol).toBeNull()
+  })
+})
+
+describe("what a question can be done with again", () => {
+  const asked = { kind: "user", key: "u1", text: "VCB thế nào?", pending: false }
+
+  it("offers the sentence back to the composer instead of editing the message", () => {
+    // A message is immutable in the store. Sửa puts the question in the field
+    // *unsent*; what leaves is a new question, and the one already asked stays.
+    // `ChatView` docks its own composer, which is the field this lands in.
+    desk.entries = [asked]
+    mount(<ChatView />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Sửa câu hỏi" }))
+
+    expect(screen.getByLabelText("Ask Alpha Desk")).toHaveValue("VCB thế nào?")
+    expect(desk.submit).not.toHaveBeenCalled()
+    expect(desk.resend).not.toHaveBeenCalled()
+  })
+
+  it("asks it again from the message itself", () => {
+    desk.entries = [asked]
+    mount(<ChatView />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Gửi lại" }))
+
+    expect(desk.resend).toHaveBeenCalledWith("VCB thế nào?")
+  })
+
+  it("goes inert while a Turn is running, as the composer does", () => {
+    desk.entries = [asked]
+    desk.canCancel = true
+    mount(<ChatView />)
+
+    expect(screen.getByRole("button", { name: "Gửi lại" })).toBeDisabled()
+  })
+
+  it("offers nothing on a question the backend has not confirmed yet", () => {
+    desk.entries = [{ ...asked, pending: true }]
+    mount(<ChatView />)
+
+    expect(screen.queryByRole("button", { name: "Gửi lại" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Sao chép" })).not.toBeInTheDocument()
   })
 })
 

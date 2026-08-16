@@ -21,7 +21,7 @@ import {
   readDeskSession,
   writeDeskSession,
 } from "@/lib/alpha-desk/desk-session"
-import { isActive, isSettled } from "@/lib/alpha-desk/live-turn"
+import { isActive, isSettled, resendPlan } from "@/lib/alpha-desk/live-turn"
 import { buildTranscript, type OpenedAnalysis, type TranscriptEntry } from "@/lib/alpha-desk/transcript"
 import type { FlagReason } from "@/lib/alpha-desk/types"
 
@@ -60,6 +60,8 @@ interface DeskApi {
   submit: (text: string) => void
   cancel: () => void
   retry: () => void
+  /** Ask one of the questions already in the transcript again. */
+  resend: (text: string) => void
   flag: (messageId: number, reason: FlagReason) => void
   unflag: (messageId: number) => void
   dismissRefusal: () => void
@@ -245,6 +247,29 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     void retryTurn({ text: lastQuestion, activeSymbol })
   }, [lastQuestion, activeSymbol, retryTurn])
 
+  /**
+   * Ask a question from the transcript again, from the message that carries it.
+   *
+   * Two different things wear the same label. Asking the *last* question again
+   * after its Turn ended badly is a retry, and goes out with
+   * `retry_of_turn_id` set so the two Turns are linked — that is what a Turn
+   * that hung, failed or was cancelled needs. Asking any *earlier* question
+   * again is a new question that happens to repeat one, and must not claim to
+   * be a second attempt at a Turn that already answered.
+   *
+   * Nothing is sent while a Turn is in flight. The composer offers Stop rather
+   * than Send for exactly that stretch, and a resend that slipped past it would
+   * open a second Turn behind the one on screen.
+   */
+  const resend = useCallback(
+    (text: string) => {
+      const plan = resendPlan(turn.state, text === lastQuestion)
+      if (plan === "retry") retry()
+      else if (plan === "submit") submit(text)
+    },
+    [turn.state, lastQuestion, retry, submit],
+  )
+
   // -- the one dispute action ---------------------------------------------
 
   const { flag, unflag } = flagging
@@ -289,6 +314,7 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       submit,
       cancel: turn.cancel,
       retry,
+      resend,
       flag: onFlag,
       unflag: onUnflag,
       dismissRefusal,
@@ -308,6 +334,7 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       flagging.failedMessageId,
       submit,
       retry,
+      resend,
       onFlag,
       onUnflag,
       dismissRefusal,
