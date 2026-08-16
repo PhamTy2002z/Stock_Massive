@@ -52,7 +52,7 @@ export function FigureRow({
         {unit && <span className="text-[11px] text-muted-foreground">{unit}</span>}
         {figure.cited && (
           <span
-            className="rounded border border-sky-500/40 px-1 text-[10px] text-sky-600 dark:text-sky-400"
+            className="rounded border border-primary/40 px-1 text-[10px] text-primary"
             title={CHROME.citations}
           >
             cited

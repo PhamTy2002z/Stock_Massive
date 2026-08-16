@@ -73,7 +73,7 @@ export function PriceZoneBand({
           width={halfWidth * 2}
           height="4"
           rx="2"
-          className="fill-sky-500/30 stroke-sky-500/60"
+          className="fill-primary/30 stroke-primary/60"
           strokeWidth="0.5"
         />
         <line

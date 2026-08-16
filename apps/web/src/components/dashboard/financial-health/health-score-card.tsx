@@ -46,7 +46,7 @@ export function HealthScoreCard({ symbol, className }: HealthScoreCardProps) {
               <div className={cn(
                 "text-4xl font-bold tabular-nums",
                 data.health_score >= 70 ? "text-positive" :
-                data.health_score >= 50 ? "text-yellow-500" : "text-red-500"
+                data.health_score >= 50 ? "text-caution" : "text-negative"
               )}>
                 {data.health_score}
                 <span className="text-lg text-muted-foreground">/100</span>

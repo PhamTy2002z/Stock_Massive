@@ -135,7 +135,7 @@ export function SpikeStockTable({
                     )}
                     {notes.length > 0 && (
                       <span
-                        className="ml-2 inline-flex items-center gap-1 text-xs text-amber-500"
+                        className="ml-2 inline-flex items-center gap-1 text-xs text-caution"
                         title={notes.join(" • ")}
                       >
                         <Info className="h-3 w-3" />
@@ -158,8 +158,8 @@ export function SpikeStockTable({
                     <span
                       className={
                         stock.change_pct && stock.change_pct >= 0
-                          ? "text-green-500"
-                          : "text-red-500"
+                          ? "text-positive"
+                          : "text-negative"
                       }
                     >
                       {formatPercent(stock.change_pct)}

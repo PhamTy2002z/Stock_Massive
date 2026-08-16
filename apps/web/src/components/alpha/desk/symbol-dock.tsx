@@ -90,7 +90,7 @@ export function SymbolDock({
           {unreadCount > 0 && (
             <span
               aria-label={`${unreadCount} unread Analyses`}
-              className="rounded-full bg-sky-500 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-white"
+              className="rounded-full bg-primary px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-white"
             >
               {unreadCount}
             </span>
@@ -214,7 +214,7 @@ function SymbolChip({
         {unread && (
           <span
             aria-label={`${symbol} has an unread Analysis`}
-            className="h-1.5 w-1.5 rounded-full bg-sky-500"
+            className="h-1.5 w-1.5 rounded-full bg-primary"
           />
         )}
       </button>

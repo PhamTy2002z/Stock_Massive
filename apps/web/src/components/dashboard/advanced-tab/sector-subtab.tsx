@@ -84,7 +84,7 @@ export default function SectorSubtab({ symbol }: SectorSubtabProps) {
       {/* Legend - 5-tier classification system */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5">
-          <span className="w-3 h-3 rounded bg-emerald-500/20 ring-1 ring-emerald-500/30" />
+          <span className="w-3 h-3 rounded bg-positive/20 ring-1 ring-positive/30" />
           Vượt trội (&gt;30%)
         </span>
         <span className="flex items-center gap-1.5">
@@ -100,7 +100,7 @@ export default function SectorSubtab({ symbol }: SectorSubtabProps) {
           Kém (-10% → -30%)
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="w-3 h-3 rounded bg-red-500/20 ring-1 ring-red-500/30" />
+          <span className="w-3 h-3 rounded bg-negative/20 ring-1 ring-negative/30" />
           Rất kém (&lt;-30%)
         </span>
       </div>
