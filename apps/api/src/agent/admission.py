@@ -21,6 +21,7 @@ that could go there would be a guess at when someone else's Turn ends.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Protocol
 
@@ -103,13 +104,20 @@ class TurnAdmission:
         self._slots = slots
         self._output_tokens = output_tokens
 
-    def admit(self, *, user_id: int) -> None:
+    async def admit(self, *, user_id: int) -> None:
         """Return quietly, or refuse with the reason and the status.
 
         The semaphore is asked first and costs no query. The two checks answer
         the same question from opposite sides — the ledger counts active rows
         across the deployment, the semaphore counts running tasks in this
         process — and either one being full is a full service.
+
+        Async, and the ledger runs in a thread, because it is synchronous
+        SQLAlchemy: ``src/core/database.py`` is explicit that calling it inside
+        a coroutine blocks every other request in the process. Here that would
+        mean one user's admission query stalling every SSE stream the process
+        is holding open — the concurrency ``docs/specs/0003`` §10.5 exists to
+        protect. The guarded client wraps the same ledger the same way.
         """
         if self._slots.full:
             raise TurnRefused(
@@ -118,7 +126,11 @@ class TurnAdmission:
                 status_code=503,
             )
         try:
-            self._spend.preflight_turn(user_id, output_tokens=self._output_tokens)
+            await asyncio.to_thread(
+                self._spend.preflight_turn,
+                user_id,
+                output_tokens=self._output_tokens,
+            )
         except BudgetRefusal as refusal:
             raise TurnRefused.of(refusal) from refusal
 
