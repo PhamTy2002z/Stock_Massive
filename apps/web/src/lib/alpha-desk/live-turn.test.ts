@@ -14,6 +14,7 @@ import {
   isActive,
   isSettled,
   liveTurnReducer,
+  resendPlan,
   type LiveTurn,
   type LiveTurnAction,
 } from "./live-turn"
@@ -418,5 +419,33 @@ describe("when the stream may be opened", () => {
     })
 
     expect(state.subscribable).toBe(false)
+  })
+})
+
+describe("asking a question in the transcript again", () => {
+  const settled = (phase: LiveTurn["phase"]): LiveTurn => ({ ...IDLE, phase })
+
+  it("retries the last question when its Turn ended badly", () => {
+    // Hung, failed or cancelled: a second attempt, linked to the first by
+    // `retry_of_turn_id`.
+    expect(resendPlan(settled("failed"), true)).toBe("retry")
+    expect(resendPlan(settled("incomplete"), true)).toBe("retry")
+    expect(resendPlan(settled("cancelled"), true)).toBe("retry")
+  })
+
+  it("asks it fresh when the last Turn answered", () => {
+    // Not a retry: claiming a second attempt at a Turn that already answered
+    // would make the lifecycle say something false.
+    expect(resendPlan(settled("completed"), true)).toBe("submit")
+  })
+
+  it("asks any earlier question fresh, whatever the last Turn did", () => {
+    expect(resendPlan(settled("failed"), false)).toBe("submit")
+  })
+
+  it("sends nothing at all while a Turn is in flight", () => {
+    // The composer offers Stop rather than Send for exactly this stretch.
+    expect(resendPlan(settled("starting"), true)).toBe("nothing")
+    expect(resendPlan(settled("running"), false)).toBe("nothing")
   })
 })
