@@ -20,7 +20,7 @@
  * event that is never coming.
  */
 
-import { alphaFetch } from "@/lib/alpha"
+import { alphaFetch, alphaSend } from "@/lib/alpha"
 
 import type {
   CreatedTurn,
@@ -49,6 +49,33 @@ export function listThreads(): Promise<{ threads: Thread[] }> {
 /** One Thread and its canonical transcript. */
 export function fetchThread(threadId: string): Promise<ThreadDetail> {
   return alphaFetch<ThreadDetail>(`/threads/${encodeURIComponent(threadId)}`)
+}
+
+/**
+ * Rename a Thread, pin it, or both — what the sidebar's per-Thread menu writes.
+ *
+ * Only the keys present are sent, and that is load bearing on the wire: the
+ * backend reads *which fields arrived* rather than their values, so a pin that
+ * also carried `title: null` would clear the name it never meant to touch.
+ */
+export function updateThread(
+  threadId: string,
+  patch: { title?: string | null; pinned?: boolean },
+): Promise<Thread> {
+  return alphaFetch<Thread>(`/threads/${encodeURIComponent(threadId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  })
+}
+
+/**
+ * Delete a Thread and its transcript.
+ *
+ * Not reversible and not archived: it takes the messages, the traces and the
+ * Turns with it. The surface asks before calling this.
+ */
+export function deleteThread(threadId: string): Promise<void> {
+  return alphaSend(`/threads/${encodeURIComponent(threadId)}`, { method: "DELETE" })
 }
 
 export interface CreateTurnInput {

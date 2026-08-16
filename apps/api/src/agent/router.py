@@ -65,6 +65,7 @@ from src.agent.schemas import (
     ThreadListResponse,
     ThreadResponse,
     TurnResponse,
+    UpdateThreadRequest,
 )
 from src.agent.service import AlphaDeskService, alpha_desk
 from src.agent.sse import frames
@@ -111,6 +112,7 @@ def _thread(record: ThreadRecord) -> ThreadResponse:
         id=record.id,
         title=record.title,
         symbols=list(record.symbols),
+        pinned_at=record.pinned_at,
         created_at=record.created_at,
         updated_at=record.updated_at,
     )
@@ -254,11 +256,54 @@ async def read_thread(
     )
 
 
-# Deleting a Thread is deliberately not here. `AgentPersistence.delete_thread`
-# exists and cascades to messages, traces and Turns (`docs/specs/0003` §10.6),
-# but neither #85 nor #86 asks for the route, nothing in `apps/web` calls one,
-# and `threads` is on the proxy's allowlist — so mounting it would put a
-# destructive verb on the wire ahead of the surface that means to offer it.
+@router.patch("/threads/{thread_id}", response_model=ThreadResponse)
+async def update_thread(
+    thread_id: uuid.UUID,
+    payload: UpdateThreadRequest,
+    current_user: CurrentUser,
+    desk: Desk,
+) -> ThreadResponse:
+    """Rename a Thread or pin it — the two things the sidebar menu writes.
+
+    Which fields were *sent* decides what is written, so a pin carries no title
+    and a rename does not silently unpin. An unknown Thread and another user's
+    Thread answer the same 404: a caller who could tell them apart has been
+    told an id exists.
+    """
+    desk.assert_enabled()
+    sent = payload.model_fields_set
+    record = await desk.store.update_thread(
+        current_user.id,
+        thread_id,
+        title=payload.title if "title" in sent else ...,
+        # `pinned: null` is not a third state. The field is a boolean the menu
+        # toggles, and a null in it means the same as leaving it out.
+        pinned=payload.pinned if "pinned" in sent and payload.pinned is not None else ...,
+    )
+    if record is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return _thread(record)
+
+
+@router.delete("/threads/{thread_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_thread(
+    thread_id: uuid.UUID,
+    current_user: CurrentUser,
+    desk: Desk,
+) -> Response:
+    """Delete a Thread and everything hanging off it.
+
+    Cascades to its messages, its traces and its Turns (`docs/specs/0003`
+    §10.6). It is not reversible and there is no archive: the menu asks the
+    user to confirm, and this route is what that confirmation runs.
+
+    A Thread that is not this user's answers 404 rather than 403, for the same
+    reason the read route does.
+    """
+    desk.assert_enabled()
+    if not await desk.store.delete_thread(current_user.id, thread_id):
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # -- creating a Turn -------------------------------------------------------
