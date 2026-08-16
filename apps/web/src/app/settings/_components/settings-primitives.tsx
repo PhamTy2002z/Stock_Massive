@@ -47,10 +47,10 @@ export function SettingsPanel({
   footer?: React.ReactNode
 }) {
   return (
-    <div className="overflow-hidden rounded-card border border-[hsl(var(--hairline))] bg-card">
+    <div className="overflow-hidden rounded-card border border-hairline bg-card">
       {children}
       {footer ? (
-        <div className="border-t border-[hsl(var(--hairline))] bg-muted/40 px-5 py-3.5">
+        <div className="border-t border-hairline bg-surface-sunken px-5 py-3.5">
           {footer}
         </div>
       ) : null}
@@ -74,7 +74,7 @@ export function SettingsRow({
       className={cn(
         // Below md the control drops under its label rather than fighting it
         // for a share of a phone-width row.
-        "flex flex-col gap-3 border-b border-[hsl(var(--hairline))] px-5 py-4 last:border-b-0 md:flex-row md:items-center md:justify-between md:gap-6",
+        "flex flex-col gap-3 border-b border-hairline px-5 py-4 last:border-b-0 md:flex-row md:items-center md:justify-between md:gap-6",
         className
       )}
     >

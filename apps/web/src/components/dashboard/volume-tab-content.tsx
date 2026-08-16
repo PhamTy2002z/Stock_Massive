@@ -160,7 +160,7 @@ export function VolumeTabContent({ symbol }: VolumeTabContentProps) {
         />
       </div>
 
-      <div className="mt-3.5 flex flex-wrap gap-4 border-t border-[hsl(var(--hairline))] pt-3.5 text-[13px] leading-[1.43] tracking-[-0.208px]">
+      <div className="mt-3.5 flex flex-wrap gap-4 border-t border-hairline pt-3.5 text-[13px] leading-[1.43] tracking-[-0.208px]">
         {legend.map((item) => (
           <span key={item.label} className="flex items-center gap-[7px]">
             <span className={cn("size-2 rounded-sm", item.color)} />
@@ -173,7 +173,7 @@ export function VolumeTabContent({ symbol }: VolumeTabContentProps) {
         </span>
       </div>
 
-      <div className="mt-3.5 grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3.5 border-t border-[hsl(var(--hairline))] pt-3.5">
+      <div className="mt-3.5 grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3.5 border-t border-hairline pt-3.5">
         <Stat
           label="Cao nhất trong phiên"
           value={compact(peak.current_volume)}

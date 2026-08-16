@@ -49,7 +49,7 @@ export function PeerMetricsTable({ peers, targetSymbol }: PeerMetricsTableProps)
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-border/50">
+          <tr className="border-b border-border">
             <th className="py-2 px-3 text-left font-medium text-muted-foreground">Symbol</th>
             <th className="py-2 px-3 text-left font-medium text-muted-foreground">Company</th>
             <th className="py-2 px-3 text-right font-medium text-muted-foreground">ROE</th>
@@ -64,7 +64,7 @@ export function PeerMetricsTable({ peers, targetSymbol }: PeerMetricsTableProps)
             <tr
               key={peer.symbol}
               className={cn(
-                "border-b border-border/30 hover:bg-muted/20",
+                "border-b border-border hover:bg-foreground/[0.06]",
                 peer.symbol === targetSymbol && "bg-foreground/[0.07] border-foreground/25"
               )}
             >

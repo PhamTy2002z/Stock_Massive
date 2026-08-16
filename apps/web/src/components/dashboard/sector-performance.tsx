@@ -33,7 +33,7 @@ function SectorRow({
   const picks = (direction === "up" ? sector.top_gainers : sector.top_losers).slice(0, 2)
 
   return (
-    <div className="grid grid-cols-[1fr_auto] items-baseline gap-4 border-t border-[hsl(var(--hairline))] py-2.5">
+    <div className="grid grid-cols-[1fr_auto] items-baseline gap-4 border-t border-hairline py-2.5">
       <div className="flex min-w-0 flex-col gap-0.5">
         <span className="truncate text-[15px] font-semibold leading-[1.24] tracking-[-0.374px]">
           {sector.icb_name}
@@ -85,7 +85,7 @@ function SectorCard({
         )}
       </div>
       {sectors.length === 0 ? (
-        <p className="border-t border-[hsl(var(--hairline))] py-4 text-[13px] leading-[1.43] tracking-[-0.224px] text-muted-foreground">
+        <p className="border-t border-hairline py-4 text-[13px] leading-[1.43] tracking-[-0.224px] text-muted-foreground">
           Chưa có ngành nào {direction === "up" ? "tăng" : "giảm"} trong phiên này.
         </p>
       ) : (

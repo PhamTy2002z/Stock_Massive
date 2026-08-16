@@ -254,7 +254,7 @@ export function OrderFlowCharts({ data, isLoading }: OrderFlowChartsProps) {
   if (!data) {
     return (
       <div className="text-center py-16">
-        <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-muted/30 flex items-center justify-center">
+        <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-surface-sunken flex items-center justify-center">
           <Activity className="w-8 h-8 text-muted-foreground/40" />
         </div>
         <p className="text-sm font-medium text-muted-foreground">Dữ liệu intraday chưa khả dụng</p>

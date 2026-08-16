@@ -221,7 +221,7 @@ export function StockRangeCards({
                   />
                   <span
                     style={{ flex: Math.max(0, 100 - volumeVsAvg) }}
-                    className="rounded-full bg-[hsl(var(--hairline))]"
+                    className="rounded-full bg-hairline"
                   />
                 </div>
                 <Caption>

@@ -234,7 +234,7 @@ export function StockPriceChart({ symbol, refPrice, className }: StockPriceChart
         {refPrice !== null && refPrice !== undefined && (
           <span
             style={{ top: `${(y(refPrice) / VIEW_H) * 220 - 10}px` }}
-            className="absolute right-0 rounded-full border border-[hsl(var(--hairline))] bg-card px-2 py-0.5 text-[11px] leading-[1.3] tracking-[-0.11px] tabular-nums text-reference"
+            className="absolute right-0 rounded-full border border-hairline bg-card px-2 py-0.5 text-[11px] leading-[1.3] tracking-[-0.11px] tabular-nums text-reference"
           >
             TC {Math.round(refPrice).toLocaleString("vi-VN")}
           </span>
@@ -247,7 +247,7 @@ export function StockPriceChart({ symbol, refPrice, className }: StockPriceChart
         ))}
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2.5 border-t border-[hsl(var(--hairline))] pt-3">
+      <div className="mt-3 flex flex-wrap items-center gap-2.5 border-t border-hairline pt-3">
         <span className="text-[13px] leading-[1.43] tracking-[-0.208px] text-muted-foreground">
           {volumeLabel}
         </span>

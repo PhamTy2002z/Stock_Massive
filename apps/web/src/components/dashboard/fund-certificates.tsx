@@ -44,7 +44,7 @@ export function FundCertificates({ className }: { className?: string }) {
       </div>
 
       {funds.length === 0 ? (
-        <p className="border-t border-[hsl(var(--hairline))] py-4 text-[13px] leading-[1.43] tracking-[-0.224px] text-muted-foreground">
+        <p className="border-t border-hairline py-4 text-[13px] leading-[1.43] tracking-[-0.224px] text-muted-foreground">
           Chưa có dữ liệu chứng chỉ quỹ.
         </p>
       ) : (
@@ -54,7 +54,7 @@ export function FundCertificates({ className }: { className?: string }) {
           return (
             <div
               key={fund.symbol}
-              className="grid grid-cols-[1fr_auto_auto] items-center gap-4 border-t border-[hsl(var(--hairline))] py-2.5"
+              className="grid grid-cols-[1fr_auto_auto] items-center gap-4 border-t border-hairline py-2.5"
             >
               <span className="truncate text-[15px] font-semibold leading-[1.24] tracking-[-0.374px]">
                 {fund.symbol}

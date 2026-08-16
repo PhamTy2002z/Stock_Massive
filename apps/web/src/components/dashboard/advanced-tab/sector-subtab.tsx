@@ -57,7 +57,7 @@ export default function SectorSubtab({ symbol }: SectorSubtabProps) {
             disabled={isFetching}
             className={cn(
               "h-8 gap-1.5 text-muted-foreground hover:text-foreground",
-              "hover:bg-muted/50 transition-colors"
+              "hover:bg-foreground/[0.06] transition-colors"
             )}
           >
             <RefreshCw className={cn("h-3.5 w-3.5", isFetching && "animate-spin")} />

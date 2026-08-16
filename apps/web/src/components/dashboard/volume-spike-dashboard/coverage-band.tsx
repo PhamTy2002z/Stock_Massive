@@ -33,7 +33,7 @@ export function CoverageBand({
       className={cn(
         "rounded-lg border p-4 space-y-2",
         healthy
-          ? "border-border/50 bg-card/50"
+          ? "border-border bg-card"
           : "border-caution/40 bg-caution/5",
         className,
       )}

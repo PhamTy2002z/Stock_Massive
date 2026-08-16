@@ -17,7 +17,7 @@ export function JobProgressBar() {
   const hasMultiple = runningJobs.length > 1
 
   return (
-    <div className="border-b bg-muted/30 px-4 py-2">
+    <div className="border-b bg-surface-sunken px-4 py-2">
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
         <div className="flex items-center gap-3">
           <Loader2 className="h-4 w-4 animate-spin text-primary" />

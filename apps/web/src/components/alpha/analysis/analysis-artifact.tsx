@@ -47,7 +47,7 @@ export function AnalysisArtifact({
   return (
     <div
       className={cn(
-        "rounded-lg border border-border/60 bg-background/60",
+        "rounded-lg border border-border bg-background/60",
         className,
       )}
       data-testid="analysis-artifact"
@@ -58,7 +58,7 @@ export function AnalysisArtifact({
           type="button"
           onClick={() => setExpanded((open) => !open)}
           aria-expanded={expanded}
-          className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border/60 px-2 py-1 text-[11px] hover:bg-muted"
+          className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] hover:bg-foreground/[0.06]"
         >
           {expanded ? (
             <Minimize2 className="h-3 w-3" />

@@ -38,7 +38,7 @@ export function UnevaluablePanel({
         {symbols.length} mã chưa tính được tín hiệu
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <ul className="rounded-lg border border-border/50 bg-card/50 divide-y divide-border/30">
+        <ul className="rounded-lg border border-border bg-card divide-y divide-border/30">
           {symbols.map((item) => (
             <li
               key={item.symbol}

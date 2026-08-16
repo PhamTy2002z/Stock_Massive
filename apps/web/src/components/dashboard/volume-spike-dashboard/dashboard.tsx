@@ -121,7 +121,7 @@ export function VolumeSpikeDashboard({ className }: VolumeSpikeDashboardProps) {
       ) : data.spikes.length > 0 ? (
         <SpikeStockTable table={table} />
       ) : (
-        <div className="rounded-lg border border-border/50 bg-card/50 p-8 text-center">
+        <div className="rounded-lg border border-border bg-card p-8 text-center">
           <p className="text-muted-foreground">
             Không có mã nào đạt ngưỡng {threshold}x trong phiên này.
           </p>

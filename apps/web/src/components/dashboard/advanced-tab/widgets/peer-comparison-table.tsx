@@ -86,7 +86,7 @@ export function PeerComparisonTable({
   }) => (
     <th
       className={cn(
-        "px-3 py-2 font-medium cursor-pointer hover:bg-muted/80 transition-colors",
+        "px-3 py-2 font-medium cursor-pointer hover:bg-foreground/[0.06] transition-colors",
         align === "right" ? "text-right" : "text-left"
       )}
       onClick={() => handleSort(column)}
@@ -121,13 +121,13 @@ export function PeerComparisonTable({
       </div>
 
       {/* Table with horizontal scroll for mobile */}
-      <div className="overflow-x-auto rounded-lg border border-border/50">
+      <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full text-sm">
           {/* Sticky header */}
-          <thead className="bg-muted/50 sticky top-0">
+          <thead className="bg-surface-sunken sticky top-0">
             <tr>
               {/* Frozen first column */}
-              <th className="sticky left-0 z-10 bg-muted/50 px-3 py-2 text-left font-medium min-w-[200px]">
+              <th className="sticky left-0 z-10 bg-surface-sunken px-3 py-2 text-left font-medium min-w-[200px]">
                 Mã CP
               </th>
               <SortableHeader column="pe">P/E</SortableHeader>
@@ -142,7 +142,7 @@ export function PeerComparisonTable({
               <tr
                 key={peer.symbol}
                 className={cn(
-                  "border-t border-border/30 hover:bg-muted/30 transition-colors cursor-pointer",
+                  "border-t border-border hover:bg-foreground/[0.06] transition-colors cursor-pointer",
                   peer.symbol === targetSymbol && "bg-primary/5 font-semibold"
                 )}
                 onClick={() => handleRowClick(peer.symbol)}

@@ -58,7 +58,7 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
   }[data.anomaly_level]
 
   return (
-    <Card className="shadow-lg border-border/50">
+    <Card className="shadow-lg border-border">
       <CardContent className="p-3 space-y-1.5">
         <p className="font-semibold text-sm">{data.time_label}</p>
         <div className="space-y-1 text-xs">
@@ -172,7 +172,7 @@ export const VolumeAnomalyChart = memo(function VolumeAnomalyChart({
         </ResponsiveContainer>
 
         {/* Legend for anomaly colors */}
-        <div className="flex flex-wrap gap-4 mt-4 pt-4 border-t border-border/50">
+        <div className="flex flex-wrap gap-4 mt-4 pt-4 border-t border-border">
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full bg-muted-foreground" />
             <span className="text-xs text-muted-foreground">Bình thường</span>

@@ -10,7 +10,7 @@ export function InsufficientDataNotice({ className }: { className?: string }) {
     <div
       className={
         className ??
-        "rounded-lg border border-border/50 bg-card/50 p-8 text-center space-y-2"
+        "rounded-lg border border-border bg-card p-8 text-center space-y-2"
       }
     >
       <p className="font-medium">Chưa đủ dữ liệu để kết luận</p>
