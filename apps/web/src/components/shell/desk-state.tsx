@@ -16,6 +16,7 @@ import { useLiveTurn } from "@/hooks/use-live-turn"
 import { useCreateThread, useFlagMessage, useThread } from "@/hooks/use-threads"
 import {
   deepLinkedSymbol,
+  deepLinkedThread,
   openingState,
   readDeskSession,
   writeDeskSession,
@@ -73,6 +74,7 @@ export function DeskProvider({ children }: { children: ReactNode }) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const symbolParam = searchParams.get("symbol")
+  const threadParam = searchParams.get("thread")
   const { state: shell, dispatch: shellDispatch } = useShell()
   const activeSymbol = shell.contextSymbol
 
@@ -81,6 +83,9 @@ export function DeskProvider({ children }: { children: ReactNode }) {
   // strips `?symbol=` from the URL, and a live read would then see an arrival
   // that is no longer there.
   const [deepLinked] = useState(() => deepLinkedSymbol(symbolParam))
+  // `?thread=` is *Open in new tab* from the sidebar menu, and is read and
+  // consumed exactly like `?symbol=`: once, before the effect below strips it.
+  const [deepLinkedThreadId] = useState(() => deepLinkedThread(threadParam))
 
   // What this tab remembered is *not* on the URL — `sessionStorage` exists only
   // in the browser, so seeding state from it during render makes the hydrated
@@ -108,20 +113,25 @@ export function DeskProvider({ children }: { children: ReactNode }) {
   // The deep link is consumed once. Left in the URL, every later reload would
   // read as a fresh arrival and open yet another Thread.
   useEffect(() => {
-    if (symbolParam !== null) router.replace("/", { scroll: false })
-  }, [symbolParam, router])
+    if (symbolParam !== null || threadParam !== null) {
+      router.replace("/", { scroll: false })
+    }
+  }, [symbolParam, threadParam, router])
 
   const { attach } = turn
   useEffect(() => {
     if (restored) return
     setRestored(true)
-    const opening = openingState(deepLinked, readDeskSession())
+    const opening = openingState(deepLinked, readDeskSession(), deepLinkedThreadId)
     setThreadId(opening.threadId)
     if (opening.activeSymbol !== null) {
       shellDispatch({ type: "context-symbol", symbol: opening.activeSymbol })
     }
+    // Only for the deep link. A remembered Thread must not drag a reader who
+    // left the tab on the board back into the conversation.
+    if (deepLinkedThreadId !== null) shellDispatch({ type: "view", view: "chat" })
     if (opening.turnId && opening.threadId) attach(opening.turnId, opening.threadId)
-  }, [restored, deepLinked, attach, shellDispatch])
+  }, [restored, deepLinked, deepLinkedThreadId, attach, shellDispatch])
 
   // What this tab was doing, for the next mount. A settled Turn is forgotten:
   // reattaching to it would open a stream for a Turn the transcript already
