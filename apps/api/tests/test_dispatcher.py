@@ -31,6 +31,7 @@ from sqlalchemy import delete, select
 
 from src.alpha.analysis_run import (
     MAX_ATTEMPTS_PER_SESSION,
+    SNAPSHOT_WAIT_MINUTES,
     RunOrigin,
     RunStatus,
     stored_run,
@@ -457,6 +458,112 @@ class TestShutdown:
         assert report.produced == [A]
         assert stored_run(session, A, TRADING_DAY).status == RunStatus.READY.value
         assert stored_run(session, B, TRADING_DAY).status == RunStatus.PENDING.value
+
+
+class TestWaitingForTheCollector:
+    """A session this symbol has no data for yet is not a failed attempt.
+
+    The Trading Day moves market-wide the moment the first symbol of an evening
+    lands, while the Collector fills the rest one at a time against a provider
+    quota. Every symbol it has not reached reports `missing_market_snapshot`,
+    and counting those against the three-attempt ceiling locks a pair out of the
+    very session whose data is minutes away.
+    """
+
+    def test_a_missing_session_defers_the_run_and_refunds_the_attempt(self, session):
+        queue(session, A)
+
+        report = drain_queue(
+            session,
+            a_failing_producer("missing_market_snapshot", "chưa có phiên"),
+            trading_day=TRADING_DAY,
+            clock=lambda: NOW,
+        )
+        run = stored_run(session, A, TRADING_DAY)
+
+        assert report.deferred == [A]
+        assert report.failed == []
+        assert run.status == RunStatus.PENDING.value
+        assert run.attempts == 0
+        assert run.next_attempt_at == NOW + timedelta(minutes=SNAPSHOT_WAIT_MINUTES)
+        # The reason is kept even though the state is pending: the rail shows a
+        # waiting symbol *and* what it is waiting for.
+        assert run.error_code == "missing_market_snapshot"
+
+    def test_deferring_repeatedly_never_reaches_the_ceiling(self, session):
+        queue(session, A)
+        waiting = a_failing_producer("missing_market_snapshot", "chưa có phiên")
+
+        moment = NOW
+        for _ in range(MAX_ATTEMPTS_PER_SESSION + 2):
+            at = moment
+            drain_queue(session, waiting, trading_day=TRADING_DAY, clock=lambda: at)
+            moment += timedelta(minutes=SNAPSHOT_WAIT_MINUTES)
+        run = stored_run(session, A, TRADING_DAY)
+
+        assert run.attempts == 0
+        assert run.status == RunStatus.PENDING.value
+
+    def test_the_data_arriving_later_still_produces_the_analysis(self, session):
+        """The whole point: the session was late, not absent."""
+        queue(session, A)
+        drain_queue(
+            session,
+            a_failing_producer("missing_market_snapshot", "chưa có phiên"),
+            trading_day=TRADING_DAY,
+            clock=lambda: NOW,
+        )
+
+        collected = a_producer()
+        drain_queue(
+            session,
+            collected,
+            trading_day=TRADING_DAY,
+            clock=lambda: NOW + timedelta(minutes=SNAPSHOT_WAIT_MINUTES),
+        )
+
+        assert collected.seen == [(A, TRADING_DAY)]
+        assert stored_run(session, A, TRADING_DAY).status == RunStatus.READY.value
+
+    def test_past_the_deadline_it_is_recorded_as_the_failure_it_is(self, session):
+        """Waiting ends when the evening does."""
+        queue(session, A)
+        late = availability_deadline(TRADING_DAY)
+
+        report = drain_queue(
+            session,
+            a_failing_producer("missing_market_snapshot", "chưa có phiên"),
+            trading_day=TRADING_DAY,
+            clock=lambda: late,
+        )
+        run = stored_run(session, A, TRADING_DAY)
+
+        assert report.failed == [A]
+        assert report.deferred == []
+        assert run.status == RunStatus.FAILED.value
+        assert run.attempts == 1
+
+    def test_only_the_waiting_symbol_is_held_back(self, session):
+        """Unlike a refused credential, this says nothing about the queue.
+
+        The symbol behind it may well have been collected already, so the pass
+        carries on rather than pushing the whole evening out.
+        """
+        queue(session, A)
+        queue(session, B)
+
+        def by_symbol(symbol: str, trading_day: date) -> AnalysisDraft:
+            if symbol == A:
+                raise ProductionFailure("missing_market_snapshot", "chưa có phiên")
+            return AnalysisDraft(verdict="hold", payload={})
+
+        report = drain_queue(
+            session, by_symbol, trading_day=TRADING_DAY, clock=lambda: NOW
+        )
+
+        assert report.deferred == [A]
+        assert report.produced == [B]
+        assert stored_run(session, B, TRADING_DAY).next_attempt_at is None
 
 
 class TestTheBackoff:

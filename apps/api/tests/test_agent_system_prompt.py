@@ -34,6 +34,7 @@ def context(**overrides) -> RuntimeContext:
     base = dict(
         user_id=7,
         trading_day=date(2026, 8, 14),
+        today=date(2026, 8, 16),
         market_state=MarketState.POST_CLOSE,
         active_symbol="FPT",
     )
@@ -91,18 +92,38 @@ def test_the_prompt_states_the_gate_the_untrusted_rules_and_the_stance_limits():
     assert "the data is insufficient" in rendered
 
 
+def test_the_prompt_says_how_today_is_read_against_the_trading_day():
+    """The instruction the second injected date exists to support.
+
+    Injecting the date is half of it. Without prose saying what to do with it,
+    "phân tích giá STB hiện tại" asked on a Sunday still reads as a question
+    about a session that does not exist, and the answer says so instead of
+    answering from Friday's.
+    """
+    rendered = render(context())
+    section = rendered.split("## 8.")[1]
+
+    assert "hôm nay" in section
+    assert "the most recent data there is" in section
+    assert "reason to tell the user there is no data" in section
+    # And both values are there to be read against each other.
+    assert "- today: 2026-08-16" in rendered
+    assert "- trading_day: 2026-08-14" in rendered
+
+
 def test_no_section_body_has_a_formatting_hole():
     for section in SECTIONS:
         assert "{" not in section.body
         assert "}" not in section.body
 
 
-def test_the_renderer_takes_only_the_four_trusted_values():
+def test_the_renderer_takes_only_the_five_trusted_values():
     rendered = render(context())
     tail = rendered[len(prefix()) :]
 
     assert tail.strip().splitlines() == [
         "- user_id: 7",
+        "- today: 2026-08-16",
         "- trading_day: 2026-08-14",
         "- market_state: post_close",
         "- active_symbol: FPT",
@@ -114,8 +135,12 @@ def test_the_renderer_takes_only_the_four_trusted_values():
         RuntimeContext(
             user_id=7,
             trading_day=date(2026, 8, 14),
+            today=date(2026, 8, 16),
             market_state="continuous — VCB 95.4",  # type: ignore[arg-type]
         )
+    with pytest.raises(TypeError):
+        # A day the caller could not resolve is not a day to render as one.
+        context(today="hôm nay")
     with pytest.raises(StockServiceError):
         context(active_symbol="not a symbol")
 
@@ -123,7 +148,13 @@ def test_the_renderer_takes_only_the_four_trusted_values():
 def test_no_figure_watchlist_or_tool_result_can_reach_the_prompt():
     fields = {name for name in RuntimeContext.__annotations__}
 
-    assert fields == {"user_id", "trading_day", "market_state", "active_symbol"}
+    assert fields == {
+        "user_id",
+        "trading_day",
+        "today",
+        "market_state",
+        "active_symbol",
+    }
 
     rendered = render(context())
     for absent in ("watchlist", "Watchlist", "tool_call_id:", "price:"):
@@ -143,9 +174,10 @@ def test_the_rendered_prompt_is_byte_stable_and_the_prefix_does_not_move():
 
 def test_the_hash_is_exported_and_changes_when_the_prose_changes():
     # Bumped with the prose it names: 1.1.0 added the evidence-reference
-    # protocol the Recommendation Validator reads (#82), 1.2.0 added the Widget
-    # selection protocol (#89), and 1.3.0 classifies downgraded/external/derived
-    # evidence without weakening the Recommendation Gate.
+    # protocol the Recommendation Validator reads (#82), and 1.2.0 added the
+    # Widget selection protocol (#89). Version 1.3.0 injects today's date and
+    # distinguishes it from the Trading Day while also classifying downgraded,
+    # external, and derived evidence without weakening the Recommendation Gate.
     assert PROMPT_VERSION == "1.3.0"
     assert PROMPT_HASH == contract_hash()
 

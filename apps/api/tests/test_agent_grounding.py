@@ -163,6 +163,40 @@ def test_a_trading_day_and_a_list_number_are_not_material_figures():
     assert block.citations == ()
 
 
+def test_a_session_named_the_way_its_reader_writes_it_is_not_a_figure():
+    """`14/08` is a date, exactly as `2026-08-14` is.
+
+    The Contract answers in Vietnamese and tells the model to name the session
+    it answered from, so this is the most ordinary sentence the product writes.
+    Read as the two numbers either side of a slash it is unattributable, and an
+    unattributable block does not lose its citation — it ends the Turn.
+    """
+    block = validator().validate(
+        "Phiên 14/08 chưa có thay đổi đáng kể so với 13/08/2026.", standard_traces()
+    )
+
+    assert block.kind is BlockKind.PROSE
+    assert block.citations == ()
+
+
+def test_a_price_written_with_thousands_dots_is_the_price_it_says():
+    """`71.800` is seventy-one thousand eight hundred, not seventy-one point eight.
+
+    A dot groups thousands and a comma is the decimal separator in the language
+    this product answers in. Parsed the other way round, a correctly written
+    share price disagrees with its own trace by a factor of a thousand and the
+    block is blocked for a mismatch its writer cannot see.
+    """
+    index = traces(c2=quote(close=71_800))
+
+    block = validator().validate(
+        "Giá đóng cửa 71.800 đồng [ev:c2#quote.close_price].", index
+    )
+
+    assert block.citations[0].value == 71_800
+    assert not figures_agree("71.8", 71_800, unit=None)
+
+
 def test_a_figure_that_disagrees_with_its_trace_is_blocked():
     text = f"RSI đang là 71.2 [ev:c1#registered_fields.{RSI}.value]."
 
@@ -185,6 +219,12 @@ def test_a_figure_is_compared_at_the_precision_it_was_written_to():
 def test_money_matches_at_a_scale_and_a_z_score_does_not():
     assert figures_agree("3.4", 3_400_000_000, unit="vnd")
     assert not figures_agree("3.4", 3_400_000_000, unit="z_score")
+    # Both separator conventions, and a scale is not what carries either of
+    # them: a stored figure cites no unit at all, so the parse has to be right
+    # on its own.
+    assert figures_agree("71.800", 71_800, unit=None)
+    assert figures_agree("71,800", 71_800, unit=None)
+    assert figures_agree("2,3", 2.3, unit="percent")
 
 
 # --- reference resolution --------------------------------------------------

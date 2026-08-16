@@ -83,7 +83,10 @@ REF = f"c1#registered_fields.{MOMENTUM}.value,c2#registered_fields.{MOMENTUM}.va
 def test_the_contract_gained_its_widget_section_and_the_catalog_did_not_move():
     rendered = render(
         RuntimeContext(
-            user_id=7, trading_day=TRADING_DAY, market_state=MarketState.POST_CLOSE
+            user_id=7,
+            trading_day=TRADING_DAY,
+            today=TRADING_DAY,
+            market_state=MarketState.POST_CLOSE,
         )
     )
 
