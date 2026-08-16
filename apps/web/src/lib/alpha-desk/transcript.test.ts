@@ -211,3 +211,57 @@ describe("the question the user just asked", () => {
     expect(entries.at(-1)).toMatchObject({ kind: "user", pending: true })
   })
 })
+
+describe("an Analysis opened into the transcript", () => {
+  it("sits where it was opened rather than at the end", () => {
+    const entries = transcript({
+      messages: [userMessage(1, "FPT thế nào?"), assistantMessage(2, "đáp")],
+      openedAnalyses: [{ symbol: "FPT", tradingDay: "2026-08-12", afterSeq: 1 }],
+    })
+
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      "user",
+      "analysis",
+      "assistant",
+    ])
+  })
+
+  it("appears on its own in a Thread that has no messages yet", () => {
+    const entries = transcript({
+      openedAnalyses: [{ symbol: "HPG", tradingDay: "2026-08-12", afterSeq: 0 }],
+    })
+
+    expect(entries).toEqual([
+      {
+        kind: "analysis",
+        key: "analysis-HPG-2026-08-12",
+        symbol: "HPG",
+        tradingDay: "2026-08-12",
+      },
+    ])
+  })
+
+  it("keeps the order they were opened in when two share an anchor", () => {
+    const entries = transcript({
+      messages: [userMessage(1, "hai mã")],
+      openedAnalyses: [
+        { symbol: "FPT", tradingDay: "2026-08-12", afterSeq: 1 },
+        { symbol: "HPG", tradingDay: "2026-08-12", afterSeq: 1 },
+      ],
+    })
+
+    expect(
+      entries.filter((entry) => entry.kind === "analysis").map((entry) => entry.key),
+    ).toEqual(["analysis-FPT-2026-08-12", "analysis-HPG-2026-08-12"])
+  })
+
+  it("stays above a draft that is still streaming", () => {
+    const entries = transcript({
+      messages: [userMessage(1, "FPT thế nào?")],
+      live: live({ blocks: [block("một khối")] }),
+      openedAnalyses: [{ symbol: "FPT", tradingDay: "2026-08-12", afterSeq: 1 }],
+    })
+
+    expect(entries.map((entry) => entry.kind)).toEqual(["user", "analysis", "draft"])
+  })
+})
