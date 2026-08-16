@@ -39,6 +39,15 @@ USER_ROLLING_30D_MICRO_USD = 15_000_000
 USER_ACTIVE_TURNS = 1
 SYSTEM_ACTIVE_TURNS = 3
 PROBE_DAILY_MICRO_USD = 250_000
+# The hard ceiling on one Eval Battery run (``docs/adr/0016``). Enforced here
+# rather than by the harness counting its own spend, and that placement is the
+# whole point: it is the same locked transaction every other call passes
+# through, so a run cannot exceed it by racing itself, and there is no second
+# arithmetic that could disagree with the ledger about what has been spent.
+#
+# ~168 runs at roughly 6k input / 800 output is $2.5–3, which is about two gate
+# runs a month inside the $5 eval lane of ``docs/adr/0014``.
+EVAL_RUN_COST_MICRO_USD = 2_500_000
 ICT = ZoneInfo("Asia/Ho_Chi_Minh")
 
 
@@ -294,6 +303,28 @@ class SpendAdmission:
                         day_start,
                         day_reset,
                     )
+                elif candidate.owner.type is OwnerType.EVAL_RUN:
+                    owner_cost = _charged_cost(
+                        session,
+                        LlmCallUsage.owner_type == candidate.owner.type.value,
+                        LlmCallUsage.owner_id == candidate.owner.id,
+                    )
+                    if owner_cost + reserved > EVAL_RUN_COST_MICRO_USD:
+                        # ``docs/adr/0016``: the harness stops and reports this.
+                        # It must never drop the remaining cases and publish a
+                        # score — a battery that truncates itself is a battery
+                        # that lies — so this refusal is fatal to the run rather
+                        # than something a case skips past.
+                        raise BudgetRefusal(
+                            "eval_budget_exhausted",
+                            "This Eval Battery run has exhausted its allowance.",
+                            operator_detail=(
+                                f"eval_run {candidate.owner.id} has {owner_cost} "
+                                f"micro-USD charged against "
+                                f"{EVAL_RUN_COST_MICRO_USD} and requested "
+                                f"{reserved} more"
+                            ),
+                        )
                 row = LlmCallUsage(
                     owner_type=candidate.owner.type.value,
                     owner_id=candidate.owner.id,
@@ -786,6 +817,7 @@ def _read_turn_state(
 
 
 __all__ = [
+    "EVAL_RUN_COST_MICRO_USD",
     "AdmissionLedger",
     "BudgetLane",
     "BudgetRefusal",
