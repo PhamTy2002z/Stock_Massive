@@ -38,6 +38,28 @@ SessionFactory = Callable[[], Session]
 UniverseFactory = Callable[[Session], Universe]
 
 
+#: The stored Analysis key `get_analysis` does not serve.
+#:
+#: The envelope is 86% of a real payload — ~15.4 KB of a ~17.9 KB row, against
+#: a catalog budget of 4 KB — so a tool that returned it returned nothing at
+#: all: `ToolResultTooLarge` every single time, and the loop never saw the
+#: Analysis it was being asked about. Withholding it is what makes the tool
+#: answer.
+#:
+#: Nothing is lost that the loop cannot get. `evidence` is every figure the
+#: model was shown, and the figures are what the registered-field tools serve
+#: directly and citably; what only this row holds is the *judgment* made from
+#: them, which is served whole. `citedFieldIds` still names every field that
+#: judgment rests on, so a reader can go and fetch any of them.
+EVIDENCE_KEY = "evidence"
+
+EVIDENCE_WITHHELD = (
+    "evidence: the Analysis's evidence envelope is not served here because it "
+    "does not fit the tool result budget. Read any figure it held with the "
+    "field tools; citedFieldIds names the ones this judgment rests on."
+)
+
+
 def _object_schema(properties: Mapping[str, Any], required: Sequence[str] = ()) -> dict:
     return {
         "type": "object",
@@ -84,8 +106,11 @@ class StoreBackedTools:
             ToolSpec(
                 name="get_analysis",
                 description=(
-                    "Read the complete stored nightly Analysis for a symbol, either "
-                    "at one Trading Day or at the latest stored Trading Day."
+                    "Read the stored nightly Analysis for a symbol — its verdict, "
+                    "thesis, per-axis readings and cited field ids — either at one "
+                    "Trading Day or at the latest stored Trading Day. The evidence "
+                    "envelope behind it is not included; read those figures with "
+                    "the field tools."
                 ),
                 parameters=_object_schema(
                     {
@@ -228,6 +253,8 @@ class StoreBackedTools:
                         + "."
                     ),
                 }
+            payload = dict(row.payload)
+            withheld = payload.pop(EVIDENCE_KEY, None) is not None
             return {
                 # An Analysis is dated to the session it was produced for, and
                 # that date belongs at the top for the same reason it does on
@@ -238,9 +265,13 @@ class StoreBackedTools:
                     "symbol": row.symbol,
                     "trading_day": row.trading_day.isoformat(),
                     "verdict": row.verdict,
-                    "payload": dict(row.payload),
+                    "payload": payload,
                     "schema_version": row.schema_version,
-                }
+                },
+                # Said out loud rather than left as an absence, so a reader of
+                # the trace can tell a withheld envelope from an Analysis that
+                # never had one.
+                **({"withheld": EVIDENCE_WITHHELD} if withheld else {}),
             }
 
     async def get_price_series(
