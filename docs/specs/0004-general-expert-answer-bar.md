@@ -131,13 +131,39 @@ The first two are the owner's flagged answers from 2026-08-17.
 - The agent's structured refusals gain a `hydration_queued` state the UI renders
   as "loading, retry in ~a minute".
 
-### W4 — Answer Tiers (unblocks G2, G9; fixes category B; ADR planned)
+### W4 — Answer Tiers (unblocks G2, G9; fixes category B) — **done**
 
-- Stance/trend/overview answers are validated at the analysis tier: every figure
-  attributed, sanctioned interpretations enforced, no zone or ref-price required.
-- The seven-condition Gate remains untouched for recommendation blocks.
-- A failed recommendation block degrades to its analysis-tier content plus a
-  precise statement of the missing conditions — a Turn never ends blank.
+The diagnosis this workstream was written against turned out to be wrong, and
+the real cause is narrower and worse. Category B did not fail because the Gate
+was mis-tiered. It failed because **the Gate's condition 3 had no route to
+satisfy**: the only registered price-zone field, `price_zone.ordinary_range_pct`,
+was declared in the Signal Registry, computed correctly in code, treated as core
+evidence by the nightly Analysis — and served by **no tool in the catalog**. No
+recommendation could name a zone computed in code, so every recommendation the
+model wrote was refused, and category B was 0/30 by construction rather than by
+data or by model quality.
+
+Landed:
+
+- A `price_zone` tool serves that field. Its details carry the anchor close a
+  recommendation cites as its reference price (Gate condition 2) and the band it
+  cites as its price zone (condition 3). Served alone rather than inside
+  `risk_metrics`, because a cluster reports its widest field's Window Health and
+  a 21-session zone would otherwise inherit a 250-session field's refusal —
+  condition 4 blocking a recommendation over a window that never fed it.
+- The System Prompt Contract's Gate section names where the zone and reference
+  price come from. `PROMPT_VERSION` 1.4.0 → 1.5.0.
+- Gate failures are split into two classes. An *availability* failure (the
+  evidence for a recommendation was not there) drops the block and lets the Turn
+  answer around it, carrying a backend-authored, figure-free sentence naming the
+  condition that was not met. An *integrity* failure — above all a figure that
+  contradicts its own citation — still ends the Turn. The Evidence Manifest
+  records a degrade as a blocked recommendation either way.
+
+Not landed, and no longer believed necessary: a separate analysis-tier
+validator. Prose already releases under the lighter bar (ADR-0018), so the tier
+distinction the spec asked for exists in the code; what was missing was the
+route, not the tier.
 
 ### W5 — General-expert lane (unblocks G3, G4, G11)
 

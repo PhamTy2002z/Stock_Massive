@@ -37,13 +37,14 @@ def test_the_composed_catalog_has_the_stable_core_and_deliberate_memory_tools():
         "recall_facts",
         "screen_universe",
         "risk_metrics",
+        "price_zone",
         "market_behavior",
         "cross_sectional",
         "foreign_flow",
         "indicator_pack",
         "get_watchlist",
     )
-    assert len(catalog.tool_schemas) == 14
+    assert len(catalog.tool_schemas) == 15
 
 
 def test_web_and_executor_tools_join_only_when_their_lanes_are_enabled():
@@ -62,4 +63,4 @@ def test_web_and_executor_tools_join_only_when_their_lanes_are_enabled():
     assert "web_search" in catalog.names
     assert "fetch_url" in catalog.names
     assert "run_python" in catalog.names
-    assert len(catalog.tool_schemas) == 17
+    assert len(catalog.tool_schemas) == 18
