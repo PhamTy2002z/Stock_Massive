@@ -118,12 +118,13 @@ rule.
 - **gate** — run on the production route and production models. Only a gate run may be
   attached to a pull request.
 
-Cost: ~46 Turn cases plus ~10 Analysis cases at three runs each ≈ **168 runs**, at
-roughly 6k input / 800 output tokens, is **$2.5–3 per gate run** — about two full gate
-runs a month inside the $5 eval lane of ADR-0014. A **hard $2.5 ceiling per gate run**
-is enforced through the same atomic reservation as every other call; on exhaustion the
-harness stops and reports `eval_budget_exhausted`. It must **never** silently drop cases
-and report a score: a battery that truncates itself is a battery that lies.
+Cost: ~46 Turn cases plus ~10 Analysis cases at three runs each ≈ **168 runs**. Every
+call is still metered through ADR-0014's atomic ledger. A metered production deployment
+sets `LLM_EVAL_RUN_COST_CEILING_USD` to its chosen per-run ceiling; on exhaustion the
+harness stops and reports `eval_budget_exhausted`. The local CLIProxy/CCS route sets it
+to `0`, disabling only this per-run refusal while keeping usage records and the Eval
+lane visible. It must **never** silently drop cases and report a score: a battery that
+truncates itself is a battery that lies.
 
 ## The gate, with no CI
 

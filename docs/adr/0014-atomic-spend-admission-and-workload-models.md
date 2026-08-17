@@ -60,6 +60,12 @@ call, 100,000 aggregate input, 20,000 aggregate output including hidden reasonin
 $15 per rolling 30 days, one active Turn — against three active Turns system-wide.
 The first token, output, or monetary ceiling reached stops further dispatch.
 
+The Eval Battery additionally supports a configurable per-run monetary ceiling through
+`LLM_EVAL_RUN_COST_CEILING_USD`. A positive value is enforced atomically like every
+other owner ceiling; `0` disables that one refusal for the local CLIProxy/CCS route but
+does not disable token accounting or the Eval lane. Production must choose a positive
+value when its route is directly metered.
+
 When a Turn cannot reserve enough worst-case budget for its next call, the loop ends
 **without another LLM apology call**, persists the partial assistant message and all
 traces, and emits `turn.incomplete` with a stable budget reason. Spending a model call

@@ -480,6 +480,7 @@ def smoke_config(settings: Settings | None = None) -> LLMConfig:
         ),
         lanes=production.lanes,
         request_timeout_seconds=production.request_timeout_seconds,
+        eval_run_cost_ceiling_usd=None,
     )
 
 
