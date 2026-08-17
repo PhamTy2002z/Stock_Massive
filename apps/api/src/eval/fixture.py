@@ -25,7 +25,7 @@ from typing import Any
 
 from .roles import FixtureRole
 from .tables import CAPTURED_TABLES
-from .versions import PinnedVersions
+from .versions import PinnedVersions, running_versions
 
 #: Bumped when a reader would have to parse the *file* differently. Separate
 #: from ``schema_version``, which is about the store the rows came from: a
@@ -198,18 +198,35 @@ def seed_path(directory: Path, fixture_version: str) -> Path:
 
 
 def latest_seed_path(directory: Path) -> Path:
-    """The newest fixture in a directory, by the trading day in its name.
+    """The newest compatible fixture, preferring the latest Trading Day.
 
     Newest rather than only: a re-freeze lands beside its predecessor so the
     previous exam stays readable, and ``docs/adr/0016`` needs the old one to
-    remain nameable when it voids a baseline.
+    remain nameable when it voids a baseline. Multiple re-freezes can share a
+    Trading Day, so their unordered content digests cannot decide which one is
+    current; the version pins do.
     """
     candidates = sorted(directory.glob("*.json")) if directory.exists() else []
     if not candidates:
         raise FixtureSeedInvalid(
             f"no Eval Fixture in {directory}: capture one with `make eval-fixture`"
         )
-    return candidates[-1]
+    loaded = tuple((path, read_seed(path)) for path in candidates)
+    newest_day = max(seed.manifest.trading_day for _, seed in loaded)
+    newest = tuple(
+        (path, seed)
+        for path, seed in loaded
+        if seed.manifest.trading_day == newest_day
+    )
+    running = running_versions()
+    compatible = tuple(
+        path
+        for path, seed in newest
+        if not seed.manifest.versions.mismatches_against(running)
+    )
+    # With no compatible re-freeze, retain the old loud mismatch at load time
+    # rather than pretending an older Trading Day is current.
+    return compatible[-1] if compatible else newest[-1][0]
 
 
 __all__ = [

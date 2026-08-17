@@ -32,6 +32,7 @@ from src.eval.capture import FixtureCaptureFailed, capture_fixture, plan_capture
 from src.eval.fixture import (
     FixtureSeed,
     FixtureSeedInvalid,
+    latest_seed_path,
     read_seed,
     write_seed,
 )
@@ -177,6 +178,21 @@ class TestTheSeedIsFrozen:
 
     def test_the_version_carries_the_trading_day_in_front(self, seed):
         assert seed.fixture_version.startswith(world.TRADING_DAY.isoformat())
+
+    def test_same_day_refreezes_select_the_fixture_for_the_running_code(
+        self, tmp_path, seed
+    ):
+        stale = FixtureSeed(
+            manifest=replace(
+                seed.manifest,
+                versions=replace(seed.manifest.versions, tool_catalog_version="stale"),
+            ),
+            tables=seed.tables,
+        )
+        current_path = write_seed(tmp_path / "a-current.json", seed)
+        write_seed(tmp_path / "z-stale.json", stale)
+
+        assert latest_seed_path(tmp_path) == current_path
 
 
 class TestVersionsAreCheckedBeforeAnythingRuns:
