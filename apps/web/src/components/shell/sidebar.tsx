@@ -9,6 +9,7 @@ import {
   Layers,
   MessageSquare,
   MoreVertical,
+  Newspaper,
   PanelLeft,
   Pencil,
   Pin,
@@ -102,7 +103,12 @@ function ViewSwitch() {
       {tabs.map((tab) => {
         // The new-conversation screen is still the conversation mode: switching
         // to the board and back must not lose which half of the app you were in.
-        const active = tab.view === "board" ? state.view === "board" : state.view !== "board"
+        // The news view belongs to neither segment, so it lights up neither —
+        // `!== "board"` would have claimed it for the conversation.
+        const active =
+          tab.view === "board"
+            ? state.view === "board"
+            : state.view === "chat" || state.view === "new"
         return (
           <button
             key={tab.view}
@@ -137,6 +143,12 @@ function Nav() {
         }}
       >
         Trò chuyện mới
+      </NavRow>
+      <NavRow
+        icon={<Newspaper className="size-[17px] text-ink-4" strokeWidth={1.6} />}
+        onClick={() => dispatch({ type: "view", view: "news" })}
+      >
+        Tin tức
       </NavRow>
       {/* No screener and no saved-report resource exists yet. Drawn because the
           reference draws them, inert because pressing them would do nothing. */}

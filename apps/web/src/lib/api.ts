@@ -1030,3 +1030,68 @@ export async function fetchValuationSeries(
     `/stocks/${encodeURIComponent(symbol)}/series/valuation?${seriesQuery(start, end)}`
   )
 }
+
+
+// === News ===
+//
+// The Discover surface's own two routes. Both answer from stored articles a
+// provider gave us, so every text field is allowed to be missing: a headline is
+// always there, a summary and a body are what the source chose to publish.
+
+/** One article, as the store holds it. */
+export interface NewsItem {
+  id: number
+  title: string
+  source: string
+  /**
+   * `"%Y-%m-%d %H:%M"` in Asia/Ho_Chi_Minh — or `""`, or whatever raw string the
+   * provider printed. Carried as text rather than parsed here: the parse belongs
+   * where the fallback is decided, in `lib/news.ts`.
+   */
+  published_at: string
+  summary: string | null
+  /** Plain text, HTML already stripped upstream, and long enough to read. */
+  content: string | null
+  url: string | null
+  image_url: string | null
+  price: number | null
+  price_change_pct: number | null
+}
+
+/** The same article on the cross-symbol feed, where it must name its own symbol. */
+export interface FeedNewsItem extends NewsItem {
+  symbol: string
+}
+
+export interface NewsFeedResponse {
+  items: FeedNewsItem[]
+  symbols: string[]
+  generated_at: string
+  total_count: number
+}
+
+export interface CompanyNewsResponse {
+  symbol: string
+  items: NewsItem[]
+  total_count: number
+}
+
+/**
+ * The whole feed, in the store's own order.
+ *
+ * `POLLED`, like the market widgets: a news pane that cannot load is the news
+ * pane's problem to show, and veiling the application because a list of
+ * headlines refused would blur surfaces that never touched this provider.
+ */
+export async function fetchNewsFeed(): Promise<NewsFeedResponse> {
+  return fetchApi<NewsFeedResponse>("/stocks/news/feed", undefined, POLLED)
+}
+
+/** One symbol's articles, for the panel beside an open one. */
+export async function fetchCompanyNews(symbol: string): Promise<CompanyNewsResponse> {
+  return fetchApi<CompanyNewsResponse>(
+    `/stocks/${encodeURIComponent(symbol)}/news`,
+    undefined,
+    POLLED,
+  )
+}

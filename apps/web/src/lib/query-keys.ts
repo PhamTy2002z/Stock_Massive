@@ -75,6 +75,10 @@ export const queryKeys = {
   sectorHistoricalPerformance: (period: SectorHistoricalPeriod) =>
     ["analytics", "sectorHistorical", period] as const,
 
+  // News
+  newsFeed: ["news", "feed"] as const,
+  companyNews: (symbol: string) => [...queryKeys.stock(symbol), "news"] as const,
+
   // Background jobs (global, not symbol-scoped)
   jobsStatus: ["jobs", "status"] as const,
 
