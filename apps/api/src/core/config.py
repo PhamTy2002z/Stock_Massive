@@ -283,8 +283,8 @@ class Settings(BaseSettings):
     llm_budget_turn_usd: float = 30.0
     llm_budget_emergency_usd: float = 5.0
     llm_budget_eval_usd: float = 5.0
-    # Zero disables only the per-run Eval ceiling. The monthly Eval lane and
-    # token metering remain active. Set this for a metered production route.
+    # Zero keeps Eval metering but disables synthetic USD refusals for the local
+    # CLIProxy/CCS route. Set a positive value for a metered production route.
     llm_eval_run_cost_ceiling_usd: float = 0.0
 
     # Eval Battery (src/eval/, docs/adr/0016). Không có giá trị mặc định nào ở

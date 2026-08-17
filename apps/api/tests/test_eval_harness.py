@@ -293,6 +293,7 @@ class TestTheCeilingStopsTheRun:
     async def test_a_dev_route_can_disable_only_the_per_run_ceiling(self, harness):
         result = await harness(
             configuration=config(
+                eval_usd=0.0,
                 output_price=COSTLY_PRICE,
                 run_ceiling_usd=None,
             )

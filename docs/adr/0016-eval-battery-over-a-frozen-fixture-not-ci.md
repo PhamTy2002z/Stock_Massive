@@ -122,8 +122,8 @@ Cost: ~46 Turn cases plus ~10 Analysis cases at three runs each ≈ **168 runs**
 call is still metered through ADR-0014's atomic ledger. A metered production deployment
 sets `LLM_EVAL_RUN_COST_CEILING_USD` to its chosen per-run ceiling; on exhaustion the
 harness stops and reports `eval_budget_exhausted`. The local CLIProxy/CCS route sets it
-to `0`, disabling only this per-run refusal while keeping usage records and the Eval
-lane visible. It must **never** silently drop cases and report a score: a battery that
+to `0`, disabling synthetic USD refusals while keeping usage records and the Eval lane
+observable. It must **never** silently drop cases and report a score: a battery that
 truncates itself is a battery that lies.
 
 ## The gate, with no CI
