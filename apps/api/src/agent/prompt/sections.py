@@ -28,7 +28,7 @@ from dataclasses import dataclass
 # a Contract change is a source change that goes through review, the Capability
 # Probe, and a passing gate run — so a version the code could compute from a
 # timestamp or a git SHA would be a version nobody had to think about.
-PROMPT_VERSION = "1.3.0"
+PROMPT_VERSION = "1.4.0"
 
 
 @dataclass(frozen=True)
