@@ -902,6 +902,20 @@ export interface FundamentalSnapshotData {
   period_end: string
   trailing_12_month_net_income_vnd: number | null
   parent_equity_vnd: number | null
+  revenue_vnd: number | null
+  gross_profit_vnd: number | null
+  operating_profit_vnd: number | null
+  pre_tax_profit_vnd: number | null
+  net_profit_after_tax_vnd: number | null
+  parent_net_profit_vnd: number | null
+  total_assets_vnd: number | null
+  total_liabilities_vnd: number | null
+  short_term_borrowings_vnd: number | null
+  long_term_borrowings_vnd: number | null
+  cash_and_equivalents_vnd: number | null
+  cfo_vnd: number | null
+  cfi_vnd: number | null
+  cff_vnd: number | null
 }
 
 /**

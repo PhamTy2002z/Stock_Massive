@@ -73,12 +73,31 @@ REFERENCE_FIELDS = ("symbol", "listed_share", "current_room", "total_room")
 
 # Statement rows are addressed by ``item_id`` rather than by their label: the
 # label is free text that arrives in two languages and changes wording, while
-# the id is the provider's stable key.
+# the id is the provider's stable key. Every id below was read off a live VCI
+# response (MSN, 2026-08-17) rather than guessed from a label.
 INCOME_ITEM_PARENT_PROFIT = "attributable_to_parent_company"
+INCOME_ITEM_NET_SALES = "net_sales"
+INCOME_ITEM_GROSS_PROFIT = "gross_profit"
+INCOME_ITEM_OPERATING_PROFIT = "operating_profit_loss"
+INCOME_ITEM_PRE_TAX_PROFIT = "net_accounting_profit_loss_before_tax"
+INCOME_ITEM_NET_PROFIT_AFTER_TAX = "net_profit_loss_after_tax"
 BALANCE_ITEM_OWNERS_EQUITY = "owners_equity"
 BALANCE_ITEM_MINORITY_INTERESTS = "minority_interests"
+BALANCE_ITEM_TOTAL_ASSETS = "total_assets"
+BALANCE_ITEM_LIABILITIES = "liabilities"
+BALANCE_ITEM_SHORT_TERM_BORROWINGS = "short_term_borrowings"
+BALANCE_ITEM_LONG_TERM_BORROWINGS = "long_term_borrowings"
+BALANCE_ITEM_CASH_AND_EQUIVALENTS = "cash_and_cash_equivalents"
+CASHFLOW_ITEM_CFO = "net_cash_inflows_outflows_from_operating_activities"
+CASHFLOW_ITEM_CFI = "net_cash_inflows_outflows_from_investing_activities"
+CASHFLOW_ITEM_CFF = "net_cash_inflows_outflows_from_financing_activities"
 
 TRAILING_QUARTERS = 4
+
+# How many reporting periods one collection emits. The community tier answers
+# with at most 8 period columns; asking to keep more is free, the columns are
+# simply not there.
+STATEMENT_QUARTERS = 8
 
 # What a quote history answers with, and the interval that asks for sessions.
 HISTORY_FIELDS = ("time", "open", "high", "low", "close", "volume")
@@ -720,7 +739,7 @@ class VnstockFundamentalProvider(VnstockProviderBase):
 
         for symbol in normalized:
             try:
-                snapshot = self._fetch_one(symbol, observed_at)
+                periods = self._fetch_one(symbol, observed_at)
             except (VnstockUnavailable, VnstockUnsupported):
                 # Quota and capability failures are about the account, not this
                 # symbol; carrying on would repeat them for every remaining one
@@ -737,8 +756,7 @@ class VnstockFundamentalProvider(VnstockProviderBase):
             except Exception as exc:
                 logger.warning("Skipping %s: vnstock statements unusable (%s)", symbol, exc)
                 continue
-            if snapshot is not None:
-                snapshots.append(snapshot)
+            snapshots.extend(periods)
 
         return tuple(snapshots)
 
@@ -746,7 +764,13 @@ class VnstockFundamentalProvider(VnstockProviderBase):
         self,
         symbol: str,
         observed_at: datetime,
-    ) -> FundamentalSnapshot | None:
+    ) -> list[FundamentalSnapshot]:
+        """Return one snapshot per reporting period, oldest first.
+
+        Oldest first because the store's current-view cache keeps whichever
+        snapshot was saved last, and a writer iterating this list in order must
+        leave the newest period there.
+        """
         finance = self._finance_factory(symbol, self._vnstock_source)
         income = self._read(
             lambda: finance.income_statement(period="quarter", lang="en", dropna=True),
@@ -760,32 +784,86 @@ class VnstockFundamentalProvider(VnstockProviderBase):
         income_periods = _statement_periods(income, f"{symbol} income statement")
         if not income_periods:
             logger.info("Skipping %s: vnstock reports no income statement", symbol)
-            return None
+            return []
 
-        period_end, latest_column = income_periods[0]
         balance_periods = _statement_periods(balance, f"{symbol} balance sheet")
 
+        # A missing cash flow statement costs this symbol its three flow lines,
+        # not its filing: banks and recent listings file the other two first,
+        # and refusing the whole symbol over the youngest statement would blank
+        # exactly the companies with the least coverage already.
         try:
-            return FundamentalSnapshot(
-                symbol=symbol,
-                metadata=SnapshotMetadata(
-                    source=self.source,
-                    effective_at=datetime.combine(
-                        period_end, datetime.min.time(), tzinfo=VN_TZ
-                    ),
-                    observed_at=observed_at,
-                ),
-                period_end=period_end,
-                trailing_12_month_net_income_vnd=_trailing_net_income(
-                    income, income_periods
-                ),
-                parent_equity_vnd=(
-                    _parent_equity(balance, latest_column) if balance_periods else None
-                ),
+            cash_flow = self._read(
+                lambda: finance.cash_flow(period="quarter", lang="en", dropna=True),
+                f"vnstock cash flow fetch failed for {symbol}",
             )
-        except ValidationError as exc:
-            logger.warning("Skipping unusable vnstock statements for %s: %s", symbol, exc)
-            return None
+            cash_flow_periods = _statement_periods(
+                cash_flow, f"{symbol} cash flow statement"
+            )
+        except VnstockReadFailed as exc:
+            logger.warning("Keeping %s without cash flow lines: %s", symbol, exc)
+            cash_flow, cash_flow_periods = None, []
+
+        snapshots: list[FundamentalSnapshot] = []
+        for index, (period_end, column) in enumerate(
+            income_periods[:STATEMENT_QUARTERS]
+        ):
+            balance_column = column if any(column == c for _, c in balance_periods) else None
+            cash_flow_column = (
+                column if any(column == c for _, c in cash_flow_periods) else None
+            )
+            try:
+                snapshots.append(
+                    FundamentalSnapshot(
+                        symbol=symbol,
+                        metadata=SnapshotMetadata(
+                            source=self.source,
+                            effective_at=datetime.combine(
+                                period_end, datetime.min.time(), tzinfo=VN_TZ
+                            ),
+                            observed_at=observed_at,
+                        ),
+                        period_end=period_end,
+                        trailing_12_month_net_income_vnd=_trailing_net_income(
+                            income, income_periods[index:]
+                        ),
+                        parent_equity_vnd=(
+                            _parent_equity(balance, balance_column)
+                            if balance_column is not None
+                            else None
+                        ),
+                        revenue_vnd=_statement_value(
+                            income, INCOME_ITEM_NET_SALES, column
+                        ),
+                        gross_profit_vnd=_statement_value(
+                            income, INCOME_ITEM_GROSS_PROFIT, column
+                        ),
+                        operating_profit_vnd=_statement_value(
+                            income, INCOME_ITEM_OPERATING_PROFIT, column
+                        ),
+                        pre_tax_profit_vnd=_statement_value(
+                            income, INCOME_ITEM_PRE_TAX_PROFIT, column
+                        ),
+                        net_profit_after_tax_vnd=_statement_value(
+                            income, INCOME_ITEM_NET_PROFIT_AFTER_TAX, column
+                        ),
+                        parent_net_profit_vnd=_statement_value(
+                            income, INCOME_ITEM_PARENT_PROFIT, column
+                        ),
+                        **_balance_lines(balance, balance_column),
+                        **_cash_flow_lines(cash_flow, cash_flow_column),
+                    )
+                )
+            except ValidationError as exc:
+                logger.warning(
+                    "Skipping unusable vnstock statements for %s %s: %s",
+                    symbol,
+                    period_end,
+                    exc,
+                )
+
+        snapshots.reverse()
+        return snapshots
 
 
 class VnstockCorporateActionProvider(VnstockProviderBase):
@@ -1054,6 +1132,44 @@ def _trailing_net_income(
     if any(value is None for value in quarters):
         return None
     return sum(quarters)
+
+
+def _balance_lines(
+    balance: pd.DataFrame | None,
+    column: str | None,
+) -> dict[str, float | None]:
+    """Read the balance-sheet lines one period's snapshot stores."""
+    if balance is None or column is None:
+        return {}
+    return {
+        "total_assets_vnd": _statement_value(balance, BALANCE_ITEM_TOTAL_ASSETS, column),
+        "total_liabilities_vnd": _statement_value(
+            balance, BALANCE_ITEM_LIABILITIES, column
+        ),
+        "short_term_borrowings_vnd": _statement_value(
+            balance, BALANCE_ITEM_SHORT_TERM_BORROWINGS, column
+        ),
+        "long_term_borrowings_vnd": _statement_value(
+            balance, BALANCE_ITEM_LONG_TERM_BORROWINGS, column
+        ),
+        "cash_and_equivalents_vnd": _statement_value(
+            balance, BALANCE_ITEM_CASH_AND_EQUIVALENTS, column
+        ),
+    }
+
+
+def _cash_flow_lines(
+    cash_flow: pd.DataFrame | None,
+    column: str | None,
+) -> dict[str, float | None]:
+    """Read the three net cash-flow lines one period's snapshot stores."""
+    if cash_flow is None or column is None:
+        return {}
+    return {
+        "cfo_vnd": _statement_value(cash_flow, CASHFLOW_ITEM_CFO, column),
+        "cfi_vnd": _statement_value(cash_flow, CASHFLOW_ITEM_CFI, column),
+        "cff_vnd": _statement_value(cash_flow, CASHFLOW_ITEM_CFF, column),
+    }
 
 
 def _parent_equity(balance: pd.DataFrame, column: str) -> float | None:
