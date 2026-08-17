@@ -42,8 +42,23 @@ export function SearchProgress({
   defaultOpen?: boolean
   className?: string
 }) {
+  const rows = visibleRows(steps, activity)
   const [open, setOpen] = useState(defaultOpen)
-  if (steps.length === 0 && activity === null && ending === null) return null
+
+  // The trail folds itself the moment the Turn ends, rather than waiting for the
+  // canonical message to replace the draft that opened it. Between those two
+  // things is a gap the reader spends looking at an answer with the machinery
+  // still spread open above it. Adjusted during render off the previous
+  // `ending` — an effect would fold on a second pass, one frame late.
+  const [endedAs, setEndedAs] = useState(ending)
+  if (ending !== endedAs) {
+    setEndedAs(ending)
+    if (ending !== null) setOpen(false)
+  }
+
+  // No step worth naming means no trail, even on a Turn that finished: a
+  // disclosure whose only row is *Hoàn thành* discloses nothing.
+  if (rows.length === 0) return null
 
   return (
     <div className={cn("grid gap-3", className)}>
@@ -63,12 +78,12 @@ export function SearchProgress({
 
       {open && (
         <ol className="grid">
-          {steps.map((step, index) => (
+          {rows.map(({ step, running, index }) => (
             <TrailRow
               key={`${step.phase}-${index}`}
-              label={labelOf(step)}
-              running={activity === step.phase && index === steps.length - 1}
-              last={ending === null && index === steps.length - 1}
+              label={labelOf(step, running)}
+              running={running}
+              last={ending === null && index === rows[rows.length - 1].index}
             >
               <StepDetail step={step} />
             </TrailRow>
@@ -176,25 +191,74 @@ function StepDetail({ step }: { step: ProgressStep }) {
 }
 
 /**
+ * Whether this pair would draw a trail at all.
+ *
+ * Exported so a caller can tell an empty trail from a folded one. The draft
+ * needs the difference: with nothing else on screen yet, a Turn whose only step
+ * has been filtered away still owes the reader a sign that it is working.
+ */
+export function hasVisibleTrail(
+  steps: ProgressStep[],
+  activity: ActivityPhase | null,
+): boolean {
+  return visibleRows(steps, activity).length > 0
+}
+
+/** One step as it is drawn, keeping the index it had among all the steps. */
+interface TrailItem {
+  step: ProgressStep
+  running: boolean
+  /** Its position in `steps`, so *last* still means last of the real work. */
+  index: number
+}
+
+/**
+ * Which steps are worth a row.
+ *
+ * Only the newest step can be the running one: the phases arrive in order, and
+ * a phase repeated later in the trail does not restart the earlier row.
+ *
+ * *Analyzing* is dropped unless it is that running step. It is the one phase
+ * that names no work the reader can weigh — no query, no source, no count — so
+ * once it is over it contributes a line that says the system was thinking about
+ * an answer the reader is already looking at.
+ */
+function visibleRows(steps: ProgressStep[], activity: ActivityPhase | null): TrailItem[] {
+  return steps
+    .map((step, index) => ({
+      step,
+      index,
+      running: activity === step.phase && index === steps.length - 1,
+    }))
+    .filter(({ step, running }) => step.phase !== "analyzing" || running)
+}
+
+/**
  * What one row says.
  *
  * Takes the whole step rather than its phase, because one row is a *number*:
  * *Đã tìm thấy 15 kết quả* is what the reader weighs the answer against, and it
  * lives in the detail beside the phase that earned it.
+ *
+ * It also takes whether the row is the live one, because a step that is over
+ * says so. *Đang tìm trên web…* above a finished answer describes a Turn that
+ * is still running, which is the thing the reader is trying to find out.
  */
-function labelOf(step: ProgressStep): string {
+function labelOf(step: ProgressStep, running: boolean): string {
   switch (step.phase) {
     case "searching":
-      return PROGRESS_COPY.searching
+      return running ? PROGRESS_COPY.searching : PROGRESS_COPY.searched
     case "found_sources":
+      // Already a finished fact in both states: the count is what came back.
       return PROGRESS_COPY.found(
         step.detail?.result_count ?? step.detail?.sources?.length ?? 0,
       )
     case "reading_data":
-      return PROGRESS_COPY.readingData
+      return running ? PROGRESS_COPY.readingData : PROGRESS_COPY.readData
     case "preparing_visual":
-      return PROGRESS_COPY.preparingVisual
+      return running ? PROGRESS_COPY.preparingVisual : PROGRESS_COPY.preparedVisual
     case "analyzing":
+      // Only ever drawn while it is the running step; see `visibleRows`.
       return PROGRESS_COPY.thinking
   }
 }
