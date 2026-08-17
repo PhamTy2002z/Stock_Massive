@@ -579,3 +579,52 @@ def test_a_fullwidth_bracket_marker_attributes_and_never_reaches_the_reader():
     assert len(released.citations) == 2
     assert "【" not in released.text and "ev:" not in released.text
     assert "4.5" in released.text and "-12.5" in released.text
+
+
+def test_a_marker_written_without_its_kind_still_attributes_the_figure():
+    """The model dropped the `ev:` prefix; the reference is still a reference.
+
+    Inferred as plain evidence, which is the weakest kind: it attributes the
+    figure in front of it and can never stand in for a zone, a reference price
+    or the contradictory citation the Gate requires.
+    """
+    text = f"Vùng dao động thường ngày 4.5【c1#registered_fields.{ZONE}.value】."
+
+    released = validator().validate(text, standard_traces())
+
+    assert released.unverified_figures == ()
+    assert len(released.citations) == 1
+    assert released.citations[0].zone_label is None
+    assert released.citations[0].reference_price is False
+    assert "【" not in released.text
+
+
+def test_an_inferred_marker_that_resolves_to_nothing_costs_only_its_figure():
+    """A forgotten prefix must not end a Turn the model otherwise answered.
+
+    An explicit `[ev:…]` naming a call that does not exist is the model
+    breaking its own protocol and still fails. An inferred one was never a
+    promise, so the figure falls back to unattributed — the same place it
+    would be with no marker at all.
+    """
+    text = "Vùng dao động thường ngày 4.5【c9#registered_fields.nothing.here】."
+
+    released = validator().validate(text, standard_traces())
+
+    assert released.unverified_figures == ("4.5",)
+    assert released.citations == ()
+    assert "【" not in released.text
+
+    explicit = "Vùng dao động thường ngày 4.5 [ev:c9#registered_fields.nothing.here]."
+
+    with pytest.raises(GroundingFailure):
+        validator().validate(explicit, standard_traces())
+
+
+def test_ordinary_bracketed_prose_is_never_read_as_a_reference():
+    """The inference is shaped to a reference, so prose keeps its brackets."""
+    text = "Thị trường đóng cửa【ghi chú của người đọc】và không có số liệu nào."
+
+    released = validator().validate(text, standard_traces())
+
+    assert "ghi chú của người đọc" in released.text
