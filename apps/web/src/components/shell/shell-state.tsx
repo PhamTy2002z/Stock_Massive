@@ -26,10 +26,10 @@ import {
 
 /** What fills the main column. Client state, deliberately: the reference switches
  *  these without a navigation, and the composer must survive the switch. */
-export type ShellView = "chat" | "board" | "new"
+export type ShellView = "chat" | "board" | "new" | "news"
 
 /** Which tab the right-hand inspector shows, or `null` when it is closed. */
-export type InspectorTab = "market" | "symbol"
+export type InspectorTab = "market" | "symbol" | "news"
 
 /** The four things that float above the surface. One at a time, always. */
 export type Overlay = "account" | "attach" | "thread" | "share" | "palette"
@@ -66,6 +66,16 @@ interface ShellState {
    * behalf.
    */
   draft: string
+  /**
+   * Which article the news view has open, as `"SYMBOL:id"`, or `null` for the feed.
+   *
+   * Here rather than in the news view for the same reason as `draft`: reading an
+   * article is not a navigation, so glancing at the board and coming back must
+   * return to the paragraph the reader was on rather than to the top of the
+   * feed. It is also what lets the inspector's source tab exist at all — that
+   * panel is a second surface describing the same open article.
+   */
+  newsArticle: string | null
 }
 
 type Action =
@@ -83,6 +93,8 @@ type Action =
   | { type: "dismiss-notice" }
   | { type: "viewport"; width: number }
   | { type: "draft"; text: string }
+  /** Open one article in the news view, or `null` to go back to the feed. */
+  | { type: "news-article"; article: string | null }
   /** Fill the composer and put the user in front of it, without sending. */
   | { type: "ask"; text: string }
 
@@ -121,6 +133,7 @@ const INITIAL: ShellState = {
   noticeDismissed: false,
   viewport: 0,
   draft: "",
+  newsArticle: null,
 }
 
 /**
@@ -200,6 +213,11 @@ function reduce(state: ShellState, action: Action): ShellState {
 
     case "draft":
       return { ...state, draft: action.text }
+
+    case "news-article":
+      // An article opening is a change of what the main column reads, so
+      // whatever was floating over it belongs to the screen being left.
+      return { ...state, newsArticle: action.article, overlay: null }
 
     case "ask":
       // The question is offered, not asked. Landing in the conversation with
