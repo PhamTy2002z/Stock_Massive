@@ -18,6 +18,13 @@ export function useNewsFeed() {
     queryFn: fetchNewsFeed,
     staleTime: STALE_TIME.STATIC,
     refetchOnWindowFocus: true,
+    // The provider's default sends a refused request to the ErrorBoundary,
+    // which for this query would replace the whole shell — the conversation and
+    // the board included — because one pane of headlines came back 404 or spent
+    // its quota. News is a view, not the app: the feed reports its own failure
+    // and offers its own retry, which is also what passing the non-veiling
+    // fetch behaviour already promised.
+    throwOnError: false,
   })
 
   return {
