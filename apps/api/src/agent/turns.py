@@ -194,6 +194,9 @@ def draft_content(draft: TurnDraft) -> dict[str, Any]:
         "widgets": [widget.as_wire() for widget in draft.widgets],
         "rounds_used": draft.rounds_used,
         "tool_calls": len(draft.tool_calls),
+        # The activity trail, so a browser reconnecting to a Turn this process
+        # no longer holds rebuilds what it was watching (``docs/adr/0020``).
+        "progress": [dict(step) for step in draft.progress],
     }
 
 
@@ -402,6 +405,7 @@ class TurnService:
                 outcomes=GateOutcome(grounding="in_progress"),
                 widgets=[widget.as_wire() for widget in draft.widgets],
                 widget_refusals=draft.widget_refusals,
+                search_progress=draft.progress,
             )
             if draft.blocks
             else None
@@ -421,6 +425,8 @@ class TurnService:
         provider_request_id: str | None = None,
         widgets: Sequence[Mapping[str, Any]] = (),
         widget_refusals: Sequence[Mapping[str, Any]] = (),
+        search_progress: Sequence[Mapping[str, Any]] = (),
+        suggestions: Sequence[str] = (),
     ) -> dict[str, Any]:
         """One assistant message, Notice and Manifest attached by the backend."""
         manifest = build_manifest(
@@ -444,6 +450,8 @@ class TurnService:
             citations=citations,
             widgets=widgets,
             widget_refusals=widget_refusals,
+            search_progress=search_progress,
+            suggestions=suggestions,
         )
 
     async def _finish(self, running: RunningTurn, outcome: TurnOutcome) -> TurnRecord:
@@ -462,6 +470,8 @@ class TurnService:
                 provider_request_id=outcome.provider_request_id,
                 widgets=[widget.as_wire() for widget in outcome.widgets],
                 widget_refusals=outcome.widget_refusals,
+                search_progress=outcome.progress,
+                suggestions=outcome.suggestions,
             )
             if outcome.blocks
             else None
@@ -521,6 +531,9 @@ class TurnService:
                     () if draft is None else [w.as_wire() for w in draft.widgets]
                 ),
                 widget_refusals=() if draft is None else draft.widget_refusals,
+                # No suggestions: this path is a Turn that ended badly, and
+                # follow-ups belong under an answer that was actually given.
+                search_progress=() if draft is None else draft.progress,
             )
             if blocks
             else None

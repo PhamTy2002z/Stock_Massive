@@ -17,9 +17,9 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 
 import type { AssistantView, DraftEntry } from "@/lib/alpha-desk/transcript"
 import type { Citation, ContentBlock, RiskNotice } from "@/lib/alpha-desk/types"
-import { ActivityTrail } from "./activity-line"
 import { AssistantMessage } from "./assistant-message"
 import { DraftMessage } from "./draft-message"
+import { SearchProgress } from "./search-progress"
 
 afterEach(cleanup)
 
@@ -88,6 +88,9 @@ function view(overrides: Partial<AssistantView> = {}): AssistantView {
     blocks: [block("kết luận")],
     riskNotice: NOTICE,
     sourcesAndMethods: [],
+    searchProgress: [],
+    suggestions: [],
+    completed: true,
     ...overrides,
   }
 }
@@ -128,6 +131,10 @@ describe("how an answer arrives", () => {
         })}
       />,
     )
+
+    // Behind the chip, which is where ADR-0015's first provenance layer lives
+    // now: one press from the claim, and never further.
+    fireEvent.click(screen.getByLabelText(/Nguồn của đoạn này/))
 
     expect(screen.getAllByText(/HOSE/).length).toBeGreaterThan(0)
     expect(screen.getByText("Nguồn ngoài · chưa kiểm chứng")).toBeInTheDocument()
@@ -179,51 +186,264 @@ describe("how an answer arrives", () => {
   })
 })
 
-describe("the activity trail", () => {
-  it("shows a generic phase while tools run", () => {
-    render(<ActivityTrail steps={[]} phase="reading_data" />)
-
-    expect(screen.getByRole("status")).toHaveTextContent(/Đang đọc dữ liệu/)
-  })
-
-  it("keeps the steps it finished, in the order it finished them", () => {
-    render(<ActivityTrail steps={["searching", "reading_data"]} phase="analyzing" />)
-
-    const lines = screen.getAllByRole("button").map((row) => row.textContent)
-    expect(lines[0]).toMatch(/Đã tìm/)
-    expect(lines[1]).toMatch(/Đã đọc dữ liệu/)
-    expect(lines[2]).toMatch(/Đang phân tích/)
-  })
-
-  it("announces only the step in flight", () => {
-    // A finished step is not progress. Announcing each one would turn a quiet
-    // answer into a queue of interruptions for a screen reader.
-    const { container } = render(
-      <ActivityTrail steps={["searching", "reading_data"]} phase="analyzing" />,
+describe("the search-progress trail", () => {
+  it("shows every step in order, with the running one announced", () => {
+    render(
+      <SearchProgress
+        steps={[{ phase: "analyzing" }, { phase: "searching" }]}
+        activity="searching"
+        defaultOpen
+      />,
     )
 
-    expect(container.querySelectorAll("[role='status']")).toHaveLength(1)
+    const rows = screen.getAllByRole("listitem").map((row) => row.textContent)
+    expect(rows[0]).toMatch(/Đang suy nghĩ/)
+    expect(rows[1]).toMatch(/Đang tìm trên web/)
+    // A finished step is not progress: announcing each one would turn a quiet
+    // answer into a queue of interruptions for a screen reader.
+    expect(screen.getAllByRole("status")).toHaveLength(1)
+    expect(screen.getByRole("status")).toHaveTextContent(/Đang tìm trên web/)
+  })
+
+  it("discloses the open web's queries, its result count and its sources", () => {
+    render(
+      <SearchProgress
+        steps={[
+          { phase: "searching", detail: { queries: ["chủ tịch Masan Group"] } },
+          {
+            phase: "found_sources",
+            detail: {
+              result_count: 15,
+              sources: [
+                {
+                  title: "Ban lãnh đạo của Công ty CP Tập đoàn Masan",
+                  url: "https://masangroup.com/leadership",
+                  domain: "masangroup.com",
+                },
+              ],
+            },
+          },
+        ]}
+        activity={null}
+        ending="done"
+        defaultOpen
+      />,
+    )
+
+    expect(screen.getByText("chủ tịch Masan Group")).toBeInTheDocument()
+    expect(screen.getByText("Đã tìm thấy 15 kết quả")).toBeInTheDocument()
+    expect(screen.getByText("Tổng hợp 15 nguồn")).toBeInTheDocument()
+    expect(screen.getByText("masangroup.com")).toBeInTheDocument()
+    expect(screen.getByText("Hoàn thành")).toBeInTheDocument()
+  })
+
+  it("opens every source in a new tab without a referrer", () => {
+    // Untrusted external pages reached from an authenticated surface: the
+    // referrer would tell each host which app sent the reader.
+    render(
+      <SearchProgress
+        steps={[
+          {
+            phase: "found_sources",
+            detail: {
+              result_count: 1,
+              sources: [{ title: "Bản tin", url: "https://e.vnexpress.net/a", domain: "e.vnexpress.net" }],
+            },
+          },
+        ]}
+        activity={null}
+        defaultOpen
+      />,
+    )
+
+    const link = screen.getByRole("link", { name: /Bản tin/ })
+    expect(link).toHaveAttribute("target", "_blank")
+    expect(link).toHaveAttribute("rel", "noopener noreferrer")
+  })
+
+  it("folds away by default, so a finished answer reads as an answer", () => {
+    render(<SearchProgress steps={[{ phase: "analyzing" }]} activity={null} ending="done" />)
+
+    expect(screen.queryByText("Đang suy nghĩ…")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /Tiến trình tìm kiếm/ }))
+
+    expect(screen.getByText("Đang suy nghĩ…")).toBeInTheDocument()
   })
 
   it("draws nothing at all when there is no work to show", () => {
-    const { container } = render(<ActivityTrail steps={[]} phase={null} />)
+    const { container } = render(<SearchProgress steps={[]} activity={null} />)
 
     expect(container).toBeEmptyDOMElement()
   })
 
-  it("exposes no tool name, symbol, argument or result — collapsed or expanded", () => {
+  it("exposes no tool name, symbol or figure on a store-reading step", () => {
+    // ADR-0020 widened disclosure for the open web only. A step from a lane that
+    // reads the store still carries a phase and nothing else.
     const { container } = render(
-      <ActivityTrail steps={["reading_data", "analyzing"]} phase="searching" />,
+      <SearchProgress
+        steps={[{ phase: "reading_data" }, { phase: "analyzing" }]}
+        activity={null}
+        ending="done"
+        defaultOpen
+      />,
     )
-
-    for (const row of screen.getAllByRole("button")) fireEvent.click(row)
 
     const markup = container.innerHTML
     for (const name of TOOL_NAMES) expect(markup).not.toContain(name)
-    // No ticker, no figure: either would mean a line was assembled from a call
-    // rather than from the phase the publisher named.
     expect(container.textContent).not.toMatch(/\b[A-Z]{3}\b/)
     expect(container.textContent).not.toMatch(/\d/)
+  })
+})
+
+describe("how prose is rendered", () => {
+  it("renders Markdown rather than showing its syntax", () => {
+    // A block is a Markdown-safe unit by construction (ADR-0013). Showing it
+    // verbatim put `**` on screen in front of readers.
+    render(<AssistantMessage view={view({ blocks: [block("Chủ tịch là **ông Quang**.")] })} />)
+
+    expect(screen.getByText("ông Quang")).toBeInTheDocument()
+    expect(screen.queryByText(/\*\*/)).not.toBeInTheDocument()
+  })
+
+  it("renders no HTML a block happens to contain", () => {
+    // No `rehype-raw`, so there is no path from model output to markup: an
+    // injected tag is escaped and reaches the reader as the text it is.
+    const { container } = render(
+      <AssistantMessage
+        view={view({ blocks: [block('Xem <img src="x" onerror="alert(1)"> nhé.')] })}
+      />,
+    )
+
+    expect(container.querySelector("img")).toBeNull()
+    expect(container.textContent).toContain('<img src="x" onerror="alert(1)">')
+  })
+})
+
+describe("what the answer offers underneath", () => {
+  it("counts the sources behind it and lists them on demand", () => {
+    render(
+      <AssistantMessage
+        view={view({
+          searchProgress: [
+            {
+              phase: "found_sources",
+              detail: {
+                result_count: 2,
+                sources: [
+                  { title: "Trang A", url: "https://a.vn/1", domain: "a.vn" },
+                  { title: "Trang B", url: "https://b.vn/2", domain: "b.vn" },
+                ],
+              },
+            },
+          ],
+        })}
+      />,
+    )
+
+    fireEvent.click(screen.getByText("2 nguồn"))
+
+    expect(screen.getByRole("link", { name: /Trang A/ })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /Trang B/ })).toBeInTheDocument()
+  })
+
+  it("opens the drawer with what each page said and when", () => {
+    render(
+      <AssistantMessage
+        view={view({
+          searchProgress: [
+            {
+              phase: "found_sources",
+              detail: {
+                result_count: 1,
+                sources: [
+                  {
+                    title: "Ban lãnh đạo của Công ty CP Tập đoàn Masan",
+                    url: "https://masangroup.com/leadership",
+                    domain: "masangroup.com",
+                    snippet: "Ban Điều hành gồm năm thành viên điều hành cao cấp.",
+                    published_at: "2025-11-20",
+                    retrieved_at: "2026-06-19T08:00:00+00:00",
+                  },
+                ],
+              },
+            },
+          ],
+        })}
+      />,
+    )
+
+    fireEvent.click(screen.getByText("1 nguồn"))
+
+    expect(screen.getByText("1 nguồn tham khảo")).toBeInTheDocument()
+    expect(screen.getByText("masangroup.com")).toBeInTheDocument()
+    expect(
+      screen.getByText("Ban Điều hành gồm năm thành viên điều hành cao cấp."),
+    ).toBeInTheDocument()
+    // Both timestamps read as the reader's calendar, never as the wire format.
+    expect(screen.getByText("20 thg 11, 2025")).toBeInTheDocument()
+    expect(screen.getByText("Cập nhật: 19 thg 6, 2026")).toBeInTheDocument()
+  })
+
+  it("shows no excerpt and no dates for a page whose result offered none", () => {
+    render(
+      <AssistantMessage
+        view={view({
+          searchProgress: [
+            {
+              phase: "found_sources",
+              detail: {
+                result_count: 1,
+                sources: [{ title: "Trang A", url: "https://a.vn/1", domain: "a.vn" }],
+              },
+            },
+          ],
+        })}
+      />,
+    )
+
+    fireEvent.click(screen.getByText("1 nguồn"))
+
+    expect(screen.getByRole("link", { name: /Trang A/ })).toBeInTheDocument()
+    expect(screen.queryByText(/Cập nhật:/)).not.toBeInTheDocument()
+  })
+
+  it("closes the trail with what the Turn actually ended as", () => {
+    // The blocks of a Turn that hit its deadline look exactly like a whole
+    // answer's; this row is the only place the difference shows.
+    render(
+      <AssistantMessage
+        view={view({ searchProgress: [{ phase: "analyzing" }], completed: false })}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Tiến trình tìm kiếm/ }))
+
+    expect(screen.getByText("Đã dừng")).toBeInTheDocument()
+    expect(screen.queryByText("Hoàn thành")).not.toBeInTheDocument()
+  })
+
+  it("offers a follow-up without asking it", () => {
+    // Pressing one fills the composer; it never spends a Turn the reader has not
+    // decided to spend.
+    const onAsk = vi.fn()
+    render(
+      <AssistantMessage
+        view={view({ suggestions: ["Chủ tịch Masan hiện tại là ai?"] })}
+        showSuggestions
+        onAsk={onAsk}
+      />,
+    )
+
+    fireEvent.click(screen.getByText("Chủ tịch Masan hiện tại là ai?"))
+
+    expect(onAsk).toHaveBeenCalledWith("Chủ tịch Masan hiện tại là ai?")
+  })
+
+  it("keeps follow-ups off every answer but the newest", () => {
+    render(<AssistantMessage view={view({ suggestions: ["một câu hỏi"] })} onAsk={vi.fn()} />)
+
+    expect(screen.queryByText("một câu hỏi")).not.toBeInTheDocument()
   })
 })
 
@@ -248,7 +468,7 @@ describe("the Risk Notice", () => {
 
 describe("what an answer never shows", () => {
   it("names no tool, anywhere, even where a citation carries one", () => {
-    const { container } = render(
+    render(
       <AssistantMessage
         view={view({
           blocks: [block("kết luận", [citation()])],
@@ -269,30 +489,45 @@ describe("what an answer never shows", () => {
       />,
     )
 
-    fireEvent.click(screen.getByText("View details"))
+    fireEvent.click(screen.getByLabelText(/Nguồn của đoạn này/))
+    fireEvent.click(screen.getByText("1 nguồn"))
     fireEvent.click(screen.getByText("Sources & methods"))
 
-    const markup = container.innerHTML
+    // The whole document, not the render container: the source drawer portals
+    // to `body`, and a tool name leaking there is the same leak.
+    const markup = document.body.innerHTML
     for (const name of TOOL_NAMES) expect(markup).not.toContain(name)
     expect(markup).not.toContain("call_01")
   })
 
-  it("puts the unit and the as_of beside the figure rather than behind a disclosure", () => {
+  it("keeps the unit and the as_of one press from the claim they belong to", () => {
+    // ADR-0015's first provenance layer. The chip replaced a card in the reading
+    // order, not the reader's access to the figure behind the sentence.
     render(<AssistantMessage view={view({ blocks: [block("kết luận", [citation()])] })} />)
+
+    fireEvent.click(screen.getByLabelText(/Nguồn của đoạn này/))
 
     expect(screen.getByText("12,4")).toBeInTheDocument()
     expect(screen.getByText("%")).toBeInTheDocument()
     expect(screen.getByText("as of 2026-08-14")).toBeInTheDocument()
+    expect(screen.getByText("technical.momentum_273d")).toBeInTheDocument()
   })
 
-  it("keeps method detail behind View details", () => {
-    render(<AssistantMessage view={view({ blocks: [block("kết luận", [citation()])] })} />)
+  it("names the source on the chip and counts the others", () => {
+    render(
+      <AssistantMessage
+        view={view({
+          blocks: [
+            block("kết luận", [
+              citation({ source: "external_claim", provenance: "www.masangroup.com" }),
+              citation({ source: "external_claim", provenance: "e.vnexpress.net" }),
+            ]),
+          ],
+        })}
+      />,
+    )
 
-    expect(screen.queryByText("technical.momentum_273d")).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByText("View details"))
-
-    expect(screen.getByText("technical.momentum_273d")).toBeInTheDocument()
+    expect(screen.getByText("masangroup +1")).toBeInTheDocument()
   })
 })
 

@@ -82,7 +82,7 @@ from .context import (
     build_messages,
     estimate_tokens,
 )
-from .events import Activity, TurnPublisher
+from .events import Activity, TurnPublisher, append_step
 from .grounding import (
     GROUNDING_FAILED,
     Citation,
@@ -91,7 +91,16 @@ from .grounding import (
     ReleasedBlock,
     TraceIndex,
 )
+from .progress import (
+    ProgressSource,
+    found_detail,
+    merge_sources,
+    queries_of,
+    searching_detail,
+    sources_of,
+)
 from .prompt import AnswerEvidence, AnswerKind, RuntimeContext, classify_answer_kind, render
+from . import suggestions
 from .tools.catalog import ToolCatalog, ToolContext, refusal_reason
 from .widgets import (
     WidgetSelection,
@@ -325,6 +334,10 @@ class TurnDraft:
     # deadline kills before it returns one is still written under the answer
     # kind it had earned rather than under a default.
     answer_kind: AnswerKind = AnswerKind.EDUCATION
+    # The activity trail, checkpointed for the same reason the blocks are: a
+    # reader who reconnects to a frozen Turn sees what it got through
+    # (``docs/adr/0020``).
+    progress: tuple[Mapping[str, Any], ...] = ()
 
     @property
     def citations(self) -> tuple[Citation, ...]:
@@ -360,6 +373,10 @@ class TurnOutcome:
     # Prose blocks released with one or more figures the Turn could not
     # attribute. Recommendations never contribute: they are blocked instead.
     downgraded_blocks: int = 0
+    # The activity trail as the canonical message will store it, and the
+    # follow-up questions offered under the answer (``docs/adr/0020``).
+    progress: tuple[Mapping[str, Any], ...] = ()
+    suggestions: tuple[str, ...] = ()
 
     @property
     def citations(self) -> tuple[Citation, ...]:
@@ -396,6 +413,12 @@ class _TurnState:
     request_id: str | None = None
     grounding_failure_code: str | None = None
     external_tool_calls: int = 0
+    # The open-web trail (``docs/adr/0020``): every phase in order, and the
+    # public pages behind the ones that searched.
+    progress: list[dict[str, Any]] = field(default_factory=list)
+    sources: tuple[ProgressSource, ...] = ()
+    result_count: int = 0
+    suggestions: tuple[str, ...] = ()
 
     def add_usage(self, usage: Usage | None) -> None:
         # ``None`` usage is not zero usage: a provider that supplied no evidence
@@ -428,6 +451,7 @@ class _TurnState:
             widget_refusals=tuple(self.widget_refusals),
             boundary=boundary,
             answer_kind=classify_answer_kind(self.evidence()),
+            progress=tuple(dict(step) for step in self.progress),
         )
 
 
@@ -532,6 +556,7 @@ class AgentLoop:
         call_timeout_seconds: float = LLM_CALL_TIMEOUT_SECONDS,
         tool_timeout_seconds: float = TOOL_TIMEOUT_SECONDS,
         spend: SpendIdentity = TURN_SPEND,
+        suggest: bool = False,
     ) -> None:
         self._spend = spend
         self._client = client
@@ -548,6 +573,15 @@ class AgentLoop:
         # decision point whose quality cannot be measured until the Eval
         # Battery exists.
         self._model = config.model_for(Workload.SESSION)
+        # The cheap model, for the one non-answer call a Turn makes: the
+        # follow-up questions under the answer (``docs/adr/0020``).
+        #
+        # Off unless asked. Every other provider call this loop makes is part of
+        # producing the answer; this one is not, and a loop constructed for a
+        # test or for the Eval Battery should not quietly spend money on a
+        # garnish nobody in that context reads.
+        self._suggest = suggest
+        self._suggestion_model = config.model_for(Workload.BATCH)
 
     async def run(
         self,
@@ -642,19 +676,24 @@ class AgentLoop:
                 )
 
             assert_distinct_ids(completion.tool_calls)
-            await self._activity(
-                Activity.SEARCHING
-                if any(
-                    call.name == NEWS_TOOL or call.name in WEB_TOOLS
-                    for call in completion.tool_calls
-                )
-                else Activity.READING_DATA,
-                state,
+            searching = any(
+                call.name == NEWS_TOOL or call.name in WEB_TOOLS
+                for call in completion.tool_calls
             )
+            await self._activity(
+                Activity.SEARCHING if searching else Activity.READING_DATA,
+                state,
+                # The queries come from the arguments of the calls about to run,
+                # so the chips are on screen while the search happens rather
+                # than as a caption on work the reader watched finish.
+                detail=searching_detail(queries_of(completion.tool_calls)),
+            )
+            before = len(state.calls)
             fatal = await self._round(
                 completion.tool_calls, request, tool_context, attempts, state
             )
             state.tool_rounds += 1
+            await self._found_sources(state, state.calls[before:])
             await self._save(state, boundary=True)
 
             if isinstance(fatal, ToolTimeout):
@@ -856,22 +895,59 @@ class AgentLoop:
         if inspect.isawaitable(saved):
             await saved
 
-    async def _activity(self, activity: Activity, state: _TurnState) -> None:
-        """Say what phase the Turn is in, and nothing about how.
+    async def _activity(
+        self,
+        activity: Activity,
+        state: _TurnState,
+        detail: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Say what phase the Turn is in, and — for the open web — with what.
 
-        No tool name, symbol, argument, raw result, prompt or reasoning: the
-        full detail stays in the Tool Call Trace, and the activity line is
-        ephemeral rather than a verbose tool history (``docs/adr/0013``).
+        No tool name, symbol, argument, raw result, prompt or reasoning reaches
+        this from a store-reading lane: that detail stays in the Tool Call Trace
+        (``docs/adr/0013``). ``detail`` is the one narrow exception
+        ``docs/adr/0020`` grants the open web, and it is built by
+        :mod:`src.agent.progress` rather than here, so the shape that may be
+        disclosed has exactly one definition.
 
-        An activity is also one of the four checkpoint boundaries that decision
+        An activity is also one of the four checkpoint boundaries ADR-0013
         names, so the draft is saved here past the once-a-second limiter: the
         phase a reconnecting reader is shown has to match the phase the Turn is
-        actually in.
+        actually in — and now so does the trail behind it.
         """
+        append_step(state.progress, {"phase": activity.value, "detail": detail})
         if self._publisher is None:
             return
-        self._publisher.activity(activity)
+        self._publisher.activity(activity, detail)
         await self._save(state, boundary=True)
+
+    async def _found_sources(
+        self, state: _TurnState, calls: Sequence[TranscriptToolCall]
+    ) -> None:
+        """Announce what an open-web round came back with, if anything did.
+
+        Separate from the ``searching`` phase because they are different facts
+        at different moments: one is what was asked, the other is what answered.
+        A round that touched no open-web tool, or found nothing, publishes
+        nothing — an empty *Found 0 results* row is noise on a Turn that was
+        never searching in the first place.
+        """
+        found: list[ProgressSource] = []
+        for call in calls:
+            result = call.result if isinstance(call.result, Mapping) else {}
+            found.extend(sources_of(call.name, result))
+        if not found:
+            return
+        # The count is every result the Turn has seen, not the length of the
+        # list under it: the list is deduplicated and capped for display, and
+        # the reader is being told how much was read, not how much is shown.
+        state.result_count += len(found)
+        state.sources = merge_sources(state.sources, found)
+        await self._activity(
+            Activity.FOUND_SOURCES,
+            state,
+            detail=found_detail(state.sources, state.result_count),
+        )
 
     async def _terminal(
         self,
@@ -911,7 +987,47 @@ class AgentLoop:
             # answer has nothing to illustrate, and illustrating it anyway would
             # put the figure back on screen that the Gate just kept off it.
             await self._release_widgets(request, state, selections)
+            await self._suggest_followups(request, status, state)
         return await self._ended(status, terminal_reason, state, rounds_exhausted)
+
+    async def _suggest_followups(
+        self, request: TurnRequest, status: TurnStatus, state: _TurnState
+    ) -> None:
+        """Ask the cheap model what the reader might want next.
+
+        Only under an answer that was actually given: a Turn that ended
+        ``incomplete``, refused, or released no block has nothing to follow up,
+        and offering "what else would you like to know" under an answer that
+        could not be given reads as the system not having noticed
+        (``docs/adr/0020``).
+
+        Nothing here can end the Turn. :func:`suggestions.generate` swallows its
+        own failures, and the worst case is an answer with no panel under it.
+        """
+        if not self._suggest or status is not TurnStatus.COMPLETE or not state.blocks:
+            return
+        if state.model_refused:
+            return
+        answer = "\n\n".join(block.text for block in state.blocks if block.text)
+        if not answer.strip():
+            return
+        body = suggestions.build_request(
+            model=self._suggestion_model,
+            user_text=request.user_text,
+            answer_text=answer,
+        )
+        state.suggestions = await suggestions.generate(
+            self._client,
+            body,
+            suggestions.spend_for(
+                body,
+                owner=self._spend.owner(request),
+                lane=self._spend.lane,
+                estimated_input_tokens=sum(
+                    estimate_tokens(message) for message in body.messages
+                ),
+            ),
+        )
 
     def _release(
         self, request: TurnRequest, state: _TurnState
@@ -1016,6 +1132,8 @@ class AgentLoop:
             downgraded_blocks=sum(
                 bool(block.unverified_figures) for block in state.blocks
             ),
+            progress=tuple(dict(step) for step in state.progress),
+            suggestions=state.suggestions,
         )
 
 

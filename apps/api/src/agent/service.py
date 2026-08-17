@@ -120,6 +120,10 @@ def build_alpha_desk(
             slots=slots,
             checkpoint=checkpoint,
             publisher=publisher,
+            # Read here rather than inside the loop: the deployment decides
+            # whether an extra batch call per answered Turn is worth its cost,
+            # and the loop should not have to know what a Settings object is.
+            suggest=settings.alpha_desk_suggestions_enabled,
         )
 
     return AlphaDeskService(

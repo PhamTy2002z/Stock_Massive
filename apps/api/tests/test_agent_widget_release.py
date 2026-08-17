@@ -76,9 +76,9 @@ class RecordingPublisher(TurnPublisher):
         self.log.append(("content.block", block["text"][:12]))
         return super().content_block(block)
 
-    def activity(self, activity):
+    def activity(self, activity, detail=None):
         self.log.append(("turn.activity", activity.value))
-        return super().activity(activity)
+        return super().activity(activity, detail)
 
 
 async def screen(_context: ToolContext, _arguments: dict) -> dict:
