@@ -67,7 +67,16 @@ from .tools.fields import sanctioned_interpretation
 
 GROUNDING_FAILED = "grounding_failed"
 
-MARKER_PATTERN = re.compile(r"\[(ev|rec|ref-price|zone|against|user):([^\]\n]{1,200})\]")
+# Fullwidth brackets are accepted beside the ASCII pair the Contract asks for.
+# A model answering in Vietnamese reaches for 【】 often enough that measuring it
+# is not necessary — it was measured anyway: a Turn on STB attributed every one
+# of its nine figures with 【ev:…】, and because the pattern did not match, all
+# nine were counted unattributed and the markers themselves reached the reader.
+# Reading a bracket the model actually typed costs nothing; the marker body is
+# still the closed grammar below, and nothing else about the protocol relaxes.
+MARKER_PATTERN = re.compile(
+    r"[\[【](ev|rec|ref-price|zone|against|user):([^\]】\n]{1,200})[\]】]"
+)
 NUMBER_PATTERN = re.compile(r"-?\d[\d.,]*")
 
 # The complete exemption list. A number matched by one of these is punctuation
