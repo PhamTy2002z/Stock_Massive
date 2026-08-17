@@ -558,3 +558,24 @@ def test_an_availability_failure_is_degradable_and_an_integrity_one_is_not():
     assert integrity.value.code == "figure_mismatch"
     assert integrity.value.degradable is False
     assert integrity.value.notice() == ""
+
+
+def test_a_fullwidth_bracket_marker_attributes_and_never_reaches_the_reader():
+    """A Vietnamese answer writes 【ev:…】, and it has to count as the citation.
+
+    Measured on a real Turn: nine figures, every one attributed with fullwidth
+    brackets, and the ASCII-only pattern matched none of them — so nine correct
+    citations were reported as unattributed and the markers were displayed as
+    part of the sentence.
+    """
+    text = (
+        f"Vùng dao động thường ngày 4.5【ev:c1#registered_fields.{ZONE}.value】 "
+        f"và mức giảm -12.5【ev:c1#registered_fields.{DRAWDOWN}.value】."
+    )
+
+    released = validator().validate(text, standard_traces())
+
+    assert released.unverified_figures == ()
+    assert len(released.citations) == 2
+    assert "【" not in released.text and "ev:" not in released.text
+    assert "4.5" in released.text and "-12.5" in released.text
