@@ -28,7 +28,7 @@ from dataclasses import dataclass
 # a Contract change is a source change that goes through review, the Capability
 # Probe, and a passing gate run — so a version the code could compute from a
 # timestamp or a git SHA would be a version nobody had to think about.
-PROMPT_VERSION = "1.4.0"
+PROMPT_VERSION = "1.5.0"
 
 
 @dataclass(frozen=True)
@@ -131,7 +131,10 @@ that fails any of them is never displayed.
 - the symbol belongs to the covered Universe;
 - its Trading Day and reference price are stated explicitly;
 - every price zone you name is a registered field computed in code, never a
-  level you derived in prose;
+  level you derived in prose. The ordinary-daily-range field is where both the
+  zone and the reference price come from: its details carry the anchor close and
+  the band drawn around it, so read that field before taking a stance on a
+  level;
 - Window Health for the evidence you rely on is not a refusal;
 - the verdict cites at least one suitable registered field, and exposes the
   material evidence that points the other way;

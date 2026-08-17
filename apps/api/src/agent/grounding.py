@@ -125,6 +125,55 @@ class BlockKind(str, Enum):
     RECOMMENDATION = "recommendation"
 
 
+#: The Gate conditions a recommendation fails when the *evidence* for it was
+#: not there — as opposed to the conditions it fails when the block says
+#: something its evidence does not.
+#:
+#: The distinction decides what the reader gets. Both classes keep the block off
+#: the screen; only this one lets the Turn carry on and say why, because "no
+#: registered price zone could be computed for this symbol today" is an answer,
+#: and a blank Turn is not. A figure that contradicts its own citation is not in
+#: here and never will be: that is the confident false number the whole design
+#: exists to stop, and it ends the Turn.
+DEGRADABLE_GATE_CODES = frozenset(
+    {
+        "missing_reference_price",
+        "missing_price_zone",
+        "unregistered_price_zone",
+        "window_health_refusal",
+        "no_supporting_field",
+        "no_contradictory_evidence",
+        "news_only_basis",
+        "unreferenced_figure",
+    }
+)
+
+#: What the reader is told in place of the recommendation that was dropped.
+#:
+#: Backend-authored and versioned for the same reason the Risk Notice is: a
+#: sentence the model writes is a sentence the model can be talked out of. It
+#: carries no figure by construction, so it needs no citation and cannot itself
+#: fail the Gate.
+DEGRADED_RECOMMENDATION_NOTICE = (
+    "Tôi chưa đưa ra khuyến nghị vùng giá cho câu hỏi này: bằng chứng bắt buộc "
+    "cho một khuyến nghị chưa đủ ({reason}). Phần nhận định ở trên là những gì "
+    "dữ liệu hiện có chứng minh được."
+)
+
+#: One Vietnamese clause per degradable condition, so the sentence above names
+#: what was missing instead of gesturing at it.
+DEGRADED_REASON_TEXT = {
+    "missing_reference_price": "chưa có giá tham chiếu nào được tính trong mã nguồn",
+    "missing_price_zone": "chưa có vùng giá nào được tính trong mã nguồn",
+    "unregistered_price_zone": "vùng giá được nêu không phải một chỉ số đã đăng ký",
+    "window_health_refusal": "cửa sổ dữ liệu của bằng chứng bị từ chối",
+    "no_supporting_field": "chưa có chỉ số đã đăng ký nào ủng hộ nhận định",
+    "no_contradictory_evidence": "chưa nêu được bằng chứng ngược chiều",
+    "news_only_basis": "vùng giá chỉ dựa trên nguồn tin, không phải số liệu tính được",
+    "unreferenced_figure": "có con số chưa gắn được với bằng chứng nào",
+}
+
+
 class GroundingFailure(Exception):
     """One block that cannot be proven, and why.
 
@@ -139,6 +188,23 @@ class GroundingFailure(Exception):
         self.code = code
         self.detail = detail
         self.reason = GROUNDING_FAILED
+
+    @property
+    def degradable(self) -> bool:
+        """Whether the Turn may carry on and say what was missing.
+
+        Read by the loop, never by the model: there is no field it can set to
+        make a failure degradable, exactly as there is none to make a block
+        pass.
+        """
+        return self.code in DEGRADABLE_GATE_CODES
+
+    def notice(self) -> str:
+        """The reader's sentence for this failure, or the empty string."""
+        reason = DEGRADED_REASON_TEXT.get(self.code)
+        if reason is None:
+            return ""
+        return DEGRADED_RECOMMENDATION_NOTICE.format(reason=reason)
 
 
 @dataclass(frozen=True)

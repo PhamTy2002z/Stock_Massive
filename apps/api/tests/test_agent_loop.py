@@ -27,7 +27,9 @@ from src.agent.loop import (
     assert_distinct_ids,
     pair_results,
 )
+from src.agent.grounding import BlockKind
 from src.agent.prompt import AnswerKind, MarketState, RuntimeContext
+from src.agent.turns import gate_outcomes
 from src.agent.tools.catalog import ToolCatalog, ToolContext, ToolDataAccess, ToolSpec
 from src.alpha.refusals import AlphaRefusal
 from src.core.llm import (
@@ -856,3 +858,30 @@ async def test_a_news_round_reads_as_searching_rather_than_reading_data():
     assert Activity.SEARCHING.value in [
         event.data["phase"] for event in seen if event.type is EventType.ACTIVITY
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_recommendation_the_gate_cannot_prove_leaves_an_answer_behind():
+    """The Turn says why it could not recommend, instead of going blank.
+
+    Before this, a recommendation failing an availability condition ended the
+    Turn with nothing released at all when it was the first block — the reader
+    got an empty answer for a question the system had partly answered. The
+    recommendation itself is still never displayed.
+    """
+    unprovable = "[rec:FPT@2026-08-14] FPT đáng mua quanh vùng hiện tại."
+    client = FakeClient([wants("get_analysis"), answer(unprovable)])
+
+    outcome = await loop(client).run(turn_request())
+
+    displayed = "\n\n".join(block.text for block in outcome.blocks)
+    assert displayed.strip()
+    assert "khuyến nghị" in displayed
+    # The unprovable text never reaches the reader, and no block claims to be a
+    # recommendation.
+    assert "đáng mua" not in displayed
+    assert all(block.kind is not BlockKind.RECOMMENDATION for block in outcome.blocks)
+    # The record still says a recommendation was blocked, and by which condition.
+    assert outcome.degraded_recommendation_code == "missing_reference_price"
+    assert gate_outcomes(outcome).recommendation == "blocked"
+    assert gate_outcomes(outcome).failure_code == "missing_reference_price"
