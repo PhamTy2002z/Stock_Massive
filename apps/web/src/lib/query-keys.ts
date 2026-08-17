@@ -75,8 +75,11 @@ export const queryKeys = {
   sectorHistoricalPerformance: (period: SectorHistoricalPeriod) =>
     ["analytics", "sectorHistorical", period] as const,
 
-  // News
-  newsFeed: ["news", "feed"] as const,
+  // News. The category is part of the feed's identity, not a parameter of it:
+  // one key for every facet would serve the previous pill's articles from cache
+  // the instant the reader pressed the next one.
+  newsFeed: (category: string) => ["news", "feed", category] as const,
+  newsCategories: ["news", "categories"] as const,
   companyNews: (symbol: string) => [...queryKeys.stock(symbol), "news"] as const,
 
   // Background jobs (global, not symbol-scoped)
