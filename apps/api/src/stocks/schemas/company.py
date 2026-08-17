@@ -153,9 +153,13 @@ class InsiderDealsResponse(StrictModel):
 
 
 class NewsItem(StrictModel):
-    """Company news item."""
+    """One news article, whether a corporate disclosure or a press story."""
 
-    id: int
+    # A string because no source guarantees an integer: VCI's `id` column is a
+    # hex digest and CafeF's key is the digit run at the end of its slug.
+    # Coercing to int used to fail and fall back to the row's position, which
+    # renamed an article whenever the feed shifted under it.
+    id: str
     title: str
     source: Optional[str] = None
     published_at: str
@@ -165,6 +169,7 @@ class NewsItem(StrictModel):
     content: Optional[str] = None
     url: Optional[str] = None
     image_url: Optional[str] = None
+    category: Optional[str] = None  # Feed slug, absent on the per-symbol lane
 
 
 class NewsResponse(StrictModel):
@@ -175,18 +180,31 @@ class NewsResponse(StrictModel):
     total_count: int
 
 
-class FeedNewsItem(NewsItem):
-    """One feed entry: a company news item plus the symbol it belongs to."""
+class NewsCategory(StrictModel):
+    """One facet of the press feed: the slug served and its Vietnamese label."""
 
-    symbol: str
+    slug: str
+    label: str
+
+
+class FeedNewsItem(NewsItem):
+    """One feed entry.
+
+    `symbol` is optional because a press article belongs to a category, not to a
+    ticker; only the per-symbol lane can fill it in.
+    """
+
+    symbol: Optional[str] = None
 
 
 class NewsFeedResponse(StrictModel):
-    """Market-wide news feed aggregated across the VN30 constituents."""
+    """Press news for one category, newest first."""
 
     items: list[FeedNewsItem]
-    # Only the symbols that actually contributed items — a symbol whose fetch
-    # failed or came back empty is absent rather than listed with nothing.
+    category: str  # The slug actually served
+    categories: list[NewsCategory]  # The full registry, for the UI's pill row
+    # Kept for the per-symbol lane; empty on the press feed, which has no
+    # ticker to attribute an article to.
     symbols: list[str]
     generated_at: str  # ISO timestamp, Asia/Ho_Chi_Minh
     total_count: int
