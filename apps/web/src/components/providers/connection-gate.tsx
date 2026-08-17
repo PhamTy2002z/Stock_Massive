@@ -22,8 +22,9 @@ const TOAST_ID = "connection-waiting"
  *
  * So the page is dimmed rather than replaced: what was on screen stays
  * readable underneath, no route unmounts, no query cache is thrown away, and
- * when the probe finds the API answering the veil lifts and the stale views
- * refetch in place.
+ * when the probe finds the API answering the stale views refetch in place. A
+ * successful application request then lifts the veil; `/health` alone cannot
+ * prove that the endpoint which originally failed has recovered.
  */
 export function ConnectionGate({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient()
@@ -55,9 +56,9 @@ export function ConnectionGate({ children }: { children: React.ReactNode }) {
       try {
         const response = await fetch(healthUrl, { cache: "no-store" })
         if (cancelled || !response.ok) return
-        connectionStatus.reportReady()
-        // The veil hid views holding data from before the outage; refetching
-        // is what makes lifting it mean anything.
+        // The health endpoint can be healthy while an application endpoint is
+        // still rate-limited or failing. Let a successful retried request call
+        // reportReady() so the waiting veil cannot flicker every probe cycle.
         void queryClient.refetchQueries({ type: "active" })
       } catch {
         // Still down. The interval asks again.
