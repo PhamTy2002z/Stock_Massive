@@ -24,6 +24,7 @@ from src.stocks.signals import (
     MACD,
     MEAN_REVERSION_Z,
     MOMENTUM_RANK,
+    PRICE_ZONE,
     REALIZED_VOLATILITY,
     RELATIVE_STRENGTH,
     ROE_PERCENTILE,
@@ -57,6 +58,15 @@ RISK_FIELDS = (
     SHARPE,
     SORTINO,
 )
+# Served alone rather than inside ``risk_metrics``, and the reason is the Gate.
+# A cluster reports the Window Health of its widest registered window, so a
+# price zone read from ``risk_metrics`` would inherit the drawdown window's
+# health: 21 sessions of usable estimate, refused because a 250-session field in
+# the same call had nothing to stand on. Gate condition 4 would then block a
+# recommendation over a window that never fed it. Alone, this tool's shared
+# health is this field's own, and a refusal here means the zone itself could not
+# be computed.
+PRICE_ZONE_TOOL_FIELDS = (PRICE_ZONE,)
 MARKET_BEHAVIOR_TOOL_FIELDS = (
     VOLATILITY_REGIME_Z,
     ADTV_MONEY,
@@ -106,6 +116,18 @@ class ComputationTools:
                 "risk_metrics",
                 "Read registered realized-volatility, drawdown and risk-adjusted-return fields.",
                 RISK_FIELDS,
+                _object_schema({"symbol": symbol}, ("symbol",)),
+            ),
+            self._registration(
+                "price_zone",
+                (
+                    "Read the registered ordinary-daily-range field: the anchor "
+                    "close a recommendation cites as its reference price, and the "
+                    "band around it a recommendation cites as its price zone. "
+                    "Both live in this field's details, so both are computed in "
+                    "code rather than derived in prose."
+                ),
+                PRICE_ZONE_TOOL_FIELDS,
                 _object_schema({"symbol": symbol}, ("symbol",)),
             ),
             self._registration(
@@ -306,5 +328,6 @@ __all__ = [
     "FOREIGN_FLOW_TOOL_FIELDS",
     "INDICATOR_FIELDS",
     "MARKET_BEHAVIOR_TOOL_FIELDS",
+    "PRICE_ZONE_TOOL_FIELDS",
     "RISK_FIELDS",
 ]

@@ -1,4 +1,4 @@
-"""The five computation clusters are thin projections over registered fields."""
+"""The computation clusters are thin projections over registered fields."""
 
 from __future__ import annotations
 
@@ -33,13 +33,14 @@ def tools_for(session, members=(SYMBOL,)) -> ComputationTools:
     )
 
 
-def test_the_five_cluster_names_and_unit_named_kelly_inputs_are_model_visible():
+def test_the_cluster_names_and_unit_named_kelly_inputs_are_model_visible():
     session = open_session()
     tools = tools_for(session)
     catalog = tools.catalog(trace_writer=lambda _trace: None)
 
     assert catalog.names == (
         "risk_metrics",
+        "price_zone",
         "market_behavior",
         "cross_sectional",
         "foreign_flow",
@@ -224,3 +225,77 @@ async def test_every_cluster_stays_in_budget_at_the_widest_registered_window():
 
         assert serialized_size(result) <= MAX_TOOL_RESULT_BYTES
         assert str(result).count("window_health") == 1
+
+
+@pytest.mark.asyncio
+async def test_the_price_zone_reaches_the_model_as_a_registered_reference_price():
+    """The Gate's condition 3 needs a route to a registered zone, and this is it.
+
+    Before this tool existed the only registered price-zone field was served by
+    no tool at all, so no recommendation could name a zone computed in code and
+    the Gate refused every one of them — the eval battery measured it as
+    category B at 0/30. The assertions below are that route: a value, an anchor
+    close to cite as the reference price, and the band around it.
+    """
+    session = open_session()
+    days = store_indicator_history(session)
+    session.commit()
+    catalog = tools_for(session).catalog(trace_writer=lambda _trace: None)
+    tool_context = ToolContext(user_id=7, trading_day=days[-1], active_symbol=SYMBOL)
+
+    result = await catalog.dispatch("price_zone", {"symbol": SYMBOL}, tool_context)
+
+    served = result["registered_fields"]["price_zone.ordinary_range_pct"]
+    assert served["refusal"] is None
+    assert served["value"] > 0
+    assert served["details"]["anchor_close"] > 0
+    assert (
+        served["details"]["lower_price"]
+        < served["details"]["anchor_close"]
+        < served["details"]["upper_price"]
+    )
+    # Alone in its call, the shared Window Health is this field's own — so a
+    # refusal here is the zone refusing, never a wider field in the same cluster.
+    assert result["health_basis_field"] == "price_zone.ordinary_range_pct"
+    assert result["window_health"]["refusal"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_price_zone_citation_resolves_as_a_registered_field():
+    """The zone and the reference price must survive the validator's resolution.
+
+    Serving the field is only half the route: the Gate reads the *citation*, and
+    conditions 3 and 7 both turn on the resolved source being a registered field
+    rather than a stored figure or an external claim.
+    """
+    from src.agent.context import TranscriptToolCall
+    from src.agent.grounding import EvidenceRef, EvidenceSource, TraceIndex
+
+    session = open_session()
+    days = store_indicator_history(session)
+    session.commit()
+    catalog = tools_for(session).catalog(trace_writer=lambda _trace: None)
+    tool_context = ToolContext(user_id=7, trading_day=days[-1], active_symbol=SYMBOL)
+    result = await catalog.dispatch("price_zone", {"symbol": SYMBOL}, tool_context)
+
+    traces = TraceIndex(
+        [
+            TranscriptToolCall(
+                call_id="c1",
+                name="price_zone",
+                arguments={"symbol": SYMBOL},
+                result=result,
+            )
+        ]
+    )
+    base = "registered_fields.price_zone.ordinary_range_pct"
+    anchor = traces.resolve(EvidenceRef.parse(f"c1#{base}.details.anchor_close"))
+    upper = traces.resolve(EvidenceRef.parse(f"c1#{base}.details.upper_price"))
+
+    assert anchor.source is EvidenceSource.REGISTERED_FIELD
+    assert upper.source is EvidenceSource.REGISTERED_FIELD
+    assert anchor.value == result["registered_fields"][
+        "price_zone.ordinary_range_pct"
+    ]["details"]["anchor_close"]
+    assert anchor.window_health_refusal is None
+    assert anchor.interpretation and anchor.unit
