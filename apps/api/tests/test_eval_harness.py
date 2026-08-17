@@ -83,7 +83,12 @@ COSTLY_PRICE = 300.0
 CALL_MICRO_USD = OUTPUT_TOKENS_PER_CALL * int(COSTLY_PRICE)
 
 
-def config(*, eval_usd: float = 1_000.0, output_price: float = CHEAP_PRICE) -> LLMConfig:
+def config(
+    *,
+    eval_usd: float = 1_000.0,
+    output_price: float = CHEAP_PRICE,
+    run_ceiling_usd: float | None = 2.5,
+) -> LLMConfig:
     prices = TokenPrices(
         input=0.0, cached_input=0.0, cache_write=0.0, output=output_price
     )
@@ -103,6 +108,7 @@ def config(*, eval_usd: float = 1_000.0, output_price: float = CHEAP_PRICE) -> L
             emergency_usd=0.0,
             eval_usd=eval_usd,
         ),
+        eval_run_cost_ceiling_usd=run_ceiling_usd,
     )
 
 
@@ -283,6 +289,17 @@ class TestThreeRunsPerCase:
 
 
 class TestTheCeilingStopsTheRun:
+    @pytest.mark.asyncio
+    async def test_a_dev_route_can_disable_only_the_per_run_ceiling(self, harness):
+        result = await harness(
+            configuration=config(
+                output_price=COSTLY_PRICE,
+                run_ceiling_usd=None,
+            )
+        ).run([case("unlimited-1"), case("unlimited-2")])
+
+        assert result.complete is True
+
     @pytest.mark.asyncio
     async def test_a_run_that_would_exceed_two_and_a_half_dollars_stops(
         self, harness, factory

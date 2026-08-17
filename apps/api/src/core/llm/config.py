@@ -147,6 +147,7 @@ class LLMConfig:
     pricing: PricingTable
     lanes: BudgetLanes
     request_timeout_seconds: float = 120.0
+    eval_run_cost_ceiling_usd: float | None = 2.5
 
     def model_for(self, workload: Workload) -> str:
         return self.models[workload]
@@ -178,6 +179,7 @@ def llm_config_from_settings(settings: Any | None = None) -> LLMConfig:
 
         settings = get_settings()
 
+    eval_ceiling = float(settings.llm_eval_run_cost_ceiling_usd)
     return LLMConfig(
         enabled=bool(settings.alpha_desk_enabled),
         route=LLMRoute(
@@ -204,6 +206,7 @@ def llm_config_from_settings(settings: Any | None = None) -> LLMConfig:
             eval_usd=settings.llm_budget_eval_usd,
         ),
         request_timeout_seconds=settings.llm_request_timeout_seconds,
+        eval_run_cost_ceiling_usd=eval_ceiling if eval_ceiling > 0 else None,
     )
 
 

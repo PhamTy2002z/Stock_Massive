@@ -326,7 +326,16 @@ class SpendAdmission:
                     )
                 elif candidate.owner.type is OwnerType.EVAL_RUN:
                     owner_cost = _owner_cost(session, candidate.owner)
-                    if owner_cost + reserved > EVAL_RUN_COST_MICRO_USD:
+                    configured_ceiling = self._config.eval_run_cost_ceiling_usd
+                    ceiling_micro_usd = (
+                        None
+                        if configured_ceiling is None
+                        else int(round(configured_ceiling * 1_000_000))
+                    )
+                    if (
+                        ceiling_micro_usd is not None
+                        and owner_cost + reserved > ceiling_micro_usd
+                    ):
                         # ``docs/adr/0016``: the harness stops and reports this.
                         # It must never drop the remaining cases and publish a
                         # score — a battery that truncates itself is a battery
@@ -338,7 +347,7 @@ class SpendAdmission:
                             operator_detail=(
                                 f"eval_run {candidate.owner.id} has {owner_cost} "
                                 f"micro-USD charged against "
-                                f"{EVAL_RUN_COST_MICRO_USD} and requested "
+                                f"{ceiling_micro_usd} and requested "
                                 f"{reserved} more"
                             ),
                         )
