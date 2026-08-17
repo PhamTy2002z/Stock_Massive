@@ -282,19 +282,28 @@ Content arrives as **complete blocks** — a paragraph, a bullet group, a finish
 or a reconnect renders everything already present at once, with no staged replay.
 Reduced-motion removes the transition.
 
-While tools run, a **collapsed activity trail** shows the work as a short list of
-steps: the phases already finished, then the one in flight — *Searching…*, *Reading
-data…*, *Analyzing…*, *Preparing visual…*, each expandable to a compact user-facing
-summary of the semantic operation. A finished step stays on screen in the past tense;
-only the step in flight is announced to assistive technology. Consecutive repeats of
-one phase are one step.
+While tools run, a **search-progress trail** shows the work as a list of steps under a
+*Tiến trình tìm kiếm* header: every phase the Turn has been through, in order, with the
+running one announced to assistive technology and nothing else announced at all.
+Consecutive repeats of one phase are one step. The trail is open while the Turn runs and
+folds to a single line above the finished answer, because how an answer was reached is
+context for reading it rather than the thing itself.
 
-The trail is **never a raw trace, and never a tool name, symbol, argument, or
-result** — the publisher sends a phase and only a phase, so the vocabulary on screen
-is those four words whatever the Turn actually called. The full detail stays in the
-**Tool Call Trace** as an audit surface. The trail is what *this tab watched happen*:
-a reconnect keeps the steps it saw, and a tab that joined a Turn late shows none
-rather than inventing the ones it missed.
+A step from a lane that reads the store is **never a raw trace, and never a tool name,
+symbol, argument, or result** — the publisher sends a phase and only a phase, so the
+vocabulary on screen is *Đang suy nghĩ…*, *Đang đọc dữ liệu…*, *Đang dựng hình…*
+whatever the Turn actually called. The full detail stays in the **Tool Call Trace** as
+an audit surface.
+
+The **open-web lane is the one exception** (ADR-0020): a `searching` step shows the
+sentences it searched for, and a `found_sources` step shows how many results came back
+and the public pages behind them, each linking out in a new tab with no referrer. Both
+are public and neither is catalog vocabulary — a reader who cannot see whether an answer
+rests on a company filing or on an anonymous aggregator cannot weigh it.
+
+The trail is carried on the snapshot and stored on the answer, so a tab that joined a
+Turn late gets the steps it missed, and a Thread reopened months later still shows what
+its answers were built from.
 
 The harness must feel like it is *working*, not hung: the first block or activity line
 arrives well before completion, and a heartbeat keeps a quiet path observable.
@@ -366,7 +375,7 @@ Mobile *web* only; the native app is out of scope.
 | --- | --- |
 | The Universe cap of 100 | An operational safety valve, not a quota sold to users (ADR-0001) |
 | USD amounts, budgets, reservations | Users see state and reset time; operations sees money (ADR-0014) |
-| Raw Tool Call Traces, tool names, arguments | The activity line is semantic; the trace is an audit surface (ADR-0013) |
+| Raw Tool Call Traces, tool names, store-lane arguments | Those steps are semantic; the trace is an audit surface (ADR-0013). Open-web queries and sources are disclosed (ADR-0020) |
 | Prompt text, hidden reasoning, credentials | Non-overridable invariant of the System Prompt Contract (ADR-0015) |
 | A `Signal Issue` code, verbatim | Codes map to short Vietnamese sentences in one place |
 | A number that could not be proven | An unprovable block is never displayed and flagged later (ADR-0015) |

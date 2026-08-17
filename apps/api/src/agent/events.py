@@ -52,6 +52,12 @@ ENVELOPE_VERSION = 1
 # reading altogether is dropped long before its queue is a memory problem.
 SUBSCRIBER_QUEUE_SIZE = 256
 
+# The activity trail's ceiling (``docs/adr/0020``). Eight tool rounds produce
+# well under thirty steps, so this bounds the pathological case and nothing else:
+# the trail rides every snapshot, and an unbounded one would make a snapshot grow
+# with how chatty a Turn was.
+MAX_TRAIL_STEPS = 60
+
 
 class EventType(str, Enum):
     """The eight v1 event types of ``docs/adr/0013``."""
@@ -81,14 +87,23 @@ class Activity(str, Enum):
 
     A closed enum because the constraint is what matters: the activity line
     never carries a tool name, symbol, argument, raw result, prompt or piece of
-    reasoning. All of that stays in the Tool Call Trace, and an enum is how a
-    free-form phase string is kept from quietly becoming one.
+    reasoning for any lane that reads the store. All of that stays in the Tool
+    Call Trace, and an enum is how a free-form phase string is kept from quietly
+    becoming one.
+
+    ``docs/adr/0020`` narrows that to the lanes it was written for and adds
+    :data:`FOUND_SOURCES`. The open-web lane may attach a ``detail`` payload —
+    the sentence it searched for, the public pages it found — because both are
+    public and a reader who cannot see them cannot weigh the answer. The enum
+    stays closed either way: a phase the backend cannot name is one it cannot
+    publish.
     """
 
     SEARCHING = "searching"
     READING_DATA = "reading_data"
     ANALYZING = "analyzing"
     PREPARING_VISUAL = "preparing_visual"
+    FOUND_SOURCES = "found_sources"
 
 
 @dataclass(frozen=True)
@@ -192,6 +207,11 @@ class TurnPublisher:
         self._blocks: list[Mapping[str, Any]] = []
         self._widgets: list[Mapping[str, Any]] = []
         self._activity: Activity | None = None
+        # Every phase the Turn has been through, in order, with whatever the
+        # open-web lane disclosed about it. A reconnecting browser rebuilds the
+        # trail from this rather than from the events it missed
+        # (``docs/adr/0020``).
+        self._progress: list[dict[str, Any]] = []
         self._status = TURN_RUNNING
         self._terminal_reason: str | None = None
         # The canonical assistant message, once the terminal transaction has
@@ -246,8 +266,19 @@ class TurnPublisher:
         self._fan_out(event)
         return event
 
-    def activity(self, activity: Activity) -> TurnEvent:
-        return self.publish(EventType.ACTIVITY, {"phase": activity.value})
+    def activity(
+        self, activity: Activity, detail: Mapping[str, Any] | None = None
+    ) -> TurnEvent:
+        """Say what phase the Turn is in, and — for the open web — with what.
+
+        ``detail`` is omitted rather than sent empty when there is nothing to
+        disclose, so a client can read its presence as "this lane discloses"
+        instead of inspecting what is inside it (``docs/adr/0020``).
+        """
+        data: dict[str, Any] = {"phase": activity.value}
+        if detail:
+            data["detail"] = dict(detail)
+        return self.publish(EventType.ACTIVITY, data)
 
     def content_block(self, block: Mapping[str, Any]) -> TurnEvent:
         """Emit one proven block.
@@ -306,6 +337,7 @@ class TurnPublisher:
                 "status": self._status,
                 "terminal_reason": self._terminal_reason,
                 "activity": None if self._activity is None else self._activity.value,
+                "progress": [dict(step) for step in self._progress],
                 "blocks": [dict(block) for block in self._blocks],
                 "widgets": [dict(widget) for widget in self._widgets],
                 "message_id": self._message_id,
@@ -329,6 +361,7 @@ class TurnPublisher:
         elif event.type is EventType.ACTIVITY:
             phase = event.data.get("phase")
             self._activity = Activity(phase) if phase else None
+            append_step(self._progress, event.data)
 
     def _fan_out(self, event: TurnEvent) -> None:
         surviving: list[Subscriber] = []
@@ -343,6 +376,32 @@ class TurnPublisher:
                 )
                 subscriber.close()
         self._subscribers = surviving
+
+
+def append_step(trail: list[dict[str, Any]], data: Mapping[str, Any]) -> None:
+    """Add one activity to the trail, collapsing a phase that merely repeated.
+
+    The loop announces ``analyzing`` before every model call, so a Turn that ran
+    four tool rounds would otherwise leave four identical *Thinking…* rows. A
+    repeat with something new to say is still a step — that is what a second
+    search with different queries is — so the collapse tests the payload rather
+    than the phase alone.
+
+    Bounded at :data:`MAX_TRAIL_STEPS`, which the eight-round ceiling puts well
+    out of reach. The cap is not about the honest case: the trail rides every
+    snapshot, and a publisher that could be made to emit activity in a loop is a
+    publisher that could be made to grow one without it.
+    """
+    phase = data.get("phase")
+    if not phase or len(trail) >= MAX_TRAIL_STEPS:
+        return
+    step: dict[str, Any] = {"phase": phase}
+    detail = data.get("detail")
+    if isinstance(detail, Mapping) and detail:
+        step["detail"] = dict(detail)
+    if trail and trail[-1] == step:
+        return
+    trail.append(step)
 
 
 def terminal_event_for(status: str, *, has_content: bool) -> EventType:
@@ -380,9 +439,14 @@ def snapshot_from_draft(
     """
     blocks: Sequence[Mapping[str, Any]] = ()
     widgets: Sequence[Mapping[str, Any]] = ()
+    progress: Sequence[Mapping[str, Any]] = ()
     if draft:
         blocks = tuple(draft.get("blocks") or ())
         widgets = tuple(draft.get("widgets") or ())
+        # The trail survives the process that produced it, because the reader
+        # reconnecting to a frozen Turn is exactly the reader who most needs to
+        # see what it managed to do before it stopped.
+        progress = tuple(draft.get("progress") or ())
     return TurnEvent(
         seq=through_seq,
         type=EventType.SNAPSHOT,
@@ -392,6 +456,7 @@ def snapshot_from_draft(
             "status": status,
             "terminal_reason": terminal_reason,
             "activity": None,
+            "progress": [dict(step) for step in progress],
             "blocks": [dict(block) for block in blocks],
             "widgets": [dict(widget) for widget in widgets],
             "message_id": message_id,
@@ -401,6 +466,7 @@ def snapshot_from_draft(
 
 __all__ = [
     "ENVELOPE_VERSION",
+    "MAX_TRAIL_STEPS",
     "SUBSCRIBER_QUEUE_SIZE",
     "TERMINAL_EVENTS",
     "Activity",
@@ -408,6 +474,7 @@ __all__ = [
     "Subscriber",
     "TurnEvent",
     "TurnPublisher",
+    "append_step",
     "snapshot_from_draft",
     "terminal_event_for",
 ]
