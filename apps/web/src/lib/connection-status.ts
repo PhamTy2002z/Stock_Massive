@@ -1,15 +1,16 @@
 /**
- * Whether the API is answering, as one fact the whole app can read.
+ * Whether every API operation which went unavailable has recovered.
  *
  * A restarting container, an exhausted rate limit and a dropped wifi all look
  * the same from a component's point of view: the data is not here *yet*. None
  * of them is the user's problem to solve, and none of them is worth an error
  * screen — the system comes back on its own within seconds. So they collapse
  * into a single "waiting" state that the UI can veil the page with, and that
- * clears itself once the API answers again.
+ * clears itself once every unavailable operation answers again.
  *
- * Kept outside React so the fetch layer can report into it without every call
- * site having to thread a callback down.
+ * Kept outside React so the fetch layer can report each unavailable operation
+ * by URL without every call site having to thread a callback down. A healthy
+ * operation cannot clear a different operation's failure.
  */
 
 export type ConnectionState = "ready" | "waiting"
@@ -37,6 +38,7 @@ type Listener = () => void
 
 class ConnectionStatus {
   private state: ConnectionState = "ready"
+  private unavailableRequests = new Set<string>()
   private listeners = new Set<Listener>()
 
   get(): ConnectionState {
@@ -50,19 +52,24 @@ class ConnectionStatus {
     }
   }
 
-  /** Called by the fetch layer when a request could not be answered. */
-  reportWaiting(): void {
+  /** Called by the fetch layer when one request could not be answered. */
+  reportWaiting(requestKey: string): void {
+    this.unavailableRequests.add(requestKey)
     this.set("waiting")
   }
 
-  /** Called by any request that succeeds: the API is evidently back. */
-  reportReady(): void {
-    this.set("ready")
+  /** Clears only the operation which has demonstrably recovered. */
+  reportReady(requestKey: string): void {
+    this.unavailableRequests.delete(requestKey)
+    if (this.unavailableRequests.size === 0) {
+      this.set("ready")
+    }
   }
 
   /** Test seam. Production code never needs to force the state. */
   reset(): void {
     this.state = "ready"
+    this.unavailableRequests.clear()
     this.listeners.clear()
   }
 

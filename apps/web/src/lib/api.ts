@@ -59,8 +59,9 @@ class ApiError extends Error {
  * A refused request and an unreachable API used to arrive at the UI as the
  * same thrown value, so a container restarting for two seconds surfaced as
  * `TypeError: Failed to fetch` in the user's face. Silence now reports itself
- * to `connectionStatus`, which the page veils on, and any answer at all —
- * including a 404 — is proof the API is back.
+ * to `connectionStatus`, which the page veils on. An answer — including a 404
+ * — clears only this operation's prior unavailable state, so a healthy request
+ * cannot hide a different endpoint which is still failing.
  */
 async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`
@@ -76,16 +77,16 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
   } catch (cause) {
     // fetch only rejects when the request never completed: no server, no
     // network, request aborted. There is no status to read.
-    connectionStatus.reportWaiting()
+    connectionStatus.reportWaiting(url)
     throw new ApiUnavailableError(undefined, undefined, { cause })
   }
 
   if (isRetryableStatus(response.status)) {
-    connectionStatus.reportWaiting()
+    connectionStatus.reportWaiting(url)
     throw new ApiUnavailableError(await readErrorDetail(response), response.status)
   }
 
-  connectionStatus.reportReady()
+  connectionStatus.reportReady(url)
 
   if (!response.ok) {
     throw new ApiError(response.status, await readErrorDetail(response))
