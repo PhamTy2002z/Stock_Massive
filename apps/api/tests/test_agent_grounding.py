@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date
 
 import pytest
@@ -523,3 +524,128 @@ def test_the_markers_never_reach_the_reader():
     )
 
     assert rendered == "RSI 61.2 là trung tính."
+
+
+def test_an_availability_failure_is_degradable_and_an_integrity_one_is_not():
+    """The two classes of Gate failure, told apart by what the reader gets.
+
+    Both keep the block off the screen. Only the availability class lets the
+    Turn go on and say what was missing, because "no registered price zone
+    could be computed" is an answer while a blank Turn is not — and the figure
+    that contradicts its own citation stays in the class that ends the Turn.
+    """
+    missing_zone = RECOMMENDATION.replace(
+        f"Vùng dao động thường ngày 4.5 [zone:tich_luy@c1#registered_fields.{ZONE}.value]. ",
+        "",
+    )
+
+    with pytest.raises(GroundingFailure) as availability:
+        validator().validate(missing_zone, standard_traces())
+
+    assert availability.value.code == "missing_price_zone"
+    assert availability.value.degradable is True
+    notice = availability.value.notice()
+    assert "vùng giá" in notice
+    # The notice is the backend's own sentence, so it may not carry a figure:
+    # nothing validates it, and a number in it would be a number nobody proved.
+    assert not re.search(r"\d", notice.replace("{", "").replace("}", ""))
+
+    mismatched = RECOMMENDATION.replace("Giá tham chiếu 95.4", "Giá tham chiếu 128.0")
+
+    with pytest.raises(GroundingFailure) as integrity:
+        validator().validate(mismatched, standard_traces())
+
+    assert integrity.value.code == "figure_mismatch"
+    assert integrity.value.degradable is False
+    assert integrity.value.notice() == ""
+
+
+def test_a_fullwidth_bracket_marker_attributes_and_never_reaches_the_reader():
+    """A Vietnamese answer writes 【ev:…】, and it has to count as the citation.
+
+    Measured on a real Turn: nine figures, every one attributed with fullwidth
+    brackets, and the ASCII-only pattern matched none of them — so nine correct
+    citations were reported as unattributed and the markers were displayed as
+    part of the sentence.
+    """
+    text = (
+        f"Vùng dao động thường ngày 4.5【ev:c1#registered_fields.{ZONE}.value】 "
+        f"và mức giảm -12.5【ev:c1#registered_fields.{DRAWDOWN}.value】."
+    )
+
+    released = validator().validate(text, standard_traces())
+
+    assert released.unverified_figures == ()
+    assert len(released.citations) == 2
+    assert "【" not in released.text and "ev:" not in released.text
+    assert "4.5" in released.text and "-12.5" in released.text
+
+
+def test_a_marker_written_without_its_kind_still_attributes_the_figure():
+    """The model dropped the `ev:` prefix; the reference is still a reference.
+
+    Inferred as plain evidence, which is the weakest kind: it attributes the
+    figure in front of it and can never stand in for a zone, a reference price
+    or the contradictory citation the Gate requires.
+    """
+    text = f"Vùng dao động thường ngày 4.5【c1#registered_fields.{ZONE}.value】."
+
+    released = validator().validate(text, standard_traces())
+
+    assert released.unverified_figures == ()
+    assert len(released.citations) == 1
+    assert released.citations[0].zone_label is None
+    assert released.citations[0].reference_price is False
+    assert "【" not in released.text
+
+
+def test_an_inferred_marker_that_resolves_to_nothing_costs_only_its_figure():
+    """A forgotten prefix must not end a Turn the model otherwise answered.
+
+    An explicit `[ev:…]` naming a call that does not exist is the model
+    breaking its own protocol and still fails. An inferred one was never a
+    promise, so the figure falls back to unattributed — the same place it
+    would be with no marker at all.
+    """
+    text = "Vùng dao động thường ngày 4.5【c9#registered_fields.nothing.here】."
+
+    released = validator().validate(text, standard_traces())
+
+    assert released.unverified_figures == ("4.5",)
+    assert released.citations == ()
+    assert "【" not in released.text
+
+    explicit = "Vùng dao động thường ngày 4.5 [ev:c9#registered_fields.nothing.here]."
+
+    with pytest.raises(GroundingFailure):
+        validator().validate(explicit, standard_traces())
+
+
+def test_ordinary_bracketed_prose_is_never_read_as_a_reference():
+    """The inference is shaped to a reference, so prose keeps its brackets."""
+    text = "Thị trường đóng cửa【ghi chú của người đọc】và không có số liệu nào."
+
+    released = validator().validate(text, standard_traces())
+
+    assert "ghi chú của người đọc" in released.text
+
+
+def test_a_figure_that_disagrees_with_an_inferred_reference_is_labelled_not_fatal():
+    """A guess that turns out wrong costs the figure its attribution, nothing more.
+
+    The explicit form keeps the guarantee that matters: a figure contradicting
+    a reference the model actually wrote still ends the Turn.
+    """
+    text = f"Vùng dao động thường ngày 99.9【c1#registered_fields.{ZONE}.value】."
+
+    released = validator().validate(text, standard_traces())
+
+    assert released.unverified_figures == ("99.9",)
+    assert "【" not in released.text
+
+    explicit = f"Vùng dao động thường ngày 99.9 [ev:c1#registered_fields.{ZONE}.value]."
+
+    with pytest.raises(GroundingFailure) as raised:
+        validator().validate(explicit, standard_traces())
+
+    assert raised.value.code == "figure_mismatch"
