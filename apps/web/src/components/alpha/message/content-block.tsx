@@ -1,16 +1,10 @@
 "use client"
 
-import { ChevronDown } from "lucide-react"
-
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible"
-import type { Citation, ContentBlock } from "@/lib/alpha-desk/types"
+import type { ContentBlock } from "@/lib/alpha-desk/types"
 import { UNVERIFIED_FIGURES_COPY } from "@/lib/alpha-desk/copy"
 import { cn } from "@/lib/utils"
-import { Figure } from "./figure"
+import { CitationChips } from "./citation-chips"
+import { Markdown } from "./markdown"
 
 /**
  * One proven presentation unit, and the figures it stands on.
@@ -21,10 +15,10 @@ import { Figure } from "./figure"
  * Recommendation Gate can withhold, and a reader should be able to see which
  * part of an answer that was.
  *
- * Units and `as_of` sit **beside** the figures rather than behind the
- * disclosure, because a number without its unit and its date is the thing this
- * whole system exists to stop being said. Method detail — the registered field
- * id and the sanctioned interpretation — is what goes behind **View details**.
+ * Units and `as_of` sit one press behind the chip at the end of the claim
+ * (`citation-chips`), never further: a number without its unit and its date is
+ * the thing this whole system exists to stop being said, and ADR-0015's first
+ * provenance layer has to stay reachable from the sentence it supports.
  *
  * **No tool name reaches this component's DOM.** A citation carries one, and it
  * is deliberately not read: the trace is an audit surface, not part of the
@@ -57,11 +51,19 @@ export function ContentBlockView({
         </p>
       )}
 
-      {/* `whitespace-pre-wrap` rather than a Markdown renderer: a block is
-          already a Markdown-safe unit, and shipping a parser to interpret model
-          output is a second place where what is stored and what is shown can
-          disagree. */}
-      <p className="whitespace-pre-wrap text-[0.95rem] leading-[1.62]">{block.text}</p>
+      {/* A block *is* a Markdown-safe unit — that is what ADR-0013 buffers the
+          provider's deltas into — so it is rendered as Markdown rather than
+          shown verbatim. Rendering it verbatim was the bug: `**Nguyễn Đăng
+          Quang**` reached readers with its asterisks. The renderer has no raw
+          HTML path, so nothing in a block can produce markup. */}
+      <Markdown
+        text={block.text}
+        trailing={
+          block.citations.length > 0 ? (
+            <CitationChips citations={block.citations} />
+          ) : undefined
+        }
+      />
 
       {(block.unverified_figures?.length ?? 0) > 0 && (
         <p
@@ -73,59 +75,7 @@ export function ContentBlockView({
         </p>
       )}
 
-      {block.citations.length > 0 && <Figures citations={block.citations} />}
     </div>
   )
 }
 
-function Figures({ citations }: { citations: Citation[] }) {
-  return (
-    <Collapsible className="overflow-hidden rounded-xl border border-border bg-surface-raised">
-      <ul className="divide-y divide-border/50">
-        {citations.map((citation, index) => (
-          <li key={`${citation.field_path}-${index}`} className="px-3 py-2 text-meta">
-            <Figure
-              value={citation.value}
-              unit={citation.unit}
-              asOf={citation.as_of}
-              stale={citation.stale}
-              sourceName={
-                citation.source === "external_claim" ? citation.provenance : null
-              }
-              retrievedAt={
-                citation.source === "external_claim" ? citation.as_of : null
-              }
-            />
-          </li>
-        ))}
-      </ul>
-
-      <CollapsibleTrigger className="group flex w-full items-center gap-1 border-t border-border px-3 py-2 text-meta text-muted-foreground transition-colors hover:text-foreground">
-        View details
-        <ChevronDown className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180 motion-reduce:transition-none" />
-      </CollapsibleTrigger>
-
-      <CollapsibleContent>
-        <dl className="space-y-2 border-t border-border px-3 py-2.5 text-meta">
-          {citations.map((citation, index) => (
-            <div key={`${citation.field_path}-detail-${index}`} className="space-y-0.5">
-              <dt className="font-mono text-micro text-muted-foreground">
-                {citation.field_path}
-              </dt>
-              {citation.interpretation && <dd>{citation.interpretation}</dd>}
-              <dd className="text-muted-foreground">
-                {citation.source === "external_claim"
-                  ? `Source: ${citation.provenance}${
-                      citation.as_of ? ` · retrieved ${citation.as_of}` : ""
-                    }`
-                  : `Source: ${citation.source}${
-                      citation.provenance ? ` · ${citation.provenance}` : ""
-                    }`}
-              </dd>
-            </div>
-          ))}
-        </dl>
-      </CollapsibleContent>
-    </Collapsible>
-  )
-}

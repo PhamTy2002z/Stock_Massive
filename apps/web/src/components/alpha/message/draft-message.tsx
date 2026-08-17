@@ -3,10 +3,10 @@
 import { Loader2 } from "lucide-react"
 
 import type { DraftEntry } from "@/lib/alpha-desk/transcript"
-import { ActivityTrail } from "./activity-line"
 import { ContentBlockView } from "./content-block"
 import { MessageShell } from "./message-shell"
 import { Reveal } from "./reveal"
+import { SearchProgress } from "./search-progress"
 import { TurnStatus } from "./turn-status"
 
 /**
@@ -41,6 +41,19 @@ export function DraftMessage({
 
   return (
     <MessageShell className={className}>
+      {/* Above the blocks and open while the work happens: the reader is
+          watching a list grow, and a trail under the answer would put the
+          growing part below the thing they are waiting for. It folds itself
+          away when the canonical message replaces this draft. */}
+      {showsActivity && (
+        <SearchProgress
+          steps={entry.steps}
+          activity={livePhase}
+          ending={running ? null : entry.phase === "completed" ? "done" : "stopped"}
+          defaultOpen
+        />
+      )}
+
       {/* `appendedIndex` is exactly the block the last event delivered. A
           snapshot appends nothing, so a reconnect and a reopened Thread reveal
           nothing and everything present renders at once. */}
@@ -49,8 +62,6 @@ export function DraftMessage({
           <ContentBlockView block={block} />
         </Reveal>
       ))}
-
-      {showsActivity && <ActivityTrail steps={entry.steps} phase={livePhase} />}
 
       {/* Before the first activity or block. The harness has to look like it is
           working rather than hung, and the first thing the backend sends can be
