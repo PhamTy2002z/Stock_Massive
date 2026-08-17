@@ -61,9 +61,32 @@ class ApiError extends Error {
  * `TypeError: Failed to fetch` in the user's face. Silence now reports itself
  * to `connectionStatus`, which the page veils on. An answer — including a 404
  * — clears only this operation's prior unavailable state, so a healthy request
- * cannot hide a different endpoint which is still failing.
+ * cannot hide a different endpoint which is still failing. Background market
+ * polls do not report either failure or recovery to the application-wide gate.
  */
-async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
+export interface FetchApiBehaviour {
+  /**
+   * Whether this request's silence is the whole application's problem.
+   *
+   * True for anything a person is waiting on: they asked, and the answer is
+   * not coming, so veiling the page is the honest reading.
+   *
+   * **False for the market-data polls.** They re-ask every 15 to 30 seconds
+   * whether anyone is looking at them, and they depend on an upstream provider
+   * with a rate limit the rest of the app does not touch. One refused poll
+   * veiling the page means the chat — which never calls that provider — is
+   * blurred, made `pointer-events-none` and covered by a toast, on a schedule,
+   * because a price ticker could not refresh. A widget that cannot load is the
+   * widget's problem to show.
+   */
+  veilsOnOutage?: boolean
+}
+
+async function fetchApi<T>(
+  endpoint: string,
+  options?: RequestInit,
+  { veilsOnOutage = true }: FetchApiBehaviour = {},
+): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`
   let response: Response
   try {
@@ -77,16 +100,19 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
   } catch (cause) {
     // fetch only rejects when the request never completed: no server, no
     // network, request aborted. There is no status to read.
-    connectionStatus.reportWaiting(url)
+    if (veilsOnOutage) connectionStatus.reportWaiting(url)
     throw new ApiUnavailableError(undefined, undefined, { cause })
   }
 
   if (isRetryableStatus(response.status)) {
-    connectionStatus.reportWaiting(url)
+    if (veilsOnOutage) connectionStatus.reportWaiting(url)
     throw new ApiUnavailableError(await readErrorDetail(response), response.status)
   }
 
-  connectionStatus.reportReady(url)
+  // A poll that does not veil does not lift either: it proves its own endpoint
+  // is answering, and that says nothing about the request a person is still
+  // waiting on.
+  if (veilsOnOutage) connectionStatus.reportReady(url)
 
   if (!response.ok) {
     throw new ApiError(response.status, await readErrorDetail(response))
@@ -94,6 +120,9 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
 
   return response.json()
 }
+
+/** What the polled market-data widgets pass: they report to nobody. */
+const POLLED: FetchApiBehaviour = { veilsOnOutage: false }
 
 /**
  * The API explains itself in `detail` — "this period has not been computed
@@ -112,7 +141,11 @@ async function readErrorDetail(response: Response): Promise<string> {
 
 export async function fetchPriceBoard(symbols: string[]): Promise<PriceBoardItem[]> {
   const symbolsParam = symbols.join(",")
-  return fetchApi<PriceBoardItem[]>(`/stocks/price-board?symbols=${encodeURIComponent(symbolsParam)}`)
+  return fetchApi<PriceBoardItem[]>(
+    `/stocks/price-board?symbols=${encodeURIComponent(symbolsParam)}`,
+    undefined,
+    POLLED,
+  )
 }
 
 export interface MarketIndexRaw {
@@ -134,7 +167,7 @@ export function mapMarketIndices(data: MarketIndexRaw[]): MarketIndex[] {
 }
 
 export async function fetchMarketIndices(): Promise<MarketIndex[]> {
-  const data = await fetchApi<MarketIndexRaw[]>("/stocks/market-indices")
+  const data = await fetchApi<MarketIndexRaw[]>("/stocks/market-indices", undefined, POLLED)
   return mapMarketIndices(data)
 }
 
@@ -380,7 +413,7 @@ export interface SectorPerformanceResponse {
 }
 
 export async function fetchSectorPerformance(): Promise<SectorPerformanceResponse> {
-  return fetchApi<SectorPerformanceResponse>("/stocks/sector-performance")
+  return fetchApi<SectorPerformanceResponse>("/stocks/sector-performance", undefined, POLLED)
 }
 
 // Fund Certificates Types
@@ -453,7 +486,7 @@ export interface VN30OverviewResponse {
 }
 
 export async function fetchVN30Overview(): Promise<VN30OverviewResponse> {
-  return fetchApi<VN30OverviewResponse>("/stocks/vn30-overview")
+  return fetchApi<VN30OverviewResponse>("/stocks/vn30-overview", undefined, POLLED)
 }
 
 // Volume Spike Signal Types

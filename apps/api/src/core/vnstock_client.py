@@ -34,6 +34,66 @@ from src.core.quota import active_lane, quota_arbiter
 
 logger = logging.getLogger(__name__)
 
+# The value vnstock's own probe reaches for when it cannot name the
+# environment. Matching it exactly is the point: this is the answer the library
+# intends for a machine that is not a hosted notebook.
+_UNKNOWN_HOSTING_SERVICE = "Local or Unknown"
+
+
+def _repair_hosting_service_probe() -> None:
+    """Supply the ``else`` that ``vnstock.core.utils.env`` is missing.
+
+    ``get_hosting_service()`` walks five ``elif`` branches for Colab, Codespace,
+    Replit, Kaggle and Hugging Face, assigns nothing when none of them match,
+    and then returns the variable — so on an ordinary machine it raises
+    ``UnboundLocalError`` rather than answering. Its own ``except`` says what
+    the answer should have been, ``"Local or Unknown"``, which is why this can
+    repair the probe rather than having to guess at one: the missing branch is
+    written down two lines below the hole.
+
+    Present in 4.0.5 and still in 4.0.6, and ``requirements.txt`` admits the
+    whole 4.x line, so waiting for a release is not a plan. It reaches us as
+    ``VnstockReadFailed(... (UnboundLocalError))`` from any path that asks
+    whether it is running on Colab — which on this deployment is every
+    ``quote.history`` call, and therefore the whole Backfill.
+
+    Patched only when it is actually broken, and only on the module that
+    defines it: both call sites resolve the name at call time — one from its
+    own module globals, one through a function-body import — so the definition
+    is the only binding that has to move. When upstream closes the hole this
+    becomes a no-op on its own.
+
+    Lying about the environment would have been the cheaper fix. Setting
+    ``CODESPACE_NAME`` makes the probe answer, and makes every telemetry
+    payload vnai sends say this machine is a Codespace.
+    """
+    try:
+        from vnstock.core.utils import env as _env
+    except Exception:  # noqa: BLE001 - a probe we cannot import needs no repair
+        return
+
+    try:
+        _env.get_hosting_service()
+    except UnboundLocalError:
+        pass
+    except Exception:  # noqa: BLE001 - broken some other way is not ours to fix
+        return
+    else:
+        return
+
+    def get_hosting_service() -> str:
+        return _UNKNOWN_HOSTING_SERVICE
+
+    _env.get_hosting_service = get_hosting_service
+    logger.info(
+        "Patched vnstock's hosting-service probe, which raises UnboundLocalError "
+        "off a hosted notebook; reporting %r",
+        _UNKNOWN_HOSTING_SERVICE,
+    )
+
+
+_repair_hosting_service_probe()
+
 # Calls that only walk vnstock's object graph — `Vnstock().stock(...)` hands
 # back a component holder rather than a response. Guarded like everything else
 # and deliberately not paced: spending an account slot on a call that reaches no

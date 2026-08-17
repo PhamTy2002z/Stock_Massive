@@ -512,3 +512,74 @@ class TestCacheInstances:
         assert sector_performance_cache.key_prefix == "stock:sector:"
         assert sector_performance_cache.ttl_trading == 300
         assert sector_performance_cache.ttl_off_hours == 3600
+
+
+class TestPollingEndpointsSurviveAnOutage:
+    """The two endpoints the browser polls must not re-ask a spent allowance.
+
+    This is the failure that took the price board down on 2026-08-17. The
+    caches were written only on success, so the first refusal left nothing to
+    serve; every poll then went upstream, one `/market-indices` request costing
+    four `Quote.history` calls, and ~30 requests a minute became ~120 against
+    an allowance of 60. The refusal was held open by the traffic reacting to
+    it — 157 misses in five minutes, and seven straight minutes of 503.
+    """
+
+    def test_both_polled_caches_can_serve_something_when_upstream_refuses(self):
+        """Without `stale_ttl` there is nothing to fall back to, by construction."""
+        from src.stocks.price.router import market_indices_cache, price_board_cache
+
+        assert market_indices_cache.stale_ttl is not None
+        assert price_board_cache.stale_ttl is not None
+        # Short enough that what it serves is still about today: an index level
+        # from last week is a lie on a trading screen, however cached.
+        assert market_indices_cache.stale_ttl <= 30 * 60
+        assert price_board_cache.stale_ttl <= 30 * 60
+
+    def test_a_refusing_provider_is_asked_once_not_once_per_poll(self):
+        """The second poll is answered from the stale copy, not from upstream.
+
+        The assertion that matters is `calls == 1`: the endpoint that kept the
+        outage alive was the one that called the loader every time.
+        """
+        from src.core.vnstock_client import VnstockUnavailable
+
+        redis = ThreadSafeRedis()
+        cache = TradingHoursCache(
+            key_prefix="test:poll:",
+            ttl_trading=1,
+            ttl_off_hours=1,
+            stale_ttl=900,
+        )
+        calls = {"n": 0}
+
+        def loader(value):
+            def load():
+                calls["n"] += 1
+                if isinstance(value, Exception):
+                    raise value
+                return value
+
+            return load
+
+        with patch("src.core.cache.get_redis", return_value=redis):
+            first = cache.get_or_load("all", loader([{"symbol": "VNINDEX"}]))
+            assert first == [{"symbol": "VNINDEX"}]
+            assert calls["n"] == 1
+
+            # The fresh key expires; upstream is now refusing.
+            time.sleep(1.1)
+            refuse = loader(VnstockUnavailable("quota"))
+            suppress = lambda exc: isinstance(exc, VnstockUnavailable)
+
+            second = cache.get_or_load("all", refuse, suppress_failure=suppress)
+            assert second == [{"symbol": "VNINDEX"}]
+            assert calls["n"] == 2
+
+            # Every further poll inside the failure window is answered without
+            # touching the provider. This is the whole fix.
+            for _ in range(5):
+                assert cache.get_or_load("all", refuse, suppress_failure=suppress) == [
+                    {"symbol": "VNINDEX"}
+                ]
+            assert calls["n"] == 2
