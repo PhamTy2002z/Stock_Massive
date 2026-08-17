@@ -45,10 +45,16 @@ describe("what the app does when the API cannot answer", () => {
     expect(connectionStatus.get()).toBe("ready")
   })
 
-  it("counts any answer as proof the API is back", async () => {
-    connectionStatus.reportWaiting()
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, [])))
+  it("clears waiting when the same operation answers again", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(503, { detail: "Restarting" }))
+        .mockResolvedValueOnce(jsonResponse(200, [])),
+    )
 
+    await expect(searchStocks("VCB")).rejects.toBeInstanceOf(ApiUnavailableError)
     await searchStocks("VCB")
 
     expect(connectionStatus.get()).toBe("ready")
