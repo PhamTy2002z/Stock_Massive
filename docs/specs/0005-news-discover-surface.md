@@ -34,9 +34,12 @@ Decisions:
 | N1 | Placement | News is a fourth `ShellView` (`"news"`), entered from a sidebar nav row ("Tin tức"), never a route. Switching to it and back must lose neither the composer draft nor the article being read. |
 | N2 | Article page | In-view reading state (`newsArticle` in the shell reducer), not a page. "Trở về" is a state transition; scroll and feed stay warm. |
 | N3 | Sources panel | The reference's slide-in sources list maps onto the existing inspector: a third `InspectorTab` (`"news"`), with drag-resize and wide-toggle inherited for free. |
-| N4 | Honesty bar | v1 renders what VCI actually serves: one source per item, provider prose, no AI-composed article body, no per-claim citation chips, no "15 nguồn" aggregation. The layout keeps the reference's shape; the labels never claim synthesis that did not happen. |
+| N4 | Honesty bar | v1 renders what the source actually serves: one source per item, no AI-composed article body, no per-claim citation chips, no "15 nguồn" aggregation. The layout keeps the reference's shape; the labels never claim synthesis that did not happen. |
+| N4a | Feed source (revised 2026-08-17) | The market feed is **CafeF category RSS**, not VCI. VCI serves no prose — measured 0/50 non-null on every content, source and link column across FPT/STB/VNM — so the reader had a headline and nothing else. VCI stays as a per-symbol **disclosure** list in the rail, labelled as disclosures rather than as news. See the correction section in `docs/research/news-sources.md`. |
+| N4b | Article text | The reader shows CafeF's own summary and a link to the original; **full text is never fetched or stored**. VCCorp holds the copyright and no ToS grants reuse. This is why the reading column is short by design. |
+| N4c | Facets | The reference's editorial facet row becomes real: eight slugs served by the API — `moi-nhat`, `chung-khoan`, `kinh-te`, `tai-chinh`, `bat-dong-san`, `doanh-nghiep`, `cong-nghe`, `the-gioi` — each backed by a CafeF category feed whose *contents* were checked, not just its name. Our slugs are the contract; CafeF's paths stay an implementation detail. Two of the reference's labels are dropped: "Đọc nhiều" needs a read-count no source publishes, and CafeF has no retail feed. Chứng khoán and Doanh nghiệp take those slots — on a market platform they are the facets a reader came for. |
 | N5 | Rail widget | The reference's weather widget becomes a market widget (VNINDEX + indices) — this is a market product; weather is not its context. |
-| N6 | Data budget | Free vnstock tier stands (spec 0004 D6). The feed aggregates VN30 only, capped at 12 symbols per rebuild, behind a Redis response cache with stale fallback — one rebuild is at most 12 provider calls, and a quota refusal mid-rebuild serves the partial feed rather than a blank screen. |
+| N6 | Data budget | The feed no longer spends vnstock quota at all: CafeF is plain HTTP, one request per category, behind a Redis response cache (300s trading / 900s off-hours, 24h stale). The rail's disclosure list is the only vnstock call on this surface, one per symbol, on the existing per-symbol cache. |
 | N7 | AI layer | Key-takeaways boxes, citation chips and composed articles are explicitly deferred to the agent lane (spec 0004 W5/W6). When they land, they enter this surface as clearly-labelled agent output, not as provider prose restyled. |
 
 ## 2. Layout, from the screenshots
@@ -45,10 +48,9 @@ Decisions:
 
 Two columns inside the main region (`max-w-[1180px]`, rail hidden below `xl`):
 
-1. **Pill tab row** — "Mới nhất" plus one pill per contributing symbol
-   (top-by-count, max 6). Client-side filter; the reference's editorial
-   categories (Kinh tế, Tài chính…) require a taxonomy no endpoint serves,
-   so symbols are the honest v1 facets.
+1. **Pill tab row** — the seven category slugs of N4c, served by
+   `GET /stocks/news/categories`. Selecting one refetches that facet rather than
+   filtering in the client: each is its own upstream feed.
 2. **Hero block** — a narrow left column stacking two small cards beside one
    large hero card (16:9 image, serif headline ~1.9rem, two-line summary,
    source line). Items 0–2 of the feed.
@@ -57,10 +59,13 @@ Two columns inside the main region (`max-w-[1180px]`, rail hidden below `xl`):
    per date group), title + summary in the middle, fixed thumbnail on the
    right.
 
-Right rail (sticky): market widget (N5), "Mới cập nhật" (five most recent),
-"Theo mã" symbol chips that drive the same filter as the pill row.
+Right rail (sticky): market widget (N5), "Mới cập nhật" (five most recent), and
+**"Công bố thông tin"** — the VCI disclosure list for the selected symbol (N4a),
+carrying a note that these are company filings rather than press articles. The
+two sources stay visibly distinct rather than blended into one list.
 
-The repeated identity unit is the **source line** (source pill + symbol +
+The repeated identity unit is the **source line** (source pill + symbol or
+category +
 date). The reference's favicon-cluster-plus-"15 nguồn" is a multi-source
 aggregation claim; ours names the single provider per item (N4).
 
@@ -68,38 +73,46 @@ aggregation claim; ours names the single provider per item (N4).
 
 A single centered reading column (~720px) rendered in place of the feed:
 serif headline (~2.1rem, Newsreader — already the system's one serif),
-Vietnamese long-form date, source line, clickable symbol chip (opens the
-symbol inspector), lead paragraph, hero image, provider prose split into
-paragraphs, then **Bài liên quan** — three same-symbol cards. Top bar: back
-(state transition), external "Bài gốc" link, and "Nguồn" opening the
-inspector tab.
+Vietnamese long-form date, source line, category label (or a clickable symbol
+chip when the item carries one), the summary set as the lead, hero image, and
+a link out to the original — the article body stays on the publisher's site
+per N4b, so the column is deliberately short and says so. Then **Bài liên
+quan** — three same-category cards. Top bar: back (state transition),
+external "Bài gốc" link, and "Nguồn" opening the inspector tab.
 
 ### Sources tab (inspector)
 
 Header "Nguồn tham khảo"; the open article's own source entry first (source,
-date, title, snippet, external link), then "Tin khác về {symbol}" — up to
-eight same-symbol feed entries, each clickable to swap the open article. The
-tab button renders only while an article is open.
+date, title, snippet, link to the original), then "Tin khác cùng chủ đề" — up
+to eight same-category feed entries, each clickable to swap the open article.
+The tab button renders only while an article is open.
 
 ## 3. Serving path
 
-Two provider-backed endpoints, both behind `TradingHoursCache` with stale
-fallback, mirroring the company router's discipline:
+Three endpoints. The two feed routes read CafeF over plain HTTP; the
+per-symbol route is the vnstock lane, and all of them sit behind
+`TradingHoursCache` with stale fallback, mirroring the company router's
+discipline:
 
-- `GET /stocks/news/feed` — VN30 aggregation (N6), `heavy_rate_limit`,
-  TTL 900s trading / 3600s off-hours, stale 24h. Sorted newest-first,
-  capped at 120 items. A symbol whose fetch fails is skipped and absent from
-  the response's `symbols`; a quota refusal with nothing gathered maps to the
-  standard 503.
-- `GET /stocks/{symbol}/news` — the per-symbol lane, `standard_rate_limit`,
-  same TTLs, stale 7d. Wires the previously-unreachable
-  `CompanyService.get_company_news`, whose row mapping is rewritten for the
-  VCI frame (the old mapping read TCBS-era column names and would have served
-  empty fields).
+- `GET /stocks/news/feed?category={slug}` — one CafeF category feed,
+  `heavy_rate_limit`, TTL 300s trading / 900s off-hours, stale 24h, cache key
+  per category. Sorted newest-first, capped at 120 items. An unknown slug is
+  a 400 before the cache is touched. A CafeF outage raises `CafeFUnavailable`
+  → 503, and the cache serves the last good feed rather than nothing.
+- `GET /stocks/news/categories` — the slug registry (N4c). No network, so the
+  pill row never waits on a feed to learn what the facets are.
+- `GET /stocks/{symbol}/news` — the VCI disclosure lane,
+  `standard_rate_limit`, TTL 900s/3600s, stale 7d. Wires the previously
+  unreachable `CompanyService.get_company_news`, whose row mapping is
+  rewritten for the VCI frame (the old mapping read TCBS-era column names and
+  would have served empty fields).
 
-`NewsItem` widens with `summary`, `content` (HTML-stripped plain text),
-`url`, `image_url` — all optional, all provider-derived. The feed item adds
-`symbol`.
+`NewsItem` carries `summary`, `content`, `url`, `image_url`, `category` — all
+optional. Its `id` is a **string**: VCI's `id` column is a hex digest and
+CafeF's key is a slug fragment, so an integer id forced a fallback to the
+row's position, which silently re-pointed an open article whenever the feed
+shifted. The feed item adds an optional `symbol` — a press article belongs to
+a category, not to a ticker.
 
 This is a Collector-free path on purpose: news is provider prose served
 through response caches, not a Capability in the store. If news ever needs a
@@ -109,8 +122,13 @@ router's docstring names.
 
 ## 4. Out of scope for v1
 
-- Editorial categories, read-counts ("Đọc nhiều nhất") and any ranking beyond
-  recency — no signal exists to back them.
+- Read-counts ("Đọc nhiều nhất") and any ranking beyond recency — no signal
+  exists to back them. (Editorial categories are now served — see N4c.)
+- **Per-symbol press news.** CafeF's RSS is category-scoped; the feed cannot
+  answer "news about VCB". The rail's disclosure list is not a substitute, and
+  the gap is named in `docs/research/news-sources.md` as the next thing to
+  research.
+- Fetching or storing full article text (N4b).
 - AI-composed article bodies, key-takeaways boxes, per-claim citation chips
   (N7).
 - Watchlist-scoped feeds and per-user personalization.

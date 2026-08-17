@@ -207,3 +207,65 @@ no auth and no prohibitive terms; costs an HTML-fragment parser.
 RSS (personal non-commercial only; keyword matching), Vietstock (JSON API returns
 empty even with CSRF tokens; scraping-only, ToS review needed), FiinQuant (no news
 capability).
+
+## Correction, measured 2026-08-17: VCI carries no prose
+
+The verdict above is wrong on the one point that mattered most, and the error is
+worth naming because it survived into a shipped UI: **this research listed the
+columns VCI's frame declares, and never checked whether they hold values.**
+
+Measured inside the API container, `stock.company.news()` on VCI, 50 rows per
+symbol, for FPT, STB and VNM alike:
+
+| Column | Non-null |
+|---|---|
+| `news_title` | 50/50 |
+| `public_date` | 50/50 |
+| `news_image_url` | 50/50 |
+| `news_short_content` | **0/50** |
+| `news_full_content` | **0/50** |
+| `news_source` | **0/50** |
+| `news_source_link` | **0/50** |
+| `news_sub_title`, `friendly_*`, `news_author`, `news_keyword` | **0/50** |
+
+So "titles, snippets, full content, original-source links" (§Verdict item 2) is
+not what the source serves. What it serves is a **corporate-disclosure feed**:
+titles of the form `FPT: Nghị quyết HĐQT về việc triển khai phương án phát hành
+cổ phiếu…`, where the title *is* the whole item and the document itself lives in
+a PDF on the exchange. `news_image_url` is the company logo on FiinGroup's CDN
+(`cdn.fiingroup.vn/…/FPT.png`), repeated for every row of a symbol — not an
+article image.
+
+Two further findings from the same measurement:
+
+- The `id` column is a hex string (`6a71318b35a7497fa78fb4c3`); `news_id` is the
+  stable integer (`12103811`). Anything keying articles must prefer `news_id`.
+- `public_date` is ISO without offset (`2026-08-03T16:13:52`), Asia/Ho_Chi_Minh.
+
+### What replaced it
+
+**CafeF category RSS**, verified live 2026-08-17 — this is now the market feed;
+VCI stays as the per-symbol disclosure list, labelled as such.
+
+- `https://cafef.vn/{category}.rss` → HTTP 200, RSS 2.0, 50–60 items, newest
+  minutes old. Verified: `home`, `thi-truong-chung-khoan`, `tai-chinh-ngan-hang`,
+  `bat-dong-san`, `doanh-nghiep`, `vi-mo-dau-tu`, `tai-chinh-quoc-te`.
+- **A browser `User-Agent` is mandatory.** Every CafeF URL answers **503** from a
+  WAF to curl's default UA, including `robots.txt` itself. This is why §2 above
+  reported the ajax endpoint as the only option and never tested the RSS index:
+  `https://cafef.vn/index.rss` returns 503 without a UA and 200 with one.
+- `robots.txt` (fetched with a UA): `User-agent: * / Allow: /`.
+- Each `<item>` carries `title`, `link`, `guid`, `pubDate`
+  (`Mon, 17 Aug 26 19:59:00 +0700` — **two-digit year**), and a `description`
+  holding `<a><img src="…600_315/…jpg"></a>` followed by the article's summary.
+  So: real headline, real 16:9 image, real summary, real link.
+- The article-id digits at the tail of a CafeF slug
+  (`…-188260817190901375.chn`) are a stable natural key.
+- **Full article text is deliberately not fetched.** VCCorp holds the copyright
+  and no ToS page grants reuse; the feed's own summary plus a link to the
+  original is the defensible surface. That decision is recorded in
+  `docs/specs/0005-news-discover-surface.md`.
+
+Per-symbol press news remains unsolved: CafeF's RSS is category-scoped, and the
+per-symbol ajax endpoint from §2 was not revisited. A symbol-scoped press feed is
+the next thing to research if the product needs one.

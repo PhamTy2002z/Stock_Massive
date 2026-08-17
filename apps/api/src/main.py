@@ -32,6 +32,7 @@ from src.core.llm import (
 from src.core.quota import QuotaRefused
 from src.core.scheduler import setup_scheduler
 from src.core.vnstock_client import VnstockUnavailable, VnstockUnsupported
+from src.stocks.providers.cafef_rss import CafeFUnavailable
 from src.stocks.router import router as stocks_router
 from src.stocks.jobs_router import router as jobs_router
 from src.stocks.signals.router import router as signals_router
@@ -216,6 +217,21 @@ async def vnstock_unavailable_handler(request: Request, exc: VnstockUnavailable)
     return JSONResponse(
         status_code=503,
         content={"detail": str(exc)},
+        headers={"Retry-After": "60"},
+    )
+
+
+@app.exception_handler(CafeFUnavailable)
+async def cafef_unavailable_handler(request: Request, exc: CafeFUnavailable):
+    """CafeF's RSS refused or answered unreadably — a third-party outage.
+
+    Kept apart from the vnstock handler: no allowance was spent here, so naming
+    the quota would send a reader looking in the wrong place.
+    """
+    logger.warning(f"CafeF unavailable on {request.url.path}: {exc}")
+    return JSONResponse(
+        status_code=503,
+        content={"detail": f"CafeF news feed unavailable: {exc}"},
         headers={"Retry-After": "60"},
     )
 

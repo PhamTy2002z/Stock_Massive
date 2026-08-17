@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import type { FeedNewsItem } from "./api"
 import {
+  articleFacet,
   articleKey,
   findArticle,
   formatPublishedDate,
@@ -9,53 +10,87 @@ import {
   parsePublishedAt,
   partitionFeed,
   relatedArticles,
-  topSymbols,
 } from "./news"
 
-/** One feed item, with only the fields the helpers actually read spelled out. */
-function item(overrides: Partial<FeedNewsItem> & { symbol: string; id: number }): FeedNewsItem {
+/**
+ * One press item, with only the fields the helpers actually read spelled out.
+ *
+ * `symbol: null` is the default because that is what the press feed looks like:
+ * a CafeF article is about a story and names no ticker. The disclosure shape —
+ * a symbol and no category — is spelled out where a test needs it.
+ */
+function item(overrides: Partial<FeedNewsItem> & { id: string }): FeedNewsItem {
   return {
-    title: `Tin ${overrides.symbol} ${overrides.id}`,
-    source: "VCI",
-    published_at: "2026-06-15 17:09",
+    title: `Tin ${overrides.id}`,
+    source: "CafeF",
+    published_at: "2026-06-15T17:09:00+07:00",
     summary: null,
     content: null,
     url: null,
     image_url: null,
+    category: "moi-nhat",
+    symbol: null,
     price: null,
     price_change_pct: null,
     ...overrides,
   }
 }
 
-/** A feed of `count` items, one symbol each, in the order the API returns them. */
+/** A feed of `count` items on the same facet, in the order the API returns them. */
 function feed(count: number): FeedNewsItem[] {
-  return Array.from({ length: count }, (_, index) =>
-    item({ symbol: `S${index}`, id: index }),
-  )
+  return Array.from({ length: count }, (_, index) => item({ id: String(index) }))
 }
 
 describe("articleKey", () => {
-  it("names an article by symbol and id", () => {
-    expect(articleKey(item({ symbol: "VCB", id: 123 }))).toBe("VCB:123")
+  it("names a press article by its facet and id", () => {
+    expect(articleKey(item({ id: "18826", category: "chung-khoan" }))).toBe("chung-khoan:18826")
   })
 
-  it("separates the same id under two symbols", () => {
-    expect(articleKey(item({ symbol: "FPT", id: 7 }))).not.toBe(
-      articleKey(item({ symbol: "VCB", id: 7 })),
+  it("names a disclosure by its symbol, which takes precedence over the facet", () => {
+    expect(articleKey(item({ id: "7", symbol: "VCB", category: "moi-nhat" }))).toBe("VCB:7")
+  })
+
+  it("falls back to a fixed namespace when the item names neither", () => {
+    expect(articleKey(item({ id: "7", category: null }))).toBe("feed:7")
+  })
+
+  it("separates the same id under two facets, so two sources cannot collide", () => {
+    expect(articleKey(item({ id: "7", category: "vi-mo" }))).not.toBe(
+      articleKey(item({ id: "7", category: "quoc-te" })),
+    )
+    expect(articleKey(item({ id: "7", category: "vi-mo" }))).not.toBe(
+      articleKey(item({ id: "7", symbol: "VCB" })),
     )
   })
 })
 
+describe("articleFacet", () => {
+  it("reads back the namespace articleKey wrote", () => {
+    const article = item({ id: "18826", category: "chung-khoan" })
+    expect(articleFacet(articleKey(article))).toBe("chung-khoan")
+  })
+
+  it("keeps the whole string when there is no namespace to split off", () => {
+    expect(articleFacet("moi-nhat")).toBe("moi-nhat")
+  })
+})
+
 describe("findArticle", () => {
-  const items = [item({ symbol: "VCB", id: 1 }), item({ symbol: "FPT", id: 2 })]
+  const items = [
+    item({ id: "1", category: "chung-khoan" }),
+    item({ id: "2", category: "vi-mo" }),
+  ]
 
   it("returns the article a key points at", () => {
-    expect(findArticle(items, "FPT:2")?.id).toBe(2)
+    expect(findArticle(items, "vi-mo:2")?.id).toBe("2")
   })
 
   it("returns null for a key the feed no longer holds", () => {
-    expect(findArticle(items, "VCB:999")).toBeNull()
+    expect(findArticle(items, "chung-khoan:999")).toBeNull()
+  })
+
+  it("returns null when the id matches under another facet", () => {
+    expect(findArticle(items, "vi-mo:1")).toBeNull()
   })
 
   it("returns null for no key at all", () => {
@@ -63,12 +98,43 @@ describe("findArticle", () => {
   })
 
   it("returns null on an empty feed", () => {
-    expect(findArticle([], "VCB:1")).toBeNull()
+    expect(findArticle([], "chung-khoan:1")).toBeNull()
   })
 })
 
 describe("parsePublishedAt", () => {
-  it("reads the wall clock as Ho Chi Minh time", () => {
+  // Shape one: CafeF, an ISO instant carrying its own offset.
+  it("trusts the offset an ISO timestamp states", () => {
+    expect(parsePublishedAt("2026-08-17T19:59:00+07:00")?.toISOString()).toBe(
+      "2026-08-17T12:59:00.000Z",
+    )
+  })
+
+  it("reads an offset that is not Vietnam's as the offset it says", () => {
+    expect(parsePublishedAt("2026-08-17T19:59:00+00:00")?.toISOString()).toBe(
+      "2026-08-17T19:59:00.000Z",
+    )
+    expect(parsePublishedAt("2026-08-17T19:59:00Z")?.toISOString()).toBe(
+      "2026-08-17T19:59:00.000Z",
+    )
+  })
+
+  it("accepts an ISO timestamp without seconds, and one with fractions", () => {
+    expect(parsePublishedAt("2026-08-17T19:59+07:00")?.toISOString()).toBe(
+      "2026-08-17T12:59:00.000Z",
+    )
+    expect(parsePublishedAt("2026-08-17T19:59:00.250+07:00")?.toISOString()).toBe(
+      "2026-08-17T12:59:00.250Z",
+    )
+  })
+
+  it("rejects an ISO timestamp on a day that does not exist", () => {
+    expect(parsePublishedAt("2026-02-30T09:30:00+07:00")).toBeNull()
+    expect(parsePublishedAt("2026-13-01T09:30:00+07:00")).toBeNull()
+  })
+
+  // Shape two: VCI, a bare wall clock that means Ho Chi Minh time.
+  it("reads a zoneless wall clock as Ho Chi Minh time", () => {
     // 09:30 in UTC+7 is 02:30 UTC, on any machine running the test.
     expect(parsePublishedAt("2026-08-15 09:30")?.toISOString()).toBe("2026-08-15T02:30:00.000Z")
   })
@@ -97,6 +163,12 @@ describe("formatPublishedDate", () => {
     expect(formatPublishedDate("2026-06-15 17:09")).toBe("Thứ Hai, 15/6/2026, 17:09")
   })
 
+  it("reads an offset timestamp back out in Ho Chi Minh time", () => {
+    expect(formatPublishedDate("2026-06-15T17:09:00+07:00")).toBe("Thứ Hai, 15/6/2026, 17:09")
+    // Same instant, stated from UTC: still the Vietnamese wall clock on screen.
+    expect(formatPublishedDate("2026-06-15T10:09:00Z")).toBe("Thứ Hai, 15/6/2026, 17:09")
+  })
+
   it("keeps midnight on a 24-hour clock", () => {
     expect(formatPublishedDate("2026-06-15 00:05")).toBe("Thứ Hai, 15/6/2026, 00:05")
   })
@@ -110,6 +182,7 @@ describe("formatPublishedDate", () => {
 describe("formatStreamDate", () => {
   it("pads the day and the month so the gutter aligns", () => {
     expect(formatStreamDate("2026-06-17 08:00")).toBe("17/06/2026")
+    expect(formatStreamDate("2026-06-17T08:00:00+07:00")).toBe("17/06/2026")
   })
 
   it("falls back to the raw string", () => {
@@ -121,10 +194,10 @@ describe("partitionFeed", () => {
   it("cuts a full feed into hero, spotlight, grid and stream", () => {
     const parts = partitionFeed(feed(12))
 
-    expect(parts.hero?.id).toBe(0)
-    expect(parts.spotlight.map((row) => row.id)).toEqual([1, 2])
-    expect(parts.grid.map((row) => row.id)).toEqual([3, 4, 5, 6])
-    expect(parts.stream.map((row) => row.id)).toEqual([7, 8, 9, 10, 11])
+    expect(parts.hero?.id).toBe("0")
+    expect(parts.spotlight.map((row) => row.id)).toEqual(["1", "2"])
+    expect(parts.grid.map((row) => row.id)).toEqual(["3", "4", "5", "6"])
+    expect(parts.stream.map((row) => row.id)).toEqual(["7", "8", "9", "10", "11"])
   })
 
   it("never repeats an article across two blocks", () => {
@@ -142,8 +215,8 @@ describe("partitionFeed", () => {
   it("leaves the later blocks empty on a short feed", () => {
     const parts = partitionFeed(feed(2))
 
-    expect(parts.hero?.id).toBe(0)
-    expect(parts.spotlight.map((row) => row.id)).toEqual([1])
+    expect(parts.hero?.id).toBe("0")
+    expect(parts.spotlight.map((row) => row.id)).toEqual(["1"])
     expect(parts.grid).toEqual([])
     expect(parts.stream).toEqual([])
   })
@@ -158,56 +231,33 @@ describe("partitionFeed", () => {
   })
 })
 
-describe("topSymbols", () => {
-  it("orders by how many articles each symbol contributed", () => {
-    const items = [
-      item({ symbol: "FPT", id: 1 }),
-      item({ symbol: "VCB", id: 2 }),
-      item({ symbol: "VCB", id: 3 }),
-      item({ symbol: "VCB", id: 4 }),
-      item({ symbol: "FPT", id: 5 }),
-      item({ symbol: "HPG", id: 6 }),
-    ]
-
-    expect(topSymbols(items, 6)).toEqual(["VCB", "FPT", "HPG"])
-  })
-
-  it("breaks a tie alphabetically so the row does not reshuffle", () => {
-    const items = [
-      item({ symbol: "VNM", id: 1 }),
-      item({ symbol: "HPG", id: 2 }),
-      item({ symbol: "ACB", id: 3 }),
-    ]
-
-    expect(topSymbols(items, 6)).toEqual(["ACB", "HPG", "VNM"])
-  })
-
-  it("stops at the maximum asked for", () => {
-    expect(topSymbols(feed(9), 6)).toHaveLength(6)
-  })
-
-  it("is empty for an empty feed", () => {
-    expect(topSymbols([], 6)).toEqual([])
-  })
-})
-
 describe("relatedArticles", () => {
-  const open = item({ symbol: "VCB", id: 1 })
+  const open = item({ id: "1", category: "chung-khoan" })
   const items = [
     open,
-    item({ symbol: "FPT", id: 2 }),
-    item({ symbol: "VCB", id: 3 }),
-    item({ symbol: "HPG", id: 4 }),
-    item({ symbol: "VCB", id: 5 }),
+    item({ id: "2", category: "vi-mo" }),
+    item({ id: "3", category: "chung-khoan" }),
+    item({ id: "4", category: "quoc-te" }),
+    item({ id: "5", category: "chung-khoan" }),
   ]
 
-  it("puts the same symbol first and never the article itself", () => {
-    expect(relatedArticles(items, open, 3).map((row) => row.id)).toEqual([3, 5, 2])
+  it("puts the same category first and never the article itself", () => {
+    expect(relatedArticles(items, open, 3).map((row) => row.id)).toEqual(["3", "5", "2"])
   })
 
-  it("pads with the newest others when the symbol has nothing else", () => {
-    const only = item({ symbol: "SSI", id: 9 })
-    expect(relatedArticles([only, ...items], only, 3).map((row) => row.id)).toEqual([1, 2, 3])
+  it("pads with the newest others when the category has nothing else", () => {
+    const only = item({ id: "9", category: "bat-dong-san" })
+    expect(relatedArticles([only, ...items], only, 3).map((row) => row.id)).toEqual([
+      "1",
+      "2",
+      "3",
+    ])
+  })
+
+  it("groups the items that name no category together, rather than with everything", () => {
+    const orphan = item({ id: "9", category: null })
+    const rows = relatedArticles([orphan, item({ id: "8", category: null }), ...items], orphan, 3)
+    expect(rows.map((row) => row.id)).toEqual(["8", "1", "2"])
   })
 
   it("returns nothing when the feed holds only this article", () => {

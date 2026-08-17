@@ -4,8 +4,8 @@ import { useMemo, useState, type ReactNode } from "react"
 import { ArrowLeft, ExternalLink, PanelRight } from "lucide-react"
 
 import { useMarketIndices } from "@/hooks/use-market-indices"
-import { useNewsFeed } from "@/hooks/use-news"
-import type { FeedNewsItem } from "@/lib/api"
+import { useCompanyNews, useNewsCategories, useNewsFeed } from "@/hooks/use-news"
+import type { FeedNewsItem, NewsCategory } from "@/lib/api"
 import {
   articleKey,
   findArticle,
@@ -13,42 +13,56 @@ import {
   formatStreamDate,
   partitionFeed,
   relatedArticles,
-  topSymbols,
 } from "@/lib/news"
 import { cn } from "@/lib/utils"
 
 import { Card, deltaClass, Eyebrow, Figure, PanelCard, QuietLine, signedPercent } from "./primitives"
 import { useShell } from "./shell-state"
 
-/** As many pills as the row can hold before it starts scrolling in earnest. */
-const MAX_PILLS = 6
+/** The facet the screen opens on, and the one the API answers with by default. */
+export const DEFAULT_CATEGORY = "moi-nhat"
+
+/** How many of a company's disclosures the rail is willing to list. */
+const MAX_DISCLOSURES = 5
 
 /**
- * The news surface: a feed of what was published, and one article at a time.
+ * The news surface: a feed of what the press published, and one article at a time.
  *
  * Both are one view rather than two, because the article is not a destination —
  * it is the feed with one item opened, and the reader goes back to the row they
  * came from. Which article is open lives in the shell's reducer for that reason;
- * the filter does not, because a pill is a way of looking at this list and means
- * nothing once the reader has left it.
+ * the category does not, because a pill is a way of looking at this list and
+ * means nothing once the reader has left it.
  *
  * The feed is the only source of articles on this screen. The reader clicked a
  * row that was in it, so the article is in it too — and when a refetch has
  * dropped that row, saying so is the honest answer rather than fetching the one
  * item back and pretending the list never moved.
+ *
+ * What the screen will *not* do is pretend to hold more of an article than the
+ * publisher gave us. CafeF's feed carries a headline, a summary and a picture;
+ * the full text stays on cafef.vn, and every reading surface here ends by
+ * pointing at it rather than by trailing off.
  */
 export function NewsView() {
   const { state } = useShell()
-  const feed = useNewsFeed()
-  const [filter, setFilter] = useState<string | null>(null)
+  // Local, not reducer state: a facet is a lens on this list, in the same way
+  // the old symbol filter was, and there is nothing for another surface to read.
+  const [category, setCategory] = useState<string>(DEFAULT_CATEGORY)
+  const feed = useNewsFeed(category)
+  const registry = useNewsCategories()
 
   const items = feed.data?.items ?? []
+  // The registry first, so the pill row still stands when the feed refused; the
+  // feed's own copy is the fallback for the reverse case.
+  const categories = registry.data ?? feed.data?.categories ?? []
 
   if (state.newsArticle !== null) {
     return (
       <ArticleScreen
         article={findArticle(items, state.newsArticle)}
         items={items}
+        categories={categories}
         pending={feed.isPending}
         isError={feed.isError}
         onRetry={() => void feed.refetch()}
@@ -59,8 +73,9 @@ export function NewsView() {
   return (
     <FeedScreen
       items={items}
-      filter={filter}
-      onFilter={setFilter}
+      categories={categories}
+      category={category}
+      onCategory={setCategory}
       pending={feed.isPending}
       isError={feed.isError}
       onRetry={() => void feed.refetch()}
@@ -68,40 +83,40 @@ export function NewsView() {
   )
 }
 
+/** What a facet is called, or its slug when the registry has not arrived. */
+function categoryLabel(categories: NewsCategory[], slug: string | null): string | null {
+  if (slug === null) return null
+  return categories.find((entry) => entry.slug === slug)?.label ?? slug
+}
+
 // ---------------------------------------------------------------------------
 // Feed
 
 function FeedScreen({
   items,
-  filter,
-  onFilter,
+  categories,
+  category,
+  onCategory,
   pending,
   isError,
   onRetry,
 }: {
   items: FeedNewsItem[]
-  filter: string | null
-  onFilter: (symbol: string | null) => void
+  categories: NewsCategory[]
+  category: string
+  onCategory: (slug: string) => void
   pending: boolean
   isError: boolean
   onRetry: () => void
 }) {
-  const symbols = useMemo(() => topSymbols(items, MAX_PILLS), [items])
-  // Filtering here rather than in the query: the feed is one request the whole
-  // screen shares, and asking the API again per pill would spend the provider's
-  // quota to re-answer a question already on the client.
-  const visible = useMemo(
-    () => (filter === null ? items : items.filter((item) => item.symbol === filter)),
-    [items, filter],
-  )
-  const blocks = useMemo(() => partitionFeed(visible), [visible])
+  const blocks = useMemo(() => partitionFeed(items), [items])
 
   return (
     <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-5 pb-6 pt-1.5">
       <div className="mx-auto grid max-w-[1180px] gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0">
-          {symbols.length > 0 && (
-            <PillRow symbols={symbols} filter={filter} onFilter={onFilter} />
+          {categories.length > 0 && (
+            <PillRow categories={categories} category={category} onCategory={onCategory} />
           )}
 
           {isError ? (
@@ -114,59 +129,72 @@ function FeedScreen({
             </Card>
           ) : pending ? (
             <FeedSkeleton />
-          ) : visible.length === 0 ? (
+          ) : items.length === 0 ? (
             <QuietLine>
-              {filter === null
+              {category === DEFAULT_CATEGORY
                 ? "Chưa có tin tức nào trong bảng tin."
-                : `Chưa có tin nào về ${filter}.`}
+                : `Chưa có tin nào trong chủ đề ${categoryLabel(categories, category)}.`}
             </QuietLine>
           ) : (
             <>
-              {blocks.hero && <HeroBlock hero={blocks.hero} spotlight={blocks.spotlight} />}
+              {blocks.hero && (
+                <HeroBlock
+                  hero={blocks.hero}
+                  spotlight={blocks.spotlight}
+                  categories={categories}
+                />
+              )}
 
               {blocks.grid.length > 0 && (
                 <section aria-label="Tin đáng chú ý" className="mt-6 grid grid-cols-2 gap-5 lg:grid-cols-4">
                   {blocks.grid.map((item) => (
-                    <SmallCard key={articleKey(item)} item={item} />
+                    <SmallCard key={articleKey(item)} item={item} categories={categories} />
                   ))}
                 </section>
               )}
 
-              {blocks.stream.length > 0 && <Stream items={blocks.stream} />}
+              {blocks.stream.length > 0 && <Stream items={blocks.stream} categories={categories} />}
             </>
           )}
         </div>
 
-        <Rail items={items} onFilter={onFilter} />
+        <Rail items={items} categories={categories} />
       </div>
     </div>
   )
 }
 
-/** "Mới nhất", then the symbols the feed is made of. */
+/**
+ * The facets the API offers, as the reader's way of narrowing the feed.
+ *
+ * Every pill is a different request, not a filter over one list: the press feed
+ * is per-category upstream, so there is no single response holding all of them
+ * to sift on the client.
+ */
 function PillRow({
-  symbols,
-  filter,
-  onFilter,
+  categories,
+  category,
+  onCategory,
 }: {
-  symbols: string[]
-  filter: string | null
-  onFilter: (symbol: string | null) => void
+  categories: NewsCategory[]
+  category: string
+  onCategory: (slug: string) => void
 }) {
   return (
     // The row scrolls rather than wraps: a second line of pills reads as a
     // second control, and the first pill must stay where the eye left it.
     <div
       role="group"
-      aria-label="Lọc bảng tin theo mã"
+      aria-label="Lọc bảng tin theo chủ đề"
       className="scrollbar-thin -mx-1 flex gap-1 overflow-x-auto px-1 pb-0.5"
     >
-      <Pill active={filter === null} onClick={() => onFilter(null)}>
-        Mới nhất
-      </Pill>
-      {symbols.map((symbol) => (
-        <Pill key={symbol} active={filter === symbol} onClick={() => onFilter(symbol)}>
-          <Figure>{symbol}</Figure>
+      {categories.map((entry) => (
+        <Pill
+          key={entry.slug}
+          active={category === entry.slug}
+          onClick={() => onCategory(entry.slug)}
+        >
+          {entry.label}
         </Pill>
       ))}
     </div>
@@ -204,12 +232,20 @@ function Pill({
  * hero's image is always the widest thing on the screen. Below `md` the whole
  * block stacks, which puts the hero first — the order it is read in.
  */
-function HeroBlock({ hero, spotlight }: { hero: FeedNewsItem; spotlight: FeedNewsItem[] }) {
+function HeroBlock({
+  hero,
+  spotlight,
+  categories,
+}: {
+  hero: FeedNewsItem
+  spotlight: FeedNewsItem[]
+  categories: NewsCategory[]
+}) {
   return (
     <section aria-label="Tin nổi bật" className="mt-3.5 grid gap-5 md:grid-cols-[264px_minmax(0,1fr)]">
       <div className="order-2 grid content-start gap-5 md:order-1">
         {spotlight.map((item) => (
-          <SmallCard key={articleKey(item)} item={item} />
+          <SmallCard key={articleKey(item)} item={item} categories={categories} />
         ))}
       </div>
 
@@ -221,19 +257,19 @@ function HeroBlock({ hero, spotlight }: { hero: FeedNewsItem; spotlight: FeedNew
         {hero.summary && (
           <p className="mt-2 line-clamp-2 text-row leading-relaxed text-ink-3">{hero.summary}</p>
         )}
-        <SourceLine item={hero} withDate className="mt-2.5" />
+        <SourceLine item={hero} categories={categories} withDate className="mt-2.5" />
       </ArticleLink>
     </section>
   )
 }
 
 /** The anatomy every card on this screen repeats: image, headline, identity. */
-function SmallCard({ item }: { item: FeedNewsItem }) {
+function SmallCard({ item, categories }: { item: FeedNewsItem; categories: NewsCategory[] }) {
   return (
     <ArticleLink item={item} className="min-w-0">
       <NewsImage item={item} className="aspect-[16/9] w-full rounded-xl" />
       <h3 className="mt-2 line-clamp-3 text-row leading-snug text-ink-1">{item.title}</h3>
-      <SourceLine item={item} className="mt-1.5" />
+      <SourceLine item={item} categories={categories} className="mt-1.5" />
     </ArticleLink>
   )
 }
@@ -246,7 +282,7 @@ function SmallCard({ item }: { item: FeedNewsItem }) {
  * row turns the column into noise. The gutter keeps its width on the rows that
  * say nothing, or the headlines would step left under each heading.
  */
-function Stream({ items }: { items: FeedNewsItem[] }) {
+function Stream({ items, categories }: { items: FeedNewsItem[]; categories: NewsCategory[] }) {
   let previous = ""
 
   return (
@@ -272,7 +308,7 @@ function Stream({ items }: { items: FeedNewsItem[] }) {
                   {item.summary}
                 </p>
               )}
-              <SourceLine item={item} className="mt-2" />
+              <SourceLine item={item} categories={categories} className="mt-2" />
             </div>
             <NewsImage
               item={item}
@@ -290,21 +326,14 @@ function Stream({ items }: { items: FeedNewsItem[] }) {
 // Rail
 
 /**
- * The right-hand rail: the session, the newest headlines, and the symbols.
+ * The right-hand rail: the session, the newest headlines, and the filings.
  *
- * Hidden below `xl` rather than stacked under the feed. Everything in it is a
- * shortcut into the column beside it, and a shortcut that sits below the whole
- * feed is a shortcut nobody reaches.
+ * Hidden below `xl` rather than stacked under the feed. Everything in it is
+ * context for the column beside it, and context that sits below the whole feed
+ * is context nobody reaches.
  */
-function Rail({
-  items,
-  onFilter,
-}: {
-  items: FeedNewsItem[]
-  onFilter: (symbol: string | null) => void
-}) {
-  const { dispatch } = useShell()
-  const symbols = useMemo(() => topSymbols(items, MAX_PILLS), [items])
+function Rail({ items, categories }: { items: FeedNewsItem[]; categories: NewsCategory[] }) {
+  const { state, dispatch } = useShell()
   const newest = items.slice(0, 5)
 
   return (
@@ -326,7 +355,9 @@ function Rail({
                   <span className="line-clamp-2 block text-control leading-snug text-ink-2">
                     {item.title}
                   </span>
-                  <Figure className="mt-1 block text-micro text-ink-6">{item.symbol}</Figure>
+                  <Figure className="mt-1 block text-micro text-ink-6">
+                    {item.symbol ?? categoryLabel(categories, item.category)}
+                  </Figure>
                 </span>
                 <NewsImage
                   item={item}
@@ -339,24 +370,53 @@ function Rail({
         </Card>
       )}
 
-      {symbols.length > 0 && (
-        <Card className="min-w-0">
-          <Eyebrow>Theo mã</Eyebrow>
-          <div className="mt-2.5 flex flex-wrap gap-1.5">
-            {symbols.map((symbol) => (
-              <button
-                key={symbol}
-                type="button"
-                onClick={() => onFilter(symbol)}
-                className="rounded-pill border border-border px-2.5 py-1 text-control text-ink-3 transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
-              >
-                <Figure>{symbol}</Figure>
-              </button>
-            ))}
-          </div>
-        </Card>
-      )}
+      <DisclosureCard symbol={state.selected.symbol} />
     </aside>
+  )
+}
+
+/**
+ * The selected company's filings, next to but never mixed into the press feed.
+ *
+ * A second source with a second character: VCI publishes what a company was
+ * obliged to announce, and publishes it as a title and a date and nothing else.
+ * There is no body to open, so these are text rather than controls — a row that
+ * looked clickable would promise a reading surface that cannot exist. The note
+ * under the heading is there for the same reason: "tin" on this screen otherwise
+ * means a press article, and these are not that.
+ */
+function DisclosureCard({ symbol }: { symbol: string }) {
+  const disclosures = useCompanyNews(symbol)
+  const rows = disclosures.data?.items.slice(0, MAX_DISCLOSURES) ?? []
+
+  return (
+    <Card className="min-w-0">
+      <Eyebrow>Công bố thông tin</Eyebrow>
+      <p className="mt-1.5 text-micro leading-relaxed text-ink-6">
+        Công bố của <Figure>{symbol}</Figure> theo nghĩa vụ niêm yết, không phải bài báo.
+      </p>
+
+      {rows.length === 0 ? (
+        <p className="mt-2 text-meta text-ink-6">
+          {disclosures.isPending
+            ? "Đang tải công bố…"
+            : disclosures.isError
+              ? "Chưa đọc được công bố thông tin."
+              : `Chưa có công bố nào của ${symbol}.`}
+        </p>
+      ) : (
+        <ul className="mt-2 grid grid-cols-fit">
+          {rows.map((row) => (
+            <li key={row.id} className="border-t border-hairline py-2 first:border-t-0">
+              <span className="block text-control leading-snug text-ink-2">{row.title}</span>
+              <Figure className="mt-1 block text-micro text-ink-6">
+                {formatStreamDate(row.published_at)}
+              </Figure>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   )
 }
 
@@ -432,23 +492,29 @@ function MarketWidget() {
 // Article
 
 /**
- * One article, read in place.
+ * One article, read in place — as much of it as the publisher actually gave us.
  *
  * A reading column of 720px and a serif face, because this is the one surface in
- * the product that is prose rather than figures. The body arrives as plain text
- * with the source's own paragraph breaks in it, so the breaks are what it is set
- * from — a single block would be a wall, and re-inferring paragraphs from
- * sentence length would be inventing structure the source did not publish.
+ * the product that is prose rather than figures. What fills that column is
+ * whatever the source published: usually the summary, because CafeF's feed does
+ * not carry the body and we deliberately do not scrape it — the text is
+ * VCCorp's. So the summary is set as the reading text and the column ends in a
+ * link to cafef.vn, which is where the rest of the article legitimately lives.
+ * Paragraph breaks are taken from the text rather than inferred: a single block
+ * would be a wall, and re-inferring paragraphs from sentence length would be
+ * inventing structure the source did not publish.
  */
 function ArticleScreen({
   article,
   items,
+  categories,
   pending,
   isError,
   onRetry,
 }: {
   article: FeedNewsItem | null
   items: FeedNewsItem[]
+  categories: NewsCategory[]
   pending: boolean
   isError: boolean
   onRetry: () => void
@@ -524,27 +590,22 @@ function ArticleScreen({
 
         <div className="mt-3.5 flex flex-wrap items-center gap-x-3 gap-y-2">
           <span className="text-meta text-ink-5">{formatPublishedDate(article.published_at)}</span>
-          <SourceLine item={article} />
-          <button
-            type="button"
-            onClick={() =>
-              dispatch({
-                type: "select-symbol",
-                selected: { symbol: article.symbol, name: article.symbol, exchange: "—" },
-                open: true,
-              })
-            }
-            className="rounded-pill border border-border px-2.5 py-1 text-micro text-ink-3 transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
-          >
-            <Figure>{article.symbol}</Figure>
-          </button>
+          <SourceLine item={article} categories={categories} subject={false} />
+          {/* A press article is about a story, not about a ticker, so the chip
+              only appears on the items that genuinely name one — sending the
+              reader to a symbol the article never mentioned would be worse than
+              saying nothing. The facet stands in otherwise, as a label rather
+              than a control, because there is nowhere for it to go. */}
+          {article.symbol !== null ? (
+            <SymbolChip symbol={article.symbol} />
+          ) : (
+            article.category !== null && (
+              <span className="rounded-pill border border-border px-2.5 py-1 text-micro text-ink-4">
+                {categoryLabel(categories, article.category)}
+              </span>
+            )
+          )}
         </div>
-
-        {article.summary && (
-          <p className="mt-5 font-serif text-[1.12rem] leading-relaxed text-ink-2">
-            {article.summary}
-          </p>
-        )}
 
         <NewsImage item={article} scale="lg" className="mt-6 aspect-[16/9] w-full rounded-card" />
 
@@ -554,22 +615,15 @@ function ArticleScreen({
               <p key={index}>{paragraph}</p>
             ))}
           </div>
-        ) : (
+        ) : article.url === null ? (
+          // Genuinely nothing but a headline: no summary, no body, nowhere to
+          // send the reader. The only case the old fallback was ever right for.
           <div className="mt-6">
             <QuietLine>Nguồn tin chỉ cung cấp tiêu đề cho bài này.</QuietLine>
-            {article.url && (
-              <a
-                href={article.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mx-2.5 inline-flex items-center gap-1.5 text-control text-primary hover:underline"
-              >
-                <ExternalLink className="size-[15px]" strokeWidth={1.6} />
-                Đọc bài gốc tại {article.source}
-              </a>
-            )}
           </div>
-        )}
+        ) : null}
+
+        {article.url && <ReadOnSource url={article.url} source={article.source} />}
 
         {related.length > 0 && (
           <section aria-label="Bài liên quan" className="mt-10 border-t border-border pt-6">
@@ -632,7 +686,61 @@ function BackButton({ onClick, className }: { onClick: () => void; className?: s
 }
 
 /**
- * The body, or the summary standing in for it.
+ * The way out of the reading column, stated once and unmissably.
+ *
+ * The header carries a "Bài gốc" affordance too, but a reader who has just
+ * finished the summary is at the bottom of the column and looking for what
+ * comes next — a control they have to scroll back up to find is a control that
+ * reads as absent. The line under it exists so the ending does not feel like a
+ * truncation bug: the full text is not missing, it is on the publisher's site
+ * on purpose.
+ */
+function ReadOnSource({ url, source }: { url: string; source: string }) {
+  return (
+    <div className="mt-7 border-t border-border pt-6">
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-2 rounded-[10px] bg-primary px-4 py-2.5 text-control font-medium text-primary-foreground transition-[filter] hover:brightness-110"
+      >
+        <ExternalLink className="size-4" strokeWidth={1.7} />
+        Đọc toàn bộ bài trên {source}
+      </a>
+      <p className="mt-2.5 text-meta leading-relaxed text-ink-6">
+        Bảng tin chỉ hiển thị tiêu đề và phần tóm tắt; toàn văn bài viết ở lại trên {source}.
+      </p>
+    </div>
+  )
+}
+
+/** The reader's way from an article about a company into that company's board. */
+function SymbolChip({ symbol }: { symbol: string }) {
+  const { dispatch } = useShell()
+
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        dispatch({
+          type: "select-symbol",
+          selected: { symbol, name: symbol, exchange: "—" },
+          open: true,
+        })
+      }
+      className="rounded-pill border border-border px-2.5 py-1 text-micro text-ink-3 transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+    >
+      <Figure>{symbol}</Figure>
+    </button>
+  )
+}
+
+/**
+ * The reading text: the body when there is one, the summary when there is not.
+ *
+ * For the press feed it is always the summary — `content` is null by design, not
+ * by accident — so the summary is not a stand-in here so much as the whole of
+ * what we are allowed to print.
  *
  * Empty lines are dropped rather than kept as blank paragraphs: the providers
  * pad their text with them, and a gap the source did not intend reads as a
@@ -650,28 +758,50 @@ function bodyParagraphs(item: FeedNewsItem): string[] {
 // Shared pieces
 
 /**
- * Where an article came from: the source, the symbol, and when.
+ * Where an article came from: the source, what it is about, and when.
  *
  * The identity unit of this whole screen — every card, row and rail entry ends
- * with one, so a headline is never read without knowing who published it. The
- * date is opt-in because most of the surfaces that draw this already state it
- * somewhere the eye reaches first.
+ * with one, so a headline is never read without knowing who published it. What
+ * it is *about* is the symbol on the items that name one and the facet on the
+ * rest, which is most of the press feed: an empty gap there would read as a
+ * field that failed to load rather than as a field that does not apply.
+ *
+ * The date is opt-in because most of the surfaces that draw this already state
+ * it somewhere the eye reaches first.
  */
 export function SourceLine({
   item,
+  categories = [],
+  subject = true,
   withDate = false,
   className,
 }: {
-  item: { source: string; symbol?: string; published_at: string }
+  item: {
+    source: string
+    symbol?: string | null
+    category?: string | null
+    published_at: string
+  }
+  categories?: NewsCategory[]
+  /**
+   * Whether to state what the item is about as well as who published it.
+   *
+   * Off in the reading column, which puts the subject in a chip of its own right
+   * beside this — saying it twice in one row reads as one of the two having
+   * fallen out of sync.
+   */
+  subject?: boolean
   withDate?: boolean
   className?: string
 }) {
+  const facet = categoryLabel(categories, item.category ?? null)
+
   return (
     <div className={cn("flex flex-wrap items-center gap-1.5 text-micro text-ink-5", className)}>
       <span className="rounded-pill bg-foreground/[0.06] px-1.5 py-0.5 lowercase">
         {item.source}
       </span>
-      {item.symbol && <Figure>{item.symbol}</Figure>}
+      {subject && (item.symbol ? <Figure>{item.symbol}</Figure> : facet && <span>{facet}</span>)}
       {withDate && item.published_at.trim() !== "" && (
         <span>· {formatStreamDate(item.published_at)}</span>
       )}
@@ -691,10 +821,10 @@ const FALLBACK_FIGURE = {
  *
  * A plain `img`: the hosts are the publishers' own and unknown ahead of time, so
  * `next/image` would need every one of them allow-listed in the config and would
- * fail closed on the next source the provider adds. The fallback covers both a
- * missing URL and a URL that turns out not to resolve — the reader gets a plate
- * with the symbol on it either way, and never a broken-image glyph in the middle
- * of a card.
+ * fail closed on the next source the provider adds — and CafeF serves from
+ * cafefcdn.com, which is exactly such a host. The fallback covers both a missing
+ * URL and a URL that turns out not to resolve: the reader gets a named plate
+ * either way, and never a broken-image glyph in the middle of a card.
  */
 function NewsImage({
   item,
@@ -717,7 +847,9 @@ function NewsImage({
         )}
       >
         <Figure className={cn("font-serif text-ink-6", FALLBACK_FIGURE[scale])}>
-          {item.symbol}
+          {/* The symbol when the item has one, otherwise the publisher: a press
+              article names no ticker, and an empty plate looks broken. */}
+          {item.symbol ?? item.source}
         </Figure>
       </div>
     )

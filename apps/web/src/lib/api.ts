@@ -1034,17 +1034,39 @@ export async function fetchValuationSeries(
 
 // === News ===
 //
-// The Discover surface's own two routes. Both answer from stored articles a
-// provider gave us, so every text field is allowed to be missing: a headline is
-// always there, a summary and a body are what the source chose to publish.
+// The Discover surface's routes, and they answer from *two different kinds of
+// source*, which is the whole reason the shapes below are as loose as they are:
+//
+//   - `/stocks/news/feed` is the press. CafeF's RSS, one facet at a time, and it
+//     gives a real headline, a real summary, a real 600×315 article image and a
+//     link to the piece on cafef.vn. What it never gives is `content`: the full
+//     text stays with the publisher, so the reader is sent there rather than
+//     handed a copy.
+//   - `/stocks/{symbol}/news` is VCI's corporate disclosures. Titles, and in
+//     practice nothing else — no summary, no body, no link, and an `image_url`
+//     that is the company's logo rather than a picture of anything.
+//
+// So every text field is nullable, and the surface has to stay honest about
+// which of the two it is drawing.
 
 /** One article, as the store holds it. */
 export interface NewsItem {
-  id: number
-  title: string
-  source: string
   /**
-   * `"%Y-%m-%d %H:%M"` in Asia/Ho_Chi_Minh — or `""`, or whatever raw string the
+   * The publisher's own id, as text. CafeF's are 18-digit article ids that do
+   * not survive a double — the reason this is a string and not a number.
+   */
+  id: string
+  title: string
+  /**
+   * Who published it — nullable, because the disclosure lane reads this from
+   * VCI's `news_source`, which is empty for every row we have measured. The
+   * press feed always names one; see `FeedNewsItem`.
+   */
+  source: string | null
+  /**
+   * When it was published, in one of two shapes depending on the source: an
+   * ISO-8601 instant with a `+07:00` offset (CafeF), or `"%Y-%m-%d %H:%M"` wall
+   * clock in Asia/Ho_Chi_Minh (VCI) — or `""`, or whatever raw string the
    * provider printed. Carried as text rather than parsed here: the parse belongs
    * where the fallback is decided, in `lib/news.ts`.
    */
@@ -1054,17 +1076,41 @@ export interface NewsItem {
   content: string | null
   url: string | null
   image_url: string | null
+  /** Which facet of the feed this arrived on, or `null` off the press feed. */
+  category: string | null
   price: number | null
   price_change_pct: number | null
 }
 
-/** The same article on the cross-symbol feed, where it must name its own symbol. */
+/**
+ * The same article on the cross-source feed.
+ *
+ * `symbol` is nullable because a press article is usually about no single
+ * company — it is the facet (`category`) that names a press item, and the symbol
+ * that names a disclosure. Anything that draws one has to cope with either.
+ */
 export interface FeedNewsItem extends NewsItem {
-  symbol: string
+  symbol: string | null
+  /**
+   * Narrowed from `NewsItem`: an item on the press feed always names its
+   * publisher, and every reading surface leans on that — the source pill, the
+   * image fallback, and the "read the rest on …" link all print it.
+   */
+  source: string
+}
+
+/** One facet of the press feed, as the API's own registry names it. */
+export interface NewsCategory {
+  slug: string
+  label: string
 }
 
 export interface NewsFeedResponse {
   items: FeedNewsItem[]
+  /** The facet these items were asked for. */
+  category: string
+  /** Every facet on offer, in the order the pill row should draw them. */
+  categories: NewsCategory[]
   symbols: string[]
   generated_at: string
   total_count: number
@@ -1077,17 +1123,29 @@ export interface CompanyNewsResponse {
 }
 
 /**
- * The whole feed, in the store's own order.
+ * One facet of the press feed, newest first.
  *
  * `POLLED`, like the market widgets: a news pane that cannot load is the news
  * pane's problem to show, and veiling the application because a list of
  * headlines refused would blur surfaces that never touched this provider.
  */
-export async function fetchNewsFeed(): Promise<NewsFeedResponse> {
-  return fetchApi<NewsFeedResponse>("/stocks/news/feed", undefined, POLLED)
+export async function fetchNewsFeed(category?: string): Promise<NewsFeedResponse> {
+  const query = category === undefined ? "" : `?category=${encodeURIComponent(category)}`
+  return fetchApi<NewsFeedResponse>(`/stocks/news/feed${query}`, undefined, POLLED)
 }
 
-/** One symbol's articles, for the panel beside an open one. */
+/**
+ * The facets the feed can be asked for.
+ *
+ * Fetched rather than hard-coded so the pill row still has something to draw
+ * when the feed itself failed — and so adding a facet upstream does not need a
+ * frontend release.
+ */
+export async function fetchNewsCategories(): Promise<NewsCategory[]> {
+  return fetchApi<NewsCategory[]>("/stocks/news/categories", undefined, POLLED)
+}
+
+/** One symbol's corporate disclosures, for the rail beside the press feed. */
 export async function fetchCompanyNews(symbol: string): Promise<CompanyNewsResponse> {
   return fetchApi<CompanyNewsResponse>(
     `/stocks/${encodeURIComponent(symbol)}/news`,
