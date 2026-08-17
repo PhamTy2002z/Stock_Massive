@@ -34,9 +34,15 @@ export function NewsSourcesTab() {
   }
 
   if (article === null) {
+    // Same distinction the reading column makes: a feed that failed to load is
+    // not an article that has left it.
     return (
       <QuietLine>
-        {feed.isPending ? "Đang tải nguồn tin…" : "Bài viết không còn trong bảng tin."}
+        {feed.isError
+          ? "Chưa đọc được nguồn tin."
+          : feed.isPending
+            ? "Đang tải nguồn tin…"
+            : "Bài viết không còn trong bảng tin."}
       </QuietLine>
     )
   }

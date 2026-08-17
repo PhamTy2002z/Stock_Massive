@@ -50,6 +50,8 @@ export function NewsView() {
         article={findArticle(items, state.newsArticle)}
         items={items}
         pending={feed.isPending}
+        isError={feed.isError}
+        onRetry={() => void feed.refetch()}
       />
     )
   }
@@ -108,13 +110,7 @@ function FeedScreen({
               <p className="mt-1 text-meta leading-relaxed text-ink-5">
                 Nguồn tin không trả lời. Bảng giá và hội thoại vẫn hoạt động bình thường.
               </p>
-              <button
-                type="button"
-                onClick={onRetry}
-                className="mt-3 rounded-[10px] bg-primary px-3.5 py-2 text-control font-medium text-primary-foreground transition-[filter] hover:brightness-110"
-              >
-                Thử lại
-              </button>
+              <RetryButton onClick={onRetry} className="mt-3" />
             </Card>
           ) : pending ? (
             <FeedSkeleton />
@@ -448,10 +444,14 @@ function ArticleScreen({
   article,
   items,
   pending,
+  isError,
+  onRetry,
 }: {
   article: FeedNewsItem | null
   items: FeedNewsItem[]
   pending: boolean
+  isError: boolean
+  onRetry: () => void
 }) {
   const { dispatch } = useShell()
   const back = () => dispatch({ type: "news-article", article: null })
@@ -460,9 +460,23 @@ function ArticleScreen({
     return (
       <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-5 pb-6 pt-1.5">
         <div className="mx-auto w-full max-w-[720px] py-10">
-          <QuietLine>
-            {pending ? "Đang mở bài viết…" : "Bài viết không còn trong bảng tin."}
-          </QuietLine>
+          {/* The article is looked up in the feed, so a feed that did not load
+              is a different fact from an article that has scrolled out of it.
+              Saying "no longer in the feed" when the request failed would send
+              the reader looking for a row that may still be there. */}
+          {isError ? (
+            <>
+              <p className="text-row text-ink-2">Chưa đọc được bài viết.</p>
+              <p className="mt-1 text-meta text-ink-5">
+                Bảng tin không tải được nên chưa mở được bài này.
+              </p>
+              <RetryButton onClick={onRetry} className="mt-3" />
+            </>
+          ) : (
+            <QuietLine>
+              {pending ? "Đang mở bài viết…" : "Bài viết không còn trong bảng tin."}
+            </QuietLine>
+          )}
           <BackButton onClick={back} className="mt-2" />
         </div>
       </div>
@@ -582,6 +596,22 @@ function ArticleScreen({
         )}
       </article>
     </div>
+  )
+}
+
+/** Re-asks for the feed. Both screens read the same query, so both offer it. */
+function RetryButton({ onClick, className }: { onClick: () => void; className?: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-[10px] bg-primary px-3.5 py-2 text-control font-medium text-primary-foreground transition-[filter] hover:brightness-110",
+        className,
+      )}
+    >
+      Thử lại
+    </button>
   )
 }
 
