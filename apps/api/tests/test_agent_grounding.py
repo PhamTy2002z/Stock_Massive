@@ -628,3 +628,24 @@ def test_ordinary_bracketed_prose_is_never_read_as_a_reference():
     released = validator().validate(text, standard_traces())
 
     assert "ghi chú của người đọc" in released.text
+
+
+def test_a_figure_that_disagrees_with_an_inferred_reference_is_labelled_not_fatal():
+    """A guess that turns out wrong costs the figure its attribution, nothing more.
+
+    The explicit form keeps the guarantee that matters: a figure contradicting
+    a reference the model actually wrote still ends the Turn.
+    """
+    text = f"Vùng dao động thường ngày 99.9【c1#registered_fields.{ZONE}.value】."
+
+    released = validator().validate(text, standard_traces())
+
+    assert released.unverified_figures == ("99.9",)
+    assert "【" not in released.text
+
+    explicit = f"Vùng dao động thường ngày 99.9 [ev:c1#registered_fields.{ZONE}.value]."
+
+    with pytest.raises(GroundingFailure) as raised:
+        validator().validate(explicit, standard_traces())
+
+    assert raised.value.code == "figure_mismatch"
