@@ -22,6 +22,7 @@ from ..schemas.company import (
     ShareholdersResponse,
     OfficersResponse,
     InsiderDealsResponse,
+    NewsResponse,
     RatioSummaryResponse,
 )
 from ..shared import validate_symbol
@@ -55,6 +56,12 @@ insider_deals_cache = TradingHoursCache(
     key_prefix="stock:insider_deals:",
     ttl_trading=3600,
     ttl_off_hours=21600,
+    stale_ttl=7 * 86400,
+)
+company_news_cache = TradingHoursCache(
+    key_prefix="stock:company_news:",
+    ttl_trading=900,
+    ttl_off_hours=3600,
     stale_ttl=7 * 86400,
 )
 ratio_summary_cache = TradingHoursCache(
@@ -130,6 +137,19 @@ def get_officers(
         f"{symbol.upper()}:{filter_by}",
         OfficersResponse,
         lambda: service.get_officers(symbol, filter_by),
+    )
+
+
+@router.get("/{symbol}/news", response_model=NewsResponse, dependencies=[Depends(standard_rate_limit)])
+def get_company_news(symbol: str) -> NewsResponse:
+    """Get company news and announcements."""
+    symbol = validate_symbol(symbol)
+    service = get_company_service()
+    return _cached_model(
+        company_news_cache,
+        symbol.upper(),
+        NewsResponse,
+        lambda: service.get_company_news(symbol),
     )
 
 
