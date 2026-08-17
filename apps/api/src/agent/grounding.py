@@ -74,8 +74,18 @@ GROUNDING_FAILED = "grounding_failed"
 # nine were counted unattributed and the markers themselves reached the reader.
 # Reading a bracket the model actually typed costs nothing; the marker body is
 # still the closed grammar below, and nothing else about the protocol relaxes.
+#
+# The kind is optional, and a marker written without one is *inferred* to be
+# ``ev``. Measured on the same Turn: the model dropped the prefix and wrote
+# 【call-a3de…#registered_fields.trend_signal.total_return_12m_pct】. Inferring
+# is safe in exactly one direction — plain evidence is the weakest kind there
+# is, so an inferred marker can never manufacture a price zone, a reference
+# price or the contradictory evidence the Gate demands. To keep the inference
+# from swallowing ordinary bracketed prose, the bare form must look like a
+# reference: an id, a '#', and a path.
 MARKER_PATTERN = re.compile(
-    r"[\[【](ev|rec|ref-price|zone|against|user):([^\]】\n]{1,200})[\]】]"
+    r"[\[【](?:(ev|rec|ref-price|zone|against|user):([^\]】\n]{1,200})"
+    r"|([^\]】\n#]{1,120}#[^\]】\n]{1,120}))[\]】]"
 )
 NUMBER_PATTERN = re.compile(r"-?\d[\d.,]*")
 
@@ -330,11 +340,22 @@ class _Marker:
     body: str
     start: int
     end: int
+    #: True when the model wrote no kind and ``ev`` was inferred from the shape
+    #: of the body. An inferred marker is best-effort: a reference that does not
+    #: resolve leaves its figure unattributed, exactly as an absent marker would,
+    #: rather than ending the Turn over a prefix the model forgot.
+    inferred: bool = False
 
 
 def _markers(text: str) -> tuple[_Marker, ...]:
     return tuple(
-        _Marker(kind=match.group(1), body=match.group(2).strip(), start=match.start(), end=match.end())
+        _Marker(
+            kind=match.group(1) or "ev",
+            body=(match.group(2) or match.group(3) or "").strip(),
+            start=match.start(),
+            end=match.end(),
+            inferred=match.group(1) is None,
+        )
         for match in MARKER_PATTERN.finditer(text)
     )
 
@@ -823,8 +844,19 @@ class RecommendationValidator:
         markers = _markers(text)
         cited: dict[int, Citation] = {}
         for index, marker in enumerate(markers):
-            if marker.kind != "rec":
+            if marker.kind == "rec":
+                continue
+            if not marker.inferred:
                 cited[index] = self._cite(marker, traces)
+                continue
+            try:
+                cited[index] = self._cite(marker, traces)
+            except GroundingFailure:
+                # Inferred, so it was never a promise the model made. The
+                # figure it sat behind falls back to unattributed and the
+                # answer survives; a marker the model *did* write in the
+                # Contract's form still fails the Turn above.
+                continue
         unverified = self._match_figures(text, markers, cited)
         citations = tuple(cited[index] for index in sorted(cited))
 
