@@ -179,6 +179,25 @@ route, not the tier.
 - Follow-up suggestion chips generated per answer.
 - Citation chips on claims sourced from the web lane.
 
+### Gate status of the W1 + W4 merge
+
+W1 and W4 reached `develop` **without** the Eval Report
+[`docs/agents/eval-battery.md`](../agents/eval-battery.md) requires of anything
+touching the System Prompt Contract, the tool catalog or the Recommendation
+Validator — all three of which they touch. Merged on the owner's explicit
+instruction, and recorded here rather than left to be discovered.
+
+What stands in its place: the fixture was re-frozen against the new tool
+catalog, `apps/api` passes 2,376 tests, `apps/web` passes type-check, lint, 431
+tests and a production build, and both flagged answers were re-run end to end
+against the deployed loop (§1) and now return the figures they could not
+before.
+
+What is still owed: one passing gate run. It could not be produced because the
+LLM route is a free tier allowing roughly fifty model calls a day, while a gate
+run needs several hundred. The first paid or higher-quota route should run it
+before any further change to these surfaces.
+
 ### W7 — Measurement
 
 - Add the Golden Question Set to the Eval Battery via the flagged-message door;
