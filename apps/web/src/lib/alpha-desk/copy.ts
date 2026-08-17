@@ -77,13 +77,23 @@ export const ACTIVITY_COPY: Record<
  * `found` takes the count because it is the one row that is a *number* the
  * reader is being asked to weigh — how much was read, not how much is listed
  * under it.
+ *
+ * Every phase that can outlive its own execution comes in a pair, for the same
+ * reason `ACTIVITY_COPY` does: a row saying *Đang tìm trên web…* under a
+ * finished answer tells the reader the Turn is still going. The row that is
+ * running says *Đang…*; every row above it says what it did. `thinking` has no
+ * past tense on purpose — an analysis step is only ever on screen while it is
+ * the thing happening, so there is no finished form of it to write.
  */
 export const PROGRESS_COPY = {
   header: "Tiến trình tìm kiếm",
   thinking: "Đang suy nghĩ…",
   searching: "Đang tìm trên web…",
+  searched: "Đã tìm trên web",
   readingData: "Đang đọc dữ liệu…",
+  readData: "Đã đọc dữ liệu đã lưu",
   preparingVisual: "Đang dựng hình…",
+  preparedVisual: "Đã dựng hình minh hoạ",
   queries: "Tìm kiếm",
   found: (count: number) => `Đã tìm thấy ${count} kết quả`,
   sourcesTitle: (count: number) => `Tổng hợp ${count} nguồn`,

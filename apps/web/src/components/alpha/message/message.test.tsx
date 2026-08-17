@@ -190,19 +190,70 @@ describe("the search-progress trail", () => {
   it("shows every step in order, with the running one announced", () => {
     render(
       <SearchProgress
-        steps={[{ phase: "analyzing" }, { phase: "searching" }]}
+        steps={[{ phase: "reading_data" }, { phase: "searching" }]}
         activity="searching"
         defaultOpen
       />,
     )
 
     const rows = screen.getAllByRole("listitem").map((row) => row.textContent)
-    expect(rows[0]).toMatch(/Đang suy nghĩ/)
+    // A step that is over says what it did; only the live row says *Đang…*.
+    expect(rows[0]).toMatch(/Đã đọc dữ liệu đã lưu/)
     expect(rows[1]).toMatch(/Đang tìm trên web/)
     // A finished step is not progress: announcing each one would turn a quiet
     // answer into a queue of interruptions for a screen reader.
     expect(screen.getAllByRole("status")).toHaveLength(1)
     expect(screen.getByRole("status")).toHaveTextContent(/Đang tìm trên web/)
+  })
+
+  it("keeps the analysis row only while it is the step happening", () => {
+    // It names no query, no source and no count, so once it is over it says
+    // only that the system thought about an answer already on screen.
+    const { rerender } = render(
+      <SearchProgress steps={[{ phase: "analyzing" }]} activity="analyzing" defaultOpen />,
+    )
+
+    expect(screen.getByText("Đang suy nghĩ…")).toBeInTheDocument()
+
+    rerender(
+      <SearchProgress
+        steps={[{ phase: "analyzing" }, { phase: "searching" }]}
+        activity="searching"
+        defaultOpen
+      />,
+    )
+
+    expect(screen.queryByText("Đang suy nghĩ…")).not.toBeInTheDocument()
+    expect(screen.getAllByRole("listitem")).toHaveLength(1)
+  })
+
+  it("draws no trail when analysis is the only thing it could show", () => {
+    // A disclosure whose one row is *Hoàn thành* discloses nothing.
+    const { container } = render(
+      <SearchProgress steps={[{ phase: "analyzing" }]} activity={null} ending="done" />,
+    )
+
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it("folds itself the moment the Turn ends, however it was left open", () => {
+    const { rerender } = render(
+      <SearchProgress steps={[{ phase: "reading_data" }]} activity="reading_data" defaultOpen />,
+    )
+
+    expect(screen.getByText("Đang đọc dữ liệu…")).toBeInTheDocument()
+
+    rerender(
+      <SearchProgress steps={[{ phase: "reading_data" }]} activity={null} ending="done" />,
+    )
+
+    // Not waiting for the canonical message to replace the draft: between the
+    // two is a gap spent reading an answer with the machinery open above it.
+    expect(screen.queryByText("Đã đọc dữ liệu đã lưu")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Tiến trình tìm kiếm/ })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    )
   })
 
   it("discloses the open web's queries, its result count and its sources", () => {
@@ -262,13 +313,13 @@ describe("the search-progress trail", () => {
   })
 
   it("folds away by default, so a finished answer reads as an answer", () => {
-    render(<SearchProgress steps={[{ phase: "analyzing" }]} activity={null} ending="done" />)
+    render(<SearchProgress steps={[{ phase: "reading_data" }]} activity={null} ending="done" />)
 
-    expect(screen.queryByText("Đang suy nghĩ…")).not.toBeInTheDocument()
+    expect(screen.queryByText("Đã đọc dữ liệu đã lưu")).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: /Tiến trình tìm kiếm/ }))
 
-    expect(screen.getByText("Đang suy nghĩ…")).toBeInTheDocument()
+    expect(screen.getByText("Đã đọc dữ liệu đã lưu")).toBeInTheDocument()
   })
 
   it("draws nothing at all when there is no work to show", () => {
@@ -413,7 +464,7 @@ describe("what the answer offers underneath", () => {
     // answer's; this row is the only place the difference shows.
     render(
       <AssistantMessage
-        view={view({ searchProgress: [{ phase: "analyzing" }], completed: false })}
+        view={view({ searchProgress: [{ phase: "reading_data" }], completed: false })}
       />,
     )
 

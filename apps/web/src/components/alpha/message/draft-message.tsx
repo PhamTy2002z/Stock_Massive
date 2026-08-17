@@ -6,7 +6,7 @@ import type { DraftEntry } from "@/lib/alpha-desk/transcript"
 import { ContentBlockView } from "./content-block"
 import { MessageShell } from "./message-shell"
 import { Reveal } from "./reveal"
-import { SearchProgress } from "./search-progress"
+import { SearchProgress, hasVisibleTrail } from "./search-progress"
 import { TurnStatus } from "./turn-status"
 
 /**
@@ -36,8 +36,9 @@ export function DraftMessage({
   const livePhase = running ? entry.activity : null
   // The trail outlives the running state. What the Turn did before it ended is
   // still what it did, and on a Turn that stopped early it is most of what the
-  // reader has to go on.
-  const showsActivity = livePhase !== null || entry.steps.length > 0
+  // reader has to go on — but only where there is a step left worth naming,
+  // which is the trail's own question to answer rather than this one's.
+  const showsActivity = hasVisibleTrail(entry.steps, livePhase)
 
   return (
     <MessageShell className={className}>
