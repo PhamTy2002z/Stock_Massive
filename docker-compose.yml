@@ -91,6 +91,11 @@ services:
       LLM_MODEL_BATCH: ${LLM_MODEL_BATCH:-gpt-5.6-luna}
       LLM_MODEL_SESSION: ${LLM_MODEL_SESSION:-gpt-5.6-terra}
       LLM_REQUEST_TIMEOUT_SECONDS: ${LLM_REQUEST_TIMEOUT_SECONDS:-120}
+      # The startup Capability Probe spends real provider tokens and refuses to
+      # boot the whole API when the route cannot answer it. Forwarded so an
+      # operator on a constrained route (expired plan, drained credits) can
+      # trade the boot-time guarantee for per-Turn failures instead.
+      LLM_CAPABILITY_PROBE_ENABLED: ${LLM_CAPABILITY_PROBE_ENABLED:-true}
       LLM_PRICING_VERSION: ${LLM_PRICING_VERSION:-}
       LLM_PRICING_EFFECTIVE_DATE: ${LLM_PRICING_EFFECTIVE_DATE:-}
       LLM_PRICE_BATCH_INPUT_USD_PER_MTOK: ${LLM_PRICE_BATCH_INPUT_USD_PER_MTOK:-0}
