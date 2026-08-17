@@ -1,122 +1,90 @@
-"""Market-wide news feed assembled from per-symbol company news.
+"""Market news feed, served from CafeF's public category RSS.
 
-No provider serves a market feed, so one is built by asking a bounded set of
-symbols for their own news and merging the answers. That makes a single rebuild
-cost up to `FEED_SYMBOL_LIMIT` upstream calls, which is why the symbol set is
-capped rather than following the whole VN30, and why the route in front of this
-is cached hard.
+This replaced a VN30 aggregation over VCI's per-symbol news. That feed carries
+corporate disclosures with no prose attached — the right answer to "what did
+this issuer announce", the wrong one for a reader screen — and it cost one
+upstream call per symbol per rebuild. CafeF costs one HTTP request and returns
+press articles with a summary, an image and a link to the original.
+
+The per-symbol VCI lane is untouched and still lives in the company router.
 """
 
 import logging
 from datetime import datetime
 from functools import lru_cache
 
-from src.core.vnstock_client import Listing, VnstockUnavailable, VnstockUnsupported
-
-from ..company import get_company_service
+from ..providers.cafef_rss import CAFEF_CATEGORIES, fetch_category
 from ..providers.normalize import VN_TZ
-from ..schemas.company import FeedNewsItem, NewsFeedResponse
+from ..schemas.company import FeedNewsItem, NewsCategory, NewsFeedResponse
 from ..shared import StockServiceError
 
 logger = logging.getLogger(__name__)
 
-# Each symbol costs one upstream call per rebuild; twelve is what the quota
-# tolerates at the TTL the route caches on.
-FEED_SYMBOL_LIMIT = 12
+DEFAULT_CATEGORY = "moi-nhat"
 
 # A feed longer than this is scroll nobody reaches, and it is all held in cache.
 MAX_FEED_ITEMS = 120
 
-_FEED_DATE_FORMAT = "%Y-%m-%d %H:%M"
+# Undated items sort below every dated one rather than being dropped. Aware, so
+# the comparison never mixes naive and aware stamps.
+_UNDATED = datetime(1970, 1, 1, tzinfo=VN_TZ)
 
 
 class NewsFeedService:
-    """Aggregate company news across the VN30 constituents into one feed."""
+    """Serve one CafeF category as the market news feed."""
 
-    def __init__(self, source: str = "VCI"):
-        """Initialize news feed service with data source."""
-        self.source = source
+    def get_feed(self, category: str = DEFAULT_CATEGORY) -> NewsFeedResponse:
+        """The category's articles, newest first, capped at `MAX_FEED_ITEMS`.
 
-    def get_feed(self) -> NewsFeedResponse:
-        """Build the market-wide news feed, newest item first."""
-        symbols = self._feed_symbols()
-        company_service = get_company_service(self.source)
+        `CafeFUnavailable` propagates: the route in front chooses between stale
+        data and a 503, and flattening the outage here would take that choice
+        away from it.
+        """
+        slug = _resolve_category(category)
+        rows = fetch_category(slug)
 
-        items: list[FeedNewsItem] = []
-        served: list[str] = []
-        unavailable: VnstockUnavailable | None = None
-
-        for symbol in symbols:
-            try:
-                response = company_service.get_company_news(symbol)
-            except VnstockUnavailable as e:
-                # The allowance is spent. Every further symbol would only burn
-                # the retry window without returning anything.
-                unavailable = e
-                break
-            except (VnstockUnsupported, StockServiceError) as e:
-                logger.warning(f"Skipping {symbol} in news feed: {e}")
-                continue
-
-            if not response.items:
-                continue
-
-            items.extend(
-                FeedNewsItem(symbol=symbol, **item.model_dump())
-                for item in response.items
-            )
-            served.append(symbol)
-
-        if not items and unavailable is not None:
-            # Nothing was gathered before the quota ran out, so there is no
-            # partial feed to serve and the caller must hear about the outage.
-            raise unavailable
-
+        items = [FeedNewsItem(**row) for row in rows]
         items.sort(key=_feed_sort_key, reverse=True)
         items = items[:MAX_FEED_ITEMS]
 
         return NewsFeedResponse(
             items=items,
-            symbols=served,
+            category=slug,
+            categories=self.get_categories(),
+            # A press article belongs to a category, not to a ticker.
+            symbols=[],
             generated_at=datetime.now(VN_TZ).isoformat(),
             total_count=len(items),
         )
 
-    def _feed_symbols(self) -> list[str]:
-        """The symbols the feed is built from, capped at `FEED_SYMBOL_LIMIT`."""
-        try:
-            symbols = Listing().symbols_by_group("VN30")
-            if symbols is None:
-                raise ValueError("provider returned no VN30 constituents")
-
-            resolved = [
-                str(symbol)
-                for symbol in (
-                    symbols.tolist() if hasattr(symbols, "tolist") else list(symbols)
-                )
-            ]
-            if not resolved:
-                raise ValueError("provider returned no VN30 constituents")
-
-            return resolved[:FEED_SYMBOL_LIMIT]
-        except (VnstockUnavailable, VnstockUnsupported):
-            # Upstream quota/capability problems carry their own meaning;
-            # don't flatten them into a generic service error.
-            raise
-        except Exception as e:
-            logger.error(f"Error listing news feed symbols: {e}")
-            raise StockServiceError(f"Failed to list news feed symbols: {e}")
+    def get_categories(self) -> list[NewsCategory]:
+        """The facets this API exposes, in the order the UI should show them."""
+        return [
+            NewsCategory(slug=category.slug, label=category.label)
+            for category in CAFEF_CATEGORIES
+        ]
 
 
-def _feed_sort_key(item: FeedNewsItem) -> datetime:
+def _resolve_category(category: str) -> str:
+    """Reject an unknown slug before a request is spent on it."""
+    slug = (category or "").strip().lower()
+    if slug not in {item.slug for item in CAFEF_CATEGORIES}:
+        raise StockServiceError(f"Unknown news category: {category}")
+    return slug
+
+
+def _feed_sort_key(item: FeedNewsItem) -> tuple[int, datetime]:
     """Sort newest first, with undated items last rather than dropped."""
     try:
-        return datetime.strptime(item.published_at, _FEED_DATE_FORMAT)
+        stamp = datetime.fromisoformat(item.published_at)
     except ValueError:
-        return datetime.min
+        return (0, _UNDATED)
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=VN_TZ)
+    return (1, stamp)
 
 
 @lru_cache(maxsize=1)
-def get_news_feed_service(source: str = "VCI") -> NewsFeedService:
+def get_news_feed_service() -> NewsFeedService:
     """Get or create news feed service instance (thread-safe singleton)."""
-    return NewsFeedService(source=source)
+    return NewsFeedService()

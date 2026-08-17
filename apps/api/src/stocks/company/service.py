@@ -354,13 +354,14 @@ class CompanyService:
                         # A row with no headline has nothing for a reader.
                         continue
 
-                    raw_id = _news_first(row, ("id", "news_id"))
-                    try:
-                        item_id = int(raw_id)
-                    except (TypeError, ValueError):
-                        # VCI omits the id on some rows; position keeps it stable
-                        # within the response rather than collapsing to 0.
-                        item_id = index
+                    # `news_id` first: it is the stable integer VCI actually
+                    # populates, while `id` is a hex digest. The position is a
+                    # last resort — it moves as the feed does, so an article a
+                    # client has open silently becomes a different one.
+                    raw_id = _news_first(row, ("news_id", "id"))
+                    item_id = "" if raw_id is None else str(raw_id).strip()
+                    if not item_id:
+                        item_id = f"row-{index}"
 
                     items.append(
                         NewsItem(
