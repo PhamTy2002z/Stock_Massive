@@ -169,3 +169,37 @@ class TestTheOldGuardIsGone:
         """
         assert not hasattr(vnstock_client, "_call_slots")
         assert not hasattr(vnstock_client, "_MAX_CONCURRENT_CALLS")
+
+
+def test_hosting_service_probe_answers_instead_of_raising():
+    """vnstock's own environment probe is repaired at import, not worked around.
+
+    `get_hosting_service()` has five `elif` branches and no `else`, so off a
+    hosted notebook it falls through and returns a variable it never assigned.
+    Anything asking whether this is Colab — which is every `quote.history` call
+    on this deployment — gets `UnboundLocalError` instead of an answer, and the
+    whole Backfill stops with it.
+
+    Asserted against the library's own fallback string rather than "any string":
+    a repair that answered something else would be inventing an environment
+    rather than supplying the branch that is missing.
+    """
+    from vnstock.core.utils import env
+
+    assert env.get_hosting_service() == vnstock_client._UNKNOWN_HOSTING_SERVICE
+    # The two callers reach the name late — one from module globals, one from a
+    # function-body import — so patching the definition is enough for both.
+    assert env.is_colab() is False
+
+
+def test_hosting_service_probe_is_left_alone_once_upstream_answers():
+    """A working probe is not replaced, so the repair retires by itself."""
+    from vnstock.core.utils import env
+
+    original = env.get_hosting_service
+    env.get_hosting_service = lambda: "Kaggle"
+    try:
+        vnstock_client._repair_hosting_service_probe()
+        assert env.get_hosting_service() == "Kaggle"
+    finally:
+        env.get_hosting_service = original
