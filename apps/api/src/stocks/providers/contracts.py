@@ -435,11 +435,40 @@ class ValuationSnapshot(SymbolSnapshot):
 
 
 class FundamentalSnapshot(SymbolSnapshot):
-    """Financial-statement inputs used for app-owned valuation history."""
+    """One reporting period's statement figures, as published upstream.
+
+    One snapshot per ``(symbol, period_end)``; a collection run emits every
+    period the provider answers with, not only the newest, so the store
+    accumulates a quarterly history instead of overwriting a single row.
+    Statement lines are optional because a company can file without a cash
+    flow statement sooner than it can file without a balance sheet — an absent
+    line is an absent line, never a zero.
+
+    All flow figures (income statement, cash flow) are for that quarter alone;
+    ``trailing_12_month_net_income_vnd`` is the one derived exception and keeps
+    its own four-quarter rule. Balance figures are as at ``period_end``.
+    """
 
     period_end: date
     trailing_12_month_net_income_vnd: float | None = None
     parent_equity_vnd: float | None = None
+    # Income statement, this quarter alone.
+    revenue_vnd: float | None = None
+    gross_profit_vnd: float | None = None
+    operating_profit_vnd: float | None = None
+    pre_tax_profit_vnd: float | None = None
+    net_profit_after_tax_vnd: float | None = None
+    parent_net_profit_vnd: float | None = None
+    # Balance sheet, as at period end.
+    total_assets_vnd: float | None = None
+    total_liabilities_vnd: float | None = None
+    short_term_borrowings_vnd: float | None = None
+    long_term_borrowings_vnd: float | None = None
+    cash_and_equivalents_vnd: float | None = None
+    # Cash flow statement, this quarter alone.
+    cfo_vnd: float | None = None
+    cfi_vnd: float | None = None
+    cff_vnd: float | None = None
 
 
 class MarketDataProvider(Protocol):

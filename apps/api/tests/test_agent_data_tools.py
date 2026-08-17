@@ -154,9 +154,9 @@ def stored_world():
                 provider_pb=1.8,
             ),
         )
-        for period, profit in (
-            (date(2026, 3, 31), 9_000_000_000),
-            (date(2026, 6, 30), 12_000_000_000),
+        for period, profit, revenue in (
+            (date(2026, 3, 31), 9_000_000_000, None),
+            (date(2026, 6, 30), 12_000_000_000, 55_000_000_000),
         ):
             SnapshotStore(session, redis=None).save(
                 Capability.FUNDAMENTAL,
@@ -166,6 +166,7 @@ def stored_world():
                     period_end=period,
                     trailing_12_month_net_income_vnd=profit,
                     parent_equity_vnd=30_000_000_000,
+                    revenue_vnd=revenue,
                 ),
             )
         SnapshotStore(session, redis=None).save(
@@ -325,9 +326,18 @@ async def test_financials_and_profile_stamp_staleness_and_unavailable_fields(sto
         "get_company_profile", {"symbol": MEMBERS[1]}, context(user_id)
     )
 
-    assert financials["periods"][0]["trailing_12_month_net_income_vnd"]["as_of"]
-    assert financials["periods"][0]["trailing_12_month_net_income_vnd"]["age_days"]
-    assert "income_statement_line_items" in financials["unavailable"]
+    newest, previous = financials["periods"]
+    assert newest["period_end"] == "2026-06-30"
+    assert newest["age_days"] == (DAY - date(2026, 6, 30)).days
+    assert newest["figures"]["trailing_12_month_net_income_vnd"] == 12_000_000_000
+    # A figure one period reported and another did not is present exactly
+    # where it was reported, and is not "unavailable".
+    assert newest["figures"]["revenue_vnd"] == 55_000_000_000
+    assert "revenue_vnd" not in previous["figures"]
+    assert "revenue_vnd" not in financials["unavailable"]
+    # A figure held for no stored period is named once, response-wide.
+    assert "cfo_vnd" in financials["unavailable"]
+    assert "trailing_12_month_net_income_vnd" not in financials["unavailable"]
     assert profile["industry"]["code"] == "10"
     assert "company_profile.foreign_room_pct" in profile["registered_fields"]
     assert profile["foreign_room"]["current_shares"]["as_of"] == "2026-08-01"
@@ -335,6 +345,59 @@ async def test_financials_and_profile_stamp_staleness_and_unavailable_fields(sto
     assert "share_counts" in missing_profile["unavailable"]
     assert "foreign_room.current_shares" in missing_profile["unavailable"]
     assert "foreign_room.total_shares" in missing_profile["unavailable"]
+
+
+@pytest.mark.asyncio
+async def test_financials_drop_oldest_periods_before_the_byte_cap_refuses(stored_world):
+    """Twelve full-statement quarters cannot fit 4 KB; the answer must anyway.
+
+    The tool shortens its own window and says so, because a catalog-level
+    ``ToolResultTooLarge`` would turn a stored history into no answer at all.
+    """
+    from src.agent.tools.catalog import MAX_TOOL_RESULT_BYTES, serialized_size
+    from src.agent.tools.data import FUNDAMENTAL_FIGURES
+
+    user_id, _, _ = stored_world
+    symbol = "U73F"
+    quarter_ends = [
+        date(year, month, day)
+        for year in (2023, 2024, 2025)
+        for month, day in ((3, 31), (6, 30), (9, 30), (12, 31))
+    ]
+    with get_sync_db() as session:
+        for period in quarter_ends:
+            SnapshotStore(session, redis=None).save(
+                Capability.FUNDAMENTAL,
+                FundamentalSnapshot(
+                    symbol=symbol,
+                    metadata=metadata(period, ProviderSource.VNSTOCK),
+                    period_end=period,
+                    **{name: 278_929_786_015_406.0 for name in FUNDAMENTAL_FIGURES},
+                ),
+            )
+    tools = StoreBackedTools(
+        session_factory=sync_session_factory,
+        redis=MemoryRedis(),
+        universe_factory=lambda _session: Universe(explicit=(symbol,)),
+    )
+    try:
+        result = await tools.catalog(trace_writer=lambda _trace: None).dispatch(
+            "get_financials",
+            {"symbol": symbol, "periods": 12},
+            context(user_id),
+        )
+
+        assert "error" not in result
+        assert serialized_size(result) <= MAX_TOOL_RESULT_BYTES
+        assert result["periods_truncated_to_fit"] is True
+        assert 0 < len(result["periods"]) < 12
+        # The dropped periods are the oldest; the newest stays first.
+        assert result["periods"][0]["period_end"] == "2025-12-31"
+    finally:
+        with get_sync_db() as session:
+            session.execute(
+                delete(ProviderSnapshot).where(ProviderSnapshot.symbol == symbol)
+            )
 
 
 @pytest.mark.asyncio
