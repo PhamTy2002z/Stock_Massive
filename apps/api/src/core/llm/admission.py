@@ -254,14 +254,24 @@ class SpendAdmission:
                         called_at = dispatch_at
                         break
                     called_at = dispatch_at
-                lane_spent, lane_limit = _assert_lane_headroom(
-                    session,
-                    config=self._config,
-                    lane=candidate.lane,
-                    reserved=reserved,
-                    month_start=month_start,
-                    month_reset=month_reset,
+                unlimited_eval = (
+                    candidate.owner.type is OwnerType.EVAL_RUN
+                    and self._config.eval_run_cost_ceiling_usd is None
                 )
+                if unlimited_eval:
+                    # Local CLIProxy/CCS runs are metered but not refused by a
+                    # synthetic USD envelope. Production sets a positive
+                    # per-run ceiling, restoring both Eval budget checks.
+                    lane_spent, lane_limit = 0, float("inf")
+                else:
+                    lane_spent, lane_limit = _assert_lane_headroom(
+                        session,
+                        config=self._config,
+                        lane=candidate.lane,
+                        reserved=reserved,
+                        month_start=month_start,
+                        month_reset=month_reset,
+                    )
                 if candidate.owner.type is OwnerType.CAPABILITY_PROBE:
                     probe_spent = _charged_cost(
                         session,
