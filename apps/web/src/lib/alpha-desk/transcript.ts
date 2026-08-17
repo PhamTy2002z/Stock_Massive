@@ -17,6 +17,7 @@ import type {
   ActivityPhase,
   ContentBlock,
   FlagReason,
+  ProgressStep,
   RiskNotice,
   SourceAndMethod,
   ThreadMessage,
@@ -36,6 +37,25 @@ export interface AssistantView {
   /** Attached by the backend. Null only if a stored message somehow lacks one. */
   riskNotice: RiskNotice | null
   sourcesAndMethods: SourceAndMethod[]
+  /**
+   * The trail the Turn left, as the message stored it (`docs/adr/0020`).
+   *
+   * Read from the message rather than kept from the draft it replaced: a Thread
+   * reopened tomorrow has no draft to remember, and the trail under an answer
+   * should not depend on whether the tab that asked is still open.
+   */
+  searchProgress: ProgressStep[]
+  /** Follow-up questions the backend generated. Empty on an answer without any. */
+  suggestions: string[]
+  /**
+   * Whether the Turn behind this answer ran to completion.
+   *
+   * Read from the Evidence Manifest, which is the only thing on a stored message
+   * that knows: the blocks of a Turn that hit its deadline look exactly like the
+   * blocks of one that finished, and closing that trail with *Hoàn thành* would
+   * tell the reader the answer is whole when it is a fragment.
+   */
+  completed: boolean
 }
 
 export interface AssistantEntry {
@@ -60,8 +80,8 @@ export interface DraftEntry {
   key: string
   blocks: ContentBlock[]
   activity: ActivityPhase | null
-  /** The phases already finished, in order, so the work stays legible. */
-  steps: ActivityPhase[]
+  /** Every step so far, in order, so the work stays legible while it happens. */
+  steps: ProgressStep[]
   phase: LivePhase
   terminalReason: string | null
   /**
@@ -225,7 +245,28 @@ function assistantView(message: ThreadMessage): AssistantView {
     sourcesAndMethods: Array.isArray(content.sources_and_methods)
       ? (content.sources_and_methods as SourceAndMethod[])
       : [],
+    // Both additive, and both read the same defensive way as everything else in
+    // here: the column is JSONB, and a message written before ADR-0020 carries
+    // neither key.
+    searchProgress: Array.isArray(content.search_progress)
+      ? (content.search_progress as ProgressStep[])
+      : [],
+    suggestions: Array.isArray(content.suggestions)
+      ? (content.suggestions as unknown[]).filter(
+          (row): row is string => typeof row === "string" && row.trim().length > 0,
+        )
+      : [],
+    // Defaults to complete on a message whose Manifest cannot be read: an answer
+    // in the transcript is one the backend wrote in a terminal transaction, and
+    // labelling every older row as *stopped* would be the louder mistake.
+    completed: manifestStatus(content.evidence_manifest) !== "incomplete",
   }
+}
+
+function manifestStatus(manifest: unknown): string | null {
+  if (typeof manifest !== "object" || manifest === null) return null
+  const status = (manifest as { status?: unknown }).status
+  return typeof status === "string" ? status : null
 }
 
 function proseBlock(text: string): ContentBlock {

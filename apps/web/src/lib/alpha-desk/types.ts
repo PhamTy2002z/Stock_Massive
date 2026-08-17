@@ -22,8 +22,56 @@ export type TurnEventType =
   | "turn.failed"
   | "turn.cancelled"
 
-/** The generic phases the activity line may show. Never a tool name. */
-export type ActivityPhase = "searching" | "reading_data" | "analyzing" | "preparing_visual"
+/**
+ * The phases the activity line may show. Never a tool name.
+ *
+ * `found_sources` is ADR-0020's addition, and it is a phase of its own rather
+ * than `searching` with extra keys: "a search is running, here is what was
+ * asked" and "the search returned, here is what came back" are different
+ * moments, and a renderer telling them apart by which key is present would be
+ * reading absence as meaning.
+ */
+export type ActivityPhase =
+  | "searching"
+  | "reading_data"
+  | "analyzing"
+  | "preparing_visual"
+  | "found_sources"
+
+/**
+ * One public page an open-web step stood on. `domain` is resolved by the backend.
+ *
+ * The excerpt and the two timestamps are what the search result itself said —
+ * present when it offered them, absent otherwise. The source drawer reads their
+ * presence; nothing here is ever an empty string standing in for "unknown".
+ */
+export interface ProgressSource {
+  title: string
+  url: string
+  domain: string
+  snippet?: string
+  published_at?: string
+  retrieved_at?: string
+}
+
+/**
+ * What the open-web lane disclosed about one step (`docs/adr/0020`).
+ *
+ * Absent on every store-reading lane, which is the whole point: presence means
+ * "this step is public work and may describe itself", and every other step is
+ * the bare phase ADR-0013 always allowed.
+ */
+export interface ProgressDetail {
+  queries?: string[]
+  result_count?: number
+  sources?: ProgressSource[]
+}
+
+/** One step of the trail, in the order the Turn went through it. */
+export interface ProgressStep {
+  phase: ActivityPhase
+  detail?: ProgressDetail
+}
 
 /** Terminal Turn statuses, as `agent_turn.status` spells them. */
 export type TurnStatus = "admitted" | "running" | "complete" | "incomplete" | "cancelled"
@@ -75,6 +123,15 @@ export interface SnapshotData {
   status: TurnStatus
   terminal_reason: string | null
   activity: ActivityPhase | null
+  /**
+   * Every step the Turn has been through, in order.
+   *
+   * Carried by the snapshot rather than rebuilt from events the tab missed, so
+   * a reconnecting reader gets the trail they were watching instead of the
+   * fragment that happened to arrive after they reattached. Absent on a
+   * snapshot from a build older than ADR-0020.
+   */
+  progress?: ProgressStep[]
   blocks: ContentBlock[]
   widgets: WidgetSpec[]
   /** The canonical assistant message, once a terminal transaction wrote one. */
@@ -137,6 +194,9 @@ export interface AssistantContent {
   risk_notice: RiskNotice
   evidence_manifest: EvidenceManifest
   sources_and_methods: SourceAndMethod[]
+  /** ADR-0020's two additive keys. Absent on messages stored by older builds. */
+  search_progress?: ProgressStep[]
+  suggestions?: string[]
 }
 
 /** The user message, as the create transaction wrote it. */

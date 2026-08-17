@@ -30,6 +30,7 @@
 import type {
   ActivityPhase,
   ContentBlock,
+  ProgressStep,
   SnapshotData,
   TurnEvent,
   TurnEventType,
@@ -61,23 +62,23 @@ export interface LiveTurn {
   seq: number
   activity: ActivityPhase | null
   /**
-   * The phases this Turn has already finished, in the order it finished them.
+   * Every step this Turn has been through, in order, including the one running.
    *
-   * The transport publishes *where the Turn is*, never where it has been, so
-   * the trail is assembled here: a phase leaves `activity` when the next one
-   * starts, when a block arrives, or when the Turn ends, and that is the moment
-   * it becomes a step the reader can still see.
+   * A step joins the trail the moment its activity event arrives rather than
+   * when the next one replaces it: the reader is watching a list grow, and a
+   * row that appeared only once it was over would always be one behind. Which
+   * row is *current* is `activity`, not a position in here.
    *
-   * It stays semantic for exactly the reason the live line does — the publisher
-   * sends a phase and only a phase, so there is no tool name, symbol, argument
-   * or result to leak (`docs/specs/0002` §6, §9). Consecutive repeats collapse:
-   * two reads in a row are one step called *reading data*, not two.
+   * Most steps are the bare phase ADR-0013 always allowed. An open-web step
+   * also carries what it asked and what it found (`docs/adr/0020`); no other
+   * lane carries anything, so there is still no tool name, symbol or store
+   * field to leak. Consecutive identical steps collapse — the loop announces
+   * `analyzing` before every model call, and four rounds is one *Thinking…*
+   * row, not four.
    *
-   * Empty after a reconnect. A snapshot is the state of the answer rather than
-   * a history of it, so a tab that joined late shows the steps from where it
-   * joined instead of inventing the ones it missed.
+   * A reconnect replaces this from the snapshot, which carries the whole trail.
    */
-  steps: ActivityPhase[]
+  steps: ProgressStep[]
   blocks: ContentBlock[]
   widgets: WidgetSpec[]
   terminalReason: string | null
@@ -112,6 +113,15 @@ export interface LiveTurn {
    */
   subscribable: boolean
 }
+
+/**
+ * The trail's ceiling, and the backend's own (`MAX_TRAIL_STEPS` in `events.py`).
+ *
+ * Stated on both sides rather than derived from what arrives: a snapshot is
+ * already bounded when it gets here, and this is what keeps a stream of activity
+ * events from growing this reducer's state without one.
+ */
+const MAX_TRAIL_STEPS = 60
 
 export const IDLE: LiveTurn = {
   turnId: null,
@@ -205,7 +215,6 @@ export function liveTurnReducer(state: LiveTurn, action: LiveTurnAction): LiveTu
             ...state,
             phase: phaseForStatus(action.status, state.blocks.length > 0),
             activity: null,
-            steps: closing(state),
             terminalReason: action.terminalReason,
             messageId: action.messageId,
             needsResync: false,
@@ -242,20 +251,24 @@ function applyEvent(state: LiveTurn, event: TurnEvent): LiveTurn {
   switch (event.type) {
     case "turn.activity": {
       const next = (event.data.phase as ActivityPhase) ?? null
-      // The phase being replaced is a phase that finished, so it moves to the
-      // trail. Re-announcing the same phase is the same step continuing.
-      return next === state.activity
-        ? advanced
-        : { ...advanced, activity: next, steps: closing(state) }
+      if (next === null) return advanced
+      return {
+        ...advanced,
+        activity: next,
+        steps: appendStep(state.steps, {
+          phase: next,
+          detail: (event.data.detail as ProgressStep["detail"]) ?? undefined,
+        }),
+      }
     }
 
     case "content.block":
       return {
         ...advanced,
         // The activity line belongs to work in progress; a block arriving is
-        // that work having produced something.
+        // that work having produced something. The trail keeps the step — what
+        // the Turn did is still what it did.
         activity: null,
-        steps: closing(state),
         blocks: [...advanced.blocks, event.data.block as ContentBlock],
         appendedIndex: advanced.blocks.length,
       }
@@ -271,7 +284,6 @@ function applyEvent(state: LiveTurn, event: TurnEvent): LiveTurn {
             ...advanced,
             phase,
             activity: null,
-            steps: closing(state),
             terminalReason: (event.data.terminal_reason as string | null) ?? null,
             messageId: (event.data.message_id as number | null) ?? null,
           }
@@ -280,16 +292,26 @@ function applyEvent(state: LiveTurn, event: TurnEvent): LiveTurn {
 }
 
 /**
- * The trail with whatever is on the live line folded into it.
+ * The trail with one more step on the end, unless it is the step already there.
  *
- * Called at every point a phase stops being current — the next activity, a
- * block, a terminal event — so the step the reader was watching becomes the
- * step they can still see. A no-op when nothing was running.
+ * The same collapse the backend applies to the trail it checkpoints, and it has
+ * to be the same one: a reconnect swaps this tab's trail for the snapshot's,
+ * and two rules that disagreed would make the list jump on reattach. A repeat
+ * with something new to say is still a step — that is what a second search with
+ * different queries is — so the comparison is over the payload, not the phase.
  */
-function closing(state: LiveTurn): ActivityPhase[] {
-  if (state.activity === null) return state.steps
-  if (state.steps[state.steps.length - 1] === state.activity) return state.steps
-  return [...state.steps, state.activity]
+export function appendStep(steps: ProgressStep[], step: ProgressStep): ProgressStep[] {
+  if (steps.length >= MAX_TRAIL_STEPS) return steps
+  const last = steps[steps.length - 1]
+  if (last !== undefined && sameStep(last, step)) return steps
+  return [...steps, step]
+}
+
+function sameStep(left: ProgressStep, right: ProgressStep): boolean {
+  return (
+    left.phase === right.phase &&
+    JSON.stringify(left.detail ?? null) === JSON.stringify(right.detail ?? null)
+  )
 }
 
 function fromSnapshot(state: LiveTurn, event: TurnEvent): LiveTurn {
@@ -302,10 +324,11 @@ function fromSnapshot(state: LiveTurn, event: TurnEvent): LiveTurn {
     // merging it would duplicate every block on every reconnect.
     seq: data.through_seq,
     activity: data.activity ?? null,
-    // Kept rather than rebuilt: a snapshot carries where the Turn *is*, and the
-    // trail is what this tab watched happen. A reconnect mid-Turn keeps the
-    // steps it saw; a tab that joined late simply has none to show.
-    steps: state.steps,
+    // Taken from the snapshot, which carries the whole trail (`docs/adr/0020`).
+    // A tab that joined late gets what it missed instead of starting the list
+    // from wherever it happened to attach; a build older than that decision
+    // sends none, and this tab keeps what it saw for itself.
+    steps: data.progress ?? state.steps,
     blocks: [...data.blocks],
     widgets: [...data.widgets],
     terminalReason: data.terminal_reason ?? null,

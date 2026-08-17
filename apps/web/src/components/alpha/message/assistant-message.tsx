@@ -2,17 +2,25 @@
 
 import type { AssistantView } from "@/lib/alpha-desk/transcript"
 import type { FlagReason } from "@/lib/alpha-desk/types"
+import { AnswerActions } from "./answer-actions"
 import { ContentBlockView } from "./content-block"
 import { FlagAction } from "./flag-action"
 import { MessageShell } from "./message-shell"
-import { SourcesAndMethods } from "./sources-and-methods"
+import { SearchProgress } from "./search-progress"
+import { sourcesOf } from "./source-list"
+import { Suggestions } from "./suggestions"
 
 /**
  * One canonical assistant message.
  *
  * This is what replaces the draft at a terminal event, and it is the fuller
- * thing: the same blocks, plus the sources the backend attached in the terminal
- * transaction.
+ * thing: the same blocks, plus the trail the Turn left, the sources the backend
+ * attached in the terminal transaction, and the follow-ups it generated.
+ *
+ * The order on screen is the order of a finished answer rather than of a Turn:
+ * the trail folds up **above** the prose, because how the answer was reached is
+ * context for reading it and never the thing itself, and the actions sit under
+ * it where the next question is about to be typed.
  *
  * The Risk Notice the backend attaches (`view.riskNotice`) is deliberately not
  * rendered. It is still carried on the message and still assembled server-side;
@@ -32,6 +40,9 @@ export function AssistantMessage({
   flagFailed = false,
   onFlag,
   onUnflag,
+  onRetry,
+  onAsk,
+  showSuggestions = false,
   className,
 }: {
   view: AssistantView
@@ -40,15 +51,40 @@ export function AssistantMessage({
   flagFailed?: boolean
   onFlag?: (messageId: number, reason: FlagReason) => void
   onUnflag?: (messageId: number) => void
+  /** Ask the question above this answer again. */
+  onRetry?: () => void
+  /** Put a follow-up in the composer, unsent. */
+  onAsk?: (question: string) => void
+  /** Only the newest answer offers follow-ups; see `Suggestions`. */
+  showSuggestions?: boolean
   className?: string
 }) {
+  const sources = sourcesOf(view.searchProgress)
+
   return (
     <MessageShell className={className}>
+      <SearchProgress
+        steps={view.searchProgress}
+        activity={null}
+        // The trail closes with what the Turn actually ended as, rather than
+        // leaving the reader to infer it from the absence of a spinner. A Turn
+        // that hit its deadline says so: its blocks look identical to a whole
+        // answer's, and this row is the difference.
+        ending={
+          view.searchProgress.length === 0 ? null : view.completed ? "done" : "stopped"
+        }
+      />
+
       {view.blocks.map((block, index) => (
         <ContentBlockView key={`block-${index}`} block={block} />
       ))}
 
-      <SourcesAndMethods rows={view.sourcesAndMethods} />
+      <AnswerActions
+        text={view.blocks.map((block) => block.text).join("\n\n")}
+        sources={sources}
+        rows={view.sourcesAndMethods}
+        onRetry={onRetry}
+      />
 
       {messageId !== undefined && onFlag !== undefined && onUnflag !== undefined && (
         <FlagAction
@@ -58,6 +94,10 @@ export function AssistantMessage({
           onFlag={onFlag}
           onUnflag={onUnflag}
         />
+      )}
+
+      {showSuggestions && onAsk !== undefined && (
+        <Suggestions questions={view.suggestions} onAsk={onAsk} className="pt-2" />
       )}
     </MessageShell>
   )

@@ -6,6 +6,7 @@ import { AlertCircle, Check, Copy, Pencil, RotateCcw, X } from "lucide-react"
 import { AnalysisCard } from "@/components/alpha/analysis"
 import { AssistantMessage } from "@/components/alpha/message/assistant-message"
 import { DraftMessage } from "@/components/alpha/message/draft-message"
+import type { TranscriptEntry } from "@/lib/alpha-desk/transcript"
 import { cn } from "@/lib/utils"
 
 import { Composer } from "./composer"
@@ -62,12 +63,17 @@ export function ChatView() {
         className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-[190px] pt-2"
       >
         <div className="mx-auto w-full max-w-[760px] space-y-7 py-5">
-          {desk.entries.map((entry) => {
+          {desk.entries.map((entry, index) => {
             if (entry.kind === "user") {
               return <UserMessage key={entry.key} text={entry.text} pending={entry.pending} />
             }
 
             if (entry.kind === "assistant") {
+              // The question this answer belongs to, for *Hỏi lại*: the nearest
+              // user row above it. Read here rather than carried on the entry,
+              // because the projection's job is what rows exist and in what
+              // order — which is exactly what makes this lookup possible.
+              const question = questionAbove(desk.entries, index)
               return (
                 <AssistantMessage
                   key={entry.key}
@@ -77,6 +83,16 @@ export function ChatView() {
                   flagFailed={entry.messageId === desk.flagFailedFor}
                   onFlag={desk.flag}
                   onUnflag={desk.unflag}
+                  onRetry={
+                    question === null || desk.canCancel
+                      ? undefined
+                      : () => desk.resend(question)
+                  }
+                  onAsk={(text) => dispatch({ type: "ask", text })}
+                  // Only under the newest answer. Every answer in a long Thread
+                  // carrying its own five would turn the transcript into a page
+                  // of prompts with the conversation between them.
+                  showSuggestions={index === desk.entries.length - 1}
                 />
               )
             }
@@ -136,6 +152,16 @@ export function ChatView() {
       </div>
     </>
   )
+}
+
+/** The question an answer is an answer to, or null if the row above is not one. */
+function questionAbove(entries: TranscriptEntry[], index: number): string | null {
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const entry = entries[cursor]
+    if (entry.kind === "user") return entry.pending ? null : entry.text
+    if (entry.kind === "assistant") return null
+  }
+  return null
 }
 
 /**

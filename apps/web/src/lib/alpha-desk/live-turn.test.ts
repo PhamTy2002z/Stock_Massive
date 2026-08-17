@@ -355,9 +355,10 @@ describe("the activity line", () => {
     expect(answered.activity).toBeNull()
   })
 
-  it("keeps a finished phase as a step, in the order it finished", () => {
-    // The transport publishes where the Turn *is*; the trail of where it has
-    // been is assembled here, because nothing else sees every transition.
+  it("keeps every step, in the order the Turn went through them", () => {
+    // A step joins the trail when its event arrives rather than when the next
+    // one replaces it: the reader watches a list grow, and a row that appeared
+    // only once it was over would always be one behind.
     const state = run(
       started,
       snapshot(0),
@@ -366,11 +367,15 @@ describe("the activity line", () => {
       event(3, "turn.activity", { phase: "analyzing" }),
     )
 
-    expect(state.steps).toEqual(["searching", "reading_data"])
+    expect(state.steps.map((step) => step.phase)).toEqual([
+      "searching",
+      "reading_data",
+      "analyzing",
+    ])
     expect(state.activity).toBe("analyzing")
   })
 
-  it("closes the running phase into the trail when a block lands", () => {
+  it("keeps the step in the trail when a block lands", () => {
     const state = run(
       started,
       snapshot(0),
@@ -378,12 +383,13 @@ describe("the activity line", () => {
       event(2, "content.block", { block: block("kết quả") }),
     )
 
-    expect(state.steps).toEqual(["reading_data"])
+    expect(state.steps.map((step) => step.phase)).toEqual(["reading_data"])
     expect(state.activity).toBeNull()
   })
 
   it("collapses a phase re-announced back to back into one step", () => {
-    // Two reads in a row are one step called *reading data*, not two.
+    // The loop announces `analyzing` before every model call, so four rounds is
+    // one *Thinking…* row rather than four.
     const state = run(
       started,
       snapshot(0),
@@ -392,7 +398,38 @@ describe("the activity line", () => {
       event(3, "turn.activity", { phase: "analyzing" }),
     )
 
-    expect(state.steps).toEqual(["reading_data"])
+    expect(state.steps.map((step) => step.phase)).toEqual(["reading_data", "analyzing"])
+  })
+
+  it("keeps a repeat that has something new to say", () => {
+    // Two searches with different queries are two steps: what distinguishes
+    // them is the payload, not the phase (`docs/adr/0020`).
+    const state = run(
+      started,
+      snapshot(0),
+      event(1, "turn.activity", { phase: "searching", detail: { queries: ["một"] } }),
+      event(2, "turn.activity", { phase: "searching", detail: { queries: ["hai"] } }),
+    )
+
+    expect(state.steps).toHaveLength(2)
+    expect(state.steps[1].detail?.queries).toEqual(["hai"])
+  })
+
+  it("carries the open web's queries and sources onto the step", () => {
+    const state = run(
+      started,
+      snapshot(0),
+      event(1, "turn.activity", {
+        phase: "found_sources",
+        detail: {
+          result_count: 15,
+          sources: [{ title: "Ban lãnh đạo", url: "https://masangroup.com/a", domain: "masangroup.com" }],
+        },
+      }),
+    )
+
+    expect(state.steps[0].detail?.result_count).toBe(15)
+    expect(state.steps[0].detail?.sources?.[0].domain).toBe("masangroup.com")
   })
 
   it("keeps the trail after the Turn ends, including one that ended early", () => {
@@ -405,8 +442,38 @@ describe("the activity line", () => {
       event(2, "turn.incomplete", { terminal_reason: "turn_deadline" }),
     )
 
-    expect(state.steps).toEqual(["searching"])
+    expect(state.steps.map((step) => step.phase)).toEqual(["searching"])
     expect(state.activity).toBeNull()
+  })
+
+  it("takes the whole trail from a snapshot rather than what it happened to see", () => {
+    // A reconnecting tab gets what it missed. The snapshot carries the trail
+    // precisely so a reader who reattached mid-Turn is not shown a fragment.
+    const state = run(started, snapshot(0), {
+      type: "event",
+      event: {
+        version: 1,
+        seq: 4,
+        type: "turn.snapshot",
+        turn_id: TURN,
+        data: {
+          through_seq: 4,
+          status: "running",
+          terminal_reason: null,
+          activity: "analyzing",
+          progress: [{ phase: "searching" }, { phase: "found_sources" }, { phase: "analyzing" }],
+          blocks: [],
+          widgets: [],
+          message_id: null,
+        },
+      },
+    })
+
+    expect(state.steps.map((step) => step.phase)).toEqual([
+      "searching",
+      "found_sources",
+      "analyzing",
+    ])
   })
 
   it("starts a new Turn with an empty trail", () => {
