@@ -189,12 +189,23 @@ The set of conditions a recommendation block must satisfy before it may be relea
 Universe membership, an explicit Trading Day and reference price, price zones that are
 registered fields computed in code, **Window Health** that is not a refusal, at least
 one cited suitable field with material contradictory evidence exposed, full metadata
-on every cited field, and unregistered evidence never as a sole directional basis. A
-recommendation block that fails is never displayed and flagged afterwards — the Turn
-ends `incomplete` with reason `grounding_failed`. An ordinary prose block with an
-unattributed figure is released with a visible downgrade instead; a figure that
-contradicts its cited evidence remains a failure in every block.
+on every cited field, and unregistered evidence never as a sole directional basis. It
+applies to recommendation blocks only — other **Answer Tier**s have their own, lighter
+bar. A recommendation block that fails is never displayed; the Turn degrades to its
+analysis-tier content plus a precise statement of the missing conditions, and never
+ends blank. A figure that contradicts its cited evidence remains a failure in every
+block.
 _Avoid_: guardrail, safety check, validation
+
+**Answer Tier**:
+The release bar an assistant answer is validated against, decided by what the answer
+asserts rather than by the question's wording: `recommendation` for a block giving
+actionable direction with price zones — the full **Recommendation Gate**; `analysis`
+for stance, trend, and overview prose — every figure attributed to cited evidence and
+read within its sanctioned interpretation, no zone or reference price required;
+`education` for prose carrying no store figures. A stricter tier failing degrades the
+answer to the tier below it, never to an empty Turn.
+_Avoid_: answer kind, strictness level, gate mode
 
 **External Claim**:
 A claim retrieved from an open web source, MCP server, or the Knowledge Store. It
@@ -237,6 +248,14 @@ Turn and the nightly Analysis prose. It is not a growing scoreboard: cases are s
 once and afterwards enter only through a confirmed flagged message.
 _Avoid_: test suite, benchmark, probe set
 
+**Golden Question Set**:
+The small set of question shapes the product commits to answering well — each with a
+named serving lane and a minimum passing answer — used as the shared quality bar
+between the owner and the system. It is not a separate scoreboard: its members enter
+the **Eval Battery** through the confirmed-flagged-message door, starting with the two
+flagged answers of 2026-08-17. Seeded in spec 0004.
+_Avoid_: test questions, demo prompts, FAQ
+
 **Eval Fixture**:
 A frozen snapshot of the store at one Trading Day, loaded into a dedicated eval
 database and carrying the registry, profile, catalog and schema versions it was frozen
@@ -266,6 +285,10 @@ _Avoid_: backfill, deep history, daily collection
 **Collector**:
 Tiến trình chạy sau phiên, là nơi duy nhất được gọi ra Provider Source. Request của người dùng không bao giờ chạm tới nhà cung cấp.
 _Avoid_: job, worker, crawler
+
+**Hydration**:
+Một lần nạp store có biên cho phần Capability còn thiếu của một mã, được *xếp hàng* bởi nhu cầu — thường là một câu hỏi mà store chưa đủ dữ liệu để trả lời — nhưng luôn do Collector thực thi, không bao giờ chạy trong đường request của người dùng. Câu trả lời đầu dùng những gì store đang có và nói rõ phần đang tải; khác **Backfill** (một lần, theo mã mới vào Universe) và **Warm-up** (cửa sổ gần, theo lịch) ở chỗ nó do cầu kéo và chỉ nạp đúng phần thiếu.
+_Avoid_: lazy loading, on-demand fetch, live call
 
 **Trading Day**:
 Một ngày mà hệ thống có Snapshot EOD — `date(max(effective_at))` trong `provider_snapshots`, chứ không phải một ngày trên lịch. Định nghĩa theo dữ liệu vì hệ thống không có lịch nghỉ lễ: `is_trading_day()` chỉ biết thứ trong tuần nên đọc Tết thành ngày giao dịch, và một Analysis đóng nhãn một phiên không tồn tại thì không diff được với bản của phiên sau.
