@@ -30,5 +30,5 @@ The downgrade becomes an observable product outcome rather than a hidden excepti
   additive field.
 - `TurnOutcome` counts downgraded blocks, and the ops snapshot reports their rate over
   released blocks alongside the rarer `grounding_failed` Turn rate.
-- Prompt contract 1.3 states that a warning is not permission to omit references.
+- Prompt contract 1.4 states that a warning is not permission to omit references.
 - Widgets are emitted only from content that survives validation.
