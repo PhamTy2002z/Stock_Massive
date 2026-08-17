@@ -34,7 +34,7 @@ function appClient() {
 }
 
 function Probe() {
-  const feed = useNewsFeed()
+  const feed = useNewsFeed("moi-nhat")
   return <div>{feed.isError ? "error-in-pane" : "no-error"}</div>
 }
 

@@ -10,9 +10,33 @@ import type { FeedNewsItem } from "./api"
  * and the view only lays out what it is handed.
  */
 
-/** How an article is named in shell state: stable across a refetch, unlike an index. */
+/**
+ * How an article is named in shell state: stable across a refetch, unlike an index.
+ *
+ * Still namespaced now that ids are the publisher's own and globally unique per
+ * source, because "per source" is the catch: a CafeF article id and a VCI
+ * disclosure id are drawn from two unrelated sequences and could collide by
+ * coincidence. The facet the item arrived on is the namespace — the symbol when
+ * it has one, the category otherwise.
+ */
 export function articleKey(item: FeedNewsItem): string {
-  return `${item.symbol}:${item.id}`
+  return `${item.symbol ?? item.category ?? "feed"}:${item.id}`
+}
+
+/**
+ * The facet a key was namespaced under — `articleKey` read backwards.
+ *
+ * The inspector's source panel has the harder version of the same problem the
+ * view has: it must ask for the facet that holds the open article *before* it
+ * has the article to read a category off. That would be circular if the key did
+ * not already carry the answer, and it does — the namespace in front of the
+ * colon is the article's own `category` (or its symbol). So the panel derives it
+ * from the key the shell is already holding, rather than a second copy of the
+ * selected facet being threaded through the reducer to say the same thing.
+ */
+export function articleFacet(key: string): string {
+  const colon = key.indexOf(":")
+  return colon === -1 ? key : key.slice(0, colon)
 }
 
 /**
@@ -41,14 +65,45 @@ const TIME_ZONE = "Asia/Ho_Chi_Minh"
 const PUBLISHED_AT = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/
 
 /**
+ * The same instant, but carrying its own offset: `2026-08-17T19:59:00+07:00`.
+ *
+ * Anchored at both ends, unlike `PUBLISHED_AT`, because this is the branch that
+ * hands the string to `Date` — the regex is what guarantees `Date` is being
+ * given the one format it parses identically everywhere, rather than being
+ * allowed to guess at something looser.
+ */
+const ZONED_PUBLISHED_AT =
+  /^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/
+
+/**
  * The instant an article was published, or `null` for anything unparseable.
  *
- * Built from the captured parts rather than handed to `new Date(string)`: the
- * string has no zone in it, and the two engines that accept it disagree about
- * whether that means UTC or local time.
+ * Two shapes, because there are two sources behind this one screen: CafeF's RSS
+ * dates itself as ISO-8601 with a `+07:00` offset, and VCI's disclosures print a
+ * bare `"YYYY-MM-DD HH:mm"` wall clock. They are read differently on purpose —
+ *
+ *   - With an offset in it, the string already names an instant, so `Date` is
+ *     the right parser and every engine agrees on the answer.
+ *   - Without one, it does not, and `new Date(string)` is exactly the wrong
+ *     tool: the engines that accept it disagree about whether a zoneless string
+ *     means UTC or local time, which would give the same article two different
+ *     timestamps on two machines. So that branch builds the instant from the
+ *     captured parts and Vietnam's fixed offset instead.
  */
 export function parsePublishedAt(value: string): Date | null {
-  const match = PUBLISHED_AT.exec(value.trim())
+  const text = value.trim()
+
+  const zoned = ZONED_PUBLISHED_AT.exec(text)
+  if (zoned !== null) {
+    const [, year, month, day] = zoned
+    // `Date` refuses an hour of 25 on its own but rolls a 30th of February into
+    // March, so the calendar date is the one part it cannot be trusted with.
+    if (!isRealDate(year, month, day)) return null
+    const moment = new Date(text)
+    return Number.isNaN(moment.getTime()) ? null : moment
+  }
+
+  const match = PUBLISHED_AT.exec(text)
   if (match === null) return null
 
   const [, year, month, day, hour, minute] = match
@@ -73,6 +128,16 @@ export function parsePublishedAt(value: string): Date | null {
     field("hour") === hour &&
     field("minute") === minute
   return roundTripped ? moment : null
+}
+
+/** Whether a `YYYY`/`MM`/`DD` triple names a day that exists, month lengths included. */
+function isRealDate(year: string, month: string, day: string): boolean {
+  const utc = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)))
+  return (
+    utc.getUTCFullYear() === Number(year) &&
+    utc.getUTCMonth() === Number(month) - 1 &&
+    utc.getUTCDate() === Number(day)
+  )
 }
 
 /** The parse's own mirror: the same fields, in the same zone, back out as text. */
@@ -161,29 +226,15 @@ export function partitionFeed(items: FeedNewsItem[]): FeedPartition {
 }
 
 /**
- * The symbols the feed is actually made of, loudest first.
+ * What to read after this one: the same subject first, then simply the newest.
  *
- * Ordered by how many articles each contributed, then alphabetically so a tie
- * does not reshuffle the pill row between two refetches of the same feed.
- */
-export function topSymbols(items: FeedNewsItem[], max: number): string[] {
-  const counts = new Map<string, number>()
-  for (const item of items) {
-    counts.set(item.symbol, (counts.get(item.symbol) ?? 0) + 1)
-  }
-
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .slice(0, max)
-    .map(([symbol]) => symbol)
-}
-
-/**
- * What to read after this one: the same company first, then simply the newest.
+ * The subject is the category rather than the symbol, because a press article is
+ * about a story and not about a ticker — most items carry no symbol at all, so
+ * grouping by one would put every article in the same undifferentiated bucket.
  *
  * Padding with unrelated articles rather than showing one card is deliberate.
- * The block's promise is "there is more", and a symbol the provider only covered
- * once would otherwise end the reading there.
+ * The block's promise is "there is more", and a thin facet would otherwise end
+ * the reading there.
  */
 export function relatedArticles(
   items: FeedNewsItem[],
@@ -192,7 +243,7 @@ export function relatedArticles(
 ): FeedNewsItem[] {
   const openKey = articleKey(article)
   const others = items.filter((item) => articleKey(item) !== openKey)
-  const sameSymbol = others.filter((item) => item.symbol === article.symbol)
-  const rest = others.filter((item) => item.symbol !== article.symbol)
-  return [...sameSymbol, ...rest].slice(0, max)
+  const sameCategory = others.filter((item) => item.category === article.category)
+  const rest = others.filter((item) => item.category !== article.category)
+  return [...sameCategory, ...rest].slice(0, max)
 }
