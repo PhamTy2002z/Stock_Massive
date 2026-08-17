@@ -85,6 +85,7 @@ from .context import (
 from .events import Activity, TurnPublisher, append_step
 from .grounding import (
     GROUNDING_FAILED,
+    BlockKind,
     Citation,
     GroundingFailure,
     RecommendationValidator,
@@ -370,6 +371,10 @@ class TurnOutcome:
     # stays the stable ``grounding_failed``; this is the operator's detail and
     # the ops query's dimension.
     grounding_failure_code: str | None = None
+    # The Gate condition that dropped a recommendation while the Turn went on
+    # to answer without it. The Manifest reports this as a blocked
+    # recommendation, exactly as it reports one that ended a Turn.
+    degraded_recommendation_code: str | None = None
     # Prose blocks released with one or more figures the Turn could not
     # attribute. Recommendations never contribute: they are blocked instead.
     downgraded_blocks: int = 0
@@ -412,6 +417,10 @@ class _TurnState:
     widget_refusals: list[Mapping[str, Any]] = field(default_factory=list)
     request_id: str | None = None
     grounding_failure_code: str | None = None
+    # Which Gate condition dropped a recommendation the Turn answered around.
+    # Separate from ``grounding_failure_code``, which is the condition that
+    # ended a Turn: a degrade is a recommendation withheld, not a Turn refused.
+    degraded_recommendation_code: str | None = None
     external_tool_calls: int = 0
     # The open-web trail (``docs/adr/0020``): every phase in order, and the
     # public pages behind the ones that searched.
@@ -1056,7 +1065,29 @@ class AgentLoop:
         validator = RecommendationValidator(trading_day=request.runtime.trading_day)
         traces = TraceIndex(state.calls)
         for raw in split_blocks(answer):
-            block = validator.validate(raw, traces)
+            try:
+                block = validator.validate(raw, traces)
+            except GroundingFailure as failure:
+                if not failure.degradable:
+                    raise
+                # The recommendation is dropped, never shown: what the reader
+                # gets instead is the backend's own sentence naming the
+                # condition that was not met. The blocks that already passed
+                # stay, so a Turn that could not raise its stance to a
+                # recommendation still answers rather than going blank.
+                logger.info(
+                    "Turn %s degraded a recommendation: %s",
+                    request.request_message_id,
+                    failure,
+                )
+                state.degraded_recommendation_code = failure.code
+                block = ReleasedBlock(
+                    text=failure.notice(),
+                    kind=BlockKind.PROSE,
+                    # Backend-authored and figure-free, so there is nothing for
+                    # it to cite and nothing in it left unattributed.
+                    citations=(),
+                )
             state.blocks.append(block)
             if self._publisher is not None:
                 self._publisher.content_block(block.as_wire())
@@ -1129,6 +1160,7 @@ class AgentLoop:
             widget_refusals=tuple(state.widget_refusals),
             provider_request_id=state.request_id,
             grounding_failure_code=state.grounding_failure_code,
+            degraded_recommendation_code=state.degraded_recommendation_code,
             downgraded_blocks=sum(
                 bool(block.unverified_figures) for block in state.blocks
             ),

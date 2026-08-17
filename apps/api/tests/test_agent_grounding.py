@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date
 
 import pytest
@@ -523,3 +524,37 @@ def test_the_markers_never_reach_the_reader():
     )
 
     assert rendered == "RSI 61.2 là trung tính."
+
+
+def test_an_availability_failure_is_degradable_and_an_integrity_one_is_not():
+    """The two classes of Gate failure, told apart by what the reader gets.
+
+    Both keep the block off the screen. Only the availability class lets the
+    Turn go on and say what was missing, because "no registered price zone
+    could be computed" is an answer while a blank Turn is not — and the figure
+    that contradicts its own citation stays in the class that ends the Turn.
+    """
+    missing_zone = RECOMMENDATION.replace(
+        f"Vùng dao động thường ngày 4.5 [zone:tich_luy@c1#registered_fields.{ZONE}.value]. ",
+        "",
+    )
+
+    with pytest.raises(GroundingFailure) as availability:
+        validator().validate(missing_zone, standard_traces())
+
+    assert availability.value.code == "missing_price_zone"
+    assert availability.value.degradable is True
+    notice = availability.value.notice()
+    assert "vùng giá" in notice
+    # The notice is the backend's own sentence, so it may not carry a figure:
+    # nothing validates it, and a number in it would be a number nobody proved.
+    assert not re.search(r"\d", notice.replace("{", "").replace("}", ""))
+
+    mismatched = RECOMMENDATION.replace("Giá tham chiếu 95.4", "Giá tham chiếu 128.0")
+
+    with pytest.raises(GroundingFailure) as integrity:
+        validator().validate(mismatched, standard_traces())
+
+    assert integrity.value.code == "figure_mismatch"
+    assert integrity.value.degradable is False
+    assert integrity.value.notice() == ""
