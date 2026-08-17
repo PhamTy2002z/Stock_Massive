@@ -34,6 +34,28 @@ from .scope import adtv_by_symbol, structured_universe_refusal
 DATA_REFERENCE_TTL_SECONDS = 24 * 60 * 60
 PRICE_SAMPLE_POINTS = 12
 
+#: Every statement figure a FundamentalSnapshot can hold, in the order the
+#: model reads them. The tool serves the stored value under the stored name —
+#: no figure here is computed at serving time.
+FUNDAMENTAL_FIGURES = (
+    "revenue_vnd",
+    "gross_profit_vnd",
+    "operating_profit_vnd",
+    "pre_tax_profit_vnd",
+    "net_profit_after_tax_vnd",
+    "parent_net_profit_vnd",
+    "trailing_12_month_net_income_vnd",
+    "parent_equity_vnd",
+    "total_assets_vnd",
+    "total_liabilities_vnd",
+    "short_term_borrowings_vnd",
+    "long_term_borrowings_vnd",
+    "cash_and_equivalents_vnd",
+    "cfo_vnd",
+    "cfi_vnd",
+    "cff_vnd",
+)
+
 SessionFactory = Callable[[], Session]
 UniverseFactory = Callable[[Session], Universe]
 
@@ -144,8 +166,12 @@ class StoreBackedTools:
             ToolSpec(
                 name="get_financials",
                 description=(
-                    "Read stored quarterly fundamentals, stamping every figure with "
-                    "its reporting date, age and staleness."
+                    "Read stored quarterly financial statements — revenue, profits, "
+                    "balance-sheet totals, borrowings and net cash flows — grouped "
+                    "per reporting period, each period stamped with its reporting "
+                    "date, age and staleness. A figure absent from one period was "
+                    "not reported for that period; a figure named in `unavailable` "
+                    "is held for no stored period."
                 ),
                 parameters=_object_schema(
                     {
@@ -503,45 +529,41 @@ class StoreBackedTools:
         for snapshot in reversed(stored[-periods:]):
             period_end = snapshot.period_end
             age = max(0, (context.trading_day - period_end).days)
+            figures = {
+                name: getattr(snapshot, name)
+                for name in FUNDAMENTAL_FIGURES
+                if getattr(snapshot, name) is not None
+            }
             output.append(
                 {
                     "period_end": period_end.isoformat(),
-                    "trailing_12_month_net_income_vnd": self._stamped(
-                        snapshot.trailing_12_month_net_income_vnd,
-                        period_end,
-                        age,
-                        age > FUNDAMENTAL_STALE_DAYS,
-                    ),
-                    "parent_equity_vnd": self._stamped(
-                        snapshot.parent_equity_vnd,
-                        period_end,
-                        age,
-                        age > FUNDAMENTAL_STALE_DAYS,
-                    ),
+                    "age_days": age,
+                    "stale": age > FUNDAMENTAL_STALE_DAYS,
+                    "figures": figures,
                 }
             )
+        # A figure held for no stored period is named once here rather than
+        # absent from every period silently — absence per period is ordinary
+        # (a company can file without a cash flow statement), absence across
+        # all of them is what the model must report as unavailable.
         unavailable = [
-            "income_statement_line_items",
-            "balance_sheet_line_items",
-            "cash_flow_line_items",
+            name
+            for name in FUNDAMENTAL_FIGURES
+            if all(name not in item["figures"] for item in output)
         ]
-        if not output:
-            unavailable.extend(
-                ["trailing_12_month_net_income_vnd", "parent_equity_vnd"]
-            )
-        else:
-            if all(
-                item["trailing_12_month_net_income_vnd"]["value"] is None
-                for item in output
-            ):
-                unavailable.append("trailing_12_month_net_income_vnd")
-            if all(item["parent_equity_vnd"]["value"] is None for item in output):
-                unavailable.append("parent_equity_vnd")
-        return {
+        result = {
             "symbol": symbol,
             "periods": output,
             "unavailable": unavailable,
         }
+        # Old periods are dropped before the catalog's byte cap refuses the
+        # whole answer: four rich quarters beat an error, and the model is
+        # told the window was shortened rather than left to read it as the
+        # store's full depth.
+        while output and serialized_size(result) > MAX_TOOL_RESULT_BYTES:
+            output.pop()
+            result["periods_truncated_to_fit"] = True
+        return result
 
     async def get_company_profile(
         self, context: ToolContext, arguments: Mapping[str, Any]

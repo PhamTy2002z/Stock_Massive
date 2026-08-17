@@ -485,12 +485,29 @@ HPG_BALANCE = statement(
 )
 
 
+HPG_CASHFLOW = statement(
+    {
+        "net_cash_inflows_outflows_from_operating_activities": dict(
+            zip(QUARTERS, [7.0e12, 6.5e12, 6.0e12, 5.5e12])
+        ),
+        "net_cash_inflows_outflows_from_investing_activities": dict(
+            zip(QUARTERS, [-3.0e12, -2.5e12, -2.0e12, -1.5e12])
+        ),
+        "net_cash_inflows_outflows_from_financing_activities": dict(
+            zip(QUARTERS, [-1.0e12, -0.5e12, 0.5e12, 1.0e12])
+        ),
+    },
+    QUARTERS,
+)
+
+
 class FakeFinance:
     """Stands in for ``Finance(symbol=..., source=...)``."""
 
-    def __init__(self, income, balance):
+    def __init__(self, income, balance, cashflow=None):
         self.income = income
         self.balance = balance
+        self.cashflow = pd.DataFrame() if cashflow is None else cashflow
 
     def income_statement(self, **kwargs):
         if isinstance(self.income, Exception):
@@ -501,6 +518,11 @@ class FakeFinance:
         if isinstance(self.balance, Exception):
             raise self.balance
         return self.balance
+
+    def cash_flow(self, **kwargs):
+        if isinstance(self.cashflow, Exception):
+            raise self.cashflow
+        return self.cashflow
 
 
 def fundamental_provider(by_symbol: dict) -> VnstockFundamentalProvider:
@@ -516,34 +538,117 @@ def fundamental_provider(by_symbol: dict) -> VnstockFundamentalProvider:
 
 
 class TestFundamentalNormalization:
-    def test_one_symbol_yields_a_snapshot_with_an_explicit_period(self):
+    def test_every_reported_period_yields_its_own_snapshot_oldest_first(self):
+        """One filing is one snapshot, and the newest is emitted last.
+
+        Oldest first is a promise to the store's current-view cache: a writer
+        saving this list in order leaves the newest period as the current one.
+        """
         provider = fundamental_provider(
             {"HPG": FakeFinance(HPG_INCOME, HPG_BALANCE)}
         )
 
-        (snapshot,) = provider.fetch_fundamentals(["HPG"])
+        snapshots = provider.fetch_fundamentals(["HPG"])
 
-        assert snapshot.symbol == "HPG"
-        assert snapshot.period_end == date(2026, 6, 30)
-        assert snapshot.metadata.source is ProviderSource.VNSTOCK
+        assert [snapshot.period_end for snapshot in snapshots] == [
+            date(2025, 9, 30),
+            date(2025, 12, 31),
+            date(2026, 3, 31),
+            date(2026, 6, 30),
+        ]
+        assert all(snapshot.symbol == "HPG" for snapshot in snapshots)
+        assert all(
+            snapshot.metadata.source is ProviderSource.VNSTOCK
+            for snapshot in snapshots
+        )
 
-    def test_the_latest_period_wins_regardless_of_column_order(self):
+    def test_the_latest_period_is_last_regardless_of_column_order(self):
         shuffled = HPG_INCOME[["item", "item_en", "item_id", *reversed(QUARTERS)]]
         provider = fundamental_provider({"HPG": FakeFinance(shuffled, HPG_BALANCE)})
 
-        (snapshot,) = provider.fetch_fundamentals(["HPG"])
+        snapshots = provider.fetch_fundamentals(["HPG"])
 
-        assert snapshot.period_end == date(2026, 6, 30)
+        assert snapshots[-1].period_end == date(2026, 6, 30)
 
     def test_net_income_trails_four_quarters_of_parent_profit(self):
         provider = fundamental_provider(
             {"HPG": FakeFinance(HPG_INCOME, HPG_BALANCE)}
         )
 
-        (snapshot,) = provider.fetch_fundamentals(["HPG"])
+        snapshots = provider.fetch_fundamentals(["HPG"])
 
-        assert snapshot.trailing_12_month_net_income_vnd == pytest.approx(
+        assert snapshots[-1].trailing_12_month_net_income_vnd == pytest.approx(
             6_371_019_000_000 + 3_100_000_000_000 + 2_900_000_000_000 + 3_000_000_000_000
+        )
+
+    def test_an_older_period_trails_its_own_four_quarters_or_nothing(self):
+        """The trailing figure is computed per period, never borrowed.
+
+        With four stored quarters, only the newest has four behind it; the
+        one before it has three, which is not a trailing twelve months.
+        """
+        provider = fundamental_provider(
+            {"HPG": FakeFinance(HPG_INCOME, HPG_BALANCE)}
+        )
+
+        snapshots = provider.fetch_fundamentals(["HPG"])
+
+        assert snapshots[-2].trailing_12_month_net_income_vnd is None
+
+    def test_income_statement_lines_land_on_their_own_periods(self):
+        provider = fundamental_provider(
+            {"HPG": FakeFinance(HPG_INCOME, HPG_BALANCE)}
+        )
+
+        snapshots = provider.fetch_fundamentals(["HPG"])
+
+        assert snapshots[-1].revenue_vnd == pytest.approx(5.51589e13)
+        assert snapshots[-2].revenue_vnd == pytest.approx(5.0e13)
+        assert snapshots[-1].parent_net_profit_vnd == pytest.approx(
+            6_371_019_000_000
+        )
+        assert snapshots[-2].parent_net_profit_vnd == pytest.approx(
+            3_100_000_000_000
+        )
+
+    def test_cash_flow_lines_land_on_their_own_periods(self):
+        provider = fundamental_provider(
+            {"HPG": FakeFinance(HPG_INCOME, HPG_BALANCE, HPG_CASHFLOW)}
+        )
+
+        snapshots = provider.fetch_fundamentals(["HPG"])
+
+        assert snapshots[-1].cfo_vnd == pytest.approx(7.0e12)
+        assert snapshots[-1].cfi_vnd == pytest.approx(-3.0e12)
+        assert snapshots[-2].cff_vnd == pytest.approx(-0.5e12)
+
+    def test_a_failed_cash_flow_read_keeps_the_filing(self):
+        """The youngest statement may not cost the other two.
+
+        Banks and recent listings answer income and balance before cash flow;
+        refusing the symbol over the missing statement would blank exactly the
+        companies with the least coverage already.
+        """
+        provider = fundamental_provider(
+            {"HPG": FakeFinance(HPG_INCOME, HPG_BALANCE, TimeoutError("gone"))}
+        )
+
+        snapshots = provider.fetch_fundamentals(["HPG"])
+
+        assert snapshots[-1].revenue_vnd == pytest.approx(5.51589e13)
+        assert snapshots[-1].cfo_vnd is None
+        assert snapshots[-1].cfi_vnd is None
+        assert snapshots[-1].cff_vnd is None
+
+    def test_balance_sheet_lines_land_on_the_period_that_reported_them(self):
+        provider = fundamental_provider(
+            {"HPG": FakeFinance(HPG_INCOME, HPG_BALANCE)}
+        )
+
+        snapshots = provider.fetch_fundamentals(["HPG"])
+
+        assert snapshots[-1].total_assets_vnd == pytest.approx(
+            278_929_786_015_406
         )
 
     def test_parent_equity_excludes_the_minority_interest_inside_it(self):
@@ -557,9 +662,9 @@ class TestFundamentalNormalization:
             {"HPG": FakeFinance(HPG_INCOME, HPG_BALANCE)}
         )
 
-        (snapshot,) = provider.fetch_fundamentals(["HPG"])
+        snapshots = provider.fetch_fundamentals(["HPG"])
 
-        assert snapshot.parent_equity_vnd == pytest.approx(
+        assert snapshots[-1].parent_equity_vnd == pytest.approx(
             141_516_026_558_331 - 658_176_389_940
         )
 
@@ -569,9 +674,9 @@ class TestFundamentalNormalization:
         )
         provider = fundamental_provider({"HPG": FakeFinance(HPG_INCOME, balance)})
 
-        (snapshot,) = provider.fetch_fundamentals(["HPG"])
+        snapshots = provider.fetch_fundamentals(["HPG"])
 
-        assert snapshot.parent_equity_vnd == pytest.approx(141_516_026_558_331)
+        assert snapshots[-1].parent_equity_vnd == pytest.approx(141_516_026_558_331)
 
     def test_fewer_than_four_quarters_reports_no_trailing_figure(self):
         """Three quarters summed is not a trailing twelve months.
@@ -591,10 +696,10 @@ class TestFundamentalNormalization:
         )
         provider = fundamental_provider({"HPG": FakeFinance(short, HPG_BALANCE)})
 
-        (snapshot,) = provider.fetch_fundamentals(["HPG"])
+        snapshots = provider.fetch_fundamentals(["HPG"])
 
-        assert snapshot.period_end == date(2026, 6, 30)
-        assert snapshot.trailing_12_month_net_income_vnd is None
+        assert snapshots[-1].period_end == date(2026, 6, 30)
+        assert snapshots[-1].trailing_12_month_net_income_vnd is None
 
     def test_a_quarter_with_a_gap_breaks_the_trailing_figure(self):
         holed = statement(
@@ -610,9 +715,9 @@ class TestFundamentalNormalization:
         )
         provider = fundamental_provider({"HPG": FakeFinance(holed, HPG_BALANCE)})
 
-        (snapshot,) = provider.fetch_fundamentals(["HPG"])
+        snapshots = provider.fetch_fundamentals(["HPG"])
 
-        assert snapshot.trailing_12_month_net_income_vnd is None
+        assert snapshots[-1].trailing_12_month_net_income_vnd is None
 
     def test_every_quarter_end_maps_to_the_last_day_of_its_quarter(self):
         for period, expected in [
@@ -644,7 +749,7 @@ class TestFundamentalIsolation:
 
         snapshots = provider.fetch_fundamentals(["HPG", "NEW", "FPT"])
 
-        assert [snapshot.symbol for snapshot in snapshots] == ["HPG", "FPT"]
+        assert sorted(set(snapshot.symbol for snapshot in snapshots)) == ["FPT", "HPG"]
 
     def test_a_symbol_whose_read_fails_does_not_cost_the_others(self):
         provider = fundamental_provider(
@@ -657,7 +762,7 @@ class TestFundamentalIsolation:
 
         snapshots = provider.fetch_fundamentals(["HPG", "DELISTED", "FPT"])
 
-        assert [snapshot.symbol for snapshot in snapshots] == ["HPG", "FPT"]
+        assert sorted(set(snapshot.symbol for snapshot in snapshots)) == ["FPT", "HPG"]
 
     def test_a_period_the_company_has_not_reached_is_skipped(self):
         """A period ending after now would date the snapshot into the future.
@@ -678,7 +783,7 @@ class TestFundamentalIsolation:
 
         snapshots = provider.fetch_fundamentals(["HPG", "FPT"])
 
-        assert [snapshot.symbol for snapshot in snapshots] == ["FPT"]
+        assert sorted(set(snapshot.symbol for snapshot in snapshots)) == ["FPT"]
 
 
 class TestFundamentalRefusal:

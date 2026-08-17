@@ -103,11 +103,29 @@ class ReferenceSection(SnapshotSection):
 
 
 class FundamentalData(StrictModel):
-    """Statement inputs, dated by the period they close rather than by run."""
+    """Statement inputs, dated by the period they close rather than by run.
+
+    Mirrors ``FundamentalSnapshot`` field for field, because the section is
+    built by dumping the stored snapshot whole rather than field by field.
+    """
 
     period_end: date
     trailing_12_month_net_income_vnd: float | None = None
     parent_equity_vnd: float | None = None
+    revenue_vnd: float | None = None
+    gross_profit_vnd: float | None = None
+    operating_profit_vnd: float | None = None
+    pre_tax_profit_vnd: float | None = None
+    net_profit_after_tax_vnd: float | None = None
+    parent_net_profit_vnd: float | None = None
+    total_assets_vnd: float | None = None
+    total_liabilities_vnd: float | None = None
+    short_term_borrowings_vnd: float | None = None
+    long_term_borrowings_vnd: float | None = None
+    cash_and_equivalents_vnd: float | None = None
+    cfo_vnd: float | None = None
+    cfi_vnd: float | None = None
+    cff_vnd: float | None = None
 
 
 class FundamentalSection(SnapshotSection):

@@ -67,7 +67,26 @@ from .tools.fields import sanctioned_interpretation
 
 GROUNDING_FAILED = "grounding_failed"
 
-MARKER_PATTERN = re.compile(r"\[(ev|rec|ref-price|zone|against|user):([^\]\n]{1,200})\]")
+# Fullwidth brackets are accepted beside the ASCII pair the Contract asks for.
+# A model answering in Vietnamese reaches for 【】 often enough that measuring it
+# is not necessary — it was measured anyway: a Turn on STB attributed every one
+# of its nine figures with 【ev:…】, and because the pattern did not match, all
+# nine were counted unattributed and the markers themselves reached the reader.
+# Reading a bracket the model actually typed costs nothing; the marker body is
+# still the closed grammar below, and nothing else about the protocol relaxes.
+#
+# The kind is optional, and a marker written without one is *inferred* to be
+# ``ev``. Measured on the same Turn: the model dropped the prefix and wrote
+# 【call-a3de…#registered_fields.trend_signal.total_return_12m_pct】. Inferring
+# is safe in exactly one direction — plain evidence is the weakest kind there
+# is, so an inferred marker can never manufacture a price zone, a reference
+# price or the contradictory evidence the Gate demands. To keep the inference
+# from swallowing ordinary bracketed prose, the bare form must look like a
+# reference: an id, a '#', and a path.
+MARKER_PATTERN = re.compile(
+    r"[\[【](?:(ev|rec|ref-price|zone|against|user):([^\]】\n]{1,200})"
+    r"|([^\]】\n#]{1,120}#[^\]】\n]{1,120}))[\]】]"
+)
 NUMBER_PATTERN = re.compile(r"-?\d[\d.,]*")
 
 # The complete exemption list. A number matched by one of these is punctuation
@@ -125,6 +144,55 @@ class BlockKind(str, Enum):
     RECOMMENDATION = "recommendation"
 
 
+#: The Gate conditions a recommendation fails when the *evidence* for it was
+#: not there — as opposed to the conditions it fails when the block says
+#: something its evidence does not.
+#:
+#: The distinction decides what the reader gets. Both classes keep the block off
+#: the screen; only this one lets the Turn carry on and say why, because "no
+#: registered price zone could be computed for this symbol today" is an answer,
+#: and a blank Turn is not. A figure that contradicts its own citation is not in
+#: here and never will be: that is the confident false number the whole design
+#: exists to stop, and it ends the Turn.
+DEGRADABLE_GATE_CODES = frozenset(
+    {
+        "missing_reference_price",
+        "missing_price_zone",
+        "unregistered_price_zone",
+        "window_health_refusal",
+        "no_supporting_field",
+        "no_contradictory_evidence",
+        "news_only_basis",
+        "unreferenced_figure",
+    }
+)
+
+#: What the reader is told in place of the recommendation that was dropped.
+#:
+#: Backend-authored and versioned for the same reason the Risk Notice is: a
+#: sentence the model writes is a sentence the model can be talked out of. It
+#: carries no figure by construction, so it needs no citation and cannot itself
+#: fail the Gate.
+DEGRADED_RECOMMENDATION_NOTICE = (
+    "Tôi chưa đưa ra khuyến nghị vùng giá cho câu hỏi này: bằng chứng bắt buộc "
+    "cho một khuyến nghị chưa đủ ({reason}). Phần nhận định ở trên là những gì "
+    "dữ liệu hiện có chứng minh được."
+)
+
+#: One Vietnamese clause per degradable condition, so the sentence above names
+#: what was missing instead of gesturing at it.
+DEGRADED_REASON_TEXT = {
+    "missing_reference_price": "chưa có giá tham chiếu nào được tính trong mã nguồn",
+    "missing_price_zone": "chưa có vùng giá nào được tính trong mã nguồn",
+    "unregistered_price_zone": "vùng giá được nêu không phải một chỉ số đã đăng ký",
+    "window_health_refusal": "cửa sổ dữ liệu của bằng chứng bị từ chối",
+    "no_supporting_field": "chưa có chỉ số đã đăng ký nào ủng hộ nhận định",
+    "no_contradictory_evidence": "chưa nêu được bằng chứng ngược chiều",
+    "news_only_basis": "vùng giá chỉ dựa trên nguồn tin, không phải số liệu tính được",
+    "unreferenced_figure": "có con số chưa gắn được với bằng chứng nào",
+}
+
+
 class GroundingFailure(Exception):
     """One block that cannot be proven, and why.
 
@@ -139,6 +207,23 @@ class GroundingFailure(Exception):
         self.code = code
         self.detail = detail
         self.reason = GROUNDING_FAILED
+
+    @property
+    def degradable(self) -> bool:
+        """Whether the Turn may carry on and say what was missing.
+
+        Read by the loop, never by the model: there is no field it can set to
+        make a failure degradable, exactly as there is none to make a block
+        pass.
+        """
+        return self.code in DEGRADABLE_GATE_CODES
+
+    def notice(self) -> str:
+        """The reader's sentence for this failure, or the empty string."""
+        reason = DEGRADED_REASON_TEXT.get(self.code)
+        if reason is None:
+            return ""
+        return DEGRADED_RECOMMENDATION_NOTICE.format(reason=reason)
 
 
 @dataclass(frozen=True)
@@ -255,11 +340,22 @@ class _Marker:
     body: str
     start: int
     end: int
+    #: True when the model wrote no kind and ``ev`` was inferred from the shape
+    #: of the body. An inferred marker is best-effort: a reference that does not
+    #: resolve leaves its figure unattributed, exactly as an absent marker would,
+    #: rather than ending the Turn over a prefix the model forgot.
+    inferred: bool = False
 
 
 def _markers(text: str) -> tuple[_Marker, ...]:
     return tuple(
-        _Marker(kind=match.group(1), body=match.group(2).strip(), start=match.start(), end=match.end())
+        _Marker(
+            kind=match.group(1) or "ev",
+            body=(match.group(2) or match.group(3) or "").strip(),
+            start=match.start(),
+            end=match.end(),
+            inferred=match.group(1) is None,
+        )
         for match in MARKER_PATTERN.finditer(text)
     )
 
@@ -748,9 +844,23 @@ class RecommendationValidator:
         markers = _markers(text)
         cited: dict[int, Citation] = {}
         for index, marker in enumerate(markers):
-            if marker.kind != "rec":
+            if marker.kind == "rec":
+                continue
+            if not marker.inferred:
                 cited[index] = self._cite(marker, traces)
-        unverified = self._match_figures(text, markers, cited)
+                continue
+            try:
+                cited[index] = self._cite(marker, traces)
+            except GroundingFailure:
+                # Inferred, so it was never a promise the model made. The
+                # figure it sat behind falls back to unattributed and the
+                # answer survives; a marker the model *did* write in the
+                # Contract's form still fails the Turn above.
+                continue
+        inferred = frozenset(
+            index for index, marker in enumerate(markers) if marker.inferred
+        )
+        unverified = self._match_figures(text, markers, cited, inferred)
         citations = tuple(cited[index] for index in sorted(cited))
 
         recommendation = next((m for m in markers if m.kind == "rec"), None)
@@ -805,6 +915,7 @@ class RecommendationValidator:
         text: str,
         markers: Sequence[_Marker],
         cited: Mapping[int, Citation],
+        inferred: frozenset[int] = frozenset(),
     ) -> tuple[str, ...]:
         """Attribute every material figure, and check it against its trace.
 
@@ -853,6 +964,15 @@ class RecommendationValidator:
                 # computed.
                 continue
             if not figures_agree(literal, citation.value, unit=citation.unit):
+                if index in inferred:
+                    # The reference behind this figure was inferred from a
+                    # marker with no kind, so a disagreement is as likely to
+                    # mean the inference picked the wrong reference as it is to
+                    # mean the model misstated a number. The figure falls back
+                    # to unattributed rather than ending a Turn over a guess;
+                    # a marker the model wrote in full still fails below.
+                    unattributed.append(literal)
+                    continue
                 raise GroundingFailure(
                     "figure_mismatch",
                     f"the block states {literal!r} but {citation.field_path} in tool "

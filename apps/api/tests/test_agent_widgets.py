@@ -90,7 +90,7 @@ def test_the_contract_gained_its_widget_section_and_the_catalog_did_not_move():
         )
     )
 
-    assert PROMPT_VERSION == "1.4.0"
+    assert PROMPT_VERSION == "1.5.0"
     assert "## 7. Visual evidence" in rendered
     for name in WIDGET_REGISTRY:
         assert name.replace("_", " ") in rendered

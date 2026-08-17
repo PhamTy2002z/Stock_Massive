@@ -688,16 +688,23 @@ def rendered_blocks(
 def gate_outcomes(outcome: TurnOutcome) -> GateOutcome:
     """What the three validators decided, in the Manifest's own vocabulary."""
     blocked = outcome.terminal_reason == GROUNDING_FAILED
+    degraded = outcome.degraded_recommendation_code is not None
     recommendation = "not_applicable"
     if any(block.kind.value == "recommendation" for block in outcome.blocks):
         recommendation = "released"
-    if blocked:
+    # A degrade is a recommendation the Gate kept off the screen, and the record
+    # says so even though the Turn went on to answer without it. Reported as
+    # "not_applicable" it would vanish from exactly the query that watches how
+    # often the Gate refuses.
+    if blocked or degraded:
         recommendation = "blocked"
     return GateOutcome(
         scope="refused" if outcome.answer_kind is AnswerKind.REFUSAL else "in_scope",
         grounding="blocked" if blocked else "passed",
         recommendation=recommendation,
-        failure_code=outcome.grounding_failure_code,
+        failure_code=(
+            outcome.grounding_failure_code or outcome.degraded_recommendation_code
+        ),
     )
 
 
