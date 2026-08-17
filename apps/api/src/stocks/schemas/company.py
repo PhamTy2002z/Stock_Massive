@@ -161,6 +161,10 @@ class NewsItem(StrictModel):
     published_at: str
     price: Optional[float] = None
     price_change_pct: Optional[float] = None
+    summary: Optional[str] = None
+    content: Optional[str] = None
+    url: Optional[str] = None
+    image_url: Optional[str] = None
 
 
 class NewsResponse(StrictModel):
@@ -168,6 +172,23 @@ class NewsResponse(StrictModel):
 
     symbol: str
     items: list[NewsItem]
+    total_count: int
+
+
+class FeedNewsItem(NewsItem):
+    """One feed entry: a company news item plus the symbol it belongs to."""
+
+    symbol: str
+
+
+class NewsFeedResponse(StrictModel):
+    """Market-wide news feed aggregated across the VN30 constituents."""
+
+    items: list[FeedNewsItem]
+    # Only the symbols that actually contributed items — a symbol whose fetch
+    # failed or came back empty is absent rather than listed with nothing.
+    symbols: list[str]
+    generated_at: str  # ISO timestamp, Asia/Ho_Chi_Minh
     total_count: int
 
 
