@@ -10,6 +10,7 @@ import { Sidebar } from "./sidebar"
 import { TopBar } from "./top-bar"
 import { BoardView } from "./view-board"
 import { ChatView } from "./view-chat"
+import { NewsView } from "./view-news"
 import { NewConversationView } from "./view-new"
 
 /**
@@ -75,7 +76,7 @@ function Frame() {
 }
 
 /**
- * Which of the three screens the main column is showing.
+ * Which screen the main column is showing.
  *
  * A conversation with nothing in it *is* the opening screen — they are not two
  * states the user chooses between, which is why this is derived from the
@@ -86,6 +87,7 @@ function MainView() {
   const { state } = useShell()
   const desk = useDesk()
 
+  if (state.view === "news") return <NewsView />
   if (state.view === "board") return <BoardView />
   if (state.view === "new" || desk.entries.length === 0) return <NewConversationView />
   return <ChatView />

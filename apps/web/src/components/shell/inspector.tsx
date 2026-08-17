@@ -20,6 +20,7 @@ import { STALE_TIME } from "@/lib/query-config"
 import { queryKeys } from "@/lib/query-keys"
 import { cn } from "@/lib/utils"
 
+import { NewsSourcesTab } from "./news-sources"
 import {
   Bar,
   deltaClass,
@@ -91,6 +92,16 @@ export function Inspector() {
             >
               Chi tiết <Figure>{state.selected.symbol}</Figure>
             </TabButton>
+            {/* Only while an article is open: the tab describes that article, so
+                without one it would be a tab onto nothing. */}
+            {state.newsArticle !== null && (
+              <TabButton
+                active={state.inspector === "news"}
+                onClick={() => dispatch({ type: "open-inspector", tab: "news" })}
+              >
+                Nguồn tin
+              </TabButton>
+            )}
           </div>
           <IconButton
             label={state.inspectorWide ? "Thu hẹp bảng" : "Mở rộng bảng"}
@@ -112,7 +123,13 @@ export function Inspector() {
         <SymbolSearch />
 
         <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-3.5">
-          {state.inspector === "market" ? <MarketTab /> : <SymbolTab />}
+          {state.inspector === "market" ? (
+            <MarketTab />
+          ) : state.inspector === "news" ? (
+            <NewsSourcesTab />
+          ) : (
+            <SymbolTab />
+          )}
         </div>
       </aside>
     </div>

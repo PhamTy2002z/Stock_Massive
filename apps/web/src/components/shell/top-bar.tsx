@@ -26,13 +26,15 @@ export function TopBar() {
 
   const current = threads.data?.threads.find((row) => row.id === desk.threadId)
   const title =
-    state.view === "board"
-      ? "Bảng giá thị trường"
-      : desk.threadId === null
-        ? "Trò chuyện mới"
-        : current
-          ? threadTitle(current.title, current.updated_at)
-          : "Hội thoại"
+    state.view === "news"
+      ? "Tin tức thị trường"
+      : state.view === "board"
+        ? "Bảng giá thị trường"
+        : desk.threadId === null
+          ? "Trò chuyện mới"
+          : current
+            ? threadTitle(current.title, current.updated_at)
+            : "Hội thoại"
 
   // 1100px of main column is where the reference stops showing the stamp.
   const showStamp = state.viewport > 0 && state.viewport - panelWidth > 1100
