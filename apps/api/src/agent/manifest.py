@@ -285,6 +285,8 @@ def assemble_message(
     notice: RiskNotice | None = None,
     widgets: Sequence[Mapping[str, Any]] = (),
     widget_refusals: Sequence[Mapping[str, Any]] = (),
+    search_progress: Sequence[Mapping[str, Any]] = (),
+    suggestions: Sequence[str] = (),
 ) -> dict[str, Any]:
     """The canonical assistant message content, Notice and Manifest included.
 
@@ -300,6 +302,13 @@ def assemble_message(
     360 already owns, and the deep link to it. Every other rejection is silent,
     because a broken box teaches a reader nothing about a picture they never
     asked for.
+
+    ``search_progress`` and ``suggestions`` are ``docs/adr/0020``'s two additive
+    keys: what the open-web lane disclosed while the Turn ran, and the follow-up
+    questions offered under it. Both are stored on the message rather than left
+    to the stream, because a Thread reopened tomorrow should show the same thing
+    the reader watched today. A message written before that decision simply has
+    neither, which is why both default to empty rather than being required.
     """
     return {
         "text": text,
@@ -310,6 +319,8 @@ def assemble_message(
         "sources_and_methods": list(sources_and_methods(citations)),
         "widgets": [dict(widget) for widget in widgets],
         "widget_refusals": [dict(refusal) for refusal in widget_refusals],
+        "search_progress": [dict(step) for step in search_progress],
+        "suggestions": list(suggestions),
     }
 
 

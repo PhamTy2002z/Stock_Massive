@@ -59,7 +59,42 @@ export const ACTIVITY_COPY: Record<
     done: "Đã dựng hình minh hoạ",
     summary: "Đang chuẩn bị một hình minh hoạ cho phần trả lời.",
   },
+  found_sources: {
+    line: "Đang đọc kết quả…",
+    done: "Đã tìm thấy kết quả",
+    summary: "Các trang công khai mà lượt này đã đọc để trả lời.",
+  },
 }
+
+/**
+ * The search-progress trail, as its header and its rows read.
+ *
+ * Vietnamese throughout, including the rows the reference design left in
+ * English: `docs/specs/0002` §5 puts narration in Vietnamese and reserves
+ * English for control chrome, and *Thinking…* beside *Hoàn thành* is the same
+ * trail speaking two languages to one reader.
+ *
+ * `found` takes the count because it is the one row that is a *number* the
+ * reader is being asked to weigh — how much was read, not how much is listed
+ * under it.
+ */
+export const PROGRESS_COPY = {
+  header: "Tiến trình tìm kiếm",
+  thinking: "Đang suy nghĩ…",
+  searching: "Đang tìm trên web…",
+  readingData: "Đang đọc dữ liệu…",
+  preparingVisual: "Đang dựng hình…",
+  queries: "Tìm kiếm",
+  found: (count: number) => `Đã tìm thấy ${count} kết quả`,
+  sourcesTitle: (count: number) => `Tổng hợp ${count} nguồn`,
+  done: "Hoàn thành",
+  stopped: "Đã dừng",
+  sourcesLabel: (count: number) => `${count} nguồn`,
+  drawerTitle: (count: number) => `${count} nguồn tham khảo`,
+  drawerClose: "Đóng",
+  updatedAt: (day: string) => `Cập nhật: ${day}`,
+  suggestionsTitle: "Gợi ý",
+} as const
 
 /**
  * How a Turn that stopped early is described.

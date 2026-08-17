@@ -32,7 +32,14 @@ function block(text: string): ContentBlock {
 }
 
 function view(): AssistantView {
-  return { blocks: [block("kết luận")], riskNotice: NOTICE, sourcesAndMethods: [] }
+  return {
+    blocks: [block("kết luận")],
+    riskNotice: NOTICE,
+    sourcesAndMethods: [],
+    searchProgress: [],
+    suggestions: [],
+    completed: true,
+  }
 }
 
 function action(overrides: Partial<React.ComponentProps<typeof FlagAction>> = {}) {

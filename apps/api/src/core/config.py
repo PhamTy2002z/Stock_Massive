@@ -227,6 +227,11 @@ class Settings(BaseSettings):
     # turns this off by name; no code path guesses that pytest is running.
     llm_capability_probe_enabled: bool = True
 
+    # Câu hỏi gợi ý dưới mỗi câu trả lời (docs/adr/0020). Một lần gọi model rẻ
+    # nữa cho mỗi Turn hoàn tất, nên nó có công tắc riêng: giá trị của nó là
+    # tiện lợi, còn chi phí thì cộng dồn trên mọi Turn.
+    alpha_desk_suggestions_enabled: bool = True
+
     # Open-web tools use their own Redis lane and Tavily credential. They are
     # off by default because each enabled Turn can spend external-provider
     # allowance independently of the vnstock account arbiter.

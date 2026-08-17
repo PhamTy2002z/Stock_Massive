@@ -62,6 +62,12 @@ already present at once and never replays the staged reveal.
 result, prompt, or reasoning; the full detail stays in the **Tool Call Trace**. The
 activity line is ephemeral rather than a verbose tool history.
 
+> **Amended by [ADR-0020](0020-open-web-progress-disclosure-and-followup-suggestions.md).**
+> The open-web lane (`web_search`, `fetch_url`) may attach a `detail` payload carrying
+> its queries and the public pages it found, and the phase vocabulary gains
+> `found_sources`. Every store-reading lane keeps the rule exactly as stated above, and
+> the trail is now carried on the snapshot rather than being ephemeral.
+
 V1 event types: `turn.snapshot`, `turn.activity`, `content.block`, `widget.ready`,
 `turn.completed`, `turn.incomplete`, `turn.failed`, `turn.cancelled`. Every event
 carries a versioned envelope with a monotonic per-Turn `seq`, which is also the SSE
