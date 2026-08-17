@@ -22,6 +22,7 @@ from src.core.database import get_db
 from src.core.ratelimit import standard_rate_limit, heavy_rate_limit
 from src.stocks.intraday_collector import IntradayCollector
 from src.core.cache import TradingHoursCache
+from src.core.vnstock_client import VnstockUnavailable
 from src.stocks.price.cache import volume_anomaly_cache
 from .service import get_price_service, HISTORY_INTERVALS, MARKET_INDICES
 from ..schemas.price import (
@@ -37,16 +38,61 @@ from ..shared import StockServiceError
 from src.auth.dependencies import require_admin
 
 # Cache instances for endpoints
+#
+# **`stale_ttl` is what keeps these two endpoints from eating the account.**
+# They are the only ones the browser polls — the board every 15 seconds, the
+# indices every 30 — and a cache that is only written on success has nothing to
+# serve the moment upstream refuses. Every poll then goes to the provider, one
+# market-indices request costs four `Quote.history` calls, and ~30 requests a
+# minute is ~120 calls against an allowance of 60. The refusal that started it
+# is then held open by the traffic reacting to it, and the cache never refills.
+# Measured on 2026-08-17: 157 `/market-indices` requests in five minutes, every
+# one of them a miss, and a `/price-board` that answered 503 for seven minutes
+# straight.
+#
+# Fifteen minutes rather than the days the slow-moving endpoints allow
+# themselves (`company/router.py`): a company profile from last Tuesday is
+# still true, and an index level from last Tuesday is a lie on a trading
+# screen. Long enough to ride out a provider blip and a spent minute of
+# allowance, short enough that what it serves is still about today.
+STALE_TTL_SECONDS = 15 * 60
+
 market_indices_cache = TradingHoursCache(
     key_prefix="stock:indices:",
     ttl_trading=30,
     ttl_off_hours=3600,
+    stale_ttl=STALE_TTL_SECONDS,
 )
 price_board_cache = TradingHoursCache(
     key_prefix="stock:price_board:",
     ttl_trading=15,
     ttl_off_hours=3600,
+    stale_ttl=STALE_TTL_SECONDS,
 )
+
+
+class PartialIndexBoard(Exception):
+    """The provider answered for some indices and not others.
+
+    Raised so the loader never writes a short board into the cache, where it
+    would be pinned for the whole TTL and read as "the market has three
+    indices". It carries the partial board because a caller with nothing better
+    still shows it — which is what this endpoint did before there was anything
+    better.
+    """
+
+    def __init__(self, board: List[MarketIndexItem]) -> None:
+        super().__init__(f"{len(board)} of {len(MARKET_INDICES)} indices answered")
+        self.board = board
+
+
+class EmptyPriceBoard(Exception):
+    """The provider answered with no rows at all.
+
+    Kept out of the cache for the same reason as a short index board: pinned
+    for a TTL it reads as "these symbols have no prices", which is a different
+    statement from "the provider did not answer".
+    """
 router = APIRouter()
 
 
@@ -86,22 +132,31 @@ def get_market_indices() -> List[MarketIndexItem]:
     """Get market indices data (VN-INDEX, VN30, HNX-INDEX, UPCOM-INDEX)."""
     cache_key = "all"
 
-    # Check cache first
-    cached = market_indices_cache.get(cache_key)
-    if cached is not None:
-        return [MarketIndexItem(**item) for item in cached]
+    def load() -> List[dict]:
+        board = get_price_service().get_market_indices()
+        # Only a complete board is cacheable, for the reason PartialIndexBoard
+        # gives. Raising rather than returning is what keeps it out of the
+        # cache while still letting a stale complete board answer instead —
+        # four indices from a minute ago beat three from now.
+        if len(board) != len(MARKET_INDICES):
+            raise PartialIndexBoard(board)
+        return [item.model_dump() for item in board]
 
-    # Cache miss - fetch from service
-    service = get_price_service()
-    result = service.get_market_indices()
+    try:
+        payload = market_indices_cache.get_or_load(
+            cache_key,
+            load,
+            # The provider refusing is worth remembering for a few seconds. It
+            # is the whole failure mode here: without it every poll re-asks an
+            # allowance that is already spent, and keeps it spent.
+            suppress_failure=lambda exc: isinstance(exc, VnstockUnavailable),
+        )
+    except PartialIndexBoard as partial:
+        # No complete board anywhere, fresh or stale. Show what there is, as
+        # this endpoint always has.
+        return partial.board
 
-    # Only cache a complete board. A partial fetch (one index timing out)
-    # would otherwise be pinned for the whole TTL and read as "the market
-    # has three indices".
-    if len(result) == len(MARKET_INDICES):
-        market_indices_cache.set(cache_key, [item.model_dump() for item in result])
-
-    return result
+    return [MarketIndexItem(**item) for item in payload]
 
 
 @router.get("/price-board", response_model=List[PriceBoardItem], dependencies=[Depends(standard_rate_limit)])
@@ -120,21 +175,26 @@ def get_price_board(
     # Use sorted symbols as cache key for consistency
     cache_key = ",".join(sorted(symbol_list))
 
-    # Check cache first
-    cached = price_board_cache.get(cache_key)
-    if cached is not None:
-        return [PriceBoardItem(**item) for item in cached]
+    def load() -> List[dict]:
+        board = get_price_service().get_price_board(symbol_list)
+        # Never cache an empty board — an upstream hiccup would otherwise be
+        # served as "these symbols have no prices" for the whole TTL. Raising
+        # keeps it uncached and lets a stale board answer in its place.
+        if not board:
+            raise EmptyPriceBoard()
+        return [item.model_dump() for item in board]
 
-    # Cache miss - fetch from service
-    service = get_price_service()
-    result = service.get_price_board(symbol_list)
+    try:
+        payload = price_board_cache.get_or_load(
+            cache_key,
+            load,
+            suppress_failure=lambda exc: isinstance(exc, VnstockUnavailable),
+        )
+    except EmptyPriceBoard:
+        # Nothing fresh and nothing stale. An empty board is the honest answer.
+        return []
 
-    # Never cache an empty board — an upstream hiccup would otherwise be
-    # served as "these symbols have no prices" for the whole TTL.
-    if result:
-        price_board_cache.set(cache_key, [item.model_dump() for item in result])
-
-    return result
+    return [PriceBoardItem(**item) for item in payload]
 
 
 @router.post("/intraday/collect", response_model=IntradayCollectionResult, dependencies=[Depends(heavy_rate_limit), Depends(require_admin)])
