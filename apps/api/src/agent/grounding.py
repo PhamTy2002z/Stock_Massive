@@ -857,7 +857,10 @@ class RecommendationValidator:
                 # answer survives; a marker the model *did* write in the
                 # Contract's form still fails the Turn above.
                 continue
-        unverified = self._match_figures(text, markers, cited)
+        inferred = frozenset(
+            index for index, marker in enumerate(markers) if marker.inferred
+        )
+        unverified = self._match_figures(text, markers, cited, inferred)
         citations = tuple(cited[index] for index in sorted(cited))
 
         recommendation = next((m for m in markers if m.kind == "rec"), None)
@@ -912,6 +915,7 @@ class RecommendationValidator:
         text: str,
         markers: Sequence[_Marker],
         cited: Mapping[int, Citation],
+        inferred: frozenset[int] = frozenset(),
     ) -> tuple[str, ...]:
         """Attribute every material figure, and check it against its trace.
 
@@ -960,6 +964,15 @@ class RecommendationValidator:
                 # computed.
                 continue
             if not figures_agree(literal, citation.value, unit=citation.unit):
+                if index in inferred:
+                    # The reference behind this figure was inferred from a
+                    # marker with no kind, so a disagreement is as likely to
+                    # mean the inference picked the wrong reference as it is to
+                    # mean the model misstated a number. The figure falls back
+                    # to unattributed rather than ending a Turn over a guess;
+                    # a marker the model wrote in full still fails below.
+                    unattributed.append(literal)
+                    continue
                 raise GroundingFailure(
                     "figure_mismatch",
                     f"the block states {literal!r} but {citation.field_path} in tool "
