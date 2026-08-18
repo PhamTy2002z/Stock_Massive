@@ -87,7 +87,7 @@ level-2 code:
 | `bank` / `real_estate` / `retail` | the stored ICB level-2 code selects that industry block |
 | `ordinary` | classified, and none of the three |
 | `injection_news` | `prepare_bars()` serves the price-zone window whole and undegraded |
-| `outside_universe` | listed by an exchange and outside the pinned Universe |
+| `outside_universe` | listed outside the pinned Universe, with a listed same-industry Universe alternative |
 
 The hard seats are filled first, and that ordering is load-bearing: a symbol
 below `min_sessions` is rare and is very often also a bank, so filling the bank

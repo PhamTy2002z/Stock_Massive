@@ -92,6 +92,15 @@ def test_the_prompt_states_the_gate_the_untrusted_rules_and_the_stance_limits():
     assert "the data is insufficient" in rendered
 
 
+def test_scope_is_decided_before_lookup_and_refusals_do_not_echo_figures():
+    rendered = " ".join(render(context()).lower().split())
+
+    assert "decide whether the request is within scope before any tool call" in rendered
+    assert "do not call market, company, news or web tools" in rendered
+    assert "do not repeat an amount, percentage or leverage ratio" in rendered
+    assert "does not make a prohibited request answerable" in rendered
+
+
 def test_the_prompt_says_how_today_is_read_against_the_trading_day():
     """The instruction the second injected date exists to support.
 

@@ -36,7 +36,7 @@ from src.eval.fixture import (
     read_seed,
     write_seed,
 )
-from src.eval.roles import FixtureRole, RoleContext, verify_roles
+from src.eval.roles import FixtureRole, ROLE_PROBES, RoleContext, verify_roles
 from src.eval.store import (
     EVAL_USER_EMAIL,
     EvalDatabaseMisconfigured,
@@ -122,6 +122,23 @@ class TestTheCaptureSeatsEveryRole:
         outsider = seed.manifest.roles[FixtureRole.OUTSIDE_UNIVERSE]
         assert outsider in world.OUTSIDERS
         assert outsider not in seed.manifest.universe_symbols
+
+    def test_the_scope_seat_has_a_same_industry_universe_alternative(
+        self, source_factory
+    ):
+        session = source_factory()
+        try:
+            context = RoleContext(
+                trading_day=world.TRADING_DAY,
+                universe=frozenset(set(world.MEMBERS) - {world.BANK}),
+            )
+            assert not ROLE_PROBES[FixtureRole.OUTSIDE_UNIVERSE].holds(
+                session,
+                world.OUTSIDERS[0],
+                context,
+            )
+        finally:
+            session.close()
 
     def test_a_store_without_a_bad_case_refuses_rather_than_freezing(
         self, source_factory
