@@ -38,3 +38,22 @@ The downgrade becomes an observable product outcome rather than a hidden excepti
   stays where it decides something: it still withholds a recommendation block and is
   still counted in the ops snapshot.
 - Widgets are emitted only from content that survives validation.
+
+## A blocked block earns one rewrite, and a blocked Turn still says something
+
+Contract 1.7 amends how a hard failure is served, not what counts as one. A figure
+conflicting with its citation is still a hard failure in every block.
+
+- A computed field is referenced by the key it is served under, or by that key's
+  `value`. The method details beside it are refused with `uncitable_field_path`.
+  They were citable before, and the citation carried the *field's* unit and
+  sanctioned reading whatever leaf it resolved: a percentage narrated beside an
+  anchor price cited was one figure-agreement check away from reaching a reader as
+  a price in percent.
+- A non-degradable failure buys one rewrite, funded from the Turn's eight lookup
+  rounds. The model is told the condition it broke and never the figure the trace
+  holds — feedback carrying the value would let a block pass by restating the
+  number it was told about. A second failure ends the Turn as before.
+- A Turn the Gate emptied releases a backend-authored, figure-free sentence
+  instead of nothing. Blocks that passed are still released, and the notice
+  appears only when none did.

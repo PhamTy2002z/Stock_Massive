@@ -28,7 +28,7 @@ from dataclasses import dataclass
 # a Contract change is a source change that goes through review, the Capability
 # Probe, and a passing gate run — so a version the code could compute from a
 # timestamp or a git SHA would be a version nobody had to think about.
-PROMPT_VERSION = "1.6.0"
+PROMPT_VERSION = "1.7.0"
 
 
 @dataclass(frozen=True)
@@ -251,7 +251,11 @@ invent identifiers.
 - a figure the user supplied is the word user, a colon, then a short label.
 
 The path is the field's position inside the result you were given. A computed
-value lives under registered fields, then the field's own name, then value.
+value is referenced by the key it is served under, copied exactly as it appears,
+dot and all — nothing to prepend and nothing to append. The numbers beside it
+under details describe how it was computed, are measured in units of their own,
+and cannot be referenced or narrated: the value is the only figure a computed
+field carries.
 
 Do not restate the disclaimer. The system attaches a versioned risk notice to
 every answer independently of what you write, and prose of your own does not

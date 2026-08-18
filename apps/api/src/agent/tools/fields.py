@@ -18,6 +18,15 @@ from src.stocks.signals import (
 REGISTERED_FIELD_VALUES_KEY = "_registered_field_values"
 SHARED_WINDOW_HEALTH_KEY = "_shared_window_health"
 
+#: Where the projection in ``tools/catalog`` puts computed fields in a result,
+#: and therefore the first segment of every path that cites one.
+REGISTERED_FIELDS_KEY = "registered_fields"
+
+#: The one leaf of a serialized field that carries the figure. Everything under
+#: ``details`` describes how the figure was computed and is measured in units of
+#: its own, so none of it can be narrated under the field's unit.
+FIELD_VALUE_KEY = "value"
+
 
 @dataclass(frozen=True)
 class RefusedRegisteredField:
@@ -43,6 +52,20 @@ def sanctioned_interpretation(field: SignalField) -> str:
     """
 
     return field.interpretation.split(". ", 1)[0].rstrip(".") + "."
+
+
+def citable_path(name: str) -> str:
+    """This field's long-form reference, for the sentence that names it.
+
+    Two spellings reference a computed field: this one, and the field's own key
+    on its own. The short one is what a reader of a result can copy — the key is
+    in front of them — so nothing repeats this path into every result, where it
+    would spend the response budget restating the key beside it. It is written
+    out here for the Gate's own refusal messages, which have to name the path in
+    full to be actionable.
+    """
+
+    return f"{REGISTERED_FIELDS_KEY}.{name}.{FIELD_VALUE_KEY}"
 
 
 def registered_field_schema(name: str) -> dict[str, Any]:
@@ -72,8 +95,8 @@ def serialize_registered_field(
         key: supplied[key] for key in field.output_keys if key in supplied
     }
     interpretation = sanctioned_interpretation(field)
-    return {
-        "value": value,
+    serialized = {
+        FIELD_VALUE_KEY: value,
         "unit": field.unit.value,
         "sign": field.sign.value,
         "interpretation": interpretation,
@@ -83,6 +106,7 @@ def serialize_registered_field(
         "details": allowed_details,
         "refusal": refusal,
     }
+    return serialized
 
 
 def serialize_window_health(health: WindowHealth) -> dict[str, Any]:
