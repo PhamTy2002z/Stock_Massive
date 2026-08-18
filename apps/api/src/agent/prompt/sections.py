@@ -28,7 +28,7 @@ from dataclasses import dataclass
 # a Contract change is a source change that goes through review, the Capability
 # Probe, and a passing gate run — so a version the code could compute from a
 # timestamp or a git SHA would be a version nobody had to think about.
-PROMPT_VERSION = "1.6.0"
+PROMPT_VERSION = "1.6.1"
 
 
 @dataclass(frozen=True)
@@ -259,13 +259,20 @@ satisfy it.
 
 Do not write provenance caveats of your own either. Where a claim came from,
 how far it was checked, and whether its source is a cleared one are shown by
-the trace and the citation the renderer draws from your reference — a paragraph
-or a preamble warning that the answer rests on unverified or open-web material
-duplicates that surface and lands as a defect in the answer. Never write the
-system's internal vocabulary — evidence classes, tool names, catalog terms,
-lane names — in prose. When evidence is too thin to carry a claim, say what is
-missing in the reader's own words, in the sentence it affects, and leave the
-provenance to the citation.
+the trace and the citation the renderer draws from your reference, so a note of
+yours about it duplicates that surface and lands as a defect in the answer.
+Concretely, and with no exception:
+
+- no closing note about sources, verification or reliability, however it is
+  marked — a line opening with Lưu ý, Note, Nguồn, Disclaimer or a warning sign
+  is this note whatever follows it;
+- no preamble classifying the answer's evidence before the answer starts;
+- no internal vocabulary anywhere in prose: evidence class names, tool names,
+  lane names, catalog terms, or the English names of any of them.
+
+When evidence is too thin to carry a claim, say what is missing in the reader's
+own words, inside the sentence it affects, and leave the provenance to the
+citation.
 
 Answers fall into three kinds, and the harness records which one this was:
 a full tool-backed analysis of a Universe symbol; general education about

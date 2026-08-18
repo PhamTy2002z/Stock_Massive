@@ -4,7 +4,7 @@
  *
  * Four writes and one link, and the interesting half of each is what it does
  * *not* do: pinning sends no title, a rename abandoned with Escape sends
- * nothing at all, and delete asks a second time before it happens.
+ * nothing at all, and delete takes the Thread on the press itself.
  *
  * The list, the mutations and the conversation are mocked at their hook
  * boundaries. The ordering is the backend's and is tested there; this file is
@@ -125,20 +125,10 @@ describe("the menu", () => {
     expect(link).toHaveAttribute("target", "_blank")
   })
 
-  it("does not delete on the first press", () => {
+  it("deletes on the press, without a second confirmation", () => {
     render(<Conversations />)
 
     fireEvent.click(within(openMenu("Xu hướng STB")).getByRole("menuitem", { name: "Xoá" }))
-
-    expect(remove.mutate).not.toHaveBeenCalled()
-    expect(screen.getByText(/Không khôi phục được/)).toBeInTheDocument()
-  })
-
-  it("deletes on the confirmation, and says what it takes with it", () => {
-    render(<Conversations />)
-
-    fireEvent.click(within(openMenu("Xu hướng STB")).getByRole("menuitem", { name: "Xoá" }))
-    fireEvent.click(screen.getByRole("menuitem", { name: "Xoá vĩnh viễn" }))
 
     expect(remove.mutate).toHaveBeenCalledWith(
       "11111111-1111-4111-8111-111111111111",
