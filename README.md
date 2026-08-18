@@ -330,7 +330,7 @@ Phần nào không chạy được thì **nói rõ phần đó** — đừng im 
 2. **[`CONTEXT.md`](CONTEXT.md)** — từ vựng chung, 50 mục. Đặt tên biến / hàm / file theo đúng từ ở đây; mỗi mục có kèm danh sách *Avoid*.
 3. **[`docs/adr/`](docs/adr/)** — 16 ADR. Đọc cái nào chạm tới vùng bạn sắp làm: 0001–0002 ranh giới phục vụ và Capability · 0003–0005 cohort, census, Warm-up · 0006 Price Basis và điều chỉnh lúc đọc · 0007–0016 lớp agent (loop, tool catalog, statistical bar, transport, budget, guardrail, eval).
 4. **[`docs/specs/`](docs/specs/)** — spec triển khai. `0001` là nền dữ liệu (M0–M2 đã build), `0002` sản phẩm Alpha Desk, `0003` kiến trúc Intelligent Quant với milestone A1–A7.
-5. **[`docs/agents/`](docs/agents/)** — [issue tracker](docs/agents/issue-tracker.md) (GitHub Issues qua `gh`), [triage labels](docs/agents/triage-labels.md), [domain docs](docs/agents/domain.md).
+5. **[`docs/agents/`](docs/agents/)** — [eval battery](docs/agents/eval-battery.md): `make eval` chạy trên DB riêng, và quy trình đóng băng lại Eval Fixture.
 
 Vài cái bẫy đã có người dẫm:
 

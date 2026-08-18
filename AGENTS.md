@@ -31,6 +31,5 @@ Nguồn sự thật cho lệnh: `package.json` ở root, `apps/api/Makefile`, `a
 
 ## Agent skills
 
-- **Issue tracker** — GitHub Issues của `PhamTy2002z/Stock_Massive`, thao tác qua `gh`. Chi tiết: `docs/agents/issue-tracker.md`.
-- **Triage labels** — 5 nhãn canonical mặc định: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. Chi tiết: `docs/agents/triage-labels.md`.
-- **Domain docs** — single-context: `CONTEXT.md` + `docs/adr/` ở root, do `/matt:domain-modeling` tạo khi có thuật ngữ hoặc quyết định cần chốt. Chi tiết: `docs/agents/domain.md`.
+- **Issue tracker** — GitHub Issues của `PhamTy2002z/Stock_Massive`, thao tác qua `gh`. 5 nhãn triage canonical: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`.
+- **Domain docs** — `CONTEXT.md` (từ vựng chung) + `docs/adr/` (quyết định đã chốt) ở root; đọc trước khi đặt tên hoặc dịch chuyển ranh giới.
