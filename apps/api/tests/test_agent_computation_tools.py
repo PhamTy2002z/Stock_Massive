@@ -67,6 +67,7 @@ async def test_cluster_refusals_keep_metadata_and_report_window_health_once():
     result = await catalog.dispatch("risk_metrics", {"symbol": SYMBOL}, context())
 
     assert set(result["registered_fields"]) == {
+        "price_zone.ordinary_range_pct",
         "realized_volatility.yang_zhang_annualized_pct",
         "drawdown_stats.mdd_over_expected",
         "risk_adjusted.sharpe_annualized",
