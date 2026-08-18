@@ -2,8 +2,8 @@
 
 The Recommendation Validator classifies evidence instead of treating every missing
 reference as a reason to end the Turn. An ordinary prose block with an unattributed
-figure is released with the literal in `unverified_figures`, and the client displays
-an explicit warning. A recommendation with the same defect remains blocked and ends
+figure is released with the literal in `unverified_figures`, which the backend keeps
+and counts. A recommendation with the same defect remains blocked and ends
 the Turn as `incomplete/grounding_failed`.
 
 This decision amends ADR-0015 without weakening its narrow-enforcement rule. A figure
@@ -30,5 +30,11 @@ The downgrade becomes an observable product outcome rather than a hidden excepti
   additive field.
 - `TurnOutcome` counts downgraded blocks, and the ops snapshot reports their rate over
   released blocks alongside the rarer `grounding_failed` Turn rate.
-- Prompt contract 1.4 states that a warning is not permission to omit references.
+- Prompt contract 1.4 states that the downgrade is not permission to omit references;
+  1.6 restates it without promising the reader a label.
+- The client no longer renders the literals. Shown as a row of bare numbers under an
+  answer, the record read as a defect in that answer rather than as provenance, and a
+  reader cannot act on a literal stripped of the sentence it came from. The downgrade
+  stays where it decides something: it still withholds a recommendation block and is
+  still counted in the ops snapshot.
 - Widgets are emitted only from content that survives validation.

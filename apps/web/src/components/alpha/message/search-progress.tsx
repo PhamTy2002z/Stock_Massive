@@ -30,6 +30,7 @@ export function SearchProgress({
   steps,
   activity,
   ending = null,
+  answered = false,
   defaultOpen = false,
   className,
 }: {
@@ -38,6 +39,8 @@ export function SearchProgress({
   activity: ActivityPhase | null
   /** The closing row: what the Turn ended as, or null while it is still going. */
   ending?: "done" | "stopped" | null
+  /** Whether the answer itself has started arriving under the trail. */
+  answered?: boolean
   /** Open while the work is happening; folded once the answer is on screen. */
   defaultOpen?: boolean
   className?: string
@@ -45,15 +48,18 @@ export function SearchProgress({
   const rows = visibleRows(steps, activity)
   const [open, setOpen] = useState(defaultOpen)
 
-  // The trail folds itself the moment the Turn ends, rather than waiting for the
-  // canonical message to replace the draft that opened it. Between those two
-  // things is a gap the reader spends looking at an answer with the machinery
-  // still spread open above it. Adjusted during render off the previous
-  // `ending` — an effect would fold on a second pass, one frame late.
-  const [endedAs, setEndedAs] = useState(ending)
-  if (ending !== endedAs) {
-    setEndedAs(ending)
-    if (ending !== null) setOpen(false)
+  // The trail folds itself the moment the lookups stop being the thing on
+  // screen — the first block of the answer arrives, or the Turn ends without
+  // one. Waiting for the canonical message to replace the draft leaves a gap
+  // the reader spends looking at an answer with the machinery spread open above
+  // it, and waiting for the Turn to end leaves the trail open across the whole
+  // stream of the answer it was gathered for. Adjusted during render off the
+  // previous value — an effect would fold on a second pass, one frame late.
+  const settled = ending !== null || answered
+  const [wasSettled, setWasSettled] = useState(settled)
+  if (settled !== wasSettled) {
+    setWasSettled(settled)
+    if (settled) setOpen(false)
   }
 
   // No step worth naming means no trail, even on a Turn that finished: a

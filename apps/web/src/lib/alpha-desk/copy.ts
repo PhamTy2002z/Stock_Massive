@@ -16,11 +16,6 @@
 
 import type { ActivityPhase, FlagReason } from "./types"
 
-export const UNVERIFIED_FIGURES_COPY = {
-  label: "Số liệu chưa kiểm chứng",
-  detail: (figures: string[]) => `Chưa có nguồn đối chiếu cho: ${figures.join(", ")}.`,
-} as const
-
 /**
  * What a phase says while it runs, once it is done, and when it is opened.
  *
