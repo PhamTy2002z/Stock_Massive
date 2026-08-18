@@ -119,12 +119,17 @@ class LLMRoute:
     #: and that is a fact about the route rather than about any one call — so it
     #: is answered here, once, instead of at every call site.
     streaming: bool = True
+    #: Whether this route requires a thinking model's own reasoning history to
+    #: come back with the tool-call history. Answered per route for the same
+    #: reason ``streaming`` is: it is a property of what is on the other end.
+    reasoning_history: bool = False
 
     def __repr__(self) -> str:
         marker = "set" if self.api_key else "missing"
         return (
             f"LLMRoute(base_url={self.base_url!r}, api_key=<{marker}>, "
-            f"streaming={self.streaming})"
+            f"streaming={self.streaming}, "
+            f"reasoning_history={self.reasoning_history})"
         )
 
     __str__ = __repr__
@@ -194,6 +199,7 @@ def llm_config_from_settings(settings: Any | None = None) -> LLMConfig:
             base_url=settings.llm_base_url.strip(),
             api_key=settings.llm_api_key.strip(),
             streaming=bool(settings.llm_streaming_enabled),
+            reasoning_history=bool(settings.llm_reasoning_history_required),
         ),
         models=MappingProxyType(
             {
