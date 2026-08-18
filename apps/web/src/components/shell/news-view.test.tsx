@@ -199,6 +199,40 @@ describe("the pill row", () => {
   })
 })
 
+describe("the stream", () => {
+  /** A feed long enough to overflow the blocks above the stream and then some. */
+  function longFeed(count: number) {
+    return response(Array.from({ length: count }, (_, index) => item({ id: String(index) })))
+  }
+
+  it("opens on one page of rows and reveals the rest on request", () => {
+    // Seven items are taken by the lead, the spotlight and the grid, so a feed
+    // of twenty leaves thirteen dated rows — one page and a bit.
+    feed.data = longFeed(20)
+
+    renderNews(<NewsView />)
+
+    // Rows seven through fourteen are the first page; the last five wait.
+    expect(screen.getByText("Tin 14")).toBeInTheDocument()
+    expect(screen.queryByText("Tin 15")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Xem thêm tin" }))
+
+    expect(screen.getByText("Tin 19")).toBeInTheDocument()
+    // Nothing left behind it, so the button goes rather than pressing to nothing.
+    expect(screen.queryByRole("button", { name: "Xem thêm tin" })).not.toBeInTheDocument()
+  })
+
+  it("offers nothing to expand when the stream already fits", () => {
+    feed.data = longFeed(12)
+
+    renderNews(<NewsView />)
+
+    expect(screen.getByText("Tin 11")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Xem thêm tin" })).not.toBeInTheDocument()
+  })
+})
+
 describe("the reading column", () => {
   it("sets the summary as the body and sends the reader to the original", () => {
     feed.data = response([
@@ -246,6 +280,34 @@ describe("the reading column", () => {
 
     expect(screen.getByText("Nguồn tin chỉ cung cấp tiêu đề cho bài này.")).toBeInTheDocument()
     expect(screen.queryByRole("link", { name: /Đọc toàn bộ bài/ })).not.toBeInTheDocument()
+  })
+
+  it("shares the publisher's own link, and only when there is one to share", () => {
+    feed.data = response([
+      item({ id: "1", title: "Fed giữ nguyên lãi suất", url: "https://cafef.vn/a-1.chn" }),
+    ])
+
+    renderNews(<OpenArticle article="chung-khoan:1" />)
+
+    // The networks' own intent endpoints, carrying the article's URL — nothing
+    // embedded, and nothing pointing at our own feed position.
+    expect(screen.getByRole("link", { name: "Chia sẻ lên Facebook" })).toHaveAttribute(
+      "href",
+      "https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fcafef.vn%2Fa-1.chn",
+    )
+    expect(screen.getByRole("link", { name: "Chia sẻ lên X" })).toHaveAttribute(
+      "href",
+      "https://x.com/intent/post?url=https%3A%2F%2Fcafef.vn%2Fa-1.chn&text=Fed%20gi%E1%BB%AF%20nguy%C3%AAn%20l%C3%A3i%20su%E1%BA%A5t",
+    )
+    expect(screen.getByRole("button", { name: "Sao chép liên kết" })).toBeInTheDocument()
+  })
+
+  it("withholds the share row from an article that has no link behind it", () => {
+    feed.data = response([item({ id: "1" })])
+
+    renderNews(<OpenArticle article="chung-khoan:1" />)
+
+    expect(screen.queryByRole("group", { name: "Chia sẻ bài viết" })).not.toBeInTheDocument()
   })
 
   it("labels a press article with its facet, since it names no symbol", () => {
