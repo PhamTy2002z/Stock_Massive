@@ -223,6 +223,16 @@ class Settings(BaseSettings):
     llm_model_batch: str = "gpt-5.6-luna"
     llm_model_session: str = "gpt-5.6-terra"
     llm_request_timeout_seconds: float = 120.0
+    # Streaming là mặc định, nhưng nó là thuộc tính của *tuyến*, không phải của
+    # lời gọi: một tuyến OpenAI-compatible có thể stream tool call mà không gửi
+    # kèm index của upstream, và `StreamAssembler` từ chối đoán index — đó là bug
+    # đã đo được, không phải sự khắt khe vô cớ. Gemini qua endpoint
+    # OpenAI-compatible là tuyến như vậy: mỗi fragment là một tool call trọn vẹn
+    # nhưng không có `index`, nên chỉ đường không-stream mới dùng được. Tắt cờ
+    # này thì tuyến vẫn chạy đủ chức năng: câu trả lời tới nguyên khối, và không
+    # có token nào được phát ra client giữa đường (loop phát activity và block,
+    # không phát token).
+    llm_streaming_enabled: bool = True
     # Explicit paid-call switch for the boot-time Capability Probe. Test code
     # turns this off by name; no code path guesses that pytest is running.
     llm_capability_probe_enabled: bool = True

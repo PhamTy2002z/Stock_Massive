@@ -65,18 +65,18 @@ ANALYSIS_SCHEMA = JsonSchemaFormat(
 )
 
 
-def config():
-    return llm_config_from_settings(
-        Settings(
-            _env_file=None,
-            alpha_desk_enabled=True,
-            llm_base_url="https://route.test/v1",
-            llm_api_key="a-token",
-            llm_model_session="model-session",
-            llm_pricing_version="2026-08",
-            llm_pricing_effective_date=date(2026, 8, 1),
-        )
+def config(**overrides):
+    settings = dict(
+        _env_file=None,
+        alpha_desk_enabled=True,
+        llm_base_url="https://route.test/v1",
+        llm_api_key="a-token",
+        llm_model_session="model-session",
+        llm_pricing_version="2026-08",
+        llm_pricing_effective_date=date(2026, 8, 1),
     )
+    settings.update(overrides)
+    return llm_config_from_settings(Settings(**settings))
 
 
 def sse(*chunks: dict) -> bytes:
@@ -124,11 +124,12 @@ class FreeAdmission:
         return None
 
 
-def client(handler) -> TransportHarness:
+def client(handler, **config_overrides) -> TransportHarness:
     transport = httpx.MockTransport(handler)
     return TransportHarness(
         OpenAICompatibleTransport(
-            config(), http_client=httpx.AsyncClient(transport=transport)
+            config(**config_overrides),
+            http_client=httpx.AsyncClient(transport=transport),
         )
     )
 
@@ -599,6 +600,81 @@ class TestNoSdkOrFramework:
             "instructor",
         ):
             assert forbidden not in requirements, forbidden
+
+
+class TestARouteThatCannotStream:
+    """Measured on Gemini's OpenAI-compatible endpoint (18/08/2026).
+
+    It streams each tool call as a complete fragment — whole id, whole name,
+    whole arguments — but sends no ``index`` on the call itself, and
+    ``StreamAssembler`` refuses to guess one. The whole-response path reads the
+    same calls correctly, because position is the upstream's own ordering there.
+    So the route is declared non-streaming and the transport downgrades the call.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_non_streaming_route_is_called_without_stream(self):
+        seen: dict = {}
+
+        def handler(http_request: httpx.Request) -> httpx.Response:
+            seen.update(json.loads(http_request.content))
+            return httpx.Response(
+                200,
+                json={
+                    "model": "model-session",
+                    "choices": [
+                        {
+                            "message": {
+                                "content": None,
+                                "tool_calls": [
+                                    {
+                                        "id": "function-call-1",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "get_price",
+                                            "arguments": '{"symbol":"FPT"}',
+                                        },
+                                    },
+                                    {
+                                        "id": "function-call-2",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "get_price",
+                                            "arguments": '{"symbol":"VCB"}',
+                                        },
+                                    },
+                                ],
+                            }
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 53, "completion_tokens": 32},
+                },
+            )
+
+        harness = client(handler, llm_streaming_enabled=False)
+        result = await harness.complete(request())
+
+        # The caller asked to stream — CompletionRequest defaults to it — and the
+        # route's own answer is what decided otherwise.
+        assert request().stream is True
+        assert seen.get("stream") is not True
+        # Both calls survive with their own id and their own arguments, which is
+        # the property the streamed path could not have given on this route.
+        assert [call.name for call in result.tool_calls] == ["get_price", "get_price"]
+        assert [call.arguments["symbol"] for call in result.tool_calls] == ["FPT", "VCB"]
+
+    @pytest.mark.asyncio
+    async def test_streaming_stays_the_default(self):
+        seen: dict = {}
+
+        def handler(http_request: httpx.Request) -> httpx.Response:
+            seen.update(json.loads(http_request.content))
+            return httpx.Response(200, content=sse(text_chunk("streamed")))
+
+        result = await client(handler).complete(request())
+
+        assert seen.get("stream") is True
+        assert result.text == "streamed"
 
 
 def _tool_chunk(index: int, *, id=None, name=None, arguments=None) -> dict:
