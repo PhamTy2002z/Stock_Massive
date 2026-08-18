@@ -114,10 +114,18 @@ class LLMRoute:
 
     base_url: str
     api_key: str = field(repr=False, default="")
+    #: Whether this route may be called with ``stream: true``. A route that
+    #: streams tool calls without the upstream index cannot be assembled safely,
+    #: and that is a fact about the route rather than about any one call — so it
+    #: is answered here, once, instead of at every call site.
+    streaming: bool = True
 
     def __repr__(self) -> str:
         marker = "set" if self.api_key else "missing"
-        return f"LLMRoute(base_url={self.base_url!r}, api_key=<{marker}>)"
+        return (
+            f"LLMRoute(base_url={self.base_url!r}, api_key=<{marker}>, "
+            f"streaming={self.streaming})"
+        )
 
     __str__ = __repr__
 
@@ -185,6 +193,7 @@ def llm_config_from_settings(settings: Any | None = None) -> LLMConfig:
         route=LLMRoute(
             base_url=settings.llm_base_url.strip(),
             api_key=settings.llm_api_key.strip(),
+            streaming=bool(settings.llm_streaming_enabled),
         ),
         models=MappingProxyType(
             {
