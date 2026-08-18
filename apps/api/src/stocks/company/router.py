@@ -1,4 +1,14 @@
-"""Company domain router for company-related endpoints."""
+"""Company domain router for company-related endpoints.
+
+Frozen: every endpoint here calls vnstock inside the user's request. Nothing in
+`providers/contracts.py` carries a company profile, its officers, its
+shareholders or its insider deals — `ReferenceSnapshot` holds share counts and
+foreign room and nothing else — so serving these from the store would mean a
+fifth `Capability` and an `Adapter` behind it. That was weighed in #27 and
+declined: the data changes on corporate actions rather than per session, so it
+costs little quota, and the pipeline's promise is about the figures a reader
+refreshes daily. Reopen the decision if this data ever needs a data age.
+"""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -12,6 +22,7 @@ from ..schemas.company import (
     ShareholdersResponse,
     OfficersResponse,
     InsiderDealsResponse,
+    NewsResponse,
     RatioSummaryResponse,
 )
 from ..shared import validate_symbol
@@ -45,6 +56,12 @@ insider_deals_cache = TradingHoursCache(
     key_prefix="stock:insider_deals:",
     ttl_trading=3600,
     ttl_off_hours=21600,
+    stale_ttl=7 * 86400,
+)
+company_news_cache = TradingHoursCache(
+    key_prefix="stock:company_news:",
+    ttl_trading=900,
+    ttl_off_hours=3600,
     stale_ttl=7 * 86400,
 )
 ratio_summary_cache = TradingHoursCache(
@@ -120,6 +137,19 @@ def get_officers(
         f"{symbol.upper()}:{filter_by}",
         OfficersResponse,
         lambda: service.get_officers(symbol, filter_by),
+    )
+
+
+@router.get("/{symbol}/news", response_model=NewsResponse, dependencies=[Depends(standard_rate_limit)])
+def get_company_news(symbol: str) -> NewsResponse:
+    """Get company news and announcements."""
+    symbol = validate_symbol(symbol)
+    service = get_company_service()
+    return _cached_model(
+        company_news_cache,
+        symbol.upper(),
+        NewsResponse,
+        lambda: service.get_company_news(symbol),
     )
 
 

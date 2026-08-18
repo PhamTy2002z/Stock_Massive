@@ -15,21 +15,90 @@ The guard converts:
     upstream NotImplementedError -> VnstockUnsupported (routers map to 501)
 
 Both are ordinary exceptions, so normal error handling applies.
+
+Being the one place every live vnstock call passes through, this is also where
+the account allowance is spent: each call takes a slot from the Redis arbiter
+in `src/core/quota.py` on whichever lane the caller declared. That replaced a
+`BoundedSemaphore` here, which bounded concurrency and not rate, and which was
+one of three uncoordinated guards over a single account quota (`docs/adr/0014`).
 """
 import functools
 import logging
-import threading
 from typing import Any, Callable
 
 import vnstock as _vnstock
 from tenacity import RetryError
 
+from src.core.provider_access import ensure_provider_source_allowed
+from src.core.quota import active_lane, quota_arbiter
+
 logger = logging.getLogger(__name__)
 
-# vnstock is not documented as thread-safe and the free tier allows 60 req/min.
-# Handlers now run in FastAPI's threadpool, so cap how many can be in flight.
-_MAX_CONCURRENT_CALLS = 4
-_call_slots = threading.BoundedSemaphore(_MAX_CONCURRENT_CALLS)
+# The value vnstock's own probe reaches for when it cannot name the
+# environment. Matching it exactly is the point: this is the answer the library
+# intends for a machine that is not a hosted notebook.
+_UNKNOWN_HOSTING_SERVICE = "Local or Unknown"
+
+
+def _repair_hosting_service_probe() -> None:
+    """Supply the ``else`` that ``vnstock.core.utils.env`` is missing.
+
+    ``get_hosting_service()`` walks five ``elif`` branches for Colab, Codespace,
+    Replit, Kaggle and Hugging Face, assigns nothing when none of them match,
+    and then returns the variable — so on an ordinary machine it raises
+    ``UnboundLocalError`` rather than answering. Its own ``except`` says what
+    the answer should have been, ``"Local or Unknown"``, which is why this can
+    repair the probe rather than having to guess at one: the missing branch is
+    written down two lines below the hole.
+
+    Present in 4.0.5 and still in 4.0.6, and ``requirements.txt`` admits the
+    whole 4.x line, so waiting for a release is not a plan. It reaches us as
+    ``VnstockReadFailed(... (UnboundLocalError))`` from any path that asks
+    whether it is running on Colab — which on this deployment is every
+    ``quote.history`` call, and therefore the whole Backfill.
+
+    Patched only when it is actually broken, and only on the module that
+    defines it: both call sites resolve the name at call time — one from its
+    own module globals, one through a function-body import — so the definition
+    is the only binding that has to move. When upstream closes the hole this
+    becomes a no-op on its own.
+
+    Lying about the environment would have been the cheaper fix. Setting
+    ``CODESPACE_NAME`` makes the probe answer, and makes every telemetry
+    payload vnai sends say this machine is a Codespace.
+    """
+    try:
+        from vnstock.core.utils import env as _env
+    except Exception:  # noqa: BLE001 - a probe we cannot import needs no repair
+        return
+
+    try:
+        _env.get_hosting_service()
+    except UnboundLocalError:
+        pass
+    except Exception:  # noqa: BLE001 - broken some other way is not ours to fix
+        return
+    else:
+        return
+
+    def get_hosting_service() -> str:
+        return _UNKNOWN_HOSTING_SERVICE
+
+    _env.get_hosting_service = get_hosting_service
+    logger.info(
+        "Patched vnstock's hosting-service probe, which raises UnboundLocalError "
+        "off a hosted notebook; reporting %r",
+        _UNKNOWN_HOSTING_SERVICE,
+    )
+
+
+_repair_hosting_service_probe()
+
+# Calls that only walk vnstock's object graph — `Vnstock().stock(...)` hands
+# back a component holder rather than a response. Guarded like everything else
+# and deliberately not paced: spending an account slot on a call that reaches no
+# provider would make the allowance smaller than it actually is.
+_NAVIGATION_LABELS = frozenset({"Vnstock.stock"})
 
 
 class VnstockUnavailable(Exception):
@@ -60,33 +129,45 @@ def _unwrap(exc: BaseException) -> BaseException:
     return exc
 
 
-def _guard(func: Callable[..., Any], label: str) -> Callable[..., Any]:
-    """Wrap a bound vnstock method so upstream failures stay catchable."""
+def _guard(
+    func: Callable[..., Any],
+    label: str,
+    paced: bool = True,
+) -> Callable[..., Any]:
+    """Wrap a bound vnstock method so upstream failures stay catchable.
+
+    Paced by default: the arbiter is asked for a slot before the call, on the
+    lane the caller declared, and a refusal — the Collector holding its lease,
+    or no Redis at all — propagates as a `QuotaRefused` rather than becoming a
+    call made outside the allowance.
+    """
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        with _call_slots:
-            try:
-                return func(*args, **kwargs)
-            except BaseException as exc:  # noqa: BLE001 - SystemExit must be caught
-                root = _unwrap(exc)
+        ensure_provider_source_allowed()
+        if paced:
+            quota_arbiter().acquire(active_lane())
+        try:
+            return func(*args, **kwargs)
+        except BaseException as exc:  # noqa: BLE001 - SystemExit must be caught
+            root = _unwrap(exc)
 
-                if isinstance(root, SystemExit):
-                    logger.warning("vnstock quota exhausted during %s", label)
-                    raise VnstockUnavailable(
-                        "Nguồn dữ liệu vnstock đang giới hạn truy cập, thử lại sau ít phút."
-                    ) from exc
+            if isinstance(root, SystemExit):
+                logger.warning("vnstock quota exhausted during %s", label)
+                raise VnstockUnavailable(
+                    "Nguồn dữ liệu vnstock đang giới hạn truy cập, thử lại sau ít phút."
+                ) from exc
 
-                if isinstance(root, NotImplementedError):
-                    logger.info("vnstock provider does not implement %s", label)
-                    raise VnstockUnsupported(
-                        f"Nguồn dữ liệu hiện tại không hỗ trợ {label}."
-                    ) from exc
+            if isinstance(root, NotImplementedError):
+                logger.info("vnstock provider does not implement %s", label)
+                raise VnstockUnsupported(
+                    f"Nguồn dữ liệu hiện tại không hỗ trợ {label}."
+                ) from exc
 
-                if root is not exc and isinstance(root, Exception):
-                    # Surface the real error rather than an opaque RetryError.
-                    raise root from exc
-                raise
+            if root is not exc and isinstance(root, Exception):
+                # Surface the real error rather than an opaque RetryError.
+                raise root from exc
+            raise
 
     return wrapper
 
@@ -109,7 +190,7 @@ class _GuardedProxy:
         label = f"{object.__getattribute__(self, '_label')}.{name}"
 
         if callable(attr):
-            guarded = _guard(attr, label)
+            guarded = _guard(attr, label, paced=label not in _NAVIGATION_LABELS)
 
             @functools.wraps(attr)
             def maybe_proxy(*args, **kwargs):
@@ -135,8 +216,11 @@ def _guarded_class(cls: type, name: str) -> Callable[..., _GuardedProxy]:
 
     @functools.wraps(cls, updated=())
     def factory(*args, **kwargs) -> _GuardedProxy:
-        # Construction itself can hit the quota check.
-        instance = _guard(cls, name)(*args, **kwargs)
+        # Construction itself can hit vnstock's own quota check, so it stays
+        # guarded — but it reaches no provider, so it is not paced. Charging the
+        # account for building an object would let the number of objects a
+        # caller happens to build decide how much data it may read.
+        instance = _guard(cls, name, paced=False)(*args, **kwargs)
         return _GuardedProxy(instance, name)
 
     return factory

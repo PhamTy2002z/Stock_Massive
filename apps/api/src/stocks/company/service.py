@@ -1,12 +1,17 @@
 """Company domain service for company information and stakeholders."""
 
+import html
 import logging
+import re
+from datetime import datetime
 from functools import lru_cache
-from typing import Optional
+from typing import Any, Optional
 
 import pandas as pd
 from src.core.vnstock_client import Company, Market, Trading, Vnstock
 from src.core.vnstock_client import VnstockUnavailable, VnstockUnsupported
+
+from ..providers.normalize import VN_TZ
 
 from ..market import MarketService
 from ..schemas.company import (
@@ -36,6 +41,79 @@ logger = logging.getLogger(__name__)
 
 # Only KBS implements Company.insider_trading in vnstock 4.x.
 INSIDER_TRADING_SOURCE = "KBS"
+
+# --- News row helpers ---
+#
+# VCI's `company.news()` and the TCBS-era frame agree on nothing but their
+# purpose: VCI spells the headline `news_title` and stamps `public_date` as an
+# epoch, TCBS spelled them `title` and `publish_date`. Every field below is read
+# through a key list so one mapping serves both frames.
+
+_NEWS_HTML_TAG = re.compile(r"<[^>]+>")
+_NEWS_WHITESPACE = re.compile(r"\s+")
+_NEWS_DATE_KEYS = ("public_date", "publish_date", "created_at")
+_NEWS_DATE_FORMAT = "%Y-%m-%d %H:%M"
+# VCI stamps some rows in seconds and others in milliseconds; anything past this
+# cannot be a plausible seconds-since-epoch date.
+_NEWS_EPOCH_MILLIS_MIN = 1e12
+
+
+def _news_first(row: pd.Series, keys: tuple[str, ...]) -> Any:
+    """First value among `keys` that is neither missing nor NaN."""
+    for key in keys:
+        value = row.get(key)
+        if value is None:
+            continue
+        try:
+            if not pd.notna(value):
+                continue
+        except (TypeError, ValueError):
+            # Not something pandas can judge for NA-ness; take it as present.
+            pass
+        return value
+    return None
+
+
+def _news_text(value: Any, limit: int) -> Optional[str]:
+    """Plain text out of a provider field that may carry markup and entities."""
+    if value is None:
+        return None
+    text = _NEWS_HTML_TAG.sub(" ", str(value))
+    text = html.unescape(text)
+    text = _NEWS_WHITESPACE.sub(" ", text).strip()
+    return text[:limit] if text else None
+
+
+def _news_link(value: Any) -> Optional[str]:
+    """Absolute http(s) links only — the frame also carries relative paths and
+    placeholder strings, which are useless to a client that just opens them."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text if text.startswith("http") else None
+
+
+def _news_published_at(row: pd.Series) -> str:
+    """Normalize whichever date key the frame carries to `_NEWS_DATE_FORMAT`."""
+    value = _news_first(row, _NEWS_DATE_KEYS)
+    if value is None:
+        return ""
+
+    if hasattr(value, "strftime"):
+        return value.strftime(_NEWS_DATE_FORMAT)
+
+    # `is_number` rather than isinstance: the frame hands back numpy scalars,
+    # which are not int/float subclasses.
+    if not isinstance(value, bool) and pd.api.types.is_number(value):
+        epoch = float(value)
+        seconds = epoch / 1000 if epoch > _NEWS_EPOCH_MILLIS_MIN else epoch
+        return datetime.fromtimestamp(seconds, tz=VN_TZ).strftime(_NEWS_DATE_FORMAT)
+
+    text = str(value).strip()
+    try:
+        return datetime.fromisoformat(text).strftime(_NEWS_DATE_FORMAT)
+    except ValueError:
+        return text
 
 
 def row_id(row: pd.Series, fallback: str) -> str:
@@ -269,26 +347,53 @@ class CompanyService:
                 return NewsResponse(symbol=symbol, items=[], total_count=0)
 
             items = []
-            for _, row in df.iterrows():
+            for index, (_, row) in enumerate(df.iterrows()):
                 try:
-                    # Parse publish date
-                    pub_date = row.get("publish_date")
-                    if pub_date is not None and pd.notna(pub_date):
-                        if hasattr(pub_date, "strftime"):
-                            pub_date_str = pub_date.strftime("%Y-%m-%d %H:%M")
-                        else:
-                            pub_date_str = str(pub_date)
-                    else:
-                        pub_date_str = ""
+                    title = _news_text(_news_first(row, ("news_title", "title")), 300)
+                    if not title:
+                        # A row with no headline has nothing for a reader.
+                        continue
+
+                    # `news_id` first: it is the stable integer VCI actually
+                    # populates, while `id` is a hex digest. The position is a
+                    # last resort — it moves as the feed does, so an article a
+                    # client has open silently becomes a different one.
+                    raw_id = _news_first(row, ("news_id", "id"))
+                    item_id = "" if raw_id is None else str(raw_id).strip()
+                    if not item_id:
+                        item_id = f"row-{index}"
 
                     items.append(
                         NewsItem(
-                            id=int(row.get("id", 0) or 0),
-                            title=str(row.get("title", "")),
-                            source=row.get("source"),
-                            published_at=pub_date_str,
-                            price=safe_float(row.get("price")),
-                            price_change_pct=safe_float(row.get("price_change_ratio")),
+                            id=item_id,
+                            title=title,
+                            source=_news_text(
+                                _news_first(row, ("news_source", "source")), 80
+                            ) or self.source,
+                            published_at=_news_published_at(row),
+                            summary=_news_text(
+                                _news_first(row, (
+                                    "news_short_content",
+                                    "friendly_sub_title",
+                                    "news_sub_title",
+                                    "sub_title",
+                                )),
+                                600,
+                            ),
+                            content=_news_text(
+                                _news_first(row, ("news_full_content", "content")),
+                                20_000,
+                            ),
+                            url=_news_link(
+                                _news_first(row, ("news_source_link", "source_link", "url"))
+                            ),
+                            image_url=_news_link(
+                                _news_first(row, ("news_image_url", "image_url"))
+                            ),
+                            price=safe_float(_news_first(row, ("close_price", "price"))),
+                            price_change_pct=safe_float(
+                                _news_first(row, ("price_change_ratio", "price_change_pct"))
+                            ),
                         )
                     )
                 except (VnstockUnavailable, VnstockUnsupported):

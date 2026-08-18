@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { formatBillions, formatPercent, formatSessionDate, formatVolume } from "./format"
+import {
+  formatBillions,
+  formatDataAge,
+  formatPercent,
+  formatVolume,
+} from "./format"
 
 describe("formatVolume", () => {
   it("uses M suffix from 1 million", () => {
@@ -49,13 +54,26 @@ describe("formatBillions", () => {
   })
 })
 
-describe("formatSessionDate", () => {
-  it("renders dd/mm/yyyy", () => {
-    expect(formatSessionDate("2026-08-08")).toBe("08/08/2026")
+describe("formatDataAge", () => {
+  it("names the coarsest unit that still says something", () => {
+    expect(formatDataAge(30)).toBe("dưới 1 phút")
+    expect(formatDataAge(60)).toBe("1 phút")
+    expect(formatDataAge(8 * 86_400)).toBe("8 ngày")
   })
 
-  it("renders empty string for missing input", () => {
-    expect(formatSessionDate(undefined)).toBe("")
-    expect(formatSessionDate("")).toBe("")
+  it("says a partial unit out loud rather than dropping it", () => {
+    // Flooring alone would show 47 hours as "1 ngày" — half its real age.
+    expect(formatDataAge(47 * 3600)).toBe("hơn 1 ngày")
+    expect(formatDataAge(82_779)).toBe("hơn 22 giờ")
+    expect(formatDataAge(3599)).toBe("hơn 59 phút")
+  })
+
+  it("never rounds up, so freshly written data is not aged", () => {
+    expect(formatDataAge(86_399)).toBe("hơn 23 giờ")
+  })
+
+  it("reads a clock-skewed negative age as brand new", () => {
+    expect(formatDataAge(-5)).toBe("dưới 1 phút")
   })
 })
+

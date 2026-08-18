@@ -21,8 +21,20 @@ models = importlib.util.module_from_spec(spec)
 sys.modules["stocks_models"] = models
 spec.loader.exec_module(models)
 
-# src.auth has no heavy imports, so a plain import is enough here
+# src.auth and src.alpha have no heavy imports, so plain imports are enough here
 from src.auth.models import RefreshToken, User  # noqa: E402,F401
+from src.alpha.models import (  # noqa: E402,F401
+    AgentMessage,
+    AgentKnowledge,
+    AgentThread,
+    AgentToolCall,
+    AgentTurn,
+    Analysis,
+    AnalysisRun,
+    EvalRun,
+    LlmCallUsage,
+    WatchlistEntry,
+)
 
 config = context.config
 settings = get_settings()

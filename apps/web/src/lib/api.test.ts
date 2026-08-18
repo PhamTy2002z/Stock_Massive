@@ -1,5 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { getApiBaseUrl, mapMarketIndices, type MarketIndexRaw } from "./api"
+import {
+  fetchMarketIndices,
+  fetchPriceBoard,
+  fetchSectorPerformance,
+  fetchVN30Overview,
+  getApiBaseUrl,
+  mapMarketIndices,
+  searchStocks,
+  type MarketIndexRaw,
+} from "./api"
+import { ApiUnavailableError, connectionStatus } from "./connection-status"
 
 describe("getApiBaseUrl (server-side)", () => {
   const original = { ...process.env }
@@ -42,5 +52,64 @@ describe("mapMarketIndices", () => {
 
   it("maps an empty list to an empty list", () => {
     expect(mapMarketIndices([])).toEqual([])
+  })
+})
+
+describe("what a refused request veils", () => {
+  const realFetch = globalThis.fetch
+
+  function refuseWith(status: number) {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ detail: "quota" }), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      })) as typeof fetch
+  }
+
+  beforeEach(() => {
+    connectionStatus.reset()
+  })
+
+  afterEach(() => {
+    globalThis.fetch = realFetch
+    connectionStatus.reset()
+  })
+
+  it("veils the page when a request a person is waiting on goes unanswered", async () => {
+    refuseWith(503)
+    await expect(searchStocks("VCB")).rejects.toBeInstanceOf(ApiUnavailableError)
+    expect(connectionStatus.get()).toBe("waiting")
+  })
+
+  it("does not veil the page because a market-data poll was refused", async () => {
+    // This is the bug it was written for: the provider behind the price board
+    // has a rate limit the chat never touches, and the board re-asks every
+    // fifteen seconds. Veiling on that blurred the conversation, blocked the
+    // pointer and raised a toast, on a schedule, while nothing the user was
+    // doing had failed.
+    refuseWith(503)
+
+    await expect(fetchPriceBoard(["VCB"])).rejects.toBeInstanceOf(ApiUnavailableError)
+    await expect(fetchMarketIndices()).rejects.toBeInstanceOf(ApiUnavailableError)
+    await expect(fetchSectorPerformance()).rejects.toBeInstanceOf(ApiUnavailableError)
+    await expect(fetchVN30Overview()).rejects.toBeInstanceOf(ApiUnavailableError)
+
+    expect(connectionStatus.get()).toBe("ready")
+  })
+
+  it("does not let a poll lift a veil it did not raise", async () => {
+    refuseWith(503)
+    await expect(searchStocks("VCB")).rejects.toBeInstanceOf(ApiUnavailableError)
+    expect(connectionStatus.get()).toBe("waiting")
+
+    globalThis.fetch = (async () =>
+      new Response("[]", {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })) as typeof fetch
+
+    // The board is fine. The thing the person asked for is still not.
+    await expect(fetchPriceBoard(["VCB"])).resolves.toEqual([])
+    expect(connectionStatus.get()).toBe("waiting")
   })
 })

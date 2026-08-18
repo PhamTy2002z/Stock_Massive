@@ -1,4 +1,10 @@
-"""Router for the supported intraday order-flow endpoint."""
+"""Router for the supported intraday order-flow endpoint.
+
+Frozen: this calls vnstock inside the user's request, and deliberately stays
+that way. It reports flow within a session, which `docs/adr/0001` and #6 both
+put outside the Snapshot-first pipeline — the store holds one bar per session,
+so there is nothing here for it to answer with.
+"""
 
 from fastapi import APIRouter, Depends
 

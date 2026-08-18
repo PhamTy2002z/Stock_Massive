@@ -15,6 +15,9 @@ export const queryKeys = {
   // Stock detail
   stock: (symbol: string) => ["stock", symbol] as const,
   stockDetail: (symbol: string) => [...queryKeys.stock(symbol), "detail"] as const,
+  symbolSnapshot: (symbol: string) => [...queryKeys.stock(symbol), "snapshot"] as const,
+  valuationSeries: (symbol: string, days: number) =>
+    [...queryKeys.stock(symbol), "valuationSeries", days] as const,
 
   // Financials
   incomeStatement: (symbol: string, period: PeriodType, limit: number) =>
@@ -39,10 +42,8 @@ export const queryKeys = {
   // Analytics
   volumeAnalysis: (symbol: string, days: number = 20) =>
     [...queryKeys.stock(symbol), "volumeAnalysis", days] as const,
-  financialStatements: (limit: number, exchange?: string) =>
-    ["analytics", "financialStatements", limit, exchange] as const,
   volumeSpikes: (params: VolumeSpikeParams) =>
-    ["analytics", "volumeSpikes", params] as const,
+    ["signals", "volumeSpikes", params] as const,
 
   // Advanced Tab - Technical
   ratioSummary: (symbol: string) =>
@@ -74,7 +75,30 @@ export const queryKeys = {
   sectorHistoricalPerformance: (period: SectorHistoricalPeriod) =>
     ["analytics", "sectorHistorical", period] as const,
 
+  // News. The category is part of the feed's identity, not a parameter of it:
+  // one key for every facet would serve the previous pill's articles from cache
+  // the instant the reader pressed the next one.
+  newsFeed: (category: string) => ["news", "feed", category] as const,
+  newsCategories: ["news", "categories"] as const,
+  companyNews: (symbol: string) => [...queryKeys.stock(symbol), "news"] as const,
+
   // Background jobs (global, not symbol-scoped)
   jobsStatus: ["jobs", "status"] as const,
+
+  // Alpha Desk. Keyed under one root so a mutation can invalidate the rail and
+  // every Analysis view behind it in one call — they are one screen's worth of
+  // state, and refreshing half of it shows two moments at once.
+  alpha: ["alpha"] as const,
+  watchlistRail: ["alpha", "rail"] as const,
+  analysisHistory: (symbol: string) => ["alpha", "analyses", symbol] as const,
+  analysis: (symbol: string, tradingDay: string) =>
+    ["alpha", "analyses", symbol, tradingDay] as const,
+
+  // The conversation, under the same root as the rail because they are one
+  // screen: a Turn that discussed a symbol changes what the rail should show.
+  // The *live* Turn is deliberately absent — it has its own reducer, and only
+  // the canonical Thread is a query (ADR-0013).
+  threads: ["alpha", "threads"] as const,
+  thread: (threadId: string) => ["alpha", "threads", threadId] as const,
 
 } as const

@@ -3,6 +3,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.core.job_status_store import job_store
+from src.stocks.collector_schedule import (
+    BACKFILL_JOB_ID,
+    BACKFILL_JOB_NAME,
+    COLLECTOR_JOB_ID,
+    COLLECTOR_JOB_NAME,
+    MARKET_INDEX_JOB_ID,
+    MARKET_INDEX_JOB_NAME,
+)
 from src.main import app
 
 client = TestClient(app)
@@ -142,6 +150,17 @@ class TestJobsRouter:
         # CORS headers should be added by middleware
         # TestClient may not include all headers, but response should succeed
 
+    def test_the_market_wide_ohlcv_trigger_is_gone(self):
+        """The job it started was deleted, so the route has to go with it.
+
+        A trigger route imports its job inside the handler, which is why nothing
+        else catches this: the module imports fine, the suite passes, and the
+        route raises only when an operator presses the button.
+        """
+        response = client.post("/api/v1/jobs/trigger/ohlcv")
+
+        assert response.status_code == 404
+
     def test_multiple_concurrent_requests(self):
         """Test API can handle multiple concurrent requests."""
         import concurrent.futures
@@ -160,3 +179,56 @@ class TestJobsRouter:
         assert len(results) == 10
         for result in results:
             assert isinstance(result, list)
+
+
+class TestWhatTheInterfaceIsToldAbout:
+    """The collection pipeline runs for the system, not for the reader.
+
+    Someone opening the app to look at a stock has no decision to make about a
+    Snapshot cycle: they cannot start it, stop it or wait it out usefully, and
+    a progress bar for it only asks them to care about plumbing. Operators
+    still need to see it, so it is hidden from the shared feed rather than
+    stopped from being recorded.
+    """
+
+    def test_the_collection_cycle_stays_out_of_the_user_facing_feed(self):
+        job_store.cleanup_old(max_age_hours=0)
+        job_store.start_job(COLLECTOR_JOB_ID, COLLECTOR_JOB_NAME, total_items=10)
+
+        listed = client.get("/api/v1/jobs/status").json()
+
+        assert [job["job_id"] for job in listed] == []
+
+    def test_the_history_load_stays_out_of_it_too(self):
+        job_store.cleanup_old(max_age_hours=0)
+        job_store.start_job(BACKFILL_JOB_ID, BACKFILL_JOB_NAME, total_items=10)
+
+        listed = client.get("/api/v1/jobs/status").json()
+
+        assert [job["job_id"] for job in listed] == []
+
+    def test_the_market_index_load_stays_out_of_it_as_well(self):
+        job_store.cleanup_old(max_age_hours=0)
+        job_store.start_job(MARKET_INDEX_JOB_ID, MARKET_INDEX_JOB_NAME)
+
+        listed = client.get("/api/v1/jobs/status").json()
+
+        assert [job["job_id"] for job in listed] == []
+
+    def test_a_job_the_user_asked_for_is_still_reported(self):
+        """Hiding infrastructure must not hide work someone is waiting on."""
+        job_store.cleanup_old(max_age_hours=0)
+        job_store.start_job("daily-ohlcv", "Thu thập OHLCV", total_items=10)
+
+        listed = client.get("/api/v1/jobs/status").json()
+
+        assert [job["job_id"] for job in listed] == ["daily-ohlcv"]
+
+    def test_an_operator_can_still_ask_for_everything(self):
+        """The cycle is hidden from the feed, not from the people running it."""
+        job_store.cleanup_old(max_age_hours=0)
+        job_store.start_job(COLLECTOR_JOB_ID, COLLECTOR_JOB_NAME, total_items=10)
+
+        listed = client.get("/api/v1/jobs/status?include_internal=true").json()
+
+        assert [job["job_id"] for job in listed] == [COLLECTOR_JOB_ID]

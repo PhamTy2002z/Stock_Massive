@@ -1,0 +1,103 @@
+"""The seam the nightly pipeline plugs into: a draft, or a failure with a name.
+
+What the state machine needs from generation is small: given a symbol and a
+Trading Day, either a complete Analysis or a named reason there is none. Keeping
+that contract here rather than inside the state machine is what let the lifecycle
+ship before the pipeline existed, and it is why the producer is passed in as an
+argument and never imported by the machine that calls it.
+
+The real one lives in ``src/alpha/production.py``. **There is deliberately no
+stub in this package.** One stood here while the lifecycle was built, writing a
+payload stamped ``stub: True`` so a placeholder that reached a user could be
+found in the database; now that a real producer exists, a stub reachable from
+``src`` is a way to publish a placeholder by wiring something to the wrong
+default. It lives in ``tests/stub_producer.py``, where nothing shipped can import
+it.
+"""
+
+from dataclasses import dataclass, field
+from datetime import date
+from typing import Callable
+
+# The template version stamped on rows this system writes today. Readers handle
+# several values — that is what the column is for — and it is deliberately not
+# part of `analysis`'s unique key.
+ANALYSIS_SCHEMA_VERSION = 1
+
+# The pipeline's failure taxonomy. Closed on purpose: a run's `error_code` is a
+# vocabulary the interface branches on, so a code invented at the call site is a
+# code nothing downstream knows how to render.
+FAILURE_CODES = frozenset(
+    {
+        "missing_market_snapshot",
+        "insufficient_core_evidence",
+        "auth_unavailable",
+        "llm_transport_error",
+        "invalid_model_output",
+        "persistence_error",
+        # The seventh, and the one spec 0003 §8.10 does not list. Admission
+        # refuses a generation the remaining budget cannot fund
+        # (``docs/adr/0014``), and that refusal has to arrive as something: left
+        # to propagate it would look like a crash and strand the run at
+        # `producing` for the sweep, and folded into `llm_transport_error` it
+        # would blame a route that was never called. It is deliberately not
+        # `auth_unavailable` either — that one pauses the dispatcher route-wide
+        # while a credential is repaired, and a spent allowance is repaired by
+        # waiting for the month rather than by anyone logging in.
+        "budget_exhausted",
+    }
+)
+
+# The longest reason that fits `analysis_run.error_message`.
+MAX_REASON_LENGTH = 500
+
+
+def sanitized_reason(message: str) -> str:
+    """A reason bounded and flattened to one line.
+
+    The guarantee that a stack trace never reaches this column is structural —
+    the state machine stores the message a `ProductionFailure` declared and
+    never `str(exception)` — and this is the second, weaker line: whatever was
+    declared arrives short and single-line, so a reason cannot become a wall of
+    text in the interface.
+    """
+    return " ".join(message.split())[:MAX_REASON_LENGTH]
+
+
+@dataclass(frozen=True)
+class AnalysisDraft:
+    """A complete Analysis, before it is published.
+
+    ``verdict`` is lifted out of the payload for the reason `Analysis` records
+    (``src/alpha/models.py``), so the draft arrives shaped like the row.
+    """
+
+    verdict: str
+    payload: dict = field(default_factory=dict)
+    schema_version: int = ANALYSIS_SCHEMA_VERSION
+
+
+class ProductionFailure(Exception):
+    """An Analysis that could not be produced, for a reason with a name.
+
+    The only exception the state machine treats as a failure. Anything else is a
+    crash, and a crash is left to look like one — see `produce_analysis`.
+    """
+
+    def __init__(self, code: str, message: str) -> None:
+        if code not in FAILURE_CODES:
+            raise ValueError(
+                f"{code!r} is not a production failure code. The taxonomy is "
+                f"closed: {sorted(FAILURE_CODES)}"
+            )
+        reason = sanitized_reason(message)
+        super().__init__(f"{code}: {reason}")
+        self.code = code
+        self.message = reason
+
+
+# What a milestone has to supply to produce Analyses for real: given a symbol and
+# a Trading Day, return a complete draft or raise `ProductionFailure`. A plain
+# callable rather than a Protocol, so a test producer is a three-line function
+# and the real pipeline is whatever shape it wants to be.
+Producer = Callable[[str, date], AnalysisDraft]

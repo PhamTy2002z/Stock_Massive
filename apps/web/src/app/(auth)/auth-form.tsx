@@ -1,18 +1,14 @@
 "use client"
 
-import Image from "next/image"
 import Link from "next/link"
-import { useSearchParams } from "next/navigation"
+import { unstable_rethrow, useSearchParams } from "next/navigation"
 import { useState } from "react"
 import { Eye, EyeOff, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { VisgniteMark, VisgniteWordmark } from "@/components/shared/visgnite-logo"
 
 import type { AuthActionResult } from "./actions"
-import MarketShowcase from "./market-showcase"
 
 interface AuthFormProps {
   mode: "login" | "register"
@@ -21,25 +17,34 @@ interface AuthFormProps {
 
 const COPY = {
   login: {
-    title: "Đăng nhập",
-    description: "Truy cập bảng phân tích chứng khoán Việt Nam của bạn.",
+    title: "Chào bạn trở lại",
+    description: "Đăng nhập để tiếp tục cuộc phân tích đang dở.",
     submit: "Đăng nhập",
-    pending: "Đang đăng nhập...",
+    pending: "Đang đăng nhập…",
     footerText: "Chưa có tài khoản?",
     footerHref: "/register",
     footerLink: "Đăng ký",
   },
   register: {
-    title: "Tạo tài khoản",
-    description: "Bắt đầu theo dõi và phân tích thị trường chứng khoán Việt Nam.",
+    title: "Mở tài khoản",
+    description: "Một màn hình để hỏi, để đọc bảng giá, và để theo dõi mã của bạn.",
     submit: "Tạo tài khoản",
-    pending: "Đang tạo tài khoản...",
+    pending: "Đang tạo tài khoản…",
     footerText: "Đã có tài khoản?",
     footerHref: "/login",
     footerLink: "Đăng nhập",
   },
 } as const
 
+/**
+ * The way in, drawn on the same ground as the product.
+ *
+ * One column rather than the split-screen the old design used: the app behind
+ * this form is a single surface, and a marketing panel beside the fields would
+ * be the only place in the product that looked like a website. The greeting is
+ * the same serif line that opens a conversation, for the same reason — it is
+ * the system addressing someone, not a heading.
+ */
 export default function AuthForm({ mode, action }: AuthFormProps) {
   const [isLoading, setIsLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
@@ -57,128 +62,130 @@ export default function AuthForm({ mode, action }: AuthFormProps) {
         toast.error(result.error)
         setIsLoading(false)
       }
-    } catch {
+    } catch (error) {
+      // A successful sign-in ends in `redirect()`, which Next reports by
+      // rejecting the action promise — swallowing it here would show a failure
+      // toast on success and leave the router with nothing to act on.
+      unstable_rethrow(error)
       toast.error("Đã có lỗi xảy ra. Vui lòng thử lại.")
       setIsLoading(false)
     }
   }
 
   return (
-    <main className="grid min-h-dvh bg-white lg:grid-cols-2">
-      <section className="relative flex min-h-dvh flex-col bg-white px-6 py-8 text-auth-ink sm:px-14 sm:py-10 lg:px-14">
-        <Link
-          href="/"
-          className="flex w-fit items-center gap-3 rounded-md font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-auth-orange focus-visible:ring-offset-4"
-        >
-          <Image src="/logo.png" alt="" width={30} height={26} className="h-7 w-8 object-contain" priority />
-          <span>Stock Massive</span>
-        </Link>
+    <main className="flex min-h-dvh flex-col bg-background px-6 py-8 text-foreground sm:px-10">
+      <Link href="/" className="w-fit rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <VisgniteWordmark />
+      </Link>
 
-        <div className="my-auto flex justify-center py-12">
-          <div className="w-full max-w-[392px] animate-auth-up">
-            <header className="mb-6">
-              <h1 className="text-[40px] font-bold leading-[1.12] tracking-[-0.04em] text-auth-ink">
-                {copy.title}
-              </h1>
-              <p className="mt-2 max-w-[370px] text-base leading-6 text-auth-muted">
-                {copy.description}
-              </p>
-            </header>
+      <div className="my-auto flex justify-center py-12">
+        <div className="w-full max-w-[392px] animate-vg-message-in">
+          <header className="mb-7 flex flex-col items-start gap-3">
+            <VisgniteMark className="h-[26px] w-[17px]" />
+            <h1 className="font-serif text-[clamp(1.8rem,4vw,2.3rem)] font-normal leading-[1.1] tracking-[-0.01em] text-ink-display">
+              {copy.title}
+            </h1>
+            <p className="text-row leading-relaxed text-ink-4">{copy.description}</p>
+          </header>
 
-            <form action={onSubmit} className="space-y-4">
-              {isRegister && (
-                <div className="space-y-2">
-                  <Label htmlFor="full_name" className="text-sm font-semibold text-auth-ink">
-                    Họ và tên
-                  </Label>
-                  <Input
-                    id="full_name"
-                    name="full_name"
-                    type="text"
-                    autoComplete="name"
-                    placeholder="Nguyễn Văn A"
-                    className="h-12 rounded-xl border-auth-border bg-white px-4 text-base text-auth-ink shadow-none placeholder:text-[#a5abb5] focus-visible:ring-auth-orange md:text-base"
-                  />
-                </div>
-              )}
-
-              <div className="space-y-2">
-                <Label htmlFor="email" className="text-sm font-semibold text-auth-ink">
-                  Email
-                </Label>
-                <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  required
-                  autoComplete="email"
-                  placeholder="you@example.com"
-                  className="h-12 rounded-xl border-auth-border bg-white px-4 text-base text-auth-ink shadow-none placeholder:text-[#a5abb5] focus-visible:ring-auth-orange md:text-base"
+          <form action={onSubmit} className="space-y-3.5">
+            {isRegister && (
+              <Field id="full_name" label="Họ và tên">
+                <input
+                  id="full_name"
+                  name="full_name"
+                  type="text"
+                  autoComplete="name"
+                  placeholder="Nguyễn Văn A"
+                  className={FIELD_CLASS}
                 />
+              </Field>
+            )}
+
+            <Field id="email" label="Email">
+              <input
+                id="email"
+                name="email"
+                type="email"
+                required
+                autoComplete="email"
+                placeholder="you@example.com"
+                className={FIELD_CLASS}
+              />
+            </Field>
+
+            <Field id="password" label="Mật khẩu">
+              <div className="relative">
+                <input
+                  id="password"
+                  name="password"
+                  type={showPassword ? "text" : "password"}
+                  required
+                  minLength={isRegister ? 8 : undefined}
+                  autoComplete={isRegister ? "new-password" : "current-password"}
+                  placeholder={isRegister ? "Tối thiểu 8 ký tự" : "Nhập mật khẩu"}
+                  className={`${FIELD_CLASS} pr-12`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((visible) => !visible)}
+                  aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+                  className="absolute inset-y-0 right-1 flex w-11 items-center justify-center rounded-lg text-ink-5 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {showPassword ? <EyeOff className="size-[18px]" /> : <Eye className="size-[18px]" />}
+                </button>
               </div>
+            </Field>
 
-              <div className="space-y-2">
-                <Label htmlFor="password" className="text-sm font-semibold text-auth-ink">
-                  Mật khẩu
-                </Label>
-                <div className="relative">
-                  <Input
-                    id="password"
-                    name="password"
-                    type={showPassword ? "text" : "password"}
-                    required
-                    minLength={isRegister ? 8 : undefined}
-                    autoComplete={isRegister ? "new-password" : "current-password"}
-                    placeholder={isRegister ? "Tối thiểu 8 ký tự" : "Nhập mật khẩu"}
-                    className="h-12 rounded-xl border-auth-border bg-white px-4 pr-12 text-base text-auth-ink shadow-none placeholder:text-[#a5abb5] focus-visible:ring-auth-orange md:text-base"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((visible) => !visible)}
-                    aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
-                    className="absolute inset-y-0 right-1 flex w-11 items-center justify-center rounded-lg text-[#858d98] transition-colors hover:text-auth-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-auth-orange"
-                  >
-                    {showPassword ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
-                  </button>
-                </div>
-              </div>
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-[11px] bg-primary text-[0.95rem] font-medium text-primary-foreground transition-[filter] hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-60"
+            >
+              {isLoading && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
+              {isLoading ? copy.pending : copy.submit}
+            </button>
+          </form>
 
-              <Button
-                type="submit"
-                disabled={isLoading}
-                className="h-12 w-full rounded-full bg-auth-orange text-base font-semibold text-white shadow-none transition-colors hover:bg-[#e95d00] focus-visible:ring-2 focus-visible:ring-auth-orange focus-visible:ring-offset-2 active:bg-[#d95500]"
-              >
-                {isLoading && <Loader2 className="animate-spin" aria-hidden="true" />}
-                {isLoading ? copy.pending : copy.submit}
-              </Button>
-            </form>
-
-            <p className="mt-6 text-center text-base text-auth-muted">
-              {copy.footerText}{" "}
-              <Link
-                href={copy.footerHref}
-                className="font-semibold text-auth-orange transition-colors hover:text-[#d95500] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-auth-orange focus-visible:ring-offset-2"
-              >
-                {copy.footerLink}
-              </Link>
-            </p>
-          </div>
+          <p className="mt-6 text-center text-row text-ink-4">
+            {copy.footerText}{" "}
+            <Link
+              href={copy.footerHref}
+              className="font-medium text-primary underline-offset-4 transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {copy.footerLink}
+            </Link>
+          </p>
         </div>
+      </div>
 
-        <footer className="flex items-center justify-between text-sm text-[#767e8a]">
-          <span>© 2026 Stock Massive</span>
-          <nav aria-label="Liên kết pháp lý" className="flex gap-6">
-            <Link href="/terms" className="hover:text-auth-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-auth-orange">
-              Điều khoản
-            </Link>
-            <Link href="/privacy" className="hover:text-auth-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-auth-orange">
-              Bảo mật
-            </Link>
-          </nav>
-        </footer>
-      </section>
-
-      <MarketShowcase />
+      <footer className="flex items-center justify-between text-meta text-ink-6">
+        <span>© {new Date().getFullYear()} VisgniteAI</span>
+        <span>HOSE · HNX · UPCOM</span>
+      </footer>
     </main>
   )
 }
+
+/** One field's shell. The label is always rendered — a placeholder is not one. */
+function Field({
+  id,
+  label,
+  children,
+}: {
+  id: string
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="space-y-1.5">
+      <label htmlFor={id} className="block text-control font-medium text-ink-2">
+        {label}
+      </label>
+      {children}
+    </div>
+  )
+}
+
+const FIELD_CLASS =
+  "h-12 w-full rounded-[11px] border border-border bg-surface-sunken px-3.5 text-[0.95rem] text-foreground outline-none transition-colors placeholder:text-ink-6 focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring/40"

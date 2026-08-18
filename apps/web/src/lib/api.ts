@@ -1,3 +1,9 @@
+import {
+  ApiUnavailableError,
+  connectionStatus,
+  isRetryableStatus,
+} from "./connection-status"
+
 // Server-side uses Docker internal network, client uses public URL
 export const getApiBaseUrl = () => {
   // Server-side: use internal Docker network URL if available
@@ -47,15 +53,66 @@ class ApiError extends Error {
   }
 }
 
-async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
+/**
+ * One request, with the difference between "wrong" and "not yet" preserved.
+ *
+ * A refused request and an unreachable API used to arrive at the UI as the
+ * same thrown value, so a container restarting for two seconds surfaced as
+ * `TypeError: Failed to fetch` in the user's face. Silence now reports itself
+ * to `connectionStatus`, which the page veils on. An answer — including a 404
+ * — clears only this operation's prior unavailable state, so a healthy request
+ * cannot hide a different endpoint which is still failing. Background market
+ * polls do not report either failure or recovery to the application-wide gate.
+ */
+export interface FetchApiBehaviour {
+  /**
+   * Whether this request's silence is the whole application's problem.
+   *
+   * True for anything a person is waiting on: they asked, and the answer is
+   * not coming, so veiling the page is the honest reading.
+   *
+   * **False for the market-data polls.** They re-ask every 15 to 30 seconds
+   * whether anyone is looking at them, and they depend on an upstream provider
+   * with a rate limit the rest of the app does not touch. One refused poll
+   * veiling the page means the chat — which never calls that provider — is
+   * blurred, made `pointer-events-none` and covered by a toast, on a schedule,
+   * because a price ticker could not refresh. A widget that cannot load is the
+   * widget's problem to show.
+   */
+  veilsOnOutage?: boolean
+}
+
+async function fetchApi<T>(
+  endpoint: string,
+  options?: RequestInit,
+  { veilsOnOutage = true }: FetchApiBehaviour = {},
+): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers,
-    },
-  })
+  let response: Response
+  try {
+    response = await fetch(url, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  } catch (cause) {
+    // fetch only rejects when the request never completed: no server, no
+    // network, request aborted. There is no status to read.
+    if (veilsOnOutage) connectionStatus.reportWaiting(url)
+    throw new ApiUnavailableError(undefined, undefined, { cause })
+  }
+
+  if (isRetryableStatus(response.status)) {
+    if (veilsOnOutage) connectionStatus.reportWaiting(url)
+    throw new ApiUnavailableError(await readErrorDetail(response), response.status)
+  }
+
+  // A poll that does not veil does not lift either: it proves its own endpoint
+  // is answering, and that says nothing about the request a person is still
+  // waiting on.
+  if (veilsOnOutage) connectionStatus.reportReady(url)
 
   if (!response.ok) {
     throw new ApiError(response.status, await readErrorDetail(response))
@@ -63,6 +120,9 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
 
   return response.json()
 }
+
+/** What the polled market-data widgets pass: they report to nobody. */
+const POLLED: FetchApiBehaviour = { veilsOnOutage: false }
 
 /**
  * The API explains itself in `detail` — "this period has not been computed
@@ -81,7 +141,11 @@ async function readErrorDetail(response: Response): Promise<string> {
 
 export async function fetchPriceBoard(symbols: string[]): Promise<PriceBoardItem[]> {
   const symbolsParam = symbols.join(",")
-  return fetchApi<PriceBoardItem[]>(`/stocks/price-board?symbols=${encodeURIComponent(symbolsParam)}`)
+  return fetchApi<PriceBoardItem[]>(
+    `/stocks/price-board?symbols=${encodeURIComponent(symbolsParam)}`,
+    undefined,
+    POLLED,
+  )
 }
 
 export interface MarketIndexRaw {
@@ -103,7 +167,7 @@ export function mapMarketIndices(data: MarketIndexRaw[]): MarketIndex[] {
 }
 
 export async function fetchMarketIndices(): Promise<MarketIndex[]> {
-  const data = await fetchApi<MarketIndexRaw[]>("/stocks/market-indices")
+  const data = await fetchApi<MarketIndexRaw[]>("/stocks/market-indices", undefined, POLLED)
   return mapMarketIndices(data)
 }
 
@@ -349,7 +413,7 @@ export interface SectorPerformanceResponse {
 }
 
 export async function fetchSectorPerformance(): Promise<SectorPerformanceResponse> {
-  return fetchApi<SectorPerformanceResponse>("/stocks/sector-performance")
+  return fetchApi<SectorPerformanceResponse>("/stocks/sector-performance", undefined, POLLED)
 }
 
 // Fund Certificates Types
@@ -422,119 +486,76 @@ export interface VN30OverviewResponse {
 }
 
 export async function fetchVN30Overview(): Promise<VN30OverviewResponse> {
-  return fetchApi<VN30OverviewResponse>("/stocks/vn30-overview")
+  return fetchApi<VN30OverviewResponse>("/stocks/vn30-overview", undefined, POLLED)
 }
 
-// Financial Statements Types
-export interface FinancialStatementItem {
-  rank: number
-  symbol: string
-  company_name: string | null
-  exchange: string | null
-  net_profit: number | null
-  revenue: number | null
-  profit_margin: number | null
-  eps: number | null
-  year: number
-  quarter: number
-}
+// Volume Spike Signal Types
+//
+// The scope value is the API's own: `universe` is rendered as "Toàn bộ Universe"
+// and never as "toàn thị trường" — this system watches a hundred symbols and
+// the interface must not claim otherwise.
+export type SignalScope = "profit_leaders" | "universe"
+export type SignalCoverageState = "ready" | "partial" | "insufficient_data"
+export type SignalFreshness = "fresh" | "lagging" | "stale"
 
-export interface FinancialStatementsResponse {
-  period: string
-  updated_at: string | null
+export interface SignalCoverage {
+  state: SignalCoverageState
+  evaluated: number
   total: number
-  data: FinancialStatementItem[]
 }
 
-export async function fetchFinancialStatements(
-  limit: number = 50,
-  exchange?: string
-): Promise<FinancialStatementsResponse> {
-  const params = new URLSearchParams()
-  params.set("limit", limit.toString())
-  if (exchange) params.set("exchange", exchange)
-
-  return fetchApi<FinancialStatementsResponse>(`/stocks/analytics/financial-statements?${params}`)
+export interface SignalCohortVersion {
+  id: number
+  reporting_period: string
 }
-
-// Financial Statements Collection Result
-export interface FinancialStatementsCollectionResult {
-  success: number
-  failed: number
-  rate_limited: number
-  total_symbols: number
-  elapsed_seconds: number
-  error: string | null
-}
-
-export async function triggerFinancialStatementsCollection(): Promise<FinancialStatementsCollectionResult> {
-  return fetchApi<FinancialStatementsCollectionResult>("/stocks/analytics/financial-statements/collect", {
-    method: "POST",
-  })
-}
-
-// Volume Spike Types
-export type VolumeSpikeAnomalyLevel = "normal" | "elevated" | "high" | "very_high"
 
 export interface VolumeSpikeItem {
   symbol: string
-  company_name: string | null
   exchange: string | null
-  current_volume: number
-  avg_volume_20d: number
-  spike_ratio: number
-  price_change_pct: number | null
+  volume: number
+  baseline_average_volume: number
+  ratio: number
   close_price: number | null
-  anomaly_level: VolumeSpikeAnomalyLevel
-  icb_code: string | null
-  icb_name: string | null
+  change_pct: number | null
+  issues: string[]
 }
 
-export interface IndustryVolumeSpikeGroup {
-  icb_code: string
-  icb_name: string
-  spike_count: number
-  avg_spike_ratio: number
-  stocks: VolumeSpikeItem[]
-}
-
-export interface VolumeSpikeMetadata {
-  calculation_time_ms: number
-  cache_hit: boolean
-  symbols_processed: number
-  symbols_with_spikes: number
+export interface UnevaluableSymbol {
+  symbol: string
+  issues: string[]
 }
 
 export interface VolumeSpikeResponse {
-  trade_date: string
-  total_spikes: number
-  industries: IndustryVolumeSpikeGroup[]
-  metadata: VolumeSpikeMetadata
+  scope: SignalScope
+  trading_day: string | null
+  threshold: number
+  coverage: SignalCoverage
+  freshness: SignalFreshness
+  cohort_version: SignalCohortVersion | null
+  issues: string[]
+  spikes: VolumeSpikeItem[]
+  unevaluable: UnevaluableSymbol[]
 }
 
 export interface VolumeSpikeParams {
-  targetDate?: string
-  minRatio?: number
+  scope?: SignalScope
+  threshold?: number
   exchange?: string
-  includeUpcom?: boolean
-  limit?: number
-  topProfitableOnly?: boolean
+  tradingDay?: string
 }
 
 export async function fetchVolumeSpikes(
   params: VolumeSpikeParams = {}
 ): Promise<VolumeSpikeResponse> {
   const searchParams = new URLSearchParams()
-  if (params.targetDate) searchParams.set("target_date", params.targetDate)
-  if (params.minRatio) searchParams.set("min_ratio", params.minRatio.toString())
+  if (params.scope) searchParams.set("scope", params.scope)
+  if (params.threshold) searchParams.set("threshold", params.threshold.toString())
   if (params.exchange) searchParams.set("exchange", params.exchange)
-  if (params.includeUpcom !== undefined) searchParams.set("include_upcom", String(params.includeUpcom))
-  if (params.limit) searchParams.set("limit", params.limit.toString())
-  if (params.topProfitableOnly) searchParams.set("top_profitable_only", "true")
+  if (params.tradingDay) searchParams.set("trading_day", params.tradingDay)
 
   const queryString = searchParams.toString()
   return fetchApi<VolumeSpikeResponse>(
-    `/stocks/analytics/volume-spikes${queryString ? `?${queryString}` : ""}`
+    `/signals/volume-spikes${queryString ? `?${queryString}` : ""}`
   )
 }
 
@@ -807,5 +828,342 @@ export async function fetchIntradayTicks(
 ): Promise<IntradayTick[]> {
   return fetchApi<IntradayTick[]>(
     `/stocks/${encodeURIComponent(symbol)}/intraday?page_size=${pageSize}`
+  )
+}
+
+
+// === Snapshot serving ===
+//
+// The one route that answers from the store instead of from a provider. Every
+// figure arrives with the Provider Source behind it and the age of the session
+// it describes, because a number shown without its age invites the reader to
+// assume it is current.
+
+/** Where one part of the answer came from, and how old the data in it is. */
+export interface SnapshotSectionMeta {
+  source: string
+  /** The session this describes, not the moment it was fetched. */
+  effective_at: string
+  observed_at: string
+  age_seconds: number
+  stale: boolean
+}
+
+export interface SnapshotSection<TData> extends SnapshotSectionMeta {
+  data: TData
+}
+
+export interface MarketSnapshotData {
+  /**
+   * What the `*_price` fields mean with respect to corporate actions. It
+   * reaches the price fields alone: every volume and every `*_value_vnd` is
+   * reported as traded on either basis, and nothing rescales them.
+   */
+  price_basis: string
+  price_unit: string
+  last_price: number | null
+  reference_price: number | null
+  open_price: number | null
+  high_price: number | null
+  low_price: number | null
+  ceiling_price: number | null
+  floor_price: number | null
+  change_pct: number | null
+  volume: number | null
+  total_value_vnd: number | null
+  active_buy_volume: number | null
+  active_sell_volume: number | null
+  foreign_buy_volume: number | null
+  foreign_sell_volume: number | null
+  foreign_buy_value_vnd: number | null
+  foreign_sell_value_vnd: number | null
+  foreign_net_value_vnd: number | null
+  market_cap_vnd: number | null
+}
+
+export interface ValuationSnapshotData {
+  provider_pe: number | null
+  provider_pb: number | null
+}
+
+/** Outstanding, listed and issued are different numbers; the type travels with the count. */
+export interface ShareCountItem {
+  share_type: string
+  value: number
+}
+
+export interface ReferenceSnapshotData {
+  shares: ShareCountItem[]
+  current_foreign_room: number | null
+  total_foreign_room: number | null
+}
+
+export interface FundamentalSnapshotData {
+  period_end: string
+  trailing_12_month_net_income_vnd: number | null
+  parent_equity_vnd: number | null
+  revenue_vnd: number | null
+  gross_profit_vnd: number | null
+  operating_profit_vnd: number | null
+  pre_tax_profit_vnd: number | null
+  net_profit_after_tax_vnd: number | null
+  parent_net_profit_vnd: number | null
+  total_assets_vnd: number | null
+  total_liabilities_vnd: number | null
+  short_term_borrowings_vnd: number | null
+  long_term_borrowings_vnd: number | null
+  cash_and_equivalents_vnd: number | null
+  cfo_vnd: number | null
+  cfi_vnd: number | null
+  cff_vnd: number | null
+}
+
+/**
+ * Everything the store holds for one symbol, part by part.
+ *
+ * A part with nothing collected yet is `null` rather than absent, which is how
+ * "not collected" stays distinguishable from "not a capability".
+ */
+export interface SymbolSnapshot {
+  symbol: string
+  market: SnapshotSection<MarketSnapshotData> | null
+  valuation: SnapshotSection<ValuationSnapshotData> | null
+  reference: SnapshotSection<ReferenceSnapshotData> | null
+  fundamental: SnapshotSection<FundamentalSnapshotData> | null
+}
+
+/**
+ * What the collector holds for one symbol, or `null` when it holds nothing.
+ *
+ * A 404 from this route is an answer about the Universe rather than a failure:
+ * the symbol is one this system has not been asked to follow, and the UI says
+ * exactly that. A malformed symbol still throws — the caller validated it
+ * before asking, so a 422 is a bug on this side, not a fact about the market.
+ */
+export async function fetchSymbolSnapshot(symbol: string): Promise<SymbolSnapshot | null> {
+  return fetchWatched<SymbolSnapshot>(`/stocks/${encodeURIComponent(symbol)}/snapshot`)
+}
+
+/**
+ * A store-backed request whose 404 means "this symbol is not watched".
+ *
+ * Every route that reads the store refuses an untracked symbol the same way, so
+ * reading that refusal belongs in one place. Other statuses still throw: a 422
+ * is a malformed symbol, which the caller validated before asking.
+ */
+async function fetchWatched<T>(endpoint: string): Promise<T | null> {
+  try {
+    return await fetchApi<T>(endpoint)
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return null
+    throw error
+  }
+}
+
+
+/** One session in a stored series, with the Provider Source that answered for it. */
+export interface SeriesPoint {
+  effective_at: string
+  source: string
+}
+
+export interface MarketBar extends SeriesPoint {
+  /**
+   * What this bar's prices mean: `raw` is what the exchange published for the
+   * session, `adjusted_at_source` what the provider had already rescaled for
+   * corporate actions. A weekly or monthly bar spanning the seam between the
+   * two eras reports `mixed` — those prices are not on one scale, and naming
+   * either side would be a claim about the other.
+   */
+  price_basis: string
+  open_price: number | null
+  high_price: number | null
+  low_price: number | null
+  close_price: number | null
+  volume: number | null
+  total_value_vnd: number | null
+}
+
+export interface ValuationPoint extends SeriesPoint {
+  provider_pe: number | null
+  provider_pb: number | null
+}
+
+/**
+ * A stretch of sessions from the store.
+ *
+ * `age_seconds` and `stale` describe the newest session only — the rest of a
+ * series is old by definition — and are null/false for a window the store holds
+ * nothing in.
+ */
+export interface SeriesResponse<TPoint extends SeriesPoint> {
+  symbol: string
+  age_seconds: number | null
+  stale: boolean
+  points: TPoint[]
+}
+
+export interface MarketSeries extends SeriesResponse<MarketBar> {
+  interval: string
+}
+
+export type ValuationSeries = SeriesResponse<ValuationPoint>
+
+/** Intervals the stored series can be asked for. Anything finer is a session's inside. */
+export type SessionInterval = "1D" | "1W" | "1M"
+
+function seriesQuery(start: string, end: string, extra?: Record<string, string>) {
+  return new URLSearchParams({ start, end, ...extra }).toString()
+}
+
+/**
+ * Sessions for a watched symbol, or `null` when the symbol is not watched.
+ *
+ * The 404 is the Universe answering, not a failure — the caller falls back to
+ * the frozen provider-backed route for symbols this system does not collect.
+ */
+export async function fetchMarketSeries(
+  symbol: string,
+  start: string,
+  end: string,
+  interval: SessionInterval
+): Promise<MarketSeries | null> {
+  const query = seriesQuery(start, end, { interval })
+  return fetchWatched<MarketSeries>(
+    `/stocks/${encodeURIComponent(symbol)}/series/market?${query}`
+  )
+}
+
+/** P/E and P/B session by session, or `null` for a symbol outside the Universe. */
+export async function fetchValuationSeries(
+  symbol: string,
+  start: string,
+  end: string
+): Promise<ValuationSeries | null> {
+  return fetchWatched<ValuationSeries>(
+    `/stocks/${encodeURIComponent(symbol)}/series/valuation?${seriesQuery(start, end)}`
+  )
+}
+
+
+// === News ===
+//
+// The Discover surface's routes, and they answer from *two different kinds of
+// source*, which is the whole reason the shapes below are as loose as they are:
+//
+//   - `/stocks/news/feed` is the press. CafeF's RSS, one facet at a time, and it
+//     gives a real headline, a real summary, a real 600×315 article image and a
+//     link to the piece on cafef.vn. What it never gives is `content`: the full
+//     text stays with the publisher, so the reader is sent there rather than
+//     handed a copy.
+//   - `/stocks/{symbol}/news` is VCI's corporate disclosures. Titles, and in
+//     practice nothing else — no summary, no body, no link, and an `image_url`
+//     that is the company's logo rather than a picture of anything.
+//
+// So every text field is nullable, and the surface has to stay honest about
+// which of the two it is drawing.
+
+/** One article, as the store holds it. */
+export interface NewsItem {
+  /**
+   * The publisher's own id, as text. CafeF's are 18-digit article ids that do
+   * not survive a double — the reason this is a string and not a number.
+   */
+  id: string
+  title: string
+  /**
+   * Who published it — nullable, because the disclosure lane reads this from
+   * VCI's `news_source`, which is empty for every row we have measured. The
+   * press feed always names one; see `FeedNewsItem`.
+   */
+  source: string | null
+  /**
+   * When it was published, in one of two shapes depending on the source: an
+   * ISO-8601 instant with a `+07:00` offset (CafeF), or `"%Y-%m-%d %H:%M"` wall
+   * clock in Asia/Ho_Chi_Minh (VCI) — or `""`, or whatever raw string the
+   * provider printed. Carried as text rather than parsed here: the parse belongs
+   * where the fallback is decided, in `lib/news.ts`.
+   */
+  published_at: string
+  summary: string | null
+  /** Plain text, HTML already stripped upstream, and long enough to read. */
+  content: string | null
+  url: string | null
+  image_url: string | null
+  /** Which facet of the feed this arrived on, or `null` off the press feed. */
+  category: string | null
+  price: number | null
+  price_change_pct: number | null
+}
+
+/**
+ * The same article on the cross-source feed.
+ *
+ * `symbol` is nullable because a press article is usually about no single
+ * company — it is the facet (`category`) that names a press item, and the symbol
+ * that names a disclosure. Anything that draws one has to cope with either.
+ */
+export interface FeedNewsItem extends NewsItem {
+  symbol: string | null
+  /**
+   * Narrowed from `NewsItem`: an item on the press feed always names its
+   * publisher, and every reading surface leans on that — the source pill, the
+   * image fallback, and the "read the rest on …" link all print it.
+   */
+  source: string
+}
+
+/** One facet of the press feed, as the API's own registry names it. */
+export interface NewsCategory {
+  slug: string
+  label: string
+}
+
+export interface NewsFeedResponse {
+  items: FeedNewsItem[]
+  /** The facet these items were asked for. */
+  category: string
+  /** Every facet on offer, in the order the pill row should draw them. */
+  categories: NewsCategory[]
+  symbols: string[]
+  generated_at: string
+  total_count: number
+}
+
+export interface CompanyNewsResponse {
+  symbol: string
+  items: NewsItem[]
+  total_count: number
+}
+
+/**
+ * One facet of the press feed, newest first.
+ *
+ * `POLLED`, like the market widgets: a news pane that cannot load is the news
+ * pane's problem to show, and veiling the application because a list of
+ * headlines refused would blur surfaces that never touched this provider.
+ */
+export async function fetchNewsFeed(category?: string): Promise<NewsFeedResponse> {
+  const query = category === undefined ? "" : `?category=${encodeURIComponent(category)}`
+  return fetchApi<NewsFeedResponse>(`/stocks/news/feed${query}`, undefined, POLLED)
+}
+
+/**
+ * The facets the feed can be asked for.
+ *
+ * Fetched rather than hard-coded so the pill row still has something to draw
+ * when the feed itself failed — and so adding a facet upstream does not need a
+ * frontend release.
+ */
+export async function fetchNewsCategories(): Promise<NewsCategory[]> {
+  return fetchApi<NewsCategory[]>("/stocks/news/categories", undefined, POLLED)
+}
+
+/** One symbol's corporate disclosures, for the rail beside the press feed. */
+export async function fetchCompanyNews(symbol: string): Promise<CompanyNewsResponse> {
+  return fetchApi<CompanyNewsResponse>(
+    `/stocks/${encodeURIComponent(symbol)}/news`,
+    undefined,
+    POLLED,
   )
 }

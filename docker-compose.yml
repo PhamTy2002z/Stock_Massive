@@ -44,8 +44,12 @@ services:
     build:
       context: ./apps/api
       dockerfile: Dockerfile
+    # Matches production: an active Turn gets 30 seconds to checkpoint, so the
+    # grace period has to be longer than that (docs/adr/0013).
+    stop_grace_period: 45s
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/stockmassive}
+      GIT_SHA: ${GIT_SHA:-unknown}
       AUTH_SECRET: ${AUTH_SECRET:-dev-secret-change-in-production}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
@@ -53,15 +57,74 @@ services:
       CACHE_REDIS_URL: ${CACHE_REDIS_URL:-redis://redis:6379/0}
       # Read by vnstock; without it the quota is 20 req/min instead of 60
       VNSTOCK_API_KEY: ${VNSTOCK_API_KEY:-}
+      # The Collector is the only path that logs into FiinQuant. Left unpassed,
+      # the container starts perfectly well and collects nothing — the same
+      # silent-empty failure mode the CA bundle fix exists to prevent.
+      FIINQUANT_USERNAME: ${FIINQUANT_USERNAME:-}
+      FIINQUANT_PASSWORD: ${FIINQUANT_PASSWORD:-}
+      # The symbols the system commits to collecting and serving. Empty is a
+      # legitimate Universe — the app runs and the Collector has nothing to do.
+      UNIVERSE_SYMBOLS: ${UNIVERSE_SYMBOLS:-}
+      COLLECTOR_ENABLED: ${COLLECTOR_ENABLED:-true}
+      BACKFILL_ENABLED: ${BACKFILL_ENABLED:-false}
+      # The weekly Corporate Action load. Forwarded like the other job switches
+      # so an operator can turn it off from the environment the container
+      # actually reads — the setting defaults to on, and a switch that only
+      # exists in the settings class is one a container never sees.
+      CORPORATE_ACTIONS_ENABLED: ${CORPORATE_ACTIONS_ENABLED:-true}
+      # The daily load of the benchmark's session series (docs/adr/0017).
+      # Forwarded for the same reason the switch above is: it defaults to on,
+      # and a switch that only exists in the settings class is one a container
+      # never sees.
+      MARKET_INDEX_ENABLED: ${MARKET_INDEX_ENABLED:-true}
       SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
-      # Full-market OHLCV exhausts the vnstock Guest quota and starves the UI.
-      DAILY_OHLCV_ENABLED: ${DAILY_OHLCV_ENABLED:-false}
-      DAILY_OHLCV_DELAY: ${DAILY_OHLCV_DELAY:-2.0}
-      DAILY_OHLCV_BATCH_SIZE: ${DAILY_OHLCV_BATCH_SIZE:-50}
       SECTOR_HISTORICAL_ENABLED: ${SECTOR_HISTORICAL_ENABLED:-false}
+      # Alpha Desk's LLM route (docs/adr/0014). Forwarded for the same reason as
+      # the job switches above: a switch that only exists in the settings class
+      # is one a container never sees. With ALPHA_DESK_ENABLED true, Budget
+      # Validation runs at startup and an unfundable price table refuses to
+      # boot — so these are exactly the keys an operator turning the desk on
+      # has to be able to set from outside the image.
+      ALPHA_DESK_ENABLED: ${ALPHA_DESK_ENABLED:-false}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL_BATCH: ${LLM_MODEL_BATCH:-gpt-5.6-luna}
+      LLM_MODEL_SESSION: ${LLM_MODEL_SESSION:-gpt-5.6-terra}
+      LLM_REQUEST_TIMEOUT_SECONDS: ${LLM_REQUEST_TIMEOUT_SECONDS:-120}
+      # The startup Capability Probe spends real provider tokens and refuses to
+      # boot the whole API when the route cannot answer it. Forwarded so an
+      # operator on a constrained route (expired plan, drained credits) can
+      # trade the boot-time guarantee for per-Turn failures instead.
+      LLM_CAPABILITY_PROBE_ENABLED: ${LLM_CAPABILITY_PROBE_ENABLED:-true}
+      LLM_PRICING_VERSION: ${LLM_PRICING_VERSION:-}
+      LLM_PRICING_EFFECTIVE_DATE: ${LLM_PRICING_EFFECTIVE_DATE:-}
+      LLM_PRICE_BATCH_INPUT_USD_PER_MTOK: ${LLM_PRICE_BATCH_INPUT_USD_PER_MTOK:-0}
+      LLM_PRICE_BATCH_CACHED_INPUT_USD_PER_MTOK: ${LLM_PRICE_BATCH_CACHED_INPUT_USD_PER_MTOK:-0}
+      LLM_PRICE_BATCH_CACHE_WRITE_USD_PER_MTOK: ${LLM_PRICE_BATCH_CACHE_WRITE_USD_PER_MTOK:-0}
+      LLM_PRICE_BATCH_OUTPUT_USD_PER_MTOK: ${LLM_PRICE_BATCH_OUTPUT_USD_PER_MTOK:-0}
+      LLM_PRICE_SESSION_INPUT_USD_PER_MTOK: ${LLM_PRICE_SESSION_INPUT_USD_PER_MTOK:-0}
+      LLM_PRICE_SESSION_CACHED_INPUT_USD_PER_MTOK: ${LLM_PRICE_SESSION_CACHED_INPUT_USD_PER_MTOK:-0}
+      LLM_PRICE_SESSION_CACHE_WRITE_USD_PER_MTOK: ${LLM_PRICE_SESSION_CACHE_WRITE_USD_PER_MTOK:-0}
+      LLM_PRICE_SESSION_OUTPUT_USD_PER_MTOK: ${LLM_PRICE_SESSION_OUTPUT_USD_PER_MTOK:-0}
+      LLM_BUDGET_MONTHLY_USD: ${LLM_BUDGET_MONTHLY_USD:-50}
+      LLM_BUDGET_ANALYSIS_USD: ${LLM_BUDGET_ANALYSIS_USD:-10}
+      LLM_BUDGET_TURN_USD: ${LLM_BUDGET_TURN_USD:-30}
+      LLM_BUDGET_EMERGENCY_USD: ${LLM_BUDGET_EMERGENCY_USD:-5}
+      LLM_BUDGET_EVAL_USD: ${LLM_BUDGET_EVAL_USD:-5}
+      LLM_EVAL_RUN_COST_CEILING_USD: ${LLM_EVAL_RUN_COST_CEILING_USD:-0}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      WEB_TOOLS_ENABLED: ${WEB_TOOLS_ENABLED:-false}
+      WEB_FETCH_MAX_BYTES: ${WEB_FETCH_MAX_BYTES:-524288}
+      WEB_DOMAIN_DENYLIST: ${WEB_DOMAIN_DENYLIST:-}
+      MCP_ENABLED: ${MCP_ENABLED:-false}
+      MCP_SERVERS: ${MCP_SERVERS:-{}}
+      EXECUTOR_ENABLED: ${EXECUTOR_ENABLED:-false}
+      EXECUTOR_QUEUE_DIR: /var/run/stock-massive-executor
+      EXECUTOR_TIMEOUT_SECONDS: ${EXECUTOR_TIMEOUT_SECONDS:-10}
     volumes:
       - ./apps/api/src:/code/src
       - ./apps/api/alembic:/code/alembic
+      - executor_queue:/var/run/stock-massive-executor
     ports:
       # Host port is configurable so a second worktree stack can run alongside
       - "${API_PORT:-8000}:8000"
@@ -72,6 +135,27 @@ services:
         condition: service_healthy
     networks:
       - stockmassive-network
+
+  executor:
+    build:
+      context: ./apps/executor
+      dockerfile: Dockerfile
+    environment:
+      EXECUTOR_QUEUE_DIR: /queue
+    network_mode: none
+    read_only: true
+    user: "65534:65534"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    volumes:
+      - executor_queue:/queue
+    cpus: 0.5
+    mem_limit: 256m
+    pids_limit: 64
 
   # Opt-in only. The default dev flow runs the frontend on the host so Next.js
   # gets native file watching and fast rebuilds; start this with
@@ -100,6 +184,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  executor_queue:
 
 networks:
   stockmassive-network:

@@ -2,9 +2,31 @@
 import pytest
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
+from zoneinfo import ZoneInfo
+
+from apscheduler.triggers.cron import CronTrigger
 
 from src.core.config import Settings
 from src.stocks.jobs import collect_intraday_data_job, cleanup_old_data_job
+
+
+class TestCronTrigger:
+    """Regression tests for Vietnam-time schedule registration."""
+
+    def test_vn_cron_does_not_return_a_past_fire_time(self):
+        """Anchor cron matching to ICT rather than the same digits in UTC."""
+        from src.core import scheduler
+
+        now = datetime(2026, 8, 12, 22, 31, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
+
+        with patch("src.core.scheduler.datetime") as mock_datetime:
+            mock_datetime.now.return_value = now
+            trigger = scheduler.vn_cron(hour=17, minute=0)
+
+        assert trigger.start_time == now
+        assert trigger.next() == datetime(
+            2026, 8, 13, 17, 0, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh")
+        )
 
 
 class TestCollectIntradayDataJob:
@@ -104,15 +126,20 @@ class TestCleanupOldDataJob:
         """Test successful cleanup of old data."""
         with patch("src.stocks.jobs.async_session_factory") as mock_factory:
             mock_session = AsyncMock()
-            mock_result = MagicMock()
-            mock_result.rowcount = 50
-            mock_session.execute.return_value = mock_result
+            intraday_result = MagicMock()
+            intraday_result.rowcount = 50
+            trace_result = MagicMock()
+            trace_result.rowcount = 7
+            mock_session.execute.side_effect = [intraday_result, trace_result]
             mock_factory.return_value.__aenter__.return_value = mock_session
 
             deleted_count = await cleanup_old_data_job()
 
-            assert deleted_count == 50
-            mock_session.execute.assert_called_once()
+            assert deleted_count == 57
+            assert mock_session.execute.call_count == 2
+            statements = [str(call.args[0]) for call in mock_session.execute.call_args_list]
+            assert "stock_intraday_bars" in statements[0]
+            assert "agent_tool_call" in statements[1]
             mock_session.commit.assert_called_once()
 
     @pytest.mark.asyncio
@@ -120,9 +147,11 @@ class TestCleanupOldDataJob:
         """Test cleanup when no old data exists."""
         with patch("src.stocks.jobs.async_session_factory") as mock_factory:
             mock_session = AsyncMock()
-            mock_result = MagicMock()
-            mock_result.rowcount = 0
-            mock_session.execute.return_value = mock_result
+            intraday_result = MagicMock()
+            intraday_result.rowcount = 0
+            trace_result = MagicMock()
+            trace_result.rowcount = 0
+            mock_session.execute.side_effect = [intraday_result, trace_result]
             mock_factory.return_value.__aenter__.return_value = mock_session
 
             deleted_count = await cleanup_old_data_job()
@@ -136,32 +165,62 @@ class TestSchedulerSetup:
     @pytest.mark.asyncio
     async def test_setup_scheduler_enabled(self):
         """Test scheduler setup when enabled."""
-        from src.core.scheduler import setup_scheduler
+        from src.core.scheduler import setup_scheduler, vn_cron
 
         mock_scheduler = AsyncMock()
 
-        with patch("src.core.scheduler.settings") as mock_settings:
-            mock_settings.scheduler_enabled = True
-            mock_settings.intraday_collect_hour = 15
-            mock_settings.intraday_collect_minute = 30
-            # Daily OHLCV settings (required since scheduler.py added this schedule)
-            mock_settings.daily_ohlcv_enabled = True
-            mock_settings.daily_ohlcv_hour = 20
-            mock_settings.daily_ohlcv_minute = 0
-            # Financial statements settings
-            mock_settings.financial_statements_enabled = True
-            mock_settings.financial_statements_hour = 2
-            mock_settings.financial_statements_minute = 0
-            # Sector historical settings
-            mock_settings.sector_historical_enabled = True
-            mock_settings.sector_historical_hour = 15
-            mock_settings.sector_historical_minute = 45
-
+        # A real Settings rather than a MagicMock: every field a schedule reads
+        # then has a usable value, so adding a schedule does not break this
+        # test for reasons that have nothing to do with what it asserts.
+        enabled = Settings(
+            scheduler_enabled=True,
+            profit_census_enabled=True,
+            sector_historical_enabled=True,
+            collector_enabled=True,
+            backfill_enabled=True,
+            corporate_actions_enabled=True,
+        )
+        with (
+            patch("src.core.scheduler.settings", enabled),
+            patch("src.core.scheduler.vn_cron", wraps=vn_cron) as mock_vn_cron,
+        ):
             await setup_scheduler(mock_scheduler)
 
-            # Should add 5 schedules: intraday collection, cleanup, daily_ohlcv,
-            # financial_statements, and sector_historical
-            assert mock_scheduler.add_schedule.call_count == 5
+        triggers = [call.args[1] for call in mock_scheduler.add_schedule.await_args_list]
+
+        # A direct CronTrigger call would silently restore the UTC-anchor bug
+        # for that schedule, so every time-of-day schedule must use the helper.
+        assert mock_vn_cron.call_count == sum(
+            isinstance(trigger, CronTrigger) for trigger in triggers
+        )
+
+        # The bug the helper exists for is APScheduler defaulting `start_time`
+        # from the host's clock, and it is not specific to cron: an interval
+        # trigger anchored the same way misfires the same way on a container
+        # running in UTC. So the rule every schedule answers to is that its
+        # anchor was chosen rather than inherited.
+        assert all(trigger.start_time is not None for trigger in triggers)
+
+        registered = {
+            call.kwargs.get("id")
+            for call in mock_scheduler.add_schedule.await_args_list
+        }
+        assert registered == {
+            "intraday-collection-daily",
+            "data-cleanup-daily",
+            "profit-census-weekly",
+            "profit-census-retry-daily",
+            "sector-historical-daily",
+            "universe-snapshots",
+            "universe-backfill",
+            "market-catchup-1830",
+            "market-catchup-2130",
+            "market-catchup-2300",
+            "corporate-actions-weekly",
+            "market-index",
+            "analysis-run-sweep",
+            "analysis-queue-drain",
+        }
 
     @pytest.mark.asyncio
     async def test_setup_scheduler_disabled(self):
@@ -170,9 +229,9 @@ class TestSchedulerSetup:
 
         mock_scheduler = AsyncMock()
 
-        with patch("src.core.scheduler.settings") as mock_settings:
-            mock_settings.scheduler_enabled = False
-
+        with patch(
+            "src.core.scheduler.settings", Settings(scheduler_enabled=False)
+        ):
             await setup_scheduler(mock_scheduler)
 
             # Should not add any schedules
@@ -191,7 +250,6 @@ class TestConfigSettings:
         assert settings.intraday_collect_minute == 30
         assert settings.intraday_retention_days == 30
         assert "VCB" in settings.intraday_symbols
-        assert settings.daily_ohlcv_enabled is False
         assert settings.sector_historical_enabled is False
 
     def test_scheduler_symbols_parsing(self):

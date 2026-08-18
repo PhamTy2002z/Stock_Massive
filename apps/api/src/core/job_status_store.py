@@ -114,6 +114,16 @@ class JobStatusStore:
             job.completed_at = datetime.now()
             job.error = error
 
+    def get_status(self, job_id: str) -> JobStatus | None:
+        """Return this job's last run whenever it happened.
+
+        Unlike `get_all_statuses`, this is not filtered to today: the question
+        "when did the collector last run, and how did it go" is at its most
+        useful precisely when the answer is "not since yesterday".
+        """
+        with self._jobs_lock:
+            return self._jobs.get(job_id)
+
     def get_all_statuses(self) -> list[JobStatus]:
         """Get all job statuses from today only."""
         today = datetime.now().date()

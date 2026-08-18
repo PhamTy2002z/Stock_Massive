@@ -1,27 +1,57 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono, Newsreader } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { QueryProvider } from "@/components/providers/query-provider";
 import { QueryErrorBoundary } from "@/components/providers/query-error-boundary";
+import { ConnectionGate } from "@/components/providers/connection-gate";
 import { Toaster } from "@/components/ui/sonner";
 
+/**
+ * The body face, and the one every label in the product is set in.
+ *
+ * **Vietnamese is not optional in the subset.** Latin alone leaves the whole
+ * U+1EA0–U+1EF9 range unsubsetted, so every word carrying a diacritic — which
+ * in this product is most of them — falls back mid-sentence to the system sans.
+ * The result reads as two typefaces fighting inside one label, which is exactly
+ * the tell that a font was configured for an English product.
+ */
 const inter = Inter({
-  subsets: ["latin"],
+  subsets: ["latin", "vietnamese"],
   variable: "--font-inter",
+  display: "swap",
 });
 
+/** Every figure a reader might compare against another figure. */
 const jetBrainsMono = JetBrains_Mono({
   subsets: ["latin", "vietnamese"],
   variable: "--font-jetbrains-mono",
+  display: "swap",
+});
+
+/**
+ * The one serif in the system, and it says one thing: the greeting that opens
+ * a new conversation.
+ *
+ * `opsz` is requested explicitly rather than left to the default instance. This
+ * face is drawn for a range of sizes, and the greeting is set at roughly 2rem —
+ * pinning a static cut would give it the thicker strokes and looser fit a
+ * caption-sized optical master is drawn with, which is precisely the difference
+ * between a display line and a heading.
+ */
+const newsreader = Newsreader({
+  subsets: ["latin", "vietnamese"],
+  axes: ["opsz"],
+  variable: "--font-newsreader",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "Stock Massive",
-  description: "Stock analysis platform with real-time charting",
+  title: "VisgniteAI",
+  description: "Trợ lý phân tích chứng khoán Việt Nam — HOSE, HNX, UPCOM",
   icons: {
-    icon: "/logo.png",
-    apple: "/logo.png",
+    icon: "/visgnite-mark.svg",
+    apple: "/visgnite-mark.svg",
   },
 };
 
@@ -31,24 +61,37 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="vi" suppressHydrationWarning>
-      <body className={`${inter.className} ${jetBrainsMono.variable}`}>
-        {/* forcedTheme, not just defaultTheme: next-themes persists the chosen
-            theme in localStorage, so every browser that ever loaded the old
-            dark build keeps rendering dark no matter what the default says —
-            and the app ships no theme switcher to escape with. The v3 design is
-            light; drop forcedTheme if a switcher is ever added. */}
+    /* The three faces are declared as variables on the root and consumed by
+       Tailwind's own `sans` / `mono` / `serif` families, rather than one of them
+       being pinned to `body` with a class. That way a component asking for
+       `font-sans` and a component inheriting from the body resolve to the same
+       stack — with a class on the body those two answers can differ. */
+    <html
+      lang="vi"
+      suppressHydrationWarning
+      className={`${inter.variable} ${jetBrainsMono.variable} ${newsreader.variable}`}
+    >
+      <body>
+        {/* Night is the design, not a mode: the VisgniteAI reference is drawn
+            on #191815 and every surface step above it is defined against that
+            ground, so a first visit lands there. The light theme is the same
+            system re-grounded on paper and stays a choice the user makes in
+            the toggle — which is why enableSystem is still on. */}
         <ThemeProvider
           attribute="class"
-          defaultTheme="light"
-          forcedTheme="light"
-          enableSystem={false}
+          defaultTheme="dark"
+          enableSystem
           disableTransitionOnChange
         >
           <QueryProvider>
-            <QueryErrorBoundary>
-              {children}
-            </QueryErrorBoundary>
+            {/* Outside the error boundary on purpose: an unreachable API is a
+                wait, not a fault, and the veil has to survive without the tree
+                below it unmounting. */}
+            <ConnectionGate>
+              <QueryErrorBoundary>
+                {children}
+              </QueryErrorBoundary>
+            </ConnectionGate>
             <Toaster />
           </QueryProvider>
         </ThemeProvider>

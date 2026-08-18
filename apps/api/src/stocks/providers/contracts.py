@@ -16,6 +16,18 @@ from ..schemas.common import StrictModel
 from ..shared import StockServiceError, validate_symbol
 
 
+class BatchTooLarge(Exception):
+    """The provider refused a batch for its size rather than its contents.
+
+    Raised by an adapter when the gateway gives up on a request — measured as a
+    504 — so the caller knows the same symbols asked for in smaller batches may
+    well succeed. It says nothing about the provider's health, which is why it
+    is a type of its own rather than one more provider error: a caller that
+    cannot tell the two apart either gives up on data it could have had, or
+    retries a genuine outage in halves.
+    """
+
+
 class ProviderSource(str, Enum):
     """Upstream sources approved for the internal VN30 pilot."""
 
@@ -27,23 +39,56 @@ class Capability(str, Enum):
     """Data classes with independent provider ownership."""
 
     MARKET = "market"
+    VALUATION = "valuation"
     REFERENCE = "reference"
     FUNDAMENTAL = "fundamental"
 
-
-PRIMARY_SOURCE_BY_CAPABILITY: Mapping[Capability, ProviderSource] = MappingProxyType(
-    {
-        Capability.MARKET: ProviderSource.FIINQUANT,
-        Capability.REFERENCE: ProviderSource.VNSTOCK,
-        Capability.FUNDAMENTAL: ProviderSource.VNSTOCK,
-    }
-)
+    # The market index's own session series, kept apart from ``market``
+    # (``docs/adr/0017``). An index is not a tradeable symbol: it has no board
+    # and therefore no price band, no corporate action, no foreign flow and no
+    # market capitalisation, and — the deciding reason — a **Trading Day** is
+    # ``date(max(effective_at))`` over the ``market`` Capability, so an index
+    # session stored there would help *define* the market-wide window every
+    # equity is measured against. One index row landing before the Universe's
+    # would move ``latest_trading_day`` forward and refuse every symbol for one
+    # session of missing history.
+    MARKET_INDEX = "market_index"
 
 
 class PriceUnit(str, Enum):
     """Canonical price unit used after provider normalization."""
 
     VND = "VND"
+
+
+class PriceBasis(str, Enum):
+    """What a stored session's prices mean with respect to corporate actions.
+
+    Written by the Adapter, which is the only code that knows which flag it
+    passed upstream, and never inferred from a session date: the seam between
+    the two eras is ``HistoryWindow.crossover()`` evaluated on the day a
+    symbol's Backfill ran, so each symbol's seam falls where its own Backfill
+    put it (``docs/adr/0006``).
+    """
+
+    # The numbers the exchange published for that session, permanently. Nothing
+    # rewrites them when a later action rescales the symbol; adjustment is a
+    # read-time transform over a persisted Corporate Action series.
+    RAW = "raw"
+
+    # Rescaled by the provider for every action up to the moment it answered.
+    # Not recomputable from what is stored, and it decays with every action
+    # since — which is why a window lying wholly here is refused rather than
+    # adjusted.
+    ADJUSTED_AT_SOURCE = "adjusted_at_source"
+
+
+# What a market payload written today looks like. Version 1 is the unstamped
+# era: those rows carry no Price Basis, and the one-time repair in
+# ``d1f4b7c02e93`` moves them here rather than re-collecting them, because
+# schema_version is part of uq_provider_snapshot_identity and a re-fetch under 2
+# would write a second row beside the first.
+MARKET_SCHEMA_VERSION = 2
 
 
 class ShareType(str, Enum):
@@ -54,10 +99,101 @@ class ShareType(str, Enum):
     ISSUED = "issued"
 
 
+class Exchange(str, Enum):
+    """The boards a Vietnamese equity can be listed on.
+
+    An enum rather than free text because eligibility is decided by it: the
+    Profit Ranking Census ranks HOSE and HNX and excludes UPCOM, so a board name
+    arriving in one of its other spellings — "HSX" for HOSE is in use elsewhere
+    in this codebase — would drop real companies out of the cohort without
+    anything failing.
+    """
+
+    HOSE = "HOSE"
+    HNX = "HNX"
+    UPCOM = "UPCOM"
+
+    @classmethod
+    def parse(cls, value: str) -> "Exchange":
+        """Read a provider's spelling of a board name, or refuse it."""
+        text = value.strip().upper()
+        if text == "HSX":
+            return cls.HOSE
+        return cls(text)
+
+
+# The boards a Profit Ranking Census ranks. UPCOM is excluded by ADR-0003: it
+# lists companies under lighter disclosure rules, so a profit figure there is not
+# comparable with one from the two main boards.
+RANKED_EXCHANGES: frozenset[Exchange] = frozenset({Exchange.HOSE, Exchange.HNX})
+
+
 class InternalSnapshot(StrictModel):
     """Immutable base for records crossing a provider boundary."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class SourceOwnership(InternalSnapshot):
+    """One row of the Main/Cover table measured in ``docs/adr/0002``.
+
+    ``main`` serves the capability. ``cover`` serves only the part the main
+    source cannot reach — outside the Universe, or deeper history than it is
+    granted — and is never a runtime fallback: the two sources disagree on
+    units, so silently swapping them would produce wrong numbers that look
+    right. Readers ask for the cover source by name or not at all.
+    """
+
+    main: ProviderSource
+    cover: ProviderSource | None = None
+
+    @model_validator(mode="after")
+    def validate_distinct_sources(self) -> "SourceOwnership":
+        if self.cover is not None and self.cover is self.main:
+            raise ValueError("cover source must differ from the main source")
+        return self
+
+    def owns(self, source: ProviderSource) -> bool:
+        return source is self.main or source is self.cover
+
+
+SOURCE_OWNERSHIP_BY_CAPABILITY: Mapping[Capability, SourceOwnership] = MappingProxyType(
+    {
+        Capability.MARKET: SourceOwnership(
+            main=ProviderSource.FIINQUANT,
+            cover=ProviderSource.VNSTOCK,
+        ),
+        Capability.VALUATION: SourceOwnership(
+            main=ProviderSource.FIINQUANT,
+            cover=ProviderSource.VNSTOCK,
+        ),
+        Capability.REFERENCE: SourceOwnership(main=ProviderSource.VNSTOCK),
+        Capability.FUNDAMENTAL: SourceOwnership(main=ProviderSource.VNSTOCK),
+        # No cover source, and that is the decision rather than an omission. The
+        # Cover Source's quote history is ``adjusted_at_source`` and there is no
+        # raw option (``docs/adr/0006``), but an index is never adjusted for
+        # anything — so a vnstock index series would carry a basis that asserts a
+        # rescaling nobody performed, and a window mixing it with the Main
+        # Source's would be refused as ``mixed_price_basis`` for a seam that does
+        # not exist in the market. One source, one basis, one meaning.
+        Capability.MARKET_INDEX: SourceOwnership(main=ProviderSource.FIINQUANT),
+    }
+)
+
+
+def main_source(capability: Capability) -> ProviderSource:
+    """Return the source that serves this capability by default."""
+    return SOURCE_OWNERSHIP_BY_CAPABILITY[capability].main
+
+
+def cover_source(capability: Capability) -> ProviderSource | None:
+    """Return the source covering what the main source cannot reach, if any."""
+    return SOURCE_OWNERSHIP_BY_CAPABILITY[capability].cover
+
+
+def owns_capability(capability: Capability, source: ProviderSource) -> bool:
+    """Report whether this source is allowed to carry this capability at all."""
+    return SOURCE_OWNERSHIP_BY_CAPABILITY[capability].owns(source)
 
 
 class SnapshotMetadata(InternalSnapshot):
@@ -97,19 +233,154 @@ class SymbolSnapshot(InternalSnapshot):
             raise ValueError(str(exc)) from exc
 
 
-class MarketSnapshot(SymbolSnapshot):
-    """Source-neutral hot market fields written by the FiinQuant collector."""
+class SessionSnapshot(SymbolSnapshot):
+    """One session of a priced instrument, whatever kind of instrument it is.
 
+    What a listed equity and a market index genuinely have in common, and
+    nothing else: an open, a high, a low, a close, how much changed hands, and
+    what the prices mean with respect to corporate actions. The equity-only
+    figures — the band, the foreign split, the market capitalisation — live on
+    ``MarketSnapshot`` below and are absent from ``MarketIndexSnapshot`` rather
+    than present-and-null on it, so "an index has no ceiling price" is a fact of
+    the type instead of a ``None`` indistinguishable from one nobody collected.
+
+    Every ``*_price`` and ``*_vnd`` field is denominated in ``price_unit``.
+    Traded quantity is named ``*_volume`` and traded money ``*_value_vnd``, and
+    no field carries both words: the provider reports active buy/sell as
+    quantity but foreign buy/sell as money, so mixing the two silently changes
+    the unit.
+
+    ``price_basis`` reaches the ``*_price`` fields and nothing else. Every
+    ``*_volume`` is the count of shares that changed hands in that session, and
+    every ``*_value_vnd`` the money they changed hands for, both exactly as
+    reported and on either basis: no code here rescales a quantity or a sum of
+    money, because a share-count-changing action moves the unit of the former
+    while leaving the latter alone, and the price factor is not the quantity
+    factor anyway (``docs/adr/0006``).
+    """
+
+    # Required, with no default on purpose: a payload that never says what its
+    # prices mean must fail validation loudly rather than be read as raw.
+    price_basis: PriceBasis
     price_unit: PriceUnit = PriceUnit.VND
     last_price: float | None = Field(default=None, gt=0)
-    reference_price: float | None = Field(default=None, gt=0)
     open_price: float | None = Field(default=None, gt=0)
     high_price: float | None = Field(default=None, gt=0)
     low_price: float | None = Field(default=None, gt=0)
     change_pct: float | None = None
     volume: int | None = Field(default=None, ge=0)
+    total_value_vnd: float | None = Field(default=None, ge=0)
+
+    @property
+    def company_figures(self) -> tuple[float | None, float | None]:
+        """What this session valued the company at, and its net foreign flow.
+
+        Answered by the contract rather than by whoever is reading it, because
+        only the contract knows: a session that is not a company's has neither
+        figure, and ``MarketIndexSnapshot`` does not carry the fields at all. A
+        reader testing the type instead would be a second mechanism for a
+        distinction the type already makes, and the two could disagree.
+        """
+        return None, None
+
+    @model_validator(mode="after")
+    def validate_schema_version(self) -> "SessionSnapshot":
+        """Refuse a session payload claiming a version older than the basis.
+
+        The basis was introduced at ``MARKET_SCHEMA_VERSION``, so a row that
+        carries one and calls itself version 1 describes a store state that has
+        never existed: the repair moves a row's version and its basis together,
+        and both Adapters write them together. Left unchecked, such a row would
+        be re-stamped by a repair keyed on version 1 — or worse, saved beside
+        the row it is a copy of, since ``schema_version`` is part of the store's
+        identity. Compared with ``>=`` rather than ``==`` so that a later
+        version can still be read by the contract that introduced this one.
+        """
+        if self.metadata.schema_version < MARKET_SCHEMA_VERSION:
+            raise ValueError(
+                "a session snapshot carrying a price basis cannot be at schema "
+                f"version {self.metadata.schema_version}; "
+                f"the basis exists from {MARKET_SCHEMA_VERSION} onward"
+            )
+        return self
+
+
+class MarketIndexSnapshot(SessionSnapshot):
+    """One session of a market index — a level, not a price of anything.
+
+    Deliberately ``SessionSnapshot`` and not one field more. An index is a
+    divisor-managed composite rather than a listed security, and the three
+    things a trailing window normally has to reckon with are absent from it by
+    construction rather than by collection gap:
+
+    - **No price band.** The band is a percentage of a board's reference price
+      and the index sits on no board, so there is no ceiling, no floor and no
+      limit lock to read. A session that moved 9% is the market moving, not an
+      anchor that is wrong.
+    - **No corporate action.** Reconstitutions and the entitlements of member
+      companies are absorbed into the index divisor by the exchange that
+      publishes it, so the series is already continuous and there is nothing for
+      read-time adjustment to apply. ``price_basis`` is still declared, because
+      a stored series that does not say what its numbers mean is exactly what
+      ``docs/adr/0006`` refuses — it is ``raw`` in the sense that matters here:
+      the level the exchange published for that session, permanently.
+    - **No foreign flow and no market capitalisation** for the composite as a
+      whole, and none is invented from its members.
+
+    ``symbol`` carries the index code as the provider spells it — ``VNINDEX``,
+    ``VN30`` — which passes the ordinary symbol pattern. It cannot collide with
+    an equity of the same name because the two live in different Capabilities:
+    that separation is the point of ``Capability.MARKET_INDEX``.
+    """
+
+
+class MarketSnapshot(SessionSnapshot):
+    """Source-neutral hot market fields written by the collector.
+
+    A listed equity's session: everything ``SessionSnapshot`` holds, plus the
+    figures that only exist because a company is behind the ticker.
+    ``market_cap_vnd`` is money but not traded, so it stays outside the
+    quantity/money naming pair; it is reported by the provider rather than
+    derived from ``ReferenceSnapshot.canonical_shares()``.
+    """
+
+    reference_price: float | None = Field(default=None, gt=0)
+    ceiling_price: float | None = Field(default=None, gt=0)
+    floor_price: float | None = Field(default=None, gt=0)
+    active_buy_volume: int | None = Field(default=None, ge=0)
+    active_sell_volume: int | None = Field(default=None, ge=0)
     foreign_buy_volume: int | None = Field(default=None, ge=0)
     foreign_sell_volume: int | None = Field(default=None, ge=0)
+    foreign_buy_value_vnd: float | None = Field(default=None, ge=0)
+    foreign_sell_value_vnd: float | None = Field(default=None, ge=0)
+    foreign_net_value_vnd: float | None = None
+    market_cap_vnd: float | None = Field(default=None, ge=0)
+
+    @property
+    def company_figures(self) -> tuple[float | None, float | None]:
+        """The two figures a listed company's session carries and a level does not."""
+        return self.market_cap_vnd, self.foreign_net_value_vnd
+
+    @model_validator(mode="after")
+    def validate_foreign_flow(self) -> "MarketSnapshot":
+        """Bound the net foreign flow by the gross flow it is drawn from.
+
+        The provider reports the net directly, so it is not recomputed here:
+        put-through deals and rounding legitimately move it away from buy minus
+        sell. What can never happen is a net larger than the gross, which is
+        what a unit slip between the three fields looks like.
+        """
+        if (
+            self.foreign_net_value_vnd is not None
+            and self.foreign_buy_value_vnd is not None
+            and self.foreign_sell_value_vnd is not None
+            and abs(self.foreign_net_value_vnd)
+            > self.foreign_buy_value_vnd + self.foreign_sell_value_vnd
+        ):
+            raise ValueError(
+                "foreign net value cannot exceed foreign buy plus sell value"
+            )
+        return self
 
 
 class ShareCount(InternalSnapshot):
@@ -152,14 +423,52 @@ class ReferenceSnapshot(SymbolSnapshot):
         return None
 
 
+class ValuationSnapshot(SymbolSnapshot):
+    """Ratios as published upstream, kept apart from statement-derived numbers.
+
+    These arrive already computed from the ``valuation`` main source, so they
+    are stored as reported rather than recomputed from ``FundamentalSnapshot``.
+    """
+
+    provider_pe: float | None = None
+    provider_pb: float | None = None
+
+
 class FundamentalSnapshot(SymbolSnapshot):
-    """Inputs used for app-owned valuation history."""
+    """One reporting period's statement figures, as published upstream.
+
+    One snapshot per ``(symbol, period_end)``; a collection run emits every
+    period the provider answers with, not only the newest, so the store
+    accumulates a quarterly history instead of overwriting a single row.
+    Statement lines are optional because a company can file without a cash
+    flow statement sooner than it can file without a balance sheet — an absent
+    line is an absent line, never a zero.
+
+    All flow figures (income statement, cash flow) are for that quarter alone;
+    ``trailing_12_month_net_income_vnd`` is the one derived exception and keeps
+    its own four-quarter rule. Balance figures are as at ``period_end``.
+    """
 
     period_end: date
     trailing_12_month_net_income_vnd: float | None = None
     parent_equity_vnd: float | None = None
-    provider_pe: float | None = None
-    provider_pb: float | None = None
+    # Income statement, this quarter alone.
+    revenue_vnd: float | None = None
+    gross_profit_vnd: float | None = None
+    operating_profit_vnd: float | None = None
+    pre_tax_profit_vnd: float | None = None
+    net_profit_after_tax_vnd: float | None = None
+    parent_net_profit_vnd: float | None = None
+    # Balance sheet, as at period end.
+    total_assets_vnd: float | None = None
+    total_liabilities_vnd: float | None = None
+    short_term_borrowings_vnd: float | None = None
+    long_term_borrowings_vnd: float | None = None
+    cash_and_equivalents_vnd: float | None = None
+    # Cash flow statement, this quarter alone.
+    cfo_vnd: float | None = None
+    cfi_vnd: float | None = None
+    cff_vnd: float | None = None
 
 
 class MarketDataProvider(Protocol):
@@ -170,12 +479,145 @@ class MarketDataProvider(Protocol):
     def fetch_market(self, symbols: Sequence[str]) -> Sequence[MarketSnapshot]: ...
 
 
+class MarketHistoryProvider(Protocol):
+    """Read a stretch of one symbol's session history.
+
+    Per symbol rather than per batch, unlike ``MarketDataProvider``: a window of
+    sessions is what a provider will answer for one ticker at a time, and both
+    callers — the one-time deep Backfill and the bounded Warm-up — walk symbols
+    one at a time anyway.
+
+    ``source`` is part of the contract because the two callers are not free to
+    use either provider. A Warm-up reads the Main Source only (``docs/adr/0005``)
+    while a Backfill reads the Cover Source for the deep years, and a reader that
+    cannot tell which one it was handed cannot enforce that.
+    """
+
+    source: ProviderSource
+
+    def fetch_market_history(
+        self,
+        symbol: str,
+        from_date: date,
+        to_date: date,
+    ) -> Sequence[MarketSnapshot]: ...
+
+
+class MarketIndexHistoryProvider(Protocol):
+    """Read a stretch of one market index's session history.
+
+    Separate from ``MarketHistoryProvider`` rather than the same protocol over a
+    different ticker, because the two return different contracts and the
+    difference is the point: an index answer carries no band, no foreign split
+    and no market capitalisation, and a caller that could be handed either would
+    have to test which one it got before reading a field.
+
+    ``source`` is part of the contract for the same reason it is on the market
+    history: the ``market_index`` Capability has one owner and no cover
+    (``docs/adr/0002``, ``docs/adr/0017``), so a loader handed some other source
+    has to be able to refuse it.
+    """
+
+    source: ProviderSource
+
+    def fetch_index_history(
+        self,
+        index: str,
+        from_date: date,
+        to_date: date,
+    ) -> Sequence[MarketIndexSnapshot]: ...
+
+
+class ValuationDataProvider(Protocol):
+    """Collect provider-published valuation ratios for a bounded universe.
+
+    Ratios are a daily series rather than a single current value, so the window
+    is required rather than defaulted: a collector asks for the session that
+    just closed while a backfill asks for a stretch of history, and a default
+    would quietly hand one of them the other's window.
+    """
+
+    source: ProviderSource
+
+    def fetch_valuation(
+        self,
+        symbols: Sequence[str],
+        from_date: date,
+        to_date: date,
+    ) -> Sequence[ValuationSnapshot]: ...
+
+
 class ReferenceDataProvider(Protocol):
     """Collect scheduled reference snapshots without serving user requests."""
 
     source: ProviderSource
 
     def fetch_reference(self, symbols: Sequence[str]) -> Sequence[ReferenceSnapshot]: ...
+
+
+class ListingEntry(InternalSnapshot):
+    """One company as the exchanges currently list it.
+
+    Not a ``SymbolSnapshot``: it carries no per-symbol observation metadata
+    because it is not an observation *about* a company the system follows. It is
+    a line from the market's own register, and the whole register is read at once
+    and stamped once.
+
+    ``icb_code`` and ``icb_name`` are the ICB level-2 classification, and they
+    are optional for the same reason ``company_name`` is: the register's
+    classification read is best-effort, and an entry that arrived without one
+    says "not read this time" rather than "this company has no industry". What
+    the store does with that distinction is where it matters — a refresh with no
+    classification leaves the stored one standing.
+    """
+
+    symbol: str
+    exchange: Exchange
+    is_listed: bool
+    company_name: str | None = None
+    icb_code: str | None = None
+    icb_name: str | None = None
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_symbol(cls, value: str) -> str:
+        try:
+            return validate_symbol(value)
+        except StockServiceError as exc:
+            raise ValueError(str(exc)) from exc
+
+    @field_validator("exchange", mode="before")
+    @classmethod
+    def normalize_exchange(cls, value: object) -> object:
+        return Exchange.parse(value) if isinstance(value, str) else value
+
+    @field_validator("icb_code", "icb_name")
+    @classmethod
+    def blank_is_no_classification(cls, value: str | None) -> str | None:
+        """An empty code is nothing read, never a code.
+
+        Kept as an empty string it would reach ``industry_for_icb`` as a code the
+        table does not name, and the symbol would be reported as classified into
+        an industry the profile has nothing extra for — which is a different
+        claim from "nobody has classified it".
+        """
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+
+class ListingRosterProvider(Protocol):
+    """Read the whole market's listing register in one pass.
+
+    Market-wide and unbatched by design: the Profit Ranking Census has to know
+    which companies exist before it can decide which fifty to rank, and asking
+    per symbol would mean already knowing the answer.
+    """
+
+    source: ProviderSource
+
+    def fetch_listing_roster(self) -> Sequence[ListingEntry]: ...
 
 
 class FundamentalDataProvider(Protocol):
@@ -187,3 +629,86 @@ class FundamentalDataProvider(Protocol):
         self,
         symbols: Sequence[str],
     ) -> Sequence[FundamentalSnapshot]: ...
+
+
+class CorporateActionEvent(InternalSnapshot):
+    """One row of a company's event feed, as the provider declares it.
+
+    Deliberately the provider's own vocabulary and nothing more. What kind of
+    action this is, whether it moves the share count, and what Adjustment Factor
+    it implies are all read off these fields by
+    ``src.stocks.signals.corporate_actions`` — an adapter that decided them here
+    would be one place the provider's wording and this system's arithmetic could
+    drift apart silently.
+
+    Three fields carry the whole load, and two of them are traps:
+
+    - ``exercise_ratio`` means **two different things** by ``event_code``. On an
+      ``ISS`` row it is the share ratio: 0.15 is fifteen new shares per hundred
+      held. On a ``DIV`` row it is the cash paid as a fraction of the 10,000 VND
+      par — TCB's 700 VND dividend arrives as 0.07 — and reading that as a share
+      ratio would invent a 7% bonus issue out of a cash payment.
+    - ``ex_date`` is optional because the feed leaves it null on real rows. TCB's
+      2026 bonus issue at ratio 0.6 carries only a ``public_date``.
+    - ``title`` is free text, and the only place the *kind* of a share issue
+      appears: "Stock dividend ratio 15.0%", "Rights issue ratio 10.0%", "ESOP
+      ratio 0.3%" all arrive as ``ISS``. Kept verbatim rather than parsed here,
+      so what the provider said stays readable next to what was made of it.
+    """
+
+    symbol: str
+    event_code: str
+    title: str
+    ex_date: date | None = None
+    record_date: date | None = None
+    public_date: date | None = None
+    exercise_ratio: float | None = None
+    value_per_share: float | None = None
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_symbol(cls, value: str) -> str:
+        try:
+            return validate_symbol(value)
+        except StockServiceError as exc:
+            raise ValueError(str(exc)) from exc
+
+    @field_validator("event_code")
+    @classmethod
+    def normalize_event_code(cls, value: str) -> str:
+        code = value.strip().upper()
+        if not code:
+            raise ValueError("a corporate action must carry an event code")
+        return code
+
+    @model_validator(mode="after")
+    def require_something_to_key_on(self) -> "CorporateActionEvent":
+        """Refuse a row that cannot be told apart from the next one.
+
+        Identity is ``(symbol, ex-date, event code)``, and a row with neither
+        date is not addressable under it or under the fallback the store keeps
+        for null ex-dates. Stored anyway, such a row would be written afresh on
+        every collection run — the one thing an idempotent load must not do.
+        """
+        if self.ex_date is None and self.public_date is None:
+            raise ValueError(
+                "a corporate action needs an ex-date or a public date: with "
+                "neither it cannot be stored idempotently"
+            )
+        return self
+
+
+class CorporateActionProvider(Protocol):
+    """Read one company's declared corporate actions.
+
+    Per symbol because the feed is: there is no batched form, which is what makes
+    this a slow cadence rather than part of the per-session cycle. Corporate
+    actions are annual events, so a Universe walked over days costs nothing.
+    """
+
+    source: ProviderSource
+
+    def fetch_corporate_actions(
+        self,
+        symbol: str,
+    ) -> Sequence[CorporateActionEvent]: ...

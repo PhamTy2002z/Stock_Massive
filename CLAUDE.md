@@ -5,7 +5,7 @@ Nền tảng dữ liệu chứng khoán Việt Nam (HOSE/HNX/UPCOM): `apps/api` 
 ## Cấu trúc
 
 - `apps/api` — FastAPI + SQLAlchemy + Alembic. Domain ở `src/stocks/` (`market`, `price`, `trading`, `financial`, `analytics`, `company`, `providers`); auth ở `src/auth/`; hạ tầng dùng chung (config, database, cache, redis, scheduler, vnstock client) ở `src/core/`.
-- `apps/web` — Next.js App Router + TypeScript, mã ở `src/` với route group `(auth)` / `(dashboard)`.
+- `apps/web` — Next.js App Router + TypeScript, mã ở `src/`. Sản phẩm là **một màn hình duy nhất** ở `/`: shell 3 vùng trong `src/components/shell/` (sidebar · cột chính · inspector phải). Ba view `chat` / `board` / `new` là state của shell chứ không phải route — đổi view không được làm mất câu đang gõ dở. Chỉ `(auth)` và `/settings` là trang riêng.
 - `docker-compose.yml` — stack dev: `db` (Postgres), `redis`, `api`; `web` chỉ lên khi bật profile `full`.
 
 Mỗi app tự quản dependency riêng — `apps/web` có `package.json` + lockfile riêng, script ở root chỉ là wrapper quanh `docker compose` và `pnpm --dir apps/web`. Root lockfile rỗng; đây không phải pnpm workspace.
@@ -17,19 +17,22 @@ Nguồn sự thật cho lệnh: `package.json` ở root, `apps/api/Makefile`, `a
 - `pnpm dev` chạy `db`/`redis`/`api` trong Docker còn web trên host, để Next.js có file watching native. Cần web trong container thì `pnpm dev:full`.
 - `make dev` ở `apps/api` chạy backend thẳng trên máy khi cần debug Python; `db`/`redis` vẫn lấy từ Docker (`pnpm dev:api:detach`).
 - Áp migration trong container bằng `pnpm db:migrate`. Tạo revision thì chạy `alembic revision --autogenerate -m "..."` tại `apps/api` với DB đang lên.
-- vnstock là điểm nghẽn quota: 20 req/phút khi thiếu `VNSTOCK_API_KEY`, 60 khi có. Các job nặng (`DAILY_OHLCV_ENABLED`, `SECTOR_HISTORICAL_ENABLED`) mặc định tắt vì lý do này.
+- vnstock là điểm nghẽn quota: 20 req/phút khi thiếu `VNSTOCK_API_KEY`, 60 khi có. Các job nặng (`SECTOR_HISTORICAL_ENABLED`, `BACKFILL_ENABLED`) mặc định tắt vì lý do này.
 - Chạy nhiều worktree song song: đặt `API_PORT`/`WEB_PORT` khác nhau, và sửa `CORS_ORIGINS` cho khớp origin mới của web.
+- `pnpm test:e2e` tại `apps/web` là cổng nghiệm thu streaming của Alpha Desk: Playwright tự dựng FastAPI thật (`apps/api/tests/e2e/server.py`) và bản build production của Next, rồi lái bằng Chromium. Cần DB đã migrate và `pnpm exec playwright install chromium`. Chi tiết ở `docs/streaming-topology.md`.
 
 ## Quy tắc bắt buộc
 
 - **Nhánh** — `develop` là nhánh tích hợp; mọi tính năng/sửa lỗi tách nhánh riêng từ `develop`, làm trong git worktree, rồi merge ngược về `develop`. `main` được protected và chỉ nhận merge từ `develop`.
 - **Cổng kiểm tra trước khi báo xong** — backend: `make test` tại `apps/api`. Frontend: `pnpm type-check`, `pnpm lint`, `pnpm test`, `pnpm build` tại `apps/web`. Phần nào không chạy được thì nêu rõ phần đó.
 - **Commit** — Conventional Commits, mô tả thay đổi kỹ thuật. Giữ ngoài index: secrets, `.env`, dữ liệu nhạy cảm, dump database, file sinh tự động.
+- **Ngôn ngữ của artifact** — issue, comment, pull request (title + body), spec, ticket: viết bằng tiếng Anh. Trao đổi trực tiếp với người dùng vẫn bằng tiếng Việt.
+- **Eval gate** — pull request chạm System Prompt Contract, tool schema/`tool_catalog_version`, Signal Registry, Analysis Field Profile, `llm_model_*`, agent loop, hoặc Recommendation Validator **bắt buộc đính Eval Report** (run id, điểm từng category, diff so với baseline) trong body và không merge vào `develop` nếu thiếu. PR chỉ chạm UI, Collector hoặc Widget rendering thì không cần. Toàn bộ quy tắc: `docs/agents/eval-battery.md`.
 
 `apps/api/AGENTS.md` do vnstock tự sinh (hướng dẫn dựng môi trường vnstock), không phải quy ước của repo này.
 
 ## Agent skills
 
-- **Issue tracker** — GitHub Issues của `PhamTy2002z/Stock_Massive`, thao tác qua `gh`. Chi tiết: `docs/agents/issue-tracker.md`.
-- **Triage labels** — 5 nhãn canonical mặc định: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. Chi tiết: `docs/agents/triage-labels.md`.
-- **Domain docs** — single-context: `CONTEXT.md` + `docs/adr/` ở root, do `/matt:domain-modeling` tạo khi có thuật ngữ hoặc quyết định cần chốt. Chi tiết: `docs/agents/domain.md`.
+- **Issue tracker** — GitHub Issues của `PhamTy2002z/Stock_Massive`, thao tác qua `gh`. 5 nhãn triage canonical: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`.
+- **Domain docs** — `CONTEXT.md` (từ vựng chung) + `docs/adr/` (quyết định đã chốt) ở root; đọc trước khi đặt tên hoặc dịch chuyển ranh giới.
+- **Eval Battery** — `make eval` tách khỏi `make test` vì nó tốn tiền; chạy trên `EVAL_DATABASE_URL` riêng và không bao giờ ghi vào store của dev/prod. Quy trình đóng băng lại Eval Fixture: `docs/agents/eval-battery.md`.

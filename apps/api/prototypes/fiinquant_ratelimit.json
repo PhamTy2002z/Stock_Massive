@@ -1,0 +1,27 @@
+{
+  "Vòng A — 1 mã mỗi lời gọi": {
+    "mã mỗi lời gọi": 1,
+    "số lời gọi thành công": 29,
+    "tổng số mã đã xin": 29,
+    "giây đã chạy": 71.5,
+    "lời gọi mỗi phút": 24.3,
+    "thời gian mỗi lời gọi (s)": {
+      "nhanh nhất": 1.71,
+      "chậm nhất": 3.3
+    },
+    "dừng vì": "hết cửa sổ đo, chưa bị chặn"
+  },
+  "Vòng B — 50 mã mỗi lời gọi": {
+    "mã mỗi lời gọi": 50,
+    "số lời gọi thành công": 15,
+    "tổng số mã đã xin": 750,
+    "giây đã chạy": 74.6,
+    "lời gọi mỗi phút": 12.1,
+    "thời gian mỗi lời gọi (s)": {
+      "nhanh nhất": 4.68,
+      "chậm nhất": 5.54
+    },
+    "dừng vì": "hết cửa sổ đo, chưa bị chặn"
+  },
+  "kết luận": "ĐẾM THEO LỜI GỌI — số mã trong một lời gọi không ảnh hưởng hạn mức"
+}
