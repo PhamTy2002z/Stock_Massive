@@ -24,6 +24,7 @@ from src.stocks.signals import (
     MACD,
     MEAN_REVERSION_Z,
     MOMENTUM_RANK,
+    PRICE_ZONE,
     REALIZED_VOLATILITY,
     RELATIVE_STRENGTH,
     ROE_PERCENTILE,
@@ -52,6 +53,7 @@ from .fields import (
 from .scope import structured_universe_refusal
 
 RISK_FIELDS = (
+    PRICE_ZONE,
     REALIZED_VOLATILITY,
     DRAWDOWN_VERSUS_BENCHMARK,
     SHARPE,
@@ -104,7 +106,10 @@ class ComputationTools:
         return (
             self._registration(
                 "risk_metrics",
-                "Read registered realized-volatility, drawdown and risk-adjusted-return fields.",
+                (
+                    "Read the registered ordinary price zone, realized-volatility, "
+                    "drawdown and risk-adjusted-return fields."
+                ),
                 RISK_FIELDS,
                 _object_schema({"symbol": symbol}, ("symbol",)),
             ),
