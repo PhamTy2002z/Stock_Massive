@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import httpx
@@ -27,6 +28,7 @@ from .config import LLMConfig
 from .errors import (
     AuthUnavailable,
     GatewayTimeout,
+    RouteRateLimited,
     LLMError,
     ModelRefusal,
     classify_status,
@@ -85,7 +87,9 @@ class OpenAICompatibleTransport:
             ) as response:
                 if response.status_code >= 400:
                     body = (await response.aread()).decode("utf-8", "replace")
-                    raise self._classified(response.status_code, body)
+                    raise self._classified(
+                        response.status_code, body, response.headers
+                    )
                 async for line in response.aiter_lines():
                     chunk = _decode_sse_line(line)
                     if chunk is not None:
@@ -134,7 +138,9 @@ class OpenAICompatibleTransport:
             raise self._timeout(exc) from exc
 
         if response.status_code >= 400:
-            raise self._classified(response.status_code, response.text)
+            raise self._classified(
+                response.status_code, response.text, response.headers
+            )
 
         try:
             payload = response.json()
@@ -205,10 +211,17 @@ class OpenAICompatibleTransport:
 
     # -- failures ---------------------------------------------------------
 
-    def _classified(self, status_code: int, body: str) -> LLMError:
-        error = classify_status(status_code, body[:500])
+    def _classified(
+        self,
+        status_code: int,
+        body: str,
+        headers: Mapping[str, str] | None = None,
+    ) -> LLMError:
+        error = classify_status(status_code, body[:500], headers)
         if isinstance(error, AuthUnavailable):
             llm_metrics().record_auth_failure(str(error))
+        elif isinstance(error, RouteRateLimited):
+            llm_metrics().record_rate_limit(str(error))
         elif isinstance(error, GatewayTimeout):
             llm_metrics().record_gateway_timeout(str(error))
         return error
