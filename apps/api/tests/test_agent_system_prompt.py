@@ -187,7 +187,7 @@ def test_the_hash_is_exported_and_changes_when_the_prose_changes():
     # Widget selection protocol (#89). Version 1.3.0 injected today's date and
     # distinguished it from the Trading Day; 1.4.0 classifies downgraded,
     # external, and derived evidence without weakening the Recommendation Gate.
-    assert PROMPT_VERSION == "1.6.0"
+    assert PROMPT_VERSION == "1.6.1"
     assert PROMPT_HASH == contract_hash()
 
     edited = tuple(
