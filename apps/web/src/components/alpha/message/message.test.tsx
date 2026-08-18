@@ -96,7 +96,11 @@ function view(overrides: Partial<AssistantView> = {}): AssistantView {
 }
 
 describe("how an answer arrives", () => {
-  it("labels an unverified prose figure without hiding its block", () => {
+  it("keeps an unverified figure's record off the answer", () => {
+    // The grounding pass still records the figures it could not tie to
+    // evidence — it is what withholds a recommendation — but the reader was
+    // shown that record as a row of bare literals, which reads as a defect in
+    // the answer rather than as provenance.
     render(
       <AssistantMessage
         view={view({
@@ -111,8 +115,8 @@ describe("how an answer arrives", () => {
     )
 
     expect(screen.getByText("Chủ tịch được bổ nhiệm năm 2024.")).toBeInTheDocument()
-    expect(screen.getByRole("note")).toHaveTextContent("Số liệu chưa kiểm chứng")
-    expect(screen.getByRole("note")).toHaveTextContent("2024")
+    expect(screen.queryByRole("note")).not.toBeInTheDocument()
+    expect(screen.queryByText(/chưa kiểm chứng/)).not.toBeInTheDocument()
   })
 
   it("names an external source and when it was retrieved", () => {
@@ -234,6 +238,36 @@ describe("the search-progress trail", () => {
     )
 
     expect(container).toBeEmptyDOMElement()
+  })
+
+  it("folds itself once the answer starts arriving under it", () => {
+    // The lookups stop being the thing on screen the moment the first block
+    // lands; leaving the trail open across the whole stream keeps the machinery
+    // above the answer it was gathered for.
+    const { rerender } = render(
+      <SearchProgress
+        steps={[{ phase: "searching", detail: { queries: ["tin tức AI"] } }]}
+        activity="searching"
+        defaultOpen
+      />,
+    )
+
+    expect(screen.getByText("tin tức AI")).toBeInTheDocument()
+
+    rerender(
+      <SearchProgress
+        steps={[{ phase: "searching", detail: { queries: ["tin tức AI"] } }]}
+        activity={null}
+        answered
+        defaultOpen
+      />,
+    )
+
+    expect(screen.queryByText("tin tức AI")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Tiến trình tìm kiếm/ })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    )
   })
 
   it("folds itself the moment the Turn ends, however it was left open", () => {

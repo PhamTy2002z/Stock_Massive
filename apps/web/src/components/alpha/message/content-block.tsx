@@ -1,7 +1,6 @@
 "use client"
 
 import type { ContentBlock } from "@/lib/alpha-desk/types"
-import { UNVERIFIED_FIGURES_COPY } from "@/lib/alpha-desk/copy"
 import { cn } from "@/lib/utils"
 import { CitationChips } from "./citation-chips"
 import { Markdown } from "./markdown"
@@ -23,6 +22,14 @@ import { Markdown } from "./markdown"
  * **No tool name reaches this component's DOM.** A citation carries one, and it
  * is deliberately not read: the trace is an audit surface, not part of the
  * answer (`docs/specs/0002` §9).
+ *
+ * `block.unverified_figures` is carried and deliberately not rendered, the same
+ * way `AssistantView.riskNotice` is. The grounding pass still records which
+ * figures it could not tie to evidence — that is what withholds a
+ * recommendation block — but the reader was shown that record as a list of bare
+ * literals ("4, 1.000, 2026"), which reads as a defect in the answer rather
+ * than as provenance. The downgrade stays server-side, where it decides
+ * something.
  */
 export function ContentBlockView({
   block,
@@ -64,17 +71,6 @@ export function ContentBlockView({
           ) : undefined
         }
       />
-
-      {(block.unverified_figures?.length ?? 0) > 0 && (
-        <p
-          role="note"
-          className="rounded-lg border border-caution/35 bg-caution/5 px-2.5 py-2 text-meta text-caution"
-        >
-          <span className="font-semibold">{UNVERIFIED_FIGURES_COPY.label}.</span>{" "}
-          {UNVERIFIED_FIGURES_COPY.detail(block.unverified_figures ?? [])}
-        </p>
-      )}
-
     </div>
   )
 }

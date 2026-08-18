@@ -45,12 +45,14 @@ export function DraftMessage({
       {/* Above the blocks and open while the work happens: the reader is
           watching a list grow, and a trail under the answer would put the
           growing part below the thing they are waiting for. It folds itself
-          away when the canonical message replaces this draft. */}
+          away as soon as the first block lands, because from that moment the
+          answer is what the reader is here for. */}
       {showsActivity && (
         <SearchProgress
           steps={entry.steps}
           activity={livePhase}
           ending={running ? null : entry.phase === "completed" ? "done" : "stopped"}
+          answered={entry.blocks.length > 0}
           defaultOpen
         />
       )}
