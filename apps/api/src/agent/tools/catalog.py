@@ -23,6 +23,7 @@ from src.core.provider_access import store_only_execution
 
 from .fields import (
     REGISTERED_FIELD_VALUES_KEY,
+    REGISTERED_FIELDS_KEY,
     SHARED_WINDOW_HEALTH_KEY,
     RefusedRegisteredField,
     registered_field_schema,
@@ -282,7 +283,7 @@ class ToolCatalog:
         """Make the Signal Registry the only route for computed field values."""
 
         payload = dict(result)
-        if "registered_fields" in payload:
+        if REGISTERED_FIELDS_KEY in payload:
             raise ValueError(
                 "tool callables cannot serialize registered_fields themselves"
             )
@@ -309,7 +310,7 @@ class ToolCatalog:
                 f"tool {registration.name} did not declare shared Window Health"
             )
         if answers:
-            payload["registered_fields"] = {
+            payload[REGISTERED_FIELDS_KEY] = {
                 name: (
                     serialize_refused_field(answer)
                     if isinstance(answer, RefusedRegisteredField)

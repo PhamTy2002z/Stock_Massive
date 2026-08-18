@@ -84,13 +84,17 @@ from .context import (
 )
 from .events import Activity, TurnPublisher, append_step
 from .grounding import (
+    BLOCKED_TURN_NOTICE,
     GROUNDING_FAILED,
+    REPAIR_FALLBACK,
+    REPAIR_GUIDANCE,
     BlockKind,
     Citation,
     GroundingFailure,
     RecommendationValidator,
     ReleasedBlock,
     TraceIndex,
+    repair_instruction,
 )
 from .progress import (
     ProgressSource,
@@ -135,6 +139,28 @@ ROUNDS_EXHAUSTED_NOTE = (
 # funds it — cannot disagree about what it costs.
 ROUNDS_EXHAUSTED_MESSAGE = Message(role=Role.SYSTEM, content=ROUNDS_EXHAUSTED_NOTE)
 ROUNDS_EXHAUSTED_TOKENS = estimate_tokens(ROUNDS_EXHAUSTED_MESSAGE)
+
+# The Gate's one piece of feedback, and the only one there will be. It names the
+# condition and the rule; ``grounding.repair_instruction`` guarantees it carries
+# no figure, so the rewrite cannot be a restatement of a number the model was
+# just told about.
+REPAIR_NOTE = (
+    "The answer you just wrote was withheld before the reader saw it. {guidance} "
+    "Rewrite the whole answer once, with every figure referenced. This is the "
+    "only rewrite you get: a figure you still cannot reference is a figure you "
+    "do not state."
+)
+# Priced at its longest wording rather than at the one this Turn happens to
+# need, for the same reason the rounds-exhausted note is built once: the budget
+# that funds the call and the context ceiling it is constructed against must not
+# disagree with the message that actually goes out. A guidance line added later
+# is measured here automatically.
+REPAIR_NOTE_TOKENS = max(
+    estimate_tokens(
+        Message(role=Role.SYSTEM, content=REPAIR_NOTE.format(guidance=guidance))
+    )
+    for guidance in (*REPAIR_GUIDANCE.values(), REPAIR_FALLBACK)
+)
 
 TOOL_EXHAUSTED_MESSAGE = (
     "this tool has already failed twice in this Turn and will not be called again; "
@@ -417,6 +443,13 @@ class _TurnState:
     widget_refusals: list[Mapping[str, Any]] = field(default_factory=list)
     request_id: str | None = None
     grounding_failure_code: str | None = None
+    # The one rewrite the Gate allows, and whether it has been spent. A blocked
+    # block is usually a misplaced marker rather than an invented figure, and a
+    # Turn that ends on one releases nothing at all; a single retry costs one of
+    # the eight rounds and is never offered twice, so a model that cannot fix
+    # its own reference still ends the Turn instead of looping on it.
+    repair_note: str | None = None
+    repair_used: bool = False
     # Which Gate condition dropped a recommendation the Turn answered around.
     # Separate from ``grounding_failure_code``, which is the condition that
     # ended a Turn: a degrade is a recommendation withheld, not a Turn refused.
@@ -617,15 +650,25 @@ class AgentLoop:
                 )
 
             final = round_index == MAX_TOOL_ROUNDS
-            context = self._construct(system_prompt, request, state, final)
+            repairing = state.repair_note is not None
+            context = self._construct(
+                system_prompt, request, state, final, repairing=repairing
+            )
             state.summary_needed = state.summary_needed or context.summary_needed
             messages = list(context.messages)
             if final:
                 messages.append(ROUNDS_EXHAUSTED_MESSAGE)
+            if repairing:
+                # Spent on the call it funds, so a model that answers the note
+                # with tool calls does not carry it into a third attempt.
+                messages.append(Message(role=Role.SYSTEM, content=state.repair_note))
+                state.repair_note = None
 
             await self._activity(Activity.ANALYZING, state)
             try:
-                completion = await self._complete(request, messages, context, final)
+                completion = await self._complete(
+                    request, messages, context, final, repairing=repairing
+                )
             except TimeoutError:
                 # Its own reason, and its own ceiling: the transport's timeout
                 # covers one HTTP request, this one covers the call including
@@ -680,6 +723,12 @@ class AgentLoop:
             await self._save(state)
 
             if final or not completion.tool_calls:
+                # The Gate's one rewrite, and only while a round is left to
+                # spend on it: on the final round there is no call to carry the
+                # note, so the Turn ends the way it always did.
+                if not final and self._repair(request, state):
+                    await self._save(state)
+                    continue
                 return await self._terminal(
                     request, TurnStatus.COMPLETE, None, state, rounds_exhausted=final
                 )
@@ -735,6 +784,8 @@ class AgentLoop:
         request: TurnRequest,
         state: _TurnState,
         final: bool,
+        *,
+        repairing: bool = False,
     ) -> ConstructedContext:
         """Meet the constructed-context ceiling, note and all."""
         budget = self._budget
@@ -742,6 +793,8 @@ class AgentLoop:
             budget = replace(
                 budget, max_tokens=budget.max_tokens - ROUNDS_EXHAUSTED_TOKENS
             )
+        if repairing:
+            budget = replace(budget, max_tokens=budget.max_tokens - REPAIR_NOTE_TOKENS)
         transcript = Transcript(
             system_prompt=system_prompt,
             turns=(
@@ -762,6 +815,8 @@ class AgentLoop:
         messages: Sequence[Message],
         context: ConstructedContext,
         final: bool,
+        *,
+        repairing: bool = False,
     ) -> Completion:
         """One model call, reserved before dispatch and reconciled after.
 
@@ -773,7 +828,8 @@ class AgentLoop:
             lane=self._spend.lane,
             workload=Workload.SESSION,
             input_tokens=context.estimated_tokens
-            + (ROUNDS_EXHAUSTED_TOKENS if final else 0),
+            + (ROUNDS_EXHAUSTED_TOKENS if final else 0)
+            + (REPAIR_NOTE_TOKENS if repairing else 0),
             output_tokens=self._max_output_tokens,
         )
         return await asyncio.wait_for(
@@ -978,10 +1034,12 @@ class AgentLoop:
 
         A block that cannot be proven overrides the status it was heading for:
         the Turn becomes ``incomplete`` with the stable ``grounding_failed``,
-        whatever it was about to be.
+        whatever it was about to be. When it was the *only* block, the reader
+        still gets :data:`BLOCKED_TURN_NOTICE` — an empty answer under a finished
+        search trail says nothing except that the product failed.
         """
         try:
-            selections = self._release(request, state)
+            selections = self._prove(request, state)
         except GroundingFailure as failure:
             logger.info(
                 "Turn %s blocked a content block: %s",
@@ -991,7 +1049,11 @@ class AgentLoop:
             state.grounding_failure_code = failure.code
             status, terminal_reason = TurnStatus.INCOMPLETE, GROUNDING_FAILED
             rounds_exhausted = False
+            self._publish_blocks(state)
+            if not state.blocks:
+                self._publish_blocked_notice(state)
         else:
+            self._publish_blocks(state)
             # Only a Turn whose text survived the Gate gets a picture. A blocked
             # answer has nothing to illustrate, and illustrating it anyway would
             # put the figure back on screen that the Gate just kept off it.
@@ -1038,19 +1100,24 @@ class AgentLoop:
             ),
         )
 
-    def _release(
+    def _prove(
         self, request: TurnRequest, state: _TurnState
     ) -> tuple[WidgetSelection, ...]:
-        """Prove each block, then emit it. Never the other way round.
+        """Prove each block into ``state.blocks``. Publishes nothing.
 
-        The ordering is not a convention this function happens to follow: the
-        publisher is reached only from inside the loop below, after
-        :meth:`RecommendationValidator.validate` has returned. A block that
-        fails raises out of here with nothing published, so there is no state in
-        which an invalid block was displayed and later retracted.
+        Proof is separated from publication because the Gate is now allowed one
+        piece of feedback (:data:`REPAIR_NOTE`): the loop has to know whether an
+        answer holds up *before* any of it is on screen, or a rewrite would
+        publish the surviving blocks of the first attempt twice. Nothing here
+        reaches the publisher, so there is no state in which an invalid block was
+        displayed and later retracted — and no state in which a block was
+        displayed before the answer it belongs to was withdrawn.
 
-        Blocks already released stay released. That is the point of failing per
-        block rather than per answer — the user keeps the part that was proven.
+        The blocks proven before a failing one stay in ``state.blocks``, and
+        :meth:`_publish_blocks` still emits them. That is the point of failing
+        per block rather than per answer — the user keeps the part that was
+        proven. Called again for the rewrite, it starts from an empty list: the
+        second answer replaces the first one whole.
 
         Widget markers come out *before* the split, and that ordering is load
         bearing twice over: the Recommendation Validator never sees one, so a
@@ -1059,6 +1126,7 @@ class AgentLoop:
         already been removed from what the reader sees, so a dropped Widget
         leaves no stray marker in the prose.
         """
+        state.blocks.clear()
         if not state.text:
             return ()
         answer, selections = extract_selections(state.text)
@@ -1089,9 +1157,59 @@ class AgentLoop:
                     citations=(),
                 )
             state.blocks.append(block)
-            if self._publisher is not None:
-                self._publisher.content_block(block.as_wire())
         return selections
+
+    def _publish_blocks(self, state: _TurnState) -> None:
+        """Emit what was proven, in the order it was written."""
+        if self._publisher is None:
+            return
+        for block in state.blocks:
+            self._publisher.content_block(block.as_wire())
+
+    def _publish_blocked_notice(self, state: _TurnState) -> None:
+        """Say that nothing could be proven, rather than saying nothing at all.
+
+        Only when the Gate left the answer empty. A Turn that released even one
+        block has already told the reader something, and appending this under it
+        would read as a retraction of what did pass.
+        """
+        notice = ReleasedBlock(
+            text=BLOCKED_TURN_NOTICE,
+            kind=BlockKind.PROSE,
+            # Backend-authored and figure-free, exactly like the degraded
+            # recommendation notice: nothing to cite, nothing unattributed.
+            citations=(),
+        )
+        state.blocks.append(notice)
+        if self._publisher is not None:
+            self._publisher.content_block(notice.as_wire())
+
+    def _repair(self, request: TurnRequest, state: _TurnState) -> bool:
+        """Whether the Gate blocks this answer and one rewrite is still owed.
+
+        Proving twice — here and again in :meth:`_terminal` — costs a regex pass
+        over prose the Turn already holds, and buys the property that matters:
+        the terminal path stays the only place that publishes, so no answer is
+        ever half on screen while its rewrite is being written.
+        """
+        if state.repair_used:
+            return False
+        try:
+            self._prove(request, state)
+        except GroundingFailure as failure:
+            if failure.degradable:  # pragma: no cover - degradables never raise
+                return False
+            logger.info(
+                "Turn %s asked the model to rewrite a blocked block: %s",
+                request.request_message_id,
+                failure,
+            )
+            state.repair_used = True
+            state.repair_note = REPAIR_NOTE.format(
+                guidance=repair_instruction(failure.code)
+            )
+            return True
+        return False
 
     async def _release_widgets(
         self,
