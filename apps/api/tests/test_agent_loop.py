@@ -11,7 +11,10 @@ from types import MappingProxyType
 import pytest
 
 from src.agent.context import ContextBudget
+from src.core.llm.budget import TURN_OUTPUT_TOKENS
 from src.agent.loop import (
+    ANSWER_TRUNCATED,
+    DEFAULT_MAX_OUTPUT_TOKENS,
     EXTERNAL_TOOL_EXHAUSTED_MESSAGE,
     MAX_EXTERNAL_TOOL_CALLS,
     MAX_TOOL_ROUNDS,
@@ -185,8 +188,40 @@ def loop(client, tools=None, **overrides) -> AgentLoop:
 # --- rounds ---------------------------------------------------------------
 
 
+def test_the_turn_cannot_outspend_what_it_was_admitted_against():
+    # Admission funds a Turn against one aggregate output ceiling while the loop
+    # spends it one call at a time. Raising the per-call ceiling or the number of
+    # rounds without lowering the other is how a Turn quietly outgrows the cost
+    # Budget Validation proved against the price table.
+    assert (MAX_TOOL_ROUNDS + 1) * DEFAULT_MAX_OUTPUT_TOKENS <= TURN_OUTPUT_TOKENS
+
+
 @pytest.mark.asyncio
-async def test_a_turn_runs_at_most_eight_rounds_then_answers_with_tool_choice_none():
+async def test_a_truncated_completion_ends_the_turn_instead_of_passing_as_an_answer():
+    # A reasoning route bills its thinking against the same per-call ceiling, so
+    # it can spend the whole allowance and return the first few words of a reply.
+    # Released as a complete Turn, that fragment reads as the whole answer.
+    client = FakeClient([
+        Completion(
+            model=SESSION_MODEL,
+            text="The user",
+            finish_reason="length",
+            usage=Usage(input_tokens=9_773, output_tokens=2_000),
+        )
+    ])
+
+    outcome = await loop(client).run(turn_request())
+
+    assert outcome.status is TurnStatus.INCOMPLETE
+    assert outcome.terminal_reason == ANSWER_TRUNCATED
+    # What did arrive is kept: the reader sees the fragment and the sentence
+    # saying it stopped, rather than an empty Turn.
+    assert outcome.text == "The user"
+
+
+
+@pytest.mark.asyncio
+async def test_a_turn_runs_its_rounds_then_answers_with_tool_choice_none():
     client = FakeClient([wants("get_analysis", prefix=f"r{n}") for n in range(20)])
 
     outcome = await loop(client).run(turn_request())
@@ -201,7 +236,7 @@ async def test_a_turn_runs_at_most_eight_rounds_then_answers_with_tool_choice_no
     note = client.requests[-1].messages[-1]
     assert note.role is Role.SYSTEM
     assert note.content == ROUNDS_EXHAUSTED_NOTE
-    assert "8 lookup rounds" in note.content
+    assert f"{MAX_TOOL_ROUNDS} lookup rounds" in note.content
 
 
 @pytest.mark.asyncio

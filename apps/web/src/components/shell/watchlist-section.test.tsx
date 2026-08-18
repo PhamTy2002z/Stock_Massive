@@ -13,16 +13,22 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 
 import type { Rail, RailEntry, RunFailure } from "@/lib/alpha"
 
 const rail = { data: undefined as Rail | undefined, isPending: false }
+const add = {
+  mutate: vi.fn(),
+  isPending: false,
+  isError: false,
+  error: null as Error | null,
+}
 
 vi.mock("@/hooks/use-watchlist-rail", () => ({
   useWatchlistRail: () => rail,
   useRailMutations: () => ({
-    add: { mutate: vi.fn(), isError: false, error: null },
+    add,
     remove: { mutate: vi.fn() },
   }),
 }))
@@ -68,7 +74,19 @@ afterEach(cleanup)
 beforeEach(() => {
   rail.data = undefined
   rail.isPending = false
+  add.mutate.mockReset()
+  add.isPending = false
+  add.isError = false
+  add.error = null
 })
+
+/** Open the add field and type a code into it, as a user does. */
+function typeCode(code: string) {
+  fireEvent.click(screen.getByRole("button", { name: "Thêm mã" }))
+  fireEvent.change(screen.getByLabelText("Tìm mã để thêm vào danh sách theo dõi"), {
+    target: { value: code },
+  })
+}
 
 describe("WatchlistSection", () => {
   it("says the Collector is being waited on, not that the symbol is queued", () => {
@@ -106,5 +124,41 @@ describe("WatchlistSection", () => {
         name: "Chưa có phiên nào chốt dữ liệu nên chưa dựng Analysis.",
       }),
     ).toBeTruthy()
+  })
+
+  it("adds the typed code when the field is submitted", () => {
+    seat([])
+    render(<WatchlistSection />)
+    typeCode("stb")
+
+    fireEvent.click(screen.getByRole("button", { name: "Thêm mã đang gõ" }))
+
+    expect(add.mutate).toHaveBeenCalledWith("STB", expect.anything())
+  })
+
+  it("keeps the typed code until the add succeeds", () => {
+    seat([])
+    render(<WatchlistSection />)
+    typeCode("stb")
+
+    fireEvent.click(screen.getByRole("button", { name: "Thêm mã đang gõ" }))
+
+    // The mutation is still open, so nothing has succeeded: an emptied field
+    // here would leave a refusal describing a code the user can no longer see.
+    expect(
+      screen.getByLabelText<HTMLInputElement>("Tìm mã để thêm vào danh sách theo dõi").value,
+    ).toBe("stb")
+  })
+
+  it("reports the wait while the add is in flight", () => {
+    seat([])
+    add.isPending = true
+    render(<WatchlistSection />)
+    fireEvent.click(screen.getByRole("button", { name: "Thêm mã" }))
+
+    expect(screen.getByRole("button", { name: "Đang thêm mã" })).toBeTruthy()
+    expect(
+      screen.getByLabelText<HTMLInputElement>("Tìm mã để thêm vào danh sách theo dõi").disabled,
+    ).toBe(true)
   })
 })

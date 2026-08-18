@@ -116,14 +116,32 @@ logger = logging.getLogger(__name__)
 
 # ``docs/specs/0003`` §6: counted by round, so a round that fans out to five
 # tools costs the same one step as a round that calls one.
-MAX_TOOL_ROUNDS = 8
+MAX_TOOL_ROUNDS = 4
 
 # ``docs/adr/0008``: in-process is correct because uvicorn runs a single worker.
 SESSION_CONCURRENCY = 3
 
-# Well inside the ≤20,000 aggregate output the Turn is admitted against, so a
-# Turn has room for several rounds rather than one expensive one.
-DEFAULT_MAX_OUTPUT_TOKENS = 2_000
+# What one call may produce, reasoning included — a reasoning model bills its
+# hidden thinking against this same ceiling, so a per-call budget that only fits
+# an answer leaves the model no room to reach one. At 2,000 a route that thinks
+# at length spent the whole allowance thinking and returned four tokens of
+# prose with ``finish_reason`` ``length``: a truncated answer rather than a
+# short one.
+#
+# The three constants here are one piece of arithmetic. A Turn is admitted
+# against ``TURN_OUTPUT_TOKENS`` (20,000) in aggregate, and it makes at most
+# ``MAX_TOOL_ROUNDS`` + 1 calls, so this ceiling times that count is what the
+# Turn can cost at worst. Raising either one without lowering the other spends
+# a Turn budget that Budget Validation has already proven against the price
+# table, so ``test_the_turn_cannot_outspend_what_it_was_admitted_against``
+# holds the identity rather than a comment asking for it to be respected.
+DEFAULT_MAX_OUTPUT_TOKENS = 4_000
+
+# What the route calls a completion it had to cut short, and the stable reason
+# the Turn ends under when it does. Both are strings the interactive surface
+# maps to a sentence; neither is ever shown to the reader as a code.
+TRUNCATED = "length"
+ANSWER_TRUNCATED = "answer_truncated"
 
 ROUNDS_EXHAUSTED_NOTE = (
     f"All {MAX_TOOL_ROUNDS} lookup rounds for this Turn have been used. Answer from "
@@ -679,6 +697,21 @@ class AgentLoop:
                 state.text = completion.text
             await self._save(state)
 
+            if completion.finish_reason == TRUNCATED:
+                # The model ran out of room mid-sentence, so whatever arrived is
+                # the front of an answer rather than an answer. Released as a
+                # finished Turn it reads as the whole reply — the shape this
+                # surfaced in was a single block saying "The user" under a
+                # question about the news. The partial text and the traces stay;
+                # what changes is that the Turn admits it stopped.
+                logger.info(
+                    "Turn %s was truncated by the route's output ceiling",
+                    request.request_message_id,
+                )
+                return await self._terminal(
+                    request, TurnStatus.INCOMPLETE, ANSWER_TRUNCATED, state
+                )
+
             if final or not completion.tool_calls:
                 return await self._terminal(
                     request, TurnStatus.COMPLETE, None, state, rounds_exhausted=final
@@ -1170,6 +1203,7 @@ class AgentLoop:
 
 
 __all__ = [
+    "ANSWER_TRUNCATED",
     "DEFAULT_MAX_OUTPUT_TOKENS",
     "LLM_CALL_TIMEOUT_SECONDS",
     "MAX_EXTERNAL_TOOL_CALLS",
