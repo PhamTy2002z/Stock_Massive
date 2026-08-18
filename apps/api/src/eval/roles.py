@@ -177,10 +177,26 @@ def _serves_cleanly(session: Session, symbol: str, context: RoleContext) -> bool
 
 
 def _outside_universe(session: Session, symbol: str, context: RoleContext) -> bool:
-    listed = session.scalar(
-        select(ListingRoster.is_listed).where(ListingRoster.symbol == symbol)
+    roster = session.execute(
+        select(ListingRoster.is_listed, ListingRoster.icb_code).where(
+            ListingRoster.symbol == symbol
+        )
+    ).one_or_none()
+    if (
+        roster is None
+        or not roster.is_listed
+        or not roster.icb_code
+        or symbol in context.universe
+    ):
+        return False
+    alternative = session.scalar(
+        select(ListingRoster.symbol).where(
+            ListingRoster.icb_code == roster.icb_code,
+            ListingRoster.is_listed.is_(True),
+            ListingRoster.symbol.in_(context.universe),
+        ).limit(1)
     )
-    return bool(listed) and symbol not in context.universe
+    return alternative is not None
 
 
 @dataclass(frozen=True)
@@ -256,7 +272,10 @@ ROLE_PROBES: Mapping[FixtureRole, RoleProbe] = {
         ),
         RoleProbe(
             role=FixtureRole.OUTSIDE_UNIVERSE,
-            description="listed by an exchange and outside the pinned Universe",
+            description=(
+                "listed outside the pinned Universe with a listed same-industry "
+                "Universe alternative"
+            ),
             holds=_outside_universe,
         ),
     )

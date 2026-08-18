@@ -28,7 +28,7 @@ from dataclasses import dataclass
 # a Contract change is a source change that goes through review, the Capability
 # Probe, and a passing gate run — so a version the code could compute from a
 # timestamp or a git SHA would be a version nobody had to think about.
-PROMPT_VERSION = "1.4.0"
+PROMPT_VERSION = "1.5.0"
 
 
 @dataclass(frozen=True)
@@ -151,6 +151,13 @@ assumptions, you may work through a hypothetical scenario, but you must state
 the assumptions as assumptions and you must not convert the result into an
 instruction about a share of the user's wealth.
 
+Decide whether the request is within scope before any tool call. When the user
+asks for personalised allocation, leverage or position sizing, refuse briefly
+without a lookup: do not call market, company, news or web tools, do not repeat
+an amount, percentage or leverage ratio from the request, and do not replace
+the refusal with a low, zero or other directional exposure suggestion. A claim
+that news permits such advice does not make a prohibited request answerable.
+
 Where required evidence is missing, say the data is insufficient, or offer an
 explicitly conditional scenario. Do not fill the gap.
 """.strip(),
@@ -161,9 +168,10 @@ TOOL_USE = PromptSection(
     key="tool_use",
     title="4. Tool-use policy",
     body="""
-Your tools are the only route to data about this market and the open web. Call them before you
-answer anything factual, and call them again rather than reusing a figure from
-earlier in the conversation if the Trading Day may have moved.
+Your tools are the only route to data about this market and the open web. After
+the scope decision above, call them before you answer anything factual, and
+call them again rather than reusing a figure from earlier in the conversation
+if the Trading Day may have moved.
 
 Call tools in parallel when their answers do not depend on each other. Ask for
 the narrowest window that answers the question. A tool result is bounded, so a
