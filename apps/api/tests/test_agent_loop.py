@@ -42,6 +42,7 @@ from src.core.llm import (
     MalformedArguments,
     ModelRefusal,
     OwnerType,
+    RouteRateLimited,
     Role,
     ToolAttempts,
     ToolCall,
@@ -459,6 +460,20 @@ async def test_gateway_timeout_is_not_retried_again_inside_the_loop():
     assert len(client.requests) == 1
     assert outcome.status is TurnStatus.INCOMPLETE
     assert outcome.terminal_reason == "gateway_timeout"
+
+
+@pytest.mark.asyncio
+async def test_a_rate_limited_route_ends_the_turn_under_its_own_reason():
+    """Not a timeout: the route answered, and the remedy is credits or a wait."""
+    client = FakeClient(
+        [RouteRateLimited("the route is out of allowance (429)", retry_after=30.0)]
+    )
+
+    outcome = await loop(client).run(turn_request())
+
+    assert len(client.requests) == 1
+    assert outcome.status is TurnStatus.INCOMPLETE
+    assert outcome.terminal_reason == "route_rate_limited"
 
 
 @pytest.mark.asyncio

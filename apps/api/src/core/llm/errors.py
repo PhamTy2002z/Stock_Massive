@@ -9,17 +9,28 @@ because their behaviours differ:
 | ``ToolError`` | structured error returned to the model, which may try another approach; at most 2 attempts on the same tool |
 | ``MalformedArguments`` | raise immediately; the caller fails saying the route violated its contract |
 | ``GatewayTimeout`` | retried through ``tenacity``, 2 attempts with backoff, then fail |
+| ``RouteRateLimited`` | **never** retried; the route answered, and its answer was "not now" |
 | ``AuthUnavailable`` | **never** retried; a 401 means the channel's credential died |
 | ``ModelRefusal`` | surfaced verbatim; no re-prompting to work around it |
 
 ``AuthUnavailable`` is a class rather than a status code because it was measured:
 the dev route's OAuth channel died mid-test and needed manual re-auth. Retrying
 a dead credential turns one failure into a run of identical ones, one per symbol.
+
+``RouteRateLimited`` was measured the same way. A 429 used to be a
+``GatewayTimeout``, which made the system say three wrong things at once: the log
+read "the route timed out" when the route had answered precisely and in detail;
+the reader was told the route did not respond, with no hint that the fix was
+credits or a wait; and ``tenacity`` retried a daily quota that reset eight hours
+later, spending two requests to be told the same thing twice. A rate limit is the
+route working — it is the one failure class where the remedy belongs to the
+operator rather than to a retry.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -75,6 +86,34 @@ class GatewayTimeout(LLMError):
     """The route did not answer in time, or answered that it could not."""
 
 
+class RouteRateLimited(LLMError):
+    """The route refused this call because the caller has run out of allowance.
+
+    Never retried, whatever the window is. A per-minute limit clears on its own
+    and a per-day limit does not, but neither is helped by a second identical
+    request half a second later — and the caller cannot tell the two apart from
+    inside the retry loop, because the window a 429 refers to is not part of the
+    status code.
+
+    ``retry_after`` and ``reset_at`` carry whatever the response said, in
+    standard HTTP headers only: ``Retry-After`` in seconds, and the unix-epoch
+    ``X-RateLimit-Reset`` that rate-limited routes conventionally send beside it.
+    Both are for the operator's log line. Nothing branches on them.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        retry_after: float | None = None,
+        reset_at: float | None = None,
+        usage: Usage | None = None,
+    ) -> None:
+        super().__init__(message, usage=usage)
+        self.retry_after = retry_after
+        self.reset_at = reset_at
+
+
 class AuthUnavailable(LLMError):
     """The channel's credential died. Never retried.
 
@@ -108,6 +147,7 @@ class LLMMetrics:
 
     malformed_arguments: int = 0
     gateway_timeouts: int = 0
+    rate_limits: int = 0
     auth_failures: int = 0
     refusals: int = 0
 
@@ -124,6 +164,12 @@ class LLMMetrics:
         self.gateway_timeouts += 1
         logger.warning("The LLM route timed out: %s", detail)
 
+    def record_rate_limit(self, detail: str) -> None:
+        self.rate_limits += 1
+        # Warning rather than error: nothing is broken, and the sentence says
+        # what to do about it instead of what failed.
+        logger.warning("The LLM route is out of allowance: %s", detail)
+
     def record_auth_failure(self, detail: str) -> None:
         self.auth_failures += 1
         logger.error("The LLM route rejected the credential: %s", detail)
@@ -135,6 +181,7 @@ class LLMMetrics:
     def reset(self) -> None:
         self.malformed_arguments = 0
         self.gateway_timeouts = 0
+        self.rate_limits = 0
         self.auth_failures = 0
         self.refusals = 0
 
@@ -190,7 +237,40 @@ def tool_error_result(tool_call_id: str, tool_name: str, message: str) -> dict[s
     }
 
 
-def classify_status(status_code: int, body: str) -> LLMError:
+def _rate_limit_window(
+    headers: Mapping[str, str],
+) -> tuple[float | None, float | None]:
+    """``Retry-After`` in seconds and the epoch a limit resets at, if sent.
+
+    Header names are matched case-insensitively and a value that is not a number
+    is dropped rather than raised on: this runs on the failure path, and a route
+    with an unparseable header is still a route that rate-limited the call.
+    ``X-RateLimit-Reset`` is sent in seconds by some routes and milliseconds by
+    others, so a value far past the year-3000 mark is read as milliseconds.
+    """
+
+    lowered = {name.lower(): value for name, value in headers.items()}
+
+    def number(name: str) -> float | None:
+        raw = lowered.get(name)
+        if raw is None:
+            return None
+        try:
+            return float(str(raw).strip())
+        except ValueError:
+            return None
+
+    reset_at = number("x-ratelimit-reset")
+    if reset_at is not None and reset_at > 32_503_680_000:
+        reset_at /= 1000
+    return number("retry-after"), reset_at
+
+
+def classify_status(
+    status_code: int,
+    body: str,
+    headers: Mapping[str, str] | None = None,
+) -> LLMError:
     """Turn one real upstream condition into its declared class.
 
     Single-sourced here so the nightly lane and the interactive lane cannot
@@ -200,7 +280,14 @@ def classify_status(status_code: int, body: str) -> LLMError:
         return AuthUnavailable(
             f"the route rejected the configured credential ({status_code}): {body}"
         )
-    if status_code in (408, 429, 502, 503, 504):
+    if status_code == 429:
+        retry_after, reset_at = _rate_limit_window(headers or {})
+        return RouteRateLimited(
+            f"the route is out of allowance ({status_code}): {body}",
+            retry_after=retry_after,
+            reset_at=reset_at,
+        )
+    if status_code in (408, 502, 503, 504):
         return GatewayTimeout(f"the route did not answer ({status_code}): {body}")
     if 500 <= status_code < 600:
         return GatewayTimeout(f"the route failed ({status_code}): {body}")
@@ -212,6 +299,7 @@ __all__ = [
     "MAX_TOOL_ATTEMPTS",
     "AuthUnavailable",
     "GatewayTimeout",
+    "RouteRateLimited",
     "LLMError",
     "LLMMetrics",
     "MalformedArguments",
