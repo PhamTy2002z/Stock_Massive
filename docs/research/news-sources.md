@@ -261,10 +261,50 @@ VCI stays as the per-symbol disclosure list, labelled as such.
   So: real headline, real 16:9 image, real summary, real link.
 - The article-id digits at the tail of a CafeF slug
   (`…-188260817190901375.chn`) are a stable natural key.
-- **Full article text is deliberately not fetched.** VCCorp holds the copyright
-  and no ToS page grants reuse; the feed's own summary plus a link to the
-  original is the defensible surface. That decision is recorded in
-  `docs/specs/0005-news-discover-surface.md`.
+- **Full article text was deliberately not fetched** in the original design:
+  VCCorp holds the copyright and no ToS page grants reuse. **Reversed
+  2026-08-19** at the product owner's direction — see the section below, and
+  the revised N4b in `docs/specs/0005-news-discover-surface.md`.
+
+## 6. Full article text — measured 2026-08-19
+
+Question: is there an open-source RSS reader that returns the article body, so
+the reading column does not end at a summary?
+
+**No, and the question has the wrong shape.** The body is missing from the
+*feed*, not from the parser. Measured live, one request per feed:
+
+| Feed | items | `<content:encoded>` |
+|---|---|---|
+| CafeF `thi-truong-chung-khoan` | 50 | absent |
+| VnExpress Kinh doanh | 60 | absent |
+| Vietstock Cổ phiếu | 20 | absent |
+| Thanh Niên Kinh tế | 50 | absent |
+| Vietnambiz Chứng khoán | 30 | absent |
+| VnEconomy Chứng khoán | 50 | absent |
+
+Every one carries `title`/`link`/`description`/`pubDate` and nothing more.
+Withholding the body is Vietnamese publishers' traffic policy, so no RSS
+library has anything to read. The tools that do solve it are **full-text
+extractors** run over the fetched article page — `trafilatura`,
+`readability-lxml`, `newspaper4k`, `@mozilla/readability`; RSSHub, morss and
+FiveFilters are the same algorithm wrapped in an HTTP service.
+
+**What was built instead:** a targeted reader, `providers/cafef_article.py`.
+CafeF puts every story in `div.detail-content` with the prose as *direct*
+children and the widgets (`tindnd` "TIN MỚI", `chisochungkhoan`, the
+`h-show-pc`/`h-show-mobile` ad slots) as nested `div`s, so emitting only the
+allowlisted blocks at depth 1 drops the furniture without a denylist. Stdlib
+`html.parser`: `lxml` is not in the API image and `bs4` is only a transitive
+vnstock dependency.
+
+Measured against `trafilatura` on a 19-article corpus across five categories:
+19/19 extracted, **0.93 of trafilatura's character count**, ~4ms per article.
+The shortfall is not loss — it is the standfirst (which lives outside the
+container and already arrives as the feed's `summary`) plus the related-article
+links that trafilatura wrongly pulls in. `trafilatura`'s image mode has the
+same problem in reverse on this site: it drags related-article thumbnails into
+the body.
 
 Per-symbol press news remains unsolved: CafeF's RSS is category-scoped, and the
 per-symbol ajax endpoint from §2 was not revisited. A symbol-scoped press feed is

@@ -20,7 +20,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 
-import type { CompanyNewsResponse, FeedNewsItem, NewsFeedResponse } from "@/lib/api"
+import type {
+  ArticleBlock,
+  CompanyNewsResponse,
+  FeedNewsItem,
+  NewsArticleResponse,
+  NewsFeedResponse,
+} from "@/lib/api"
 
 /** The registry the API serves, trimmed to the facets these tests press. */
 const CATEGORIES = [
@@ -53,10 +59,22 @@ const companyNews = {
   isError: false,
 }
 
+/** The article body lane, which only fires once a reader opens something. */
+const articleBodyQuery = {
+  data: undefined as NewsArticleResponse | undefined,
+  isPending: false,
+  isError: false,
+  refetch: vi.fn(),
+}
+
+/** Records the URL the reading column asked for, or `null` when it asked for none. */
+const articleSpy = vi.fn((_url: string | null) => articleBodyQuery)
+
 vi.mock("@/hooks/use-news", () => ({
   useNewsFeed: (category: string) => feedSpy(category),
   useNewsCategories: () => categories,
   useCompanyNews: () => companyNews,
+  useNewsArticle: (url: string | null) => articleSpy(url),
 }))
 
 vi.mock("@/hooks/use-market-indices", () => ({
@@ -76,7 +94,37 @@ beforeEach(() => {
   feedSpy.mockClear()
   categories.data = CATEGORIES
   companyNews.data = undefined
+  articleBodyQuery.data = undefined
+  articleBodyQuery.isPending = false
+  articleBodyQuery.isError = false
+  articleBodyQuery.refetch = vi.fn()
+  articleSpy.mockClear()
 })
+
+/** One block of an article body, defaulted to the prose case. */
+function block(overrides: Partial<ArticleBlock> = {}): ArticleBlock {
+  return {
+    kind: "paragraph",
+    text: null,
+    items: null,
+    image_url: null,
+    caption: null,
+    ...overrides,
+  }
+}
+
+/** An article body response around some blocks. */
+function articleResponse(
+  blocks: ArticleBlock[],
+  url = "https://cafef.vn/a-1.chn",
+): NewsArticleResponse {
+  return {
+    url,
+    source: "CafeF",
+    blocks,
+    content: blocks.map((entry) => entry.text ?? "").join("\n"),
+  }
+}
 
 /** One press item: a string id, a facet, and no symbol — the CafeF shape. */
 function item(overrides: Partial<FeedNewsItem> & { id: string }): FeedNewsItem {
@@ -260,6 +308,130 @@ describe("the reading column", () => {
     expect(
       screen.queryByText("Nguồn tin chỉ cung cấp tiêu đề cho bài này."),
     ).not.toBeInTheDocument()
+  })
+
+  it("prints the article's body and asks for it by the publisher's URL", () => {
+    feed.data = response([
+      item({
+        id: "1",
+        summary: "Xếp hạng tín nhiệm đã có khung pháp lý.",
+        url: "https://cafef.vn/a-1.chn",
+      }),
+    ])
+    articleBodyQuery.data = articleResponse([
+      block({ text: "Đoạn mở đầu của bài viết, đủ dài để đọc như một đoạn văn." }),
+      block({ kind: "heading", text: "Khi nào dòng vốn quay lại?" }),
+      block({ kind: "list", items: ["Điều thứ nhất", "Điều thứ hai"] }),
+    ])
+
+    renderNews(<OpenArticle article="chung-khoan:1" />)
+
+    expect(articleSpy).toHaveBeenCalledWith("https://cafef.vn/a-1.chn")
+    expect(
+      screen.getByText("Đoạn mở đầu của bài viết, đủ dài để đọc như một đoạn văn."),
+    ).toBeInTheDocument()
+    // A subheading is set as one, which is the whole point of sending blocks
+    // rather than a string.
+    expect(
+      screen.getByRole("heading", { name: "Khi nào dòng vốn quay lại?", level: 2 }),
+    ).toBeInTheDocument()
+    expect(screen.getAllByRole("listitem")).toHaveLength(2)
+    expect(screen.getByText("Điều thứ hai")).toBeInTheDocument()
+  })
+
+  it("does not ask for a body until an article is open", () => {
+    feed.data = response([item({ id: "1", url: "https://cafef.vn/a-1.chn" })])
+
+    renderNews(<NewsView />)
+
+    // The reading column is not mounted on the feed, so the publisher is not
+    // asked for the body of a headline nobody pressed.
+    expect(articleSpy).not.toHaveBeenCalled()
+  })
+
+  it("stops promising the rest of the article once it has printed it", () => {
+    feed.data = response([item({ id: "1", url: "https://cafef.vn/a-1.chn" })])
+    articleBodyQuery.data = articleResponse([
+      block({ text: "Toàn văn bài viết đã nằm ngay trong cột đọc này." }),
+    ])
+
+    renderNews(<OpenArticle article="chung-khoan:1" />)
+
+    // "Read the whole thing there" would be false when the whole thing is here.
+    expect(screen.getByRole("link", { name: /Xem bài gốc trên CafeF/ })).toBeInTheDocument()
+    expect(screen.queryByText(/toàn văn bài viết ở lại trên CafeF/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/được trích từ bài gốc của CafeF/i)).toBeInTheDocument()
+  })
+
+  it("draws a body photo with its caption, and never the headline as alt text", () => {
+    feed.data = response([
+      item({ id: "1", title: "Tiêu đề bài", url: "https://cafef.vn/a-1.chn" }),
+    ])
+    articleBodyQuery.data = articleResponse([
+      block({
+        kind: "image",
+        image_url: "https://cafefcdn.com/anh.png",
+        caption: "Mai Văn Chỉ cùng tang vật.",
+      }),
+    ])
+
+    renderNews(<OpenArticle article="chung-khoan:1" />)
+
+    const photo = screen.getByAltText("Mai Văn Chỉ cùng tang vật.")
+    expect(photo).toHaveAttribute("src", "https://cafefcdn.com/anh.png")
+    expect(screen.getByText("Mai Văn Chỉ cùng tang vật.")).toBeInTheDocument()
+    expect(screen.queryByAltText("Tiêu đề bài")).not.toBeInTheDocument()
+  })
+
+  it("does not print the standfirst twice when the body repeats it", () => {
+    const sapo =
+      "Theo ông Minh, điều quan trọng trong giai đoạn hiện tại không phải là dự đoán thị trường."
+    feed.data = response([item({ id: "1", summary: sapo, url: "https://cafef.vn/a-1.chn" })])
+    articleBodyQuery.data = articleResponse([
+      block({ text: "Năm 2026 là một năm không dễ dàng với thị trường chứng khoán." }),
+      block({ text: sapo }),
+    ])
+
+    renderNews(<OpenArticle article="chung-khoan:1" />)
+
+    expect(screen.getAllByText(sapo)).toHaveLength(1)
+  })
+
+  it("stays readable while the body is still in flight", () => {
+    feed.data = response([
+      item({
+        id: "1",
+        title: "Tiêu đề đã có",
+        summary: "Tóm tắt đã có.",
+        url: "https://cafef.vn/a-1.chn",
+      }),
+    ])
+    articleBodyQuery.isPending = true
+
+    renderNews(<OpenArticle article="chung-khoan:1" />)
+
+    expect(screen.getByText("Tiêu đề đã có")).toBeInTheDocument()
+    expect(screen.getByText("Tóm tắt đã có.")).toBeInTheDocument()
+    expect(screen.getByText("Đang tải nội dung bài viết…")).toBeInTheDocument()
+  })
+
+  it("offers a retry for the body alone when only the body refused", () => {
+    feed.data = response([
+      item({ id: "1", summary: "Tóm tắt đã có.", url: "https://cafef.vn/a-1.chn" }),
+    ])
+    articleBodyQuery.isError = true
+
+    renderNews(<OpenArticle article="chung-khoan:1" />)
+
+    // The feed loaded, so the article is still readable down to its summary —
+    // this must not be reported as the feed failing.
+    expect(screen.getByText("Tóm tắt đã có.")).toBeInTheDocument()
+    expect(screen.queryByText("Chưa đọc được bài viết.")).not.toBeInTheDocument()
+    expect(screen.getByText("Chưa tải được nội dung đầy đủ của bài này.")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Thử lại" }))
+    expect(articleBodyQuery.refetch).toHaveBeenCalled()
+    expect(feed.refetch).not.toHaveBeenCalled()
   })
 
   it("still offers the original when the summary is missing but the link is not", () => {

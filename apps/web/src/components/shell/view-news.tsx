@@ -14,9 +14,15 @@ import {
 } from "lucide-react"
 
 import { useMarketIndices } from "@/hooks/use-market-indices"
-import { useCompanyNews, useNewsCategories, useNewsFeed } from "@/hooks/use-news"
-import type { FeedNewsItem, NewsCategory } from "@/lib/api"
 import {
+  useCompanyNews,
+  useNewsArticle,
+  useNewsCategories,
+  useNewsFeed,
+} from "@/hooks/use-news"
+import type { ArticleBlock, FeedNewsItem, NewsCategory } from "@/lib/api"
+import {
+  articleBody,
   articleKey,
   findArticle,
   formatPublishedDate,
@@ -52,10 +58,12 @@ const STREAM_PAGE = 8
  * dropped that row, saying so is the honest answer rather than fetching the one
  * item back and pretending the list never moved.
  *
- * What the screen will *not* do is pretend to hold more of an article than the
- * publisher gave us. CafeF's feed carries a headline, a summary and a picture;
- * the full text stays on cafef.vn, and every reading surface here ends by
- * pointing at it rather than by trailing off.
+ * The body is the one thing the feed does not carry. CafeF's RSS has no
+ * full-text element — no Vietnamese finance feed measured beside it does — so
+ * the reading column fetches the article's own page when it opens, and only
+ * then. The feed stays one request per facet; a headline nobody pressed costs
+ * nothing. Every reading surface still ends at the original, because the body
+ * we print is an extract of someone else's page and says so.
  *
  * The measurements below are the news design's own — 41px on the lead headline,
  * 26px on a stream row, a 344px rail — written as pixels rather than as the
@@ -646,6 +654,9 @@ function ArticleScreen({
   onRetry: () => void
 }) {
   const { dispatch } = useShell()
+  // Before the early return, because a hook cannot be conditional — and `null`
+  // is exactly what tells the query not to fire for an article that is not open.
+  const body = useNewsArticle(article?.url ?? null)
   const back = () => dispatch({ type: "news-article", article: null })
 
   if (article === null) {
@@ -676,8 +687,9 @@ function ArticleScreen({
   }
 
   const related = relatedArticles(items, article, 3)
-  const [lede, ...body] = bodyParagraphs(article)
+  const [lede, ...summaryRest] = bodyParagraphs(article)
   const facet = categoryLabel(categories, article.category)
+  const blocks = body.data === undefined ? null : articleBody(body.data.blocks, article.summary)
 
   return (
     <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
@@ -757,15 +769,31 @@ function ArticleScreen({
           </div>
         </div>
 
-        {body.length > 0 &&
-          body.map((paragraph, index) => (
-            <p
-              key={index}
-              className="text-pretty font-serif text-[19px] leading-[1.68] text-ink-3"
-            >
-              {paragraph}
+        {summaryRest.map((paragraph, index) => (
+          <p
+            key={index}
+            className="text-pretty font-serif text-[19px] leading-[1.68] text-ink-3"
+          >
+            {paragraph}
+          </p>
+        ))}
+
+        {blocks !== null && <ArticleBody blocks={blocks} />}
+
+        {/* The body is a second request behind the one that produced this
+            screen, so the column is already readable — headline, lede, picture —
+            while it lands. Saying which part is still coming beats a spinner
+            over prose the reader can already read. */}
+        {body.isPending && <QuietLine>Đang tải nội dung bài viết…</QuietLine>}
+
+        {body.isError && article.url && (
+          <div className="rounded-xl border border-border bg-surface-sunken px-4 py-3.5">
+            <p className="text-[14px] text-ink-3">
+              Chưa tải được nội dung đầy đủ của bài này.
             </p>
-          ))}
+            <RetryButton onClick={() => void body.refetch()} className="mt-2.5" />
+          </div>
+        )}
 
         {lede === undefined && article.url === null && (
           // Genuinely nothing but a headline: no summary, no body, nowhere to
@@ -773,7 +801,13 @@ function ArticleScreen({
           <QuietLine>Nguồn tin chỉ cung cấp tiêu đề cho bài này.</QuietLine>
         )}
 
-        {article.url && <ReadOnSource url={article.url} source={article.source} />}
+        {article.url && (
+          <ReadOnSource
+            url={article.url}
+            source={article.source}
+            extracted={blocks !== null && blocks.length > 0}
+          />
+        )}
 
         {related.length > 0 && (
           <section aria-label="Bài liên quan" className="mt-4">
@@ -789,6 +823,108 @@ function ArticleScreen({
         )}
       </article>
     </div>
+  )
+}
+
+/**
+ * The article's own body, drawn one block at a time.
+ *
+ * The API sends a tree rather than a string precisely so this can happen: a
+ * subheading is set as a subheading and a photo keeps its caption, instead of
+ * every block arriving as another paragraph. Blocks the extractor could not
+ * type do not exist — it emits only these five — so there is no default arm to
+ * write, and a kind added upstream renders nothing rather than something wrong.
+ *
+ * Keys are positional because a block has no id, and the list is replaced
+ * wholesale by a refetch rather than reordered.
+ */
+function ArticleBody({ blocks }: { blocks: ArticleBlock[] }) {
+  return (
+    <>
+      {blocks.map((block, index) => {
+        if (block.kind === "heading") {
+          return (
+            <h2
+              key={index}
+              className="mt-2 font-serif text-[25px] font-medium leading-[1.25] text-ink-1"
+            >
+              {block.text}
+            </h2>
+          )
+        }
+
+        if (block.kind === "quote") {
+          return (
+            <blockquote
+              key={index}
+              className="border-l-2 border-ink-6 pl-5 font-serif text-[19px] italic leading-[1.6] text-ink-2"
+            >
+              {block.text}
+            </blockquote>
+          )
+        }
+
+        if (block.kind === "list") {
+          return (
+            <ul key={index} className="flex list-disc flex-col gap-2 pl-6">
+              {(block.items ?? []).map((entry, position) => (
+                <li
+                  key={position}
+                  className="text-pretty font-serif text-[19px] leading-[1.68] text-ink-3"
+                >
+                  {entry}
+                </li>
+              ))}
+            </ul>
+          )
+        }
+
+        if (block.kind === "image") {
+          return <BodyImage key={index} block={block} />
+        }
+
+        return (
+          <p
+            key={index}
+            className="text-pretty font-serif text-[19px] leading-[1.68] text-ink-3"
+          >
+            {block.text}
+          </p>
+        )
+      })}
+    </>
+  )
+}
+
+/**
+ * One photo from inside the article, with the caption the publisher wrote.
+ *
+ * A body image that 404s is dropped rather than replaced by the lettered plate
+ * the cards use: that plate exists so a *card* keeps its shape in a grid, and in
+ * the middle of prose it would be a grey rectangle interrupting the reading for
+ * no information at all. `alt` is the caption or empty — never the headline,
+ * which would have a screen reader announce the title again mid-article.
+ */
+function BodyImage({ block }: { block: ArticleBlock }) {
+  const [failed, setFailed] = useState(false)
+
+  if (block.image_url === null || failed) return null
+
+  return (
+    <figure className="flex flex-col gap-2.5">
+      <img
+        src={block.image_url}
+        alt={block.caption ?? ""}
+        loading="lazy"
+        onError={() => setFailed(true)}
+        className="w-full rounded-xl bg-surface-sunken"
+      />
+      {block.caption && (
+        <figcaption className="text-[13.5px] leading-relaxed text-ink-6">
+          {block.caption}
+        </figcaption>
+      )}
+    </figure>
   )
 }
 
@@ -939,14 +1075,26 @@ function BackButton({
 /**
  * The way out of the reading column, stated once and unmissably.
  *
- * The header carries a "Bài gốc" affordance too, but a reader who has just
- * finished the summary is at the bottom of the column and looking for what
- * comes next — a control they have to scroll back up to find is a control that
- * reads as absent. The line under it exists so the ending does not feel like a
- * truncation bug: the full text is not missing, it is on the publisher's site
- * on purpose.
+ * The header carries a "Bài gốc" affordance too, but a reader at the end of the
+ * body is looking for what comes next, and a control they have to scroll back
+ * up to find is a control that reads as absent.
+ *
+ * What it says depends on what the column managed to print. With the body
+ * extracted, "read the whole thing there" would be false — the whole thing is
+ * right here — so the link becomes attribution and names what the original
+ * still has that an extract does not. Without it, the older promise stands: the
+ * column ends after the summary on purpose, not because it broke.
  */
-function ReadOnSource({ url, source }: { url: string; source: string }) {
+function ReadOnSource({
+  url,
+  source,
+  extracted,
+}: {
+  url: string
+  source: string
+  /** Whether the column printed the article's body, not just its summary. */
+  extracted: boolean
+}) {
   return (
     <div className="mt-4 border-t border-border pt-7">
       <a
@@ -956,10 +1104,12 @@ function ReadOnSource({ url, source }: { url: string; source: string }) {
         className="inline-flex items-center gap-2 rounded-pill bg-primary px-5 py-3 text-[14px] font-medium text-primary-foreground transition-[filter] hover:brightness-110"
       >
         <ExternalLink className="size-4" strokeWidth={1.8} />
-        Đọc toàn bộ bài trên {source}
+        {extracted ? `Xem bài gốc trên ${source}` : `Đọc toàn bộ bài trên ${source}`}
       </a>
       <p className="mt-3 text-[13px] leading-relaxed text-ink-6">
-        Bảng tin chỉ hiển thị tiêu đề và phần tóm tắt; toàn văn bài viết ở lại trên {source}.
+        {extracted
+          ? `Nội dung trên được trích từ bài gốc của ${source}. Bản gốc giữ đầy đủ hình ảnh, bảng biểu và định dạng.`
+          : `Bảng tin chỉ hiển thị tiêu đề và phần tóm tắt; toàn văn bài viết ở lại trên ${source}.`}
       </p>
     </div>
   )
