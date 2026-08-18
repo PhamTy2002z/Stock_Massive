@@ -407,12 +407,11 @@ function ThreadRow({
 }
 
 /**
- * The menu itself, with Delete behind a second press.
+ * The menu itself.
  *
- * The confirmation is the menu's own state rather than a dialog: a Thread and
- * its transcript are not recoverable, and a destructive item one press away in
- * a list of hover-revealed controls is the wrong distance — but a modal for it
- * would be the wrong ceremony, and it would take focus off the list.
+ * Delete takes effect on the press: the menu is only reachable behind the
+ * ellipsis, so the item is already two deliberate gestures deep, and a second
+ * confirmation there was ceremony over a list users clean out routinely.
  */
 function ThreadMenu({
   row,
@@ -427,56 +426,35 @@ function ThreadMenu({
   onRename: () => void
   onDelete: () => void
 }) {
-  const [confirming, setConfirming] = React.useState(false)
-
   return (
     <Menu className="absolute right-1 top-[calc(100%-4px)] z-30 w-[212px]">
-      {confirming ? (
-        <>
-          <p className="px-2.5 pb-1 pt-1.5 text-meta leading-relaxed text-ink-4">
-            Xoá hội thoại này và toàn bộ nội dung của nó? Không khôi phục được.
-          </p>
-          <MenuItem icon={<Trash2 className="size-[17px]" />} destructive onClick={onDelete}>
-            Xoá vĩnh viễn
-          </MenuItem>
-          <MenuItem onClick={() => setConfirming(false)}>Huỷ</MenuItem>
-        </>
-      ) : (
-        <>
-          <MenuItem
-            icon={
-              pinned ? (
-                <PinOff className="size-[17px] text-ink-4" />
-              ) : (
-                <Pin className="size-[17px] text-ink-4" />
-              )
-            }
-            onClick={onPin}
-          >
-            {pinned ? "Bỏ ghim" : "Ghim"}
-          </MenuItem>
-          <MenuItem icon={<Pencil className="size-[17px] text-ink-4" />} onClick={onRename}>
-            Đổi tên
-          </MenuItem>
-          {/* A plain link, so the browser's own "open in new tab" affordances —
-              middle click, ⌘-click — work on it as well as the item itself. */}
-          <a href={`/?thread=${encodeURIComponent(row.id)}`} target="_blank" rel="noopener" className="block">
-            <MenuItem icon={<ExternalLink className="size-[17px] text-ink-4" />}>
-              Mở ở tab mới
-            </MenuItem>
-          </a>
+      <MenuItem
+        icon={
+          pinned ? (
+            <PinOff className="size-[17px] text-ink-4" />
+          ) : (
+            <Pin className="size-[17px] text-ink-4" />
+          )
+        }
+        onClick={onPin}
+      >
+        {pinned ? "Bỏ ghim" : "Ghim"}
+      </MenuItem>
+      <MenuItem icon={<Pencil className="size-[17px] text-ink-4" />} onClick={onRename}>
+        Đổi tên
+      </MenuItem>
+      {/* A plain link, so the browser's own "open in new tab" affordances —
+          middle click, ⌘-click — work on it as well as the item itself. */}
+      <a href={`/?thread=${encodeURIComponent(row.id)}`} target="_blank" rel="noopener" className="block">
+        <MenuItem icon={<ExternalLink className="size-[17px] text-ink-4" />}>
+          Mở ở tab mới
+        </MenuItem>
+      </a>
 
-          <MenuSeparator />
-
-          <MenuItem
-            icon={<Trash2 className="size-[17px]" />}
-            destructive
-            onClick={() => setConfirming(true)}
-          >
-            Xoá
-          </MenuItem>
-        </>
-      )}
+      <MenuSeparator />
+      <MenuItem icon={<Trash2 className="size-[17px]" />} destructive onClick={onDelete}>
+        Xoá
+      </MenuItem>
     </Menu>
   )
 }
