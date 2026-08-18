@@ -13,7 +13,13 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitForElementToBeRemoved,
+} from "@testing-library/react"
 
 import type { AssistantView, DraftEntry } from "@/lib/alpha-desk/transcript"
 import type { Citation, ContentBlock, RiskNotice } from "@/lib/alpha-desk/types"
@@ -240,7 +246,51 @@ describe("the search-progress trail", () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it("folds itself once the answer starts arriving under it", () => {
+  it("animates a step as it lands and leaves the older ones still", () => {
+    // The trail is a list the reader watches grow. A step that arrived while
+    // they were looking rises into place; the ones above it already did.
+    const searching = { phase: "searching" as const, detail: { queries: ["tin tức AI"] } }
+    const { rerender } = render(
+      <SearchProgress steps={[searching]} activity="searching" defaultOpen />,
+    )
+
+    rerender(
+      <SearchProgress
+        steps={[searching, { phase: "found_sources", detail: { result_count: 4 } }]}
+        activity="found_sources"
+        defaultOpen
+      />,
+    )
+
+    expect(screen.getByText("Đã tìm thấy 4 kết quả").closest("li")).toHaveClass(
+      "animate-vg-row-in",
+    )
+    expect(screen.getByText("Đã tìm trên web").closest("li")).not.toHaveClass(
+      "animate-vg-row-in",
+    )
+  })
+
+  it("draws a reopened Turn's trail without replaying it", () => {
+    // Every step of a finished Turn arrived before the reader opened it, so
+    // animating them would stage work that ended minutes ago.
+    render(
+      <SearchProgress
+        steps={[{ phase: "reading_data" }]}
+        activity={null}
+        ending="done"
+        defaultOpen
+      />,
+    )
+
+    expect(screen.getByText("Đã đọc dữ liệu đã lưu").closest("li")).not.toHaveClass(
+      "animate-vg-row-in",
+    )
+    expect(screen.getByText("Hoàn thành").closest("li")).not.toHaveClass(
+      "animate-vg-row-in",
+    )
+  })
+
+  it("folds itself once the answer starts arriving under it", async () => {
     // The lookups stop being the thing on screen the moment the first block
     // lands; leaving the trail open across the whole stream keeps the machinery
     // above the answer it was gathered for.
@@ -263,14 +313,16 @@ describe("the search-progress trail", () => {
       />,
     )
 
-    expect(screen.queryByText("tin tức AI")).not.toBeInTheDocument()
+    // The rows leave over the fold rather than in the frame the answer landed:
+    // a disclosure that vanishes reads as content being taken away.
     expect(screen.getByRole("button", { name: /Tiến trình tìm kiếm/ })).toHaveAttribute(
       "aria-expanded",
       "false",
     )
+    await waitForElementToBeRemoved(() => screen.queryByText("tin tức AI"))
   })
 
-  it("folds itself the moment the Turn ends, however it was left open", () => {
+  it("folds itself the moment the Turn ends, however it was left open", async () => {
     const { rerender } = render(
       <SearchProgress steps={[{ phase: "reading_data" }]} activity="reading_data" defaultOpen />,
     )
@@ -283,11 +335,11 @@ describe("the search-progress trail", () => {
 
     // Not waiting for the canonical message to replace the draft: between the
     // two is a gap spent reading an answer with the machinery open above it.
-    expect(screen.queryByText("Đã đọc dữ liệu đã lưu")).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: /Tiến trình tìm kiếm/ })).toHaveAttribute(
       "aria-expanded",
       "false",
     )
+    await waitForElementToBeRemoved(() => screen.queryByText("Đã đọc dữ liệu đã lưu"))
   })
 
   it("discloses the open web's queries, its result count and its sources", () => {

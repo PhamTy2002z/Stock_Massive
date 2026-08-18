@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ChevronDown, ChevronRight, Globe } from "lucide-react"
 
 import { PROGRESS_COPY } from "@/lib/alpha-desk/copy"
@@ -25,6 +25,13 @@ import { SourceList } from "./source-list"
  * The vertical rule is drawn by the rows rather than by a container so the last
  * row can end it: a line running past the final dot reads as a step that has not
  * arrived yet, which on a finished Turn is a lie about the work.
+ *
+ * **A row animates when it arrives and never again.** The trail is a list the
+ * reader watches grow, so a step that has just landed rises into place; a step
+ * that was already there when this trail was first drawn, or that the reader is
+ * looking at a second time because they reopened the disclosure, appears with no
+ * motion at all. Replaying the whole trail on every open would animate work that
+ * finished minutes ago, which is the same lie the vertical rule avoids.
  */
 export function SearchProgress({
   steps,
@@ -47,6 +54,7 @@ export function SearchProgress({
 }) {
   const rows = visibleRows(steps, activity)
   const [open, setOpen] = useState(defaultOpen)
+  const entering = useArrivals(rowKeys(rows, ending))
 
   // The trail folds itself the moment the lookups stop being the thing on
   // screen — the first block of the answer arrives, or the Turn ends without
@@ -82,7 +90,7 @@ export function SearchProgress({
         )}
       </button>
 
-      {open && (
+      <Collapse open={open}>
         <ol className="grid">
           {rows.map(({ step, running, index }) => (
             <TrailRow
@@ -90,6 +98,7 @@ export function SearchProgress({
               label={labelOf(step, running)}
               running={running}
               last={ending === null && index === rows[rows.length - 1].index}
+              entering={entering.has(stepKey(step.phase, index))}
             >
               <StepDetail step={step} />
             </TrailRow>
@@ -100,10 +109,11 @@ export function SearchProgress({
               label={ending === "done" ? PROGRESS_COPY.done : PROGRESS_COPY.stopped}
               running={false}
               last
+              entering={entering.has(ENDING_KEY)}
             />
           )}
         </ol>
-      )}
+      </Collapse>
     </div>
   )
 }
@@ -119,15 +129,23 @@ function TrailRow({
   label,
   running,
   last,
+  entering,
   children,
 }: {
   label: string
   running: boolean
   last: boolean
+  /** Whether this row is landing now, rather than being redrawn. */
+  entering: boolean
   children?: React.ReactNode
 }) {
   return (
-    <li className="relative grid gap-2 pb-5 pl-7 last:pb-0">
+    <li
+      className={cn(
+        "relative grid gap-2 pb-5 pl-7 last:pb-0",
+        entering && "animate-vg-row-in",
+      )}
+    >
       {/* The rule, drawn from this row's dot down to the next one. Absent on
           the last row, where a line to nowhere would promise another step. */}
       {!last && (
@@ -156,6 +174,92 @@ function TrailRow({
     </li>
   )
 }
+
+/**
+ * The disclosure's open and closed states, and the motion between them.
+ *
+ * A `display` toggle folds the trail in one frame, which under a Turn that just
+ * finished reads as the machinery being snatched away rather than stepping
+ * aside. The rows are laid out in a grid track that animates from `0fr` to
+ * `1fr`, so the height the browser animates is the height the content actually
+ * has — no measured pixel value to go stale when a step arrives mid-fold.
+ *
+ * The children leave the DOM once the fold is over rather than staying hidden
+ * inside a collapsed box: a folded trail is not part of the answer, and a
+ * reader on a screen reader should not walk through it.
+ */
+function Collapse({ open, children }: { open: boolean; children: React.ReactNode }) {
+  const [mounted, setMounted] = useState(open)
+  const [expanded, setExpanded] = useState(open)
+
+  useEffect(() => {
+    if (open) {
+      setMounted(true)
+      // A frame later, so the browser has painted the collapsed track and has
+      // something to animate from; both states in one commit skip the motion.
+      const frame = requestAnimationFrame(() => setExpanded(true))
+      return () => cancelAnimationFrame(frame)
+    }
+
+    setExpanded(false)
+    const timer = setTimeout(() => setMounted(false), FOLD_MS)
+    return () => clearTimeout(timer)
+  }, [open])
+
+  if (!mounted) return null
+
+  return (
+    <div
+      style={{ transitionDuration: `${FOLD_MS}ms` }}
+      className={cn(
+        "grid transition-[grid-template-rows,opacity] ease-out",
+        "motion-reduce:transition-none",
+        expanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+      )}
+    >
+      <div className="overflow-hidden">{children}</div>
+    </div>
+  )
+}
+
+/**
+ * Which of the rows on screen have never been drawn before.
+ *
+ * Seeded with whatever the trail held on its first render, so a Turn reopened
+ * from history animates nothing: those steps arrived before the reader was
+ * looking. Everything after that is a genuine arrival, and it keeps its
+ * animation exactly once — the set is updated in an effect rather than during
+ * render, so a re-render for an unrelated reason does not consume it.
+ */
+function useArrivals(keys: string[]): Set<string> {
+  const [seeded] = useState(() => new Set(keys))
+  const seen = useRef(seeded)
+  const arrivals = new Set(keys.filter((key) => !seen.current.has(key)))
+
+  useEffect(() => {
+    for (const key of keys) seen.current.add(key)
+  })
+
+  return arrivals
+}
+
+/** A row's identity across renders: its phase and its place in the trail. */
+function stepKey(phase: ActivityPhase, index: number): string {
+  return `${phase}-${index}`
+}
+
+/** The closing row's identity. There is only ever one of it. */
+const ENDING_KEY = "ending"
+
+/** Every row the trail would draw right now, in order. */
+function rowKeys(rows: TrailItem[], ending: "done" | "stopped" | null): string[] {
+  const keys = rows.map(({ step, index }) => stepKey(step.phase, index))
+  return ending === null ? keys : [...keys, ENDING_KEY]
+}
+
+/** The fold, in milliseconds. Long enough to read as motion, short enough that
+    a reader reaching for the answer is never waiting on it. */
+const FOLD_MS = 220
 
 /** The open-web disclosure: what was asked, then what came back. */
 function StepDetail({ step }: { step: ProgressStep }) {
