@@ -36,10 +36,10 @@ Decisions:
 | N3 | Sources panel | The reference's slide-in sources list maps onto the existing inspector: a third `InspectorTab` (`"news"`), with drag-resize and wide-toggle inherited for free. |
 | N4 | Honesty bar | v1 renders what the source actually serves: one source per item, no AI-composed article body, no per-claim citation chips, no "15 nguồn" aggregation. The layout keeps the reference's shape; the labels never claim synthesis that did not happen. |
 | N4a | Feed source (revised 2026-08-17) | The market feed is **CafeF category RSS**, not VCI. VCI serves no prose — measured 0/50 non-null on every content, source and link column across FPT/STB/VNM — so the reader had a headline and nothing else. VCI stays as a per-symbol **disclosure** list in the rail, labelled as disclosures rather than as news. See the correction section in `docs/research/news-sources.md`. |
-| N4b | Article text | The reader shows CafeF's own summary and a link to the original; **full text is never fetched or stored**. VCCorp holds the copyright and no ToS grants reuse. This is why the reading column is short by design. |
+| N4b | Article text (revised 2026-08-19) | The reader shows the article's **full body**, extracted from CafeF's own page when the reader opens it, above a link to the original. This reverses the original N4b — "full text is never fetched or stored" — at the product owner's explicit direction after the constraint was restated. The copyright position is unchanged and is what shapes the implementation: the body is fetched per read and cached, never stored in the database; `robots.txt` is `Allow: /`; every reading surface still ends by attributing the extract to CafeF and linking the original. Feeds cannot supply this — CafeF's RSS carries no `content:encoded`, and neither does any Vietnamese finance feed measured beside it (VnExpress, Vietstock, Thanh Niên, Vietnambiz, VnEconomy: 0/5). See `docs/research/news-sources.md`. |
 | N4c | Facets | The reference's editorial facet row becomes real: eight slugs served by the API — `moi-nhat`, `chung-khoan`, `kinh-te`, `tai-chinh`, `bat-dong-san`, `doanh-nghiep`, `cong-nghe`, `the-gioi` — each backed by a CafeF category feed whose *contents* were checked, not just its name. Our slugs are the contract; CafeF's paths stay an implementation detail. Two of the reference's labels are dropped: "Đọc nhiều" needs a read-count no source publishes, and CafeF has no retail feed. Chứng khoán and Doanh nghiệp take those slots — on a market platform they are the facets a reader came for. |
 | N5 | Rail widget | The reference's weather widget becomes a market widget (VNINDEX + indices) — this is a market product; weather is not its context. |
-| N6 | Data budget | The feed no longer spends vnstock quota at all: CafeF is plain HTTP, one request per category, behind a Redis response cache (300s trading / 900s off-hours, 24h stale). The rail's disclosure list is the only vnstock call on this surface, one per symbol, on the existing per-symbol cache. |
+| N6 | Data budget | The feed no longer spends vnstock quota at all: CafeF is plain HTTP, one request per category, behind a Redis response cache (300s trading / 900s off-hours, 24h stale). An article body is one further request, made only when a reader opens that article and cached for 24h — a rebuild still costs one request, not one per headline. The rail's disclosure list is the only vnstock call on this surface, one per symbol, on the existing per-symbol cache. |
 | N7 | AI layer | Key-takeaways boxes, citation chips and composed articles are explicitly deferred to the agent lane (spec 0004 W5/W6). When they land, they enter this surface as clearly-labelled agent output, not as provider prose restyled. |
 
 ## 2. Layout, from the screenshots
@@ -74,9 +74,15 @@ aggregation claim; ours names the single provider per item (N4).
 A single centered reading column (~720px) rendered in place of the feed:
 serif headline (~2.1rem, Newsreader — already the system's one serif),
 Vietnamese long-form date, source line, category label (or a clickable symbol
-chip when the item carries one), the summary set as the lead, hero image, and
-a link out to the original — the article body stays on the publisher's site
-per N4b, so the column is deliberately short and says so. Then **Bài liên
+chip when the item carries one), the summary set as the lead, hero image, then
+the article's own body — paragraphs, subheadings, lists and inline photos with
+their captions, drawn from the block tree the API sends (N4b). The lead is not
+printed twice: CafeF repeats its standfirst inside the body on many articles,
+and `articleBody` in `lib/news.ts` drops the copy. The body is a second request
+behind the one that drew this screen, so the column is readable while it lands
+and says which part is still coming; if it refuses, the summary stands and the
+retry is scoped to the body rather than to the feed. It ends at a link to the
+original, labelled as attribution once the body is present. Then **Bài liên
 quan** — three same-category cards. Top bar: back (state transition),
 external "Bài gốc" link, and "Nguồn" opening the inspector tab.
 
@@ -89,10 +95,9 @@ The tab button renders only while an article is open.
 
 ## 3. Serving path
 
-Three endpoints. The two feed routes read CafeF over plain HTTP; the
-per-symbol route is the vnstock lane, and all of them sit behind
-`TradingHoursCache` with stale fallback, mirroring the company router's
-discipline:
+Four endpoints. Three read CafeF over plain HTTP; the per-symbol route is the
+vnstock lane, and all of them sit behind `TradingHoursCache` with stale
+fallback, mirroring the company router's discipline:
 
 - `GET /stocks/news/feed?category={slug}` — one CafeF category feed,
   `heavy_rate_limit`, TTL 300s trading / 900s off-hours, stale 24h, cache key
@@ -101,6 +106,16 @@ discipline:
   → 503, and the cache serves the last good feed rather than nothing.
 - `GET /stocks/news/categories` — the slug registry (N4c). No network, so the
   pill row never waits on a feed to learn what the facets are.
+- `GET /stocks/news/article?url={url}` — one article's body as blocks in
+  reading order, `heavy_rate_limit`, TTL 24h both sides (a published article
+  does not go stale on the trading clock), stale 7d, cache key per URL. The
+  URL comes from the client, so `is_cafef_article_url` gates it on scheme,
+  host and CafeF's `.chn` suffix *before* the cache is touched — without that
+  the route is an open proxy to any address a caller names. Extraction reads
+  the allowlisted blocks directly inside `div.detail-content`, which is what
+  separates prose from the widgets nested in the same container; a body under
+  200 characters is reported as `CafeFUnavailable` rather than served, so a
+  renamed container fails loudly instead of shipping two sentences.
 - `GET /stocks/{symbol}/news` — the VCI disclosure lane,
   `standard_rate_limit`, TTL 900s/3600s, stale 7d. Wires the previously
   unreachable `CompanyService.get_company_news`, whose row mapping is

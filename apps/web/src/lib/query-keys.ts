@@ -80,6 +80,9 @@ export const queryKeys = {
   // the instant the reader pressed the next one.
   newsFeed: (category: string) => ["news", "feed", category] as const,
   newsCategories: ["news", "categories"] as const,
+  // Keyed on the publisher URL, which is the article's identity across a
+  // feed refresh — the feed position is not.
+  newsArticle: (url: string) => ["news", "article", url] as const,
   companyNews: (symbol: string) => [...queryKeys.stock(symbol), "news"] as const,
 
   // Background jobs (global, not symbol-scoped)

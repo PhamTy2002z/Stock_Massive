@@ -1,6 +1,6 @@
 """Company domain schemas."""
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel
 
@@ -208,6 +208,41 @@ class NewsFeedResponse(StrictModel):
     symbols: list[str]
     generated_at: str  # ISO timestamp, Asia/Ho_Chi_Minh
     total_count: int
+
+
+class ArticleBlock(StrictModel):
+    """One block of an article's body, in reading order.
+
+    A block tree rather than one string because the reader draws prose, a
+    subheading, a pull quote and a photo differently, and flattening them to
+    text throws away the only signal that says which is which. Every field but
+    `kind` is optional and only the ones that field implies are populated:
+    `text` for prose, `items` for a list, `image_url` plus `caption` for a
+    figure. `NewsArticleResponse.content` carries the flattened form for callers
+    that want plain text.
+    """
+
+    kind: Literal["paragraph", "heading", "quote", "list", "image"]
+    text: Optional[str] = None
+    items: Optional[list[str]] = None
+    image_url: Optional[str] = None
+    caption: Optional[str] = None
+
+
+class NewsArticleResponse(StrictModel):
+    """One press article's body, read from the publisher's own page.
+
+    Separate from the feed rather than a field on `FeedNewsItem`: the body costs
+    one HTTP request per article, and folding it into the feed would turn a
+    single request per category rebuild into one per headline nobody opened.
+    """
+
+    url: str
+    source: str
+    blocks: list[ArticleBlock]
+    # The same body as newline-separated plain text, matching what
+    # `NewsItem.content` is declared to hold everywhere else.
+    content: str
 
 
 class DividendItem(StrictModel):

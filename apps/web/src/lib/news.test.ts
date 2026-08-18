@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest"
 
-import type { FeedNewsItem } from "./api"
+import type { ArticleBlock, FeedNewsItem } from "./api"
 import {
+  articleBody,
   articleFacet,
   articleKey,
   findArticle,
@@ -61,6 +62,76 @@ describe("articleKey", () => {
     expect(articleKey(item({ id: "7", category: "vi-mo" }))).not.toBe(
       articleKey(item({ id: "7", symbol: "VCB" })),
     )
+  })
+})
+
+describe("articleBody", () => {
+  const block = (overrides: Partial<ArticleBlock> = {}): ArticleBlock => ({
+    kind: "paragraph",
+    text: null,
+    items: null,
+    image_url: null,
+    caption: null,
+    ...overrides,
+  })
+
+  // Long enough to clear the 60-character comparison floor, as a real standfirst is.
+  const SAPO =
+    "Theo ông Minh, điều quan trọng trong giai đoạn hiện tại không phải là dự đoán thị trường."
+
+  it("drops the paragraph that repeats the standfirst", () => {
+    const blocks = [block({ text: "Mở đầu bài viết." }), block({ text: SAPO })]
+
+    expect(articleBody(blocks, SAPO)).toEqual([block({ text: "Mở đầu bài viết." })])
+  })
+
+  it("matches a standfirst the feed truncated mid-sentence", () => {
+    // The summary arrives capped at 600 characters, so the two copies of the
+    // same paragraph are rarely equal — only their opening is.
+    const truncated = SAPO.slice(0, 70)
+    const blocks = [block({ text: SAPO })]
+
+    expect(articleBody(blocks, truncated)).toEqual([])
+  })
+
+  it("matches across the whitespace a stripped tag leaves behind", () => {
+    const spaced = SAPO.replace(" điều", "\n  điều")
+    const blocks = [block({ text: spaced })]
+
+    expect(articleBody(blocks, SAPO)).toEqual([])
+  })
+
+  it("drops only the first copy", () => {
+    const blocks = [block({ text: SAPO }), block({ text: SAPO })]
+
+    expect(articleBody(blocks, SAPO)).toHaveLength(1)
+  })
+
+  it("leaves prose that merely starts the same way", () => {
+    const blocks = [block({ text: "Theo ông Minh, thị trường sẽ hồi phục vào quý sau." })]
+
+    expect(articleBody(blocks, SAPO)).toEqual(blocks)
+  })
+
+  it("never drops a photo whose caption echoes the standfirst", () => {
+    const photo = block({ kind: "image", image_url: "https://x/a.png", caption: SAPO })
+
+    expect(articleBody([photo], SAPO)).toEqual([photo])
+  })
+
+  it("leaves the body alone when there is no standfirst to match", () => {
+    const blocks = [block({ text: SAPO })]
+
+    expect(articleBody(blocks, null)).toEqual(blocks)
+  })
+
+  it("leaves the body alone when the standfirst is too short to identify", () => {
+    // Below the comparison floor a shared opening proves nothing: "VN-Index
+    // tăng" begins any number of unrelated paragraphs.
+    const short = "VN-Index tăng."
+    const blocks = [block({ text: `${short} Phiên hôm nay thanh khoản cải thiện rõ.` })]
+
+    expect(articleBody(blocks, short)).toEqual(blocks)
   })
 })
 
