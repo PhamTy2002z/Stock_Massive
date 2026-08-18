@@ -1,8 +1,8 @@
 "use client"
 
-import { useMemo, useState, type KeyboardEvent } from "react"
+import { useMemo, useState, type FormEvent, type KeyboardEvent } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { Plus, X } from "lucide-react"
+import { ArrowRight, Loader2, Plus, X } from "lucide-react"
 
 import { searchStocks } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
@@ -69,16 +69,42 @@ export function WatchlistSection() {
 
   function submit(symbol: string) {
     const code = symbol.trim().toUpperCase()
-    if (!code || full) return
-    add.mutate(code)
-    setDraft("")
+    if (!code || full || add.isPending) return
+    // The draft is cleared on success only. A refused code — outside the
+    // Universe, or arriving at a full Watchlist — is one the user wants to
+    // correct, and clearing it optimistically leaves them an empty field beside
+    // an error about a code they can no longer see.
+    add.mutate(code, { onSuccess: () => setDraft("") })
+  }
+
+  /**
+   * The code a submission means, in the order a reader expects it.
+   *
+   * The exact match first: the search ranks a whole code first for a whole code,
+   * but a reader who typed `MBB` means `MBB` whatever the endpoint puts at the
+   * top of a list of warrants over it.
+   */
+  function submitted() {
+    const code = term.toUpperCase()
+    const list = hits.data ?? []
+    return list.find((hit) => hit.symbol === code)?.symbol ?? list[0]?.symbol ?? code
+  }
+
+  /**
+   * Enter is handled by the form rather than by a key listener on the input.
+   *
+   * A single-field form submits natively on Enter, including the Enter that
+   * follows an IME commit — the press a `keydown` reading `event.key` can miss
+   * entirely, because the composing keystroke is delivered to the IME and not as
+   * `Enter`. The same handler backs the visible submit button, so adding never
+   * depends on one key reaching one listener.
+   */
+  function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    submit(submitted())
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    if (event.key === "Enter") {
-      event.preventDefault()
-      submit(hits.data?.[0]?.symbol ?? draft)
-    }
     if (event.key === "Escape") {
       setAdding(false)
       setDraft("")
@@ -110,15 +136,35 @@ export function WatchlistSection() {
 
       {adding && (
         <div className="px-3 pb-1.5 pt-0.5">
-          <input
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={onKeyDown}
-            autoFocus
-            aria-label="Tìm mã để thêm vào danh sách theo dõi"
-            placeholder="Tìm mã · Enter để thêm"
-            className="w-full rounded-lg border border-primary/[0.32] bg-surface-sunken px-2.5 py-1.5 font-mono text-control uppercase text-foreground outline-none placeholder:text-ink-6 placeholder:normal-case"
-          />
+          <form onSubmit={onSubmit} className="relative">
+            <input
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={onKeyDown}
+              autoFocus
+              disabled={add.isPending}
+              aria-label="Tìm mã để thêm vào danh sách theo dõi"
+              placeholder="Tìm mã · Enter để thêm"
+              className="w-full rounded-lg border border-primary/[0.32] bg-surface-sunken py-1.5 pl-2.5 pr-8 font-mono text-control uppercase text-foreground outline-none placeholder:text-ink-6 placeholder:normal-case disabled:opacity-60"
+            />
+            {/* The add, as something to click. Enter is the fast path, not the
+                only one, and while the request is open this is where the wait is
+                shown — an input that empties and reports nothing is the shape of
+                an add that silently failed. */}
+            <IconButton
+              type="submit"
+              label={add.isPending ? "Đang thêm mã" : "Thêm mã đang gõ"}
+              size="sm"
+              disabled={!term || add.isPending}
+              className="absolute right-1 top-1/2 size-[22px] -translate-y-1/2 rounded-md text-ink-5 hover:bg-primary/[0.16] hover:text-primary"
+            >
+              {add.isPending ? (
+                <Loader2 className="size-3.5 animate-spin" strokeWidth={2} />
+              ) : (
+                <ArrowRight className="size-3.5" strokeWidth={2} />
+              )}
+            </IconButton>
+          </form>
 
           {(hits.data ?? []).length > 0 && (
             <div className="mt-1.5 animate-vg-row-in overflow-hidden rounded-[10px] border border-border bg-surface-menu">
