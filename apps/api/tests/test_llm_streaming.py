@@ -200,6 +200,96 @@ class TestTextAndFinish:
         assert assembler.usage_payload == {"prompt_tokens": 10}
 
 
+class TestTheRoutesReasoningToken:
+    """Gemini 3.x refuses a round whose function calls come back without it."""
+
+    def test_a_streamed_signature_is_carried_onto_the_call(self):
+        assembler = StreamAssembler()
+        assembler.add_tool_call_fragment(
+            {
+                "index": 0,
+                "id": "call_a",
+                "function": {"name": "get_price", "arguments": '{"symbol": "STB"}'},
+                "extra_content": {"google": {"thought_signature": "Eu0CCuo"}},
+            }
+        )
+
+        (call,) = assembler.tool_calls()
+
+        assert call.signature == "Eu0CCuo"
+
+    def test_the_first_fragment_that_carries_one_wins(self):
+        assembler = StreamAssembler()
+        assembler.add_tool_call_fragment(
+            fragment(0, id="call_a", name="get_price", arguments='{"symbol": ')
+        )
+        assembler.add_tool_call_fragment(
+            {
+                "index": 0,
+                "extra_content": {"google": {"thought_signature": "first"}},
+                "function": {"arguments": '"STB"}'},
+            }
+        )
+        assembler.add_tool_call_fragment(
+            {
+                "index": 0,
+                "extra_content": {"google": {"thought_signature": "second"}},
+            }
+        )
+
+        (call,) = assembler.tool_calls()
+
+        assert call.signature == "first"
+        assert call.arguments == {"symbol": "STB"}
+
+    def test_a_call_without_one_reads_as_having_none(self):
+        assembler = StreamAssembler()
+        assembler.add_tool_call_fragment(
+            fragment(0, id="call_a", name="get_price", arguments="{}")
+        )
+
+        (call,) = assembler.tool_calls()
+
+        assert call.signature is None
+
+    @pytest.mark.parametrize(
+        "container",
+        [
+            {"google": {"thought_signature": ""}},
+            {"google": {"thought_signature": None}},
+            {"google": "not a mapping"},
+            "not a mapping",
+        ],
+    )
+    def test_anything_but_a_non_empty_string_reads_as_absent(self, container):
+        assembler = StreamAssembler()
+        assembler.add_tool_call_fragment(
+            {
+                "index": 0,
+                "id": "call_a",
+                "function": {"name": "get_price", "arguments": "{}"},
+                "extra_content": container,
+            }
+        )
+
+        (call,) = assembler.tool_calls()
+
+        assert call.signature is None
+
+    def test_the_whole_response_path_reads_it_too(self):
+        (call,) = parse_tool_calls(
+            [
+                {
+                    "id": "call_a",
+                    "function": {"name": "get_price", "arguments": "{}"},
+                    "extra_content": {"google": {"thought_signature": "whole"}},
+                }
+            ]
+        )
+
+        assert call.signature == "whole"
+
+
 class TestTheWholeResponsePath:
     def test_a_complete_response_is_read_under_the_same_rule(self):
         calls = parse_tool_calls(
