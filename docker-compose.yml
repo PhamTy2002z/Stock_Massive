@@ -95,6 +95,9 @@ services:
       # be called whole. Forwarded like the other switches: a flag that only
       # exists in the settings class is one a container never sees.
       LLM_STREAMING_ENABLED: ${LLM_STREAMING_ENABLED:-true}
+      # A thinking route wants its own reasoning back with the tool-call
+      # history. Forwarded for the same reason as the switch above.
+      LLM_REASONING_HISTORY_REQUIRED: ${LLM_REASONING_HISTORY_REQUIRED:-false}
       # The startup Capability Probe spends real provider tokens and refuses to
       # boot the whole API when the route cannot answer it. Forwarded so an
       # operator on a constrained route (expired plan, drained credits) can

@@ -34,7 +34,7 @@ from .errors import (
     classify_status,
     llm_metrics,
 )
-from .protocol import Completion, CompletionRequest, Usage
+from .protocol import Completion, CompletionRequest, Role, Usage
 from .streaming import StreamAssembler, parse_tool_calls
 
 logger = logging.getLogger(__name__)
@@ -44,6 +44,11 @@ CHAT_COMPLETIONS_PATH = "/chat/completions"
 # The tool_choice values that travel as themselves. Anything else is read as a
 # tool name and forced, which is what the Capability Probe checks is honoured.
 PASSTHROUGH_TOOL_CHOICES = frozenset({"auto", "none", "required"})
+
+# What a thinking route calls the field, and the smallest value it accepts. An
+# empty string is refused; a space is not.
+REASONING_HISTORY_KEY = "reasoning_content"
+REASONING_HISTORY_PLACEHOLDER = " "
 
 SSE_DATA_PREFIX = "data:"
 SSE_DONE = "[DONE]"
@@ -79,6 +84,27 @@ class OpenAICompatibleTransport:
         if self._streaming(request):
             return await self._streamed(request)
         return await self._whole(request)
+
+    def _messages(self, request: CompletionRequest) -> list[dict[str, Any]]:
+        """The transcript on the wire, with whatever this route insists on.
+
+        A thinking route wants its own reasoning back beside the tool calls it
+        made. This transcript does not keep that text — reasoning is not evidence,
+        and nothing downstream may cite it — so what goes out is a placeholder
+        that satisfies the requirement and asserts nothing. Measured on DeepSeek
+        v4-pro through TokenRouter: a single space is accepted where an empty
+        string is refused.
+
+        Only assistant turns that actually carry tool calls are touched, so a
+        route without the requirement sees exactly what it saw before.
+        """
+        wire = [message.as_wire() for message in request.messages]
+        if not self._config.route.reasoning_history:
+            return wire
+        for payload in wire:
+            if payload.get("role") == Role.ASSISTANT.value and payload.get("tool_calls"):
+                payload.setdefault(REASONING_HISTORY_KEY, REASONING_HISTORY_PLACEHOLDER)
+        return wire
 
     def _streaming(self, request: CompletionRequest) -> bool:
         """Whether this call streams: the caller's wish and the route's answer."""
@@ -197,7 +223,7 @@ class OpenAICompatibleTransport:
     def _body(self, request: CompletionRequest) -> dict[str, Any]:
         body: dict[str, Any] = {
             "model": request.model,
-            "messages": [message.as_wire() for message in request.messages],
+            "messages": self._messages(request),
             "stream": self._streaming(request),
         }
 

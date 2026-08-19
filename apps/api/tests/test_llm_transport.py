@@ -40,6 +40,7 @@ from src.core.llm.protocol import (
     JsonSchemaFormat,
     Message,
     Role,
+    ToolCall,
     ToolSchema,
 )
 from src.core.llm.transport import OpenAICompatibleTransport
@@ -645,6 +646,64 @@ class TestNoSdkOrFramework:
             "instructor",
         ):
             assert forbidden not in requirements, forbidden
+
+
+class TestAThinkingRoute:
+    """Measured on DeepSeek v4-pro through TokenRouter (19/08/2026).
+
+    The route refuses a second round with `messages[1].reasoning_content is
+    required for thinking tool-call history`. This transcript does not keep a
+    model's reasoning — it is not evidence and nothing may cite it — so the
+    requirement is met with a placeholder. The same measurement showed an empty
+    string refused and a single space accepted.
+    """
+
+    def _sent(self, **config_overrides) -> dict:
+        seen: dict = {}
+
+        def handler(http_request: httpx.Request) -> httpx.Response:
+            seen.update(json.loads(http_request.content))
+            return httpx.Response(200, content=sse(text_chunk("ok")))
+
+        harness = client(handler, **config_overrides)
+        history = [
+            Message(role=Role.USER, content="Đọc giá FPT."),
+            Message(
+                role=Role.ASSISTANT,
+                tool_calls=(
+                    ToolCall(
+                        id="call-1",
+                        name="get_price",
+                        arguments={"symbol": "FPT"},
+                        output_index=0,
+                    ),
+                ),
+            ),
+            Message(role=Role.TOOL, tool_call_id="call-1", content="{}"),
+        ]
+        return seen, harness, history
+
+    @pytest.mark.asyncio
+    async def test_an_assistant_turn_with_tool_calls_carries_the_placeholder(self):
+        seen, harness, history = self._sent(llm_reasoning_history_required=True)
+
+        await harness.complete(request(messages=history))
+
+        roles = [message["role"] for message in seen["messages"]]
+        assert roles == ["user", "assistant", "tool"]
+        assistant = seen["messages"][1]
+        assert assistant["reasoning_content"] == " "
+        # Nothing else gains the field: only the turn that made the calls.
+        assert "reasoning_content" not in seen["messages"][0]
+        assert "reasoning_content" not in seen["messages"][2]
+
+    @pytest.mark.asyncio
+    async def test_a_route_without_the_requirement_sees_no_extra_field(self):
+        seen, harness, history = self._sent()
+
+        await harness.complete(request(messages=history))
+
+        assert all("reasoning_content" not in m for m in seen["messages"])
 
 
 class TestARouteThatCannotStream:
