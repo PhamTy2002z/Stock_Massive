@@ -233,6 +233,14 @@ class Settings(BaseSettings):
     # có token nào được phát ra client giữa đường (loop phát activity và block,
     # không phát token).
     llm_streaming_enabled: bool = True
+    # Một tuyến phục vụ *thinking model* có thể đòi lịch sử suy luận của chính nó
+    # quay lại cùng lịch sử tool-call: DeepSeek v4-pro qua TokenRouter từ chối vòng
+    # thứ hai với `messages[1].reasoning_content is required for thinking tool-call
+    # history`. Transcript ở đây không lưu chuỗi suy luận của model — nó không phải
+    # bằng chứng, và Evidence Manifest không có chỗ cho nó — nên cờ này chỉ khiến
+    # mỗi assistant turn có tool call mang theo một chỗ giữ chỗ hợp lệ. Đo được:
+    # tuyến nhận một khoảng trắng nhưng từ chối chuỗi rỗng.
+    llm_reasoning_history_required: bool = False
     # Explicit paid-call switch for the boot-time Capability Probe. Test code
     # turns this off by name; no code path guesses that pytest is running.
     llm_capability_probe_enabled: bool = True
