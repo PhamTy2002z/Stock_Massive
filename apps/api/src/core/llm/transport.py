@@ -68,10 +68,21 @@ class OpenAICompatibleTransport:
             await self._http.aclose()
 
     async def dispatch(self, request: CompletionRequest) -> Completion:
-        """Make exactly one paid attempt, returning or raising a typed result."""
-        if request.stream:
+        """Make exactly one paid attempt, returning or raising a typed result.
+
+        A caller asks for streaming; the route decides whether it can be given.
+        Both shapes assemble tool calls through the same rule, and the whole
+        response is the one that also works on a route which omits the upstream
+        index — so a route declared non-streaming is downgraded here rather than
+        failing later inside the assembler.
+        """
+        if self._streaming(request):
             return await self._streamed(request)
         return await self._whole(request)
+
+    def _streaming(self, request: CompletionRequest) -> bool:
+        """Whether this call streams: the caller's wish and the route's answer."""
+        return request.stream and self._config.route.streaming
 
     # -- the two response shapes ------------------------------------------
 
@@ -187,10 +198,10 @@ class OpenAICompatibleTransport:
         body: dict[str, Any] = {
             "model": request.model,
             "messages": [message.as_wire() for message in request.messages],
-            "stream": request.stream,
+            "stream": self._streaming(request),
         }
 
-        if request.stream:
+        if self._streaming(request):
             # Without this a streamed response carries no usage at all, and a
             # call with no usage cannot be reconciled against its reservation.
             body["stream_options"] = {"include_usage": True}

@@ -91,6 +91,10 @@ services:
       LLM_MODEL_BATCH: ${LLM_MODEL_BATCH:-gpt-5.6-luna}
       LLM_MODEL_SESSION: ${LLM_MODEL_SESSION:-gpt-5.6-terra}
       LLM_REQUEST_TIMEOUT_SECONDS: ${LLM_REQUEST_TIMEOUT_SECONDS:-120}
+      # A route that streams tool calls without the upstream index can only
+      # be called whole. Forwarded like the other switches: a flag that only
+      # exists in the settings class is one a container never sees.
+      LLM_STREAMING_ENABLED: ${LLM_STREAMING_ENABLED:-true}
       # The startup Capability Probe spends real provider tokens and refuses to
       # boot the whole API when the route cannot answer it. Forwarded so an
       # operator on a constrained route (expired plan, drained credits) can
