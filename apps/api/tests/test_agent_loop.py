@@ -575,6 +575,33 @@ async def test_any_other_route_failure_ends_the_turn_incomplete():
     assert outcome.terminal_reason == "route_error"
 
 
+@pytest.mark.asyncio
+async def test_the_second_round_hands_back_the_token_the_first_round_issued():
+    # Gemini 3.x refuses a round whose function calls arrive without the
+    # signature it issued for them, so the loop has to carry it across rounds.
+    signed = Completion(
+        model=SESSION_MODEL,
+        tool_calls=(
+            ToolCall(
+                id="call_0",
+                name="get_analysis",
+                arguments={"symbol": "FPT"},
+                output_index=0,
+                signature="Eu0CCuo",
+            ),
+        ),
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+    client = FakeClient([signed, answer()])
+
+    await loop(client).run(turn_request())
+
+    second = client.requests[1]
+    (assistant,) = [m for m in second.messages if m.role is Role.ASSISTANT]
+    (call,) = assistant.tool_calls
+    assert call.signature == "Eu0CCuo"
+
+
 # --- money ----------------------------------------------------------------
 
 

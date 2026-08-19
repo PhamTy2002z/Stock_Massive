@@ -23,7 +23,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .errors import LLMError, MalformedArguments, llm_metrics
-from .protocol import ToolCall
+from .protocol import (
+    SIGNATURE_CONTAINER_KEY,
+    SIGNATURE_KEY,
+    SIGNATURE_VENDOR_KEY,
+    ToolCall,
+)
 
 # The delta keys an OpenAI-compatible route may use for the upstream index.
 # ``output_index`` is the Responses API's name and ``index`` the Chat
@@ -32,20 +37,49 @@ from .protocol import ToolCall
 INDEX_KEYS = ("output_index", "index")
 
 
+def _signature_of(fragment: dict[str, Any]) -> str | None:
+    """The route's reasoning token for this call, if it sent one.
+
+    Read defensively rather than trusted: the container is a vendor extension,
+    so a route may send it empty, send something that is not a mapping, or not
+    send it at all. Anything but a non-empty string reads as absent, which is
+    the state a route that has no such token is already in.
+    """
+    container = fragment.get(SIGNATURE_CONTAINER_KEY)
+    if not isinstance(container, dict):
+        return None
+    vendor = container.get(SIGNATURE_VENDOR_KEY)
+    if not isinstance(vendor, dict):
+        return None
+    signature = vendor.get(SIGNATURE_KEY)
+    return signature if isinstance(signature, str) and signature else None
+
+
 @dataclass
 class _PartialToolCall:
     output_index: int
     id: str = ""
     name: str = ""
     arguments: str = ""
+    signature: str | None = None
 
-    def append(self, id: str | None, name: str | None, arguments: str | None) -> None:
+    def append(
+        self,
+        id: str | None,
+        name: str | None,
+        arguments: str | None,
+        signature: str | None = None,
+    ) -> None:
         # First writer wins for id and name: a route that repeats them on every
-        # fragment is common, and concatenating them would corrupt both.
+        # fragment is common, and concatenating them would corrupt both. The
+        # signature is one opaque token rather than text, so it is kept whole for
+        # the same reason and never appended to.
         if id and not self.id:
             self.id = id
         if name and not self.name:
             self.name = name
+        if signature and self.signature is None:
+            self.signature = signature
         if arguments:
             self.arguments += arguments
 
@@ -106,6 +140,7 @@ class StreamAssembler:
             id=fragment.get("id"),
             name=function.get("name"),
             arguments=function.get("arguments"),
+            signature=_signature_of(fragment),
         )
 
     @staticmethod
@@ -172,6 +207,7 @@ def _finish(partial: _PartialToolCall) -> ToolCall:
         name=partial.name,
         arguments=arguments,
         output_index=partial.output_index,
+        signature=partial.signature,
     )
 
 

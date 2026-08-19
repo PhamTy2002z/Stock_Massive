@@ -955,6 +955,7 @@ class AgentLoop:
                     name=call.name,
                     arguments=dict(call.arguments),
                     result=result,
+                    signature=call.signature,
                 )
             )
         return fatal

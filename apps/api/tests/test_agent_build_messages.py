@@ -253,3 +253,33 @@ def test_one_turn_that_outgrows_the_ceiling_collapses_its_own_results():
 def test_a_context_that_cannot_be_made_to_fit_fails_loudly():
     with pytest.raises(ConstructedContextTooLarge, match="ceiling of 10"):
         build_messages(transcript(3), ContextBudget(max_tokens=10))
+
+
+def test_a_calls_route_signature_reaches_the_assistant_turn_that_made_it():
+    # Gemini 3.x refuses the next round unless the calls come back carrying the
+    # token it issued, so the transcript has to hand it to the message builder.
+    signed = TranscriptToolCall(
+        call_id="call_0",
+        name="get_price_series",
+        arguments={"symbol": "STB"},
+        result={"summary": "ok"},
+        signature="Eu0CCuo",
+    )
+    unsigned = TranscriptToolCall(
+        call_id="call_1",
+        name="get_news",
+        arguments={"symbol": "VNM"},
+        result={"summary": "ok"},
+    )
+    built = build_messages(
+        Transcript(
+            system_prompt=SYSTEM_PROMPT,
+            turns=(TranscriptTurn(user_text="Giá STB?", tool_calls=(signed, unsigned)),),
+        ),
+        ContextBudget(max_tokens=8_000),
+    )
+
+    (assistant,) = [m for m in built.messages if m.role is Role.ASSISTANT]
+    first, second = assistant.tool_calls
+    assert first.signature == "Eu0CCuo"
+    assert second.signature is None
