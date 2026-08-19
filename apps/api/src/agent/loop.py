@@ -54,6 +54,7 @@ from src.core.llm import (
     Completion,
     CompletionRequest,
     GatewayTimeout,
+    RouteRateLimited,
     LLMClient,
     LLMConfig,
     LLMError,
@@ -718,6 +719,22 @@ class AgentLoop:
                 # the interactive surface renders as *re-auth needed*.
                 return await self._terminal(
                     request, TurnStatus.INCOMPLETE, "auth_unavailable", state
+                )
+            except RouteRateLimited as limited:
+                # Its own reason because the remedy is its own: the route
+                # answered, and what it said was that this caller has spent its
+                # allowance. Nothing here retries it — see ``RouteRateLimited``
+                # — and the reader is told to wait rather than told the route is
+                # unreachable.
+                logger.info(
+                    "Turn %s stopped on a rate-limited route (retry_after=%s, "
+                    "reset_at=%s)",
+                    request.request_message_id,
+                    limited.retry_after,
+                    limited.reset_at,
+                )
+                return await self._terminal(
+                    request, TurnStatus.INCOMPLETE, "route_rate_limited", state
                 )
             except GatewayTimeout:
                 # Already retried with backoff inside the client; a third
