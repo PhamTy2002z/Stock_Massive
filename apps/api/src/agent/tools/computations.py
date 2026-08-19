@@ -171,14 +171,20 @@ class ComputationTools:
                         "edge_decimal": {
                             "type": "number",
                             "minimum": 0,
-                            "description": "User-supplied expected edge as a decimal fraction.",
+                            "description": (
+                                "Expected edge as a decimal fraction, and only "
+                                "when the user supplied one. Omit it otherwise; "
+                                "never estimate it and never send zero."
+                            ),
                         },
                         "variance_decimal_squared": {
                             "type": "number",
                             "exclusiveMinimum": 0,
                             "description": (
-                                "User-supplied return variance in decimal-squared "
-                                "units."
+                                "Return variance in decimal-squared units, and "
+                                "only when the user supplied one. Omit it "
+                                "otherwise; never estimate it and never send "
+                                "zero."
                             ),
                         },
                     },
@@ -300,6 +306,15 @@ class ComputationTools:
 
     @staticmethod
     def _kelly(arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+        """The scenario, or a refusal that keeps the rest of the pack alive.
+
+        Every branch here returns. The sizing helper owns caller estimates and
+        rejects the ones it cannot size from, but raising through this method
+        would fail the whole tool call — and the registered RSI, MACD and
+        Bollinger fields beside it are the reason the model called the tool at
+        all. A scenario nobody can compute is a refused scenario, not a dead
+        read.
+        """
         has_edge = arguments.get("edge_decimal") is not None
         has_variance = arguments.get("variance_decimal_squared") is not None
         if not has_edge and not has_variance:
@@ -309,9 +324,18 @@ class ComputationTools:
                 "status": "refused",
                 "reason": "edge_and_variance_required_together",
             }
-        edge = float(arguments["edge_decimal"])
-        variance = float(arguments["variance_decimal_squared"])
-        sizing = fractional_kelly_sizing(edge=edge, variance=variance)
+        try:
+            edge = float(arguments["edge_decimal"])
+            variance = float(arguments["variance_decimal_squared"])
+            sizing = fractional_kelly_sizing(edge=edge, variance=variance)
+        except (TypeError, ValueError):
+            # Reached by a caller that filled the two numbers in rather than
+            # leaving them out: zeros, or a value the transport delivered as
+            # text. The pack still answers; only the scenario is withheld.
+            return {
+                "status": "refused",
+                "reason": "edge_and_variance_must_be_supplied_estimates",
+            }
         return {
             "provenance": "user_input",
             "scenario_only": True,

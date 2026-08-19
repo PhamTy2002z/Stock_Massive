@@ -197,6 +197,33 @@ async def test_kelly_requires_both_user_inputs_and_never_estimates_an_edge():
 
 
 @pytest.mark.asyncio
+async def test_a_kelly_scenario_nobody_can_size_refuses_without_killing_the_pack():
+    """Measured on a real Turn: two zeros, and RSI lost with them.
+
+    A model with no user estimate to pass filled both numbers in with zero. The
+    sizing helper rejects a zero variance, and the exception took the whole call
+    down — so the registered RSI, MACD and Bollinger fields the pack exists to
+    serve never reached the Turn. The scenario refuses on its own now.
+    """
+    session = open_session()
+    list_on(session, SYMBOL, Exchange.HOSE)
+    session.commit()
+    catalog = tools_for(session).catalog(trace_writer=lambda _trace: None)
+
+    result = await catalog.dispatch(
+        "indicator_pack",
+        {"symbol": SYMBOL, "edge_decimal": "0", "variance_decimal_squared": "0"},
+        context(),
+    )
+
+    assert result["fractional_kelly"] == {
+        "status": "refused",
+        "reason": "edge_and_variance_must_be_supplied_estimates",
+    }
+    assert result["registered_fields"]
+
+
+@pytest.mark.asyncio
 async def test_every_cluster_stays_in_budget_at_the_widest_registered_window():
     session = open_cross_session()
     members, days = a_sample(
@@ -263,14 +290,25 @@ async def test_the_price_zone_reaches_the_model_as_a_registered_reference_price(
 
 @pytest.mark.asyncio
 async def test_a_price_zone_citation_resolves_as_a_registered_field():
-    """The zone and the reference price must survive the validator's resolution.
+    """The zone must survive the validator's resolution, in both spellings.
 
     Serving the field is only half the route: the Gate reads the *citation*, and
     conditions 3 and 7 both turn on the resolved source being a registered field
     rather than a stored figure or an external claim.
+
+    The method details beside the value are refused. They were citable once, and
+    a Turn on STB showed what that buys: a percentage narrated, an anchor price
+    in dong cited, and — had the two agreed — a citation carrying this field's
+    percent unit and its sanctioned reading for a price. A zone is the value or
+    it is nothing.
     """
     from src.agent.context import TranscriptToolCall
-    from src.agent.grounding import EvidenceRef, EvidenceSource, TraceIndex
+    from src.agent.grounding import (
+        EvidenceRef,
+        EvidenceSource,
+        GroundingFailure,
+        TraceIndex,
+    )
 
     session = open_session()
     days = store_indicator_history(session)
@@ -289,14 +327,18 @@ async def test_a_price_zone_citation_resolves_as_a_registered_field():
             )
         ]
     )
-    base = "registered_fields.price_zone.ordinary_range_pct"
-    anchor = traces.resolve(EvidenceRef.parse(f"c1#{base}.details.anchor_close"))
-    upper = traces.resolve(EvidenceRef.parse(f"c1#{base}.details.upper_price"))
+    field = "price_zone.ordinary_range_pct"
+    served = result["registered_fields"][field]
+    long_form = traces.resolve(EvidenceRef.parse(f"c1#registered_fields.{field}.value"))
+    short_form = traces.resolve(EvidenceRef.parse(f"c1#{field}"))
 
-    assert anchor.source is EvidenceSource.REGISTERED_FIELD
-    assert upper.source is EvidenceSource.REGISTERED_FIELD
-    assert anchor.value == result["registered_fields"][
-        "price_zone.ordinary_range_pct"
-    ]["details"]["anchor_close"]
-    assert anchor.window_health_refusal is None
-    assert anchor.interpretation and anchor.unit
+    assert long_form.source is EvidenceSource.REGISTERED_FIELD
+    assert short_form.source is EvidenceSource.REGISTERED_FIELD
+    assert long_form.value == short_form.value == served["value"]
+    assert long_form.window_health_refusal is None
+    assert long_form.interpretation and long_form.unit
+
+    for detail in ("details.anchor_close", "details.upper_price"):
+        with pytest.raises(GroundingFailure) as raised:
+            traces.resolve(EvidenceRef.parse(f"c1#registered_fields.{field}.{detail}"))
+        assert raised.value.code == "uncitable_field_path"
