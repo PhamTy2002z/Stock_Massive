@@ -30,6 +30,7 @@ from src.core.llm.errors import (
     LLMError,
     MalformedArguments,
     ModelRefusal,
+    RouteRateLimited,
     ToolAttempts,
     llm_metrics,
     tool_error_result,
@@ -389,6 +390,50 @@ class TestTheErrorTaxonomy:
             await client(handler).complete(request())
 
         assert attempts["count"] == 2
+
+    async def test_a_429_is_a_rate_limit_and_is_never_retried(self):
+        """Measured: a daily quota retried twice, eight hours before it reset.
+
+        The route answered — precisely, and with the remedy in the body — so a
+        second identical request buys another copy of the same sentence. It is
+        also not a timeout: calling it one made the log say the route was silent
+        when it had been explicit.
+        """
+        attempts = {"count": 0}
+        body = json.dumps(
+            {
+                "error": {
+                    "message": "Rate limit exceeded: free-models-per-day",
+                    "code": 429,
+                }
+            }
+        )
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            attempts["count"] += 1
+            return httpx.Response(
+                429,
+                text=body,
+                headers={"Retry-After": "30", "X-RateLimit-Reset": "1787097600000"},
+            )
+
+        with pytest.raises(RouteRateLimited) as raised:
+            await client(handler).complete(request())
+
+        assert attempts["count"] == 1
+        assert not isinstance(raised.value, GatewayTimeout)
+        # The window the route reported, in seconds, however it spelled it.
+        assert raised.value.retry_after == 30.0
+        assert raised.value.reset_at == 1787097600.0
+
+    async def test_a_429_without_headers_still_classifies(self):
+        with pytest.raises(RouteRateLimited) as raised:
+            await client(lambda _r: httpx.Response(429, text="slow down")).complete(
+                request()
+            )
+
+        assert raised.value.retry_after is None
+        assert raised.value.reset_at is None
 
     async def test_a_timeout_on_the_socket_is_the_same_class(self):
         attempts = {"count": 0}

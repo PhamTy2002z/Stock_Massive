@@ -43,6 +43,7 @@ from .config import (
 from .errors import (
     AuthUnavailable,
     GatewayTimeout,
+    RouteRateLimited,
     LLMError,
     LLMMetrics,
     MalformedArguments,
@@ -86,6 +87,7 @@ __all__ = [
     "CapabilityProbe",
     "CapabilityProbeError",
     "GatewayTimeout",
+    "RouteRateLimited",
     "JsonSchemaFormat",
     "LLMClient",
     "LLMConfig",

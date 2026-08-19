@@ -120,6 +120,8 @@ const TERMINAL_REASONS: Record<string, string> = {
   llm_call_timeout: "Mô hình không trả lời kịp nên lượt này dừng lại.",
   answer_truncated: "Câu trả lời bị cắt giữa chừng vì vượt giới hạn độ dài cho một lượt.",
   gateway_timeout: "Tuyến mô hình không phản hồi nên lượt này dừng lại.",
+  route_rate_limited:
+    "Tuyến mô hình đã dùng hết lượt gọi được cấp nên lượt này dừng lại. Chờ hạn mức được cấp lại rồi thử lại.",
   route_error: "Tuyến mô hình gặp lỗi nên lượt này dừng lại.",
   auth_unavailable: "Không kết nối được tới tuyến mô hình nên lượt này dừng lại.",
   tool_timeout: "Một bước đọc dữ liệu quá thời gian nên lượt này dừng lại.",
