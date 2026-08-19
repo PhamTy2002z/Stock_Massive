@@ -566,13 +566,20 @@ async def test_a_model_refusal_is_shown_verbatim_and_never_re_prompted():
 
 
 @pytest.mark.asyncio
-async def test_any_other_route_failure_ends_the_turn_incomplete():
+async def test_any_other_route_failure_ends_the_turn_incomplete(caplog):
     client = FakeClient([LLMError("the route refused the request (400)")])
 
-    outcome = await loop(client).run(turn_request())
+    with caplog.at_level("WARNING"):
+        outcome = await loop(client).run(turn_request())
 
     assert outcome.status is TurnStatus.INCOMPLETE
     assert outcome.terminal_reason == "route_error"
+    # The reason is one word for every route failure that is not its own class,
+    # so what the route said has to reach the log or it reaches nobody.
+    assert any(
+        "the route refused the request (400)" in record.message
+        for record in caplog.records
+    )
 
 
 # --- money ----------------------------------------------------------------
