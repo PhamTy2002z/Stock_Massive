@@ -920,3 +920,83 @@ async def test_a_recommendation_the_gate_cannot_prove_leaves_an_answer_behind():
     assert outcome.degraded_recommendation_code == "missing_reference_price"
     assert gate_outcomes(outcome).recommendation == "blocked"
     assert gate_outcomes(outcome).failure_code == "missing_reference_price"
+
+
+# --- the Gate's one rewrite ------------------------------------------------
+
+
+UNPROVABLE = "RSI đang ở 61,2 [ev:nope#registered_fields.indicator_pack.rsi_14.value]"
+
+
+@pytest.mark.asyncio
+async def test_a_blocked_block_earns_one_rewrite_and_the_rewrite_is_released():
+    """A misplaced reference costs a round, not the whole answer.
+
+    The first answer references a call this Turn never made, which is a
+    non-degradable condition and used to end the Turn with nothing on screen.
+    The model is told the condition once and rewrites; the rewrite is what the
+    reader gets, and the withheld attempt is not part of it.
+    """
+    client = FakeClient(
+        [wants("get_analysis"), answer(UNPROVABLE), answer("Kết luận không có số.")]
+    )
+
+    outcome = await loop(client).run(turn_request())
+
+    assert outcome.status is TurnStatus.COMPLETE
+    assert outcome.terminal_reason is None
+    assert [block.text for block in outcome.blocks] == ["Kết luận không có số."]
+    # Three calls: the lookup, the blocked answer, and the rewrite it earned.
+    assert len(client.requests) == 3
+    note = client.requests[-1].messages[-1]
+    assert note.role is Role.SYSTEM
+    assert "withheld" in note.content
+    # The instruction names the condition and never the figure behind it.
+    assert "61,2" not in note.content
+    assert "61.2" not in note.content
+
+
+@pytest.mark.asyncio
+async def test_the_rewrite_is_offered_once_and_the_second_failure_ends_the_turn():
+    client = FakeClient(
+        [wants("get_analysis"), answer(UNPROVABLE), answer(UNPROVABLE), answer("Muộn.")]
+    )
+
+    outcome = await loop(client).run(turn_request())
+
+    assert outcome.status is TurnStatus.INCOMPLETE
+    assert outcome.terminal_reason == "grounding_failed"
+    assert outcome.grounding_failure_code == "unknown_tool_call"
+    # The third answer is never asked for: the rewrite was the last chance.
+    assert len(client.requests) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_turn_the_gate_emptied_says_so_rather_than_showing_nothing():
+    """The floor under a blocked Turn is a sentence, not a blank answer."""
+    from src.agent.grounding import BLOCKED_TURN_NOTICE
+
+    client = FakeClient([wants("get_analysis"), answer(UNPROVABLE), answer(UNPROVABLE)])
+
+    outcome = await loop(client).run(turn_request())
+
+    assert [block.text for block in outcome.blocks] == [BLOCKED_TURN_NOTICE]
+    assert outcome.blocks[0].citations == ()
+    assert outcome.blocks[0].kind is BlockKind.PROSE
+    # Nothing of the withheld answer survives in it.
+    assert "61,2" not in outcome.blocks[0].text
+
+
+@pytest.mark.asyncio
+async def test_a_partly_proven_answer_keeps_its_proven_blocks_and_adds_no_notice():
+    """The notice is only for a Turn the Gate emptied."""
+    from src.agent.grounding import BLOCKED_TURN_NOTICE
+
+    text = f"Phiên hôm nay đi ngang.\n\n{UNPROVABLE}"
+    client = FakeClient([wants("get_analysis"), answer(text), answer(text)])
+
+    outcome = await loop(client).run(turn_request())
+
+    assert outcome.terminal_reason == "grounding_failed"
+    assert [block.text for block in outcome.blocks] == ["Phiên hôm nay đi ngang."]
+    assert BLOCKED_TURN_NOTICE not in [block.text for block in outcome.blocks]

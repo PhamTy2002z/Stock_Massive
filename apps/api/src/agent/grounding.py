@@ -63,7 +63,12 @@ from src.stocks.signals import registered_field
 
 from .context import TranscriptToolCall
 from .tools.catalog import refusal_reason
-from .tools.fields import sanctioned_interpretation
+from .tools.fields import (
+    FIELD_VALUE_KEY,
+    REGISTERED_FIELDS_KEY,
+    citable_path,
+    sanctioned_interpretation,
+)
 
 GROUNDING_FAILED = "grounding_failed"
 
@@ -191,6 +196,102 @@ DEGRADED_REASON_TEXT = {
     "news_only_basis": "vùng giá chỉ dựa trên nguồn tin, không phải số liệu tính được",
     "unreferenced_figure": "có con số chưa gắn được với bằng chứng nào",
 }
+
+
+#: What a blocked Turn says when the Gate kept every one of its blocks off the
+#: screen.
+#:
+#: Backend-authored, figure-free and versioned for the reason
+#: :data:`DEGRADED_RECOMMENDATION_NOTICE` is. A Turn whose first block fails
+#: releases nothing, and a reader watching a search trail finish above an empty
+#: answer learns only that the product is broken. This sentence is the floor: it
+#: names what happened in the reader's own terms and claims nothing about the
+#: symbol.
+BLOCKED_TURN_NOTICE = (
+    "Tôi chưa đưa được nhận định nào cho câu hỏi này: các con số trong bản "
+    "nháp chưa gắn được với dữ liệu đã đăng ký, nên tôi giữ lại toàn bộ thay "
+    "vì trả lời bằng số liệu chưa chứng minh được. Bạn thử hỏi lại, hoặc hỏi "
+    "hẹp hơn về một chỉ số cụ thể."
+)
+
+#: One instruction per Gate condition, for the single rewrite the loop allows.
+#:
+#: **No value ever appears here.** The operator's ``detail`` names the figure the
+#: trace holds, and feeding that back would let a block pass by restating the
+#: number it was told about — the model would be shopping the Gate rather than
+#: correcting a reference. What it gets is the condition it broke and the rule
+#: that fixes it, which is exactly what a misplaced marker needs and no help at
+#: all to a fabricated figure.
+REPAIR_GUIDANCE = {
+    "figure_mismatch": (
+        "A figure you wrote is not the figure the field you referenced holds. "
+        "Reference the field the figure actually came from, or do not write it."
+    ),
+    "uncitable_field_path": (
+        "A reference pointed inside a computed field instead of at the field "
+        "itself. Reference it by the key it is served under, copied exactly as "
+        "it appears: the details beside it cannot be referenced."
+    ),
+    "unknown_field_path": (
+        "A reference named a path that is not in the result you were given. A "
+        "computed field is referenced by the key it is served under, copied "
+        "exactly as it appears."
+    ),
+    "unknown_tool_call": (
+        "A reference named a tool call this Turn did not make. Use the "
+        "identifiers of the calls in this Turn only."
+    ),
+    "malformed_reference": (
+        "A marker was not a call identifier, a hash sign and a field path."
+    ),
+    "incomplete_citation": (
+        "A marker was left unfinished. Write the closing bracket."
+    ),
+    "missing_value": (
+        "The field you referenced has no value for this session, so nothing in "
+        "it can be narrated. Say what is missing instead."
+    ),
+    "refused_field": (
+        "The field you referenced was refused and carries no value. Say what is "
+        "missing instead."
+    ),
+    "refused_tool_call": (
+        "The call you referenced answered with a refusal and carries no figure."
+    ),
+    "unfinished_tool_call": (
+        "The call you referenced has no result to cite."
+    ),
+    "symbol_not_in_universe": (
+        "The block was about a symbol no tool in this Turn answered about."
+    ),
+    "trading_day_mismatch": (
+        "A recommendation declared a day that is not this Turn's Trading Day."
+    ),
+    "missing_trading_day": (
+        "A recommendation carried no Trading Day."
+    ),
+    "unclassified_claim": (
+        "A reference pointed at material that declares no claim class."
+    ),
+    "field_not_registered": (
+        "A reference pointed at something the Signal Registry does not declare."
+    ),
+    "missing_as_of": (
+        "The field you referenced carries no date it was computed for."
+    ),
+}
+
+#: The fallback instruction, so an unmapped code still gets one rewrite rather
+#: than ending the Turn on a sentence the model cannot act on.
+REPAIR_FALLBACK = (
+    "One paragraph could not be proven against this Turn's results."
+)
+
+
+def repair_instruction(code: str) -> str:
+    """The rewrite instruction for a Gate condition. Never carries a figure."""
+
+    return REPAIR_GUIDANCE.get(code, REPAIR_FALLBACK)
 
 
 class GroundingFailure(Exception):
@@ -567,8 +668,16 @@ class TraceIndex:
         ref: EvidenceRef,
     ) -> Citation:
         parts = [part for part in ref.field_path.split(".") if part]
-        if parts and parts[0] == "registered_fields":
-            return self._registered(call, result, ref, parts)
+        if parts and parts[0] == REGISTERED_FIELDS_KEY:
+            return self._registered(call, result, ref, ".".join(parts[1:]))
+        # A computed field may also be referenced by the key it is served under,
+        # with no prefix at all. That spelling is the one a reader of the result
+        # can copy rather than compose: the key is already in front of them, dot
+        # and all, and there is no ``registered_fields`` to prepend and no
+        # ``value`` to remember. Nothing else in a result carries a dotted key,
+        # so this cannot shadow an ordinary path.
+        if _registered_name(result, ref.field_path) is not None:
+            return self._registered(call, result, ref, ref.field_path)
         leaf, container = _walk(result, parts, ref)
         stamped = _claim_container(result, parts)
         if stamped is None:
@@ -587,24 +696,10 @@ class TraceIndex:
         call: TranscriptToolCall,
         result: Mapping[str, Any],
         ref: EvidenceRef,
-        parts: Sequence[str],
+        remainder: str,
     ) -> Citation:
-        # A registered field's name is itself dotted — ``indicator_pack.rsi_14``
-        # — so the path cannot be split on dots and then indexed. The longest
-        # matching key wins, which is the only rule that stays right if two
-        # field names ever share a prefix.
-        served = result.get("registered_fields")
-        remainder = ".".join(parts[1:])
-        name = None
-        if isinstance(served, Mapping):
-            name = next(
-                (
-                    key
-                    for key in sorted(served, key=len, reverse=True)
-                    if remainder == key or remainder.startswith(f"{key}.")
-                ),
-                None,
-            )
+        served = result.get(REGISTERED_FIELDS_KEY)
+        name = _registered_name(result, remainder)
         if name is None:
             raise GroundingFailure(
                 "unknown_field_path",
@@ -617,7 +712,20 @@ class TraceIndex:
                 "unknown_field_path",
                 f"tool call {ref.call_id!r} returned no registered field {name!r}",
             )
+        # A registered figure lives at exactly one leaf, and the field carries
+        # that path in its own ``ev`` key. Everything under ``details`` is method
+        # description — an anchor close, a window bound, a standard error — held
+        # in units of its own, and citing one of those would attach this field's
+        # unit and sanctioned reading to a number that was never measured in
+        # them. The reference resolves the value or it fails.
         inside = [part for part in remainder[len(name) :].split(".") if part]
+        if inside not in ([], [FIELD_VALUE_KEY]):
+            raise GroundingFailure(
+                "uncitable_field_path",
+                f"{ref.field_path!r} points inside {name!r} rather than at its "
+                f"value; the only reference this field can carry is "
+                f"{citable_path(name)!r}",
+            )
         leaf = serialized if not inside else _walk(serialized, inside, ref)[0]
         try:
             declared = registered_field(name)
@@ -654,8 +762,8 @@ class TraceIndex:
             raise GroundingFailure(
                 "missing_as_of", f"{name} carries no date it was computed for"
             )
-        value = leaf if not isinstance(leaf, Mapping) else leaf.get("value")
-        if value is None and parts[-1] == "value":
+        value = leaf if not isinstance(leaf, Mapping) else leaf.get(FIELD_VALUE_KEY)
+        if value is None and inside == [FIELD_VALUE_KEY]:
             raise GroundingFailure(
                 "missing_value", f"{name} has no value to narrate"
             )
@@ -758,6 +866,28 @@ class TraceIndex:
                 else None
             ),
         )
+
+
+def _registered_name(result: Mapping[str, Any], remainder: str) -> str | None:
+    """The served field a path names, or ``None`` if it names none.
+
+    A registered field's name is itself dotted — ``indicator_pack.rsi_14`` — so
+    the path cannot be split on dots and then indexed. The longest matching key
+    wins, which is the only rule that stays right if two field names ever share
+    a prefix.
+    """
+
+    served = result.get(REGISTERED_FIELDS_KEY)
+    if not isinstance(served, Mapping):
+        return None
+    return next(
+        (
+            key
+            for key in sorted(served, key=len, reverse=True)
+            if remainder == key or remainder.startswith(f"{key}.")
+        ),
+        None,
+    )
 
 
 def _walk(

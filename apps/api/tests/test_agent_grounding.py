@@ -20,7 +20,7 @@ from src.agent.grounding import (
     display_text,
     figures_agree,
 )
-from src.agent.tools.fields import serialize_registered_field
+from src.agent.tools.fields import citable_path, serialize_registered_field
 
 TRADING_DAY = date(2026, 8, 14)
 RSI = "indicator_pack.rsi_14"
@@ -649,3 +649,59 @@ def test_a_figure_that_disagrees_with_an_inferred_reference_is_labelled_not_fata
         validator().validate(explicit, standard_traces())
 
     assert raised.value.code == "figure_mismatch"
+
+
+# --- one citable leaf per field --------------------------------------------
+
+
+def test_a_field_is_referenced_by_the_key_it_is_served_under():
+    """The spelling a reader of a result can copy rather than compose."""
+    index = traces(c1=computation(**{ZONE: registered(ZONE, 1.82)}))
+
+    block = validator().validate(f"Biên độ 1.82 [ev:c1#{ZONE}].", index)
+
+    assert [citation.value for citation in block.citations] == [1.82]
+    # The long form names the same figure, and is what a refusal quotes.
+    assert citable_path(ZONE) == f"registered_fields.{ZONE}.value"
+
+
+def test_the_serialized_field_repeats_no_path_into_the_result():
+    """A path beside the key would restate the key, and the budget is 4 KB."""
+    served = serialize_registered_field(ZONE, value=1.82)
+
+    assert "ev" not in served
+
+
+def test_a_reference_into_a_fields_details_is_refused_before_it_is_compared():
+    """Measured on a real Turn: a percentage narrated, an anchor price cited.
+
+    The figure and the leaf disagreed, so the mismatch check caught it — but a
+    figure that happened to equal the anchor would have passed, and the citation
+    would have carried this field's percent unit and its sanctioned reading for a
+    price in dong. The path is refused instead, whatever the figure says.
+    """
+    index = traces(
+        c1=computation(
+            **{
+                ZONE: {
+                    **registered(ZONE, 1.82),
+                    "details": {"anchor_close": 74200.0},
+                }
+            }
+        )
+    )
+    text = f"Biên độ thường 1.82 [ev:c1#registered_fields.{ZONE}.details.anchor_close]."
+
+    with pytest.raises(GroundingFailure) as raised:
+        validator().validate(text, index)
+
+    assert raised.value.code == "uncitable_field_path"
+    assert f"registered_fields.{ZONE}.value" in raised.value.detail
+
+
+def test_a_reference_at_the_field_or_at_its_value_reads_the_same_figure():
+    index = traces(c1=computation(**{ZONE: registered(ZONE, 1.82)}))
+
+    for path in (f"registered_fields.{ZONE}", f"registered_fields.{ZONE}.value"):
+        block = validator().validate(f"Biên độ 1.82 [ev:c1#{path}].", index)
+        assert [citation.value for citation in block.citations] == [1.82]
