@@ -31,8 +31,8 @@ export type ShellView = "chat" | "board" | "new" | "news"
 /** Which tab the right-hand inspector shows, or `null` when it is closed. */
 export type InspectorTab = "market" | "symbol" | "news"
 
-/** The four things that float above the surface. One at a time, always. */
-export type Overlay = "account" | "attach" | "thread" | "share" | "palette"
+/** The things that float above the surface. One at a time, always. */
+export type Overlay = "account" | "attach" | "thread" | "share" | "palette" | "settings"
 
 export interface SelectedSymbol {
   symbol: string
@@ -248,13 +248,20 @@ export function ShellProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("resize", measure)
   }, [])
 
-  // Escape closes whatever floats; ⌘K / Ctrl+K opens the palette from anywhere.
+  // Escape closes whatever floats; ⌘K / Ctrl+K opens the palette and ⇧⌘, the
+  // settings dialog, from anywhere.
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (event.key === "Escape") dispatch({ type: "overlay", overlay: null })
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault()
         dispatch({ type: "overlay", overlay: "palette" })
+      }
+      // Matched on `code` rather than `key`: with Shift held the comma key
+      // reports ">" on a US layout and something else again on every other one.
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.code === "Comma") {
+        event.preventDefault()
+        dispatch({ type: "overlay", overlay: "settings" })
       }
     }
     window.addEventListener("keydown", onKey)

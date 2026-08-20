@@ -7,34 +7,34 @@ import { cn } from "@/lib/utils"
 /**
  * The settings surface is built from three pieces that repeat: a titled
  * section, a bordered panel, and a row whose label sits left and whose control
- * sits right. Elevation is carried by the surface step (--card over
- * --background), never by a shadow, so the panel ships flat with one hairline.
+ * sits right. Elevation is carried by the surface step (the panel one stop
+ * above the dialog it sits in), never by a shadow, so the panel ships flat with
+ * one hairline.
  */
 
 export function SettingsSection({
-  id,
   title,
   description,
   children,
 }: {
-  id: string
   title: string
   description?: string
   children: React.ReactNode
 }) {
   return (
-    /* Sections scroll inside their own column rather than the page, so the
-       anchor only needs to clear its own top padding. */
-    <section id={id} className="scroll-mt-8">
-      <h2 className="text-[21px] font-semibold leading-[1.19]">
+    /* One section is on screen at a time — the dialog's rail switches between
+       them rather than scrolling past them — so the heading is the pane's own
+       title, not an anchor to jump to. */
+    <section className="animate-vg-row-in">
+      <h2 className="text-[1.45rem] font-semibold leading-[1.19] tracking-[-0.02em]">
         {title}
       </h2>
       {description ? (
-        <p className="mt-1 text-meta text-muted-foreground">
+        <p className="mt-2 text-meta text-ink-4">
           {description}
         </p>
       ) : null}
-      <div className="mt-4 space-y-6">{children}</div>
+      <div className="mt-5 space-y-6">{children}</div>
     </section>
   )
 }
@@ -50,7 +50,7 @@ export function SettingsPanel({
     <div className="overflow-hidden rounded-card border border-hairline bg-card">
       {children}
       {footer ? (
-        <div className="border-t border-hairline bg-surface-sunken px-5 py-3.5">
+        <div className="border-t border-hairline bg-foreground/[0.025] px-5 py-3">
           {footer}
         </div>
       ) : null}
@@ -78,12 +78,12 @@ export function SettingsRow({
         className
       )}
     >
-      <div className="min-w-0 md:max-w-[46%]">
-        <div className="text-[0.95rem] font-semibold">
+      <div className="min-w-0 md:max-w-[280px]">
+        <div className="text-[0.95rem] font-medium">
           {label}
         </div>
         {description ? (
-          <p className="mt-0.5 text-meta text-muted-foreground">
+          <p className="mt-0.5 text-meta text-ink-6">
             {description}
           </p>
         ) : null}
@@ -99,7 +99,7 @@ export function SettingsRow({
  */
 export function ReadOnlyField({ value }: { value: string }) {
   return (
-    <div className="w-full truncate rounded-lg border border-border bg-background px-3 py-2 text-meta tabular-nums text-muted-foreground md:w-[320px]">
+    <div className="w-full truncate rounded-lg border border-hairline bg-background px-3 py-2 text-meta tabular-nums text-ink-4 md:w-[250px]">
       {value}
     </div>
   )

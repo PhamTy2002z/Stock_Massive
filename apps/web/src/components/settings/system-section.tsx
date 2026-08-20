@@ -10,7 +10,6 @@ import { ReadOnlyField, SettingsPanel, SettingsRow, SettingsSection } from "./se
 export function SystemSection() {
   return (
     <SettingsSection
-      id="system"
       title="Hệ thống"
       description="Các quy ước dữ liệu đang áp dụng cho mọi màn hình."
     >
