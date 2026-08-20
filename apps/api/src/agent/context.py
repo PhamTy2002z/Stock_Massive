@@ -62,6 +62,11 @@ class TranscriptToolCall:
     name: str
     arguments: Mapping[str, Any] = field(default_factory=dict)
     result: Mapping[str, Any] | None = None
+    #: The route's own token for the reasoning behind this call, when the route
+    #: issued one. Held for the length of the Turn and no longer: a route that
+    #: demands it back demands it for the rounds of the Turn it is answering,
+    #: and a Turn already closed in the history is accepted without it.
+    signature: str | None = None
 
 
 @dataclass(frozen=True)
@@ -188,6 +193,7 @@ def _turn_messages(
                         name=call.name,
                         arguments=dict(call.arguments),
                         output_index=index,
+                        signature=call.signature,
                     )
                     for index, call in enumerate(calls)
                 ),
