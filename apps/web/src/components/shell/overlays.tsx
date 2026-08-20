@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 
 import { useDesk } from "./desk-state"
 import { IconButton, SampleDataNote } from "./primitives"
+import { SettingsDialog } from "./settings-dialog"
 import { threadTitle } from "./sidebar"
 import { useShell } from "./shell-state"
 
@@ -23,6 +24,13 @@ export function Overlays() {
 
   if (state.overlay === "palette") return <CommandPalette />
   if (state.overlay === "share") return <ShareDialog />
+  if (state.overlay === "settings") {
+    return (
+      <Scrim label="Cài đặt">
+        <SettingsDialog />
+      </Scrim>
+    )
+  }
   return null
 }
 

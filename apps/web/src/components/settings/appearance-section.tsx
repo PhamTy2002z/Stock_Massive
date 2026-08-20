@@ -26,7 +26,7 @@ function ThemePicker() {
     <div
       role="radiogroup"
       aria-label="Chế độ màu"
-      className="flex w-full gap-1 rounded-full border border-hairline bg-surface-sunken p-1 md:w-auto"
+      className="flex w-full gap-0.5 rounded-[11px] border border-hairline bg-background p-[3px] md:w-auto"
     >
       {MODES.map(({ value, label, icon: Icon }) => {
         const selected = mounted && theme === value
@@ -38,12 +38,15 @@ function ThemePicker() {
             aria-checked={selected}
             onClick={() => setTheme(value)}
             className={cn(
-              "flex flex-1 items-center justify-center gap-1.5 rounded-full px-3.5 py-1.5 text-meta font-medium leading-[1.29] outline-none transition-[background-color,color,transform] duration-150 focus-visible:ring-2 focus-visible:ring-interactive-strong active:scale-95 md:flex-none",
+              "flex flex-1 items-center justify-center gap-1.5 rounded-[9px] px-3 py-1.5 text-meta leading-[1.29] outline-none transition-[background-color,color] duration-150 focus-visible:ring-2 focus-visible:ring-ring md:flex-none",
+              // A raised neutral, not the teal: the accent is rationed to one
+              // filled control per view, and a mode switch is not it. The pill
+              // is the menu surface because that is the one step that lifts on
+              // both grounds — white on the light theme, a warm grey on the
+              // dark one — where a fixed alpha would vanish into one of them.
               selected
-                // Ink on emerald, never white — the filled control is a lit
-                // surface with dark type, not a coloured chip.
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground"
+                ? "bg-surface-menu text-foreground shadow-sm"
+                : "text-ink-4 hover:text-foreground"
             )}
           >
             <Icon className="size-[15px]" />
@@ -59,12 +62,12 @@ function ThemePicker() {
  *  numbers, where up and down have to stay apart on both surfaces. */
 function QuotePreview() {
   return (
-    <div className="w-full rounded-card border border-hairline bg-background p-4 md:w-[320px]">
+    <div className="w-full rounded-card border border-hairline bg-background p-4 md:w-[250px]">
       <div className="flex items-baseline justify-between">
         <span className="text-[0.95rem] font-semibold">
           VNM
         </span>
-        <span className="text-micro text-muted-foreground">
+        <span className="text-micro text-ink-6">
           HOSE
         </span>
       </div>
@@ -87,13 +90,12 @@ function QuotePreview() {
 export function AppearanceSection() {
   return (
     <SettingsSection
-      id="appearance"
       title="Giao diện"
       description="Chế độ màu áp dụng cho toàn bộ hệ thống và được nhớ trên trình duyệt này."
     >
       <SettingsPanel
         footer={
-          <p className="text-micro text-muted-foreground">
+          <p className="text-micro text-ink-6">
             Lựa chọn được lưu ngay khi bấm — không có bước xác nhận.
           </p>
         }

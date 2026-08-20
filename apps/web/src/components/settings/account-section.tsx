@@ -55,13 +55,12 @@ export function AccountSection() {
 
   return (
     <SettingsSection
-      id="account"
       title="Tài khoản"
       description="Thông tin của phiên đăng nhập hiện tại."
     >
       <SettingsPanel
         footer={
-          <p className="text-micro text-muted-foreground">
+          <p className="text-micro text-ink-6">
             Chỉnh sửa hồ sơ chưa được build — các giá trị dưới đây chỉ để xem.
           </p>
         }
