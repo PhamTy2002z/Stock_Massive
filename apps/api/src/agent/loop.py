@@ -745,7 +745,17 @@ class AgentLoop:
             except MalformedArguments:
                 # Counted and logged at the boundary. Nothing is disabled here.
                 raise
-            except LLMError:
+            except LLMError as error:
+                # The only place the route's own words survive. Without them a
+                # ``route_error`` Turn is indistinguishable from every other
+                # one, and the difference between a retired model, an answer
+                # with no choices and a refused request is exactly what an
+                # operator needs to act on.
+                logger.warning(
+                    "Turn %s ended on a route error: %s",
+                    request.request_message_id,
+                    error,
+                )
                 return await self._terminal(
                     request, TurnStatus.INCOMPLETE, "route_error", state
                 )
