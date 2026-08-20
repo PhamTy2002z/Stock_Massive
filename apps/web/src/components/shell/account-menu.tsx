@@ -1,6 +1,5 @@
 "use client"
 
-import Link from "next/link"
 import {
   Check,
   ChevronDown,
@@ -48,11 +47,13 @@ export function AccountMenu() {
 
           <MenuSeparator />
 
-          <Link href="/settings" className="block" onClick={() => dispatch({ type: "overlay", overlay: null })}>
-            <MenuItem icon={<Settings className="size-[17px] text-ink-4" />} hint="⇧⌘,">
-              Cài đặt
-            </MenuItem>
-          </Link>
+          <MenuItem
+            icon={<Settings className="size-[17px] text-ink-4" />}
+            hint="⇧⌘,"
+            onClick={() => dispatch({ type: "overlay", overlay: "settings" })}
+          >
+            Cài đặt
+          </MenuItem>
           <MenuItem
             icon={<Globe className="size-[17px] text-ink-4" />}
             trailing={<ChevronRight className="size-4 shrink-0 text-ink-6" />}
