@@ -1,7 +1,12 @@
 "use client"
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
-import { fetchCompanyNews, fetchNewsCategories, fetchNewsFeed } from "@/lib/api"
+import {
+  fetchCompanyNews,
+  fetchNewsArticle,
+  fetchNewsCategories,
+  fetchNewsFeed,
+} from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
 import { STALE_TIME } from "@/lib/query-config"
 
@@ -66,6 +71,39 @@ export function useNewsCategories() {
     data: query.data,
     isPending: query.isPending,
     isError: query.isError,
+  }
+}
+
+/**
+ * The body of the article the reader has open, fetched on the way in.
+ *
+ * `null` while no article is open, which is what `enabled` reads: the reading
+ * column is one view of a shell that spends most of its life on the feed, and a
+ * query that fired anyway would ask CafeF for a story nobody opened.
+ *
+ * `STATIC` because a published article does not change. Backing out to the feed
+ * and pressing the same headline again is a cache hit, not a second fetch — and
+ * that matters more here than on the other queries, since a miss costs the API
+ * a request to the publisher rather than a read of its own store.
+ */
+export function useNewsArticle(url: string | null) {
+  const query = useQuery({
+    queryKey: queryKeys.newsArticle(url ?? ""),
+    queryFn: () => fetchNewsArticle(url as string),
+    enabled: url !== null,
+    staleTime: STALE_TIME.STATIC,
+    // The article still has its headline, its summary and a link to the
+    // original when the body refuses. Losing the body is a degraded read, and
+    // the column says so itself rather than surrendering the shell to the
+    // ErrorBoundary.
+    throwOnError: false,
+  })
+
+  return {
+    data: query.data,
+    isPending: url !== null && query.isPending,
+    isError: query.isError,
+    refetch: query.refetch,
   }
 }
 

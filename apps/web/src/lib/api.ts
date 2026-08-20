@@ -1130,6 +1130,35 @@ export interface NewsFeedResponse {
   total_count: number
 }
 
+/**
+ * One block of an article's body, in reading order.
+ *
+ * A tree rather than one string because the reader draws prose, a subheading
+ * and a photo differently, and a flat string is exactly the signal that says
+ * which is which, thrown away. Only the fields `kind` implies are populated;
+ * the rest arrive null.
+ */
+export interface ArticleBlock {
+  kind: "paragraph" | "heading" | "quote" | "list" | "image"
+  /** Prose, for `paragraph`, `heading` and `quote`. */
+  text: string | null
+  /** The entries, for `list`. */
+  items: string[] | null
+  /** The photo, for `image` — always absolute, never a `data:` placeholder. */
+  image_url: string | null
+  /** The photo's caption, for `image`, when the publisher wrote one. */
+  caption: string | null
+}
+
+/** One press article's body, read from the publisher's own page. */
+export interface NewsArticleResponse {
+  url: string
+  source: string
+  blocks: ArticleBlock[]
+  /** The same body flattened to newline-separated plain text. */
+  content: string
+}
+
 export interface CompanyNewsResponse {
   symbol: string
   items: NewsItem[]
@@ -1157,6 +1186,23 @@ export async function fetchNewsFeed(category?: string): Promise<NewsFeedResponse
  */
 export async function fetchNewsCategories(): Promise<NewsCategory[]> {
   return fetchApi<NewsCategory[]>("/stocks/news/categories", undefined, POLLED)
+}
+
+/**
+ * One article's body, fetched only when a reader opens it.
+ *
+ * Not a field on the feed: the body costs the API one request to the publisher
+ * per article, so asking for it up front would spend 120 requests on the
+ * headlines nobody opened. `POLLED` for the same reason the feed is — a body
+ * that refused is the reading column's problem to report, not grounds for
+ * veiling the shell around it.
+ */
+export async function fetchNewsArticle(url: string): Promise<NewsArticleResponse> {
+  return fetchApi<NewsArticleResponse>(
+    `/stocks/news/article?url=${encodeURIComponent(url)}`,
+    undefined,
+    POLLED,
+  )
 }
 
 /** One symbol's corporate disclosures, for the rail beside the press feed. */

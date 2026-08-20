@@ -1,4 +1,4 @@
-import type { FeedNewsItem } from "./api"
+import type { ArticleBlock, FeedNewsItem } from "./api"
 
 /**
  * Everything the news surface decides about a feed, away from the components.
@@ -49,6 +49,61 @@ export function articleFacet(key: string): string {
 export function findArticle(items: FeedNewsItem[], key: string | null): FeedNewsItem | null {
   if (key === null) return null
   return items.find((item) => articleKey(item) === key) ?? null
+}
+
+/**
+ * How much of two texts has to agree before they are the same paragraph.
+ *
+ * The summary arrives capped at 600 characters and cut mid-word, so the two
+ * copies are rarely equal even when they are the same sentence; a shared
+ * opening is what actually identifies them. Long enough that no two distinct
+ * paragraphs of an article collide on it.
+ */
+const SAME_PARAGRAPH_CHARS = 60
+
+/**
+ * The article's blocks with the standfirst removed, if the body repeats it.
+ *
+ * CafeF prints the sapo above the body and, on many articles, again as a
+ * paragraph inside it. The reading column already draws the summary as the lede
+ * in its own larger type, so leaving the copy in place shows the reader the same
+ * sentence twice a screen apart — which reads as a rendering bug rather than as
+ * emphasis.
+ *
+ * Only the first match goes, and only for prose: an article whose photo caption
+ * happens to echo the standfirst still gets its photo.
+ */
+export function articleBody(
+  blocks: ArticleBlock[],
+  summary: string | null,
+): ArticleBlock[] {
+  const lede = normalizeForMatch(summary)
+  if (lede.length < SAME_PARAGRAPH_CHARS) return blocks
+
+  const index = blocks.findIndex(
+    (block) =>
+      block.kind === "paragraph" && sameParagraph(normalizeForMatch(block.text), lede),
+  )
+  if (index === -1) return blocks
+  return [...blocks.slice(0, index), ...blocks.slice(index + 1)]
+}
+
+/** Whether two normalized texts open on the same `SAME_PARAGRAPH_CHARS`. */
+function sameParagraph(a: string, b: string): boolean {
+  if (a.length < SAME_PARAGRAPH_CHARS) return false
+  return a.slice(0, SAME_PARAGRAPH_CHARS) === b.slice(0, SAME_PARAGRAPH_CHARS)
+}
+
+/**
+ * Case-folded, whitespace-collapsed text, for comparison and nothing else.
+ *
+ * The two copies of a standfirst come through different paths — one through the
+ * RSS description, one out of the article's markup — and differ in spacing where
+ * a tag used to be. Nothing here is ever displayed.
+ */
+function normalizeForMatch(value: string | null): string {
+  if (value === null) return ""
+  return value.replace(/\s+/g, " ").trim().toLowerCase()
 }
 
 /**

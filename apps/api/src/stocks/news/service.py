@@ -6,6 +6,11 @@ this issuer announce", the wrong one for a reader screen — and it cost one
 upstream call per symbol per rebuild. CafeF costs one HTTP request and returns
 press articles with a summary, an image and a link to the original.
 
+An article's body is not part of the feed. CafeF's RSS carries no full-text
+element, so reading a story means fetching its page — one request for the
+article a reader actually opened, rather than 120 for the ones they did not.
+That lives in `get_article`, behind `providers.cafef_article`.
+
 The per-symbol VCI lane is untouched and still lives in the company router.
 """
 
@@ -13,9 +18,15 @@ import logging
 from datetime import datetime
 from functools import lru_cache
 
+from ..providers.cafef_article import fetch_article, is_cafef_article_url
 from ..providers.cafef_rss import CAFEF_CATEGORIES, fetch_category
 from ..providers.normalize import VN_TZ
-from ..schemas.company import FeedNewsItem, NewsCategory, NewsFeedResponse
+from ..schemas.company import (
+    FeedNewsItem,
+    NewsArticleResponse,
+    NewsCategory,
+    NewsFeedResponse,
+)
 from ..shared import StockServiceError
 
 logger = logging.getLogger(__name__)
@@ -56,6 +67,22 @@ class NewsFeedService:
             generated_at=datetime.now(VN_TZ).isoformat(),
             total_count=len(items),
         )
+
+    def get_article(self, url: str) -> NewsArticleResponse:
+        """One article's body, fetched from the publisher's page on demand.
+
+        On demand and not during the feed rebuild: the body is one HTTP request
+        per article, and a reader opens a handful of the 120 headlines a rebuild
+        returns. `CafeFUnavailable` propagates for the same reason it does on
+        the feed — the route decides between stale text and a 503.
+        """
+        if not is_cafef_article_url(url):
+            # A caller error, not an outage: this reader serves CafeF articles
+            # and refusing anything else is what keeps the endpoint from being
+            # a fetch proxy for whatever URL a client names.
+            raise StockServiceError(f"Not a readable article URL: {url}")
+
+        return NewsArticleResponse(**fetch_article(url))
 
     def get_categories(self) -> list[NewsCategory]:
         """The facets this API exposes, in the order the UI should show them."""
