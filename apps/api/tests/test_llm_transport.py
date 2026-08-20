@@ -781,6 +781,92 @@ class TestARouteThatCannotStream:
         assert result.text == "streamed"
 
 
+class TestTheRoutesReasoningToken:
+    """Measured on Gemini 3.x through its OpenAI-compatible endpoint (19/08/2026).
+
+    Every function call arrives with an opaque ``thought_signature`` under
+    ``extra_content.google``, and the next round is refused with *Function call
+    is missing a thought_signature in functionCall parts* unless the calls come
+    back carrying it. The same measurement showed a Turn already closed in the
+    history accepted without one, so the token is carried for the length of a
+    Turn and nothing is persisted.
+    """
+
+    def _seen(self, *calls: ToolCall):
+        seen: dict = {}
+
+        def handler(http_request: httpx.Request) -> httpx.Response:
+            seen.update(json.loads(http_request.content))
+            return httpx.Response(200, content=sse(text_chunk("ok")))
+
+        harness = client(handler)
+        history = [
+            Message(role=Role.USER, content="Đọc giá STB."),
+            Message(role=Role.ASSISTANT, tool_calls=calls),
+            Message(role=Role.TOOL, tool_call_id=calls[0].id, content="{}"),
+        ]
+        return seen, harness, history
+
+    @pytest.mark.asyncio
+    async def test_a_call_that_has_one_hands_it_back_untouched(self):
+        seen, harness, history = self._seen(
+            ToolCall(
+                id="call-1",
+                name="get_price",
+                arguments={"symbol": "STB"},
+                output_index=0,
+                signature="Eu0CCuo",
+            )
+        )
+
+        await harness.complete(request(messages=history))
+
+        (call,) = seen["messages"][1]["tool_calls"]
+        assert call["extra_content"] == {"google": {"thought_signature": "Eu0CCuo"}}
+        assert call["function"]["name"] == "get_price"
+
+    @pytest.mark.asyncio
+    async def test_a_call_without_one_carries_no_vendor_container(self):
+        seen, harness, history = self._seen(
+            ToolCall(
+                id="call-1",
+                name="get_price",
+                arguments={"symbol": "STB"},
+                output_index=0,
+            )
+        )
+
+        await harness.complete(request(messages=history))
+
+        (call,) = seen["messages"][1]["tool_calls"]
+        assert "extra_content" not in call
+
+    @pytest.mark.asyncio
+    async def test_each_parallel_call_keeps_its_own(self):
+        seen, harness, history = self._seen(
+            ToolCall(
+                id="call-1",
+                name="get_price",
+                arguments={"symbol": "STB"},
+                output_index=0,
+                signature="first",
+            ),
+            ToolCall(
+                id="call-2",
+                name="get_news",
+                arguments={"symbol": "VNM"},
+                output_index=1,
+                signature="second",
+            ),
+        )
+
+        await harness.complete(request(messages=history))
+
+        first, second = seen["messages"][1]["tool_calls"]
+        assert first["extra_content"]["google"]["thought_signature"] == "first"
+        assert second["extra_content"]["google"]["thought_signature"] == "second"
+
+
 def _tool_chunk(index: int, *, id=None, name=None, arguments=None) -> dict:
     function = {}
     if name is not None:

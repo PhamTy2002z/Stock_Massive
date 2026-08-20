@@ -136,6 +136,40 @@ class ToolCall:
     name: str
     arguments: Mapping[str, Any]
     output_index: int = 0
+    #: The route's own opaque token for the reasoning behind this call, kept
+    #: exactly as it arrived. Gemini 3.x refuses a round whose function calls
+    #: come back without it, and only the route that issued one can read it —
+    #: so it is carried, never inspected, and never synthesised.
+    signature: str | None = None
+
+
+#: Where an OpenAI-compatible route carries vendor fields on a tool call. Read
+#: and written under the same two keys, because a token that comes back under a
+#: different name than it left is not the token the route asked for.
+SIGNATURE_CONTAINER_KEY = "extra_content"
+SIGNATURE_VENDOR_KEY = "google"
+SIGNATURE_KEY = "thought_signature"
+
+
+def _tool_call_wire(call: ToolCall) -> dict[str, Any]:
+    """One tool call on the wire, with the route's own token if it gave one.
+
+    A signature is only ever present because this route issued it, so handing it
+    back needs no per-route switch: a route that never sends one never sees one.
+    """
+    payload: dict[str, Any] = {
+        "id": call.id,
+        "type": "function",
+        "function": {
+            "name": call.name,
+            "arguments": json.dumps(call.arguments),
+        },
+    }
+    if call.signature is not None:
+        payload[SIGNATURE_CONTAINER_KEY] = {
+            SIGNATURE_VENDOR_KEY: {SIGNATURE_KEY: call.signature}
+        }
+    return payload
 
 
 @dataclass(frozen=True)
@@ -154,15 +188,7 @@ class Message:
             payload["content"] = self.content
         if self.tool_calls:
             payload["tool_calls"] = [
-                {
-                    "id": call.id,
-                    "type": "function",
-                    "function": {
-                        "name": call.name,
-                        "arguments": json.dumps(call.arguments),
-                    },
-                }
-                for call in self.tool_calls
+                _tool_call_wire(call) for call in self.tool_calls
             ]
         if self.tool_call_id is not None:
             payload["tool_call_id"] = self.tool_call_id
