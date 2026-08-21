@@ -18,11 +18,20 @@ wrong id while returning 200.  That class of failure never surfaces at runtime;
 it only makes the answers wrong.  So a mismatched, missing or repeated id is a
 :class:`ToolCallIdMismatch` — a ``malformed_arguments``, raised immediately.
 
-**Rounds, not calls.**  Eight tool-call rounds per Turn.  On the ceiling one
-further call with ``tool_choice="none"`` lets the model answer from what it has,
-and the transcript says all eight lookup steps were used — information, not an
-error.  An answer built on incomplete data beats a blank one, provided its
-incompleteness is visible.
+**Rounds, not calls.**  Four tool-call rounds per Turn — ``MAX_TOOL_ROUNDS``,
+and the constant is the authority.  On the ceiling one further call with
+``tool_choice="none"`` lets the model answer from what it has, and the
+transcript says all four lookup steps were used — information, not an error.  An
+answer built on incomplete data beats a blank one, provided its incompleteness
+is visible.
+
+Four rather than eight because the round count is not free to choose: a Turn is
+admitted against ``TURN_OUTPUT_TOKENS`` and makes at most ``MAX_TOOL_ROUNDS + 1``
+calls, so the round count and ``DEFAULT_MAX_OUTPUT_TOKENS`` are one piece of
+arithmetic that ``test_the_turn_cannot_outspend_what_it_was_admitted_against``
+holds.  Eight rounds buys back the per-call ceiling that a reasoning route spent
+entirely on hidden thinking, which is the truncation this file already fixed
+once.
 
 **No apology call.**  A Turn that cannot fund its next call ends where it is,
 with its partial message and the traces of what ran.  Spending a call to
@@ -53,8 +62,14 @@ from src.core.llm import (
     CallOwner,
     Completion,
     CompletionRequest,
+    ContentPolicyBlocked,
+    ContextOverflow,
     GatewayTimeout,
+    RouteAttempt,
+    ModelUnavailable,
+    OutputCapExceeded,
     RouteRateLimited,
+    SchemaRejected,
     LLMClient,
     LLMConfig,
     LLMError,
@@ -71,7 +86,7 @@ from src.core.llm import (
     llm_metrics,
     tool_error_result,
 )
-from src.core.llm.errors import MAX_TOOL_ATTEMPTS
+from src.core.llm.errors import MAX_TOOL_ATTEMPTS, redact
 
 from .blocks import split_blocks
 from .context import (
@@ -95,6 +110,7 @@ from .grounding import (
     RecommendationValidator,
     ReleasedBlock,
     TraceIndex,
+    is_recommendation_draft,
     repair_instruction,
 )
 from .progress import (
@@ -148,6 +164,19 @@ DEFAULT_MAX_OUTPUT_TOKENS = 4_000
 TRUNCATED = "length"
 ANSWER_TRUNCATED = "answer_truncated"
 
+# The stable reasons the five newly named route conditions end a Turn under.
+# Named here beside ``ANSWER_TRUNCATED`` because they are the same kind of
+# string: the interactive surface maps each to a sentence, none is ever shown as
+# a code, and the ops snapshot's ``incomplete_reasons`` tally splits them
+# because it groups by whatever this file writes. Before them all five arrived
+# as ``route_error``, which counted a retired model and an oversized transcript
+# as the same event.
+CONTEXT_OVERFLOW = "context_overflow"
+OUTPUT_CAP_EXCEEDED = "output_cap_exceeded"
+CONTENT_POLICY_BLOCKED = "content_policy_blocked"
+MODEL_UNAVAILABLE = "model_unavailable"
+SCHEMA_REJECTED = "schema_rejected"
+
 ROUNDS_EXHAUSTED_NOTE = (
     f"All {MAX_TOOL_ROUNDS} lookup rounds for this Turn have been used. Answer from "
     "the evidence already gathered, and state plainly which evidence you were not "
@@ -159,15 +188,28 @@ ROUNDS_EXHAUSTED_NOTE = (
 ROUNDS_EXHAUSTED_MESSAGE = Message(role=Role.SYSTEM, content=ROUNDS_EXHAUSTED_NOTE)
 ROUNDS_EXHAUSTED_TOKENS = estimate_tokens(ROUNDS_EXHAUSTED_MESSAGE)
 
+# How many times one Turn's answer may be put through the Gate. Two, so the
+# model gets exactly one nudge: the first validation finds the problem and the
+# note goes out with the next call, the second is final and whatever it decides
+# stands — refused blocks stay off the screen, downgraded ones are replaced by
+# the backend's sentence.
+#
+# A count rather than the flag this used to be, because the cost of a nudge is a
+# whole model call: if the per-Turn spend measured in ``llm_call_usage`` climbs
+# after the Gate's default was inverted, lowering this to 1 removes every nudge
+# without touching another line.
+MAX_GATE_ATTEMPTS = 2
+
 # The Gate's one piece of feedback, and the only one there will be. It names the
 # condition and the rule; ``grounding.repair_instruction`` guarantees it carries
 # no figure, so the rewrite cannot be a restatement of a number the model was
 # just told about.
+
 REPAIR_NOTE = (
-    "The answer you just wrote was withheld before the reader saw it. {guidance} "
-    "Rewrite the whole answer once, with every figure referenced. This is the "
-    "only rewrite you get: a figure you still cannot reference is a figure you "
-    "do not state."
+    "Part of the answer you just wrote was withheld before the reader saw it. "
+    "{guidance} Rewrite the whole answer once, with every figure referenced. "
+    "This is the only rewrite you get: a figure you still cannot reference is a "
+    "figure you do not state."
 )
 # Priced at its longest wording rather than at the one this Turn happens to
 # need, for the same reason the rounds-exhausted note is built once: the budget
@@ -416,10 +458,17 @@ class TurnOutcome:
     # stays the stable ``grounding_failed``; this is the operator's detail and
     # the ops query's dimension.
     grounding_failure_code: str | None = None
-    # The Gate condition that dropped a recommendation while the Turn went on
-    # to answer without it. The Manifest reports this as a blocked
+    # Every Gate condition that downgraded a block while the Turn went on to
+    # answer around it, in order. The Manifest reports these as a blocked
     # recommendation, exactly as it reports one that ended a Turn.
-    degraded_recommendation_code: str | None = None
+    degraded_codes: tuple[str, ...] = ()
+    # How many of those downgrades were drafts carrying a recommendation.
+    degraded_recommendations: int = 0
+
+    @property
+    def degraded_recommendation_code(self) -> str | None:
+        """The first downgrade, for the readers that record exactly one."""
+        return self.degraded_codes[0] if self.degraded_codes else None
     # Prose blocks released with one or more figures the Turn could not
     # attribute. Recommendations never contribute: they are blocked instead.
     downgraded_blocks: int = 0
@@ -462,17 +511,47 @@ class _TurnState:
     widget_refusals: list[Mapping[str, Any]] = field(default_factory=list)
     request_id: str | None = None
     grounding_failure_code: str | None = None
-    # The one rewrite the Gate allows, and whether it has been spent. A blocked
-    # block is usually a misplaced marker rather than an invented figure, and a
-    # Turn that ends on one releases nothing at all; a single retry costs one of
-    # the eight rounds and is never offered twice, so a model that cannot fix
-    # its own reference still ends the Turn instead of looping on it.
+    # The nudge the Gate is allowed, and how many validations it has spent. A
+    # refused block is usually a misplaced marker rather than an invented
+    # figure, so the model gets one chance to fix its own reference — but only
+    # one, and after it the block is downgraded rather than the Turn ended. The
+    # ceiling is a count rather than a flag so lowering it to zero nudges is one
+    # constant away: the cost of a nudge is a whole model call.
     repair_note: str | None = None
-    repair_used: bool = False
-    # Which Gate condition dropped a recommendation the Turn answered around.
-    # Separate from ``grounding_failure_code``, which is the condition that
-    # ended a Turn: a degrade is a recommendation withheld, not a Turn refused.
-    degraded_recommendation_code: str | None = None
+    gate_attempts: int = 0
+    # The draft the Gate would have released, kept only when a nudge was spent on
+    # an answer that did not need one to survive.
+    #
+    # A downgrade-only failure means the answer *was* releasable: proven blocks
+    # plus the backend's own sentences. The nudge asks the model to attach every
+    # figure to a reference, and a reference attached to the wrong call is
+    # ``figure_mismatch`` — integrity, which ends the Turn. So the nudge can turn
+    # an answer the reader would have received into a blank one. This is the
+    # floor under that: the earlier draft is proven again and released instead.
+    releasable_text: str | None = None
+    # Every Gate condition that downgraded a block while the Turn went on to
+    # answer around it, in the order they happened. A list rather than one
+    # value: an answer has several blocks, each can be downgraded for its own
+    # reason, and a single field would report the last one as though it were the
+    # only one. Separate from ``grounding_failure_code``, which is the condition
+    # that *ended* a Turn — a downgrade is a block withheld, not a Turn refused.
+    degraded_codes: list[str] = field(default_factory=list)
+    # How many of those downgrades were drafts actually carrying a
+    # recommendation. Counted because the Manifest's ``recommendation`` dimension
+    # answers "how often did the Gate refuse a recommendation", and with twenty
+    # conditions downgrading on *any* block a market-summary paragraph with one
+    # misplaced bracket would otherwise answer it "yes".
+    degraded_recommendations: int = 0
+
+    @property
+    def degraded_recommendation_code(self) -> str | None:
+        """The first downgrade, for the readers that record exactly one.
+
+        The Manifest's ``failure_code`` and the ops query's dimension are single
+        values and were before any of this; the full list travels beside them
+        rather than instead of them.
+        """
+        return self.degraded_codes[0] if self.degraded_codes else None
     external_tool_calls: int = 0
     # The open-web trail (``docs/adr/0020``): every phase in order, and the
     # public pages behind the ones that searched.
@@ -736,25 +815,127 @@ class AgentLoop:
                 return await self._terminal(
                     request, TurnStatus.INCOMPLETE, "route_rate_limited", state
                 )
-            except GatewayTimeout:
+            except GatewayTimeout as timeout:
                 # Already retried with backoff inside the client; a third
                 # attempt here would silently double the tabled ceiling.
+                #
+                # Logged for the reason the ``LLMError`` branch below is: this
+                # was the only terminal path in the loop that ended a Turn
+                # without saying anything, so three quarters of the Turns that
+                # died on the route left nothing to classify them by. What a
+                # timeout needs beyond the message is how much was spent
+                # reaching it — attempts, elapsed, and whether any of the answer
+                # arrived — because a route that never spoke and a route that
+                # broke off mid-answer are different incidents.
+                attempt = timeout.attempt
+                if attempt is None or not attempt.measured:
+                    # A 5xx is a ``GatewayTimeout`` too, and it arrives with no
+                    # measurements: the route answered, quickly and with a body.
+                    # Printing "0 byte(s) received" for it would assert the one
+                    # thing that number exists to rule out.
+                    logger.warning(
+                        "Turn %s ended on a gateway timeout after %d attempt(s) "
+                        "(the route answered rather than went quiet, so nothing "
+                        "was measured): %s",
+                        request.request_message_id,
+                        attempt.attempts if attempt else 1,
+                        redact(str(timeout)),
+                    )
+                else:
+                    logger.warning(
+                        "Turn %s ended on a gateway timeout after %d attempt(s), "
+                        "%.1fs on the last one, %d byte(s) received: %s",
+                        request.request_message_id,
+                        attempt.attempts,
+                        attempt.elapsed_seconds,
+                        attempt.bytes_received,
+                        redact(str(timeout)),
+                    )
                 return await self._terminal(
                     request, TurnStatus.INCOMPLETE, "gateway_timeout", state
                 )
             except MalformedArguments:
                 # Counted and logged at the boundary. Nothing is disabled here.
                 raise
+            except ContextOverflow as overflow:
+                # The transcript did not fit. Terminal for now and its own
+                # reason, so the ops snapshot can say how often it happens
+                # before anything tries to compress in response to it.
+                logger.warning(
+                    "Turn %s ended because its transcript did not fit the "
+                    "context window: %s",
+                    request.request_message_id,
+                    redact(str(overflow)),
+                )
+                return await self._terminal(
+                    request, TurnStatus.INCOMPLETE, CONTEXT_OVERFLOW, state
+                )
+            except OutputCapExceeded as capped:
+                # Distinct from the above and never folded into it: here the
+                # transcript fits and it is the reserved output ceiling that
+                # pushed the total over, so trimming the transcript would throw
+                # away evidence the Turn already paid for and fix nothing.
+                logger.warning(
+                    "Turn %s ended because the reserved output ceiling did not "
+                    "fit beside its input: %s",
+                    request.request_message_id,
+                    redact(str(capped)),
+                )
+                return await self._terminal(
+                    request, TurnStatus.INCOMPLETE, OUTPUT_CAP_EXCEEDED, state
+                )
+            except ContentPolicyBlocked as blocked:
+                # The route's filter, not the model — so unlike a
+                # ``ModelRefusal`` there are no words of the model's to carry,
+                # and the Turn ends incomplete rather than complete.
+                logger.warning(
+                    "Turn %s was refused by the route's content filter: %s",
+                    request.request_message_id,
+                    redact(str(blocked)),
+                )
+                return await self._terminal(
+                    request, TurnStatus.INCOMPLETE, CONTENT_POLICY_BLOCKED, state
+                )
+            except ModelUnavailable as unavailable:
+                # Nothing here is transient, which is why it is not a timeout.
+                # ``error`` rather than ``warning``: a route that stopped serving
+                # the configured model fails every Turn until somebody changes
+                # configuration.
+                logger.error(
+                    "Turn %s ended because the route does not serve the "
+                    "configured model: %s",
+                    request.request_message_id,
+                    redact(str(unavailable)),
+                )
+                return await self._terminal(
+                    request, TurnStatus.INCOMPLETE, MODEL_UNAVAILABLE, state
+                )
+            except SchemaRejected as rejected:
+                # Loud because it is ours to fix: the Tool Catalog wrote the
+                # schemas this route refused.
+                logger.error(
+                    "Turn %s ended because the route refused our tool schemas: %s",
+                    request.request_message_id,
+                    redact(str(rejected)),
+                )
+                return await self._terminal(
+                    request, TurnStatus.INCOMPLETE, SCHEMA_REJECTED, state
+                )
             except LLMError as error:
                 # The only place the route's own words survive. Without them a
                 # ``route_error`` Turn is indistinguishable from every other
                 # one, and the difference between a retired model, an answer
                 # with no choices and a refused request is exactly what an
                 # operator needs to act on.
+                #
+                # Now the residue rather than the catch-all: the five classes
+                # above carry the conditions that used to arrive here shapeless,
+                # so what is left is a 400 whose body this repository has never
+                # seen — and the body is what tells us which class it belongs in.
                 logger.warning(
-                    "Turn %s ended on a route error: %s",
+                    "Turn %s ended on an unclassified route error: %s",
                     request.request_message_id,
-                    error,
+                    redact(str(error)),
                 )
                 return await self._terminal(
                     request, TurnStatus.INCOMPLETE, "route_error", state
@@ -1102,25 +1283,63 @@ class AgentLoop:
         try:
             selections = self._prove(request, state)
         except GroundingFailure as failure:
-            logger.info(
-                "Turn %s blocked a content block: %s",
-                request.request_message_id,
-                failure,
-            )
-            state.grounding_failure_code = failure.code
-            status, terminal_reason = TurnStatus.INCOMPLETE, GROUNDING_FAILED
-            rounds_exhausted = False
-            self._publish_blocks(state)
-            if not state.blocks:
-                self._publish_blocked_notice(state)
-        else:
-            self._publish_blocks(state)
-            # Only a Turn whose text survived the Gate gets a picture. A blocked
-            # answer has nothing to illustrate, and illustrating it anyway would
-            # put the figure back on screen that the Gate just kept off it.
-            await self._release_widgets(request, state, selections)
-            await self._suggest_followups(request, status, state)
+            recovered = self._fall_back_to_pre_nudge_draft(request, state, failure)
+            if recovered is None:
+                logger.info(
+                    "Turn %s blocked a content block: %s",
+                    request.request_message_id,
+                    failure,
+                )
+                state.grounding_failure_code = failure.code
+                self._publish_blocks(state)
+                if not state.blocks:
+                    self._publish_blocked_notice(state)
+                # A blocked answer has nothing to illustrate and nothing to
+                # follow up: illustrating it would put the figure back on screen
+                # that the Gate just kept off it.
+                return await self._ended(
+                    TurnStatus.INCOMPLETE, GROUNDING_FAILED, state, False
+                )
+            selections = recovered
+
+        self._publish_blocks(state)
+        await self._release_widgets(request, state, selections)
+        await self._suggest_followups(request, status, state)
         return await self._ended(status, terminal_reason, state, rounds_exhausted)
+
+    def _fall_back_to_pre_nudge_draft(
+        self,
+        request: TurnRequest,
+        state: _TurnState,
+        failure: GroundingFailure,
+    ) -> tuple[WidgetSelection, ...] | None:
+        """The draft from before the nudge, when the rewrite came back worse.
+
+        ``None`` when there is nothing to fall back to, which is every Turn that
+        was never nudged and every Turn whose first attempt was already refused.
+
+        The case this exists for is created by the nudge itself. A
+        downgrade-only failure means the answer *was* releasable — proven blocks
+        plus the backend's own sentences — and the nudge then asks the model to
+        attach every figure to a reference. A reference attached to the wrong
+        call is ``figure_mismatch``: integrity, which ends the Turn. Without this
+        the reader loses an answer they would have been given one call earlier,
+        for a reason that had nothing to do with their question.
+
+        Re-proving cannot raise: this text already proved with downgrades only,
+        and the Gate is deterministic over the same traces.
+        """
+        if state.releasable_text is None:
+            return None
+        logger.info(
+            "Turn %s kept the draft from before its nudge, because the rewrite "
+            "failed %s",
+            request.request_message_id,
+            failure,
+        )
+        state.text = state.releasable_text
+        state.releasable_text = None
+        return self._prove(request, state)
 
     async def _suggest_followups(
         self, request: TurnRequest, status: TurnStatus, state: _TurnState
@@ -1188,6 +1407,12 @@ class AgentLoop:
         leaves no stray marker in the prose.
         """
         state.blocks.clear()
+        # Cleared with the blocks, for the same reason: proving runs again for
+        # the nudge, and the second answer replaces the first one whole. Left
+        # standing, a condition the rewrite fixed would still be recorded
+        # against the Turn.
+        state.degraded_codes.clear()
+        state.degraded_recommendations = 0
         if not state.text:
             return ()
         answer, selections = extract_selections(state.text)
@@ -1199,19 +1424,38 @@ class AgentLoop:
             except GroundingFailure as failure:
                 if not failure.degradable:
                     raise
-                # The recommendation is dropped, never shown: what the reader
-                # gets instead is the backend's own sentence naming the
-                # condition that was not met. The blocks that already passed
-                # stay, so a Turn that could not raise its stance to a
-                # recommendation still answers rather than going blank.
+                # The block is dropped, never shown: what the reader gets
+                # instead is the backend's own sentence naming the condition
+                # that was not met. The blocks that already passed stay, so a
+                # Turn that could not prove one paragraph still answers rather
+                # than going blank.
+                #
+                # Which sentence depends on what the draft was trying to be,
+                # read from the draft itself: most conditions fire while a
+                # marker is being resolved, before the block's kind is known,
+                # and telling a reader who asked about today's market that no
+                # price zone was recommended would answer a question they did
+                # not ask.
                 logger.info(
-                    "Turn %s degraded a recommendation: %s",
+                    "Turn %s downgraded a block: %s",
                     request.request_message_id,
                     failure,
                 )
-                state.degraded_recommendation_code = failure.code
+                was_recommendation = is_recommendation_draft(raw)
+                state.degraded_codes.append(failure.code)
+                if was_recommendation:
+                    state.degraded_recommendations += 1
+                notice = failure.notice(recommendation=was_recommendation)
+                if any(existing.text == notice for existing in state.blocks):
+                    # Three paragraphs failing the same condition produce three
+                    # copies of one sentence, which reads as a stutter rather
+                    # than as three facts. With twenty conditions downgrading on
+                    # any block, multi-block downgrades are the common case. The
+                    # code is still recorded once per block above: the record
+                    # counts, the screen does not repeat.
+                    continue
                 block = ReleasedBlock(
-                    text=failure.notice(),
+                    text=notice,
                     kind=BlockKind.PROSE,
                     # Backend-authored and figure-free, so there is nothing for
                     # it to cite and nothing in it left unattributed.
@@ -1246,28 +1490,58 @@ class AgentLoop:
             self._publisher.content_block(notice.as_wire())
 
     def _repair(self, request: TurnRequest, state: _TurnState) -> bool:
-        """Whether the Gate blocks this answer and one rewrite is still owed.
+        """Whether this answer needs a nudge and one is still owed.
 
         Proving twice — here and again in :meth:`_terminal` — costs a regex pass
         over prose the Turn already holds, and buys the property that matters:
         the terminal path stays the only place that publishes, so no answer is
         ever half on screen while its rewrite is being written.
+
+        Two conditions earn a nudge, and inverting the Gate's default is what
+        made the second one necessary:
+
+        * a **refused** block, which is an integrity failure and ends the Turn
+          if the rewrite does not fix it;
+        * a **downgraded** block, which does not end the Turn but does cost the
+          reader the paragraph. Before the inversion these raised, so they came
+          through the first branch; after it they do not raise at all, and
+          without this branch the model would never again be asked to fix a
+          misplaced marker — the answer would silently become the backend's
+          apology sentence instead.
+
+        The ceiling is :data:`MAX_GATE_ATTEMPTS` validations, so at most one
+        nudge per Turn. That is the count the loop already spent at worst, and
+        the cost of raising it is a whole model call.
         """
-        if state.repair_used:
+        state.gate_attempts += 1
+        if state.gate_attempts >= MAX_GATE_ATTEMPTS:
+            # This validation was the last one funded. Proving again here would
+            # only discover a problem no call remains to carry a note about, so
+            # the terminal path proves once and whatever it decides stands.
             return False
         try:
             self._prove(request, state)
         except GroundingFailure as failure:
-            if failure.degradable:  # pragma: no cover - degradables never raise
-                return False
             logger.info(
-                "Turn %s asked the model to rewrite a blocked block: %s",
+                "Turn %s asked the model to rewrite a refused block: %s",
                 request.request_message_id,
                 failure,
             )
-            state.repair_used = True
             state.repair_note = REPAIR_NOTE.format(
                 guidance=repair_instruction(failure.code)
+            )
+            return True
+        if state.degraded_codes:
+            logger.info(
+                "Turn %s asked the model to rewrite a downgraded block: %s",
+                request.request_message_id,
+                ", ".join(state.degraded_codes),
+            )
+            # Nothing raised, so this draft is releasable as it stands. Kept
+            # before the nudge, because the nudge is allowed to make it worse.
+            state.releasable_text = state.text
+            state.repair_note = REPAIR_NOTE.format(
+                guidance=repair_instruction(state.degraded_codes[0])
             )
             return True
         return False
@@ -1339,7 +1613,8 @@ class AgentLoop:
             widget_refusals=tuple(state.widget_refusals),
             provider_request_id=state.request_id,
             grounding_failure_code=state.grounding_failure_code,
-            degraded_recommendation_code=state.degraded_recommendation_code,
+            degraded_codes=tuple(state.degraded_codes),
+            degraded_recommendations=state.degraded_recommendations,
             downgraded_blocks=sum(
                 bool(block.unverified_figures) for block in state.blocks
             ),

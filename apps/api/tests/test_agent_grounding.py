@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pathlib
 import re
 from datetime import date
 
@@ -11,6 +12,7 @@ from src.agent.blocks import split_blocks
 from src.agent.context import TranscriptToolCall
 from src.agent.grounding import (
     GROUNDING_FAILED,
+    INTEGRITY_GATE_CODES,
     BlockKind,
     EvidenceRef,
     EvidenceSource,
@@ -19,6 +21,7 @@ from src.agent.grounding import (
     TraceIndex,
     display_text,
     figures_agree,
+    is_recommendation_draft,
 )
 from src.agent.tools.fields import citable_path, serialize_registered_field
 
@@ -524,6 +527,202 @@ def test_the_markers_never_reach_the_reader():
     )
 
     assert rendered == "RSI 61.2 là trung tính."
+
+
+#: Every condition ``grounding.py`` raises, and which side of the boundary it is
+#: on. Written out rather than derived, because the point of the list is to be
+#: the thing a reviewer reads: moving a code across this table is the decision
+#: that changes what a reader sees, and it should not be possible to make it by
+#: editing one set and no test.
+GATE_CODES = {
+    # Integrity: the block says something its own evidence does not.
+    "figure_mismatch": "block",
+    "trading_day_mismatch": "block",
+    "missing_trading_day": "block",
+    "symbol_not_in_universe": "block",
+    # The same class, raised from a loop variable rather than written out: a
+    # serialized field that disagrees with its Signal Registry declaration.
+    "unit_mismatch": "block",
+    "claim_mismatch": "block",
+    "source_mismatch": "block",
+    "interpretation_mismatch": "block",
+    # Availability: the evidence was asked for and is not there.
+    "missing_reference_price": "degrade",
+    "missing_price_zone": "degrade",
+    "unregistered_price_zone": "degrade",
+    "window_health_refusal": "degrade",
+    "no_supporting_field": "degrade",
+    "no_contradictory_evidence": "degrade",
+    "news_only_basis": "degrade",
+    "unreferenced_figure": "degrade",
+    "missing_value": "degrade",
+    "missing_as_of": "degrade",
+    "refused_field": "degrade",
+    "refused_tool_call": "degrade",
+    "unfinished_tool_call": "degrade",
+    "field_not_registered": "degrade",
+    "unclassified_claim": "degrade",
+    # Form: the marker naming the evidence was written wrong.
+    "unknown_field_path": "degrade",
+    "uncitable_field_path": "degrade",
+    "unknown_tool_call": "degrade",
+    "incomplete_citation": "degrade",
+    "malformed_reference": "degrade",
+}
+
+
+def gate_codes_in_source() -> set[str]:
+    """Every code ``grounding.py`` can raise, read off the syntax tree.
+
+    An AST walk rather than a grep, because a grep is what made this guard
+    useless the first time it was written: four of these codes are built as
+    ``f"{key}_mismatch"`` from a loop variable, so a pattern looking for a string
+    literal after ``GroundingFailure(`` found 24 of 28 and reported the set
+    complete. The four it missed had all silently changed side.
+
+    An f-string resolves to the literal parts it is made of, joined by the loop's
+    own values where those are a plain tuple of constants — which is the shape
+    this module uses. Anything this function cannot resolve is returned as a
+    marker so the assertion fails loudly instead of quietly shrinking.
+    """
+    import ast
+
+    from src.agent import grounding
+
+    tree = ast.parse(pathlib.Path(grounding.__file__).read_text())
+
+    # The loop constants any f-string code interpolates: ``for key, _ in (...)``
+    # over a tuple of string literals.
+    loop_values: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.For) and isinstance(node.iter, ast.Tuple):
+            for element in node.iter.elts:
+                if isinstance(element, ast.Tuple) and element.elts:
+                    first = element.elts[0]
+                    if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                        loop_values.add(first.value)
+
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        callee = node.func
+        if not (isinstance(callee, ast.Name) and callee.id == "GroundingFailure"):
+            continue
+        if not node.args:
+            continue
+        code = node.args[0]
+        if isinstance(code, ast.Constant) and isinstance(code.value, str):
+            found.add(code.value)
+        elif isinstance(code, ast.JoinedStr):
+            # ``f"{key}_mismatch"`` — one interpolation and one literal tail.
+            suffix = "".join(
+                part.value
+                for part in code.values
+                if isinstance(part, ast.Constant) and isinstance(part.value, str)
+            )
+            if suffix and loop_values:
+                found.update(f"{value}{suffix}" for value in loop_values)
+            else:
+                found.add(f"<unresolved f-string at line {code.lineno}>")
+        else:
+            found.add(f"<unresolved {type(code).__name__} at line {code.lineno}>")
+    return found
+
+
+def test_the_table_above_lists_every_condition_the_module_actually_raises():
+    """Guards the table against the module drifting out from under it.
+
+    The table decides what a reader sees, so a condition added to
+    ``grounding.py`` without a row here would be classified by the default —
+    silently, and correctly for safety, but with nobody having decided. That is
+    not hypothetical: it already happened to the four ``*_mismatch`` codes.
+    """
+    assert gate_codes_in_source() == set(GATE_CODES)
+
+
+def test_the_guard_above_can_see_a_code_that_is_not_a_literal():
+    """The property the first version of that guard did not have."""
+    assert "unit_mismatch" in gate_codes_in_source()
+    assert "interpretation_mismatch" in gate_codes_in_source()
+
+
+def test_the_boundary_is_eight_conditions_wide_and_twenty_on_the_other_side():
+    """The measured inversion: it was sixteen blocking and eight degrading.
+
+    Sixteen conditions ended a Turn, and most of them were not integrity
+    failures — 58% of Turns ended `grounding_failed`, and the simplest category
+    of valid question scored 0 out of 30.
+    """
+    assert len(GATE_CODES) == 28
+    blocking = {code for code, side in GATE_CODES.items() if side == "block"}
+    assert blocking == set(INTEGRITY_GATE_CODES)
+    assert len(blocking) == 8
+    assert len(GATE_CODES) - len(blocking) == 20
+
+
+@pytest.mark.parametrize("code", sorted(GATE_CODES))
+def test_each_condition_lands_on_the_side_the_table_says(code):
+    failure = GroundingFailure(code, "an operator sentence")
+
+    assert failure.degradable is (GATE_CODES[code] == "degrade")
+
+
+@pytest.mark.parametrize(
+    "code", sorted(c for c, side in GATE_CODES.items() if side == "degrade")
+)
+def test_every_downgraded_condition_has_a_sentence_for_the_reader(code):
+    """A downgrade with no sentence is a block with no text: a blank screen.
+
+    Both frames are checked, because most of these conditions fire while a
+    marker is being resolved — before anything knows whether the block was going
+    to carry a recommendation.
+    """
+    for recommendation in (True, False):
+        notice = GroundingFailure(code, "detail").notice(recommendation=recommendation)
+        assert notice.strip()
+        # Backend-authored, so it may not carry a figure: nothing validates it,
+        # and a number in it is a number nobody proved.
+        assert not re.search(r"\d", notice)
+        # Nor an internal name, which would tell the reader nothing and an
+        # attacker something.
+        assert "registered_fields" not in notice
+        assert "_" not in notice
+
+
+@pytest.mark.parametrize(
+    "code", sorted(c for c, side in GATE_CODES.items() if side == "block")
+)
+def test_a_refused_condition_carries_no_sentence(code):
+    """Explaining a figure the Gate just decided not to trust explains nothing."""
+    assert GroundingFailure(code, "detail").notice() == ""
+
+
+def test_a_condition_written_tomorrow_downgrades_and_still_says_something():
+    """The default is degrade, so the fallback clause is what makes it safe.
+
+    Without it a condition added to `grounding.py` next month would downgrade
+    into an *empty* notice — the blank screen this inversion removed, arriving
+    through a new door.
+    """
+    unwritten = GroundingFailure("a_condition_nobody_has_worded_yet", "detail")
+
+    assert unwritten.degradable is True
+    assert unwritten.notice().strip()
+    assert unwritten.notice(recommendation=False).strip()
+
+
+def test_the_two_frames_answer_two_different_questions():
+    """A reader who asked about the market did not ask about a price zone."""
+    failure = GroundingFailure("missing_value", "detail")
+
+    assert "khuyến nghị" in failure.notice(recommendation=True)
+    assert "khuyến nghị" not in failure.notice(recommendation=False)
+
+
+def test_the_frame_is_chosen_from_the_draft_the_gate_refused():
+    assert is_recommendation_draft("[rec:FPT@2026-08-14] Nên mua.") is True
+    assert is_recommendation_draft("RSI 61.2 [ev:c1#a.b.value] là trung tính.") is False
 
 
 def test_an_availability_failure_is_degradable_and_an_integrity_one_is_not():

@@ -146,6 +146,16 @@ class GateOutcome:
     grounding: str = "passed"
     recommendation: str = "not_applicable"
     failure_code: str | None = None
+    #: Every condition that downgraded a block this Turn answered around, in the
+    #: order they happened.
+    #:
+    #: ``failure_code`` reports one, which was enough while eight conditions
+    #: could downgrade and only a recommendation could be the block. Twenty can
+    #: now, on any block, so an answer routinely has several — and the record
+    #: that decides whether inverting the Gate's default let a false figure
+    #: through is the record that lists all of them. Additive: an old reader that
+    #: knows only ``failure_code`` reads this Manifest unchanged.
+    downgrades: tuple[str, ...] = ()
 
     def as_wire(self) -> dict[str, Any]:
         return {
@@ -153,6 +163,7 @@ class GateOutcome:
             "grounding": self.grounding,
             "recommendation": self.recommendation,
             "failure_code": self.failure_code,
+            "downgrades": list(self.downgrades),
         }
 
 

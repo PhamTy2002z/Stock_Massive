@@ -383,6 +383,35 @@ def test_incomplete_reasons_are_counted_by_reason_and_only_for_incomplete_turns(
     assert reading.incomplete_total == 3
 
 
+def test_the_named_route_conditions_are_counted_apart_from_route_error(world):
+    """The reason for not changing `ops.py` at all, held as a test.
+
+    `incomplete_reasons` is a group-by over whatever the loop writes, so the five
+    conditions that used to arrive as `route_error` split the moment they got
+    their own reasons — no allowlist here to extend, and none to forget to
+    extend next time. What is left under `route_error` is the residue: a 400
+    whose body this repository has never seen.
+    """
+    world.turn(status=TURN_INCOMPLETE, terminal_reason="context_overflow")
+    world.turn(status=TURN_INCOMPLETE, terminal_reason="context_overflow")
+    world.turn(status=TURN_INCOMPLETE, terminal_reason="output_cap_exceeded")
+    world.turn(status=TURN_INCOMPLETE, terminal_reason="content_policy_blocked")
+    world.turn(status=TURN_INCOMPLETE, terminal_reason="model_unavailable")
+    world.turn(status=TURN_INCOMPLETE, terminal_reason="schema_rejected")
+    world.turn(status=TURN_INCOMPLETE, terminal_reason="route_error")
+
+    reading = snapshot(world)
+
+    assert reading.incomplete_reasons == {
+        "context_overflow": 2,
+        "output_cap_exceeded": 1,
+        "content_policy_blocked": 1,
+        "model_unavailable": 1,
+        "schema_rejected": 1,
+        "route_error": 1,
+    }
+
+
 def test_unknown_tool_is_counted_by_the_name_that_was_asked_for(world):
     """Capability gaps retain both the requested name and its frequency."""
     world.tool_call(status=TOOL_CALL_UNKNOWN_TOOL, tool_name="run_python")
