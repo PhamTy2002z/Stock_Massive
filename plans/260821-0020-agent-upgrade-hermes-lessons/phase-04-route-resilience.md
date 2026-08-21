@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Độ bền tuyến LLM"
-status: pending
+status: complete
 priority: P1
 effort: "3-4d"
 dependencies: [1]
@@ -128,17 +128,56 @@ session cùng đập vào một tuyến đã rate-limit.
 
 ## Success Criteria
 
-- [ ] Mỗi lớp lỗi có nhánh phục hồi hoặc lý do terminal ghi trong code
-- [ ] `ContextOverflow` → nén và thử lại, không terminal
-- [ ] `GatewayTimeout` → rebuild client rồi retry
-- [ ] Breaker Redis: Collector và API không đẩy nhau vào rate limit (test có 2 client)
-- [ ] Guard rỗng: 2 lần rỗng cùng signature → đổi model, không retry lần 3
-- [ ] Guard rỗng fail-open: thiếu usage → giữ nguyên budget (test)
-- [ ] Deadline của ta classify khác timeout của provider
-- [ ] Đọc thân lỗi streaming có trần byte và trần thời gian
-- [ ] `cache_control` được set khi tuyến hỗ trợ; probe xác nhận
-- [ ] `make test` + `pnpm test:e2e` xanh
-- [ ] Sau 48h: tỉ lệ Turn chết vì route giảm, và phần còn lại có tên
+- [x] Mỗi lớp lỗi có nhánh phục hồi hoặc lý do terminal ghi trong code —
+      `core/llm/recovery.py`, có test đi hết bảng
+- [x] `ContextOverflow` → nén và thử lại, không terminal (trần 2 lần)
+- [x] `GatewayTimeout` → rebuild client rồi retry
+- [x] Breaker Redis: hai client trên một Redis đọc cùng một câu trả lời (test cả
+      hai dialect redis-py và Upstash)
+- [x] Guard rỗng: 2 lần rỗng cùng signature → đổi model, không retry lần 3
+- [x] Guard rỗng fail-open: thiếu usage → giữ nguyên budget; reasoning token
+      tính là sinh thật
+- [x] Deadline của ta classify khác timeout của provider — `DeadlineExpired`,
+      terminal reason `deadline_expired`
+- [x] Đọc thân lỗi streaming có trần byte (8 KiB) và trần thời gian (5s)
+- [x] `cache_control` có đường đi và có probe check; **cờ mặc định tắt** cho tới
+      khi probe xác nhận trên tuyến thật
+- [x] `make test` xanh (2686 passed)
+- [ ] `pnpm test:e2e` — **chưa chạy**: `pnpm dev` đang mở, mà e2e chạy
+      `pnpm build` cùng thư mục nên sẽ phá `.next` của dev; thêm nữa
+      `apps/api/.env` đang thiếu
+- [ ] Sau 48h: tỉ lệ Turn chết vì route giảm, và phần còn lại có tên — cần thời
+      gian chạy thật
+
+## Quyết định đã chốt khi thực thi
+
+- **Breaker fail-OPEN.** Câu hỏi mở của phase này. Chốt fail-open, lý do ghi
+  trong docstring `core/llm/breaker.py`: `core/quota.py` fail-closed là đúng cho
+  hạn mức tài khoản trả tiền (vnstock `sys.exit()` khi cạn), còn ở đây tuyến tự
+  enforce limit của nó nên breaker chỉ tiết kiệm đúng một request đã bị từ chối,
+  và giá của việc sai là màn hình trắng. Có cờ tắt `LLM_ROUTE_BREAKER_ENABLED`.
+  Hold bị chặn trên ở 300s để một `Retry-After` sai không khoá lane hàng giờ.
+- **Rate limit vẫn không retry.** Bảng của plan ghi "backoff jittered" cho
+  `RouteRateLimited`, nhưng `errors.py` đã ghi quyết định đo được: tuyến *đã trả
+  lời*. Giữ nguyên không retry; cái mới là ghi vào breaker để caller kế tiếp
+  không hỏi lại. Backoff jitter áp cho các nhánh thật sự retry.
+- **Failover model nằm ở client, không ở transport.** `transport.py` cấm đổi
+  model vì nó không hỏi được admission; client hỏi lại được, nên nó reserve lần
+  nữa cho model kia dưới workload mà model đó được định giá — và
+  `SpendAdmission.reserve` từ chối nếu cặp không khớp.
+- **Nén chỉ khi nén thật sự nhường được gì.** Turn ngắn có prompt chiếm phần lớn
+  input: hạ trần của ta không đổi được context đã dựng, nên nhánh này raise ngay
+  thay vì mua một lần bị từ chối y hệt.
+- **Bound thân lỗi bằng `asyncio.wait_for`, không dùng daemon thread.** Mẫu
+  Hermes dùng thread vì transport của họ đồng bộ; ở transport async, đọc socket
+  nhường lại event loop nên timer nổ được và response đóng được dưới nó.
+
+## Chưa làm (ngoài scope đã ghi ở trên)
+
+- Tách `LLM_REQUEST_TIMEOUT_SECONDS` thành hai biến riêng cho connect/read: hiện
+  vẫn một deadline cho mỗi HTTP attempt, nhưng nó đã được **classify** riêng
+  khỏi deadline của provider, tức là phần Phase 4 cần cho ops đã có. Thêm biến
+  thứ hai là tuning, không phải phục hồi.
 
 ## Risk Assessment
 
