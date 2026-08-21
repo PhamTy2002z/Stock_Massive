@@ -16,6 +16,9 @@ from src.agent.grounding import TraceIndex
 from src.agent.prompt import PROMPT_VERSION, MarketState, RuntimeContext, render
 from src.agent.tools.fields import serialize_registered_field
 from src.agent.widgets import (
+    STOCK_360_SUBJECTS,
+    WIDGET_CEILING,
+    WIDGET_CEILING_ON_REQUEST,
     WIDGET_REGISTRY,
     BindingKind,
     WidgetDataResolver,
@@ -64,6 +67,36 @@ def comparison_traces() -> TraceIndex:
     )
 
 
+PERIODS = (
+    {
+        "period_end": "2026-06-30",
+        "age_days": 45,
+        "stale": False,
+        "figures": {"revenue_vnd": 21_000.0, "net_profit_after_tax_vnd": 1_400.0},
+    },
+    {
+        "period_end": "2026-03-31",
+        "age_days": 136,
+        "stale": True,
+        "figures": {"revenue_vnd": 18_500.0, "net_profit_after_tax_vnd": 900.0},
+    },
+)
+
+
+def financials_traces(periods=PERIODS, symbol: str = "MSN") -> TraceIndex:
+    return TraceIndex(
+        [
+            call(
+                "f1",
+                "get_financials",
+                {"symbol": symbol, "periods": list(periods), "unavailable": []},
+                symbol=symbol,
+                periods=len(periods),
+            )
+        ]
+    )
+
+
 def selection(body: str):
     _text, selections = extract_selections(f"Kết luận.\n\n[widget:{body}]")
     assert len(selections) == 1
@@ -90,7 +123,7 @@ def test_the_contract_gained_its_widget_section_and_the_catalog_did_not_move():
         )
     )
 
-    assert PROMPT_VERSION == "1.8.0"
+    assert PROMPT_VERSION == "1.9.0"
     assert "## 9. Visual evidence" in rendered
     for name in WIDGET_REGISTRY:
         assert name.replace("_", " ") in rendered
@@ -268,22 +301,26 @@ def test_one_field_across_symbols_and_not_two_fields():
 # -- the one-per-answer ceiling -------------------------------------------
 
 
-def test_a_second_widget_is_rejected_unless_the_user_asked_for_one():
+def test_the_fourth_widget_is_rejected_unless_the_user_asked_for_more():
+    # ``docs/specs/0004`` D11 raised the ceiling from one to three, so what the
+    # anti-spam rule now catches is the fourth selection rather than the second.
     _text, selections = extract_selections(
         f"Kết luận.\n\n[widget:metric_comparison|{REF}|Một]\n"
         f"[widget:metric_comparison|{REF}|Hai]\n"
+        f"[widget:metric_comparison|{REF}|Ba]\n"
+        f"[widget:metric_comparison|{REF}|Bốn]\n"
     )
 
     specs, rejections = validator().validate_all(selections, comparison_traces())
 
-    assert len(specs) == 1
+    assert len(specs) == WIDGET_CEILING == 3
     assert [rejection.code for rejection in rejections] == ["widget_ceiling"]
 
     allowed, none_rejected = validator(allow_second=True).validate_all(
         selections, comparison_traces()
     )
 
-    assert len(allowed) == 2
+    assert len(allowed) == WIDGET_CEILING_ON_REQUEST == 4
     assert none_rejected == ()
 
 
@@ -433,6 +470,86 @@ def test_a_ranking_bound_to_something_other_than_a_screen_is_rejected():
     assert raised.value.code == "wrong_binding"
 
 
+# -- the periods binding ---------------------------------------------------
+
+
+def test_a_quarterly_table_pins_the_periods_it_was_written_about():
+    spec = validator().validate(
+        selection("quarterly_financials|f1#periods|Kết quả theo quý"), financials_traces()
+    )
+
+    assert spec.name == "quarterly_financials"
+    assert spec.unit == "vnd"
+    # The newest period the table shows is what the reader is told it is dated
+    # to; the Turn's own session is kept separately as the replay boundary,
+    # because a filing for June is written to the store in August.
+    assert spec.as_of == "2026-06-30"
+    assert spec.descriptor["trading_day"] == TRADING_DAY.isoformat()
+    assert spec.descriptor["period_ends"] == ["2026-06-30", "2026-03-31"]
+    assert spec.descriptor["symbol"] == "MSN"
+    # Only the columns the store actually answered with, in the registry's order.
+    assert spec.fields == ("revenue_vnd", "net_profit_after_tax_vnd")
+    assert spec.tool_call_ids == ("f1",)
+
+
+def test_a_quarterly_table_is_not_the_valuation_history_stock_360_owns():
+    # ``get_financials``'s periods are listed in ``STOCK_360_SUBJECTS`` because
+    # the deep-dive screen draws the valuation line from them. A table of filed
+    # figures is not that line, so this binding is allowed through where a chart
+    # bound to the same path is still refused.
+    assert ("get_financials", "periods") in STOCK_360_SUBJECTS
+
+    spec = validator().validate(
+        selection("quarterly_financials|f1#periods|Kết quả theo quý"), financials_traces()
+    )
+
+    assert spec.descriptor["kind"] == BindingKind.PERIODS.value
+
+    with pytest.raises(WidgetRejected) as refused:
+        validator().validate(
+            selection("metric_trend|f1#periods|Lịch sử định giá"), financials_traces()
+        )
+
+    assert refused.value.code == "owned_by_stock_360"
+
+
+def test_a_quarterly_table_bound_to_another_tool_is_refused():
+    with pytest.raises(WidgetRejected) as refused:
+        validator().validate(
+            selection(f"quarterly_financials|c1#registered_fields.{MOMENTUM}.value|X"),
+            comparison_traces(),
+        )
+
+    assert refused.value.code == "wrong_binding"
+
+
+def test_a_quarterly_table_with_no_drawable_column_is_refused():
+    # A company that filed none of the four income-statement lines this table
+    # draws leaves nothing to table, and a table of empty cells claims the
+    # figures exist and were not fetched.
+    periods = (
+        {"period_end": "2026-06-30", "stale": False, "figures": {"total_assets_vnd": 5.0}},
+    )
+
+    with pytest.raises(WidgetRejected) as refused:
+        validator().validate(
+            selection("quarterly_financials|f1#periods|X"), financials_traces(periods)
+        )
+
+    assert refused.value.code == "missing_figures"
+
+
+def test_a_quarterly_table_whose_period_carries_no_end_is_refused():
+    periods = ({"stale": False, "figures": {"revenue_vnd": 5.0}},)
+
+    with pytest.raises(WidgetRejected) as refused:
+        validator().validate(
+            selection("quarterly_financials|f1#periods|X"), financials_traces(periods)
+        )
+
+    assert refused.value.code == "missing_as_of"
+
+
 # -- replay ----------------------------------------------------------------
 
 
@@ -444,6 +561,7 @@ class _Tools:
         self.rows = rows
         self.field_calls: list[tuple] = []
         self.screen_calls: list[dict] = []
+        self.financials_calls: list[dict] = []
 
     async def replay_field(self, *, symbols, field_name, as_of):
         self.field_calls.append((tuple(symbols), field_name, as_of))
@@ -459,6 +577,32 @@ class _Tools:
             "points": points,
             "available": present,
             "unavailable_reason": None if present else "slice_unavailable",
+        }
+
+    async def replay_financials(self, *, symbol, period_ends, figures, trading_day):
+        self.financials_calls.append(
+            {
+                "symbol": symbol,
+                "period_ends": tuple(period_ends),
+                "figures": tuple(figures),
+                "trading_day": trading_day,
+            }
+        )
+        rows = [
+            {
+                "period_end": day,
+                "stale": False,
+                "figures": {name: 1.0 for name in figures},
+            }
+            for day in period_ends
+        ]
+        return {
+            "symbol": symbol,
+            "unit": "vnd",
+            "figures": list(figures),
+            "periods": rows,
+            "available": True,
+            "unavailable_reason": None,
         }
 
     async def replay_screen(self, *, criteria, sort_by, order, limit, as_of):
@@ -540,6 +684,34 @@ async def test_a_slice_that_cannot_be_rebuilt_resolves_to_an_explicit_unavailabl
     assert resolved["unavailable_reason"] == "slice_unavailable"
     # Still dated: a reader told a slice is missing is told which slice.
     assert resolved["as_of"] == TRADING_DAY.isoformat()
+
+
+@pytest.mark.asyncio
+async def test_a_quarterly_table_replays_the_named_periods_and_not_the_latest_ones():
+    tools = _Tools()
+    resolver = WidgetDataResolver(tools=tools, redis=None)
+
+    resolved = await resolver.resolve(
+        {
+            "kind": BindingKind.PERIODS.value,
+            "symbol": "MSN",
+            "period_ends": ["2026-06-30", "2026-03-31"],
+            "figures": ["revenue_vnd"],
+            "trading_day": TRADING_DAY.isoformat(),
+            "as_of": "2026-06-30",
+        }
+    )
+
+    assert resolved["kind"] == BindingKind.PERIODS.value
+    assert [row["period_end"] for row in resolved["periods"]] == [
+        "2026-06-30",
+        "2026-03-31",
+    ]
+    # The quarters are named rather than counted, so two more filings do not
+    # change what a reopened answer shows; and the read is bounded by the Turn's
+    # own session rather than by the newest period it displays.
+    assert tools.financials_calls[0]["period_ends"] == ("2026-06-30", "2026-03-31")
+    assert tools.financials_calls[0]["trading_day"] == TRADING_DAY
 
 
 @pytest.mark.asyncio

@@ -5,32 +5,34 @@
 /* ---------------------------------------------------------------------------
    VisgniteAI — the design system this app is built from.
 
-   The reference is a *warm* night surface. Not a dark mode bolted onto a light
-   design, and not a neutral black either: the ground is #191815 — a near-black
-   carrying a few degrees of yellow — and every step above it holds that same
-   warmth, so the whole product reads as lamplight rather than as a switched-off
-   screen. The ink is warm to match; a neutral grey label on this ground looks
-   blue, which is the tell that a palette was ported rather than designed.
+   The reference is a *cool* night surface. Not a dark mode bolted onto a light
+   design and not a pure black either: the ground is #101112 — a near-black
+   carrying a few degrees of blue — and every step above it holds that same
+   slate cast, so the whole product reads as an instrument panel rather than as
+   a switched-off screen. The ink is held on the same axis; a warm grey label on
+   this ground looks stained, which is the tell that a palette was ported
+   rather than designed.
 
-     #191815  ground        — the page, the composer's gradient, the scrollbar
-     #1f1d1a  panel         — sidebar and the right-hand inspector
-     #232019  raised        — cards on the page
-     #282520  sunken        — fields, and cards nested inside a panel
-     #2c2924  menu          — popovers floating above everything
-     #302c27  bubble        — what the user said
-     #78d0cd  teal          — the filled action, and nothing else
-     #fafafa → #8d8579      — the ink ladder, six warm steps, never pure white
+     #101112  ground        — the page, the composer's gradient, the scrollbar
+     #17181a  panel         — sidebar and the right-hand inspector
+     #1c1d1f  raised        — cards on the page
+     #202123  sunken        — fields, and cards nested inside a panel
+     #232426  menu          — popovers floating above everything
+     #26282a  bubble        — what the user said
+     #f59331  amber         — the filled action, and nothing else
+     #fafafa → #8c8f93      — the ink ladder, six slate steps, never pure white
                               on a chart and never pure black anywhere
 
    Two rules hold across the whole file.
 
-   The teal is rationed. One filled control per view, always ink-on-teal rather
-   than white-on-teal — the button reads as a lit surface with dark type, which
-   is the idiosyncratic part of this brand. It never carries body text: at
-   2.9:1 on the ground it fails contrast long before it fails taste.
+   The amber is rationed. One filled control per view, always ink-on-amber
+   rather than white-on-amber — the button reads as a lit surface with dark
+   type, which is the idiosyncratic part of this brand. It never carries body
+   text on the night ground: at 2.4:1 there it fails contrast long before it
+   fails taste, which is why the light theme carries a darkened amber instead.
 
    Green and red are data, not brand. A board has to say up from down, and the
-   up colour (#4ec97a) is deliberately not the teal so a rising number never
+   up colour (#3fbf6a) sits far enough from the amber that a rising number never
    reads as a control and a control never reads as a rising number. --------- */
 
 @layer base {
@@ -38,27 +40,27 @@
      theme below is the same system re-grounded, not a different design. */
   :root {
     /* -- the surface ladder ------------------------------------------------ */
-    /* #191815 → #302c27. The hue is held at roughly 36° the whole way up, so a
-       card lifted off the page never cools down as it lifts. */
-    --surface-ground: 45 9% 9%;
-    --surface-panel: 36 9% 11%;
-    --surface-raised: 42 17% 12%;
-    --surface-sunken: 38 11% 14%;
-    --surface-menu: 38 10% 16%;
-    --surface-bubble: 33 10% 17%;
+    /* #101112 → #26282a. The hue is held between 210° and 220° the whole way
+       up, so a card lifted off the page never warms up as it lifts. */
+    --surface-ground: 210 6% 7%;
+    --surface-panel: 220 6% 10%;
+    --surface-raised: 220 5% 12%;
+    --surface-sunken: 220 4% 13%;
+    --surface-menu: 220 4% 14%;
+    --surface-bubble: 210 5% 16%;
 
     /* -- the ink ladder ---------------------------------------------------- */
-    /* #fafafa, #e6e2dc, #d3ccc4, #b3aaa0, #a29a8e, #8d8579. Only the top step
-       is neutral: white reads as white on any ground, but a neutral grey on a
-       warm one reads blue, so every step below it carries the ground's hue. */
-    /* #f2eee8 — display type only, one step above ink-1 and warmer than it. */
-    --ink-display: 36 28% 93%;
+    /* #fafafa, #e4e5e7, #d2d4d7, #b2b5b9, #a1a4a8, #8c8f93. Only the top step
+       is neutral: white reads as white on any ground, but the steps below it
+       carry the ground's own slate cast so a label never looks stained. */
+    /* #fdfdfd — display type only, one step above ink-1. */
+    --ink-display: 0 0% 99%;
     --ink-1: 0 0% 98%;
-    --ink-2: 36 17% 88%;
-    --ink-3: 32 15% 80%;
-    --ink-4: 32 11% 66%;
-    --ink-5: 36 10% 60%;
-    --ink-6: 36 8% 51%;
+    --ink-2: 220 6% 90%;
+    --ink-3: 216 6% 83%;
+    --ink-4: 214 5% 71%;
+    --ink-5: 214 4% 65%;
+    --ink-6: 214 3% 56%;
 
     /* -- shadcn semantics, mapped onto the ladders ------------------------- */
     --background: var(--surface-ground);
@@ -67,25 +69,25 @@
     --card-foreground: var(--ink-2);
     --popover: var(--surface-menu);
     --popover-foreground: var(--ink-1);
-    /* #78d0cd. Ink on teal — never white, see the note above. */
-    --primary: 178 48% 64%;
-    --primary-foreground: 45 9% 9%;
+    /* #f59331. Ink on amber — never white, see the note above. */
+    --primary: 30 91% 58%;
+    --primary-foreground: 210 6% 7%;
     --secondary: var(--surface-bubble);
     --secondary-foreground: var(--ink-1);
     --muted: var(--surface-sunken);
     --muted-foreground: var(--ink-6);
-    --accent: 36 11% 18%;
+    --accent: 216 4% 17%;
     --accent-foreground: var(--ink-1);
-    --destructive: 2 67% 63%;
-    --destructive-foreground: 45 9% 9%;
-    /* A hairline on this ground is a lifted white at ~7% alpha; flattened to an
-       opaque value so it composites identically over every surface step — and
-       kept on the ground's own hue so the rule does not read as a cool line
-       drawn across a warm card. */
-    --border: 38 8% 17%;
-    --input: 38 8% 22%;
-    --ring: 178 48% 64%;
-    --hairline: 38 8% 15%;
+    --destructive: 3 72% 60%;
+    --destructive-foreground: 210 6% 7%;
+    /* A hairline on this ground is a lifted white at ~8.5% alpha; flattened to
+       an opaque value so it composites identically over every surface step —
+       and kept on the ground's own hue so the rule does not read as a warm line
+       drawn across a cool card. */
+    --border: 220 4% 16%;
+    --input: 220 4% 21%;
+    --ring: 30 91% 58%;
+    --hairline: 220 4% 14%;
     --radius: 0.625rem;
 
     /* -- chrome ------------------------------------------------------------ */
@@ -93,17 +95,17 @@
     --nav-foreground: var(--ink-2);
     --sidebar-background: var(--surface-panel);
     --sidebar-foreground: var(--ink-3);
-    --sidebar-primary: 178 48% 64%;
-    --sidebar-primary-foreground: 45 9% 9%;
-    --sidebar-accent: 36 11% 18%;
+    --sidebar-primary: 30 91% 58%;
+    --sidebar-primary-foreground: 210 6% 7%;
+    --sidebar-accent: 216 4% 17%;
     --sidebar-accent-foreground: var(--ink-1);
-    --sidebar-border: 38 8% 16%;
-    --sidebar-ring: 178 48% 64%;
+    --sidebar-border: 220 4% 15%;
+    --sidebar-ring: 30 91% 58%;
 
     /* -- market semantics -------------------------------------------------- */
-    /* #4ec97a / #e0645f. Data, not brand. */
-    --positive: 142 53% 55%;
-    --negative: 2 67% 63%;
+    /* #3fbf6a / #e2574f. Data, not brand. */
+    --positive: 140 50% 50%;
+    --negative: 3 72% 60%;
     /* The Vietnamese board convention: ceiling violet #b18cf0, reference yellow
        #e8c454, floor cyan #5fc9d6. Tokens rather than inline hexes because all
        three are tuned for a near-black board and go unreadable on a white one. */
@@ -112,55 +114,66 @@
     --floor: 187 59% 61%;
     --caution: 45 76% 62%;
 
-    /* Links and icon actions are ink; the teal is reserved for filled surfaces
+    /* Links and icon actions are ink; the amber is reserved for filled surfaces
        and for the one accent stroke a selected row is allowed. */
     --interactive: var(--ink-1);
-    --interactive-strong: 178 48% 64%;
+    --interactive-strong: 30 91% 58%;
 
     /* -- charts ------------------------------------------------------------ */
-    /* Teal, red, violet, yellow, cyan — the reference's own five. */
-    --chart-1: 178 48% 64%;
-    --chart-2: 2 67% 63%;
+    /* Amber, red, violet, yellow, cyan — the reference's own five. */
+    --chart-1: 30 91% 58%;
+    --chart-2: 3 72% 60%;
     --chart-3: 262 77% 75%;
     --chart-4: 45 76% 62%;
     --chart-5: 187 59% 61%;
   }
 
-  /* Day. The same system re-grounded on paper: the ladders invert, the teal
-     darkens just enough to stay a surface rather than a highlighter, and the
-     market pair deepens so it still separates from the brand. */
+  /* Day. The same system re-grounded on paper: the ladders invert, the amber
+     darkens far enough to carry text as well as fill a button — 5.2:1 against
+     white and 4.8:1 against the ground, because `text-primary` is a real usage
+     here — and the market pair deepens so it still separates from the brand. */
   .light {
-    --surface-ground: 40 10% 97%;
+    --surface-ground: 220 12% 97%;
     --surface-panel: 0 0% 100%;
     --surface-raised: 0 0% 100%;
-    --surface-sunken: 40 8% 98%;
+    --surface-sunken: 220 14% 98%;
     --surface-menu: 0 0% 100%;
-    --surface-bubble: 40 8% 94%;
+    --surface-bubble: 220 10% 94%;
 
-    --ink-display: 36 14% 12%;
-    --ink-1: 36 12% 10%;
-    --ink-2: 36 10% 17%;
-    --ink-3: 34 8% 31%;
-    --ink-4: 34 7% 43%;
-    --ink-5: 34 7% 49%;
-    --ink-6: 34 7% 56%;
+    --ink-display: 220 12% 12%;
+    --ink-1: 220 10% 10%;
+    --ink-2: 220 9% 17%;
+    --ink-3: 218 7% 31%;
+    --ink-4: 216 6% 43%;
+    --ink-5: 216 5% 49%;
+    --ink-6: 214 5% 56%;
 
-    --primary: 178 44% 46%;
+    /* #a25c16 — the amber taken down five steps. White on it, because at this
+       lightness dark ink is the half that fails. */
+    --primary: 30 76% 36%;
     --primary-foreground: 0 0% 100%;
-    --accent: 40 8% 92%;
-    --destructive: 2 72% 48%;
+    --accent: 220 10% 92%;
+    --destructive: 3 72% 44%;
     --destructive-foreground: 0 0% 100%;
-    --border: 40 6% 87%;
-    --input: 40 6% 85%;
-    --hairline: 40 6% 91%;
+    --border: 220 8% 87%;
+    --input: 220 8% 85%;
+    --hairline: 220 8% 91%;
 
     --nav-foreground: var(--ink-1);
     --sidebar-foreground: var(--ink-2);
-    --sidebar-accent: 40 8% 93%;
-    --sidebar-border: 40 6% 88%;
+    --sidebar-accent: 220 10% 93%;
+    --sidebar-border: 220 8% 88%;
+    --sidebar-primary: 30 76% 36%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-ring: 30 76% 36%;
 
-    --positive: 142 62% 30%;
-    --negative: 2 72% 46%;
+    --ring: 30 76% 36%;
+    --interactive-strong: 30 76% 36%;
+    --chart-1: 30 76% 36%;
+    --chart-2: 3 72% 44%;
+
+    --positive: 140 60% 28%;
+    --negative: 3 72% 42%;
     --ceiling: 262 55% 46%;
     --reference: 42 92% 30%;
     --floor: 187 72% 30%;
@@ -419,7 +432,7 @@
    The Alpha Desk Widget registry palette (ADR-0012).
 
    Still declared separately from the chart layer above, and for the same
-   reason: a Widget must never paint a series in the brand teal or in a market
+   reason: a Widget must never paint a series in the brand amber or in a market
    green, because a neutral figure drawn in the up colour reads as a rising
    number and a bar drawn in the brand colour reads as a control.
 
@@ -429,34 +442,34 @@
 @layer base {
   :root {
     --widget-surface: var(--surface-raised);
-    --widget-ink: 36 14% 92%;
-    --widget-ink-muted: 32 11% 66%;
-    /* The one categorical series colour: a blue that is neither the teal nor
+    --widget-ink: 220 6% 90%;
+    --widget-ink-muted: 214 5% 71%;
+    /* The one categorical series colour: a blue that is neither the amber nor
        the market pair. */
     --widget-series: 213 84% 72%;
     --widget-series-muted: 213 26% 40%;
-    --widget-up: 142 53% 55%;
-    --widget-down: 2 67% 63%;
-    --widget-neutral: 36 10% 60%;
-    --widget-track: 36 11% 20%;
-    --widget-grid: 38 9% 18%;
-    --widget-axis: 32 11% 66%;
+    --widget-up: 140 50% 50%;
+    --widget-down: 3 72% 60%;
+    --widget-neutral: 214 4% 65%;
+    --widget-track: 220 5% 20%;
+    --widget-grid: 220 5% 18%;
+    --widget-axis: 214 5% 71%;
     /* The row or point the answer is actually about. */
-    --widget-focus: 178 48% 64%;
+    --widget-focus: 30 91% 58%;
   }
 
   .light {
     --widget-surface: 0 0% 100%;
-    --widget-ink: 0 0% 9%;
-    --widget-ink-muted: 0 0% 38%;
+    --widget-ink: 220 10% 10%;
+    --widget-ink-muted: 216 6% 40%;
     --widget-series: 217 72% 40%;
     --widget-series-muted: 217 38% 80%;
-    --widget-up: 142 62% 26%;
-    --widget-down: 2 72% 42%;
-    --widget-neutral: 0 0% 42%;
-    --widget-track: 40 6% 90%;
-    --widget-grid: 40 6% 88%;
-    --widget-axis: 0 0% 38%;
-    --widget-focus: 178 44% 34%;
+    --widget-up: 140 60% 26%;
+    --widget-down: 3 72% 42%;
+    --widget-neutral: 216 5% 44%;
+    --widget-track: 220 8% 90%;
+    --widget-grid: 220 8% 88%;
+    --widget-axis: 216 6% 40%;
+    --widget-focus: 30 76% 36%;
   }
 }

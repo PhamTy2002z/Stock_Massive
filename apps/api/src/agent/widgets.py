@@ -87,6 +87,44 @@ CACHE_TTL_SECONDS = 24 * 60 * 60
 
 DEEP_LINK_ROUTE = "/analytics/deep-dive"
 
+# How many Widgets one answer may carry.
+#
+# ``docs/specs/0004`` D11 raised this from one to three, and the reason is the
+# product's own moat argument: an answer whose figures arrive as data blocks is
+# what a general chatbot cannot produce, and one picture per answer made that
+# unreachable for a question about several things at once — a comparison, a
+# trend and the quarters behind them are three shapes, not three versions of one.
+#
+# The anti-spam rule it replaces still exists, one number higher. Three is what
+# an answer may choose on its own; the fourth is only for a reader who asked for
+# more visuals in their own words, which is the one signal the backend owns
+# (:func:`user_requested_multiple`). Neither number is something the model can
+# set, and neither is read from the answer.
+WIDGET_CEILING = 3
+WIDGET_CEILING_ON_REQUEST = 4
+
+# The columns a quarterly-financials table draws, in this order.
+#
+# Server-owned, like every other presentation default in ADR-0012: the model
+# names the Widget and binds it to the periods it read, and what a reader sees
+# in the columns is not the model's choice. Four income-statement figures rather
+# than the sixteen ``get_financials`` can serve, because a table wider than that
+# is unreadable at 360px and because these four are the ones the question behind
+# this Widget asks — how much came in, and how much of it survived to the bottom.
+#
+# Every one is a stored figure in dong. Nothing here is computed at render time:
+# a margin is a division, and a figure this system divided in a component would
+# be a figure with no Signal Registry declaration behind it (``docs/adr/0010``).
+QUARTERLY_COLUMNS: tuple[str, ...] = (
+    "revenue_vnd",
+    "gross_profit_vnd",
+    "operating_profit_vnd",
+    "net_profit_after_tax_vnd",
+)
+
+#: The tool a quarterly-financials selection binds to, and the only one.
+FINANCIALS_TOOL = "get_financials"
+
 
 class BindingKind(str, Enum):
     """What shape of evidence a Widget binds to.
@@ -101,6 +139,7 @@ class BindingKind(str, Enum):
     RANKING = "ranking"
     SERIES = "series"
     POSITION = "position"
+    PERIODS = "periods"
 
 
 @dataclass(frozen=True)
@@ -155,6 +194,17 @@ WIDGET_REGISTRY: Mapping[str, WidgetDefinition] = {
             min_refs=1,
             max_refs=1,
             summary="where a value sits against its own history or the Universe",
+        ),
+        WidgetDefinition(
+            name="quarterly_financials",
+            version=1,
+            binding=BindingKind.PERIODS,
+            # One reference, because the binding is the whole served list of
+            # periods rather than a figure inside one of them: a selection
+            # naming two of them would be two tables.
+            min_refs=1,
+            max_refs=1,
+            summary="stored statement figures across reporting periods",
         ),
     )
 }
@@ -426,7 +476,7 @@ class WidgetValidator:
         emit what survived and record what did not — and a rejection is never a
         reason to withhold the answer.
         """
-        ceiling = 2 if self._allow_second else 1
+        ceiling = WIDGET_CEILING_ON_REQUEST if self._allow_second else WIDGET_CEILING
         specs: list[WidgetSpec] = []
         rejections: list[WidgetRejected] = []
         for selection in selections:
@@ -462,12 +512,13 @@ class WidgetValidator:
                 f"{definition.max_refs} references and was given "
                 f"{len(selection.refs)}",
             )
-        self._refuse_stock_360(selection, traces)
+        self._refuse_stock_360(definition, selection, traces)
         builder = {
             BindingKind.CROSS_SYMBOL: self._cross_symbol,
             BindingKind.RANKING: self._ranking,
             BindingKind.SERIES: self._series,
             BindingKind.POSITION: self._position,
+            BindingKind.PERIODS: self._periods,
         }[definition.binding]
         spec = builder(definition, selection, traces)
         self._refuse_future_slice(spec)
@@ -658,6 +709,95 @@ class WidgetValidator:
             tool_call_ids=(call.call_id,),
         )
 
+    def _periods(
+        self,
+        definition: WidgetDefinition,
+        selection: WidgetSelection,
+        traces: TraceIndex,
+    ) -> WidgetSpec:
+        """Stored statement figures across the reporting periods a call served.
+
+        A descriptor binding rather than a citation one, for the reason
+        :meth:`TraceIndex.resolve_descriptor` exists: a period row is a stored
+        provider figure with no Signal Registry declaration, so it carries no
+        unit and no sanctioned interpretation and would fail :meth:`_cite` on the
+        ``as_of`` it does not have. What pins the slice instead is the list of
+        period ends, copied off the result the model actually read.
+
+        Two dates are kept and they are different facts. ``as_of`` is the newest
+        period the table shows, which is what the reader is told the figures are
+        dated to. ``trading_day`` is the Turn's own session, and it is the *read
+        boundary* on replay: a filing for June arrives in August, so rebuilding
+        the slice against June would silently drop the row it is meant to show.
+        """
+        ref = selection.refs[0]
+        named = traces.call(ref.call_id)
+        if named is None or named.name != FINANCIALS_TOOL:
+            raise WidgetRejected(
+                "wrong_binding",
+                f"a quarterly financials Widget binds to {FINANCIALS_TOOL}, not to "
+                + (named.name if named is not None else repr(ref.call_id)),
+            )
+        call, leaf = self._descriptor_binding(ref, traces)
+        rows = [row for row in leaf if isinstance(row, Mapping)] if isinstance(
+            leaf, Sequence
+        ) and not isinstance(leaf, (str, bytes)) else []
+        if not rows:
+            raise WidgetRejected(
+                "wrong_binding",
+                f"{ref.field_path!r} in tool call {ref.call_id!r} is not the served "
+                "list of reporting periods",
+            )
+        period_ends = [str(row.get("period_end") or "") for row in rows]
+        if not all(period_ends):
+            raise WidgetRejected(
+                "missing_as_of",
+                "a reporting period came back with no period end, so the slice is "
+                "not fixed",
+            )
+        result = call.result if isinstance(call.result, Mapping) else {}
+        symbol = result.get("symbol")
+        if not isinstance(symbol, str) or not symbol:
+            raise WidgetRejected(
+                "unknown_symbol", f"tool call {ref.call_id!r} names no symbol to table"
+            )
+        # Only the columns the store actually answered with. A column of empty
+        # cells is a claim that the figure exists and was not fetched, which is
+        # the opposite of what an absent line item means.
+        served = {
+            name
+            for row in rows
+            for name in (row.get("figures") or {})
+            if isinstance(row.get("figures"), Mapping)
+        }
+        columns = tuple(name for name in QUARTERLY_COLUMNS if name in served)
+        if not columns:
+            raise WidgetRejected(
+                "missing_figures",
+                "none of the statement figures this table draws was served for any "
+                "of the periods",
+            )
+        as_of = max(period_ends)
+        return WidgetSpec(
+            name=definition.name,
+            version=definition.version,
+            title=selection.title,
+            fields=columns,
+            # Every column is a money figure in dong, which is why the unit is
+            # one value on the spec rather than one per column.
+            unit="vnd",
+            as_of=as_of,
+            descriptor={
+                "kind": BindingKind.PERIODS.value,
+                "symbol": symbol.upper(),
+                "period_ends": period_ends,
+                "figures": list(columns),
+                "trading_day": self._trading_day.isoformat(),
+                "as_of": as_of,
+            },
+            tool_call_ids=(call.call_id,),
+        )
+
     # -- the shared checks -------------------------------------------------
 
     def _cite(self, ref: EvidenceRef, traces: TraceIndex) -> Citation:
@@ -761,8 +901,22 @@ class WidgetValidator:
             raise WidgetRejected("unresolvable_binding", failure.detail) from failure
 
     @staticmethod
-    def _refuse_stock_360(selection: WidgetSelection, traces: TraceIndex) -> None:
-        """Never redraw a chart Stock 360 already owns; deep-link to it instead."""
+    def _refuse_stock_360(
+        definition: WidgetDefinition,
+        selection: WidgetSelection,
+        traces: TraceIndex,
+    ) -> None:
+        """Never redraw a chart Stock 360 already owns; deep-link to it instead.
+
+        The periods binding is the one exception, and it is an exception about
+        *what is drawn* rather than about which tool answered. ``get_financials``
+        is listed below because the valuation-history **chart** on the deep-dive
+        screen is drawn from those periods; a quarterly table of filed figures is
+        not that chart, and refusing it would send a reader asking for the
+        numbers to a screen that shows them as a line.
+        """
+        if definition.binding is BindingKind.PERIODS:
+            return
         for ref in selection.refs:
             call = traces.call(ref.call_id)
             if call is None:
@@ -876,6 +1030,14 @@ class WidgetDataResolver:
                 "matched_count": screen.get("matched_count"),
                 **availability(bool(rows)),
             }
+        if kind == BindingKind.PERIODS.value:
+            served = await self._tools.replay_financials(
+                symbol=str(descriptor["symbol"]),
+                period_ends=[str(day) for day in descriptor["period_ends"]],
+                figures=[str(name) for name in descriptor["figures"]],
+                trading_day=date.fromisoformat(str(descriptor["trading_day"])),
+            )
+            return {**_descriptor_echo(descriptor), **served}
         if kind == BindingKind.SERIES.value:
             reference = dict(descriptor["data_ref"])
             resolved = await self._tools.resolve_data_ref(reference)
@@ -954,9 +1116,13 @@ def _descriptor_echo(descriptor: Mapping[str, Any]) -> dict[str, Any]:
 __all__ = [
     "CACHE_TTL_SECONDS",
     "DEEP_LINK_ROUTE",
+    "FINANCIALS_TOOL",
     "MAX_TITLE_CHARS",
+    "QUARTERLY_COLUMNS",
     "SELECTION_PATTERN",
     "STOCK_360_SUBJECTS",
+    "WIDGET_CEILING",
+    "WIDGET_CEILING_ON_REQUEST",
     "WIDGET_REGISTRY",
     "BindingKind",
     "WidgetDataResolver",

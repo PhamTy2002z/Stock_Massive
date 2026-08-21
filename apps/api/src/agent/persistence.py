@@ -134,6 +134,11 @@ class ToolCallRecord:
     prompt_tokens: int | None
     completion_tokens: int | None
     started_at: datetime
+    #: The route's id for the call, when it sent one. Absent on rows written
+    #: before the column existed.
+    tool_call_id: str | None = None
+    #: How large the result was on a Turn where the model saw a preview of it.
+    spilled_bytes: int | None = None
 
 
 @dataclass(frozen=True)
@@ -268,6 +273,8 @@ def _trace_record(row: AgentToolCall) -> ToolCallRecord:
         prompt_tokens=row.prompt_tokens,
         completion_tokens=row.completion_tokens,
         started_at=row.started_at,
+        tool_call_id=row.tool_call_id,
+        spilled_bytes=row.spilled_bytes,
     )
 
 
@@ -676,6 +683,11 @@ class AgentPersistence:
                 thread_id=thread_id,
                 request_message_id=request_message_id,
                 tool_name=str(trace["tool_name"]),
+                tool_call_id=(
+                    str(trace["tool_call_id"])[:128]
+                    if trace.get("tool_call_id")
+                    else None
+                ),
                 arguments=dict(trace.get("arguments") or {}),
                 result=(
                     dict(trace["result"])
@@ -692,6 +704,66 @@ class AgentPersistence:
             session.add(row)
             session.commit()
             return _trace_record(row)
+
+    async def record_spillover(
+        self, request_message_id: int, spilled: Mapping[str, int]
+    ) -> int:
+        """Note, on the rows themselves, which results the model only previewed.
+
+        A second write rather than part of the insert, because the two decisions
+        happen at different moments: a result is traced as soon as the tool
+        answers, and whether the *round* fits the context window is only knowable
+        once every result in it is back. Only spilled calls are touched, so an
+        ordinary round costs no writes at all.
+        """
+        if not spilled:
+            return 0
+        return await asyncio.to_thread(
+            self._record_spillover, request_message_id, dict(spilled)
+        )
+
+    def _record_spillover(
+        self, request_message_id: int, spilled: Mapping[str, int]
+    ) -> int:
+        with self._session_factory() as session:
+            updated = 0
+            for call_id, full_bytes in spilled.items():
+                updated += session.execute(
+                    update(AgentToolCall)
+                    .where(
+                        AgentToolCall.request_message_id == request_message_id,
+                        AgentToolCall.tool_call_id == call_id,
+                    )
+                    .values(spilled_bytes=int(full_bytes))
+                ).rowcount or 0
+            session.commit()
+            return updated
+
+    async def tool_result(
+        self, request_message_id: int, tool_call_id: str
+    ) -> Mapping[str, Any] | None:
+        """The whole result of one call, by the id the model cites it under.
+
+        What makes a spilled result *retrievable* rather than merely stored: the
+        transcript carries a preview, and this is the route back to everything
+        the preview stood in for. Scoped to the request message so a call id from
+        another Turn cannot be read through it.
+        """
+        return await asyncio.to_thread(
+            self._tool_result, request_message_id, tool_call_id
+        )
+
+    def _tool_result(
+        self, request_message_id: int, tool_call_id: str
+    ) -> Mapping[str, Any] | None:
+        with self._session_factory() as session:
+            row = session.execute(
+                select(AgentToolCall.result).where(
+                    AgentToolCall.request_message_id == request_message_id,
+                    AgentToolCall.tool_call_id == tool_call_id,
+                )
+            ).scalar_one_or_none()
+            return dict(row) if isinstance(row, Mapping) else None
 
     async def traces_for_request(
         self, request_message_id: int

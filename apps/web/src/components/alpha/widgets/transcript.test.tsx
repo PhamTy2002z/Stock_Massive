@@ -12,7 +12,7 @@ import * as React from "react"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { crossSymbol, ranking, spec } from "./fixtures"
+import { crossSymbol, periods, quarterlySpec, ranking, spec } from "./fixtures"
 import { MAX_WIDGETS_PER_ANSWER, MessageWidgets } from "./message-widgets"
 import { lookupWidget, supportedWidgets } from "./registry"
 import { parseWidgetRefusals, parseWidgetSpec, parseWidgetSpecs } from "./spec"
@@ -53,6 +53,16 @@ describe("validating the persisted spec before the registry is asked", () => {
     expect(lookupWidget(parsed as WidgetSpec)).toBeDefined()
   })
 
+  it("accepts the periods spec the quarterly table is persisted as", () => {
+    // Its name is in `WIDGET_NAMES` and its descriptor kind is a string, which
+    // is all the parser is entitled to check — the pairing of `periods` data to
+    // the table component is the slot's, one step later.
+    const parsed = parseWidgetSpec(quarterlySpec())
+
+    expect(parsed?.name).toBe("quarterly_financials")
+    expect(lookupWidget(parsed as WidgetSpec)?.kind).toBe("periods")
+  })
+
   it.each([
     ["an unknown name", { name: "candlestick" }],
     ["a non-integer version", { version: 1.5 }],
@@ -74,6 +84,7 @@ describe("validating the persisted spec before the registry is asked", () => {
     expect(supportedWidgets()).toEqual([
       "metric_comparison@1",
       "metric_trend@1",
+      "quarterly_financials@1",
       "ranked_symbols@1",
       "relative_position@1",
     ])
@@ -100,6 +111,20 @@ describe("the slot", () => {
 
     expect(await screen.findByRole("figure")).toBeInTheDocument()
     expect(screen.queryByTestId("widget-placeholder")).not.toBeInTheDocument()
+    expect(screen.getByText(TEXT)).toBeInTheDocument()
+  })
+
+  it("draws a periods slice as the table the registry pairs it with", async () => {
+    render(
+      <Answer>
+        <WidgetSlot spec={quarterlySpec()} resolve={resolvesTo(periods())} />
+      </Answer>
+    )
+
+    expect(await screen.findByRole("figure")).toBeInTheDocument()
+    // The table is the Widget here, so it is present without a disclosure being
+    // opened first — eight quarters and a header.
+    expect(screen.getAllByRole("row")).toHaveLength(9)
     expect(screen.getByText(TEXT)).toBeInTheDocument()
   })
 
@@ -228,23 +253,12 @@ describe("the slot", () => {
 })
 
 describe("the answer's Widgets", () => {
-  it("renders what the server admitted, which is the one-or-two ruling", async () => {
-    // One Widget per answer, and two only where the user asked for two, is
+  it("renders every Widget the server admitted, up to the ceiling it allows", async () => {
+    // Three per answer, and a fourth only where the user asked for more, is
     // decided by `apps/api` before anything is persisted — it is the only side
-    // holding the user's text. A message carrying two carries two because the
-    // user asked; the transcript does not re-litigate that.
-    render(
-      <MessageWidgets
-        messageId={1}
-        widgets={[spec(), spec({ descriptor_id: "second" })]}
-        resolve={resolvesTo(crossSymbol())}
-      />
-    )
-
-    await waitFor(() => expect(screen.getAllByRole("figure")).toHaveLength(2))
-  })
-
-  it("bounds an absurd message rather than spraying the transcript", async () => {
+    // holding the user's text. A message carrying four carries four because the
+    // user asked; the transcript does not re-litigate that, which is why the
+    // backstop below sits at four rather than at the default of three.
     render(
       <MessageWidgets
         messageId={1}
@@ -258,8 +272,23 @@ describe("the answer's Widgets", () => {
       />
     )
 
+    await waitFor(() => expect(screen.getAllByRole("figure")).toHaveLength(4))
+  })
+
+  it("bounds an absurd message rather than spraying the transcript", async () => {
+    render(
+      <MessageWidgets
+        messageId={1}
+        widgets={Array.from({ length: 9 }, (_unused, index) =>
+          spec({ descriptor_id: `slice-${index}` })
+        )}
+        resolve={resolvesTo(crossSymbol())}
+      />
+    )
+
     await screen.findAllByRole("figure")
     expect(screen.getAllByRole("figure")).toHaveLength(MAX_WIDGETS_PER_ANSWER)
+    expect(MAX_WIDGETS_PER_ANSWER).toBe(4)
   })
 
   it("offers the existing screen when the chart is one Stock 360 owns", () => {

@@ -243,19 +243,22 @@ async def test_a_rejected_selection_leaves_the_text_answer_complete_and_unmarked
 
 
 @pytest.mark.asyncio
-async def test_a_second_widget_is_dropped_unless_the_user_asked_for_two():
+async def test_the_fourth_widget_is_dropped_unless_the_user_asked_for_more():
+    # Three is the ceiling since ``docs/specs/0004`` D11, so a Turn releasing
+    # four selections releases three of them and drops the last.
+    selections = "\n".join([VALID] * 4)
     outcome, _log, _checkpoints, _published = await run(
-        f"Hai mã dẫn đầu thanh khoản.\n\n{VALID}\n{VALID}"
+        f"Hai mã dẫn đầu thanh khoản.\n\n{selections}"
     )
 
-    assert len(outcome.widgets) == 1
+    assert len(outcome.widgets) == 3
 
     asked, _log, _checkpoints, _published = await run(
-        f"Hai mã dẫn đầu thanh khoản.\n\n{VALID}\n{VALID}",
+        f"Hai mã dẫn đầu thanh khoản.\n\n{selections}",
         user_text="Cho tôi hai biểu đồ: thanh khoản và động lượng.",
     )
 
-    assert len(asked.widgets) == 2
+    assert len(asked.widgets) == 4
 
 
 @pytest.mark.asyncio

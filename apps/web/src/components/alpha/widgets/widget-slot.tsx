@@ -40,7 +40,17 @@ export interface WidgetSlotProps {
   className?: string
 }
 
-/** Tall enough to hold any of the four, so the swap moves nothing. */
+/**
+ * The height a Widget is assumed to need before its data says otherwise.
+ *
+ * One number for every registry entry, and deliberately not derived from the
+ * descriptor: a long ranking or a periods table lands taller than this and the
+ * transcript still shifts by the difference. Sizing each slot exactly would mean
+ * this file reading row counts out of descriptors it is otherwise agnostic
+ * about — a guess about layout in the one place that must not care what it is
+ * drawing. What the reservation buys is the common case: the swap does not
+ * start from zero height.
+ */
 export const PLACEHOLDER_CLASS = "h-[168px] w-full rounded-card border border-border"
 
 export function WidgetSlot({ spec, resolve, onExpand, className }: WidgetSlotProps) {

@@ -45,6 +45,35 @@ nghĩa chứ không phải nâng cấp.
 
 ---
 
+## ⚠ Cập nhật 23:05 — đo trace xong, Điểm 2 bị hạ cấp
+
+Query `agent_tool_call` (64 Turn, 232 call):
+
+```
+ok          207
+tool_error   25      ← 10.8%, và 25/25 là CÙNG một tool
+unknown_tool  0
+
+cross_sectional | tool_error | 25
+"tool cross_sectional returned 4135 bytes; the limit is 4096 bytes"  (4119–4148)
+```
+
+Cả 25 lỗi là `ToolResultTooLarge`, vượt trần **23–52 byte**, trên 4 Turn.
+
+Ba kết luận đảo lại phần dưới:
+
+1. **Hint gần như vô dụng trên dữ liệu hiện có.** Không có lỗi nào mà model có lựa
+   chọn: nó không có tham số nào để giảm output của `cross_sectional`. Hint chỉ giúp
+   khi model làm sai và có đường làm đúng — ở đây cả hai đều không.
+2. **numpy hết cơ sở hoàn toàn.** `run_python` có **0** lỗi, `unknown_tool` có **0**
+   dòng. Không có cầu nào để đáp.
+3. **Việc đúng là Phase 6 tầng 2 (`data_ref` + preview), và nay nó có số.** 25 call /
+   4 Turn chết vì vượt trần 23–52 byte — tức là trần 4KB đang giết kết quả gần-vừa,
+   không phải kết quả khổng lồ. Đây là lỗi phía tool, không phía model.
+
+Phần dưới giữ lại làm ghi chép cách suy luận, nhưng **thứ tự ưu tiên là Phase 6 tầng
+2 trước, hint sau (nếu còn cần)**.
+
 ## Điểm 2 — Ghép vào Phase 6.3: hint executor, chưa phải numpy
 
 Phase 6.3 đã có mục *"gợi ý phục hồi trong lỗi tool"* theo mẫu `terminal_hints.py`.
@@ -149,6 +178,45 @@ reproduce được.
 
 Câu "EXECUTOR_ENABLED ở prod là gì?" còn nợ từ hai báo cáo trước hoá ra **không
 phải câu hỏi vận hành** — nó là input của eval gate.
+
+### Cập nhật 21:47 — không còn là rủi ro, Phase 8 đang bị chặn
+
+Cơ chế chặn là thật và đã kiểm: `eval/store.py:169` gọi `assert_matches()` lúc
+**load** fixture, `eval/harness.py:600` gọi lại lúc **run**; lệch bất kỳ một trong
+bốn pin → `FixtureVersionMismatch`, từ chối chạy. Fixture pin bốn version trong
+`manifest.versions` (không phải `prompt_version`).
+
+Đo trong container đang chạy (`executor=True web=True mcp=False`):
+
+```
+running tool_catalog_version: a6798d55e5b9bd36
+differs  2022-02-08-0122946c87a3dc6d.json  b119cc46207b9dd2
+differs  2022-02-08-4699fd0907d00297.json  2d08b9a89e49281f
+differs  2022-02-08-6396fc5cde35fd62.json  979c0cbd5ee9a612
+differs  2022-02-08-7db4993d35e5fe6a.json  979c0cbd5ee9a612
+differs  2022-02-08-d15af1f1957f779a.json  af4e99251bf1eb56
+differs  2022-02-08-ea339750ce521641.json  ee6b51cb432bd542
+differs  2022-02-08-fb36095088ae100c.json  c2df6f75958bc30f
+```
+
+**Không fixture nào khớp.** Ba pin còn lại (`registry_version`, `profile_version`,
+`schema_version`) đều khớp — lệch đúng một field: `tool_catalog_version`.
+
+Hai hệ quả cho plan:
+
+1. **Phase 8 bị chặn ngay khi tới**, không phải bị chặn vì thiếu quota. Nó cần một
+   lần capture lại trước khi chạy được, và capture có tiền đề riêng (store phải có
+   2022-02-08 + FLC trong `UNIVERSE_SYMBOLS`). Effort của Phase 8 hiện chưa tính
+   phần này.
+2. **7 fixture mang 6 pin khác nhau** — đó là dấu vết của việc catalog đã dịch 6 lần
+   và mỗi lần phải capture lại. Chính là cái giá mà Điểm 3 (dồn thay đổi schema vào
+   một lần refreeze) tồn tại để chặn.
+
+Lưu ý về ghi chú mới trong `plan.md` (*"Eval Fixture không phải đóng băng lại —
+fixture chỉ phụ thuộc dữ liệu thị trường, không phụ thuộc `prompt_version`"*): đúng
+với Phase 3, vì `prompt_version` **không** nằm trong bốn pin. Nhưng nó không mở rộng
+sang Phase 6, và số đo trên cho thấy `tool_catalog_version` đã lệch sẵn vì lý do
+khác. Đừng đọc ghi chú đó thành "fixture đang ổn".
 
 ---
 

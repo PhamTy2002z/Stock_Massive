@@ -46,6 +46,29 @@ export interface AssistantView {
   /** Follow-up questions the backend generated. Empty on an answer without any. */
   suggestions: string[]
   /**
+   * The Widget specs the message stored, carried through unvalidated.
+   *
+   * `unknown[]` on purpose. ADR-0012 validates a spec twice and the second pass
+   * belongs where the registry is (`widgets/spec.ts`), because that is the only
+   * place that can answer the question the pass exists to ask: *does this build
+   * still ship a component for this `(name, version)`*. Validating here would
+   * put the verdict in a module with no registry to consult, and the failure
+   * would be silent — a spec dropped by the projection is a spec the slot never
+   * gets to degrade gracefully on.
+   *
+   * So this reads exactly as far as it honestly can: the column held an array,
+   * or it did not.
+   */
+  widgets: unknown[]
+  /**
+   * Selections the backend refused, in the same unvalidated form.
+   *
+   * A refusal is only worth rendering when it points at a screen in this app,
+   * and `parseWidgetRefusals` is what decides that. Same reasoning as above:
+   * one validator, at the point of use.
+   */
+  widgetRefusals: unknown[]
+  /**
    * Whether the Turn behind this answer ran to completion.
    *
    * Read from the Evidence Manifest, which is the only thing on a stored message
@@ -250,6 +273,12 @@ function assistantView(message: ThreadMessage): AssistantView {
       ? (content.suggestions as unknown[]).filter(
           (row): row is string => typeof row === "string" && row.trim().length > 0,
         )
+      : [],
+    // Read the same defensive way, and no further: an element is not inspected
+    // here, only the fact that there is a list to inspect later.
+    widgets: Array.isArray(content.widgets) ? (content.widgets as unknown[]) : [],
+    widgetRefusals: Array.isArray(content.widget_refusals)
+      ? (content.widget_refusals as unknown[])
       : [],
     // Defaults to complete on a message whose Manifest cannot be read: an answer
     // in the transcript is one the backend wrote in a terminal transaction, and

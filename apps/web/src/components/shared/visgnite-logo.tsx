@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
  * A bolt cut from a 31.5 × 48.5 box, filled with the reference's own metallic
  * ramp and notched twice in flat white so the shape still reads at 13px in the
  * sidebar. It is monochrome by design: the one chromatic thing in this system
- * is the teal, and the brand mark is deliberately not it.
+ * is the amber, and the brand mark is deliberately not it.
  *
  * The gradient id is fixed rather than generated. Every instance paints the
  * identical ramp, so two marks on one page resolving to the same `<defs>` is

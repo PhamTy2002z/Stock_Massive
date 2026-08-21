@@ -21,6 +21,7 @@ import {
   waitForElementToBeRemoved,
 } from "@testing-library/react"
 
+import { periods, quarterlySpec } from "@/components/alpha/widgets/fixtures"
 import type { AssistantView, DraftEntry } from "@/lib/alpha-desk/transcript"
 import type { Citation, ContentBlock, RiskNotice } from "@/lib/alpha-desk/types"
 import { AssistantMessage } from "./assistant-message"
@@ -96,6 +97,8 @@ function view(overrides: Partial<AssistantView> = {}): AssistantView {
     riskNotice: NOTICE,
     searchProgress: [],
     suggestions: [],
+    widgets: [],
+    widgetRefusals: [],
     completed: true,
     ...overrides,
   }
@@ -631,6 +634,21 @@ describe("what the answer offers underneath", () => {
 
     expect(screen.queryByText("một câu hỏi")).not.toBeInTheDocument()
   })
+
+  it("offers two follow-ups even when the message carries more", () => {
+    // A message written before the limit still holds the five it was given.
+    render(
+      <AssistantMessage
+        view={view({ suggestions: ["câu một", "câu hai", "câu ba", "câu bốn", "câu năm"] })}
+        showSuggestions
+        onAsk={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText("câu một")).toBeInTheDocument()
+    expect(screen.getByText("câu hai")).toBeInTheDocument()
+    expect(screen.queryByText("câu ba")).not.toBeInTheDocument()
+  })
 })
 
 describe("the Risk Notice", () => {
@@ -772,5 +790,171 @@ describe("a Turn that stopped early", () => {
 
     expect(screen.getByText("một phần")).toBeInTheDocument()
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+  })
+})
+
+describe("the pages behind a passage", () => {
+  it("links out to the page it was written from, labelled with the host", () => {
+    render(
+      <AssistantMessage
+        view={view({
+          blocks: [
+            {
+              ...block("Chủ tịch được bổ nhiệm năm 2024."),
+              source_ids: ["https://www.vnexpress.net/tin/abc"],
+            },
+          ],
+        })}
+      />,
+    )
+    const link = screen.getByRole("link", { name: "vnexpress.net" })
+
+    expect(link).toHaveAttribute("href", "https://www.vnexpress.net/tin/abc")
+    expect(link).toHaveAttribute("target", "_blank")
+    // These are untrusted external pages opened from an authenticated surface,
+    // so the referrer does not go with the reader.
+    expect(link).toHaveAttribute("rel", "noopener noreferrer")
+  })
+
+  it("keeps a junk id from costing the reader the answer", () => {
+    render(
+      <AssistantMessage
+        view={view({
+          blocks: [
+            {
+              ...block("Doanh thu quý II tăng."),
+              source_ids: [
+                "không phải url",
+                "/trang-noi-bo",
+                // Parses as a URL and would be a clickable script in an `href`.
+                "javascript:alert(1)",
+                "https://cafef.vn/bai-viet",
+                "https://cafef.vn/bai-viet",
+              ],
+            },
+          ],
+        })}
+      />,
+    )
+
+    // The prose is the answer and it is untouched; one chip survives, once.
+    expect(screen.getByText("Doanh thu quý II tăng.")).toBeInTheDocument()
+    expect(screen.getAllByRole("link")).toHaveLength(1)
+    expect(screen.getByRole("link", { name: "cafef.vn" })).toHaveAttribute(
+      "href",
+      "https://cafef.vn/bai-viet",
+    )
+  })
+
+  it("gives two pages on one host a chip each", () => {
+    render(
+      <AssistantMessage
+        view={view({
+          blocks: [
+            {
+              ...block("Hai bản tin cùng nói vậy."),
+              source_ids: ["https://cafef.vn/mot", "https://cafef.vn/hai"],
+            },
+          ],
+        })}
+      />,
+    )
+
+    // Different pages, so hiding one would understate what the passage rests on.
+    expect(screen.getAllByRole("link", { name: "cafef.vn" })).toHaveLength(2)
+  })
+
+  it("shows nothing where a block carried no source ids at all", () => {
+    // A message stored before the field existed has no key, and an answer that
+    // stood on nothing external has an empty list. Neither is a defect.
+    render(<AssistantMessage view={view({ blocks: [block("kết luận")] })} />)
+    expect(screen.queryByRole("link")).not.toBeInTheDocument()
+
+    cleanup()
+
+    render(
+      <AssistantMessage
+        view={view({ blocks: [{ ...block("kết luận"), source_ids: [] }] })}
+      />,
+    )
+    expect(screen.queryByRole("link")).not.toBeInTheDocument()
+  })
+})
+
+describe("the Widgets under an answer", () => {
+  // The resolver takes a message id and asks the route for that message's
+  // slice, so the network is the whole point of the wiring and stubbing it is
+  // the only way to see the wiring work. Nothing else in this file needs one.
+  function stubResolve() {
+    const fetcher = vi.fn(
+      async () =>
+        ({
+          ok: true,
+          json: async () => periods(),
+        }) as unknown as Response,
+    )
+    vi.stubGlobal("fetch", fetcher)
+    return fetcher
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it("draws a stored spec by resolving it against this message", async () => {
+    const fetcher = stubResolve()
+    render(
+      <AssistantMessage
+        view={view({ widgets: [quarterlySpec()] })}
+        messageId={7}
+      />,
+    )
+
+    expect(await screen.findByRole("figure")).toBeInTheDocument()
+    // The descriptor is read back *through the message*, which is what makes a
+    // reopened Thread show the same historical slice rather than today's.
+    expect(fetcher).toHaveBeenCalledWith(
+      "/api/alpha-desk/widgets/7/d3adb33fd3adb33fd3adb33f",
+      { credentials: "same-origin" },
+    )
+  })
+
+  it("puts the picture under the prose and above the action row", async () => {
+    stubResolve()
+    render(
+      <AssistantMessage
+        view={view({ blocks: [block("kết luận")], widgets: [quarterlySpec()] })}
+        messageId={7}
+      />,
+    )
+    const figure = await screen.findByRole("figure")
+    const actions = screen.getByRole("button", { name: "Sao chép" })
+
+    // A Widget is evidence for the answer just given; the action row is where
+    // the reader turns to the next question.
+    expect(screen.getByText("kết luận").compareDocumentPosition(figure)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    )
+    expect(figure.compareDocumentPosition(actions)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    )
+  })
+
+  it("asks for nothing where there is no message id to ask through", () => {
+    const fetcher = stubResolve()
+    // Which is every draft: a Turn mid-flight has specs and no id yet, and the
+    // picture arrives with the canonical message a moment later.
+    render(<AssistantMessage view={view({ widgets: [quarterlySpec()] })} />)
+
+    expect(screen.queryByRole("figure")).not.toBeInTheDocument()
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it("asks for nothing where the answer carried no specs", () => {
+    const fetcher = stubResolve()
+    render(<AssistantMessage view={view()} messageId={7} />)
+
+    expect(fetcher).not.toHaveBeenCalled()
+    expect(screen.queryByRole("figure")).not.toBeInTheDocument()
   })
 })

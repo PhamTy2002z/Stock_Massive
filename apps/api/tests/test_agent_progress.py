@@ -24,15 +24,18 @@ from src.agent.events import (
     append_step,
 )
 from src.agent.loop import AgentLoop, TurnRequest, TurnStatus
+from src.agent.context import TranscriptToolCall
 from src.agent.progress import (
     MAX_SNIPPET_CHARS,
     MAX_SOURCES,
     ProgressSource,
+    block_source_ids,
     domain_of,
     found_detail,
     merge_sources,
     queries_of,
     searching_detail,
+    sources_by_call,
     sources_of,
 )
 from src.agent.prompt import MarketState, RuntimeContext
@@ -412,6 +415,98 @@ def test_a_snapshot_carries_the_whole_trail():
     ]
 
 
+def test_only_the_disclosing_tools_are_indexed_by_call():
+    calls = [
+        TranscriptToolCall(
+            call_id="w1",
+            name="web_search",
+            arguments={"query": "một"},
+            result={
+                "results": [
+                    {"title": "A", "url": "https://a.vn/x"},
+                    {"title": "B", "url": "https://b.vn/y"},
+                ]
+            },
+        ),
+        TranscriptToolCall(
+            call_id="s1",
+            name="get_price_series",
+            arguments={"symbol": "MSN"},
+            result={"symbol": "MSN", "close": 95.4},
+        ),
+    ]
+
+    index = sources_by_call(calls)
+
+    assert index == {"w1": {0: "https://a.vn/x", 1: "https://b.vn/y"}}
+
+
+def test_a_block_names_only_pages_the_turn_itself_listed():
+    index = {
+        "w1": {0: "https://a.vn/x", 1: "https://gone.vn/z"},
+        "w2": {0: "https://a.vn/x"},
+    }
+    listed = ("https://a.vn/x", "https://b.vn/y")
+
+    found = block_source_ids(
+        [("w1", "results.1.title"), ("w2", "results.0.title"), ("unknown", "x")],
+        index,
+        listed,
+    )
+
+    # The page the trail never showed is dropped even though the path named it,
+    # the page two calls returned is named once, and a call id from nowhere
+    # costs the chips nothing: this is display metadata, so an id that resolves
+    # to nothing is not a failure.
+    assert found == ("https://a.vn/x",)
+
+
+def test_a_cited_row_names_that_row_and_not_the_whole_search():
+    index = {
+        "w1": {0: "https://a.vn/x", 1: "https://b.vn/y", 2: "https://c.vn/z"}
+    }
+    listed = tuple(index["w1"].values())
+
+    one = block_source_ids([("w1", "results.1.title")], index, listed)
+    whole = block_source_ids([("w1", "query")], index, listed)
+
+    # A sentence citing one result rests on one page; a reference to the call as
+    # a whole rests on everything it came back with.
+    assert one == ("https://b.vn/y",)
+    assert whole == listed
+
+
+def test_a_result_row_with_no_url_does_not_shift_the_rows_after_it():
+    # The failure this pins: a search result the provider returned without a URL
+    # is dropped from the trail, and a list of survivors would make every later
+    # citation name the page one row further down.
+    calls = [
+        TranscriptToolCall(
+            call_id="w1",
+            name="web_search",
+            arguments={"query": "một"},
+            result={
+                "results": [
+                    {"title": "A", "url": "https://a.vn/x"},
+                    {"title": "no link", "url": ""},
+                    {"title": "C", "url": "https://c.vn/z"},
+                ]
+            },
+        )
+    ]
+    index = sources_by_call(calls)
+    listed = ("https://a.vn/x", "https://c.vn/z")
+
+    assert index == {"w1": {0: "https://a.vn/x", 2: "https://c.vn/z"}}
+    assert block_source_ids([("w1", "results.2.title")], index, listed) == (
+        "https://c.vn/z",
+    )
+    # And the row that had no page names none, rather than borrowing a neighbour.
+    assert block_source_ids([("w1", "results.1.title")], index, listed) == ()
+    # A cited row past the end is the same case, and is not the whole search.
+    assert block_source_ids([("w1", "results.9.title")], index, listed) == ()
+
+
 # --- the loop -------------------------------------------------------------
 
 
@@ -432,6 +527,43 @@ async def test_an_open_web_round_publishes_its_queries_then_what_it_found():
         "masangroup.com",
         "e.vnexpress.net",
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_block_carries_the_pages_its_own_evidence_stood_on():
+    publisher = RecordingPublisher()
+    client = FakeClient(
+        [
+            wants_web(),
+            answer(
+                "Chủ tịch hiện tại được trang chủ công ty nêu tên "
+                "[ev:call_0#results.0.title]."
+            ),
+        ]
+    )
+
+    outcome = await loop(client, publisher=publisher).run(turn_request())
+
+    (block,) = outcome.blocks
+    assert block.source_ids == ("https://www.masangroup.com/leadership",)
+    # The same list reaches the browser, so the chip under the sentence and the
+    # source list in the trail cannot disagree about which page it was.
+    released = [
+        dict(event.data)["block"]
+        for event in publisher.events
+        if event.type is EventType.CONTENT_BLOCK
+    ]
+    assert released[0]["source_ids"] == ["https://www.masangroup.com/leadership"]
+
+
+@pytest.mark.asyncio
+async def test_a_block_resting_on_the_store_names_no_pages():
+    client = FakeClient([wants_store(), answer("Phiên gần nhất đã đóng cửa.")])
+
+    outcome = await loop(client).run(turn_request())
+
+    (block,) = outcome.blocks
+    assert block.source_ids == ()
 
 
 @pytest.mark.asyncio
@@ -566,7 +698,7 @@ def test_parsing_never_raises_on_a_shape_it_did_not_ask_for():
         assert suggestions.parse(text) == ()
 
 
-def test_at_most_five_are_kept():
+def test_at_most_two_are_kept():
     payload = json.dumps({"suggestions": [f"Câu hỏi {n}" for n in range(12)]})
 
     assert len(suggestions.parse(payload)) == suggestions.MAX_SUGGESTIONS

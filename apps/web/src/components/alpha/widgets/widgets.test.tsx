@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * The four Widgets, from fixtures, with no network anywhere (#90).
+ * Every registered Widget, from fixtures, with no network anywhere (#90).
  *
  * Every test below renders a component with data already in hand. That is not a
  * testing convenience — it is the property ADR-0012 asks for: a Widget that
@@ -14,12 +14,15 @@ import { afterEach, describe, expect, it } from "vitest"
 
 import { MetricComparison } from "./metric-comparison"
 import { MetricTrend } from "./metric-trend"
+import { QuarterlyFinancials } from "./quarterly-financials"
 import { RankedSymbols } from "./ranked-symbols"
 import { RelativePosition } from "./relative-position"
 import {
   AS_OF,
   crossSymbol,
+  periods,
   position,
+  quarterlySpec,
   ranking,
   series,
   signedCrossSymbol,
@@ -287,5 +290,100 @@ describe("relative_position", () => {
 
     expect(document.querySelector("[data-widget-figure]")).toBeNull()
     expect(screen.getByText(/Chưa có biên độ tham chiếu/)).toBeInTheDocument()
+  })
+})
+
+describe("quarterly_financials", () => {
+  it("renders one row per reporting period, newest first, in the server's column order", () => {
+    render(<QuarterlyFinancials spec={quarterlySpec()} data={periods()} />)
+    const table = screen.getByRole("table")
+
+    // Eight quarters plus the header row. The order is the resolution's, not a
+    // sort this component applied to dates it cannot be sure it can parse.
+    expect(within(table).getAllByRole("row")).toHaveLength(9)
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((cell) => cell.textContent)
+    ).toEqual(["Kỳ", "revenue_vnd", "gross_profit_vnd", "net_income_vnd"])
+    const first = within(table).getAllByRole("row")[1]
+    expect(first.textContent).toContain("30/6/2026")
+  })
+
+  it("carries the data date in the caption a screen reader hears first", () => {
+    render(<QuarterlyFinancials spec={quarterlySpec()} data={periods()} />)
+
+    expect(
+      screen.getByText(`Kết quả theo kỳ của MSN — đơn vị đồng — dữ liệu ngày 14/8/2026`)
+    ).toBeInTheDocument()
+  })
+
+  it("says a period is old in words rather than in a colour", () => {
+    render(<QuarterlyFinancials spec={quarterlySpec()} data={periods()} />)
+
+    // The row header carries it, which is also what is announced with the row.
+    expect(screen.getByText("30/9/2024 · số liệu cũ")).toBeInTheDocument()
+  })
+
+  it("writes a statement line the quarter never reported as a dash", () => {
+    render(<QuarterlyFinancials spec={quarterlySpec()} data={periods()} />)
+    const row = screen
+      .getAllByRole("row")
+      .find((candidate) => candidate.textContent?.includes("30/9/2025"))
+
+    // A missing gross profit line is not a zero, and a zero is what a reader
+    // would take an empty cell — or a bare `0` — to mean.
+    expect(within(row as HTMLElement).getByText("—")).toBeInTheDocument()
+    expect(within(row as HTMLElement).getByText("20,80 nghìn tỷ")).toBeInTheDocument()
+  })
+
+  it("is the table, not a picture with a table hidden behind it", () => {
+    const { container } = render(
+      <QuarterlyFinancials spec={quarterlySpec()} data={periods()} />
+    )
+
+    // No disclosure offering to reveal what is already on screen, one table
+    // rather than two copies of the same figures, and no drawing at all.
+    expect(screen.queryByRole("button", { name: "Xem bảng dữ liệu" })).not.toBeInTheDocument()
+    expect(screen.getAllByRole("table")).toHaveLength(1)
+    expect(container.querySelector("svg")).toBeNull()
+    expect(container.querySelector("figure > p.sr-only")?.textContent).toContain("MSN")
+    expect(container.querySelector("figure > p:not(.sr-only)")?.textContent).toContain(
+      "8 kỳ báo cáo"
+    )
+  })
+
+  it("keeps a wide statement inside its own scroller at 360px", () => {
+    const { container } = render(
+      <QuarterlyFinancials spec={quarterlySpec()} data={periods()} />
+    )
+
+    // The transcript column is fixed, so a table wider than it scrolls inside
+    // its own box rather than pushing the composer sideways.
+    expect(container.querySelector("figure")?.className).toContain("min-w-0")
+    expect(
+      container.querySelector("[data-widget-figure] > div")?.className
+    ).toContain("overflow-x-auto")
+  })
+
+  it("renders bullets rather than an empty table when there is nothing to show", () => {
+    render(
+      <QuarterlyFinancials
+        spec={quarterlySpec()}
+        data={periods({ periods: [], available: false, unavailable_reason: "slice_unavailable" })}
+      />
+    )
+
+    expect(screen.queryByRole("table")).not.toBeInTheDocument()
+    expect(screen.getAllByRole("listitem").length).toBeGreaterThan(0)
+    expect(screen.getByText(/Dữ liệu ngày/)).toBeInTheDocument()
+  })
+
+  it("treats a period list with no measured columns as nothing to show", () => {
+    render(<QuarterlyFinancials spec={quarterlySpec()} data={periods({ figures: [] })} />)
+
+    // A table of dates with no figures against them reads as data and is not.
+    expect(screen.queryByRole("table")).not.toBeInTheDocument()
+    expect(screen.getAllByRole("listitem").length).toBeGreaterThan(0)
   })
 })

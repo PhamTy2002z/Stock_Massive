@@ -142,6 +142,10 @@ class StoreBackedTools:
                     ("symbol",),
                 ),
                 callable=self.get_analysis,
+                # What this serves is a judgment, already reduced to fit once
+                # (``EVIDENCE_WITHHELD``). Clipping prose leaves a sentence that
+                # looks finished, which is the one shape a preview must not have.
+                result_budget_bytes=MAX_TOOL_RESULT_BYTES,
             ),
             ToolSpec(
                 name="get_price_series",
@@ -181,6 +185,11 @@ class StoreBackedTools:
                     ("symbol",),
                 ),
                 callable=self.get_financials,
+                # The periods list *is* the answer — the flagged question this
+                # tool was widened for asks for eight quarters — and it is also
+                # what a quarterly-financials Widget binds to. Previewing it
+                # would answer with three quarters and draw three.
+                result_budget_bytes=MAX_TOOL_RESULT_BYTES,
             ),
             ToolSpec(
                 name="get_company_profile",
@@ -226,6 +235,9 @@ class StoreBackedTools:
                     }
                 ),
                 callable=self.screen_universe,
+                # A screen is asked for its tail as much as its head. The top
+                # three rows of a ranking answer a question nobody asked.
+                result_budget_bytes=MAX_TOOL_RESULT_BYTES,
             ),
             ToolSpec(
                 name="get_watchlist",
@@ -502,6 +514,80 @@ class StoreBackedTools:
             "as_of": as_of.isoformat(),
             "points": points,
             **availability(present),
+        }
+
+    async def replay_financials(
+        self,
+        *,
+        symbol: str,
+        period_ends: Sequence[str],
+        figures: Sequence[str],
+        trading_day: date,
+    ) -> Mapping[str, Any]:
+        """Re-read the stored statement figures one Widget's table was drawn from.
+
+        The Widget half of ``get_financials`` (``docs/adr/0012``). The periods are
+        named rather than counted, so a reopened Thread shows the quarters the
+        answer was written about even after two more have been filed — asking for
+        "the last four" a year later is how a historical record turns into a fresh
+        query wearing an old date.
+
+        ``trading_day`` is the read boundary and it is not the same date as the
+        newest period: a June filing is written to the store in August, so
+        bounding the read at the period end would drop the row this exists to
+        return.
+        """
+        return await asyncio.to_thread(
+            self._replay_financials,
+            validate_symbol(symbol),
+            tuple(period_ends),
+            tuple(figures),
+            trading_day,
+        )
+
+    def _replay_financials(
+        self,
+        symbol: str,
+        period_ends: Sequence[str],
+        figures: Sequence[str],
+        trading_day: date,
+    ) -> Mapping[str, Any]:
+        wanted = set(period_ends)
+        with self._session_factory() as session:
+            stored = SnapshotStore(session, redis=None).series(
+                Capability.FUNDAMENTAL,
+                symbol,
+                end=trading_day,
+            ).snapshots
+        rows: list[dict[str, Any]] = []
+        for snapshot in stored:
+            period_end = snapshot.period_end
+            if period_end.isoformat() not in wanted:
+                continue
+            age = max(0, (trading_day - period_end).days)
+            rows.append(
+                {
+                    "period_end": period_end.isoformat(),
+                    "stale": age > FUNDAMENTAL_STALE_DAYS,
+                    # Only the columns the table draws, and only where the store
+                    # holds them: an absent line item is a company that filed
+                    # without one, which is a different fact from a zero.
+                    "figures": {
+                        name: getattr(snapshot, name)
+                        for name in figures
+                        if getattr(snapshot, name, None) is not None
+                    },
+                }
+            )
+        # Newest first, which is the order a reader compares quarters in and the
+        # order the tool served them to the model.
+        rows.sort(key=lambda row: row["period_end"], reverse=True)
+        return {
+            "symbol": symbol,
+            "unit": "vnd",
+            "figures": list(figures),
+            "periods": rows,
+            **availability(any(row["figures"] for row in rows)),
         }
 
     async def get_financials(

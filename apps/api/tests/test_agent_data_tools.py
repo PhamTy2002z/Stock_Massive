@@ -411,6 +411,12 @@ async def test_universe_refusal_suggests_same_industry_by_descending_adtv(stored
     assert refused == {
         "reason": "not_in_universe",
         "suggestions": [MEMBERS[2], MEMBERS[1], MEMBERS[0]],
+        # Additive, and it points at the suggestions above rather than
+        # duplicating them: the refusal shape itself is unchanged.
+        "hint": (
+            "this symbol is outside the covered Universe; ask about one of the "
+            "alternatives this refusal lists, or tell the reader it is not covered"
+        ),
     }
 
 

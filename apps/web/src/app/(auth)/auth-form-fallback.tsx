@@ -3,7 +3,7 @@
  *
  * The shapes are the form's own — a heading, two fields and a full-width action
  * — drawn on the surface ladder rather than in light greys. A placeholder
- * painted white on a #191815 page is a flash, which is the one thing a loading
+ * painted white on a #101112 page is a flash, which is the one thing a loading
  * state must not be.
  */
 export default function AuthFormFallback() {

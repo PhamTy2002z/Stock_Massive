@@ -20,6 +20,13 @@ import { TurnStatus } from "./turn-status"
  * What it does carry is everything the user has already been shown, through
  * every ending. Cancel keeps it, a deadline keeps it, a failed route keeps it —
  * the status is a line underneath, never a replacement.
+ *
+ * It carries no Widgets either, and for a plainer reason than the notice: a
+ * Widget's data is read back through the message that stores its descriptor, and
+ * a draft has no message id yet. A `widget.ready` mid-Turn therefore has nothing
+ * to resolve against, and the picture appears when the canonical message
+ * replaces this a moment later. Drawing something from the spec alone would mean
+ * drawing a Widget from no data at all.
  */
 export function DraftMessage({
   entry,

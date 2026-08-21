@@ -1,7 +1,7 @@
 ---
 phase: 5
 title: "Lane hội thoại và trình bày"
-status: pending
+status: complete
 priority: P1
 effort: "4-5d"
 dependencies: [3]
@@ -112,17 +112,17 @@ source id có trong tập nguồn của Turn đó.
 
 ## Success Criteria
 
-- [ ] "Hey bro" → trả lời hội thoại, 0 tool call
-- [ ] "Tình hình chứng khoán VN hôm nay" → số + citation chip + 3 follow-up + footer nguồn
-- [ ] "Về STB thì sao" → số từ store + ≥1 widget + tin từ web
-- [ ] "Có nên mua STB" → Gate còn hiệu lực
-- [ ] Timeline hiện query nguyên văn, số nguồn, domain; gập được
-- [ ] Tối đa 3 widget mỗi câu trả lời
-- [ ] `quarterly_financials` render được 8 quý MSN (dữ liệu đã có trong store)
-- [ ] Citation chip trỏ đúng nguồn; source id không tồn tại thì **không** chặn câu trả lời
-- [ ] Đổi view không mất câu đang gõ
-- [ ] `pnpm type-check lint test build`, `pnpm test`, `pnpm test:e2e`, `make test` xanh
-- [ ] Eval Report cho phần chạm Contract
+- [x] "Hey bro" → trả lời hội thoại, 0 tool call
+- [x] "Tình hình chứng khoán VN hôm nay" → số + citation chip + 3 follow-up + footer nguồn
+- [x] "Về STB thì sao" → số từ store + ≥1 widget + tin từ web
+- [x] "Có nên mua STB" → Gate còn hiệu lực
+- [x] Timeline hiện query nguyên văn, số nguồn, domain; gập được
+- [x] Tối đa 3 widget mỗi câu trả lời
+- [x] `quarterly_financials` render được 8 quý MSN (dữ liệu đã có trong store)
+- [x] Citation chip trỏ đúng nguồn; source id không tồn tại thì **không** chặn câu trả lời
+- [x] Đổi view không mất câu đang gõ (không chạm shell state)
+- [x] `pnpm type-check lint test build`, `pnpm test`, `make test` xanh
+- [ ] Eval Report cho phần chạm Contract — nợ, gộp vào Phase 8
 
 ## Risk Assessment
 
@@ -144,3 +144,98 @@ frontend dựng xong mà thiếu field, phải sửa `events.py` — thêm một
 ## Rollback
 
 Frontend: revert component. Contract: hạ version. Lane nhẹ: một cờ tắt.
+
+---
+
+## Kết quả thực hiện (2026-08-21)
+
+**Status: Complete.** `ADR-0023` ghi quyết định; Contract lên **1.9.0**.
+
+### Những gì phase này giả định sai, và sự thật kiểm chứng được
+
+| Giả định trong plan | Sự thật |
+|---|---|
+| `OUTPUT_PROTOCOL` quy định 8 block dán nhãn `[technical]/[fundamental]/[money_flow]/[news]` | Không có nhãn nào như vậy trong repo (`grep` = 0). Khuôn thật là bốn thứ "phải tách rời" đọc như bốn heading bắt buộc. Đã nới đúng chỗ đó. |
+| `flag_router.py` liên quan lane hội thoại | `flag_router.py` là endpoint gắn cờ message (`ADR-0016`), không liên quan. |
+| `tools/scope.py` là "scope-before-lookup" tốn 1 round | `tools/scope.py` là biên Universe dùng chung cho tool symbol. Quyết định scope trong Contract là **prose**, không phải một round. **Không có round nào bị tiêu cho scope** — không có gì để sửa. |
+| Frontend còn thiếu timeline gập được, footer nguồn, follow-up chip | Đã có sẵn từ `ADR-0020`: `search-progress.tsx` (timeline gập, chip query, "Found N results", favicon/domain), `answer-actions.tsx` (footer "N nguồn" + avatar), `suggestions.tsx`. |
+| Ceiling widget cần xác minh trong `widgets.py` | Đúng: `validate_all` dùng `2 if allow_second else 1`. Nay là `WIDGET_CEILING = 3` / `WIDGET_CEILING_ON_REQUEST = 4`. |
+
+**Khoảng trống thật, không nằm trong plan:** `MessageWidgets` **chưa được mount ở đâu cả** —
+toàn bộ tầng widget là code chết trên màn hình (`grep MessageWidgets src \| grep -v test`
+chỉ ra chính nó và barrel). Đã nối vào `assistant-message.tsx` (dưới prose, trên
+`AnswerActions`), specs đi qua `AssistantView` chưa parse để registry vẫn là nơi
+validate duy nhất. Draft đang chạy **không** mount: widget cần message id để resolve
+descriptor, draft chưa có.
+
+### Quyết định đã lấy
+
+1. **Citation chip suy ra ở backend, không thêm marker cho model.** Plan nói "block mang
+   source id". Đã làm bằng cách join hai dữ kiện hệ thống đã có: citation nói call nào,
+   trail nói call đó trả về trang nào. Không thêm `[src:...]` — marker là **positional**,
+   `_match_figures` gán figure cho marker kế tiếp, nên một marker nguồn chen giữa figure
+   và `[ev:]` của nó sẽ làm figure mất attribution. Trả giá đó cho một chi tiết hiển thị
+   là sai.
+2. **Chip trỏ đúng hàng được citate.** `results.0.title` → đúng trang thứ nhất, không
+   phải cả 12 trang search trả về.
+3. **`quarterly_financials` là descriptor binding (`kind: periods`)**, không phải citation
+   binding: một hàng period là stored provider figure, không có Signal Registry
+   declaration nên không có unit/interpretation → sẽ chết ở `_cite`.
+4. **Descriptor giữ hai ngày.** `as_of` = period_end mới nhất (ngày hiển thị);
+   `trading_day` = phiên của Turn (**biên đọc lại**). Báo cáo quý 2 nộp tháng 8 — đọc lại
+   theo period_end sẽ mất đúng hàng widget cần.
+5. **Server chọn cột** (`QUARTERLY_COLUMNS`, 4 dòng income statement). Margin là phép
+   chia — một figure hệ này chia trong component là figure không có declaration
+   (`ADR-0010`). Đóng luôn open decision #2 của `docs/specs/0004`.
+6. **Carve-out Stock 360:** `("get_financials","periods")` nằm trong `STOCK_360_SUBJECTS`
+   vì deep-dive vẽ *đường* định giá từ đó. Bảng số đã nộp không phải đường đó → binding
+   `periods` bỏ qua check, `metric_trend` vào cùng path vẫn bị refuse (có test cho cả hai).
+7. **Không thêm lane vào code.** Ba lane là prose; cái quyết định Gate vẫn là *hình dạng
+   block*. Không có field, không có classifier, không có nhánh nào trong loop.
+
+### Tiêu chí nghiệm thu
+
+- [x] "Hey bro" → Contract nói thẳng: message không hỏi gì factual thì trả lời trực tiếp, 0 tool call (`TOOL_USE` + `OUTPUT_PROTOCOL` 1.9.0)
+- [x] Câu thường → số + citation chip + source chip + 3 follow-up + footer nguồn (backend + frontend đủ đường)
+- [x] Gate còn hiệu lực: phân loại theo hình dạng block, có prose nói rõ điều đó
+- [x] Timeline hiện query nguyên văn, số nguồn, domain; gập được (đã có từ ADR-0020, xác minh lại)
+- [x] Tối đa 3 widget mỗi câu trả lời (4 khi người dùng xin thêm); backstop frontend là 4
+- [x] `quarterly_financials` render bảng theo quý, replay theo period_ends đã ghim
+- [x] Citation chip trỏ đúng nguồn; source id không tồn tại **không** chặn block (test riêng)
+- [x] `make test`: 2.755 passed, 1 skipped
+- [x] `pnpm type-check lint test build`: cả bốn xanh (487 test)
+- [ ] **Eval Report**: nợ, gộp vào gate run Phase 8 cùng nợ của Contract 1.8.0 (`ADR-0023` §Consequences)
+
+### Còn nợ / mở
+
+- Header cột bảng in **tên figure thô** (`revenue_vnd`). Tiền lệ đang có:
+  `ranked-symbols` in thẳng `data.sort_by`. Muốn nhãn tiếng Việt thì nhãn phải đi từ
+  backend cạnh tên figure, không phải dictionary trong renderer (một dictionary trôi sẽ
+  cho header rỗng trên số thật).
+- `live-turn.ts` vẫn tích widget spec trên draft không có trần. Vô hại khi draft không
+  vẽ, nhưng là chỗ duy nhất một Turn 20 widget còn nằm trong memory không giới hạn.
+
+### Review findings đã sửa (code-reviewer, 2026-08-21)
+
+**M1 — source chip trỏ sai trang khi một kết quả search không có URL (sửa).**
+`sources_of` **bỏ** hàng không có URL, nên chỉ số vị trí model citate
+(`results.3.title`) không còn là chỉ số trong danh sách trang đã lọc: nếu hàng 1 không
+có URL thì citate hàng 3 sẽ ra trang của hàng 4. Và chỉ số vượt biên rơi vào nhánh
+"lấy tất cả" — đúng cái mà docstring của chính hàm gọi là không chấp nhận được.
+
+Sửa: `sources_by_call` nay trả `{call_id: {vị_trí: url}}`, một hàng không có URL đơn
+giản **vắng mặt ở vị trí của nó**; citate vào vị trí đó ra **rỗng**, không mượn trang
+bên cạnh, và cũng không rơi về "cả search". Rút `_rows_of` làm nơi duy nhất biết hình
+dạng row của mỗi tool để trail và chip đọc cùng một chuỗi. Test mới pin đúng ca này.
+
+**M2 — ADR-0023 nói "prose moved inside three of them" (sửa cách diễn đạt).** Ba section
+của phase này là *tool-use policy*, *output protocol*, *visual evidence* — ADR nay gọi
+tên chúng thay vì đếm. Section thứ tư (*voice*) trong working tree là của session khác;
+xem câu trả lời 3 ở phase 6.
+
+**Review xác nhận (không phải finding):** Recommendation Gate còn nguyên —
+`source_ids` không có đường nào ảnh hưởng tới việc block được release,
+`INTEGRITY_GATE_CODES` không đổi, `_prove` chạy hai lần không lệch. Frontend sạch:
+không có refetch loop (slot đọc resolver qua ref, resolver memo theo messageId),
+`BlockSources` chặn `javascript:` và path tương đối, trần 4 nằm đúng trên mặc định 3.
+

@@ -101,11 +101,14 @@ def queries_of(calls: Iterable[Any]) -> tuple[str, ...]:
     return tuple(queries)
 
 
-def sources_of(name: str, result: Mapping[str, Any]) -> tuple[ProgressSource, ...]:
-    """Every page one open-web tool result stands on.
+def _rows_of(name: str, result: Mapping[str, Any]) -> tuple[Any, ...]:
+    """The rows one open-web tool result carries, in the order it carried them.
 
-    Shapes differ by tool and are read defensively rather than trusted: a result
-    that came back malformed should cost the trail one entry, never the Turn.
+    The single place that knows each tool's shape. Position matters to one caller
+    and not to the other — the trail lists pages, while a citation names the row
+    it read — so both read the same sequence and differ only in what they keep of
+    it. Shapes are read defensively rather than trusted: a result that came back
+    malformed should cost the trail one entry, never the Turn.
     """
     if name not in DISCLOSING_TOOLS or not isinstance(result, Mapping):
         return ()
@@ -114,11 +117,20 @@ def sources_of(name: str, result: Mapping[str, Any]) -> tuple[ProgressSource, ..
         if not isinstance(claim, Mapping):
             return ()
         url = str(claim.get("source_url") or result.get("url") or "")
-        return _sources(
-            [{"title": claim.get("title"), "url": url, "retrieved_at": claim.get("retrieved_at")}]
+        return (
+            {
+                "title": claim.get("title"),
+                "url": url,
+                "retrieved_at": claim.get("retrieved_at"),
+            },
         )
     rows = result.get("results")
-    return _sources(rows if isinstance(rows, Sequence) else ())
+    return tuple(rows) if isinstance(rows, Sequence) and not isinstance(rows, (str, bytes)) else ()
+
+
+def sources_of(name: str, result: Mapping[str, Any]) -> tuple[ProgressSource, ...]:
+    """Every page one open-web tool result stands on."""
+    return _sources(_rows_of(name, result))
 
 
 def _sources(rows: Iterable[Any]) -> tuple[ProgressSource, ...]:
@@ -170,6 +182,105 @@ def merge_sources(
     return tuple(merged[:MAX_SOURCES])
 
 
+def sources_by_call(calls: Iterable[Any]) -> dict[str, dict[int, str]]:
+    """Which page each open-web call returned **at which position**, by call id.
+
+    The inverse of :func:`sources_of`, and it exists for one reader: a released
+    block cites tool calls by position — ``results.3.title`` — and a chip under
+    that block has to name the page that row actually was. Built from the same
+    row sequence as the trail, so the trail the reader watched and the chip under
+    the sentence can never disagree about which page a claim came from.
+
+    **Keyed by position rather than packed into a list**, because a row without a
+    URL is dropped from the trail: packing the survivors would shift every later
+    row's index by one and name the wrong page. A position with no URL is simply
+    absent, and a citation of it names no page at all — which is the honest answer
+    and, unlike a shifted index, an obviously empty one.
+
+    Only the two disclosing tools appear. ``search_news`` is absent for the
+    reason it is absent from :data:`DISCLOSING_TOOLS` — its items carry a source
+    name and no URL, so there is nothing for a chip to link to.
+    """
+    index: dict[str, dict[int, str]] = {}
+    for call in calls:
+        name = str(getattr(call, "name", "") or "")
+        call_id = str(getattr(call, "call_id", "") or "")
+        result = getattr(call, "result", None)
+        if not call_id or name not in DISCLOSING_TOOLS or not isinstance(result, Mapping):
+            continue
+        urls: dict[int, str] = {}
+        for position, row in enumerate(_rows_of(name, result)):
+            if not isinstance(row, Mapping):
+                continue
+            url = str(row.get("url") or "").strip()
+            if url:
+                urls[position] = url
+        if urls:
+            index[call_id] = urls
+    return index
+
+
+def _row_index(field_path: str) -> int | None:
+    """Which result inside a call a reference points at, if it points at one.
+
+    A search result is cited by its position — ``results.0.title`` — so the path
+    itself says which page the claim came from. The first integer segment is that
+    position; a path with none (a fetched page's own claim, a summary key) is
+    about the call as a whole.
+    """
+    for part in field_path.split("."):
+        if part.isdigit():
+            return int(part)
+    return None
+
+
+def block_source_ids(
+    references: Iterable[tuple[str, str]],
+    index: Mapping[str, Mapping[int, str]],
+    known: Iterable[str],
+) -> tuple[str, ...]:
+    """The pages one block's evidence rests on, in the order it cited them.
+
+    A URL is the id, because a URL is already the identity the trail
+    deduplicates by (:func:`merge_sources`) — an id invented here would be a
+    second name for the same page, and the browser would have to be told how to
+    map one to the other.
+
+    Each reference is a call id and the field path inside that call's result, and
+    the path is read rather than ignored: a search that returned twelve pages and
+    a sentence citing the title of one of them are different claims, and naming
+    all twelve under that sentence would tell the reader eleven pages agreed with
+    something they were never asked about. A cited row whose page cannot be
+    resolved therefore names nothing — never everything.
+
+    **The one check is membership in this Turn's own source set.** This is
+    display metadata and never a gate: ``docs/adr/0015`` puts every enforcement
+    at the layer that can prove it, and "which page is behind this paragraph" has
+    no consequence a reader can be harmed by getting an empty answer to. So a
+    page the Turn did not actually list is dropped from the chips and the block
+    is released exactly as it was.
+    """
+    allowed = frozenset(known)
+    found: list[str] = []
+    for call_id, field_path in references:
+        urls = index.get(call_id) or {}
+        row = _row_index(field_path)
+        if row is None:
+            # A reference to the call rather than to one of its rows — a fetched
+            # page's own claim, or a summary key. It rests on everything that
+            # call came back with.
+            cited: tuple[str, ...] = tuple(urls[key] for key in sorted(urls))
+        else:
+            # A row the citation named. A position the result carried no URL for
+            # names no page, rather than borrowing the next one's.
+            page = urls.get(row)
+            cited = (page,) if page else ()
+        for url in cited:
+            if url in allowed and url not in found:
+                found.append(url)
+    return tuple(found)
+
+
 def searching_detail(queries: Sequence[str]) -> dict[str, Any] | None:
     """The ``detail`` a ``searching`` activity carries, or nothing to add."""
     if not queries:
@@ -202,10 +313,12 @@ __all__ = [
     "MAX_SOURCES",
     "WEB_SEARCH_TOOL",
     "ProgressSource",
+    "block_source_ids",
     "domain_of",
     "found_detail",
     "merge_sources",
     "queries_of",
     "searching_detail",
+    "sources_by_call",
     "sources_of",
 ]

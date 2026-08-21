@@ -207,6 +207,11 @@ async def test_news_refuses_without_redis_and_never_calls_the_provider():
         "stale": False,
         "age_seconds": None,
         "reason": "news_unavailable",
+        "hint": (
+            "the news channel is unreachable in this Turn; answer from stored "
+            "data and say the news source was unavailable rather than calling it "
+            "again"
+        ),
     }
     assert calls == 0
 

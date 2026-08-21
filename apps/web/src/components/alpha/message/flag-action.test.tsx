@@ -37,6 +37,8 @@ function view(): AssistantView {
     riskNotice: NOTICE,
     searchProgress: [],
     suggestions: [],
+    widgets: [],
+    widgetRefusals: [],
     completed: true,
   }
 }

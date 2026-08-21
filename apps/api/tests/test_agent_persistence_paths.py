@@ -153,6 +153,52 @@ async def test_each_trace_survives_independently_and_cost_is_summed(owner):
 
 
 @pytest.mark.asyncio
+async def test_a_spilled_result_is_noted_on_its_trace_and_still_readable_whole(owner):
+    store = persistence()
+    thread = await store.create_thread(owner)
+    request = await store.append_message(
+        thread.id, role="user", content={"text": "one big call"}
+    )
+    whole = {"symbol": "FPT", "rows": [{"close": 90.0 + day} for day in range(30)]}
+    await store.record_tool_call(
+        {
+            "thread_id": thread.id,
+            "request_message_id": request.id,
+            "tool_name": "get_price_series",
+            "tool_call_id": "call_0",
+            "arguments": {"symbol": "FPT"},
+            "result": whole,
+            "status": "ok",
+            "error": None,
+        }
+    )
+
+    updated = await store.record_spillover(request.id, {"call_0": 18_682})
+
+    (trace,) = await store.traces_for_request(request.id)
+    assert updated == 1
+    assert trace.tool_call_id == "call_0"
+    assert trace.spilled_bytes == 18_682
+    # The model saw a preview; the record kept the whole of it, addressable by
+    # the same id the model cites in an evidence reference.
+    assert await store.tool_result(request.id, "call_0") == whole
+    # And not through another Turn's request: the scope is the anchor, not the id.
+    assert await store.tool_result(request.id + 1_000, "call_0") is None
+
+
+@pytest.mark.asyncio
+async def test_a_spill_for_a_call_nobody_traced_changes_nothing(owner):
+    store = persistence()
+    thread = await store.create_thread(owner)
+    request = await store.append_message(
+        thread.id, role="user", content={"text": "no traces"}
+    )
+
+    assert await store.record_spillover(request.id, {"call_0": 4_096}) == 0
+    assert await store.record_spillover(request.id, {}) == 0
+
+
+@pytest.mark.asyncio
 async def test_catalog_unknown_tool_is_persisted_with_usage(owner):
     store = persistence()
     thread = await store.create_thread(owner)

@@ -324,12 +324,14 @@ arrives well before completion, and a heartbeat keeps a quiet path observable.
 
 ### Widgets
 
-At most **one Widget per answer** by default; a second requires an explicit request. A
-single value stays text. A Widget appears only when a visual makes a comparison,
-ranking, trend, or relative position easier to understand than words, and it always
-carries a plain-language *"what this means"* line plus its data date. Reopening a
-Thread re-renders the same fixed historical slice — never today's numbers. The four v1
-forms and their accessibility contract are in ADR-0012.
+At most **three Widgets per answer** by default (raised from one by
+`docs/specs/0004` D11, recorded in ADR-0023); a fourth requires an explicit
+request. A single value stays text. A Widget appears only when a visual makes a
+comparison, ranking, trend, relative position, or a set of reporting periods
+easier to understand than words, and it always carries a plain-language *"what
+this means"* line plus its data date. Reopening a Thread re-renders the same
+fixed historical slice — never today's numbers. The registered forms and their
+accessibility contract are in ADR-0012.
 
 ### A pending on-demand Analysis
 

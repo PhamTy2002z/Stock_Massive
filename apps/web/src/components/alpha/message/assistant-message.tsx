@@ -1,5 +1,10 @@
 "use client"
 
+import { useMemo } from "react"
+
+// Through the barrel, which is the boundary the registry states: a component
+// reached around it is a component reached without its `(name, version)` check.
+import { MessageWidgets, widgetResolverFor } from "@/components/alpha/widgets"
 import type { AssistantView } from "@/lib/alpha-desk/transcript"
 import type { FlagReason } from "@/lib/alpha-desk/types"
 import { AnswerActions } from "./answer-actions"
@@ -26,6 +31,15 @@ import { Suggestions } from "./suggestions"
  * rendered. It is still carried on the message and still assembled server-side;
  * the product decision is that it does not belong on this surface, so the
  * renderer drops it rather than the contract losing it.
+ *
+ * **Widgets need a message id, and that is why only this component draws them.**
+ * A Widget is resolved through the message that stores its descriptor, so the id
+ * is not a convenience here — it is the whole retrieval path, and it is what
+ * makes a reopened Thread show the same historical slice (ADR-0012). The draft
+ * above has no id yet, which is why a `widget.ready` mid-Turn puts nothing on
+ * screen until the canonical message replaces the draft a moment later. The
+ * alternative would be resolving a descriptor through some route that does not
+ * name a message, and that route is exactly the one the design does not have.
  *
  * The flag action is conditional, and it is conditional on the *handlers*
  * rather than on the message: a surface with nowhere to send a flag renders no
@@ -60,6 +74,14 @@ export function AssistantMessage({
   className?: string
 }) {
   const sources = sourcesOf(view.searchProgress)
+  // Bound to the message rather than rebuilt per render. The slot reads its
+  // resolver through a ref precisely so a new function identity cannot restart
+  // a fetch (`widget-slot`), and memoising here keeps that defence from being
+  // the only thing standing between a streaming transcript and a refetch loop.
+  const resolveWidget = useMemo(
+    () => (messageId === undefined ? null : widgetResolverFor(messageId)),
+    [messageId],
+  )
 
   return (
     <MessageShell className={className}>
@@ -78,6 +100,18 @@ export function AssistantMessage({
       {view.blocks.map((block, index) => (
         <ContentBlockView key={`block-${index}`} block={block} />
       ))}
+
+      {/* Under the prose and above the actions: a Widget is evidence for the
+          answer just given, where the action row is where the reader turns to
+          the next question. */}
+      {messageId !== undefined && resolveWidget !== null && (
+        <MessageWidgets
+          messageId={messageId}
+          widgets={view.widgets}
+          refusals={view.widgetRefusals}
+          resolve={resolveWidget}
+        />
+      )}
 
       <AnswerActions
         text={view.blocks.map((block) => block.text).join("\n\n")}

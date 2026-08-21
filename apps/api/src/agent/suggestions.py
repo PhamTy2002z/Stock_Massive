@@ -1,8 +1,8 @@
 """The follow-up questions offered under a completed answer.
 
 ``docs/adr/0020``: one extra provider call on the **batch** workload, charged to
-the same owner as the Turn that earned it, producing at most five short questions
-the reader might ask next.
+the same owner as the Turn that earned it, producing the two short questions the
+reader is most likely to ask next.
 
 Best-effort by construction. Every failure path — refused budget, timeout, a
 malformed response, a dead route — returns no suggestions and says so in the log.
@@ -34,23 +34,27 @@ from src.core.llm import (
 
 logger = logging.getLogger(__name__)
 
-#: Exactly what the panel in the UI has room for.
-MAX_SUGGESTIONS = 5
+#: Two, and only two. A panel of five reads as a menu the reader has to triage;
+#: two read as the conversation's next step, so each one has to earn its place.
+MAX_SUGGESTIONS = 2
 #: A follow-up is a question, not a paragraph. Anything longer is dropped.
 MAX_SUGGESTION_CHARS = 120
-#: Short by nature: five one-line questions cannot need more than this.
+#: Short by nature: two one-line questions cannot need more than this, and the
+#: headroom is for a route that spends tokens thinking before it answers.
 MAX_OUTPUT_TOKENS = 400
 #: Nothing waits on these interactively, but the terminal transaction does.
 TIMEOUT_SECONDS = 20.0
-#: How much of the answer the suggester is shown. Enough to know the subject.
-MAX_ANSWER_CHARS = 2_000
+#: How much of the answer the suggester is shown. A follow-up is only specific if
+#: it can name what the answer actually said, so it is shown the figures and the
+#: names, not just the opening subject.
+MAX_ANSWER_CHARS = 6_000
 
 SUGGESTIONS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "suggestions": {
             "type": "array",
-            "minItems": 1,
+            "minItems": MAX_SUGGESTIONS,
             "maxItems": MAX_SUGGESTIONS,
             "items": {"type": "string", "minLength": 1, "maxLength": MAX_SUGGESTION_CHARS},
         }
@@ -67,20 +71,33 @@ SUGGESTIONS_FORMAT = JsonSchemaFormat(name="followup_suggestions", schema=SUGGES
 SYSTEM_PROMPT = """\
 You write follow-up questions for a Vietnamese equities research assistant.
 
-You are given the user's question and the answer they were just shown. Return up
-to five short questions the same reader would plausibly ask next.
+You are given the user's question and the answer they were just shown. Return
+exactly two questions — the two the same reader would most plausibly ask next.
+
+Two, not a menu. Each one has to move the conversation forward from this answer,
+so:
+
+- Question 1 goes **deeper**: it takes a specific figure, name, period or
+  mechanism the answer stated and asks for the thing behind it.
+- Question 2 goes **wider**: it keeps the same subject and extends it to another
+  period, another statement, a peer company or the same company's sector.
 
 Rules:
 
-- Write in the language of the user's question. If it is Vietnamese, every
-  question is Vietnamese.
+- Name what the answer named. A question that would read the same under any
+  other answer is worthless — use the ticker, the figure, the quarter, the line
+  item or the company that actually appeared.
+- Never ask something the answer already answered, and never restate the user's
+  question.
+- No general-knowledge or textbook questions ("how do I tell whether X is
+  seasonal", "which items explain Y"). Ask about this company, this number,
+  this period.
+- Write in the language of the user's question. If it is Vietnamese, both
+  questions are Vietnamese.
 - One line each, at most 120 characters, phrased as the reader would type them.
 - Each must be answerable from Vietnamese listed-equity data or public company
   information — never a request for a price target, a buy/sell instruction, or a
   prediction of a future price.
-- No duplicates, and none that merely restate the question already answered.
-- Ask about things the answer touched but did not exhaust: other figures, other
-  periods, related companies, the mechanism behind a number.
 """
 
 

@@ -105,7 +105,7 @@ export function AccountMenu() {
 }
 
 /**
- * The one place the teal meets the board's yellow.
+ * The one place the amber meets the board's yellow.
  *
  * A gradient rather than a flat fill, and ink-on-light rather than the reverse:
  * it is the same reading as the filled button — a lit surface carrying dark

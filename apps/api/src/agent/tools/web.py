@@ -203,6 +203,11 @@ class WebTools:
                 ),
                 callable=self.web_search,
                 data_access=ToolDataAccess.EXTERNAL,
+                # It already packs results against the catalog's own cap while
+                # building them, so what comes back is the largest honest
+                # payload. Dropping sources from it would also cost the source
+                # drawer the pages the answer cites.
+                result_budget_bytes=MAX_TOOL_RESULT_BYTES,
             ),
             ToolSpec(
                 name="fetch_url",
@@ -215,6 +220,10 @@ class WebTools:
                 ),
                 callable=self.fetch_url,
                 data_access=ToolDataAccess.EXTERNAL,
+                # The page text is the whole result and is already clipped at
+                # ``MAX_PAGE_TEXT_CHARS``. A second clipping would cut the same
+                # paragraph at a boundary nobody read.
+                result_budget_bytes=MAX_TOOL_RESULT_BYTES,
             ),
         )
 

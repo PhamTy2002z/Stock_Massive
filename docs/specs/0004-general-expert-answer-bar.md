@@ -172,12 +172,21 @@ route, not the tier.
 - Activity events carry real step content: issued queries, source domains, counts.
   Prompts, reasoning, and raw tool payloads remain out of the stream.
 
-### W6 — Presentation (the visible moat)
+### W6 — Presentation (the visible moat) — **landed**
 
 - Widget ceiling 1 → 3; add `quarterly_financials` table widget to the typed
   registry.
 - Follow-up suggestion chips generated per answer.
 - Citation chips on claims sourced from the web lane.
+
+Delivered by `plans/260821-0020-agent-upgrade-hermes-lessons` phase 5, recorded
+in ADR-0023. The ceiling is three by default and four when the user asks for
+more; `quarterly_financials` binds to the served list of periods and draws the
+four income-statement columns the server chooses (open decision 2 below is
+closed by that choice). Suggestion chips arrived earlier with ADR-0020. Web-lane
+citation chips are two surfaces rather than one: the figure panel behind a claim
+(`citation-chips`) and the source chip naming the page a passage rests on, built
+from the `source_ids` the backend derives from the block's own citations.
 
 ### Gate status of the W1 + W4 merge
 
