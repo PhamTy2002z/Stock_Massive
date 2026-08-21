@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import Mapping
 from typing import Any
 
@@ -27,12 +28,19 @@ import httpx
 from .config import LLMConfig
 from .errors import (
     AuthUnavailable,
+    ContentPolicyBlocked,
+    ContextOverflow,
     GatewayTimeout,
     RouteRateLimited,
     LLMError,
     ModelRefusal,
+    ModelUnavailable,
+    OutputCapExceeded,
+    RouteAttempt,
+    SchemaRejected,
     classify_status,
     llm_metrics,
+    redact,
 )
 from .protocol import Completion, CompletionRequest, Role, Usage
 from .streaming import StreamAssembler, parse_tool_calls
@@ -114,6 +122,12 @@ class OpenAICompatibleTransport:
 
     async def _streamed(self, request: CompletionRequest) -> Completion:
         assembler = StreamAssembler(model=request.model)
+        # Counted on the way past rather than reconstructed afterwards: on the
+        # failure path there is no response object left to ask, and "how much
+        # arrived before it stopped" is the one number that separates a route
+        # that never spoke from a route that broke off mid-answer.
+        started = time.monotonic()
+        received = 0
 
         try:
             async with self._http.stream(
@@ -128,6 +142,12 @@ class OpenAICompatibleTransport:
                         response.status_code, body, response.headers
                     )
                 async for line in response.aiter_lines():
+                    # Encoded length, because the field is called bytes and a
+                    # Vietnamese answer is two to three bytes per character —
+                    # counting characters would understate a broken stream by
+                    # the same factor and make the number unusable for the one
+                    # thing it is for.
+                    received += len(line.encode())
                     chunk = _decode_sse_line(line)
                     if chunk is not None:
                         assembler.add_chunk(chunk)
@@ -135,7 +155,13 @@ class OpenAICompatibleTransport:
             # Covers TimeoutException, which subclasses it: a route that did not
             # answer and a route that could not be reached are the same fact
             # from here, and both are retryable.
-            raise self._timeout(exc) from exc
+            raise self._timeout(
+                exc,
+                attempt=RouteAttempt(
+                    elapsed_seconds=time.monotonic() - started,
+                    bytes_received=received,
+                ),
+            ) from exc
 
         if assembler.refusal:
             llm_metrics().record_refusal(assembler.refusal)
@@ -162,6 +188,7 @@ class OpenAICompatibleTransport:
         )
 
     async def _whole(self, request: CompletionRequest) -> Completion:
+        started = time.monotonic()
         try:
             response = await self._http.post(
                 self._url(),
@@ -172,7 +199,14 @@ class OpenAICompatibleTransport:
             # Covers TimeoutException, which subclasses it: a route that did not
             # answer and a route that could not be reached are the same fact
             # from here, and both are retryable.
-            raise self._timeout(exc) from exc
+            #
+            # No byte count: a non-streaming request either has its whole body
+            # or has none of it, so the number would always be zero and would
+            # read as information.
+            raise self._timeout(
+                exc,
+                attempt=RouteAttempt(elapsed_seconds=time.monotonic() - started),
+            ) from exc
 
         if response.status_code >= 400:
             raise self._classified(
@@ -261,10 +295,30 @@ class OpenAICompatibleTransport:
             llm_metrics().record_rate_limit(str(error))
         elif isinstance(error, GatewayTimeout):
             llm_metrics().record_gateway_timeout(str(error))
+        elif isinstance(error, SchemaRejected):
+            # Loud because it is ours: the Tool Catalog wrote the schemas this
+            # route just refused, so this is a defect here rather than a
+            # condition of the world.
+            logger.error("The LLM route refused our tool schemas: %s", redact(str(error)))
+        elif isinstance(
+            error,
+            (ContextOverflow, OutputCapExceeded, ContentPolicyBlocked, ModelUnavailable),
+        ):
+            # One line per class at the boundary, so the ops snapshot's counts
+            # and the log agree about what a refused request actually was. The
+            # body is redacted: a route that quotes the request it refused
+            # quotes the credential with it.
+            logger.warning(
+                "The LLM route refused the request as %s: %s",
+                type(error).__name__,
+                redact(str(error)),
+            )
         return error
 
-    def _timeout(self, exc: Exception) -> GatewayTimeout:
-        error = GatewayTimeout(f"the route did not answer: {exc}")
+    def _timeout(
+        self, exc: Exception, *, attempt: RouteAttempt | None = None
+    ) -> GatewayTimeout:
+        error = GatewayTimeout(f"the route did not answer: {exc}", attempt=attempt)
         llm_metrics().record_gateway_timeout(str(error))
         return error
 

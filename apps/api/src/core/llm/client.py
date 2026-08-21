@@ -18,7 +18,7 @@ from tenacity import (
 
 from .admission import AdmissionLedger, BudgetLane, SpendAdmission, SpendRequest
 from .config import LLMConfig
-from .errors import GatewayTimeout, LLMError, MAX_GATEWAY_ATTEMPTS
+from .errors import GatewayTimeout, LLMError, MAX_GATEWAY_ATTEMPTS, RouteAttempt
 from .protocol import Completion, CompletionRequest
 
 
@@ -90,6 +90,16 @@ class ReservedLLMClient:
                             self._admission.reconcile,
                             reservation,
                             exc.usage,
+                        )
+                    if isinstance(exc, GatewayTimeout):
+                        # The retry count is only knowable here: the transport
+                        # makes one paid attempt and does not know it is the
+                        # second. Stamped rather than logged, so the caller that
+                        # ends the Turn is the one that says how much was spent
+                        # trying.
+                        exc.attempt = replace(
+                            exc.attempt or RouteAttempt(),
+                            attempts=attempt.retry_state.attempt_number,
                         )
                     raise
                 if result.usage is not None:

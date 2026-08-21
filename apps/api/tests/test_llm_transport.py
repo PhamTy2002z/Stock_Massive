@@ -26,10 +26,13 @@ from src.core.llm.client import ReservedLLMClient
 from src.core.llm.config import Workload, llm_config_from_settings
 from src.core.llm.errors import (
     AuthUnavailable,
+    ContextOverflow,
     GatewayTimeout,
+    ModelUnavailable,
     LLMError,
     MalformedArguments,
     ModelRefusal,
+    MAX_GATEWAY_ATTEMPTS,
     RouteRateLimited,
     ToolAttempts,
     llm_metrics,
@@ -504,6 +507,71 @@ class TestTheErrorTaxonomy:
 
         assert not isinstance(exc_info.value, GatewayTimeout)
         assert attempts["count"] == 1
+
+    async def test_a_400_the_route_explains_is_classified_and_still_not_retried(self):
+        """The taxonomy narrows the class; it must not widen the retry rule.
+
+        A refused request is refused for a reason the caller has to change, so a
+        second identical attempt buys another copy of the same 400.
+        """
+        attempts = {"count": 0}
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            attempts["count"] += 1
+            return httpx.Response(
+                400, text="This model's maximum context length is 8192 tokens"
+            )
+
+        with pytest.raises(ContextOverflow):
+            await client(handler).complete(request())
+
+        assert attempts["count"] == 1
+
+    async def test_a_404_naming_the_model_is_not_retried_either(self):
+        attempts = {"count": 0}
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            attempts["count"] += 1
+            return httpx.Response(404, text="model_not_found: model-session")
+
+        with pytest.raises(ModelUnavailable):
+            await client(handler).complete(request())
+
+        assert attempts["count"] == 1
+
+    async def test_a_streamed_break_reports_the_attempt_it_broke_on(self):
+        """The three numbers are measured on the way past, not reconstructed.
+
+        On the failure path there is no response object left to ask how much
+        arrived, and "how much arrived" is what separates a route that never
+        spoke from one that broke off mid-answer.
+        """
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            raise httpx.ReadTimeout("read timed out")
+
+        with pytest.raises(GatewayTimeout) as raised:
+            await client(handler).complete(request())
+
+        attempt = raised.value.attempt
+        assert attempt is not None
+        # Both attempts the client is allowed, since a timeout is retried once.
+        assert attempt.attempts == MAX_GATEWAY_ATTEMPTS
+        assert attempt.elapsed_seconds >= 0.0
+        assert attempt.bytes_received == 0
+
+    async def test_bytes_that_arrived_before_the_break_are_counted(self):
+        def handler(_request: httpx.Request) -> httpx.Response:
+            async def body():
+                yield f"data: {json.dumps(text_chunk('Giá VCB '))}\n\n".encode()
+                raise httpx.ReadTimeout("read timed out mid-stream")
+
+            return httpx.Response(200, content=body())
+
+        with pytest.raises(GatewayTimeout) as raised:
+            await client(handler).complete(request())
+
+        assert raised.value.attempt.bytes_received > 0
 
 
 class TestToolErrors:
