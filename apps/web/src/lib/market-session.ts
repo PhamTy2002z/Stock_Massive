@@ -119,3 +119,21 @@ export function formatVietnamTime(value: Date | number): string {
     hour12: false,
   }).format(value)
 }
+
+/** Which third of the trading day the market's clock is in. */
+export type PartOfDay = "Morning" | "Afternoon" | "Evening"
+
+/**
+ * The part of the day, read on the market's clock rather than the viewer's.
+ *
+ * The greeting needs this during the first render, not after an effect: a
+ * value that only arrives on mount makes the surface open on a placeholder and
+ * swap it a frame later. Vietnam's zone is fixed and shared by the server and
+ * the browser, so both sides render the same word and hydration stays quiet.
+ */
+export function vietnamPartOfDay(now: Date = new Date()): PartOfDay {
+  const hour = Math.floor(vietnamMinutes(now) / 60)
+  if (hour < 12) return "Morning"
+  if (hour < 17) return "Afternoon"
+  return "Evening"
+}
