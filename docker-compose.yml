@@ -103,6 +103,8 @@ services:
       # operator on a constrained route (expired plan, drained credits) can
       # trade the boot-time guarantee for per-Turn failures instead.
       LLM_CAPABILITY_PROBE_ENABLED: ${LLM_CAPABILITY_PROBE_ENABLED:-true}
+      LLM_ROUTE_BREAKER_ENABLED: ${LLM_ROUTE_BREAKER_ENABLED:-true}
+      LLM_PROMPT_CACHE_CONTROL_ENABLED: ${LLM_PROMPT_CACHE_CONTROL_ENABLED:-false}
       LLM_PRICING_VERSION: ${LLM_PRICING_VERSION:-}
       LLM_PRICING_EFFECTIVE_DATE: ${LLM_PRICING_EFFECTIVE_DATE:-}
       LLM_PRICE_BATCH_INPUT_USD_PER_MTOK: ${LLM_PRICE_BATCH_INPUT_USD_PER_MTOK:-0}
