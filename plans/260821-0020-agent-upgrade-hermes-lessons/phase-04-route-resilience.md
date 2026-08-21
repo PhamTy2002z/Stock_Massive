@@ -172,6 +172,41 @@ session cùng đập vào một tuyến đã rate-limit.
   Hermes dùng thread vì transport của họ đồng bộ; ở transport async, đọc socket
   nhường lại event loop nên timer nổ được và response đóng được dưới nó.
 
+## Sửa sau review (`code-reviewer`, cùng phiên)
+
+Bốn lỗi suite không phủ, đã sửa và có test riêng:
+
+- **`rebuild()` đóng client dùng chung** → giết call đang bay của mọi Turn khác,
+  và lỗi đó lại classify thành `GatewayTimeout` nên Turn kia cũng rebuild → một
+  con 504 cascade khắp process. Nay: client bị thay bị *ngưng dùng* ngay và đóng
+  sau `request_timeout + 5s`, rebuild có lock và cooldown 30s.
+- **Lua của breaker lưu millisecond phân số** → Redis thật từ chối `PX` phân số,
+  nên mọi 429 *gia hạn* một hold đang có đều fail âm thầm (breaker chết sau hold
+  đầu tiên). Nay floor cả hai số; `tests/fake_redis.py` từ chối `PX` phân số để
+  mirror không còn dễ tính hơn thứ nó mirror.
+- **`ConstructedContextTooLarge` lọt ra khỏi nhánh nén** → Turn kết thúc
+  `turn_failed`, mất chính cái classification phase này sinh ra. Nay raise lại
+  `ContextOverflow` gốc. Kèm: mỗi round có trần thời gian riêng
+  (`ROUND_TIMEOUT_MULTIPLE`), vì 5 call ở trần mỗi call là đủ chạm Turn deadline
+  — mà đường đó kết Turn không qua nhánh terminal nào đặt tên được.
+- **Ghi 429 vào Redis đồng bộ trên event loop** (`get_redis` trả client sync,
+  dialect Upstash là một round trip HTTPS, và `ping()` không có connect timeout).
+  Nay qua `asyncio.to_thread`.
+
+Kèm các mục nhỏ: `cache_control` giờ **thật sự** tới prefix ổn định (`Transcript`
+mang biên, loop truyền `contract.prefix()` — trước đó chỉ probe set segment nên
+cờ bật lên là mua rủi ro 400 mà không có cache); `route_key` dùng `hostname` nên
+userinfo trong base URL không vào key/log; test bảng recovery đi theo cây class
+thay vì theo chính key của bảng; `RouteAttempt.attempts` đếm mọi attempt trả
+tiền; probe cache check xét *chấp nhận field*, không xét model có nói gì.
+
+Còn để nguyên có chủ ý: nhánh phục hồi của loop reserve ở lane của caller
+(`TURN`) chứ không `EMERGENCY` — nó là một call **khác hình dạng** của cùng
+round, không phải retry y nguyên; lane `EMERGENCY` vẫn dành cho retry bên trong
+`client.complete`. Reservation `status='reserved'` không được reconcile vẫn tính
+worst case vĩnh viễn (hành vi `ADR-0014` có từ trước), nhưng số attempt mỗi Turn
+tăng nên rủi ro `BudgetRefusal` giữa round cao hơn — ghi lại để Phase 8 đo.
+
 ## Chưa làm (ngoài scope đã ghi ở trên)
 
 - Tách `LLM_REQUEST_TIMEOUT_SECONDS` thành hai biến riêng cho connect/read: hiện
