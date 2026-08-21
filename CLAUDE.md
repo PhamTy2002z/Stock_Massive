@@ -23,7 +23,7 @@ Nguồn sự thật cho lệnh: `package.json` ở root, `apps/api/Makefile`, `a
 
 ## Quy tắc bắt buộc 
 
-- **Nhánh** — `develop` là nhánh tích hợp; mọi tính năng/sửa lỗi tách nhánh riêng từ `develop`, làm xong thì rồi merge ngược về `develop` và xóa nhánh riêng. `main` được protected và chỉ nhận merge từ `develop`.
+- **Nhánh** — `develop` là nhánh làm việc: mọi tính năng/sửa lỗi commit thẳng lên `develop`, không tách nhánh riêng. `main` được protected và chỉ nhận merge từ `develop`.
 - **Cổng kiểm tra trước khi báo xong** — backend: `make test` tại `apps/api`. Frontend: `pnpm type-check`, `pnpm lint`, `pnpm test`, `pnpm build` tại `apps/web`. Phần nào không chạy được thì nêu rõ phần đó.
 - **Commit** — Conventional Commits, mô tả thay đổi kỹ thuật. Giữ ngoài index: secrets, `.env`, dữ liệu nhạy cảm, dump database, file sinh tự động.
 - **Eval gate** — pull request chạm System Prompt Contract, tool schema/`tool_catalog_version`, Signal Registry, Analysis Field Profile, `llm_model_*`, agent loop, hoặc Recommendation Validator **bắt buộc đính Eval Report** (run id, điểm từng category, diff so với baseline) trong body và không merge vào `develop` nếu thiếu. PR chỉ chạm UI, Collector hoặc Widget rendering thì không cần. Toàn bộ quy tắc: `docs/agents/eval-battery.md`.
