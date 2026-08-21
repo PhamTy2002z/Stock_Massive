@@ -57,3 +57,25 @@ conflicting with its citation is still a hard failure in every block.
 - A Turn the Gate emptied releases a backend-authored, figure-free sentence
   instead of nothing. Blocks that passed are still released, and the notice
   appears only when none did.
+
+## Amended by ADR-0021: the default inverted
+
+`ADR-0021` keeps this decision's rule and inverts the default around it. A figure
+conflicting with its citation is still a hard failure in every block — that
+sentence is unchanged and is now one of only eight conditions that end a Turn. The
+other twelve that used to end one downgrade instead: the block is withheld and
+replaced by a backend-authored sentence, and the Turn releases what it proved.
+
+Two sentences above are superseded in their detail:
+
+- "A recommendation with the same defect remains blocked and ends the Turn as
+  `incomplete/grounding_failed`" — it remains blocked, and blocked still means the
+  recommendation never reaches the screen. It no longer ends the Turn unless the
+  condition is one of the four.
+- "A non-degradable failure buys one rewrite… A second failure ends the Turn as
+  before" — the rewrite is now offered for a downgraded block too, under the same
+  ceiling of one. A second failure ends the Turn only for the four; otherwise it
+  downgrades.
+
+The eight-round figure in the rewrite paragraph is stale for an unrelated reason:
+`MAX_TOOL_ROUNDS` is four, and `docs/specs/0003` §6 records why.
