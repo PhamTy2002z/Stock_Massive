@@ -81,8 +81,13 @@ ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:3000 || exit 1
+# ``127.0.0.1`` rather than ``localhost``: inside the container that name
+# resolves to ``::1`` first, and the server listens on ``0.0.0.0`` — IPv4 only.
+# The check then reports a refused connection while the service answers every
+# request, which is the worst way for a healthcheck to be wrong: it fails a
+# rollout gate over a healthy container.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:3000 || exit 1
 
 # Start application. `app/` for the reason the copies above explain.
 CMD ["node", "app/server.js"]
