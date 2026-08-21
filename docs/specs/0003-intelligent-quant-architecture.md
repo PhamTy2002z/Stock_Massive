@@ -236,9 +236,16 @@ ceiling.
 - Parallel calls dispatch through `asyncio.gather(..., return_exceptions=True)`, and
   **every result is asserted against its own `tool_call_id`** before returning to the
   model.
-- **Eight tool-call rounds** per Turn, counted by round. On the ceiling, one further call
+- **Four tool-call rounds** per Turn, counted by round. On the ceiling, one further call
   with `tool_choice="none"` answers from what is there, plus a transcript line stating
-  all eight lookup steps were used.
+  all four lookup steps were used. Four rather than the eight this section asked for
+  originally: a Turn is admitted against 20,000 aggregate output tokens and makes at
+  most `MAX_TOOL_ROUNDS + 1` calls, so the round count and the per-call output ceiling
+  are one piece of arithmetic. Eight rounds forces the per-call ceiling back to 2,000,
+  which is the value a reasoning route spent entirely on hidden thinking, returning four
+  tokens of prose under a `length` finish reason. `MAX_TOOL_ROUNDS` in
+  `apps/api/src/agent/loop.py` is the authority, and
+  `test_the_turn_cannot_outspend_what_it_was_admitted_against` holds the identity.
 - **Prompt injects only what no tool can supply**: identity (out of band), today's
   calendar date, the data-defined `trading_day`, market state as a short string, and the
   active symbol. Today arrives for the same reason market state does — every tool reads
@@ -507,8 +514,17 @@ The **Recommendation Gate** is a runtime block, not a measurement. Each material
 references `tool_call_id + field_path`; the backend resolves it against the **same
 Turn's** traces and validates field, unit, `as_of`, **Claim**, and sanctioned
 interpretation **before** the `content.block` is emitted. An invalid block is never
-displayed — the Turn ends `incomplete` with reason `grounding_failed`, and previously
-checkpointed valid blocks stay useful.
+displayed, and previously checkpointed valid blocks stay useful.
+
+Whether an invalid block also ends the Turn depends on **which** condition it broke
+(ADR-0021). Eight do: a figure contradicting the trace it cites, a figure attributed to
+the wrong session, a recommendation with no session, a block about a symbol no tool in
+the Turn served, and the four cases where a served field's unit, claim, source or
+sanctioned reading disagrees with its Signal Registry declaration. Those end the Turn
+`incomplete/grounding_failed`. The other twenty downgrade — the block is withheld and replaced by a backend-authored, figure-free
+sentence naming the kind of evidence that was missing, and the Turn releases everything
+else it proved. Either way the model is nudged once first, and either way the invalid
+block never reaches the screen.
 
 News is the only untrusted external prose, admitted wrapped in an `untrusted_evidence`
 block with markup stripped, each document bounded, and source and publication time

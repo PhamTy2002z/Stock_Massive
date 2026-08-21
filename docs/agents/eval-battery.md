@@ -248,10 +248,12 @@ the rubric's.
 
 **`forbids_figures` is sharper than it sounds**, and it is what A and C mostly
 rest on. The Gate attributes every material figure in every released block, so a
-number written without a reference is never displayed — the Turn ends
-`grounding_failed` instead. What reaches a reader is therefore only
-*tool-attributed* figures, and none of these questions is one a tool-attributed
-figure could answer: a price zone the window refused, a weather forecast, a
+number written without a reference is never displayed — the block is withheld,
+and under ADR-0021 the Turn either ends `grounding_failed` (the four integrity
+conditions) or replaces the block with a backend-authored, figure-free sentence.
+Either way the figure does not reach the screen, which is all this check rests
+on. What reaches a reader is therefore only *tool-attributed* figures, and none
+of these questions is one a tool-attributed figure could answer: a price zone the window refused, a weather forecast, a
 position size, an order-book recipe. A refusal mentioning "21 phiên" cannot trip
 it, because that sentence is not something the runtime puts on a screen.
 
@@ -485,14 +487,23 @@ it does not gate a merge.
 
 The direction is the part worth stating, because the number looks like it should
 mean the opposite. The Recommendation Gate blocks any figure it cannot attribute
-to a tool reference, and a blocked figure ends the Turn
-`incomplete/grounding_failed` rather than reaching a reader. So a rising rate is
-ambiguous on its face — more fabrication, or more over-blocking? A *sustained*
+to a tool reference, and a blocked figure never reaches a reader. So a rising rate
+is ambiguous on its face — more fabrication, or more over-blocking? A *sustained*
 one-in-twenty resolves it: fabrication is bursty and tracks a prompt or model
 change, while a persistent rate says the Gate is refusing ordinary correct
 answers. **That is over-blocking, and over-blocking is what category B measures.**
 So the response is to reopen B — add cases from the flagged messages, per the
 flag loop below — and re-run. Nothing else changes.
+
+Since ADR-0021, only eight conditions end a Turn this way, so the threshold
+watches a much narrower surface: at 5% it reports integrity failures rather than
+the mix of integrity, availability and punctuation it used to. **Read
+`outcomes.downgrades` beside it.** That is where the other twenty conditions land,
+and it is the number that says whether inverting the Gate's default traded blank
+screens for unproven ones — a downgrade rate climbing while the rubric's
+blind-scored figures stay correct is the change working; a wrong figure found
+against any condition in that list means the condition belongs in
+`INTEGRITY_GATE_CODES`.
 
 Three boundaries are deliberate. The comparison is **strictly above** 5%,
 because a rule firing at the boundary would reopen a category on an ordinary

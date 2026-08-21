@@ -123,6 +123,14 @@ const TERMINAL_REASONS: Record<string, string> = {
   route_rate_limited:
     "Tuyến mô hình đã dùng hết lượt gọi được cấp nên lượt này dừng lại. Chờ hạn mức được cấp lại rồi thử lại.",
   route_error: "Tuyến mô hình gặp lỗi nên lượt này dừng lại.",
+  context_overflow:
+    "Cuộc hội thoại đã dài hơn mức tuyến mô hình nhận được nên lượt này dừng lại. Bạn thử mở luồng mới.",
+  output_cap_exceeded:
+    "Lượt này cần chỗ trả lời nhiều hơn mức tuyến mô hình cho phép nên dừng lại. Bạn thử hỏi hẹp hơn.",
+  content_policy_blocked: "Tuyến mô hình từ chối câu hỏi này nên lượt này dừng lại.",
+  model_unavailable:
+    "Tuyến mô hình không còn phục vụ mô hình đang cấu hình nên lượt này dừng lại.",
+  schema_rejected: "Tuyến mô hình không nhận được danh mục công cụ nên lượt này dừng lại.",
   auth_unavailable: "Không kết nối được tới tuyến mô hình nên lượt này dừng lại.",
   tool_timeout: "Một bước đọc dữ liệu quá thời gian nên lượt này dừng lại.",
   model_refusal: "Mô hình đã từ chối trả lời câu hỏi này.",
