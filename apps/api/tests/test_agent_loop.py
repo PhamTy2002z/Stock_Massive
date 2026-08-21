@@ -14,16 +14,22 @@ from src.agent.context import ContextBudget
 from src.core.llm.budget import TURN_OUTPUT_TOKENS
 from src.agent.loop import (
     ANSWER_TRUNCATED,
+    CONTENT_POLICY_BLOCKED,
+    CONTEXT_OVERFLOW,
     DEFAULT_MAX_OUTPUT_TOKENS,
     EXTERNAL_TOOL_EXHAUSTED_MESSAGE,
     MAX_EXTERNAL_TOOL_CALLS,
     MAX_TOOL_ROUNDS,
+    MODEL_UNAVAILABLE,
+    OUTPUT_CAP_EXCEEDED,
     ROUNDS_EXHAUSTED_NOTE,
+    SCHEMA_REJECTED,
     SESSION_CONCURRENCY,
     AgentLoop,
     SessionCapacityExceeded,
     SessionSlots,
     ToolCallIdMismatch,
+    TurnDraft,
     TurnRequest,
     TurnStatus,
     admit_round,
@@ -32,12 +38,18 @@ from src.agent.loop import (
 )
 from src.agent.grounding import BlockKind
 from src.agent.prompt import AnswerKind, MarketState, RuntimeContext
-from src.agent.turns import gate_outcomes
+from src.agent.turns import draft_content, gate_outcomes
 from src.agent.tools.catalog import ToolCatalog, ToolContext, ToolDataAccess, ToolSpec
 from src.alpha.refusals import AlphaRefusal
 from src.core.llm import (
     AuthUnavailable,
     BudgetLane,
+    ContentPolicyBlocked,
+    ContextOverflow,
+    ModelUnavailable,
+    OutputCapExceeded,
+    RouteAttempt,
+    SchemaRejected,
     BudgetRefusal,
     Completion,
     GatewayTimeout,
@@ -187,6 +199,22 @@ def loop(client, tools=None, **overrides) -> AgentLoop:
 
 
 # --- rounds ---------------------------------------------------------------
+
+
+def test_the_module_docstring_states_the_round_count_the_constant_holds():
+    """The docstring said eight while the constant said four, for months.
+
+    The number is not free to choose — it is one half of the arithmetic the test
+    below holds — so a docstring that disagrees with it is a docstring that
+    invites somebody to raise the other half.
+    """
+    from src.agent import loop as loop_module
+
+    assert MAX_TOOL_ROUNDS == 4
+    heading = loop_module.__doc__.split("Four rather than eight")[0]
+    assert "Four tool-call rounds" in heading
+    assert "all four lookup steps" in heading
+    assert "Eight" not in heading
 
 
 def test_the_turn_cannot_outspend_what_it_was_admitted_against():
@@ -495,6 +523,124 @@ async def test_gateway_timeout_is_not_retried_again_inside_the_loop():
     assert len(client.requests) == 1
     assert outcome.status is TurnStatus.INCOMPLETE
     assert outcome.terminal_reason == "gateway_timeout"
+
+
+@pytest.mark.asyncio
+async def test_a_gateway_timeout_says_how_much_was_spent_reaching_it(caplog):
+    """Measured: this branch ended Turns without logging anything at all.
+
+    It was the largest single source of Turns that died on the route, and the
+    only one with no line to classify it by — so the share of route failures
+    that were timeouts was a guess. What a timeout needs beyond its message is
+    how much was spent: a route that never spoke and a route that broke off
+    mid-answer are different incidents wearing the same class.
+    """
+    client = FakeClient(
+        [
+            GatewayTimeout(
+                "the route did not answer (504)",
+                attempt=RouteAttempt(
+                    attempts=2, elapsed_seconds=118.4, bytes_received=8_192
+                ),
+            )
+        ]
+    )
+
+    with caplog.at_level("WARNING"):
+        outcome = await loop(client).run(turn_request())
+
+    assert outcome.terminal_reason == "gateway_timeout"
+    line = next(
+        record.message for record in caplog.records if "gateway timeout" in record.message
+    )
+    assert "2 attempt(s)" in line
+    assert "118.4s" in line
+    assert "8192 byte(s)" in line
+
+
+@pytest.mark.asyncio
+async def test_a_timeout_with_no_measurements_still_logs_a_classifiable_line(caplog):
+    """The diagnostics are additive, so their absence must not lose the line."""
+    client = FakeClient([GatewayTimeout("the route did not answer (504)")])
+
+    with caplog.at_level("WARNING"):
+        await loop(client).run(turn_request())
+
+    assert any("gateway timeout" in record.message for record in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_no_route_failure_log_carries_a_credential(caplog):
+    """A route that quotes the request it refused quotes the header with it.
+
+    Every one of these branches copies the route's own words into a log line,
+    which makes redaction a property of the branch rather than a courtesy: a key
+    that reaches a log file once has to be rotated.
+    """
+    echoed = 'refused: {"headers":{"Authorization":"Bearer sk-livekey0123456789"}}'
+    for error in (
+        GatewayTimeout(echoed),
+        ContextOverflow(echoed),
+        OutputCapExceeded(echoed),
+        ContentPolicyBlocked(echoed),
+        ModelUnavailable(echoed),
+        SchemaRejected(echoed),
+        LLMError(echoed),
+    ):
+        caplog.clear()
+        with caplog.at_level("WARNING"):
+            await loop(FakeClient([error])).run(turn_request())
+        assert caplog.records, f"{type(error).__name__} logged nothing"
+        for record in caplog.records:
+            assert "sk-livekey0123456789" not in record.message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [
+        (ContextOverflow("the transcript does not fit (400)"), CONTEXT_OVERFLOW),
+        (OutputCapExceeded("the output ceiling does not fit (400)"), OUTPUT_CAP_EXCEEDED),
+        (ContentPolicyBlocked("the filter refused (400)"), CONTENT_POLICY_BLOCKED),
+        (ModelUnavailable("the model is not served (404)"), MODEL_UNAVAILABLE),
+        (SchemaRejected("the tool schemas were refused (400)"), SCHEMA_REJECTED),
+    ],
+)
+async def test_each_named_route_condition_ends_the_turn_under_its_own_reason(
+    error, reason
+):
+    """`route_error` is no longer one bucket holding five different remedies.
+
+    The reason is what the ops snapshot groups by, so a condition without its own
+    reason cannot be counted — and the share of Turns lost to an oversized
+    transcript versus a retired model is the number Phase 4 needs before it
+    chooses a recovery for either.
+    """
+    client = FakeClient([error])
+
+    outcome = await loop(client).run(turn_request())
+
+    assert len(client.requests) == 1
+    assert outcome.status is TurnStatus.INCOMPLETE
+    assert outcome.terminal_reason == reason
+
+
+@pytest.mark.asyncio
+async def test_the_five_named_conditions_do_not_end_up_as_route_error():
+    """Guards the `except` ordering: all five subclass `LLMError`."""
+    reasons = set()
+    for error in (
+        ContextOverflow("x"),
+        OutputCapExceeded("x"),
+        ContentPolicyBlocked("x"),
+        ModelUnavailable("x"),
+        SchemaRejected("x"),
+    ):
+        outcome = await loop(FakeClient([error])).run(turn_request())
+        reasons.add(outcome.terminal_reason)
+
+    assert "route_error" not in reasons
+    assert len(reasons) == 5
 
 
 @pytest.mark.asyncio
@@ -954,7 +1100,9 @@ async def test_a_recommendation_the_gate_cannot_prove_leaves_an_answer_behind():
     recommendation itself is still never displayed.
     """
     unprovable = "[rec:FPT@2026-08-14] FPT đáng mua quanh vùng hiện tại."
-    client = FakeClient([wants("get_analysis"), answer(unprovable)])
+    client = FakeClient(
+        [wants("get_analysis"), answer(unprovable), answer(unprovable)]
+    )
 
     outcome = await loop(client).run(turn_request())
 
@@ -1006,17 +1154,128 @@ async def test_a_blocked_block_earns_one_rewrite_and_the_rewrite_is_released():
 
 
 @pytest.mark.asyncio
-async def test_the_rewrite_is_offered_once_and_the_second_failure_ends_the_turn():
+async def test_the_nudge_is_spent_on_its_call_and_never_becomes_transcript():
+    """The note funds one call and leaves no trace behind it.
+
+    A nudge in the durable transcript would be replayed into every later Turn of
+    the thread, and the model would read an instruction about an answer it can no
+    longer see. It stays out by construction rather than by being filtered: the
+    note is appended to the in-flight message list, and what is stored is blocks,
+    widgets, traces and the activity trail.
+    """
+    client = FakeClient(
+        [wants("get_analysis"), answer(UNPROVABLE), answer("Kết luận không có số.")]
+    )
+
+    outcome = await loop(client).run(turn_request())
+
+    carried = client.requests[-1].messages[-1]
+    assert carried.role is Role.SYSTEM
+    assert "withheld" in carried.content
+    # Nothing of it reaches what is kept: not the blocks, not the checkpoint.
+    stored = draft_content(
+        TurnDraft(
+            text=outcome.text,
+            rounds_used=outcome.rounds_used,
+            tool_calls=outcome.tool_calls,
+            blocks=outcome.blocks,
+            widgets=outcome.widgets,
+            progress=outcome.progress,
+        )
+    )
+    assert "withheld" not in json.dumps(stored, ensure_ascii=False)
+    assert all("withheld" not in block.text for block in outcome.blocks)
+
+
+@pytest.mark.asyncio
+async def test_a_buy_call_without_a_zone_or_a_reference_price_never_reaches_the_screen():
+    """The condition the inversion was not allowed to relax.
+
+    Fail-open lets a Turn answer around a paragraph it could not prove. It does
+    not let a priced buy call through: a recommendation missing its price zone or
+    its reference price is dropped exactly as before, and what the reader gets
+    instead is the backend saying which evidence was not there.
+    """
+    for draft in (
+        "[rec:FPT@2026-08-14] Nên mua FPT quanh vùng hiện tại.",
+        "[rec:FPT@2026-08-14] Bán FPT ngay bây giờ.",
+    ):
+        client = FakeClient([wants("get_analysis"), answer(draft), answer(draft)])
+
+        outcome = await loop(client).run(turn_request())
+
+        displayed = "\n\n".join(block.text for block in outcome.blocks)
+        assert all(
+            block.kind is not BlockKind.RECOMMENDATION for block in outcome.blocks
+        )
+        assert "Nên mua" not in displayed
+        assert "Bán FPT" not in displayed
+        # And the record still says a recommendation was refused, which is the
+        # dimension the ops query watches.
+        assert gate_outcomes(outcome).recommendation == "blocked"
+        assert outcome.degraded_codes
+
+
+# A recommendation about a symbol no tool in this Turn served: an integrity
+# failure, and one of the only four left. Figure-free on purpose, so it reaches
+# the Universe check rather than failing an attribution rule on the way.
+INTEGRITY_DRAFT = "[rec:XYZ@2026-08-14] Nên xem xét thêm."
+
+
+
+@pytest.mark.asyncio
+async def test_a_form_failure_survives_its_nudge_as_a_downgrade_not_a_dead_turn():
+    """The inverted default, measured at the loop.
+
+    `unknown_tool_call` is a marker naming a call this Turn never made — the
+    model's punctuation, not its arithmetic. It used to end the Turn, and Turns
+    ending this way were 58% of all of them. Now the model is nudged once, and
+    if the rewrite repeats the mistake the block is replaced by the backend's
+    sentence and the Turn completes.
+    """
     client = FakeClient(
         [wants("get_analysis"), answer(UNPROVABLE), answer(UNPROVABLE), answer("Muộn.")]
     )
 
     outcome = await loop(client).run(turn_request())
 
+    assert outcome.status is TurnStatus.COMPLETE
+    assert outcome.terminal_reason is None
+    assert outcome.degraded_codes == ("unknown_tool_call",)
+    # The nudge is spent once and only once: the lookup, the first answer, and
+    # the rewrite. A fourth answer is never asked for.
+    assert len(client.requests) == 3
+    # The unprovable figure never reaches the reader, and what replaces it says
+    # why in the reader's own language.
+    displayed = "\n\n".join(block.text for block in outcome.blocks)
+    assert "61,2" not in displayed
+    assert "chưa dẫn được về dữ liệu đã đăng ký" in displayed
+
+
+@pytest.mark.asyncio
+async def test_an_integrity_failure_still_ends_the_turn_after_its_one_rewrite():
+    """The four conditions the inversion did not touch, and must not.
+
+    A block about a symbol no tool served is a confident statement about
+    something this Turn has no evidence for — the class `docs/adr/0018` keeps as
+    a hard failure in every block. It earns the same single rewrite, and when
+    the rewrite repeats it the Turn ends rather than downgrading.
+    """
+    client = FakeClient(
+        [
+            wants("get_analysis"),
+            answer(INTEGRITY_DRAFT),
+            answer(INTEGRITY_DRAFT),
+            answer("Muộn."),
+        ]
+    )
+
+    outcome = await loop(client).run(turn_request())
+
     assert outcome.status is TurnStatus.INCOMPLETE
     assert outcome.terminal_reason == "grounding_failed"
-    assert outcome.grounding_failure_code == "unknown_tool_call"
-    # The third answer is never asked for: the rewrite was the last chance.
+    assert outcome.grounding_failure_code == "symbol_not_in_universe"
+    assert outcome.degraded_codes == ()
     assert len(client.requests) == 3
 
 
@@ -1025,15 +1284,17 @@ async def test_a_turn_the_gate_emptied_says_so_rather_than_showing_nothing():
     """The floor under a blocked Turn is a sentence, not a blank answer."""
     from src.agent.grounding import BLOCKED_TURN_NOTICE
 
-    client = FakeClient([wants("get_analysis"), answer(UNPROVABLE), answer(UNPROVABLE)])
+    client = FakeClient(
+        [wants("get_analysis"), answer(INTEGRITY_DRAFT), answer(INTEGRITY_DRAFT)]
+    )
 
     outcome = await loop(client).run(turn_request())
 
     assert [block.text for block in outcome.blocks] == [BLOCKED_TURN_NOTICE]
     assert outcome.blocks[0].citations == ()
     assert outcome.blocks[0].kind is BlockKind.PROSE
-    # Nothing of the withheld answer survives in it.
-    assert "61,2" not in outcome.blocks[0].text
+    # Nothing of the refused answer survives in it.
+    assert "XYZ" not in outcome.blocks[0].text
 
 
 @pytest.mark.asyncio
@@ -1041,7 +1302,7 @@ async def test_a_partly_proven_answer_keeps_its_proven_blocks_and_adds_no_notice
     """The notice is only for a Turn the Gate emptied."""
     from src.agent.grounding import BLOCKED_TURN_NOTICE
 
-    text = f"Phiên hôm nay đi ngang.\n\n{UNPROVABLE}"
+    text = f"Phiên hôm nay đi ngang.\n\n{INTEGRITY_DRAFT}"
     client = FakeClient([wants("get_analysis"), answer(text), answer(text)])
 
     outcome = await loop(client).run(turn_request())
@@ -1049,3 +1310,129 @@ async def test_a_partly_proven_answer_keeps_its_proven_blocks_and_adds_no_notice
     assert outcome.terminal_reason == "grounding_failed"
     assert [block.text for block in outcome.blocks] == ["Phiên hôm nay đi ngang."]
     assert BLOCKED_TURN_NOTICE not in [block.text for block in outcome.blocks]
+
+
+@pytest.mark.asyncio
+async def test_a_downgraded_block_is_never_nudged_twice():
+    """The ceiling holds whether the failure downgrades or refuses.
+
+    The nudge costs a whole model call, and a Turn that spends two of them on a
+    model that cannot fix its own reference has spent them to arrive at the same
+    sentence it would have written after one.
+    """
+    client = FakeClient(
+        [
+            wants("get_analysis"),
+            answer(UNPROVABLE),
+            answer(UNPROVABLE),
+            answer(UNPROVABLE),
+            answer("Muộn."),
+        ]
+    )
+
+    outcome = await loop(client).run(turn_request())
+
+    assert len(client.requests) == 3
+    assert outcome.status is TurnStatus.COMPLETE
+
+
+@pytest.mark.asyncio
+async def test_a_nudge_that_makes_the_answer_worse_keeps_the_earlier_draft(caplog):
+    """The regression the downgrade nudge introduced, and its floor.
+
+    Attempt 1 fails only degradable conditions, so its answer was releasable.
+    The nudge then presses the model to attach every figure to a reference, and a
+    reference attached to the wrong call is `figure_mismatch` — integrity, which
+    ends the Turn. Without a floor the reader loses an answer they would have
+    been given one call earlier, for a reason that had nothing to do with them.
+
+    Driven here through `symbol_not_in_universe` rather than `figure_mismatch`,
+    because it is the integrity condition this harness can reach: the test
+    catalog serves no registered field for a figure to disagree with. The path
+    under test is the same one — any integrity failure on the rewrite.
+    """
+    client = FakeClient(
+        [wants("get_analysis"), answer(UNPROVABLE), answer(INTEGRITY_DRAFT)]
+    )
+
+    with caplog.at_level("INFO"):
+        outcome = await loop(client).run(turn_request())
+
+    # The fallback ran, rather than the rewrite merely downgrading again.
+    assert any(
+        "kept the draft from before its nudge" in record.message
+        for record in caplog.records
+    )
+    assert any("symbol_not_in_universe" in record.message for record in caplog.records)
+    # The Turn survives on the pre-nudge draft rather than blanking.
+    assert outcome.status is TurnStatus.COMPLETE
+    assert outcome.terminal_reason is None
+    assert outcome.blocks
+    displayed = "\n\n".join(block.text for block in outcome.blocks)
+    assert "chưa dẫn được về dữ liệu đã đăng ký" in displayed
+    # And nothing of the rewrite the Gate refused reaches the screen.
+    assert "XYZ" not in displayed
+
+
+@pytest.mark.asyncio
+async def test_an_integrity_failure_on_the_first_attempt_has_nothing_to_fall_back_to():
+    """The floor is only under a draft that was already releasable.
+
+    A Turn refused on its first attempt never had a publishable answer, so there
+    is nothing to keep and the Gate still ends it.
+    """
+    client = FakeClient(
+        [wants("get_analysis"), answer(INTEGRITY_DRAFT), answer(INTEGRITY_DRAFT)]
+    )
+
+    outcome = await loop(client).run(turn_request())
+
+    assert outcome.status is TurnStatus.INCOMPLETE
+    assert outcome.terminal_reason == "grounding_failed"
+
+
+@pytest.mark.asyncio
+async def test_a_downgraded_prose_block_is_not_recorded_as_a_blocked_recommendation():
+    """The dimension has to mean what its name says.
+
+    Since the default inverted, twenty conditions downgrade on *any* block. Read
+    off the code list, a market summary with one misplaced bracket reports a
+    blocked recommendation it never attempted — and this is the dimension Phase
+    8's baseline reads to decide whether the inversion let false figures through.
+    """
+    client = FakeClient([wants("get_analysis"), answer(UNPROVABLE), answer(UNPROVABLE)])
+
+    outcome = await loop(client).run(turn_request())
+
+    assert outcome.degraded_codes  # something was downgraded
+    assert outcome.degraded_recommendations == 0
+    outcomes = gate_outcomes(outcome)
+    assert outcomes.recommendation == "not_applicable"
+    # The condition is still on the record, in the field that carries all of them.
+    assert outcomes.downgrades == outcome.degraded_codes
+
+
+@pytest.mark.asyncio
+async def test_one_condition_failing_three_blocks_says_it_once():
+    """Three copies of one sentence read as a stutter, not as three facts."""
+    text = "\n\n".join([UNPROVABLE] * 3)
+    client = FakeClient([wants("get_analysis"), answer(text), answer(text)])
+
+    outcome = await loop(client).run(turn_request())
+
+    notices = [block.text for block in outcome.blocks]
+    assert len(notices) == len(set(notices))
+    # Every occurrence is still counted, because the record is what Phase 8 reads.
+    assert len(outcome.degraded_codes) == 3
+
+
+@pytest.mark.asyncio
+async def test_every_downgrade_in_one_answer_is_recorded():
+    """One field per Turn would report the last condition as the only one."""
+    text = f"{UNPROVABLE}\n\nSố khác 44,5 [ev:nope#registered_fields.a.b.value]"
+    client = FakeClient([wants("get_analysis"), answer(text), answer(text)])
+
+    outcome = await loop(client).run(turn_request())
+
+    assert len(outcome.degraded_codes) == 2
+    assert gate_outcomes(outcome).downgrades == outcome.degraded_codes

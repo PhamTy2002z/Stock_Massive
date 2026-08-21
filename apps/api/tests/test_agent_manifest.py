@@ -132,7 +132,37 @@ def test_a_blocked_recommendation_is_recorded_as_an_outcome():
         "grounding": "blocked",
         "recommendation": "blocked",
         "failure_code": "window_health_refusal",
+        "downgrades": [],
     }
+
+
+def test_every_downgrade_is_recorded_and_not_only_the_first():
+    """`failure_code` reports one condition; an answer now has several.
+
+    Twenty conditions downgrade a block instead of ending the Turn, on any block
+    rather than only on a recommendation, so a Turn routinely answers around
+    more than one. The record that decides whether inverting the Gate's default
+    let a false figure through is the record that lists all of them.
+    """
+    built = manifest(
+        status="complete",
+        terminal_reason=None,
+        outcomes=GateOutcome(
+            recommendation="blocked",
+            failure_code="missing_value",
+            downgrades=("missing_value", "malformed_reference", "unknown_tool_call"),
+        ),
+    )
+
+    wire = built.as_wire()["outcomes"]
+    assert wire["downgrades"] == [
+        "missing_value",
+        "malformed_reference",
+        "unknown_tool_call",
+    ]
+    # The single-value field an older reader knows still answers, and answers
+    # with the first of them rather than the last.
+    assert wire["failure_code"] == "missing_value"
 
 
 # --- the Risk Notice -------------------------------------------------------

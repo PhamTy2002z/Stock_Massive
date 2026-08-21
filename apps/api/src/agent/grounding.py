@@ -149,26 +149,38 @@ class BlockKind(str, Enum):
     RECOMMENDATION = "recommendation"
 
 
-#: The Gate conditions a recommendation fails when the *evidence* for it was
-#: not there — as opposed to the conditions it fails when the block says
-#: something its evidence does not.
+#: The Gate conditions where the block says something its own evidence does not.
 #:
-#: The distinction decides what the reader gets. Both classes keep the block off
-#: the screen; only this one lets the Turn carry on and say why, because "no
-#: registered price zone could be computed for this symbol today" is an answer,
-#: and a blank Turn is not. A figure that contradicts its own citation is not in
-#: here and never will be: that is the confident false number the whole design
-#: exists to stop, and it ends the Turn.
-DEGRADABLE_GATE_CODES = frozenset(
+#: These four end the Turn, and they are the only four that do. The boundary is
+#: **integrity**, not severity: a figure that contradicts the trace it cites, a
+#: figure attributed to the wrong session, a recommendation with no session at
+#: all, and a block about a symbol no tool in this Turn answered about. Each one
+#: is a confident false statement, which is the single output this whole design
+#: exists to stop — ``docs/adr/0018``: *"A figure that conflicts with the cited
+#: Tool Call Trace remains a hard failure in every block."*
+#:
+#: Everything else is an **availability or form** failure: the evidence was not
+#: there, or the marker naming it was written wrong. Those are facts about this
+#: Turn's data and about the model's punctuation. Neither is a false statement,
+#: and neither is worth a blank screen — which is what they cost, measured: 58%
+#: of Turns ended ``grounding_failed`` and the simplest category of valid
+#: question scored 0 out of 30.
+#: The four ``*_mismatch`` codes below are built from a loop variable rather than
+#: written as literals (``_registered``), which is how they were missed when this
+#: boundary was first drawn: a serialized field disagreeing with its Signal
+#: Registry declaration is *the* case of a figure that cannot be narrated under
+#: the reading it claims. They blocked before the default was inverted and they
+#: block after it. Nothing about them is availability or form.
+INTEGRITY_GATE_CODES = frozenset(
     {
-        "missing_reference_price",
-        "missing_price_zone",
-        "unregistered_price_zone",
-        "window_health_refusal",
-        "no_supporting_field",
-        "no_contradictory_evidence",
-        "news_only_basis",
-        "unreferenced_figure",
+        "figure_mismatch",
+        "trading_day_mismatch",
+        "missing_trading_day",
+        "symbol_not_in_universe",
+        "unit_mismatch",
+        "claim_mismatch",
+        "source_mismatch",
+        "interpretation_mismatch",
     }
 )
 
@@ -184,9 +196,30 @@ DEGRADED_RECOMMENDATION_NOTICE = (
     "dữ liệu hiện có chứng minh được."
 )
 
+#: The same sentence for a block that was never a recommendation.
+#:
+#: A separate frame because most of the conditions below fire while a marker is
+#: being resolved, which happens before anything knows whether the block was
+#: going to carry a recommendation at all. Telling a reader who asked about
+#: today's market that no *price zone* was recommended would answer a question
+#: they did not ask.
+DEGRADED_PROSE_NOTICE = (
+    "Một đoạn trong câu trả lời này chưa dẫn được về dữ liệu đã đăng ký "
+    "({reason}), nên tôi giữ lại đoạn đó. Những phần còn lại là những gì dữ "
+    "liệu hiện có chứng minh được."
+)
+
 #: One Vietnamese clause per degradable condition, so the sentence above names
 #: what was missing instead of gesturing at it.
+#:
+#: Two rules hold for every clause here, and a new one has to keep both. **No
+#: figure**: nothing validates these sentences, so a number in one is a number
+#: nobody proved. **No internal name**: not a field path, not a tool-call id,
+#: not a Signal Registry key. The reader is told which *kind* of evidence was
+#: missing, because that is the part they can act on — the field path would tell
+#: them nothing and tells an attacker something.
 DEGRADED_REASON_TEXT = {
+    # The eight that were degradable before this Turn's default was inverted.
     "missing_reference_price": "chưa có giá tham chiếu nào được tính trong mã nguồn",
     "missing_price_zone": "chưa có vùng giá nào được tính trong mã nguồn",
     "unregistered_price_zone": "vùng giá được nêu không phải một chỉ số đã đăng ký",
@@ -195,7 +228,53 @@ DEGRADED_REASON_TEXT = {
     "no_contradictory_evidence": "chưa nêu được bằng chứng ngược chiều",
     "news_only_basis": "vùng giá chỉ dựa trên nguồn tin, không phải số liệu tính được",
     "unreferenced_figure": "có con số chưa gắn được với bằng chứng nào",
+    # Availability: the evidence was asked for and is not there. Nothing was
+    # stated wrongly; there was nothing to state.
+    "missing_value": "chỉ số được dẫn không có giá trị cho phiên này",
+    "missing_as_of": "chỉ số được dẫn không kèm ngày nó được tính",
+    "refused_field": "chỉ số được dẫn đã bị từ chối nên không mang giá trị",
+    "refused_tool_call": "bước đọc dữ liệu được dẫn đã trả về từ chối",
+    "unfinished_tool_call": "bước đọc dữ liệu được dẫn chưa có kết quả",
+    "field_not_registered": "chỉ số được dẫn không nằm trong danh mục đã đăng ký",
+    "unclassified_claim": "bằng chứng được dẫn không khai báo loại nhận định",
+    # Form: the evidence may well exist, but the marker pointing at it was
+    # written wrong. A reader cannot act on the difference, so the clause says
+    # what it means for them — the number could not be traced.
+    "unknown_field_path": "đường dẫn tới chỉ số không có trong kết quả đã đọc",
+    "uncitable_field_path": "đường dẫn trỏ vào bên trong một chỉ số thay vì vào chính nó",
+    "unknown_tool_call": "trích dẫn trỏ tới một bước đọc dữ liệu không có trong lượt này",
+    "incomplete_citation": "một trích dẫn bị viết dở",
+    "malformed_reference": "một trích dẫn viết sai cú pháp",
 }
+
+#: The clause for a condition nobody has written one for yet.
+#:
+#: It exists because the default is now degrade: a condition added to
+#: ``grounding.py`` next month is degradable the moment it is written, and
+#: without this it would degrade into an *empty* notice — a block with no text,
+#: which is the blank screen this phase removed, arriving by a new door.
+DEGRADED_REASON_FALLBACK = "bằng chứng bắt buộc chưa đủ"
+
+
+def degraded_notice(code: str, *, recommendation: bool) -> str:
+    """The reader's sentence for a downgraded block. Never carries a figure."""
+
+    reason = DEGRADED_REASON_TEXT.get(code, DEGRADED_REASON_FALLBACK)
+    frame = DEGRADED_RECOMMENDATION_NOTICE if recommendation else DEGRADED_PROSE_NOTICE
+    return frame.format(reason=reason)
+
+
+def is_recommendation_draft(text: str) -> bool:
+    """Whether a block the Gate refused was trying to be a recommendation.
+
+    Read from the raw draft rather than from the failure, because most Gate
+    conditions fire while a marker is being resolved — before anything knows
+    what kind of block it was going to be. The same detection
+    :meth:`RecommendationValidator.validate` uses, so the two cannot disagree
+    about what a ``rec`` marker is.
+    """
+
+    return any(marker.kind == "rec" for marker in _markers(text))
 
 
 #: What a blocked Turn says when the Gate kept every one of its blocks off the
@@ -316,15 +395,26 @@ class GroundingFailure(Exception):
         Read by the loop, never by the model: there is no field it can set to
         make a failure degradable, exactly as there is none to make a block
         pass.
-        """
-        return self.code in DEGRADABLE_GATE_CODES
 
-    def notice(self) -> str:
-        """The reader's sentence for this failure, or the empty string."""
-        reason = DEGRADED_REASON_TEXT.get(self.code)
-        if reason is None:
+        Written as an exclusion rather than as a membership test, and that is
+        the whole change: the default is now *degrade*. A condition added to
+        this module later degrades until somebody decides it is an integrity
+        failure, which is the direction that fails towards an answer instead of
+        towards a blank screen. It inverts a default that was measured killing
+        58% of Turns.
+        """
+        return self.code not in INTEGRITY_GATE_CODES
+
+    def notice(self, *, recommendation: bool = True) -> str:
+        """The reader's sentence for this failure, or the empty string.
+
+        Empty for an integrity failure and only for one: that block is refused
+        outright, and a sentence explaining why would be a sentence about a
+        number the Gate just decided not to trust.
+        """
+        if not self.degradable:
             return ""
-        return DEGRADED_RECOMMENDATION_NOTICE.format(reason=reason)
+        return degraded_notice(self.code, recommendation=recommendation)
 
 
 @dataclass(frozen=True)
@@ -350,7 +440,7 @@ class Citation:
     """One resolved reference, as the backend describes it to everyone.
 
     This is the shape the visible answer takes its unit and ``as_of`` from, the
-    shape the *Sources & methods* surface renders, and the shape the Evidence
+    shape the citation surface behind a claim renders, and the shape the Evidence
     Manifest keeps forever. One shape rather than three, because three would let
     the answer and the record disagree about what was cited.
     """
@@ -738,6 +828,11 @@ class TraceIndex:
         # The registry is the authority; a serialized result that disagrees with
         # it is a tampered or stale projection, and either way the figure cannot
         # be narrated under a reading the registry never sanctioned.
+        #
+        # The four codes are built from ``key``, so they do not appear as
+        # literals anywhere. :data:`INTEGRITY_GATE_CODES` names all four
+        # explicitly — a grep for ``GroundingFailure("`` does not find them, and
+        # that is exactly how they were once left out of that set.
         for key, expected in (
             ("unit", declared.unit.value),
             ("claim", declared.claim.value),
@@ -1289,6 +1384,7 @@ def _user_citation(label: str) -> Citation:
 
 __all__ = [
     "GROUNDING_FAILED",
+    "INTEGRITY_GATE_CODES",
     "BlockKind",
     "Citation",
     "EvidenceRef",
@@ -1297,6 +1393,8 @@ __all__ = [
     "RecommendationValidator",
     "ReleasedBlock",
     "TraceIndex",
+    "degraded_notice",
     "display_text",
     "figures_agree",
+    "is_recommendation_draft",
 ]
