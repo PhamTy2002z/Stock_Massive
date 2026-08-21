@@ -244,6 +244,18 @@ class Settings(BaseSettings):
     # Explicit paid-call switch for the boot-time Capability Probe. Test code
     # turns this off by name; no code path guesses that pytest is running.
     llm_capability_probe_enabled: bool = True
+    # Breaker rate-limit dùng chung qua Redis (`core/llm/breaker.py`). Bật mặc
+    # định vì nó chỉ tiết kiệm đúng một request đã bị tuyến từ chối; tắt được
+    # bằng một biến vì đây là cơ chế mới nhất trong tuyến LLM. Redis chết thì
+    # breaker admit lời gọi — fail-open, khác `core/quota.py` một cách có chủ ý,
+    # và lý do nằm ở docstring của module đó.
+    llm_route_breaker_enabled: bool = True
+    # `cache_control` trên prefix ổn định của system prompt. Mặc định **tắt**:
+    # nó là cú pháp của Anthropic mà một tuyến OpenAI-compatible có thể từ chối,
+    # và `cache_control` đặt sai chỗ phá cache thay vì tạo cache. Quy trình bật:
+    # đặt cờ, chạy Capability Probe, và chỉ giữ cờ nếu check
+    # `prompt_cache_control` xanh.
+    llm_prompt_cache_control_enabled: bool = False
 
     # Câu hỏi gợi ý dưới mỗi câu trả lời (docs/adr/0020). Một lần gọi model rẻ
     # nữa cho mỗi Turn hoàn tất, nên nó có công tắc riêng: giá trị của nó là

@@ -24,6 +24,26 @@ from typing import Any, Mapping
 # Prices are published per million tokens; costs are in USD.
 TOKENS_PER_PRICE_UNIT = 1_000_000
 
+# Every deadline is clamped where it is configured rather than where it is used,
+# and the reason is a real crash rather than tidiness: a timeout large enough to
+# overflow ``time_t`` raises inside ``Lock.acquire(timeout=)`` on macOS and takes
+# the whole batch down with it (cpython #83220). One day is far past any answer
+# worth waiting for, and one second is the floor below which a configuration
+# value is a typo rather than an impatient operator.
+MIN_TIMEOUT_SECONDS = 1.0
+MAX_TIMEOUT_SECONDS = 86_400.0
+
+
+def clamp_timeout(seconds: float) -> float:
+    """One deadline, inside the range every waiter can express."""
+    try:
+        value = float(seconds)
+    except (TypeError, ValueError):
+        return MIN_TIMEOUT_SECONDS
+    if value != value:  # NaN, which compares false against every bound
+        return MIN_TIMEOUT_SECONDS
+    return max(MIN_TIMEOUT_SECONDS, min(MAX_TIMEOUT_SECONDS, value))
+
 
 class Workload(str, Enum):
     """The two lanes a model is chosen for, never inside a loop.
@@ -123,13 +143,20 @@ class LLMRoute:
     #: come back with the tool-call history. Answered per route for the same
     #: reason ``streaming`` is: it is a property of what is on the other end.
     reasoning_history: bool = False
+    #: Whether this route accepts ``cache_control`` breakpoints on message
+    #: content. Off until the Capability Probe's ``prompt_cache_control`` check
+    #: says otherwise, because the field is Anthropic's spelling and an
+    #: OpenAI-compatible route is free to refuse the request that carries it —
+    #: and a breakpoint in the wrong place voids a cache rather than filling one.
+    prompt_cache_control: bool = False
 
     def __repr__(self) -> str:
         marker = "set" if self.api_key else "missing"
         return (
             f"LLMRoute(base_url={self.base_url!r}, api_key=<{marker}>, "
             f"streaming={self.streaming}, "
-            f"reasoning_history={self.reasoning_history})"
+            f"reasoning_history={self.reasoning_history}, "
+            f"prompt_cache_control={self.prompt_cache_control})"
         )
 
     __str__ = __repr__
@@ -159,11 +186,34 @@ class LLMConfig:
     models: Mapping[Workload, str]
     pricing: PricingTable
     lanes: BudgetLanes
+    #: How long *this process* waits for one HTTP attempt. Enforced by ``httpx``
+    #: on the socket, and distinct from the deadline the route keeps for itself:
+    #: an expiry here is a ``DeadlineExpired``, while a 504 from the route is a
+    #: ``GatewayTimeout``, and the two have different remedies.
     request_timeout_seconds: float = 120.0
     eval_run_cost_ceiling_usd: float | None = 2.5
+    #: The shared Redis rate-limit breaker (``core/llm/breaker.py``). A kill
+    #: switch rather than a tuning knob: the breaker fails open, so turning it
+    #: off returns the deployment to discovering each rate limit per caller.
+    route_breaker_enabled: bool = True
 
     def model_for(self, workload: Workload) -> str:
         return self.models[workload]
+
+    def alternate_model(self, workload: Workload) -> tuple[str, Workload] | None:
+        """The other model of the configured pair, with the workload it is priced under.
+
+        Returned as a pair because a failover that changed the model without
+        changing the workload would be reserved against the wrong prices, and
+        ``SpendAdmission.reserve`` refuses that combination outright — which is
+        the check that makes this failover legitimate rather than the silent
+        transport-level fallback ``transport.py`` refuses to do.
+        """
+        other = Workload.BATCH if workload is Workload.SESSION else Workload.SESSION
+        candidate = self.models.get(other, "").strip()
+        if not candidate or candidate == self.models.get(workload, "").strip():
+            return None
+        return candidate, other
 
     def prices_for(self, workload: Workload) -> TokenPrices:
         return self.pricing.for_workload(workload)
@@ -200,6 +250,9 @@ def llm_config_from_settings(settings: Any | None = None) -> LLMConfig:
             api_key=settings.llm_api_key.strip(),
             streaming=bool(settings.llm_streaming_enabled),
             reasoning_history=bool(settings.llm_reasoning_history_required),
+            prompt_cache_control=bool(
+                getattr(settings, "llm_prompt_cache_control_enabled", False)
+            ),
         ),
         models=MappingProxyType(
             {
@@ -220,17 +273,21 @@ def llm_config_from_settings(settings: Any | None = None) -> LLMConfig:
             emergency_usd=settings.llm_budget_emergency_usd,
             eval_usd=settings.llm_budget_eval_usd,
         ),
-        request_timeout_seconds=settings.llm_request_timeout_seconds,
+        request_timeout_seconds=clamp_timeout(settings.llm_request_timeout_seconds),
         eval_run_cost_ceiling_usd=eval_ceiling if eval_ceiling > 0 else None,
+        route_breaker_enabled=bool(getattr(settings, "llm_route_breaker_enabled", True)),
     )
 
 
 __all__ = [
+    "MAX_TIMEOUT_SECONDS",
+    "MIN_TIMEOUT_SECONDS",
     "BudgetLanes",
     "LLMConfig",
     "LLMRoute",
     "PricingTable",
     "TokenPrices",
     "Workload",
+    "clamp_timeout",
     "llm_config_from_settings",
 ]

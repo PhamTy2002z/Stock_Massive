@@ -11,13 +11,18 @@ What the hand-rolling buys, concretely:
 - the **JSON-parse invariant** on every returned ``arguments``,
 - ``auth_unavailable`` as a first-class class that is **never retried**.
 
-There is no automatic model fallback. A fallback route may have different
-capabilities and different prices, which invalidates the monetary ceiling that
-was reserved against the original model (``docs/adr/0014``).
+**This transport never changes the model it was given.** A different model has
+different prices, so swapping one in under a reservation made for another spends
+against a ceiling that was never checked (``docs/adr/0014``). Failover exists one
+layer up, in ``client.py``, precisely because a reservation can be made there:
+the client asks admission again, for the other model and under the workload that
+model is priced in, and ``SpendAdmission.reserve`` refuses the pair if they do
+not match.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -25,11 +30,12 @@ from collections.abc import Mapping
 from typing import Any
 
 import httpx
-from .config import LLMConfig
+from .config import LLMConfig, clamp_timeout
 from .errors import (
     AuthUnavailable,
     ContentPolicyBlocked,
     ContextOverflow,
+    DeadlineExpired,
     GatewayTimeout,
     RouteRateLimited,
     LLMError,
@@ -42,7 +48,7 @@ from .errors import (
     llm_metrics,
     redact,
 )
-from .protocol import Completion, CompletionRequest, Role, Usage
+from .protocol import CACHE_CONTROL, Completion, CompletionRequest, Role, Usage
 from .streaming import StreamAssembler, parse_tool_calls
 
 logger = logging.getLogger(__name__)
@@ -61,6 +67,27 @@ REASONING_HISTORY_PLACEHOLDER = " "
 SSE_DATA_PREFIX = "data:"
 SSE_DONE = "[DONE]"
 
+# How much of a refused response's body is read, and for how long. Ported from
+# ``openclaw#95108``: ``read()`` on a stream is unbounded in two directions at
+# once — a body that never ends, and a server that opens one and then stops
+# sending — and the second is the one that hurts, because the request already
+# failed and this is the error path.
+#
+# 8 KiB is far more than the 500 characters classification looks at and far less
+# than a body worth holding in memory on a failure. The deadline is enforced by
+# ``asyncio.wait_for`` around the whole read: unlike the synchronous case, where
+# ``iter_bytes`` blocks *inside* the socket read and a check between chunks never
+# runs, an async read yields to the event loop, so the timer fires and the
+# response is closed under it.
+ERROR_BODY_MAX_BYTES = 8_192
+ERROR_BODY_MAX_SECONDS = 5.0
+
+# How many trailing non-system messages carry a cache breakpoint. Two, so the
+# prefix that grew by one exchange is still readable from cache on the next call;
+# a breakpoint on every message would spend the route's small allowance of them
+# on content that changes before it is read back.
+CACHE_TAIL_MESSAGES = 2
+
 
 class OpenAICompatibleTransport:
     """The network transport used only behind the reserved public client."""
@@ -72,13 +99,43 @@ class OpenAICompatibleTransport:
     ) -> None:
         self._config = config
         self._owns_client = http_client is None
-        self._http = http_client or httpx.AsyncClient(
-            timeout=httpx.Timeout(config.request_timeout_seconds)
+        self._http = http_client or self._new_client()
+
+    def _new_client(self) -> httpx.AsyncClient:
+        """One HTTP client, with this process's own deadline on the socket.
+
+        Clamped rather than passed through: ``clamp_timeout`` explains why a
+        deadline nobody can express is a crash rather than a long wait.
+        """
+        return httpx.AsyncClient(
+            timeout=httpx.Timeout(clamp_timeout(self._config.request_timeout_seconds))
         )
 
     async def aclose(self) -> None:
         if self._owns_client:
             await self._http.aclose()
+
+    async def rebuild(self) -> bool:
+        """Throw this transport's connections away and build fresh ones.
+
+        Called after our own deadline expired, which a connection wedged in the
+        pool reproduces on the next call and on every call after it. The cost is
+        one handshake; the alternative is a route that looks dead until the
+        process restarts.
+
+        Answers ``False`` when the client was injected: a caller that supplied
+        its own ``AsyncClient`` owns its lifecycle, and closing it here would
+        break the next user of it rather than this one.
+        """
+        if not self._owns_client:
+            return False
+        stale = self._http
+        self._http = self._new_client()
+        try:
+            await stale.aclose()
+        except Exception as exc:  # noqa: BLE001 - the point was to stop using it
+            logger.debug("The stale LLM transport did not close cleanly: %s", exc)
+        return True
 
     async def dispatch(self, request: CompletionRequest) -> Completion:
         """Make exactly one paid attempt, returning or raising a typed result.
@@ -106,7 +163,10 @@ class OpenAICompatibleTransport:
         Only assistant turns that actually carry tool calls are touched, so a
         route without the requirement sees exactly what it saw before.
         """
-        wire = [message.as_wire() for message in request.messages]
+        cache_control = self._config.route.prompt_cache_control
+        wire = [message.as_wire(cache_control=cache_control) for message in request.messages]
+        if cache_control:
+            _mark_tail_breakpoints(wire)
         if not self._config.route.reasoning_history:
             return wire
         for payload in wire:
@@ -137,7 +197,7 @@ class OpenAICompatibleTransport:
                 headers=self._headers(),
             ) as response:
                 if response.status_code >= 400:
-                    body = (await response.aread()).decode("utf-8", "replace")
+                    body = await _read_error_body(response)
                     raise self._classified(
                         response.status_code, body, response.headers
                     )
@@ -152,9 +212,11 @@ class OpenAICompatibleTransport:
                     if chunk is not None:
                         assembler.add_chunk(chunk)
         except httpx.RequestError as exc:
-            # Covers TimeoutException, which subclasses it: a route that did not
-            # answer and a route that could not be reached are the same fact
-            # from here, and both are retryable.
+            # A route that could not be reached and a route that stopped talking
+            # are both retryable, but they are not the same fact: a
+            # ``TimeoutException`` is *our* deadline expiring, which a wedged
+            # connection reproduces on the next call, so it is classified as one
+            # and the client rebuilds this transport before asking again.
             raise self._timeout(
                 exc,
                 attempt=RouteAttempt(
@@ -196,9 +258,8 @@ class OpenAICompatibleTransport:
                 headers=self._headers(),
             )
         except httpx.RequestError as exc:
-            # Covers TimeoutException, which subclasses it: a route that did not
-            # answer and a route that could not be reached are the same fact
-            # from here, and both are retryable.
+            # Split the same way the streamed path splits it: our own expiry is
+            # a ``DeadlineExpired``, an unreachable route is a ``GatewayTimeout``.
             #
             # No byte count: a non-streaming request either has its whole body
             # or has none of it, so the number would always be zero and would
@@ -318,9 +379,97 @@ class OpenAICompatibleTransport:
     def _timeout(
         self, exc: Exception, *, attempt: RouteAttempt | None = None
     ) -> GatewayTimeout:
-        error = GatewayTimeout(f"the route did not answer: {exc}", attempt=attempt)
+        """The transport's own failure, classified by whose deadline it was.
+
+        Counted under one metric either way. The counter answers "how often does
+        the route not answer", which both of these are; the class answers "what
+        should be done about it", which they differ on.
+        """
+        if isinstance(exc, httpx.TimeoutException):
+            error: GatewayTimeout = DeadlineExpired(
+                f"this process stopped waiting for the route: {exc}", attempt=attempt
+            )
+        else:
+            error = GatewayTimeout(f"the route could not be reached: {exc}", attempt=attempt)
         llm_metrics().record_gateway_timeout(str(error))
         return error
+
+
+def _mark_tail_breakpoints(wire: list[dict[str, Any]]) -> None:
+    """Put a cache breakpoint on the last two non-system messages.
+
+    Done on the wire payload rather than on the ``Message`` objects: where the
+    stable prefix ends is knowledge the *caller* has and states in segments,
+    while where the conversation currently ends is knowledge only the request
+    has — and it changes on every call, so it is not a property to freeze into
+    the transcript.
+
+    A message whose content is not a plain string is left alone. It either
+    already carries blocks of its own, in which case its last block gets the
+    marker, or it carries none, in which case there is nothing to mark.
+    """
+    marked = 0
+    for index in range(len(wire) - 1, -1, -1):
+        payload = wire[index]
+        if payload.get("role") == Role.SYSTEM.value:
+            continue
+        content = payload.get("content")
+        if isinstance(content, str):
+            payload["content"] = [
+                {"type": "text", "text": content, "cache_control": dict(CACHE_CONTROL)}
+            ]
+        elif isinstance(content, list) and content:
+            block = dict(content[-1])
+            block["cache_control"] = dict(CACHE_CONTROL)
+            payload["content"] = [*content[:-1], block]
+        else:
+            continue
+        marked += 1
+        if marked >= CACHE_TAIL_MESSAGES:
+            return
+
+
+async def _read_error_body(response: httpx.Response) -> str:
+    """As much of a refused body as classification needs, and no more.
+
+    Bounded in bytes and in time, and the response is closed either way: a route
+    that opens an error body and then stops sending would otherwise hold this
+    call for the whole request deadline *after* it has already failed.
+
+    Whatever arrived is returned. A partial body classifies as well as a whole
+    one — the markers ``classify_status`` matches are at the start of a message,
+    not the end — and an empty string falls through to the unclassified branch,
+    which is the pre-existing behaviour.
+    """
+
+    chunks: list[bytes] = []
+    received = 0
+
+    async def collect() -> None:
+        nonlocal received
+        async for chunk in response.aiter_bytes():
+            chunks.append(chunk)
+            received += len(chunk)
+            if received >= ERROR_BODY_MAX_BYTES:
+                return
+
+    try:
+        await asyncio.wait_for(collect(), timeout=ERROR_BODY_MAX_SECONDS)
+    except (TimeoutError, asyncio.TimeoutError):
+        logger.warning(
+            "The LLM route opened an error body and stopped sending; keeping the "
+            "%d byte(s) that arrived",
+            received,
+        )
+    except (httpx.RequestError, httpx.StreamError) as exc:
+        logger.debug("The LLM route's error body could not be read: %s", exc)
+    finally:
+        try:
+            await response.aclose()
+        except Exception as exc:  # noqa: BLE001 - already on the failure path
+            logger.debug("The refused response did not close cleanly: %s", exc)
+
+    return b"".join(chunks)[:ERROR_BODY_MAX_BYTES].decode("utf-8", "replace")
 
 
 def _decode_sse_line(line: str) -> dict[str, Any] | None:
@@ -396,7 +545,10 @@ def build_transport(
 
 
 __all__ = [
+    "CACHE_TAIL_MESSAGES",
     "CHAT_COMPLETIONS_PATH",
+    "ERROR_BODY_MAX_BYTES",
+    "ERROR_BODY_MAX_SECONDS",
     "OpenAICompatibleTransport",
     "build_transport",
 ]
