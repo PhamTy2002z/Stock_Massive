@@ -147,7 +147,17 @@ async def test_a_non_universe_symbol_gets_the_shared_structured_refusal():
 
     result = await catalog.dispatch("market_behavior", {"symbol": SYMBOL}, context())
 
-    assert result == {"reason": "not_in_universe", "suggestions": []}
+    assert result == {
+        "reason": "not_in_universe",
+        "suggestions": [],
+        # The refusal now says what to do next, from the closed table in
+        # ``tools/catalog.py``. Additive: the Structured Refusal itself is
+        # unchanged, and nothing branches on this key.
+        "hint": (
+            "this symbol is outside the covered Universe; ask about one of the "
+            "alternatives this refusal lists, or tell the reader it is not covered"
+        ),
+    }
 
 
 @pytest.mark.asyncio

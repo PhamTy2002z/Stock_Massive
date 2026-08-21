@@ -77,8 +77,14 @@ cannot name is a phase it cannot publish.
 
 ## Follow-up suggestions are generated, and they are batch work
 
-A completed Turn now ends with up to five follow-up questions, stored on the message as
+A completed Turn now ends with **two** follow-up questions, stored on the message as
 `suggestions` and rendered under the answer.
+
+Two rather than five: a panel long enough to scan is a menu the reader has to triage,
+and the questions that filled it out were the generic ones — questions that would read
+the same under any answer. The prompt asks for one that goes deeper into a figure the
+answer actually stated and one that widens the same subject, and it is shown enough of
+the answer to name what it is following up on.
 
 They are produced by **one additional provider call on the batch workload** — the cheap
 model, `Workload.BATCH` under ADR-0014, charged to the same owner as the Turn that

@@ -21,9 +21,12 @@ export { MetricComparison } from "./metric-comparison"
 export { RankedSymbols } from "./ranked-symbols"
 export { MetricTrend } from "./metric-trend"
 export { RelativePosition } from "./relative-position"
+export { QuarterlyFinancials } from "./quarterly-financials"
 export { WIDGET_NAMES } from "./types"
 export type {
   CrossSymbolData,
+  PeriodFigures,
+  PeriodsData,
   RankingData,
   SeriesData,
   WidgetData,

@@ -43,6 +43,7 @@ Twice, on both sides of persistence.
 | `ranked_symbols` | ordered Universe screening results | new, mobile-first ranked list; bars only where their length carries meaning |
 | `metric_trend` | a registered analytical field over a fixed historical window | a registry-owned generic trend leaf extracted from the existing Recharts patterns |
 | `relative_position` | where a value sits against its own history or the Universe | a new accessible range/percentile strip informed by the existing range-card primitive |
+| `quarterly_financials` | stored statement figures across the reporting periods a lookup returned | added by ADR-0023; a table rather than a picture, drawn with the same `WidgetTable` every other entry carries as its accessible equivalent |
 
 `Sparkline` may be reused as an internal primitive but is not model-selectable. Pie,
 radar, candlestick, 3D, arbitrary specs, and image generation are outside the v1
@@ -71,9 +72,14 @@ band, which is its one inline graphic.
 - The answer starts with a clear conclusion in two to four concise bullets.
 - A Widget appears only when a visual makes a comparison, ranking, trend, or
   relative position easier to understand than text. A single value stays text.
-- The default ceiling is **one Widget per answer**; a second requires an explicit
-  user request. This is the anti-spam rule, and it is a protocol constraint rather
-  than a style preference.
+- The default ceiling is **three Widgets per answer**; a fourth requires an
+  explicit user request. This is the anti-spam rule, and it is a protocol
+  constraint rather than a style preference. It was **one** here originally, and
+  `docs/specs/0004` D11 raised it: one picture per answer cannot serve a question
+  about several things at once, which is most of the questions this product is
+  for. ADR-0023 records the change and the measurement behind it. The user's own
+  words remain the only thing that raises it further (`user_requested_multiple`),
+  and `WIDGET_CEILING` in `apps/api/src/agent/widgets.py` is the authority.
 - Formulae, method names, sources, and implementation detail live under **View
   details**.
 

@@ -92,6 +92,8 @@ from src.core.llm.errors import MAX_TOOL_ATTEMPTS, redact
 
 from .blocks import split_blocks
 from .context import (
+    CHARS_PER_TOKEN,
+    MESSAGE_OVERHEAD_TOKENS,
     ConstructedContext,
     ConstructedContextTooLarge,
     ContextBudget,
@@ -102,6 +104,13 @@ from .context import (
     estimate_tokens,
 )
 from .events import Activity, TurnPublisher, append_step
+from .guardrails import (
+    GuardrailLadder,
+    ObservedCall,
+    PlannedCall,
+    RoundJudgement,
+    Verdict,
+)
 from .grounding import (
     BLOCKED_TURN_NOTICE,
     GROUNDING_FAILED,
@@ -118,12 +127,15 @@ from .grounding import (
 )
 from .progress import (
     ProgressSource,
+    block_source_ids,
     found_detail,
     merge_sources,
     queries_of,
     searching_detail,
+    sources_by_call,
     sources_of,
 )
+from .tools.spillover import RoundResult, SpilloverBudget, spill_round
 from .prompt import (
     AnswerEvidence,
     AnswerKind,
@@ -150,6 +162,12 @@ logger = logging.getLogger(__name__)
 MAX_TOOL_ROUNDS = 4
 
 # ``docs/adr/0008``: in-process is correct because uvicorn runs a single worker.
+#
+# The default only. ``service.py`` wires the semaphore from the same configured
+# ceiling the ledger checks (``UserCeilings.active_turns_system``), because the
+# two enforce one number from opposite sides — the ledger counts active rows
+# across the deployment, the semaphore counts running tasks in this process —
+# and a deployment that raised one and not the other would have raised nothing.
 SESSION_CONCURRENCY = 3
 
 # What one call may produce, reasoning included — a reasoning model bills its
@@ -295,6 +313,35 @@ EXTERNAL_TOOL_EXHAUSTED_MESSAGE = (
     "already gathered."
 )
 
+# What share of one call's constructed context a single round of tool results may
+# claim, before the largest of them is replaced by a preview
+# (``tools/spillover.py`` rung three).
+#
+# A quarter, and the arithmetic is the argument: the Contract alone is about a
+# quarter of ``TURN_CONTEXT_PER_CALL``, the Turns behind this one need room, and
+# the answer is reserved separately. Measured against sixty days of stored
+# traces this ceiling is not reached by an ordinary round — the fattest Turn on
+# record produced 61 KB of results across 62 calls and four rounds — which is
+# the intent: rung three is for the round that fans out further than any round
+# has yet, not a tax on the ones that do not.
+ROUND_RESULT_SHARE = 0.25
+
+# What a guardrail nudge is priced at, and the length it is held to.
+#
+# One reservation rather than a measurement of the sentences that happen to
+# apply, for the reason ``REPAIR_NOTE_TOKENS`` is: the budget that funds the call
+# and the ceiling the context is constructed against must not disagree with the
+# message that actually goes out. The ladder's guidance is one sentence per
+# condition and there are three conditions, so this is an upper bound with room
+# to spare — and the note is truncated to it, so the bound cannot be exceeded by
+# a sentence somebody lengthens later.
+GUARDRAIL_NOTE_TOKENS = 160
+# The characters that fit inside that reservation, message overhead included:
+# ``estimate_tokens`` charges ``MESSAGE_OVERHEAD_TOKENS`` for the role and the
+# delimiters before it counts a character, so a note truncated to the whole
+# reservation would cost four tokens more than was reserved for it.
+GUARDRAIL_NOTE_CHARS = (GUARDRAIL_NOTE_TOKENS - MESSAGE_OVERHEAD_TOKENS) * CHARS_PER_TOKEN
+
 
 class TurnStatus(str, Enum):
     """How a Turn ended, in the lifecycle table's own vocabulary."""
@@ -328,14 +375,20 @@ class SessionCapacityExceeded(AlphaRefusal):
 
 
 class SessionSlots:
-    """Three concurrent Turns at the route, and no queue behind them."""
+    """How many Turns run at the route at once, with no queue behind them.
 
-    def __init__(self, limit: int = SESSION_CONCURRENCY) -> None:
+    ``limit=None`` removes the ceiling, for a deployment whose configured
+    ``active_turns_system`` is unlimited. Nothing else changes: a Turn still
+    passes through :meth:`occupy`, so the accounting of who is running stays
+    where it was and only the refusal goes away.
+    """
+
+    def __init__(self, limit: int | None = SESSION_CONCURRENCY) -> None:
         self._limit = limit
-        self._semaphore = asyncio.Semaphore(limit)
+        self._semaphore = None if limit is None else asyncio.Semaphore(limit)
 
     @property
-    def limit(self) -> int:
+    def limit(self) -> int | None:
         return self._limit
 
     @property
@@ -349,10 +402,13 @@ class SessionSlots:
         the Turn honestly, where losing this one would only have cost a round
         trip.
         """
-        return self._semaphore.locked()
+        return self._semaphore is not None and self._semaphore.locked()
 
     @asynccontextmanager
     async def occupy(self):
+        if self._semaphore is None:
+            yield
+            return
         # ``locked()`` is true exactly when no permit is left, and no await sits
         # between the check and the acquire, so the pair is atomic on the event
         # loop and the acquire below cannot block.
@@ -529,6 +585,12 @@ class TurnOutcome:
 
 Checkpoint = Callable[[TurnDraft], Awaitable[None] | None]
 Cancelled = Callable[[], bool]
+#: How a spill is written down: the request the Turn answers, and how large each
+#: previewed result actually was. A callback rather than a store handle for the
+#: reason the checkpoint is one — a Turn never holds a session
+#: (``docs/specs/0003`` §10.5) — and optional because a loop built for a test or
+#: for the Eval Battery has no trace rows to annotate.
+SpillRecorder = Callable[[int, Mapping[str, int]], Awaitable[Any] | None]
 
 
 @dataclass
@@ -601,6 +663,23 @@ class _TurnState:
         """
         return self.degraded_codes[0] if self.degraded_codes else None
     external_tool_calls: int = 0
+    # What the guardrail ladder has seen this Turn do, in order, and what it
+    # decided about it. The history is passed to the ladder rather than kept by
+    # it: a controller that recorded its own observations could not be asked the
+    # same question twice and give the same answer (``guardrails.py``).
+    observed: list[ObservedCall] = field(default_factory=list)
+    # The ladder's guidance, waiting for the next call to carry it. One string
+    # rather than a list because it travels as one system message, and it is
+    # cleared by the call that sent it for the same reason ``repair_note`` is.
+    guardrail_note: str | None = None
+    # Set when the ladder halted the tool loop. The Turn does not end: it makes
+    # its answering call one round early, which is what the halt guidance asks
+    # the model to do — a Turn ended here would throw away evidence the reader
+    # was already owed.
+    tools_halted: bool = False
+    # Every result the model was shown a preview of, and how large the whole of
+    # it was. Written to the trace at the end of the round it happened in.
+    spilled: dict[str, int] = field(default_factory=dict)
     # The open-web trail (``docs/adr/0020``): every phase in order, and the
     # public pages behind the ones that searched.
     progress: list[dict[str, Any]] = field(default_factory=list)
@@ -745,6 +824,7 @@ class AgentLoop:
         tool_timeout_seconds: float = TOOL_TIMEOUT_SECONDS,
         spend: SpendIdentity = TURN_SPEND,
         suggest: bool = False,
+        spill_recorder: SpillRecorder | None = None,
     ) -> None:
         self._spend = spend
         self._client = client
@@ -770,6 +850,21 @@ class AgentLoop:
         # garnish nobody in that context reads.
         self._suggest = suggest
         self._suggestion_model = config.model_for(Workload.BATCH)
+        # The ladder is constructed against this loop's own round budget, so the
+        # rung that halts is reachable inside it (``guardrails.py``). It holds no
+        # state: the history travels with every question.
+        self._guardrails = GuardrailLadder(max_rounds=MAX_TOOL_ROUNDS)
+        # The per-tool half of the spillover budget is the catalog's own
+        # declarations, read once here so that a threshold has exactly one
+        # source. The round ceiling is this loop's to set, because only the loop
+        # knows what a call's context budget is.
+        self._spill_budget = SpilloverBudget(
+            per_tool=dict(self._catalog.result_budgets),
+            round_bytes=int(
+                self._budget.max_tokens * CHARS_PER_TOKEN * ROUND_RESULT_SHARE
+            ),
+        )
+        self._spill_recorder = spill_recorder
 
     async def run(
         self,
@@ -795,7 +890,11 @@ class AgentLoop:
                     request, TurnStatus.CANCELLED, "cancelled_by_user", state
                 )
 
-            final = round_index == MAX_TOOL_ROUNDS
+            # A halt from the guardrail ladder ends the *tool* loop rather than
+            # the Turn: the round it refused is not dispatched, and this call is
+            # the answering one. That is what the halt guidance asks for, and it
+            # keeps the evidence already gathered on screen.
+            final = round_index == MAX_TOOL_ROUNDS or state.tools_halted
             repairing = state.repair_note is not None
 
             await self._activity(Activity.ANALYZING, state)
@@ -1036,6 +1135,7 @@ class AgentLoop:
                 )
 
             assert_distinct_ids(completion.tool_calls)
+            judgement = self._judge(request, completion.tool_calls, state)
             searching = any(
                 call.name == NEWS_TOOL or call.name in WEB_TOOLS
                 for call in completion.tool_calls
@@ -1050,10 +1150,21 @@ class AgentLoop:
             )
             before = len(state.calls)
             fatal = await self._round(
-                completion.tool_calls, request, tool_context, attempts, state
+                completion.tool_calls,
+                request,
+                tool_context,
+                attempts,
+                state,
+                judgement,
             )
             state.tool_rounds += 1
+            # The trail is projected from the results as they came back, and the
+            # spillover runs after it. Reversing the two would shorten the source
+            # drawer by however much a preview left out, which would make the
+            # reader's own count of what an answer stands on a function of a
+            # context budget they cannot see.
             await self._found_sources(state, state.calls[before:])
+            await self._spill(request, state, before)
             await self._save(state, boundary=True)
 
             if isinstance(fatal, ToolTimeout):
@@ -1111,6 +1222,10 @@ class AgentLoop:
             )
         if repairing:
             budget = replace(budget, max_tokens=budget.max_tokens - REPAIR_NOTE_TOKENS)
+        if state.guardrail_note is not None:
+            budget = replace(
+                budget, max_tokens=budget.max_tokens - GUARDRAIL_NOTE_TOKENS
+            )
         transcript = Transcript(
             system_prompt=system_prompt,
             # The Contract's own stable half, so a route configured for prompt
@@ -1152,7 +1267,8 @@ class AgentLoop:
             workload=Workload.SESSION,
             input_tokens=context.estimated_tokens
             + (ROUNDS_EXHAUSTED_TOKENS if final else 0)
-            + (REPAIR_NOTE_TOKENS if repairing else 0),
+            + (REPAIR_NOTE_TOKENS if repairing else 0)
+            + (GUARDRAIL_NOTE_TOKENS if state.guardrail_note is not None else 0),
             output_tokens=output_tokens,
         )
         return await asyncio.wait_for(
@@ -1226,6 +1342,10 @@ class AgentLoop:
             messages = list(context.messages)
             if final:
                 messages.append(ROUNDS_EXHAUSTED_MESSAGE)
+            if state.guardrail_note is not None:
+                messages.append(
+                    Message(role=Role.SYSTEM, content=state.guardrail_note)
+                )
             if repairing and state.repair_note is not None:
                 messages.append(Message(role=Role.SYSTEM, content=state.repair_note))
 
@@ -1302,6 +1422,10 @@ class AgentLoop:
             # with tool calls does not carry it into a third attempt.
             if repairing:
                 state.repair_note = None
+            # The same rule for the ladder's guidance, and for the same reason:
+            # a Turn told twice about one repetition has been charged twice for
+            # one observation.
+            state.guardrail_note = None
             return completion
 
     async def _round(
@@ -1311,18 +1435,32 @@ class AgentLoop:
         tool_context: ToolContext,
         attempts: ToolAttempts,
         state: _TurnState,
+        judgement: RoundJudgement | None = None,
     ) -> BaseException | None:
         """Dispatch one round concurrently; one failing tool does not kill it.
 
         Every result is recorded before a fatal failure is handed back, so a
         dead credential on the news channel does not throw away the three store
         reads that succeeded beside it.
+
+        Three bounds decide which of the round's calls actually run, and they are
+        different questions: ``admit_round`` spends the retry allowance of a tool
+        that has already failed, the external-tool budget bounds what one Turn
+        may spend off-store, and the guardrail ladder refuses a call this Turn has
+        already made and been answered. A call any of them stops is answered with
+        the reason rather than dropped, because a tool call with no result at all
+        is a transcript the model has to guess at (``context.py``).
         """
         admitted = admit_round(calls, attempts)
+        blocked = frozenset(judgement.refused if judgement is not None else ())
         denials: list[str | None] = []
         bounded: list[bool] = []
         for call, allowed in zip(calls, admitted):
             denial = None
+            if allowed and call.id in blocked:
+                allowed = False
+                decision = judgement.decisions[call.id] if judgement else None
+                denial = decision.guidance if decision is not None else None
             if allowed and self._catalog.is_external(call.name):
                 if state.external_tool_calls >= MAX_EXTERNAL_TOOL_CALLS:
                     allowed = False
@@ -1356,6 +1494,31 @@ class AgentLoop:
             else:
                 result = outcome
             state.observe(result)
+            # What the ladder is shown of this call, and it is deliberately not
+            # every call.
+            #
+            # A call that *failed* is a retry question, and ``ToolAttempts``
+            # already owns it: two attempts, then ``admit_round`` stops
+            # dispatching. Showing the same failure to the ladder as well would
+            # refuse the second attempt the retry policy exists to allow — the
+            # two guards would be deciding one thing. What the ladder is for is
+            # the Turn that repeats a call every tool answered successfully.
+            #
+            # A call the ladder itself blocked *is* recorded, because the signal
+            # its last rung acts on is precisely that the guidance did not land.
+            #
+            # ``progressed`` is answered here because it is a question about the
+            # Turn's evidence rather than about the call: a result that carried
+            # data moved the Turn forward, and a Structured Refusal — however
+            # informative — did not.
+            if call.id in blocked or result.get("status") != "tool_error":
+                state.observed.append(
+                    ObservedCall(
+                        tool_name=call.name,
+                        arguments=dict(call.arguments),
+                        progressed=refusal_reason(result) is None,
+                    )
+                )
             state.calls.append(
                 TranscriptToolCall(
                     call_id=call.id,
@@ -1366,6 +1529,102 @@ class AgentLoop:
                 )
             )
         return fatal
+
+    def _judge(
+        self,
+        request: TurnRequest,
+        calls: Sequence[ToolCall],
+        state: _TurnState,
+    ) -> RoundJudgement:
+        """Ask the ladder about the round before any of it is dispatched.
+
+        The verdict is turned into three different things here, which is the
+        division ``guardrails.py`` exists to keep: guidance becomes a system
+        message the next call carries, a block becomes a call that is answered
+        rather than run, and a halt becomes an answering call one round early.
+        None of that is decided by the controller, and none of it is decided
+        twice.
+        """
+        judgement = self._guardrails.judge_round(
+            tuple(
+                PlannedCall(
+                    call_id=call.id, tool_name=call.name, arguments=dict(call.arguments)
+                )
+                for call in calls
+            ),
+            state.observed,
+        )
+        if judgement.guidance:
+            state.guardrail_note = " ".join(judgement.guidance)[:GUARDRAIL_NOTE_CHARS]
+        if judgement.verdict is Verdict.HALT:
+            # The halt takes the *loop*, not this round. The call that earned it
+            # is refused with its siblings' results still gathered, and the next
+            # call is the answering one — a Turn that threw the round away would
+            # lose evidence nobody had asked for twice, which is the whole
+            # difference between stopping and giving up.
+            state.tools_halted = True
+            logger.info(
+                "Turn %s stopped calling tools after %d round(s): %s",
+                request.request_message_id,
+                state.tool_rounds,
+                ", ".join(
+                    decision.reason
+                    for decision in judgement.decisions.values()
+                    if decision.verdict is Verdict.HALT
+                ),
+            )
+        return judgement
+
+    async def _spill(
+        self, request: TurnRequest, state: _TurnState, before: int
+    ) -> None:
+        """Rungs two and three, over the results this round just produced.
+
+        Applied to the *transcript* copy and to nothing else. The whole result is
+        already in the trace (``agent_tool_call.result``), so what is spilled is
+        what the model is shown — and because the model can then only cite what
+        it saw, the citation index the Gate resolves against is the same copy.
+        The preview keeps ``registered_fields`` and ``data_ref`` whole for exactly
+        that reason (``tools/spillover.py``).
+        """
+        fresh = state.calls[before:]
+        if not fresh:
+            return
+        spillover = spill_round(
+            tuple(
+                RoundResult(
+                    call_id=call.call_id,
+                    tool_name=call.name,
+                    result=call.result if isinstance(call.result, Mapping) else {},
+                )
+                for call in fresh
+            ),
+            budget=self._spill_budget,
+        )
+        if not spillover.spilled:
+            return
+        for offset, call in enumerate(fresh, start=before):
+            previewed = spillover.results.get(call.call_id)
+            if previewed is not None and previewed is not call.result:
+                state.calls[offset] = replace(call, result=previewed)
+        for record in spillover.spilled:
+            state.spilled[record.call_id] = record.full_bytes
+        logger.info(
+            "Turn %s previewed %d tool result(s) to keep the round inside %d "
+            "byte(s) of context%s",
+            request.request_message_id,
+            len(spillover.spilled),
+            self._spill_budget.round_bytes,
+            "; the round is still over its ceiling" if spillover.over_ceiling else "",
+        )
+        if self._spill_recorder is None:
+            return
+        recorded = self._spill_recorder(
+            request.request_message_id,
+            {record.call_id: record.full_bytes for record in spillover.spilled},
+        )
+        if inspect.isawaitable(recorded):
+            await recorded
 
     async def _dispatch(
         self,
@@ -1386,6 +1645,7 @@ class AgentLoop:
                     call.name,
                     call.arguments,
                     tool_context,
+                    call_id=call.id,
                     thread_id=request.thread_id,
                     request_message_id=request.request_message_id,
                 ),
@@ -1634,9 +1894,18 @@ class AgentLoop:
         answer, selections = extract_selections(state.text)
         validator = RecommendationValidator(trading_day=request.runtime.trading_day)
         traces = TraceIndex(state.calls)
+        # Which open-web call returned which page, and which pages the Turn has
+        # actually listed to the reader. Built once for the whole answer rather
+        # than per block: both are facts about the Turn, and rebuilding them per
+        # paragraph would let two paragraphs of one answer disagree about what
+        # the Turn found.
+        pages = sources_by_call(state.calls)
+        listed = tuple(source.url for source in state.sources)
         for raw in split_blocks(answer):
             try:
-                block = validator.validate(raw, traces)
+                block = self._attribute_sources(
+                    validator.validate(raw, traces), pages, listed
+                )
             except GroundingFailure as failure:
                 if not failure.degradable:
                     raise
@@ -1679,6 +1948,37 @@ class AgentLoop:
                 )
             state.blocks.append(block)
         return selections
+
+    @staticmethod
+    def _attribute_sources(
+        block: ReleasedBlock,
+        pages: Mapping[str, Sequence[str]],
+        listed: Sequence[str],
+    ) -> ReleasedBlock:
+        """Name the public pages behind one proven block, for the chip under it.
+
+        Derived from the block's own citations rather than from a marker the
+        model writes, and that is the whole of the design: the model already
+        says which call each claim came from, the trail already says which pages
+        each call returned, and joining two facts the system holds cannot
+        invent a third. A marker would also have to sit between a figure and its
+        evidence reference, which is exactly where ``_match_figures`` reads
+        attribution from — a display detail is not worth risking that.
+
+        Absent citations, or citations that touched no open-web call, leave the
+        block exactly as it was validated.
+        """
+        if not block.citations or not pages:
+            return block
+        found = block_source_ids(
+            (
+                (citation.call_id, citation.field_path)
+                for citation in block.citations
+            ),
+            pages,
+            listed,
+        )
+        return replace(block, source_ids=found) if found else block
 
     def _publish_blocks(self, state: _TurnState) -> None:
         """Emit what was proven, in the order it was written."""

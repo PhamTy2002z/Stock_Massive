@@ -93,8 +93,24 @@ def test_the_prompt_states_the_gate_the_untrusted_rules_and_the_stance_limits():
     assert "never reveal" in rendered or "never reveals" in rendered
     assert "chain of thought" in rendered
     assert "credentials" in rendered
-    assert "Default to Vietnamese" in rendered
+    assert "Vietnamese is the default only where" in rendered
     assert "the data is insufficient" in rendered
+
+
+def test_the_answer_follows_the_language_of_the_latest_user_message():
+    """A Thread that opened in Vietnamese must still answer English in English.
+
+    The instruction it replaced said "answer in the user's language, default to
+    Vietnamese", and both halves were read as one: an English question inside a
+    Thread whose first exchange was Vietnamese came back in Vietnamese. What the
+    model needs stated is which message decides, and that a greeting decides it
+    too.
+    """
+    rendered = render(context())
+
+    assert "language of the user's latest message" in rendered
+    assert "whatever language the" in rendered
+    assert '"Hello" is' in rendered
 
 
 def test_scope_is_decided_before_lookup_and_refusals_do_not_echo_figures():
@@ -267,7 +283,11 @@ def test_the_hash_is_exported_and_changes_when_the_prose_changes():
     # external, and derived evidence without weakening the Recommendation Gate.
     # 1.8.0 gives the Contract the no-fabrication rule and the batching rule
     # (``docs/adr/0022``), which is a minor bump because two sections arrived.
-    assert PROMPT_VERSION == "1.8.0"
+    # 1.9.0 hands the answer's shape back to the model, says a message asking
+    # for nothing factual is answered without a lookup, and raises the visual
+    # ceiling to three (``docs/adr/0023``) — no section arrived or left, so the
+    # section list is unchanged and only prose inside existing sections moved.
+    assert PROMPT_VERSION == "1.9.0"
     assert PROMPT_HASH == contract_hash()
 
     edited = tuple(

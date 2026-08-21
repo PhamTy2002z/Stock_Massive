@@ -10,6 +10,7 @@
 
 import type {
   CrossSymbolData,
+  PeriodsData,
   RankingData,
   SeriesData,
   WidgetSpec,
@@ -100,6 +101,81 @@ export function series(overrides: Partial<SeriesData> = {}): SeriesData {
       { date: "2026-08-13", value: 33.6 },
       { date: AS_OF, value: 35.2 },
     ],
+    available: true,
+    unavailable_reason: null,
+    ...overrides,
+  }
+}
+
+/**
+ * The spec a `quarterly_financials` message carries, descriptor included.
+ *
+ * Composed from `spec()` rather than written out beside it, so a field the
+ * envelope gains is gained here too. The descriptor is the real one — a periods
+ * descriptor, not a comparison one wearing a new name — because the slot pairs
+ * `descriptor.kind` against the registry entry and a fixture that skipped that
+ * would pass a check the product does not.
+ */
+export function quarterlySpec(overrides: Partial<WidgetSpec> = {}): WidgetSpec {
+  return spec({
+    name: "quarterly_financials",
+    title: "Kết quả kinh doanh theo quý",
+    fields: ["revenue_vnd", "gross_profit_vnd", "net_income_vnd"],
+    unit: "vnd",
+    descriptor: {
+      kind: "periods",
+      symbol: "MSN",
+      period_ends: QUARTER_ENDS,
+      figures: ["revenue_vnd", "gross_profit_vnd", "net_income_vnd"],
+      trading_day: AS_OF,
+      as_of: AS_OF,
+    },
+    ...overrides,
+  })
+}
+
+/** Eight quarters, newest first, exactly as the resolution orders them. */
+const QUARTER_ENDS = [
+  "2026-06-30",
+  "2026-03-31",
+  "2025-12-31",
+  "2025-09-30",
+  "2025-06-30",
+  "2025-03-31",
+  "2024-12-31",
+  "2024-09-30",
+]
+
+/**
+ * Eight quarters of MSN, with the two cases a statement really has.
+ *
+ * One period is marked stale, and one carries no gross profit line at all —
+ * an absent key rather than a null, which is what a quarter whose statement did
+ * not report it looks like on the wire.
+ */
+export function periods(overrides: Partial<PeriodsData> = {}): PeriodsData {
+  return {
+    kind: "periods",
+    as_of: AS_OF,
+    symbol: "MSN",
+    unit: "vnd",
+    figures: ["revenue_vnd", "gross_profit_vnd", "net_income_vnd"],
+    periods: QUARTER_ENDS.map((periodEnd, index) => {
+      const figures: Record<string, number | null> = {
+        revenue_vnd: 22_000_000_000_000 - index * 400_000_000_000,
+        gross_profit_vnd: 6_500_000_000_000 - index * 120_000_000_000,
+        net_income_vnd: 1_200_000_000_000 - index * 45_000_000_000,
+      }
+      // Deleted rather than set to null: a quarter whose statement never
+      // reported the line carries no key, and the two reach the renderer
+      // through different paths.
+      if (periodEnd === "2025-09-30") delete figures.gross_profit_vnd
+      return {
+        period_end: periodEnd,
+        stale: periodEnd === "2024-09-30",
+        figures,
+      }
+    }),
     available: true,
     unavailable_reason: null,
     ...overrides,

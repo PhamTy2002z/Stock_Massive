@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 /**
  * The segmented control from the reference's sidebar head: a 4% white trough,
  * 10px corners, and the selected segment lifted onto the bubble surface. The
- * active tab is a *lighter* plane rather than a coloured one — the teal is not
+ * active tab is a *lighter* plane rather than a coloured one — the amber is not
  * spent on navigation.
  */
 const Tabs = TabsPrimitive.Root

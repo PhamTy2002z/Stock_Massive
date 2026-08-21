@@ -20,6 +20,12 @@ import { WIDGET_PALETTE } from "./palette"
  * that it is there. What a screen-reader user must not have to open a
  * disclosure for is the *reading*, and that is why the summary, the data date
  * and each Widget's own per-row description sit outside it.
+ *
+ * `table` is omitted by the one Widget whose primary form *is* a table. The
+ * requirement being met there is stricter, not looser: the rows are in the
+ * accessibility tree unconditionally, with no disclosure to open first. A second
+ * copy behind a button would be the same data twice in the same figure, and a
+ * button offering to reveal what is already on screen.
  */
 export interface WidgetFrameProps {
   title: string
@@ -29,8 +35,8 @@ export interface WidgetFrameProps {
   asOf: string
   /** What a screen reader is told the picture is. */
   figureLabel: string
-  /** The data table, which is always rendered and sometimes visible. */
-  table: React.ReactNode
+  /** The data table beside a picture. Absent only when the table *is* the Widget. */
+  table?: React.ReactNode
   /** Opens the same fixed data full-screen; absent inside the expanded view. */
   onExpand?: () => void
   expanded?: boolean
@@ -106,15 +112,17 @@ export function WidgetFrame({
       <p className="mt-3 text-meta">{summary}</p>
 
       <div className="mt-3 flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          aria-expanded={showTable}
-          aria-controls={tableId}
-          onClick={() => setShowTable((open) => !open)}
-          className="rounded-md text-meta underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          {showTable ? "Ẩn bảng dữ liệu" : "Xem bảng dữ liệu"}
-        </button>
+        {table !== undefined && (
+          <button
+            type="button"
+            aria-expanded={showTable}
+            aria-controls={tableId}
+            onClick={() => setShowTable((open) => !open)}
+            className="rounded-md text-meta underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {showTable ? "Ẩn bảng dữ liệu" : "Xem bảng dữ liệu"}
+          </button>
+        )}
         {onExpand && !expanded && (
           <button
             type="button"
@@ -126,9 +134,11 @@ export function WidgetFrame({
         )}
       </div>
 
-      <div id={tableId} hidden={!showTable} className="mt-3 overflow-x-auto">
-        {table}
-      </div>
+      {table !== undefined && (
+        <div id={tableId} hidden={!showTable} className="mt-3 overflow-x-auto">
+          {table}
+        </div>
+      )}
     </figure>
   )
 }

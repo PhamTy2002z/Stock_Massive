@@ -130,6 +130,9 @@ class NewsTools:
                 ),
                 callable=self.search_news,
                 data_access=ToolDataAccess.NEWS_PROVIDER,
+                # Items are already few and small; the window, not the byte
+                # count, is what bounds this one.
+                result_budget_bytes=MAX_TOOL_RESULT_BYTES,
             ),
         )
 

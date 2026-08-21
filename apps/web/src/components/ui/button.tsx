@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 /**
  * Buttons, at the reference's own weights.
  *
- * `default` is the one filled control — teal with ink on top, brightened on
+ * `default` is the one filled control — amber with ink on top, brightened on
  * hover rather than dimmed, because on a near-black ground `bg-primary/90`
  * composites *towards* the page and the control looks like it switched off
  * when you touch it. The design rations this variant to roughly one per view.

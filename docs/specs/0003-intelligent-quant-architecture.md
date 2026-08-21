@@ -284,6 +284,21 @@ ceiling.
   `agent_tool_call`, so this costs nothing in auditability) → past a threshold, one
   model-written summary stored as an `agent_message` with `role = 'summary'`, cached and
   never re-summarised.
+- **A round's tool results have a ceiling of their own**, above the per-tool one:
+  each tool bounds its own output at `MAX_TOOL_RESULT_BYTES`, and a round whose
+  results together claim more than a quarter of the constructed-context budget
+  has its largest result replaced by a preview that keeps the envelope, the
+  citable fields and the first rows, and states what it left out
+  (`apps/api/src/agent/tools/spillover.py`). The whole result stays in
+  `agent_tool_call`, addressable by the call id the model cites it under, so the
+  preview costs the transcript and nothing else. ADR-0024.
+- **A repetition ladder decides a round before it is dispatched**: a call this
+  Turn already made and had answered is warned, then refused, and a Turn that
+  keeps repeating stops calling tools and answers from what it holds. Thresholds
+  are a function of `MAX_TOOL_ROUNDS` rather than constants, because a halt rung
+  placed past the round budget is a guardrail that never fires
+  (`apps/api/src/agent/guardrails.py`). Retry policy is separate and unchanged:
+  a tool that *fails* is `ToolAttempts`'s business, two attempts and no more.
 - **Cancellation stops after the in-flight tool call completes.** Every tool is
   read-only. The partial message persists as `cancelled` with the traces of what ran.
 - **Concurrency**: an in-process `asyncio.Semaphore` of **3 sessions** at the route, plus
@@ -715,12 +730,16 @@ Full contract: ADR-0014. The engineering surface:
   reconciles to actual usage. A death after provider acceptance leaves `usage_unknown`
   with the full reservation charged.
 - **Envelope**: $50/month = **$10** Analysis + **$30** Turn + **$5** emergency + **$5**
-  eval. Alert at 70%; at 100% reject new work while admitted work finishes.
+  eval. Alert at 70%; at 100% reject new work while admitted work finishes. Configurable,
+  and zero across all five values declares a deployment with no monthly ceiling
+  (`docs/adr/0014`).
 - **Per Analysis**: ≤6,000 input / 1,500 output tokens per generation, ≤$0.0045 across
   all attempts for the pair. **Per Turn**: ≤32,000 constructed-context tokens per call,
-  ≤100,000 aggregate input, ≤20,000 aggregate output including reasoning, ≤$0.50.
-  **Per user**: 20 Turn starts/ICT day, $3/ICT day, $15/rolling 30 days, one active Turn
-  — against three system-wide.
+  ≤100,000 aggregate input, ≤20,000 aggregate output including reasoning, ≤$0.50. These
+  are constants.
+  **Per user** — configuration, defaulting to the same numbers, `0` for unlimited
+  (`docs/adr/0014`): 20 Turn starts/ICT day, $3/ICT day, $15/rolling 30 days, one active
+  Turn — against three system-wide, which is also the size of the in-process semaphore.
 - **A Turn that cannot fund its next call ends without another LLM apology call**,
   persists the partial message and traces, and emits `turn.incomplete` with a stable
   budget reason.

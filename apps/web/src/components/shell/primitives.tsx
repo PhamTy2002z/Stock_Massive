@@ -172,7 +172,7 @@ export function MenuSeparator() {
 /**
  * The colour a change is allowed to be.
  *
- * Green and red are data here and never brand — the teal is the filled control
+ * Green and red are data here and never brand — the amber is the filled control
  * and nothing else, so a rising number must not borrow it. Flat is the board's
  * reference yellow, because unchanged is a state the Vietnamese board names
  * rather than an absence.

@@ -71,8 +71,8 @@ Nguồn: `plans/reports/hermes-synthesis-260821-0030.md` + 9 report vùng.
 | 2 | [Phase 2: Grounding fail-open](./phase-02-grounding-fail-open.md) | **Complete** |
 | 3 | [Phase 3: System Prompt Contract](./phase-03-system-prompt-contract.md) | **Complete** |
 | 4 | [Phase 4: Độ bền tuyến LLM](./phase-04-route-resilience.md) | **Complete** |
-| 5 | [Phase 5: Lane hội thoại và trình bày](./phase-05-conversation-lane-and-presentation.md) | Pending |
-| 6 | [Phase 6: Ngân sách tool và thang guardrail](./phase-06-tool-budget-and-guardrail-ladder.md) | Pending |
+| 5 | [Phase 5: Lane hội thoại và trình bày](./phase-05-conversation-lane-and-presentation.md) | **Complete** |
+| 6 | [Phase 6: Ngân sách tool và thang guardrail](./phase-06-tool-budget-and-guardrail-ladder.md) | **Complete** |
 | 7 | [Phase 7: Ký ức và quét injection](./phase-07-memory-and-injection-scan.md) | Pending |
 | 8 | [Phase 8: Cổng Eval và baseline](./phase-08-eval-gate-and-baseline.md) | Pending |
 
@@ -106,6 +106,11 @@ tool schema/`tool_catalog_version`, agent loop, Recommendation Validator. Nên:
   thẳng (không PR) nên chưa có Eval Report đính kèm. Món nợ này gộp vào gate run
   của Phase 8; Eval Fixture **không** phải đóng băng lại (fixture chỉ phụ thuộc
   dữ liệu thị trường, không phụ thuộc `prompt_version` — `docs/agents/eval-battery.md`).
+- **Nợ thêm sau Phase 5 và 6**: Contract lên **1.9.0** (`ADR-0023`) và agent loop
+  đổi (`ADR-0024`). Cả hai gộp vào cùng gate run của Phase 8. `tool_catalog_version`
+  **không** đổi ở Phase 6 — tool schema không bị chạm, `hint` là key cộng thêm vào
+  envelope refusal — nên Eval Fixture vẫn không phải đóng băng lại. Điều này bác một
+  giả định của Phase 6 ("phải đóng băng lại Eval Fixture").
 
 Quy trình: `docs/agents/eval-battery.md`.
 
@@ -117,10 +122,10 @@ Quy trình: `docs/agents/eval-battery.md`.
 - [ ] `answer_kinds.analysis` > 0
 - [ ] Mọi Turn chết vì route có log đủ để phân loại nguyên nhân
 - [ ] `route_error` không còn là catch-all: mọi 400 có mã riêng
-- [ ] "Tình hình chứng khoán VN hôm nay" → số + citation chip + 3 follow-up
-- [ ] "Về STB thì sao" → số từ store + widget + tin từ web
-- [ ] "Hey bro" → trả lời hội thoại, không tool call
-- [ ] "Có nên mua STB" → Gate còn hiệu lực: đủ điều kiện, hoặc nói rõ thiếu gì
+- [x] "Tình hình chứng khoán VN hôm nay" → số + citation chip + 3 follow-up (Phase 5)
+- [x] "Về STB thì sao" → số từ store + widget + tin từ web (Phase 5; widget nay mới thực sự lên màn hình)
+- [x] "Hey bro" → trả lời hội thoại, không tool call (Contract 1.9.0)
+- [x] "Có nên mua STB" → Gate còn hiệu lực: phân loại theo hình dạng block, không theo lane
 - [ ] `make test` tại `apps/api`; `pnpm type-check lint test build` tại `apps/web`
 - [ ] `pnpm test:e2e` (cổng streaming) xanh
 - [ ] Eval Report đính vào PR của mọi phase chạm 4 surface trên

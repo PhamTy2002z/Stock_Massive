@@ -14,6 +14,7 @@ export const WIDGET_NAMES = [
   "ranked_symbols",
   "metric_trend",
   "relative_position",
+  "quarterly_financials",
 ] as const
 
 export type WidgetName = (typeof WIDGET_NAMES)[number]
@@ -90,7 +91,38 @@ export interface SeriesData extends ResolvedBase {
   series: SeriesPoint[]
 }
 
-export type WidgetData = CrossSymbolData | RankingData | SeriesData
+/**
+ * One reporting period's line items, as the store holds them.
+ *
+ * `figures` is keyed by the figure names the resolution declares, and a key may
+ * simply be absent: a quarter where the statement carried no gross profit line
+ * is not a quarter with a zero in it. Every read of this map therefore goes
+ * through a `typeof` check rather than trusting the index signature, which
+ * TypeScript widens to the declared value type whether or not the key is there.
+ */
+export interface PeriodFigures {
+  period_end: string
+  stale: boolean
+  figures: Record<string, number | null>
+}
+
+/**
+ * A per-period table: one unit, one symbol, newest period first.
+ *
+ * The only shape in this union whose primary form is a table rather than a
+ * picture. `figures` carries the column order the server chose, so the reader
+ * sees revenue before profit because the statement reads that way — not because
+ * an object's key order survived a round trip through JSON.
+ */
+export interface PeriodsData extends ResolvedBase {
+  kind: "periods"
+  symbol: string
+  unit: string
+  figures: string[]
+  periods: PeriodFigures[]
+}
+
+export type WidgetData = CrossSymbolData | RankingData | SeriesData | PeriodsData
 
 /** What every Widget component takes, and the only thing it takes. */
 export interface WidgetProps<TData extends WidgetData> {

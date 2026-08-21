@@ -142,6 +142,49 @@ describe("the canonical Thread", () => {
   })
 })
 
+describe("the Widgets a stored answer carries", () => {
+  /** A stored answer with whatever the JSONB column happened to hold. */
+  function withContent(extra: Record<string, unknown>): ThreadMessage {
+    const message = assistantMessage(1, "answer")
+    return { ...message, content: { ...message.content, ...extra } }
+  }
+
+  it("hands every spec down unparsed, so the registry stays the one validator", () => {
+    const [entry] = transcript({
+      messages: [
+        withContent({
+          widgets: [{ name: "quarterly_financials", version: 1 }, "rác"],
+          widget_refusals: [{ code: "owned_by_stock_360", deep_link: "/analytics" }],
+        }),
+      ],
+    })
+
+    // Two in, two out — the junk element included. Deciding it is junk needs the
+    // registry, which is `parseWidgetSpecs`'s to consult and not this file's, and
+    // a spec dropped here is one the slot never gets to degrade gracefully on.
+    expect(entry.kind === "assistant" && entry.view.widgets).toHaveLength(2)
+    expect(entry.kind === "assistant" && entry.view.widgetRefusals).toHaveLength(1)
+  })
+
+  it("reads a message written before the keys existed as carrying none", () => {
+    const [entry] = transcript({ messages: [assistantMessage(1, "answer")] })
+
+    expect(entry.kind === "assistant" && entry.view.widgets).toEqual([])
+    expect(entry.kind === "assistant" && entry.view.widgetRefusals).toEqual([])
+  })
+
+  it("reads a key that is not a list as carrying none rather than as one item", () => {
+    // The column is JSONB and this projection is the boundary: an object here
+    // would otherwise reach the renderer as something to iterate.
+    const [entry] = transcript({
+      messages: [withContent({ widgets: { name: "ranked_symbols" }, widget_refusals: 7 })],
+    })
+
+    expect(entry.kind === "assistant" && entry.view.widgets).toEqual([])
+    expect(entry.kind === "assistant" && entry.view.widgetRefusals).toEqual([])
+  })
+})
+
 describe("the draft", () => {
   it("shows while the Turn runs", () => {
     const entries = transcript({ live: live({ blocks: [block("phần đầu")] }) })

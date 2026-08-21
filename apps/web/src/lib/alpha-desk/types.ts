@@ -111,6 +111,21 @@ export interface ContentBlock {
   citations: Citation[]
   /** Additive in prompt contract 1.3; absent on messages stored by older builds. */
   unverified_figures?: string[]
+  /**
+   * The public pages this block was written from, as URLs the Turn recorded.
+   *
+   * Additive, so a block stored by an older build carries no such key at all and
+   * an answer that stood on nothing external carries an empty list — the two are
+   * the same thing to a renderer and neither is a defect.
+   *
+   * **Display metadata, not a gate.** The backend drops any id outside the
+   * Turn's own source set before the block reaches the wire, so what arrives is
+   * already checked. A renderer must therefore never withhold or blank a block
+   * because this list is missing, empty, or full of strings that are not URLs:
+   * doing so would let a bad label cost the reader the answer, which is the one
+   * outcome worse than an unlabelled claim.
+   */
+  source_ids?: string[]
 }
 
 /** A validated Widget spec. The registry itself is #89's; this is its envelope. */

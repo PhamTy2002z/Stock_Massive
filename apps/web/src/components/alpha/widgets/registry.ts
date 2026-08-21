@@ -16,6 +16,10 @@
 import type { ComponentType } from "react"
 import { MetricComparison, METRIC_COMPARISON_VERSION } from "./metric-comparison"
 import { MetricTrend, METRIC_TREND_VERSION } from "./metric-trend"
+import {
+  QuarterlyFinancials,
+  QUARTERLY_FINANCIALS_VERSION,
+} from "./quarterly-financials"
 import { RankedSymbols, RANKED_SYMBOLS_VERSION } from "./ranked-symbols"
 import { RelativePosition, RELATIVE_POSITION_VERSION } from "./relative-position"
 import type { WidgetData, WidgetSpec } from "./types"
@@ -64,6 +68,10 @@ const REGISTRY: Record<string, WidgetEntry> = {
   [key("relative_position", RELATIVE_POSITION_VERSION)]: entry(
     RelativePosition,
     "position"
+  ),
+  [key("quarterly_financials", QUARTERLY_FINANCIALS_VERSION)]: entry(
+    QuarterlyFinancials,
+    "periods"
   ),
 }
 

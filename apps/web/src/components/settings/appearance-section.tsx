@@ -39,10 +39,10 @@ function ThemePicker() {
             onClick={() => setTheme(value)}
             className={cn(
               "flex flex-1 items-center justify-center gap-1.5 rounded-[9px] px-3 py-1.5 text-meta leading-[1.29] outline-none transition-[background-color,color] duration-150 focus-visible:ring-2 focus-visible:ring-ring md:flex-none",
-              // A raised neutral, not the teal: the accent is rationed to one
+              // A raised neutral, not the amber: the accent is rationed to one
               // filled control per view, and a mode switch is not it. The pill
               // is the menu surface because that is the one step that lifts on
-              // both grounds — white on the light theme, a warm grey on the
+              // both grounds — white on the light theme, a slate grey on the
               // dark one — where a fixed alpha would vanish into one of them.
               selected
                 ? "bg-surface-menu text-foreground shadow-sm"

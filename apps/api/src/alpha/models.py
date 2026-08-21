@@ -342,8 +342,20 @@ class AgentToolCall(Base):
         nullable=False,
     )
     tool_name = Column(String(64), nullable=False)
+    # The route's own id for this call, which is also the id the model cites in
+    # an evidence reference. Nullable because it is additive: a row written
+    # before this column existed has one and cannot be told what it was, and a
+    # gateway that sent no id gives us nothing to store.
+    tool_call_id = Column(String(128), nullable=True)
     arguments = Column(JSONB, nullable=False)
     result = Column(JSONB, nullable=True)
+    # Set when the model was shown a preview of this result instead of the whole
+    # of it (``agent/tools/spillover.py``), and holding the size of the whole —
+    # which is the number a threshold is tuned against — the part the model did
+    # not see is a difference nobody needs stored. It exists so the threshold can
+    # be tuned against measured spills rather than guessed at: a Turn that
+    # answered worse after a spill is only diagnosable if the spill left a record.
+    spilled_bytes = Column(Integer, nullable=True)
     # ok | tool_error | timeout | unknown_tool
     status = Column(String(16), nullable=False)  # see TOOL_CALL_* below
     error = Column(String(500), nullable=True)

@@ -148,11 +148,22 @@ def answer(text: str = "Kết luận.") -> Completion:
     return Completion(model=SESSION_MODEL, text=text, usage=Usage(input_tokens=10, output_tokens=5))
 
 
-def wants(*names: str, prefix: str = "call") -> Completion:
+def wants(*names: str, prefix: str = "call", symbol: str = "FPT") -> Completion:
+    """One round of tool calls, as the route would send it.
+
+    ``symbol`` is a knob because the guardrail ladder reads *arguments*: a test
+    that spends the round budget has to ask a different question each round, or
+    it is testing the ladder rather than the budget (``guardrails.py``).
+    """
     return Completion(
         model=SESSION_MODEL,
         tool_calls=tuple(
-            ToolCall(id=f"{prefix}_{index}", name=name, arguments={"symbol": "FPT"}, output_index=index)
+            ToolCall(
+                id=f"{prefix}_{index}",
+                name=name,
+                arguments={"symbol": symbol},
+                output_index=index,
+            )
             for index, name in enumerate(names)
         ),
         usage=Usage(input_tokens=10, output_tokens=5),
@@ -278,7 +289,12 @@ async def test_a_truncated_completion_ends_the_turn_instead_of_passing_as_an_ans
 
 @pytest.mark.asyncio
 async def test_a_turn_runs_its_rounds_then_answers_with_tool_choice_none():
-    client = FakeClient([wants("get_analysis", prefix=f"r{n}") for n in range(20)])
+    client = FakeClient(
+        [
+            wants("get_analysis", prefix=f"r{n}", symbol=f"SYM{n}")
+            for n in range(20)
+        ]
+    )
 
     outcome = await loop(client).run(turn_request())
 
@@ -523,8 +539,23 @@ async def test_external_calls_share_one_turn_budget_across_parallel_fan_out():
         callable=external,
         data_access=ToolDataAccess.EXTERNAL,
     )
-    names = ("external_lookup",) * (MAX_EXTERNAL_TOOL_CALLS + 1)
-    client = FakeClient([wants(*names), answer()])
+    # One symbol per call: the budget under test is the *number* of external
+    # calls, and seven copies of one call is a repetition the guardrail ladder
+    # refuses before this bound is ever reached (``guardrails.py``).
+    fan_out = Completion(
+        model=SESSION_MODEL,
+        tool_calls=tuple(
+            ToolCall(
+                id=f"call_{index}",
+                name="external_lookup",
+                arguments={"symbol": f"SYM{index}"},
+                output_index=index,
+            )
+            for index in range(MAX_EXTERNAL_TOOL_CALLS + 1)
+        ),
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+    client = FakeClient([fan_out, answer()])
 
     outcome = await loop(client, catalog(external_spec)).run(turn_request())
 
@@ -1134,6 +1165,27 @@ async def test_a_turn_cancelled_before_its_first_call_never_reaches_the_route():
 
 
 @pytest.mark.asyncio
+async def test_unlimited_slots_never_refuse_a_concurrent_turn():
+    """``limit=None`` is the configured ``active_turns_system`` being unlimited."""
+    slots = SessionSlots(limit=None)
+    release = asyncio.Event()
+
+    async def holder():
+        async with slots.occupy():
+            await release.wait()
+
+    held = [asyncio.create_task(holder()) for _ in range(12)]
+    await asyncio.sleep(0)
+
+    assert slots.full is False
+    async with slots.occupy():
+        pass
+
+    release.set()
+    await asyncio.gather(*held)
+
+
+@pytest.mark.asyncio
 async def test_a_fourth_concurrent_session_is_refused_immediately_and_never_queued():
     slots = SessionSlots()
     release = asyncio.Event()
@@ -1705,3 +1757,201 @@ async def test_every_downgrade_in_one_answer_is_recorded():
 
     assert len(outcome.degraded_codes) == 2
     assert gate_outcomes(outcome).downgrades == outcome.degraded_codes
+
+# --- the guardrail ladder and the spillover ------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_repeated_call_is_warned_before_it_is_refused():
+    # Round one asks; round two asks the identical question again. The tool
+    # answered both times, so ``ToolAttempts`` sees nothing — this is the case
+    # the ladder exists for (``guardrails.py``).
+    client = FakeClient(
+        [
+            wants("get_analysis", prefix="a"),
+            wants("get_analysis", prefix="b"),
+            answer("Kết luận cuối cùng."),
+        ]
+    )
+
+    outcome = await loop(client).run(turn_request())
+
+    assert outcome.status is TurnStatus.COMPLETE
+    # Warned, not blocked: the second round still ran.
+    assert outcome.rounds_used == 2
+    notes = [
+        message.content
+        for request in client.requests
+        for message in request.messages
+        if message.role is Role.SYSTEM and message.content
+    ]
+    assert any("already called get_analysis" in note for note in notes)
+
+
+@pytest.mark.asyncio
+async def test_the_same_call_twice_in_one_round_is_answered_once():
+    duplicate = Completion(
+        model=SESSION_MODEL,
+        tool_calls=tuple(
+            ToolCall(
+                id=f"call_{index}",
+                name="get_analysis",
+                arguments={"symbol": "FPT"},
+                output_index=index,
+            )
+            for index in range(3)
+        ),
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+    dispatched: list[str] = []
+
+    async def counted(_context: ToolContext, arguments: dict) -> dict:
+        dispatched.append(str(arguments.get("symbol")))
+        return {"symbol": arguments.get("symbol"), "close": 95.4}
+
+    client = FakeClient([duplicate, answer()])
+
+    outcome = await loop(client, catalog(spec("get_analysis", counted))).run(
+        turn_request()
+    )
+
+    # One dispatch, three results: the copies are answered with the reason
+    # rather than dropped, because half a tool exchange is a transcript the
+    # model has to guess at.
+    assert dispatched == ["FPT"]
+    assert len(outcome.tool_calls) == 3
+    assert outcome.status is TurnStatus.COMPLETE
+    # A duplicate inside one round cannot halt the Turn: every call in it was
+    # decided before any guidance existed.
+    assert outcome.rounds_used == 1
+
+
+@pytest.mark.asyncio
+async def test_a_turn_that_keeps_repeating_stops_paying_for_the_repetition():
+    dispatched: list[str] = []
+
+    async def counted(_context: ToolContext, arguments: dict) -> dict:
+        dispatched.append(str(arguments.get("symbol")))
+        return {"symbol": arguments.get("symbol"), "close": 95.4}
+
+    client = FakeClient(
+        [
+            wants("get_analysis", prefix="a"),
+            wants("get_analysis", prefix="b"),
+            wants("get_analysis", prefix="c"),
+            wants("get_analysis", prefix="d"),
+            answer("Kết luận từ bằng chứng đã có."),
+        ]
+    )
+
+    outcome = await loop(client, catalog(spec("get_analysis", counted))).run(
+        turn_request()
+    )
+
+    # Asked four times, dispatched twice: the third is refused before dispatch
+    # and the fourth halts the tool loop. The Turn still answers — the halt ends
+    # the *tool* loop, not the Turn, so the reader keeps the evidence that was
+    # gathered before the model started going round in circles.
+    assert dispatched == ["FPT", "FPT"]
+    assert outcome.status is TurnStatus.COMPLETE
+    assert outcome.text == "Kết luận từ bằng chứng đã có."
+    assert client.requests[-1].tool_choice == "none"
+
+
+@pytest.mark.asyncio
+async def test_a_halted_round_still_dispatches_the_calls_beside_it():
+    dispatched: list[str] = []
+
+    async def counted(_context: ToolContext, arguments: dict) -> dict:
+        dispatched.append(f"{arguments.get('symbol')}")
+        return {"symbol": arguments.get("symbol"), "close": 95.4}
+
+    # Three rounds of the same call, then a fourth round carrying the repetition
+    # *and* a question nobody has asked yet.
+    mixed = Completion(
+        model=SESSION_MODEL,
+        tool_calls=(
+            ToolCall(id="d_0", name="get_analysis", arguments={"symbol": "FPT"}, output_index=0),
+            ToolCall(id="d_1", name="get_analysis", arguments={"symbol": "VNM"}, output_index=1),
+        ),
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+    client = FakeClient(
+        [
+            wants("get_analysis", prefix="a"),
+            wants("get_analysis", prefix="b"),
+            wants("get_analysis", prefix="c"),
+            mixed,
+            answer("Kết luận."),
+        ]
+    )
+
+    outcome = await loop(client, catalog(spec("get_analysis", counted))).run(
+        turn_request()
+    )
+
+    # The new question ran; the repetition did not. A halt that discarded its
+    # round would have thrown away evidence nobody had asked for twice.
+    assert dispatched == ["FPT", "FPT", "VNM"]
+    assert outcome.status is TurnStatus.COMPLETE
+
+
+@pytest.mark.asyncio
+async def test_a_result_too_large_for_its_tool_reaches_the_model_as_a_preview():
+    async def bulky(_context: ToolContext, arguments: dict) -> dict:
+        return {
+            "symbol": arguments.get("symbol"),
+            "as_of": "2026-08-14",
+            "rows": [{"date": f"2026-08-{day:02d}", "close": 90.0 + day} for day in range(1, 29)],
+        }
+
+    recorded: list[tuple[int, dict]] = []
+
+    async def record(request_message_id: int, spilled) -> None:
+        recorded.append((request_message_id, dict(spilled)))
+
+    client = FakeClient([wants("bulky"), answer()])
+    tools = ToolCatalog(
+        (
+            ToolSpec(
+                name="bulky",
+                description="Return a long series.",
+                parameters={
+                    "type": "object",
+                    "properties": {"symbol": {"type": "string"}},
+                    "additionalProperties": False,
+                },
+                callable=bulky,
+                # Small enough that the result above is over it, which is what
+                # makes this a test of rung two rather than of the shipped
+                # default.
+                result_budget_bytes=400,
+            ),
+        ),
+        trace_writer=lambda _trace: None,
+    )
+
+    outcome = await loop(client, tools, spill_recorder=record).run(turn_request())
+
+    (call,) = outcome.tool_calls
+    assert call.result is not None
+    # The envelope survives, the bulk does not, and the reference says how much
+    # was left out — the model can see the shape of what it is missing.
+    assert call.result["symbol"] == "FPT"
+    assert len(call.result["rows"]) < 28
+    reference = call.result["spilled_ref"]
+    assert reference["full_bytes"] > 400
+    assert reference["truncated"][0]["key"] == "rows"
+    # And the spill is written down, so a threshold can be tuned against
+    # measured spills rather than guessed at.
+    assert recorded == [(42, {"call_0": reference["full_bytes"]})]
+
+
+@pytest.mark.asyncio
+async def test_a_result_inside_its_budget_is_never_touched():
+    client = FakeClient([wants("get_analysis"), answer()])
+
+    outcome = await loop(client).run(turn_request())
+
+    (call,) = outcome.tool_calls
+    assert call.result == {"symbol": "FPT", "close": 95.4}

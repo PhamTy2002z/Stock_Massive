@@ -76,7 +76,7 @@ export default function RootLayout({
     >
       <body>
         {/* Night is the design, not a mode: the VisgniteAI reference is drawn
-            on #191815 and every surface step above it is defined against that
+            on #101112 and every surface step above it is defined against that
             ground, so a first visit lands there. The light theme is the same
             system re-grounded on paper and stays a choice the user makes in
             the toggle — which is why enableSystem is still on. */}

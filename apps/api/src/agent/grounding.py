@@ -513,6 +513,15 @@ class ReleasedBlock:
     #: The literals as written, because the renderer's label names them and a
     #: reader has to be able to find them in the sentence they are reading.
     unverified_figures: tuple[str, ...] = ()
+    #: The public pages this block's evidence rests on, as their URLs.
+    #:
+    #: Attached by the caller rather than resolved here, because it is the only
+    #: reader that holds the Turn's source set: this validator is given traces
+    #: and a block, and a page is a fact about the Turn. Set is
+    #: ``progress.block_source_ids``, and the membership check it does is the
+    #: only one there is — this is the chip under a paragraph, never a gate, so a
+    #: page the Turn did not list is dropped and the block is released unchanged.
+    source_ids: tuple[str, ...] = ()
 
     def as_wire(self) -> dict[str, Any]:
         return {
@@ -522,6 +531,7 @@ class ReleasedBlock:
             "trading_day": self.trading_day,
             "citations": [citation.as_wire() for citation in self.citations],
             "unverified_figures": list(self.unverified_figures),
+            "source_ids": list(self.source_ids),
         }
 
 
