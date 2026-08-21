@@ -19,9 +19,9 @@ that it passed any validator.
 ## Sections and precedence
 
 The prompt's sections are fixed: mission and non-goals; non-overridable scope,
-privacy, provenance, and safety invariants; the **Recommendation Gate**; tool-use
-policy; output protocol; voice and interaction style; **visual evidence**; trusted
-runtime context.
+privacy, provenance, and safety invariants; **figures and the gaps in them**; the
+**Recommendation Gate**; tool-use policy; **batching lookups**; output protocol;
+voice and interaction style; **visual evidence**; trusted runtime context.
 
 A section is added only by amending that list, in the same commit as the prose and
 the `prompt_version` bump. That is how *visual evidence* arrived at 1.2.0: ADR-0012
@@ -180,3 +180,18 @@ or changeable data with user responsibility.
   goes through version control, code review, the Capability Probe, and a passing gate
   run of the Eval Battery before release — which is also why `prompt_version` is one of
   the fields that voids a cached prefix and requires an Eval Report on the pull request.
+
+## Amended by ADR-0021 and ADR-0022
+
+`ADR-0021` inverts the Recommendation Validator's default: a Gate condition that
+cannot prove a block withholds the block rather than ending the Turn, and four
+integrity conditions stay fail-closed. The invariant above is untouched — there is
+still no field the model can set to make a failure degradable.
+
+`ADR-0022` amends the narrow-enforcement rule in one direction only. The Contract
+may now carry a behavioural rule the backend detects but cannot repair: that a
+figure comes from a tool call or is not stated, and that the independent lookups
+of a round are emitted together. Nothing about it is checked in the prompt, and
+nothing about it is a model assertion — enforcement stays exactly where the table
+above puts it. The fixed section list gains the two entries named in *Sections and
+precedence*, at `prompt_version` 1.8.0.

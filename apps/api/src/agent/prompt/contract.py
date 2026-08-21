@@ -73,8 +73,8 @@ class RuntimeContext:
 
     Deliberately the same three trusted facts the Tool Catalog's
     ``ToolContext`` carries, plus market state — which is injected for the one
-    reason given in section 7: without it the model calls yesterday's close
-    "the current price", and no tool can catch that sentence.
+    reason given under *Trusted runtime context*: without it the model calls
+    yesterday's close "the current price", and no tool can catch that sentence.
 
     ``today`` is injected for the same kind of reason and no other. The Trading
     Day is the session the *store* is dated to, and on a Sunday it is Friday's;
