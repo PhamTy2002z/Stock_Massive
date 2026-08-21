@@ -78,10 +78,10 @@ from .protocol import (
 )
 from .recovery import (
     RECOVERIES,
-    ROUTE_ERROR_CLASSES,
     Recovery,
     RouteAction,
     recovery_for,
+    route_error_classes,
 )
 from .probe import (
     CapabilityProbe,
@@ -96,7 +96,6 @@ __all__ = [
     "BUDGET_REFUSAL_REASONS",
     "CACHE_CONTROL",
     "RECOVERIES",
-    "ROUTE_ERROR_CLASSES",
     "AuthUnavailable",
     "BudgetLane",
     "BudgetRefusal",
@@ -157,6 +156,7 @@ __all__ = [
     "llm_config_from_settings",
     "llm_metrics",
     "recovery_for",
+    "route_error_classes",
     "redact",
     "route_key",
     "tool_error_result",

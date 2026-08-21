@@ -88,6 +88,24 @@ ERROR_BODY_MAX_SECONDS = 5.0
 # on content that changes before it is read back.
 CACHE_TAIL_MESSAGES = 2
 
+# How long a rebuilt transport is left alone before another rebuild is allowed,
+# and how long the replaced client is kept alive after being replaced.
+#
+# Both exist because **one** ``AsyncClient`` is shared by every Turn in the
+# process (``agent/service.py`` builds it once and hands it to every loop). Two
+# consequences had to be designed for rather than discovered:
+#
+# - Closing the replaced client would abort every *other* Turn's in-flight
+#   request, which arrives at those Turns as ``httpx.ReadError`` — a
+#   ``GatewayTimeout``, whose own recovery is another rebuild. One 504 would
+#   cascade into every concurrent Turn rebuilding on top of each other. So the
+#   replaced client is dropped from use immediately and closed later, by which
+#   time anything still on it has hit its own request deadline.
+# - A cooldown, because the second Turn to ask for a rebuild within seconds of
+#   the first is asking for a pool that is already new.
+REBUILD_COOLDOWN_SECONDS = 30.0
+STALE_CLIENT_GRACE_SECONDS = 5.0
+
 
 class OpenAICompatibleTransport:
     """The network transport used only behind the reserved public client."""
@@ -100,6 +118,13 @@ class OpenAICompatibleTransport:
         self._config = config
         self._owns_client = http_client is None
         self._http = http_client or self._new_client()
+        # Serialised, because the client this swaps is shared by every Turn in
+        # the process and two Turns rebuilding at once would each throw away the
+        # other's fresh pool.
+        self._rebuild_lock = asyncio.Lock()
+        self._rebuilt_at: float | None = None
+        self._retiring: set[httpx.AsyncClient] = set()
+        self._closers: set[asyncio.Task[None]] = set()
 
     def _new_client(self) -> httpx.AsyncClient:
         """One HTTP client, with this process's own deadline on the socket.
@@ -112,30 +137,77 @@ class OpenAICompatibleTransport:
         )
 
     async def aclose(self) -> None:
-        if self._owns_client:
-            await self._http.aclose()
+        if not self._owns_client:
+            return
+        for task in list(self._closers):
+            task.cancel()
+        self._closers.clear()
+        for retiring in list(self._retiring):
+            await _close_quietly(retiring)
+        self._retiring.clear()
+        await self._http.aclose()
 
     async def rebuild(self) -> bool:
-        """Throw this transport's connections away and build fresh ones.
+        """Stop using this transport's connections and build fresh ones.
 
         Called after our own deadline expired, which a connection wedged in the
         pool reproduces on the next call and on every call after it. The cost is
         one handshake; the alternative is a route that looks dead until the
         process restarts.
 
-        Answers ``False`` when the client was injected: a caller that supplied
-        its own ``AsyncClient`` owns its lifecycle, and closing it here would
-        break the next user of it rather than this one.
+        **The replaced client is not closed here.** Every Turn in the process
+        shares it, and closing it aborts their in-flight requests — which reach
+        them as a failure whose own recovery is another rebuild, so one 504 would
+        cascade through every concurrent Turn. It is dropped from use at once and
+        closed after a grace period longer than nothing still on it can survive.
+
+        Answers ``False`` when the client was injected, and when another caller
+        rebuilt moments ago: a caller that supplied its own ``AsyncClient`` owns
+        its lifecycle, and a pool built two seconds ago is already the fresh one.
         """
         if not self._owns_client:
             return False
-        stale = self._http
-        self._http = self._new_client()
-        try:
-            await stale.aclose()
-        except Exception as exc:  # noqa: BLE001 - the point was to stop using it
-            logger.debug("The stale LLM transport did not close cleanly: %s", exc)
+        async with self._rebuild_lock:
+            now = time.monotonic()
+            if (
+                self._rebuilt_at is not None
+                and now - self._rebuilt_at < REBUILD_COOLDOWN_SECONDS
+            ):
+                return False
+            self._rebuilt_at = now
+            stale = self._http
+            self._http = self._new_client()
+        self._retire(stale)
         return True
+
+    def _retire(self, stale: httpx.AsyncClient) -> None:
+        """Close a replaced client once whatever is still on it has finished.
+
+        The grace period is the request deadline plus a margin, so the close
+        lands after any request that was in flight when the swap happened has
+        either answered or hit its own timeout.
+        """
+        self._retiring.add(stale)
+        grace = (
+            clamp_timeout(self._config.request_timeout_seconds)
+            + STALE_CLIENT_GRACE_SECONDS
+        )
+
+        async def close_later() -> None:
+            try:
+                await asyncio.sleep(grace)
+                await _close_quietly(stale)
+            except asyncio.CancelledError:
+                # Shutdown closes it directly; nothing to do here.
+                raise
+            finally:
+                self._retiring.discard(stale)
+
+        task = asyncio.create_task(close_later())
+        # Held, because a task nobody references can be collected mid-sleep and
+        # the client would then never close at all.
+        self._closers.add(task)
+        task.add_done_callback(self._closers.discard)
 
     async def dispatch(self, request: CompletionRequest) -> Completion:
         """Make exactly one paid attempt, returning or raising a typed result.
@@ -270,8 +342,14 @@ class OpenAICompatibleTransport:
             ) from exc
 
         if response.status_code >= 400:
+            # Already buffered: a non-streaming ``post`` reads the whole body
+            # before returning, so the byte ceiling the streamed path applies has
+            # nothing left to bound here. Sliced anyway, because what travels
+            # into the exception message and the log is what matters.
             raise self._classified(
-                response.status_code, response.text, response.headers
+                response.status_code,
+                response.text[:ERROR_BODY_MAX_BYTES],
+                response.headers,
             )
 
         try:
@@ -393,6 +471,13 @@ class OpenAICompatibleTransport:
             error = GatewayTimeout(f"the route could not be reached: {exc}", attempt=attempt)
         llm_metrics().record_gateway_timeout(str(error))
         return error
+
+
+async def _close_quietly(client: httpx.AsyncClient) -> None:
+    try:
+        await client.aclose()
+    except Exception as exc:  # noqa: BLE001 - the point was to stop using it
+        logger.debug("A replaced LLM transport did not close cleanly: %s", exc)
 
 
 def _mark_tail_breakpoints(wire: list[dict[str, Any]]) -> None:
@@ -549,6 +634,8 @@ __all__ = [
     "CHAT_COMPLETIONS_PATH",
     "ERROR_BODY_MAX_BYTES",
     "ERROR_BODY_MAX_SECONDS",
+    "REBUILD_COOLDOWN_SECONDS",
+    "STALE_CLIENT_GRACE_SECONDS",
     "OpenAICompatibleTransport",
     "build_transport",
 ]

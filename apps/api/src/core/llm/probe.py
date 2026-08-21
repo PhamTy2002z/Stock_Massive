@@ -300,8 +300,13 @@ class CapabilityProbe:
                 metadata={"probe_check": "prompt_cache_control"},
             )
         )
+        # Acceptance is the whole check: the call returned rather than being
+        # refused. Asserting a non-empty answer would fail the boot probe over a
+        # model having a bad second, on a route that had just proven it speaks
+        # the field — and an empty answer is the deterministic-empty guard's
+        # subject, not this one's.
         cached = completion.usage.cached_input_tokens if completion.usage else 0
-        return bool(completion.text), f"cached_input_tokens={cached} {_render(completion)}"
+        return True, f"cached_input_tokens={cached} {_render(completion)}"
 
 
 def _render(completion: Completion) -> str:

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date, datetime, timezone
+
+import httpx
 from types import MappingProxyType
 
 import pytest
@@ -67,7 +69,8 @@ from src.core.llm.config import (
     clamp_timeout,
 )
 from src.core.llm.errors import MAX_GATEWAY_ATTEMPTS
-from src.core.llm.recovery import RECOVERIES, ROUTE_ERROR_CLASSES
+from src.core.llm.transport import OpenAICompatibleTransport
+from src.core.llm.recovery import RECOVERIES, UNCOVERED, route_error_classes
 from tests.fake_redis import FakeRedis, PositionalFakeRedis
 
 SESSION_MODEL = "session-model"
@@ -194,15 +197,26 @@ def client(transport, *, breaker=None, cfg=None) -> ReservedLLMClient:
 def test_every_route_failure_has_an_action_or_a_stated_reason():
     """The success criterion, as a test rather than a claim.
 
-    A class with no entry would fall through to ``LLMError`` and be terminal
-    silently, which is the shapeless behaviour Phase 1 replaced. So the table is
-    walked rather than trusted, and every entry has to justify itself in a
-    sentence an operator can read.
+    Walked from the **class tree** rather than from the table's own keys: a
+    completeness check that reads what it is checking proves only that the table
+    equals itself, and a class added to ``errors.py`` next month would inherit
+    ``LLMError``'s terminal entry in silence — which is the Phase-1 shapelessness
+    returning through a new door.
     """
-    for klass in ROUTE_ERROR_CLASSES:
+    classes = route_error_classes()
+    assert len(classes) >= 12, "the walk stopped finding the taxonomy"
+
+    for klass in classes:
+        assert klass in RECOVERIES, (
+            f"{klass.__name__} has no recovery; add one, or name it in "
+            "recovery.UNCOVERED with the reason it never reaches the table"
+        )
         recovery = RECOVERIES[klass]
         assert recovery.reason.strip(), f"{klass.__name__} has no stated reason"
         assert len(recovery.reason) > 40, f"{klass.__name__} has a placeholder reason"
+
+    # And the exclusion is a decision, not an oversight.
+    assert "ToolError" in UNCOVERED
 
 
 @pytest.mark.parametrize(
@@ -556,6 +570,29 @@ class TestRouteBreaker:
 
             assert interactive.open_for(key) > 0
 
+    def test_a_fractional_clock_still_opens_and_extends_the_hold(self):
+        """Redis parses ``PX`` as a strict integer and refuses a fractional one.
+
+        A clock in milliseconds is fractional, and the value the script stores
+        becomes the next caller's ``held`` — so the *extend* path is where an
+        unfloored millisecond count fails on a real server. ``tests/fake_redis``
+        refuses a fractional ``PX`` for exactly this reason, which is what makes
+        this test able to fail.
+        """
+        now = [1_755_000_020.123_456]
+        shared = FakeRedis(clock=lambda: now[0])
+        breaker = RouteBreaker(redis_factory=lambda: shared, clock=lambda: now[0])
+        key = route_key(BASE_URL, SESSION_MODEL)
+
+        assert breaker.record_rate_limit(key, retry_after=30.5) > 0
+        # The extend: a second 429 read back through the value just stored.
+        assert breaker.record_rate_limit(key, retry_after=45.25) > 0
+        assert breaker.open_for(key) > 40
+
+        # And the reset-epoch path, whose hold is a difference of two floats.
+        breaker.clear(key)
+        assert breaker.record_rate_limit(key, reset_at=now[0] + 12.75) > 0
+
     def test_a_second_caller_cannot_shorten_the_hold(self):
         now = [1_000_000.0]
         shared = FakeRedis(clock=lambda: now[0])
@@ -629,6 +666,15 @@ class TestRouteBreaker:
         assert "sk-live-123" not in key
         assert key != route_key(BASE_URL, BATCH_MODEL)
 
+        # Userinfo too, which ``netloc`` keeps and ``hostname`` does not: a base
+        # URL of this shape would otherwise write the credential into the key and
+        # into the log line beside it.
+        embedded = route_key("https://sk-live-456@llm.example/v1", SESSION_MODEL)
+        assert "sk-live-456" not in embedded
+        assert "llm.example" in embedded
+        # A port still distinguishes two routes on one host.
+        assert route_key("https://llm.example:8443/v1", SESSION_MODEL) != key
+
 
 class TestBreakerInTheClient:
     pytestmark = pytest.mark.asyncio
@@ -675,6 +721,50 @@ class TestBreakerInTheClient:
             await client(transport).complete(request(), spend())
 
         assert len(transport.seen) == 1
+
+
+class TestRebuildingASharedTransport:
+    pytestmark = pytest.mark.asyncio
+
+    async def test_the_replaced_client_is_not_closed_under_the_turns_using_it(self):
+        """The whole process shares one ``AsyncClient`` (``agent/service.py``).
+
+        Closing it on rebuild aborts every *other* Turn's in-flight request,
+        which reaches those Turns as a transport failure whose own recovery is
+        another rebuild — so one 504 would cascade through every concurrent Turn.
+        The replaced client is therefore dropped from use and closed later.
+        """
+        subject = OpenAICompatibleTransport(config())
+        first = subject._http
+
+        assert await subject.rebuild() is True
+        assert subject._http is not first
+        assert first.is_closed is False
+
+        await subject.aclose()
+        assert first.is_closed is True
+        assert subject._http.is_closed is True
+
+    async def test_a_second_rebuild_inside_the_cooldown_is_refused(self):
+        """A pool built two seconds ago is already the fresh one."""
+        subject = OpenAICompatibleTransport(config())
+        try:
+            assert await subject.rebuild() is True
+            assert await subject.rebuild() is False
+        finally:
+            await subject.aclose()
+
+    async def test_an_injected_client_is_never_rebuilt(self):
+        """Its lifecycle belongs to whoever supplied it."""
+        supplied = httpx.AsyncClient()
+        subject = OpenAICompatibleTransport(config(), http_client=supplied)
+
+        assert await subject.rebuild() is False
+        assert supplied.is_closed is False
+
+        await subject.aclose()
+        assert supplied.is_closed is False
+        await supplied.aclose()
 
 
 # --- deadlines ------------------------------------------------------------

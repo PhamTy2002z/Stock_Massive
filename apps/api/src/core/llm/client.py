@@ -43,7 +43,6 @@ from .errors import (
     MAX_GATEWAY_ATTEMPTS,
     RouteAttempt,
     RouteRateLimited,
-    llm_metrics,
 )
 from .protocol import Completion, CompletionRequest
 from .recovery import RouteAction, recovery_for
@@ -223,12 +222,23 @@ class ReservedLLMClient:
                     # one paid attempt and does not know it is the second.
                     # Stamped rather than logged, so the caller that ends the Turn
                     # is the one that says how much was spent trying.
+                    #
+                    # Every paid attempt of this call, not only the ones that
+                    # timed out: the field says what was spent reaching the
+                    # failure, and a failover before it was spent too.
                     exc.attempt = replace(
-                        exc.attempt or RouteAttempt(), attempts=gateway_attempts
+                        exc.attempt or RouteAttempt(), attempts=attempt
                     )
                 action = recovery_for(exc).action
                 if isinstance(exc, RouteRateLimited):
-                    self._record_rate_limit(request.model, exc)
+                    # Off the event loop: ``get_redis`` hands back a *synchronous*
+                    # client, and on the Upstash dialect this is an HTTPS round
+                    # trip. Blocking here would stall every other Turn, every SSE
+                    # heartbeat, and — per cpython #84047 — every asyncio timer in
+                    # the process, on the one path this module calls cheap.
+                    await asyncio.to_thread(
+                        self._record_rate_limit, request.model, exc
+                    )
                     raise
                 if action is RouteAction.REBUILD_AND_RETRY and self._may_retry(
                     attempt, gateway_attempts
@@ -243,6 +253,9 @@ class ReservedLLMClient:
                 ):
                     swapped = self._switch_model(request, spend)
                     if swapped is not None:
+                        # No backoff: the wait between attempts exists to
+                        # decorrelate callers hammering one route, and this
+                        # attempt is going somewhere else.
                         request, spend = swapped
                         switched = True
                         continue
@@ -376,8 +389,14 @@ class ReservedLLMClient:
         remaining = await asyncio.to_thread(self._breaker.open_for, key)
         if remaining <= 0:
             return
-        llm_metrics().record_rate_limit(
-            f"a shared breaker is holding {model} for another {remaining:.1f}s"
+        # Logged rather than counted. ``llm_metrics().rate_limits`` answers "how
+        # often did the route refuse us", and a refusal this process made on the
+        # strength of an earlier one would count the same 429 twice.
+        logger.info(
+            "Refusing an LLM call before dispatch: a shared breaker is holding "
+            "%s for another %.1fs",
+            model,
+            remaining,
         )
         raise RouteRateLimited(
             f"the route is out of allowance for {model}; a shared breaker is "
