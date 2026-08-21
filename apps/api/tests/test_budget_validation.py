@@ -181,6 +181,43 @@ class TestImpossibleConfiguration:
         )
 
 
+class TestAnUnmeteredEnvelope:
+    """Zero across all five values is a deployment with no monthly ceiling.
+
+    The prices are not part of that decision. They are what the ledger records
+    against every call, so they stay validated — an unmetered envelope must not
+    become a licence to boot with a price table nobody filled in.
+    """
+
+    UNMETERED = dict(
+        llm_budget_monthly_usd=0,
+        llm_budget_analysis_usd=0,
+        llm_budget_turn_usd=0,
+        llm_budget_emergency_usd=0,
+        llm_budget_eval_usd=0,
+    )
+
+    def test_all_five_at_zero_passes(self):
+        report = validate_budget(_config(**self.UNMETERED))
+
+        assert report.ok, report.summary()
+        assert report.analysis_cost_usd == pytest.approx(ANALYSIS_COST_CEILING_USD)
+
+    def test_the_price_table_is_still_validated(self):
+        report = validate_budget(
+            _config(**self.UNMETERED, llm_price_session_output_usd_per_mtok=0)
+        )
+
+        assert not report.ok
+        assert "pricing_table" in _failed_ceilings(report)
+
+    def test_one_lane_left_at_zero_is_a_variable_nobody_filled_in(self):
+        report = validate_budget(_config(llm_budget_turn_usd=0))
+
+        assert not report.ok
+        assert "monthly_envelope" in _failed_ceilings(report)
+
+
 class TestEnforcement:
     def test_alpha_desk_enabled_fails_startup_naming_the_ceiling(self):
         config = _config(llm_price_batch_input_usd_per_mtok=5.0)

@@ -110,7 +110,9 @@ def build_alpha_desk(
         # uses; a Turn never holds a session (``docs/specs/0003`` §10.5).
         trace_writer=persistence.record_tool_call,
     )
-    slots = SessionSlots()
+    # The semaphore and the ledger enforce one configured ceiling from
+    # opposite sides (``core/llm/admission.py``); ``None`` is unlimited in both.
+    slots = SessionSlots(limit=resolved.ceilings.active_turns_system)
 
     def loop_factory(*, checkpoint, publisher) -> AgentLoop:
         return AgentLoop(
@@ -124,6 +126,9 @@ def build_alpha_desk(
             # whether an extra batch call per answered Turn is worth its cost,
             # and the loop should not have to know what a Settings object is.
             suggest=settings.alpha_desk_suggestions_enabled,
+            # Wired the same way the Trace is: one short transaction per write,
+            # and a Turn never holds a session (``docs/specs/0003`` §10.5).
+            spill_recorder=persistence.record_spillover,
         )
 
     return AlphaDeskService(

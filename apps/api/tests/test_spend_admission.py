@@ -13,6 +13,7 @@ from sqlalchemy.pool import StaticPool
 
 from src.core.llm import (
     BudgetLane,
+    UserCeilings,
     CallOwner,
     Completion,
     CompletionRequest,
@@ -786,6 +787,122 @@ class TestPerUserCeilings:
 
         assert refused.value.reason == "user_spend_rolling_30d"
         assert refused.value.reset_at == base + timedelta(days=31)
+
+
+class TestCeilingsTurnedOff:
+    """A deployment may declare a ceiling unlimited, and metering continues.
+
+    The reason these are worth their own tests: turning a refusal off must not
+    turn the *ledger* off with it. An internal deployment that stopped writing
+    cost rows would have no way back to enforcing anything, because the counts
+    the ceilings compare against would be missing for the whole period it ran
+    that way.
+    """
+
+    def test_an_unlimited_start_ceiling_admits_the_hundredth_turn_of_the_day(self):
+        config = replace(
+            llm_config(), ceilings=UserCeilings(turn_starts_per_day=None)
+        )
+        admission, sessions = admission_with(
+            config,
+            turn_state_reader=lambda *_: TurnState(
+                starts_today=100, active_for_user=1, active_system=1
+            ),
+        )
+
+        reservation = admission.reserve(spend(), "session-model")
+
+        assert reservation.id == 1
+        with sessions() as session:
+            assert session.scalars(select(LlmCallUsage)).one().reserved_micro_usd > 0
+
+    def test_unlimited_active_turns_admit_a_second_turn_for_the_same_user(self):
+        config = replace(
+            llm_config(),
+            ceilings=UserCeilings(
+                active_turns_per_user=None, active_turns_system=None
+            ),
+        )
+        admission, _ = admission_with(
+            config,
+            turn_state_reader=lambda *_: TurnState(
+                starts_today=1, active_for_user=9, active_system=9
+            ),
+        )
+
+        assert admission.reserve(spend(), "session-model").id == 1
+
+    def test_unlimited_monetary_ceilings_admit_past_the_configured_dollars(self):
+        expensive = replace(
+            llm_config(),
+            pricing=replace(
+                llm_config().pricing, session=TokenPrices(10, 10, 10, 10)
+            ),
+            ceilings=UserCeilings(daily_usd=None, rolling_30d_usd=None),
+        )
+        admission, sessions = admission_with(expensive)
+        for owner in range(8):
+            admission.reserve(
+                replace(
+                    spend(),
+                    owner=CallOwner(
+                        OwnerType.TURN_REQUEST_MESSAGE, str(owner), user_id=7
+                    ),
+                    input_tokens=30_000,
+                    output_tokens=19_000,
+                ),
+                "session-model",
+            )
+
+        with sessions() as session:
+            charged = sum(
+                row.reserved_micro_usd
+                for row in session.scalars(select(LlmCallUsage))
+            )
+
+        # Eight calls at $0.49 each: past the $3 daily and the $15 rolling
+        # ceilings the defaults would have refused, and every one of them
+        # recorded.
+        assert charged > 3_000_000
+
+    def test_an_unmetered_envelope_admits_past_the_monthly_lane(self):
+        config = replace(
+            llm_config(),
+            lanes=BudgetLanes(
+                monthly_envelope_usd=0,
+                analysis_usd=0,
+                turn_usd=0,
+                emergency_usd=0,
+                eval_usd=0,
+            ),
+            pricing=replace(
+                llm_config().pricing, session=TokenPrices(10, 10, 10, 10)
+            ),
+            ceilings=UserCeilings(daily_usd=None, rolling_30d_usd=None),
+        )
+        admission, _ = admission_with(config)
+        for owner in range(70):
+            admission.reserve(
+                replace(
+                    spend(),
+                    owner=CallOwner(
+                        OwnerType.TURN_REQUEST_MESSAGE, str(owner), user_id=7
+                    ),
+                    input_tokens=30_000,
+                    output_tokens=19_000,
+                ),
+                "session-model",
+            )
+
+        # $34 of Turn spend, against a $30 lane that is no longer declared.
+        assert admission.reserve(
+            replace(
+                spend(),
+                owner=CallOwner(OwnerType.TURN_REQUEST_MESSAGE, "last", user_id=7),
+                input_tokens=30_000,
+            ),
+            "session-model",
+        ).id == 71
 
 
 class FailingTransport:

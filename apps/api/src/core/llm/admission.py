@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal, ROUND_CEILING
+from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 from enum import Enum
 import hashlib
 import logging
@@ -21,7 +21,7 @@ from src.alpha.models import (
     LlmCallUsage,
 )
 
-from .config import LLMConfig, TokenPrices, Workload
+from .config import LLMConfig, TokenPrices, UserCeilings, Workload
 from .protocol import Usage
 
 logger = logging.getLogger(__name__)
@@ -33,11 +33,11 @@ TURN_CONTEXT_PER_CALL = 32_000
 TURN_INPUT_TOTAL = 100_000
 TURN_OUTPUT_TOTAL = 20_000
 TURN_COST_MICRO_USD = 500_000
-USER_TURN_STARTS_PER_DAY = 20
-USER_DAILY_MICRO_USD = 3_000_000
-USER_ROLLING_30D_MICRO_USD = 15_000_000
-USER_ACTIVE_TURNS = 1
-SYSTEM_ACTIVE_TURNS = 3
+# The five per-user ceilings live in ``UserCeilings`` (``config.py``) rather
+# than here. They are the one group of ceilings a deployment legitimately
+# changes without changing what the product promises, and each of them may be
+# unlimited; the per-Turn and per-Analysis ceilings above are the contract and
+# stay constants.
 PROBE_DAILY_MICRO_USD = 250_000
 # The hard ceiling on one Eval Battery run (``docs/adr/0016``). Enforced here
 # rather than by the harness counting its own spend, and that placement is the
@@ -452,6 +452,7 @@ class SpendAdmission:
             _assert_user_ceilings(
                 session,
                 state=self._turn_state_reader(session, user_id, called_at, ""),
+                ceilings=self._config.ceilings,
                 user_id=user_id,
                 reserved=reserved,
                 called_at=called_at,
@@ -483,6 +484,7 @@ class SpendAdmission:
                 called_at,
                 candidate.owner.id,
             ),
+            ceilings=self._config.ceilings,
             user_id=user_id,
             reserved=reserved,
             called_at=called_at,
@@ -531,7 +533,7 @@ def _assert_lane_headroom(
     reserved: int,
     month_start: datetime,
     month_reset: datetime,
-) -> tuple[int, int]:
+) -> tuple[int, int | float]:
     """The lane's monthly ceiling, asked once for both callers.
 
     :meth:`SpendAdmission.reserve` asks it under an advisory lock immediately
@@ -564,6 +566,7 @@ def _assert_user_ceilings(
     session: Session,
     *,
     state: TurnState,
+    ceilings: UserCeilings,
     user_id: int,
     reserved: int,
     called_at: datetime,
@@ -580,68 +583,86 @@ def _assert_user_ceilings(
     is what keeps the two paths from drifting into disagreeing about who may
     start a Turn — an admission that let through what dispatch then refused
     would produce an ``incomplete`` Turn with nothing in it.
+
+    A ceiling left unlimited is not asked at all, and the two monetary ones do
+    not even run their query. That is the point of asking here rather than
+    inside ``_charged_cost``: an unlimited ceiling should cost nothing per call,
+    not a scan whose answer is then discarded.
     """
-    if state.starts_today > USER_TURN_STARTS_PER_DAY:
+    if (
+        ceilings.turn_starts_per_day is not None
+        and state.starts_today > ceilings.turn_starts_per_day
+    ):
         raise BudgetRefusal(
             "user_turn_starts_daily",
             "Your daily Turn allowance has been exhausted.",
             reset_at=day_reset,
         )
-    if state.active_for_user + pending > USER_ACTIVE_TURNS:
+    if (
+        ceilings.active_turns_per_user is not None
+        and state.active_for_user + pending > ceilings.active_turns_per_user
+    ):
         raise BudgetRefusal(
             "user_active_turn",
             "Another Turn is already active for this account.",
             state="capacity_exhausted",
         )
-    if state.active_system + pending > SYSTEM_ACTIVE_TURNS:
+    if (
+        ceilings.active_turns_system is not None
+        and state.active_system + pending > ceilings.active_turns_system
+    ):
         raise BudgetRefusal(
             "system_active_turns",
             "The service is at its active Turn capacity.",
             state="capacity_exhausted",
         )
 
-    daily = _charged_cost(
-        session,
-        LlmCallUsage.user_id == user_id,
-        LlmCallUsage.owner_type == OwnerType.TURN_REQUEST_MESSAGE.value,
-        LlmCallUsage.provider_called_at >= day_start,
-        LlmCallUsage.provider_called_at < day_reset,
-    )
-    if daily + reserved > USER_DAILY_MICRO_USD:
-        raise BudgetRefusal(
-            "user_spend_daily",
-            "Your daily generation allowance has been exhausted.",
-            reset_at=day_reset,
-            operator_detail=(
-                f"user {user_id} has {daily} micro-USD charged today and "
-                f"this request needs {reserved}"
-            ),
+    daily_ceiling = _micro_usd_ceiling(ceilings.daily_usd)
+    if daily_ceiling is not None:
+        daily = _charged_cost(
+            session,
+            LlmCallUsage.user_id == user_id,
+            LlmCallUsage.owner_type == OwnerType.TURN_REQUEST_MESSAGE.value,
+            LlmCallUsage.provider_called_at >= day_start,
+            LlmCallUsage.provider_called_at < day_reset,
         )
+        if daily + reserved > daily_ceiling:
+            raise BudgetRefusal(
+                "user_spend_daily",
+                "Your daily generation allowance has been exhausted.",
+                reset_at=day_reset,
+                operator_detail=(
+                    f"user {user_id} has {daily} micro-USD charged today and "
+                    f"this request needs {reserved}"
+                ),
+            )
 
-    rolling_start = called_at - timedelta(days=30)
-    rolling = _charged_cost(
-        session,
-        LlmCallUsage.user_id == user_id,
-        LlmCallUsage.owner_type == OwnerType.TURN_REQUEST_MESSAGE.value,
-        LlmCallUsage.provider_called_at > rolling_start,
-        LlmCallUsage.provider_called_at <= called_at,
-    )
-    if rolling + reserved > USER_ROLLING_30D_MICRO_USD:
-        raise BudgetRefusal(
-            "user_spend_rolling_30d",
-            "Your rolling generation allowance has been exhausted.",
-            reset_at=_rolling_reset_at(
-                session,
-                user_id=user_id,
-                rolling_start=rolling_start,
-                called_at=called_at,
-                amount_to_release=rolling + reserved - USER_ROLLING_30D_MICRO_USD,
-            ),
-            operator_detail=(
-                f"user {user_id} has {rolling} micro-USD charged in 30 days "
-                f"and this request needs {reserved}"
-            ),
+    rolling_ceiling = _micro_usd_ceiling(ceilings.rolling_30d_usd)
+    if rolling_ceiling is not None:
+        rolling_start = called_at - timedelta(days=30)
+        rolling = _charged_cost(
+            session,
+            LlmCallUsage.user_id == user_id,
+            LlmCallUsage.owner_type == OwnerType.TURN_REQUEST_MESSAGE.value,
+            LlmCallUsage.provider_called_at > rolling_start,
+            LlmCallUsage.provider_called_at <= called_at,
         )
+        if rolling + reserved > rolling_ceiling:
+            raise BudgetRefusal(
+                "user_spend_rolling_30d",
+                "Your rolling generation allowance has been exhausted.",
+                reset_at=_rolling_reset_at(
+                    session,
+                    user_id=user_id,
+                    rolling_start=rolling_start,
+                    called_at=called_at,
+                    amount_to_release=rolling + reserved - rolling_ceiling,
+                ),
+                operator_detail=(
+                    f"user {user_id} has {rolling} micro-USD charged in 30 days "
+                    f"and this request needs {reserved}"
+                ),
+            )
 
 
 def _micro_usd(
@@ -793,7 +814,31 @@ def _lock_scopes(session: Session, scopes: list[str]) -> None:
         session.execute(select(func.pg_advisory_xact_lock(key)))
 
 
-def _lane_limit_micro_usd(config: LLMConfig, lane: BudgetLane) -> int:
+def _micro_usd_ceiling(amount: float | None) -> int | None:
+    """A configured USD ceiling in the ledger's integer unit, or unlimited.
+
+    Rounded *down* where a reservation is rounded up: a ceiling is the most that
+    may be spent, so rounding it outward would fund a call the configuration
+    did not.
+    """
+    if amount is None:
+        return None
+    return int(
+        (Decimal(str(amount)) * Decimal(1_000_000)).to_integral_value(
+            rounding=ROUND_FLOOR
+        )
+    )
+
+
+def _lane_limit_micro_usd(config: LLMConfig, lane: BudgetLane) -> int | float:
+    """The lane's monthly ceiling in micro-USD, or ``inf`` when unmetered.
+
+    ``BudgetLanes.unmetered`` is the deployment saying it has no monthly
+    envelope, so the comparison in :func:`_assert_lane_headroom` is left to
+    return the spend it measured and admit the call.
+    """
+    if config.lanes.unmetered:
+        return float("inf")
     amount = {
         BudgetLane.ANALYSIS: config.lanes.analysis_usd,
         BudgetLane.TURN: config.lanes.turn_usd,

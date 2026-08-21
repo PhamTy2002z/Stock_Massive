@@ -322,6 +322,20 @@ class Settings(BaseSettings):
     # CLIProxy/CCS route. Set a positive value for a metered production route.
     llm_eval_run_cost_ceiling_usd: float = 0.0
 
+    # Năm trần per-user của docs/adr/0014. Là cấu hình chứ không phải hằng số vì
+    # một account được tiêu bao nhiêu trong ngày là quyết định chi tiêu: bản
+    # nội bộ chạy qua route thuê bao trả lời khác hẳn bản phục vụ người lạ trên
+    # một API tính tiền theo call. Con số của ADR vẫn là mặc định ở đây, nên hợp
+    # đồng còn một chỗ được ghi lại và một biến env là đủ để siết lại.
+    #
+    # `0` = không giới hạn, cùng quy ước với llm_eval_run_cost_ceiling_usd ở
+    # trên: mọi call vẫn được ghi vào `llm_call_usage`, chỉ bỏ phần từ chối.
+    llm_user_turn_starts_per_day: int = 20
+    llm_user_active_turns: int = 1
+    llm_system_active_turns: int = 3
+    llm_user_daily_usd: float = 3.0
+    llm_user_rolling_30d_usd: float = 15.0
+
     # Eval Battery (src/eval/, docs/adr/0016). Không có giá trị mặc định nào ở
     # đây trỏ vào database đang phục vụ: pin chạy battery phải là một hành động
     # cố ý, và một mặc định rỗng từ chối thẳng còn hơn một mặc định tiện tay ghi
