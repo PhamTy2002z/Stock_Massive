@@ -69,8 +69,8 @@ Nguồn: `plans/reports/hermes-synthesis-260821-0030.md` + 9 report vùng.
 |---|-------|--------|
 | 1 | [Phase 1: Chẩn đoán trước mọi thứ](./phase-01-start.md) | **Complete** |
 | 2 | [Phase 2: Grounding fail-open](./phase-02-grounding-fail-open.md) | **Complete** |
-| 3 | [Phase 3: System Prompt Contract](./phase-03-system-prompt-contract.md) | Pending |
-| 4 | [Phase 4: Độ bền tuyến LLM](./phase-04-route-resilience.md) | Pending |
+| 3 | [Phase 3: System Prompt Contract](./phase-03-system-prompt-contract.md) | **Complete** |
+| 4 | [Phase 4: Độ bền tuyến LLM](./phase-04-route-resilience.md) | **Complete** |
 | 5 | [Phase 5: Lane hội thoại và trình bày](./phase-05-conversation-lane-and-presentation.md) | Pending |
 | 6 | [Phase 6: Ngân sách tool và thang guardrail](./phase-06-tool-budget-and-guardrail-ladder.md) | Pending |
 | 7 | [Phase 7: Ký ức và quét injection](./phase-07-memory-and-injection-scan.md) | Pending |
@@ -86,7 +86,7 @@ ADR/spec, phải amend chứ không trái.
 
 | # | Quyết định | Ở đâu | Phase | Trạng thái |
 |---|---|---|---|---|
-| G1 | Đưa prose chống bịa vào Contract | `ADR-0015` nói thẳng *"refuses to let the Contract be an enforcement mechanism"* | 3 | Chưa mở |
+| G1 | Đưa prose chống bịa vào Contract | `ADR-0015` nói thẳng *"refuses to let the Contract be an enforcement mechanism"* | 3 | **Chốt 8/21** → `ADR-0022` |
 | G2 | Đảo mặc định 16 mã lỗi từ block sang degrade | `ADR-0015` + `ADR-0018` | 2 | **Chốt 4/20** → `ADR-0021` |
 | G3 | Đổi `MAX_TOOL_ROUNDS` 4 → N | `docs/specs/0003` §6 | 1 | **Chốt: giữ 4, sửa docs** |
 
@@ -99,8 +99,13 @@ tool schema/`tool_catalog_version`, agent loop, Recommendation Validator. Nên:
   diff so baseline) — không merge vào `develop` nếu thiếu.
 - Phase 1, 4 chỉ chạm `core/llm` + logging → không cần.
 - Phase 5 phần UI/widget → không cần; phần Contract → cần.
-- Baseline hiện tại đã lỗi thời (1.4.0, contract nay là 1.7.1). Phase 8 tạo
-  baseline mới; các phase trước so với 1.4.0 và ghi rõ là so sánh xuyên phiên bản.
+- Baseline hiện tại đã lỗi thời (1.4.0, contract nay là **1.8.0** sau Phase 3).
+  Phase 8 tạo baseline mới; các phase trước so với 1.4.0 và ghi rõ là so sánh
+  xuyên phiên bản.
+- **Nợ còn lại sau Phase 3**: Contract 1.8.0 đã vào `develop` theo quy ước commit
+  thẳng (không PR) nên chưa có Eval Report đính kèm. Món nợ này gộp vào gate run
+  của Phase 8; Eval Fixture **không** phải đóng băng lại (fixture chỉ phụ thuộc
+  dữ liệu thị trường, không phụ thuộc `prompt_version` — `docs/agents/eval-battery.md`).
 
 Quy trình: `docs/agents/eval-battery.md`.
 

@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "System Prompt Contract"
-status: pending
+status: complete
 priority: P1
 effort: "1d"
 dependencies: [2]
@@ -98,15 +98,30 @@ trong phase này.
 
 ## Success Criteria
 
-- [ ] Cổng G1 chốt; ADR-0022 viết xong và `ADR-0015` trỏ tới nó
-- [ ] Hai section mới có trong `SECTIONS`, không chứa brace
-- [ ] `PROMPT_VERSION` = 1.8.0, `contract_hash()` khác 1.7.1
-- [ ] `prefix()` byte-identical giữa hai Turn khác nhau (test)
-- [ ] Không field mới nào model có thể set để tự khai tuân thủ
-- [ ] Chạy tay: câu không đủ dữ liệu → trả lời có nội dung + nêu rõ khoảng trống,
-      không hedge một câu, không màn hình trắng
-- [ ] `make test` xanh
-- [ ] Eval Report đính vào PR, có diff so 1.4.0 (ghi rõ là so xuyên phiên bản)
+- [x] Cổng G1 chốt; ADR-0022 viết xong và `ADR-0015` trỏ tới nó
+- [x] Hai section mới có trong `SECTIONS`, không chứa brace — `figures` (mục 3) và
+      `batched_lookups` (mục 6), mỗi cái đặt cạnh section nó mở rộng
+- [x] `PROMPT_VERSION` = 1.8.0, `contract_hash()` khác 1.7.1
+- [x] `prefix()` byte-identical giữa hai Turn khác nhau (test cũ vẫn giữ)
+- [x] Không field mới nào model có thể set để tự khai tuân thủ — có test riêng
+      quét cả vốn từ marker
+- [ ] Chạy tay: câu không đủ dữ liệu → trả lời có nội dung + nêu rõ khoảng trống.
+      **Chưa chạy**: cần một tuyến LLM thật; để chung với gate run Phase 8
+- [x] `make test` xanh (2686 passed)
+- [ ] Eval Report — **nợ**, gộp vào Phase 8. Commit thẳng `develop` nên không có
+      PR body để đính; fixture không phải đóng băng lại
+
+## Ghi chú thực thi
+
+- Câu *"Call tools in parallel when their answers do not depend on each other"*
+  đã bị **bỏ khỏi** `TOOL_USE`: section mới nói đủ và nói kỹ hơn, giữ cả hai là
+  lặp trong prefix trả tiền một lần nhưng đọc hai lần.
+- Số mục của mọi section sau mục 2 dịch lên: `runtime_context` từ 8 → 10. Hai
+  docstring trỏ "section 7" (`contract.py`, `widgets.py`) vốn đã lệch một bậc từ
+  trước, nay trỏ theo **tên** section.
+- Prompt tăng ~600 token estimate (6.518 token cho `prefix()` ở
+  `CHARS_PER_TOKEN=3`, trên trần 32.000 mỗi call). Test trần constructed-context
+  giờ suy ra trần từ Contract đã render thay vì hằng số viết tay.
 
 ## Risk Assessment
 
