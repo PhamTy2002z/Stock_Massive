@@ -58,15 +58,22 @@ MAX_HOLD_SECONDS = 300.0
 # because two callers rate-limited in the same second must not shorten each
 # other's hold, which a read-then-write from Python does exactly half the time.
 #
-# ``tests/fake_redis.py`` mirrors this in Python. A change here that is not made
-# there raises ``UnknownScript`` rather than passing quietly.
+# ``math.floor`` on both numbers is load-bearing rather than tidy: Redis parses
+# ``PX`` as a strict integer and answers a fractional one with *value is not an
+# integer or out of range*. A clock in milliseconds is fractional, and the value
+# stored here becomes the next caller's ``held`` — so without the floor the
+# *extend* path fails on a real server while passing against a fake that rounds.
+#
+# ``tests/fake_redis.py`` mirrors this in Python, and refuses a fractional ``PX``
+# for the same reason. A change here that is not made there raises
+# ``UnknownScript`` rather than passing quietly.
 OPEN_BREAKER_SCRIPT = """
 local key = KEYS[1]
-local now = tonumber(ARGV[1])
-local until_at = tonumber(ARGV[2])
+local now = math.floor(tonumber(ARGV[1]))
+local until_at = math.floor(tonumber(ARGV[2]))
 local held = tonumber(redis.call('GET', key))
-if held ~= nil and held > until_at then
-  until_at = held
+if held ~= nil and math.floor(held) > until_at then
+  until_at = math.floor(held)
 end
 if until_at <= now then
   redis.call('DEL', key)
@@ -84,7 +91,13 @@ def route_key(base_url: str, model: str) -> str:
     same allowance, and the credential can appear in a query string, which is not
     a thing to write into a Redis key.
     """
-    host = urlsplit(base_url).netloc or base_url.strip().strip("/")
+    parsed = urlsplit(base_url)
+    # ``hostname`` rather than ``netloc``: a base URL may carry userinfo
+    # (``https://token@route/v1``), and ``netloc`` keeps it — which would write a
+    # credential into a Redis key and into the log line below it.
+    host = parsed.hostname or base_url.strip().strip("/")
+    if parsed.port:
+        host = f"{host}:{parsed.port}"
     return f"{KEY_PREFIX}:{host}:{model}"
 
 
@@ -152,13 +165,13 @@ class RouteBreaker:
             redis = self._redis_factory()
             if redis is None:
                 return 0.0
-            now_ms = self._clock() * 1000
+            now_ms = int(self._clock() * 1000)
             remaining_ms = float(
                 eval_script(
                     redis,
                     OPEN_BREAKER_SCRIPT,
                     [key],
-                    [now_ms, now_ms + hold * 1000],
+                    [now_ms, now_ms + int(hold * 1000)],
                 )
             )
         except Exception as exc:  # noqa: BLE001 - fail open, whatever broke

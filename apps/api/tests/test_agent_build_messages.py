@@ -283,3 +283,47 @@ def test_a_calls_route_signature_reaches_the_assistant_turn_that_made_it():
     first, second = assistant.tool_calls
     assert first.signature == "Eu0CCuo"
     assert second.signature is None
+
+
+def test_the_system_prompt_carries_its_cache_boundary_when_the_caller_knows_it():
+    """Only the Contract's stable half is worth caching (``docs/adr/0015``).
+
+    The boundary lives *inside* one message, which a plain string cannot express
+    — so the caller that holds ``prompt.prefix()`` states it, and the segments
+    describe the same text the message already carries. Without this the flag
+    would put breakpoints on the conversation and none on the ~6.5k-token prefix
+    the whole mechanism exists for.
+    """
+    stable = SYSTEM_PROMPT
+    prompt = stable + "\n\n- trading_day: 2026-08-14\n"
+
+    context = build_messages(
+        transcript(2, system_prompt=prompt, system_prefix=stable)
+    )
+    system = context.messages[0]
+
+    assert system.role is Role.SYSTEM
+    assert system.content == prompt
+    assert [segment.text for segment in system.segments] == [
+        stable,
+        "\n\n- trading_day: 2026-08-14\n",
+    ]
+    assert system.segments[0].cache_breakpoint is True
+    assert system.segments[1].cache_breakpoint is False
+
+    # Off by default, and the wire shape is the one it always was.
+    assert system.as_wire()["content"] == prompt
+
+
+def test_a_prefix_that_does_not_match_leaves_the_prompt_as_one_block():
+    """A boundary that cannot be proven is not guessed at.
+
+    A stale prefix — a Contract edited without the caller being rebuilt — must
+    not be spliced into the middle of a prompt it no longer describes.
+    """
+    for prefix in (None, "", "a different contract entirely"):
+        context = build_messages(
+            transcript(2, system_prompt=SYSTEM_PROMPT, system_prefix=prefix)
+        )
+        assert context.messages[0].segments == ()
+        assert context.messages[0].content == SYSTEM_PROMPT

@@ -147,10 +147,36 @@ RECOVERIES: dict[type[LLMError], Recovery] = {
     ),
 }
 
-#: Every class a route failure can arrive as. ``ToolError`` is deliberately
-#: absent: it is a tool's failure handed back to the model as a structured
-#: result, not the route failing, and it never reaches this table.
-ROUTE_ERROR_CLASSES: tuple[type[LLMError], ...] = tuple(RECOVERIES)
+#: The classes this table deliberately does not cover. ``ToolError`` is a tool's
+#: failure handed back to the model as a structured result rather than the route
+#: failing, so it never reaches a recovery.
+UNCOVERED: frozenset[str] = frozenset({"ToolError"})
+
+
+def route_error_classes() -> tuple[type[LLMError], ...]:
+    """Every ``LLMError`` this package defines, from the class tree itself.
+
+    Derived rather than listed, and not from :data:`RECOVERIES`: a completeness
+    check that reads the table it is checking proves only that the table equals
+    itself. A class added to ``errors.py`` next month has to appear here, which
+    is what makes the test able to notice it has no entry.
+    """
+
+    def descendants(klass: type[LLMError]) -> list[type[LLMError]]:
+        found = [klass]
+        for child in klass.__subclasses__():
+            found.extend(descendants(child))
+        return found
+
+    return tuple(
+        klass
+        for klass in dict.fromkeys(descendants(LLMError))
+        # This package's own classes only. A subclass declared in a test or by a
+        # caller is that caller's business, and ``recovery_for`` already answers
+        # for it by MRO.
+        if klass.__module__ == LLMError.__module__
+        and klass.__name__ not in UNCOVERED
+    )
 
 
 def recovery_for(error: BaseException) -> Recovery:
@@ -169,8 +195,9 @@ def recovery_for(error: BaseException) -> Recovery:
 
 __all__ = [
     "RECOVERIES",
-    "ROUTE_ERROR_CLASSES",
+    "UNCOVERED",
     "Recovery",
     "RouteAction",
     "recovery_for",
+    "route_error_classes",
 ]

@@ -10,6 +10,7 @@ from types import MappingProxyType
 
 import pytest
 
+from src.agent import loop as loop_module
 from src.agent.context import (
     ContextBudget,
     TranscriptToolCall,
@@ -24,6 +25,7 @@ from src.agent.loop import (
     DEADLINE_EXPIRED,
     DEFAULT_MAX_OUTPUT_TOKENS,
     EXTERNAL_TOOL_EXHAUSTED_MESSAGE,
+    CONTEXT_COMPRESSION_FACTOR,
     MAX_CONTEXT_COMPRESSIONS,
     MAX_EXTERNAL_TOOL_CALLS,
     MAX_OUTPUT_CAP_REDUCTIONS,
@@ -738,6 +740,54 @@ async def test_a_short_turn_is_not_charged_for_a_compression_that_gives_nothing(
 
     outcome = await loop(client).run(turn_request())
 
+    assert len(client.requests) == 1
+    assert outcome.terminal_reason == CONTEXT_OVERFLOW
+
+
+@pytest.mark.asyncio
+async def test_a_ceiling_the_ladder_cannot_meet_still_ends_under_its_own_reason():
+    """The compression probe can fail, and the reason must survive it.
+
+    ``build_messages`` raises ``ConstructedContextTooLarge`` when even the
+    protected Turn fully collapsed breaks the ceiling. That is not an
+    ``LLMError``, so unhandled it escapes to the Turn lifecycle's catch-all and
+    the Turn ends ``turn_failed`` — losing the classification this branch exists
+    to record.
+    """
+    request = turn_request(history=long_history())
+    floor = estimate_tokens(Message(role=Role.SYSTEM, content=render(request.runtime)))
+    client = FakeClient([ContextOverflow("the transcript does not fit (400)")] * 5)
+    agent = AgentLoop(
+        client=client,
+        catalog=catalog(),
+        config=config(),
+        # Fits at full size, and cannot fit once compressed: the compressed
+        # ceiling lands below the system prompt the ladder cannot drop.
+        budget=ContextBudget(max_tokens=int(floor / CONTEXT_COMPRESSION_FACTOR) + 500),
+    )
+
+    outcome = await agent.run(request)
+
+    assert outcome.status is TurnStatus.INCOMPLETE
+    assert outcome.terminal_reason == CONTEXT_OVERFLOW
+
+
+@pytest.mark.asyncio
+async def test_one_round_cannot_spend_the_whole_turn_deadline(monkeypatch):
+    """Five calls at the per-call ceiling would reach the Turn deadline.
+
+    And the Turn deadline ends a Turn through the lifecycle rather than through
+    the terminal branch that names the route condition, so the round carries its
+    own bound and gives up inside the branch that can still report. The budget is
+    zeroed here rather than waited out: a test that proves a ten-minute bound by
+    taking ten minutes is a test nobody runs.
+    """
+    monkeypatch.setattr(loop_module, "ROUND_TIMEOUT_MULTIPLE", 0.0)
+    client = FakeClient([ContextOverflow("the transcript does not fit (400)")] * 5)
+
+    outcome = await loop(client).run(turn_request(history=long_history()))
+
+    # One call, and the reason is still the route's rather than the deadline's.
     assert len(client.requests) == 1
     assert outcome.terminal_reason == CONTEXT_OVERFLOW
 

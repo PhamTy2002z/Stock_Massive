@@ -24,6 +24,11 @@ from src.core.quota import RESERVE_SLOT_SCRIPT
 from src.core.redis import RELEASE_IF_OWNED_SCRIPT, RENEW_IF_OWNED_SCRIPT
 
 
+def _floor(value: float) -> int:
+    """``math.floor`` as the Lua spells it."""
+    return int(value // 1)
+
+
 class UnknownScript(AssertionError):
     """A Lua script this fake has no mirror for."""
 
@@ -69,7 +74,16 @@ class FakeRedis:
             if ex is not None:
                 self._expiry[key] = self._clock() + ex
             elif px is not None:
-                self._expiry[key] = self._clock() + px / 1000
+                # Redis parses these as strict integers and refuses a fractional
+                # one. A fake that rounds is a fake that passes a script real
+                # Redis raises on, which is the one failure a mirror must not
+                # hide.
+                if float(px) != int(px):
+                    raise AssertionError(
+                        f"redis refuses a fractional PX ({px!r}); floor it where "
+                        "the value is built"
+                    )
+                self._expiry[key] = self._clock() + int(px) / 1000
             return True
 
     def delete(self, key: str) -> int:
@@ -93,6 +107,10 @@ class FakeRedis:
 
     def expire(self, key: str, seconds: int) -> bool:
         with self._lock:
+            if float(seconds) != int(seconds):
+                raise AssertionError(
+                    f"redis refuses a fractional EXPIRE ({seconds!r})"
+                )
             if not self._live(key):
                 return False
             self._expiry[key] = self._clock() + seconds
@@ -129,15 +147,18 @@ class FakeRedis:
         return int(wait)
 
     def _open_breaker(self, key: str, args: list[float]) -> int:
-        now, until_at = args
+        # Floors where the Lua floors, and nowhere else: rounding a value the
+        # script does not round is how a mirror drifts from what it mirrors.
+        now = _floor(args[0])
+        until_at = _floor(args[1])
         held = self.get(key)
-        if held is not None and float(held) > until_at:
-            until_at = float(held)
+        if held is not None and _floor(float(held)) > until_at:
+            until_at = _floor(float(held))
         if until_at <= now:
             self.delete(key)
             return 0
-        self.set(key, int(until_at), px=int(until_at - now))
-        return int(until_at - now)
+        self.set(key, until_at, px=until_at - now)
+        return until_at - now
 
 
 class PositionalFakeRedis(FakeRedis):

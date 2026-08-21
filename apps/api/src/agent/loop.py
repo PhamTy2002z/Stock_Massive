@@ -47,6 +47,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
@@ -92,6 +93,7 @@ from src.core.llm.errors import MAX_TOOL_ATTEMPTS, redact
 from .blocks import split_blocks
 from .context import (
     ConstructedContext,
+    ConstructedContextTooLarge,
     ContextBudget,
     Transcript,
     TranscriptToolCall,
@@ -122,7 +124,14 @@ from .progress import (
     searching_detail,
     sources_of,
 )
-from .prompt import AnswerEvidence, AnswerKind, RuntimeContext, classify_answer_kind, render
+from .prompt import (
+    AnswerEvidence,
+    AnswerKind,
+    RuntimeContext,
+    classify_answer_kind,
+    prefix as contract_prefix,
+    render,
+)
 from . import suggestions
 from .tools.catalog import ToolCatalog, ToolContext, refusal_reason
 from .widgets import (
@@ -201,6 +210,14 @@ CONTEXT_COMPRESSION_FACTOR = 0.6
 MAX_OUTPUT_CAP_REDUCTIONS = 2
 OUTPUT_CAP_REDUCTION_FACTOR = 0.5
 MIN_OUTPUT_TOKENS = 1_000
+
+# How much of a call's ceiling one *round* may spend across its recoveries.
+# ``LLM_CALL_TIMEOUT_SECONDS`` bounds one call including the client's retries;
+# without a second bound here, a round that compresses twice and lowers its cap
+# twice could spend five of those ceilings and arrive at the Turn deadline —
+# which ends the Turn through ``turns.py`` rather than through the terminal
+# branch that would have named the route condition.
+ROUND_TIMEOUT_MULTIPLE = 2.0
 
 ROUNDS_EXHAUSTED_NOTE = (
     f"All {MAX_TOOL_ROUNDS} lookup rounds for this Turn have been used. Answer from "
@@ -788,8 +805,9 @@ class AgentLoop:
                 )
             except TimeoutError:
                 # Its own reason, and its own ceiling: the transport's timeout
-                # covers one HTTP request, this one covers the call including
-                # every retry the client made inside it.
+                # covers one HTTP request, this one covers one ``complete``
+                # including every retry the client made inside it. The round's
+                # own recoveries are bounded separately, in ``_call``.
                 return await self._terminal(
                     request, TurnStatus.INCOMPLETE, "llm_call_timeout", state
                 )
@@ -1095,6 +1113,11 @@ class AgentLoop:
             budget = replace(budget, max_tokens=budget.max_tokens - REPAIR_NOTE_TOKENS)
         transcript = Transcript(
             system_prompt=system_prompt,
+            # The Contract's own stable half, so a route configured for prompt
+            # caching gets its breakpoint at the boundary ``contract.prefix()``
+            # exists to draw. Ignored by every route that does not, and by the
+            # token estimate either way.
+            system_prefix=contract_prefix(),
             turns=(
                 *request.history,
                 TranscriptTurn(
@@ -1147,6 +1170,10 @@ class AgentLoop:
             self._call_timeout,
         )
 
+    def _round_budget(self) -> float:
+        """How long one round may spend, retries and recoveries included."""
+        return self._call_timeout * ROUND_TIMEOUT_MULTIPLE
+
     def _output_tokens(self, state: _TurnState) -> int:
         """The output ceiling this Turn is asking for now.
 
@@ -1179,7 +1206,18 @@ class AgentLoop:
         The repair note is cleared only once a call has carried it. A compression
         that discarded it would nudge the model with a note the next call never
         sends, which is a nudge paid for and not delivered.
+
+        Bounded in time as well as in attempts. ``_complete`` puts a ceiling on
+        one call including the retries the client makes inside it; this puts one
+        on the round, because five calls at that ceiling would reach the Turn
+        deadline — and the Turn deadline ends a Turn through a path that never
+        reaches the terminal branches these recoveries report through.
         """
+        started = time.monotonic()
+
+        def _spent(since: float) -> bool:
+            return time.monotonic() - since >= self._round_budget()
+
         while True:
             context = self._construct(
                 system_prompt, request, state, final, repairing=repairing
@@ -1198,10 +1236,25 @@ class AgentLoop:
             except ContextOverflow as overflow:
                 if state.compressions >= MAX_CONTEXT_COMPRESSIONS:
                     raise
+                if _spent(started):
+                    # A round that has already used its share of the Turn is not
+                    # given another call. The Turn deadline is the next thing it
+                    # would meet, and that path ends the Turn without the reason
+                    # this branch exists to record.
+                    raise
                 state.compressions += 1
-                smaller = self._construct(
-                    system_prompt, request, state, final, repairing=repairing
-                )
+                try:
+                    smaller = self._construct(
+                        system_prompt, request, state, final, repairing=repairing
+                    )
+                except ConstructedContextTooLarge:
+                    # The compressed ceiling is below what the protected Turn
+                    # needs even fully collapsed. That is still the route's
+                    # ``context_overflow``, and raising the constructor's own
+                    # error instead would leave the Turn as ``turn_failed`` with
+                    # nothing to classify it by.
+                    state.compressions -= 1
+                    raise overflow from None
                 if smaller.estimated_tokens >= context.estimated_tokens:
                     # Nothing was given up, so the next call would be the call
                     # that was just refused. This is the ordinary shape of a
@@ -1224,6 +1277,8 @@ class AgentLoop:
                 continue
             except OutputCapExceeded as capped:
                 if state.output_cap_reductions >= MAX_OUTPUT_CAP_REDUCTIONS:
+                    raise
+                if _spent(started):
                     raise
                 previous = self._output_tokens(state)
                 state.output_cap_reductions += 1
@@ -1799,6 +1854,7 @@ __all__ = [
     "ROUNDS_EXHAUSTED_MESSAGE",
     "ROUNDS_EXHAUSTED_NOTE",
     "ROUNDS_EXHAUSTED_TOKENS",
+    "ROUND_TIMEOUT_MULTIPLE",
     "SESSION_CONCURRENCY",
     "TOOL_TIMEOUT_SECONDS",
     "TURN_SPEND",

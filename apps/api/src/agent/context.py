@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from src.core.llm.admission import TURN_CONTEXT_PER_CALL
-from src.core.llm.protocol import Message, Role, ToolCall
+from src.core.llm.protocol import ContentSegment, Message, Role, ToolCall
 
 # A deterministic approximation, and deliberately a pessimistic one. Vietnamese
 # prose with diacritics tokenizes worse than English, and the ceiling this feeds
@@ -92,6 +92,13 @@ class Transcript:
     """
 
     system_prompt: str
+    #: Where the stable part of ``system_prompt`` ends, when the caller knows.
+    #: The Contract is one artifact with a cacheable prefix and five values
+    #: appended (``docs/adr/0015``), and only a caller holding
+    #: ``prompt.prefix()`` can say which is which — so the boundary arrives here
+    #: rather than being guessed at by string surgery. ``None`` means the whole
+    #: prompt travels as one block, which is what it did before prompt caching.
+    system_prefix: str | None = None
     turns: tuple[TranscriptTurn, ...] = ()
     # The cached ``role = 'summary'`` message, and how many leading Turns it
     # covers. Both come from persistence together; a summary whose span is
@@ -238,9 +245,7 @@ def _render(
     summary into the prompt would put conversation content inside the artifact
     ADR-0015 forbids conversation content from entering.
     """
-    messages: list[Message] = [
-        Message(role=Role.SYSTEM, content=transcript.system_prompt)
-    ]
+    messages: list[Message] = [_system_message(transcript)]
     if transcript.summary:
         messages.append(
             Message(
@@ -251,6 +256,28 @@ def _render(
     for turn in turns[dropped:]:
         messages.extend(_turn_messages(turn, collapsed))
     return tuple(messages)
+
+
+def _system_message(transcript: Transcript) -> Message:
+    """The system prompt, carrying its cache boundary when one is known.
+
+    The segments describe the same string the message already holds — ``Message``
+    refuses any other arrangement — so a route that does not speak
+    ``cache_control`` sees exactly the prompt it saw before, and the token
+    estimate this module charges is unchanged either way.
+    """
+    prompt = transcript.system_prompt
+    stable = transcript.system_prefix
+    if not stable or not prompt.startswith(stable) or len(stable) == len(prompt):
+        return Message(role=Role.SYSTEM, content=prompt)
+    return Message(
+        role=Role.SYSTEM,
+        content=prompt,
+        segments=(
+            ContentSegment(stable, cache_breakpoint=True),
+            ContentSegment(prompt[len(stable) :]),
+        ),
+    )
 
 
 def _reductions(
