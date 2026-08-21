@@ -11,8 +11,9 @@ is where that ownership is enforced.
 The Tool Catalog is fixed at twelve and its ordering is part of
 ``tool_catalog_version``, which is also part of the prompt cache key and of what
 an Eval Fixture is frozen against.  A tool that drew a picture would move all
-three.  So the selection is a marker in the answer text, described by section 7
-of the System Prompt Contract, and :func:`extract_selections` lifts it out
+three.  So the selection is a marker in the answer text, described by the
+*Visual evidence* section of the System Prompt Contract, and
+:func:`extract_selections` lifts it out
 *before* the answer is split into blocks.  That ordering is why the Recommendation
 Validator never sees a Widget marker and never has to know one exists.
 

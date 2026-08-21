@@ -48,8 +48,13 @@ def test_the_sections_render_in_the_fixed_order():
     assert keys == [
         "mission",
         "invariants",
+        # ``docs/adr/0022`` seats each 1.8.0 section beside the one whose rule
+        # it extends: the figure rule after the invariants that state
+        # provenance, batching after the tool-use policy it paces.
+        "figures",
         "recommendation_gate",
         "tool_use",
+        "batched_lookups",
         "output_protocol",
         "voice",
         "visual_evidence",
@@ -110,7 +115,7 @@ def test_the_prompt_says_how_today_is_read_against_the_trading_day():
     answering from Friday's.
     """
     rendered = render(context())
-    section = rendered.split("## 8.")[1]
+    section = rendered.split("## 10.")[1]
 
     assert "hôm nay" in section
     assert "the most recent data there is" in section
@@ -118,6 +123,79 @@ def test_the_prompt_says_how_today_is_read_against_the_trading_day():
     # And both values are there to be read against each other.
     assert "- today: 2026-08-16" in rendered
     assert "- trading_day: 2026-08-14" in rendered
+
+
+def test_the_figure_rule_answers_in_part_rather_than_hedging():
+    """``docs/adr/0022``: the prose that has to keep a Turn from going blank.
+
+    Three claims, and the third is the one the Contract did not make before
+    1.8.0. Saying *a figure you cannot reference is a figure you do not state*
+    without saying what to do next is how a model arrives at one hedged
+    sentence, which is the outcome ADR-0021 measured at 58% of Turns.
+    """
+    section = render(context()).split("## 3. Figures and the gaps in them")[1]
+    section = section.split("## 4.")[0]
+    lowered = " ".join(section.lower().split())
+
+    # 1. a figure comes from a tool call, and arithmetic in prose is not one.
+    assert "came back from a tool call in this turn" in lowered
+    assert "a ratio you divided yourself" in lowered
+    # 2. an unreferenced figure ends a sentence, and the answer goes on.
+    assert "a figure you cannot reference is a figure you do not state" in lowered
+    assert "that ends a sentence, never an answer" in lowered
+    assert "you answer in part" in lowered
+    # 3. naming the obstacle beats a plausible number, and beats a hedge.
+    assert "naming the obstacle is the answer at that point" in lowered
+    assert "hedging is not a substitute" in lowered
+
+    # The gap is named inside the sentence it affects. Contract 1.6.0 forbids a
+    # closing note about sources, and this section must not reopen that door.
+    assert "inside the sentence it affects" in lowered
+
+
+def test_the_batching_rule_bounds_itself_to_independent_lookups():
+    """The high-leverage half of 1.8.0, and the guard that keeps it cheap.
+
+    ``loop.py`` has always dispatched a round concurrently; the model was never
+    told to emit the calls together. Unbounded, the same instruction produces a
+    first round of guessed arguments — so the block says what independence
+    means and what it is not.
+    """
+    section = render(context()).split("## 6. Batching lookups")[1]
+    section = section.split("## 7.")[0]
+    lowered = " ".join(section.lower().split())
+
+    assert "emit those calls together in one turn" in lowered
+    assert "genuinely depends on an earlier one's result" in lowered
+    assert "not about the order you would read the answers in" in lowered
+    # The anti-thrash half: a round of invented arguments is a round spent.
+    assert "together does not mean everything you can imagine" in lowered
+
+
+def test_the_new_sections_add_no_field_the_model_could_set():
+    """Prose carries the rule; nothing gives the model a compliance switch.
+
+    ``docs/adr/0015``'s invariant is the one thing ADR-0022 does not touch, and
+    the way it would be broken is a field — in the injected context or in the
+    marker vocabulary — that a model could write to claim it had complied.
+    """
+    assert set(RuntimeContext.__annotations__) == {
+        "user_id",
+        "trading_day",
+        "today",
+        "market_state",
+        "active_symbol",
+    }
+
+    for section in SECTIONS:
+        if section.key not in ("figures", "batched_lookups"):
+            continue
+        lowered = section.body.lower()
+        # No marker vocabulary: the reference markers of the output protocol are
+        # the only structured thing the model writes, and neither new section
+        # may add a sixth kind.
+        for invented in ("the word ", "square-bracket", "declare", "mark it as"):
+            assert invented not in lowered
 
 
 def test_no_section_body_has_a_formatting_hole():
@@ -167,7 +245,7 @@ def test_no_figure_watchlist_or_tool_result_can_reach_the_prompt():
 
     rendered = render(context())
     for absent in ("watchlist", "Watchlist", "tool_call_id:", "price:"):
-        assert absent not in rendered.split("## 8.")[1]
+        assert absent not in rendered.split("## 10.")[1]
 
 
 def test_the_rendered_prompt_is_byte_stable_and_the_prefix_does_not_move():
@@ -187,7 +265,9 @@ def test_the_hash_is_exported_and_changes_when_the_prose_changes():
     # Widget selection protocol (#89). Version 1.3.0 injected today's date and
     # distinguished it from the Trading Day; 1.4.0 classifies downgraded,
     # external, and derived evidence without weakening the Recommendation Gate.
-    assert PROMPT_VERSION == "1.7.1"
+    # 1.8.0 gives the Contract the no-fabrication rule and the batching rule
+    # (``docs/adr/0022``), which is a minor bump because two sections arrived.
+    assert PROMPT_VERSION == "1.8.0"
     assert PROMPT_HASH == contract_hash()
 
     edited = tuple(

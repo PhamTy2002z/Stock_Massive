@@ -10,7 +10,7 @@ from types import MappingProxyType
 
 import pytest
 
-from src.agent.context import ContextBudget
+from src.agent.context import ContextBudget, estimate_tokens
 from src.core.llm.budget import TURN_OUTPUT_TOKENS
 from src.agent.loop import (
     ANSWER_TRUNCATED,
@@ -37,7 +37,7 @@ from src.agent.loop import (
     pair_results,
 )
 from src.agent.grounding import BlockKind
-from src.agent.prompt import AnswerKind, MarketState, RuntimeContext
+from src.agent.prompt import AnswerKind, MarketState, RuntimeContext, render
 from src.agent.turns import draft_content, gate_outcomes
 from src.agent.tools.catalog import ToolCatalog, ToolContext, ToolDataAccess, ToolSpec
 from src.alpha.refusals import AlphaRefusal
@@ -55,6 +55,7 @@ from src.core.llm import (
     GatewayTimeout,
     LLMError,
     MalformedArguments,
+    Message,
     ModelRefusal,
     OwnerType,
     RouteRateLimited,
@@ -283,18 +284,27 @@ async def test_a_turn_that_needs_no_tool_ends_after_one_call():
 
 @pytest.mark.asyncio
 async def test_the_constructed_context_never_exceeds_the_ceiling_with_the_note():
+    # Derived from the Contract rather than written as a number: the system
+    # prompt is a fixed cost in every call, so a hand-picked ceiling that
+    # happens to sit above today's prose fails the day a section is added —
+    # which says nothing about the ladder this test exercises. The headroom is
+    # what the ladder gets to work in.
+    request = turn_request()
+    floor = estimate_tokens(Message(role=Role.SYSTEM, content=render(request.runtime)))
+    ceiling = floor + 2_000
+
     client = FakeClient([wants("get_analysis", prefix=f"r{n}") for n in range(20)])
     agent = AgentLoop(
         client=client,
         catalog=catalog(),
         config=config(),
-        budget=ContextBudget(max_tokens=6_000),
+        budget=ContextBudget(max_tokens=ceiling),
     )
 
-    await agent.run(turn_request())
+    await agent.run(request)
 
     for spend in client.spends:
-        assert spend.input_tokens <= 6_000
+        assert spend.input_tokens <= ceiling
 
 
 # --- parallel dispatch and the id assertion -------------------------------
