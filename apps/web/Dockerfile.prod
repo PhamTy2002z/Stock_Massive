@@ -52,10 +52,22 @@ WORKDIR /app
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
-# Copy built assets
-COPY --from=builder /app/public ./public
+# Copy built assets.
+#
+# `next.config.ts` sets `outputFileTracingRoot` to two levels above the app, for
+# the repo layout on a developer's machine. The build context here is the app
+# itself at `/app`, so that root resolves to `/` — and a standalone bundle
+# mirrors the tree *below its tracing root*, which puts the server at
+# `app/server.js` rather than at the top. `static` and `public` have to sit
+# beside that server or Next serves neither, and the process exits with
+# `Cannot find module '/app/server.js'` when they are copied to the top instead.
+#
+# The same offset is why `apps/web/playwright.config.ts` runs
+# `.next/standalone/apps/web/server.js`: on the host the tracing root is the
+# repository, so the app lands under `apps/web/`.
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder /app/public ./app/public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./app/.next/static
 
 # Switch to non-root user
 USER nextjs
@@ -72,5 +84,5 @@ ENV HOSTNAME="0.0.0.0"
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:3000 || exit 1
 
-# Start application
-CMD ["node", "server.js"]
+# Start application. `app/` for the reason the copies above explain.
+CMD ["node", "app/server.js"]
