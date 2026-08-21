@@ -10,16 +10,25 @@ from types import MappingProxyType
 
 import pytest
 
-from src.agent.context import ContextBudget, estimate_tokens
+from src.agent.context import (
+    ContextBudget,
+    TranscriptToolCall,
+    TranscriptTurn,
+    estimate_tokens,
+)
 from src.core.llm.budget import TURN_OUTPUT_TOKENS
 from src.agent.loop import (
     ANSWER_TRUNCATED,
     CONTENT_POLICY_BLOCKED,
     CONTEXT_OVERFLOW,
+    DEADLINE_EXPIRED,
     DEFAULT_MAX_OUTPUT_TOKENS,
     EXTERNAL_TOOL_EXHAUSTED_MESSAGE,
+    MAX_CONTEXT_COMPRESSIONS,
     MAX_EXTERNAL_TOOL_CALLS,
+    MAX_OUTPUT_CAP_REDUCTIONS,
     MAX_TOOL_ROUNDS,
+    MIN_OUTPUT_TOKENS,
     MODEL_UNAVAILABLE,
     OUTPUT_CAP_EXCEEDED,
     ROUNDS_EXHAUSTED_NOTE,
@@ -30,6 +39,7 @@ from src.agent.loop import (
     SessionSlots,
     ToolCallIdMismatch,
     TurnDraft,
+    _TurnState,
     TurnRequest,
     TurnStatus,
     admit_round,
@@ -46,6 +56,7 @@ from src.core.llm import (
     BudgetLane,
     ContentPolicyBlocked,
     ContextOverflow,
+    DeadlineExpired,
     ModelUnavailable,
     OutputCapExceeded,
     RouteAttempt,
@@ -116,6 +127,19 @@ class FakeClient:
         if isinstance(item, BaseException):
             raise item
         return item
+
+
+# The nudge the Gate is allowed, as a fixed string so a test can look for the
+# message the model was actually sent rather than for the fact that some system
+# message existed.
+REPAIR_NOTE_TEXT = "Attach every figure to the reference it came from."
+
+
+def _state_with_note(_agent) -> "_TurnState":
+    """A Turn state mid-nudge, which only the Gate reaches through ``_run``."""
+    state = _TurnState()
+    state.repair_note = REPAIR_NOTE_TEXT
+    return state
 
 
 def answer(text: str = "Kết luận.") -> Completion:
@@ -588,65 +612,250 @@ async def test_no_route_failure_log_carries_a_credential(caplog):
     that reaches a log file once has to be rotated.
     """
     echoed = 'refused: {"headers":{"Authorization":"Bearer sk-livekey0123456789"}}'
-    for error in (
-        GatewayTimeout(echoed),
-        ContextOverflow(echoed),
-        OutputCapExceeded(echoed),
-        ContentPolicyBlocked(echoed),
-        ModelUnavailable(echoed),
-        SchemaRejected(echoed),
-        LLMError(echoed),
+    for factory in (
+        GatewayTimeout,
+        ContextOverflow,
+        OutputCapExceeded,
+        ContentPolicyBlocked,
+        ModelUnavailable,
+        SchemaRejected,
+        LLMError,
     ):
         caplog.clear()
-        with caplog.at_level("WARNING"):
-            await loop(FakeClient([error])).run(turn_request())
-        assert caplog.records, f"{type(error).__name__} logged nothing"
+        # Enough copies for the two classes the loop now recovers from to run out
+        # of recoveries: the terminal line is the one that copies the route's
+        # words, and a class that recovered never reaches it.
+        script = [factory(echoed) for _ in range(MAX_CONTEXT_COMPRESSIONS + 1)]
+        with caplog.at_level("INFO"):
+            await loop(FakeClient(script)).run(turn_request(history=long_history()))
+        assert caplog.records, f"{factory.__name__} logged nothing"
         for record in caplog.records:
             assert "sk-livekey0123456789" not in record.message
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("error", "reason"),
+    ("error", "reason", "calls"),
     [
-        (ContextOverflow("the transcript does not fit (400)"), CONTEXT_OVERFLOW),
-        (OutputCapExceeded("the output ceiling does not fit (400)"), OUTPUT_CAP_EXCEEDED),
-        (ContentPolicyBlocked("the filter refused (400)"), CONTENT_POLICY_BLOCKED),
-        (ModelUnavailable("the model is not served (404)"), MODEL_UNAVAILABLE),
-        (SchemaRejected("the tool schemas were refused (400)"), SCHEMA_REJECTED),
+        # The first two are recovered from before they are terminal, so reaching
+        # the reason costs the whole recovery budget; the last three are terminal
+        # on arrival, and a second call would be one nothing could learn from.
+        (ContextOverflow("the transcript does not fit (400)"), CONTEXT_OVERFLOW, 3),
+        (
+            OutputCapExceeded("the output ceiling does not fit (400)"),
+            OUTPUT_CAP_EXCEEDED,
+            3,
+        ),
+        (ContentPolicyBlocked("the filter refused (400)"), CONTENT_POLICY_BLOCKED, 1),
+        (ModelUnavailable("the model is not served (404)"), MODEL_UNAVAILABLE, 1),
+        (SchemaRejected("the tool schemas were refused (400)"), SCHEMA_REJECTED, 1),
     ],
 )
 async def test_each_named_route_condition_ends_the_turn_under_its_own_reason(
-    error, reason
+    error, reason, calls
 ):
     """`route_error` is no longer one bucket holding five different remedies.
 
     The reason is what the ops snapshot groups by, so a condition without its own
     reason cannot be counted — and the share of Turns lost to an oversized
-    transcript versus a retired model is the number Phase 4 needs before it
-    chooses a recovery for either.
+    transcript versus a retired model is the number that chose the recovery each
+    one now gets.
     """
-    client = FakeClient([error])
+    client = FakeClient([error] * calls)
+
+    outcome = await loop(client).run(turn_request(history=long_history()))
+
+    assert len(client.requests) == calls
+    assert outcome.status is TurnStatus.INCOMPLETE
+    assert outcome.terminal_reason == reason
+
+
+def long_history(turns: int = 12) -> tuple[TranscriptTurn, ...]:
+    """A transcript with enough behind it that the ladder has something to drop."""
+    return tuple(
+        TranscriptTurn(
+            user_text=f"Câu hỏi {index} về FPT và thị trường",
+            tool_calls=(
+                TranscriptToolCall(
+                    call_id=f"h{index}",
+                    name="get_analysis",
+                    arguments={"symbol": "FPT"},
+                    result={"rows": ["x" * 400 for _ in range(6)]},
+                ),
+            ),
+            assistant_text="Trả lời cũ. " * 40,
+        )
+        for index in range(turns)
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_oversized_transcript_is_compressed_and_asked_again():
+    """The route measures what this loop only estimates.
+
+    A ``ContextOverflow`` says the estimate that fit was wrong, so the next call
+    is constructed against a smaller ceiling instead of the Turn ending. The
+    second request carries strictly fewer input tokens than the first, which is
+    the whole content of the word *compressed*.
+    """
+    client = FakeClient([ContextOverflow("the transcript does not fit (400)")])
+
+    outcome = await loop(client).run(turn_request(history=long_history()))
+
+    assert outcome.status is TurnStatus.COMPLETE
+    assert outcome.terminal_reason is None
+    assert len(client.requests) == 2
+    assert client.spends[1].input_tokens < client.spends[0].input_tokens
+    assert client.spends[1].lane is BudgetLane.TURN
+
+
+@pytest.mark.asyncio
+async def test_compression_stops_rather_than_thrashing():
+    """Two attempts, then the reason stands.
+
+    A Turn that compresses forever spends a call per attempt to discover that
+    compression is not converging, which is a more expensive way of reaching the
+    same blank screen.
+    """
+    overflow = ContextOverflow("the transcript does not fit (400)")
+    client = FakeClient([overflow] * 10)
+
+    outcome = await loop(client).run(turn_request(history=long_history()))
+
+    assert len(client.requests) == MAX_CONTEXT_COMPRESSIONS + 1
+    assert outcome.terminal_reason == CONTEXT_OVERFLOW
+
+
+@pytest.mark.asyncio
+async def test_a_short_turn_is_not_charged_for_a_compression_that_gives_nothing():
+    """The prompt is most of a short Turn's input, and it is not compressible.
+
+    The ladder protects the current Turn and there is no older one to drop, so
+    the constructed context after compressing is the context that was just
+    refused. Sending it again would buy one more refusal.
+    """
+    client = FakeClient([ContextOverflow("the transcript does not fit (400)")] * 5)
 
     outcome = await loop(client).run(turn_request())
 
     assert len(client.requests) == 1
-    assert outcome.status is TurnStatus.INCOMPLETE
-    assert outcome.terminal_reason == reason
+    assert outcome.terminal_reason == CONTEXT_OVERFLOW
+
+
+@pytest.mark.asyncio
+async def test_a_refused_output_ceiling_is_lowered_rather_than_trimming_evidence():
+    """The opposite remedy to the one above, and never confused with it.
+
+    Here the transcript fits: what did not fit is the ceiling reserved for the
+    answer. So the ceiling comes down and the transcript is left alone — trimming
+    it would discard evidence the Turn already paid for.
+    """
+    client = FakeClient([OutputCapExceeded("the output ceiling does not fit (400)")])
+
+    outcome = await loop(client).run(turn_request())
+
+    assert outcome.status is TurnStatus.COMPLETE
+    assert len(client.requests) == 2
+    assert client.requests[0].max_output_tokens == DEFAULT_MAX_OUTPUT_TOKENS
+    assert client.requests[1].max_output_tokens < DEFAULT_MAX_OUTPUT_TOKENS
+    # What was reserved moves with what was asked for, or the ledger funds a
+    # ceiling the request no longer carries.
+    assert client.spends[1].output_tokens == client.requests[1].max_output_tokens
+    # The transcript is untouched by this recovery.
+    assert client.spends[1].input_tokens == client.spends[0].input_tokens
+
+
+@pytest.mark.asyncio
+async def test_the_output_ceiling_never_falls_below_a_usable_answer():
+    """An answer cut off mid-sentence is not a recovered Turn.
+
+    ``answer_truncated`` is a failure this file already fixed once, so the floor
+    is a floor: the ceiling stops falling and the Turn ends under its own reason
+    rather than buying a call whose answer cannot be released.
+    """
+    capped = OutputCapExceeded("the output ceiling does not fit (400)")
+    client = FakeClient([capped] * 10)
+
+    outcome = await loop(client).run(turn_request())
+
+    assert outcome.terminal_reason == OUTPUT_CAP_EXCEEDED
+    assert len(client.requests) == MAX_OUTPUT_CAP_REDUCTIONS + 1
+    assert all(
+        request.max_output_tokens >= MIN_OUTPUT_TOKENS for request in client.requests
+    )
+
+
+@pytest.mark.asyncio
+async def test_our_own_deadline_is_not_the_routes_deadline(caplog):
+    """Two facts that used to share one reason and one log line.
+
+    An expiry on this side points at the connection pool or at a deadline set
+    too low for the model; a 504 points at the route. The ops snapshot can only
+    tell them apart if the Turn records which one happened.
+    """
+    expired = DeadlineExpired(
+        "this process stopped waiting for the route: ReadTimeout",
+        attempt=RouteAttempt(attempts=2, elapsed_seconds=120.0, bytes_received=0),
+    )
+    client = FakeClient([expired])
+
+    with caplog.at_level("WARNING"):
+        outcome = await loop(client).run(turn_request())
+
+    assert outcome.terminal_reason == DEADLINE_EXPIRED
+    assert outcome.terminal_reason != "gateway_timeout"
+    assert any("stopped waiting" in record.message for record in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_a_compression_keeps_the_nudge_it_had_not_spent_yet():
+    """A note paid for and not delivered is the one thing worse than no note.
+
+    The Gate's single nudge costs a whole model call. It is cleared when a call
+    carries it, not when a call is *built* with it, so a compression between the
+    two does not throw it away.
+    """
+    client = FakeClient([ContextOverflow("the transcript does not fit (400)")])
+    agent = loop(client)
+    state = _state_with_note(agent)
+    request = turn_request(history=long_history())
+
+    completion = await agent._call(
+        render(request.runtime),
+        request,
+        state,
+        final=False,
+        repairing=True,
+    )
+
+    assert completion is not None
+    assert state.repair_note is None
+    assert state.compressions == 1
+    # Both calls carried the note: the first was refused, the second delivered it.
+    assert all(
+        any(
+            message.content == REPAIR_NOTE_TEXT
+            for message in request.messages
+        )
+        for request in client.requests
+    )
 
 
 @pytest.mark.asyncio
 async def test_the_five_named_conditions_do_not_end_up_as_route_error():
     """Guards the `except` ordering: all five subclass `LLMError`."""
     reasons = set()
-    for error in (
-        ContextOverflow("x"),
-        OutputCapExceeded("x"),
-        ContentPolicyBlocked("x"),
-        ModelUnavailable("x"),
-        SchemaRejected("x"),
+    for factory in (
+        ContextOverflow,
+        OutputCapExceeded,
+        ContentPolicyBlocked,
+        ModelUnavailable,
+        SchemaRejected,
     ):
-        outcome = await loop(FakeClient([error])).run(turn_request())
+        script = [factory("x") for _ in range(MAX_CONTEXT_COMPRESSIONS + 1)]
+        outcome = await loop(FakeClient(script)).run(
+            turn_request(history=long_history())
+        )
         reasons.add(outcome.terminal_reason)
 
     assert "route_error" not in reasons
