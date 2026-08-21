@@ -64,6 +64,7 @@ from src.core.llm import (
     CompletionRequest,
     ContentPolicyBlocked,
     ContextOverflow,
+    DeadlineExpired,
     GatewayTimeout,
     RouteAttempt,
     ModelUnavailable,
@@ -176,6 +177,30 @@ OUTPUT_CAP_EXCEEDED = "output_cap_exceeded"
 CONTENT_POLICY_BLOCKED = "content_policy_blocked"
 MODEL_UNAVAILABLE = "model_unavailable"
 SCHEMA_REJECTED = "schema_rejected"
+# Our own deadline, kept apart from the route's. ``gateway_timeout`` used to
+# carry both, which made the ops snapshot unable to say whether the fix was on
+# the route's side or in this process's connection pool.
+DEADLINE_EXPIRED = "deadline_expired"
+
+# How the two recoveries this loop owns are bounded (``core/llm/recovery.py``
+# names them; the transcript and the output ceiling are the loop's to change).
+#
+# **Compression** answers ``ContextOverflow``: the route measured what this
+# process only estimates, so the estimate that fit is wrong and the remedy is to
+# construct the call against a smaller ceiling. Two attempts, then the Turn ends
+# — a third would mean compression is not converging, and a Turn that compresses
+# forever spends a call per attempt to find that out.
+#
+# **Lowering the cap** answers ``OutputCapExceeded``: the transcript fits and the
+# reserved output ceiling is what pushed the total over. Halved rather than
+# nudged, because the route refuses by an amount it does not disclose, and never
+# below a floor at which the answer would be cut off mid-sentence — which is the
+# ``answer_truncated`` failure this file already fixed once.
+MAX_CONTEXT_COMPRESSIONS = 2
+CONTEXT_COMPRESSION_FACTOR = 0.6
+MAX_OUTPUT_CAP_REDUCTIONS = 2
+OUTPUT_CAP_REDUCTION_FACTOR = 0.5
+MIN_OUTPUT_TOKENS = 1_000
 
 ROUNDS_EXHAUSTED_NOTE = (
     f"All {MAX_TOOL_ROUNDS} lookup rounds for this Turn have been used. Answer from "
@@ -519,6 +544,12 @@ class _TurnState:
     # constant away: the cost of a nudge is a whole model call.
     repair_note: str | None = None
     gate_attempts: int = 0
+    # How far this Turn has already given ground to the route, and both are
+    # per-Turn rather than per-call: a Turn whose transcript was too large in
+    # round two is a Turn whose transcript is too large, and rediscovering that
+    # in round three costs another call.
+    compressions: int = 0
+    output_cap_reductions: int = 0
     # The draft the Gate would have released, kept only when a nudge was spent on
     # an answer that did not need one to survive.
     #
@@ -749,23 +780,11 @@ class AgentLoop:
 
             final = round_index == MAX_TOOL_ROUNDS
             repairing = state.repair_note is not None
-            context = self._construct(
-                system_prompt, request, state, final, repairing=repairing
-            )
-            state.summary_needed = state.summary_needed or context.summary_needed
-            messages = list(context.messages)
-            if final:
-                messages.append(ROUNDS_EXHAUSTED_MESSAGE)
-            if repairing:
-                # Spent on the call it funds, so a model that answers the note
-                # with tool calls does not carry it into a third attempt.
-                messages.append(Message(role=Role.SYSTEM, content=state.repair_note))
-                state.repair_note = None
 
             await self._activity(Activity.ANALYZING, state)
             try:
-                completion = await self._complete(
-                    request, messages, context, final, repairing=repairing
+                completion = await self._call(
+                    system_prompt, request, state, final, repairing=repairing
                 )
             except TimeoutError:
                 # Its own reason, and its own ceiling: the transport's timeout
@@ -815,6 +834,25 @@ class AgentLoop:
                 return await self._terminal(
                     request, TurnStatus.INCOMPLETE, "route_rate_limited", state
                 )
+            except DeadlineExpired as expired:
+                # *We* stopped waiting, which the client has already answered by
+                # rebuilding its transport and asking again. Its own reason
+                # because its remedy is its own: an expiry here points at this
+                # process's connection pool or at a deadline set too low for the
+                # model, while a 504 points at the route.
+                attempt = expired.attempt or RouteAttempt()
+                logger.warning(
+                    "Turn %s stopped waiting for the route after %d attempt(s), "
+                    "%.1fs on the last one, %d byte(s) received: %s",
+                    request.request_message_id,
+                    attempt.attempts,
+                    attempt.elapsed_seconds,
+                    attempt.bytes_received,
+                    redact(str(expired)),
+                )
+                return await self._terminal(
+                    request, TurnStatus.INCOMPLETE, DEADLINE_EXPIRED, state
+                )
             except GatewayTimeout as timeout:
                 # Already retried with backoff inside the client; a third
                 # attempt here would silently double the tabled ceiling.
@@ -858,13 +896,15 @@ class AgentLoop:
                 # Counted and logged at the boundary. Nothing is disabled here.
                 raise
             except ContextOverflow as overflow:
-                # The transcript did not fit. Terminal for now and its own
-                # reason, so the ops snapshot can say how often it happens
-                # before anything tries to compress in response to it.
+                # Reached only after ``_call`` compressed as far as it is allowed
+                # to. The remedy was tried and did not work, so the reason stands
+                # and the ops snapshot now counts a converging failure rather
+                # than an untried one.
                 logger.warning(
                     "Turn %s ended because its transcript did not fit the "
-                    "context window: %s",
+                    "context window after %d compression(s): %s",
                     request.request_message_id,
+                    state.compressions,
                     redact(str(overflow)),
                 )
                 return await self._terminal(
@@ -877,8 +917,11 @@ class AgentLoop:
                 # away evidence the Turn already paid for and fix nothing.
                 logger.warning(
                     "Turn %s ended because the reserved output ceiling did not "
-                    "fit beside its input: %s",
+                    "fit beside its input, down to %d token(s) after %d "
+                    "reduction(s): %s",
                     request.request_message_id,
+                    self._output_tokens(state),
+                    state.output_cap_reductions,
                     redact(str(capped)),
                 )
                 return await self._terminal(
@@ -1028,8 +1071,22 @@ class AgentLoop:
         *,
         repairing: bool = False,
     ) -> ConstructedContext:
-        """Meet the constructed-context ceiling, note and all."""
+        """Meet the constructed-context ceiling, note and all.
+
+        The ceiling is this loop's estimate; the route's is the real one. When
+        the route says the estimate was wrong, ``state.compressions`` lowers ours
+        and the ladder in ``context.py`` does the rest — dropping older Turns and
+        collapsing their results in the order it already decided is safest.
+        """
         budget = self._budget
+        if state.compressions:
+            budget = replace(
+                budget,
+                max_tokens=int(
+                    budget.max_tokens
+                    * CONTEXT_COMPRESSION_FACTOR ** state.compressions
+                ),
+            )
         if final:
             budget = replace(
                 budget, max_tokens=budget.max_tokens - ROUNDS_EXHAUSTED_TOKENS
@@ -1056,6 +1113,7 @@ class AgentLoop:
         messages: Sequence[Message],
         context: ConstructedContext,
         final: bool,
+        state: _TurnState,
         *,
         repairing: bool = False,
     ) -> Completion:
@@ -1064,6 +1122,7 @@ class AgentLoop:
         Both halves happen inside the client, which holds no transaction across
         the network call; the loop's job is to name the worst case honestly.
         """
+        output_tokens = self._output_tokens(state)
         spend = SpendRequest(
             owner=self._spend.owner(request),
             lane=self._spend.lane,
@@ -1071,7 +1130,7 @@ class AgentLoop:
             input_tokens=context.estimated_tokens
             + (ROUNDS_EXHAUSTED_TOKENS if final else 0)
             + (REPAIR_NOTE_TOKENS if repairing else 0),
-            output_tokens=self._max_output_tokens,
+            output_tokens=output_tokens,
         )
         return await asyncio.wait_for(
             self._client.complete(
@@ -1081,12 +1140,114 @@ class AgentLoop:
                     tools=self._catalog.tool_schemas,
                     tool_choice="none" if final else "auto",
                     parallel_tool_calls=True,
-                    max_output_tokens=self._max_output_tokens,
+                    max_output_tokens=output_tokens,
                 ),
                 spend,
             ),
             self._call_timeout,
         )
+
+    def _output_tokens(self, state: _TurnState) -> int:
+        """The output ceiling this Turn is asking for now.
+
+        Never below :data:`MIN_OUTPUT_TOKENS`: an answer cut off mid-sentence is
+        the ``answer_truncated`` failure, and buying a call that fits by making
+        its answer unusable is not a recovery.
+        """
+        ceiling = self._max_output_tokens
+        for _ in range(state.output_cap_reductions):
+            ceiling = int(ceiling * OUTPUT_CAP_REDUCTION_FACTOR)
+        return max(MIN_OUTPUT_TOKENS, ceiling)
+
+    async def _call(
+        self,
+        system_prompt: str,
+        request: TurnRequest,
+        state: _TurnState,
+        final: bool,
+        *,
+        repairing: bool,
+    ) -> Completion:
+        """One round's model call, giving ground where the route says to.
+
+        Two of the recoveries in ``core/llm/recovery.py`` belong here rather than
+        in the client, because the transcript and the output ceiling are this
+        loop's to change and the client was asked to send them as they were. Both
+        are bounded and both re-raise when their budget is spent, so the terminal
+        branches above still own the outcome.
+
+        The repair note is cleared only once a call has carried it. A compression
+        that discarded it would nudge the model with a note the next call never
+        sends, which is a nudge paid for and not delivered.
+        """
+        while True:
+            context = self._construct(
+                system_prompt, request, state, final, repairing=repairing
+            )
+            state.summary_needed = state.summary_needed or context.summary_needed
+            messages = list(context.messages)
+            if final:
+                messages.append(ROUNDS_EXHAUSTED_MESSAGE)
+            if repairing and state.repair_note is not None:
+                messages.append(Message(role=Role.SYSTEM, content=state.repair_note))
+
+            try:
+                completion = await self._complete(
+                    request, messages, context, final, state, repairing=repairing
+                )
+            except ContextOverflow as overflow:
+                if state.compressions >= MAX_CONTEXT_COMPRESSIONS:
+                    raise
+                state.compressions += 1
+                smaller = self._construct(
+                    system_prompt, request, state, final, repairing=repairing
+                )
+                if smaller.estimated_tokens >= context.estimated_tokens:
+                    # Nothing was given up, so the next call would be the call
+                    # that was just refused. This is the ordinary shape of a
+                    # short Turn whose *prompt* is most of its input: the ladder
+                    # protects the current Turn, and there is no older one to
+                    # drop. Paying for an identical attempt to discover that is
+                    # exactly the waste the compression budget exists to bound.
+                    state.compressions -= 1
+                    raise
+                logger.info(
+                    "Turn %s did not fit the context window at %d estimated "
+                    "token(s); compressing to %d (%d of %d) and asking again: %s",
+                    request.request_message_id,
+                    context.estimated_tokens,
+                    smaller.estimated_tokens,
+                    state.compressions,
+                    MAX_CONTEXT_COMPRESSIONS,
+                    redact(str(overflow)),
+                )
+                continue
+            except OutputCapExceeded as capped:
+                if state.output_cap_reductions >= MAX_OUTPUT_CAP_REDUCTIONS:
+                    raise
+                previous = self._output_tokens(state)
+                state.output_cap_reductions += 1
+                reduced = self._output_tokens(state)
+                if reduced >= previous:
+                    # Already at the floor, so the next attempt would send the
+                    # same request and be refused the same way.
+                    state.output_cap_reductions -= 1
+                    raise
+                logger.info(
+                    "Turn %s could not reserve %d output token(s); asking for %d "
+                    "instead: %s",
+                    request.request_message_id,
+                    previous,
+                    reduced,
+                    redact(str(capped)),
+                )
+                continue
+
+            # Spent on the call that carried it, so a model that answers the note
+            # with tool calls does not carry it into a third attempt.
+            if repairing:
+                state.repair_note = None
+            return completion
 
     async def _round(
         self,
@@ -1625,10 +1786,16 @@ class AgentLoop:
 
 __all__ = [
     "ANSWER_TRUNCATED",
+    "CONTEXT_COMPRESSION_FACTOR",
+    "DEADLINE_EXPIRED",
     "DEFAULT_MAX_OUTPUT_TOKENS",
     "LLM_CALL_TIMEOUT_SECONDS",
+    "MAX_CONTEXT_COMPRESSIONS",
     "MAX_EXTERNAL_TOOL_CALLS",
+    "MAX_OUTPUT_CAP_REDUCTIONS",
     "MAX_TOOL_ROUNDS",
+    "MIN_OUTPUT_TOKENS",
+    "OUTPUT_CAP_REDUCTION_FACTOR",
     "ROUNDS_EXHAUSTED_MESSAGE",
     "ROUNDS_EXHAUSTED_NOTE",
     "ROUNDS_EXHAUSTED_TOKENS",
