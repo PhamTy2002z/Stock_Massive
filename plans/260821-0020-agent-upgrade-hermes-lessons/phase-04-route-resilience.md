@@ -1,0 +1,162 @@
+---
+phase: 4
+title: "Độ bền tuyến LLM"
+status: pending
+priority: P1
+effort: "3-4d"
+dependencies: [1]
+---
+
+# Phase 4: Độ bền tuyến LLM
+
+## Overview
+
+Biến từng mã lỗi Phase 1 phân loại được thành một hành động phục hồi. Mục tiêu:
+36% Turn chết vì route giảm xuống mức mà phần còn lại là lỗi thật của tuyến,
+không phải lỗi ta không biết cách phục hồi.
+
+Chạy song song với Phase 5 — không chung file.
+
+## Requirements
+
+- Functional: mỗi mã lỗi có một hành động phục hồi, hoặc một lý do ghi rõ vì sao
+  terminal.
+- Functional: Collector và API không tự làm nhau chết vì rate limit.
+- Functional: hai lần trả rỗng liên tiếp cùng signature → đừng retry, đổi hướng.
+- Functional: `cache_control` được set thật để prefix ổn định được cache.
+- Non-functional: mọi guard fail-OPEN. Không guard nào được phép làm Turn chết
+  thêm so với hiện tại.
+- Non-functional: `StreamAssembler` giữ nguyên bất biến — không đoán index tool call.
+
+## Architecture
+
+### 4.1 Bảng hành động phục hồi
+
+Từ taxonomy `FailoverReason` của Hermes (`error_classifier.py`), giữ tên miền của ta:
+
+| Lớp lỗi (Phase 1) | Hành động |
+|---|---|
+| `ContextOverflow` | **nén, không failover** — Hermes ghi rõ *"compress, not failover"* |
+| `OutputCapExceeded` | giảm output cap cho lời gọi này, **không** thu `context_length` |
+| `RouteRateLimited` (có) | backoff jittered, ghi vào breaker chung |
+| `GatewayTimeout` (có) | **rebuild client** rồi retry — Hermes: `timeout` → rebuild client |
+| `ModelUnavailable` | đổi sang model còn lại trong cặp batch/session |
+| `ContentPolicyBlocked` | terminal, thông báo riêng, không retry |
+| `SchemaRejected` | log loud, terminal — retry sẽ lặp y nguyên |
+| `AuthUnavailable` (có) | terminal — ta chỉ có một credential, không có pool để rotate |
+
+### 4.2 Breaker rate-limit xuyên tiến trình — trên Redis
+
+Collector (trong `core/scheduler.py`) và API cùng process nhưng eval và worktree
+song song thì không. Hermes giải bằng file chia sẻ; **ta không bắt chước** — ta
+đã có khuôn tốt hơn.
+
+`core/quota.py:1` mở đầu: *"One Redis arbiter over the whole vnstock account
+allowance"*, và lý do tồn tại (`:3`): *"Before this module there were three pacers
+and none of them was the quota"* — đúng bài toán này, một tầng khác. Dựng breaker
+cho tuyến LLM theo cùng khuôn: khoá Redis, Lua nguyên tử, và **fail-closed khi
+Redis chết** giống `quota.py` đã chọn.
+
+Lưu ý ngược chiều: `quota.py` fail-closed là đúng cho hạn mức trả tiền. Với
+breaker LLM, fail-closed nghĩa là không gọi được model khi Redis chết — cân nhắc
+fail-open ở đây vì hậu quả là Turn trắng. **Cần quyết định**, ghi ở câu hỏi mở.
+
+### 4.3 Guard rỗng xác định
+
+Mẫu `empty_response_guard.py` (NS-503 — *"charged ~$2.33 for an empty answer"*).
+Hai guard, cả hai fail-open:
+
+- Hai lần rỗng liên tiếp, **cả hai** có usage và `output_tokens == 0`, cùng
+  `(model, route, finish_reason)` → coi là xác định, bỏ retry còn lại, đổi model.
+- Thiếu usage, hoặc `output_tokens > 0` (model sinh *gì đó*) → **không** xếp là
+  xác định, giữ nguyên budget retry.
+- Reasoning token tính là sinh thật — response chỉ có reasoning **không** phải rỗng xác định.
+
+Kèm: định giá không bao giờ được làm chết loop (`except Exception` + log debug).
+
+### 4.4 Deadline của ta vs của provider
+
+Hiện `LLM_REQUEST_TIMEOUT_SECONDS=120` là timeout duy nhất, và `gateway_timeout`
+gộp "ta bỏ cuộc" với "provider bỏ cuộc". Tách hai thứ, classify khác nhau.
+
+Hai chi tiết kỹ thuật từ `deadline.py` cần giữ:
+- `asyncio.wait_for` hẹn hết hạn trên event loop; khi loop bị chặn trong một lời
+  gọi đồng bộ thì **mọi** timeout dựa trên asyncio âm thầm mất tác dụng (#84047).
+- Timeout lớn overflow `time_t` trong `Lock.acquire(timeout=)` trên macOS, giết cả
+  batch (#83220) → clamp ở biên dùng chung.
+
+### 4.5 Bound việc đọc thân lỗi streaming
+
+Mẫu `bounded_response.py` (port từ `openclaw#95108`). `response.read()` trên
+stream không giới hạn theo hai hướng: body khổng lồ, và server mở body rồi treo.
+`iter_bytes()` chặn **bên trong** socket read nên kiểm giờ giữa các chunk không
+cứu được — phải đọc trên daemon thread và đóng response khi hết hạn.
+
+### 4.6 Gắn `cache_control`
+
+`cache_key()` có nhưng không `cache_control` nào được set. Prefix mà
+`contract.py::prefix()` cẩn thận tách ra đang không được cache thật. Nếu tuyến
+hỗ trợ, đặt breakpoint theo khuôn `prompt_caching.py`: prefix stable của system,
+cuối system prompt, và 2 message non-system cuối.
+
+### 4.7 Jittered backoff
+
+Thay backoff cố định. Lý do (`retry_utils.py`): chống thundering-herd khi nhiều
+session cùng đập vào một tuyến đã rate-limit.
+
+## Related Code Files
+
+- Modify: `apps/api/src/core/llm/client.py` — bảng hành động, guard rỗng, backoff
+- Modify: `apps/api/src/core/llm/transport.py` — deadline tách, bound error body, rebuild client
+- Modify: `apps/api/src/core/llm/errors.py` — dùng lớp lỗi Phase 1
+- Create: `apps/api/src/core/llm/breaker.py` — breaker Redis, khuôn `core/quota.py`
+- Modify: `apps/api/src/core/llm/config.py` — `cache_control`, tách timeout
+- Modify: `apps/api/src/agent/loop.py` — nhánh `ContextOverflow` gọi nén thay vì terminal
+- Modify: `apps/api/tests/` — test cho từng nhánh
+
+## Implementation Steps
+
+1. Bảng hành động: một commit cho **mỗi** nhánh, mỗi commit có test. Không gộp —
+   `pnpm test:e2e` là cổng streaming, gộp thì không biết cái nào phá.
+2. `breaker.py` theo khuôn `quota.py`. Chốt fail-open hay fail-closed trước khi viết.
+3. Guard rỗng xác định trong `client.py`.
+4. Tách deadline; clamp; classify `DeadlineExpired` riêng.
+5. Bound error body trên daemon thread.
+6. `cache_control` — chỉ khi capability probe xác nhận tuyến hỗ trợ.
+7. Jittered backoff.
+8. `make test` + `pnpm test:e2e`.
+
+## Success Criteria
+
+- [ ] Mỗi lớp lỗi có nhánh phục hồi hoặc lý do terminal ghi trong code
+- [ ] `ContextOverflow` → nén và thử lại, không terminal
+- [ ] `GatewayTimeout` → rebuild client rồi retry
+- [ ] Breaker Redis: Collector và API không đẩy nhau vào rate limit (test có 2 client)
+- [ ] Guard rỗng: 2 lần rỗng cùng signature → đổi model, không retry lần 3
+- [ ] Guard rỗng fail-open: thiếu usage → giữ nguyên budget (test)
+- [ ] Deadline của ta classify khác timeout của provider
+- [ ] Đọc thân lỗi streaming có trần byte và trần thời gian
+- [ ] `cache_control` được set khi tuyến hỗ trợ; probe xác nhận
+- [ ] `make test` + `pnpm test:e2e` xanh
+- [ ] Sau 48h: tỉ lệ Turn chết vì route giảm, và phần còn lại có tên
+
+## Risk Assessment
+
+**Rủi ro**: nén rồi thử lại có thể vòng vô hạn nếu nén không giảm đủ. **Tín
+hiệu**: cùng một Turn nén nhiều lần. **Phản ứng**: trần số lần nén mỗi Turn =
+2, sau đó terminal — Hermes có đúng guard này (anti-thrash).
+
+**Rủi ro**: breaker fail-closed làm Turn trắng khi Redis chết. **Tín hiệu**:
+Redis down → mọi Turn 503. **Phản ứng**: đây là quyết định phải chốt **trước**
+khi viết, không phải sau. Ghi ở câu hỏi mở.
+
+**Rủi ro**: `cache_control` sai chỗ phá cache thay vì tạo cache. **Tín hiệu**:
+`cache_read_tokens` không tăng, hoặc giảm. **Phản ứng**: gỡ cờ; đây là thay đổi
+một biến.
+
+**Assumption có thể vỡ**: giả định tuyến hiện tại (proxy OpenAI-compatible) hỗ
+trợ prompt caching. Nếu không, mục 4.6 vô nghĩa và bỏ khỏi phase.
+
+## Rollback
+
+Mỗi mục là một commit độc lập, revert riêng được. `breaker.py` có cờ tắt.
