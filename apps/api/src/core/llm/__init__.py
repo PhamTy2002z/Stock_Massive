@@ -31,6 +31,7 @@ from .admission import (
     check_candidate_shape,
 )
 from .client import MissingSpendReservation, ReservedLLMClient, build_client
+from .breaker import RouteBreaker, route_key
 from .config import (
     BudgetLanes,
     LLMConfig,
@@ -38,12 +39,14 @@ from .config import (
     PricingTable,
     TokenPrices,
     Workload,
+    clamp_timeout,
     llm_config_from_settings,
 )
 from .errors import (
     AuthUnavailable,
     ContentPolicyBlocked,
     ContextOverflow,
+    DeadlineExpired,
     GatewayTimeout,
     RouteAttempt,
     RouteRateLimited,
@@ -61,8 +64,10 @@ from .errors import (
     tool_error_result,
 )
 from .protocol import (
+    CACHE_CONTROL,
     Completion,
     CompletionRequest,
+    ContentSegment,
     JsonSchemaFormat,
     LLMClient,
     Message,
@@ -70,6 +75,13 @@ from .protocol import (
     ToolCall,
     ToolSchema,
     Usage,
+)
+from .recovery import (
+    RECOVERIES,
+    ROUTE_ERROR_CLASSES,
+    Recovery,
+    RouteAction,
+    recovery_for,
 )
 from .probe import (
     CapabilityProbe,
@@ -82,6 +94,9 @@ from .probe import (
 
 __all__ = [
     "BUDGET_REFUSAL_REASONS",
+    "CACHE_CONTROL",
+    "RECOVERIES",
+    "ROUTE_ERROR_CLASSES",
     "AuthUnavailable",
     "BudgetLane",
     "BudgetRefusal",
@@ -94,7 +109,9 @@ __all__ = [
     "CapabilityProbe",
     "CapabilityProbeError",
     "ContentPolicyBlocked",
+    "ContentSegment",
     "ContextOverflow",
+    "DeadlineExpired",
     "GatewayTimeout",
     "ModelUnavailable",
     "OutputCapExceeded",
@@ -115,8 +132,11 @@ __all__ = [
     "PricingTable",
     "ProbeCheck",
     "ProbeResult",
+    "Recovery",
     "Role",
     "Reservation",
+    "RouteAction",
+    "RouteBreaker",
     "SpendAdmission",
     "ReservedLLMClient",
     "TokenPrices",
@@ -130,12 +150,15 @@ __all__ = [
     "Usage",
     "Workload",
     "build_client",
+    "clamp_timeout",
     "clear_capability_probe_cache",
     "enforce_budget_validation",
     "enforce_capability_probe",
     "llm_config_from_settings",
     "llm_metrics",
+    "recovery_for",
     "redact",
+    "route_key",
     "tool_error_result",
     "validate_budget",
 ]

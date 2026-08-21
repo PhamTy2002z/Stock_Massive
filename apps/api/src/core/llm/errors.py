@@ -8,7 +8,8 @@ because their behaviours differ:
 | --- | --- |
 | ``ToolError`` | structured error returned to the model, which may try another approach; at most 2 attempts on the same tool |
 | ``MalformedArguments`` | raise immediately; the caller fails saying the route violated its contract |
-| ``GatewayTimeout`` | retried through ``tenacity``, 2 attempts with backoff, then fail |
+| ``GatewayTimeout`` | 2 attempts with jittered backoff, the transport rebuilt between them, then fail |
+| ``DeadlineExpired`` | a ``GatewayTimeout`` whose deadline was *ours* rather than the route's |
 | ``RouteRateLimited`` | **never** retried; the route answered, and its answer was "not now" |
 | ``AuthUnavailable`` | **never** retried; a 401 means the channel's credential died |
 | ``ModelRefusal`` | surfaced verbatim; no re-prompting to work around it |
@@ -131,6 +132,38 @@ class GatewayTimeout(LLMError):
     ) -> None:
         super().__init__(message, usage=usage)
         self.attempt = attempt
+
+
+class DeadlineExpired(GatewayTimeout):
+    """*We* stopped waiting. The route may still have been working.
+
+    A subclass rather than a sibling, so every ``except GatewayTimeout`` written
+    before it keeps catching it and every caller that does not know about it
+    behaves exactly as it did.
+
+    The distinction is not cosmetic. ``gateway_timeout`` used to mean two
+    unrelated things — a 504 from the route, which is the route saying it gave
+    up, and our own ``httpx`` timeout, which is this process saying it did — and
+    the remedies differ: an upstream 504 is answered by asking again, while our
+    own expiry may be a wedged connection in a pool that will expire the next
+    call the same way. So this class is the one the client rebuilds its transport
+    for.
+
+    Two properties of deadlines are worth stating where the class lives, because
+    both were measured elsewhere and neither is visible in the code that relies
+    on them:
+
+    - an ``asyncio`` timeout is scheduled on the event loop, so while the loop is
+      blocked inside a synchronous call *every* timeout built on it silently
+      stops firing (cpython #84047). The transport's deadline is enforced by
+      ``httpx`` on the socket rather than by ``asyncio.wait_for``, which is why
+      it survives that state; the loop's own per-call ceiling does not, and is a
+      second line rather than the first.
+    - a timeout large enough to overflow ``time_t`` raises inside
+      ``Lock.acquire(timeout=)`` on macOS and takes the whole batch with it
+      (cpython #83220), which is why every deadline is clamped where it is
+      configured rather than where it is used.
+    """
 
 
 class RouteRateLimited(LLMError):
@@ -590,6 +623,7 @@ __all__ = [
     "AuthUnavailable",
     "ContentPolicyBlocked",
     "ContextOverflow",
+    "DeadlineExpired",
     "GatewayTimeout",
     "RouteRateLimited",
     "LLMError",

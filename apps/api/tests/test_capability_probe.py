@@ -1,4 +1,4 @@
-"""The configured route proves the four contracts Alpha Desk relies on."""
+"""The configured route proves the contracts Alpha Desk relies on."""
 
 import logging
 from types import SimpleNamespace
@@ -84,7 +84,7 @@ def empty_probe_cache():
 class TestCapabilityProbe:
     pytestmark = pytest.mark.asyncio
 
-    async def test_all_four_checks_pass_and_every_call_uses_emergency_admission(self):
+    async def test_every_check_passes_and_every_call_uses_emergency_admission(self):
         route = ConformingRoute()
 
         result = await CapabilityProbe(route, model="session-model").run()
@@ -95,9 +95,31 @@ class TestCapabilityProbe:
             "parallel_tool_calls",
             "strict_json_schema",
             "closed_tool_loop",
+            "prompt_cache_control",
         }
         assert all(check.passed for check in result.checks.values())
+        # Five calls, not six: the cache check costs nothing while the route is
+        # not configured to send ``cache_control``, because there is nothing to
+        # prove about a field this deployment does not use.
         assert len(route.calls) == 5
+        assert "disabled" in result.checks["prompt_cache_control"].response
+
+    async def test_the_cache_check_costs_a_call_only_where_it_is_enabled(self):
+        """And what it proves is acceptance, not effectiveness.
+
+        Whether the route *served* the prefix from cache shows up in
+        ``cached_input_tokens`` on real traffic; a single probe call has no
+        earlier call to have cached anything for.
+        """
+        route = ConformingRoute()
+
+        result = await CapabilityProbe(
+            route, model="session-model", prompt_cache_control=True
+        ).run()
+
+        assert result.checks["prompt_cache_control"].passed is True
+        assert len(route.calls) == 6
+        assert "cached_input_tokens=" in result.checks["prompt_cache_control"].response
 
     async def test_every_check_reports_even_when_the_route_drops_parameters(self):
         route = DroppingRoute()
@@ -105,9 +127,16 @@ class TestCapabilityProbe:
         result = await CapabilityProbe(route, model="session-model").run()
 
         assert result.ok is False
-        assert len(result.checks) == 4
-        assert all(not check.passed for check in result.checks.values())
-        assert all("parameters ignored" in check.response for check in result.checks.values())
+        # The cache check is the one that passes without asking the route
+        # anything, so a route that drops every parameter still leaves it green.
+        paid = {
+            name: check
+            for name, check in result.checks.items()
+            if name != "prompt_cache_control"
+        }
+        assert len(paid) == 4
+        assert all(not check.passed for check in paid.values())
+        assert all("parameters ignored" in check.response for check in paid.values())
 
     async def test_result_is_cached_for_the_rest_of_the_process(self):
         route = ConformingRoute()

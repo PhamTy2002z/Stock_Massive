@@ -125,12 +125,38 @@ Single-sourced across both lanes.
 | --- | --- |
 | `tool_error` | structured error returned to the model, which may try another approach; max 2 attempts on the same tool |
 | `malformed_arguments` | **raise immediately**; the Turn fails saying the route violated its contract |
-| `gateway_timeout` | retry via `tenacity`, 2 attempts with backoff, then fail the Turn |
+| `gateway_timeout` | 2 attempts with jittered backoff and a rebuilt transport between them, then fail the Turn |
+| `deadline_expired` | a `gateway_timeout` whose deadline was **ours**: same retry, and the transport is rebuilt because a wedged connection reproduces it |
+| `route_rate_limited` | **never retried**; the refusal is written to a shared Redis breaker so the next caller waits instead of asking |
 | `auth_unavailable` | **never retried**; interactive surfaces re-auth, batch marks failed-retryable |
 | `model_refusal` | shown verbatim; no re-prompting to work around it |
+| `context_overflow` | **compress, not failover**: the agent loop reconstructs against a smaller ceiling, at most twice, then fails the Turn |
+| `output_cap_exceeded` | the requested output ceiling is halved, at most twice and never below a usable answer; the transcript is untouched |
+| `content_policy_blocked` | terminal; the route's own filter refuses the same text again |
+| `model_unavailable` | one failover to the other model of the configured pair, through a fresh reservation at that model's prices |
+| `schema_rejected` | terminal and logged loudly; the Tool Catalog wrote the schemas, so this is ours to fix |
+
+Every class maps to exactly one action in `core/llm/recovery.py`, and a class with no
+entry is terminal rather than retried. The two actions that change the *request* —
+compressing the transcript and lowering the output ceiling — belong to the agent loop,
+because a client that changed either would be editing a request it was asked to send.
+
+**An empty answer is bounded, not retried indefinitely.** Two answers from one model
+with the same finish reason and no output tokens are treated as deterministic and the
+call moves to the other model; an answer with no usage at all, or one carrying
+reasoning tokens, keeps its retry — the evidence that the route generated nothing is
+precisely the usage that is missing.
 
 **No auto-disable of a route.** `malformed_arguments` is counted and logged loudly; the
-operator flips `alpha_desk_enabled` by hand (ADR-0008).
+operator flips `alpha_desk_enabled` by hand (ADR-0008). The rate-limit breaker is not an
+exception: it fails open, so a Redis outage returns the deployment to discovering each
+rate limit per caller (`LLM_ROUTE_BREAKER_ENABLED` turns it off entirely).
+
+**Prompt caching ships behind a probe.** `LLM_PROMPT_CACHE_CONTROL_ENABLED` puts
+`cache_control` breakpoints on the stable prompt prefix and the last two non-system
+messages. It is off by default because the field is Anthropic's spelling and an
+OpenAI-compatible route may refuse the request carrying it: enable the flag, run the
+Capability Probe, and keep the flag only if `prompt_cache_control` passes.
 
 ## 4. The signals package
 

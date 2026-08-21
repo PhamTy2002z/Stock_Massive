@@ -1,7 +1,7 @@
 """An in-process stand-in for Redis, faithful to the calls the arbiter makes.
 
 The arbiter's reservation is a Lua script, and a fake cannot run Lua — so this
-mirrors the three scripts in Python. That mirror is a real risk: a change to the
+mirrors the four scripts in Python. That mirror is a real risk: a change to the
 Lua that is not made here would leave the suite green over a bucket that no
 longer spaces anything. Two things hold it down. The mirror lives beside the
 scripts it copies, keyed by the script text itself, so an edited script that was
@@ -19,6 +19,7 @@ import threading
 import time
 from typing import Any
 
+from src.core.llm.breaker import OPEN_BREAKER_SCRIPT
 from src.core.quota import RESERVE_SLOT_SCRIPT
 from src.core.redis import RELEASE_IF_OWNED_SCRIPT, RENEW_IF_OWNED_SCRIPT
 
@@ -111,6 +112,8 @@ class FakeRedis:
                 if self.get(keys[0]) == str(args[0]):
                     return int(self.expire(keys[0], int(args[1])))
                 return 0
+            if script == OPEN_BREAKER_SCRIPT:
+                return self._open_breaker(keys[0], [float(arg) for arg in args])
             raise UnknownScript(script)
 
     def _reserve(self, key: str, args: list[float]) -> int:
@@ -124,6 +127,17 @@ class FakeRedis:
             return -1
         self.set(key, int(next_at + spacing), px=int(ttl))
         return int(wait)
+
+    def _open_breaker(self, key: str, args: list[float]) -> int:
+        now, until_at = args
+        held = self.get(key)
+        if held is not None and float(held) > until_at:
+            until_at = float(held)
+        if until_at <= now:
+            self.delete(key)
+            return 0
+        self.set(key, int(until_at), px=int(until_at - now))
+        return int(until_at - now)
 
 
 class PositionalFakeRedis(FakeRedis):

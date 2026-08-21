@@ -172,6 +172,33 @@ def _tool_call_wire(call: ToolCall) -> dict[str, Any]:
     return payload
 
 
+#: The one vendor spelling of a cache breakpoint, and the only value any route
+#: that speaks it accepts. Written once so a second spelling has to be a
+#: deliberate change rather than a copied literal.
+CACHE_CONTROL = {"type": "ephemeral"}
+
+
+@dataclass(frozen=True)
+class ContentSegment:
+    """One piece of a message's text, and whether a cache ends after it.
+
+    The System Prompt Contract is one artifact with a stable prefix and five
+    values appended (``docs/adr/0015``), and only the prefix is worth caching.
+    Expressing that needs a boundary *inside* one message, which a plain string
+    cannot carry — so a caller that knows where the stable part ends says so
+    here, and the transport turns it into content blocks only for a route that
+    accepts them.
+
+    The segments are a description of ``content``, never a second source of
+    truth for it: a :class:`Message` refuses to exist if its segments do not
+    concatenate to the content it also carries, because a route reading the
+    blocks and a ledger measuring the string must be reading the same prompt.
+    """
+
+    text: str
+    cache_breakpoint: bool = False
+
+
 @dataclass(frozen=True)
 class Message:
     """One turn of the conversation, in the shape the route expects."""
@@ -181,10 +208,29 @@ class Message:
     tool_calls: tuple[ToolCall, ...] = ()
     tool_call_id: str | None = None
     name: str | None = None
+    #: Where this message's cacheable part ends, when the caller knows. Empty for
+    #: every message that has no such boundary, which is all of them but the
+    #: system prompt.
+    segments: tuple[ContentSegment, ...] = ()
 
-    def as_wire(self) -> dict[str, Any]:
+    def __post_init__(self) -> None:
+        if self.segments and "".join(
+            segment.text for segment in self.segments
+        ) != (self.content or ""):
+            raise ValueError(
+                "a message's segments must concatenate to its content; the "
+                "blocks a route reads and the string a ledger measures cannot "
+                "be two different prompts"
+            )
+
+    def as_wire(self, cache_control: bool = False) -> dict[str, Any]:
         payload: dict[str, Any] = {"role": self.role.value}
-        if self.content is not None:
+        if cache_control and self.segments:
+            # Content blocks only where a breakpoint has to be expressed. A
+            # route that accepts ``cache_control`` still accepts a plain string,
+            # so every other message keeps the shape it has always had.
+            payload["content"] = [_content_block(segment) for segment in self.segments]
+        elif self.content is not None:
             payload["content"] = self.content
         if self.tool_calls:
             payload["tool_calls"] = [
@@ -195,6 +241,13 @@ class Message:
         if self.name is not None:
             payload["name"] = self.name
         return payload
+
+
+def _content_block(segment: ContentSegment) -> dict[str, Any]:
+    block: dict[str, Any] = {"type": "text", "text": segment.text}
+    if segment.cache_breakpoint:
+        block["cache_control"] = dict(CACHE_CONTROL)
+    return block
 
 
 @dataclass(frozen=True)
@@ -315,8 +368,10 @@ class LLMClient(Protocol):
 
 
 __all__ = [
+    "CACHE_CONTROL",
     "Completion",
     "CompletionRequest",
+    "ContentSegment",
     "JsonSchemaFormat",
     "LLMClient",
     "Message",

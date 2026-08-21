@@ -8,6 +8,7 @@ route — forced `tool_choice`, parallel tool calls through streaming, strict
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import date, datetime, timezone
 
@@ -27,6 +28,7 @@ from src.core.llm.config import Workload, llm_config_from_settings
 from src.core.llm.errors import (
     AuthUnavailable,
     ContextOverflow,
+    DeadlineExpired,
     GatewayTimeout,
     ModelUnavailable,
     LLMError,
@@ -40,13 +42,16 @@ from src.core.llm.errors import (
 )
 from src.core.llm.protocol import (
     CompletionRequest,
+    ContentSegment,
     JsonSchemaFormat,
     Message,
     Role,
     ToolCall,
     ToolSchema,
 )
-from src.core.llm.transport import OpenAICompatibleTransport
+from src.core.llm import transport as transport_module
+from src.core.llm.config import MAX_TIMEOUT_SECONDS
+from src.core.llm.transport import ERROR_BODY_MAX_BYTES, OpenAICompatibleTransport
 
 PRICE_TOOL = ToolSchema(
     name="get_price",
@@ -572,6 +577,180 @@ class TestTheErrorTaxonomy:
             await client(handler).complete(request())
 
         assert raised.value.attempt.bytes_received > 0
+
+
+class TestOurDeadlineAgainstTheRoutes:
+    pytestmark = pytest.mark.asyncio
+
+    async def test_a_socket_timeout_is_our_deadline_and_says_so(self):
+        """The split Phase 4 needs before it can act on either.
+
+        An expiry on this side points at the connection pool or at a deadline set
+        too low; a 504 points at the route. Both stay retryable, and both stay
+        ``GatewayTimeout`` for every caller written before the split.
+        """
+
+        def handler(http_request: httpx.Request):
+            raise httpx.ReadTimeout("too slow", request=http_request)
+
+        with pytest.raises(DeadlineExpired) as raised:
+            await client(handler).complete(request())
+
+        assert isinstance(raised.value, GatewayTimeout)
+        assert "stopped waiting" in str(raised.value)
+
+    async def test_a_504_is_the_routes_deadline_and_is_not_ours(self):
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(504, text="upstream gave up")
+
+        with pytest.raises(GatewayTimeout) as raised:
+            await client(handler).complete(request())
+
+        assert not isinstance(raised.value, DeadlineExpired)
+
+    async def test_a_route_that_cannot_be_reached_is_not_our_deadline_either(self):
+        def handler(http_request: httpx.Request):
+            raise httpx.ConnectError("no route to host", request=http_request)
+
+        with pytest.raises(GatewayTimeout) as raised:
+            await client(handler).complete(request())
+
+        assert not isinstance(raised.value, DeadlineExpired)
+        assert "could not be reached" in str(raised.value)
+
+    async def test_a_configured_deadline_is_clamped_before_it_reaches_a_waiter(self):
+        """cpython #83220, at the boundary rather than at each waiter."""
+        clamped = config(llm_request_timeout_seconds=10 ** 12)
+
+        assert clamped.request_timeout_seconds == MAX_TIMEOUT_SECONDS
+
+
+class TestABoundedErrorBody:
+    pytestmark = pytest.mark.asyncio
+
+    async def test_a_refused_body_is_read_to_a_ceiling_and_still_classified(self):
+        """``openclaw#95108``: ``read()`` on a stream is unbounded twice over.
+
+        The markers classification matches are at the start of a message, so a
+        bounded read classifies exactly as well as an unbounded one — and it
+        cannot be held open by a route that sends an error body forever.
+        """
+        marker = "This model's maximum context length is exceeded. "
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            async def body():
+                yield marker.encode()
+                for _ in range(200):
+                    yield (b"x" * 1024)
+
+            return httpx.Response(400, content=body())
+
+        with pytest.raises(ContextOverflow) as raised:
+            await client(handler).complete(request())
+
+        assert len(str(raised.value)) < ERROR_BODY_MAX_BYTES
+
+    async def test_a_route_that_stops_sending_mid_body_does_not_hold_the_call(
+        self, monkeypatch
+    ):
+        """The failure that actually hurts: the request already failed.
+
+        A body opened and then abandoned would otherwise hold this call for the
+        whole request deadline *after* there is nothing left to wait for. The
+        deadline is shortened here rather than waited out, because a test that
+        proves a five-second bound by taking five seconds is a test nobody runs.
+        """
+        monkeypatch.setattr(transport_module, "ERROR_BODY_MAX_SECONDS", 0.05)
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            async def body():
+                yield b"prompt is too long"
+                await asyncio.sleep(30)
+                yield b"never arrives"
+
+            return httpx.Response(400, content=body())
+
+        with pytest.raises(ContextOverflow):
+            await client(handler).complete(request())
+
+
+class TestTheCacheBreakpoint:
+    pytestmark = pytest.mark.asyncio
+
+    async def test_nothing_reaches_the_wire_until_the_route_is_configured_for_it(self):
+        """Off by default, and off means the request is unchanged.
+
+        ``cache_control`` is Anthropic's spelling and an OpenAI-compatible route
+        is free to refuse the request that carries it, so the field ships behind
+        a flag the Capability Probe has to agree with.
+        """
+        seen: dict = {}
+
+        def handler(http_request: httpx.Request) -> httpx.Response:
+            seen.update(json.loads(http_request.content))
+            return httpx.Response(200, content=sse(text_chunk("ok")))
+
+        system = Message(
+            role=Role.SYSTEM,
+            content="stable prefix and the values",
+            segments=(
+                ContentSegment("stable prefix", cache_breakpoint=True),
+                ContentSegment(" and the values"),
+            ),
+        )
+
+        await client(handler).complete(
+            request(messages=[system, Message(role=Role.USER, content="FPT?")])
+        )
+
+        assert seen["messages"][0]["content"] == "stable prefix and the values"
+        assert "cache_control" not in json.dumps(seen)
+
+    async def test_the_breakpoints_land_on_the_prefix_and_the_last_two_messages(self):
+        """Where a breakpoint goes decides whether it fills a cache or voids one.
+
+        The prefix is the part identical on every Turn; the last two non-system
+        messages are the part a follow-up question reads back. Everything between
+        them changes before it would be read, so a breakpoint there spends the
+        route's allowance on nothing.
+        """
+        seen: dict = {}
+
+        def handler(http_request: httpx.Request) -> httpx.Response:
+            seen.update(json.loads(http_request.content))
+            return httpx.Response(200, content=sse(text_chunk("ok")))
+
+        system = Message(
+            role=Role.SYSTEM,
+            content="stable prefix and the values",
+            segments=(
+                ContentSegment("stable prefix", cache_breakpoint=True),
+                ContentSegment(" and the values"),
+            ),
+        )
+        history = [
+            Message(role=Role.USER, content="câu cũ"),
+            Message(role=Role.ASSISTANT, content="trả lời cũ"),
+            Message(role=Role.USER, content="FPT?"),
+        ]
+
+        await client(
+            handler, llm_prompt_cache_control_enabled=True
+        ).complete(request(messages=[system, *history]))
+
+        blocks = seen["messages"][0]["content"]
+        assert blocks[0]["text"] == "stable prefix"
+        assert blocks[0]["cache_control"] == {"type": "ephemeral"}
+        assert "cache_control" not in blocks[1]
+
+        marked = [
+            index
+            for index, payload in enumerate(seen["messages"])
+            if isinstance(payload["content"], list)
+            and any("cache_control" in block for block in payload["content"])
+        ]
+        # The system prefix, and the last two of the three non-system messages.
+        assert marked == [0, 2, 3]
 
 
 class TestToolErrors:

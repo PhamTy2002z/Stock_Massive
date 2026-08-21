@@ -19,6 +19,7 @@ from .config import Workload
 from .protocol import (
     Completion,
     CompletionRequest,
+    ContentSegment,
     JsonSchemaFormat,
     LLMClient,
     Message,
@@ -102,11 +103,20 @@ _cached_result: ProbeResult | None = None
 
 
 class CapabilityProbe:
-    """Run the four independent checks, once per process."""
+    """Run the independent route checks, once per process."""
 
-    def __init__(self, client: LLMClient, model: str) -> None:
+    def __init__(
+        self,
+        client: LLMClient,
+        model: str,
+        prompt_cache_control: bool = False,
+    ) -> None:
         self._client = client
         self._model = model
+        # Whether the route is *configured* to send ``cache_control``. The check
+        # below is what says whether it should be: caching is off by default, and
+        # the only way to learn that a route accepts the field is to send it one.
+        self._prompt_cache_control = prompt_cache_control
         self._run_id = uuid.uuid4().hex
         self._call_index = 0
 
@@ -127,6 +137,9 @@ class CapabilityProbe:
         )
         checks["closed_tool_loop"] = await self._check(
             "closed_tool_loop", self._closed_tool_loop
+        )
+        checks["prompt_cache_control"] = await self._check(
+            "prompt_cache_control", self._prompt_cache_breakpoint
         )
         _cached_result = ProbeResult(checks=checks)
         return _cached_result
@@ -249,6 +262,48 @@ class CapabilityProbe:
         return passed, _render(second)
 
 
+    async def _prompt_cache_breakpoint(self) -> tuple[bool, str]:
+        """Whether this route answers a request carrying a cache breakpoint.
+
+        The one check that can pass without a call. ``cache_control`` is
+        Anthropic's spelling, an OpenAI-compatible route is free to refuse the
+        request that carries it, and refusing arrives as a 400 that
+        ``classify_status`` reads as a schema or an unclassified failure — so a
+        deployment that has not enabled the field has nothing to prove and is not
+        charged for proving it.
+
+        With the field enabled, what is checked is acceptance rather than
+        effectiveness: whether the route *served* the prefix from cache is
+        visible in ``Usage.cached_input_tokens`` on real traffic, and a single
+        probe call has no earlier call to have cached anything for. The response
+        line records the counter anyway, because an operator reading a green
+        check wants to know which of the two they are looking at.
+        """
+        if not self._prompt_cache_control:
+            return True, "cache_control disabled by configuration"
+
+        stable = "You are a capability probe. Answer with the word ready."
+        completion = await self._complete(
+            CompletionRequest(
+                model=self._model,
+                messages=(
+                    Message(
+                        role=Role.SYSTEM,
+                        content=stable + " Nothing else.",
+                        segments=(
+                            ContentSegment(stable, cache_breakpoint=True),
+                            ContentSegment(" Nothing else."),
+                        ),
+                    ),
+                    Message(role=Role.USER, content="Say ready."),
+                ),
+                metadata={"probe_check": "prompt_cache_control"},
+            )
+        )
+        cached = completion.usage.cached_input_tokens if completion.usage else 0
+        return bool(completion.text), f"cached_input_tokens={cached} {_render(completion)}"
+
+
 def _render(completion: Completion) -> str:
     return repr(
         {
@@ -268,7 +323,9 @@ def enforce_capability_probe(
     alpha_desk_enabled: bool,
 ) -> ProbeResult:
     if result.ok:
-        logger.info("Capability Probe passed all four route checks")
+        logger.info(
+            "Capability Probe passed all %d route checks", len(result.checks)
+        )
         return result
     error = CapabilityProbeError(result)
     if alpha_desk_enabled:

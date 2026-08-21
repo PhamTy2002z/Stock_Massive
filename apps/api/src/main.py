@@ -61,6 +61,7 @@ async def run_capability_probe_at_startup(config) -> None:
         result = await CapabilityProbe(
             client,
             model=config.model_for(Workload.SESSION),
+            prompt_cache_control=config.route.prompt_cache_control,
         ).run()
     finally:
         await client.aclose()
