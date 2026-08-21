@@ -1,13 +1,13 @@
 "use client"
 
-import { useEffect, useState } from "react"
 import { BarChart3 } from "lucide-react"
+import { useState } from "react"
 
 import { VisgniteMark } from "@/components/shared/visgnite-logo"
 import { useAuth } from "@/hooks/use-auth"
 import { useMarketIndices } from "@/hooks/use-market-indices"
-import { FIRST_RUN } from "@/lib/alpha-desk/copy"
-import { formatVietnamDate } from "@/lib/market-session"
+import { greetingFor, plainGreeting } from "@/lib/greeting"
+import { formatVietnamDate, vietnamPartOfDay } from "@/lib/market-session"
 
 import { Composer } from "./composer"
 import { Figure } from "./primitives"
@@ -52,34 +52,40 @@ export function NewConversationView() {
 }
 
 /**
- * The mark, and the time of day by the reader's own clock.
+ * The mark, and the time of day on the market's clock.
  *
- * The hour is read after mount. Rendered on the server it would state whichever
- * part of the day the *server* is in, and the first client frame would disagree
- * with it — a hydration mismatch over a pleasantry.
+ * The hour is read during render, not after mount: an effect-borne value would
+ * open the surface on a placeholder line and replace it a frame later, which
+ * reads as the screen changing its mind. Vietnam's zone is the same on the
+ * server and in the browser, so the word matches across hydration whatever zone
+ * the reader is actually sitting in.
  *
  * **This one line is in English, and it is the only one.** The rest of the
  * product speaks Vietnamese; the greeting is set in the serif display face
  * where the Vietnamese diacritics sit unevenly at this size, so it is left as
  * `Morning, <name>`.
+ *
+ * Which of the day's lines gets used is drawn per mount, so starting a new
+ * conversation opens on a line the reader did not just see. The draw is gated
+ * on the session having resolved, and that gate is what keeps hydration quiet:
+ * the roll below is thrown on the server too, and its answer there is not the
+ * browser's. Until `/api/auth/me` comes back — which is the state the server
+ * renders in and the state the browser hydrates in — the line is the plain
+ * `plainGreeting`, identical on both sides. Once the account is in the cache
+ * the very first render already has it, so switching back to this screen picks
+ * a line without flashing the plain one first.
  */
 function Greeting() {
-  const { user } = useAuth()
-  const [hour, setHour] = useState<number | null>(null)
-
-  useEffect(() => setHour(new Date().getHours()), [])
+  const { user, isPending } = useAuth()
+  const [roll] = useState(Math.random)
 
   // The whole name, not the last word of it. A Vietnamese name is read in full,
   // and cutting it to the given name is a Western reading of the order.
   const name = user?.full_name?.trim() || user?.email?.split("@")[0] || null
-  const partOfDay =
-    hour === null
-      ? null
-      : hour < 12
-        ? "Morning"
-        : hour < 17
-          ? "Afternoon"
-          : "Evening"
+  const partOfDay = vietnamPartOfDay()
+  const line = isPending
+    ? plainGreeting(partOfDay, name)
+    : greetingFor(partOfDay, name, roll)
 
   return (
     <div className="flex items-center justify-center gap-3">
@@ -88,7 +94,7 @@ function Greeting() {
           off-white because at this weight the body's neutral white goes cold
           against the ground — see the note on the font in app/layout. */}
       <h2 className="min-w-0 font-serif text-[clamp(1.6rem,2.7vw,2.15rem)] font-normal leading-[1.1] tracking-[-0.01em] text-ink-display">
-        {partOfDay ? `${partOfDay}${name ? `, ${name}` : ""}` : FIRST_RUN.question}
+        {line}
       </h2>
     </div>
   )
