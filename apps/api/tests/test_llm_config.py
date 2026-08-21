@@ -75,6 +75,62 @@ class TestConfiguredRoute:
         assert config.lanes.monthly_envelope_usd == 50.0
         assert config.lanes.allocated_usd == 50.0
 
+    def test_per_user_ceilings_come_from_settings(self):
+        config = llm_config_from_settings(
+            _settings(
+                llm_user_turn_starts_per_day=50,
+                llm_user_active_turns=4,
+                llm_system_active_turns=8,
+                llm_user_daily_usd=9.5,
+                llm_user_rolling_30d_usd=40.0,
+            )
+        )
+
+        assert config.ceilings.turn_starts_per_day == 50
+        assert config.ceilings.active_turns_per_user == 4
+        assert config.ceilings.active_turns_system == 8
+        assert config.ceilings.daily_usd == 9.5
+        assert config.ceilings.rolling_30d_usd == 40.0
+
+    def test_zero_reads_as_unlimited_one_ceiling_at_a_time(self):
+        """The convention ``llm_eval_run_cost_ceiling_usd`` already uses."""
+        config = llm_config_from_settings(
+            _settings(llm_user_turn_starts_per_day=0, llm_user_daily_usd=0)
+        )
+
+        assert config.ceilings.turn_starts_per_day is None
+        assert config.ceilings.daily_usd is None
+        assert config.ceilings.active_turns_per_user == 1
+        assert config.ceilings.rolling_30d_usd == 15.0
+
+    def test_the_adr_numbers_are_the_defaults(self):
+        """A deployment that configures nothing gets the contract."""
+        config = llm_config_from_settings(_settings())
+
+        assert config.ceilings.turn_starts_per_day == 20
+        assert config.ceilings.active_turns_per_user == 1
+        assert config.ceilings.active_turns_system == 3
+        assert config.ceilings.daily_usd == 3.0
+        assert config.ceilings.rolling_30d_usd == 15.0
+
+    def test_an_unmetered_envelope_is_all_five_values_or_none(self):
+        unmetered = llm_config_from_settings(
+            _settings(
+                llm_budget_monthly_usd=0,
+                llm_budget_analysis_usd=0,
+                llm_budget_turn_usd=0,
+                llm_budget_emergency_usd=0,
+                llm_budget_eval_usd=0,
+            )
+        )
+
+        assert unmetered.lanes.unmetered is True
+        assert llm_config_from_settings(_settings()).lanes.unmetered is False
+        assert (
+            llm_config_from_settings(_settings(llm_budget_turn_usd=0)).lanes.unmetered
+            is False
+        )
+
     def test_credential_stays_out_of_the_representation(self):
         """A route printed into a log or a traceback must not carry the key."""
         config = llm_config_from_settings(_settings(llm_api_key="sk-secret-value"))

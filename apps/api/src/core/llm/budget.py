@@ -174,6 +174,19 @@ def _lane_failures(config: LLMConfig, analysis: float, turn: float) -> list[Budg
     failures: list[BudgetFailure] = []
     lanes = config.lanes
 
+    if lanes.unmetered:
+        # A zero envelope across all four lanes is a deployment that declares no
+        # monthly ceiling at all — the ``0`` of ``LLM_EVAL_RUN_COST_CEILING_USD``
+        # widened to the whole envelope, for a route billed by subscription
+        # rather than per call. The price table above is still validated, so
+        # every token and cost row remains priced and comparable; what goes away
+        # is the synthetic USD refusal.
+        #
+        # A *partly* zero envelope is not this. It falls through to the checks
+        # below and fails there, because a single unfunded lane refuses every
+        # call in it rather than admitting them.
+        return failures
+
     if abs(lanes.allocated_usd - lanes.monthly_envelope_usd) > MICRO_USD:
         failures.append(
             BudgetFailure(

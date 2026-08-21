@@ -60,6 +60,30 @@ call, 100,000 aggregate input, 20,000 aggregate output including hidden reasonin
 $15 per rolling 30 days, one active Turn — against three active Turns system-wide.
 The first token, output, or monetary ceiling reached stops further dispatch.
 
+**The per-workload and per-Turn ceilings are constants; the five per-user ones and the
+monthly envelope are configuration.** What one account may spend in a day is a spend
+decision, not a promise the product makes, and a deployment used internally over a
+subscription route answers it differently from one serving strangers over a metered
+API. The numbers above remain the defaults, so the contract still has one written home
+and one env var restores it: `LLM_USER_TURN_STARTS_PER_DAY`, `LLM_USER_ACTIVE_TURNS`,
+`LLM_SYSTEM_ACTIVE_TURNS`, `LLM_USER_DAILY_USD`, `LLM_USER_ROLLING_30D_USD`. `0` is
+unlimited, one ceiling at a time. `LLM_SYSTEM_ACTIVE_TURNS` sizes the in-process
+semaphore as well as the ledger check, because the two enforce one number from opposite
+sides and raising only one of them would raise nothing.
+
+The four lane amounts and the envelope take the same convention, but **all five at once
+or none**: zero across all of them declares a deployment with no monthly ceiling, while
+a single zero among four funded lanes is a variable nobody filled in and fails Budget
+Validation, because an unfunded lane refuses every call in it. The price table is
+validated either way — it is what the ledger records against every call, and an
+unmetered envelope is not a licence to boot with prices nobody set.
+
+Turning a ceiling off never turns the ledger off with it. Every call is still reserved
+and reconciled into `llm_call_usage`, which is what makes the decision reversible: a
+deployment that stopped writing cost rows could not go back to enforcing anything,
+because the counts the ceilings compare against would be missing for the whole period
+it ran that way.
+
 The Eval Battery additionally supports a configurable per-run monetary ceiling through
 `LLM_EVAL_RUN_COST_CEILING_USD`. A positive value enforces both the monthly Eval lane
 and the owner ceiling atomically. `0` disables those synthetic USD refusals for the

@@ -121,11 +121,26 @@ services:
       LLM_PRICE_SESSION_CACHED_INPUT_USD_PER_MTOK: ${LLM_PRICE_SESSION_CACHED_INPUT_USD_PER_MTOK:-0}
       LLM_PRICE_SESSION_CACHE_WRITE_USD_PER_MTOK: ${LLM_PRICE_SESSION_CACHE_WRITE_USD_PER_MTOK:-0}
       LLM_PRICE_SESSION_OUTPUT_USD_PER_MTOK: ${LLM_PRICE_SESSION_OUTPUT_USD_PER_MTOK:-0}
-      LLM_BUDGET_MONTHLY_USD: ${LLM_BUDGET_MONTHLY_USD:-50}
-      LLM_BUDGET_ANALYSIS_USD: ${LLM_BUDGET_ANALYSIS_USD:-10}
-      LLM_BUDGET_TURN_USD: ${LLM_BUDGET_TURN_USD:-30}
-      LLM_BUDGET_EMERGENCY_USD: ${LLM_BUDGET_EMERGENCY_USD:-5}
-      LLM_BUDGET_EVAL_USD: ${LLM_BUDGET_EVAL_USD:-5}
+      # Trần chi tiêu. `0` = không giới hạn, và với bốn lane thì phải cả bốn
+      # cùng 0 (một lane 0 lẫn giữa ba lane có tiền là biến bị bỏ trống, và
+      # Budget Validation chặn startup vì lane không được cấp vốn từ chối mọi
+      # call). Bản dev/nội bộ chạy qua route thuê bao nên mặc định là 0: ledger
+      # vẫn ghi đủ token và giá, chỉ bỏ phần từ chối bằng USD tổng hợp. Trỏ vào
+      # API tính tiền theo call thì đặt lại 50/10/30/5/5 của docs/adr/0014.
+      LLM_BUDGET_MONTHLY_USD: ${LLM_BUDGET_MONTHLY_USD:-0}
+      LLM_BUDGET_ANALYSIS_USD: ${LLM_BUDGET_ANALYSIS_USD:-0}
+      LLM_BUDGET_TURN_USD: ${LLM_BUDGET_TURN_USD:-0}
+      LLM_BUDGET_EMERGENCY_USD: ${LLM_BUDGET_EMERGENCY_USD:-0}
+      LLM_BUDGET_EVAL_USD: ${LLM_BUDGET_EVAL_USD:-0}
+      # Năm trần per-user của docs/adr/0014 (20 Turn/ngày ICT, $3/ngày, $15/30
+      # ngày, 1 Turn đang chạy mỗi account, 3 Turn toàn hệ thống). `0` = không
+      # giới hạn từng cái một. LLM_SYSTEM_ACTIVE_TURNS cấu hình cả semaphore
+      # trong process lẫn trần trong ledger — hai mặt của cùng một con số.
+      LLM_USER_TURN_STARTS_PER_DAY: ${LLM_USER_TURN_STARTS_PER_DAY:-0}
+      LLM_USER_ACTIVE_TURNS: ${LLM_USER_ACTIVE_TURNS:-0}
+      LLM_SYSTEM_ACTIVE_TURNS: ${LLM_SYSTEM_ACTIVE_TURNS:-0}
+      LLM_USER_DAILY_USD: ${LLM_USER_DAILY_USD:-0}
+      LLM_USER_ROLLING_30D_USD: ${LLM_USER_ROLLING_30D_USD:-0}
       # The open-web lane (docs/adr/0020). Off without a key, and the denylist
       # and byte ceiling are the two bounds a deployment may want its own values
       # for.

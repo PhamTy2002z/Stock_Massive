@@ -176,6 +176,48 @@ class BudgetLanes:
     def allocated_usd(self) -> float:
         return self.analysis_usd + self.turn_usd + self.emergency_usd + self.eval_usd
 
+    @property
+    def unmetered(self) -> bool:
+        """Whether this deployment declares no monthly envelope at all.
+
+        ``0`` is unlimited here, the convention ``eval_run_cost_ceiling_usd``
+        already uses, widened to the whole envelope for a route billed by
+        subscription rather than per call. It has to be all five values or
+        none: a single zero among four funded lanes is a variable somebody
+        forgot to fill in, and Budget Validation keeps failing that, because an
+        unfunded lane refuses every call rather than admitting it.
+        """
+        return (
+            self.monthly_envelope_usd <= 0
+            and self.analysis_usd <= 0
+            and self.turn_usd <= 0
+            and self.emergency_usd <= 0
+            and self.eval_usd <= 0
+        )
+
+
+@dataclass(frozen=True)
+class UserCeilings:
+    """The five per-user ceilings of ``docs/adr/0014``; ``None`` is unlimited.
+
+    Configuration for the same reason the lanes are: what one account may spend
+    in a day is a spend decision rather than a promise the product makes, and a
+    deployment used internally over a subscription route answers it differently
+    from one serving strangers over a metered API. The ADR's numbers are the
+    defaults, so the contract still has one written home and one env var
+    restores it.
+
+    ``None`` drops only the refusal. Every call is still reserved and
+    reconciled into ``llm_call_usage``, so the ledger keeps answering what an
+    account has spent — which is what makes turning a ceiling off recoverable.
+    """
+
+    turn_starts_per_day: int | None = 20
+    active_turns_per_user: int | None = 1
+    active_turns_system: int | None = 3
+    daily_usd: float | None = 3.0
+    rolling_30d_usd: float | None = 15.0
+
 
 @dataclass(frozen=True)
 class LLMConfig:
@@ -192,6 +234,8 @@ class LLMConfig:
     #: ``GatewayTimeout``, and the two have different remedies.
     request_timeout_seconds: float = 120.0
     eval_run_cost_ceiling_usd: float | None = 2.5
+    #: The five per-user ceilings, each of which may be unlimited.
+    ceilings: UserCeilings = UserCeilings()
     #: The shared Redis rate-limit breaker (``core/llm/breaker.py``). A kill
     #: switch rather than a tuning knob: the breaker fails open, so turning it
     #: off returns the deployment to discovering each rate limit per caller.
@@ -217,6 +261,28 @@ class LLMConfig:
 
     def prices_for(self, workload: Workload) -> TokenPrices:
         return self.pricing.for_workload(workload)
+
+
+def _user_ceilings_from_settings(settings: Any) -> UserCeilings:
+    """Read the five per-user ceilings, mapping a non-positive value to unlimited.
+
+    One reader for all five rather than five inline conditionals: the
+    ``0``-means-unlimited convention is the part a later ceiling would get
+    wrong, and a ceiling accidentally read as ``0`` *enforced* would refuse
+    every Turn instead of admitting them.
+    """
+
+    def limit(name: str, cast):
+        value = cast(getattr(settings, name))
+        return value if value > 0 else None
+
+    return UserCeilings(
+        turn_starts_per_day=limit("llm_user_turn_starts_per_day", int),
+        active_turns_per_user=limit("llm_user_active_turns", int),
+        active_turns_system=limit("llm_system_active_turns", int),
+        daily_usd=limit("llm_user_daily_usd", float),
+        rolling_30d_usd=limit("llm_user_rolling_30d_usd", float),
+    )
 
 
 def _prices_for(settings: Any, workload: Workload) -> TokenPrices:
@@ -275,6 +341,7 @@ def llm_config_from_settings(settings: Any | None = None) -> LLMConfig:
         ),
         request_timeout_seconds=clamp_timeout(settings.llm_request_timeout_seconds),
         eval_run_cost_ceiling_usd=eval_ceiling if eval_ceiling > 0 else None,
+        ceilings=_user_ceilings_from_settings(settings),
         route_breaker_enabled=bool(getattr(settings, "llm_route_breaker_enabled", True)),
     )
 
@@ -287,6 +354,7 @@ __all__ = [
     "LLMRoute",
     "PricingTable",
     "TokenPrices",
+    "UserCeilings",
     "Workload",
     "clamp_timeout",
     "llm_config_from_settings",
