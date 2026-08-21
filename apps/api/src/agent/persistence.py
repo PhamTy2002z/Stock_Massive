@@ -8,6 +8,7 @@ one short transaction; a Turn never owns a database session.
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -39,6 +40,10 @@ SessionFactory = Callable[[], Session]
 MessageBuilder = Callable[["TurnRecord"], Mapping[str, Any] | None]
 MAX_SEQUENCE_RETRIES = 20
 TOOL_CALL_RETENTION_DAYS = 90
+
+# How much of the opening question a Thread is named by. Long enough for a
+# whole short question, short enough to sit on one line of the sidebar.
+THREAD_TITLE_LENGTH = 60
 
 # The stable reason a Turn frozen by the startup sweep carries. V1 never resumes
 # execution after a restart, so this is a terminal reason and not a state a
@@ -264,6 +269,30 @@ def _trace_record(row: AgentToolCall) -> ToolCallRecord:
         completion_tokens=row.completion_tokens,
         started_at=row.started_at,
     )
+
+
+def thread_title_from(text: str) -> str | None:
+    """Name a Thread by the question that opened it.
+
+    The opening question, not a summary of the conversation: it is the one line
+    the reader wrote themselves, so it is the line they will recognise the
+    Thread by later. Whitespace is collapsed because a pasted question arrives
+    with the newlines of wherever it was copied from, and a title that wraps a
+    line break renders as a gap in the sidebar.
+
+    A question cut mid-word keeps the ellipsis so the name reads as truncated
+    rather than as a sentence that stops; a question that fits keeps its own
+    punctuation. Empty text names nothing — the sidebar already falls back to
+    the Thread's timestamp, which is a truer name than a blank one.
+    """
+    collapsed = re.sub(r"\s+", " ", text).strip()
+    if not collapsed:
+        return None
+    if len(collapsed) <= THREAD_TITLE_LENGTH:
+        return collapsed
+    clipped = collapsed[:THREAD_TITLE_LENGTH]
+    spaced = clipped.rsplit(" ", 1)[0] if " " in clipped else clipped
+    return f"{spaced.rstrip()}…"
 
 
 def _insert_message(
@@ -761,6 +790,12 @@ class AgentPersistence:
                 raise LookupError(f"Thread {thread_id} does not exist")
 
             message = _insert_message(session, thread_id, "user", payload, symbols)
+            # The opening question names the Thread. Only the opening one, and
+            # only while the Thread is unnamed: a later question must not
+            # rename a conversation the reader is already navigating by, and a
+            # name they typed themselves outranks anything derived here.
+            if thread.title is None and message.seq == 1:
+                thread.title = thread_title_from(user_text)
             turn = AgentTurn(
                 id=turn_id,
                 thread_id=thread_id,

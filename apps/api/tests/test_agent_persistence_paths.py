@@ -9,7 +9,11 @@ from datetime import date
 import pytest
 from sqlalchemy import delete, select
 
-from src.agent.persistence import AgentPersistence
+from src.agent.persistence import (
+    THREAD_TITLE_LENGTH,
+    AgentPersistence,
+    thread_title_from,
+)
 from src.agent.tools import ToolCatalog, ToolContext
 from src.alpha.models import AgentThread, Analysis
 from src.auth.models import User
@@ -171,3 +175,70 @@ async def test_catalog_unknown_tool_is_persisted_with_usage(owner):
     assert trace.status == "unknown_tool"
     assert trace.prompt_tokens == 13
     assert trace.completion_tokens == 5
+
+
+@pytest.mark.asyncio
+async def test_the_opening_question_names_the_thread(owner):
+    store = persistence()
+    thread = await store.create_thread(owner)
+
+    await store.create_turn(
+        user_id=owner,
+        thread_id=thread.id,
+        turn_id=uuid.uuid4(),
+        user_text="  Vì sao PATHS bị hạ điểm\n phiên hôm qua?  ",
+    )
+
+    named = await store.read_thread(owner, uuid.UUID(str(thread.id)))
+    assert named is not None
+    assert named.title == "Vì sao PATHS bị hạ điểm phiên hôm qua?"
+
+
+@pytest.mark.asyncio
+async def test_a_later_question_does_not_rename_the_thread(owner):
+    store = persistence()
+    thread = await store.create_thread(owner)
+
+    for text in ("Câu hỏi đầu", "Câu hỏi sau"):
+        await store.create_turn(
+            user_id=owner,
+            thread_id=thread.id,
+            turn_id=uuid.uuid4(),
+            user_text=text,
+        )
+
+    named = await store.read_thread(owner, uuid.UUID(str(thread.id)))
+    assert named is not None
+    assert named.title == "Câu hỏi đầu"
+
+
+@pytest.mark.asyncio
+async def test_a_thread_the_user_named_keeps_that_name(owner):
+    store = persistence()
+    thread = await store.create_thread(owner, title="Sổ tay phiên chiều")
+
+    await store.create_turn(
+        user_id=owner,
+        thread_id=thread.id,
+        turn_id=uuid.uuid4(),
+        user_text="Phân tích PATHS giúp tôi",
+    )
+
+    named = await store.read_thread(owner, uuid.UUID(str(thread.id)))
+    assert named is not None
+    assert named.title == "Sổ tay phiên chiều"
+
+
+def test_a_long_question_is_cut_at_a_word_with_an_ellipsis():
+    title = thread_title_from(
+        "Vì sao nhóm ngân hàng vẫn giữ được đà tăng trong khi thanh khoản "
+        "toàn thị trường giảm mạnh?"
+    )
+    assert title is not None
+    assert len(title) <= THREAD_TITLE_LENGTH + 1
+    assert title.endswith("…")
+    assert not title.endswith(" …")
+
+
+def test_a_blank_question_names_nothing():
+    assert thread_title_from("   \n  ") is None
