@@ -1,5 +1,7 @@
 "use client"
 
+import { useState } from "react"
+
 import type { ContentBlock } from "@/lib/alpha-desk/types"
 import { cn } from "@/lib/utils"
 import { CitationChips } from "./citation-chips"
@@ -30,14 +32,25 @@ import { Markdown } from "./markdown"
  * literals ("4, 1.000, 2026"), which reads as a defect in the answer rather
  * than as provenance. The downgrade stays server-side, where it decides
  * something.
+ *
+ * `stagger` is **latched at mount**. It says "this block is the one that just
+ * arrived", and that stops being true the moment the next event lands — an
+ * activity event a beat later would otherwise cut the cascade off mid-sentence.
+ * A block never changes once appended, so what was true at mount stays the right
+ * answer; history and a reconnect's snapshot mount with it false and render at
+ * once.
  */
 export function ContentBlockView({
   block,
+  stagger = false,
   className,
 }: {
   block: ContentBlock
+  /** This block was just delivered: cascade its prose in a few words at a time. */
+  stagger?: boolean
   className?: string
 }) {
+  const [cascade] = useState(stagger)
   const isRecommendation = block.kind === "recommendation"
 
   return (
@@ -65,6 +78,7 @@ export function ContentBlockView({
           HTML path, so nothing in a block can produce markup. */}
       <Markdown
         text={block.text}
+        stagger={cascade}
         trailing={
           block.citations.length > 0 ? (
             <CitationChips citations={block.citations} />

@@ -82,7 +82,6 @@ export function AssistantMessage({
       <AnswerActions
         text={view.blocks.map((block) => block.text).join("\n\n")}
         sources={sources}
-        rows={view.sourcesAndMethods}
         onRetry={onRetry}
       />
 

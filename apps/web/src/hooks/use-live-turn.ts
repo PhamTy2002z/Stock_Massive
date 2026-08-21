@@ -195,6 +195,11 @@ export function useLiveTurn(threadId: string | null): LiveTurnController {
       // The user message is committed by the time the create returns, so the
       // transcript can show it without an optimistic copy that might not match.
       void queryClient.invalidateQueries({ queryKey: queryKeys.thread(threadId) })
+      // The same commit names an unnamed Thread after the question that opened
+      // it, so the list is refetched now rather than at the terminal event —
+      // the sidebar would otherwise show the timestamped fallback for as long
+      // as the answer takes.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.threads })
     },
     [threadId, queryClient],
   )

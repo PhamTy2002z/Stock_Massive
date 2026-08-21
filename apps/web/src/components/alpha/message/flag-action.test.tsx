@@ -35,7 +35,6 @@ function view(): AssistantView {
   return {
     blocks: [block("kết luận")],
     riskNotice: NOTICE,
-    sourcesAndMethods: [],
     searchProgress: [],
     suggestions: [],
     completed: true,

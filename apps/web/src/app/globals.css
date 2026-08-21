@@ -233,6 +233,15 @@
     to { opacity: 1; transform: none; }
   }
 
+  /* One chunk of an answer arriving: a few words lifting out of a soft blur.
+     Staggered by an inline `animation-delay` the renderer writes per chunk
+     (`word-cadence`), so the cascade is CSS time rather than React state — the
+     whole block is in the DOM the moment it lands and nothing reflows. */
+  @keyframes vg-chunk-in {
+    from { opacity: 0; filter: blur(3px); transform: translateY(2px); }
+    to { opacity: 1; filter: none; transform: none; }
+  }
+
   @keyframes vg-row-in {
     from { opacity: 0; transform: translateY(6px); }
     to { opacity: 1; transform: none; }
@@ -256,6 +265,7 @@
   .animate-vg-fade-in { animation: vg-fade-in 0.3s ease both; }
   .animate-vg-message-in { animation: vg-message-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) both; }
   .animate-vg-row-in { animation: vg-row-in 0.16s ease both; }
+
   .animate-vg-dot-pulse { animation: vg-dot-pulse 1.2s ease-in-out infinite; }
 
   /* Draws the price line left to right, so a chart reads as time passing
@@ -270,6 +280,13 @@
     animation: vg-bar-grow 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
+  /* `both` keeps a chunk invisible through its delay; without it every chunk
+     would be on screen before its turn and the cascade would be a no-op. */
+  .vg-chunk {
+    display: inline;
+    animation: vg-chunk-in 0.26s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .animate-vg-fade-in,
     .animate-vg-message-in,
@@ -277,6 +294,7 @@
     .animate-vg-dot-pulse,
     .animate-vg-draw-line,
     .animate-vg-bar-grow,
+    .vg-chunk,
     .price-line-reveal,
     .stock-detail-enter {
       animation: none;

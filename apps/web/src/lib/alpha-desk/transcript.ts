@@ -19,7 +19,6 @@ import type {
   FlagReason,
   ProgressStep,
   RiskNotice,
-  SourceAndMethod,
   ThreadMessage,
 } from "./types"
 
@@ -36,7 +35,6 @@ export interface AssistantView {
   blocks: ContentBlock[]
   /** Attached by the backend. Null only if a stored message somehow lacks one. */
   riskNotice: RiskNotice | null
-  sourcesAndMethods: SourceAndMethod[]
   /**
    * The trail the Turn left, as the message stored it (`docs/adr/0020`).
    *
@@ -242,9 +240,6 @@ function assistantView(message: ThreadMessage): AssistantView {
     // written before this shape existed renders as prose rather than as a gap.
     blocks: blocks.length > 0 ? blocks : text ? [proseBlock(text)] : [],
     riskNotice: isRiskNotice(content.risk_notice) ? content.risk_notice : null,
-    sourcesAndMethods: Array.isArray(content.sources_and_methods)
-      ? (content.sources_and_methods as SourceAndMethod[])
-      : [],
     // Both additive, and both read the same defensive way as everything else in
     // here: the column is JSONB, and a message written before ADR-0020 carries
     // neither key.

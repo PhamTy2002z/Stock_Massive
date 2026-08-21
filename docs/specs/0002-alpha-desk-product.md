@@ -268,7 +268,7 @@ the exact registered field ids. The stored payload always carries the complete
 - Facts, interpretation, reference actions, and risks are visibly separate. Units and
   `as_of` sit next to material figures.
 - Formulas, method names, and implementation detail appear only on demand, under
-  **View details** and an expandable **Sources & methods** surface.
+  **View details** and behind the citation chip at the end of the claim they support.
 - *"I don't know"* and *"the data is insufficient"* are valid answers.
 - No certainty claims, and no personalised allocation, leverage, or position sizing —
   the system does not know the user's assets, horizon, or loss tolerance. It may state
@@ -277,10 +277,24 @@ the exact registered field ids. The stored payload always carries the complete
 
 ### Streaming, as the user perceives it
 
-Content arrives as **complete blocks** — a paragraph, a bullet group, a finished table
-— with a light 150–200 ms reveal. **There is no typewriter effect.** A reopened Thread
-or a reconnect renders everything already present at once, with no staged replay.
-Reduced-motion removes the transition.
+Content arrives as **complete blocks** — a paragraph, a bullet group, a finished table.
+A block that has just been delivered reveals its prose in **chunks of about four words**,
+staggered so the answer reads as it is being said; the whole block is in the DOM the
+moment it lands, so nothing reflows, a screen reader is handed finished prose, and the
+text is already there for a reader who scrolls back. **There is no typewriter effect and
+no partial Markdown** — the cadence is applied to parsed output, never to a half-written
+unit, and it is capped in total so a long block is never gated by its own animation.
+Tables and code blocks appear whole: one filling in cell by cell is unreadable while it
+does it. A reopened Thread or a reconnect renders everything already present at once,
+with no staged replay. Reduced-motion removes the animation entirely.
+
+A **follow-up question goes to the top of the viewport**, not to the bottom: the answer
+being read scrolls out above it and the new answer arrives into a clear screen, so the
+reader's eye stays at one height instead of chasing the last line down the page. The
+transcript reserves exactly the shortfall the pin needs and gives it back as the answer
+grows into it, which is why nothing moves while the answer streams; once the answer is
+taller than the screen, following the newest line takes over again. Any scroll the reader
+performs themselves releases the pin. Reopening a Thread lands at its end.
 
 While tools run, a **search-progress trail** shows the work as a list of steps under a
 *Tiến trình tìm kiếm* header: every phase the Turn has been through, in order, with the

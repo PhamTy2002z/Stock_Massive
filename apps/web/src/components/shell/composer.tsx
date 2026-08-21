@@ -6,7 +6,6 @@ import {
   Camera,
   ChevronDown,
   ChevronRight,
-  Clock,
   Globe,
   Grid2x2,
   LayoutList,
@@ -151,16 +150,9 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
           </IconButton>
         </div>
 
-        {/* States the window every answer is computed over. Inert on purpose:
-            the window is a property of the Analysis, not a control. */}
-        <span className="hidden items-center gap-1.5 rounded-lg px-1.5 py-1 text-meta text-ink-5 sm:flex">
-          <Clock className="size-[15px]" strokeWidth={1.6} />
-          Dữ liệu 12 tháng
-        </span>
-
         <div className="ml-auto flex items-center gap-1.5">
           <span className="hidden items-center gap-1.5 rounded-lg px-2 py-1 text-control text-ink-3 md:flex">
-            VisgniteAI Pro <span className="text-ink-6">Sâu</span>
+            Visgnite Pro
             <ChevronDown className="size-3 text-ink-6" strokeWidth={1.8} />
           </span>
           <IconButton label="Nhập bằng giọng nói" disabled>

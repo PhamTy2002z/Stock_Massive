@@ -5,7 +5,6 @@ import { Loader2 } from "lucide-react"
 import type { DraftEntry } from "@/lib/alpha-desk/transcript"
 import { ContentBlockView } from "./content-block"
 import { MessageShell } from "./message-shell"
-import { Reveal } from "./reveal"
 import { SearchProgress, hasVisibleTrail } from "./search-progress"
 import { TurnStatus } from "./turn-status"
 
@@ -57,13 +56,16 @@ export function DraftMessage({
         />
       )}
 
-      {/* `appendedIndex` is exactly the block the last event delivered. A
-          snapshot appends nothing, so a reconnect and a reopened Thread reveal
+      {/* `appendedIndex` is exactly the block the last event delivered, and it
+          is the only block that cascades its prose in (`word-cadence`). A
+          snapshot appends nothing, so a reconnect and a reopened Thread stage
           nothing and everything present renders at once. */}
       {entry.blocks.map((block, index) => (
-        <Reveal key={`block-${index}`} animate={index === entry.appendedIndex}>
-          <ContentBlockView block={block} />
-        </Reveal>
+        <ContentBlockView
+          key={`block-${index}`}
+          block={block}
+          stagger={index === entry.appendedIndex}
+        />
       ))}
 
       {/* Before the first activity or block. The harness has to look like it is

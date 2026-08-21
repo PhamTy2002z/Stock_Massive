@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { Check, Copy, RotateCcw } from "lucide-react"
 
 import { PROGRESS_COPY } from "@/lib/alpha-desk/copy"
-import type { ProgressSource, SourceAndMethod } from "@/lib/alpha-desk/types"
+import type { ProgressSource } from "@/lib/alpha-desk/types"
 import { cn } from "@/lib/utils"
 import { SourceDrawer } from "./source-drawer"
 import { SourceCluster } from "./source-list"
@@ -18,16 +18,16 @@ import { SourceCluster } from "./source-list"
  * a row a keyboard cannot reach.
  *
  * The sources control is a **count with faces on it** — the icons of the hosts
- * behind the answer, then how many there were. That is the part of provenance
- * worth a line by default: not which field came from where, which is one press
- * away, but whether the answer rests on somebody recognisable. Pressing it opens
- * the source drawer beside the conversation rather than unfolding a list into
- * it — see `SourceDrawer` for why.
+ * behind the answer, then how many there were. That is the provenance worth a
+ * line under an answer: whether it rests on somebody recognisable. Pressing it
+ * opens the source drawer beside the conversation rather than unfolding a list
+ * into it — see `SourceDrawer` for why. Figure-level provenance stays where it
+ * is actionable, one press behind the chip on the claim itself
+ * (`citation-chips`), rather than repeated as a list under the answer.
  */
 export function AnswerActions({
   text,
   sources,
-  rows,
   onRetry,
   className,
 }: {
@@ -35,8 +35,6 @@ export function AnswerActions({
   text: string
   /** The public pages behind it, deduplicated by the trail. */
   sources: ProgressSource[]
-  /** The figure-level provenance, as the backend assembled it. */
-  rows: SourceAndMethod[]
   /** Ask the same question again, or absent where there is nothing to re-ask. */
   onRetry?: () => void
   className?: string
@@ -59,7 +57,7 @@ export function AnswerActions({
     }
   }
 
-  const total = sources.length + rows.length
+  const total = sources.length
   if (!text && total === 0 && onRetry === undefined) return null
 
   return (
@@ -77,7 +75,7 @@ export function AnswerActions({
       )}
 
       {total > 0 && (
-        <SourceDrawer sources={sources} rows={rows}>
+        <SourceDrawer sources={sources}>
           <button
             type="button"
             className="ml-1 flex items-center gap-2 rounded-lg px-1.5 py-1 text-meta text-ink-5 transition-colors hover:text-ink-2"
