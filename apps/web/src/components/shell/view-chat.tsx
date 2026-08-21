@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { AlertCircle, Check, Copy, Pencil, RotateCcw, X } from "lucide-react"
 
 import { AnalysisCard } from "@/components/alpha/analysis"
@@ -17,6 +17,9 @@ import { useShell } from "./shell-state"
 /** How close to the bottom still counts as "following" the newest content. */
 const FOLLOW_THRESHOLD_PX = 120
 
+/** Breathing room left above a question pinned to the top of the viewport. */
+const ANCHOR_PAD_PX = 14
+
 /**
  * The conversation: a transcript that scrolls, and a composer docked over it.
  *
@@ -29,29 +32,149 @@ const FOLLOW_THRESHOLD_PX = 120
  * the scroll container reserves the height it occupies. That is what lets the
  * last answer stay visually continuous with the field asking the next question,
  * which a bordered footer would cut in half.
+ *
+ * **A follow-up question goes to the top of the viewport, not to the bottom.**
+ * The answer being read scrolls out above it and the new one has the whole
+ * screen to arrive into, which is what makes a long conversation legible: the
+ * reader's eye stays at one height instead of chasing the last line down the
+ * page. Pinning a question needs room underneath it that does not exist yet, so
+ * the transcript ends in a spacer sized to exactly the shortfall — and the
+ * spacer melts away as the answer grows into it, which is why nothing moves
+ * while the answer streams. Once the answer is taller than the screen there is
+ * no shortfall left, the spacer is gone, and following the bottom takes over
+ * again.
  */
 export function ChatView() {
   const desk = useDesk()
   const { state, dispatch, panelWidth } = useShell()
   const container = useRef<HTMLDivElement>(null)
   const following = useRef(true)
+  // The newest question, while it is held at the top of the viewport. Cleared by
+  // any scroll the reader performs themselves, and by the spacer running out.
+  const pinned = useRef(false)
+  const anchor = useRef<HTMLDivElement | null>(null)
+  const [tail, setTail] = useState(0)
+  const tailHeight = useRef(0)
 
-  const last = desk.entries.at(-1)
-  const blockCount = last?.kind === "draft" ? last.blocks.length : 0
+  // What identifies "the reader asked something". Counted rather than keyed off
+  // the entry itself: a pending question and the committed one that replaces it
+  // are two keys for one question, and re-anchoring on the swap would jump the
+  // page a second time for nothing.
+  const questionCount = desk.entries.reduce(
+    (total, entry) => (entry.kind === "user" ? total + 1 : total),
+    0,
+  )
+  const asked = useRef(questionCount)
+  const thread = useRef(desk.threadId)
+  const lastQuestionIndex = desk.entries.reduce(
+    (found, entry, index) => (entry.kind === "user" ? index : found),
+    -1,
+  )
 
+  /** Where the pinned question would sit, as an offset into the transcript. */
+  const anchorOffset = useCallback(() => {
+    const element = container.current
+    const question = anchor.current
+    if (!element || !question) return null
+    // Measured against the viewport rather than read from `offsetTop`: the
+    // scroll container is not the offset parent here, and which ancestor is
+    // positioned is a layout detail this must not depend on.
+    const top = question.getBoundingClientRect().top - element.getBoundingClientRect().top
+    return top + element.scrollTop - ANCHOR_PAD_PX
+  }, [])
+
+  /**
+   * The spacer the pin still needs, given how much answer has arrived.
+   *
+   * `scrollHeight` already includes the current spacer, so the shortfall is
+   * added to it rather than replacing it — and once the answer fills the screen
+   * the shortfall is negative and this returns zero.
+   */
+  const requiredTail = useCallback(() => {
+    const element = container.current
+    const target = anchorOffset()
+    if (!element || target === null) return 0
+    const reachable = element.scrollHeight - element.clientHeight
+    return Math.max(0, Math.round(tailHeight.current + target - reachable))
+  }, [anchorOffset])
+
+  const setTailHeight = useCallback((next: number) => {
+    if (next === tailHeight.current) return
+    tailHeight.current = next
+    setTail(next)
+  }, [])
+
+  // A new question, or a different Thread.
   useEffect(() => {
     const element = container.current
-    if (!element || !following.current) return
+    if (!element) return
+
+    const switched = thread.current !== desk.threadId
+    thread.current = desk.threadId
+    const isNew = questionCount > asked.current
+    asked.current = questionCount
+
+    if (switched) {
+      // Reopening a Thread lands at its end. The last answer is what the reader
+      // came back for, not the question that produced it.
+      pinned.current = false
+      following.current = true
+      setTailHeight(0)
+      element.scrollTop = element.scrollHeight
+      return
+    }
+
+    if (!isNew) return
+
+    pinned.current = true
+    following.current = true
+    setTailHeight(requiredTail())
+    // After the spacer is laid out, or the scroll is clamped to a transcript
+    // that is still the old height.
+    const frame = requestAnimationFrame(() => {
+      const target = anchorOffset()
+      if (target === null) return
+      scrollTo(element, target)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [questionCount, desk.threadId, anchorOffset, requiredTail, setTailHeight])
+
+  // The answer arriving. While a question is pinned the spacer gives back
+  // exactly the height the answer took, so the transcript does not move at all;
+  // when there is nothing left to give back, the bottom takes over.
+  useEffect(() => {
+    const element = container.current
+    if (!element) return
+
+    if (tailHeight.current > 0) {
+      const next = requiredTail()
+      setTailHeight(next)
+      if (next === 0) pinned.current = false
+      return
+    }
+
+    if (pinned.current || !following.current) return
     // Assigned rather than animated. A smooth scroll per block turns a fast
     // answer into a moving target, and it is motion nobody asked for.
     element.scrollTop = element.scrollHeight
-  }, [desk.entries.length, blockCount])
+    // Every event the live Turn applies produces a new projection, so this is
+    // one dependency for every way the transcript can get taller: a block, a
+    // step joining the trail, a status line under an answer that ended.
+  }, [desk.entries, requiredTail, setTailHeight])
 
   function onScroll() {
     const element = container.current
     if (!element) return
+    // A pinned question owns the scroll position, and the browser reports the
+    // pin itself as a scroll. Only the reader releases it (`onUserScroll`).
+    if (pinned.current) return
     const distance = element.scrollHeight - element.scrollTop - element.clientHeight
     following.current = distance <= FOLLOW_THRESHOLD_PX
+  }
+
+  /** The reader taking the scroll back. A wheel or a drag outranks the pin. */
+  function onUserScroll() {
+    pinned.current = false
   }
 
   return (
@@ -59,13 +182,33 @@ export function ChatView() {
       <div
         ref={container}
         onScroll={onScroll}
+        onWheel={onUserScroll}
+        onTouchMove={onUserScroll}
         onClick={() => dispatch({ type: "overlay", overlay: null })}
         className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-[190px] pt-2"
       >
         <div className="mx-auto w-full max-w-[760px] space-y-7 py-5">
           {desk.entries.map((entry, index) => {
             if (entry.kind === "user") {
-              return <UserMessage key={entry.key} text={entry.text} pending={entry.pending} />
+              // Only the newest question is an anchor. `ref` is never cleared on
+              // unmount: a pending question and the committed one that replaces
+              // it hand over in that order, and nulling would leave the pin
+              // pointing at nothing for the render in between.
+              const isAnchor = index === lastQuestionIndex
+              return (
+                <UserMessage
+                  key={entry.key}
+                  text={entry.text}
+                  pending={entry.pending}
+                  innerRef={
+                    isAnchor
+                      ? (element) => {
+                          if (element) anchor.current = element
+                        }
+                      : undefined
+                  }
+                />
+              )
             }
 
             if (entry.kind === "assistant") {
@@ -110,6 +253,13 @@ export function ChatView() {
             return <DraftMessage key={entry.key} entry={entry} onRetry={desk.retry} />
           })}
         </div>
+
+        {/* The room a pinned question needs and the transcript does not have
+            yet. It shrinks as the answer arrives and is gone by the time the
+            answer is taller than the screen, so it never leaves dead space
+            under a finished conversation — and it sits outside the stack above
+            so that at zero height it contributes no gap either. */}
+        <div aria-hidden="true" style={{ height: tail }} />
       </div>
 
       {/* Anchored to the main column rather than the viewport, and it follows
@@ -154,6 +304,22 @@ export function ChatView() {
   )
 }
 
+/**
+ * Move the transcript, smoothly where the reader has not asked otherwise.
+ *
+ * `scrollTo` is the only way to ask for a smooth scroll, and it is missing in
+ * jsdom, so the assignment stays as the fallback: the position matters and the
+ * animation does not.
+ */
+function scrollTo(element: HTMLElement, top: number): void {
+  const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+  if (typeof element.scrollTo !== "function") {
+    element.scrollTop = top
+    return
+  }
+  element.scrollTo({ top, behavior: still ? "auto" : "smooth" })
+}
+
 /** The question an answer is an answer to, or null if the row above is not one. */
 function questionAbove(entries: TranscriptEntry[], index: number): string | null {
   for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
@@ -182,7 +348,16 @@ function questionAbove(entries: TranscriptEntry[], index: number): string | null
  * it out of reach of a keyboard, and makes it appear under a pointer that had
  * already arrived.
  */
-function UserMessage({ text, pending }: { text: string; pending: boolean }) {
+function UserMessage({
+  text,
+  pending,
+  innerRef,
+}: {
+  text: string
+  pending: boolean
+  /** Set on the newest question, which the transcript pins to the top. */
+  innerRef?: (element: HTMLDivElement | null) => void
+}) {
   const desk = useDesk()
   const { dispatch } = useShell()
   const [copied, setCopied] = useState(false)
@@ -205,7 +380,7 @@ function UserMessage({ text, pending }: { text: string; pending: boolean }) {
   }
 
   return (
-    <div className="group/msg flex flex-col items-end gap-1">
+    <div ref={innerRef} className="group/msg flex flex-col items-end gap-1">
       {/* The question is the one thing in a bubble, and it is the bubble
           surface rather than the muted one: on this ground `bg-muted` sits a
           percent off the page and stops reading as a bubble at all. */}

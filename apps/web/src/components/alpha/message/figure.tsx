@@ -5,10 +5,10 @@ import { cn } from "@/lib/utils"
 /**
  * One material figure: its value, its unit, and when it was true.
  *
- * Shared by the citations under a block and by the Sources &amp; methods list
- * because they are the same claim shown at two depths, and a figure that
- * rendered its unit in one place and not the other would be the exact failure
- * this system exists to prevent — a number the reader cannot weigh.
+ * Used wherever a figure is shown behind a claim — the citation panel at the end
+ * of the sentence it supports — because a figure that rendered its unit in one
+ * place and not the other would be the exact failure this system exists to
+ * prevent: a number the reader cannot weigh.
  *
  * Staleness is stated rather than styled away. A figure the system knows is old
  * is still usable; one silently presented as current is not.

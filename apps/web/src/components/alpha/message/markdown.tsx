@@ -5,6 +5,23 @@ import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
 import { cn } from "@/lib/utils"
+import { chunkedProse } from "./word-cadence"
+
+/**
+ * The plugin list, built once per mode.
+ *
+ * A new array per render would make react-markdown reparse on every unrelated
+ * render, and the plugin is stateless — it carries its own chunk list per call.
+ *
+ * The cast is the price of not depending on `@types/hast`: the walk declares the
+ * handful of node fields it touches, which is narrower than a hast tree rather
+ * than incompatible with one.
+ */
+type RehypePlugins = NonNullable<
+  ComponentPropsWithoutRef<typeof ReactMarkdown>["rehypePlugins"]
+>
+const STAGGERED: RehypePlugins = [chunkedProse] as unknown as RehypePlugins
+const PLAIN: RehypePlugins = []
 
 /**
  * One block's prose, rendered as the Markdown it already is.
@@ -26,10 +43,16 @@ import { cn } from "@/lib/utils"
  * through the component below, which opens in a new tab and sends no referrer —
  * the prose is derived from untrusted external claims, and a link in it is not a
  * link this product is vouching for.
+ *
+ * `stagger` adds one rehype pass that wraps the already-parsed prose in chunk
+ * spans (`word-cadence`), for the one block a `content.block` event just
+ * delivered. It runs after parsing, never instead of it: partial Markdown is
+ * still never rendered.
  */
 export function Markdown({
   text,
   trailing,
+  stagger = false,
   className,
 }: {
   text: string
@@ -43,6 +66,8 @@ export function Markdown({
    * *element* is not the last *block* once a list is involved.
    */
   trailing?: React.ReactNode
+  /** Cascade this block's prose in, a few words at a time. */
+  stagger?: boolean
   className?: string
 }) {
   const end = text.trimEnd().length
@@ -74,15 +99,25 @@ export function Markdown({
         // GFM for the two things a Vietnamese equities answer actually uses:
         // tables of figures, and strikethrough on a superseded number.
         remarkPlugins={[remarkGfm]}
+        rehypePlugins={stagger ? STAGGERED : PLAIN}
         components={{
           a: Anchor,
           table: Table,
-          p: ({ node, children, ...rest }) => (
-            <p {...rest}>
-              {children}
-              {isLast(node) && trailing}
-            </p>
-          ),
+          // The paragraph that carries the chip is a `div`, not a `p`. The chip
+          // is a disclosure and its panel is a block element, which a `p` may
+          // not contain: the browser closes the paragraph before the panel and
+          // hydration then mismatches the server's markup. Only the tag name
+          // differs — nothing here styles `p` specifically — and every other
+          // paragraph keeps its own tag.
+          p: ({ node, children, ...rest }) =>
+            isLast(node) ? (
+              <div {...(rest as ComponentPropsWithoutRef<"div">)}>
+                {children}
+                {trailing}
+              </div>
+            ) : (
+              <p {...rest}>{children}</p>
+            ),
           li: ({ node, children, ...rest }) => (
             <li {...rest}>
               {children}

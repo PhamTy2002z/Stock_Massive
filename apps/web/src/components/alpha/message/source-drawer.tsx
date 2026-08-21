@@ -4,9 +4,8 @@ import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { X } from "lucide-react"
 
 import { PROGRESS_COPY } from "@/lib/alpha-desk/copy"
-import type { ProgressSource, SourceAndMethod } from "@/lib/alpha-desk/types"
+import type { ProgressSource } from "@/lib/alpha-desk/types"
 import { SourceIcon } from "./source-list"
-import { SourcesAndMethods } from "./sources-and-methods"
 
 /**
  * Every page the answer stood on, in a panel beside the conversation.
@@ -22,17 +21,17 @@ import { SourcesAndMethods } from "./sources-and-methods"
  * then appear to vouch for. A row whose result offered no excerpt or date simply
  * has none.
  *
- * The figure-level provenance (`SourcesAndMethods`) rides in the same drawer,
- * under the pages: one control under the answer, one place everything it stood
- * on can be inspected.
+ * Figure-level provenance is deliberately **not** here. Every material number
+ * already carries its unit, its `as_of` and its source one press behind the chip
+ * at the end of its own claim (`citation-chips`), which is where a reader is
+ * asking the question; the same rows listed again under the answer were a second
+ * copy nobody opened.
  */
 export function SourceDrawer({
   sources,
-  rows,
   children,
 }: {
   sources: ProgressSource[]
-  rows: SourceAndMethod[]
   /** The trigger — the count-with-faces button under the answer. */
   children: React.ReactNode
 }) {
@@ -65,7 +64,6 @@ export function SourceDrawer({
                 <SourceRow key={source.url} source={source} />
               ))}
             </ul>
-            {rows.length > 0 && <SourcesAndMethods rows={rows} className="mt-5" />}
           </div>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>

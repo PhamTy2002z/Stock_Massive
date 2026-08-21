@@ -58,9 +58,11 @@ export function useThreads(enabled: boolean) {
 /**
  * Open a Thread.
  *
- * Free-roaming and untitled: a Thread is never owned by a symbol, and titling
- * it from the first question would make the deep-linked `?symbol=` case look
- * like a symbol-scoped conversation, which is exactly what it is not.
+ * Opened without a name, and never named from the client: the backend titles an
+ * unnamed Thread from the question that opens it, in the same transaction that
+ * commits the message. A title guessed here would be a second authority on the
+ * name, and the deep-linked `?symbol=` case would carry a symbol-scoped name
+ * into a conversation that is not scoped to a symbol at all.
  */
 export function useCreateThread() {
   const queryClient = useQueryClient()

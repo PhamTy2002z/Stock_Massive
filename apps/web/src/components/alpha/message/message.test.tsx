@@ -26,6 +26,7 @@ import type { Citation, ContentBlock, RiskNotice } from "@/lib/alpha-desk/types"
 import { AssistantMessage } from "./assistant-message"
 import { DraftMessage } from "./draft-message"
 import { SearchProgress } from "./search-progress"
+import { CASCADE_CAP_MS, CHUNK_CLASS, CHUNK_STEP_MS } from "./word-cadence"
 
 afterEach(cleanup)
 
@@ -93,7 +94,6 @@ function view(overrides: Partial<AssistantView> = {}): AssistantView {
   return {
     blocks: [block("kết luận")],
     riskNotice: NOTICE,
-    sourcesAndMethods: [],
     searchProgress: [],
     suggestions: [],
     completed: true,
@@ -151,37 +151,60 @@ describe("how an answer arrives", () => {
     expect(screen.getAllByText(/retrieved 2026-08-17/).length).toBeGreaterThan(0)
   })
 
-  it("shows a block whole, with a fade rather than a typewriter", () => {
-    // The backend buffers deltas into Markdown-safe units, so the block is
-    // complete when it lands. Revealing it letter by letter would put back an
-    // illusion the transport was built to remove.
+  it("cascades a delivered block in a few words at a time", () => {
+    // The block is complete when it lands — the transport still buffers deltas
+    // into Markdown-safe units, and a per-character crawl would put back the
+    // illusion it was built to remove. What arrives in stages is the *reveal*:
+    // chunks of four words, staggered by CSS, over prose that is already whole.
     const { container } = render(
       <DraftMessage
-        entry={draft({ blocks: [block("một câu đầy đủ")], appendedIndex: 0 })}
+        entry={draft({
+          blocks: [block("một hai ba bốn năm sáu bảy tám")],
+          appendedIndex: 0,
+        })}
         onRetry={vi.fn()}
       />,
     )
 
-    expect(screen.getByText("một câu đầy đủ")).toBeInTheDocument()
-    expect(container.querySelector(".transition-opacity")).not.toBeNull()
+    // Whole in the DOM the instant it arrives: nothing reflows as it reveals,
+    // and a screen reader is handed a finished sentence. Read off the container
+    // rather than queried by text — the sentence now spans two elements, which
+    // is the whole point, and joining them back is the assertion.
+    expect(container.textContent).toContain("một hai ba bốn năm sáu bảy tám")
+
+    const chunks = container.querySelectorAll(`.${CHUNK_CLASS}`)
+    expect(chunks).toHaveLength(2)
+    expect(chunks[0].getAttribute("style")).toContain("animation-delay: 0ms")
+    expect(chunks[1].getAttribute("style")).toContain(`animation-delay: ${CHUNK_STEP_MS}ms`)
   })
 
-  it("removes the transition entirely under reduced motion", () => {
+  it("caps the cascade so a long block is not gated by its own animation", () => {
     const { container } = render(
       <DraftMessage
-        entry={draft({ blocks: [block("một")], appendedIndex: 0 })}
+        entry={draft({ blocks: [block("từ ".repeat(400).trim())], appendedIndex: 0 })}
         onRetry={vi.fn()}
       />,
     )
 
-    const revealed = container.querySelector(".transition-opacity")
-    expect(revealed?.className).toContain("motion-reduce:transition-none")
-    expect(revealed?.className).toContain("motion-reduce:opacity-100")
+    const chunks = container.querySelectorAll(`.${CHUNK_CLASS}`)
+    const last = chunks[chunks.length - 1].getAttribute("style") ?? ""
+    const delay = Number(last.match(/animation-delay:\s*(\d+)ms/)?.[1])
+    expect(delay).toBeLessThanOrEqual(CASCADE_CAP_MS)
+  })
+
+  it("leaves a table whole rather than filling it in cell by cell", () => {
+    const table = "| Mã | Giá |\n| --- | --- |\n| VHM | 41.2 |"
+    const { container } = render(
+      <DraftMessage entry={draft({ blocks: [block(table)], appendedIndex: 0 })} onRetry={vi.fn()} />,
+    )
+
+    expect(container.querySelector("table")).not.toBeNull()
+    expect(container.querySelectorAll(`table .${CHUNK_CLASS}`)).toHaveLength(0)
   })
 
   it("renders a reopened Thread all at once, with no staged replay", () => {
     // A null `appendedIndex` means a snapshot replaced the projection rather
-    // than an event delivering one block. Nothing carries transition markup at
+    // than an event delivering one block. Nothing carries cadence markup at
     // all, so "at once" is visible in the DOM rather than a matter of how long
     // the test waits.
     const { container } = render(
@@ -192,7 +215,19 @@ describe("how an answer arrives", () => {
     )
 
     expect(screen.getByText("ba")).toBeInTheDocument()
-    expect(container.querySelector(".transition-opacity")).toBeNull()
+    expect(container.querySelector(`.${CHUNK_CLASS}`)).toBeNull()
+  })
+
+  it("keeps cascading a block after the next event lands", () => {
+    // `appendedIndex` is cleared by the very next event — an activity row, a
+    // status. A reveal that read it live would cut itself off mid-sentence, so
+    // the block latches what it was at mount.
+    const entry = draft({ blocks: [block("một hai ba bốn năm")], appendedIndex: 0 })
+    const { container, rerender } = render(<DraftMessage entry={entry} onRetry={vi.fn()} />)
+
+    rerender(<DraftMessage entry={{ ...entry, appendedIndex: null }} onRetry={vi.fn()} />)
+
+    expect(container.querySelectorAll(`.${CHUNK_CLASS}`).length).toBeGreaterThan(0)
   })
 })
 
@@ -455,6 +490,20 @@ describe("how prose is rendered", () => {
     expect(container.querySelector("img")).toBeNull()
     expect(container.textContent).toContain('<img src="x" onerror="alert(1)">')
   })
+
+  it("keeps the citation chip's panel out of a paragraph", () => {
+    // The chip opens a block-level panel, which a `p` may not contain: the
+    // browser would close the paragraph before it and hydration would mismatch.
+    const { container } = render(
+      <AssistantMessage
+        view={view({ blocks: [block("Chốt phiên tăng 2%.", [citation()])] })}
+      />,
+    )
+
+    const trigger = screen.getByRole("button", { name: /Nguồn của đoạn này/ })
+    expect(trigger.closest("p")).toBeNull()
+    expect(container.querySelector("p div")).toBeNull()
+  })
 })
 
 describe("what the answer offers underneath", () => {
@@ -608,30 +657,20 @@ describe("what an answer never shows", () => {
     render(
       <AssistantMessage
         view={view({
-          blocks: [block("kết luận", [citation()])],
-          sourcesAndMethods: [
-            {
-              provider_source: "vnstock",
-              tool_call_id: "call_01",
-              tool_name: "get_price_series",
-              registered_field: "technical.momentum_273d",
-              value: 12.4,
-              unit: "%",
-              interpretation: "Cao hơn trung vị ngành.",
-              freshness: { as_of: "2026-08-14", stale: false },
-              window_health: null,
-            },
+          blocks: [
+            block("kết luận", [citation(), citation({ tool_name: "get_price_series" })]),
           ],
         })}
       />,
     )
 
+    // Open the one provenance surface an answer has: the chip at the end of the
+    // claim. Everything a citation carries is reachable from here, tool name
+    // included — and that is exactly what must not come with it.
     fireEvent.click(screen.getByLabelText(/Nguồn của đoạn này/))
-    fireEvent.click(screen.getByText("1 nguồn"))
-    fireEvent.click(screen.getByText("Sources & methods"))
 
-    // The whole document, not the render container: the source drawer portals
-    // to `body`, and a tool name leaking there is the same leak.
+    // The whole document, not the render container: the panel behind the chip
+    // portals to `body`, and a tool name leaking there is the same leak.
     const markup = document.body.innerHTML
     for (const name of TOOL_NAMES) expect(markup).not.toContain(name)
     expect(markup).not.toContain("call_01")
