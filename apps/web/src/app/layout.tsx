@@ -46,13 +46,16 @@ const newsreader = Newsreader({
   display: "swap",
 });
 
+/**
+ * `icons` is deliberately absent: `app/icon.svg`, `app/favicon.ico` and
+ * `app/apple-icon.png` are Next's file conventions, so the link tags — type,
+ * sizes and a content hash for cache busting — are emitted from the files
+ * themselves. Declaring the same icons here would only add a second, unhashed
+ * copy of each tag.
+ */
 export const metadata: Metadata = {
   title: "VisgniteAI",
   description: "Trợ lý phân tích chứng khoán Việt Nam — HOSE, HNX, UPCOM",
-  icons: {
-    icon: "/visgnite-mark.svg",
-    apple: "/visgnite-mark.svg",
-  },
 };
 
 export default function RootLayout({
