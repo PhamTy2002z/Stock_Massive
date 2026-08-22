@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { Loader2 } from "lucide-react"
 
 import { toolCallErrorLabel } from "@/lib/alpha-desk/copy"
-import type { Thought, ToolCall } from "@/lib/alpha-desk/types"
+import { toolCallKind, type Thought, type ToolCall } from "@/lib/alpha-desk/types"
 import { cn } from "@/lib/utils"
 import { SourceChips } from "./source-chips"
 import { SourceList } from "./source-list"
@@ -279,7 +279,10 @@ function SingleCallRow({ call, isLast }: { call: ToolCall; isLast: boolean }) {
           {toolCallErrorLabel(call.error)}
         </span>
       )}
-      {call.status === "ok" && (
+      {/* A result count only where results are what came back. A store read
+          answers with one figure and no sources, so "0 kết quả" beside a call
+          that succeeded said the opposite of what happened. */}
+      {call.status === "ok" && toolCallKind(call) === "external" && (
         <span className="ml-auto flex flex-none items-center gap-[0.55rem] text-meta leading-[22px] text-muted-foreground">
           {call.result_count} kết quả
           <SourceChips sources={call.results.map((result) => result.source)} />
@@ -290,7 +293,7 @@ function SingleCallRow({ call, isLast }: { call: ToolCall; isLast: boolean }) {
 
   return (
     <RailRow
-      icon={running ? <Spinner /> : <GlobeIcon />}
+      icon={running ? <Spinner /> : <CallIcon call={call} />}
       isLast={isLast}
     >
       {hasResults ? (
@@ -328,7 +331,7 @@ function GroupRow({ calls, isLast }: { calls: ToolCall[]; isLast: boolean }) {
             {call.status === "running" ? (
               <Spinner className="flex-none" />
             ) : (
-              <GlobeIcon className="flex-none text-muted-foreground" />
+              <CallIcon call={call} className="flex-none text-muted-foreground" />
             )}
             <span className="min-w-0 text-meta leading-[22px] text-muted-foreground">
               {call.summary}
@@ -371,6 +374,24 @@ function BulbIcon({ className }: { className?: string }) {
     </svg>
   )
 }
+
+/**
+ * Which kind of evidence one call went and got.
+ *
+ * A globe for the open web, a chart for this system's own store. The backend
+ * says which (`ToolCall.kind`), off the same declaration that decides whether
+ * the result is wrapped as outside content — so the rail cannot draw a figure
+ * out of our own Postgres the way it draws a stranger's page, which is the
+ * distinction the whole evidence boundary rests on.
+ */
+function CallIcon({ call, className }: { call: ToolCall; className?: string }) {
+  return toolCallKind(call) === "store" ? (
+    <ChartIcon className={className} />
+  ) : (
+    <GlobeIcon className={className} />
+  )
+}
+
 
 function GlobeIcon({ className }: { className?: string }) {
   return (
@@ -427,6 +448,30 @@ function ChevronIcon({ open }: { open: boolean }) {
       {/* One chevron that turns, rather than two that swap: the swap reads as
           a flicker beside a panel that is itself gliding. */}
       <polyline points="7 10 12 15 17 10" />
+    </svg>
+  )
+}
+
+
+/** A bar chart, for a figure read out of this system's own store. */
+function ChartIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M3 3v18h18" />
+      <path d="M7 16v-5" />
+      <path d="M12 16V7" />
+      <path d="M17 16v-8" />
     </svg>
   )
 }

@@ -1,10 +1,10 @@
 "use client"
 
 import { useState } from "react"
-import { ChevronDown, ChevronRight, Globe, Lightbulb } from "lucide-react"
+import { BarChart3, ChevronDown, ChevronRight, Globe, Lightbulb } from "lucide-react"
 
 import { SourceList } from "@/components/alpha/message/source-list"
-import type { Thought, ToolCall } from "@/lib/alpha-desk/types"
+import { toolCallKind, type Thought, type ToolCall } from "@/lib/alpha-desk/types"
 import { cn } from "@/lib/utils"
 
 import { useDesk } from "./desk-state"
@@ -26,6 +26,20 @@ import { useShell } from "./shell-state"
  * A search with no results still gets a row. The reader asked what the answer
  * rested on, and "this search came back empty" is part of that answer — hiding
  * it would make the work look tidier than it was.
+ *
+ * **The two kinds of evidence are drawn apart.** A page and a figure out of this
+ * system's own store are not the same kind of claim: the figure carries a date
+ * and a health and reads the same tomorrow. The backend says which is which
+ * (`ToolCall.kind`), and this panel gives them different icons, a different
+ * count, and different grouping — a store read has no "results" to count, so a
+ * `0` beside a successful one read as "found nothing".
+ *
+ * **A run of store reads collapses to one row.** A model answering about one
+ * company asks for a dozen figures in a breath, and a dozen rows that differ
+ * only in which figure was named is a panel a reader scrolls past rather than
+ * reads. One line says how many, and opening it lists them. Searches stay one
+ * row each: each has its own pages behind it, and those are the thing the reader
+ * came to check.
  */
 export function SourcesTab() {
   const { state } = useShell()
@@ -58,9 +72,13 @@ export function SourcesTab() {
       {rounds(thoughts, toolCalls).map((round) => (
         <div key={round.index}>
           {round.thought !== null && <ThoughtRow text={round.thought.text} />}
-          {round.calls.map((call) => (
-            <CallRow key={call.id} call={call} />
-          ))}
+          {runs(round.calls).map((run) =>
+            run.kind === "store" && run.calls.length > 1 ? (
+              <StoreRunRow key={run.calls[0].id} calls={run.calls} />
+            ) : (
+              run.calls.map((call) => <CallRow key={call.id} call={call} />)
+            ),
+          )}
         </div>
       ))}
     </div>
@@ -77,10 +95,11 @@ function ThoughtRow({ text }: { text: string }) {
   )
 }
 
-/** One search, and its pages behind a disclosure. */
+/** One lookup, and its pages behind a disclosure where it has any. */
 function CallRow({ call }: { call: ToolCall }) {
   const [open, setOpen] = useState(false)
   const hasResults = call.results.length > 0
+  const store = toolCallKind(call) === "store"
 
   return (
     <div className="border-y border-border">
@@ -107,17 +126,81 @@ function CallRow({ call }: { call: ToolCall }) {
             <span className="block size-[15px]" />
           )}
         </span>
-        <Globe className="size-[15px] flex-none pt-px text-muted-foreground" strokeWidth={1.5} />
+        <KindIcon store={store} />
         <span className="min-w-0 flex-1 text-meta text-muted-foreground">{call.summary}</span>
-        <span className="flex-none rounded-lg border border-border px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
-          {call.result_count}
-        </span>
+        {/* A count only where counting means something. A search has pages and
+            the number of them is the reader's first question; a store read has
+            one figure, and a `0` beside a call that succeeded read as "found
+            nothing" — the opposite of what happened. */}
+        {!store && (
+          <span className="flex-none rounded-lg border border-border px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
+            {call.result_count}
+          </span>
+        )}
       </button>
 
       {open && hasResults && (
         <SourceList results={call.results} className="border-0 bg-transparent p-0 pb-4 pl-8" />
       )}
     </div>
+  )
+}
+
+/**
+ * Several store reads from one round, as one row that opens.
+ *
+ * The rows underneath carry no icon of their own: they are all the same kind by
+ * construction, and repeating one icon a dozen times down a narrow panel is
+ * noise rather than information.
+ */
+function StoreRunRow({ calls }: { calls: ToolCall[] }) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <div className="border-y border-border">
+      <button
+        type="button"
+        onClick={() => setOpen((was) => !was)}
+        aria-expanded={open}
+        className="flex w-full items-start gap-2 px-1 py-3 text-left transition-opacity hover:opacity-75"
+      >
+        <span className="flex-none pt-px text-muted-foreground">
+          {open ? (
+            <ChevronDown className="size-[15px]" strokeWidth={1.8} />
+          ) : (
+            <ChevronRight className="size-[15px]" strokeWidth={1.8} />
+          )}
+        </span>
+        <KindIcon store />
+        <span className="min-w-0 flex-1 text-meta text-muted-foreground">
+          Đọc {calls.length} chỉ báo từ dữ liệu hệ thống
+        </span>
+      </button>
+
+      {open && (
+        <ul className="grid gap-[9px] pb-4 pl-8">
+          {calls.map((call) => (
+            <li key={call.id} className="text-meta text-muted-foreground">
+              {call.summary}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Which kind of evidence this row is about.
+ *
+ * A globe for the open web and a chart for this system's own store. The icon is
+ * the fastest read on the row, so it is where the distinction belongs: a globe
+ * on a figure out of our own Postgres told the reader the opposite of the truth.
+ */
+function KindIcon({ store }: { store: boolean }) {
+  const Icon = store ? BarChart3 : Globe
+  return (
+    <Icon className="size-[15px] flex-none pt-px text-muted-foreground" strokeWidth={1.5} />
   )
 }
 
@@ -134,6 +217,30 @@ interface Round {
  * the several searches a model asks for at once were one decision, and the
  * sentence introducing them belongs above all of them.
  */
+interface Run {
+  kind: "external" | "store"
+  calls: ToolCall[]
+}
+
+/**
+ * One round's calls split into consecutive stretches of the same kind.
+ *
+ * Consecutive rather than sorted, so the order the model actually asked in
+ * survives: a round that read three figures, searched, then read two more is
+ * three runs, and reordering it into "all reads then all searches" would
+ * describe work that did not happen.
+ */
+function runs(calls: ToolCall[]): Run[] {
+  const grouped: Run[] = []
+  for (const call of calls) {
+    const kind = toolCallKind(call)
+    const last = grouped.at(-1)
+    if (last !== undefined && last.kind === kind) last.calls.push(call)
+    else grouped.push({ kind, calls: [call] })
+  }
+  return grouped
+}
+
 function rounds(thoughts: Thought[], toolCalls: ToolCall[]): Round[] {
   const indices = new Set<number>()
   for (const thought of thoughts) indices.add(thought.round)

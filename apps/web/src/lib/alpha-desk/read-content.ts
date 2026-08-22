@@ -67,6 +67,11 @@ export function readToolCall(
     // with no count at all falls back, and it falls back to the truth.
     result_count: asNumber(record.result_count, results.length),
     results,
+    // Anything other than the one value that means "this system's own store"
+    // reads as outside content, which is the same direction the backend's own
+    // default leans: being wrong this way costs a wrapper around a figure, and
+    // being wrong the other way draws a stranger's page as our own data.
+    kind: record.kind === "store" ? "store" : "external",
   }
 }
 
