@@ -11,6 +11,7 @@
 import { beforeEach, describe, expect, it } from "vitest"
 
 import {
+  clearDeskSession,
   deepLinkedSymbol,
   deepLinkedThread,
   openingState,
@@ -54,6 +55,18 @@ describe("what the tab remembers", () => {
     writeDeskSession({ threadId: "thread-1", turnId: "turn-1", activeSymbol: null })
     writeDeskSession({ threadId: null, turnId: null, activeSymbol: null })
 
+    expect(window.sessionStorage.getItem(KEY)).toBeNull()
+  })
+
+  it("forgets everything when the way in asks it to", () => {
+    // What signing in opens onto. A remembered Thread is for a reload of the
+    // desk, not for a return across a sign-in: whoever just gave their password
+    // gets the empty question, not this tab's last conversation.
+    writeDeskSession({ threadId: "thread-1", turnId: "turn-1", activeSymbol: "STB" })
+
+    clearDeskSession()
+
+    expect(readDeskSession()).toEqual({ threadId: null, turnId: null, activeSymbol: null })
     expect(window.sessionStorage.getItem(KEY)).toBeNull()
   })
 })
