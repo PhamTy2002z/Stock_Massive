@@ -130,6 +130,7 @@ def _message(record: MessageRecord) -> MessageResponse:
         # looks unpressed and the reader presses it a second time (#99).
         flagged_reason=record.flagged_reason,
         flagged_at=record.flagged_at,
+        helpful_at=record.helpful_at,
     )
 
 

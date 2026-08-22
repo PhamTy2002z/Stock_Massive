@@ -275,9 +275,16 @@ class AgentMessage(Base):
     ``flagged_reason`` and ``flagged_at`` are the whole of v1's dispute surface.
     They are a nullable pair on this row rather than a ``message_flag`` table
     because a message carries at most one reason — re-flagging is a correction
-    and not a second opinion — and ``docs/adr/0016`` forbids a new table for
-    observability. They are also the one thing about this row that changes; the
-    message a flag is about is never rewritten by the flag.
+    and not a second opinion — and a new table for observability is not worth
+    it. They are also the one thing about this row that changes; the message a
+    flag is about is never rewritten by the flag.
+
+    ``helpful_at`` is the opposite mark and carries no reason, because there is
+    nothing to categorise about an answer that worked. It is a single stamp
+    rather than a pair for exactly that reason, and it lives beside the flag
+    rather than in a third column encoding both: the two marks are mutually
+    exclusive in the UI but not in the store, and a reader who marks an answer
+    helpful and then disputes one figure in it has said two true things.
     """
 
     __tablename__ = "agent_message"
@@ -297,6 +304,7 @@ class AgentMessage(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     flagged_reason = Column(String(48), nullable=True)
     flagged_at = Column(DateTime(timezone=True), nullable=True)
+    helpful_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("thread_id", "seq", name="uq_agent_message_thread_seq"),

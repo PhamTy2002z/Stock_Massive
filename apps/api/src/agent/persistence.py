@@ -102,6 +102,10 @@ class MessageRecord:
     # Thread renders what was already flagged from the read it already does.
     flagged_reason: str | None = None
     flagged_at: datetime | None = None
+    # The opposite mark, and one column because it carries no reason. Read on
+    # the same transcript read for the same purpose: an answer already marked
+    # helpful must come back marked.
+    helpful_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -179,18 +183,22 @@ class TurnCreation:
 
 
 class UnflaggableMessage(ValueError):
-    """The message exists and is the caller's, and is still not flaggable.
+    """The message exists and is the caller's, and is still not markable.
 
     Separate from "not found" on purpose. A user's own question and a context
     summary are both real rows this caller owns, so answering 404 would say
-    something false; the flag is an action on what the *assistant* said, and
+    something false; a verdict is an action on what the *assistant* said, and
     that is the sentence this exception carries. The transport maps it to 409.
+
+    ``verb`` is what the caller was trying to do, because both verdicts share
+    this guard: one exception type means one 409 mapping, and the sentence still
+    names the action that was refused rather than the wrong one.
     """
 
-    def __init__(self, message_id: int, role: str) -> None:
+    def __init__(self, message_id: int, role: str, verb: str = "flagged") -> None:
         super().__init__(
             f"Message {message_id} has role {role!r}; only an assistant message "
-            "can be flagged"
+            f"can be {verb}"
         )
         self.message_id = message_id
         self.role = role
@@ -258,6 +266,7 @@ def _message_record(row: AgentMessage) -> MessageRecord:
         created_at=row.created_at,
         flagged_reason=row.flagged_reason,
         flagged_at=row.flagged_at,
+        helpful_at=row.helpful_at,
     )
 
 
@@ -491,6 +500,55 @@ class AgentPersistence:
                 return _message_record(row)
             row.flagged_reason = reason
             row.flagged_at = None if reason is None else datetime.now(timezone.utc)
+            session.commit()
+            return _message_record(row)
+
+    # -- marking a message helpful ----------------------------------------
+
+    async def mark_helpful(
+        self, user_id: int, message_id: int
+    ) -> MessageRecord | None:
+        """Stamp one assistant message as helpful. Idempotent per message.
+
+        The mirror of :meth:`flag_message` with the reason taken out, because
+        there is nothing to categorise about an answer that worked. Pressing it
+        again on an already-marked message writes nothing, stamp included: the
+        stamp answers *when the reader said so*, and a second press is the same
+        reader saying the same thing.
+
+        ``None`` means the message is not this user's to mark — the same answer
+        as a message that does not exist, for the reason the flag gives.
+        """
+        return await asyncio.to_thread(self._set_helpful, user_id, message_id, True)
+
+    async def clear_helpful(
+        self, user_id: int, message_id: int
+    ) -> MessageRecord | None:
+        """Take the mark back. Nulls the stamp; touches no other column."""
+        return await asyncio.to_thread(self._set_helpful, user_id, message_id, False)
+
+    def _set_helpful(
+        self, user_id: int, message_id: int, helpful: bool
+    ) -> MessageRecord | None:
+        with self._session_factory() as session:
+            row = session.execute(
+                # The same owner-scoped join the flag uses, for the same
+                # reason: ``agent_message`` has no ``user_id``.
+                select(AgentMessage)
+                .join(AgentThread, AgentThread.id == AgentMessage.thread_id)
+                .where(AgentMessage.id == message_id, AgentThread.user_id == user_id)
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            if helpful and row.role != "assistant":
+                raise UnflaggableMessage(message_id, row.role, verb="marked helpful")
+            if (row.helpful_at is not None) == helpful:
+                return _message_record(row)
+            # The flag is deliberately *not* cleared here. The two marks are
+            # exclusive in the UI because a reader presses one thing at a time,
+            # not because the store knows they contradict each other — an
+            # answer that was useful and got one figure wrong is both.
+            row.helpful_at = datetime.now(timezone.utc) if helpful else None
             session.commit()
             return _message_record(row)
 

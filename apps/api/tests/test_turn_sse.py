@@ -59,7 +59,7 @@ class TestTheFrame:
             "seq": 1,
             "type": "content.delta",
             "turn_id": str(TURN),
-            "data": {"text": "VCB"},
+            "data": {"text": "VCB", "kind": "answer", "round": 0},
         }
 
     async def test_the_data_field_is_one_line_so_no_payload_can_split_a_frame(self):

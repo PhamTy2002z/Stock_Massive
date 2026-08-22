@@ -91,6 +91,19 @@ class MessageFlagResponse(BaseModel):
     flagged_at: datetime | None
 
 
+class MessageHelpfulResponse(BaseModel):
+    """A message's positive mark after a write.
+
+    One field and no reason, mirroring the column. ``helpful_at`` set is the
+    mark; null is its absence — which is what ``DELETE`` answers with, rather
+    than ``204``, so the caller can render the settled state from the response
+    it already has.
+    """
+
+    message_id: int
+    helpful_at: datetime | None
+
+
 class MessageResponse(BaseModel):
     id: int
     seq: int
@@ -102,6 +115,9 @@ class MessageResponse(BaseModel):
     # message.
     flagged_reason: str | None = None
     flagged_at: datetime | None = None
+    # Carried for the same reason as the flag: an answer the reader already
+    # marked helpful must come back marked.
+    helpful_at: datetime | None = None
 
 
 class ThreadResponse(BaseModel):

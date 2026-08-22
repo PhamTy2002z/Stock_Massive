@@ -28,14 +28,24 @@ fresh snapshot.
 
 **The answer is a string, and the snapshot restates the whole of it.** A reader
 that reconnects mid-Turn replaces what it holds rather than merging, which is
-what makes the concatenation of every ``content.delta`` and the ``text`` on the
-snapshot the same string.
+what makes the concatenation of every ``content.delta`` carrying ``kind:
+"answer"`` and the ``text`` on the snapshot the same string.
+
+**Prose written on the way to the answer is not the answer.** A round that ends
+in tool calls often says a sentence first — *checking today's filings* — and
+that sentence describes work rather than concluding it. It travels as a delta of
+``kind: "thought"``, is restated on the snapshot under ``thoughts`` keyed by the
+round that wrote it, and never joins ``text``. The reader sees it in the
+timeline of what happened; the model still sees all of it, because the loop
+keeps its own full string for the transcript and that is a separate concern from
+what this module streams.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -43,6 +53,8 @@ from enum import Enum
 from typing import Any
 
 from src.alpha.models import ACTIVE_TURN_STATUSES, TURN_RUNNING
+
+from .messages import ANSWER, THOUGHT
 
 logger = logging.getLogger(__name__)
 
@@ -79,11 +91,32 @@ TERMINAL_EVENTS = frozenset(
     }
 )
 
-#: The keys a ``tool.call`` payload is allowed to carry. An allowlist rather
-#: than whatever the loop happens to hand over: a tool call's arguments and its
-#: result belong in the Tool Call Trace, and an event that carried them would put
-#: a page's own text on a channel the client renders.
-TOOL_CALL_FIELDS = ("id", "name", "status", "summary")
+#: The keys a ``tool.call`` payload is allowed to carry.
+#:
+#: Still an allowlist, and still for the original reason: a call's *arguments*
+#: and its *whole result* belong in the Tool Call Trace, and an event carrying
+#: either would put an arbitrary page's text on a channel the client renders.
+#: Neither is here.
+#:
+#: What ``results`` admits is narrower than that and is a deliberate widening.
+#: The reader is shown which sources an answer rested on, so the sources have to
+#: reach the browser, and the reference harness sends its whole tool result to
+#: do it. This sends a projection instead: four named strings per result, built
+#: by ``messages.display_results`` out of text the web tools already ran through
+#: ``visible_text`` — so it is visible text rather than markup, flattened rather
+#: than nested, and cut to a length a card has room for. The surface labels the
+#: block as outside content; the label lives there rather than in the payload,
+#: because a payload a page can influence is a payload a page could forge a
+#: label into.
+TOOL_CALL_FIELDS = (
+    "id",
+    "name",
+    "status",
+    "summary",
+    "round",
+    "results",
+    "result_count",
+)
 
 
 @dataclass(frozen=True)
@@ -182,11 +215,23 @@ class TurnPublisher:
     ) -> None:
         self.turn_id = turn_id if isinstance(turn_id, uuid.UUID) else uuid.UUID(str(turn_id))
         self._seq = seq
+        # A monotonic mark, so the elapsed time the reader is shown cannot move
+        # backwards when the host's wall clock is corrected mid-Turn.
+        self._started = time.monotonic()
+        # Set once, by the terminal event. ``None`` means the Turn is still
+        # running and the elapsed time is still being read off the clock.
+        self._elapsed_ms: int | None = None
         self._queue_size = queue_size
         self._subscribers: list[Subscriber] = []
-        # The answer so far, as one string. Appended to by every delta, which is
-        # what makes the snapshot able to restate it rather than replay.
+        # The answer so far, as one string. Appended to by every ``answer``
+        # delta, which is what makes the snapshot able to restate it rather than
+        # replay.
         self._text = ""
+        # Prose the Turn wrote on its way to the answer, one entry per round
+        # that wrote any. Keyed by round rather than appended blindly so that
+        # several deltas within a round join into the one sentence they are,
+        # instead of becoming several lines in the timeline.
+        self._thoughts: dict[int, str] = {}
         # Tool calls by id, in the order they were first announced: a call is
         # published twice — running, then its outcome — and the second event
         # replaces the first rather than adding a row.
@@ -223,9 +268,34 @@ class TurnPublisher:
         return self._text
 
     @property
+    def elapsed_ms(self) -> int:
+        """How long this Turn has been running, in whole milliseconds.
+
+        Frozen at the terminal event rather than left running, so a finished
+        Turn reports the time it took and not the time since it started — the
+        two differ by however long the tab stayed open afterwards.
+        """
+        if self._elapsed_ms is not None:
+            return self._elapsed_ms
+        return int((time.monotonic() - self._started) * 1000)
+
+    @property
     def tool_calls(self) -> tuple[Mapping[str, Any], ...]:
         """Every tool call announced, in the order it was first announced."""
         return tuple(dict(call) for call in self._tool_calls.values())
+
+    @property
+    def thoughts(self) -> tuple[Mapping[str, Any], ...]:
+        """What the Turn said on the way to the answer, in round order.
+
+        Sorted by round rather than by arrival: rounds are announced in order
+        anyway, but the timeline reads a thought against the calls of the same
+        round, and a dictionary's order is not the thing to rest that on.
+        """
+        return tuple(
+            {"round": index, "text": text}
+            for index, text in sorted(self._thoughts.items())
+        )
 
     @property
     def subscriber_count(self) -> int:
@@ -250,15 +320,30 @@ class TurnPublisher:
         self._fan_out(event)
         return event
 
-    def content_delta(self, text: str) -> TurnEvent:
-        """Emit exactly the text just appended to the answer.
+    def content_delta(
+        self,
+        text: str,
+        *,
+        kind: str = ANSWER,
+        round: int = 0,
+    ) -> TurnEvent:
+        """Emit exactly the text just appended, and say which stream it joins.
 
         The delta is what was added and not what the answer now says, so a
         client appends rather than replaces. The loop owns the separator between
         two pieces of prose and puts it *inside* the delta, which is what keeps
         the concatenation of the deltas equal to the stored answer.
+
+        ``kind`` splits that in two. An ``answer`` delta joins the answer; a
+        ``thought`` delta joins the line for ``round`` and never touches the
+        answer. Defaulting to ``answer`` is the safe way round: a caller that
+        forgot to say produces an answer with too much in it, which is visible,
+        rather than an answer silently missing a paragraph.
         """
-        return self.publish(EventType.CONTENT_DELTA, {"text": text})
+        return self.publish(
+            EventType.CONTENT_DELTA,
+            {"text": text, "kind": kind, "round": round},
+        )
 
     def tool_call(self, payload: Mapping[str, Any]) -> TurnEvent:
         """Emit one tool call's current state, by the id it is upserted under."""
@@ -280,7 +365,15 @@ class TurnPublisher:
             raise ValueError(f"{event_type.value} is not a terminal event")
         self._status = status
         self._terminal_reason = terminal_reason
-        payload = {"status": status, "terminal_reason": terminal_reason, **(data or {})}
+        # Read before publishing, so the number on the terminal event and the
+        # number every later snapshot restates are the same number.
+        self._elapsed_ms = self.elapsed_ms
+        payload = {
+            "status": status,
+            "terminal_reason": terminal_reason,
+            "elapsed_ms": self._elapsed_ms,
+            **(data or {}),
+        }
         message_id = payload.get("message_id")
         self._message_id = message_id if isinstance(message_id, int) else None
         event = self.publish(event_type, payload)
@@ -304,8 +397,10 @@ class TurnPublisher:
                 "status": self._status,
                 "terminal_reason": self._terminal_reason,
                 "text": self._text,
+                "thoughts": [dict(thought) for thought in self.thoughts],
                 "tool_calls": [dict(call) for call in self._tool_calls.values()],
                 "message_id": self._message_id,
+                "elapsed_ms": self.elapsed_ms,
             },
         )
         subscriber = Subscriber(snapshot, queue_size=self._queue_size)
@@ -320,7 +415,13 @@ class TurnPublisher:
 
     def _remember(self, event: TurnEvent) -> None:
         if event.type is EventType.CONTENT_DELTA:
-            self._text += str(event.data.get("text") or "")
+            piece = str(event.data.get("text") or "")
+            if event.data.get("kind") == THOUGHT:
+                index = event.data.get("round")
+                key = index if isinstance(index, int) else 0
+                self._thoughts[key] = self._thoughts.get(key, "") + piece
+            else:
+                self._text += piece
         elif event.type is EventType.TOOL_CALL:
             call = dict(event.data)
             identifier = call.get("id")
@@ -367,6 +468,7 @@ def snapshot_from_draft(
     terminal_reason: str | None,
     through_seq: int,
     message_id: int | None = None,
+    elapsed_ms: int = 0,
 ) -> TurnEvent:
     """The snapshot a subscriber gets for a Turn no publisher is holding.
 
@@ -377,9 +479,11 @@ def snapshot_from_draft(
     """
     text = ""
     tool_calls: Sequence[Mapping[str, Any]] = ()
+    thoughts: Sequence[Mapping[str, Any]] = ()
     if draft:
         text = str(draft.get("text") or "")
         tool_calls = tuple(draft.get("tool_calls") or ())
+        thoughts = tuple(draft.get("thoughts") or ())
     return TurnEvent(
         seq=through_seq,
         type=EventType.SNAPSHOT,
@@ -389,16 +493,20 @@ def snapshot_from_draft(
             "status": status,
             "terminal_reason": terminal_reason,
             "text": text,
+            "thoughts": [dict(thought) for thought in thoughts],
             "tool_calls": [dict(call) for call in tool_calls],
             "message_id": message_id,
+            "elapsed_ms": elapsed_ms,
         },
     )
 
 
 __all__ = [
+    "ANSWER",
     "ENVELOPE_VERSION",
     "SUBSCRIBER_QUEUE_SIZE",
     "TERMINAL_EVENTS",
+    "THOUGHT",
     "TOOL_CALL_FIELDS",
     "EventType",
     "Subscriber",

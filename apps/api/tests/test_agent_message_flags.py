@@ -1,10 +1,14 @@
-"""Flagging a message: the one dispute action v1 ships (#99).
+"""The two verdicts on a message: the flag, and the positive mark (#99).
 
 Every claim here is one the obvious implementation gets wrong by being
 conventional. A feedback feature normally accumulates rows, opens a ticket,
 notifies somebody, and trusts the surface to decide who may press the button.
-This one replaces a pair of columns in place, opens nothing, notifies nobody,
-and resolves ownership through the Thread on every call.
+This one replaces columns in place, opens nothing, notifies nobody, and resolves
+ownership through the Thread on every call.
+
+The two verdicts are deliberately not symmetrical — the flag carries one of four
+reasons, the mark carries none — and they are deliberately not exclusive in the
+store, which is the one thing about them a reader of the UI would guess wrong.
 
 The persistence half runs against a live database because owner scoping is a
 statement about a join, and a fake store would let it pass. The HTTP half runs
@@ -456,5 +460,121 @@ async def test_flagging_without_a_session_is_refused(client, account):
     response = await client.post(
         f"{API}/messages/{message_id}/flag", json={"reason": "other"}
     )
+
+    assert response.status_code == 401
+
+
+# -- the positive mark -----------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_marking_helpful_stamps_once_and_a_second_press_does_not_move_it(owner):
+    store = persistence()
+    _, _, answer = await _answered_thread(store, owner)
+
+    marked = await store.mark_helpful(owner, answer.id)
+    assert marked is not None
+    assert marked.helpful_at is not None
+
+    # The same rule the flag follows: nothing changed, so nothing is written.
+    # The stamp answers when the reader said so, and a second press is the same
+    # reader saying the same thing.
+    repeat = await store.mark_helpful(owner, answer.id)
+    assert repeat.helpful_at == marked.helpful_at
+
+    cleared = await store.clear_helpful(owner, answer.id)
+    assert cleared.helpful_at is None
+
+
+@pytest.mark.asyncio
+async def test_the_mark_carries_no_reason_and_leaves_the_flag_alone(owner):
+    store = persistence()
+    _, _, answer = await _answered_thread(store, owner)
+    await store.flag_message(owner, answer.id, reason="wrong_figure")
+
+    marked = await store.mark_helpful(owner, answer.id)
+
+    # Exclusive in the UI because a reader presses one thing at a time, not
+    # because the store knows they contradict each other. An answer that was
+    # useful and got one figure wrong is both, and clearing the flag here would
+    # silently delete the more informative of the two.
+    assert marked.helpful_at is not None
+    assert marked.flagged_reason == "wrong_figure"
+    assert marked.flagged_at is not None
+
+
+@pytest.mark.asyncio
+async def test_only_an_assistant_message_can_be_marked_helpful(owner):
+    store = persistence()
+    _, question, _ = await _answered_thread(store, owner)
+
+    with pytest.raises(UnflaggableMessage) as refused:
+        await store.mark_helpful(owner, question.id)
+
+    # One exception type for both verdicts, so the sentence has to name the one
+    # that was actually refused.
+    assert "marked helpful" in str(refused.value)
+
+
+@pytest.mark.asyncio
+async def test_another_users_message_cannot_be_marked(owner, stranger):
+    store = persistence()
+    _, _, answer = await _answered_thread(store, owner)
+
+    assert await store.mark_helpful(stranger, answer.id) is None
+    assert await store.clear_helpful(stranger, answer.id) is None
+    assert (await store.read_message(owner, answer.id)).helpful_at is None
+
+
+@pytest.mark.asyncio
+async def test_the_helpful_endpoint_marks_clears_and_comes_back_on_the_transcript(
+    client, account
+):
+    headers = await authenticate(client, account)
+    message_id = await _answered_thread_over_http(client, headers)
+
+    marked = await client.post(f"{API}/messages/{message_id}/helpful", headers=headers)
+    assert marked.status_code == 200, marked.text
+    assert marked.json()["helpful_at"] is not None
+
+    threads = await client.get(f"{API}/threads", headers=headers)
+    thread_id = threads.json()["threads"][0]["id"]
+    detail = await client.get(f"{API}/threads/{thread_id}", headers=headers)
+    message = [
+        entry for entry in detail.json()["messages"] if entry["id"] == message_id
+    ][0]
+    # A reopened Thread has to show the mark, or the button looks unpressed.
+    assert message["helpful_at"] is not None
+
+    cleared = await client.delete(
+        f"{API}/messages/{message_id}/helpful", headers=headers
+    )
+    assert cleared.status_code == 200, cleared.text
+    # The cleared stamp rather than 204, so the caller renders the settled state
+    # from the response it already has.
+    assert cleared.json()["helpful_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_the_helpful_endpoint_refuses_a_message_the_user_wrote(client, account):
+    headers = await authenticate(client, account)
+    store = persistence()
+    me = await client.get(f"{API}/auth/me", headers=headers)
+    _, question, _ = await _answered_thread(store, int(me.json()["id"]))
+
+    response = await client.post(
+        f"{API}/messages/{question.id}/helpful", headers=headers
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["reason"] == "not_an_assistant_message"
+
+
+@pytest.mark.asyncio
+async def test_marking_helpful_without_a_session_is_refused(client, account):
+    headers = await authenticate(client, account)
+    message_id = await _answered_thread_over_http(client, headers)
+
+    response = await client.post(f"{API}/messages/{message_id}/helpful")
 
     assert response.status_code == 401

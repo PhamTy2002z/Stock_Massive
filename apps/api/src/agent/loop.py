@@ -35,9 +35,16 @@ with its partial answer and the traces of what ran. Spending a call to
 apologise for having no budget is the one thing that must not happen here.
 
 **The text the reader gets is the sum of the deltas.** Every piece of prose the
-model produces is appended to the answer and published as a delta in the same
-step, so a reconnecting browser rebuilding from a checkpoint and a browser that
-followed the stream cannot disagree about what was said.
+model produces is recorded and published as a delta in the same step, so a
+reconnecting browser rebuilding from a checkpoint and a browser that followed
+the stream cannot disagree about what was said.
+
+**Narration is not the answer, and the model is told both.** Prose from a round
+that went on to call tools describes work rather than concluding it, so it is
+published as a ``thought`` and the surface files it in the timeline instead of
+in the reply. It is *not* withheld from the model: ``state.text`` keeps every
+piece, and that is the string the next Turn's transcript is built from. How a
+surface chooses to draw a sentence must not change what the model saw.
 
 **Nothing is disabled automatically.** ``malformed_arguments`` is counted and
 logged loudly; an operator flips the switch by hand. A cutoff that fires on two
@@ -103,10 +110,12 @@ from .guardrails import TurnGuardrails
 # than inside it: the transport names the same ``TranscriptTurn`` when it reads a
 # Thread out of the store (``messages.py``).
 from .messages import (
+    ANSWER,
     CHARS_PER_TOKEN,
     MAX_SUMMARY_CHARS,
     MESSAGE_OVERHEAD_TOKENS,
     SUMMARY_LABEL,
+    THOUGHT,
     ConstructedContext,
     ConstructedContextTooLarge,
     ContextBudget,
@@ -115,6 +124,7 @@ from .messages import (
     TranscriptTurn,
     TurnToolCall,
     build_messages,
+    display_results,
     estimate_tokens,
     shown_result,
     summarise_call,
@@ -536,6 +546,12 @@ class TurnDraft:
     rounds_used: int
     tool_calls: tuple[TurnToolCall, ...]
     boundary: bool = False
+    #: The reply alone, and the narration alone. Both derived from the same
+    #: prose ``text`` already holds, and both checkpointed, because the surface
+    #: rebuilding from a checkpoint has to draw the same two things the stream
+    #: drew — a reader who reconnected must not lose the timeline.
+    answer: str | None = None
+    thoughts: tuple[Mapping[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -550,6 +566,13 @@ class TurnOutcome:
     tool_calls: tuple[TurnToolCall, ...]
     usage: Usage
     summary_needed: bool = False
+    #: The reply without the narration, and the narration by round. ``text``
+    #: stays whole beside them: it is what the next Turn's transcript is built
+    #: from, and these two are what a screen draws.
+    answer: str | None = None
+    thoughts: tuple[Mapping[str, Any], ...] = ()
+    #: Wall-clock milliseconds this Turn took, for the line that says so.
+    elapsed_ms: int = 0
     #: The route's id for the last call it answered, so a disputed answer can be
     #: traced back at the provider. ``None`` when the route supplied none: the
     #: whole value of the field is that somebody can look it up.
@@ -618,8 +641,18 @@ class _TurnState:
     a positional tail of six values is where a swap goes unnoticed.
     """
 
+    #: Every piece of prose the Turn produced, joined. What the *model* reads
+    #: next Turn, and deliberately unchanged by the split below: how a surface
+    #: chooses to draw a sentence must not change what the model saw.
     started: float = field(default_factory=time.monotonic)
     text: str | None = None
+    #: The same prose minus the thoughts: what the *reader* is shown as the
+    #: reply. Held separately rather than derived by subtracting one string from
+    #: another, because a subtraction would be exact only until two pieces
+    #: happened to share a prefix.
+    answer: str | None = None
+    #: Prose written in a round that went on to call tools, keyed by that round.
+    thoughts: dict[int, str] = field(default_factory=dict)
     tool_rounds: int = 0
     usage: Usage = field(default_factory=Usage)
     calls: list[TurnToolCall] = field(default_factory=list)
@@ -649,9 +682,18 @@ class _TurnState:
         if usage is not None:
             self.usage = self.usage + usage
 
+    def narration(self) -> tuple[Mapping[str, Any], ...]:
+        """What was said on the way to the answer, in round order."""
+        return tuple(
+            {"round": index, "text": text}
+            for index, text in sorted(self.thoughts.items())
+        )
+
     def draft(self, *, boundary: bool = False) -> TurnDraft:
         return TurnDraft(
             text=self.text,
+            answer=self.answer,
+            thoughts=self.narration(),
             rounds_used=self.tool_rounds,
             tool_calls=tuple(self.calls),
             boundary=boundary,
@@ -797,7 +839,16 @@ class AgentLoop:
             if completion.request_id:
                 state.request_id = completion.request_id
             if completion.text:
-                self._append_text(state, completion.text)
+                # A round that also asked for tools was narrating, not
+                # concluding: the model said what it was about to look up. The
+                # decision is made here because this is the one place both
+                # halves of the completion are in hand — the prose and whether
+                # any tool call came with it.
+                self._append_text(
+                    state,
+                    completion.text,
+                    thought=bool(completion.tool_calls) and not final,
+                )
             await self._save(state)
 
             if completion.finish_reason == TRUNCATED:
@@ -1169,6 +1220,7 @@ class AgentLoop:
                 arguments=arguments,
                 summary=summarise_call(call.name, arguments),
                 signature=call.signature,
+                round=state.tool_rounds,
             )
             if call.name in EXTERNAL_TOOLS:
                 if state.external_calls >= MAX_EXTERNAL_TOOL_CALLS:
@@ -1231,6 +1283,11 @@ class AgentLoop:
                         guidance=result.guidance,
                         duration_ms=result.duration_ms,
                         dispatched=result.dispatched,
+                        # Built from the structured payload rather than by
+                        # re-parsing ``result.text``: the executor already holds
+                        # the object, and a second parse is a second chance to
+                        # read a provider's JSON differently from the first.
+                        results=display_results(result.tool_name, result.payload),
                     )
                     state.calls[position] = finished
                     turn_budget.add(
@@ -1326,21 +1383,43 @@ class AgentLoop:
 
     # -- publication and checkpointing ------------------------------------
 
-    def _append_text(self, state: _TurnState, piece: str) -> None:
-        """Append prose to the answer and publish exactly what was appended.
+    def _append_text(
+        self,
+        state: _TurnState,
+        piece: str,
+        *,
+        thought: bool = False,
+    ) -> None:
+        """Append prose and publish exactly what was appended.
 
         One step rather than two, because the property that matters is that the
         answer stored on the message and the concatenation of the deltas are the
         same string: a browser that followed the stream and a browser that
         rebuilt from a checkpoint must not be able to disagree about what was
         said. The separator therefore travels *inside* the delta.
+
+        ``thought`` marks prose from a round that went on to call tools. Such a
+        piece still joins ``state.text``, because that is what the model reads
+        next Turn and nothing about how a surface draws it should change what
+        the model saw. It additionally joins ``state.thoughts`` under the
+        current round, and goes out as a delta the surface files in its timeline
+        rather than in the answer.
         """
         if not piece:
             return
-        delta = piece if state.text is None else f"\n\n{piece}"
-        state.text = (state.text or "") + delta
+        state.text = piece if state.text is None else f"{state.text}\n\n{piece}"
+        if thought:
+            index = state.tool_rounds
+            state.thoughts[index] = state.thoughts.get(index, "") + piece
+            if self._publisher is not None:
+                self._publisher.content_delta(piece, kind=THOUGHT, round=index)
+            return
+        # The separator travels inside the delta, which is what keeps the
+        # concatenation of the answer deltas equal to the stored answer.
+        delta = piece if state.answer is None else f"\n\n{piece}"
+        state.answer = (state.answer or "") + delta
         if self._publisher is not None:
-            self._publisher.content_delta(delta)
+            self._publisher.content_delta(delta, kind=ANSWER, round=state.tool_rounds)
 
     def _publish_call(self, call: TurnToolCall) -> None:
         if self._publisher is not None:
@@ -1398,6 +1477,9 @@ class AgentLoop:
             status=status,
             terminal_reason=terminal_reason,
             text=state.text,
+            answer=state.answer,
+            thoughts=state.narration(),
+            elapsed_ms=int((time.monotonic() - state.started) * 1000),
             rounds_used=state.tool_rounds,
             rounds_exhausted=rounds_exhausted,
             tool_calls=tuple(state.calls),

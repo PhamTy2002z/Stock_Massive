@@ -22,6 +22,7 @@ from .agent_tool_world import isolated_registry
 from src.agent import registry
 from src.agent.guardrails import HALT_GUIDANCE
 from src.agent.loop import (
+    ANSWER,
     ANSWER_TRUNCATED,
     AUTH_UNAVAILABLE,
     CANCELLED_BY_USER,
@@ -44,6 +45,7 @@ from src.agent.loop import (
     ROUTE_ERROR,
     ROUTE_RATE_LIMITED,
     SCHEMA_REJECTED,
+    THOUGHT,
     TOOL_TIMEOUT,
     TURN_DEADLINE,
     AgentLoop,
@@ -149,10 +151,18 @@ class RecordingPublisher:
 
     def __init__(self) -> None:
         self.deltas: list[str] = []
+        self.thoughts: list[str] = []
         self.calls: list[dict[str, Any]] = []
         self.order: list[tuple[str, Any]] = []
 
-    def content_delta(self, text: str) -> None:
+    def content_delta(self, text: str, *, kind: str = ANSWER, round: int = 0) -> None:
+        # Narration and answer are kept in separate lists, because almost every
+        # assertion below is about one of them and would be made vacuous by a
+        # list holding both.
+        if kind == THOUGHT:
+            self.thoughts.append(text)
+            self.order.append(("thought", text))
+            return
         self.deltas.append(text)
         self.order.append(("delta", text))
 
@@ -267,11 +277,13 @@ async def test_the_answer_is_exactly_the_concatenation_of_its_deltas() -> None:
     outcome = await loop(client, publisher=publisher).run(turn_request())
 
     assert outcome.status is TurnStatus.COMPLETE
-    assert "".join(publisher.deltas) == outcome.text
+    assert "".join(publisher.deltas) == outcome.answer
+    # Nothing narrated, so the answer is the whole of what the model produced.
+    assert outcome.text == outcome.answer
 
 
 @pytest.mark.asyncio
-async def test_prose_from_two_rounds_arrives_as_two_deltas_in_order() -> None:
+async def test_prose_before_a_tool_call_is_narration_and_not_the_answer() -> None:
     publisher = RecordingPublisher()
     client = FakeClient(
         [
@@ -286,12 +298,22 @@ async def test_prose_from_two_rounds_arrives_as_two_deltas_in_order() -> None:
 
     outcome = await loop(client, publisher=publisher).run(turn_request())
 
-    assert publisher.deltas == ["Để tôi tra đã.", "\n\nKết quả là 6,5%."]
-    assert "".join(publisher.deltas) == outcome.text
-    # The first delta precedes the tool call it introduced, and both precede the
-    # second one: the transcript on screen has to read in the order it happened.
+    # The sentence that introduced the search describes work, so it goes to the
+    # timeline. The reply is what is left.
+    assert publisher.thoughts == ["Để tôi tra đã."]
+    assert publisher.deltas == ["Kết quả là 6,5%."]
+    assert "".join(publisher.deltas) == outcome.answer
+    assert outcome.thoughts == ({"round": 0, "text": "Để tôi tra đã."},)
+
+    # The load-bearing half: splitting the two for the screen must not change
+    # what the model is shown next Turn, so the full string still holds both,
+    # joined exactly as it was before the split existed.
+    assert outcome.text == "Để tôi tra đã.\n\nKết quả là 6,5%."
+
+    # The narration precedes the call it introduced, and both precede the reply:
+    # the transcript on screen has to read in the order it happened.
     assert [kind for kind, _ in publisher.order] == [
-        "delta",
+        "thought",
         "tool",
         "tool",
         "delta",
@@ -1076,15 +1098,31 @@ def test_a_summary_is_capped_so_one_call_cannot_fill_the_screen() -> None:
     assert len(summary) <= len("Đọc trang: ") + MAX_SUMMARY_CHARS
 
 
-def test_the_wire_payload_is_exactly_the_four_fields_of_the_contract() -> None:
-    call = TurnToolCall(id="c1", name="web_search", summary="Tìm trên web: x")
+def test_the_wire_payload_is_exactly_the_fields_of_the_contract() -> None:
+    call = TurnToolCall(
+        id="c1",
+        name="web_search",
+        summary="Tìm trên web: x",
+        round=2,
+        arguments={"query": "x"},
+        result_text="the whole page, every byte of it",
+    )
 
-    assert call.as_wire() == {
+    payload = call.as_wire()
+
+    assert payload == {
         "id": "c1",
         "name": "web_search",
         "status": "running",
         "summary": "Tìm trên web: x",
+        "round": 2,
+        "results": [],
+        "result_count": 0,
     }
+    # The two the allowlist exists to keep off a rendered channel. ``results``
+    # widened it; these did not come with it.
+    assert "arguments" not in payload
+    assert "result_text" not in payload
 
 
 def test_one_message_is_charged_deterministically() -> None:

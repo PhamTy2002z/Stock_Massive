@@ -27,6 +27,19 @@ from src.core.llm.admission import TURN_CONTEXT_PER_CALL
 from .untrusted import wrap_result
 
 
+#: The two things a piece of a Turn's prose can be.
+#:
+#: ``answer`` is the reply. ``thought`` is a sentence written on the way to it,
+#: in a round that went on to call tools — it belongs to the timeline of what
+#: happened rather than to what was concluded.
+#:
+#: Here rather than in the transport, for the reason ``ToolCallStatus`` is here:
+#: the loop produces these and the transport streams them, and the loop names
+#: the shape of the transport rather than importing its module.
+ANSWER = "answer"
+THOUGHT = "thought"
+
+
 class ToolCallStatus(str, Enum):
     """The three states the interactive surface renders a tool call in."""
 
@@ -107,6 +120,22 @@ class TurnToolCall:
     guidance: str | None = None
     duration_ms: int = 0
     dispatched: bool = True
+    #: Which round of the tool loop asked for this call, counting from zero.
+    #:
+    #: Carried so the surface can group a round's calls under one line — the
+    #: model asks for several searches at once, and five rows that all appeared
+    #: in the same instant read as five separate decisions rather than as the
+    #: one decision it was. Grouping by arrival time would guess at that; the
+    #: round is the fact.
+    round: int = 0
+    #: The part of this call's result that is fit to put on a screen.
+    #:
+    #: Distinct from ``result_text``, which is the whole result and belongs to
+    #: the model and the trace. This is a short, already-flattened projection —
+    #: title, link, source, one snippet — built by :func:`display_results` from
+    #: text the web tools ran through ``visible_text`` and therefore stripped of
+    #: markup. Empty for every tool that has nothing worth showing.
+    results: tuple[Mapping[str, Any], ...] = ()
     #: The route's own opaque token for the reasoning behind this call, when the
     #: route issued one. Held for the length of the Turn and no longer: a route
     #: that demands it back demands it for the rounds of the Turn it is
@@ -124,6 +153,9 @@ class TurnToolCall:
             "name": self.name,
             "status": self.status.value,
             "summary": self.summary,
+            "round": self.round,
+            "results": [dict(item) for item in self.results],
+            "result_count": len(self.results),
         }
 
 
@@ -148,6 +180,93 @@ def summarise_call(name: str, arguments: Mapping[str, Any]) -> str:
     if not detail:
         return verb
     return f"{verb}: {detail[:MAX_SUMMARY_CHARS]}"
+
+
+#: How much of one result's snippet is sent to a screen.
+#:
+#: Shorter than the ``MAX_SNIPPET_CHARS`` the model reads, because the two are
+#: doing different jobs: the model reads a snippet to decide whether the page is
+#: worth fetching, and the reader reads it to recognise a source they already
+#: half-know. A card is two lines tall either way, so the rest of it would be
+#: bytes on the wire that no layout has room for.
+DISPLAY_SNIPPET_CHARS = 280
+
+#: The most results one call may put on screen, whatever the tool returned.
+#:
+#: A ceiling on this side as well as on the tool's, so raising ``MAX_RESULTS``
+#: to widen what the *model* reads cannot silently make every Turn's event
+#: stream several times larger.
+MAX_DISPLAY_RESULTS = 10
+
+
+def display_results(name: str, payload: Any) -> tuple[Mapping[str, Any], ...]:
+    """The part of one tool's result that may be put on a screen.
+
+    Separate from ``result_text`` on purpose. ``result_text`` is the whole
+    result: it belongs to the model, which is told to treat it as data, and to
+    the Tool Call Trace, which nobody renders. What comes back from here is a
+    short projection with four named fields and no body — the fields a reader
+    needs to recognise a source and click it.
+
+    Four properties make that projection safe to render, and all four are
+    already true of what the web tools return rather than being asserted here:
+
+    * the text has been through ``visible_text``, so it is the *visible* text of
+      an HTML document with tags and scripts discarded, not markup;
+    * every field is a string, flattened here, so no nested object from a
+      provider reaches a component that would have to walk it;
+    * the snippet is cut to :data:`DISPLAY_SNIPPET_CHARS` and the list to
+      :data:`MAX_DISPLAY_RESULTS`, so one enormous answer cannot become one
+      enormous frame;
+    * the surface labels the whole block as outside content, which is where that
+      label belongs — a wrapper *inside* the payload would be a string a page
+      could forge.
+
+    A tool with nothing worth showing returns nothing, which is the default: a
+    tool added later shows a row and no results until somebody decides what of
+    it is fit for a screen.
+    """
+    if not isinstance(payload, Mapping):
+        return ()
+    if name == "web_search":
+        raw = payload.get("results")
+        if not isinstance(raw, Sequence) or isinstance(raw, str):
+            return ()
+        return tuple(
+            _display_item(item)
+            for item in raw[:MAX_DISPLAY_RESULTS]
+            if isinstance(item, Mapping)
+        )
+    if name == "fetch_url":
+        # A page read is one result, and it is only worth a row once it has a
+        # page: a refusal carries a ``reason`` and no title, and a card with an
+        # empty heading tells the reader less than no card at all.
+        if not payload.get("title") and not payload.get("url"):
+            return ()
+        return (_display_item(payload),)
+    return ()
+
+
+def _display_item(item: Mapping[str, Any]) -> Mapping[str, Any]:
+    """One result flattened to the four strings a card is built from."""
+    return {
+        "title": _display_text(item.get("title"), 240),
+        "url": _display_text(item.get("url"), 2048),
+        "source": _display_text(item.get("source"), 120),
+        "snippet": _display_text(item.get("snippet"), DISPLAY_SNIPPET_CHARS),
+    }
+
+
+def _display_text(value: Any, limit: int) -> str:
+    """A single-line string of at most ``limit`` characters.
+
+    Newlines collapse rather than survive: these strings are put in a card that
+    is two lines tall, and a snippet carrying its own line breaks would either
+    blow the card open or be silently clipped mid-paragraph.
+    """
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.split())[:limit]
 
 
 def shown_result(call: TurnToolCall) -> str:
@@ -435,10 +554,14 @@ def build_messages(
 
 
 __all__ = [
+    "ANSWER",
     "CHARS_PER_TOKEN",
+    "DISPLAY_SNIPPET_CHARS",
+    "MAX_DISPLAY_RESULTS",
     "MAX_SUMMARY_CHARS",
     "MESSAGE_OVERHEAD_TOKENS",
     "SUMMARY_LABEL",
+    "THOUGHT",
     "ConstructedContext",
     "ConstructedContextTooLarge",
     "ContextBudget",
@@ -447,6 +570,7 @@ __all__ = [
     "TranscriptTurn",
     "TurnToolCall",
     "build_messages",
+    "display_results",
     "estimate_tokens",
     "shown_result",
     "summarise_call",

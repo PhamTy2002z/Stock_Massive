@@ -58,12 +58,38 @@ def test_a_delta_carries_what_was_appended_and_not_the_whole_answer():
     first = published.content_delta("một")
     second = published.content_delta("\n\nhai")
 
-    assert first.data == {"text": "một"}
-    assert second.data == {"text": "\n\nhai"}
+    assert first.data == {"text": "một", "kind": "answer", "round": 0}
+    assert second.data == {"text": "\n\nhai", "kind": "answer", "round": 0}
     assert published.text == "một\n\nhai"
 
 
-def test_a_tool_call_carries_four_fields_and_never_its_arguments():
+def test_narration_joins_the_timeline_and_never_the_answer():
+    published = publisher()
+
+    published.content_delta("Đang tra đã", kind="thought", round=0)
+    published.content_delta("rồi tra tiếp", kind="thought", round=1)
+    published.content_delta("Xong.")
+
+    # The answer is the answer deltas and nothing else.
+    assert published.text == "Xong."
+    # Two rounds narrated, so two timeline entries, in round order.
+    assert published.thoughts == (
+        {"round": 0, "text": "Đang tra đã"},
+        {"round": 1, "text": "rồi tra tiếp"},
+    )
+
+
+def test_several_thought_deltas_in_one_round_join_into_one_line():
+    """A round narrating across two deltas said one sentence, not two."""
+    published = publisher()
+
+    published.content_delta("Đang tra ", kind="thought", round=0)
+    published.content_delta("tin hôm nay", kind="thought", round=0)
+
+    assert published.thoughts == ({"round": 0, "text": "Đang tra tin hôm nay"},)
+
+
+def test_a_tool_call_carries_the_contract_fields_and_never_its_arguments():
     """A page's own text must not travel on the channel the client renders."""
     published = publisher()
 
@@ -71,8 +97,20 @@ def test_a_tool_call_carries_four_fields_and_never_its_arguments():
         {**CALL, "arguments": {"query": "lãi suất"}, "result_text": "…"}
     )
 
-    assert set(event.data) == {"id", "name", "status", "summary"}
+    assert set(event.data) == {
+        "id",
+        "name",
+        "status",
+        "summary",
+        "round",
+        "results",
+        "result_count",
+    }
     assert event.data["summary"] == "Tìm trên web: lãi suất"
+    # Widening the allowlist for the sources a reader is shown did not let the
+    # arguments or the whole result through with them.
+    assert "arguments" not in event.data
+    assert "result_text" not in event.data
 
 
 def test_a_second_event_for_one_call_replaces_it_rather_than_adding_a_row():
