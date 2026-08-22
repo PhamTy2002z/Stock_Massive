@@ -215,14 +215,30 @@ async def _slow(_context: registry.ToolContext, _arguments) -> Any:
 
 WEB_TOOLS = {"web_search", "fetch_url"}
 
+# What production declares each of these tools is called on a reader's screen,
+# and which argument is worth naming beside it. Mirrored here because several
+# tests below assert the row a reader actually gets; that the *registrations*
+# carry these is asserted where each tool is tested.
+DISPLAY: dict[str, tuple[str, str | None]] = {
+    "web_search": ("Tìm trên web", "query"),
+    "fetch_url": ("Đọc trang", "url"),
+    "session_search": ("Tìm trong hội thoại trước", "query"),
+    "remember_fact": ("Ghi nhớ", "title"),
+    "recall_facts": ("Đọc lại ghi chú", "query"),
+    "get_field": ("Đọc chỉ báo", None),
+}
+
 
 def entry(name: str, handler=_ok, **overrides: Any) -> registry.ToolEntry:
+    shown, detail = DISPLAY.get(name, (f"Stub {name}", None))
     fields: dict[str, Any] = {
         "name": name,
         "toolset": "web" if name in WEB_TOOLS else "memory",
         "schema": registry.object_schema({"query": {"type": "string"}}),
         "handler": handler,
         "description": f"stub {name}",
+        "display_name": shown,
+        "summary_detail_arg": detail,
         # Declared, because the message layer reads it: a stub memory tool left
         # at the conservative default would have its results wrapped as a
         # stranger's writing, and these tests would be asserting against a
@@ -1257,11 +1273,55 @@ def test_the_wire_payload_is_exactly_the_fields_of_the_contract() -> None:
         "round": 2,
         "results": [],
         "result_count": 0,
+        # Which kind of evidence the call went and got, so a surface cannot draw
+        # a read of this store the way it draws a stranger's page. External for
+        # an unregistered name, conservatively, the same way the wrapper reads it.
+        "kind": "external",
     }
     # The two the allowlist exists to keep off a rendered channel. ``results``
     # widened it; these did not come with it.
     assert "arguments" not in payload
     assert "result_text" not in payload
+
+
+def test_the_wire_says_which_kind_of_evidence_a_call_went_and_got() -> None:
+    """So a surface cannot draw a read of this store like a stranger's page.
+
+    Read off the same declaration the untrusted wrapper reads, rather than off a
+    second list of names that would drift from it.
+    """
+    from src.agent.tools import register_all
+
+    with isolated_registry():
+        register_all()
+        page = TurnToolCall(id="c1", name="fetch_url").as_wire()
+        figure = TurnToolCall(id="c2", name="get_field").as_wire()
+
+    assert page["kind"] == "external"
+    assert figure["kind"] == "store"
+
+
+def test_a_tool_the_registry_does_not_hold_reads_as_outside_content() -> None:
+    """Conservative in the same direction as the wrapper's own default."""
+    with isolated_registry():
+        assert TurnToolCall(id="c1", name="mystery").as_wire()["kind"] == "external"
+
+
+def test_the_row_a_reader_gets_is_the_registration_s_own_words() -> None:
+    """Not a table in ``messages.py``, which is why three tools added after it
+    was written showed a reader their raw names."""
+    from src.agent.tools import register_all
+
+    with isolated_registry():
+        register_all()
+
+        assert summarise_call("web_search", {"query": "lãi suất"}) == (
+            "Tìm trên web: lãi suất"
+        )
+        assert summarise_call("get_field", {"field_id": "indicator_pack.rsi_14"}) == (
+            "Đọc chỉ báo: RSI (14)"
+        )
+        assert summarise_call("list_fields", {}) == "Xem danh mục chỉ báo"
 
 
 def test_one_message_is_charged_deterministically() -> None:

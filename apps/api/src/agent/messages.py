@@ -24,7 +24,16 @@ from typing import Any
 from src.core.llm import ContentSegment, Message, Role, ToolCall
 from src.core.llm.admission import TURN_CONTEXT_PER_CALL
 
+from . import registry
 from .untrusted import wrap_result
+
+#: What a tool call went and read, as the surface is told it. Two values, and the
+#: distinction is the one the evidence boundary is built on: a figure out of this
+#: system's store has a date and a health and reads the same tomorrow, and a page
+#: has none of those. A surface that drew them alike would be undoing in pixels
+#: what ``untrusted.py`` does in the message.
+EXTERNAL_KIND = "external"
+STORE_KIND = "store"
 
 
 #: The two things a piece of a Turn's prose can be.
@@ -57,14 +66,13 @@ class ToolCallStatus(str, Enum):
 #: Vietnamese prose here or nowhere. And an argument nobody named is an argument
 #: nobody reviewed for a screen: a tool added later shows its name and nothing
 #: else until somebody decides what of it is fit to show.
-_SUMMARY_TEMPLATES: dict[str, tuple[str, str | None]] = {
-    "web_search": ("Tìm trên web", "query"),
-    "fetch_url": ("Đọc trang", "url"),
-    "session_search": ("Tìm trong hội thoại trước", "query"),
-    "remember_fact": ("Ghi nhớ", "title"),
-    "recall_facts": ("Đọc lại ghi chú", "query"),
-}
 MAX_SUMMARY_CHARS = 120
+
+#: The hard ceiling on a whole rail row, for the tools that compose their own.
+#: A row is one line in a narrow panel; past this it is truncated by the layout
+#: anyway, and the cap is here so that is decided once rather than by whichever
+#: tool wrote the longest sentence.
+MAX_SUMMARY_ROW_CHARS = 200
 
 # A deterministic approximation, and deliberately a pessimistic one. Vietnamese
 # prose with diacritics tokenizes worse than English, and the ceiling this feeds
@@ -156,6 +164,13 @@ class TurnToolCall:
             "round": self.round,
             "results": [dict(item) for item in self.results],
             "result_count": len(self.results),
+            # Which kind of evidence this call went and got. Read off the same
+            # declaration the untrusted wrapper reads, so a surface cannot draw a
+            # read of this system's own store the way it draws a stranger's page
+            # — the distinction the whole evidence boundary rests on. A name the
+            # registry does not hold reads as external, conservatively, exactly
+            # as it does for the wrapper.
+            "kind": EXTERNAL_KIND if registry.reads_external(self.name) else STORE_KIND,
         }
 
 
@@ -171,15 +186,32 @@ def summarise_call(name: str, arguments: Mapping[str, Any]) -> str:
     announced. What came back is the call's status, which the surface shows
     beside it, and a failure code belongs in the trace rather than in a sentence
     somebody reads.
+
+    **Built from the registration, not from a table here.** Every tool declares
+    the phrase a person reads (``ToolEntry.display_name``) beside the name the
+    model calls, and ``register`` refuses a blank one. This function used to keep
+    its own mapping of five tool names, which is why the three tools added after
+    it was written showed a reader ``get_field`` — the same defect, in the same
+    shape, that ``untrusted.py`` had with its frozenset of two.
+
+    A name the registry does not hold falls back to itself. That is a tool
+    nobody registered, so there is no declared phrase to use and inventing one
+    would be this function guessing; it happens in a process whose tool surface
+    has not been installed, and a raw name there is a symptom worth seeing.
     """
-    verb, key = _SUMMARY_TEMPLATES.get(name, (name, None))
-    if key is None:
-        return verb
-    value = arguments.get(key)
+    entry = registry.get(name)
+    if entry is None:
+        return name
+    if entry.summarise is not None:
+        # A tool whose row cannot be built from one argument builds its own.
+        return entry.summarise(arguments)[:MAX_SUMMARY_ROW_CHARS]
+    if entry.summary_detail_arg is None:
+        return entry.display_name
+    value = arguments.get(entry.summary_detail_arg)
     detail = value.strip() if isinstance(value, str) else ""
     if not detail:
-        return verb
-    return f"{verb}: {detail[:MAX_SUMMARY_CHARS]}"
+        return entry.display_name
+    return f"{entry.display_name}: {detail[:MAX_SUMMARY_CHARS]}"
 
 
 #: How much of one result's snippet is sent to a screen.

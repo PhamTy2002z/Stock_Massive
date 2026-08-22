@@ -54,6 +54,7 @@ class Surface:
             schema=registry.object_schema({"value": {"type": "string"}}),
             handler=handler if is_async else blocking,
             description=f"stub {name}",
+            display_name=f"Stub {name}",
             is_async=is_async,
         )
 

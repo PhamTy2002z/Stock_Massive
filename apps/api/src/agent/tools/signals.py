@@ -120,6 +120,70 @@ CATALOG_AXES: Mapping[str, Axis] = MappingProxyType(
     }
 )
 
+#: What a reader is shown when one of these fields is looked up, in Vietnamese.
+#:
+#: A second name for each field, and deliberately not the one that travels with
+#: the figure. ``envelope.profile_entry_for`` gives a field the **Analysis Field
+#: Profile**'s label where it has one and its own id where it does not, and
+#: refuses to invent the missing ones on the grounds that a label beside a number
+#: is an interpretation of it. That refusal is right and this table does not
+#: touch it: nothing here reaches a payload, a figure or the model. These are rail
+#: rows — the line a person reads to see *which* field was looked up — and for
+#: that job an id is not a label at all.
+#:
+#: Which is what a real Turn showed: fourteen rows reading ``get_field``, because
+#: sixteen of the thirty registered fields have no profile label and the rail had
+#: nothing else to print.
+#:
+#: Written out rather than derived, and checked both ways at import
+#: (:func:`_check_the_display_names_hold`) so a field added to the **Signal
+#: Registry** without a row here fails the build instead of reaching a screen as
+#: its own id.
+DISPLAY_NAMES: Mapping[str, str] = MappingProxyType(
+    {
+        "band_pressure.limit_days_in_window": "Số phiên chạm biên",
+        "company_profile.foreign_room_pct": "Room ngoại còn lại",
+        "drawdown_stats.current_drawdown_pct": "Sụt giá hiện tại",
+        "drawdown_stats.days_underwater": "Số phiên dưới đỉnh",
+        "drawdown_stats.max_drawdown_pct": "Sụt giá sâu nhất",
+        "drawdown_stats.mdd_over_expected": "Sụt giá so mức kỳ vọng",
+        "factor_percentiles.book_yield_percentile": "Phân vị lợi suất sổ sách",
+        "factor_percentiles.earnings_yield_percentile": "Phân vị lợi suất lợi nhuận",
+        "factor_percentiles.roe_percentile": "Phân vị ROE",
+        "factor_percentiles.size_percentile": "Phân vị quy mô",
+        "foreign_flow_pressure.net_value_over_adtv": "Áp lực dòng tiền ngoại",
+        "foreign_flow_pressure.net_volume_over_adtv": "Khối lượng ròng ngoại",
+        "foreign_flow_pressure.persistence_run_days": "Chuỗi phiên ròng ngoại",
+        "indicator_pack.bollinger_percent_b_20": "Bollinger %B (20)",
+        "indicator_pack.macd_12_26_vnd": "MACD (12/26)",
+        "indicator_pack.rsi_14": "RSI (14)",
+        "liquidity_profile.adtv_percentile": "Phân vị thanh khoản",
+        "liquidity_profile.adtv_shares": "Khối lượng giao dịch bình quân",
+        "liquidity_profile.adtv_vnd": "Giá trị giao dịch bình quân",
+        "liquidity_profile.amihud_illiq": "Độ kém thanh khoản Amihud",
+        "mean_reversion.half_life_sessions": "Chu kỳ bán rã hồi quy",
+        "mean_reversion.trailing_z": "Độ lệch so trung bình",
+        "momentum_rank.percentile_12_2": "Phân vị động lượng",
+        "price_zone.ordinary_range_pct": "Biên độ ngày thường",
+        "realized_volatility.yang_zhang_annualized_pct": "Biến động thực tế",
+        "relative_strength.beta_vs_market_index": "Beta so chỉ số thị trường",
+        "risk_adjusted.sharpe_annualized": "Sharpe (năm hoá)",
+        "risk_adjusted.sortino_annualized": "Sortino (năm hoá)",
+        "trend_signal.total_return_12m_pct": "Hiệu suất giá 12 tháng",
+        "volatility_regime.gk_variance_robust_z": "Chế độ biến động",
+    }
+)
+
+#: What a reader is shown for an axis, when the catalog is asked for one.
+AXIS_DISPLAY_NAMES: Mapping[str, str] = MappingProxyType(
+    {
+        Axis.TECHNICAL.value: "kỹ thuật",
+        Axis.FUNDAMENTAL.value: "cơ bản",
+        Axis.MONEY_FLOW.value: "dòng tiền",
+        Axis.NEWS.value: "tin tức",
+    }
+)
+
 SessionOpener = Callable[[], Any]
 
 
@@ -157,6 +221,41 @@ def catalog(axis: Axis | None = None) -> tuple[Mapping[str, Any], ...]:
     )
 
 
+
+def display_name_of(field_id: str) -> str:
+    """The phrase a person reads for this field, or its id if it has none.
+
+    The fallback is unreachable for a registered field — the import check below
+    refuses a build where one is missing — and is kept for the one caller that
+    can pass anything: a rail row built from whatever the model actually put in
+    ``field_id``, which may be a name nothing holds.
+    """
+    return DISPLAY_NAMES.get(field_id, field_id)
+
+
+def summarise_get_field(arguments: Mapping[str, Any]) -> str:
+    """The rail row for one field read: which figure, and for which company.
+
+    Composed here rather than from one argument, because one argument cannot say
+    it. The field alone would read the same for every symbol in a Turn that
+    compared two, and the symbol alone would not say what was looked up.
+
+    The symbol is absent in the Analysis lane, where it is a trusted fact rather
+    than an argument, and the row is then the field alone — which is right: every
+    row of that rail is about the one company the Analysis is for.
+    """
+    field_id = str(arguments.get("field_id") or "").strip()
+    label = display_name_of(field_id) if field_id else "chỉ báo"
+    symbol = str(arguments.get("symbol") or "").strip().upper()
+    return f"Đọc chỉ báo: {label} — {symbol}" if symbol else f"Đọc chỉ báo: {label}"
+
+
+def summarise_list_fields(arguments: Mapping[str, Any]) -> str:
+    """The rail row for a catalog read, naming the axis when one was asked for."""
+    raw = str(arguments.get("axis") or "").strip()
+    axis = AXIS_DISPLAY_NAMES.get(raw)
+    return f"Xem danh mục chỉ báo: {axis}" if axis else "Xem danh mục chỉ báo"
+
 class SignalTools:
     """Read the catalog, and read one registered field for the pair in context."""
 
@@ -191,6 +290,8 @@ class SignalTools:
                     }
                 ),
                 handler=self.list_fields,
+                display_name="Xem danh mục chỉ báo",
+                summarise=summarise_list_fields,
                 # This system's own field registry. Nothing here was written
                 # outside the deployment, so the message layer does not wrap it.
                 reads_external=False,
@@ -234,6 +335,8 @@ class SignalTools:
                     ("field_id",),
                 ),
                 handler=self.get_field,
+                display_name="Đọc chỉ báo",
+                summarise=summarise_get_field,
                 reads_external=False,
                 # ``serve_field`` takes a synchronous Session, so this blocks;
                 # the executor moves it to a worker thread rather than letting
@@ -433,7 +536,37 @@ def _check_the_catalog_holds() -> None:
         )
 
 
+def _check_the_display_names_hold() -> None:
+    """Refuse to import a display table that does not cover the registry.
+
+    Both directions, for the reason the axis table is checked both ways. A
+    registered field with no row here reaches a reader as its own id, which is
+    the defect this table exists to fix and would reappear silently for whichever
+    field was added next. A row for a field nothing registers is a phrase
+    describing something that is gone.
+    """
+    registered = set(REGISTRY)
+    missing = sorted(registered - set(DISPLAY_NAMES))
+    if missing:
+        raise ValueError(
+            "these registered fields have no display name, so a reader would be "
+            f"shown their ids: {', '.join(missing)}"
+        )
+    stale = sorted(set(DISPLAY_NAMES) - registered)
+    if stale:
+        raise ValueError(
+            f"these display names describe fields nothing registers: {', '.join(stale)}"
+        )
+    for field_id, shown in DISPLAY_NAMES.items():
+        if not shown.strip() or shown == field_id:
+            raise ValueError(
+                f"{field_id} needs a display name a person can read; its own id "
+                "is not one"
+            )
+
+
 _check_the_catalog_holds()
+_check_the_display_names_hold()
 _CATALOG_LABELS: Mapping[str, str] = _labels()
 
 
@@ -444,12 +577,17 @@ def register_signal_tools(**kwargs: Any) -> tuple[ToolEntry, ...]:
 
 
 __all__ = [
+    "AXIS_DISPLAY_NAMES",
     "CATALOG_AXES",
+    "DISPLAY_NAMES",
     "MAX_RESULT_CHARS",
     "TOOLSET",
     "SignalTools",
     "axis_of",
     "catalog",
+    "display_name_of",
     "namespace_of",
+    "summarise_get_field",
+    "summarise_list_fields",
     "register_signal_tools",
 ]

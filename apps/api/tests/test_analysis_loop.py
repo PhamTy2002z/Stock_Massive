@@ -198,6 +198,8 @@ class FakeTools:
                 toolset=entry.toolset,
                 schema=entry.schema,
                 description=entry.description,
+                display_name=entry.display_name,
+                summarise=entry.summarise,
                 handler=self._handler(entry.name),
                 is_async=True,
                 max_result_size_chars=entry.max_result_size_chars,
