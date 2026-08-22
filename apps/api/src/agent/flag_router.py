@@ -1,12 +1,20 @@
-"""Flag a message — the one dispute action v1 ships (#99).
+"""The two verdicts a reader can leave on a message (#99).
 
-Two endpoints over a pair of columns, and the interesting part is everything
-they deliberately are not.
+Four endpoints over three columns, and the interesting part is everything they
+deliberately are not.
 
 ```
 POST   /api/v1/messages/{messageId}/flag   {"reason": "..."}  → the flag
 DELETE /api/v1/messages/{messageId}/flag                      → the cleared pair
+POST   /api/v1/messages/{messageId}/helpful                   → the mark
+DELETE /api/v1/messages/{messageId}/helpful                   → the cleared mark
 ```
+
+**The flag carries a reason and the mark does not.** The four labels are what
+makes a dispute readable when the answers are reviewed; there is nothing to
+categorise about an answer that worked, so the positive verdict is one stamp
+and asks the reader nothing. That asymmetry is the whole difference between the
+two halves of this file.
 
 **It opens nothing.** No ticket is created, nobody is notified, no account is
 suspended, and no background job is dispatched. ADR-0016 is explicit that v1 has
@@ -42,7 +50,11 @@ from src.agent.persistence import (
     MessageRecord,
     UnflaggableMessage,
 )
-from src.agent.schemas import FlagMessageRequest, MessageFlagResponse
+from src.agent.schemas import (
+    FlagMessageRequest,
+    MessageFlagResponse,
+    MessageHelpfulResponse,
+)
 from src.auth.dependencies import CurrentUser
 
 router = APIRouter(prefix="/messages", tags=["alpha-desk"])
@@ -65,6 +77,12 @@ def _flag(record: MessageRecord) -> MessageFlagResponse:
         message_id=record.id,
         flagged_reason=record.flagged_reason,
         flagged_at=record.flagged_at,
+    )
+
+
+def _helpful(record: MessageRecord) -> MessageHelpfulResponse:
+    return MessageHelpfulResponse(
+        message_id=record.id, helpful_at=record.helpful_at
     )
 
 
@@ -117,6 +135,49 @@ async def unflag_message(
     if record is None:
         raise _NOT_FOUND
     return _flag(record)
+
+
+@router.post("/{message_id}/helpful", response_model=MessageHelpfulResponse)
+async def mark_message_helpful(
+    message_id: int,
+    current_user: CurrentUser,
+    store: Store,
+) -> MessageHelpfulResponse:
+    """Mark one assistant message helpful. Idempotent per message.
+
+    No body, because there is nothing to say: the mark is the whole of it. A
+    second press on an already-marked message answers with the existing stamp
+    rather than moving it, the same rule the flag follows.
+    """
+    try:
+        record = await store.mark_helpful(current_user.id, message_id)
+    except UnflaggableMessage as refused:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "reason": "not_an_assistant_message",
+                "message": (
+                    "Only an assistant message can be marked helpful. This "
+                    "action is about what the system answered."
+                ),
+            },
+        ) from refused
+    if record is None:
+        raise _NOT_FOUND
+    return _helpful(record)
+
+
+@router.delete("/{message_id}/helpful", response_model=MessageHelpfulResponse)
+async def clear_message_helpful(
+    message_id: int,
+    current_user: CurrentUser,
+    store: Store,
+) -> MessageHelpfulResponse:
+    """Take the mark back, answering with the cleared stamp."""
+    record = await store.clear_helpful(current_user.id, message_id)
+    if record is None:
+        raise _NOT_FOUND
+    return _helpful(record)
 
 
 __all__ = ["router", "get_store"]

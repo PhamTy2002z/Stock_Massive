@@ -867,13 +867,17 @@ class TestThreads:
         assert answer["content"]["text"] == "một phần"
         assert answer["content"]["status"] == "incomplete"
         assert [call["id"] for call in answer["content"]["tool_calls"]] == ["call_0"]
-        # Four fields and no arguments: what a page said is trace material, not
-        # transcript material.
+        # The contract's fields and no more. `results` is the projection a
+        # reader is shown; the *arguments* and the whole result body are trace
+        # material rather than transcript material, and neither is here.
         assert set(answer["content"]["tool_calls"][0]) == {
             "id",
             "name",
             "status",
             "summary",
+            "round",
+            "results",
+            "result_count",
         }
 
     async def test_a_tool_call_reaches_the_wire_and_rides_the_snapshot(
@@ -897,6 +901,9 @@ class TestThreads:
                 "name": "web_search",
                 "status": "ok",
                 "summary": "Tìm trên web: web_search",
+                "round": 0,
+                "results": [],
+                "result_count": 0,
             }
         ]
 

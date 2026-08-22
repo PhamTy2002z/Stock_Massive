@@ -13,6 +13,7 @@ from src.agent.router import router as alpha_desk_router
 from src.agent.service import close_alpha_desk
 from src.agent.turns import sweep_interrupted_turns
 from src.alpha.analysis_router import router as analysis_router
+from src.alpha.favicons import router as favicons_router
 from src.alpha.router import router as watchlist_router
 from src.alpha.refusals import AlphaRefusal
 from src.auth.router import router as auth_router
@@ -165,10 +166,16 @@ app.include_router(analysis_router, prefix="/api/v1")
 # `/api/alpha-desk/threads/...` through the Next proxy, whose allowlist names
 # `threads` and `turns` as two of the resources it will carry (docs/adr/0013).
 app.include_router(alpha_desk_router, prefix="/api/v1")
-# Flagging a message is not a Turn — it admits nothing and reaches no model — so
-# it is mounted separately and takes only the store. It must stay possible on a
-# transcript the model route is too broke or too broken to add to.
+# A verdict on a message is not a Turn — it admits nothing and reaches no model
+# — so both of them are mounted separately and take only the store. They must
+# stay possible on a transcript the model route is too broke or too broken to
+# add to.
 app.include_router(message_flag_router, prefix="/api/v1")
+# Favicons the browser must never fetch itself: a direct request would tell the
+# target domain, and the network path to it, which page a signed-in user is
+# reading and from what IP. The server fetches once, through the same
+# public-URL guard as `fetch_url`, and caches both the hit and the miss.
+app.include_router(favicons_router, prefix="/api/v1")
 
 
 @app.exception_handler(AlphaRefusal)

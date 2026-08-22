@@ -46,6 +46,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any
 
@@ -166,6 +167,24 @@ class Checkpointer:
         )
 
 
+def _elapsed_ms(record: TurnRecord) -> int:
+    """How long a Turn ran, for a Turn no publisher in this process is holding.
+
+    Off the stored timestamps rather than a monotonic clock, because the process
+    that started this Turn may be gone: a restart, another worker, or simply a
+    Turn that finished yesterday. A Turn still running is measured to now.
+
+    Never negative. Two timestamps written by different transactions can arrive
+    a hair out of order, and a Turn that reports having taken minus one second
+    is a worse answer than one that reports zero.
+    """
+    started = record.started_at
+    if started is None:
+        return 0
+    finished = record.finished_at or datetime.now(timezone.utc)
+    return max(0, int((finished - started).total_seconds() * 1000))
+
+
 def draft_content(draft: TurnDraft) -> dict[str, Any]:
     """The checkpoint payload: the answer so far, and the calls behind it.
 
@@ -175,9 +194,17 @@ def draft_content(draft: TurnDraft) -> dict[str, Any]:
     the same string the canonical message will store, which is what keeps a
     reader who followed the stream and a reader who rebuilt from here from
     disagreeing about what was said.
+
+    ``answer`` and ``thoughts`` are that same prose split the way a screen draws
+    it — the reply, and what was said on the way to it. Both are checkpointed
+    rather than recomputed, because the split is made from a fact only the loop
+    has (whether a round went on to call tools), and a reader rebuilding from
+    here has no way to work it out from ``text`` alone.
     """
     return {
         "text": draft.text or "",
+        "answer": draft.answer or "",
+        "thoughts": [dict(thought) for thought in draft.thoughts],
         "tool_calls": [call.as_wire() for call in draft.tool_calls],
         "rounds_used": draft.rounds_used,
     }
@@ -188,6 +215,9 @@ def assistant_message(
     text: str,
     tool_calls: Sequence[Mapping[str, Any]] = (),
     status: str,
+    answer: str | None = None,
+    thoughts: Sequence[Mapping[str, Any]] = (),
+    elapsed_ms: int = 0,
 ) -> dict[str, Any]:
     """The canonical assistant message, in the one place its shape is decided.
 
@@ -195,11 +225,25 @@ def assistant_message(
     A reopened Thread renders the transcript alone, so without it a reader could
     not tell an answer that finished from one a deadline cut off — and the
     transcript would read every truncated answer as complete.
+
+    ``text`` and ``answer`` are both stored, and they are not the same field
+    wearing two names. ``text`` is every piece of prose the Turn produced, and
+    it is what the next Turn's transcript is built from; ``answer`` is that
+    minus the narration, and it is what the reader is shown as the reply. They
+    coincide on a Turn that narrated nothing, which is most of them. Keeping
+    both means the model's view of the conversation is unaffected by how a
+    surface chooses to draw it.
+
+    ``answer`` defaults to ``text``, which is what a message written before this
+    split existed means: no narration was recorded, so all of it is the reply.
     """
     return {
         "text": text,
+        "answer": text if answer is None else answer,
+        "thoughts": [dict(thought) for thought in thoughts],
         "tool_calls": [dict(call) for call in tool_calls],
         "status": status,
+        "elapsed_ms": elapsed_ms,
     }
 
 
@@ -220,6 +264,11 @@ def frozen_message(record: TurnRecord) -> Mapping[str, Any] | None:
         return None
     return assistant_message(
         text=text,
+        # ``None`` rather than ``""`` when the checkpoint predates the split, so
+        # the whole of what was said stays the reply instead of becoming an
+        # empty one.
+        answer=draft.get("answer") or None,
+        thoughts=tuple(draft.get("thoughts") or ()),
         tool_calls=tuple(draft.get("tool_calls") or ()),
         status=TURN_INCOMPLETE,
     )
@@ -379,7 +428,14 @@ class TurnService:
         text = outcome.text or ""
         calls = [call.as_wire() for call in outcome.tool_calls]
         message = (
-            assistant_message(text=text, tool_calls=calls, status=status)
+            assistant_message(
+                text=text,
+                answer=outcome.answer,
+                thoughts=outcome.thoughts,
+                tool_calls=calls,
+                status=status,
+                elapsed_ms=outcome.elapsed_ms,
+            )
             if text
             else None
         )
@@ -422,7 +478,16 @@ class TurnService:
         text = "" if draft is None else (draft.text or "")
         calls = [] if draft is None else [call.as_wire() for call in draft.tool_calls]
         message = (
-            assistant_message(text=text, tool_calls=calls, status=status)
+            assistant_message(
+                text=text,
+                # The checkpoint's own split, not a recomputed one: this path
+                # never saw the loop finish, so what it has is what was written
+                # down at the last boundary.
+                answer=None if draft is None else (draft.answer or None),
+                thoughts=() if draft is None else draft.thoughts,
+                tool_calls=calls,
+                status=status,
+            )
             if text
             else None
         )
@@ -465,6 +530,7 @@ class TurnService:
             terminal_reason=record.terminal_reason,
             through_seq=record.last_event_seq,
             message_id=record.response_message_id,
+            elapsed_ms=_elapsed_ms(record),
         )
         subscriber = Subscriber(snapshot)
         subscriber.close()
