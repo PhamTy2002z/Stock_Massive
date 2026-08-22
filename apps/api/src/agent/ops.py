@@ -12,6 +12,9 @@ would justify one already exists on rows the product writes anyway:
   deadline and a halted tool loop all surface under their own names;
 - ``unknown_tool`` in ``agent_tool_call``, showing expected but unavailable
   capabilities;
+- why the tool calls that failed failed (``agent_tool_call.error``), which is
+  where a guardrail's blocked call, a halted tool loop, a harness bug and a
+  round's refused fan-out each arrive under their own name;
 - flagged-message counts, the nullable pair on ``agent_message``.
 
 So there is exactly **one** query, it is read-only, it returns a value, and
@@ -49,6 +52,7 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.orm import InstrumentedAttribute, Session
 
 from src.alpha.models import (
+    TOOL_CALL_OK,
     TOOL_CALL_UNKNOWN_TOOL,
     TURN_INCOMPLETE,
     AgentToolCall,
@@ -87,6 +91,14 @@ class OpsSnapshot:
     #: gaps stay visible: the model asking repeatedly for something that is not
     #: registered is the one signal that names a tool nobody has written.
     unknown_tool_calls: Mapping[str, int]
+    #: Every tool call that did not end ``ok``, grouped by the reason it did not,
+    #: busiest first. Grouped on ``error`` rather than on ``status`` because
+    #: ``status`` deliberately holds four groups and this is the reading that
+    #: needs the specific name: a guardrail verdict, a halted tool loop and a
+    #: bug in the harness are the same status and three different jobs. The
+    #: module whose own comment says its failure looks like *a halt count
+    #: standing at zero forever* is counted here or nowhere.
+    tool_call_errors: Mapping[str, int]
     #: One key per reason in ``FLAG_REASONS``, present even at zero — except on
     #: an unread store, where the mapping is empty rather than zeroed.
     flags: Mapping[str, int]
@@ -115,6 +127,10 @@ class OpsSnapshot:
         return sum(self.unknown_tool_calls.values())
 
     @property
+    def tool_call_error_total(self) -> int:
+        return sum(self.tool_call_errors.values())
+
+    @property
     def flags_total(self) -> int:
         return sum(self.flags.values())
 
@@ -127,6 +143,7 @@ class OpsSnapshot:
             "incomplete_reasons": dict(self.incomplete_reasons),
             "tool_calls": self.tool_calls,
             "unknown_tool_calls": dict(self.unknown_tool_calls),
+            "tool_call_errors": dict(self.tool_call_errors),
             "flags": dict(self.flags),
             "error": self.error,
         }
@@ -141,6 +158,7 @@ class OpsSnapshot:
             incomplete_reasons=dict(payload.get("incomplete_reasons") or {}),
             tool_calls=int(payload.get("tool_calls", 0)),
             unknown_tool_calls=dict(payload.get("unknown_tool_calls") or {}),
+            tool_call_errors=dict(payload.get("tool_call_errors") or {}),
             flags=dict(payload.get("flags") or {}),
             error=payload.get("error"),
         )
@@ -158,6 +176,7 @@ class OpsSnapshot:
             incomplete_reasons={},
             tool_calls=0,
             unknown_tool_calls={},
+            tool_call_errors={},
             # Empty, not seeded with zeros. A zero here would say *nothing was
             # flagged*, which is the one thing an unread store cannot say.
             flags={},
@@ -206,6 +225,13 @@ def read_ops_snapshot(
             AgentToolCall.tool_name,
             AgentToolCall.started_at,
             AgentToolCall.status == TOOL_CALL_UNKNOWN_TOOL,
+        ),
+        tool_call_errors=window.tally(
+            session,
+            AgentToolCall.error,
+            AgentToolCall.started_at,
+            AgentToolCall.status != TOOL_CALL_OK,
+            AgentToolCall.error.is_not(None),
         ),
         # Bounded on ``flagged_at``: a flag is written long after the message it
         # is about, so placing it by the message's own timestamp would report it

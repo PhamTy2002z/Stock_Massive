@@ -26,7 +26,7 @@ from dataclasses import dataclass
 # assistant; 1.x was the analyst harness that read this project's store, and
 # nothing about the two is comparable — so the major number moves rather than
 # implying a continuous line.
-PROMPT_VERSION = "2.2.0"
+PROMPT_VERSION = "2.3.0"
 
 
 @dataclass(frozen=True)
@@ -157,6 +157,13 @@ bạn lấy ở đâu.
 Tra có mục đích. Một truy vấn tốt rồi đọc kỹ tốt hơn năm truy vấn gần giống
 nhau. Nếu hai lần tra liên tiếp trả về cùng một thứ, đừng tra lần thứ ba: hãy
 dùng những gì đã có, hoặc hỏi lại người dùng điều còn thiếu.
+
+Gộp lượt, không tra thêm. Việc tra nào không phụ thuộc kết quả của việc tra
+khác thì phát trong cùng một lượt gọi: lãi suất của hai ngân hàng, giá vàng và
+tỷ giá, dân số của hai nước — đó là nhiều lần gọi trong một lượt, không phải
+nhiều lượt nối nhau. Chỉ để sang lượt sau những gì phải có kết quả trước mới
+biết tra tiếp. Số lượt là có hạn, nên gộp được bao nhiêu là nới được tầm với
+bấy nhiêu.
 
 Một công cụ báo lỗi là một dữ kiện, không phải một lời mời gọi lại y nguyên.
 Đổi cách hỏi, đổi công cụ, hoặc nói ra điều bạn không lấy được.

@@ -33,12 +33,15 @@ import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
+from src.agent.loop import EMPTY_ANSWER
 from src.agent.ops import OPS_WINDOW_DAYS, OpsSnapshot, read_ops_snapshot
 from src.alpha.models import (
     FLAG_OTHER,
     FLAG_OVERREACH,
     FLAG_REASONS,
     FLAG_WRONG_FIGURE,
+    TOOL_CALL_OK,
+    TOOL_CALL_TOOL_ERROR,
     TOOL_CALL_UNKNOWN_TOOL,
     TURN_COMPLETE,
     TURN_INCOMPLETE,
@@ -154,7 +157,8 @@ class _World:
         self,
         *,
         tool_name: str = "web_search",
-        status: str = "ok",
+        status: str = TOOL_CALL_OK,
+        error: str | None = None,
         started_at: datetime = INSIDE,
     ) -> None:
         request_id = self.message(role="user", created_at=started_at)
@@ -167,6 +171,7 @@ class _World:
                     arguments={},
                     result={},
                     status=status,
+                    error=error,
                     started_at=started_at,
                 )
             )
@@ -201,6 +206,56 @@ def test_the_window_is_half_open_and_binds_every_signal(world):
     assert reading.incomplete_reasons == {"turn_deadline": 1}
     assert reading.unknown_tool_calls == {"run_python": 1}
     assert reading.flags[FLAG_OVERREACH] == 1
+
+
+def test_a_failed_call_is_counted_under_the_reason_it_failed_for(world):
+    """``status`` groups four ways; this is the reading that needs the name.
+
+    A guardrail's blocked call, a halted tool loop and a round refused for
+    fanning out are one status and three different jobs. The module that writes
+    the first two says its own failure mode is *a halt count standing at zero
+    forever*, which is only observable if something counts halts.
+    """
+    world.tool_call(status=TOOL_CALL_TOOL_ERROR, error="blocked_call")
+    world.tool_call(status=TOOL_CALL_TOOL_ERROR, error="blocked_call")
+    world.tool_call(status=TOOL_CALL_TOOL_ERROR, error="halted_turn")
+    world.tool_call(status=TOOL_CALL_TOOL_ERROR, error="round_fanout_exceeded")
+    world.tool_call(status=TOOL_CALL_UNKNOWN_TOOL, error="unknown_tool")
+    # Neither of these is a failure, and neither may reach the tally.
+    world.tool_call()
+    world.tool_call(
+        status=TOOL_CALL_TOOL_ERROR, error="blocked_call", started_at=OUTSIDE
+    )
+
+    reading = snapshot(world)
+
+    assert reading.tool_call_errors == {
+        "blocked_call": 2,
+        "halted_turn": 1,
+        "round_fanout_exceeded": 1,
+        "unknown_tool": 1,
+    }
+    assert reading.tool_call_error_total == 5
+    # The same rows, grouped the other way: one reading does not replace the
+    # other, and the tool name is only kept on the one that needs it.
+    assert reading.unknown_tool_calls == {"web_search": 1}
+    assert reading.tool_calls == 6
+
+
+def test_a_turn_that_had_nothing_to_say_is_a_reason_like_any_other(world):
+    """The class of failure phase 1 closed arrives here without new code.
+
+    A Turn that ended ``complete`` with no message was invisible: it was not
+    incomplete, so it carried no reason, so nothing counted it. Ending it
+    ``incomplete`` under its own reason is what puts it in this list.
+    """
+    world.turn(status=TURN_INCOMPLETE, terminal_reason=EMPTY_ANSWER)
+    world.turn(status=TURN_INCOMPLETE, terminal_reason="turn_deadline")
+
+    assert snapshot(world).incomplete_reasons == {
+        EMPTY_ANSWER: 1,
+        "turn_deadline": 1,
+    }
 
 
 def test_the_window_is_configurable(world):

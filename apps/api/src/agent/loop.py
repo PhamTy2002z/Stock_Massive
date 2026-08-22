@@ -73,6 +73,12 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Protocol
 
+from src.alpha.models import (
+    TOOL_CALL_OK,
+    TOOL_CALL_TIMEOUT,
+    TOOL_CALL_TOOL_ERROR,
+    TOOL_CALL_UNKNOWN_TOOL,
+)
 from src.alpha.refusals import AlphaRefusal
 from src.core.llm import (
     AuthUnavailable,
@@ -111,7 +117,7 @@ from src.core.llm.errors import redact
 from . import registry
 from .budget import TurnBudget, thresholds_for_context, trim_text
 from .definitions import get_tool_definitions
-from .executor import ExecutionOutcome, ToolExecutor
+from .executor import UNKNOWN_TOOL, ExecutionOutcome, ToolExecutor
 from .executor import ToolCall as ExecutorToolCall
 from .guardrails import TurnGuardrails
 # The transcript types and the context constructor live beside the loop rather
@@ -311,6 +317,31 @@ EMPTY_AFTER_TOOLS_NOTE = (
 # and a total for the rare sequential one. Its own reason because its remedy is
 # its own: a tool that never returns is a tool to fix, not a route to retry.
 TOOL_TIMEOUT = "tool_timeout"
+
+
+def trace_status(*, ok: bool, error: str | None) -> str:
+    """One call's outcome in the vocabulary its column was declared with.
+
+    The Tool Call Trace carries two different questions and one column each:
+    ``status`` is the small closed set an ops reading groups by, and ``error`` is
+    the specific reason under it. Writing ``"error"`` into ``status`` — which is
+    not one of its four values — collapsed the first question into the second and
+    left ``unknown_tool`` counting zero for every deployment that ever ran.
+
+    Only two error names get a group of their own, and both because their remedy
+    is their own: a tool that does not exist is a capability nobody has written,
+    and a tool that does not answer is a bound that is missing. Everything else —
+    a blocked call, a halted turn, a failed dispatch, a fan-out over the round's
+    ceiling — is a tool call that went wrong, and the ``error`` column is where
+    they stay told apart.
+    """
+    if ok:
+        return TOOL_CALL_OK
+    if error == UNKNOWN_TOOL:
+        return TOOL_CALL_UNKNOWN_TOOL
+    if error == TOOL_TIMEOUT:
+        return TOOL_CALL_TIMEOUT
+    return TOOL_CALL_TOOL_ERROR
 
 
 class TurnStatus(str, Enum):
@@ -1460,7 +1491,14 @@ class AgentLoop:
                         "chars": len(body),
                         "dispatched": bool(entry.get("dispatched", True)),
                     },
-                    "status": "ok" if entry.get("ok") else "error",
+                    "status": trace_status(
+                        ok=bool(entry.get("ok")),
+                        error=(
+                            str(entry["error"])
+                            if entry.get("error") is not None
+                            else None
+                        ),
+                    ),
                     "error": entry.get("error"),
                     "latency_ms": entry.get("duration_ms"),
                 }
@@ -1674,4 +1712,5 @@ __all__ = [
     "shown_result",
     "summarise_call",
     "terminal_reason_for",
+    "trace_status",
 ]

@@ -204,6 +204,116 @@ async def test_a_handler_that_raises_becomes_a_failed_result_not_an_exception():
 
 
 @pytest.mark.asyncio
+async def test_a_call_the_harness_cannot_dispatch_keeps_its_siblings_alive():
+    # The registry lookup, the availability check and the trace write all sit
+    # outside ``_dispatch``'s own try blocks. An exception there used to cancel
+    # every sibling in the gather and throw away results already paid for.
+    surface = Surface()
+    surface.add("web_search")
+    surface.add("fetch_url")
+    surface.add("session_search")
+
+    def lookup(name: str) -> registry.ToolEntry | None:
+        if name == "fetch_url":
+            raise RuntimeError("the registry is mid-reload")
+        return surface.entries.get(name)
+
+    broken = executor.ToolExecutor(
+        context=CONTEXT,
+        lookup=lookup,
+        availability=lambda name: name in surface.entries,
+    )
+
+    outcome = await broken.run(
+        [call("web_search"), call("fetch_url"), call("session_search")]
+    )
+
+    assert [result.ok for result in outcome.results] == [True, False, True]
+    failed = outcome.results[1]
+    assert (failed.error, failed.dispatched) == (executor.DISPATCH_FAILED, False)
+    assert "fetch_url" in failed.text
+    assert sorted(surface.order) == ["session_search", "web_search"]
+
+
+@pytest.mark.asyncio
+async def test_a_sequential_barrier_that_cannot_be_dispatched_answers_too():
+    # A sequential segment runs outside the gather, so it needs the floor spelled
+    # out — and a barrier is the call most likely to be a write.
+    surface = Surface()
+    surface.add("remember_fact")
+    surface.add("forget_fact")
+
+    def lookup(name: str) -> registry.ToolEntry | None:
+        if name == "forget_fact":
+            raise RuntimeError("the registry is mid-reload")
+        return surface.entries.get(name)
+
+    broken = executor.ToolExecutor(
+        context=CONTEXT,
+        lookup=lookup,
+        availability=lambda name: name in surface.entries,
+    )
+
+    outcome = await broken.run(
+        [
+            call("remember_fact", "a"),
+            call("forget_fact", "b"),
+            call("remember_fact", "c"),
+        ]
+    )
+
+    assert [result.call_id for result in outcome.results] == ["a", "b", "c"]
+    assert [result.error for result in outcome.results] == [
+        None,
+        executor.DISPATCH_FAILED,
+        None,
+    ]
+    # The barrier after the failure still ran: one dead call is not a dead round.
+    assert surface.order == ["remember_fact", "remember_fact"]
+
+
+@pytest.mark.asyncio
+async def test_a_batch_past_the_round_ceiling_runs_its_head_and_answers_its_tail():
+    surface = Surface()
+    surface.add("session_search")
+    issued = executor.MAX_CALLS_PER_ROUND + 4
+    calls = [call("session_search", f"c{index}") for index in range(issued)]
+
+    # Planning is unchanged: the ceiling is a limit on what is dispatched, not on
+    # how a batch is grouped.
+    segments = executor.plan_segments(calls)
+    assert [(mode, len(group)) for mode, group in segments] == [("parallel", issued)]
+
+    outcome = await surface.executor().run(calls)
+
+    assert [result.call_id for result in outcome.results] == [
+        f"c{index}" for index in range(issued)
+    ]
+    assert len(surface.order) == executor.MAX_CALLS_PER_ROUND
+    refused = outcome.results[executor.MAX_CALLS_PER_ROUND :]
+    assert all(result.error == executor.ROUND_FANOUT_EXCEEDED for result in refused)
+    assert all(result.dispatched is False for result in refused)
+    assert all(result.ok for result in outcome.results[: executor.MAX_CALLS_PER_ROUND])
+    # The refusal says what happened, in numbers the model can act on.
+    assert f"{issued} tool calls" in refused[0].text
+
+
+@pytest.mark.asyncio
+async def test_a_batch_at_the_round_ceiling_is_dispatched_whole():
+    surface = Surface()
+    surface.add("session_search")
+    calls = [
+        call("session_search", f"c{index}")
+        for index in range(executor.MAX_CALLS_PER_ROUND)
+    ]
+
+    outcome = await surface.executor().run(calls)
+
+    assert all(result.ok for result in outcome.results)
+    assert len(surface.order) == executor.MAX_CALLS_PER_ROUND
+
+
+@pytest.mark.asyncio
 async def test_a_blocked_repeat_is_not_dispatched_and_carries_its_guidance():
     surface = Surface()
     surface.add("fetch_url")

@@ -364,8 +364,7 @@ class AgentToolCall(Base):
     # be tuned against measured spills rather than guessed at: a Turn that
     # answered worse after a spill is only diagnosable if the spill left a record.
     spilled_bytes = Column(Integer, nullable=True)
-    # ok | tool_error | timeout | unknown_tool
-    status = Column(String(16), nullable=False)  # see TOOL_CALL_* below
+    status = Column(String(16), nullable=False)  # one of TOOL_CALL_STATUSES below
     error = Column(String(500), nullable=True)
     latency_ms = Column(Integer, nullable=True)
     prompt_tokens = Column(Integer, nullable=True)
@@ -450,18 +449,34 @@ event.listen(
 )
 
 
-# The one value of ``agent_tool_call.status`` that something other than the
-# catalog reads, named where the column is declared so the reader and the writer
-# cannot spell it differently. It is also ``docs/adr/0011``'s demand trigger — a
-# model reaching for a tool that does not exist is the evidence for whether
-# sandboxed execution is ever needed — which is why the fixed ops query counts
-# the currently enabled catalog lacks — which is why the fixed ops query counts
-# it by tool name rather than only totalling it.
+# The four values of ``agent_tool_call.status``, named where the column is
+# declared so the one writer (the trace adapter in ``src/agent/loop.py``) and the
+# readers cannot spell them differently. Four constants because the column was
+# declared with four values and written with two: a status nobody writes is a
+# signal that reads zero forever.
 #
-# The other three stay as the literals ``src/agent/tools/catalog.py`` writes.
-# Naming them here would leave three constants with no reader, and adopting them
-# in the catalog is an edit inside ``src/agent/tools/``.
+# ``status`` answers *which kind of outcome*, in four groups. The ``error``
+# column beside it keeps the specific reason — ``blocked_call``, ``halted_turn``,
+# ``dispatch_failed``, ``round_fanout_exceeded`` — so neither column has to carry
+# two questions.
+#
+# ``unknown_tool`` is the one value something other than the trace reads: a model
+# reaching for a tool that does not exist is the evidence for whether sandboxed
+# execution is ever worth building, which is why the fixed ops query counts it by
+# tool name rather than only totalling it.
+TOOL_CALL_OK = "ok"
+TOOL_CALL_TOOL_ERROR = "tool_error"
+TOOL_CALL_TIMEOUT = "timeout"
 TOOL_CALL_UNKNOWN_TOOL = "unknown_tool"
+
+#: Every value the column may hold, so a writer can be held to the vocabulary
+#: instead of being trusted with it.
+TOOL_CALL_STATUSES = (
+    TOOL_CALL_OK,
+    TOOL_CALL_TOOL_ERROR,
+    TOOL_CALL_TIMEOUT,
+    TOOL_CALL_UNKNOWN_TOOL,
+)
 
 
 # The five states of ``agent_turn.status``, named where the column is declared so

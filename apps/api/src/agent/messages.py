@@ -110,8 +110,10 @@ class TurnToolCall:
     arguments: Mapping[str, Any] = field(default_factory=dict)
     status: ToolCallStatus = ToolCallStatus.RUNNING
     result_text: str | None = None
-    #: A short user-facing line: the tool and the one argument worth naming, or
-    #: the error code when it failed. Never the result body.
+    #: A short user-facing line: the tool and the one argument worth naming.
+    #: Never the result body, and never the reason it failed — that is ``error``,
+    #: which travels beside it so a surface can say *why* without the summary
+    #: having to be rewritten into an apology.
     summary: str = ""
     error: str | None = None
     #: The guardrail ladder's warning about this call, when it warned. Carried
@@ -147,12 +149,26 @@ class TurnToolCall:
         return self.status is not ToolCallStatus.RUNNING
 
     def as_wire(self) -> dict[str, Any]:
-        """The ``tool.call`` payload of the SSE contract, and nothing else."""
+        """The ``tool.call`` payload of the SSE contract, and nothing else.
+
+        ``error`` is here because ``status`` alone cannot answer the question a
+        reader actually has. Three of the reasons a call ends in ``error`` are
+        not failures at all — the Turn spent its external-call allowance, the
+        round asked for more calls than it may dispatch, the tool loop was
+        halted — and every one of those was refused by this deployment before
+        anything was dispatched. Sending only ``error`` as a status draws them
+        exactly like a tool that broke, and only one of the two is worth
+        retrying.
+
+        The reason is a stable code, not a sentence: the surface owns the words,
+        the same way it already owns the words for ``terminal_reason``.
+        """
         return {
             "id": self.id,
             "name": self.name,
             "status": self.status.value,
             "summary": self.summary,
+            "error": self.error,
             "round": self.round,
             "results": [dict(item) for item in self.results],
             "result_count": len(self.results),

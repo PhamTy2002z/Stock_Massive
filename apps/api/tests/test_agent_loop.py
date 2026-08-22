@@ -20,7 +20,15 @@ import pytest
 
 from .agent_tool_world import isolated_registry
 from src.agent import registry
+from src.agent.executor import DISPATCH_FAILED, ToolExecutor
 from src.agent.guardrails import HALT_GUIDANCE
+from src.alpha.models import (
+    TOOL_CALL_OK,
+    TOOL_CALL_STATUSES,
+    TOOL_CALL_TIMEOUT,
+    TOOL_CALL_TOOL_ERROR,
+    TOOL_CALL_UNKNOWN_TOOL,
+)
 from src.agent.loop import (
     ANSWER,
     ANSWER_TRUNCATED,
@@ -67,6 +75,7 @@ from src.agent.loop import (
     shown_result,
     summarise_call,
     terminal_reason_for,
+    trace_status,
 )
 from src.agent.prompt import RuntimeContext, prefix as prompt_prefix, render
 from src.core.llm import (
@@ -417,8 +426,14 @@ async def test_a_reply_that_arrives_without_narration_is_not_nudged() -> None:
 
 @pytest.mark.asyncio
 async def test_the_round_ceiling_is_the_constant_and_the_last_call_answers() -> None:
+    # The last item answers, because the subject here is the ceiling and not the
+    # empty reply: a script that never speaks would end the Turn under
+    # ``empty_answer`` and test that instead.
     client = FakeClient(
-        [wants("web_search", query=f"q{index}") for index in range(MAX_TOOL_ROUNDS + 2)]
+        [wants("web_search", query=f"q{index}") for index in range(MAX_TOOL_ROUNDS)]
+        # The answering call, and one more item after it that the ceiling must
+        # never let the Turn reach.
+        + [answer("Xong rồi."), answer("không bao giờ dùng")]
     )
 
     outcome = await loop(client).run(turn_request())
@@ -827,13 +842,15 @@ async def test_a_local_tool_is_not_charged_to_the_external_budget() -> None:
 
 @pytest.mark.asyncio
 async def test_a_halt_makes_the_next_call_the_answering_one() -> None:
-    # Eight failures of one tool is the ladder's halt rung, and one round can
-    # reach it: a round that fans out is exactly where the model loses the plot.
+    # Six failures of one tool is the ladder's halt rung, and one round can reach
+    # it: a round that fans out is exactly where the model loses the plot. It is
+    # also reachable across rounds now — ``test_agent_guardrails`` holds that
+    # arithmetic — so this batch is a shape the ladder handles, not the only one.
     halting_round = Completion(
         model=SESSION_MODEL,
         tool_calls=tuple(
             ToolCall(id=f"c{index}", name="broken", arguments={"query": f"q{index}"})
-            for index in range(8)
+            for index in range(6)
         ),
     )
     client = FakeClient([halting_round, answer(), answer()])
@@ -863,7 +880,7 @@ async def test_a_halt_still_keeps_the_results_the_round_gathered() -> None:
             ToolCall(id="good", name="web_search", arguments={"query": "a"}),
             *(
                 ToolCall(id=f"c{index}", name="broken", arguments={"query": f"q{index}"})
-                for index in range(8)
+                for index in range(6)
             ),
         ),
     )
@@ -874,8 +891,42 @@ async def test_a_halt_still_keeps_the_results_the_round_gathered() -> None:
     by_id = {call.id: call for call in outcome.tool_calls}
     assert by_id["good"].status is ToolCallStatus.OK
     # Every call of the round has a result, including the ones the halt skipped.
-    assert len(outcome.tool_calls) == 9
+    assert len(outcome.tool_calls) == 7
     assert all(call.finished for call in outcome.tool_calls)
+
+
+@pytest.mark.asyncio
+async def test_a_call_the_harness_cannot_dispatch_does_not_end_the_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Injected through the loop's executor because the failure being tested is
+    # the harness's own: the registry lookup sits outside every try block in
+    # ``_dispatch``, so nothing a tool or a route does can reach it. That is why
+    # it went unnoticed while it was cancelling whole rounds.
+    def failing_lookup(name: str):
+        if name == "fetch_url":
+            raise RuntimeError("the registry is mid-reload")
+        return registry.get(name)
+
+    def build(**kwargs: Any) -> ToolExecutor:
+        return ToolExecutor(**kwargs, lookup=failing_lookup)
+
+    monkeypatch.setattr("src.agent.loop.ToolExecutor", build)
+    client = FakeClient([wants("web_search", "fetch_url"), answer("Được nhiêu đó.")])
+
+    outcome = await loop(client).run(turn_request())
+
+    # Not ``turn_failed``: one dead call is not a dead Turn, and the round's
+    # other result is still there to answer from.
+    assert outcome.status is TurnStatus.COMPLETE
+    assert outcome.terminal_reason is None
+    assert outcome.answer == "Được nhiêu đó."
+    by_name = {call.name: call for call in outcome.tool_calls}
+    assert by_name["web_search"].status is ToolCallStatus.OK
+    assert by_name["fetch_url"].error == DISPATCH_FAILED
+    assert by_name["fetch_url"].dispatched is False
+    # The model reads the failure back rather than guessing at a missing result.
+    assert "fetch_url" in (by_name["fetch_url"].result_text or "")
 
 
 # -- the route's failures ----------------------------------------------------
@@ -992,7 +1043,75 @@ async def test_the_trace_records_one_row_per_call_under_this_turn() -> None:
     assert len(written) == 2
     assert {row["tool_name"] for row in written} == {"web_search", "broken"}
     assert {row["request_message_id"] for row in written} == {51}
-    assert {row["status"] for row in written} == {"ok", "error"}
+    assert {row["status"] for row in written} == {
+        TOOL_CALL_OK,
+        TOOL_CALL_TOOL_ERROR,
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_call_for_a_tool_that_does_not_exist_is_traced_as_unknown_tool() -> None:
+    """The signal that decides whether sandboxed execution is ever worth building.
+
+    The ops query has always grouped this column by ``unknown_tool``; nothing had
+    ever written that word into it, so the number stood at zero however often the
+    model reached for a tool nobody had written.
+    """
+    written: list[dict[str, Any]] = []
+
+    async def trace(row):
+        written.append(dict(row))
+
+    client = FakeClient([wants("run_python"), answer()])
+
+    await loop(client, trace=trace).run(turn_request())
+
+    assert [row["tool_name"] for row in written] == ["run_python"]
+    assert written[0]["status"] == TOOL_CALL_UNKNOWN_TOOL
+    # And the specific reason stays in its own column rather than being folded in.
+    assert written[0]["error"] == "unknown_tool"
+
+
+@pytest.mark.asyncio
+async def test_a_verdict_and_a_tool_crash_share_a_status_and_not_a_reason() -> None:
+    """``status`` groups; ``error`` names. Four groups, one reason each.
+
+    A blocked call and a tool that threw are the same kind of outcome to an ops
+    reading and two different jobs to whoever fixes them, which is why the reason
+    is not collapsed into the group.
+    """
+    written: list[dict[str, Any]] = []
+
+    async def trace(row):
+        written.append(dict(row))
+
+    client = FakeClient([wants("broken"), answer()])
+
+    await loop(client, trace=trace).run(turn_request())
+
+    assert written[0]["status"] == TOOL_CALL_TOOL_ERROR
+    assert written[0]["error"] == "tool_failed"
+
+
+def test_the_status_written_is_always_one_the_column_was_declared_with() -> None:
+    """Held to the vocabulary rather than trusted with it.
+
+    ``tool_timeout`` is reached through the mapping rather than through a Turn:
+    a round that times out is cancelled inside the executor, so no trace row is
+    written for its calls at all. The group exists because the column declares
+    it and the loop already spells the reason that way — see the phase report for
+    the gap that leaves.
+    """
+    assert trace_status(ok=True, error=None) == TOOL_CALL_OK
+    assert trace_status(ok=False, error=TOOL_TIMEOUT) == TOOL_CALL_TIMEOUT
+    assert trace_status(ok=False, error="unknown_tool") == TOOL_CALL_UNKNOWN_TOOL
+    for reason in ("blocked_call", "halted_turn", "dispatch_failed", None):
+        assert trace_status(ok=False, error=reason) == TOOL_CALL_TOOL_ERROR
+    assert set(TOOL_CALL_STATUSES) == {
+        trace_status(ok=ok, error=reason)
+        for ok in (True, False)
+        for reason in (None, TOOL_TIMEOUT, "unknown_tool", "blocked_call")
+    }
 
 
 @pytest.mark.asyncio
@@ -1196,14 +1315,55 @@ def test_the_wire_payload_is_exactly_the_fields_of_the_contract() -> None:
         "name": "web_search",
         "status": "running",
         "summary": "Tìm trên web: x",
+        "error": None,
         "round": 2,
         "results": [],
         "result_count": 0,
     }
     # The two the allowlist exists to keep off a rendered channel. ``results``
-    # widened it; these did not come with it.
+    # and ``error`` widened it; these did not come with them.
     assert "arguments" not in payload
     assert "result_text" not in payload
+
+
+@pytest.mark.asyncio
+async def test_a_call_the_turn_refused_tells_the_surface_which_ceiling_refused_it() -> None:
+    """A budget the product imposed on itself is not a tool that broke.
+
+    The reader watching the screen sees a row per call. Until the reason
+    travelled, a Turn that had spent its external allowance drew those rows
+    exactly like a search engine going down — and the two ask opposite things of
+    the reader, because only one of them is worth trying again.
+    """
+    rounds = [
+        wants(*(["web_search"] * 3), prefix="a"),
+        wants(*(["web_search"] * 3), prefix="b"),
+        wants("web_search", prefix="c"),
+        answer(),
+    ]
+    published: list[dict[str, Any]] = []
+
+    class Surface:
+        def content_delta(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        def tool_call(self, payload):
+            published.append(dict(payload))
+
+    outcome = await loop(FakeClient(rounds), publisher=Surface()).run(turn_request())
+
+    # Six external calls ran; the seventh had nothing left to spend.
+    refused = [call for call in outcome.tool_calls if not call.dispatched]
+    assert [call.error for call in refused] == ["external_budget_exhausted"]
+    assert outcome.status is TurnStatus.COMPLETE
+
+    # And the surface was told the reason, not merely that something failed.
+    seen = {
+        payload["id"]: payload["error"]
+        for payload in published
+        if payload["status"] == "error"
+    }
+    assert set(seen.values()) == {"external_budget_exhausted"}
 
 
 def test_one_message_is_charged_deterministically() -> None:
