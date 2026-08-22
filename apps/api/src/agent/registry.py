@@ -24,9 +24,12 @@ flag takes effect without a restart.
 cache the built schema list; they cannot know when a tool appeared or left
 unless the registry says so with a number they can compare.
 
-Nothing here reads the market store, a provider, or a Signal Registry: the
-agent's tools are general capabilities, and the market data path is a separate
-serving surface that the model does not read.
+This module knows nothing about what any tool reads. That matters because the
+tools no longer all read the same kind of thing: the chat surface's five are
+general capabilities, and the ``signals`` bundle reads registered **Signal
+Field**s out of this system's own store. Which bundle a caller selects is what
+keeps them apart (``toolsets.py``), not a rule written here — a registry that
+tried to police provenance would be a second, weaker copy of that selection.
 """
 
 from __future__ import annotations
@@ -37,7 +40,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from src.core.llm import ToolSchema
@@ -70,17 +73,33 @@ class ToolShadowError(ValueError):
 
 @dataclass(frozen=True)
 class ToolContext:
-    """Trusted Turn facts handed to a handler out of band.
+    """Trusted facts handed to a handler out of band.
 
-    Never part of a tool schema: the model must not be able to name a user or a
-    thread it does not own, so identity arrives here and arguments arrive from
-    the model, and the two are never merged.
+    Never part of a tool schema: the model must not be able to name a user, a
+    thread, a symbol or a Trading Day it was not given, so identity arrives here
+    and arguments arrive from the model, and the two are never merged.
+
+    **Every field is optional because the callers are not one kind of caller.**
+    A Turn is owned by a user and belongs to a Thread; an Analysis is owned by
+    neither. An Analysis is keyed by ``(symbol, trading_day)`` and shared
+    system-wide (``src/alpha/watchlist.py``), so ``user_id`` on it would be a
+    number invented to fill a field. A handler that genuinely needs one refuses
+    when it is absent, in the same spirit as ``requires_env``: the condition is
+    stated where the handler is rather than assumed by its type.
     """
 
-    user_id: int
+    user_id: int | None = None
     thread_id: uuid.UUID | None = None
-    #: The Turn's clock. Injected so a handler that stamps a row and a test that
-    #: asserts the stamp read the same instant.
+    #: The symbol one Analysis is being produced for. Trusted rather than an
+    #: argument for the reason above: an argument naming a symbol is a route to
+    #: reading a symbol this call was not opened for.
+    symbol: str | None = None
+    #: The Trading Day that Analysis is keyed by. Trusted for the same reason,
+    #: and for one more: an argument naming a day is a route to a session that
+    #: has not closed yet.
+    trading_day: date | None = None
+    #: The caller's clock. Injected so a handler that stamps a row and a test
+    #: that asserts the stamp read the same instant.
     now: datetime | None = None
 
 

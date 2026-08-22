@@ -188,7 +188,7 @@ class MemoryTools:
                 ),
                 {
                     "query": query,
-                    "user_id": context.user_id,
+                    "user_id": _owner(context),
                     "excerpt": MAX_EXCERPT_CHARS,
                     "limit": limit,
                 },
@@ -230,7 +230,7 @@ class MemoryTools:
         as_of = _optional_instant(arguments.get("as_of"))
         with self._session_factory() as session:
             row = AgentKnowledge(
-                user_id=context.user_id,
+                user_id=_owner(context),
                 title=title,
                 body=body,
                 source_url=source_url,
@@ -297,7 +297,7 @@ class MemoryTools:
                     LIMIT :limit
                     """
                 ),
-                {"query": query, "user_id": context.user_id, "limit": limit},
+                {"query": query, "user_id": _owner(context), "limit": limit},
             ).mappings()
             facts = [
                 {
@@ -317,6 +317,30 @@ class MemoryTools:
             "count": len(facts),
             "reason": None if facts else "no_remembered_facts",
         }
+
+
+def _owner(context: ToolContext) -> int:
+    """The user these three tools are about, or a refusal naming what is missing.
+
+    ``ToolContext.user_id`` is optional because not every caller of the registry
+    has a user: an Analysis is keyed by ``(symbol, trading_day)`` and belongs to
+    nobody. These three tools do belong to somebody — every read is scoped to
+    one user's own rows in SQL — so the condition is asserted here rather than
+    assumed from the type. A refusal rather than a crash, because the executor
+    turns a raising handler into a result the model can read, and "this tool
+    needs a signed-in user" is exactly what it should read.
+
+    Unreachable through the chat lane, which always has a user, and unreachable
+    through the Analysis lane, which does not select the ``memory`` toolset at
+    all. It is the third caller — the one nobody has written yet — that this is
+    for.
+    """
+    if context.user_id is None:
+        raise ValueError(
+            "this tool reads one user's own conversation and there is no user in "
+            "this context"
+        )
+    return context.user_id
 
 
 def _source(value: Any) -> tuple[str, str]:

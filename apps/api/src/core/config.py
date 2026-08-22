@@ -218,6 +218,13 @@ class Settings(BaseSettings):
     # định là cặp production đã chốt; lane dev trỏ LLM_BASE_URL vào CLIProxyAPI
     # cục bộ và ghi đè cả hai model.
     alpha_desk_enabled: bool = False
+    # Whether an Analysis is produced by the evidence loop or by the one shot it
+    # replaced (``src/alpha/analysis_loop.py`` vs ``generation.py``). Both are
+    # reachable on purpose: the loop trades reproducibility for audit, and a
+    # deployment that finds the trade wrong turns it off here rather than waiting
+    # for a revert. Off, an Analysis is stamped ``promptVersion v1`` and reads
+    # eleven fixed figures; on, ``v2`` and whatever the model asked for.
+    analysis_evidence_loop_enabled: bool = True
     llm_base_url: str = ""
     llm_api_key: str = ""
     llm_model_batch: str = "gpt-5.6-luna"

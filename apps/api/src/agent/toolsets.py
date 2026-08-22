@@ -47,7 +47,29 @@ TOOLSETS: dict[str, Toolset] = {
         ),
         "tools": ("session_search", "remember_fact", "recall_facts"),
     },
+    # Selected by the Analysis lane and by nothing else. A Turn that named it
+    # would be reading the evidence plane through a surface whose whole boundary
+    # is that it does not (``1e7b936``), and the two lanes select their bundles
+    # in two different modules — so the separation is the selection rather than a
+    # rule stated twice.
+    "signals": {
+        "description": (
+            "Read one registered Signal Field for the symbol under analysis."
+        ),
+        "tools": ("list_fields", "get_field"),
+    },
 }
+
+
+#: What a conversation may reach for, and the only selection the chat lane makes.
+#:
+#: A list of *toolset names* rather than of tools, which is the distinction this
+#: module's opening paragraph is about: the members of a bundle move when a
+#: capability is switched on, and this does not. It is written down because the
+#: alternative is a default of "everything registered", and the day a bundle was
+#: added for another lane that default would hand it to every Turn without a
+#: single line changing.
+CHAT_TOOLSETS: tuple[str, ...] = ("web", "memory")
 
 
 class UnknownToolsetError(KeyError):
@@ -148,7 +170,30 @@ def known_toolsets(*, toolsets: Mapping[str, Toolset] | None = None) -> tuple[st
     return tuple(TOOLSETS if toolsets is None else toolsets)
 
 
+def _check_the_chat_selection_holds() -> None:
+    """Refuse to import a chat selection that names something it should not.
+
+    The boundary ``1e7b936`` drew — an assistant that reads none of this
+    system's data — survives now only because the chat lane does not select the
+    bundle that does. That is one tuple, and a tuple is one edit away from being
+    wrong, so the condition is asserted at import rather than left to a review.
+    """
+    unknown = [name for name in CHAT_TOOLSETS if name not in TOOLSETS]
+    if unknown:
+        raise UnknownToolsetError(unknown[0], tuple(TOOLSETS))
+    if "signals" in CHAT_TOOLSETS:
+        raise ValueError(
+            "the signals bundle reads this system's own evidence plane and is "
+            "selected by the Analysis lane; a conversation that could call it "
+            "would be the surface this agent was rebuilt not to be"
+        )
+
+
+_check_the_chat_selection_holds()
+
+
 __all__ = [
+    "CHAT_TOOLSETS",
     "CORE_TOOLS",
     "TOOLSETS",
     "Toolset",

@@ -1,7 +1,7 @@
 """Budget Validation refuses an impossible configuration at startup.
 
 The arithmetic is local and costs no tokens (``docs/adr/0014``): a pricing table
-that cannot fund one Analysis under $0.0045 or one Turn under $0.50 is a fact
+that cannot fund one Analysis under $0.015 or one Turn under $0.50 is a fact
 about the configuration, knowable before the first request. Discovering it
 halfway through a real Turn is the failure these checks exist to prevent.
 """
@@ -25,7 +25,9 @@ from src.core.llm.budget import (
 from src.core.llm.config import llm_config_from_settings
 
 # Prices that fund both workloads with room to spare: one Analysis costs
-# 6,000 x $0.5/Mtok + 1,500 x $1/Mtok = $0.0045, exactly the ceiling.
+# 24,000 x $0.5/Mtok + 3,000 x $1/Mtok = $0.015, exactly the ceiling. The
+# token figures are the whole of one Analysis and not of one call: the lane
+# is a bounded loop now (``src/alpha/analysis_loop.py``).
 AFFORDABLE = dict(
     llm_price_batch_input_usd_per_mtok=0.5,
     llm_price_batch_cached_input_usd_per_mtok=0.05,
@@ -93,7 +95,7 @@ class TestImpossibleConfiguration:
 
         assert not report.ok
         assert "analysis_cost" in _failed_ceilings(report)
-        assert "$0.0045" in report.summary()
+        assert "$0.0150" in report.summary()
 
     def test_a_turn_that_cannot_be_funded_names_its_ceiling(self):
         report = validate_budget(

@@ -26,9 +26,23 @@ from .protocol import Usage
 
 logger = logging.getLogger(__name__)
 
-ANALYSIS_INPUT_PER_CALL = 6_000
-ANALYSIS_OUTPUT_PER_CALL = 1_500
-ANALYSIS_COST_MICRO_USD = 4_500
+# What one call inside an Analysis may reserve, and what the whole Analysis may
+# cost. The two per-call bounds are deliberately as large as the whole
+# Analysis's token allowance: the Analysis lane is a *loop* now
+# (``src/alpha/analysis_loop.py``), and the thing that actually bounds it across
+# calls is ``ANALYSIS_COST_MICRO_USD`` below, checked against everything this
+# owner has already been charged. Two token ceilings per call as well would be a
+# second, weaker answer to a question the cost ceiling already answers exactly.
+#
+# They are not unbounded, and that matters: an envelope that grew past what one
+# generation can carry still arrives here reserved at its real size and is
+# refused under ``analysis_input_per_call``, which is the only way that defect
+# ever surfaces.
+ANALYSIS_INPUT_PER_CALL = 24_000
+ANALYSIS_OUTPUT_PER_CALL = 3_000
+# ``budget.ANALYSIS_COST_CEILING_USD`` in the ledger's own unit. One number in
+# two places, and the test suite compares them rather than trusting the comment.
+ANALYSIS_COST_MICRO_USD = 15_000
 TURN_CONTEXT_PER_CALL = 32_000
 TURN_INPUT_TOTAL = 100_000
 TURN_OUTPUT_TOTAL = 20_000
