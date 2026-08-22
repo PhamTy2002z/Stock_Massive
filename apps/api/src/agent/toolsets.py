@@ -54,9 +54,11 @@ TOOLSETS: dict[str, Toolset] = {
     # rule stated twice.
     "signals": {
         "description": (
-            "Read one registered Signal Field for the symbol under analysis."
+            "Read one registered Signal Field out of this system's own store, "
+            "and check a price published elsewhere against the exchange that "
+            "would have had to produce it."
         ),
-        "tools": ("list_fields", "get_field"),
+        "tools": ("list_fields", "get_field", "check_price_claim"),
     },
 }
 

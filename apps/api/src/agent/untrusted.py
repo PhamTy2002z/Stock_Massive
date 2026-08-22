@@ -13,8 +13,18 @@ Two decisions make this a defence rather than a decoration.
 **It lives here, not in the prompt.** A rule stated only in the system prompt is
 a rule applied to whatever the message layer happened to build. Wrapping at
 construction means there is no path by which external content reaches the model
-unwrapped — including tools added later, which are wrapped by naming their source
-rather than by remembering to ask.
+unwrapped — including tools added later, which are wrapped because their own
+registration declares where their results come from
+(``registry.ToolEntry.reads_external``) and an undeclared one reads as external.
+
+That last clause is the correction of a real defect rather than a description of
+an old design. This module used to decide from a frozenset of two tool names
+written here, while this paragraph already claimed the property the frozenset
+does not have: a tool added later was wrapped only when somebody remembered to
+edit the list. It is the same defect Hermes carries, where ``x_search`` is
+missing from its own ``_UNTRUSTED_TOOL_NAMES``. Asking the registration cannot
+be forgotten, because a registration is the thing that has to exist for the
+tool to be callable at all.
 
 **The delimiter is defanged inside the content.** Without that, a page can write
 the closing tag itself, and everything after it reads as though the harness had
@@ -31,6 +41,8 @@ from __future__ import annotations
 
 import re
 
+from . import registry
+
 #: Below this, a result is too short to carry an instruction and the wrapper
 #: would be most of what the model reads.
 MIN_WRAP_CHARS = 32
@@ -38,19 +50,19 @@ MIN_WRAP_CHARS = 32
 OPEN_TEMPLATE = '<untrusted_tool_result source="{source}">'
 CLOSE_TAG = "</untrusted_tool_result>"
 
-#: Tools whose results are content somebody else wrote. Named rather than
-#: derived from a toolset so that adding a tool to the ``web`` bundle cannot
-#: quietly opt it out — and so an MCP-style tool, whose provenance nothing here
-#: can inspect, can be added by name.
-UNTRUSTED_TOOLS = frozenset({"web_search", "fetch_url"})
-
 _DELIMITER = re.compile(r"<\s*(/?)\s*untrusted_tool_result", re.IGNORECASE)
 _SOURCE_UNSAFE = re.compile(r'[^0-9A-Za-z._:\-/ ]')
 
 
 def is_untrusted(tool_name: str) -> bool:
-    """Whether this tool's results are outside content."""
-    return tool_name in UNTRUSTED_TOOLS
+    """Whether this tool's results are outside content.
+
+    Answered by the registration, so a tool nobody registered — a name a route
+    invented, an MCP-style tool whose provenance nothing here can inspect — is
+    wrapped. Wrapping a store read costs a delimiter; not wrapping a stranger's
+    page costs the boundary this module exists to hold.
+    """
+    return registry.reads_external(tool_name)
 
 
 def defang(text: str) -> str:
@@ -92,7 +104,6 @@ __all__ = [
     "CLOSE_TAG",
     "MIN_WRAP_CHARS",
     "OPEN_TEMPLATE",
-    "UNTRUSTED_TOOLS",
     "defang",
     "is_untrusted",
     "wrap_result",

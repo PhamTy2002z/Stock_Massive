@@ -84,6 +84,10 @@ class MemoryTools:
                     ("query",),
                 ),
                 handler=self.session_search,
+                # The user's own earlier words. Already in the trust position
+                # the conversation gives them, so wrapping them would tell the
+                # model to weigh what it was itself told a moment ago.
+                reads_external=False,
             ),
             ToolEntry(
                 name="remember_fact",
@@ -119,6 +123,7 @@ class MemoryTools:
                     ("title", "body"),
                 ),
                 handler=self.remember_fact,
+                reads_external=False,
             ),
             ToolEntry(
                 name="recall_facts",
@@ -135,6 +140,7 @@ class MemoryTools:
                     ("query",),
                 ),
                 handler=self.recall_facts,
+                reads_external=False,
             ),
         )
 

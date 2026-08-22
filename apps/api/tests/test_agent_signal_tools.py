@@ -92,9 +92,10 @@ class TestWhoMayReachThem:
         assert "list_fields" not in resolve_toolset(CHAT_TOOLSETS)
         assert "get_field" not in resolve_toolset(CHAT_TOOLSETS)
 
-    def test_the_bundle_exists_and_holds_exactly_the_two_store_tools(self):
-        assert TOOLSETS["signals"]["tools"] == ("list_fields", "get_field")
-        assert resolve_toolset("signals") == ("list_fields", "get_field")
+    def test_the_bundle_holds_the_two_store_reads_and_the_price_check(self):
+        expected = ("list_fields", "get_field", "check_price_claim")
+        assert TOOLSETS["signals"]["tools"] == expected
+        assert resolve_toolset("signals") == expected
 
     def test_the_agent_loop_defaults_to_the_chat_selection(self):
         """Not to "every registered bundle", which would hand chat the store."""

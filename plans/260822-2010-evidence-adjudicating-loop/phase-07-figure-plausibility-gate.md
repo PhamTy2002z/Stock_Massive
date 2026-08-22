@@ -1,7 +1,7 @@
 ---
 phase: 7
 title: "Cổng kiểm số: bước check giữa call tool và phân tích"
-status: pending
+status: implemented
 ---
 
 # Phase 7 — Cổng kiểm số
@@ -139,3 +139,41 @@ HPG thật nêu cả ba (55.557 tỷ, 6.424 tỷ, 19%). Không có bước giá 
 số báo cáo tài chính, nên cách duy nhất kiểm chúng là đối chiếu BCTC đã lưu — mà store chưa
 lưu (`Non-goals` của plan này). Phase 7 đóng đúng một lớp: **giá**. Nói rõ để không ai đọc nó
 thành "số liệu AI nêu đã được kiểm".
+
+
+## Đã làm (2026-08-23)
+
+`agent/tools/price_check.py` — tool `check_price_claim(symbol, price, session_date?)`, đăng ký
+vào bundle `signals` nên cả hai lane đều có. Ba kiểm độc lập (`tick` · `band` · `store`) cộng
+trạng thái thứ tư `unverified` kèm lý do; không kiểm nào gộp vào một verdict chung.
+
+Ba điều lệch khỏi bản mô tả trong plan, mỗi điều một lý do đo được:
+
+1. **Bước giá trả lời được khi không có phiên nào.** Bước giá là thuộc tính của **sàn**, không
+   của phiên; chỉ `band` và `store` cần một phiên. Cho cả ba cùng `unverified` vì thiếu ngày sẽ
+   che đúng cái kiểm duy nhất tự nó chứng minh được một giá là bất khả. Sàn hỏi theo
+   `session_date` khi có, theo hôm nay khi không — vẫn qua `listing_roster` + register di trú,
+   không hardcode HOSE.
+2. **`session_date` bỏ trống rơi về phiên gần nhất store có**, không phải hôm nay: hôm nay có
+   thể chưa đóng, và một biên độ đang chạy không kiểm được cái gì.
+3. **`price_basis` không phải `raw` thì `band` và `store` trả `unverified`.** Một close đã điều
+   chỉnh tại nguồn không phải giá tham chiếu sàn đặt biên độ từ đó, và đối chiếu nó với một giá
+   thô là đối chiếu hai đại lượng khác nhau — đúng lớp lỗi mà cả module này tồn tại để gọi tên.
+
+`check_price_claim` **không đọc `ToolContext.symbol`**: chủ thể ở đây là một lời khẳng định,
+không phải hàng mà lời gọi được mở cho. Một giá nêu giữa lượt Analysis thường là về công ty
+khác, và khoá kiểm vào mã đang phân tích sẽ để đúng những lời khẳng định đó không được kiểm.
+
+`registry.ToolEntry.reads_external` thay `untrusted.UNTRUSTED_TOOLS`. Mặc định `True` — tool
+không khai là tool được bọc. Docstring của `untrusted.py` đã sửa cho khớp hành vi; nó vốn đang
+khẳng định đúng tính chất mà frozenset không có.
+
+**Đo, chưa dựng backstop.** `agent/ops.py::read_price_check_compliance` đếm: trong các Turn vừa
+đọc nội dung ngoài vừa nêu một số dạng giá, bao nhiêu Turn đã gọi `check_price_claim`. Mẫu số
+hẹp có chủ đích — Turn trả lời từ store, hay không nêu số nào, không nợ một lần kiểm. `rate` là
+`None` chứ không phải `0` trên cửa sổ rỗng. `names_a_price` là heuristic đọc-only, **không** nối
+vào tầng dựng message: `55.557 tỷ` và `12.500%` cùng hình dạng với một mức giá và không phải
+giá, nên nó loại theo từ đơn vị đứng sau.
+
+Test: `tests/test_agent_price_check.py` (27 case) · `tests/test_agent_ops_query.py` (11 case
+mới).
