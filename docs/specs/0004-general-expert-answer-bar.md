@@ -1,5 +1,14 @@
 # Product specification — the General-Expert Answer Bar
 
+> **Superseded in part, 2026-08-22.** The interactive agent this document
+> specifies no longer exists. `docs/adr/0026` replaced it with a general
+> assistant on a Hermes-shaped harness that reads none of this project's data:
+> the Tool Catalog, the Recommendation Validator, the Evidence Manifest, the
+> typed Widget protocol and the labelled analysis blocks are all gone. What
+> still holds here is everything about the **price board** and the
+> deterministic **Analysis** lane — the signals package, the serving path, the
+> collector and the nightly pipeline. Read the agent sections as history.
+
 Why the agent's answers today lose to pasting the same question into ChatGPT, and
 what has to change so they win. This spec records the decisions closed in the
 2026-08-17 grilling session with the product owner, defines the acceptance bar for
