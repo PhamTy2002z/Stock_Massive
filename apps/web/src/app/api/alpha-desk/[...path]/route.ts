@@ -34,6 +34,14 @@ import { currentAccessToken, rotateAccessToken } from "@/lib/auth/bearer"
  *
  * A stream is a `GET`, so it carries no request body to replay; that is why the
  * one refresh retry is still safe on this path.
+ *
+ * `assets` is a third body shape: binary, not JSON and not an event stream.
+ * `await response.text()` decodes the upstream body as UTF-8 text, which is
+ * exactly wrong for an image — it would replace bytes the decoder cannot
+ * represent and hand the browser a corrupted favicon. So `assets` goes out
+ * unbuffered, the same way an event stream does, carrying whatever
+ * `Content-Type` and `Cache-Control` the API set rather than the JSON
+ * defaults below.
  */
 
 // The resources this proxy will carry, matched on the first path segment.
@@ -41,8 +49,19 @@ import { currentAccessToken, rotateAccessToken } from "@/lib/auth/bearer"
 // `analyses` are the rail and the Analyses behind it. `messages` is the flag
 // action of ADR-0016 and nothing else: upstream mounts `POST` and `DELETE` on
 // `/messages/{id}/flag` alone, and both resolve ownership through the Thread, so
-// the same argument covers it.
-const FORWARDED_RESOURCES = new Set(["watchlist", "analyses", "threads", "turns", "messages"])
+// the same argument covers it. `assets` is the favicon fetch-and-cache: the
+// browser must never reach a search result's domain directly to load its
+// icon — that would tell the domain, and the network path to it, which page a
+// signed-in user is reading and from what IP — so the API fetches it and this
+// allowlist is what lets the browser reach that endpoint at all.
+const FORWARDED_RESOURCES = new Set([
+  "watchlist",
+  "analyses",
+  "threads",
+  "turns",
+  "messages",
+  "assets",
+])
 
 const EVENT_STREAM = "text/event-stream"
 
@@ -164,7 +183,17 @@ async function forward(request: NextRequest, path: string[]): Promise<NextRespon
     // Exactly one refresh and exactly one retry. A loop here would turn one
     // dead credential into a run of identical exchanges against a token that
     // rotates on every one of them.
-    await response.body?.cancel()
+    //
+    // The refused body is **read** and thrown away rather than cancelled.
+    // `body.cancel()` never settles under the fetch this runtime installs, and
+    // an await that never returns here is the worst possible place for one: the
+    // rotation below never runs, so the request the browser is waiting on hangs
+    // instead of being retried with a fresh token — which is every request on
+    // this path from the moment an access token expires. Reading it is what the
+    // success path does with the same body a few lines down, so it is the shape
+    // already proven against this runtime, and a refusal's body is one short
+    // sentence of JSON.
+    await response.text().catch(() => "")
     token = (await rotateAccessToken()) ?? undefined
     if (!token) {
       return NextResponse.json({ detail: "Not authenticated" }, { status: 401 })
@@ -173,6 +202,7 @@ async function forward(request: NextRequest, path: string[]): Promise<NextRespon
   }
 
   if (isEventStream(response)) return streamed(response)
+  if (path[0] === "assets") return passthrough(response)
 
   const payload = await response.text()
   return new NextResponse(payload || null, {
@@ -204,6 +234,25 @@ function streamed(response: Response): NextResponse {
   return new NextResponse(response.body, {
     status: response.status,
     headers: { ...STREAM_HEADERS },
+  })
+}
+
+/**
+ * Hand a binary upstream body on without decoding it, keeping its own headers.
+ *
+ * Unlike `streamed`, the `Content-Type` and `Cache-Control` are not fixed —
+ * they are the favicon endpoint's own decision (an image type and a long or
+ * short cache lifetime depending on whether one was found), and copying them
+ * through is what lets the browser cache a hit for a week and a miss for a
+ * day exactly as the API intended.
+ */
+function passthrough(response: Response): NextResponse {
+  return new NextResponse(response.body, {
+    status: response.status,
+    headers: {
+      "Content-Type": response.headers.get("Content-Type") ?? "application/octet-stream",
+      "Cache-Control": response.headers.get("Cache-Control") ?? "no-store",
+    },
   })
 }
 

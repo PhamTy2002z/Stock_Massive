@@ -79,6 +79,29 @@ function json(payload: unknown, status = 200): Response {
   })
 }
 
+/**
+ * A refusal whose body can be read but never cancelled.
+ *
+ * Not a hypothetical. The `fetch` this app runs on hands back a body whose
+ * `cancel()` never settles, so a handler that awaited it stopped there — and
+ * because that await sits before the token rotation, every request on this path
+ * hung from the moment an access token expired instead of being retried. A real
+ * `ReadableStream` cannot express "readable but uncancellable", so the body is
+ * hand-made: this test pins the handler's behaviour against the runtime it
+ * actually has rather than against the one the spec describes.
+ */
+function uncancellableRefusal(payload: unknown, status = 401): Response {
+  const body = {
+    cancel: () => new Promise<void>(() => {}),
+  } as unknown as ReadableStream<Uint8Array>
+  return {
+    status,
+    body,
+    headers: new Headers({ "Content-Type": "application/json" }),
+    text: async () => JSON.stringify(payload),
+  } as unknown as Response
+}
+
 let fetchMock: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
@@ -188,6 +211,24 @@ describe("an expired token", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer access-1")
     expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe("Bearer access-2")
+    expect(response.status).toBe(200)
+    await response.body?.cancel()
+  })
+
+  it("rotates and retries even when the refused body cannot be cancelled", async () => {
+    fetchMock
+      .mockResolvedValueOnce(uncancellableRefusal({ detail: "Not authenticated" }))
+      .mockResolvedValueOnce(slowEventStream(["id: 1\ndata: {}\n\n"], []))
+
+    const response = await GET(
+      request(`${ORIGIN}/api/alpha-desk/turns/abc/events`),
+      context(["turns", "abc", "events"]),
+    )
+
+    // The point of the assertion is that this line is reached at all: the
+    // handler got past the refused body, rotated, and asked again.
+    expect(rotateAccessToken).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(response.status).toBe(200)
     await response.body?.cancel()
   })
