@@ -175,6 +175,9 @@ class SignalTools:
                     }
                 ),
                 handler=self.list_fields,
+                # This system's own field registry. Nothing here was written
+                # outside the deployment, so the message layer does not wrap it.
+                reads_external=False,
                 # Pure: a registry read, no session, no socket. There is nothing
                 # here to move off the event loop.
                 is_async=True,
@@ -203,6 +206,7 @@ class SignalTools:
                     ("field_id",),
                 ),
                 handler=self.get_field,
+                reads_external=False,
                 # ``serve_field`` takes a synchronous Session, so this blocks;
                 # the executor moves it to a worker thread rather than letting
                 # one store read stall the rest of the round.

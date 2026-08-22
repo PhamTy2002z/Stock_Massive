@@ -316,6 +316,11 @@ class WebTools:
                     ("query",),
                 ),
                 handler=self.web_search,
+                # Stated rather than left to the default, because this is the
+                # tool the default exists for: what comes back is a stranger's
+                # writing, and the message layer wraps it on the strength of
+                # this line.
+                reads_external=True,
                 # Both halves are required: the flag is the deployment's decision
                 # and the key is whether the call can be made at all. Offering the
                 # tool without one of them buys a refusal the model has to spend a
@@ -336,6 +341,7 @@ class WebTools:
                     {"url": {"type": "string", "minLength": 1}}, ("url",)
                 ),
                 handler=self.fetch_url,
+                reads_external=True,
                 check_fn=lambda: bool(self._settings.web_tools_enabled),
                 max_result_size_chars=PAGE_RESULT_CHARS,
             ),

@@ -121,7 +121,7 @@ nào để chấm, và chấm cần ≥20 phiên (sàn T+2). Nó là bar thứ h
 | 4 | [Vòng lặp thay `generate_fragment`](phase-04-analysis-loop.md) | `alpha/analysis_loop.py`, `production.py`, `core/llm/budget`+`admission` | 2, 3 | ✅ |
 | 5 | [Substitution rate](phase-05-substitution-rate.md) | `alpha/analysis_reads.py`, ops | 2, 4 | pending |
 | 6 | [Chat đọc store](phase-06-chat-store-tools.md) | `toolsets.py`, `prompt/sections.py` | 3, 7 | pending |
-| 7 | [Cổng kiểm số](phase-07-figure-plausibility-gate.md) | `agent/tools/price_check.py`, `untrusted.py` | 3 | pending |
+| 7 | [Cổng kiểm số](phase-07-figure-plausibility-gate.md) | `agent/tools/price_check.py`, `untrusted.py`, `registry`, `ops` | 3 | ✅ |
 
 Phase 1–3 độc lập về file. **Phase 7 phải xong trước Phase 6**: Phase 6 thêm tool vào chat, và
 `untrusted.py:45` đang gắn nhãn untrusted bằng frozenset viết tay — Phase 7 đổi nó sang thuộc

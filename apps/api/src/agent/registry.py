@@ -24,12 +24,17 @@ flag takes effect without a restart.
 cache the built schema list; they cannot know when a tool appeared or left
 unless the registry says so with a number they can compare.
 
-This module knows nothing about what any tool reads. That matters because the
-tools no longer all read the same kind of thing: the chat surface's five are
-general capabilities, and the ``signals`` bundle reads registered **Signal
-Field**s out of this system's own store. Which bundle a caller selects is what
-keeps them apart (``toolsets.py``), not a rule written here — a registry that
-tried to police provenance would be a second, weaker copy of that selection.
+**Provenance is declared, not remembered.** A registration says whether its
+results are content from outside this deployment
+(:attr:`ToolEntry.reads_external`), and the layer that builds the message asks
+this rather than checking a hand-written list of tool names. A list is a thing
+somebody has to remember to extend, and the tool that gets forgotten is by
+definition the newest one — the failure ``untrusted.py`` describes and, until
+this attribute existed, also had.
+
+Which *bundle* a caller selects is still what decides what a lane may call
+(``toolsets.py``). This attribute answers a different question: given that it
+was called, is what came back somebody else's writing.
 """
 
 from __future__ import annotations
@@ -122,6 +127,18 @@ class ToolEntry:
     #: Environment variables that must be set and non-empty. Kept separate from
     #: ``check_fn`` so a missing credential is stated declaratively.
     requires_env: tuple[str, ...] = ()
+    #: Whether this tool's results are content somebody outside this deployment
+    #: wrote. ``untrusted.py`` wraps those at the layer that builds the message,
+    #: and it asks this rather than consulting a list of names it has to
+    #: remember to extend.
+    #:
+    #: **The default is the unsafe answer stated safely.** A registration that
+    #: says nothing is treated as external, so a tool added without a thought
+    #: about provenance is wrapped rather than trusted. The cost of being wrong
+    #: this way is a delimiter around a store read; the cost the other way is a
+    #: web page reaching the model in the position the harness's own
+    #: instructions occupy.
+    reads_external: bool = True
     #: ``False`` for a blocking handler; the executor moves those off the event
     #: loop rather than letting them stall every other call in the round.
     is_async: bool = True
@@ -281,6 +298,18 @@ def get_max_result_size(name: str) -> int | None:
     return None if entry is None else entry.max_result_size_chars
 
 
+def reads_external(name: str) -> bool:
+    """Whether this tool's results are content from outside this deployment.
+
+    An unregistered name answers ``True``. That is not a placeholder: the only
+    callers are the wrapper and the external-call ceiling, and both are asking
+    "must I be careful about this", where the honest answer about a tool nobody
+    registered is yes.
+    """
+    entry = _ENTRIES.get(name)
+    return True if entry is None else entry.reads_external
+
+
 def object_schema(
     properties: Mapping[str, Mapping[str, Any]], required: Sequence[str] = ()
 ) -> dict[str, Any]:
@@ -324,5 +353,6 @@ __all__ = [
     "is_available",
     "names",
     "object_schema",
+    "reads_external",
     "register",
 ]

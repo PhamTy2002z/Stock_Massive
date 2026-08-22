@@ -213,13 +213,21 @@ async def _slow(_context: registry.ToolContext, _arguments) -> Any:
     return {"found": "eventually"}
 
 
+WEB_TOOLS = {"web_search", "fetch_url"}
+
+
 def entry(name: str, handler=_ok, **overrides: Any) -> registry.ToolEntry:
     fields: dict[str, Any] = {
         "name": name,
-        "toolset": "web" if name in {"web_search", "fetch_url"} else "memory",
+        "toolset": "web" if name in WEB_TOOLS else "memory",
         "schema": registry.object_schema({"query": {"type": "string"}}),
         "handler": handler,
         "description": f"stub {name}",
+        # Declared, because the message layer reads it: a stub memory tool left
+        # at the conservative default would have its results wrapped as a
+        # stranger's writing, and these tests would be asserting against a
+        # surface the process does not have.
+        "reads_external": name in WEB_TOOLS,
     }
     fields.update(overrides)
     return registry.ToolEntry(**fields)
@@ -1145,6 +1153,7 @@ def test_web_content_is_wrapped_and_our_own_guidance_stays_outside_it() -> None:
 
 
 def test_a_local_tools_result_is_not_wrapped() -> None:
+    """Read off the registration, so the surface has to be installed to ask."""
     call = TurnToolCall(
         id="c1",
         name="recall_facts",
@@ -1152,7 +1161,11 @@ def test_a_local_tools_result_is_not_wrapped() -> None:
         result_text="x" * 200,
     )
 
-    assert shown_result(call) == "x" * 200
+    from src.agent.tools import register_all
+
+    with isolated_registry():
+        register_all()
+        assert shown_result(call) == "x" * 200
 
 
 def test_a_summary_is_a_sentence_and_names_one_allowlisted_argument() -> None:
