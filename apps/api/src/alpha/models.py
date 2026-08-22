@@ -1,6 +1,12 @@
-"""The nine tables Alpha Desk stands on, declared together.
+"""The ten tables Alpha Desk stands on.
 
-Five of them stay empty until the agent loop lands. They are here anyway,
+Nine of them were declared together and arrived in one revision. The tenth,
+``analysis_tool_call``, came later and alone: it is the audit trail an Analysis
+produced by a loop leaves behind, and nothing in the original nine depends on
+it. Amending a revision other worktrees have already run is worse than adding
+one.
+
+Five of the nine stay empty until the agent loop lands. They are here anyway,
 because they come into existence together: ``agent_message`` means nothing
 without ``agent_thread``, and a trace anchored to a message that does not exist
 is not a partial system, it is a broken one. Splitting them into nine
@@ -24,10 +30,12 @@ is enforced by the database rather than by the code that writes it:
 2. Transcript order is held by ``UNIQUE(thread_id, seq)``, never by timestamps.
    Two streamed messages can share a millisecond, and a timestamp cannot express
    inserting between two rows.
-3. Traces anchor to the user's message (``request_message_id`` NOT NULL) — the
-   one row that already exists before the first tool call. A nullable id patched
-   in once the assistant message forms would orphan traces exactly when a Turn
-   dies mid-flight and the trace matters most.
+3. Traces anchor to the row that already exists before the first tool call, and
+   the anchor is NOT NULL: a chat trace to the user's message
+   (``request_message_id``), an Analysis trace to the run (``run_id``), never to
+   the ``analysis`` row that only exists once production succeeded. A nullable
+   anchor patched in later would orphan traces exactly when a Turn or a run dies
+   mid-flight and the trace matters most.
 """
 
 from sqlalchemy import (
@@ -205,6 +213,79 @@ class AnalysisRun(Base):
 
     def __repr__(self) -> str:
         return f"<AnalysisRun {self.symbol} {self.trading_day} {self.status}>"
+
+
+class AnalysisToolCall(Base):
+    """One tool call an Analysis made while it was being produced.
+
+    An Analysis produced by a loop is no longer rebuildable from the store —
+    ``src/alpha/envelope.py`` states the property this gives up, and this table
+    is what is bought back with it. Reproducibility is replaced by audit: what
+    was asked, what came back, in what order.
+
+    **Anchored to the run, not to the Analysis.** A run exists before an
+    Analysis does (``src/alpha/analysis_run.py``: a row in ``analysis`` existing
+    means it is complete), so ``analysis.id`` is not available when the first
+    tool call is made. Anchoring there would orphan the trace exactly when a run
+    dies mid-flight and the trace is the most valuable thing left.
+
+    **``round_index`` does not reset between attempts.** One run row serves all
+    three attempts of a ``(symbol, trading_day)`` pair, so the trace of every
+    attempt lands under the same run and the counter keeps climbing across them.
+    A reader looking for "the second round" finds one row per attempt, not one
+    row. This is the assumption most likely to be made wrong, which is why it is
+    written here rather than left to the reader.
+
+    Not a widened ``agent_tool_call``: that table's anchors are NOT NULL foreign
+    keys to a Thread and a message, and an Analysis Run has neither. Nullable-ing
+    them would teach every existing reader that two columns it relies on can now
+    be null, and would put two retention policies — the chat trace is swept at 90
+    days, an Analysis trace should live as long as its Analysis — on one
+    ``started_at``.
+    """
+
+    __tablename__ = "analysis_tool_call"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    run_id = Column(
+        BigInteger,
+        ForeignKey("analysis_run.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    round_index = Column(Integer, nullable=False)
+    seq = Column(Integer, nullable=False)
+    tool_name = Column(String(64), nullable=False)
+    # The route's own id for this call. Nullable for the same reason as the chat
+    # table's: a gateway that sent no id gives us nothing to store.
+    tool_call_id = Column(String(128), nullable=True)
+    arguments = Column(JSONB, nullable=False)
+    result = Column(JSONB, nullable=True)
+    # ok | tool_error | timeout | unknown_tool | blocked
+    status = Column(String(16), nullable=False)
+    error = Column(String(500), nullable=True)
+    latency_ms = Column(Integer, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        # Order is a pair of columns, never a clock: two calls dispatched
+        # together in one round share a millisecond, and a timestamp cannot
+        # express inserting between two rows. Reading a run's whole trace in
+        # order is the only query this table has, and this constraint's index
+        # serves it — which is why there is no second index here, and none on
+        # ``started_at``: nothing sweeps this table by age.
+        UniqueConstraint(
+            "run_id",
+            "round_index",
+            "seq",
+            name="uq_analysis_tool_call_run_round_seq",
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<AnalysisToolCall run={self.run_id} "
+            f"r{self.round_index}.{self.seq} {self.tool_name} {self.status}>"
+        )
 
 
 class AgentThread(Base):
