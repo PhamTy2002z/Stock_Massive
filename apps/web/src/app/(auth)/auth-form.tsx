@@ -2,11 +2,12 @@
 
 import Link from "next/link"
 import { unstable_rethrow, useSearchParams } from "next/navigation"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Eye, EyeOff, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { VisgniteMark, VisgniteWordmark } from "@/components/shared/visgnite-logo"
+import { clearDeskSession } from "@/lib/alpha-desk/desk-session"
 
 import type { AuthActionResult } from "./actions"
 
@@ -53,6 +54,13 @@ export default function AuthForm({ mode, action }: AuthFormProps) {
 
   const copy = COPY[mode]
   const isRegister = mode === "register"
+
+  // Whatever this tab was reading before, it is not what the person signing in
+  // asked for. Done on mount rather than after the action, because the action
+  // redirects and never hands control back to this component.
+  useEffect(() => {
+    clearDeskSession()
+  }, [])
 
   async function onSubmit(formData: FormData) {
     setIsLoading(true)

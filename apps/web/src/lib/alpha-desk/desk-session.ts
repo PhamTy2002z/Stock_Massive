@@ -61,6 +61,20 @@ export function writeDeskSession(session: DeskSession): void {
 }
 
 /**
+ * Forget what this tab was doing.
+ *
+ * Called from the way in. A remembered Thread is a convenience for a reload of
+ * the desk, not a place to be returned to across a sign-in: someone who has just
+ * given their password is starting, and dropping them into whichever
+ * conversation this tab had open before reads as the app deciding for them.
+ * Clearing it here rather than after the redirect keeps the decision on the one
+ * screen that means "a session begins now".
+ */
+export function clearDeskSession(): void {
+  safeRemove()
+}
+
+/**
  * What the surface opens onto, given the URL and what this tab remembers.
  *
  * Two entry points, and they mean opposite things. A deep link is a fresh
