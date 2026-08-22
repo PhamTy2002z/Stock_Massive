@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from src.agent.guardrails import (
+    DEFAULT_THRESHOLDS,
     NO_PROGRESS,
     REPEATED_FAILURE,
     REPEATED_TOOL_FAILURE,
@@ -12,6 +13,7 @@ from src.agent.guardrails import (
     call_signature,
     result_signature,
 )
+from src.agent.loop import MAX_EXTERNAL_TOOL_CALLS, MAX_TOOL_ROUNDS
 
 ARGUMENTS = {"query": "lãi suất", "limit": 3}
 
@@ -54,9 +56,9 @@ def test_the_third_failure_of_one_tool_warns_even_with_new_arguments():
     assert third.reason == REPEATED_TOOL_FAILURE
 
 
-def test_the_sixth_identical_call_is_blocked_before_it_is_dispatched():
+def test_the_fourth_identical_call_is_blocked_before_it_is_dispatched():
     guardrails = TurnGuardrails()
-    for _ in range(5):
+    for _ in range(3):
         guardrails.after_call("web_search", ARGUMENTS, ok=False)
 
     decision = guardrails.before_call("web_search", ARGUMENTS)
@@ -68,7 +70,7 @@ def test_the_sixth_identical_call_is_blocked_before_it_is_dispatched():
 
 def test_a_call_that_has_not_failed_is_never_blocked():
     guardrails = TurnGuardrails()
-    for _ in range(5):
+    for _ in range(3):
         guardrails.after_call("web_search", ARGUMENTS, ok=False)
 
     assert guardrails.before_call("web_search", {"query": "something else"}).verdict is (
@@ -76,11 +78,55 @@ def test_a_call_that_has_not_failed_is_never_blocked():
     )
 
 
-def test_the_eighth_failure_of_one_tool_halts_the_turn():
+def test_the_block_rung_is_reached_at_one_call_a_round():
+    # The shape the loop actually produces: judge, dispatch, record, next round.
+    # No fan-out, and the rung still lands inside MAX_TOOL_ROUNDS — which is the
+    # whole point of the threshold being three rather than five.
+    guardrails = TurnGuardrails()
+
+    verdicts = []
+    for _ in range(MAX_TOOL_ROUNDS):
+        decision = guardrails.before_call("web_search", ARGUMENTS)
+        verdicts.append(decision.verdict)
+        if decision.verdict is Verdict.ALLOW:
+            guardrails.after_call("web_search", ARGUMENTS, ok=False)
+
+    assert verdicts[-1] is Verdict.BLOCK
+    assert verdicts[:-1] == [Verdict.ALLOW] * (MAX_TOOL_ROUNDS - 1)
+
+
+def test_the_halt_rung_is_reached_inside_the_external_call_budget():
+    # Two searches a round is an ordinary fan-out, not a pathological one, and
+    # six failures is the whole external allowance. Under the old threshold of
+    # eight this could not happen at all: the Turn ran out of calls first.
+    guardrails = TurnGuardrails()
+
+    verdicts = []
+    for round_index in range(MAX_TOOL_ROUNDS):
+        if guardrails.halted:
+            break
+        for slot in range(2):
+            verdicts.append(
+                guardrails.after_call(
+                    "web_search", {"query": f"r{round_index}-{slot}"}, ok=False
+                ).verdict
+            )
+
+    assert len(verdicts) <= MAX_EXTERNAL_TOOL_CALLS
+    assert verdicts[-1] is Verdict.HALT
+    assert guardrails.halted is True
+
+
+def test_the_halt_rung_is_the_external_call_ceiling():
+    # One fact, written once. Whoever moves either number reads this line first.
+    assert DEFAULT_THRESHOLDS.same_tool_failure_halt_after == MAX_EXTERNAL_TOOL_CALLS
+
+
+def test_the_sixth_failure_of_one_tool_halts_the_turn():
     guardrails = TurnGuardrails()
     verdicts = [
         guardrails.after_call("fetch_url", {"url": f"https://{index}.example"}, ok=False)
-        for index in range(8)
+        for index in range(6)
     ]
 
     assert verdicts[-1].verdict is Verdict.HALT
@@ -136,7 +182,7 @@ def test_a_new_answer_clears_the_no_progress_streak():
 
 def test_a_turn_that_resets_starts_from_the_first_rung_again():
     guardrails = TurnGuardrails()
-    for _ in range(8):
+    for _ in range(6):
         guardrails.after_call("fetch_url", {"url": "https://a.example"}, ok=False)
     assert guardrails.halted is True
 

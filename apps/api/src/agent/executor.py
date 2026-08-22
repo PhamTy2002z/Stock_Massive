@@ -18,9 +18,21 @@ consequence.
 issued, whatever order they executed in. The model reads its own batch back.
 
 **Every call produces exactly one result.** A blocked call, an unknown tool, a
-handler that raised, a call skipped because the Turn halted — each returns a
+handler that raised, a call skipped because the Turn halted, a call this module
+itself failed to dispatch, a call past the round's ceiling — each returns a
 result carrying the reason. A tool call with no result is a conversation the
-provider will reject, so there is no path here that drops one.
+provider will reject, so there is no path here that drops one. That includes
+this module's own failures: ``_dispatch`` guards the handler and the arguments,
+but the registry lookup, the availability check and the trace write sit outside
+those guards, and an exception there used to cancel every sibling in the
+``gather`` and take the round's gathered results with it.
+
+**A round has a ceiling.** :data:`MAX_CALLS_PER_ROUND` calls are dispatched and
+the rest are answered with the reason, in the order the model issued them, so
+the head of a batch runs and the tail is told it was cut. Unbounded fan-out is
+two problems at once: a round timeout shared by forty concurrent reads, and a
+way past the repetition ladder, whose ``before_call`` verdicts for one batch are
+all decided before its first ``after_call`` records anything.
 
 Concurrency is ``asyncio`` and not a thread pool: this codebase is async
 throughout, and the one case that genuinely blocks — a handler that declares
@@ -66,6 +78,22 @@ INVALID_ARGUMENTS = "invalid_arguments"
 BLOCKED_CALL = "blocked_call"
 HALTED_TURN = "halted_turn"
 TOOL_FAILED = "tool_failed"
+#: This module broke, rather than the tool or the route. Its own code, so its
+#: own name: ``tool_failed`` would file a harness bug under the tool that was
+#: working, and the operational count that matters is the one nobody expects to
+#: be non-zero.
+DISPATCH_FAILED = "dispatch_failed"
+#: Answered rather than dropped, and answered rather than raised: the round's
+#: ceiling is a limit on what runs, not on what the model hears back.
+ROUND_FANOUT_EXCEEDED = "round_fanout_exceeded"
+
+#: How many calls of one round are dispatched. Arithmetic rather than taste: a
+#: Turn gets four rounds (``loop.MAX_TOOL_ROUNDS``) and six calls to the tools
+#: that leave this deployment (``loop.MAX_EXTERNAL_TOOL_CALLS``), so a round
+#: needing more than six calls is not a Turn making progress. Eight leaves a
+#: round room to spend that whole external allowance beside a memory read, and
+#: still refuses the fan-out that has no legitimate shape.
+MAX_CALLS_PER_ROUND = 8
 
 Mode = Literal["parallel", "sequential"]
 Segment = tuple[Mode, tuple["ToolCall", ...]]
@@ -147,19 +175,42 @@ class ToolExecutor:
         results: dict[str, ToolResult] = {}
         halt_reason: str | None = None
         guidance: str | None = None
+        # The ceiling is taken over the batch as the model issued it rather than
+        # segment by segment: the head of the batch runs and the tail is
+        # refused, so the model reads its own order back with the cut where it
+        # made it.
+        admitted = {call.id for call in calls[:MAX_CALLS_PER_ROUND]}
         for mode, segment in plan_segments(calls):
+            for call in segment:
+                if call.id not in admitted:
+                    results[call.id] = await self._over_ceiling(call, len(calls))
+            runnable = tuple(call for call in segment if call.id in admitted)
+            if not runnable:
+                continue
             if self.guardrails.halted:
-                for call in segment:
+                for call in runnable:
                     results[call.id] = self._skipped(call)
                 continue
-            if mode == "parallel" and len(segment) > 1:
-                completed = await asyncio.gather(
-                    *(self._dispatch(call) for call in segment)
+            completed: list[ToolResult | BaseException]
+            if mode == "parallel" and len(runnable) > 1:
+                # ``return_exceptions`` because the alternative is a sibling's
+                # failure cancelling calls that were about to succeed, and then
+                # a Turn that ends under ``turn_failed`` having thrown away
+                # everything the round had already paid for.
+                completed = list(
+                    await asyncio.gather(
+                        *(self._dispatch(call) for call in runnable),
+                        return_exceptions=True,
+                    )
                 )
             else:
-                completed = [await self._dispatch(call) for call in segment]
-            for result in completed:
-                results[result.call_id] = result
+                completed = [await self._attempt(call) for call in runnable]
+            for call, finished in zip(runnable, completed, strict=True):
+                results[call.id] = (
+                    finished
+                    if isinstance(finished, ToolResult)
+                    else self._dispatch_failed(call, finished)
+                )
         if self.guardrails.halted:
             halt_reason = HALTED_TURN
             guidance = HALT_GUIDANCE
@@ -276,6 +327,71 @@ class ToolExecutor:
         # database read cannot stall the other calls of the same round.
         return await asyncio.to_thread(entry.handler, self.context, arguments)
 
+    async def _attempt(self, call: ToolCall) -> ToolResult:
+        """One call from a sequential segment, under the parallel path's floor.
+
+        ``gather(return_exceptions=True)`` catches whatever escapes
+        :meth:`_dispatch` in a parallel segment. A sequential segment runs
+        outside that gather, so the same floor is spelled out here — otherwise
+        one raising barrier still takes the round, and a barrier is exactly the
+        call most likely to be a write.
+        """
+        try:
+            return await self._dispatch(call)
+        except Exception as exc:  # noqa: BLE001 - our own failure is a result too
+            return self._dispatch_failed(call, exc)
+
+    def _dispatch_failed(self, call: ToolCall, error: BaseException) -> ToolResult:
+        """This module failed, and the batch still owes the model a result.
+
+        Logged at ``warning`` and counted under its own code, because a bug
+        turned into a result is a bug that has to stay visible somewhere. No
+        trace entry: the trace write is one of the things that can land here.
+        """
+        logger.warning("Could not dispatch %s: %r", call.name, error)
+        return ToolResult(
+            call_id=call.id,
+            tool_name=call.name,
+            ok=False,
+            error=DISPATCH_FAILED,
+            text=f"{call.name} could not be run: {error}",
+            dispatched=False,
+        )
+
+    async def _over_ceiling(self, call: ToolCall, issued: int) -> ToolResult:
+        """A call past the round's ceiling, told what happened and what to do.
+
+        Traced, and warned about, because a ceiling nobody can see firing is a
+        ceiling nobody can tune. The number to raise or lower it by is the rate
+        it turns away batches on healthy traffic, and that rate is a count of
+        these rows. Unlike :meth:`_dispatch_failed` there is no risk of writing
+        a trace about a failed trace write here: nothing has been dispatched and
+        nothing has failed except the model asking for too much at once.
+        """
+        logger.warning(
+            "A round issued %d tool calls; %s was past the ceiling of %d",
+            issued,
+            call.name,
+            MAX_CALLS_PER_ROUND,
+        )
+        return await self._record(
+            call,
+            {},
+            ToolResult(
+                call_id=call.id,
+                tool_name=call.name,
+                ok=False,
+                error=ROUND_FANOUT_EXCEEDED,
+                text=(
+                    f"This round issued {issued} tool calls and only the first "
+                    f"{MAX_CALLS_PER_ROUND} were run, so this one was not "
+                    "dispatched. Ask for fewer at a time, and reissue what still "
+                    "matters."
+                ),
+                dispatched=False,
+            ),
+        )
+
     def _skipped(self, call: ToolCall) -> ToolResult:
         return ToolResult(
             call_id=call.id,
@@ -289,7 +405,13 @@ class ToolExecutor:
     async def _record(
         self, call: ToolCall, arguments: Mapping[str, Any], result: ToolResult
     ) -> ToolResult:
-        """Write one trace entry. Every attempted call gets one, dispatched or not."""
+        """Write one trace entry for one call, dispatched or not.
+
+        Two paths deliberately do not come here. :meth:`_dispatch_failed` cannot,
+        because the trace write is one of the things that can land there.
+        :meth:`_skipped` does not, because the call the halt was declared on
+        already wrote its own row and the ones behind it were never attempted.
+        """
         if self.trace is None:
             return result
         entry = {
@@ -354,9 +476,12 @@ def _normalize(payload: Any) -> str:
 
 __all__ = [
     "BLOCKED_CALL",
+    "DISPATCH_FAILED",
     "HALTED_TURN",
     "INVALID_ARGUMENTS",
+    "MAX_CALLS_PER_ROUND",
     "PARALLEL_SAFE_TOOLS",
+    "ROUND_FANOUT_EXCEEDED",
     "TOOL_FAILED",
     "TOOL_UNAVAILABLE",
     "UNKNOWN_TOOL",

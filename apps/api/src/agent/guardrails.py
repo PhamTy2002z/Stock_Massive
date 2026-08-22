@@ -78,13 +78,37 @@ class GuardrailThresholds:
     ``warn_after=2`` means the second observation warns — the count is compared
     with ``>=``, so a threshold of 1 would fire on the first call and a threshold
     of 0 would fire before anything happened.
+
+    The two upper rungs are arithmetic against the runtime that dispatches them,
+    not taste. A Turn gets four tool rounds (``loop.MAX_TOOL_ROUNDS``) and six
+    calls to the tools that leave this deployment
+    (``loop.MAX_EXTERNAL_TOOL_CALLS``), so a rung set above either of those is a
+    rung nothing can ring: a warn-only ladder that reads strict.
+
+    ``exact_failure_block_after=3``: the count is compared with ``>=`` in
+    :meth:`TurnGuardrails.before_call`, so three recorded failures refuse the
+    *fourth* call. Failing in rounds one, two and three leaves round four
+    blocked — the rung lands inside the round budget with nothing to spare. At
+    five it needed five byte-identical calls fanned out inside a single round,
+    which is the one shape the ladder should not have to depend on.
+
+    ``same_tool_failure_halt_after=6``: the external-call ceiling itself. Six
+    failures of one tool is that whole allowance spent on nothing, so the two
+    numbers are one fact and are written as one — change either and change
+    both. Reached by an ordinary two-calls-a-round fan-out over three rounds.
+    At eight it was unreachable by construction for ``web_search`` and
+    ``fetch_url``: the Turn ran out of calls before the tool ran out of
+    failures.
+
+    No import backs those two sentences: this module stays free of the runtime
+    it judges, and the equality is held by a test instead.
     """
 
     exact_failure_warn_after: int = 2
     same_tool_failure_warn_after: int = 3
     no_progress_warn_after: int = 2
-    exact_failure_block_after: int = 5
-    same_tool_failure_halt_after: int = 8
+    exact_failure_block_after: int = 3
+    same_tool_failure_halt_after: int = 6
 
 
 DEFAULT_THRESHOLDS = GuardrailThresholds()

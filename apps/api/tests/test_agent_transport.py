@@ -874,6 +874,10 @@ class TestThreads:
             "name",
             "status",
             "summary",
+            # Beside the status, not folded into it: three of the reasons a call
+            # ends in ``error`` are ceilings of ours refusing it rather than
+            # anything failing, and the surface cannot say which without this.
+            "error",
             "round",
             "results",
             "result_count",
@@ -900,6 +904,7 @@ class TestThreads:
                 "name": "web_search",
                 "status": "ok",
                 "summary": "Tìm trên web: web_search",
+                "error": None,
                 "round": 0,
                 "results": [],
                 "result_count": 0,

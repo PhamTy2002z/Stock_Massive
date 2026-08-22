@@ -138,6 +138,28 @@ def test_the_prompt_names_every_tool_the_agent_actually_has() -> None:
         assert tool in rendered
 
 
+def test_the_prompt_tells_the_model_to_emit_independent_lookups_together() -> None:
+    """The half of concurrency the runtime could not supply for itself.
+
+    The executor has always run an independent batch concurrently and the loop
+    has always sent ``parallel_tool_calls``; what neither can do is make the
+    model *ask* for the calls together. A Turn gets four rounds, so one call a
+    round is four lookups — and one round costs a whole resend of the
+    conversation, which makes this a bill before it is a latency.
+
+    Asserted against the prefix rather than the rendered prompt: the sentence has
+    to sit in the cacheable half, where its tokens are paid for once instead of
+    once per Turn.
+    """
+    tools = next(section for section in SECTIONS if section.key == "tools")
+
+    assert "cùng một lượt gọi" in tools.body
+    assert "cùng một lượt gọi" in prefix()
+    # And it says what to leave for later, because guidance that only says
+    # *batch* teaches the model to batch calls that depend on each other.
+    assert "Chỉ để sang lượt sau" in tools.body
+
+
 def test_the_prompt_says_where_untrusted_content_arrives() -> None:
     rendered = render(RuntimeContext(today=date(2026, 8, 22)))
 
