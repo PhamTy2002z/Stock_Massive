@@ -21,10 +21,10 @@ another user's Thread is not reachable at all.  This layer enforces it; A6 maps
 it onto status codes.
 
 **Checkpointing is bounded, not per token.**  At most one write a second, plus
-the boundaries ``docs/adr/0013`` names — activity, Widget, cancellation and
-terminal.  Per-token writes would turn one conversation into thousands of row
-versions for no recoverable benefit, and the only thing a reader wants back is
-the current state of the answer, which is what a checkpoint is.
+the boundaries the loop names — a tool round, a cancellation, a terminal state.
+Per-token writes would turn one conversation into thousands of row versions for
+no recoverable benefit, and the only thing a reader wants back is the current
+state of the answer, which is what a checkpoint is.
 
 **One terminal transaction.**  The draft is frozen into the canonical assistant
 ``agent_message`` while ``status``, ``terminal_reason``, ``response_message_id``
@@ -50,8 +50,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.alpha.refusals import AlphaRefusal
-from src.core.config import get_settings
-from src.core.llm import Workload
 from src.core.llm.config import LLMConfig
 
 from .events import (
@@ -60,17 +58,9 @@ from .events import (
     snapshot_from_draft,
     terminal_event_for,
 )
-from .grounding import GROUNDING_FAILED, ReleasedBlock
 from .loop import TurnDraft, TurnOutcome, TurnRequest, TurnStatus
-from .manifest import GateOutcome, assemble_message, build_manifest
-from .persistence import (
-    INTERRUPTED_REASON,
-    TURN_INCOMPLETE,
-    TURN_RUNNING,
-    AgentPersistence,
-    TurnRecord,
-)
-from .prompt import AnswerKind, RuntimeContext
+from .persistence import TURN_INCOMPLETE, AgentPersistence, TurnRecord
+from .prompt import RuntimeContext
 
 logger = logging.getLogger(__name__)
 
@@ -127,8 +117,8 @@ class RunningTurn:
     cancel_requested: bool = False
     shutting_down: bool = False
     # The last draft the loop checkpointed. It is what a Turn killed by the
-    # deadline or by shutdown leaves behind, and the only place its proven
-    # blocks, its citations and its answer kind still exist in this process.
+    # deadline or by shutdown leaves behind, and the only place the prose it
+    # managed to produce still exists in this process.
     draft: TurnDraft | None = None
 
     def cancelled(self) -> bool:
@@ -177,52 +167,62 @@ class Checkpointer:
 
 
 def draft_content(draft: TurnDraft) -> dict[str, Any]:
-    """The checkpoint payload, which is the blocks and nothing unproven.
+    """The checkpoint payload: the answer so far, and the calls behind it.
 
-    ``text`` is deliberately absent. The model's raw answer is not a thing a
-    reconnecting browser may render — it has not been through the Gate — and a
-    checkpoint carrying it would be a route around the validator that nobody
-    wrote on purpose.
-
-    ``widgets`` holds validated specs, under the same rule and for the same
-    reason: ``docs/adr/0012`` emits ``widget.ready`` only after the spec is
-    checkpointed, so a subscriber reconnecting on that event finds it already
-    here rather than racing the write that would have put it here.
+    ``text`` is the whole answer rather than the last delta, because what a
+    reconnecting browser needs is the current state of the answer and not the
+    history of how it arrived. It is the same string the snapshot restates and
+    the same string the canonical message will store, which is what keeps a
+    reader who followed the stream and a reader who rebuilt from here from
+    disagreeing about what was said.
     """
     return {
-        "blocks": [block.as_wire() for block in draft.blocks],
-        "widgets": [widget.as_wire() for widget in draft.widgets],
+        "text": draft.text or "",
+        "tool_calls": [call.as_wire() for call in draft.tool_calls],
         "rounds_used": draft.rounds_used,
-        "tool_calls": len(draft.tool_calls),
-        # The activity trail, so a browser reconnecting to a Turn this process
-        # no longer holds rebuilds what it was watching (``docs/adr/0020``).
-        "progress": [dict(step) for step in draft.progress],
+    }
+
+
+def assistant_message(
+    *,
+    text: str,
+    tool_calls: Sequence[Mapping[str, Any]] = (),
+    status: str,
+) -> dict[str, Any]:
+    """The canonical assistant message, in the one place its shape is decided.
+
+    ``status`` is carried on the content and not only on the ``agent_turn`` row.
+    A reopened Thread renders the transcript alone, so without it a reader could
+    not tell an answer that finished from one a deadline cut off — and the
+    transcript would read every truncated answer as complete.
+    """
+    return {
+        "text": text,
+        "tool_calls": [dict(call) for call in tool_calls],
+        "status": status,
     }
 
 
 def frozen_message(record: TurnRecord) -> Mapping[str, Any] | None:
     """The canonical message for a Turn some restart interrupted.
 
-    Taken from the checkpoint rather than rebuilt, and that is the whole point:
-    the Evidence Manifest of an interrupted Turn belongs to the build that
-    *produced* it — its prompt version, its model, its git SHA — and this
-    process is by definition a different one. Rebuilding it here would stamp
-    today's identity on yesterday's answer, which is the one thing a Manifest
-    exists to make impossible.
+    Built from the checkpoint, and only from it. Two fields are this process's
+    to know — how the Turn ended, and why — and everything else in the message
+    is what the build that was actually answering had already written down.
 
-    Only two fields are patched, because only two are this process's to know:
-    how the Turn ended, and why.
+    A checkpoint with no prose in it produces no message: a Turn that was
+    interrupted before it said anything has nothing for a reader to keep, and an
+    empty assistant bubble in the transcript would be worse than none.
     """
     draft = record.draft_content or {}
-    message = draft.get("message")
-    if not isinstance(message, Mapping) or not message.get("blocks"):
+    text = str(draft.get("text") or "")
+    if not text:
         return None
-    frozen = dict(message)
-    manifest = dict(frozen.get("evidence_manifest") or {})
-    manifest["status"] = TURN_INCOMPLETE
-    manifest["terminal_reason"] = INTERRUPTED_REASON
-    frozen["evidence_manifest"] = manifest
-    return frozen
+    return assistant_message(
+        text=text,
+        tool_calls=tuple(draft.get("tool_calls") or ()),
+        status=TURN_INCOMPLETE,
+    )
 
 
 async def sweep_interrupted_turns(
@@ -263,21 +263,12 @@ class TurnService:
         store: AgentPersistence,
         loop_factory: LoopFactory,
         config: LLMConfig,
-        tool_catalog_version: str,
-        mcp_servers_version: str = "disabled",
-        git_sha: str | None = None,
         deadline_seconds: float = TURN_DEADLINE_SECONDS,
         shutdown_seconds: float = GRACEFUL_SHUTDOWN_SECONDS,
     ) -> None:
         self._store = store
         self._loop_factory = loop_factory
         self._config = config
-        self._tool_catalog_version = tool_catalog_version
-        self._mcp_servers_version = mcp_servers_version
-        # Read from configuration rather than defaulted to a literal: a Manifest
-        # that records "unknown" for every answer records nothing anyone can
-        # dispute, and the deployment is the only thing that knows the SHA.
-        self._git_sha = git_sha or get_settings().git_sha
         self._deadline = deadline_seconds
         self._shutdown_seconds = shutdown_seconds
         self._running: dict[uuid.UUID, RunningTurn] = {}
@@ -350,7 +341,7 @@ class TurnService:
         publisher = running.publisher
         def remember(draft: TurnDraft) -> dict[str, Any]:
             running.draft = draft
-            return self._checkpoint_payload(draft)
+            return draft_content(draft)
 
         checkpointer = Checkpointer(self._store, turn_id, publisher, payload=remember)
         agent = self._loop_factory(checkpoint=checkpointer, publisher=publisher)
@@ -382,98 +373,14 @@ class TurnService:
             self._running.pop(turn_id, None)
 
 
-    def _checkpoint_payload(self, draft: TurnDraft) -> dict[str, Any]:
-        """One checkpoint: the proven blocks, and the message they would form.
-
-        The whole assembled message is checkpointed, not just the blocks, so
-        that a Turn a restart interrupts can be frozen into a canonical message
-        carrying *its own* Evidence Manifest — the prompt version, model and git
-        SHA of the build that actually answered. A later process cannot
-        reconstruct those, and stamping its own on the answer would defeat the
-        Manifest.
-        """
-        payload = draft_content(draft)
-        blocks, text = rendered_blocks(draft.blocks)
-        payload["message"] = (
-            self._message(
-                blocks=blocks,
-                text=text,
-                answer_kind=draft.answer_kind,
-                status=TURN_RUNNING,
-                terminal_reason=None,
-                citations=draft.citations,
-                outcomes=GateOutcome(grounding="in_progress"),
-                widgets=[widget.as_wire() for widget in draft.widgets],
-                widget_refusals=draft.widget_refusals,
-                search_progress=draft.progress,
-            )
-            if draft.blocks
-            else None
-        )
-        return payload
-
-    def _message(
-        self,
-        *,
-        blocks: Sequence[Mapping[str, Any]],
-        text: str,
-        answer_kind: AnswerKind,
-        status: str,
-        terminal_reason: str | None,
-        citations: Sequence[Any] = (),
-        outcomes: GateOutcome | None = None,
-        provider_request_id: str | None = None,
-        widgets: Sequence[Mapping[str, Any]] = (),
-        widget_refusals: Sequence[Mapping[str, Any]] = (),
-        search_progress: Sequence[Mapping[str, Any]] = (),
-        suggestions: Sequence[str] = (),
-    ) -> dict[str, Any]:
-        """One assistant message, Notice and Manifest attached by the backend."""
-        manifest = build_manifest(
-            git_sha=self._git_sha,
-            model=self._config.model_for(Workload.SESSION),
-            route=self._config.route.base_url,
-            provider_request_id=provider_request_id,
-            tool_catalog_version=self._tool_catalog_version,
-            mcp_servers_version=self._mcp_servers_version,
-            answer_kind=answer_kind,
-            status=status,
-            terminal_reason=terminal_reason,
-            citations=citations,
-            outcomes=outcomes,
-        )
-        return assemble_message(
-            blocks=blocks,
-            text=text,
-            answer_kind=answer_kind,
-            manifest=manifest,
-            citations=citations,
-            widgets=widgets,
-            widget_refusals=widget_refusals,
-            search_progress=search_progress,
-            suggestions=suggestions,
-        )
-
     async def _finish(self, running: RunningTurn, outcome: TurnOutcome) -> TurnRecord:
         """The one terminal transaction, then the terminal event."""
         status, terminal_reason = _terminal_state(running, outcome)
-        blocks, text = rendered_blocks(outcome.blocks)
+        text = outcome.text or ""
+        calls = [call.as_wire() for call in outcome.tool_calls]
         message = (
-            self._message(
-                blocks=blocks,
-                text=text,
-                answer_kind=outcome.answer_kind,
-                status=status,
-                terminal_reason=terminal_reason,
-                citations=outcome.citations,
-                outcomes=gate_outcomes(outcome),
-                provider_request_id=outcome.provider_request_id,
-                widgets=[widget.as_wire() for widget in outcome.widgets],
-                widget_refusals=outcome.widget_refusals,
-                search_progress=outcome.progress,
-                suggestions=outcome.suggestions,
-            )
-            if outcome.blocks
+            assistant_message(text=text, tool_calls=calls, status=status)
+            if text
             else None
         )
         record = await self._store.finish_turn(
@@ -481,20 +388,17 @@ class TurnService:
             status=status,
             terminal_reason=terminal_reason,
             message=message,
-            symbols=_symbols_of(outcome),
             draft=draft_content(
                 TurnDraft(
-                    text=None,
+                    text=outcome.text,
                     rounds_used=outcome.rounds_used,
                     tool_calls=outcome.tool_calls,
-                    blocks=outcome.blocks,
-                    widgets=outcome.widgets,
                 )
             ),
             last_event_seq=running.publisher.next_seq,
         )
         running.publisher.terminal(
-            terminal_event_for(status, has_content=bool(outcome.blocks)),
+            terminal_event_for(status, has_content=bool(text)),
             status=status,
             terminal_reason=terminal_reason,
             data={"message_id": record.response_message_id},
@@ -509,33 +413,17 @@ class TurnService:
     ) -> TurnRecord:
         """End a Turn whose loop never handed back an outcome.
 
-        A deadline, a shutdown or an unexpected failure leaves the blocks that
-        were already checkpointed and nothing else. They are still written to a
+        A deadline, a shutdown or an unexpected failure leaves whatever was
+        already checkpointed and nothing else. It is still written to a
         canonical message, because a partial answer the user can read is the
         difference between ``incomplete`` and ``failed``.
         """
         draft = running.draft
-        blocks, text = rendered_blocks(() if draft is None else draft.blocks)
+        text = "" if draft is None else (draft.text or "")
+        calls = [] if draft is None else [call.as_wire() for call in draft.tool_calls]
         message = (
-            self._message(
-                blocks=blocks,
-                text=text,
-                answer_kind=(
-                    AnswerKind.EDUCATION if draft is None else draft.answer_kind
-                ),
-                status=status,
-                terminal_reason=terminal_reason,
-                citations=() if draft is None else draft.citations,
-                outcomes=GateOutcome(grounding="not_reached"),
-                widgets=(
-                    () if draft is None else [w.as_wire() for w in draft.widgets]
-                ),
-                widget_refusals=() if draft is None else draft.widget_refusals,
-                # No suggestions: this path is a Turn that ended badly, and
-                # follow-ups belong under an answer that was actually given.
-                search_progress=() if draft is None else draft.progress,
-            )
-            if blocks
+            assistant_message(text=text, tool_calls=calls, status=status)
+            if text
             else None
         )
         record = await self._store.finish_turn(
@@ -546,7 +434,7 @@ class TurnService:
             last_event_seq=running.publisher.next_seq,
         )
         running.publisher.terminal(
-            terminal_event_for(status, has_content=bool(blocks)),
+            terminal_event_for(status, has_content=bool(text)),
             status=status,
             terminal_reason=terminal_reason,
             data={"message_id": record.response_message_id},
@@ -667,58 +555,6 @@ def _terminal_state(running: RunningTurn, outcome: TurnOutcome) -> tuple[str, st
     return outcome.status.value, outcome.terminal_reason
 
 
-def rendered_blocks(
-    blocks: Sequence[ReleasedBlock],
-) -> tuple[list[dict[str, Any]], str]:
-    """The two forms every assistant message needs, derived once.
-
-    Three call sites wanted the same pair — checkpoint, terminal, and the bare
-    terminal — and the third had already drifted to reading the text back out of
-    the wire form it had just written. Module level rather than a method,
-    because the Eval Battery assembles the *same* message a user would have
-    received (``docs/adr/0016``): a lookalike built beside this one is the way
-    the battery comes to score a shape nobody is served.
-    """
-    return (
-        [block.as_wire() for block in blocks],
-        "\n\n".join(block.text for block in blocks),
-    )
-
-
-def gate_outcomes(outcome: TurnOutcome) -> GateOutcome:
-    """What the three validators decided, in the Manifest's own vocabulary."""
-    blocked = outcome.terminal_reason == GROUNDING_FAILED
-    recommendation = "not_applicable"
-    if any(block.kind.value == "recommendation" for block in outcome.blocks):
-        recommendation = "released"
-    # A downgraded recommendation is one the Gate kept off the screen, and the
-    # record says so even though the Turn went on to answer without it. Reported
-    # as "not_applicable" it would vanish from exactly the query that watches how
-    # often the Gate refuses.
-    #
-    # Counted off ``degraded_recommendations`` rather than off the code list,
-    # because since ADR-0021 twenty conditions downgrade on *any* block: a market
-    # summary with one misplaced bracket would report a blocked recommendation it
-    # never attempted, and this dimension is what Phase 8's baseline reads.
-    # ``downgrades`` below carries every condition either way.
-    if blocked or outcome.degraded_recommendations:
-        recommendation = "blocked"
-    return GateOutcome(
-        scope="refused" if outcome.answer_kind is AnswerKind.REFUSAL else "in_scope",
-        grounding="blocked" if blocked else "passed",
-        recommendation=recommendation,
-        failure_code=(
-            outcome.grounding_failure_code or outcome.degraded_recommendation_code
-        ),
-        downgrades=outcome.degraded_codes,
-    )
-
-
-def _symbols_of(outcome: TurnOutcome) -> tuple[str, ...]:
-    """The symbols this Turn discussed, for the Thread's GIN-indexed array."""
-    return tuple(sorted({block.symbol for block in outcome.blocks if block.symbol}))
-
-
 __all__ = [
     "CHECKPOINT_INTERVAL_SECONDS",
     "GRACEFUL_SHUTDOWN_SECONDS",
@@ -730,9 +566,8 @@ __all__ = [
     "TurnService",
     "UserInputTooLarge",
     "assert_input_within_cap",
+    "assistant_message",
     "draft_content",
     "frozen_message",
-    "gate_outcomes",
-    "rendered_blocks",
     "sweep_interrupted_turns",
 ]

@@ -24,6 +24,24 @@ browser ──HTTPS──▶ proxy (Caddy) ──HTTP──▶ web (Next) ──
   terminates TLS at a load balancer it already owns runs without it and owes the same
   contract in its own configuration.
 
+## The event contract
+
+Envelope, unchanged in shape and at `version: 2` since ADR-0026 replaced the harness:
+`{version, seq, type, turn_id, data}`. Framing is `id: {seq}` + `event: {type}` +
+`data: {json}`; the heartbeat is an SSE comment and consumes no `seq`; `Last-Event-ID`
+is answered with a snapshot that restates rather than a filtered replay.
+
+| `type` | `data` |
+| --- | --- |
+| `turn.snapshot` | `through_seq`, `status`, `terminal_reason`, `text`, `tool_calls[]`, `message_id` |
+| `content.delta` | `text` — appended to what the stream has sent so far |
+| `tool.call` | `id`, `name`, `status` (`running` \| `ok` \| `error`), `summary` |
+| `turn.completed` · `turn.incomplete` · `turn.failed` · `turn.cancelled` | `status`, `terminal_reason`, `message_id` |
+
+The old contract's `content.block`, `widget.ready` and five-phase `turn.activity` are
+gone, along with the citation, widget and manifest payloads they carried. A canonical
+message stores `{text, tool_calls}`.
+
 ## What every hop owes an event stream
 
 1. **Do not buffer.** Forward each write as it arrives. Caddy does not buffer a proxied
@@ -107,20 +125,20 @@ installs with `pnpm exec playwright install chromium`.
 
 The four properties, all through the real browser → Next → FastAPI path:
 
-1. **The first block and a 15-second heartbeat arrive before completion.** A harness that
-   buffers looks identical to one that is hung, and this is the assertion that tells them
-   apart. The heartbeat is an SSE comment, so `EventSource` discards it by design — the
-   test reads the stream as raw bytes through the same proxy to see one.
+1. **The first `content.delta` and a 15-second heartbeat arrive before completion.** A
+   harness that buffers looks identical to one that is hung, and this is the assertion
+   that tells them apart. The heartbeat is an SSE comment, so `EventSource` discards it by
+   design — the test reads the stream as raw bytes through the same proxy to see one.
 2. **A reconnect begins with an ordered snapshot and duplicates nothing.** The page is
    reloaded mid-Turn; the transcript is the same transcript, in the same order, and the
-   next block lands on the reattached subscriber.
+   next delta lands on the reattached subscriber.
 3. **A slow subscriber cannot slow the Turn.** A second subscriber opens the stream and
    never reads it; its bounded queue fills and it is dropped without ever receiving the
    terminal event, while the Turn reaches its terminal state and the canonical message
    replaces the draft.
 4. **The terminal refetch yields the canonical message.** The draft is replaced, not
-   appended to — one copy of the block, and the Risk Notice that only a canonical message
-   carries.
+   appended to — one copy of the answer text, and the tool-call list the canonical message
+   stores rather than the running one the stream carried.
 
 **Any future CDN or reverse proxy passes this same file.** Point `E2E_WEB_PORT` at the
 new hop, or run the suite against a staging deployment by pointing the config's `baseURL`

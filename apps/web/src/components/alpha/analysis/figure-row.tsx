@@ -1,6 +1,6 @@
 "use client"
 
-import { formatFieldValue, unitLabel } from "@/components/alpha/widgets/units"
+import { formatFieldValue, unitLabel } from "@/lib/units"
 import type { FigureView } from "@/lib/alpha-desk/analysis"
 import { cn } from "@/lib/utils"
 import { CHROME, HEALTH_LABEL, HEALTH_TONE, NARRATION } from "./copy"

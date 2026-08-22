@@ -2,103 +2,32 @@
  * Every sentence the conversation surface says on the system's behalf.
  *
  * In one file because each of them is a promise about what the user is *not*
- * shown. The activity line must carry a phase and never a tool name, a symbol,
- * an argument or a result (`docs/specs/0002` §6, §9); a Turn that stopped early
- * must carry a sentence and never its stable code, the same way the rail maps a
- * `Signal Issue` code to prose. Spread across the components that render them,
- * both rules would be enforced by whoever happened to write the JSX.
+ * shown: a Turn that stopped early must carry a sentence and never its stable
+ * code, the same way the rail maps a `Signal Issue` code to prose. Spread
+ * across the components that render them, that rule would be enforced by
+ * whoever happened to write the JSX.
  *
- * Application chrome is English and narration is Vietnamese (`docs/specs/0002`
- * §5). Almost everything here is the system narrating, so almost everything
- * here is Vietnamese; the one exception is named where it appears, and it is a
- * control label rather than a sentence.
+ * Application chrome is English and narration is Vietnamese. Almost everything
+ * here is the system narrating, so almost everything here is Vietnamese; the
+ * one exception is named where it appears, and it is a control label rather
+ * than a sentence.
  */
 
-import type { ActivityPhase, FlagReason } from "./types"
-
-/**
- * What a phase says while it runs, once it is done, and when it is opened.
- *
- * The phase is the whole vocabulary — three sentences per phase, and there are
- * four phases. `summary` describes the *kind* of work in user language: it is
- * not a longer trace, and expanding it must never become the way a curious user
- * learns the catalog. The Tool Call Trace is where the detail lives, and it is
- * an audit surface rather than part of the answer.
- *
- * `done` is the same promise in the past tense. A finished step stays on screen
- * under the ones after it, so it has to read as a completed fact rather than as
- * a line that stopped moving — and it still names no tool, symbol, argument or
- * result, because the publisher never sent one.
- */
-export const ACTIVITY_COPY: Record<
-  ActivityPhase,
-  { line: string; done: string; summary: string }
-> = {
-  searching: {
-    line: "Đang tìm…",
-    done: "Đã tìm trong các nguồn đã duyệt",
-    summary: "Đang tìm trong các nguồn tin đã được duyệt cho câu hỏi này.",
-  },
-  reading_data: {
-    line: "Đang đọc dữ liệu…",
-    done: "Đã đọc dữ liệu đã lưu",
-    summary: "Đang đọc số liệu phiên gần nhất và các chỉ số đã đăng ký.",
-  },
-  analyzing: {
-    line: "Đang phân tích…",
-    done: "Đã đối chiếu số liệu vừa đọc",
-    summary: "Đang đối chiếu những gì vừa đọc trước khi trả lời.",
-  },
-  preparing_visual: {
-    line: "Đang dựng hình…",
-    done: "Đã dựng hình minh hoạ",
-    summary: "Đang chuẩn bị một hình minh hoạ cho phần trả lời.",
-  },
-  found_sources: {
-    line: "Đang đọc kết quả…",
-    done: "Đã tìm thấy kết quả",
-    summary: "Các trang công khai mà lượt này đã đọc để trả lời.",
-  },
-}
+import type { FlagReason } from "./types"
 
 /**
- * The search-progress trail, as its header and its rows read.
+ * What the list of tool calls says: its own label, and one word per outcome.
  *
- * Vietnamese throughout, including the rows the reference design left in
- * English: `docs/specs/0002` §5 puts narration in Vietnamese and reserves
- * English for control chrome, and *Thinking…* beside *Hoàn thành* is the same
- * trail speaking two languages to one reader.
- *
- * `found` takes the count because it is the one row that is a *number* the
- * reader is being asked to weigh — how much was read, not how much is listed
- * under it.
- *
- * Every phase that can outlive its own execution comes in a pair, for the same
- * reason `ACTIVITY_COPY` does: a row saying *Đang tìm trên web…* under a
- * finished answer tells the reader the Turn is still going. The row that is
- * running says *Đang…*; every row above it says what it did. `thinking` has no
- * past tense on purpose — an analysis step is only ever on screen while it is
- * the thing happening, so there is no finished form of it to write.
+ * The sentence describing a call is the backend's `summary`, because only the
+ * side that made the call knows what it was for. What is left here is the
+ * chrome around it — which is why there are three words and not three
+ * templates.
  */
-export const PROGRESS_COPY = {
-  header: "Tiến trình tìm kiếm",
-  thinking: "Đang suy nghĩ…",
-  searching: "Đang tìm trên web…",
-  searched: "Đã tìm trên web",
-  readingData: "Đang đọc dữ liệu…",
-  readData: "Đã đọc dữ liệu đã lưu",
-  preparingVisual: "Đang dựng hình…",
-  preparedVisual: "Đã dựng hình minh hoạ",
-  queries: "Tìm kiếm",
-  found: (count: number) => `Đã tìm thấy ${count} kết quả`,
-  sourcesTitle: (count: number) => `Tổng hợp ${count} nguồn`,
-  done: "Hoàn thành",
-  stopped: "Đã dừng",
-  sourcesLabel: (count: number) => `${count} nguồn`,
-  drawerTitle: (count: number) => `${count} nguồn tham khảo`,
-  drawerClose: "Đóng",
-  updatedAt: (day: string) => `Cập nhật: ${day}`,
-  suggestionsTitle: "Gợi ý",
+export const TOOL_CALL_COPY = {
+  label: "Công cụ đã dùng",
+  running: "Đang chạy…",
+  ok: "Xong",
+  error: "Lỗi",
 } as const
 
 /**
@@ -115,8 +44,6 @@ const TERMINAL_REASONS: Record<string, string> = {
   interrupted_restart: "Hệ thống khởi động lại nên lượt này dừng giữa chừng.",
   turn_deadline: "Lượt này chạy quá thời gian cho phép nên dừng lại.",
   turn_failed: "Lượt này gặp sự cố nên dừng lại.",
-  grounding_failed:
-    "Một phần nội dung không dẫn được về số liệu đã đăng ký nên đã bị giữ lại.",
   llm_call_timeout: "Mô hình không trả lời kịp nên lượt này dừng lại.",
   answer_truncated: "Câu trả lời bị cắt giữa chừng vì vượt giới hạn độ dài cho một lượt.",
   gateway_timeout: "Tuyến mô hình không phản hồi nên lượt này dừng lại.",
@@ -132,7 +59,7 @@ const TERMINAL_REASONS: Record<string, string> = {
     "Tuyến mô hình không còn phục vụ mô hình đang cấu hình nên lượt này dừng lại.",
   schema_rejected: "Tuyến mô hình không nhận được danh mục công cụ nên lượt này dừng lại.",
   auth_unavailable: "Không kết nối được tới tuyến mô hình nên lượt này dừng lại.",
-  tool_timeout: "Một bước đọc dữ liệu quá thời gian nên lượt này dừng lại.",
+  tool_timeout: "Một công cụ chạy quá thời gian nên lượt này dừng lại.",
   model_refusal: "Mô hình đã từ chối trả lời câu hỏi này.",
   user_input_too_large: "Câu hỏi vượt quá giới hạn độ dài cho một lượt.",
 }
@@ -143,31 +70,6 @@ const UNNAMED_REASON = "Lượt này dừng trước khi hoàn tất."
 export function terminalSentence(reason: string | null): string {
   return (reason && TERMINAL_REASONS[reason]) || UNNAMED_REASON
 }
-
-/** The stable reasons this surface has a sentence for. Exported for its test. */
-export const KNOWN_TERMINAL_REASONS = Object.keys(TERMINAL_REASONS)
-
-/**
- * The first-run empty state.
- *
- * Two things, both explicit, and neither of them a feature tour: the
- * Universe-vs-Watchlist rule, because a user who believes the Watchlist gates
- * the agent will spend a slot to ask one question; and the scope boundary in
- * user language, because the difference between registered analysis and a
- * derived calculation is important before either one appears in an answer.
- *
- * **The catalog is not published.** Listing what the agent can compute would
- * turn the empty state into a menu, and a menu is a promise about every item on
- * it. A refusal teaches the detail at the moment it matters (ADR-0019).
- */
-export const FIRST_RUN = {
-  question: "Hôm nay bạn muốn hỏi gì về danh mục của mình?",
-  universeRule:
-    "Bạn có thể hỏi về bất kỳ mã nào trong Universe. Watchlist chỉ quyết định mã nào được dựng Analysis mỗi phiên — nó không giới hạn câu hỏi.",
-  scopeBoundary:
-    "Phạm vi là phân tích bốn trục cho các mã trong Watchlist, dựa trên những chỉ số đã đăng ký. Phép tính tuỳ biến chỉ là dữ liệu dẫn xuất có cảnh báo, và hệ thống không đưa ra khuyến nghị phân bổ vốn hay đòn bẩy.",
-  hint: "Ví dụ: hỏi vì sao một mã được đánh giá như vậy trong phiên gần nhất.",
-} as const
 
 /**
  * What the stop control says once it has been pressed.
@@ -196,7 +98,7 @@ export const CANCELLING_LABEL = "Cancelling…"
  *
  * The four labels are the reader's vocabulary rather than the column's, so they
  * describe what went wrong in the answer and never name a mechanism: nobody
- * flags an answer for *grounding failure*, they flag it because the number is
+ * flags an answer for a validator's verdict, they flag it because the number is
  * wrong.
  */
 export const FLAG_REASON_LABELS: Record<FlagReason, string> = {

@@ -202,7 +202,7 @@ class TestTheSeedIsFrozen:
         stale = FixtureSeed(
             manifest=replace(
                 seed.manifest,
-                versions=replace(seed.manifest.versions, tool_catalog_version="stale"),
+                versions=replace(seed.manifest.versions, profile_version="stale"),
             ),
             tables=seed.tables,
         )
@@ -213,7 +213,7 @@ class TestTheSeedIsFrozen:
 
 
 class TestVersionsAreCheckedBeforeAnythingRuns:
-    def test_a_fixture_records_all_four(self, seed):
+    def test_a_fixture_records_all_three(self, seed):
         assert seed.manifest.versions == running_versions()
 
     def test_a_moved_registry_version_refuses_and_names_itself(self):
@@ -227,14 +227,12 @@ class TestVersionsAreCheckedBeforeAnythingRuns:
         frozen = PinnedVersions(
             registry_version="x",
             profile_version="y",
-            tool_catalog_version="z",
             schema_version="w",
         )
         names = {item.name for item in frozen.mismatches_against(running_versions())}
         assert names == {
             "registry_version",
             "profile_version",
-            "tool_catalog_version",
             "schema_version",
         }
 

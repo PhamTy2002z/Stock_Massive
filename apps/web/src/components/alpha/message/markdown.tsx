@@ -5,75 +5,30 @@ import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
 import { cn } from "@/lib/utils"
-import { chunkedProse } from "./word-cadence"
 
 /**
- * The plugin list, built once per mode.
+ * An answer's prose, rendered as the Markdown it is.
  *
- * A new array per render would make react-markdown reparse on every unrelated
- * render, and the plugin is stateless — it carries its own chunk list per call.
- *
- * The cast is the price of not depending on `@types/hast`: the walk declares the
- * handful of node fields it touches, which is narrower than a hast tree rather
- * than incompatible with one.
- */
-type RehypePlugins = NonNullable<
-  ComponentPropsWithoutRef<typeof ReactMarkdown>["rehypePlugins"]
->
-const STAGGERED: RehypePlugins = [chunkedProse] as unknown as RehypePlugins
-const PLAIN: RehypePlugins = []
-
-/**
- * One block's prose, rendered as the Markdown it already is.
- *
- * The backend buffers provider deltas into complete, **Markdown-safe** units and
- * emits one event per unit (ADR-0013) — a closed paragraph, a whole bullet
- * group, a complete table, a closed fence. So a block is not text that happens
- * to contain asterisks; it is Markdown, and showing it verbatim put `**` on
- * screen in front of readers.
- *
- * Two rules make this safe to do at all:
+ * The model writes Markdown, so showing the text verbatim put `**` on screen in
+ * front of readers. Two rules make rendering it safe to do at all:
  *
  * **No raw HTML.** `rehype-raw` is deliberately absent, so the plugin chain has
  * no path from model output to markup. An `<img onerror>` in an answer renders
  * as the text it is. This is why no sanitiser is needed rather than why one was
  * skipped: nothing here can produce an element the code below did not name.
  *
- * **No autolinked bare URLs into a live anchor without a rel.** Every link goes
- * through the component below, which opens in a new tab and sends no referrer —
- * the prose is derived from untrusted external claims, and a link in it is not a
- * link this product is vouching for.
+ * **No autolinked bare URL becomes a live anchor without a rel.** Every link
+ * goes through the component below, which opens in a new tab and sends no
+ * referrer — the prose can be written out of untrusted external pages, and a
+ * link in it is not a link this product is vouching for.
  *
- * `stagger` adds one rehype pass that wraps the already-parsed prose in chunk
- * spans (`word-cadence`), for the one block a `content.block` event just
- * delivered. It runs after parsing, never instead of it: partial Markdown is
- * still never rendered.
+ * The text grows by deltas while a Turn runs, so this is re-parsed as it
+ * arrives and will sometimes parse a half-written construct. That is the
+ * accepted cost of prose that appears as it is written; the alternative is
+ * holding each sentence back until it closes, which is the buffering the
+ * streaming path exists to avoid.
  */
-export function Markdown({
-  text,
-  trailing,
-  stagger = false,
-  className,
-}: {
-  text: string
-  /**
-   * Rendered inside the last paragraph or list item, on the same line.
-   *
-   * The citation chip belongs at the end of the sentence it supports, and a
-   * sibling after the renderer would sit on a line of its own — a chip on its
-   * own line reads as a caption for the whole answer rather than as a mark on
-   * the claim. Placed by source offset rather than by index, because the last
-   * *element* is not the last *block* once a list is involved.
-   */
-  trailing?: React.ReactNode
-  /** Cascade this block's prose in, a few words at a time. */
-  stagger?: boolean
-  className?: string
-}) {
-  const end = text.trimEnd().length
-  const isLast = (node: { position?: { end?: { offset?: number } } } | undefined) =>
-    trailing !== undefined && (node?.position?.end?.offset ?? -1) >= end
-
+export function Markdown({ text, className }: { text: string; className?: string }) {
   return (
     <div
       className={cn(
@@ -96,34 +51,12 @@ export function Markdown({
       )}
     >
       <ReactMarkdown
-        // GFM for the two things a Vietnamese equities answer actually uses:
-        // tables of figures, and strikethrough on a superseded number.
+        // GFM for the two things an answer actually uses beyond plain prose:
+        // tables, and strikethrough on a superseded line.
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={stagger ? STAGGERED : PLAIN}
         components={{
           a: Anchor,
           table: Table,
-          // The paragraph that carries the chip is a `div`, not a `p`. The chip
-          // is a disclosure and its panel is a block element, which a `p` may
-          // not contain: the browser closes the paragraph before the panel and
-          // hydration then mismatches the server's markup. Only the tag name
-          // differs — nothing here styles `p` specifically — and every other
-          // paragraph keeps its own tag.
-          p: ({ node, children, ...rest }) =>
-            isLast(node) ? (
-              <div {...(rest as ComponentPropsWithoutRef<"div">)}>
-                {children}
-                {trailing}
-              </div>
-            ) : (
-              <p {...rest}>{children}</p>
-            ),
-          li: ({ node, children, ...rest }) => (
-            <li {...rest}>
-              {children}
-              {isLast(node) && trailing}
-            </li>
-          ),
           th: (props) => (
             <th
               {...props}

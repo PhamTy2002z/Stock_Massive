@@ -36,7 +36,6 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from .cases import EvalCategory
-from .scoring import Check
 
 if TYPE_CHECKING:  # pragma: no cover - the types only, never the modules
     from .harness import CaseResult, EvalRunResult
@@ -58,23 +57,6 @@ THRESHOLDS: Mapping[EvalCategory, float] = MappingProxyType(
 )
 
 
-#: The checks whose failure overrides every rate. One entry, and it is the one
-#: ``docs/adr/0016`` names: narrating a registered field backwards in sign is
-#: the exact defect that disqualified the assessed external library, and it must
-#: not dissolve into an average. A set rather than an ``if``, so that a second
-#: hard fail — should one ever be justified — is a line here and not a rewrite.
-HARD_FAIL_CHECKS: frozenset[str] = frozenset({Check.SIGN_FIDELITY.value})
-
-#: The sentence every surface says when one fires. Written once, because the
-#: report and the command line saying it differently would leave a reader
-#: wondering whether they are the same rule.
-HARD_FAIL_NOTICE = (
-    "HARD FAIL — a registered field was narrated backwards in sign. This "
-    "overrides every rate: it is the exact defect that disqualified the "
-    "assessed external library, and it does not dissolve into an average."
-)
-
-
 @dataclass(frozen=True)
 class RunFailure:
     """One broken property, attributed to the one run that broke it."""
@@ -89,16 +71,11 @@ class RunFailure:
     # different remedies.
     human: bool = False
 
-    @property
-    def hard(self) -> bool:
-        return self.check in HARD_FAIL_CHECKS
-
     def __str__(self) -> str:
         source = "rubric" if self.human else "deterministic"
-        hard = " [HARD FAIL]" if self.hard else ""
         return (
             f"{self.case_id} run {self.run_index + 1}: {self.check} "
-            f"({source}) — {self.detail}{hard}"
+            f"({source}) — {self.detail}"
         )
 
 
@@ -156,7 +133,7 @@ class BatteryVerdict:
     @property
     def passed(self) -> bool:
         """A stopped run has no verdict, and no score to argue about."""
-        if not self.complete or self.hard_failures:
+        if not self.complete:
             return False
         return all(item.met for item in self.categories)
 
@@ -165,11 +142,6 @@ class BatteryVerdict:
         return tuple(
             failure for item in self.categories for failure in item.failures
         )
-
-    @property
-    def hard_failures(self) -> tuple[RunFailure, ...]:
-        """The failures that override every rate, whoever decided them."""
-        return tuple(failure for failure in self.failures if failure.hard)
 
     def by_category(self, category: EvalCategory) -> CategoryVerdict:
         return next(item for item in self.categories if item.category is category)
@@ -264,8 +236,6 @@ def verdict(
 
 
 __all__ = [
-    "HARD_FAIL_CHECKS",
-    "HARD_FAIL_NOTICE",
     "THRESHOLDS",
     "BatteryVerdict",
     "CategoryVerdict",

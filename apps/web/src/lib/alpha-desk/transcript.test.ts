@@ -1,10 +1,10 @@
 /**
  * Where the draft ends and history begins.
  *
- * The transcript is the one place the two halves of ADR-0013's client meet, and
- * every claim here is one a reasonable implementation gets wrong by merging
- * them: the draft shown next to its own canonical message, the pending question
- * left on screen after the real one committed, a Turn that failed with nothing
+ * The transcript is the one place the two halves of the client meet, and every
+ * claim here is one a reasonable implementation gets wrong by merging them: the
+ * draft shown next to its own canonical message, the pending question left on
+ * screen after the real one committed, a Turn that failed with nothing
  * disappearing along with its retry.
  */
 
@@ -12,18 +12,13 @@ import { describe, expect, it } from "vitest"
 
 import { IDLE, type LiveTurn } from "./live-turn"
 import { buildTranscript, type TranscriptInput } from "./transcript"
-import type {
-  ContentBlock,
-  EvidenceManifest,
-  FlagReason,
-  ThreadMessage,
-} from "./types"
+import type { FlagReason, ThreadMessage, ToolCall } from "./types"
 
 const THREAD = "11111111-1111-4111-8111-111111111111"
 const TURN = "22222222-2222-4222-8222-222222222222"
 
-function block(text: string): ContentBlock {
-  return { kind: "prose", text, symbol: null, trading_day: null, citations: [] }
+function call(id: string, status: ToolCall["status"] = "ok"): ToolCall {
+  return { id, name: "web_search", status, summary: "Đã tìm trên web" }
 }
 
 function userMessage(id: number, text: string): ThreadMessage {
@@ -32,7 +27,7 @@ function userMessage(id: number, text: string): ThreadMessage {
     seq: id,
     role: "user",
     content: { text },
-    created_at: "2026-08-16T09:00:00Z",
+    created_at: "2026-08-22T09:00:00Z",
     flagged_reason: null,
     flagged_at: null,
   }
@@ -47,21 +42,17 @@ function assistantMessage(
     id,
     seq: id,
     role: "assistant",
-    content: {
-      text,
-      blocks: [block(text)],
-      answer_kind: "analysis",
-      risk_notice: { version: "1", locale: "vi", text: "Không phải khuyến nghị đầu tư.", meanings: [] },
-      sources_and_methods: [],
-      // Partial on purpose, and cast because the stored column is JSONB: the
-      // transcript carries the Manifest through to the audit surface and never
-      // reads a field out of it.
-      evidence_manifest: { answer_kind: "analysis" } as unknown as EvidenceManifest,
-    },
-    created_at: "2026-08-16T09:00:05Z",
+    content: { text, tool_calls: [] },
+    created_at: "2026-08-22T09:00:05Z",
     flagged_reason: flag,
-    flagged_at: flag === null ? null : "2026-08-16T10:00:00Z",
+    flagged_at: flag === null ? null : "2026-08-22T10:00:00Z",
   }
+}
+
+/** A stored answer with whatever the JSONB column happened to hold. */
+function withContent(extra: Record<string, unknown>): ThreadMessage {
+  const message = assistantMessage(1, "đáp")
+  return { ...message, content: { ...message.content, ...extra } }
 }
 
 function live(overrides: Partial<LiveTurn> = {}): LiveTurn {
@@ -81,7 +72,7 @@ function transcript(overrides: Partial<TranscriptInput> = {}) {
 describe("the canonical Thread", () => {
   it("renders messages in sequence order, not in arrival order", () => {
     const entries = transcript({
-      messages: [assistantMessage(2, "answer"), userMessage(1, "question")],
+      messages: [assistantMessage(2, "đáp"), userMessage(1, "hỏi")],
     })
 
     expect(entries.map((entry) => entry.kind)).toEqual(["user", "assistant"])
@@ -93,7 +84,7 @@ describe("the canonical Thread", () => {
       seq: 3,
       role: "summary",
       content: { text: "earlier Turns, compacted" },
-      created_at: "2026-08-16T09:00:00Z",
+      created_at: "2026-08-22T09:00:00Z",
       flagged_reason: null,
       flagged_at: null,
     }
@@ -101,95 +92,100 @@ describe("the canonical Thread", () => {
     expect(transcript({ messages: [summary] })).toHaveLength(0)
   })
 
-  it("carries the Risk Notice through to the entry rather than dropping it", () => {
-    const [entry] = transcript({ messages: [assistantMessage(1, "answer")] })
+  it("carries the answer's whole text, which is what the message stores", () => {
+    const [entry] = transcript({ messages: [assistantMessage(1, "một đoạn văn xuôi")] })
 
-    expect(entry.kind).toBe("assistant")
-    if (entry.kind !== "assistant") return
-    expect(entry.view.riskNotice?.text).toMatch(/Không phải khuyến nghị/)
+    expect(entry.kind === "assistant" && entry.view.text).toBe("một đoạn văn xuôi")
   })
 
   it("carries a flag already on the message, so a reopened Thread shows it", () => {
     // Otherwise the action looks unpressed after a reload and the reader presses
     // it a second time — which the backend would take as a correction.
-    const [entry] = transcript({
-      messages: [assistantMessage(1, "answer", "wrong_figure")],
-    })
+    const [entry] = transcript({ messages: [assistantMessage(1, "đáp", "wrong_figure")] })
 
     expect(entry.kind === "assistant" && entry.flaggedReason).toBe("wrong_figure")
   })
 
   it("reports an unflagged message as null rather than as undefined", () => {
-    const [entry] = transcript({ messages: [assistantMessage(1, "answer")] })
+    const [entry] = transcript({ messages: [assistantMessage(1, "đáp")] })
 
     expect(entry.kind === "assistant" && entry.flaggedReason).toBeNull()
   })
-
-  it("renders a stored message with no blocks as its prose rather than as a gap", () => {
-    const bare: ThreadMessage = {
-      id: 1,
-      seq: 1,
-      role: "assistant",
-      content: { text: "một câu trả lời" },
-      created_at: "2026-08-16T09:00:00Z",
-      flagged_reason: null,
-      flagged_at: null,
-    }
-
-    const [entry] = transcript({ messages: [bare] })
-
-    expect(entry.kind === "assistant" && entry.view.blocks).toHaveLength(1)
-  })
 })
 
-describe("the Widgets a stored answer carries", () => {
-  /** A stored answer with whatever the JSONB column happened to hold. */
-  function withContent(extra: Record<string, unknown>): ThreadMessage {
-    const message = assistantMessage(1, "answer")
-    return { ...message, content: { ...message.content, ...extra } }
-  }
-
-  it("hands every spec down unparsed, so the registry stays the one validator", () => {
+describe("the tool calls a stored answer carries", () => {
+  it("reads them through, keeping the order the message stored", () => {
     const [entry] = transcript({
-      messages: [
-        withContent({
-          widgets: [{ name: "quarterly_financials", version: 1 }, "rác"],
-          widget_refusals: [{ code: "owned_by_stock_360", deep_link: "/analytics" }],
-        }),
-      ],
+      messages: [withContent({ tool_calls: [call("a"), call("b", "error")] })],
     })
 
-    // Two in, two out — the junk element included. Deciding it is junk needs the
-    // registry, which is `parseWidgetSpecs`'s to consult and not this file's, and
-    // a spec dropped here is one the slot never gets to degrade gracefully on.
-    expect(entry.kind === "assistant" && entry.view.widgets).toHaveLength(2)
-    expect(entry.kind === "assistant" && entry.view.widgetRefusals).toHaveLength(1)
+    expect(entry.kind === "assistant" && entry.view.toolCalls.map((one) => one.id)).toEqual([
+      "a",
+      "b",
+    ])
+    expect(entry.kind === "assistant" && entry.view.toolCalls[1].status).toBe("error")
   })
 
-  it("reads a message written before the keys existed as carrying none", () => {
-    const [entry] = transcript({ messages: [assistantMessage(1, "answer")] })
+  it("reads a message that used no tool as carrying none", () => {
+    const [entry] = transcript({ messages: [assistantMessage(1, "đáp")] })
 
-    expect(entry.kind === "assistant" && entry.view.widgets).toEqual([])
-    expect(entry.kind === "assistant" && entry.view.widgetRefusals).toEqual([])
+    expect(entry.kind === "assistant" && entry.view.toolCalls).toEqual([])
   })
 
   it("reads a key that is not a list as carrying none rather than as one item", () => {
     // The column is JSONB and this projection is the boundary: an object here
     // would otherwise reach the renderer as something to iterate.
+    const [entry] = transcript({ messages: [withContent({ tool_calls: { id: "a" } })] })
+
+    expect(entry.kind === "assistant" && entry.view.toolCalls).toEqual([])
+  })
+
+  it("drops a row it cannot draw instead of rendering a blank line", () => {
     const [entry] = transcript({
-      messages: [withContent({ widgets: { name: "ranked_symbols" }, widget_refusals: 7 })],
+      messages: [withContent({ tool_calls: [{ id: "a" }, "rác", null, call("b")] })],
     })
 
-    expect(entry.kind === "assistant" && entry.view.widgets).toEqual([])
-    expect(entry.kind === "assistant" && entry.view.widgetRefusals).toEqual([])
+    expect(entry.kind === "assistant" && entry.view.toolCalls.map((one) => one.id)).toEqual([
+      "b",
+    ])
+  })
+
+  it("labels a call that stored no summary with the tool's own name", () => {
+    const [entry] = transcript({
+      messages: [withContent({ tool_calls: [{ id: "a", name: "recall_facts" }] })],
+    })
+
+    expect(entry.kind === "assistant" && entry.view.toolCalls[0].summary).toBe("recall_facts")
+  })
+})
+
+describe("whether a stored answer is whole", () => {
+  it("reads as complete when the message says nothing about it", () => {
+    const [entry] = transcript({ messages: [assistantMessage(1, "đáp")] })
+
+    expect(entry.kind === "assistant" && entry.view.completed).toBe(true)
+  })
+
+  it("reads as a fragment when the message says the Turn stopped early", () => {
+    const [entry] = transcript({ messages: [withContent({ status: "incomplete" })] })
+
+    expect(entry.kind === "assistant" && entry.view.completed).toBe(false)
   })
 })
 
 describe("the draft", () => {
   it("shows while the Turn runs", () => {
-    const entries = transcript({ live: live({ blocks: [block("phần đầu")] }) })
+    const entries = transcript({ live: live({ text: "phần đầu" }) })
 
     expect(entries.at(-1)?.kind).toBe("draft")
+  })
+
+  it("carries the text and the calls the reducer holds", () => {
+    const entries = transcript({ live: live({ text: "phần đầu", toolCalls: [call("a", "running")] }) })
+    const draft = entries.at(-1)
+
+    expect(draft?.kind === "draft" && draft.text).toBe("phần đầu")
+    expect(draft?.kind === "draft" && draft.toolCalls[0].status).toBe("running")
   })
 
   it("belongs to one Thread and does not follow the user to another", () => {
@@ -197,7 +193,7 @@ describe("the draft", () => {
     // new one's transcript.
     const entries = transcript({
       threadId: "33333333-3333-4333-8333-333333333333",
-      live: live({ blocks: [block("phần đầu")] }),
+      live: live({ text: "phần đầu" }),
     })
 
     expect(entries).toHaveLength(0)
@@ -206,7 +202,7 @@ describe("the draft", () => {
   it("is replaced by the canonical message rather than shown beside it", () => {
     const entries = transcript({
       messages: [userMessage(1, "hỏi"), assistantMessage(2, "đáp")],
-      live: live({ phase: "completed", messageId: 2, blocks: [block("đáp")] }),
+      live: live({ phase: "completed", messageId: 2, text: "đáp" }),
     })
 
     expect(entries.map((entry) => entry.kind)).toEqual(["user", "assistant"])
@@ -217,28 +213,10 @@ describe("the draft", () => {
     // Dropping the draft on the id alone would empty the screen in between.
     const entries = transcript({
       messages: [userMessage(1, "hỏi")],
-      live: live({ phase: "completed", messageId: 2, blocks: [block("đáp")] }),
+      live: live({ phase: "completed", messageId: 2, text: "đáp" }),
     })
 
     expect(entries.at(-1)?.kind).toBe("draft")
-  })
-
-  it("yields to the canonical message a terminal snapshot named", () => {
-    // A reader arriving after the Turn ended gets a snapshot rather than a
-    // terminal event. It carries the same message id, so this draft hands over
-    // exactly as one that watched the Turn end would — rather than standing
-    // beside the canonical copy, without a Risk Notice, forever.
-    const entries = transcript({
-      messages: [userMessage(1, "hỏi"), assistantMessage(2, "đáp")],
-      live: live({
-        phase: "completed",
-        messageId: 2,
-        blocks: [block("đáp")],
-        appendedIndex: null,
-      }),
-    })
-
-    expect(entries.map((entry) => entry.kind)).toEqual(["user", "assistant"])
   })
 
   it("stays after a Turn that produced nothing, because the status is owed", () => {
@@ -295,11 +273,7 @@ describe("an Analysis opened into the transcript", () => {
       openedAnalyses: [{ symbol: "FPT", tradingDay: "2026-08-12", afterSeq: 1 }],
     })
 
-    expect(entries.map((entry) => entry.kind)).toEqual([
-      "user",
-      "analysis",
-      "assistant",
-    ])
+    expect(entries.map((entry) => entry.kind)).toEqual(["user", "analysis", "assistant"])
   })
 
   it("appears on its own in a Thread that has no messages yet", () => {
@@ -334,7 +308,7 @@ describe("an Analysis opened into the transcript", () => {
   it("stays above a draft that is still streaming", () => {
     const entries = transcript({
       messages: [userMessage(1, "FPT thế nào?")],
-      live: live({ blocks: [block("một khối")] }),
+      live: live({ text: "một câu" }),
       openedAnalyses: [{ symbol: "FPT", tradingDay: "2026-08-12", afterSeq: 1 }],
     })
 

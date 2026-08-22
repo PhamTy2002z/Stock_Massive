@@ -13,33 +13,30 @@ would have written.
 the real store held, so a lane that did not clear the pair would score one
 generation three times and call it agreement.
 
-*Every generation is charged to the ``eval_run``.* Same ceiling, same ledger,
-same locked transaction as the Turn lane — and the production per-call ceilings
-are still asked, on the spend the producer built, before the owner is changed.
+*Every generation is charged to the ``eval_run``.* Same ceiling, same ledger and
+same locked transaction a user's Analysis gets — and the production per-call
+ceilings are still asked, on the spend the producer built, before the owner is
+changed.
 
-*The lanes stay separable.* One run, two surfaces, and totals a reader can take
-apart.
+*A case enters its own category total.* The report is read by category, and a
+category that counted the wrong cases is a report nobody can act on.
 """
 
 from __future__ import annotations
-
-import json
 
 import pytest
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.alpha.field_profile import AXIS_ORDER
-from src.alpha.generation import Emphasis, Verdict
+from src.alpha.generation import Verdict
 from src.alpha.models import Analysis, EvalRun, LlmCallUsage
 from src.core.llm import (
     BudgetLane,
     BudgetRefusal,
     CallOwner,
-    Completion,
     OwnerType,
     SpendRequest,
-    Usage,
     Workload,
 )
 from src.core.llm.admission import (
@@ -55,79 +52,19 @@ from src.eval.cases import (
     EvalSurface,
     Expectation,
 )
-from src.eval.harness import ANALYSIS_ANSWER_KIND, RUNS_PER_CASE, EvalHarness, EvalMode
+from src.eval.harness import RUNS_PER_CASE, EvalHarness, EvalMode
 from src.eval.roles import FixtureRole
 from src.eval.scoring import Check
 from src.eval.store import create_schema, eval_engine, load_fixture
 
 from . import eval_world as world
 from .eval_store import SOURCE_DB, TARGET_DB, create_database, drop_database
-from .test_eval_harness import ScriptedTransport, client_for, config
-
-# What one Analysis generation reserves in output tokens. Small enough that the
-# ceiling never fires by accident and the tests that are about the ceiling can
-# set the price instead.
-FRAGMENT_OUTPUT_TOKENS = 700
-
-
-class AnalysisTransport:
-    """A route that answers with a fragment built from the envelope it was sent.
-
-    Not a canned string: the semantic pass behind the generation checks the
-    citations against *this* envelope, so a fixed fragment would be rejected for
-    citing ids the fixture does not have and every test would measure the
-    rejection path. Reading the envelope back out of the request is what a
-    cooperating model does, and it leaves the misbehaviours to the flags below.
-    """
-
-    def __init__(self, *, cite_refused: bool = False, leads: int = 1) -> None:
-        self.cite_refused = cite_refused
-        self.leads = leads
-        self.envelopes: list[dict] = []
-
-    async def dispatch(self, request):
-        envelope = json.loads(request.messages[1].content)
-        self.envelopes.append(envelope)
-        figures = [envelope["priceZone"]] + [
-            figure
-            for section in envelope["sections"]
-            for figure in section["figures"]
-        ]
-        citable = [
-            figure["fieldId"]
-            for figure in figures
-            if figure["health"] != "refused" and figure["value"] is not None
-        ]
-        refused = [
-            figure["fieldId"] for figure in figures if figure["health"] == "refused"
-        ]
-        cited = list(citable)
-        if self.cite_refused and refused:
-            cited.append(refused[0])
-        fragment = {
-            "verdict": Verdict.HOLD.value,
-            "verdictLine": "Vùng giá thường ngày vẫn hẹp.",
-            "thesis": "Bằng chứng hiện có chỉ mô tả trạng thái gần đây.",
-            "citedFieldIds": cited,
-            "axes": [
-                {
-                    "axis": axis.value,
-                    "emphasis": (
-                        Emphasis.LEAD.value
-                        if index < self.leads
-                        else Emphasis.SUPPORT.value
-                    ),
-                    "emphasisReason": "Trục này mang nhiều bằng chứng dùng được nhất.",
-                    "read": "Các chỉ số nằm trong vùng quen thuộc của chính nó.",
-                }
-                for index, axis in enumerate(AXIS_ORDER)
-            ],
-        }
-        return Completion(
-            model=request.model,
-            text=json.dumps(fragment, ensure_ascii=False),
-            usage=Usage(input_tokens=0, output_tokens=FRAGMENT_OUTPUT_TOKENS),
-        )
+from .test_eval_harness import (
+    FRAGMENT_OUTPUT_TOKENS,
+    AnalysisTransport,
+    client_for,
+    config,
+)
 
 
 def analysis_case(identifier: str, **overrides) -> EvalCase:
@@ -142,16 +79,6 @@ def analysis_case(identifier: str, **overrides) -> EvalCase:
     )
     defaults.update(overrides)
     return EvalCase(**defaults)
-
-
-def turn_case(identifier: str) -> EvalCase:
-    return EvalCase(
-        id=identifier,
-        category=EvalCategory.FALSE_REFUSAL,
-        surface=EvalSurface.TURN,
-        prompt="Cổ phiếu này đang ở vùng giá nào?",
-        role=FixtureRole.BANK,
-    )
 
 
 @pytest.fixture(scope="module")
@@ -199,7 +126,7 @@ def factory(target_engine):
 
 @pytest.fixture
 def harness(factory, seed):
-    def build(*, configuration=None, transport=None, turn_transport=None):
+    def build(*, configuration=None, transport=None):
         resolved = configuration or config()
         analysis = transport or AnalysisTransport()
         return EvalHarness(
@@ -207,13 +134,13 @@ def harness(factory, seed):
             fixture=load_fixture(seed, factory),
             session_factory=factory,
             config=resolved,
-            client=client_for(
-                factory, resolved, turn_transport or ScriptedTransport()
-            ),
             # A fresh guarded client per generation, which is what the lane
             # requires: the producer runs each one in an event loop of its own.
             analysis_client_factory=lambda: client_for(factory, resolved, analysis),
             git_sha="eval-test",
+            # Never the application store: this file asserts nothing about the
+            # field, and left unset the run would open the dev database.
+            ops_session_factory=factory,
         )
 
     return build
@@ -235,10 +162,8 @@ class TestTheNightlyPipelineRunsUnmodified:
         result = await harness().run([analysis_case("lane-1")])
 
         run = result.results[0].runs[0]
-        assert run.answer_kind == ANALYSIS_ANSWER_KIND
         assert run.verdict == Verdict.HOLD.value
         assert run.cited_field_ids
-        assert run.tool_calls == ()
 
         session = factory()
         try:
@@ -430,19 +355,19 @@ class TestTheThreeChecksOnlyThisLaneHas:
         assert not run.passed
 
 
-class TestTheLanesAreSeparableInOneRun:
+class TestTheTotalsAreReadableByCategoryAndBySurface:
     @pytest.mark.asyncio
-    async def test_one_run_carries_both_surfaces_and_totals_them_apart(
+    async def test_one_run_totals_its_cases_under_the_surface_they_ran_on(
         self, harness, factory
     ):
-        result = await harness().run(
-            [turn_case("mixed-turn"), analysis_case("mixed-analysis")]
-        )
+        result = await harness().run([analysis_case("mixed-analysis")])
 
         totals = result.category_totals
-        assert totals["by_surface"]["turn"]["cases"] == 1
         assert totals["by_surface"]["analysis"]["cases"] == 1
         assert totals["by_surface"]["analysis"]["runs"] == RUNS_PER_CASE
+        # Present at zero rather than absent: a missing key and a zero read the
+        # same to a careless eye and mean opposite things.
+        assert totals["by_surface"]["turn"] == {"cases": 0, "runs": 0, "passed": 0}
 
         session = factory()
         try:

@@ -3,24 +3,17 @@
  *
  * The two halves arrive from different places and mean different things: the
  * Thread is a TanStack Query resource and is history, and the live Turn is a
- * reducer's draft and is not history yet (ADR-0013). Deciding between them in
- * JSX would put the one rule that matters — **the canonical message replaces
- * the draft, it never joins it** — inside a component, where the only way to
- * check it is to render.
+ * reducer's draft and is not history yet. Deciding between them in JSX would
+ * put the one rule that matters — **the canonical message replaces the draft,
+ * it never joins it** — inside a component, where the only way to check it is
+ * to render.
  *
  * So this is a pure projection. It answers one question: what rows are on
  * screen right now, in order.
  */
 
 import type { LivePhase, LiveTurn } from "./live-turn"
-import type {
-  ActivityPhase,
-  ContentBlock,
-  FlagReason,
-  ProgressStep,
-  RiskNotice,
-  ThreadMessage,
-} from "./types"
+import type { FlagReason, ThreadMessage, ToolCall } from "./types"
 
 export interface UserEntry {
   kind: "user"
@@ -32,49 +25,19 @@ export interface UserEntry {
 
 /** One canonical assistant message, read defensively because it is stored JSONB. */
 export interface AssistantView {
-  blocks: ContentBlock[]
-  /** Attached by the backend. Null only if a stored message somehow lacks one. */
-  riskNotice: RiskNotice | null
-  /**
-   * The trail the Turn left, as the message stored it (`docs/adr/0020`).
-   *
-   * Read from the message rather than kept from the draft it replaced: a Thread
-   * reopened tomorrow has no draft to remember, and the trail under an answer
-   * should not depend on whether the tab that asked is still open.
-   */
-  searchProgress: ProgressStep[]
-  /** Follow-up questions the backend generated. Empty on an answer without any. */
-  suggestions: string[]
-  /**
-   * The Widget specs the message stored, carried through unvalidated.
-   *
-   * `unknown[]` on purpose. ADR-0012 validates a spec twice and the second pass
-   * belongs where the registry is (`widgets/spec.ts`), because that is the only
-   * place that can answer the question the pass exists to ask: *does this build
-   * still ship a component for this `(name, version)`*. Validating here would
-   * put the verdict in a module with no registry to consult, and the failure
-   * would be silent — a spec dropped by the projection is a spec the slot never
-   * gets to degrade gracefully on.
-   *
-   * So this reads exactly as far as it honestly can: the column held an array,
-   * or it did not.
-   */
-  widgets: unknown[]
-  /**
-   * Selections the backend refused, in the same unvalidated form.
-   *
-   * A refusal is only worth rendering when it points at a screen in this app,
-   * and `parseWidgetRefusals` is what decides that. Same reasoning as above:
-   * one validator, at the point of use.
-   */
-  widgetRefusals: unknown[]
+  /** The whole answer, as Markdown the message stored. */
+  text: string
+  /** The calls the Turn made, as the message stored them. Empty on most answers. */
+  toolCalls: ToolCall[]
   /**
    * Whether the Turn behind this answer ran to completion.
    *
-   * Read from the Evidence Manifest, which is the only thing on a stored message
-   * that knows: the blocks of a Turn that hit its deadline look exactly like the
-   * blocks of one that finished, and closing that trail with *Hoàn thành* would
-   * tell the reader the answer is whole when it is a fragment.
+   * The text of a Turn that hit its deadline looks exactly like the text of one
+   * that finished, so this is the only thing that can tell the reader they are
+   * holding a fragment. Read from a `status` the message may carry and defaults
+   * to complete without one: an answer in the transcript is one the backend
+   * wrote in a terminal transaction, and labelling every message that predates
+   * the key as *stopped* would be the louder mistake.
    */
   completed: boolean
 }
@@ -99,31 +62,21 @@ export interface AssistantEntry {
 export interface DraftEntry {
   kind: "draft"
   key: string
-  blocks: ContentBlock[]
-  activity: ActivityPhase | null
-  /** Every step so far, in order, so the work stays legible while it happens. */
-  steps: ProgressStep[]
+  /** The answer so far. Grows by whole deltas, never re-ordered. */
+  text: string
+  toolCalls: ToolCall[]
   phase: LivePhase
   terminalReason: string | null
-  /**
-   * The block that just arrived, by index, or null if nothing did.
-   *
-   * Carried straight from the reducer rather than derived from how the count
-   * changed between renders. A snapshot and a run of events can produce the
-   * same two counts, and only the action that caused them knows which happened
-   * — so the reveal is decided where the events are, not where they are drawn.
-   */
-  appendedIndex: number | null
 }
 
 /**
  * One Analysis the user opened, sitting where they opened it.
  *
- * An Analysis is an artifact rather than a page (`docs/specs/0002` §5), so
- * opening one puts a row in the transcript instead of navigating away from it.
- * The row carries only the pair that identifies the Analysis; the artifact
- * reads itself, because a payload threaded through this projection would be a
- * second copy of a resource TanStack Query already owns.
+ * An Analysis is an artifact rather than a page, so opening one puts a row in
+ * the transcript instead of navigating away from it. The row carries only the
+ * pair that identifies the Analysis; the artifact reads itself, because a
+ * payload threaded through this projection would be a second copy of a resource
+ * TanStack Query already owns.
  */
 export interface AnalysisEntry {
   kind: "analysis"
@@ -221,12 +174,10 @@ export function buildTranscript(input: TranscriptInput): TranscriptEntry[] {
     entries.push({
       kind: "draft",
       key: `draft-${input.live.turnId}`,
-      blocks: input.live.blocks,
-      activity: input.live.activity,
-      steps: input.live.steps,
+      text: input.live.text,
+      toolCalls: input.live.toolCalls,
       phase: input.live.phase,
       terminalReason: input.live.terminalReason,
-      appendedIndex: input.live.appendedIndex,
     })
   }
 
@@ -237,10 +188,9 @@ export function buildTranscript(input: TranscriptInput): TranscriptEntry[] {
  * Whether the draft is still the newest thing on screen.
  *
  * It stops being so the moment its canonical message is in the Thread — that
- * message carries the Risk Notice, the Evidence Manifest and the sources, and
- * showing both would render one answer twice with the fuller copy underneath.
- * Until then the draft stands, including when it ended with nothing: a Turn
- * that failed still owes the user a status and a retry.
+ * message is the same answer as the draft, and showing both would print it
+ * twice. Until then the draft stands, including when it ended with nothing: a
+ * Turn that failed still owes the user a status and a retry.
  */
 function showsDraft(input: TranscriptInput, ordered: ThreadMessage[]): boolean {
   const { live } = input
@@ -256,51 +206,33 @@ function textOf(message: ThreadMessage): string {
 
 function assistantView(message: ThreadMessage): AssistantView {
   const content = message.content
-  const blocks = Array.isArray(content.blocks) ? (content.blocks as ContentBlock[]) : []
-  const text = textOf(message)
   return {
-    // A stored message always carries blocks; the fallback exists so that a row
-    // written before this shape existed renders as prose rather than as a gap.
-    blocks: blocks.length > 0 ? blocks : text ? [proseBlock(text)] : [],
-    riskNotice: isRiskNotice(content.risk_notice) ? content.risk_notice : null,
-    // Both additive, and both read the same defensive way as everything else in
-    // here: the column is JSONB, and a message written before ADR-0020 carries
-    // neither key.
-    searchProgress: Array.isArray(content.search_progress)
-      ? (content.search_progress as ProgressStep[])
-      : [],
-    suggestions: Array.isArray(content.suggestions)
-      ? (content.suggestions as unknown[]).filter(
-          (row): row is string => typeof row === "string" && row.trim().length > 0,
-        )
-      : [],
-    // Read the same defensive way, and no further: an element is not inspected
-    // here, only the fact that there is a list to inspect later.
-    widgets: Array.isArray(content.widgets) ? (content.widgets as unknown[]) : [],
-    widgetRefusals: Array.isArray(content.widget_refusals)
-      ? (content.widget_refusals as unknown[])
-      : [],
-    // Defaults to complete on a message whose Manifest cannot be read: an answer
-    // in the transcript is one the backend wrote in a terminal transaction, and
-    // labelling every older row as *stopped* would be the louder mistake.
-    completed: manifestStatus(content.evidence_manifest) !== "incomplete",
+    text: textOf(message),
+    toolCalls: Array.isArray(content.tool_calls) ? toolCalls(content.tool_calls) : [],
+    completed: content.status !== "incomplete",
   }
 }
 
-function manifestStatus(manifest: unknown): string | null {
-  if (typeof manifest !== "object" || manifest === null) return null
-  const status = (manifest as { status?: unknown }).status
-  return typeof status === "string" ? status : null
-}
-
-function proseBlock(text: string): ContentBlock {
-  return { kind: "prose", text, symbol: null, trading_day: null, citations: [] }
-}
-
-function isRiskNotice(value: unknown): value is RiskNotice {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as RiskNotice).text === "string"
-  )
+/**
+ * The tool calls a stored message can be rendered from, and nothing else.
+ *
+ * The column is JSONB, so the interface saying `ToolCall[]` describes the
+ * contract rather than the bytes. A row missing the two fields the list is
+ * drawn from is dropped instead of rendering as a blank line, because a blank
+ * line in this list reads as a call the reader cannot see the result of.
+ */
+function toolCalls(rows: unknown[]): ToolCall[] {
+  const calls: ToolCall[] = []
+  for (const row of rows) {
+    if (typeof row !== "object" || row === null) continue
+    const { id, name, status, summary } = row as Partial<ToolCall>
+    if (typeof id !== "string" || typeof name !== "string") continue
+    calls.push({
+      id,
+      name,
+      status: status === "running" || status === "error" ? status : "ok",
+      summary: typeof summary === "string" && summary !== "" ? summary : name,
+    })
+  }
+  return calls
 }

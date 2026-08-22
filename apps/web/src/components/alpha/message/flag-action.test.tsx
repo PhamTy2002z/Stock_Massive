@@ -14,33 +14,13 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 
 import { FLAG_REASON_LABELS } from "@/lib/alpha-desk/copy"
 import type { AssistantView } from "@/lib/alpha-desk/transcript"
-import type { ContentBlock, RiskNotice } from "@/lib/alpha-desk/types"
 import { AssistantMessage } from "./assistant-message"
 import { FlagAction } from "./flag-action"
 
 afterEach(cleanup)
 
-const NOTICE: RiskNotice = {
-  version: "risk-notice/1",
-  locale: "vi",
-  text: "Đây không phải khuyến nghị đầu tư.",
-  meanings: [],
-}
-
-function block(text: string): ContentBlock {
-  return { kind: "prose", text, symbol: null, trading_day: null, citations: [] }
-}
-
 function view(): AssistantView {
-  return {
-    blocks: [block("kết luận")],
-    riskNotice: NOTICE,
-    searchProgress: [],
-    suggestions: [],
-    widgets: [],
-    widgetRefusals: [],
-    completed: true,
-  }
+  return { text: "kết luận", toolCalls: [], completed: true }
 }
 
 function action(overrides: Partial<React.ComponentProps<typeof FlagAction>> = {}) {

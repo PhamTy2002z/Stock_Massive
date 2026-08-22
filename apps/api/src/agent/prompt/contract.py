@@ -1,139 +1,111 @@
-"""Rendering, versioning and hashing the System Prompt Contract.
+"""Rendering, versioning and hashing the system prompt.
 
-``docs/adr/0015`` makes the Contract the behavioural core and, in the same
-breath, refuses to let it be an enforcement mechanism.  This module is what that
-distinction looks like in code: it renders text and computes a hash, and it
-contains no check that a model could be said to have passed.
+This module renders text and computes a hash. It contains no check a model could
+be said to have passed: the prompt is what the model is told, never what the
+harness enforces. Everything this harness actually enforces lives in
+:mod:`src.agent.guardrails`, :mod:`src.agent.budget` and
+:mod:`src.agent.untrusted`, because a rule stated only in prose is a rule that
+holds until a page asks nicely.
 
-Three things are proven here rather than asserted in prose.
+Three properties are proven here rather than asserted.
 
-**Nothing but five typed values can reach the prompt.**  :func:`render` accepts a
-:class:`RuntimeContext` whose fields are an ``int``, two ``date``s, a
-:class:`MarketState` and a validated symbol.  There is no string field, so there
-is no hole a figure, a Watchlist entry, a tool result or user prose could be
-poured into — and :data:`_STATIC_TEXT` is built by concatenation with no
-formatting call anywhere in the module.
+**Almost nothing can reach the prompt.** :func:`render` accepts a
+:class:`RuntimeContext` whose fields are a ``date`` and one optional short name,
+and :data:`_STATIC_TEXT` is built by concatenation with no formatting call
+anywhere in the module. The name is the one free-text value, and it is sanitised
+on the way in — see :meth:`RuntimeContext.__post_init__`.
 
-**The prose is the version.**  :func:`contract_hash` hashes the section text
+**The prose is the version.** :func:`contract_hash` hashes the section text
 itself, so an edit that forgets to bump :data:`PROMPT_VERSION` still changes the
-hash the Evidence Manifest records and the cache key derives from.
+hash.
 
-**The cacheable prefix is genuinely stable.**  Every section is identical for
-every Turn; only the five values appended after the last one vary.
-:func:`prefix` returns exactly the stable part, so a cache key built from it
-cannot silently include today's Trading Day.
+**The cacheable prefix is genuinely stable.** Every section is identical for
+every Turn; only the values appended after the last one vary. :func:`prefix`
+returns exactly the stable part, so a cache key built from it cannot silently
+include today's date.
 """
 
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
-from enum import Enum
-
-from src.stocks.shared import validate_symbol
 
 from .sections import PROMPT_VERSION, SECTIONS, PromptSection
 
+#: How much of a user-supplied name is carried into the prompt. Long enough for
+#: a real Vietnamese full name, short enough that the field cannot become a
+#: second prompt.
+MAX_NAME_CHARS = 64
 
-class MarketState(str, Enum):
-    """The market's state as a short string, and the only one injected.
+#: Everything a name may keep: letters (including Vietnamese diacritics),
+#: digits, spaces and the three punctuation marks names actually use. Anything
+#: else — newlines, angle brackets, quotes, the delimiters this harness wraps
+#: untrusted content in — is dropped rather than escaped, because a name has no
+#: legitimate use for them.
+_NAME_UNSAFE = re.compile(r"[^\w .'\-]", re.UNICODE)
+_NAME_SPACES = re.compile(r"\s+")
 
-    An enum rather than free text, and that is the point: a string field here
-    would be the one hole in an otherwise closed renderer, and the value is
-    injected precisely because no tool can supply it.
+
+def sanitise_name(raw: str) -> str | None:
+    """A display name reduced to something that cannot act as an instruction.
+
+    The threat here is small but real: the name is the only user-controlled
+    string in the prompt, and a user who writes instructions into it is
+    steering their own answers rather than anybody else's. Sanitising is still
+    worth its four lines, because the *shape* of the prompt — one line per
+    value — is what a reader and a cache key both depend on, and a newline in a
+    name breaks that shape for free.
     """
-
-    CLOSED = "closed"
-    PRE_OPEN = "pre_open"
-    ATO = "ato"
-    CONTINUOUS = "continuous"
-    LUNCH_BREAK = "lunch_break"
-    ATC = "atc"
-    POST_CLOSE = "post_close"
-
-
-class AnswerKind(str, Enum):
-    """The three answer classes of ``docs/adr/0015``.
-
-    Classified by the harness under the Contract. V1 adds no router model: a
-    second call whose accuracy cannot be measured until the Eval Battery exists
-    is a second call that cannot be defended.
-    """
-
-    ANALYSIS = "analysis"
-    EDUCATION = "education"
-    REFUSAL = "refusal"
+    cleaned = _NAME_SPACES.sub(" ", _NAME_UNSAFE.sub("", raw)).strip()
+    return cleaned[:MAX_NAME_CHARS].strip() or None
 
 
 @dataclass(frozen=True)
 class RuntimeContext:
     """The complete set of what may be injected, and nothing else.
 
-    Deliberately the same three trusted facts the Tool Catalog's
-    ``ToolContext`` carries, plus market state — which is injected for the one
-    reason given under *Trusted runtime context*: without it the model calls
-    yesterday's close "the current price", and no tool can catch that sentence.
+    Two values, and each is here because no tool can supply it.
 
-    ``today`` is injected for the same kind of reason and no other. The Trading
-    Day is the session the *store* is dated to, and on a Sunday it is Friday's;
-    a model holding only that has no way to resolve the word "today" in a
-    question, and what it produces instead is an answer saying the session the
-    user asked about does not exist. No tool can supply the calendar date
-    either: every one of them reads the store, and the store's newest session is
-    the value being disambiguated.
+    ``today`` is the calendar date in the user's own timezone. Without it the
+    model cannot resolve the word "today" in a question, and it cannot tell
+    whether a page it just fetched is describing this week or last year.
 
-    A date and never a timestamp. A clock here would void the cacheable prefix
-    on every Turn, and it would invite an answer to be precise about a minute
-    that the end-of-day data behind it is not.
+    A date and never a timestamp: a clock here would change the prompt on every
+    Turn and void the cacheable prefix, and it would invite precision about a
+    minute that nothing behind the answer has.
+
+    ``user_name`` is what to call the reader, when the account carries a name.
+    Optional because most do not, and sanitised because it is the one field a
+    user writes.
     """
 
-    user_id: int
-    trading_day: date
     today: date
-    market_state: MarketState
-    active_symbol: str | None = None
+    user_name: str | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.user_id, int) or isinstance(self.user_id, bool):
-            raise TypeError("identity is injected as a user id, out of band")
-        if not isinstance(self.trading_day, date):
-            raise TypeError("trading_day must be a date")
         if not isinstance(self.today, date):
             raise TypeError("today must be a date")
-        if not isinstance(self.market_state, MarketState):
-            raise TypeError("market_state must be a MarketState")
-        if self.active_symbol is not None:
-            object.__setattr__(self, "active_symbol", validate_symbol(self.active_symbol))
-
-
-@dataclass(frozen=True)
-class AnswerEvidence:
-    """What the harness observed during a Turn, in classification terms.
-
-    Counts and flags the loop already has. Nothing here is a model assertion:
-    the model cannot tell the harness that its own answer was an analysis.
-    """
-
-    model_refused: bool = False
-    universe_refusals: int = 0
-    grounded_tool_calls: int = 0
+        if self.user_name is not None:
+            if not isinstance(self.user_name, str):
+                raise TypeError("user_name must be a string when present")
+            object.__setattr__(self, "user_name", sanitise_name(self.user_name))
 
 
 def _assert_no_formatting_hole(sections: Sequence[PromptSection]) -> None:
     """Refuse a section body that could be filled in later.
 
-    The acceptance criterion is that no code path can interpolate a figure into
-    the system prompt. Auditing the call sites proves that for today's code; a
-    body with no brace in it proves it for tomorrow's, because there is nothing
-    for a stray ``format`` call to fill.
+    Auditing the call sites proves for today's code that nothing interpolates
+    into the prompt; a body with no brace in it proves the same for tomorrow's,
+    because there is nothing for a stray ``format`` call to fill.
     """
     for section in sections:
         if "{" in section.body or "}" in section.body:
             raise ValueError(
-                f"section {section.key} contains a formatting hole; the Contract's "
-                "prose describes shapes in words so that it cannot be filled in"
+                f"section {section.key} contains a formatting hole; the prose "
+                "describes shapes in words so that it cannot be filled in"
             )
 
 
@@ -155,8 +127,8 @@ def contract_hash(
     """A stable hash of the version and the prose it names.
 
     Taken over the static text rather than a rendered prompt: a hash that moved
-    with the Trading Day would void the cached prefix once a day and would tell
-    an auditor nothing about which Contract produced an answer.
+    with the date would void the cached prefix once a day and would tell an
+    auditor nothing about which prompt produced an answer.
     """
     digest = hashlib.sha256()
     digest.update(version.encode("utf-8"))
@@ -174,64 +146,40 @@ def prefix() -> str:
 
 
 def render(context: RuntimeContext) -> str:
-    """The whole system prompt: the stable prefix, then the five values.
+    """The whole system prompt: the stable prefix, then the Turn's values.
 
     Byte-stable for the same version and the same context, because the only
-    variable part is five values rendered from typed fields in a fixed order.
+    variable part is rendered from typed fields in a fixed order.
     """
     if not isinstance(context, RuntimeContext):
         raise TypeError("the system prompt renders only a RuntimeContext")
-    lines = (
-        f"- user_id: {context.user_id}",
-        # Ordered the way the question arrives: what day it is, then how far the
-        # data reaches, then what the exchange is doing. A reader that meets
-        # `trading_day` first has already had to guess whether it means today.
-        f"- today: {context.today.isoformat()}",
-        f"- trading_day: {context.trading_day.isoformat()}",
-        f"- market_state: {context.market_state.value}",
-        f"- active_symbol: {context.active_symbol or 'none'}",
-    )
+    lines = [f"- today: {context.today.isoformat()}"]
+    if context.user_name:
+        lines.append(f"- user_name: {context.user_name}")
     return _STATIC_TEXT + "\n\n" + "\n".join(lines) + "\n"
 
 
-def cache_key(model: str, tool_catalog_version: str) -> str:
-    """The identity of a cacheable prefix, per ``docs/adr/0015``.
+def cache_key(model: str, tool_signature: str) -> str:
+    """The identity of a cacheable prefix.
 
-    Model, ``prompt_version`` and ``tool_catalog_version`` — and the prompt hash
-    with them, so a prose edit that forgets the version bump still voids the
-    cache. Caching never changes correctness or control flow; this key only
-    decides whether a prefix may be reused.
+    Model, version and the prompt hash — the hash so that a prose edit which
+    forgets the version bump still voids the cache — plus whatever the caller
+    uses to identify the tool list, because the schemas travel in the same
+    cacheable head of the request as the prompt. Caching never changes
+    correctness or control flow; this key only decides whether a prefix may be
+    reused.
     """
-    return "|".join((model, PROMPT_VERSION, PROMPT_HASH, tool_catalog_version))
-
-
-def classify_answer_kind(evidence: AnswerEvidence) -> AnswerKind:
-    """Assign one of the three answer classes, deterministically.
-
-    Ordered by the Contract's own precedence: a refusal outranks everything,
-    grounded evidence makes an analysis, and what remains is education. No
-    model call, and no branch that a model's own claim about its answer could
-    enter.
-    """
-    if evidence.model_refused:
-        return AnswerKind.REFUSAL
-    if evidence.grounded_tool_calls > 0:
-        return AnswerKind.ANALYSIS
-    if evidence.universe_refusals > 0:
-        return AnswerKind.REFUSAL
-    return AnswerKind.EDUCATION
+    return "|".join((model, PROMPT_VERSION, PROMPT_HASH, tool_signature))
 
 
 __all__ = [
+    "MAX_NAME_CHARS",
     "PROMPT_HASH",
     "PROMPT_VERSION",
-    "AnswerEvidence",
-    "AnswerKind",
-    "MarketState",
     "RuntimeContext",
     "cache_key",
-    "classify_answer_kind",
     "contract_hash",
     "prefix",
     "render",
+    "sanitise_name",
 ]

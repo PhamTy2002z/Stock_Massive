@@ -42,7 +42,6 @@ from pathlib import Path
 from typing import Any
 
 from src.agent.ops import OpsSnapshot
-from src.agent.prompt import AnswerKind
 
 from .baseline import Baseline, compare_to_baseline
 from .cases import EvalCase, battery
@@ -215,8 +214,8 @@ def _run(payload: dict[str, Any], case_id: str) -> CaseRun:
         answer=payload.get("answer", ""),
         status=payload.get("status", ""),
         terminal_reason=payload.get("terminal_reason"),
-        answer_kind=payload.get("answer_kind", AnswerKind.EDUCATION.value),
-        tool_calls=tuple(payload.get("tool_calls", ())),
+        verdict=payload.get("verdict"),
+        cited_field_ids=tuple(payload.get("cited_field_ids", ())),
     )
 
 

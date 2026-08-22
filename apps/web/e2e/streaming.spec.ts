@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test"
 
 import {
+  ANSWER_LABEL,
   API_ORIGIN,
   CANONICAL_MARK,
   ask,
@@ -15,18 +16,27 @@ import {
 } from "./desk"
 
 /**
- * The four properties streaming is accepted against (#92, ADR-0013).
+ * The four properties streaming is accepted against.
  *
  * Through the real path: a real browser drives a real Next production build,
  * which proxies a real FastAPI. Every assertion below is about bytes arriving
  * over that path at a particular *time*, which is the one thing unit tests on
  * either side of a proxy cannot say anything about.
  *
+ * A `content.delta` is appended to the answer rather than added as a row, so
+ * these read the answer for what it contains and count occurrences by hand: two
+ * deltas are one paragraph, and `getByText` matches whole elements.
+ *
  * Any future CDN or reverse proxy passes this same file. Running it is
  * documented in `docs/streaming-topology.md`.
  */
 
 let email = ""
+
+/** How many times a fragment appears in the answer on screen. */
+function occurrences(text: string, fragment: string): number {
+  return text.split(fragment).length - 1
+}
 
 test.beforeEach(async ({ page, request }) => {
   email = newEmail()
@@ -42,16 +52,16 @@ test.afterEach(async ({ request }) => {
   await purge(request, email)
 })
 
-test("the first block and a heartbeat arrive before the Turn completes", async ({
+test("the first delta and a heartbeat arrive before the Turn completes", async ({
   page,
   request,
 }) => {
   await ask(page, request, "VCB thế nào?")
-  await say(request, "khối đầu tiên")
+  await say(request, "đoạn đầu tiên ")
 
   // Arrived, and the Turn is still running: a transport that buffered would
   // show nothing here until `finish` had been called.
-  await expect(page.getByText("khối đầu tiên")).toBeVisible()
+  await expect(page.getByLabel(ANSWER_LABEL)).toContainText("đoạn đầu tiên")
   const before = await (await request.get(`${API_ORIGIN}/e2e/turn`)).json()
   expect(before.released).toBe(false)
 
@@ -100,30 +110,32 @@ test("a mid-Turn reconnect resumes from an ordered snapshot, with no duplicate a
   page,
   request,
 }) => {
+  const answer = page.getByLabel(ANSWER_LABEL)
+
   await ask(page, request, "VCB thế nào?")
-  await say(request, "khối một")
-  await say(request, "khối hai")
-  await expect(page.getByText("khối hai")).toBeVisible()
+  await say(request, "đoạn một ")
+  await say(request, "đoạn hai ")
+  await expect(answer).toContainText("đoạn hai")
 
   // A reload ends this subscriber and nothing else: the Turn belongs to the
   // backend, and reattaching is what the desk remembered how to do.
   await page.reload()
-  await expect(page.getByText("khối một")).toBeVisible()
-  await expect(page.getByText("khối hai")).toBeVisible()
+  await expect(answer).toContainText("đoạn một")
+  await expect(answer).toContainText("đoạn hai")
 
-  // The same transcript, not a longer one.
-  await expect(page.getByText("khối một")).toHaveCount(1)
-  await expect(page.getByText("khối hai")).toHaveCount(1)
+  // The same answer, not a longer one: a snapshot restates the whole text, so
+  // merging it into what was on screen would print every delta twice.
+  const restated = await answer.innerText()
+  expect(occurrences(restated, "đoạn một")).toBe(1)
+  expect(occurrences(restated, "đoạn hai")).toBe(1)
+  // Order survives the reconnect, because the snapshot carries the text as one
+  // string rather than replaying the deltas as they happen to be redelivered.
+  expect(restated.indexOf("đoạn một")).toBeLessThan(restated.indexOf("đoạn hai"))
 
-  // Order survives the reconnect, because a snapshot carries the blocks in
-  // sequence rather than replaying them as they happen to be redelivered.
-  const order = await page.evaluate(() => document.body.innerText)
-  expect(order.indexOf("khối một")).toBeLessThan(order.indexOf("khối hai"))
-
-  // And the third block, published after the reattach, lands on the reattached
+  // And the third delta, published after the reattach, lands on the reattached
   // subscriber rather than on the connection the reload closed.
-  await say(request, "khối ba")
-  await expect(page.getByText("khối ba")).toBeVisible()
+  await say(request, "đoạn ba ")
+  await expect(answer).toContainText("đoạn ba")
 })
 
 test("a subscriber that stops reading is dropped, and the Turn finishes anyway", async ({
@@ -131,8 +143,8 @@ test("a subscriber that stops reading is dropped, and the Turn finishes anyway",
   request,
 }) => {
   await ask(page, request, "VCB thế nào?")
-  await say(request, "khối đầu tiên")
-  await expect(page.getByText("khối đầu tiên")).toBeVisible()
+  await say(request, "đoạn đầu tiên ")
+  await expect(page.getByLabel(ANSWER_LABEL)).toContainText("đoạn đầu tiên")
 
   const turnId = await liveTurnId(page)
 
@@ -184,9 +196,11 @@ test("the terminal event refetches the Thread and replaces the draft", async ({
   page,
   request,
 }) => {
+  const answer = page.getByLabel(ANSWER_LABEL)
+
   await ask(page, request, "VCB thế nào?")
-  await say(request, "khối đầu tiên")
-  await expect(page.getByText("khối đầu tiên")).toBeVisible()
+  await say(request, "đoạn đầu tiên ")
+  await expect(answer).toContainText("đoạn đầu tiên")
 
   // The draft carries no flag control; only the persisted message does, because
   // a flag names a message id and the draft has none yet.
@@ -197,7 +211,8 @@ test("the terminal event refetches the Thread and replaces the draft", async ({
   await expect(page.getByRole(CANONICAL_MARK.role, { name: CANONICAL_MARK.name })).toBeVisible({
     timeout: 20_000,
   })
-  // Replaced, not appended to: one copy of the block, not two.
-  await expect(page.getByText("khối đầu tiên")).toHaveCount(1)
-  await expect(page.getByLabel("Assistant message")).toHaveCount(1)
+  // Replaced, not appended to: one answer on screen, carrying one copy of the
+  // text the stream delivered.
+  await expect(answer).toHaveCount(1)
+  expect(occurrences(await answer.innerText(), "đoạn đầu tiên")).toBe(1)
 })

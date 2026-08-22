@@ -46,7 +46,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 
-from src.agent.context import TranscriptTurn
+from src.agent.messages import TranscriptTurn
 from src.agent.persistence import (
     MessageRecord,
     ThreadRecord,
@@ -55,7 +55,6 @@ from src.agent.persistence import (
     TurnRecord,
 )
 from src.agent.prompt import RuntimeContext
-from src.agent.runtime import ICT, market_state_at, resolve_trading_day
 from src.agent.schemas import (
     CreatedTurnResponse,
     CreateThreadRequest,
@@ -70,9 +69,11 @@ from src.agent.schemas import (
 from src.agent.service import AlphaDeskService, alpha_desk
 from src.agent.sse import frames
 from src.auth.dependencies import CurrentUser
+from src.auth.models import User
 from src.auth.security import TokenError, decode_access_token
 from src.auth.service import get_user_by_id
-from src.core.database import async_session_factory, in_sync_session
+from src.core.database import async_session_factory
+from src.stocks.providers.normalize import VN_TZ
 
 logger = logging.getLogger(__name__)
 
@@ -309,24 +310,21 @@ async def delete_thread(
 # -- creating a Turn -------------------------------------------------------
 
 
-async def _runtime(user_id: int, active_symbol: str | None) -> RuntimeContext:
-    """The five trusted values, and nothing else, for one Turn.
+def _runtime(user: User) -> RuntimeContext:
+    """The two trusted values, and nothing else, for one Turn.
 
-    Both dates are read off the same instant, and that instant is the one in
-    Vietnam: a Turn opened at 00:30 ICT is asked on a day that is still
-    yesterday in UTC, and these two values are compared against each other by
-    whoever answers.
+    The date is read in Vietnam rather than in UTC: a Turn opened at 00:30 local
+    time is asked on a day that is still yesterday in UTC, and "today" is the
+    reader's day or it is no use to them.
+
+    The name is the only user-supplied string that reaches the system prompt, so
+    it is the whole attack surface of this function. ``RuntimeContext`` sanitises
+    it; passing it through untouched here is deliberate, because a second
+    cleaning rule beside that one is how the two come to disagree.
     """
-    now = datetime.now(ICT)
-    trading_day = await in_sync_session(
-        lambda session: resolve_trading_day(session, fallback=now.date())
-    )
     return RuntimeContext(
-        user_id=user_id,
-        trading_day=trading_day,
-        today=now.date(),
-        market_state=market_state_at(now),
-        active_symbol=active_symbol,
+        today=datetime.now(VN_TZ).date(),
+        user_name=user.full_name,
     )
 
 
@@ -366,7 +364,7 @@ async def create_turn(
             thread_id=thread_id,
             turn_id=payload.turn_id,
             user_text=payload.text,
-            runtime=await _runtime(current_user.id, payload.active_symbol),
+            runtime=_runtime(current_user),
             symbols=payload.symbols,
             history=history_of(view.messages),
             retry_of_turn_id=payload.retry_of_turn_id,

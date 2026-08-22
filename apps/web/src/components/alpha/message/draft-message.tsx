@@ -3,30 +3,20 @@
 import { Loader2 } from "lucide-react"
 
 import type { DraftEntry } from "@/lib/alpha-desk/transcript"
-import { ContentBlockView } from "./content-block"
+import { Markdown } from "./markdown"
 import { MessageShell } from "./message-shell"
-import { SearchProgress, hasVisibleTrail } from "./search-progress"
+import { ToolCallList } from "./tool-call-list"
 import { TurnStatus } from "./turn-status"
 
 /**
  * The Turn in flight, as far as it has got.
  *
- * The draft is not history and never carries the Risk Notice: the notice is
- * attached in the terminal transaction, and the canonical message that arrives
- * a moment later is what replaces this. Synthesising one here would put a
- * backend-owned guarantee under the client's control, which is the thing
- * attaching it in the backend exists to prevent.
+ * The same two things the canonical message shows, in the same order, so the
+ * swap at the terminal event moves nothing on screen.
  *
- * What it does carry is everything the user has already been shown, through
- * every ending. Cancel keeps it, a deadline keeps it, a failed route keeps it —
- * the status is a line underneath, never a replacement.
- *
- * It carries no Widgets either, and for a plainer reason than the notice: a
- * Widget's data is read back through the message that stores its descriptor, and
- * a draft has no message id yet. A `widget.ready` mid-Turn therefore has nothing
- * to resolve against, and the picture appears when the canonical message
- * replaces this a moment later. Drawing something from the spec alone would mean
- * drawing a Widget from no data at all.
+ * What it carries is everything the user has already been shown, through every
+ * ending. Cancel keeps it, a deadline keeps it, a failed route keeps it — the
+ * status is a line underneath, never a replacement.
  */
 export function DraftMessage({
   entry,
@@ -39,46 +29,23 @@ export function DraftMessage({
 }) {
   const running =
     entry.phase === "starting" || entry.phase === "running" || entry.phase === "cancelling"
-  const livePhase = running ? entry.activity : null
-  // The trail outlives the running state. What the Turn did before it ended is
-  // still what it did, and on a Turn that stopped early it is most of what the
-  // reader has to go on — but only where there is a step left worth naming,
-  // which is the trail's own question to answer rather than this one's.
-  const showsActivity = hasVisibleTrail(entry.steps, livePhase)
 
   return (
     <MessageShell className={className}>
-      {/* Above the blocks and open while the work happens: the reader is
-          watching a list grow, and a trail under the answer would put the
-          growing part below the thing they are waiting for. It folds itself
-          away as soon as the first block lands, because from that moment the
-          answer is what the reader is here for. */}
-      {showsActivity && (
-        <SearchProgress
-          steps={entry.steps}
-          activity={livePhase}
-          ending={running ? null : entry.phase === "completed" ? "done" : "stopped"}
-          answered={entry.blocks.length > 0}
-          defaultOpen
-        />
-      )}
+      <ToolCallList calls={entry.toolCalls} />
 
-      {/* `appendedIndex` is exactly the block the last event delivered, and it
-          is the only block that cascades its prose in (`word-cadence`). A
-          snapshot appends nothing, so a reconnect and a reopened Thread stage
-          nothing and everything present renders at once. */}
-      {entry.blocks.map((block, index) => (
-        <ContentBlockView
-          key={`block-${index}`}
-          block={block}
-          stagger={index === entry.appendedIndex}
-        />
-      ))}
+      {/* Rendered as the Markdown it is, mid-sentence and all: the answer
+          arrives as deltas, so a closing marker can be one delta behind the
+          text it closes. A syntax character on screen for a moment is the price
+          of the answer arriving as it is written, and holding the text back
+          until it parsed cleanly would be the buffered transport this whole
+          path exists to avoid. */}
+      {entry.text !== "" && <Markdown text={entry.text} />}
 
-      {/* Before the first activity or block. The harness has to look like it is
-          working rather than hung, and the first thing the backend sends can be
-          a moment away. */}
-      {running && !showsActivity && entry.blocks.length === 0 && (
+      {/* Before the first delta and before the first call. The harness has to
+          look like it is working rather than hung, and the first thing the
+          backend sends can be a moment away. */}
+      {running && entry.text === "" && entry.toolCalls.length === 0 && (
         <p role="status" className="flex items-center gap-2 text-meta text-muted-foreground">
           <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" />
           Đang chuẩn bị…

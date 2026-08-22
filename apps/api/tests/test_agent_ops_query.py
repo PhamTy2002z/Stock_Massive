@@ -1,24 +1,23 @@
 """The one fixed ops query (#100), over a database nothing else is writing to.
 
 Every assertion here is about a *count*, and a count is the one thing a shared
-test database cannot give: another module's leftover Turn would move the
-`grounding_failed` rate and nobody would know which test was wrong. So this file
-creates its own throwaway Postgres beside the dev store, the same way the Eval
-Fixture tests do, and drops it afterwards.
+test database cannot give: another module's leftover Turn would move every rate
+and nobody would know which test was wrong. So this file creates its own
+throwaway Postgres beside the dev store, the same way the Eval Fixture tests do,
+and drops it afterwards.
 
 Four properties are what the file is for.
 
 *The window is half-open and it is real.* A row outside `[since, until)` is not
-counted, in every one of the five signals — the whole value of the query is that
-"over 7 days" means the same thing to all of them.
+counted, in any signal — the whole value of the query is that "over 7 days"
+means the same thing to all of them.
 
-*The denominator is Turns.* ADR-0016 states the threshold as `grounding_failed`
-above 5% **of Turns**, so the rate is over `agent_turn` rows and never over
+*The denominator is Turns.* Every rate is over `agent_turn` rows and never over
 messages, incomplete Turns, or anything else that happens to be smaller.
 
-*A key at zero is not a missing key.* Every flag reason, every `AnswerKind` and
-every tool-call status the query names is present even when nothing produced it.
-Absent and zero read the same to a careless eye and mean opposite things.
+*A key at zero is not a missing key.* Every flag reason is present even when
+nothing produced it. Absent and zero read the same to a careless eye and mean
+opposite things.
 
 *It writes nothing.* Asserted by counting rows before and after, because the
 query runs against the database the API serves from and that is the one promise
@@ -34,14 +33,7 @@ import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
-from src.agent.ops import (
-    GROUNDING_FAILED_RATE_THRESHOLD,
-    OPS_WINDOW_DAYS,
-    NO_ANSWER_KIND,
-    OpsSnapshot,
-    read_ops_snapshot,
-)
-from src.agent.prompt import AnswerKind
+from src.agent.ops import OPS_WINDOW_DAYS, OpsSnapshot, read_ops_snapshot
 from src.alpha.models import (
     FLAG_OTHER,
     FLAG_OVERREACH,
@@ -113,18 +105,12 @@ class _World:
         self,
         *,
         role: str = "assistant",
-        answer_kind: str | None = AnswerKind.ANALYSIS.value,
         created_at: datetime = INSIDE,
         flagged_reason: str | None = None,
         flagged_at: datetime | None = None,
-        blocks: list[dict] | None = None,
     ) -> int:
         self._seq += 1
-        content: dict = {"text": "x"}
-        if answer_kind is not None:
-            content["answer_kind"] = answer_kind
-        if blocks is not None:
-            content["blocks"] = blocks
+        content: dict = {"text": "x", "tool_calls": [], "status": "complete"}
         with self.session() as session:
             row = AgentMessage(
                 thread_id=self.thread_id,
@@ -145,15 +131,11 @@ class _World:
         status: str = TURN_COMPLETE,
         terminal_reason: str | None = None,
         started_at: datetime = INSIDE,
-        answer_kind: str | None = AnswerKind.ANALYSIS.value,
         with_message: bool = True,
-        blocks: list[dict] | None = None,
     ) -> None:
-        request_id = self.message(role="user", answer_kind=None, created_at=started_at)
+        request_id = self.message(role="user", created_at=started_at)
         response_id = (
-            self.message(answer_kind=answer_kind, created_at=started_at, blocks=blocks)
-            if with_message
-            else None
+            self.message(created_at=started_at) if with_message else None
         )
         with self.session() as session:
             session.add(
@@ -172,11 +154,11 @@ class _World:
     def tool_call(
         self,
         *,
-        tool_name: str = "get_price_zone",
+        tool_name: str = "web_search",
         status: str = "ok",
         started_at: datetime = INSIDE,
     ) -> None:
-        request_id = self.message(role="user", answer_kind=None, created_at=started_at)
+        request_id = self.message(role="user", created_at=started_at)
         with self.session() as session:
             session.add(
                 AgentToolCall(
@@ -199,10 +181,10 @@ def snapshot(world: _World, *, window_days: int = OPS_WINDOW_DAYS) -> OpsSnapsho
 
 def test_the_window_is_half_open_and_binds_every_signal(world):
     """One row of each kind inside the window, one outside. Only the first counts."""
-    world.turn(status=TURN_INCOMPLETE, terminal_reason="grounding_failed")
+    world.turn(status=TURN_INCOMPLETE, terminal_reason="turn_deadline")
     world.turn(
         status=TURN_INCOMPLETE,
-        terminal_reason="grounding_failed",
+        terminal_reason="turn_deadline",
         started_at=OUTSIDE,
     )
     world.tool_call(status=TOOL_CALL_UNKNOWN_TOOL, tool_name="run_python")
@@ -217,8 +199,7 @@ def test_the_window_is_half_open_and_binds_every_signal(world):
     assert reading.since == SINCE
     assert reading.until == NOW
     assert reading.turns == 1
-    assert reading.grounding_failed == 1
-    assert reading.incomplete_reasons == {"grounding_failed": 1}
+    assert reading.incomplete_reasons == {"turn_deadline": 1}
     assert reading.unknown_tool_calls == {"run_python": 1}
     assert reading.flags[FLAG_OVERREACH] == 1
 
@@ -230,29 +211,13 @@ def test_the_window_is_configurable(world):
     assert snapshot(world, window_days=OPS_WINDOW_DAYS + 3).turns == 1
 
 
-def test_released_blocks_and_visible_downgrades_are_counted_from_messages(world):
-    world.turn(
-        blocks=[
-            {"text": "Doanh thu là 10 tỷ.", "unverified_figures": ["10"]},
-            {"text": "Không có số liệu."},
-        ]
-    )
-    world.turn(blocks=[{"text": "Ngoài cửa sổ", "unverified_figures": ["1"]}], started_at=OUTSIDE)
-
-    reading = snapshot(world)
-
-    assert reading.blocks == 2
-    assert reading.downgraded_blocks == 1
-    assert reading.downgraded_block_rate == pytest.approx(0.5)
-
-
-def test_the_configured_default_is_the_window_the_threshold_is_stated_over():
+def test_the_configured_default_is_the_window_the_report_is_written_over():
     """``eval_ops_window_days`` cannot be imported from here, so it is pinned.
 
     ``src/core/config.py`` cannot import :mod:`src.agent.ops` — the import graph
-    runs the other way — so the ADR's seven days is written down twice. This is
-    the assertion that keeps the two copies equal, because a settings default
-    that drifted would silently change what "5% over 7 days" is measured over.
+    runs the other way — so the seven days is written down twice. This is the
+    assertion that keeps the two copies equal, because a settings default that
+    drifted would silently change the span every report is read over.
 
     Read off the field rather than off a constructed ``Settings``: this is a
     claim about the two code constants agreeing, and a developer who exported
@@ -263,66 +228,29 @@ def test_the_configured_default_is_the_window_the_threshold_is_stated_over():
     )
 
 
-def test_the_grounding_rate_is_over_turns_not_over_incomplete_turns(world):
-    """ADR-0016 states the threshold as a share of Turns. The denominator matters.
+def test_the_incomplete_rate_is_over_turns_not_over_incomplete_turns(world):
+    """The denominator is every Turn that ran, not every Turn that failed.
 
-    Nineteen healthy Turns and one blocked one is 5% exactly, which is not
-    *above* the threshold — the rule reopens category B above 5%, and a boundary
-    read as a breach would reopen it on the first ordinary week.
+    A rate over the failures would be 100% on every window that had any, which
+    is the shape of a number nobody can read.
     """
     for _ in range(19):
         world.turn()
-    world.turn(status=TURN_INCOMPLETE, terminal_reason="grounding_failed")
+    world.turn(status=TURN_INCOMPLETE, terminal_reason="turn_deadline")
 
     reading = snapshot(world)
 
     assert reading.turns == 20
-    assert reading.grounding_failed == 1
-    assert reading.grounding_failed_rate == pytest.approx(0.05)
-    assert reading.grounding_failed_rate == GROUNDING_FAILED_RATE_THRESHOLD
-    assert not reading.reopens_category_b
+    assert reading.incomplete_total == 1
+    assert reading.incomplete_rate == pytest.approx(0.05)
 
 
-def test_above_five_percent_of_turns_reopens_category_b(world):
-    for _ in range(18):
-        world.turn()
-    world.turn(status=TURN_INCOMPLETE, terminal_reason="grounding_failed")
-    world.turn(status=TURN_INCOMPLETE, terminal_reason="grounding_failed")
-
-    reading = snapshot(world)
-
-    assert reading.grounding_failed_rate == pytest.approx(0.10)
-    assert reading.reopens_category_b
-
-
-def test_a_widened_window_reads_the_rate_and_never_the_threshold(world):
-    """*5% over 7 days* is one sentence, and the span is half of it.
-
-    A month smooths the burst that separates fabrication from over-blocking, so
-    a wider reading is useful and is not the quantity the rule decides on.
-    """
-    for _ in range(4):
-        world.turn(started_at=OUTSIDE)
-    world.turn(
-        status=TURN_INCOMPLETE,
-        terminal_reason="grounding_failed",
-        started_at=OUTSIDE,
-    )
-
-    wide = snapshot(world, window_days=OPS_WINDOW_DAYS + 30)
-
-    assert wide.grounding_failed_rate == pytest.approx(0.20)
-    assert not wide.threshold_applies
-    assert not wide.reopens_category_b
-
-
-def test_an_empty_window_is_not_a_breach(world):
-    """Zero Turns is zero percent, not a division by zero and not an alarm."""
+def test_an_empty_window_is_zero_rather_than_a_division_by_zero(world):
     reading = snapshot(world)
 
     assert reading.turns == 0
-    assert reading.grounding_failed_rate == 0.0
-    assert not reading.reopens_category_b
+    assert reading.incomplete_rate == 0.0
+    assert reading.incomplete_total == 0
 
 
 def test_every_flag_reason_is_a_key_even_at_zero(world):
@@ -336,41 +264,11 @@ def test_every_flag_reason_is_a_key_even_at_zero(world):
     assert reading.flags_total == 1
 
 
-def test_every_answer_kind_is_a_key_and_a_released_nothing_is_its_own_bucket(world):
-    """The distribution is over Turns, so a Turn that released no message shows.
-
-    A Turn that ended before any block was released has no assistant message and
-    therefore no ``answer_kind`` at all. Dropping those would make the
-    distribution silently smaller than the Turn count it sits beside — and the
-    Turns most likely to be missing are exactly the ones that failed.
-    """
-    world.turn(answer_kind=AnswerKind.ANALYSIS.value)
-    world.turn(answer_kind=AnswerKind.REFUSAL.value)
-    world.turn(
-        status=TURN_INCOMPLETE, terminal_reason="turn_deadline", with_message=False
-    )
-
-    reading = snapshot(world)
-
-    assert set(reading.answer_kinds) == {
-        AnswerKind.ANALYSIS.value,
-        AnswerKind.EDUCATION.value,
-        AnswerKind.REFUSAL.value,
-        NO_ANSWER_KIND,
-    }
-    assert reading.answer_kinds[AnswerKind.ANALYSIS.value] == 1
-    assert reading.answer_kinds[AnswerKind.REFUSAL.value] == 1
-    assert reading.answer_kinds[AnswerKind.EDUCATION.value] == 0
-    assert reading.answer_kinds[NO_ANSWER_KIND] == 1
-    # The distribution and the denominator are the same population.
-    assert sum(reading.answer_kinds.values()) == reading.turns
-
-
 def test_incomplete_reasons_are_counted_by_reason_and_only_for_incomplete_turns(world):
     """A cancelled Turn carries a reason too, and it is not an incomplete one."""
     world.turn(status=TURN_INCOMPLETE, terminal_reason="llm_call_timeout")
     world.turn(status=TURN_INCOMPLETE, terminal_reason="llm_call_timeout")
-    world.turn(status=TURN_INCOMPLETE, terminal_reason="grounding_failed")
+    world.turn(status=TURN_INCOMPLETE, terminal_reason="tool_timeout")
     world.turn(status="cancelled", terminal_reason="cancelled_by_user")
     world.turn()
 
@@ -378,7 +276,7 @@ def test_incomplete_reasons_are_counted_by_reason_and_only_for_incomplete_turns(
 
     assert reading.incomplete_reasons == {
         "llm_call_timeout": 2,
-        "grounding_failed": 1,
+        "tool_timeout": 1,
     }
     assert reading.incomplete_total == 3
 
@@ -417,7 +315,7 @@ def test_unknown_tool_is_counted_by_the_name_that_was_asked_for(world):
     world.tool_call(status=TOOL_CALL_UNKNOWN_TOOL, tool_name="run_python")
     world.tool_call(status=TOOL_CALL_UNKNOWN_TOOL, tool_name="run_python")
     world.tool_call(status=TOOL_CALL_UNKNOWN_TOOL, tool_name="backtest")
-    world.tool_call(status="ok", tool_name="get_price_zone")
+    world.tool_call(status="ok", tool_name="web_search")
 
     reading = snapshot(world)
 
@@ -428,7 +326,7 @@ def test_unknown_tool_is_counted_by_the_name_that_was_asked_for(world):
 
 def test_the_query_writes_nothing(world):
     """It runs against the database the API serves from. That is the promise."""
-    world.turn(status=TURN_INCOMPLETE, terminal_reason="grounding_failed")
+    world.turn(status=TURN_INCOMPLETE, terminal_reason="turn_deadline")
     world.message(flagged_reason=FLAG_OTHER, flagged_at=INSIDE)
 
     def totals() -> tuple[int, ...]:

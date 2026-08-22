@@ -1,11 +1,11 @@
 """The real application, with the model replaced by a Turn the test drives.
 
 This is the FastAPI end of the end-to-end streaming acceptance (ADR-0013,
-spec 0003 §7). Unit tests on either side of the proxy prove the two halves; they
-cannot prove that an intermediary streams, because both halves are in the same
-process and there is no intermediary. So the browser drives Next, Next proxies
-FastAPI, and *this* is the FastAPI — ``src.main:app`` itself, with its routers,
-its middleware, its lifespan and its shutdown path.
+ADR-0026, spec 0003 §7). Unit tests on either side of the proxy prove the two
+halves; they cannot prove that an intermediary streams, because both halves are
+in the same process and there is no intermediary. So the browser drives Next,
+Next proxies FastAPI, and *this* is the FastAPI — ``src.main:app`` itself, with
+its routers, its middleware, its lifespan and its shutdown path.
 
 **One thing is replaced and it is named here: the model.** ``AlphaDeskService``
 is built with a scripted loop rather than :class:`AgentLoop`, at the seam
@@ -30,7 +30,6 @@ which is what ``apps/web/playwright.config.ts`` does.
 from __future__ import annotations
 
 import asyncio
-import uuid
 from datetime import date
 from types import MappingProxyType
 from typing import Any
@@ -39,16 +38,20 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import delete, select
 
-from src.agent.admission import TurnAdmission
-from src.agent.events import Activity
-from src.agent.grounding import BlockKind, ReleasedBlock
 from src.agent.limits import SubscriptionLimiter
-from src.agent.loop import SessionSlots, TurnOutcome, TurnStatus
+from src.agent.loop import (
+    SessionSlots,
+    ToolCallStatus,
+    TurnAdmission,
+    TurnOutcome,
+    TurnStatus,
+    TurnToolCall,
+)
 from src.agent.persistence import AgentPersistence
-from src.agent.prompt import AnswerKind
 from src.agent.service import AlphaDeskService, set_alpha_desk
 from src.agent.turns import TurnService
 from src.alpha.models import (
+    AgentKnowledge,
     AgentMessage,
     AgentThread,
     AgentToolCall,
@@ -68,13 +71,19 @@ from src.core.llm import (
 )
 from src.main import app
 
+#: The one tool call the churn endpoint republishes. A single id on purpose: the
+#: browser upserts a ``tool.call`` by id, so republishing one consumes sequence
+#: numbers — which is what fills a slow subscriber's queue — while leaving the
+#: answer and the list on screen exactly as they were.
+CHURN_CALL_ID = "churn-1"
+
 
 def _config() -> LLMConfig:
     """A route the admission arithmetic can fund, pointing at nothing.
 
     No call is ever made through it — the scripted loop below is what runs — but
-    the configuration is read by Budget Validation and by the Evidence Manifest,
-    and both would be answering about a route that did not exist otherwise.
+    the configuration is read by Budget Validation, which would otherwise be
+    answering about a route that did not exist.
     """
     return LLMConfig(
         enabled=True,
@@ -108,35 +117,43 @@ class Control:
     def __init__(self) -> None:
         self.started = asyncio.Event()
         self.release = asyncio.Event()
-        self.blocks: list[ReleasedBlock] = []
+        self.text = ""
         self.publisher: Any | None = None
 
     def reset(self) -> None:
         self.started = asyncio.Event()
         self.release = asyncio.Event()
-        self.blocks = []
+        self.text = ""
         self.publisher = None
 
     def say(self, text: str) -> None:
-        """Release one content block, exactly as the Gate would have."""
-        if self.publisher is None:
-            raise HTTPException(status_code=409, detail="No Turn is running")
-        block = ReleasedBlock(text=text, kind=BlockKind.PROSE, citations=())
-        self.blocks.append(block)
-        self.publisher.content_block(block.as_wire())
+        """Publish one ``content.delta``, exactly as the loop would.
 
-    def churn(self, count: int) -> None:
-        """Publish `count` activity events and nothing else.
-
-        The way a slow subscriber is made to overflow its bounded queue without
-        changing what the answer says: activity is ephemeral, so none of this
-        reaches the transcript.
+        The delta is appended here as well as published, so the answer the
+        terminal transaction stores is the concatenation of what was streamed —
+        the invariant the reconnect property is written against.
         """
         if self.publisher is None:
             raise HTTPException(status_code=409, detail="No Turn is running")
-        phases = [Activity.SEARCHING, Activity.READING_DATA, Activity.ANALYZING]
-        for index in range(count):
-            self.publisher.activity(phases[index % len(phases)])
+        self.text += text
+        self.publisher.content_delta(text)
+
+    def churn(self, count: int) -> None:
+        """Publish ``count`` events that consume a sequence and nothing else.
+
+        The way a slow subscriber is made to overflow its bounded queue without
+        changing what the answer says: one tool call, republished under the same
+        id, so the browser upserts a single row and the transcript is untouched.
+        """
+        if self.publisher is None:
+            raise HTTPException(status_code=409, detail="No Turn is running")
+        payload = TurnToolCall(
+            id=CHURN_CALL_ID,
+            name="web_search",
+            summary="Tìm trên web: kiểm tra hàng đợi",
+        ).as_wire()
+        for _ in range(count):
+            self.publisher.tool_call(payload)
 
 
 CONTROL = Control()
@@ -158,20 +175,28 @@ class ScriptedLoop:
     async def run(self, request, cancelled) -> TurnOutcome:
         self._control.publisher = self._publisher
         self._control.started.set()
-        self._publisher.activity(Activity.ANALYZING)
         await self._control.release.wait()
         status = TurnStatus.CANCELLED if cancelled() else TurnStatus.COMPLETE
-        blocks = tuple(self._control.blocks)
+        calls = (
+            (
+                TurnToolCall(
+                    id=CHURN_CALL_ID,
+                    name="web_search",
+                    status=ToolCallStatus.OK,
+                    summary="Tìm trên web: kiểm tra hàng đợi",
+                ),
+            )
+            if self._control.publisher.tool_calls
+            else ()
+        )
         return TurnOutcome(
             status=status,
             terminal_reason="cancelled_by_user" if cancelled() else None,
-            text="\n\n".join(block.text for block in blocks) or None,
-            answer_kind=AnswerKind.EDUCATION,
+            text=self._control.text or None,
             rounds_used=0,
             rounds_exhausted=False,
-            tool_calls=(),
+            tool_calls=calls,
             usage=Usage(),
-            blocks=blocks,
         )
 
 
@@ -191,13 +216,7 @@ def build_service() -> AlphaDeskService:
         return ScriptedLoop(CONTROL, checkpoint=checkpoint, publisher=publisher)
 
     return AlphaDeskService(
-        turns=TurnService(
-            store=store,
-            loop_factory=loop_factory,
-            config=config,
-            tool_catalog_version="e2e-catalog",
-            git_sha="e2e",
-        ),
+        turns=TurnService(store=store, loop_factory=loop_factory, config=config),
         admission=TurnAdmission(OpenLedger(), slots=slots),
         # Generous on purpose: the reconnect property drives several subscribes
         # in a row, and throttling them is a different ticket's assertion.
@@ -218,6 +237,7 @@ Base.metadata.create_all(
         AgentMessage.__table__,
         AgentToolCall.__table__,
         AgentTurn.__table__,
+        AgentKnowledge.__table__,
         LlmCallUsage.__table__,
     ],
     checkfirst=True,
@@ -268,7 +288,7 @@ async def wait_for_turn() -> dict[str, bool]:
 @control_router.post("/turn/say")
 async def say(request: SayRequest) -> dict[str, int]:
     CONTROL.say(request.text)
-    return {"blocks": len(CONTROL.blocks)}
+    return {"chars": len(CONTROL.text)}
 
 
 @control_router.post("/turn/churn")
@@ -311,6 +331,7 @@ async def purge(request: PurgeRequest) -> dict[str, bool]:
                 delete(AgentMessage).where(AgentMessage.thread_id.in_(threads))
             )
             session.execute(delete(AgentThread).where(AgentThread.id.in_(threads)))
+        session.execute(delete(AgentKnowledge).where(AgentKnowledge.user_id == user.id))
         session.execute(delete(LlmCallUsage).where(LlmCallUsage.user_id == user.id))
         session.execute(delete(RefreshToken).where(RefreshToken.user_id == user.id))
         session.execute(delete(User).where(User.id == user.id))
