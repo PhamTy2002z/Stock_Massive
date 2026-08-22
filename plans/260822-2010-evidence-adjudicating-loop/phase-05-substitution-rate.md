@@ -1,7 +1,7 @@
 ---
 phase: 5
 title: "Substitution rate"
-status: pending
+status: implemented
 ---
 
 # Phase 5 — Substitution rate
@@ -98,3 +98,42 @@ Sau ~20 phiên có verdict thật: forward-return ledger (verdict × horizon 5/2
 chỉnh corporate action × so với VN-Index — chuỗi benchmark đã lưu bền qua
 `Capability.MARKET_INDEX`), attribution về `citedFieldIds`, và chỉ khi đó mới bàn mở
 `Claim.PREDICTIVE`. Cần hàm chi phí giao dịch trước.
+
+
+## Đã làm (2026-08-23)
+
+`alpha/analysis_reads.py` — ba hàm đọc, tham số là khoảng Trading Day **bao gồm cả hai đầu**
+(đây là khoảng *phiên*, không phải khoảng thời điểm): `substitution_rate` · `round_yield` ·
+`cited_figure_rate`. Không bảng mới, không view.
+
+**Cách tách seed khỏi fetched.** `analysis_payload` lưu envelope **đã mở rộng** — seed cộng mọi
+figure loop lấy thêm — nên payload một mình không nói được figure nào là seed. Cách giải: đọc
+trace, lấy các `field_id` mà `get_field` trả `status = ok`; figure nào **không** nằm trong tập
+đó là seed. Không có bước này thì một lần fetch bị refused sẽ tự làm tăng mẫu số của chính nó,
+tức là loop tự tạo ra điểm để được chấm.
+
+**`useful` xét theo `health`, không theo `status`.** Một `get_field` trả figure `refused` là lời
+gọi **thành công** và câu hỏi **thất bại**; cột `status` chỉ biết điều thứ nhất. Lời gọi không
+mang `health` (`list_fields`, `check_price_claim`) thì thành công là toàn bộ việc nó phải làm.
+
+`priceZone` được đếm như một figure seed — nó nằm **cạnh** `sections`, không nằm trong section
+nào, nên một vòng lặp chỉ đi qua `sections` sẽ bỏ đúng cái figure mà baseline Phase 1 thấy ít
+được dẫn nhất (`price_zone.ordinary_range_pct`, 0/8 lượt).
+
+Cả ba dataclass **không lưu** rate: `rate` là property, và trả `None` trên mẫu số 0 chứ không
+trả `0.0` — 0 trên 0 là một thất bại chưa từng có cơ hội xảy ra.
+
+**Endpoint.** `GET /api/v1/ops/analysis-loop?since=&until=` — router riêng
+`alpha/loop_ops_router.py`, admin-only, chỉ đọc, không ngưỡng, không boolean `healthy`. Không
+đặt dưới `/analyses` vì `/{symbol}` và `/{symbol}/{trading_day}` ở đó sẽ biến path này thành
+một cái tên phải đăng ký trước chúng và phải ở lại đó — một ràng buộc thứ tự mà không dòng nào
+trong file giải thích cho người sắp xếp lại. Khoảng ngày đảo ngược được đọc xuôi lại, vì một
+khoảng ngược là lỗi gõ và trả 0 row sẽ trông y hệt một tháng vắng.
+
+**Cảnh báo đi kèm con số, không nằm trong plan.** `SUBSTITUTION_CAVEAT` nằm trong mỗi response
+mang rate: tỷ lệ substitution cao chứng minh loop hồi phục được khỏi bằng chứng thiếu, **không**
+chứng minh Analysis đúng — điều đó cần forward return đã trừ chi phí giao dịch, cần verdict thật
+mà hệ thống chưa sinh ra.
+
+Test: `tests/test_analysis_loop_measurement.py` — 26 case trên một Postgres tạm riêng (đếm phải
+chính xác, và `payload` là JSONB nên SQLite không thay được).

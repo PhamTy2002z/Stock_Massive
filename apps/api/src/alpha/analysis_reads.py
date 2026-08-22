@@ -27,12 +27,20 @@ window that is mostly gaps.
 Nothing produces an Analysis until the pipeline milestone. Everything here is
 therefore exercised against directly inserted rows, and the tests say so rather
 than implying a producer exists.
+
+The last section of this module reads something else: **what the Analysis lane's
+loop bought.** Three numbers over a range of Trading Days, no new table, and one
+of them able to fall while the other two rise. They are here rather than in a
+module of their own because they are reads of ``analysis`` and its trace, which
+is what this file is.
 """
 
 import logging
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -40,7 +48,7 @@ from sqlalchemy.orm import Session
 from src.stocks.trading_day import latest_trading_day
 
 from .analysis_run import MAX_ATTEMPTS_PER_SESSION, RunStatus
-from .models import Analysis, AnalysisRun
+from .models import Analysis, AnalysisRun, AnalysisToolCall
 
 logger = logging.getLogger(__name__)
 
@@ -351,3 +359,305 @@ def is_unread(latest: AnalysisSummary | None, last_seen: date | None) -> bool:
     if latest is None:
         return False
     return last_seen is None or last_seen < latest.trading_day
+
+
+# -- what the loop added, measured --------------------------------------------
+#
+# The Analysis lane's loop adds exactly one behaviour: met with a figure the
+# store refused, go and find a usable substitute. So the measurement is that
+# behaviour and not a proxy for it.
+#
+# There is nothing to borrow here. The eval battery was deleted, and the Hermes
+# survey established that Hermes has no grader either — its batch runner emits
+# trajectories and tool counts, its verify runner scores a build green, and the
+# file called ``battery.py`` reads a laptop battery. So these three numbers are
+# written from the rows this product already stores, and there is no new table.
+#
+# **Read the substitution rate for what it is.** A high rate proves the loop
+# recovers from missing evidence. It does not prove the Analysis is right, and
+# nothing here can: that question needs forward returns net of transaction
+# costs, which needs at least twenty sessions of real verdicts and a cost
+# function this domain has not written down. The caveat travels with the number
+# (:data:`SUBSTITUTION_CAVEAT`) rather than living in a plan nobody reads beside
+# it.
+
+#: What the substitution rate does not say, carried in every response that
+#: carries the rate. Beside the number, because a rate read as a quality score
+#: is worse than no rate at all.
+SUBSTITUTION_CAVEAT = (
+    "A high substitution rate proves the loop recovers from evidence the store "
+    "refused. It does not prove an Analysis is correct — that needs forward "
+    "returns net of transaction costs, which needs verdicts this system has not "
+    "produced yet."
+)
+
+#: The health values a figure may be cited under. The same two the fragment
+#: validator enforces; a refused figure can never support a verdict however many
+#: times it is asked for.
+#:
+#: Spelled out rather than taken from ``envelope.Health``, because importing the
+#: production module into the module that reads what it produced is the wrong
+#: direction of dependency for a reader.
+USABLE_HEALTH = frozenset({"ok", "degraded"})
+
+#: The health of a figure the store could not compute.
+REFUSED_HEALTH = "refused"
+
+#: The tool a substitution is made with. Named because the trace holds calls to
+#: several and only this one returns a figure.
+FIELD_TOOL = "get_field"
+
+
+@dataclass(frozen=True)
+class SubstitutionRate:
+    """How often a refused seed figure was answered with a usable one.
+
+    ``eligible`` is the denominator and it is *not* every Analysis. An Analysis
+    whose seed held no refusal was never asked to substitute, and dividing by all
+    of them would produce a number that falls whenever the store gets better.
+
+    An Analysis with a refused seed figure and no tool call at all counts as a
+    failure rather than being dropped: the model deciding not to look is exactly
+    the outcome this measures.
+    """
+
+    since: date
+    until: date
+    analyses: int
+    eligible: int
+    substituted: int
+
+    @property
+    def rate(self) -> float | None:
+        """None with nothing eligible, because zero of zero is not a failure."""
+        return None if self.eligible == 0 else self.substituted / self.eligible
+
+    def as_wire(self) -> dict[str, Any]:
+        return {
+            "analyses": self.analyses,
+            "eligible": self.eligible,
+            "substituted": self.substituted,
+            "rate": self.rate,
+            "caveat": SUBSTITUTION_CAVEAT,
+        }
+
+
+@dataclass(frozen=True)
+class RoundYield:
+    """How many tool calls came back with something usable.
+
+    Read against the round ceiling rather than against quality: a call that asked
+    for a field and got a refusal spent a round and bought nothing, so a low
+    yield says the ceiling is being consumed by dead ends and a high one says the
+    catalog is being used well.
+
+    ``useful`` is judged on the figure's *health* and not on the call's status. A
+    ``get_field`` that returns a refused figure succeeded as a call and failed as
+    a question, and the status column only knows the first.
+    """
+
+    since: date
+    until: date
+    calls: int
+    useful: int
+
+    @property
+    def rate(self) -> float | None:
+        return None if self.calls == 0 else self.useful / self.calls
+
+    def as_wire(self) -> dict[str, Any]:
+        return {"calls": self.calls, "useful": self.useful, "rate": self.rate}
+
+
+@dataclass(frozen=True)
+class CitedFigureRate:
+    """How much of the usable evidence the verdict actually rested on.
+
+    The one number that can fall while the other two rise, which is why it is
+    here: a loop that fetches more evidence and cites less of it is buying data
+    it does not use. The one-shot baseline to read it against is 47.7% of usable
+    figures uncited (``plans/reports/baseline-oneshot-260822.md``).
+    """
+
+    since: date
+    until: date
+    usable: int
+    cited: int
+
+    @property
+    def rate(self) -> float | None:
+        return None if self.usable == 0 else self.cited / self.usable
+
+    def as_wire(self) -> dict[str, Any]:
+        return {"usable": self.usable, "cited": self.cited, "rate": self.rate}
+
+
+def substitution_rate(
+    session: Session, since: date, until: date
+) -> SubstitutionRate:
+    """The share of Analyses that answered a refusal with a usable figure.
+
+    Two queries and a walk in Python. The walk is not avoidable in SQL at any
+    price worth paying: what counts as a seed figure is *the payload's figures
+    minus the ones the trace shows were fetched*, and expressing that as a JSONB
+    join would be a clever query nobody can check against this docstring.
+
+    The window is inclusive on both ends because it is a range of Trading Days
+    rather than of instants: a caller asking about 4 August to 8 August means the
+    sessions on both.
+    """
+    rows = _analyses_between(session, since, until)
+    fetched_by_pair = _fetched_field_ids(session, since, until)
+
+    eligible = 0
+    substituted = 0
+    for row in rows:
+        fetched = fetched_by_pair.get((row.symbol, row.trading_day), frozenset())
+        figures = {
+            figure["fieldId"]: figure for figure in _figures_in(row.payload)
+        }
+        seed_refused = any(
+            figure.get("health") == REFUSED_HEALTH
+            for field_id, figure in figures.items()
+            if field_id not in fetched
+        )
+        if not seed_refused:
+            continue
+        eligible += 1
+        cited = set(_cited_in(row.payload))
+        if any(
+            field_id in cited
+            and figures[field_id].get("health") in USABLE_HEALTH
+            for field_id in fetched
+            if field_id in figures
+        ):
+            substituted += 1
+
+    return SubstitutionRate(
+        since=since,
+        until=until,
+        analyses=len(rows),
+        eligible=eligible,
+        substituted=substituted,
+    )
+
+
+def round_yield(session: Session, since: date, until: date) -> RoundYield:
+    """The share of tool calls in the window that returned something usable."""
+    calls = 0
+    useful = 0
+    for tool_name, status, result in _trace_between(session, since, until):
+        calls += 1
+        if status != "ok":
+            continue
+        health = result.get("health") if isinstance(result, Mapping) else None
+        # A call whose result carries no health is not a field read — a catalog
+        # listing, a price check — and succeeding is the whole of what it had to
+        # do.
+        if health is None or health in USABLE_HEALTH:
+            useful += 1
+    return RoundYield(since=since, until=until, calls=calls, useful=useful)
+
+
+def cited_figure_rate(
+    session: Session, since: date, until: date
+) -> CitedFigureRate:
+    """How many usable figures the verdicts in this window rested on."""
+    usable = 0
+    cited = 0
+    for row in _analyses_between(session, since, until):
+        named = set(_cited_in(row.payload))
+        for figure in _figures_in(row.payload):
+            if figure.get("health") not in USABLE_HEALTH:
+                continue
+            usable += 1
+            if figure["fieldId"] in named:
+                cited += 1
+    return CitedFigureRate(since=since, until=until, usable=usable, cited=cited)
+
+
+def _analyses_between(
+    session: Session, since: date, until: date
+) -> Sequence[Analysis]:
+    return list(
+        session.execute(
+            select(Analysis)
+            .where(Analysis.trading_day >= since, Analysis.trading_day <= until)
+            .order_by(Analysis.trading_day, Analysis.symbol)
+        ).scalars()
+    )
+
+
+def _fetched_field_ids(
+    session: Session, since: date, until: date
+) -> dict[tuple[str, date], frozenset[str]]:
+    """Which fields the model successfully fetched, per ``(symbol, day)``.
+
+    Keyed by the pair rather than by run id because that is what the Analysis is
+    keyed by, and one run serves all three of a pair's attempts — a trace read
+    per attempt would be a distinction no reader of these numbers is making.
+    """
+    rows = session.execute(
+        select(AnalysisRun.symbol, AnalysisRun.trading_day, AnalysisToolCall.result)
+        .join(AnalysisToolCall, AnalysisToolCall.run_id == AnalysisRun.id)
+        .where(
+            AnalysisRun.trading_day >= since,
+            AnalysisRun.trading_day <= until,
+            AnalysisToolCall.tool_name == FIELD_TOOL,
+            AnalysisToolCall.status == "ok",
+        )
+    ).all()
+    fetched: dict[tuple[str, date], set[str]] = {}
+    for symbol, trading_day, result in rows:
+        if not isinstance(result, Mapping):
+            continue
+        field_id = result.get("fieldId")
+        if isinstance(field_id, str):
+            fetched.setdefault((symbol, trading_day), set()).add(field_id)
+    return {pair: frozenset(ids) for pair, ids in fetched.items()}
+
+
+def _trace_between(
+    session: Session, since: date, until: date
+) -> Sequence[tuple[str, str, Any]]:
+    return session.execute(
+        select(
+            AnalysisToolCall.tool_name,
+            AnalysisToolCall.status,
+            AnalysisToolCall.result,
+        )
+        .join(AnalysisRun, AnalysisRun.id == AnalysisToolCall.run_id)
+        .where(
+            AnalysisRun.trading_day >= since,
+            AnalysisRun.trading_day <= until,
+        )
+    ).all()
+
+
+def _figures_in(payload: Any) -> Iterator[Mapping[str, Any]]:
+    """Every figure in a stored payload, core evidence included.
+
+    ``priceZone`` sits beside the sections rather than inside one, so a walk over
+    sections alone would miss the figure the baseline found least often cited.
+    """
+    evidence = payload.get("evidence") if isinstance(payload, Mapping) else None
+    if not isinstance(evidence, Mapping):
+        return
+    zone = evidence.get("priceZone")
+    if isinstance(zone, Mapping) and isinstance(zone.get("fieldId"), str):
+        yield zone
+    for section in evidence.get("sections") or ():
+        if not isinstance(section, Mapping):
+            continue
+        for figure in section.get("figures") or ():
+            if isinstance(figure, Mapping) and isinstance(figure.get("fieldId"), str):
+                yield figure
+
+
+def _cited_in(payload: Any) -> tuple[str, ...]:
+    if not isinstance(payload, Mapping):
+        return ()
+    named = payload.get("citedFieldIds")
+    if not isinstance(named, (list, tuple)):
+        return ()
+    return tuple(item for item in named if isinstance(item, str))

@@ -1,6 +1,6 @@
 ---
 title: "Evidence-Adjudicating Loop: số liệu đúng, kiểm được, và một vòng lặp biết tự phán xử"
-status: in-progress
+status: implemented
 created: 2026-08-22
 updated: 2026-08-23
 branch: feat/evidence-adjudicating-loop
@@ -102,14 +102,27 @@ nào để chấm, và chấm cần ≥20 phiên (sàn T+2). Nó là bar thứ h
 
 ## Acceptance criteria
 
-1. Mọi Analysis do loop sinh có trace đầy đủ: hỏi gì, nhận gì, thứ tự nào.
-2. Substitution rate query được từ trace.
-3. `check_price_claim("HPG", 27542)` trả `off_tick` — lỗi đã đo được ở lượt `a81c94f1` không
-   lặp lại im lặng.
-4. Chạy lại `Phân tích HPG` cho câu trả lời tách hai khối: figure từ store kèm `asOf`, và tin
-   tức có nhãn nguồn ngoài.
-5. Không Analysis nào rỗng; không Turn nào bị cổng kiểm làm trắng.
-6. `make test` tại `apps/api` pass; cổng web không bị chạm.
+1. ✅ Mọi Analysis do loop sinh có trace đầy đủ: hỏi gì, nhận gì, thứ tự nào.
+2. ✅ Substitution rate query được từ trace — `analysis_reads.substitution_rate`, và
+   `GET /api/v1/ops/analysis-loop`.
+3. ✅ Một mức giá không nằm trên bước giá của sàn trả `off_tick`, kèm câu giải thích nêu bước
+   giá. Đo trên fixture HOSE với đúng con số `27542` của lượt `a81c94f1`.
+4. ⏳ **Chưa nghiệm thu.** Contract đã yêu cầu tách hai khối và lane chat đã có đường đọc store,
+   nhưng chạy lại `Phân tích HPG` là một phép đo trên deployment có store đầy — không phải một
+   test. Việc kế tiếp.
+5. ✅ Không Analysis nào rỗng; không Turn nào bị cổng kiểm làm trắng. `check_price_claim` không
+   xoá số và không chặn; mọi nhánh không kiểm được trả `unverified` kèm lý do.
+6. ✅ `make test`: 2422 pass, 2 fail đều **không** thuộc thay đổi này — xem dưới. Cổng web không
+   bị chạm (không file nào trong `apps/web`).
+
+**Hai fail còn lại, cả hai có trước nhánh này:**
+
+- `test_deployment_topology.py::test_the_topology_is_written_down_where_the_next_reader_will_look`
+  — đòi `docs/streaming-topology.md`, đã bị xoá cùng `docs/` ở `b352417`. Ghi trong CLAUDE.md.
+- `test_agent_loop.py::test_the_round_ceiling_is_the_constant_and_the_last_call_answers` —
+  thừa hưởng từ base `develop@1974c24`: ở đó một câu trả lời rỗng kết thúc Turn là `incomplete`,
+  và commit `6bfaccd` trên `develop` (plan `260822-1908`) mới sửa hành vi đó. Rebase lên
+  `develop` là cách đóng nó, đúng như mục **Rủi ro đã biết** của plan này đã nói.
 
 ## Phase
 
@@ -119,7 +132,7 @@ nào để chấm, và chấm cần ≥20 phiên (sàn T+2). Nó là bar thứ h
 | 2 | [Trace: bảng `analysis_tool_call`](phase-02-trace-table.md) | `alpha/models.py`, 1 migration | — | ✅ |
 | 3 | [Hai tool store-only](phase-03-store-tools.md) | `agent/tools/signals.py`, `registry`, `toolsets`, `envelope` | — | ✅ |
 | 4 | [Vòng lặp thay `generate_fragment`](phase-04-analysis-loop.md) | `alpha/analysis_loop.py`, `production.py`, `core/llm/budget`+`admission` | 2, 3 | ✅ |
-| 5 | [Substitution rate](phase-05-substitution-rate.md) | `alpha/analysis_reads.py`, ops | 2, 4 | pending |
+| 5 | [Substitution rate](phase-05-substitution-rate.md) | `alpha/analysis_reads.py`, `loop_ops_router.py` | 2, 4 | ✅ |
 | 6 | [Chat đọc store](phase-06-chat-store-tools.md) | `toolsets.py`, `prompt/sections.py`, `tools/signals.py`, `loop.py` | 3, 7 | ✅ |
 | 7 | [Cổng kiểm số](phase-07-figure-plausibility-gate.md) | `agent/tools/price_check.py`, `untrusted.py`, `registry`, `ops` | 3 | ✅ |
 
