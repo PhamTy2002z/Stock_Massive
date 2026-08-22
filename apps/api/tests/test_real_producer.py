@@ -224,8 +224,17 @@ def a_producer(*answers, **overrides):
     Everything except the model call is the shipped path: the envelope is built
     from the store, the payload is the shipped shape, and only the network is
     fake — a real route would make these tests measure a model.
+
+    ``evidence_loop`` defaults to off here, which is deliberate rather than
+    incidental. What this file proves is the seam between backend evidence and
+    model judgment: one envelope in, one payload out, seven audit fields, no
+    number the model supplied. That seam is the same under both generation
+    shapes, and the one-shot shape lets a test script one answer and count one
+    call. The loop shape has its own file, and the class below proves that it is
+    what the producer actually reaches for by default.
     """
     client = FakeClient(*(answers or (a_fragment(),)))
+    overrides.setdefault("evidence_loop", False)
     producer = analysis_producer(
         client=client,
         config=_config(),

@@ -33,9 +33,23 @@ logger = logging.getLogger(__name__)
 # The ceilings of ``docs/adr/0014``. These are the contract, not the route, so
 # they are constants: a deployment that wants different ceilings is changing
 # what the product promises, not which model it talks to.
-ANALYSIS_INPUT_TOKENS = 6_000
-ANALYSIS_OUTPUT_TOKENS = 1_500
-ANALYSIS_COST_CEILING_USD = 0.0045
+#
+# **What one Analysis may spend, not what one call may.** They were the same
+# number while an Analysis was one call. It is now a bounded loop
+# (``src/alpha/analysis_loop.py``): six tool rounds that read the store, then one
+# call with no tools that returns the fragment. The arithmetic behind the two
+# figures is written where the loop is, and the measured six-round worst case
+# with prompt caching off is 23,005 input and 2,700 output tokens.
+#
+# Raising them is raising what the product promises to spend, and it was priced:
+# at the configured batch table this is $0.015 an Analysis, so an internal cohort
+# of thirty symbols over a month of sessions costs about $9.45 against the $10
+# Analysis lane. Prompt caching is what buys the headroom back — roughly 80% of
+# the loop's input is a prefix it re-sends every round — and it is a
+# before-production task rather than a way to make these numbers smaller.
+ANALYSIS_INPUT_TOKENS = 24_000
+ANALYSIS_OUTPUT_TOKENS = 3_000
+ANALYSIS_COST_CEILING_USD = 0.015
 
 TURN_INPUT_TOKENS = 100_000
 TURN_OUTPUT_TOKENS = 20_000

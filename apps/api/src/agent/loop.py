@@ -138,6 +138,7 @@ from .messages import (
     summarise_call,
 )
 from .prompt import RuntimeContext, prefix as prompt_prefix, render
+from .toolsets import CHAT_TOOLSETS
 
 logger = logging.getLogger(__name__)
 
@@ -720,7 +721,11 @@ class AgentLoop:
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._client = client
-        self._toolsets = toolsets
+        # A conversation's selection, never "every bundle this build registered".
+        # One of those bundles reads this system's evidence plane for the
+        # Analysis lane, and a default that expanded to everything would hand it
+        # to every Turn (``toolsets.CHAT_TOOLSETS``).
+        self._toolsets = CHAT_TOOLSETS if toolsets is None else toolsets
         self._budget = budget or ContextBudget()
         self._slots = slots or SessionSlots()
         self._max_output_tokens = max_output_tokens
