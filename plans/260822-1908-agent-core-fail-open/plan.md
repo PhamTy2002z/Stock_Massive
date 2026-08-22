@@ -49,14 +49,20 @@ chỉ nhận đúng hai dòng copy ở Phase 1 và Phase 4.
 
 | # | Phase | Vùng | Chặn bởi |
 |---|---|---|---|
-| 1 | [Turn rỗng không được là Turn xong](phase-01-empty-answer.md) | `agent/loop.py`, `apps/web/.../copy.ts` | — |
-| 2 | [Thang guardrail tới được bằng 4 round](phase-02-ladder-arithmetic.md) | `agent/guardrails.py` | — |
-| 3 | [Một call chết không kéo cả round](phase-03-executor-fail-open.md) | `agent/executor.py`, `agent/loop.py` | — |
-| 4 | [Ops thấy được ba lớp lỗi vừa đóng](phase-04-ops-visibility.md) | `agent/ops.py`, `agent/loop.py` | 1, 2, 3 |
-| 5 | [Dạy model gọi tool song song](phase-05-parallel-tool-guidance.md) | `agent/prompt/sections.py` | quyết định bar eval |
+| 1 | [Turn rỗng không được là Turn xong](phase-01-empty-answer.md) ✅ | `agent/loop.py`, `apps/web/.../copy.ts` | — |
+| 2 | [Thang guardrail tới được bằng 4 round](phase-02-ladder-arithmetic.md) ✅ | `agent/guardrails.py` | — |
+| 3 | [Một call chết không kéo cả round](phase-03-executor-fail-open.md) ✅ | `agent/executor.py` | — |
+| 4 | [Ops thấy được ba lớp lỗi vừa đóng](phase-04-ops-visibility.md) ✅ | `agent/ops.py`, `agent/loop.py`, `alpha/models.py`, `agent/executor.py` | 1, 2, 3 |
+| 5 | [Dạy model gọi tool song song](phase-05-parallel-tool-guidance.md) ✅ | `agent/prompt/sections.py` | — (`1974c24` đã xoá eval gate) |
+
+Cả 5 phase đã implement. Plan vẫn `in-progress` chứ không `complete`: code review nền của
+Phase 2–3 (2026-08-22) tìm ra một defect chặn trong `loop.py`/`executor.py` mà chính Phase 3
+tuyên bố là "chỉ cần kiểm, không cần viết" — xem câu hỏi 7 dưới đây. Đóng plan là quyết định
+sau khi xử lý nó, không phải sau khi năm phase có dấu ✅.
 
 Phase 1–3 độc lập, chạy được song song về mặt file. Phase 4 cần cả ba xong để có cái mà
-đếm. Phase 5 bump `PROMPT_VERSION` nên **chạm eval gate đang treo** trong `CLAUDE.md`.
+đếm. Phase 5 bump `PROMPT_VERSION`; eval gate đã bị xoá ở `1974c24` nên không còn cổng chặn,
+nhưng phép đo trước/sau vẫn phải làm bằng tay — đổi prompt mà không có số là đổi hành vi mù.
 
 ## Acceptance criteria
 
@@ -71,7 +77,23 @@ Phase 1–3 độc lập, chạy được song song về mặt file. Phase 4 c�
 
 ## Câu hỏi chưa giải quyết
 
-1. Bar eval cho trợ lý tổng quát chưa chốt (`CLAUDE.md` § Eval gate). Phase 5 bị chặn ở đó,
-   không phải ở code.
-2. `deadline_expired` là reason backend ghi thật nhưng `copy.ts` không có câu cho nó → rơi
-   vào `UNNAMED_REASON`. Sửa kèm Phase 1 hay tách? Plan này gộp vào Phase 1 vì cùng một file.
+1. ~~Bar eval chưa chốt~~ — `1974c24` xoá cả Eval Battery/Gate/Report. Không còn cổng, cũng
+   không còn harness đo sẵn: Phase 5 phải tự đo trước/sau.
+2. ~~`deadline_expired` không có câu trong `copy.ts`~~ — đã sửa kèm Phase 1.
+3. `test_deployment_topology.py` canh `docs/streaming-topology.md`, file đã bị xoá ở
+   `b352417`. Đang đỏ từ trước plan này. Phục hồi tài liệu hay bỏ test? Là quyết định về
+   tài liệu, không thuộc phạm vi plan này.
+4. `ModelRefusal` với `refusal` rỗng vẫn đi đường `COMPLETE` + `model_refusal` và không dựng
+   message (`loop.py`, `turns.py:439`). Cùng họ với lớp lỗi Phase 1 nhưng hẹp hơn nhiều.
+   Chưa đóng — cố ý, để không nới phạm vi.
+5. `rounds_exhausted` vẫn không persist ở đâu, nên ops không đếm được. Cần một cột, tức một
+   migration mà plan này đã tuyên bố không làm.
+6. Ba lý do lỗi call không tới được `agent_tool_call.error` nên `tool_call_errors` mù với
+   chúng: `dispatch_failed` (cố ý), `external_budget_exhausted` (đặt trên `TurnToolCall`
+   trong `loop.py::_round`, không qua `executor._record`) và `halted_turn` của các call sau
+   halt. Số đo Phase 5 cho thấy `external_budget_exhausted` nổ ở 10/48 lượt, nên đây là tín
+   hiệu đang mất thật. Nhóm `"timeout"` cũng chưa có đường ghi. Chi tiết ở phase 4.
+7. Code review Phase 2–3 (nền, 2026-08-22) để lại ba việc chưa xử: external budget bị trừ
+   *trước* dispatch nên một call bị trần fan-out cắt vẫn mất tiền; `CancelledError` từ con
+   trong segment song song bị biến thành `dispatch_failed`; và halt-at-6 cho một route
+   external chết chặn luôn cả tool memory phần còn lại của Turn. Không thuộc Phase 4/5.

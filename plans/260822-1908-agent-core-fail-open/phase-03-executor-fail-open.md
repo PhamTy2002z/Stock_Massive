@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Một call chết không kéo cả round"
-status: pending
+status: complete
 ---
 
 # Phase 3 — Một call chết không kéo cả round
@@ -97,3 +97,37 @@ Cổng: `make test`.
   `warning` và bằng việc `dispatch_failed` có tên riêng, đếm riêng ở Phase 4. Một bug che mà
   đếm được tốt hơn một bug giết cả round.
 - **Rollback**: `git revert`. Không đụng schema, không đụng contract.
+
+## Đã làm (2026-08-22)
+
+`executor.py`: `asyncio.gather(..., return_exceptions=True)` cho segment song song, `_attempt`
+bọc từng call của segment tuần tự (chỗ này nằm ngoài gather nên phải viết sàn ra), `_dispatch_failed`
+dựng `ToolResult` mang hằng mới `DISPATCH_FAILED` + `dispatched=False` + log `warning`, và
+`_over_ceiling` cho trần fan-out `MAX_CALLS_PER_ROUND = 8` với hằng `ROUND_FANOUT_EXCEEDED`.
+Trần lấy theo thứ tự model phát (`calls[:MAX_CALLS_PER_ROUND]`) nên đầu batch chạy, đuôi bị từ
+chối — `plan_segments` không đổi một dòng. Docstring module nhận thêm hai đoạn: "every call
+produces exactly one result" giờ kể cả lỗi của **chính module này**, và một đoạn riêng cho trần
+round.
+
+`_dispatch_failed` **không** ghi trace: chính lời gọi trace là một trong những thứ có thể rơi
+vào đây, nên nó chỉ log. Đây là chỗ duy nhất lệch khỏi "mọi call attempted đều có một trace entry".
+
+`loop.py`: **không đổi gì**, đúng như plan đoán. Đã kiểm: result của call bị trần từ chối đi qua
+`outcome.results` nên vẫn vào `turn_budget.add`; vòng thứ hai trên `planned`
+(`if not record.dispatched and record.result_text`) không đếm trùng, vì `planned` giữ bản record
+gốc còn `state.calls` mới là chỗ bị `replace`.
+
+Đã đo, không phải suy luận: `asyncio.wait_for` bọc `gather(return_exceptions=True)` vẫn nổ
+`TimeoutError` khi hết hạn và gather **không** trả kết quả một phần — đường `TOOL_TIMEOUT` của
+`_round` còn nguyên.
+
+Test mới: `test_agent_tool_executor.py` thêm bốn (`lookup` raise trong batch song song 3 call →
+hai call kia vẫn OK; cùng ca ở segment tuần tự, và barrier sau lỗi vẫn chạy; batch 12 call → 8
+chạy + 4 `round_fanout_exceeded`, đủ 12 result, thứ tự nguyên; batch đúng bằng trần thì chạy
+trọn). `test_agent_loop.py` thêm
+`test_a_call_the_harness_cannot_dispatch_does_not_end_the_turn` — Turn `COMPLETE`,
+`terminal_reason is None`, không còn `turn_failed`. Test này phải `monkeypatch`
+`src.agent.loop.ToolExecutor` để tiêm `lookup` lỗi: `lookup` nằm ngoài mọi try của `_dispatch`
+nên **không có đường in-band nào** làm nó raise — đó chính là lý do lớp lỗi này sống lâu.
+
+Cổng: toàn bộ `apps/api` 2275 passed, 1 failed — `test_deployment_topology.py::test_the_topology_is_written_down_where_the_next_reader_will_look`, fail có sẵn từ `b352417` (xoá `docs/streaming-topology.md`), không liên quan.

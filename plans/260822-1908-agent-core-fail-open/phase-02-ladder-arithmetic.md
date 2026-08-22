@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Thang guardrail tới được bằng 4 round"
-status: pending
+status: complete
 ---
 
 # Phase 2 — Thang guardrail tới được bằng 4 round
@@ -93,3 +93,28 @@ Cổng: `make test`.
 - **Risk**: `halt=6` cắt sớm một Turn thật cần 6 lần tra. Không: 6 là số lần **fail** của
   cùng một tool, không phải số lần gọi. Sáu lần fail liên tiếp là Turn đã hỏng.
 - **Rollback**: 5 con số trong một dataclass. `git revert`.
+
+## Đã làm (2026-08-22)
+
+`guardrails.py`: `exact_failure_block_after` 5 → **3**, `same_tool_failure_halt_after` 8 → **6**,
+và docstring của `GuardrailThresholds` giờ mang phép tính của cả hai rung — kèm câu nói rõ vì
+sao không import `loop`: module này giữ nguyên tính pure, đẳng thức do test giữ.
+
+`tests/test_agent_guardrails.py`: đổi tên/số ba test neo vào ngưỡng cũ (`the_sixth_identical_call`
+→ `the_fourth_identical_call`, `the_eighth_failure` → `the_sixth_failure`, và vòng `range(8)` của
+test reset → `range(6)`). Thêm ba test:
+`test_the_block_rung_is_reached_at_one_call_a_round` (dựng đúng hình judge → dispatch → record
+của loop, không fan-out, `MAX_TOOL_ROUNDS` vòng),
+`test_the_halt_rung_is_reached_inside_the_external_call_budget` (2 call/round, dừng ở
+`MAX_EXTERNAL_TOOL_CALLS` — test này **không thể pass** dưới ngưỡng 8), và
+`test_the_halt_rung_is_the_external_call_ceiling` (đẳng thức với `MAX_EXTERNAL_TOOL_CALLS`).
+
+`test_blocked_calls_still_count_towards_the_halt` **không cần sửa**: nó tự dựng
+`GuardrailThresholds(2, 4)` nên đã độc lập với mặc định — plan dự đoán phải đổi số, code thật thì
+không.
+
+`tests/test_agent_loop.py`: hai test halt giảm fan-out 8 → 6, `len(outcome.tool_calls)` 9 → 7,
+và comment "Eight failures" viết lại — nó nói rằng chỉ một round mới tới được halt, điều vừa
+hết đúng.
+
+Cổng: `tests/test_agent_guardrails.py` 15/15, `tests/test_agent_loop.py` 66/66.
