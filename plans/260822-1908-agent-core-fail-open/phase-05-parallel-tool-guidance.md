@@ -1,8 +1,7 @@
 ---
 phase: 5
 title: "Dạy model gọi tool song song"
-status: blocked
-blocked_by: "bar eval cho trợ lý tổng quát chưa chốt (CLAUDE.md § Eval gate)"
+status: complete
 ---
 
 # Phase 5 — Dạy model gọi tool song song
@@ -25,16 +24,19 @@ thoại.
 
 Đây là thay đổi rẻ nhất trong plan và tăng tầm với nhiều nhất.
 
-## Vì sao bị chặn
+## Không còn bị chặn
 
-Bump `PROMPT_VERSION` (`prompt/sections.py:29`, hiện `2.2.0`) → PR chạm System Prompt.
-`CLAUDE.md` § Eval gate: PR chạm agent loop, tool schema hoặc prompt **vẫn phải nói rõ đã đo
-gì**, và bar mới cho trợ lý tổng quát chưa được chốt. Eval Battery cũ chấm groundedness /
-citation / recommendation — ba tính chất vừa bị xoá — nên nó không đo được cái này.
+Bản đầu của phase này ghi "blocked" vì `CLAUDE.md` § Eval gate đòi một bar đo cho PR chạm
+prompt. Commit `1974c24` (2026-08-22) đã **xoá hẳn** Eval Battery / Eval Gate / Eval Report,
+và `CLAUDE.md:49` nay ghi thẳng: *"PR chạm agent loop, tool schema hay prompt **không** còn
+cổng đo nào."*
 
-Không lặng lẽ trái. Chốt bar trước, hoặc chốt rằng phase này đo bằng cái khác và ghi lại.
+Nên phase này chạy được — nhưng cái nó cần vẫn là một phép đo, chỉ là không còn harness nào
+làm sẵn. Đo bằng tay theo mục "Đo gì" dưới đây, và ghi số vào `plans/reports/`. Bump
+`PROMPT_VERSION` (`prompt/sections.py:29`, hiện `2.2.0`) mà không có số nào bên cạnh thì
+đúng là thay hành vi mù.
 
-## Thay đổi (khi được mở)
+## Thay đổi
 
 ### `agent/prompt/sections.py`
 
@@ -66,6 +68,21 @@ tool call** trước/sau. Tính chất cần chứng minh là *cùng số call, 
 
 Cổng: `make test`, 4 cổng web (prompt không chạm web nhưng contract version có thể lộ ra
 snapshot test).
+
+## Đã làm
+
+- `agent/prompt/sections.py`: thêm đoạn *"Gộp lượt, không tra thêm"* vào mục
+  `TOOLS`, ngay sau *"Tra có mục đích"*. Mở đầu bằng chính tính chất phải giữ,
+  vì một đoạn chỉ nói *hãy gộp* sẽ dạy model gộp cả những call phụ thuộc nhau.
+  `PROMPT_VERSION` `2.2.0` → `2.3.0`.
+- `tests/test_agent_prompt.py`: test khẳng định câu đó nằm trong `prefix()`,
+  tức nửa cacheable — token trả một lần, không trả mỗi lượt.
+
+Số đo: `plans/reports/measurement-260822-1940-parallel-tool-guidance.md`.
+48 lượt thật, 24 mỗi arm, chạy đan xen theo block. Round −13,7 %, tool call
+−4,7 %, call/round +10,5 %, 24/24 lượt `complete` ở cả hai arm. Bar *"cùng số
+call, ít round hơn"* đạt; biên độ nhỏ vì model đã tự batch ở 20/24 lượt arm
+`before` trước khi được dạy. Ngưỡng revert cho lần đo sau ghi trong report.
 
 ## Risk / rollback
 

@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Turn rỗng không được là Turn xong"
-status: pending
+status: complete
 ---
 
 # Phase 1 — Turn rỗng không được là Turn xong
@@ -123,3 +123,24 @@ Cổng: `make test`, rồi 4 cổng web.
 - **Risk**: `empty_answer` làm `incomplete_rate` trong ops nhảy lên. Đó là *đo được thay vì
   vô hình*, không phải hồi quy. Ghi rõ khi báo cáo để không ai đọc sai con số.
 - **Rollback**: một commit, ba hằng và một nhánh. `git revert`.
+
+## Đã làm (2026-08-22)
+
+`loop.py`: `EMPTY_ANSWER`, `MAX_EMPTY_NUDGES = 1`, `EMPTY_AFTER_TOOLS_NOTE`,
+`_TurnState.empty_nudges`, `AgentLoop._nudge_empty`, nhánh terminal ở `_run`, và một đoạn
+docstring module nói rõ nudge này **là** ngoại lệ có chủ đích của "No apology call".
+`copy.ts`: câu cho `empty_answer` và `deadline_expired`.
+
+Một lỗi đã tự bắt trong lúc làm, ghi lại vì nó là cái bẫy của chỗ này: `_nudge_empty` chạy
+**bên trong** `_call`, trước `_append_text`, nên `state.answer` còn là trạng thái của các
+round *trước*. Bản đầu chỉ đọc `state.answer` → nudge nổ trên mọi Turn bình thường. Điều
+kiện đúng phải gồm `completion.text`.
+
+`test_the_round_ceiling_is_the_constant_and_the_last_call_answers` phải sửa: script cũ toàn
+`wants()` không có prose nào, nên dưới luật mới nó là một Turn `empty_answer` thật. Cho nó
+một câu trả lời thật — chủ đề của test là cái trần, không phải sự rỗng.
+
+Cổng: `tests/test_agent_loop.py` 65/65 pass; toàn bộ `apps/api` 2267 passed, 1 failed
+(`test_deployment_topology.py::test_the_topology_is_written_down_where_the_next_reader_will_look`
+— **có trước** thay đổi này: `docs/streaming-topology.md` bị xoá ở `b352417`, test canh nó
+còn nguyên). 4 cổng web pass.

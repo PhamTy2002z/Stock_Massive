@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Ops thấy được ba lớp lỗi vừa đóng"
-status: pending
+status: complete
 ---
 
 # Phase 4 — Ops thấy được ba lớp lỗi vừa đóng
@@ -87,6 +87,48 @@ Test tại `apps/api/tests/`:
 5. Turn rỗng của Phase 1 xuất hiện trong `incomplete_reasons` dưới khoá `empty_answer`.
 
 Cổng: `make test`, rồi 4 cổng web nếu có sửa `apps/web`.
+
+## Đã làm
+
+- `alpha/models.py`: đặt tên cả bốn giá trị của `agent_tool_call.status`
+  (`TOOL_CALL_OK` / `TOOL_CALL_TOOL_ERROR` / `TOOL_CALL_TIMEOUT` /
+  `TOOL_CALL_UNKNOWN_TOOL`) cùng `TOOL_CALL_STATUSES`, ở đúng chỗ cột được khai.
+  Comment cũ vừa bị lặp dòng vừa trỏ vào `src/agent/tools/catalog.py` — file
+  không tồn tại — nên viết lại.
+- `agent/loop.py`: `trace_status(ok=…, error=…)` map error sang bốn nhóm, và
+  `_trace_writer` dùng nó thay cho `"ok" if ok else "error"`.
+- `agent/ops.py`: thêm `tool_call_errors` (tally trên `AgentToolCall.error` với
+  `status != "ok"`) và property `tool_call_error_total`.
+- `agent/executor.py`: `_over_ceiling` giờ đi qua `_record` và log `warning`.
+  Ngoài phạm vi "Thay đổi" ở trên, nhưng bắt buộc: không có nó thì
+  `round_fanout_exceeded` không có hàng nào để `tool_call_errors` đếm, tức lời
+  hứa của chính phase này là sai. Code review Phase 2–3 độc lập gọi đây là
+  blocker.
+- `apps/web`: không sửa. `grep -rn 'unknown_tool_calls' apps/web/src` sạch —
+  snapshot ops chưa được vẽ ở đâu, kể cả trước phase này.
+
+Test: `tests/test_agent_loop.py` (3 test mới: unknown_tool end-to-end,
+verdict-vs-crash cùng status khác error, và mapping bị giữ trong vốn từ đã khai),
+`tests/test_agent_ops_query.py` (2 test mới: tally theo reason, và `empty_answer`
+trong `incomplete_reasons`). `make test`: 2281 passed, 1 failed — đúng fail có sẵn
+của `test_deployment_topology`.
+
+## Còn hở, đã kiểm chứ không đoán
+
+Ba tên trong danh sách "Thay đổi" ở trên **không** tới được cột `error` của
+`agent_tool_call`, nên `tool_call_errors` không thấy chúng:
+
+- `dispatch_failed` — cố ý, `_dispatch_failed` không ghi trace vì trace write là
+  một trong những thứ có thể chết ở đó. Chỉ còn log.
+- `external_budget_exhausted` — đặt trên `TurnToolCall` trong `loop.py::_round`,
+  không đi qua `executor._record`. Số đo Phase 5 cho thấy nó nổ ở 10/48 lượt,
+  nên đây là tín hiệu đang mất thật, không phải giả thuyết.
+- `halted_turn` của `_skipped` — call sau khi halt; call *bị* halt thì có hàng.
+
+Và `"timeout"` chưa có đường nào ghi được: round timeout huỷ `executor.run`
+trước khi `_record` chạy, tool tự timeout thành `tool_failed`. Nhóm này tồn tại
+vì cột khai nó và loop đã gọi lý do đó bằng tên đó; nó được test qua mapping, chứ
+không qua một lượt thật.
 
 ## Risk / rollback
 
