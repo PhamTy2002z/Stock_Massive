@@ -158,6 +158,10 @@ class FakeClient:
         answer = self._answers.pop(0)
         if isinstance(answer, Exception):
             raise answer
+        if isinstance(answer, Completion):
+            # A caller that needs to script tool calls, or a finish reason,
+            # hands over the whole completion. Anything else is a fragment.
+            return answer
         return Completion(
             model=MODEL,
             text=answer if isinstance(answer, str) else json.dumps(answer),

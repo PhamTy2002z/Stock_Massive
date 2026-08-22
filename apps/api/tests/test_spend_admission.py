@@ -38,6 +38,10 @@ from src.core.llm import (
     Workload,
 )
 from src.alpha.models import LlmCallUsage
+from src.core.llm.admission import (
+    ANALYSIS_INPUT_PER_CALL,
+    ANALYSIS_OUTPUT_PER_CALL,
+)
 
 
 def request() -> CompletionRequest:
@@ -293,7 +297,8 @@ class TestAnalysisCeilings:
 
         with pytest.raises(BudgetRefusal) as refused:
             admission.reserve(
-                analysis_spend(input_tokens=6_001), model="batch-model"
+                analysis_spend(input_tokens=ANALYSIS_INPUT_PER_CALL + 1),
+                model="batch-model",
             )
 
         assert refused.value.reason == "analysis_input_per_call"
@@ -307,20 +312,28 @@ class TestAnalysisCeilings:
 
         with pytest.raises(BudgetRefusal) as refused:
             admission.reserve(
-                analysis_spend(output_tokens=1_501), model="batch-model"
+                analysis_spend(output_tokens=ANALYSIS_OUTPUT_PER_CALL + 1),
+                model="batch-model",
             )
 
         assert refused.value.reason == "analysis_output_per_call"
 
     def test_analysis_cost_ceiling_holds_across_attempts_for_one_owner(self, ledger):
+        """One run's whole allowance, however many calls its loop made."""
         admission, sessions = ledger
         first = admission.reserve(
-            analysis_spend(input_tokens=6_000, output_tokens=1_500),
+            analysis_spend(
+                input_tokens=ANALYSIS_INPUT_PER_CALL,
+                output_tokens=ANALYSIS_OUTPUT_PER_CALL,
+            ),
             model="batch-model",
         )
         admission.reconcile(
             first,
-            Usage(input_tokens=6_000, output_tokens=1_500),
+            Usage(
+                input_tokens=ANALYSIS_INPUT_PER_CALL,
+                output_tokens=ANALYSIS_OUTPUT_PER_CALL,
+            ),
         )
 
         with pytest.raises(BudgetRefusal) as refused:
@@ -335,10 +348,19 @@ class TestAnalysisCeilings:
     def test_another_analysis_owner_has_its_own_ceiling(self, ledger):
         admission, _ = ledger
         first = admission.reserve(
-            analysis_spend(input_tokens=6_000, output_tokens=1_500),
+            analysis_spend(
+                input_tokens=ANALYSIS_INPUT_PER_CALL,
+                output_tokens=ANALYSIS_OUTPUT_PER_CALL,
+            ),
             model="batch-model",
         )
-        admission.reconcile(first, Usage(input_tokens=6_000, output_tokens=1_500))
+        admission.reconcile(
+            first,
+            Usage(
+                input_tokens=ANALYSIS_INPUT_PER_CALL,
+                output_tokens=ANALYSIS_OUTPUT_PER_CALL,
+            ),
+        )
 
         reservation = admission.reserve(
             analysis_spend(owner_id="run-2", input_tokens=1),

@@ -1,10 +1,48 @@
 ---
 phase: 3
 title: "Hai tool store-only"
-status: pending
+status: done
 ---
 
 # Phase 3 — Hai tool store-only
+
+## Kết quả (2026-08-23)
+
+Đã land. `src/agent/tools/signals.py` với `list_fields` + `get_field`, toolset `signals` trong
+`toolsets.py`, `register_signal_tools()` trong `tools/__init__.py`. 33 test mới trong
+`tests/test_agent_signal_tools.py`. `make test` pass (còn đúng hai fail có sẵn:
+`test_deployment_topology` và `test_agent_loop::test_the_round_ceiling_...`, cả hai đã fail trước
+thay đổi này — đã kiểm bằng `git stash`).
+
+**Một lỗ hổng đã tìm ra và bịt, không có trong plan.** `AgentLoop(toolsets=None)` → 
+`definitions._selection(None)` → `tuple(TOOLSETS)` = **mọi** toolset. Nghĩa là chỉ việc thêm
+`signals` vào `TOOLSETS` đã đủ để lane chat thấy hai tool store — đúng cái ranh giới `1e7b936`
+mà plan nói "không đổi". Bịt bằng `toolsets.CHAT_TOOLSETS = ("web", "memory")`, kiểm lúc import
+(`_check_the_chat_selection_holds` từ chối nếu `signals` có trong đó), và `AgentLoop` mặc định
+về tuple đó thay vì `None`. Đây là thay đổi file thứ tư ngoài ba file plan nêu, và nó bắt buộc.
+
+**Ba quyết định khác với/ngoài plan:**
+
+1. **`axis` là tham số có thật nên cần bảng namespace → axis.** `REGISTRY` không mang axis;
+   `field_profile` chỉ gán axis cho 11–16 field nó gọi tên, tức là **không** gán cho đúng 16
+   field mà cặp tool này tồn tại để với tới. Nên `CATALOG_AXES` (15 namespace) viết tay trong
+   `signals.py`, và `_check_the_catalog_holds()` từ chối import nếu (a) một namespace đã đăng ký
+   không có axis, (b) một axis trỏ tới namespace không còn field, (c) bảng này đặt một field
+   lên axis khác với axis mà profile đã đặt nó. Không drift được.
+2. **`figure_for_field()` + `profile_entry_for()` thêm vào `alpha/envelope.py`.** Plan nói "hình
+   dạng tool result đã tồn tại, không phát minh lại" nhưng ba hàm dựng figure (`_from_field_value`,
+   `_from_cross_section`, `_sample_around`) đều private. Import private xuyên module là đường
+   để có bộ luật thứ hai; thay vào đó envelope.py có một hàm công khai đọc **một** field theo id,
+   giữ nguyên bất biến "chỉ một chỗ biến served field thành figure".
+3. **`list_fields` là `is_async=True`.** Plan nói cả hai `is_async=False` với lý do
+   "`serve_field` nhận Session đồng bộ" — lý do đó chỉ đúng cho `get_field`. `list_fields` đọc
+   `REGISTRY` trong bộ nhớ, không mở session, không có gì để đẩy ra khỏi event loop.
+
+Catalog thật: **5.160 byte cho cả 30 field** (plan đoán ~2KB; chênh vì có thêm khoá `axis` và
+`label`). Vẫn dưới 1/4 `MAX_RESULT_CHARS`.
+
+`ToolContext.user_id` thành `int | None` như plan; ba handler memory đi qua `_owner(context)`
+và từ chối bằng câu đọc được khi không có user.
 
 ## Lớp lỗi đang mở
 

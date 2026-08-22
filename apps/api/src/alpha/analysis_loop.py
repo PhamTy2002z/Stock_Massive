@@ -602,6 +602,11 @@ async def _record_round(
     def write() -> None:
         with session_opener() as session:
             session.add_all(rows)
+            # Committed here rather than left to whoever opened the session, the
+            # same way the chat lane's trace writer does it: the trace is one
+            # short transaction of its own, and a caller that hands over a plain
+            # session factory closes without committing.
+            session.commit()
 
     try:
         await asyncio.to_thread(write)
