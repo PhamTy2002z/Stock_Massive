@@ -1,6 +1,6 @@
 "use client"
 
-import { formatFieldValue } from "@/components/alpha/widgets/units"
+import { formatFieldValue } from "@/lib/units"
 import type { FigureView } from "@/lib/alpha-desk/analysis"
 import { priceZoneExtent } from "@/lib/alpha-desk/analysis"
 import { cn } from "@/lib/utils"

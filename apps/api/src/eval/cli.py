@@ -39,7 +39,6 @@ from pathlib import Path
 
 from src.core.config import get_settings
 
-from . import categories as _categories  # noqa: F401 - seats the battery
 from .capture import CAPTURE_HISTORY_SESSIONS, capture_fixture
 from .fixture import latest_seed_path, read_seed, seed_path, write_seed
 from .harness import EvalMode, EvalRunResult, build_harness
@@ -55,7 +54,7 @@ from .rubric import (
     sheet_filename,
 )
 from .store import create_schema, eval_engine, eval_session_factory, load_fixture
-from .verdict import HARD_FAIL_NOTICE, verdict
+from .verdict import verdict
 
 logger = logging.getLogger("src.eval")
 
@@ -175,8 +174,6 @@ def _report_verdict(
     scored = verdict(result, scores)
     for item in scored.categories:
         print(f"  {item.category.value}: {item.summary}")
-    if scored.hard_failures:
-        print(HARD_FAIL_NOTICE, file=sys.stderr)
     if not scored.passed:
         # Named rather than counted: a category total tells an operator that
         # something regressed and nothing about what, and finding out by hand is
@@ -236,8 +233,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "how many days of live traffic the fixed ops query reads; defaults "
-            "to EVAL_OPS_WINDOW_DAYS. The 5%% grounding_failed threshold is "
-            "stated over 7 days, so widening this widens what it is read over"
+            "to EVAL_OPS_WINDOW_DAYS. The report names the span it measured, so "
+            "widening this widens what every rate in that section is read over"
         ),
     )
     run_parser.set_defaults(handler=run)

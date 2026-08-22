@@ -1,4 +1,4 @@
-"""The four versions a fixture is frozen against, and the loud failure.
+"""The three versions a fixture is frozen against, and the loud failure.
 
 ``docs/adr/0016``: *a mismatch makes the harness fail loud and refuse to run.*
 The failure mode being designed out is not a crash — it is a green run. An old
@@ -7,9 +7,14 @@ precisely the moment the registry changed, and nothing about that run looks
 wrong from the outside. So the comparison happens before the first case, it
 names which version moved, and it raises.
 
-Each of the four is derived rather than declared, for the same reason
+Each of the three is derived rather than declared, for the same reason
 ``registry_version`` is: a number somebody has to remember to bump is a number
 that eventually names the wrong thing, and here being wrong is silent.
+
+There is no pin for the tool catalog. The battery scores the nightly Analysis
+lane, which calls no tool, and the harness that did has no frozen catalog to
+name any more (``docs/adr/0026``): its tools are registered per process, so a pin
+over them would move without the fixture moving.
 """
 
 from __future__ import annotations
@@ -18,7 +23,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from src.agent.tools.suite import tool_catalog_version
 from src.alpha.field_profile import FIELD_PROFILE_VERSION
 from src.stocks.signals import registry_version
 
@@ -61,14 +65,12 @@ class PinnedVersions:
 
     registry_version: str
     profile_version: str
-    tool_catalog_version: str
     schema_version: str
 
     def as_wire(self) -> dict[str, str]:
         return {
             "registry_version": self.registry_version,
             "profile_version": self.profile_version,
-            "tool_catalog_version": self.tool_catalog_version,
             "schema_version": self.schema_version,
         }
 
@@ -100,11 +102,10 @@ class PinnedVersions:
 
 
 def running_versions() -> PinnedVersions:
-    """The four versions this build actually serves."""
+    """The three versions this build actually serves."""
     return PinnedVersions(
         registry_version=registry_version(),
         profile_version=FIELD_PROFILE_VERSION,
-        tool_catalog_version=tool_catalog_version(),
         schema_version=store_schema_version(),
     )
 

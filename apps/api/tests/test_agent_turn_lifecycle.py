@@ -9,9 +9,8 @@ from datetime import date, datetime, timezone
 import pytest
 from sqlalchemy import delete, select
 
-from src.agent.context import ContextBudget
 from src.agent.events import EventType
-from src.agent.loop import AgentLoop, TurnDraft
+from src.agent.loop import AgentLoop, ContextBudget, TurnDraft
 from src.agent.persistence import (
     TURN_COMPLETE,
     TURN_INCOMPLETE,
@@ -19,8 +18,7 @@ from src.agent.persistence import (
     AgentPersistence,
     TurnPayloadConflict,
 )
-from src.agent.manifest import assemble_message, build_manifest
-from src.agent.prompt import AnswerKind, MarketState, RuntimeContext
+from src.agent.prompt import RuntimeContext
 from src.agent.turns import (
     MAX_USER_INPUT_BYTES,
     Checkpointer,
@@ -40,9 +38,18 @@ from src.core.database import Base, get_sync_db, sync_engine, sync_session_facto
 from src.core.llm import Completion, ModelRefusal, ToolCall, Usage
 from src.core.llm.admission import _read_turn_state
 
-from tests.test_agent_loop import FakeClient, catalog, config, spec
+from .agent_tool_world import isolated_registry
+from .test_agent_loop import FakeClient, config, entry, install
 
-TRADING_DAY = date(2026, 8, 14)
+TODAY = date(2026, 8, 14)
+
+
+@pytest.fixture(autouse=True)
+def _tools():
+    """A registry of this file's own, so a tool here reaches no other test."""
+    with isolated_registry():
+        install()
+        yield
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -70,14 +77,8 @@ def store() -> AgentPersistence:
     return AgentPersistence(session_factory=sync_session_factory)
 
 
-def runtime(user_id: int) -> RuntimeContext:
-    return RuntimeContext(
-        user_id=user_id,
-        trading_day=TRADING_DAY,
-        today=TRADING_DAY,
-        market_state=MarketState.POST_CLOSE,
-        active_symbol="FPT",
-    )
+def runtime(_user_id: int) -> RuntimeContext:
+    return RuntimeContext(today=TODAY, user_name="Ty")
 
 
 def answer(text: str) -> Completion:
@@ -93,19 +94,18 @@ def wants(name: str) -> Completion:
     return Completion(
         model="gpt-5.6-terra",
         tool_calls=(
-            ToolCall(id="c1", name=name, arguments={"symbol": "FPT"}, output_index=0),
+            ToolCall(id="c1", name=name, arguments={"query": "FPT"}, output_index=0),
         ),
         usage=Usage(input_tokens=10, output_tokens=5),
     )
 
 
-def service(client, *, tools=None, loop=None, **overrides) -> TurnService:
+def service(client, *, loop=None, **overrides) -> TurnService:
     loop_kwargs = loop or {}
 
     def loop_factory(*, checkpoint, publisher):
         return AgentLoop(
             client=client,
-            catalog=tools or catalog(),
             config=config(),
             budget=ContextBudget(max_tokens=30_000),
             checkpoint=checkpoint,
@@ -117,8 +117,6 @@ def service(client, *, tools=None, loop=None, **overrides) -> TurnService:
         store=store(),
         loop_factory=loop_factory,
         config=config(),
-        tool_catalog_version="catalog-v1",
-        git_sha="9f2c1ab",
         **overrides,
     )
 
@@ -152,8 +150,9 @@ async def test_the_user_message_and_the_turn_commit_before_execution(owner):
         await release.wait()
         return {"symbol": "FPT", "ok": True}
 
+    install(entry("slow", slow))
     client = FakeClient([wants("slow"), answer("Xong.")])
-    turns = service(client, tools=catalog(spec("slow", slow)))
+    turns = service(client)
     turn_id = uuid.uuid4()
 
     handle = await turns.create(
@@ -292,8 +291,9 @@ async def test_a_subscriber_disconnecting_mid_turn_does_not_stop_execution(owner
         await release.wait()
         return {"symbol": "FPT", "ok": True}
 
+    install(entry("slow", slow))
     client = FakeClient([wants("slow"), answer("Kết luận cuối cùng.")])
-    turns = service(client, tools=catalog(spec("slow", slow), traces=traces))
+    turns = service(client, loop={"trace": traces.append})
     turn_id = uuid.uuid4()
     await turns.create(
         user_id=owner,
@@ -365,11 +365,11 @@ async def test_one_transaction_writes_the_message_and_the_terminal_fields(owner)
     assert record.response_message_id == assistant.id
     assert record.finished_at is not None
     assert assistant.content["text"] == "Kết luận cuối cùng."
-    assert assistant.content["risk_notice"]["version"]
-    assert assistant.content["evidence_manifest"]["git_sha"] == "9f2c1ab"
-    assert assistant.content["evidence_manifest"]["provider_request_id"] == "req_abc"
-    assert assistant.content["evidence_manifest"]["tool_catalog_version"] == "catalog-v1"
-    assert assistant.content["answer_kind"] in {"analysis", "education", "refusal"}
+    assert assistant.content["tool_calls"] == []
+    # The status rides the content, because a reopened Thread renders the
+    # transcript and nothing else: without it a truncated answer would read as
+    # a finished one.
+    assert assistant.content["status"] == TURN_COMPLETE
 
 
 @pytest.mark.asyncio
@@ -383,10 +383,8 @@ async def test_no_half_written_answer_is_visible_before_that_transaction(owner):
         await release.wait()
         return {"symbol": "FPT", "ok": True}
 
-    turns = service(
-        FakeClient([wants("slow"), answer("Kết luận cuối cùng.")]),
-        tools=catalog(spec("slow", slow)),
-    )
+    install(entry("slow", slow))
+    turns = service(FakeClient([wants("slow"), answer("Kết luận cuối cùng.")]))
     turn_id = uuid.uuid4()
     await turns.create(
         user_id=owner,
@@ -413,9 +411,9 @@ async def test_every_non_complete_terminal_state_carries_a_stable_reason(owner):
         await asyncio.sleep(5)
         return {"ok": True}
 
+    install(entry("sleepy", sleepy))
     turns = service(
         FakeClient([wants("sleepy"), answer("Không tới đây.")]),
-        tools=catalog(spec("sleepy", sleepy)),
         deadline_seconds=0.05,
     )
     turn_id = uuid.uuid4()
@@ -446,8 +444,9 @@ async def test_a_cancel_is_idempotent_and_dispatches_no_further_call(owner):
         finished.append("done")
         return {"symbol": "FPT", "ok": True}
 
+    install(entry("slow", slow))
     client = FakeClient([wants("slow"), answer("Không tới đây.")])
-    turns = service(client, tools=catalog(spec("slow", slow)))
+    turns = service(client)
     turn_id = uuid.uuid4()
     await turns.create(
         user_id=owner,
@@ -487,9 +486,9 @@ class _Publisher:
     seq = 3
 
 
-def draft(blocks=(), *, boundary: bool = False) -> TurnDraft:
+def draft(text: str = "một phần", *, boundary: bool = False) -> TurnDraft:
     return TurnDraft(
-        text="raw", rounds_used=1, tool_calls=(), blocks=blocks, boundary=boundary
+        text=text, rounds_used=1, tool_calls=(), boundary=boundary
     )
 
 
@@ -526,20 +525,28 @@ async def test_a_boundary_is_checkpointed_whatever_the_rate_limiter_says():
 
 
 @pytest.mark.asyncio
-async def test_the_checkpoint_carries_proven_blocks_and_never_the_raw_answer():
+async def test_the_checkpoint_carries_the_answer_as_the_stream_delivered_it():
+    """The whole answer, not the last delta.
+
+    What a reconnecting browser needs is the current state of the answer, and it
+    is the same string the snapshot restates and the canonical message stores —
+    which is what keeps a reader who followed the stream and a reader who rebuilt
+    from the checkpoint from disagreeing about what was said.
+    """
     recording = _RecordingStore()
     checkpointer = Checkpointer(recording, uuid.uuid4(), _Publisher())
 
-    await checkpointer(draft(boundary=True))
+    await checkpointer(draft("một\n\nhai", boundary=True))
 
-    assert "text" not in recording.saved[0]["draft"]
-    assert recording.saved[0]["draft"]["blocks"] == []
+    assert recording.saved[0]["draft"]["text"] == "một\n\nhai"
+    assert recording.saved[0]["draft"]["tool_calls"] == []
+    assert recording.saved[0]["draft"]["rounds_used"] == 1
 
 
 @pytest.mark.asyncio
 async def test_the_last_event_sequence_is_persisted_with_the_checkpoint(owner):
     thread_id = await thread_for(owner)
-    turns = service(FakeClient([wants("get_analysis"), answer("Kết luận.")]))
+    turns = service(FakeClient([wants("web_search"), answer("Kết luận.")]))
     turn_id = uuid.uuid4()
     await turns.create(
         user_id=owner,
@@ -559,26 +566,17 @@ async def test_the_last_event_sequence_is_persisted_with_the_checkpoint(owner):
 
 def _checkpoint_of_an_older_build() -> dict:
     """A checkpoint written by the process a deploy replaced."""
-    blocks = [{"kind": "prose", "text": "Một phần đã chứng minh.", "citations": []}]
     return {
-        "blocks": blocks,
+        "text": "Một phần đã kịp nói.",
+        "tool_calls": [
+            {
+                "id": "c1",
+                "name": "web_search",
+                "status": "ok",
+                "summary": "Tìm trên web: FPT",
+            }
+        ],
         "rounds_used": 2,
-        "tool_calls": 3,
-        "message": assemble_message(
-            blocks=blocks,
-            text="Một phần đã chứng minh.",
-            answer_kind=AnswerKind.ANALYSIS,
-            manifest=build_manifest(
-                git_sha="older-build",
-                model="gpt-5.6-terra",
-                route="https://route.example",
-                provider_request_id="req_old",
-                tool_catalog_version="catalog-v0",
-                answer_kind=AnswerKind.ANALYSIS,
-                status=TURN_RUNNING,
-                terminal_reason=None,
-            ),
-        ),
     }
 
 
@@ -615,18 +613,15 @@ async def test_a_turn_left_running_by_a_restart_is_frozen_incomplete(owner):
     assert client.requests == []  # nothing was resumed
 
     assistant = [row for row in messages_of(thread_id) if row.role == "assistant"][0]
-    assert assistant.content["text"] == "Một phần đã chứng minh."
-    assert assistant.content["risk_notice"]["version"]
-    assert assistant.content["evidence_manifest"]["terminal_reason"] == (
-        "interrupted_restart"
-    )
-    assert assistant.content["evidence_manifest"]["status"] == TURN_INCOMPLETE
-    # The Manifest belongs to the build that answered, not to the one sweeping.
-    assert assistant.content["evidence_manifest"]["git_sha"] == "older-build"
+    # Everything but the status comes from the build that was answering; only
+    # how the Turn ended is this process's to know.
+    assert assistant.content["text"] == "Một phần đã kịp nói."
+    assert assistant.content["status"] == TURN_INCOMPLETE
+    assert [call["id"] for call in assistant.content["tool_calls"]] == ["c1"]
 
 
 @pytest.mark.asyncio
-async def test_a_frozen_turn_with_nothing_proven_writes_no_message(owner):
+async def test_a_frozen_turn_that_never_spoke_writes_no_message(owner):
     thread_id = await thread_for(owner)
     message = await store().append_message(
         thread_id, role="user", content={"text": "FPT thế nào?"}
@@ -664,10 +659,8 @@ async def test_shutdown_gives_an_active_turn_its_window_to_checkpoint(owner):
         await asyncio.sleep(0.05)
         return {"symbol": "FPT", "ok": True}
 
-    turns = service(
-        FakeClient([wants("slow"), answer("Kết luận cuối cùng.")]),
-        tools=catalog(spec("slow", slow)),
-    )
+    install(entry("slow", slow))
+    turns = service(FakeClient([wants("slow"), answer("Kết luận cuối cùng.")]))
     turn_id = uuid.uuid4()
     await turns.create(
         user_id=owner,
@@ -686,95 +679,6 @@ async def test_shutdown_gives_an_active_turn_its_window_to_checkpoint(owner):
     assert record.terminal_reason == "shutdown"
     assert record.finished_at is not None
     assert turns.running_ids == ()
-
-
-# --- the Gate inside a Turn ------------------------------------------------
-
-
-async def _grounded(_context, arguments):
-    return {
-        "symbol": arguments.get("symbol", "FPT"),
-        "close": 95.4,
-        "as_of": TRADING_DAY.isoformat(),
-    }
-
-
-@pytest.mark.asyncio
-async def test_an_unverified_prose_block_completes_with_a_downgrade_label(owner):
-    thread_id = await thread_for(owner)
-    client = FakeClient(
-        [
-            wants("quote"),
-            answer(
-                "Giá đóng cửa 95.4 [ev:c1#close].\n\n"
-                "RSI đang quanh 61.2 nhưng chưa có nguồn."
-            ),
-        ]
-    )
-    turns = service(client, tools=catalog(spec("quote", _grounded)))
-    turn_id = uuid.uuid4()
-    handle = await turns.create(
-        user_id=owner,
-        thread_id=thread_id,
-        turn_id=turn_id,
-        user_text="FPT thế nào?",
-        runtime=runtime(owner),
-    )
-    published: list = []
-    subscriber = await turns.subscribe(owner, turn_id)
-    await turns.running(turn_id).task
-    published = [event async for event in subscriber.events()]
-
-    record = await store().read_turn(owner, turn_id)
-    assert record.status == TURN_COMPLETE
-    assert record.terminal_reason is None
-
-    # Both blocks are emitted whole; the second carries the literals the client
-    # must label rather than converting the Turn into a refusal.
-    blocks = [event for event in published if event.type is EventType.CONTENT_BLOCK]
-    assert len(blocks) == 2
-    assert blocks[0].data["block"]["text"] == "Giá đóng cửa 95.4."
-    assert blocks[1].data["block"]["unverified_figures"] == ["61.2"]
-    assert published[-1].type is EventType.COMPLETED
-
-    assistant = [row for row in messages_of(thread_id) if row.role == "assistant"][0]
-    assert "61.2" in assistant.content["text"]
-    assert assistant.content["blocks"][1]["unverified_figures"] == ["61.2"]
-    assert assistant.content["evidence_manifest"]["outcomes"]["grounding"] == "passed"
-    assert assistant.content["evidence_manifest"]["outcomes"]["failure_code"] is None
-    assert handle.publisher.blocks[0]["text"] == "Giá đóng cửa 95.4."
-
-
-@pytest.mark.asyncio
-async def test_a_grounded_answer_reaches_the_transcript_with_its_citations(owner):
-    thread_id = await thread_for(owner)
-    client = FakeClient(
-        [wants("quote"), answer("Giá đóng cửa 95.4 [ev:c1#close] đồng.")]
-    )
-    turns = service(client, tools=catalog(spec("quote", _grounded)))
-    turn_id = uuid.uuid4()
-    await turns.create(
-        user_id=owner,
-        thread_id=thread_id,
-        turn_id=turn_id,
-        user_text="FPT thế nào?",
-        runtime=runtime(owner),
-    )
-    await turns.running(turn_id).task
-
-    record = await store().read_turn(owner, turn_id)
-    assistant = [row for row in messages_of(thread_id) if row.role == "assistant"][0]
-
-    assert record.status == TURN_COMPLETE
-    assert assistant.content["text"] == "Giá đóng cửa 95.4 đồng."
-    cited = assistant.content["evidence_manifest"]["cited_fields"]
-    assert cited[0]["tool_call_id"] == "c1"
-    assert cited[0]["value"] == 95.4
-    assert cited[0]["as_of"] == TRADING_DAY.isoformat()
-    assert assistant.content["sources_and_methods"][0]["tool_name"] == "quote"
-
-
-# --- the Turn start allowance (#83) ---------------------------------------
 
 
 def _reservation(user_id: int, owner_id: str, when: datetime) -> LlmCallUsage:
@@ -861,65 +765,6 @@ async def test_a_turns_own_later_calls_do_not_each_cost_a_start(owner):
         )
 
 
-# --- what survives, and what never happens (#83) ---------------------------
-
-
-@pytest.mark.asyncio
-async def test_the_manifest_outlives_the_traces_it_was_built_from(owner):
-    """Traces keep a 90-day window; the Manifest is kept indefinitely."""
-    thread_id = await thread_for(owner)
-    traces: list[dict] = []
-    client = FakeClient(
-        [wants("quote"), answer("Giá đóng cửa 95.4 [ev:c1#close] đồng.")]
-    )
-    turns = service(client, tools=catalog(spec("quote", _grounded), traces=traces))
-    turn_id = uuid.uuid4()
-    await turns.create(
-        user_id=owner,
-        thread_id=thread_id,
-        turn_id=turn_id,
-        user_text="FPT thế nào?",
-        runtime=runtime(owner),
-    )
-    await turns.running(turn_id).task
-    assert traces  # the trace existed while the Turn ran
-
-    # Day 91: the cleanup job takes the traces away.
-    with get_sync_db() as session:
-        session.execute(delete(AgentToolCall).where(AgentToolCall.thread_id == thread_id))
-
-    assistant = [row for row in messages_of(thread_id) if row.role == "assistant"][0]
-    cited = assistant.content["evidence_manifest"]["cited_fields"][0]
-    assert cited["value"] == 95.4
-    assert cited["unit"] is None or cited["unit"]
-    assert cited["as_of"] == TRADING_DAY.isoformat()
-    assert cited["provenance"] == "quote"
-
-
-@pytest.mark.asyncio
-async def test_answer_kind_is_classified_by_the_harness_with_no_second_call(owner):
-    thread_id = await thread_for(owner)
-    client = FakeClient(
-        [wants("quote"), answer("Giá đóng cửa 95.4 [ev:c1#close] đồng.")]
-    )
-    turns = service(client, tools=catalog(spec("quote", _grounded)))
-    turn_id = uuid.uuid4()
-    await turns.create(
-        user_id=owner,
-        thread_id=thread_id,
-        turn_id=turn_id,
-        user_text="FPT thế nào?",
-        runtime=runtime(owner),
-    )
-    await turns.running(turn_id).task
-
-    assistant = [row for row in messages_of(thread_id) if row.role == "assistant"][0]
-    assert assistant.content["answer_kind"] == "analysis"
-    # Two calls: the tool round and the answer. A classifying model call would
-    # be a third, and there is no code path that makes one.
-    assert len(client.requests) == 2
-
-
 @pytest.mark.asyncio
 async def test_a_refusal_records_its_reason_and_suspends_nobody(owner):
     thread_id = await thread_for(owner)
@@ -942,44 +787,13 @@ async def test_a_refusal_records_its_reason_and_suspends_nobody(owner):
 
     assert record.status == TURN_COMPLETE
     assert record.terminal_reason == "model_refusal"
-    assert assistant.content["answer_kind"] == "refusal"
-    assert assistant.content["evidence_manifest"]["outcomes"]["scope"] == "refused"
+    # A refusal is an answer, and it reaches the reader.
+    assert assistant.content["text"] == "Tôi không thể giúp với yêu cầu này."
+    assert assistant.content["status"] == TURN_COMPLETE
     # V1 records the reason and does nothing to the account.
     with get_sync_db() as session:
         user = session.get(User, owner)
         assert user is not None
-
-
-@pytest.mark.asyncio
-async def test_the_citation_payload_comes_from_the_trace_and_not_from_the_model(owner):
-    """The model supplies evidence ids; the backend supplies the prose."""
-    thread_id = await thread_for(owner)
-    client = FakeClient(
-        [
-            wants("quote"),
-            answer(
-                "Theo Bloomberg, giá đóng cửa 95.4 [ev:c1#close] đồng."
-            ),
-        ]
-    )
-    turns = service(client, tools=catalog(spec("quote", _grounded)))
-    turn_id = uuid.uuid4()
-    await turns.create(
-        user_id=owner,
-        thread_id=thread_id,
-        turn_id=turn_id,
-        user_text="FPT thế nào?",
-        runtime=runtime(owner),
-    )
-    await turns.running(turn_id).task
-
-    assistant = [row for row in messages_of(thread_id) if row.role == "assistant"][0]
-    source = assistant.content["sources_and_methods"][0]
-
-    # Whatever the model wrote in prose, the recorded source is the tool call.
-    assert source["provider_source"] == "quote"
-    assert source["tool_call_id"] == "c1"
-    assert "Bloomberg" not in str(source)
 
 
 # --- what a real Turn emits and records ------------------------------------
@@ -988,10 +802,9 @@ async def test_the_citation_payload_comes_from_the_trace_and_not_from_the_model(
 @pytest.mark.asyncio
 async def test_a_completed_turn_emits_its_terminal_event_after_the_transaction(owner):
     thread_id = await thread_for(owner)
-    client = FakeClient(
-        [wants("quote"), answer("Giá đóng cửa 95.4 [ev:c1#close] đồng.")]
-    )
-    turns = service(client, tools=catalog(spec("quote", _grounded)))
+    install(entry("web_search"))
+    client = FakeClient([wants("web_search"), answer("Giá đóng cửa 95,4 đồng.")])
+    turns = service(client)
     turn_id = uuid.uuid4()
     await turns.create(
         user_id=owner,
@@ -1004,8 +817,8 @@ async def test_a_completed_turn_emits_its_terminal_event_after_the_transaction(o
     await turns.running(turn_id).task
     seen = [event async for event in subscriber.events()]
 
-    assert EventType.ACTIVITY in [event.type for event in seen]
-    assert EventType.CONTENT_BLOCK in [event.type for event in seen]
+    assert EventType.TOOL_CALL in [event.type for event in seen]
+    assert EventType.CONTENT_DELTA in [event.type for event in seen]
     assert seen[-1].type is EventType.COMPLETED
     assert seen[-1].data["status"] == TURN_COMPLETE
     # The message exists by the time the terminal event names it, so a client
@@ -1026,10 +839,8 @@ async def test_a_cancelled_turn_emits_turn_cancelled(owner):
         await release.wait()
         return {"symbol": "FPT", "ok": True}
 
-    turns = service(
-        FakeClient([wants("slow"), answer("Không tới đây.")]),
-        tools=catalog(spec("slow", slow)),
-    )
+    install(entry("slow", slow))
+    turns = service(FakeClient([wants("slow"), answer("Không tới đây.")]))
     turn_id = uuid.uuid4()
     await turns.create(
         user_id=owner,
@@ -1050,7 +861,14 @@ async def test_a_cancelled_turn_emits_turn_cancelled(owner):
 
 
 @pytest.mark.asyncio
-async def test_an_activity_boundary_checkpoints_the_turn(owner):
+async def test_a_turn_interrupted_mid_round_has_already_been_checkpointed(owner):
+    """What a restart freezes has to exist before the restart.
+
+    The loop checkpoints after every model call and again at the end of every
+    tool round, so a Turn killed while a tool is in flight leaves the prose it
+    had already produced — which is the difference between an ``incomplete`` a
+    reader keeps and a ``failed`` they cannot.
+    """
     thread_id = await thread_for(owner)
     started = asyncio.Event()
     release = asyncio.Event()
@@ -1060,9 +878,10 @@ async def test_an_activity_boundary_checkpoints_the_turn(owner):
         await release.wait()
         return {"symbol": "FPT", "ok": True}
 
+    install(entry("slow", slow))
     turns = service(
         FakeClient([wants("slow"), answer("Xong.")]),
-        tools=catalog(spec("slow", slow)),
+        loop={"clock": lambda: datetime.now(timezone.utc)},
     )
     turn_id = uuid.uuid4()
     await turns.create(
@@ -1074,26 +893,16 @@ async def test_an_activity_boundary_checkpoints_the_turn(owner):
     )
     await started.wait()
 
-    # The reading-data activity fired before the tool ran, and its checkpoint
-    # carries the sequence that activity consumed.
-    record = await store().read_turn(owner, turn_id)
-    assert record.last_event_seq >= 2
+    mid_round = await store().read_turn(owner, turn_id)
+    assert mid_round.draft_content is not None
 
     release.set()
     await turns.running(turn_id).task
 
-
-def test_the_git_sha_comes_from_configuration_when_nobody_names_one():
-    from src.core.config import get_settings
-
-    turns = TurnService(
-        store=store(),
-        loop_factory=lambda **_: None,
-        config=config(),
-        tool_catalog_version="catalog-v1",
-    )
-
-    assert turns._git_sha == get_settings().git_sha
+    # And the boundary checkpoint after the round carries the sequence the
+    # tool-call events consumed.
+    finished = await store().read_turn(owner, turn_id)
+    assert finished.last_event_seq >= 2
 
 
 @pytest.mark.asyncio

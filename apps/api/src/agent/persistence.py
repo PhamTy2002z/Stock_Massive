@@ -137,7 +137,9 @@ class ToolCallRecord:
     #: The route's id for the call, when it sent one. Absent on rows written
     #: before the column existed.
     tool_call_id: str | None = None
-    #: How large the result was on a Turn where the model saw a preview of it.
+    #: Left over from the harness that recorded a preview and its full size in
+    #: two places. The size the model was shown a preview of now rides
+    #: ``result`` beside the preview itself, so nothing writes this column.
     spilled_bytes: int | None = None
 
 
@@ -705,40 +707,6 @@ class AgentPersistence:
             session.commit()
             return _trace_record(row)
 
-    async def record_spillover(
-        self, request_message_id: int, spilled: Mapping[str, int]
-    ) -> int:
-        """Note, on the rows themselves, which results the model only previewed.
-
-        A second write rather than part of the insert, because the two decisions
-        happen at different moments: a result is traced as soon as the tool
-        answers, and whether the *round* fits the context window is only knowable
-        once every result in it is back. Only spilled calls are touched, so an
-        ordinary round costs no writes at all.
-        """
-        if not spilled:
-            return 0
-        return await asyncio.to_thread(
-            self._record_spillover, request_message_id, dict(spilled)
-        )
-
-    def _record_spillover(
-        self, request_message_id: int, spilled: Mapping[str, int]
-    ) -> int:
-        with self._session_factory() as session:
-            updated = 0
-            for call_id, full_bytes in spilled.items():
-                updated += session.execute(
-                    update(AgentToolCall)
-                    .where(
-                        AgentToolCall.request_message_id == request_message_id,
-                        AgentToolCall.tool_call_id == call_id,
-                    )
-                    .values(spilled_bytes=int(full_bytes))
-                ).rowcount or 0
-            session.commit()
-            return updated
-
     async def tool_result(
         self, request_message_id: int, tool_call_id: str
     ) -> Mapping[str, Any] | None:
@@ -780,24 +748,6 @@ class AgentPersistence:
                 .order_by(AgentToolCall.started_at.asc(), AgentToolCall.id.asc())
             ).scalars()
             return tuple(_trace_record(row) for row in rows)
-
-    async def tool_tokens_for_request(self, request_message_id: int) -> int:
-        return await asyncio.to_thread(self._tool_tokens_for_request, request_message_id)
-
-    def _tool_tokens_for_request(self, request_message_id: int) -> int:
-        with self._session_factory() as session:
-            total = session.execute(
-                select(
-                    func.coalesce(
-                        func.sum(
-                            func.coalesce(AgentToolCall.prompt_tokens, 0)
-                            + func.coalesce(AgentToolCall.completion_tokens, 0)
-                        ),
-                        0,
-                    )
-                ).where(AgentToolCall.request_message_id == request_message_id)
-            ).scalar_one()
-            return int(total)
 
     # -- the Turn lifecycle (#81) -----------------------------------------
 
@@ -1051,8 +1001,8 @@ class AgentPersistence:
         ``message_builder`` turns one frozen draft into the canonical assistant
         message, in the same transaction that freezes the Turn. It is a callback
         rather than logic here because what a useful incomplete message looks
-        like — its blocks, its Risk Notice, its Evidence Manifest — is the
-        lifecycle's business, and this module's business is the transaction.
+        like is the lifecycle's business, and this module's business is the
+        transaction.
         """
         return await asyncio.to_thread(self._freeze_interrupted_turns, message_builder)
 

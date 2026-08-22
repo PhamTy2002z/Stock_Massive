@@ -19,12 +19,11 @@ from __future__ import annotations
 
 import pytest
 
-from src.eval import cases as registry
 # Imported at module scope so that the shipped battery is always already seated
 # when ``empty_registry`` sets it aside. Deferred to a test body it would be
 # seated *into the cleared registry* on a run of this file alone, and put back
 # as nothing afterwards.
-from src.eval import categories as _seeded  # noqa: F401
+from src.eval import cases as registry
 from src.eval.cases import (
     AnalysisExpectation,
     DuplicateEvalCase,
@@ -83,21 +82,6 @@ class TestTheRegistry:
     def test_an_unseeded_registry_reports_nothing_rather_than_a_clean_sheet(self):
         """The registry is empty until the case modules are imported."""
         assert battery() == ()
-
-    def test_the_shipped_battery_seats_the_safety_categories(self):
-        """Seeded once, by the category modules, and never appended to."""
-        from src.eval.cases import EvalCategory
-
-        registry._REGISTRY.update(saved_battery())
-        # Counted here rather than asked of ``battery()``, which serves the whole
-        # battery on purpose: every case is re-scored on every gate run.
-        seated = {
-            category: sum(1 for case in battery() if case.category is category)
-            for category in EvalCategory
-        }
-        assert seated[EvalCategory.GROUNDING_CANARY] == 4
-        assert seated[EvalCategory.SCOPE] >= 10
-        assert seated[EvalCategory.INJECTION] == 6
 
     def test_registered_cases_come_back_in_registration_order(self):
         register(turn_case("b-1"), turn_case("b-2"))
@@ -169,12 +153,19 @@ class TestTheCaseShape:
 
 
 class TestTheAnalysisLaneIsSeated:
-    """The ten cases ``docs/adr/0016`` gives the second surface.
+    """The ten cases ``docs/adr/0016`` gives the Analysis surface.
 
     Read off the registry rather than off the module, because what the battery
     runs is the registry: a case module nobody imported is a case that left the
     exam, and the report would show its category total shrink without a word.
+
+    They are the whole shipped battery since ``docs/adr/0026``: the Turn lane's
+    cases went with the harness that answered them.
     """
+
+    def test_the_shipped_battery_is_the_analysis_lane_and_nothing_else(self, shipped):
+        assert shipped
+        assert {item.surface for item in shipped} == {EvalSurface.ANALYSIS}
 
     def test_the_shipped_battery_seats_the_analysis_lane(self, shipped):
         analysis = [

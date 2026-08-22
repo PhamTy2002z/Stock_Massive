@@ -6,7 +6,6 @@ import { AlertCircle, Check, Copy, Pencil, RotateCcw, X } from "lucide-react"
 import { AnalysisCard } from "@/components/alpha/analysis"
 import { AssistantMessage } from "@/components/alpha/message/assistant-message"
 import { DraftMessage } from "@/components/alpha/message/draft-message"
-import type { TranscriptEntry } from "@/lib/alpha-desk/transcript"
 import { cn } from "@/lib/utils"
 
 import { Composer } from "./composer"
@@ -154,12 +153,12 @@ export function ChatView() {
     }
 
     if (pinned.current || !following.current) return
-    // Assigned rather than animated. A smooth scroll per block turns a fast
+    // Assigned rather than animated. A smooth scroll per delta turns a fast
     // answer into a moving target, and it is motion nobody asked for.
     element.scrollTop = element.scrollHeight
     // Every event the live Turn applies produces a new projection, so this is
-    // one dependency for every way the transcript can get taller: a block, a
-    // step joining the trail, a status line under an answer that ended.
+    // one dependency for every way the transcript can get taller: a delta, a
+    // tool call joining the list, a status line under an answer that ended.
   }, [desk.entries, requiredTail, setTailHeight])
 
   function onScroll() {
@@ -212,11 +211,6 @@ export function ChatView() {
             }
 
             if (entry.kind === "assistant") {
-              // The question this answer belongs to, for *Hỏi lại*: the nearest
-              // user row above it. Read here rather than carried on the entry,
-              // because the projection's job is what rows exist and in what
-              // order — which is exactly what makes this lookup possible.
-              const question = questionAbove(desk.entries, index)
               return (
                 <AssistantMessage
                   key={entry.key}
@@ -226,16 +220,6 @@ export function ChatView() {
                   flagFailed={entry.messageId === desk.flagFailedFor}
                   onFlag={desk.flag}
                   onUnflag={desk.unflag}
-                  onRetry={
-                    question === null || desk.canCancel
-                      ? undefined
-                      : () => desk.resend(question)
-                  }
-                  onAsk={(text) => dispatch({ type: "ask", text })}
-                  // Only under the newest answer. Every answer in a long Thread
-                  // carrying its own five would turn the transcript into a page
-                  // of prompts with the conversation between them.
-                  showSuggestions={index === desk.entries.length - 1}
                 />
               )
             }
@@ -318,16 +302,6 @@ function scrollTo(element: HTMLElement, top: number): void {
     return
   }
   element.scrollTo({ top, behavior: still ? "auto" : "smooth" })
-}
-
-/** The question an answer is an answer to, or null if the row above is not one. */
-function questionAbove(entries: TranscriptEntry[], index: number): string | null {
-  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
-    const entry = entries[cursor]
-    if (entry.kind === "user") return entry.pending ? null : entry.text
-    if (entry.kind === "assistant") return null
-  }
-  return null
 }
 
 /**

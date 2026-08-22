@@ -27,13 +27,17 @@ from fastapi.dependencies.utils import get_dependant
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, select
 
-from src.agent.admission import TurnAdmission
-from src.agent.events import Activity, EventType
-from src.agent.grounding import BlockKind, ReleasedBlock
+from src.agent.events import EventType
 from src.agent.limits import SubscriptionLimiter, SubscriptionThrottled
-from src.agent.loop import SessionSlots, TurnOutcome, TurnStatus
+from src.agent.loop import (
+    SessionSlots,
+    ToolCallStatus,
+    TurnAdmission,
+    TurnOutcome,
+    TurnStatus,
+    TurnToolCall,
+)
 from src.agent.persistence import AgentPersistence
-from src.agent.prompt import AnswerKind
 from src.agent.router import (
     desk as desk_dependency,
     history_of,
@@ -109,11 +113,12 @@ class ScriptedLoop:
 
     async def run(self, request, cancelled) -> TurnOutcome:
         self._control.started.set()
-        self._publisher.activity(Activity.ANALYZING)
-        for block in self._control.blocks:
-            # Published only after it would have passed the Gate, which is the
-            # order the real loop enforces and the one the snapshot depends on.
-            self._publisher.content_block(block.as_wire())
+        for call in self._control.calls:
+            self._publisher.tool_call(call.as_wire())
+        for index, piece in enumerate(self._control.pieces):
+            # The separator travels inside the delta, exactly as the real loop
+            # sends it, so the answer is the concatenation of what was streamed.
+            self._publisher.content_delta(piece if index == 0 else f"\n\n{piece}")
         await self._control.release.wait()
         status = TurnStatus.CANCELLED if cancelled() else self._control.status
         return TurnOutcome(
@@ -123,13 +128,11 @@ class ScriptedLoop:
                 if status is TurnStatus.CANCELLED
                 else self._control.terminal_reason
             ),
-            text="\n\n".join(block.text for block in self._control.blocks) or None,
-            answer_kind=AnswerKind.EDUCATION,
+            text=self._control.text or None,
             rounds_used=0,
             rounds_exhausted=False,
-            tool_calls=(),
+            tool_calls=tuple(self._control.calls),
             usage=Usage(),
-            blocks=tuple(self._control.blocks),
         )
 
 
@@ -139,17 +142,29 @@ class Control:
     def __init__(self) -> None:
         self.started = asyncio.Event()
         self.release = asyncio.Event()
-        self.blocks: list[ReleasedBlock] = []
+        self.pieces: list[str] = []
+        self.calls: list[TurnToolCall] = []
         self.status = TurnStatus.COMPLETE
         self.terminal_reason: str | None = None
+
+    @property
+    def text(self) -> str:
+        return "\n\n".join(self.pieces)
 
     def finish(self) -> None:
         self.release.set()
 
     def says(self, *texts: str) -> None:
-        self.blocks = [
-            ReleasedBlock(text=text, kind=BlockKind.PROSE, citations=())
-            for text in texts
+        self.pieces = list(texts)
+
+    def calls_a_tool(self, name: str = "web_search") -> None:
+        self.calls = [
+            TurnToolCall(
+                id="call_0",
+                name=name,
+                status=ToolCallStatus.OK,
+                summary=f"Tìm trên web: {name}",
+            )
         ]
 
 
@@ -183,8 +198,6 @@ class Desk:
                 store=store,
                 loop_factory=loop_factory,
                 config=llm_config(enabled=enabled),
-                tool_catalog_version="catalog-under-test",
-                git_sha="0000000",
             ),
             admission=TurnAdmission(self.ledger, slots=self.slots),
             subscriptions=SubscriptionLimiter(per_user=1000, per_turn=1000, window=60),
@@ -587,11 +600,11 @@ class TestTheStream:
         response = await client.get(f"{API}/turns/{turn_id}/events", headers=auth)
 
         # The Turn ended before this subscriber arrived, so the snapshot is the
-        # whole of it — and it carries the blocks the stream would have.
+        # whole of it — and it carries the text the stream would have.
         snapshot = sse_events(response.text)[0]
         assert snapshot["seq"] == snapshot["data"]["through_seq"]
         assert sse_ids(response.text) == [str(snapshot["seq"])]
-        assert snapshot["version"] == 1
+        assert snapshot["version"] == 2
 
     async def test_a_live_turn_streams_its_events_before_it_ends(
         self, live_client, auth, desk
@@ -648,7 +661,7 @@ class TestTheStream:
             following = await _first_event(lines)
 
         assert snapshot["type"] == EventType.SNAPSHOT.value
-        assert [block["text"] for block in snapshot["data"]["blocks"]] == ["một", "hai"]
+        assert snapshot["data"]["text"] == "một\n\nhai"
         assert following["seq"] > snapshot["data"]["through_seq"]
 
     async def test_a_subscriber_that_leaves_does_not_stop_the_turn(
@@ -798,9 +811,7 @@ class TestCancel:
         stream = await client.get(f"{API}/turns/{turn_id}/events", headers=auth)
         snapshot = sse_events(stream.text)[0]
         assert snapshot["data"]["status"] == "cancelled"
-        assert [block["text"] for block in snapshot["data"]["blocks"]] == [
-            "VCB đóng cửa ở 62.0"
-        ]
+        assert snapshot["data"]["text"] == "VCB đóng cửa ở 62.0"
 
 
 # -- Threads ---------------------------------------------------------------
@@ -829,20 +840,74 @@ class TestThreads:
         assert roles == ["user", "assistant"]
         assert theirs.status_code == 404
 
-    async def test_switching_the_active_symbol_reuses_the_thread(
+    async def test_the_canonical_message_says_whether_the_answer_finished(
+        self, client, auth, desk
+    ):
+        """A reopened Thread renders the transcript and nothing else.
+
+        Without ``status`` on the content, a reader could not tell an answer that
+        finished from one a deadline cut off — every truncated answer in the
+        transcript would read as complete.
+        """
+        thread_id = await open_thread(client, auth)
+        turn_id = str(uuid.uuid4())
+        desk.control.says("một phần")
+        desk.control.calls_a_tool()
+        desk.control.status = TurnStatus.INCOMPLETE
+        desk.control.terminal_reason = "turn_deadline"
+        await start_turn(client, auth, thread_id, turn_id=turn_id)
+        await asyncio.wait_for(desk.control.started.wait(), 2)
+        desk.control.finish()
+        await _settle(desk, turn_id)
+
+        thread = await client.get(f"{API}/threads/{thread_id}", headers=auth)
+        answer = thread.json()["messages"][-1]
+
+        assert answer["role"] == "assistant"
+        assert answer["content"]["text"] == "một phần"
+        assert answer["content"]["status"] == "incomplete"
+        assert [call["id"] for call in answer["content"]["tool_calls"]] == ["call_0"]
+        # Four fields and no arguments: what a page said is trace material, not
+        # transcript material.
+        assert set(answer["content"]["tool_calls"][0]) == {
+            "id",
+            "name",
+            "status",
+            "summary",
+        }
+
+    async def test_a_tool_call_reaches_the_wire_and_rides_the_snapshot(
         self, client, auth, desk
     ):
         thread_id = await open_thread(client, auth)
+        turn_id = str(uuid.uuid4())
+        desk.control.says("xong")
+        desk.control.calls_a_tool()
+        await start_turn(client, auth, thread_id, turn_id=turn_id)
+        await asyncio.wait_for(desk.control.started.wait(), 2)
+        desk.control.finish()
+        await _settle(desk, turn_id)
 
-        first = await start_turn(
-            client, auth, thread_id, active_symbol="VCB", text="VCB?"
-        )
+        stream = await client.get(f"{API}/turns/{turn_id}/events", headers=auth)
+        snapshot = sse_events(stream.text)[0]
+
+        assert snapshot["data"]["tool_calls"] == [
+            {
+                "id": "call_0",
+                "name": "web_search",
+                "status": "ok",
+                "summary": "Tìm trên web: web_search",
+            }
+        ]
+
+    async def test_a_second_question_reuses_the_thread(self, client, auth, desk):
+        thread_id = await open_thread(client, auth)
+
+        first = await start_turn(client, auth, thread_id, text="VCB?")
         desk.control.finish()
         await _settle(desk, first.json()["id"])
         desk.control = Control()
-        second = await start_turn(
-            client, auth, thread_id, active_symbol="HPG", text="HPG?"
-        )
+        second = await start_turn(client, auth, thread_id, text="HPG?")
         desk.control.finish()
         await _settle(desk, second.json()["id"])
 

@@ -1,960 +1,192 @@
 // @vitest-environment jsdom
 /**
- * What one answer promises, and what it must never do.
+ * What an answer puts on screen, and what it must never put there.
  *
- * Every claim here is one a plausible implementation gets wrong by being
- * conventional: a chat UI types characters out, replaces a stopped request with
- * an error page, and labels its spinner with the function it is calling. Each
- * of those is a decision this product made in the other direction.
- *
- * These components render *content*, so they are tested on their own — the
- * shell that arranges them is checked separately, and mixing the two would mean
- * mocking three query hooks to assert on a Risk Notice.
+ * The surface is prose plus the calls that produced it, so the assertions split
+ * the same way: the Markdown is rendered rather than shown with its syntax, no
+ * path exists from model output to markup, and a call is one row that changes
+ * status rather than two rows that accumulate.
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest"
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitForElementToBeRemoved,
-} from "@testing-library/react"
+import { cleanup, render, screen, within } from "@testing-library/react"
 
-import { periods, quarterlySpec } from "@/components/alpha/widgets/fixtures"
+import { TOOL_CALL_COPY, terminalSentence } from "@/lib/alpha-desk/copy"
 import type { AssistantView, DraftEntry } from "@/lib/alpha-desk/transcript"
-import type { Citation, ContentBlock, RiskNotice } from "@/lib/alpha-desk/types"
+import type { ToolCall } from "@/lib/alpha-desk/types"
 import { AssistantMessage } from "./assistant-message"
 import { DraftMessage } from "./draft-message"
-import { SearchProgress } from "./search-progress"
-import { CASCADE_CAP_MS, CHUNK_CLASS, CHUNK_STEP_MS } from "./word-cadence"
 
 afterEach(cleanup)
 
-// The v1 catalog. Named here because the point is that none of these names has
-// any route to the browser.
-const TOOL_NAMES = [
-  "get_analysis",
-  "get_company_profile",
-  "get_financials",
-  "get_price_series",
-  "get_watchlist",
-  "screen_universe",
-  "search_news",
-]
-
-const NOTICE: RiskNotice = {
-  version: "risk-notice/1",
-  locale: "vi",
-  text: "Đây không phải khuyến nghị đầu tư.",
-  // The enum values the backend sends, not prose: they exist so a translation
-  // can be checked against a required set, and they are never displayed.
-  meanings: ["analytical_purpose", "no_personal_advice"],
-}
-
-function citation(overrides: Partial<Citation> = {}): Citation {
+function call(overrides: Partial<ToolCall> = {}): ToolCall {
   return {
-    tool_call_id: "call_01",
-    tool_name: "get_analysis",
-    field_path: "technical.momentum_273d",
-    value: 12.4,
-    unit: "%",
-    interpretation: "Cao hơn trung vị ngành.",
-    claim: null,
-    provenance: "registry",
-    as_of: "2026-08-14",
-    stale: false,
-    source: "registered_field",
-    window_health: null,
-    contradictory: false,
-    zone_label: null,
-    reference_price: false,
+    id: "call-1",
+    name: "web_search",
+    status: "running",
+    summary: "Đang tìm trên web",
     ...overrides,
   }
 }
 
-function block(text: string, citations: Citation[] = []): ContentBlock {
-  return { kind: "prose", text, symbol: null, trading_day: null, citations }
+function view(overrides: Partial<AssistantView> = {}): AssistantView {
+  return { text: "một câu trả lời", toolCalls: [], completed: true, ...overrides }
 }
 
 function draft(overrides: Partial<DraftEntry> = {}): DraftEntry {
   return {
     kind: "draft",
     key: "draft-1",
-    blocks: [],
-    activity: null,
-    steps: [],
+    text: "",
+    toolCalls: [],
     phase: "running",
     terminalReason: null,
-    appendedIndex: null,
     ...overrides,
   }
 }
 
-function view(overrides: Partial<AssistantView> = {}): AssistantView {
-  return {
-    blocks: [block("kết luận")],
-    riskNotice: NOTICE,
-    searchProgress: [],
-    suggestions: [],
-    widgets: [],
-    widgetRefusals: [],
-    completed: true,
-    ...overrides,
-  }
-}
+describe("the answer's prose", () => {
+  it("renders the Markdown the model wrote instead of showing its syntax", () => {
+    render(<AssistantMessage view={view({ text: "**Nguyễn Đăng Quang** là chủ tịch." })} />)
 
-describe("how an answer arrives", () => {
-  it("keeps an unverified figure's record off the answer", () => {
-    // The grounding pass still records the figures it could not tie to
-    // evidence — it is what withholds a recommendation — but the reader was
-    // shown that record as a row of bare literals, which reads as a defect in
-    // the answer rather than as provenance.
-    render(
-      <AssistantMessage
-        view={view({
-          blocks: [
-            {
-              ...block("Chủ tịch được bổ nhiệm năm 2024."),
-              unverified_figures: ["2024"],
-            },
-          ],
-        })}
-      />,
-    )
-
-    expect(screen.getByText("Chủ tịch được bổ nhiệm năm 2024.")).toBeInTheDocument()
-    expect(screen.queryByRole("note")).not.toBeInTheDocument()
-    expect(screen.queryByText(/chưa kiểm chứng/)).not.toBeInTheDocument()
-  })
-
-  it("names an external source and when it was retrieved", () => {
-    render(
-      <AssistantMessage
-        view={view({
-          blocks: [
-            block("Ban lãnh đạo hiện tại.", [
-              citation({
-                source: "external_claim",
-                provenance: "HOSE",
-                as_of: "2026-08-17T08:00:00+07:00",
-              }),
-            ]),
-          ],
-        })}
-      />,
-    )
-
-    // Behind the chip, which is where ADR-0015's first provenance layer lives
-    // now: one press from the claim, and never further.
-    fireEvent.click(screen.getByLabelText(/Nguồn của đoạn này/))
-
-    expect(screen.getAllByText(/HOSE/).length).toBeGreaterThan(0)
-    expect(screen.getByText("Nguồn ngoài · chưa kiểm chứng")).toBeInTheDocument()
-    expect(screen.getAllByText(/retrieved 2026-08-17/).length).toBeGreaterThan(0)
-  })
-
-  it("cascades a delivered block in a few words at a time", () => {
-    // The block is complete when it lands — the transport still buffers deltas
-    // into Markdown-safe units, and a per-character crawl would put back the
-    // illusion it was built to remove. What arrives in stages is the *reveal*:
-    // chunks of four words, staggered by CSS, over prose that is already whole.
-    const { container } = render(
-      <DraftMessage
-        entry={draft({
-          blocks: [block("một hai ba bốn năm sáu bảy tám")],
-          appendedIndex: 0,
-        })}
-        onRetry={vi.fn()}
-      />,
-    )
-
-    // Whole in the DOM the instant it arrives: nothing reflows as it reveals,
-    // and a screen reader is handed a finished sentence. Read off the container
-    // rather than queried by text — the sentence now spans two elements, which
-    // is the whole point, and joining them back is the assertion.
-    expect(container.textContent).toContain("một hai ba bốn năm sáu bảy tám")
-
-    const chunks = container.querySelectorAll(`.${CHUNK_CLASS}`)
-    expect(chunks).toHaveLength(2)
-    expect(chunks[0].getAttribute("style")).toContain("animation-delay: 0ms")
-    expect(chunks[1].getAttribute("style")).toContain(`animation-delay: ${CHUNK_STEP_MS}ms`)
-  })
-
-  it("caps the cascade so a long block is not gated by its own animation", () => {
-    const { container } = render(
-      <DraftMessage
-        entry={draft({ blocks: [block("từ ".repeat(400).trim())], appendedIndex: 0 })}
-        onRetry={vi.fn()}
-      />,
-    )
-
-    const chunks = container.querySelectorAll(`.${CHUNK_CLASS}`)
-    const last = chunks[chunks.length - 1].getAttribute("style") ?? ""
-    const delay = Number(last.match(/animation-delay:\s*(\d+)ms/)?.[1])
-    expect(delay).toBeLessThanOrEqual(CASCADE_CAP_MS)
-  })
-
-  it("leaves a table whole rather than filling it in cell by cell", () => {
-    const table = "| Mã | Giá |\n| --- | --- |\n| VHM | 41.2 |"
-    const { container } = render(
-      <DraftMessage entry={draft({ blocks: [block(table)], appendedIndex: 0 })} onRetry={vi.fn()} />,
-    )
-
-    expect(container.querySelector("table")).not.toBeNull()
-    expect(container.querySelectorAll(`table .${CHUNK_CLASS}`)).toHaveLength(0)
-  })
-
-  it("renders a reopened Thread all at once, with no staged replay", () => {
-    // A null `appendedIndex` means a snapshot replaced the projection rather
-    // than an event delivering one block. Nothing carries cadence markup at
-    // all, so "at once" is visible in the DOM rather than a matter of how long
-    // the test waits.
-    const { container } = render(
-      <DraftMessage
-        entry={draft({ blocks: [block("một"), block("hai"), block("ba")] })}
-        onRetry={vi.fn()}
-      />,
-    )
-
-    expect(screen.getByText("ba")).toBeInTheDocument()
-    expect(container.querySelector(`.${CHUNK_CLASS}`)).toBeNull()
-  })
-
-  it("keeps cascading a block after the next event lands", () => {
-    // `appendedIndex` is cleared by the very next event — an activity row, a
-    // status. A reveal that read it live would cut itself off mid-sentence, so
-    // the block latches what it was at mount.
-    const entry = draft({ blocks: [block("một hai ba bốn năm")], appendedIndex: 0 })
-    const { container, rerender } = render(<DraftMessage entry={entry} onRetry={vi.fn()} />)
-
-    rerender(<DraftMessage entry={{ ...entry, appendedIndex: null }} onRetry={vi.fn()} />)
-
-    expect(container.querySelectorAll(`.${CHUNK_CLASS}`).length).toBeGreaterThan(0)
-  })
-})
-
-describe("the search-progress trail", () => {
-  it("shows every step in order, with the running one announced", () => {
-    render(
-      <SearchProgress
-        steps={[{ phase: "reading_data" }, { phase: "searching" }]}
-        activity="searching"
-        defaultOpen
-      />,
-    )
-
-    const rows = screen.getAllByRole("listitem").map((row) => row.textContent)
-    // A step that is over says what it did; only the live row says *Đang…*.
-    expect(rows[0]).toMatch(/Đã đọc dữ liệu đã lưu/)
-    expect(rows[1]).toMatch(/Đang tìm trên web/)
-    // A finished step is not progress: announcing each one would turn a quiet
-    // answer into a queue of interruptions for a screen reader.
-    expect(screen.getAllByRole("status")).toHaveLength(1)
-    expect(screen.getByRole("status")).toHaveTextContent(/Đang tìm trên web/)
-  })
-
-  it("keeps the analysis row only while it is the step happening", () => {
-    // It names no query, no source and no count, so once it is over it says
-    // only that the system thought about an answer already on screen.
-    const { rerender } = render(
-      <SearchProgress steps={[{ phase: "analyzing" }]} activity="analyzing" defaultOpen />,
-    )
-
-    expect(screen.getByText("Đang suy nghĩ…")).toBeInTheDocument()
-
-    rerender(
-      <SearchProgress
-        steps={[{ phase: "analyzing" }, { phase: "searching" }]}
-        activity="searching"
-        defaultOpen
-      />,
-    )
-
-    expect(screen.queryByText("Đang suy nghĩ…")).not.toBeInTheDocument()
-    expect(screen.getAllByRole("listitem")).toHaveLength(1)
-  })
-
-  it("draws no trail when analysis is the only thing it could show", () => {
-    // A disclosure whose one row is *Hoàn thành* discloses nothing.
-    const { container } = render(
-      <SearchProgress steps={[{ phase: "analyzing" }]} activity={null} ending="done" />,
-    )
-
-    expect(container).toBeEmptyDOMElement()
-  })
-
-  it("animates a step as it lands and leaves the older ones still", () => {
-    // The trail is a list the reader watches grow. A step that arrived while
-    // they were looking rises into place; the ones above it already did.
-    const searching = { phase: "searching" as const, detail: { queries: ["tin tức AI"] } }
-    const { rerender } = render(
-      <SearchProgress steps={[searching]} activity="searching" defaultOpen />,
-    )
-
-    rerender(
-      <SearchProgress
-        steps={[searching, { phase: "found_sources", detail: { result_count: 4 } }]}
-        activity="found_sources"
-        defaultOpen
-      />,
-    )
-
-    expect(screen.getByText("Đã tìm thấy 4 kết quả").closest("li")).toHaveClass(
-      "animate-vg-row-in",
-    )
-    expect(screen.getByText("Đã tìm trên web").closest("li")).not.toHaveClass(
-      "animate-vg-row-in",
-    )
-  })
-
-  it("draws a reopened Turn's trail without replaying it", () => {
-    // Every step of a finished Turn arrived before the reader opened it, so
-    // animating them would stage work that ended minutes ago.
-    render(
-      <SearchProgress
-        steps={[{ phase: "reading_data" }]}
-        activity={null}
-        ending="done"
-        defaultOpen
-      />,
-    )
-
-    expect(screen.getByText("Đã đọc dữ liệu đã lưu").closest("li")).not.toHaveClass(
-      "animate-vg-row-in",
-    )
-    expect(screen.getByText("Hoàn thành").closest("li")).not.toHaveClass(
-      "animate-vg-row-in",
-    )
-  })
-
-  it("folds itself once the answer starts arriving under it", async () => {
-    // The lookups stop being the thing on screen the moment the first block
-    // lands; leaving the trail open across the whole stream keeps the machinery
-    // above the answer it was gathered for.
-    const { rerender } = render(
-      <SearchProgress
-        steps={[{ phase: "searching", detail: { queries: ["tin tức AI"] } }]}
-        activity="searching"
-        defaultOpen
-      />,
-    )
-
-    expect(screen.getByText("tin tức AI")).toBeInTheDocument()
-
-    rerender(
-      <SearchProgress
-        steps={[{ phase: "searching", detail: { queries: ["tin tức AI"] } }]}
-        activity={null}
-        answered
-        defaultOpen
-      />,
-    )
-
-    // The rows leave over the fold rather than in the frame the answer landed:
-    // a disclosure that vanishes reads as content being taken away.
-    expect(screen.getByRole("button", { name: /Tiến trình tìm kiếm/ })).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    )
-    await waitForElementToBeRemoved(() => screen.queryByText("tin tức AI"))
-  })
-
-  it("folds itself the moment the Turn ends, however it was left open", async () => {
-    const { rerender } = render(
-      <SearchProgress steps={[{ phase: "reading_data" }]} activity="reading_data" defaultOpen />,
-    )
-
-    expect(screen.getByText("Đang đọc dữ liệu…")).toBeInTheDocument()
-
-    rerender(
-      <SearchProgress steps={[{ phase: "reading_data" }]} activity={null} ending="done" />,
-    )
-
-    // Not waiting for the canonical message to replace the draft: between the
-    // two is a gap spent reading an answer with the machinery open above it.
-    expect(screen.getByRole("button", { name: /Tiến trình tìm kiếm/ })).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    )
-    await waitForElementToBeRemoved(() => screen.queryByText("Đã đọc dữ liệu đã lưu"))
-  })
-
-  it("discloses the open web's queries, its result count and its sources", () => {
-    render(
-      <SearchProgress
-        steps={[
-          { phase: "searching", detail: { queries: ["chủ tịch Masan Group"] } },
-          {
-            phase: "found_sources",
-            detail: {
-              result_count: 15,
-              sources: [
-                {
-                  title: "Ban lãnh đạo của Công ty CP Tập đoàn Masan",
-                  url: "https://masangroup.com/leadership",
-                  domain: "masangroup.com",
-                },
-              ],
-            },
-          },
-        ]}
-        activity={null}
-        ending="done"
-        defaultOpen
-      />,
-    )
-
-    expect(screen.getByText("chủ tịch Masan Group")).toBeInTheDocument()
-    expect(screen.getByText("Đã tìm thấy 15 kết quả")).toBeInTheDocument()
-    expect(screen.getByText("Tổng hợp 15 nguồn")).toBeInTheDocument()
-    expect(screen.getByText("masangroup.com")).toBeInTheDocument()
-    expect(screen.getByText("Hoàn thành")).toBeInTheDocument()
-  })
-
-  it("opens every source in a new tab without a referrer", () => {
-    // Untrusted external pages reached from an authenticated surface: the
-    // referrer would tell each host which app sent the reader.
-    render(
-      <SearchProgress
-        steps={[
-          {
-            phase: "found_sources",
-            detail: {
-              result_count: 1,
-              sources: [{ title: "Bản tin", url: "https://e.vnexpress.net/a", domain: "e.vnexpress.net" }],
-            },
-          },
-        ]}
-        activity={null}
-        defaultOpen
-      />,
-    )
-
-    const link = screen.getByRole("link", { name: /Bản tin/ })
-    expect(link).toHaveAttribute("target", "_blank")
-    expect(link).toHaveAttribute("rel", "noopener noreferrer")
-  })
-
-  it("folds away by default, so a finished answer reads as an answer", () => {
-    render(<SearchProgress steps={[{ phase: "reading_data" }]} activity={null} ending="done" />)
-
-    expect(screen.queryByText("Đã đọc dữ liệu đã lưu")).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole("button", { name: /Tiến trình tìm kiếm/ }))
-
-    expect(screen.getByText("Đã đọc dữ liệu đã lưu")).toBeInTheDocument()
-  })
-
-  it("draws nothing at all when there is no work to show", () => {
-    const { container } = render(<SearchProgress steps={[]} activity={null} />)
-
-    expect(container).toBeEmptyDOMElement()
-  })
-
-  it("exposes no tool name, symbol or figure on a store-reading step", () => {
-    // ADR-0020 widened disclosure for the open web only. A step from a lane that
-    // reads the store still carries a phase and nothing else.
-    const { container } = render(
-      <SearchProgress
-        steps={[{ phase: "reading_data" }, { phase: "analyzing" }]}
-        activity={null}
-        ending="done"
-        defaultOpen
-      />,
-    )
-
-    const markup = container.innerHTML
-    for (const name of TOOL_NAMES) expect(markup).not.toContain(name)
-    expect(container.textContent).not.toMatch(/\b[A-Z]{3}\b/)
-    expect(container.textContent).not.toMatch(/\d/)
-  })
-})
-
-describe("how prose is rendered", () => {
-  it("renders Markdown rather than showing its syntax", () => {
-    // A block is a Markdown-safe unit by construction (ADR-0013). Showing it
-    // verbatim put `**` on screen in front of readers.
-    render(<AssistantMessage view={view({ blocks: [block("Chủ tịch là **ông Quang**.")] })} />)
-
-    expect(screen.getByText("ông Quang")).toBeInTheDocument()
+    expect(screen.getByText("Nguyễn Đăng Quang").tagName).toBe("STRONG")
     expect(screen.queryByText(/\*\*/)).not.toBeInTheDocument()
   })
 
-  it("renders no HTML a block happens to contain", () => {
-    // No `rehype-raw`, so there is no path from model output to markup: an
-    // injected tag is escaped and reaches the reader as the text it is.
-    const { container } = render(
-      <AssistantMessage
-        view={view({ blocks: [block('Xem <img src="x" onerror="alert(1)"> nhé.')] })}
-      />,
-    )
-
-    expect(container.querySelector("img")).toBeNull()
-    expect(container.textContent).toContain('<img src="x" onerror="alert(1)">')
-  })
-
-  it("keeps the citation chip's panel out of a paragraph", () => {
-    // The chip opens a block-level panel, which a `p` may not contain: the
-    // browser would close the paragraph before it and hydration would mismatch.
-    const { container } = render(
-      <AssistantMessage
-        view={view({ blocks: [block("Chốt phiên tăng 2%.", [citation()])] })}
-      />,
-    )
-
-    const trigger = screen.getByRole("button", { name: /Nguồn của đoạn này/ })
-    expect(trigger.closest("p")).toBeNull()
-    expect(container.querySelector("p div")).toBeNull()
-  })
-})
-
-describe("what the answer offers underneath", () => {
-  it("counts the sources behind it and lists them on demand", () => {
+  it("renders a GFM table, because a table is what a comparison arrives as", () => {
     render(
       <AssistantMessage
-        view={view({
-          searchProgress: [
-            {
-              phase: "found_sources",
-              detail: {
-                result_count: 2,
-                sources: [
-                  { title: "Trang A", url: "https://a.vn/1", domain: "a.vn" },
-                  { title: "Trang B", url: "https://b.vn/2", domain: "b.vn" },
-                ],
-              },
-            },
-          ],
-        })}
+        view={view({ text: "| Mã | Giá |\n| --- | --- |\n| FPT | 100 |" })}
       />,
     )
 
-    fireEvent.click(screen.getByText("2 nguồn"))
-
-    expect(screen.getByRole("link", { name: /Trang A/ })).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /Trang B/ })).toBeInTheDocument()
+    expect(screen.getByRole("table")).toBeInTheDocument()
+    expect(screen.getByRole("columnheader", { name: "Mã" })).toBeInTheDocument()
   })
 
-  it("opens the drawer with what each page said and when", () => {
-    render(
-      <AssistantMessage
-        view={view({
-          searchProgress: [
-            {
-              phase: "found_sources",
-              detail: {
-                result_count: 1,
-                sources: [
-                  {
-                    title: "Ban lãnh đạo của Công ty CP Tập đoàn Masan",
-                    url: "https://masangroup.com/leadership",
-                    domain: "masangroup.com",
-                    snippet: "Ban Điều hành gồm năm thành viên điều hành cao cấp.",
-                    published_at: "2025-11-20",
-                    retrieved_at: "2026-06-19T08:00:00+00:00",
-                  },
-                ],
-              },
-            },
-          ],
-        })}
-      />,
-    )
+  it("opens a link in a new tab and sends no referrer with it", () => {
+    // The prose can be written out of untrusted external pages, so a link in it
+    // is not a link this product vouches for.
+    render(<AssistantMessage view={view({ text: "[nguồn](https://example.com/a)" })} />)
 
-    fireEvent.click(screen.getByText("1 nguồn"))
-
-    expect(screen.getByText("1 nguồn tham khảo")).toBeInTheDocument()
-    expect(screen.getByText("masangroup.com")).toBeInTheDocument()
-    expect(
-      screen.getByText("Ban Điều hành gồm năm thành viên điều hành cao cấp."),
-    ).toBeInTheDocument()
-    // Both timestamps read as the reader's calendar, never as the wire format.
-    expect(screen.getByText("20 thg 11, 2025")).toBeInTheDocument()
-    expect(screen.getByText("Cập nhật: 19 thg 6, 2026")).toBeInTheDocument()
-  })
-
-  it("shows no excerpt and no dates for a page whose result offered none", () => {
-    render(
-      <AssistantMessage
-        view={view({
-          searchProgress: [
-            {
-              phase: "found_sources",
-              detail: {
-                result_count: 1,
-                sources: [{ title: "Trang A", url: "https://a.vn/1", domain: "a.vn" }],
-              },
-            },
-          ],
-        })}
-      />,
-    )
-
-    fireEvent.click(screen.getByText("1 nguồn"))
-
-    expect(screen.getByRole("link", { name: /Trang A/ })).toBeInTheDocument()
-    expect(screen.queryByText(/Cập nhật:/)).not.toBeInTheDocument()
-  })
-
-  it("closes the trail with what the Turn actually ended as", () => {
-    // The blocks of a Turn that hit its deadline look exactly like a whole
-    // answer's; this row is the only place the difference shows.
-    render(
-      <AssistantMessage
-        view={view({ searchProgress: [{ phase: "reading_data" }], completed: false })}
-      />,
-    )
-
-    fireEvent.click(screen.getByRole("button", { name: /Tiến trình tìm kiếm/ }))
-
-    expect(screen.getByText("Đã dừng")).toBeInTheDocument()
-    expect(screen.queryByText("Hoàn thành")).not.toBeInTheDocument()
-  })
-
-  it("offers a follow-up without asking it", () => {
-    // Pressing one fills the composer; it never spends a Turn the reader has not
-    // decided to spend.
-    const onAsk = vi.fn()
-    render(
-      <AssistantMessage
-        view={view({ suggestions: ["Chủ tịch Masan hiện tại là ai?"] })}
-        showSuggestions
-        onAsk={onAsk}
-      />,
-    )
-
-    fireEvent.click(screen.getByText("Chủ tịch Masan hiện tại là ai?"))
-
-    expect(onAsk).toHaveBeenCalledWith("Chủ tịch Masan hiện tại là ai?")
-  })
-
-  it("keeps follow-ups off every answer but the newest", () => {
-    render(<AssistantMessage view={view({ suggestions: ["một câu hỏi"] })} onAsk={vi.fn()} />)
-
-    expect(screen.queryByText("một câu hỏi")).not.toBeInTheDocument()
-  })
-
-  it("offers two follow-ups even when the message carries more", () => {
-    // A message written before the limit still holds the five it was given.
-    render(
-      <AssistantMessage
-        view={view({ suggestions: ["câu một", "câu hai", "câu ba", "câu bốn", "câu năm"] })}
-        showSuggestions
-        onAsk={vi.fn()}
-      />,
-    )
-
-    expect(screen.getByText("câu một")).toBeInTheDocument()
-    expect(screen.getByText("câu hai")).toBeInTheDocument()
-    expect(screen.queryByText("câu ba")).not.toBeInTheDocument()
-  })
-})
-
-describe("the Risk Notice", () => {
-  // Still attached by the backend and still parsed into the view; simply not a
-  // thing this surface draws. The assertions are that it stays off screen —
-  // both the canonical wording and the renderer's own fallback.
-  it("is not rendered on a completed assistant message", () => {
-    render(<AssistantMessage view={view()} />)
-
-    expect(screen.queryByLabelText("Risk notice")).not.toBeInTheDocument()
-    expect(screen.queryByText(NOTICE.text)).not.toBeInTheDocument()
-  })
-
-  it("puts no stand-in on screen when the message carries none", () => {
-    render(<AssistantMessage view={view({ riskNotice: null })} />)
-
-    expect(screen.queryByLabelText("Risk notice")).not.toBeInTheDocument()
-    expect(screen.queryByText(/Chưa đọc được Risk Notice/)).not.toBeInTheDocument()
-  })
-})
-
-describe("what an answer never shows", () => {
-  it("names no tool, anywhere, even where a citation carries one", () => {
-    render(
-      <AssistantMessage
-        view={view({
-          blocks: [
-            block("kết luận", [citation(), citation({ tool_name: "get_price_series" })]),
-          ],
-        })}
-      />,
-    )
-
-    // Open the one provenance surface an answer has: the chip at the end of the
-    // claim. Everything a citation carries is reachable from here, tool name
-    // included — and that is exactly what must not come with it.
-    fireEvent.click(screen.getByLabelText(/Nguồn của đoạn này/))
-
-    // The whole document, not the render container: the panel behind the chip
-    // portals to `body`, and a tool name leaking there is the same leak.
-    const markup = document.body.innerHTML
-    for (const name of TOOL_NAMES) expect(markup).not.toContain(name)
-    expect(markup).not.toContain("call_01")
-  })
-
-  it("keeps the unit and the as_of one press from the claim they belong to", () => {
-    // ADR-0015's first provenance layer. The chip replaced a card in the reading
-    // order, not the reader's access to the figure behind the sentence.
-    render(<AssistantMessage view={view({ blocks: [block("kết luận", [citation()])] })} />)
-
-    fireEvent.click(screen.getByLabelText(/Nguồn của đoạn này/))
-
-    expect(screen.getByText("12,4")).toBeInTheDocument()
-    expect(screen.getByText("%")).toBeInTheDocument()
-    expect(screen.getByText("as of 2026-08-14")).toBeInTheDocument()
-    expect(screen.getByText("technical.momentum_273d")).toBeInTheDocument()
-  })
-
-  it("names the source on the chip and counts the others", () => {
-    render(
-      <AssistantMessage
-        view={view({
-          blocks: [
-            block("kết luận", [
-              citation({ source: "external_claim", provenance: "www.masangroup.com" }),
-              citation({ source: "external_claim", provenance: "e.vnexpress.net" }),
-            ]),
-          ],
-        })}
-      />,
-    )
-
-    expect(screen.getByText("masangroup +1")).toBeInTheDocument()
-  })
-})
-
-describe("a Turn that stopped early", () => {
-  it("keeps its useful content and offers a retry beside it", () => {
-    render(
-      <DraftMessage
-        entry={draft({
-          phase: "incomplete",
-          terminalReason: "turn_deadline",
-          blocks: [block("phần đã trả lời được")],
-        })}
-        onRetry={vi.fn()}
-      />,
-    )
-
-    expect(screen.getByText("phần đã trả lời được")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument()
-  })
-
-  it("explains itself in a sentence and never with the stable reason", () => {
-    render(
-      <DraftMessage
-        entry={draft({
-          phase: "incomplete",
-          terminalReason: "grounding_failed",
-          blocks: [block("x")],
-        })}
-        onRetry={vi.fn()}
-      />,
-    )
-
-    expect(screen.queryByText(/grounding_failed/)).not.toBeInTheDocument()
-    expect(screen.getByRole("status")).toHaveTextContent(/không dẫn được về số liệu/)
-  })
-
-  it("keeps every block already received when it is cancelled", () => {
-    render(
-      <DraftMessage
-        entry={draft({
-          phase: "cancelling",
-          blocks: [block("giữ lại"), block("và cái này")],
-        })}
-        onRetry={vi.fn()}
-      />,
-    )
-
-    expect(screen.getByText("giữ lại")).toBeInTheDocument()
-    expect(screen.getByText("và cái này")).toBeInTheDocument()
-    expect(screen.getByRole("status")).toHaveTextContent(/Cancelling/)
-  })
-
-  it("never becomes a full-screen error", () => {
-    // The status is an inline note under the answer. Nothing takes the place of
-    // what was already said, and nothing shouts.
-    render(
-      <DraftMessage
-        entry={draft({
-          phase: "failed",
-          terminalReason: "route_error",
-          blocks: [block("một phần")],
-        })}
-        onRetry={vi.fn()}
-      />,
-    )
-
-    expect(screen.getByText("một phần")).toBeInTheDocument()
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
-  })
-})
-
-describe("the pages behind a passage", () => {
-  it("links out to the page it was written from, labelled with the host", () => {
-    render(
-      <AssistantMessage
-        view={view({
-          blocks: [
-            {
-              ...block("Chủ tịch được bổ nhiệm năm 2024."),
-              source_ids: ["https://www.vnexpress.net/tin/abc"],
-            },
-          ],
-        })}
-      />,
-    )
-    const link = screen.getByRole("link", { name: "vnexpress.net" })
-
-    expect(link).toHaveAttribute("href", "https://www.vnexpress.net/tin/abc")
+    const link = screen.getByRole("link", { name: "nguồn" })
     expect(link).toHaveAttribute("target", "_blank")
-    // These are untrusted external pages opened from an authenticated surface,
-    // so the referrer does not go with the reader.
     expect(link).toHaveAttribute("rel", "noopener noreferrer")
   })
 
-  it("keeps a junk id from costing the reader the answer", () => {
-    render(
-      <AssistantMessage
-        view={view({
-          blocks: [
-            {
-              ...block("Doanh thu quý II tăng."),
-              source_ids: [
-                "không phải url",
-                "/trang-noi-bo",
-                // Parses as a URL and would be a clickable script in an `href`.
-                "javascript:alert(1)",
-                "https://cafef.vn/bai-viet",
-                "https://cafef.vn/bai-viet",
-              ],
-            },
-          ],
-        })}
-      />,
+  it("renders an HTML tag in the answer as the text it is", () => {
+    // There is no raw-HTML path in the plugin chain, which is why no sanitiser
+    // is needed rather than why one was skipped.
+    const { container } = render(
+      <AssistantMessage view={view({ text: '<img src=x onerror="alert(1)">' })} />,
     )
 
-    // The prose is the answer and it is untouched; one chip survives, once.
-    expect(screen.getByText("Doanh thu quý II tăng.")).toBeInTheDocument()
-    expect(screen.getAllByRole("link")).toHaveLength(1)
-    expect(screen.getByRole("link", { name: "cafef.vn" })).toHaveAttribute(
-      "href",
-      "https://cafef.vn/bai-viet",
-    )
-  })
-
-  it("gives two pages on one host a chip each", () => {
-    render(
-      <AssistantMessage
-        view={view({
-          blocks: [
-            {
-              ...block("Hai bản tin cùng nói vậy."),
-              source_ids: ["https://cafef.vn/mot", "https://cafef.vn/hai"],
-            },
-          ],
-        })}
-      />,
-    )
-
-    // Different pages, so hiding one would understate what the passage rests on.
-    expect(screen.getAllByRole("link", { name: "cafef.vn" })).toHaveLength(2)
-  })
-
-  it("shows nothing where a block carried no source ids at all", () => {
-    // A message stored before the field existed has no key, and an answer that
-    // stood on nothing external has an empty list. Neither is a defect.
-    render(<AssistantMessage view={view({ blocks: [block("kết luận")] })} />)
-    expect(screen.queryByRole("link")).not.toBeInTheDocument()
-
-    cleanup()
-
-    render(
-      <AssistantMessage
-        view={view({ blocks: [{ ...block("kết luận"), source_ids: [] }] })}
-      />,
-    )
-    expect(screen.queryByRole("link")).not.toBeInTheDocument()
+    expect(container.querySelector("img")).toBeNull()
+    expect(screen.getByText(/onerror/)).toBeInTheDocument()
   })
 })
 
-describe("the Widgets under an answer", () => {
-  // The resolver takes a message id and asks the route for that message's
-  // slice, so the network is the whole point of the wiring and stubbing it is
-  // the only way to see the wiring work. Nothing else in this file needs one.
-  function stubResolve() {
-    const fetcher = vi.fn(
-      async () =>
-        ({
-          ok: true,
-          json: async () => periods(),
-        }) as unknown as Response,
-    )
-    vi.stubGlobal("fetch", fetcher)
-    return fetcher
-  }
-
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
-  it("draws a stored spec by resolving it against this message", async () => {
-    const fetcher = stubResolve()
+describe("the tool calls behind an answer", () => {
+  it("names each call by the summary the backend sent, with its outcome beside it", () => {
     render(
       <AssistantMessage
-        view={view({ widgets: [quarterlySpec()] })}
-        messageId={7}
+        view={view({
+          toolCalls: [
+            call({ id: "a", status: "ok", summary: "Đã tìm trên web" }),
+            call({ id: "b", status: "error", summary: "Không mở được trang" }),
+          ],
+        })}
       />,
     )
 
-    expect(await screen.findByRole("figure")).toBeInTheDocument()
-    // The descriptor is read back *through the message*, which is what makes a
-    // reopened Thread show the same historical slice rather than today's.
-    expect(fetcher).toHaveBeenCalledWith(
-      "/api/alpha-desk/widgets/7/d3adb33fd3adb33fd3adb33f",
-      { credentials: "same-origin" },
-    )
+    const list = within(screen.getByRole("list", { name: TOOL_CALL_COPY.label }))
+    const rows = list.getAllByRole("listitem")
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toHaveTextContent("Đã tìm trên web")
+    expect(rows[0]).toHaveTextContent(TOOL_CALL_COPY.ok)
+    expect(rows[1]).toHaveTextContent(TOOL_CALL_COPY.error)
   })
 
-  it("puts the picture under the prose and above the action row", async () => {
-    stubResolve()
+  it("draws no list at all on an answer that used no tool", () => {
+    render(<AssistantMessage view={view()} />)
+
+    expect(screen.queryByRole("list", { name: TOOL_CALL_COPY.label })).not.toBeInTheDocument()
+  })
+
+  it("shows a call still running as running, on the draft it belongs to", () => {
+    render(<DraftMessage entry={draft({ toolCalls: [call()] })} onRetry={vi.fn()} />)
+
+    expect(screen.getByText(TOOL_CALL_COPY.running)).toBeInTheDocument()
+    expect(screen.getByText("Đang tìm trên web")).toBeInTheDocument()
+  })
+})
+
+describe("an answer that stopped early", () => {
+  it("says so under the text rather than in place of it", () => {
+    render(<AssistantMessage view={view({ text: "một nửa câu", completed: false })} />)
+
+    expect(screen.getByText("một nửa câu")).toBeInTheDocument()
+    expect(screen.getByText(terminalSentence(null))).toBeInTheDocument()
+  })
+
+  it("says nothing on an answer that ran to completion", () => {
+    render(<AssistantMessage view={view()} />)
+
+    expect(screen.queryByText(terminalSentence(null))).not.toBeInTheDocument()
+  })
+})
+
+describe("the Turn in flight", () => {
+  it("shows that it is working before the first delta and the first call", () => {
+    render(<DraftMessage entry={draft()} onRetry={vi.fn()} />)
+
+    expect(screen.getByRole("status")).toHaveTextContent("Đang chuẩn bị…")
+  })
+
+  it("drops that line as soon as anything has arrived", () => {
+    render(<DraftMessage entry={draft({ text: "câu đầu" })} onRetry={vi.fn()} />)
+
+    expect(screen.queryByText("Đang chuẩn bị…")).not.toBeInTheDocument()
+    expect(screen.getByText("câu đầu")).toBeInTheDocument()
+  })
+
+  it("keeps what arrived and offers a retry when the Turn ended badly", () => {
+    // Never a full-screen error: a Turn that hit its deadline still said
+    // something, and replacing it with an error page throws away the only part
+    // the reader wanted.
     render(
-      <AssistantMessage
-        view={view({ blocks: [block("kết luận")], widgets: [quarterlySpec()] })}
-        messageId={7}
+      <DraftMessage
+        entry={draft({ text: "một nửa", phase: "incomplete", terminalReason: "turn_deadline" })}
+        onRetry={vi.fn()}
       />,
     )
-    const figure = await screen.findByRole("figure")
-    const actions = screen.getByRole("button", { name: "Sao chép" })
 
-    // A Widget is evidence for the answer just given; the action row is where
-    // the reader turns to the next question.
-    expect(screen.getByText("kết luận").compareDocumentPosition(figure)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    )
-    expect(figure.compareDocumentPosition(actions)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    )
+    expect(screen.getByText("một nửa")).toBeInTheDocument()
+    expect(screen.getByText(terminalSentence("turn_deadline"))).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
   })
 
-  it("asks for nothing where there is no message id to ask through", () => {
-    const fetcher = stubResolve()
-    // Which is every draft: a Turn mid-flight has specs and no id yet, and the
-    // picture arrives with the canonical message a moment later.
-    render(<AssistantMessage view={view({ widgets: [quarterlySpec()] })} />)
+  it("never shows a stable reason code, whatever the code is", () => {
+    render(
+      <DraftMessage
+        entry={draft({ phase: "failed", terminalReason: "a_reason_never_mapped" })}
+        onRetry={vi.fn()}
+      />,
+    )
 
-    expect(screen.queryByRole("figure")).not.toBeInTheDocument()
-    expect(fetcher).not.toHaveBeenCalled()
+    expect(screen.queryByText(/a_reason_never_mapped/)).not.toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent(terminalSentence(null))
   })
 
-  it("asks for nothing where the answer carried no specs", () => {
-    const fetcher = stubResolve()
-    render(<AssistantMessage view={view()} messageId={7} />)
+  it("says nothing under a Turn that simply finished", () => {
+    render(<DraftMessage entry={draft({ text: "xong", phase: "completed" })} onRetry={vi.fn()} />)
 
-    expect(fetcher).not.toHaveBeenCalled()
-    expect(screen.queryByRole("figure")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument()
+  })
+
+  it("carries no flag control, because a flag names a message this draft has not got", () => {
+    render(<DraftMessage entry={draft({ text: "một nửa" })} onRetry={vi.fn()} />)
+
+    expect(screen.queryByRole("button", { name: /báo lỗi/i })).not.toBeInTheDocument()
   })
 })

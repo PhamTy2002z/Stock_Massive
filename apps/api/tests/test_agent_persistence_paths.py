@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 
 import pytest
 from sqlalchemy import delete, select
@@ -14,7 +14,8 @@ from src.agent.persistence import (
     AgentPersistence,
     thread_title_from,
 )
-from src.agent.tools import ToolCatalog, ToolContext
+from src.agent.executor import ToolCall, ToolExecutor
+from src.agent.registry import ToolContext
 from src.alpha.models import AgentThread, Analysis
 from src.auth.models import User
 from src.core.database import Base, get_sync_db, sync_engine, sync_session_factory
@@ -122,7 +123,7 @@ async def test_concurrent_writers_receive_distinct_gapless_sequences(owner):
 
 
 @pytest.mark.asyncio
-async def test_each_trace_survives_independently_and_cost_is_summed(owner):
+async def test_each_trace_survives_independently(owner):
     store = persistence()
     thread = await store.create_thread(owner)
     request = await store.append_message(
@@ -140,8 +141,6 @@ async def test_each_trace_survives_independently_and_cost_is_summed(owner):
                 "status": "ok",
                 "error": None,
                 "latency_ms": index + 1,
-                "prompt_tokens": 10 + index,
-                "completion_tokens": 2 + index,
             }
         )
 
@@ -149,78 +148,78 @@ async def test_each_trace_survives_independently_and_cost_is_summed(owner):
 
     assert [trace.tool_name for trace in traces] == ["tool_0", "tool_1"]
     assert [trace.result for trace in traces] == [{"index": 0}, {"index": 1}]
-    assert await store.tool_tokens_for_request(request.id) == 26
+    assert [trace.latency_ms for trace in traces] == [1, 2]
 
 
 @pytest.mark.asyncio
-async def test_a_spilled_result_is_noted_on_its_trace_and_still_readable_whole(owner):
+async def test_a_traced_result_keeps_its_body_and_is_scoped_to_its_request(owner):
+    """The trace is the only record of what an answer rested on.
+
+    With no citations and no manifest, a row holding a character count would
+    answer no question anyone opens it to ask — so the body is stored, and it is
+    readable back under the id the call was made with. Scoped to the request
+    message, so a call id from another Turn cannot be read through it.
+    """
     store = persistence()
     thread = await store.create_thread(owner)
     request = await store.append_message(
         thread.id, role="user", content={"text": "one big call"}
     )
-    whole = {"symbol": "FPT", "rows": [{"close": 90.0 + day} for day in range(30)]}
+    body = {"text": "lãi suất điều hành giữ nguyên", "chars": 29, "dispatched": True}
     await store.record_tool_call(
         {
             "thread_id": thread.id,
             "request_message_id": request.id,
-            "tool_name": "get_price_series",
+            "tool_name": "web_search",
             "tool_call_id": "call_0",
-            "arguments": {"symbol": "FPT"},
-            "result": whole,
+            "arguments": {"query": "lãi suất"},
+            "result": body,
             "status": "ok",
             "error": None,
         }
     )
 
-    updated = await store.record_spillover(request.id, {"call_0": 18_682})
-
     (trace,) = await store.traces_for_request(request.id)
-    assert updated == 1
+
     assert trace.tool_call_id == "call_0"
-    assert trace.spilled_bytes == 18_682
-    # The model saw a preview; the record kept the whole of it, addressable by
-    # the same id the model cites in an evidence reference.
-    assert await store.tool_result(request.id, "call_0") == whole
-    # And not through another Turn's request: the scope is the anchor, not the id.
+    assert trace.result == body
+    assert await store.tool_result(request.id, "call_0") == body
     assert await store.tool_result(request.id + 1_000, "call_0") is None
 
 
 @pytest.mark.asyncio
-async def test_a_spill_for_a_call_nobody_traced_changes_nothing(owner):
-    store = persistence()
-    thread = await store.create_thread(owner)
-    request = await store.append_message(
-        thread.id, role="user", content={"text": "no traces"}
-    )
-
-    assert await store.record_spillover(request.id, {"call_0": 4_096}) == 0
-    assert await store.record_spillover(request.id, {}) == 0
-
-
-@pytest.mark.asyncio
-async def test_catalog_unknown_tool_is_persisted_with_usage(owner):
+async def test_a_tool_the_registry_does_not_have_is_persisted_as_unknown(owner):
+    """The one status the ops query counts by name, written by the executor."""
     store = persistence()
     thread = await store.create_thread(owner)
     request = await store.append_message(
         thread.id, role="user", content={"text": "call missing"}
     )
-    catalog = ToolCatalog((), trace_writer=store.record_tool_call)
 
-    await catalog.dispatch(
-        "missing",
-        {},
-        ToolContext(user_id=owner, trading_day=date(2026, 8, 14)),
-        thread_id=thread.id,
-        request_message_id=request.id,
-        prompt_tokens=13,
-        completion_tokens=5,
+    async def trace(entry):
+        await store.record_tool_call(
+            {
+                "thread_id": thread.id,
+                "request_message_id": request.id,
+                "tool_name": entry["tool"],
+                "tool_call_id": entry["call_id"],
+                "arguments": dict(entry["arguments"]),
+                "result": {"text": entry["result_text"]},
+                "status": "ok" if entry["ok"] else entry["error"],
+            }
+        )
+
+    executor = ToolExecutor(
+        context=ToolContext(
+            user_id=owner, thread_id=thread.id, now=datetime.now(timezone.utc)
+        ),
+        trace=trace,
     )
+    await executor.run([ToolCall(id="call_0", name="missing", arguments={})])
 
-    (trace,) = await store.traces_for_request(request.id)
-    assert trace.status == "unknown_tool"
-    assert trace.prompt_tokens == 13
-    assert trace.completion_tokens == 5
+    (written,) = await store.traces_for_request(request.id)
+    assert written.status == "unknown_tool"
+    assert written.tool_name == "missing"
 
 
 @pytest.mark.asyncio

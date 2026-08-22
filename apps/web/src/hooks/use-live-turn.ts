@@ -26,8 +26,8 @@ import { queryKeys } from "@/lib/query-keys"
  *
  * The reducer owns the draft and TanStack Query owns everything canonical. At a
  * terminal event this refetches the Thread; the surface then replaces the draft
- * with the message that came back. Nothing here writes a block into the query
- * cache, because a Turn in flight is not history yet (ADR-0013).
+ * with the message that came back. Nothing here writes the answer into the
+ * query cache, because a Turn in flight is not history yet.
  *
  * **Reattaching is not restarting.** A page reload, a route change or a dropped
  * network ends a subscriber and nothing else: the Turn belongs to the backend,
@@ -40,9 +40,8 @@ import { queryKeys } from "@/lib/query-keys"
 // and a named SSE event never fires the default `message` handler.
 const EVENT_TYPES: TurnEventType[] = [
   "turn.snapshot",
-  "turn.activity",
-  "content.block",
-  "widget.ready",
+  "content.delta",
+  "tool.call",
   "turn.completed",
   "turn.incomplete",
   "turn.failed",
@@ -65,7 +64,7 @@ export interface LiveTurnController {
   state: LiveTurn
   /** Admit a Turn under an id generated here, before the request goes out. */
   send: (input: TurnInput) => Promise<void>
-  /** Immediate in the UI, and it keeps every block already received. */
+  /** Immediate in the UI, and it keeps every word already received. */
   cancel: () => Promise<void>
   /** A new Turn pointing at the old one. The previous Turn stays untouched. */
   retry: (input: TurnInput) => Promise<void>

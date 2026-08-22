@@ -1,10 +1,10 @@
 /**
- * The replay contract, as the browser has to honour it.
+ * The replay contract, as a sequence of events rather than as a rendered tree.
  *
- * ADR-0013 states it in three sentences — a snapshot replaces, a duplicate is
- * ignored, a gap forces a fresh snapshot — and every one of them is a rule
- * about a sequence of events rather than about React, which is why the reducer
- * is pure and why this file needs no DOM.
+ * Every assertion here is about what a reader ends up holding after a stream
+ * misbehaves: a delta redelivered, a delta missed, a reconnect restating an
+ * answer that is already on screen. The reducer is pure precisely so those
+ * three can be stated without a browser.
  */
 
 import { describe, expect, it } from "vitest"
@@ -16,568 +16,324 @@ import {
   liveTurnReducer,
   resendPlan,
   type LiveTurn,
-  type LiveTurnAction,
 } from "./live-turn"
-import type { ContentBlock, TurnEvent, TurnEventType } from "./types"
+import { TURN_EVENT_VERSION, type TurnEvent, type TurnEventType } from "./types"
 
-const TURN = "11111111-2222-3333-4444-555555555555"
-const THREAD = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-
-function block(text: string): ContentBlock {
-  return { kind: "prose", text, symbol: null, trading_day: null, citations: [] }
-}
+const TURN = "turn-1"
+const THREAD = "thread-1"
 
 function event(
-  seq: number,
   type: TurnEventType,
+  seq: number,
   data: Record<string, unknown> = {},
-): LiveTurnAction {
-  return {
-    type: "event",
-    event: { version: 1, seq, type, turn_id: TURN, data } as TurnEvent,
-  }
+  turnId: string = TURN,
+): TurnEvent {
+  return { version: TURN_EVENT_VERSION, seq, type, turn_id: turnId, data }
 }
 
-function snapshot(
-  through: number,
-  overrides: Partial<{
-    status: string
-    terminal_reason: string | null
-    activity: string | null
-    blocks: ContentBlock[]
-    widgets: unknown[]
-    message_id: number | null
-  }> = {},
-): LiveTurnAction {
-  return event(through, "turn.snapshot", {
-    through_seq: through,
-    status: "running",
-    terminal_reason: null,
-    activity: null,
-    blocks: [],
-    widgets: [],
-    message_id: null,
-    ...overrides,
-  })
+function started(): LiveTurn {
+  return liveTurnReducer(IDLE, { type: "start", turnId: TURN, threadId: THREAD })
 }
 
-function run(...actions: LiveTurnAction[]): LiveTurn {
-  return actions.reduce(liveTurnReducer, IDLE)
+function apply(state: LiveTurn, ...events: TurnEvent[]): LiveTurn {
+  return events.reduce((next, one) => liveTurnReducer(next, { type: "event", event: one }), state)
 }
 
-const started: LiveTurnAction = { type: "start", turnId: TURN, threadId: THREAD }
-
-describe("starting a Turn", () => {
-  it("begins from nothing, so the previous answer is not shown twice", () => {
-    // The finished Turn is already a canonical message in the transcript.
-    const carried = run(started, snapshot(0), event(1, "content.block", { block: block("cũ") }))
-
-    const fresh = liveTurnReducer(carried, {
-      type: "start",
-      turnId: "another",
-      threadId: THREAD,
-    })
-
-    expect(fresh.blocks).toEqual([])
-    expect(fresh.seq).toBe(0)
-    expect(fresh.phase).toBe("starting")
-    expect(fresh.turnId).toBe("another")
-  })
-})
-
-describe("a snapshot", () => {
-  it("replaces the projection instead of merging into it", () => {
-    // Merging would duplicate every block on every reconnect.
-    const state = run(
-      started,
-      snapshot(0),
-      event(1, "content.block", { block: block("một") }),
-      snapshot(2, { blocks: [block("một"), block("hai")] }),
-    )
-
-    expect(state.blocks.map((entry) => entry.text)).toEqual(["một", "hai"])
-    expect(state.seq).toBe(2)
-  })
-
-  it("carries the sequence forward so the stream resumes past it", () => {
-    const state = run(started, snapshot(7, { blocks: [block("đã có")] }))
-
-    const next = liveTurnReducer(state, event(8, "content.block", { block: block("mới") }))
-
-    expect(next.blocks.map((entry) => entry.text)).toEqual(["đã có", "mới"])
-    expect(next.seq).toBe(8)
-  })
-
-  it("settles a Turn that was already terminal when the reader arrived", () => {
-    // A fast Turn must not look like a dead one.
-    const state = run(
-      started,
-      snapshot(3, { status: "complete", blocks: [block("xong")] }),
-    )
-
-    expect(state.phase).toBe("completed")
-    expect(isSettled(state)).toBe(true)
-    expect(state.blocks).toHaveLength(1)
-  })
-
-  it("reads an incomplete Turn with content as a partial answer, not a failure", () => {
-    const partial = run(
-      started,
-      snapshot(3, {
-        status: "incomplete",
-        terminal_reason: "turn_deadline",
-        blocks: [block("một phần"), block("thứ hai")],
-      }),
-    )
-    const empty = run(
-      started,
-      snapshot(1, { status: "incomplete", terminal_reason: "turn_failed" }),
-    )
-
-    // The UI never replaces useful content with a full-screen error, so the
-    // two have to be different states rather than one status with a caveat.
-    expect(partial.phase).toBe("incomplete")
-    expect(partial.terminalReason).toBe("turn_deadline")
-    expect(empty.phase).toBe("failed")
-  })
-
-  it("does not take a pressed stop button back", () => {
-    // The snapshot honestly says `running`, and the user honestly pressed stop.
-    const state = run(started, snapshot(0), { type: "cancelling" }, snapshot(1))
-
-    expect(state.phase).toBe("cancelling")
-  })
-})
-
-describe("which block just arrived", () => {
-  it("names the one a content event delivered, so only that one is revealed", () => {
-    const state = run(
-      started,
-      snapshot(0),
-      event(1, "content.block", { block: block("một") }),
-      event(2, "content.block", { block: block("hai") }),
-    )
-
-    expect(state.appendedIndex).toBe(1)
-  })
-
-  it("names none after a snapshot, however many blocks it restated", () => {
-    // A reconnect and a reopened Thread render everything present at once. A
-    // renderer comparing block counts between frames cannot tell a snapshot of
-    // one block from an event delivering one, so the reducer says which it was.
-    const state = run(started, snapshot(4, { blocks: [block("một")] }))
-
-    expect(state.blocks).toHaveLength(1)
-    expect(state.appendedIndex).toBeNull()
-  })
-
-  it("names none after an activity, so a block on screen does not re-arrive", () => {
-    const state = run(
-      started,
-      snapshot(0),
-      event(1, "content.block", { block: block("một") }),
-      event(2, "turn.activity", { phase: "analyzing" }),
-    )
-
-    expect(state.appendedIndex).toBeNull()
-  })
-})
-
-describe("a terminal snapshot", () => {
-  it("names the message that replaces the draft, as the terminal event does", () => {
-    // A reader arriving *after* the Turn ended gets a snapshot rather than a
-    // terminal event. Without the id it would hold a draft it could never hand
-    // over, and the answer would render twice — once without its Risk Notice.
-    const state = run(
-      started,
-      snapshot(3, { status: "complete", blocks: [block("xong")], message_id: 42 }),
-    )
-
-    expect(state.phase).toBe("completed")
-    expect(state.messageId).toBe(42)
-  })
-
-  it("leaves a message id the stream already gave alone", () => {
-    const settled = run(
-      started,
-      snapshot(0),
-      event(1, "turn.completed", { terminal_reason: null, message_id: 7 }),
-    )
-
-    expect(liveTurnReducer(settled, snapshot(1, { status: "complete" })).messageId).toBe(7)
-  })
-})
-
-describe("a duplicate", () => {
-  it("is ignored rather than applied a second time", () => {
-    const state = run(
-      started,
-      snapshot(0),
-      event(1, "content.block", { block: block("một") }),
-      event(1, "content.block", { block: block("một") }),
-    )
-
-    expect(state.blocks).toHaveLength(1)
-    expect(state.seq).toBe(1)
-  })
-
-  it("is ignored when a reconnect redelivers everything below the snapshot", () => {
-    const state = run(
-      started,
-      snapshot(4, { blocks: [block("một"), block("hai")] }),
-      event(3, "content.block", { block: block("hai") }),
-      event(4, "turn.activity", { phase: "analyzing" }),
-    )
-
-    expect(state.blocks).toHaveLength(2)
-    expect(state.activity).toBeNull()
-  })
-})
-
-describe("a gap", () => {
-  it("is not patched over — it asks for a fresh snapshot", () => {
-    const state = run(
-      started,
-      snapshot(0),
-      event(1, "content.block", { block: block("một") }),
-      event(3, "content.block", { block: block("ba") }),
-    )
-
-    // The missing event cannot be reconstructed from what is here, so nothing
-    // pretends it can be.
-    expect(state.needsResync).toBe(true)
-    expect(state.blocks.map((entry) => entry.text)).toEqual(["một"])
-    expect(state.seq).toBe(1)
-  })
-
-  it("is cleared only by the snapshot that answers it", () => {
-    const gapped = run(
-      started,
-      snapshot(0),
-      event(2, "content.block", { block: block("hai") }),
-    )
-
-    const resynced = liveTurnReducer(
-      liveTurnReducer(gapped, { type: "resynced" }),
-      snapshot(2, { blocks: [block("một"), block("hai")] }),
-    )
-
-    expect(resynced.needsResync).toBe(false)
-    expect(resynced.blocks).toHaveLength(2)
-    expect(resynced.seq).toBe(2)
-  })
-
-  it("treats an unparseable frame the same way, because it is the same thing", () => {
-    const state = run(started, snapshot(0), { type: "gap" })
-
-    expect(state.needsResync).toBe(true)
-  })
-})
-
-describe("the four terminal meanings", () => {
-  const cases: Array<[TurnEventType, LiveTurn["phase"]]> = [
-    ["turn.completed", "completed"],
-    ["turn.incomplete", "incomplete"],
-    ["turn.failed", "failed"],
-    ["turn.cancelled", "cancelled"],
-  ]
-
-  it.each(cases)("%s settles as %s", (type, phase) => {
-    const state = run(
-      started,
-      snapshot(0),
-      event(1, type, { status: "x", terminal_reason: "why", message_id: 42 }),
-    )
-
-    expect(state.phase).toBe(phase)
-    expect(state.terminalReason).toBe("why")
-    // The message the client refetches the Thread for.
-    expect(state.messageId).toBe(42)
-    expect(isActive(state)).toBe(false)
-  })
-
-  it("keeps every block a cancelled Turn had already delivered", () => {
-    const state = run(
-      started,
-      snapshot(0),
-      event(1, "content.block", { block: block("giữ lại") }),
-      { type: "cancelling" },
-      event(2, "turn.cancelled", { terminal_reason: "cancelled_by_user" }),
-    )
-
-    expect(state.phase).toBe("cancelled")
-    expect(state.blocks.map((entry) => entry.text)).toEqual(["giữ lại"])
-  })
-})
-
-describe("settling from the Turn row", () => {
-  it("applies whatever the sequence says, because the stream stopped speaking", () => {
-    // The row is authoritative precisely when the stream is not, so holding
-    // this to a rule about stream ordering would leave the UI spinning.
-    const state = run(
-      started,
-      snapshot(9, { blocks: [block("một phần")] }),
-      {
-        type: "settled",
-        status: "incomplete",
-        terminalReason: "interrupted_restart",
-        messageId: 7,
-      },
-    )
-
-    expect(state.phase).toBe("incomplete")
-    expect(state.terminalReason).toBe("interrupted_restart")
-    expect(state.blocks).toHaveLength(1)
-  })
-
-  it("cannot overwrite a terminal state the stream already delivered", () => {
-    const state = run(
-      started,
-      snapshot(0),
-      event(1, "turn.completed", { terminal_reason: null, message_id: 3 }),
-      { type: "settled", status: "incomplete", terminalReason: "late", messageId: 9 },
-    )
-
-    expect(state.phase).toBe("completed")
-    expect(state.messageId).toBe(3)
-  })
-})
-
-describe("the activity line", () => {
-  it("shows a phase while tools run and clears when a block lands", () => {
-    const working = run(started, snapshot(0), event(1, "turn.activity", { phase: "searching" }))
-    const answered = liveTurnReducer(
-      working,
-      event(2, "content.block", { block: block("kết quả") }),
-    )
-
-    expect(working.activity).toBe("searching")
-    expect(answered.activity).toBeNull()
-  })
-
-  it("keeps every step, in the order the Turn went through them", () => {
-    // A step joins the trail when its event arrives rather than when the next
-    // one replaces it: the reader watches a list grow, and a row that appeared
-    // only once it was over would always be one behind.
-    const state = run(
-      started,
-      snapshot(0),
-      event(1, "turn.activity", { phase: "searching" }),
-      event(2, "turn.activity", { phase: "reading_data" }),
-      event(3, "turn.activity", { phase: "analyzing" }),
-    )
-
-    expect(state.steps.map((step) => step.phase)).toEqual([
-      "searching",
-      "reading_data",
-      "analyzing",
-    ])
-    expect(state.activity).toBe("analyzing")
-  })
-
-  it("keeps the step in the trail when a block lands", () => {
-    const state = run(
-      started,
-      snapshot(0),
-      event(1, "turn.activity", { phase: "reading_data" }),
-      event(2, "content.block", { block: block("kết quả") }),
-    )
-
-    expect(state.steps.map((step) => step.phase)).toEqual(["reading_data"])
-    expect(state.activity).toBeNull()
-  })
-
-  it("collapses a phase re-announced back to back into one step", () => {
-    // The loop announces `analyzing` before every model call, so four rounds is
-    // one *Thinking…* row rather than four.
-    const state = run(
-      started,
-      snapshot(0),
-      event(1, "turn.activity", { phase: "reading_data" }),
-      event(2, "turn.activity", { phase: "reading_data" }),
-      event(3, "turn.activity", { phase: "analyzing" }),
-    )
-
-    expect(state.steps.map((step) => step.phase)).toEqual(["reading_data", "analyzing"])
-  })
-
-  it("keeps a repeat that has something new to say", () => {
-    // Two searches with different queries are two steps: what distinguishes
-    // them is the payload, not the phase (`docs/adr/0020`).
-    const state = run(
-      started,
-      snapshot(0),
-      event(1, "turn.activity", { phase: "searching", detail: { queries: ["một"] } }),
-      event(2, "turn.activity", { phase: "searching", detail: { queries: ["hai"] } }),
-    )
-
-    expect(state.steps).toHaveLength(2)
-    expect(state.steps[1].detail?.queries).toEqual(["hai"])
-  })
-
-  it("carries the open web's queries and sources onto the step", () => {
-    const state = run(
-      started,
-      snapshot(0),
-      event(1, "turn.activity", {
-        phase: "found_sources",
-        detail: {
-          result_count: 15,
-          sources: [{ title: "Ban lãnh đạo", url: "https://masangroup.com/a", domain: "masangroup.com" }],
-        },
-      }),
-    )
-
-    expect(state.steps[0].detail?.result_count).toBe(15)
-    expect(state.steps[0].detail?.sources?.[0].domain).toBe("masangroup.com")
-  })
-
-  it("keeps the trail after the Turn ends, including one that ended early", () => {
-    // On a Turn that stopped early the trail is most of what the reader has to
-    // go on, so it outlives the running state.
-    const state = run(
-      started,
-      snapshot(0),
-      event(1, "turn.activity", { phase: "searching" }),
-      event(2, "turn.incomplete", { terminal_reason: "turn_deadline" }),
-    )
-
-    expect(state.steps.map((step) => step.phase)).toEqual(["searching"])
-    expect(state.activity).toBeNull()
-  })
-
-  it("takes the whole trail from a snapshot rather than what it happened to see", () => {
-    // A reconnecting tab gets what it missed. The snapshot carries the trail
-    // precisely so a reader who reattached mid-Turn is not shown a fragment.
-    const state = run(started, snapshot(0), {
-      type: "event",
-      event: {
-        version: 1,
-        seq: 4,
-        type: "turn.snapshot",
-        turn_id: TURN,
-        data: {
-          through_seq: 4,
-          status: "running",
-          terminal_reason: null,
-          activity: "analyzing",
-          progress: [{ phase: "searching" }, { phase: "found_sources" }, { phase: "analyzing" }],
-          blocks: [],
-          widgets: [],
-          message_id: null,
-        },
-      },
-    })
-
-    expect(state.steps.map((step) => step.phase)).toEqual([
-      "searching",
-      "found_sources",
-      "analyzing",
-    ])
-  })
-
-  it("starts a new Turn with an empty trail", () => {
-    const state = run(
-      started,
-      snapshot(0),
-      event(1, "turn.activity", { phase: "searching" }),
-      { type: "start", turnId: "another", threadId: THREAD },
-    )
-
-    expect(state.steps).toEqual([])
-  })
-})
-
-describe("an event from another Turn", () => {
-  it("is dropped, so a retry's stream cannot write into the new one", () => {
-    const state = run(started, snapshot(0))
-
-    const stray = liveTurnReducer(state, {
-      type: "event",
-      event: {
-        version: 1,
-        seq: 1,
-        type: "content.block",
-        turn_id: "a-different-turn",
-        data: { block: block("của Turn khác") },
-      },
-    })
-
-    expect(stray.blocks).toEqual([])
-  })
-})
-
-describe("when the stream may be opened", () => {
-  /**
-   * The Turn has to exist before anything subscribes to it.
-   *
-   * `EventSource` does not reconnect after a non-200 response — the spec calls
-   * that failing the connection — so a subscribe that raced the create and got
-   * a 404 leaves the surface watching a stream that will never speak. Found by
-   * the end-to-end acceptance (#92), where it happens on every send: the id is
-   * generated locally and the create is a network round trip behind it.
-   */
-  it("is not open on an id the backend has not admitted yet", () => {
-    const state = run(started)
-
-    expect(state.turnId).toBe(TURN)
+function delta(seq: number, text: string): TurnEvent {
+  return event("content.delta", seq, { text })
+}
+
+describe("admission", () => {
+  it("does not let a subscriber open a stream until the create came back", () => {
+    const state = started()
+    expect(state.phase).toBe("starting")
     expect(state.subscribable).toBe(false)
+    expect(liveTurnReducer(state, { type: "admitted" }).subscribable).toBe(true)
   })
 
-  it("is open once the create came back", () => {
-    const state = run(started, { type: "admitted" })
-
-    expect(state.subscribable).toBe(true)
-  })
-
-  it("is open immediately when reattaching to a Turn that already exists", () => {
-    // A reload does not create anything: the Turn is on the backend already,
-    // and waiting for an admission that will never come would strand the tab.
-    const state = run({
+  it("opens the stream at once when reattaching, because that Turn already exists", () => {
+    const state = liveTurnReducer(IDLE, {
       type: "start",
       turnId: TURN,
       threadId: THREAD,
       subscribable: true,
     })
-
     expect(state.subscribable).toBe(true)
   })
 
-  it("closes again when the next Turn starts", () => {
-    const state = run(started, { type: "admitted" }, {
+  it("starts a new Turn from nothing, so the previous answer is not shown twice", () => {
+    const finished = apply(started(), delta(1, "câu trả lời cũ"), event("turn.completed", 2))
+    const next = liveTurnReducer(finished, {
       type: "start",
-      turnId: "another",
+      turnId: "turn-2",
       threadId: THREAD,
     })
-
-    expect(state.subscribable).toBe(false)
+    expect(next.text).toBe("")
+    expect(next.seq).toBe(0)
+    expect(next.phase).toBe("starting")
   })
 })
 
-describe("asking a question in the transcript again", () => {
-  const settled = (phase: LiveTurn["phase"]): LiveTurn => ({ ...IDLE, phase })
-
-  it("retries the last question when its Turn ended badly", () => {
-    // Hung, failed or cancelled: a second attempt, linked to the first by
-    // `retry_of_turn_id`.
-    expect(resendPlan(settled("failed"), true)).toBe("retry")
-    expect(resendPlan(settled("incomplete"), true)).toBe("retry")
-    expect(resendPlan(settled("cancelled"), true)).toBe("retry")
+describe("content deltas", () => {
+  it("joins them into one string, in the order they arrived", () => {
+    const state = apply(started(), delta(1, "Xin "), delta(2, "chào "), delta(3, "bạn"))
+    expect(state.text).toBe("Xin chào bạn")
+    expect(state.seq).toBe(3)
   })
 
-  it("asks it fresh when the last Turn answered", () => {
-    // Not a retry: claiming a second attempt at a Turn that already answered
-    // would make the lifecycle say something false.
-    expect(resendPlan(settled("completed"), true)).toBe("submit")
+  it("advances the sequence on a delta carrying nothing, and adds nothing", () => {
+    const state = apply(started(), delta(1, "một"), delta(2, ""))
+    expect(state.text).toBe("một")
+    expect(state.seq).toBe(2)
   })
 
-  it("asks any earlier question fresh, whatever the last Turn did", () => {
-    expect(resendPlan(settled("failed"), false)).toBe("submit")
+  it("ignores a redelivered delta rather than printing it twice", () => {
+    const state = apply(started(), delta(1, "một"), delta(2, " hai"), delta(2, " hai"))
+    expect(state.text).toBe("một hai")
+    expect(state.seq).toBe(2)
   })
 
-  it("sends nothing at all while a Turn is in flight", () => {
-    // The composer offers Stop rather than Send for exactly this stretch.
-    expect(resendPlan(settled("starting"), true)).toBe("nothing")
-    expect(resendPlan(settled("running"), false)).toBe("nothing")
+  it("asks for a resync on a gap instead of stitching the hole shut", () => {
+    const state = apply(started(), delta(1, "một"), delta(3, " ba"))
+    expect(state.needsResync).toBe(true)
+    // The missing sentence is not reconstructable, so nothing was applied.
+    expect(state.text).toBe("một")
+    expect(state.seq).toBe(1)
+  })
+
+  it("ignores an event belonging to a Turn it is not showing", () => {
+    const state = apply(started(), delta(1, "một"), event("content.delta", 2, { text: " hai" }, "turn-9"))
+    expect(state.text).toBe("một")
+    expect(state.seq).toBe(1)
+  })
+})
+
+describe("tool calls", () => {
+  it("updates a call in place when its outcome arrives", () => {
+    const state = apply(
+      started(),
+      event("tool.call", 1, { id: "a", name: "web_search", status: "running", summary: "Đang tìm" }),
+      event("tool.call", 2, { id: "a", name: "web_search", status: "ok", summary: "Đã tìm" }),
+    )
+    expect(state.toolCalls).toEqual([
+      { id: "a", name: "web_search", status: "ok", summary: "Đã tìm" },
+    ])
+  })
+
+  it("keeps several calls in the order they first appeared", () => {
+    const state = apply(
+      started(),
+      event("tool.call", 1, { id: "a", name: "web_search", status: "running", summary: "một" }),
+      event("tool.call", 2, { id: "b", name: "fetch_url", status: "running", summary: "hai" }),
+      event("tool.call", 3, { id: "a", name: "web_search", status: "ok", summary: "một" }),
+    )
+    expect(state.toolCalls.map((call) => call.id)).toEqual(["a", "b"])
+    expect(state.toolCalls.map((call) => call.status)).toEqual(["ok", "running"])
+  })
+
+  it("reads a call with no id as no call, because nothing could ever update it", () => {
+    const state = apply(started(), event("tool.call", 1, { name: "web_search", status: "ok" }))
+    expect(state.toolCalls).toEqual([])
+    expect(state.seq).toBe(1)
+  })
+
+  it("falls back to the tool's name when no summary was sent, and to running on an unknown status", () => {
+    const state = apply(started(), event("tool.call", 1, { id: "a", name: "recall_facts" }))
+    expect(state.toolCalls).toEqual([
+      { id: "a", name: "recall_facts", status: "running", summary: "recall_facts" },
+    ])
+  })
+})
+
+describe("a snapshot", () => {
+  const snapshot = (data: Record<string, unknown>) => event("turn.snapshot", 0, data)
+
+  it("replaces the answer rather than merging into it", () => {
+    const state = apply(
+      started(),
+      delta(1, "một"),
+      snapshot({
+        through_seq: 4,
+        status: "running",
+        terminal_reason: null,
+        text: "một hai ba",
+        tool_calls: [{ id: "a", name: "web_search", status: "ok", summary: "Đã tìm" }],
+        message_id: null,
+      }),
+    )
+    expect(state.text).toBe("một hai ba")
+    expect(state.seq).toBe(4)
+    expect(state.toolCalls).toHaveLength(1)
+    expect(state.needsResync).toBe(false)
+  })
+
+  it("is applied whatever its seq says, because it restates rather than replays", () => {
+    const state = apply(
+      started(),
+      delta(1, "một"),
+      delta(2, " hai"),
+      snapshot({
+        through_seq: 2,
+        status: "running",
+        terminal_reason: null,
+        text: "một hai",
+        tool_calls: [],
+        message_id: null,
+      }),
+    )
+    expect(state.text).toBe("một hai")
+    expect(state.phase).toBe("running")
+  })
+
+  it("names the message that replaces the draft when it arrives after the Turn ended", () => {
+    const state = apply(
+      started(),
+      snapshot({
+        through_seq: 7,
+        status: "complete",
+        terminal_reason: null,
+        text: "xong",
+        tool_calls: [],
+        message_id: 42,
+      }),
+    )
+    expect(state.phase).toBe("completed")
+    expect(state.messageId).toBe(42)
+    expect(isSettled(state)).toBe(true)
+  })
+
+  it("reads an incomplete Turn that said nothing as the failure it is", () => {
+    const state = apply(
+      started(),
+      snapshot({
+        through_seq: 1,
+        status: "incomplete",
+        terminal_reason: "turn_deadline",
+        text: "",
+        tool_calls: [],
+        message_id: null,
+      }),
+    )
+    expect(state.phase).toBe("failed")
+    expect(state.terminalReason).toBe("turn_deadline")
+  })
+
+  it("keeps a Turn the user stopped reading as cancelling until it actually ends", () => {
+    const cancelling = liveTurnReducer(started(), { type: "cancelling" })
+    const state = apply(
+      cancelling,
+      snapshot({
+        through_seq: 2,
+        status: "running",
+        terminal_reason: null,
+        text: "một",
+        tool_calls: [],
+        message_id: null,
+      }),
+    )
+    expect(state.phase).toBe("cancelling")
+  })
+})
+
+describe("the four endings", () => {
+  it.each([
+    ["turn.completed", "completed"],
+    ["turn.incomplete", "incomplete"],
+    ["turn.failed", "failed"],
+    ["turn.cancelled", "cancelled"],
+  ] as const)("%s settles the Turn as %s", (type, phase) => {
+    const state = apply(started(), delta(1, "một"), event(type, 2, { message_id: 7 }))
+    expect(state.phase).toBe(phase)
+    expect(state.messageId).toBe(7)
+    expect(isSettled(state)).toBe(true)
+    // Whatever the ending, what the reader was shown stays on screen.
+    expect(state.text).toBe("một")
+  })
+
+  it("carries the stable reason so the surface can say it in a sentence", () => {
+    const state = apply(started(), event("turn.incomplete", 1, { terminal_reason: "turn_deadline" }))
+    expect(state.terminalReason).toBe("turn_deadline")
+  })
+})
+
+describe("settling from the Turn row", () => {
+  it("applies without regard to the stream's sequence, because the stream stopped speaking", () => {
+    const state = liveTurnReducer(apply(started(), delta(1, "một")), {
+      type: "settled",
+      status: "incomplete",
+      terminalReason: "shutdown",
+      messageId: null,
+    })
+    expect(state.phase).toBe("incomplete")
+    expect(state.terminalReason).toBe("shutdown")
+  })
+
+  it("reads an incomplete Turn with nothing to keep as failed", () => {
+    const state = liveTurnReducer(started(), {
+      type: "settled",
+      status: "incomplete",
+      terminalReason: "turn_failed",
+      messageId: null,
+    })
+    expect(state.phase).toBe("failed")
+  })
+
+  it("does not overwrite an ending the stream already delivered", () => {
+    const completed = apply(started(), event("turn.completed", 1, { message_id: 5 }))
+    const state = liveTurnReducer(completed, {
+      type: "settled",
+      status: "cancelled",
+      terminalReason: "cancelled_by_user",
+      messageId: null,
+    })
+    expect(state).toBe(completed)
+  })
+})
+
+describe("cancelling, resync and reset", () => {
+  it("shows the stop immediately and keeps every word already received", () => {
+    const state = liveTurnReducer(apply(started(), delta(1, "một")), { type: "cancelling" })
+    expect(state.phase).toBe("cancelling")
+    expect(state.text).toBe("một")
+    expect(isActive(state)).toBe(false)
+  })
+
+  it("ignores a stop pressed on a Turn that already ended", () => {
+    const completed = apply(started(), event("turn.completed", 1))
+    expect(liveTurnReducer(completed, { type: "cancelling" })).toBe(completed)
+  })
+
+  it("clears the resync flag once, so the stream is reopened once", () => {
+    const gapped = liveTurnReducer(started(), { type: "gap" })
+    const cleared = liveTurnReducer(gapped, { type: "resynced" })
+    expect(cleared.needsResync).toBe(false)
+    expect(liveTurnReducer(cleared, { type: "resynced" })).toBe(cleared)
+  })
+
+  it("treats an unparseable frame as the missed event it is indistinguishable from", () => {
+    expect(liveTurnReducer(started(), { type: "gap" }).needsResync).toBe(true)
+    // Nothing to resync when there is no Turn on screen.
+    expect(liveTurnReducer(IDLE, { type: "gap" })).toBe(IDLE)
+  })
+
+  it("resets to idle", () => {
+    expect(liveTurnReducer(apply(started(), delta(1, "một")), { type: "reset" })).toEqual(IDLE)
+  })
+})
+
+describe("what asking again means", () => {
+  it("sends nothing while a Turn is in flight", () => {
+    expect(resendPlan(started(), true)).toBe("nothing")
+  })
+
+  it("links a second attempt at the last question, and only after a bad ending", () => {
+    const failed = apply(started(), event("turn.failed", 1))
+    expect(resendPlan(failed, true)).toBe("retry")
+    expect(resendPlan(failed, false)).toBe("submit")
+  })
+
+  it("treats repeating an answered question as a new question", () => {
+    const completed = apply(started(), delta(1, "một"), event("turn.completed", 2))
+    expect(resendPlan(completed, true)).toBe("submit")
   })
 })

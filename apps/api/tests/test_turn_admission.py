@@ -19,12 +19,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from src.agent.admission import (
+from src.agent.loop import (
     ADMISSION_STATUS,
+    SessionSlots,
     TurnAdmission,
     TurnRefused,
 )
-from src.agent.loop import SessionSlots
 from src.alpha.models import LlmCallUsage
 from src.core.llm import (
     BudgetLanes,

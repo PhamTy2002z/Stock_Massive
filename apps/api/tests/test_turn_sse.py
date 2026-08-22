@@ -14,7 +14,7 @@ import uuid
 
 import pytest
 
-from src.agent.events import Activity, EventType, TurnPublisher
+from src.agent.events import EventType, TurnPublisher
 from src.agent.sse import (
     HEARTBEAT_FRAME,
     SSE_HEARTBEAT_SECONDS,
@@ -48,25 +48,25 @@ async def collect(stream, count: int) -> list[str]:
 class TestTheFrame:
     async def test_seq_is_the_sse_id_and_the_envelope_travels_whole(self):
         published = TurnPublisher(TURN)
-        event = published.content_block({"text": "VCB"})
+        event = published.content_delta("VCB")
 
         fields = parse(encode(event))
 
         assert fields["id"] == "1"
-        assert fields["event"] == "content.block"
+        assert fields["event"] == "content.delta"
         assert json.loads(fields["data"]) == {
-            "version": 1,
+            "version": 2,
             "seq": 1,
-            "type": "content.block",
+            "type": "content.delta",
             "turn_id": str(TURN),
-            "data": {"block": {"text": "VCB"}},
+            "data": {"text": "VCB"},
         }
 
     async def test_the_data_field_is_one_line_so_no_payload_can_split_a_frame(self):
         # A newline inside the JSON would end the frame early and the rest would
         # be read as a second event with no type at all.
         published = TurnPublisher(TURN)
-        event = published.content_block({"text": "một\nhai"})
+        event = published.content_delta("một\nhai")
 
         body = encode(event)
 
@@ -77,27 +77,27 @@ class TestTheFrame:
 class TestTheStream:
     async def test_the_snapshot_leads_and_every_later_event_follows_in_order(self):
         published = TurnPublisher(TURN)
-        published.content_block({"text": "already here"})
+        published.content_delta("already here")
         subscriber = published.subscribe()
 
         stream = frames(subscriber)
         first = await anext(stream)
-        published.activity(Activity.ANALYZING)
+        published.content_delta(" and this")
         second = await anext(stream)
 
         assert parse(first)["event"] == EventType.SNAPSHOT.value
         snapshot = json.loads(parse(first)["data"])
         assert snapshot["data"]["through_seq"] == 1
-        assert snapshot["data"]["blocks"] == [{"text": "already here"}]
+        assert snapshot["data"]["text"] == "already here"
         assert json.loads(parse(second)["data"])["seq"] == 2
         await stream.aclose()
 
     async def test_only_events_past_the_snapshot_reach_a_reconnecting_reader(self):
         published = TurnPublisher(TURN)
-        published.content_block({"text": "before"})
-        published.content_block({"text": "also before"})
+        published.content_delta("before")
+        published.content_delta(" also before")
         subscriber = published.subscribe()
-        published.content_block({"text": "after"})
+        published.content_delta(" after")
 
         stream = frames(subscriber)
         gathered = await collect(stream, 2)
@@ -115,7 +115,7 @@ class TestTheStream:
         stream = frames(subscriber, heartbeat_seconds=0.01)
         await anext(stream)  # the snapshot
         beat = await anext(stream)
-        published.activity(Activity.SEARCHING)
+        published.content_delta("một")
         after = await anext(stream)
         await stream.aclose()
 
@@ -145,7 +145,7 @@ class TestTheStream:
         # answer and the connection ends, rather than an empty stream that only
         # a timeout would resolve.
         published = TurnPublisher(TURN)
-        published.content_block({"text": "done"})
+        published.content_delta("done")
         published.terminal(
             EventType.COMPLETED, status="complete", terminal_reason=None
         )
@@ -157,16 +157,15 @@ class TestTheStream:
         snapshot = json.loads(parse(gathered[0])["data"])
         assert snapshot["type"] == EventType.SNAPSHOT.value
         assert snapshot["data"]["status"] == "complete"
-        assert snapshot["data"]["blocks"] == [{"text": "done"}]
+        assert snapshot["data"]["text"] == "done"
 
     async def test_a_terminal_snapshot_names_the_message_that_replaces_the_draft(self):
         # The reader that watched the Turn end learned the message id from the
         # terminal event; the reader that arrives afterwards gets only this
         # snapshot. Without the id on it, that reader holds a draft it can never
-        # hand over and renders the answer twice — the second copy without the
-        # Risk Notice, which lives on the canonical message alone.
+        # hand over and renders the answer twice.
         published = TurnPublisher(TURN)
-        published.content_block({"text": "done"})
+        published.content_delta("done")
         published.terminal(
             EventType.COMPLETED,
             status="complete",
@@ -180,7 +179,7 @@ class TestTheStream:
 
     async def test_a_running_turn_has_no_message_to_name_yet(self):
         published = TurnPublisher(TURN)
-        published.content_block({"text": "so far"})
+        published.content_delta("so far")
 
         snapshot = json.loads(parse(encode(published.subscribe().snapshot))["data"])
 
@@ -195,7 +194,7 @@ class TestTheStream:
         await stream.aclose()
 
         # Publishing after the reader is gone neither raises nor waits.
-        published.activity(Activity.ANALYZING)
+        published.content_delta("một")
         assert published.seq == 1
 
     async def test_the_default_beat_is_the_fifteen_seconds_the_decision_names(self):

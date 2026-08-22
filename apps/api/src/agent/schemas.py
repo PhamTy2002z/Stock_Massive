@@ -4,6 +4,11 @@ Thin by design.  The Turn's own vocabulary — its statuses, its terminal reason
 its event envelope — is fixed in :mod:`src.agent.events` and
 :mod:`src.alpha.models`, and restating any of it as a second enum here would
 create two places that can disagree about what ``incomplete`` means.
+
+A message's ``content`` is deliberately an open mapping rather than a model.
+Its shape belongs to the lifecycle that writes it (``turns.assistant_message``),
+and a second declaration of it here is a second thing to keep in step with the
+client reading it.
 """
 
 from __future__ import annotations
@@ -63,7 +68,7 @@ class FlagMessageRequest(BaseModel):
     **There is no free-text field, and that is deliberate.** A comment box is a
     promise that somebody reads it, and v1 has no dispute workflow to read one
     (``docs/adr/0016``). The label is what the ops query counts; the transcript
-    and its Evidence Manifest are what a reviewer re-reads.
+    and its Tool Call Trace are what a reviewer re-reads.
     """
 
     reason: str
@@ -134,9 +139,6 @@ class CreateTurnRequest(BaseModel):
     # Part of the idempotency payload: the same id with a different set is a
     # different question.
     symbols: list[str] = Field(default_factory=list, max_length=10)
-    # The workspace lens, which is not the same thing. Switching it must not
-    # start a new Thread, so it travels per Turn rather than on the Thread.
-    active_symbol: str | None = None
     # Retry creates a *new* Turn that points at the old one; the previous Turn,
     # its spend, its message and its traces stay immutable.
     retry_of_turn_id: uuid.UUID | None = None
@@ -155,11 +157,6 @@ class CreateTurnRequest(BaseModel):
     @classmethod
     def _normalise(cls, value: list[str]) -> list[str]:
         return list(dict.fromkeys(_symbol(entry) for entry in value))
-
-    @field_validator("active_symbol")
-    @classmethod
-    def _normalise_lens(cls, value: str | None) -> str | None:
-        return None if value is None else _symbol(value)
 
 
 class TurnResponse(BaseModel):

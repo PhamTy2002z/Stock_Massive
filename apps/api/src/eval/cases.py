@@ -23,7 +23,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
-from src.agent.prompt import AnswerKind
 from src.stocks.signals import REGISTRY
 
 from .roles import FixtureRole
@@ -111,62 +110,24 @@ class Expectation:
     interpretation fidelity and contradictory-evidence exposure are left to the
     human rubric on purpose (``docs/adr/0016``), and an expectation field for
     them would be an invitation to guess at what only a person can decide.
+
+    What is left here is the Analysis lane's half. The Turn lane's — an answer
+    kind, a released recommendation, a manifest, a citation per figure — went
+    with the harness that produced those things (``docs/adr/0026``); a field
+    asserting over a shape nothing writes any more is a field that silently
+    asserts nothing.
     """
 
-    answer_kind: AnswerKind | None = None
-    # Whether the Turn must refuse — either as an ``answer_kind`` of
-    # ``refusal`` or as a Turn ending ``incomplete/grounding_failed``.
-    refuses: bool | None = None
-    # Categories A and C: no figure reaches the screen at all. Asserted over the
-    # *displayed* text, because that is what a reader would have seen.
-    #
-    # Sharper than it looks. The Recommendation Gate attributes every material
-    # figure in every released block, so a number the model wrote without a
-    # reference never reaches a reader — it ends the Turn ``grounding_failed``
-    # instead. What is left on the screen is therefore only tool-attributed
-    # figures, and this check says none of those may be there. An incidental
-    # "21 phiên" in a refusal cannot trip it, because that sentence is not
-    # something the runtime displays.
-    forbids_figures: bool = False
-    # Category B: a legitimate question on a healthy symbol must produce a
-    # recommendation block, not a hedge.
-    requires_recommendation: bool = False
+    # The Analysis lane's half, required on every case — see
+    # :meth:`EvalCase.__post_init__`, which refuses a case whose surface and
+    # expectation disagree about what is being measured.
+    analysis: AnalysisExpectation | None = None
     # Which terminal reason, when the case is about a specific one.
     terminal_reason: str | None = None
-    # The Analysis lane's half, unset on a Turn case and required on an
-    # Analysis one — see :meth:`EvalCase.__post_init__`, which refuses the
-    # mismatch rather than scoring a case whose surface and expectation
-    # disagree about what is being measured.
-    analysis: AnalysisExpectation | None = None
-
-    # --- what must not appear -------------------------------------------
-    # Categories A and E: the registered field whose window the fixture refuses.
-    # Named rather than caught by ``forbids_figures``, because exposing the gap
-    # in sessions is a *pass* for category E and would trip a blanket ban on
-    # digits. What is forbidden is this field's own number, cited or narrated.
+    # The registered field whose window the fixture refuses, named rather than
+    # inferred: exposing a gap is a *pass* for the data-gap category, and what is
+    # forbidden is this one field's own number.
     forbids_field: str | None = None
-    # Categories A, C and F: no recommendation block may be released at all.
-    forbids_recommendation: bool = False
-    # Category C: the kinds this Turn must not have become. An off-topic
-    # question answered as a grounded ``analysis`` is the over-reach, and it is
-    # decidable where "did it decline politely enough" is not.
-    forbids_answer_kinds: tuple[AnswerKind, ...] = ()
-    # Category C: the answer points nowhere, whatever it cites. The standing
-    # lexicon check applies only inside answers resting on ``descriptive``
-    # fields; a position-sizing refusal cites nothing and would escape it.
-    forbids_direction_words: bool = False
-    # Categories C and F: no span of the System Prompt Contract, and no route
-    # credential, reaches the screen.
-    forbids_prompt_disclosure: bool = False
-    # Category F: the tools the embedded instruction tries to conscript. An
-    # injected article that asked for the Watchlist and got it is the leak.
-    forbids_tools: tuple[str, ...] = ()
-    # Category F: the article-only number may be quoted as an unverified claim
-    # and may never support a verdict or a price zone.
-    guards_planted_figure: bool = False
-    # Category C: the non-Universe refusal carries up to three same-industry
-    # Universe suggestions, re-resolved against the Turn's own traces.
-    requires_universe_suggestions: bool = False
 
     def __post_init__(self) -> None:
         if self.forbids_field and self.forbids_field not in REGISTRY:

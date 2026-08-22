@@ -1,0 +1,125 @@
+"""What the registry refuses, what it caches, and what it tells layers above."""
+
+from __future__ import annotations
+
+import pytest
+
+from src.agent import registry
+
+from .agent_tool_world import isolated_registry, stub_entry
+
+
+@pytest.fixture(autouse=True)
+def _registry():
+    with isolated_registry():
+        yield
+
+
+def test_a_second_toolset_may_not_shadow_a_registered_name():
+    registry.register(stub_entry("read_thing", toolset="alpha"))
+
+    with pytest.raises(registry.ToolShadowError) as raised:
+        registry.register(stub_entry("read_thing", toolset="beta"))
+
+    assert raised.value.existing_toolset == "alpha"
+    assert raised.value.new_toolset == "beta"
+    assert registry.get("read_thing").toolset == "alpha"
+
+
+def test_shadowing_is_possible_when_it_is_stated():
+    registry.register(stub_entry("read_thing", toolset="alpha"))
+
+    registry.register(stub_entry("read_thing", toolset="beta"), override=True)
+
+    assert registry.get("read_thing").toolset == "beta"
+
+
+def test_the_same_toolset_may_re_register_its_own_tool():
+    registry.register(stub_entry("read_thing", toolset="alpha", description="first"))
+
+    registry.register(stub_entry("read_thing", toolset="alpha", description="second"))
+
+    assert registry.get("read_thing").description == "second"
+
+
+def test_registration_and_removal_move_the_generation():
+    first = registry.generation()
+
+    registry.register(stub_entry("read_thing"))
+    after_register = registry.generation()
+    registry.deregister("read_thing")
+    after_deregister = registry.generation()
+
+    assert first < after_register < after_deregister
+    assert registry.deregister("read_thing") is False
+    assert registry.generation() == after_deregister
+
+
+def test_an_availability_check_is_not_repeated_inside_its_window():
+    probes: list[int] = []
+    registry.register(
+        stub_entry("gated", check_fn=lambda: bool(probes.append(1)) or True)
+    )
+
+    assert registry.is_available("gated", now=100.0) is True
+    assert registry.is_available("gated", now=100.0 + registry.CHECK_TTL_SECONDS - 1) is True
+    assert len(probes) == 1
+
+    assert registry.is_available("gated", now=100.0 + registry.CHECK_TTL_SECONDS + 1) is True
+    assert len(probes) == 2
+
+
+def test_re_registering_a_tool_forgets_its_cached_verdict():
+    registry.register(stub_entry("gated", check_fn=lambda: False))
+    assert registry.is_available("gated", now=10.0) is False
+
+    registry.register(stub_entry("gated", check_fn=lambda: True))
+
+    assert registry.is_available("gated", now=10.0) is True
+
+
+def test_a_raising_check_hides_only_its_own_tool():
+    def broken() -> bool:
+        raise RuntimeError("the probe is broken")
+
+    registry.register(stub_entry("broken", check_fn=broken))
+    registry.register(stub_entry("healthy"))
+
+    assert registry.is_available("broken", now=0.0) is False
+    assert [schema.name for schema in registry.definitions(now=0.0)] == ["healthy"]
+
+
+def test_a_missing_environment_variable_withholds_the_tool(monkeypatch):
+    monkeypatch.delenv("STOCK_MASSIVE_TEST_TOKEN", raising=False)
+    registry.register(
+        stub_entry("needs_token", requires_env=("STOCK_MASSIVE_TEST_TOKEN",))
+    )
+
+    assert registry.is_available("needs_token", now=0.0) is False
+
+    monkeypatch.setenv("STOCK_MASSIVE_TEST_TOKEN", "present")
+
+    assert registry.is_available("needs_token", now=1_000.0) is True
+
+
+def test_definitions_follow_the_requested_order_and_skip_unknown_names():
+    registry.register(stub_entry("one"))
+    registry.register(stub_entry("two"))
+
+    schemas = registry.definitions(["two", "missing", "one", "two"], now=0.0)
+
+    assert [schema.name for schema in schemas] == ["two", "one"]
+
+
+def test_a_declared_result_size_is_readable_by_the_budget():
+    registry.register(stub_entry("big", max_result_size_chars=12_345))
+    registry.register(stub_entry("plain"))
+
+    assert registry.get_max_result_size("big") == 12_345
+    assert registry.get_max_result_size("plain") is None
+    assert registry.declared_result_sizes() == {"big": 12_345}
+
+
+def test_a_registration_without_a_description_is_refused():
+    with pytest.raises(ValueError):
+        registry.register(stub_entry("silent", description="  "))

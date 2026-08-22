@@ -37,11 +37,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.agent.ops import (
-    GROUNDING_FAILED_RATE_THRESHOLD,
-    OPS_WINDOW_DAYS,
-    OpsSnapshot,
-)
+from src.agent.ops import OpsSnapshot
 
 from .baseline import (
     CASE_EQUIVALENT_DRIFT,
@@ -52,7 +48,7 @@ from .baseline import (
 from .cases import EvalSurface
 from .harness import EvalRunResult
 from .rubric import QUESTIONS, RubricScores
-from .verdict import HARD_FAIL_NOTICE, verdict
+from .verdict import verdict
 
 
 def report_filename(result: EvalRunResult) -> str:
@@ -112,7 +108,6 @@ def render_report(
         ("started", result.started_at.isoformat()),
         ("finished", result.finished_at.isoformat()),
         ("prompt_version", result.prompt_version),
-        ("tool_catalog_version", result.versions.tool_catalog_version),
         ("registry_version", result.versions.registry_version),
         ("fixture_version", result.fixture_version),
         ("profile_version", result.versions.profile_version),
@@ -144,11 +139,6 @@ def render_report(
             f"{item.passed} | {rule} | {mark} |"
         )
     lines.append("")
-
-    # Loud, and above the per-category detail, because it overrides all of it.
-    if scored.hard_failures:
-        lines.append(f"> **{HARD_FAIL_NOTICE}**")
-        lines.append("")
 
     # A category total is not actionable. What a reader does next is open the
     # case that broke, so the case, the run and the property are here rather
@@ -210,8 +200,7 @@ def render_report(
             mark = "pass" if run.passed else "FAIL"
             header = (
                 f"**Run {run.run_index + 1} — {mark}** "
-                f"(`{run.status}`/`{run.terminal_reason or 'none'}`, "
-                f"`{run.answer_kind}`"
+                f"(`{run.status}`/`{run.terminal_reason or 'none'}`"
             )
             if run.verdict:
                 header += f", verdict `{run.verdict}`"
@@ -386,14 +375,13 @@ def _ops_section(ops: OpsSnapshot | None) -> list[str]:
 
     ``docs/adr/0016``'s fixed ops query, output required here so that *the
     battery and the field are reconciled instead of drifting apart*. A gate run
-    can be green over a frozen exam while production quietly blocks one answer
-    in five, and this section is the only place a reader would find out.
+    can be green over a frozen exam while production quietly fails one answer in
+    five, and this section is the only place a reader would find out.
 
-    The threshold line comes first and reads as a sentence, because it is the
-    one number in this document a person is asked to act on: **``grounding_failed``
-    above 5% of Turns over 7 days reopens category B.** No alerting sits behind
-    it — one developer and no rotation means an alert would be noise — so being
-    legible on the page is the whole of the mechanism.
+    There is no threshold line and no verdict. The one rule this section used to
+    carry was about the Recommendation Gate, which ``docs/adr/0026`` removed; a
+    rule printed over a mechanism that no longer exists would be read as live by
+    the next person who opened the report.
     """
     lines = ["## The field", ""]
     if ops is None:
@@ -422,73 +410,20 @@ def _ops_section(ops: OpsSnapshot | None) -> list[str]:
 
     lines.append(f"One fixed read-only query over {window}. No table, no alerting.")
     lines.append("")
-
-    lines.extend(_grounding_headline(ops))
-    lines.append(
-        f"**Downgraded prose blocks: {ops.downgraded_blocks} of {ops.blocks} "
-        f"released blocks ({_rate(ops.downgraded_blocks, ops.blocks)})**. These "
-        "blocks were shown with an explicit unverified-figure warning rather "
-        "than being silently accepted or ending the Turn."
-    )
+    if not ops.turns:
+        lines.append("**No Turn ran in this window.**")
+    else:
+        lines.append(
+            f"**Turns: {ops.turns}**, of which {ops.incomplete_total} ended "
+            f"incomplete ({_rate(ops.incomplete_total, ops.turns)})."
+        )
     lines.append("")
     lines.extend(_ops_tables(ops))
     return lines
 
 
-def _grounding_headline(ops: OpsSnapshot) -> list[str]:
-    """The rate, and the verdict where the rule is entitled to give one.
-
-    Three readings, and only the last of them carries a verdict. **No Turn ran**
-    is not "at or below the threshold" — nothing was measured, and a window
-    claiming the bar was met is claiming a result it does not have. **A widened
-    window** is a useful reading and not the quantity the rule decides on: *5% of
-    Turns over 7 days* is one sentence and the span is half of it.
-    """
-    if not ops.turns:
-        return [
-            "**No Turn ran in this window**, so there is nothing to read the "
-            f"{GROUNDING_FAILED_RATE_THRESHOLD:.0%} `grounding_failed` "
-            "threshold against.",
-            "",
-        ]
-
-    reading = (
-        f"**`grounding_failed`: {ops.grounding_failed} of {ops.turns} Turns "
-        f"({_rate(ops.grounding_failed, ops.turns)})**"
-    )
-    if not ops.threshold_applies:
-        return [
-            f"{reading} — read over {ops.window_days} days rather than "
-            f"{OPS_WINDOW_DAYS}, so the "
-            f"{GROUNDING_FAILED_RATE_THRESHOLD:.0%} threshold is **not applied "
-            "here**. It is stated over seven days, and a different span is a "
-            "useful reading rather than the one the rule decides on.",
-            "",
-        ]
-
-    breached = "**above**" if ops.reopens_category_b else "at or below"
-    verdict_line = (
-        "> **Category B is reopened.** A sustained share this high means the "
-        "Recommendation Gate is blocking answers that were right, not that the "
-        "model is fabricating — over-blocking is exactly what category B "
-        "measures. Add cases from the flagged messages and re-run; nothing "
-        "else changes."
-        if ops.reopens_category_b
-        else "Category B stands. The threshold exists to catch the Gate "
-        "refusing ordinary correct answers, which is how this product would "
-        "die quietly."
-    )
-    return [
-        f"{reading} — {breached} the "
-        f"{GROUNDING_FAILED_RATE_THRESHOLD:.0%} threshold.",
-        "",
-        verdict_line,
-        "",
-    ]
-
-
 def _ops_tables(ops: OpsSnapshot) -> list[str]:
-    """The four distributions, each against the population it was counted over."""
+    """The three distributions, each against the population it was counted over."""
     lines: list[str] = []
     lines.extend(
         _ops_table(
@@ -511,15 +446,6 @@ def _ops_tables(ops: OpsSnapshot) -> list[str]:
                 "These names expose capabilities the model expected but the "
                 "currently enabled catalog did not provide."
             ),
-        )
-    )
-    lines.extend(
-        _ops_table(
-            "`answer_kind`, over Turns",
-            "Kind",
-            ops.answer_kinds,
-            ops.turns,
-            "No Turn ran in this window.",
         )
     )
     lines.extend(

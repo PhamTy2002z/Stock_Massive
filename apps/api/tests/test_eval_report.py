@@ -24,7 +24,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from src.agent.ops import NO_ANSWER_KIND, OPS_WINDOW_DAYS, OpsSnapshot
+from src.agent.ops import OPS_WINDOW_DAYS, OpsSnapshot
 from src.eval.baseline import Baseline, BaselineComparison, compare_to_baseline
 from src.eval.cases import (
     AnalysisExpectation,
@@ -34,7 +34,6 @@ from src.eval.cases import (
     Expectation,
 )
 from src.eval.harness import (
-    ANALYSIS_ANSWER_KIND,
     CaseResult,
     CaseRun,
     EvalMode,
@@ -54,7 +53,6 @@ ANALYSIS_ANSWER = "Vùng giá vẫn hẹp.\n\n[news] Không có tin nguồn đư
 VERSIONS = PinnedVersions(
     registry_version="reg-1",
     profile_version="v1",
-    tool_catalog_version="tc-1",
     schema_version="schema-1",
 )
 
@@ -64,10 +62,7 @@ def score(case_id: str, index: int, *, passed: bool = True) -> DeterministicScor
         case_id=case_id,
         run_index=index,
         results=(
-            CheckResult(Check.BLOCK_STRUCTURE, passed, "1 blocks"),
-            CheckResult(
-                Check.DIRECTION_LEXICON, True, "not asserted", applicable=False
-            ),
+            CheckResult(Check.DIRECTION_LEXICON, passed, "1 descriptive citation"),
         ),
     )
 
@@ -90,8 +85,6 @@ def turn_result(case_id: str = "b-1", *, passes: int = 3) -> CaseResult:
                 answer=TURN_ANSWER,
                 status="completed",
                 terminal_reason=None,
-                answer_kind="descriptive",
-                tool_calls=("get_price_series",),
             )
             for index in range(3)
         ),
@@ -117,8 +110,6 @@ def analysis_result(case_id: str = "analysis-d-bank") -> CaseResult:
                 answer=ANALYSIS_ANSWER,
                 status="ready",
                 terminal_reason=None,
-                answer_kind=ANALYSIS_ANSWER_KIND,
-                tool_calls=(),
                 verdict="hold",
                 cited_field_ids=("price_zone.ordinary_range_pct",),
             )
@@ -127,45 +118,32 @@ def analysis_result(case_id: str = "analysis-d-bank") -> CaseResult:
     )
 
 
-def a_registered_turn_case() -> str:
-    """The id of a real category-B Turn case this build seats.
+def a_registered_case() -> str:
+    """The id of a real case this build seats.
 
     Needed only by the round-trip tests: a record is refused when it names a
     case the registry does not hold, so a synthetic id cannot travel through
     one. Read from the battery rather than written down, because a hard-coded
-    id here would be a second place the case list has to be kept true.
+    id here would be a second place the case list has to be kept true. Every
+    seated case is an Analysis-lane case now — the Turn cases scored properties
+    the harness no longer has.
     """
-    from src.eval import categories as _seeded  # noqa: F401 - seats the battery
+    import src.eval as _seeded  # noqa: F401 - importing the package seats the battery
     from src.eval.cases import battery
 
-    return next(
-        case.id
-        for case in battery()
-        if case.category is EvalCategory.FALSE_REFUSAL
-        and case.surface is EvalSurface.TURN
-    )
+    return next(case.id for case in battery() if case.surface is EvalSurface.ANALYSIS)
 
 
-def an_ops(*, turns: int = 100, grounding_failed: int = 1) -> OpsSnapshot:
-    """A week of live traffic, with one of each signal in it."""
-    healthy = turns - grounding_failed
+def an_ops(*, turns: int = 100, incomplete: int = 1) -> OpsSnapshot:
+    """A week of live traffic, with one of each surviving signal in it."""
     return OpsSnapshot(
         since=FINISHED - timedelta(days=OPS_WINDOW_DAYS),
         until=FINISHED,
         window_days=OPS_WINDOW_DAYS,
         turns=turns,
-        grounding_failed=grounding_failed,
-        blocks=120,
-        downgraded_blocks=3,
-        incomplete_reasons={"grounding_failed": grounding_failed},
+        incomplete_reasons={"route_error": incomplete},
         tool_calls=400,
-        unknown_tool_calls={"run_python": 2},
-        answer_kinds={
-            "analysis": 60,
-            "education": healthy - 60 - 5,
-            "refusal": 5,
-            NO_ANSWER_KIND: grounding_failed,
-        },
+        unknown_tool_calls={"read_file": 2},
         flags={
             "wrong_figure": 3,
             "overreach": 1,
@@ -232,7 +210,7 @@ def totals_with(**per_category) -> dict:
 
 
 class TestWhatEveryReportCarries:
-    def test_the_run_id_mode_route_model_and_four_versions(self):
+    def test_the_run_id_mode_route_model_and_the_pinned_versions(self):
         rendered = render_report(a_run(results=(turn_result(),)))
         for expected in (
             str(uuid.UUID(int=7)),
@@ -240,7 +218,6 @@ class TestWhatEveryReportCarries:
             "https://production.example",
             "production-session",
             "reg-1",
-            "tc-1",
             FIXTURE,
         ):
             assert expected in rendered
@@ -403,57 +380,6 @@ class TestAStoppedRunIsTheLoudestThingInTheFile:
         assert "No comparison was made." in rendered
 
 
-class TestTheOneFailureThatOverridesEveryRate:
-    def pointed_backwards(self) -> CaseResult:
-        case = EvalCase(
-            id="d-3",
-            category=EvalCategory.INTERPRETATION,
-            surface=EvalSurface.TURN,
-            prompt="RSI của mã này nói lên điều gì?",
-            role=FixtureRole.ORDINARY,
-        )
-        return CaseResult(
-            case=case,
-            runs=(
-                CaseRun(
-                    run_index=0,
-                    score=DeterministicScore(
-                        case_id="d-3",
-                        run_index=0,
-                        results=(
-                            CheckResult(
-                                Check.SIGN_FIDELITY,
-                                False,
-                                "block 0 calls drawdown_stats.current_drawdown_pct "
-                                "positive and it holds -12.4",
-                            ),
-                        ),
-                    ),
-                    answer="Biên độ sụt giảm dương 12,4%.",
-                    status="completed",
-                    terminal_reason=None,
-                    answer_kind="descriptive",
-                    tool_calls=(),
-                ),
-            ),
-        )
-
-    def test_one_run_in_three_is_enough_to_name_the_case(self):
-        result = a_run(results=(turn_result(), self.pointed_backwards()))
-        assert result.hard_fails == ("d-3",)
-        assert result.category_totals["hard_fails"] == ["d-3"]
-
-    def test_the_report_says_so_where_the_rates_it_overrides_are_read(self):
-        from src.eval.verdict import HARD_FAIL_NOTICE
-
-        rendered = render_report(a_run(results=(self.pointed_backwards(),)))
-        assert HARD_FAIL_NOTICE in rendered
-        assert "d-3 run 1: sign_fidelity" in rendered
-
-    def test_a_clean_run_names_none(self):
-        assert a_run(results=(turn_result(),)).hard_fails == ()
-
-
 class TestTheHumanRubricIsInTheDocument:
     def test_an_unscored_report_says_so_rather_than_reading_as_judged(self):
         """D and E on their deterministic half alone is not the gating reading."""
@@ -480,50 +406,45 @@ class TestTheFixedOpsQueryIsInTheReport:
     pasted in the first busy week.
     """
 
-    def test_the_threshold_its_reading_and_its_meaning_are_all_on_the_page(self):
+    def test_the_window_its_population_and_its_incomplete_rate_are_on_the_page(self):
         rendered = render_report(a_run(results=(turn_result(),), ops=an_ops()))
 
         assert "## The field" in rendered
         assert "No table, no alerting." in rendered
-        # The count, the denominator and the rate, because a count alone is not
-        # a thing the 5% rule can be read against.
-        assert "`grounding_failed`: 1 of 100 Turns (1.0%)" in rendered
-        assert "at or below the 5% threshold" in rendered
-        assert "Category B stands." in rendered
+        # The count, the denominator and the rate: a count alone is a number
+        # whose denominator two readers disagree about.
+        assert "**Turns: 100**, of which 1 ended incomplete (1.0%)." in rendered
 
-    def test_above_the_threshold_the_report_says_category_b_is_reopened(self):
+    def test_no_threshold_or_verdict_is_printed_over_a_mechanism_that_is_gone(self):
+        """A rule printed over a deleted mechanism reads as live to the next reader."""
         rendered = render_report(
-            a_run(results=(turn_result(),), ops=an_ops(turns=100, grounding_failed=6))
+            a_run(results=(turn_result(),), ops=an_ops(turns=100, incomplete=6))
         )
 
-        assert "**above** the 5% threshold" in rendered
-        assert "**Category B is reopened.**" in rendered
-        # The reading a person would otherwise get backwards.
-        assert "blocking answers that were right" in rendered
+        assert "5% threshold" not in rendered
+        assert "Category B" not in rendered
+        assert "grounding" not in rendered.lower()
 
-    def test_all_five_signals_are_rendered_with_their_denominators(self):
+    def test_the_three_distributions_are_rendered_with_their_denominators(self):
         rendered = render_report(a_run(results=(turn_result(),), ops=an_ops()))
 
         assert "Incomplete Turns, by reason" in rendered
-        assert "| `grounding_failed` | 1 | 1.0% |" in rendered
+        assert "| `route_error` | 1 | 1.0% |" in rendered
         assert "`unknown_tool`, by the tool that was asked for" in rendered
-        assert "| `run_python` | 2 | 0.5% |" in rendered
-        assert "`answer_kind`, over Turns" in rendered
-        assert "| `analysis` | 60 | 60.0% |" in rendered
+        assert "| `read_file` | 2 | 0.5% |" in rendered
         assert "Flagged messages, by reason" in rendered
         assert "| `wrong_figure` | 3 |" in rendered
 
-    def test_a_widened_window_prints_the_rate_and_withholds_the_verdict(self):
-        """The module calls a rate over another span meaningless; so must the page."""
+    def test_a_widened_window_names_the_span_it_actually_measured(self):
+        """A rate over another span is a different measurement; the page says which."""
         from dataclasses import replace
 
-        wide = replace(an_ops(turns=100, grounding_failed=20), window_days=30)
+        wide = replace(an_ops(turns=100, incomplete=20), window_days=30)
 
         rendered = render_report(a_run(results=(turn_result(),), ops=wide))
 
         assert "20.0%" in rendered
-        assert "**not applied here**" in rendered
-        assert "Category B is reopened" not in rendered
+        assert "(30 days)" in rendered
 
     def test_a_window_with_no_traffic_claims_no_result_from_the_threshold(self):
         """Nothing measured is not "the bar was met"."""
@@ -532,19 +453,15 @@ class TestTheFixedOpsQueryIsInTheReport:
             until=FINISHED,
             window_days=OPS_WINDOW_DAYS,
             turns=0,
-            grounding_failed=0,
-            blocks=0,
-            downgraded_blocks=0,
             incomplete_reasons={},
             tool_calls=0,
             unknown_tool_calls={},
-            answer_kinds=dict.fromkeys(("analysis", "education", "refusal"), 0),
             flags=dict.fromkeys(("wrong_figure", "other"), 0),
         )
 
         rendered = render_report(a_run(results=(turn_result(),), ops=quiet))
 
-        assert "**No Turn ran in this window**" in rendered
+        assert "**No Turn ran in this window.**" in rendered
         assert "at or below the 5% threshold" not in rendered
         assert "Category B stands." not in rendered
 
@@ -592,7 +509,7 @@ class TestTheReportARubricWritesIsTheOneAPullRequestCarries:
         these round trips have to be about a real case, unlike the rendering
         tests above.
         """
-        return a_run(results=(turn_result(a_registered_turn_case()),), **kwargs)
+        return a_run(results=(analysis_result(a_registered_case()),), **kwargs)
 
     def test_the_baseline_diff_the_merge_rule_asks_for_survives(self, tmp_path):
         totals = totals_with(B=(10, 30, 30))
@@ -632,8 +549,8 @@ class TestTheReportARubricWritesIsTheOneAPullRequestCarries:
 
         assert restored.ops.since == result.ops.since
         assert restored.ops.until == result.ops.until
-        assert restored.ops.grounding_failed == 1
-        assert "`grounding_failed`: 1 of 100 Turns" in render_report(restored)
+        assert restored.ops.incomplete_reasons == {"route_error": 1}
+        assert "**Turns: 100**, of which 1 ended incomplete" in render_report(restored)
 
     def test_a_smoke_run_still_has_no_baseline_to_compare_against(self, tmp_path):
         result = self.a_recorded_run(mode=EvalMode.SMOKE)

@@ -18,12 +18,11 @@ export const API_ORIGIN = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8010}`
  * A flag names a message id, and the draft above it does not have one yet, so
  * the flag control is mounted on the persisted message and nowhere else. Seeing
  * it is how the test knows the draft was replaced rather than added to.
- *
- * It replaced the Risk Notice in this role when the notice was taken off the
- * surface: the notice is still attached in the terminal transaction, it is just
- * no longer something on screen to assert against.
  */
 export const CANONICAL_MARK = { role: "button" as const, name: "Báo lỗi câu trả lời" }
+
+/** The answer on screen, draft or canonical: they share one shell by design. */
+export const ANSWER_LABEL = "Assistant message"
 
 export function newEmail(): string {
   return `e2e-${Date.now()}-${Math.floor(Math.random() * 1e6)}@example.com`
@@ -77,12 +76,19 @@ export async function ask(
   expect(started.ok(), "the Turn should have started executing").toBeTruthy()
 }
 
+/**
+ * Publish one `content.delta`.
+ *
+ * The browser appends it to the answer on screen, so two calls make one
+ * paragraph rather than two rows — which is why the assertions read the answer
+ * for what it contains instead of matching a whole element's text.
+ */
 export async function say(request: APIRequestContext, text: string): Promise<void> {
   const response = await request.post(`${API_ORIGIN}/e2e/turn/say`, { data: { text } })
   expect(response.ok()).toBeTruthy()
 }
 
-/** Publish activity events and nothing else, to fill a subscriber's queue. */
+/** Publish events that consume a `seq` and nothing else, to fill a subscriber's queue. */
 export async function churn(
   request: APIRequestContext,
   count: number,
