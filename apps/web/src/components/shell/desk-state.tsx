@@ -13,7 +13,12 @@ import {
 import { useRouter, useSearchParams } from "next/navigation"
 
 import { useLiveTurn } from "@/hooks/use-live-turn"
-import { useCreateThread, useFlagMessage, useThread } from "@/hooks/use-threads"
+import {
+  useCreateThread,
+  useFlagMessage,
+  useHelpfulMessage,
+  useThread,
+} from "@/hooks/use-threads"
 import {
   deepLinkedSymbol,
   deepLinkedThread,
@@ -64,6 +69,8 @@ interface DeskApi {
   resend: (text: string) => void
   flag: (messageId: number, reason: FlagReason) => void
   unflag: (messageId: number) => void
+  /** Leave the positive verdict on one answer, or take it back. */
+  helpful: (messageId: number, helpful: boolean) => void
   dismissRefusal: () => void
   openThread: (id: string) => void
   newThread: () => void
@@ -111,6 +118,7 @@ export function DeskProvider({ children }: { children: ReactNode }) {
   const turn = useLiveTurn(threadId)
   const createThread = useCreateThread()
   const flagging = useFlagMessage(threadId)
+  const helpfulness = useHelpfulMessage(threadId)
 
   // The deep link is consumed once. Left in the URL, every later reload would
   // read as a fresh arrival and open yet another Thread.
@@ -270,7 +278,7 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     [turn.state, lastQuestion, retry, submit],
   )
 
-  // -- the one dispute action ---------------------------------------------
+  // -- the two verdicts ---------------------------------------------------
 
   const { flag, unflag } = flagging
   const onFlag = useCallback(
@@ -278,6 +286,15 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     [flag],
   )
   const onUnflag = useCallback((messageId: number) => unflag.mutate(messageId), [unflag])
+
+  // One callback for both directions, because the caller knows which state the
+  // press is asking for and the two endpoints differ only in method.
+  const { mark, unmark } = helpfulness
+  const onHelpful = useCallback(
+    (messageId: number, helpful: boolean) =>
+      helpful ? mark.mutate(messageId) : unmark.mutate(messageId),
+    [mark, unmark],
+  )
 
   // Both of these leave the conversation the artifacts were opened into, so
   // they leave with it.
@@ -317,6 +334,7 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       resend,
       flag: onFlag,
       unflag: onUnflag,
+      helpful: onHelpful,
       dismissRefusal,
       openThread,
       newThread,
@@ -337,6 +355,7 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       resend,
       onFlag,
       onUnflag,
+      onHelpful,
       dismissRefusal,
       openThread,
       newThread,

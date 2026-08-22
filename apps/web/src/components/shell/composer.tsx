@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, type FormEvent, type KeyboardEvent } from "react"
 import {
-  ArrowUp,
   Camera,
   ChevronDown,
   ChevronRight,
@@ -18,12 +17,42 @@ import {
   X,
 } from "lucide-react"
 
-import { CANCELLING_LABEL } from "@/lib/alpha-desk/copy"
+import { CANCELLING_LABEL, SEND_LABEL } from "@/lib/alpha-desk/copy"
 import { cn } from "@/lib/utils"
 
 import { useDesk } from "./desk-state"
 import { IconButton, Menu, MenuItem, MenuSeparator } from "./primitives"
 import { useShell } from "./shell-state"
+
+/**
+ * The five-bar waveform on the send control.
+ *
+ * Hand-drawn rather than taken from the icon set: the design fixes each bar's
+ * height, and the symmetry — tall in the middle, tapering either side — is the
+ * whole of what makes it read as sound rather than as a bar chart. The nearest
+ * packaged icon has different proportions, and matching a design by eye is how
+ * two surfaces drift apart.
+ */
+function WaveformIcon() {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.9}
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <line x1="4.5" y1="10" x2="4.5" y2="14" />
+      <line x1="8" y1="7.5" x2="8" y2="16.5" />
+      <line x1="11.5" y1="5.5" x2="11.5" y2="18.5" />
+      <line x1="15" y1="8.5" x2="15" y2="15.5" />
+      <line x1="18.5" y1="10.5" x2="18.5" y2="13.5" />
+    </svg>
+  )
+}
 
 /** What a question is allowed to grow to before the field starts scrolling. */
 const MAX_FIELD_HEIGHT_PX = 150
@@ -172,11 +201,25 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
           ) : (
             <button
               type="submit"
+              title={SEND_LABEL}
               disabled={!text.trim() || desk.isSubmitting}
-              className="inline-flex size-8 shrink-0 items-center justify-center rounded-[10px] bg-primary text-primary-foreground transition-[filter,transform] hover:-translate-y-px hover:brightness-110 disabled:pointer-events-none disabled:opacity-40"
+              // Inverted rather than coloured: the design makes this the one
+              // solid light shape on the whole surface, which is what picks it
+              // out without the accent colour — that is spoken for by the
+              // analysis-context chip a few pixels away, and two oranges in one
+              // card compete. `bg-foreground` inverts with the theme, so the
+              // button stays the opposite of its ground in light mode too.
+              //
+              // Three states, and the pressed one is the point: this is the
+              // last thing the reader touches before waiting, so it has to
+              // acknowledge the press itself rather than leave them wondering
+              // whether it registered. Lift on hover, settle and darken on
+              // press, and no pointer events at all while there is nothing to
+              // send — a disabled control that still reacts reads as broken.
+              className="inline-flex size-[34px] shrink-0 items-center justify-center rounded-full bg-foreground text-background transition-[filter,transform] duration-150 hover:-translate-y-px hover:brightness-110 active:translate-y-0 active:brightness-90 disabled:pointer-events-none disabled:opacity-40 motion-reduce:transition-none motion-reduce:hover:translate-y-0"
             >
-              <ArrowUp className="size-[17px]" strokeWidth={2} />
-              <span className="sr-only">Send</span>
+              <WaveformIcon />
+              <span className="sr-only">{SEND_LABEL}</span>
             </button>
           )}
         </div>

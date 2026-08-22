@@ -72,13 +72,27 @@ export function terminalSentence(reason: string | null): string {
 }
 
 /**
+ * What the send control is called.
+ *
+ * Vietnamese, following the design: the composer is the one place in the shell
+ * a first-time reader has to act rather than read, and a control they are meant
+ * to reach for should not be the one thing on screen in another language.
+ *
+ * It is never drawn as text — the button is an arrow — so this is what a screen
+ * reader announces and what the tooltip says. Both need to be the same word,
+ * which is why it is named once here rather than typed twice at the button.
+ */
+export const SEND_LABEL = "Gửi"
+
+/**
  * What the stop control says once it has been pressed.
  *
- * English, and the one string in this file that is: it is a button's own label,
- * not the system narrating, and it sits where `Stop` and `Send` sit. Shared
- * because the composer and the status line both say it, and a Turn that read
- * *Cancelling…* in one place and something else in the other would look like
- * two different things happening.
+ * Still English, unlike {@link SEND_LABEL}, and the difference is deliberate:
+ * this is the label of the control the composer shows *instead of* send while a
+ * Turn runs, and the two are never on screen together. Shared because the
+ * composer and the status line both say it, and a Turn that read *Cancelling…*
+ * in one place and something else in the other would look like two different
+ * things happening.
  */
 export const CANCELLING_LABEL = "Cancelling…"
 

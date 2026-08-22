@@ -35,6 +35,7 @@ import {
   signedPercent,
 } from "./primitives"
 import { useInspectorDrag, useShell } from "./shell-state"
+import { SourcesTab } from "./sources-tab"
 
 /**
  * The right-hand inspector: the session, or one symbol, beside the conversation.
@@ -92,6 +93,21 @@ export function Inspector() {
             >
               Chi tiết <Figure>{state.selected.symbol}</Figure>
             </TabButton>
+            {/* Only while an answer is being examined, for the same reason as
+                the news tab: without one it is a tab onto nothing. */}
+            {state.sourcesMessageId !== null && (
+              <TabButton
+                active={state.inspector === "sources"}
+                onClick={() =>
+                  dispatch({
+                    type: "open-sources",
+                    messageId: state.sourcesMessageId as number,
+                  })
+                }
+              >
+                Nguồn
+              </TabButton>
+            )}
             {/* Only while an article is open: the tab describes that article, so
                 without one it would be a tab onto nothing. */}
             {state.newsArticle !== null && (
@@ -120,13 +136,18 @@ export function Inspector() {
           </IconButton>
         </div>
 
-        <SymbolSearch />
+        {/* Not on the sources tab: that tab is about one answer, and a symbol
+            search above it would offer to navigate away from the thing the
+            reader opened it to check. */}
+        {state.inspector !== "sources" && <SymbolSearch />}
 
         <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-3.5">
           {state.inspector === "market" ? (
             <MarketTab />
           ) : state.inspector === "news" ? (
             <NewsSourcesTab />
+          ) : state.inspector === "sources" ? (
+            <SourcesTab />
           ) : (
             <SymbolTab />
           )}

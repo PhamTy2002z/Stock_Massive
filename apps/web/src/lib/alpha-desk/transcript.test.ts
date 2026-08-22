@@ -18,7 +18,15 @@ const THREAD = "11111111-1111-4111-8111-111111111111"
 const TURN = "22222222-2222-4222-8222-222222222222"
 
 function call(id: string, status: ToolCall["status"] = "ok"): ToolCall {
-  return { id, name: "web_search", status, summary: "Đã tìm trên web" }
+  return {
+    id,
+    name: "web_search",
+    status,
+    summary: "Đã tìm trên web",
+    round: 0,
+    result_count: 0,
+    results: [],
+  }
 }
 
 function userMessage(id: number, text: string): ThreadMessage {
@@ -30,6 +38,7 @@ function userMessage(id: number, text: string): ThreadMessage {
     created_at: "2026-08-22T09:00:00Z",
     flagged_reason: null,
     flagged_at: null,
+    helpful_at: null,
   }
 }
 
@@ -37,6 +46,7 @@ function assistantMessage(
   id: number,
   text: string,
   flag: FlagReason | null = null,
+  helpfulAt: string | null = null,
 ): ThreadMessage {
   return {
     id,
@@ -46,6 +56,7 @@ function assistantMessage(
     created_at: "2026-08-22T09:00:05Z",
     flagged_reason: flag,
     flagged_at: flag === null ? null : "2026-08-22T10:00:00Z",
+    helpful_at: helpfulAt,
   }
 }
 
@@ -87,6 +98,7 @@ describe("the canonical Thread", () => {
       created_at: "2026-08-22T09:00:00Z",
       flagged_reason: null,
       flagged_at: null,
+      helpful_at: null,
     }
 
     expect(transcript({ messages: [summary] })).toHaveLength(0)
@@ -110,6 +122,29 @@ describe("the canonical Thread", () => {
     const [entry] = transcript({ messages: [assistantMessage(1, "đáp")] })
 
     expect(entry.kind === "assistant" && entry.flaggedReason).toBeNull()
+  })
+
+  it("carries the positive mark as a boolean, not as the stamp behind it", () => {
+    // Nothing on this surface renders *when* the reader approved, only that
+    // they did — so the entry says that and nothing more.
+    const [marked] = transcript({
+      messages: [assistantMessage(1, "đáp", null, "2026-08-22T10:00:00Z")],
+    })
+    const [unmarked] = transcript({ messages: [assistantMessage(2, "đáp")] })
+
+    expect(marked.kind === "assistant" && marked.helpful).toBe(true)
+    expect(unmarked.kind === "assistant" && unmarked.helpful).toBe(false)
+  })
+
+  it("keeps the two verdicts independent, because the store does", () => {
+    const [entry] = transcript({
+      messages: [assistantMessage(1, "đáp", "wrong_figure", "2026-08-22T10:00:00Z")],
+    })
+
+    // An answer that was useful and got one figure wrong is both, and the
+    // transcript is not the place that decides one of them away.
+    expect(entry.kind === "assistant" && entry.flaggedReason).toBe("wrong_figure")
+    expect(entry.kind === "assistant" && entry.helpful).toBe(true)
   })
 })
 
@@ -313,5 +348,56 @@ describe("an Analysis opened into the transcript", () => {
     })
 
     expect(entries.map((entry) => entry.kind)).toEqual(["user", "analysis", "draft"])
+  })
+})
+
+describe("a stored answer", () => {
+  const stored = (content: Record<string, unknown>): ThreadMessage => ({
+    id: 1,
+    seq: 1,
+    role: "assistant",
+    content,
+    created_at: "2026-08-22T09:00:00Z",
+    flagged_reason: null,
+    flagged_at: null,
+    helpful_at: null,
+  })
+
+  it("shows the reply and keeps the narration out of it", () => {
+    const [entry] = buildTranscript({
+      threadId: THREAD,
+      messages: [
+        stored({
+          text: "Đang tra tin\n\nĐây là câu trả lời.",
+          answer: "Đây là câu trả lời.",
+          thoughts: [{ round: 0, text: "Đang tra tin" }],
+          elapsed_ms: 8000,
+        }),
+      ],
+      live: IDLE,
+      pendingUserText: null,
+    })
+
+    expect(entry.kind === "assistant" && entry.view.text).toBe("Đây là câu trả lời.")
+    expect(entry.kind === "assistant" && entry.view.thoughts).toEqual([
+      { round: 0, text: "Đang tra tin" },
+    ])
+    expect(entry.kind === "assistant" && entry.view.elapsedMs).toBe(8000)
+  })
+
+  it("reads a message written before the split as all reply", () => {
+    // The load-bearing back-compatibility case: an older row has `text` and no
+    // `answer`, and every word of it was the reply. Falling back to an empty
+    // string here would blank out the transcript of every past conversation.
+    const [entry] = buildTranscript({
+      threadId: THREAD,
+      messages: [stored({ text: "Câu trả lời cũ.", tool_calls: [] })],
+      live: IDLE,
+      pendingUserText: null,
+    })
+
+    expect(entry.kind === "assistant" && entry.view.text).toBe("Câu trả lời cũ.")
+    expect(entry.kind === "assistant" && entry.view.thoughts).toEqual([])
+    expect(entry.kind === "assistant" && entry.view.elapsedMs).toBe(0)
   })
 })

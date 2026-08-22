@@ -5,7 +5,7 @@ import { Loader2 } from "lucide-react"
 import type { DraftEntry } from "@/lib/alpha-desk/transcript"
 import { Markdown } from "./markdown"
 import { MessageShell } from "./message-shell"
-import { ToolCallList } from "./tool-call-list"
+import { ReasoningTimeline } from "./reasoning-timeline"
 import { TurnStatus } from "./turn-status"
 
 /**
@@ -32,7 +32,15 @@ export function DraftMessage({
 
   return (
     <MessageShell className={className}>
-      <ToolCallList calls={entry.toolCalls} />
+      {/* The work, above the answer, because that is the order it happened in
+          and because a list growing *under* the thing the reader is waiting for
+          would push the answer down the page while they read it. */}
+      <ReasoningTimeline
+        thoughts={entry.thoughts}
+        toolCalls={entry.toolCalls}
+        elapsedMs={entry.elapsedMs}
+        running={running}
+      />
 
       {/* Rendered as the Markdown it is, mid-sentence and all: the answer
           arrives as deltas, so a closing marker can be one delta behind the
@@ -45,7 +53,10 @@ export function DraftMessage({
       {/* Before the first delta and before the first call. The harness has to
           look like it is working rather than hung, and the first thing the
           backend sends can be a moment away. */}
-      {running && entry.text === "" && entry.toolCalls.length === 0 && (
+      {running &&
+        entry.text === "" &&
+        entry.toolCalls.length === 0 &&
+        entry.thoughts.length === 0 && (
         <p role="status" className="flex items-center gap-2 text-meta text-muted-foreground">
           <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" />
           Đang chuẩn bị…

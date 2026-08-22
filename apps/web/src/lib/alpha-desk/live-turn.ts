@@ -28,7 +28,8 @@
  * rules is a statement about a sequence of events rather than about React.
  */
 
-import type { SnapshotData, ToolCall, TurnEvent, TurnEventType } from "./types"
+import { appendThought, readThoughts, readToolCall, readToolCalls } from "./read-content"
+import type { SnapshotData, Thought, ToolCall, TurnEvent, TurnEventType } from "./types"
 
 /**
  * Where a Turn is, as the surface needs to render it.
@@ -69,6 +70,24 @@ export interface LiveTurn {
    * the same call rather than another one.
    */
   toolCalls: ToolCall[]
+  /**
+   * What the Turn said on the way to the answer, by round.
+   *
+   * Kept out of `text` because it is not the reply: it is the model saying what
+   * it is about to look up. Several deltas can arrive for one round, and they
+   * join into that round's single line rather than becoming several — a
+   * sentence split across two frames is still one sentence.
+   */
+  thoughts: Thought[]
+  /**
+   * How long the Turn has been running, as the backend last reported it.
+   *
+   * The backend's number rather than a timer this tab started, so a reader who
+   * opened the tab late — or reconnected — is told how long the *Turn* has run
+   * and not how long they have been watching. The surface may tick between
+   * events; this is what it ticks from.
+   */
+  elapsedMs: number
   terminalReason: string | null
   /** The canonical assistant message id, once the transport names one. */
   messageId: number | null
@@ -99,6 +118,8 @@ export const IDLE: LiveTurn = {
   seq: 0,
   text: "",
   toolCalls: [],
+  thoughts: [],
+  elapsedMs: 0,
   terminalReason: null,
   messageId: null,
   needsResync: false,
@@ -214,11 +235,20 @@ function applyEvent(state: LiveTurn, event: TurnEvent): LiveTurn {
   switch (event.type) {
     case "content.delta": {
       const delta = typeof event.data.text === "string" ? event.data.text : ""
-      return delta === "" ? advanced : { ...advanced, text: advanced.text + delta }
+      if (delta === "") return advanced
+      // A delta with no `kind` is an answer. That is the safe default in the
+      // same direction the backend defaults: an unlabelled piece shows up in
+      // the reply, where it is visible, rather than vanishing into a timeline
+      // row nobody has expanded.
+      if (event.data.kind !== "thought") {
+        return { ...advanced, text: advanced.text + delta }
+      }
+      const round = typeof event.data.round === "number" ? event.data.round : 0
+      return { ...advanced, thoughts: appendThought(state.thoughts, round, delta) }
     }
 
     case "tool.call": {
-      const call = toolCallOf(event.data)
+      const call = readToolCall(event.data, "running")
       return call === null ? advanced : { ...advanced, toolCalls: upsert(state.toolCalls, call) }
     }
 
@@ -231,29 +261,14 @@ function applyEvent(state: LiveTurn, event: TurnEvent): LiveTurn {
             phase,
             terminalReason: (event.data.terminal_reason as string | null) ?? null,
             messageId: (event.data.message_id as number | null) ?? null,
+            // The final figure, so the line stops counting at what the Turn
+            // took rather than at how long the tab stayed open after it.
+            elapsedMs:
+              typeof event.data.elapsed_ms === "number"
+                ? event.data.elapsed_ms
+                : advanced.elapsedMs,
           }
     }
-  }
-}
-
-/**
- * One tool call out of an event payload, or nothing.
- *
- * An event with no id names no call, and a call with no id cannot be updated by
- * the announcement that follows it — so it is dropped rather than added as a
- * row that would then be duplicated. `summary` falls back to the tool's own
- * name, which is the one label always present.
- */
-function toolCallOf(data: Record<string, unknown>): ToolCall | null {
-  const id = typeof data.id === "string" ? data.id : ""
-  if (id === "") return null
-  const name = typeof data.name === "string" ? data.name : ""
-  const status = data.status
-  return {
-    id,
-    name,
-    status: status === "ok" || status === "error" ? status : "running",
-    summary: typeof data.summary === "string" && data.summary !== "" ? data.summary : name,
   }
 }
 
@@ -277,7 +292,13 @@ function fromSnapshot(state: LiveTurn, event: TurnEvent): LiveTurn {
     // would print every sentence twice on every reconnect.
     seq: data.through_seq,
     text,
-    toolCalls: Array.isArray(data.tool_calls) ? [...data.tool_calls] : [],
+    toolCalls: readToolCalls(data.tool_calls, "running"),
+    // Read through the same defensive path as a streamed one rather than spread
+    // wholesale: a snapshot is the same payload arriving by another route, and
+    // trusting it more than the stream would make a reconnect the way to get a
+    // malformed call onto the screen.
+    thoughts: readThoughts(data.thoughts),
+    elapsedMs: typeof data.elapsed_ms === "number" ? data.elapsed_ms : state.elapsedMs,
     terminalReason: data.terminal_reason ?? null,
     // A terminal snapshot names the message that replaces this draft, exactly
     // as the terminal event does. Without it a reader arriving after the Turn
