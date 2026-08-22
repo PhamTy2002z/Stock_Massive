@@ -125,6 +125,7 @@ describe("tool calls", () => {
         error: null,
         result_count: 0,
         results: [],
+        kind: "external",
       },
     ])
   })
@@ -186,6 +187,9 @@ describe("tool calls", () => {
         error: null,
         result_count: 0,
         results: [],
+        // A payload with no kind reads as outside content, which is the safe
+        // direction and the one the backend's own default leans.
+        kind: "external",
       },
     ])
   })

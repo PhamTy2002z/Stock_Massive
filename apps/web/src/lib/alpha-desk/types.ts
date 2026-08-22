@@ -71,6 +71,29 @@ export interface ToolCall {
   result_count: number
   /** The sources behind this call, already flattened and capped by the backend. */
   results: ToolResult[]
+  /**
+   * Which kind of evidence the call went and got.
+   *
+   * The backend reads this off the tool's own registration — the same
+   * declaration that decides whether the result is wrapped as outside content —
+   * so the surface can draw the two apart without keeping a list of tool names
+   * it would have to remember to extend. A figure out of this system's store
+   * carries a date and a health and reads the same tomorrow; a page carries
+   * none of that, and drawing them alike would undo in pixels what the message
+   * layer does in the prompt.
+   *
+   * Optional because a Turn stored before the field existed does not carry it,
+   * and `external` is the safe reading of a call whose provenance is unstated.
+   */
+  kind?: ToolCallKind
+}
+
+/** Where a tool call's result came from: outside this deployment, or its store. */
+export type ToolCallKind = "external" | "store"
+
+/** What a call read, defaulting the way the backend defaults an unknown tool. */
+export function toolCallKind(call: ToolCall): ToolCallKind {
+  return call.kind === "store" ? "store" : "external"
 }
 
 /**
