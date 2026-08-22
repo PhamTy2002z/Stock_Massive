@@ -24,6 +24,11 @@ flag takes effect without a restart.
 cache the built schema list; they cannot know when a tool appeared or left
 unless the registry says so with a number they can compare.
 
+**A tool names itself twice, for two audiences.** ``name`` is what the model
+calls; :attr:`ToolEntry.display_name` is what a person reads on the rail of what
+a Turn did. Both are declared on the registration, and a blank display name is
+refused, so there is no path by which a raw tool name reaches a screen.
+
 **Provenance is declared, not remembered.** A registration says whether its
 results are content from outside this deployment
 (:attr:`ToolEntry.reads_external`), and the layer that builds the message asks
@@ -120,6 +125,30 @@ class ToolEntry:
     schema: Mapping[str, Any]
     handler: Handler
     description: str = ""
+    #: The reader-facing name of what this tool does, in the reader's language.
+    #:
+    #: **Every tool carries two names and they are for different audiences.**
+    #: ``name`` is the identifier the model calls and the trace records;
+    #: ``display_name`` is the phrase a person reads on the rail of what a Turn
+    #: did. They are never the same string: a rail row saying ``get_field`` tells
+    #: a reader nothing about what was looked up, and a model asked to call
+    #: "Đọc chỉ báo" has nothing to call.
+    #:
+    #: Required — :func:`register` refuses a blank one. That refusal is the whole
+    #: mechanism: the alternative is a table of display names kept somewhere else,
+    #: which is a list somebody has to remember to extend, and the tool that gets
+    #: forgotten is by definition the newest one. This is the same failure
+    #: ``untrusted.py`` used to have with its frozenset.
+    display_name: str = ""
+    #: Which argument, if any, is worth appending to :attr:`display_name` on that
+    #: rail row — a query, a URL. ``None`` for a tool whose arguments say nothing
+    #: a reader would recognise.
+    summary_detail_arg: str | None = None
+    #: A tool that composes its own rail row, when one argument cannot say what
+    #: the call was for. ``get_field`` needs a field and a symbol and a curated
+    #: label for the field, so it builds the sentence itself. Takes the model's
+    #: arguments and returns the whole row, :attr:`display_name` included.
+    summarise: Callable[[Mapping[str, Any]], str] | None = None
     #: Whether this tool can run here. ``None`` means unconditionally available.
     #: A raising ``check_fn`` reads as unavailable: a broken probe must not take
     #: the whole schema list down with it.
@@ -184,6 +213,14 @@ def register(entry: ToolEntry, *, override: bool = False) -> ToolEntry:
         raise ValueError(f"tool {entry.name!r} needs a toolset")
     if not entry.description.strip():
         raise ValueError(f"tool {entry.name!r} needs a description the model can read")
+    if not entry.display_name.strip():
+        # Refused rather than defaulted to the tool's own name. A default here
+        # would put `get_field` on a reader's screen and look deliberate, which
+        # is exactly what happened before this field existed.
+        raise ValueError(
+            f"tool {entry.name!r} needs a display_name a person can read; the "
+            "model's name for it is not one"
+        )
     if not isinstance(entry.schema, Mapping):
         raise TypeError(f"tool {entry.name!r} needs a JSON Schema mapping")
     existing = _ENTRIES.get(entry.name)

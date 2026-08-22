@@ -92,6 +92,22 @@ UNVERIFIED = "unverified"
 SessionOpener = Callable[[], Any]
 
 
+def summarise_check_price_claim(arguments: Mapping[str, Any]) -> str:
+    """The rail row for one price check: which price, for which company.
+
+    The price is the subject, so it is in the row. A reader scanning the rail
+    after an answer that quoted an odd number wants to see whether that number
+    was the one checked, and a row saying only the ticker cannot tell them.
+    """
+    symbol = str(arguments.get("symbol") or "").strip().upper()
+    raw = arguments.get("price")
+    price = _price(raw)
+    # Vietnamese thousands separator, because this is a price on a Vietnamese
+    # exchange and the reader is comparing it against one they read elsewhere.
+    shown = f"{int(price):,}".replace(",", ".") if price is not None else "?"
+    return f"Kiểm mức giá: {shown} — {symbol}" if symbol else f"Kiểm mức giá: {shown}"
+
+
 class PriceCheckTool:
     """One tool: judge one claimed price for one symbol on one session."""
 
@@ -136,6 +152,8 @@ class PriceCheckTool:
                     ("symbol", "price"),
                 ),
                 handler=self.check_price_claim,
+                display_name="Kiểm mức giá",
+                summarise=summarise_check_price_claim,
                 # It reads this system's own store to judge somebody else's
                 # number. The number came from outside; what comes back from here
                 # did not.
@@ -499,4 +517,5 @@ __all__ = [
     "WITHIN_BAND",
     "PriceCheckTool",
     "register_price_check_tool",
+    "summarise_check_price_claim",
 ]

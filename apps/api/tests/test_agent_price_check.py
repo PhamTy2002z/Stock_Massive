@@ -42,6 +42,7 @@ from src.agent.tools.price_check import (
     UNVERIFIED,
     WITHIN_BAND,
     PriceCheckTool,
+    summarise_check_price_claim,
 )
 from src.agent.toolsets import TOOLSETS, resolve_toolset
 from src.stocks.providers import Exchange, PriceBasis
@@ -332,6 +333,7 @@ class TestProvenanceIsDeclaredRatherThanRemembered:
                 schema=registry.object_schema({}),
                 handler=lambda context, arguments: {},
                 description="reads outside content",
+                display_name="Đọc ngoài",
                 reads_external=True,
             )
         )
@@ -342,6 +344,7 @@ class TestProvenanceIsDeclaredRatherThanRemembered:
                 schema=registry.object_schema({}),
                 handler=lambda context, arguments: {},
                 description="reads this store",
+                display_name="Đọc store",
                 reads_external=False,
             )
         )
@@ -361,6 +364,7 @@ class TestProvenanceIsDeclaredRatherThanRemembered:
                 schema=registry.object_schema({}),
                 handler=lambda context, arguments: {},
                 description="says nothing about where its results come from",
+                display_name="Không khai gì",
             )
         )
         try:
@@ -370,3 +374,36 @@ class TestProvenanceIsDeclaredRatherThanRemembered:
 
     def test_a_name_nobody_registered_is_treated_as_outside(self):
         assert untrusted.is_untrusted("a_tool_that_does_not_exist") is True
+
+
+class TestWhatAReaderIsShown:
+    def test_the_row_names_the_price_and_the_company(self):
+        """The price is the subject.
+
+        A reader scanning the rail after an answer that quoted an odd number
+        wants to see whether that number was the one checked, and a row naming
+        only the ticker cannot tell them.
+        """
+        assert (
+            summarise_check_price_claim({"symbol": "hpg", "price": IMPOSSIBLE})
+            == "Kiểm mức giá: 27.542 — HPG"
+        )
+
+    def test_the_price_is_grouped_the_way_this_market_writes_one(self):
+        """Compared against a number the reader read on a Vietnamese site."""
+        assert "21.700" in summarise_check_price_claim(
+            {"symbol": "HPG", "price": REAL_CLOSE}
+        )
+
+    def test_a_price_that_is_not_a_number_still_draws_a_row(self):
+        row = summarise_check_price_claim({"symbol": "HPG", "price": "twenty"})
+
+        assert row.startswith("Kiểm mức giá:")
+        assert "HPG" in row
+
+    def test_the_registration_carries_both_names(self):
+        entry = tool_over(None).entries()[0]
+
+        assert entry.name == "check_price_claim"
+        assert entry.display_name == "Kiểm mức giá"
+        assert entry.summarise is summarise_check_price_claim

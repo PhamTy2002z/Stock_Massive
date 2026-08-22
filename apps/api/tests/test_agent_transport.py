@@ -877,6 +877,7 @@ class TestThreads:
             "round",
             "results",
             "result_count",
+            "kind",
         }
 
     async def test_a_tool_call_reaches_the_wire_and_rides_the_snapshot(
@@ -903,6 +904,7 @@ class TestThreads:
                 "round": 0,
                 "results": [],
                 "result_count": 0,
+                "kind": "external",
             }
         ]
 

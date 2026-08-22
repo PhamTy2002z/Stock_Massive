@@ -38,12 +38,16 @@ from src.agent.executor import ToolExecutor
 from src.agent.executor import ToolCall as ExecutorToolCall
 from src.agent.tools.signals import (
     CATALOG_AXES,
+    DISPLAY_NAMES,
     MAX_RESULT_CHARS,
     TOOLSET,
     SignalTools,
     axis_of,
     catalog,
+    display_name_of,
     namespace_of,
+    summarise_get_field,
+    summarise_list_fields,
 )
 from src.agent.toolsets import CHAT_TOOLSETS, TOOLSETS, resolve_toolset
 from src.alpha.field_profile import (
@@ -524,3 +528,99 @@ class TestTheAnalysisLaneBoundaryIsEnforced:
             )
 
         assert "fieldId" not in result
+
+
+class TestWhatAReaderIsShown:
+    """The second of a tool's two names, and the one a real Turn got wrong.
+
+    A Turn analysing SSI put fourteen rows reading ``get_field`` on screen. Two
+    causes: the rail had no reader-facing name for the tool, and sixteen of the
+    thirty registered fields have no label at all — ``profile_entry_for`` hands
+    back the field's own id for any field the **Analysis Field Profile** never
+    names, and those sixteen are exactly the ones these tools exist to reach.
+
+    So the labels are curated here, and they are checked both ways at import: a
+    field added to the **Signal Registry** without one fails the build rather
+    than reaching a screen as its id.
+    """
+
+    def test_every_registered_field_has_a_name_a_person_can_read(self):
+        assert set(DISPLAY_NAMES) == set(REGISTRY)
+        for field_id, shown in DISPLAY_NAMES.items():
+            assert shown.strip()
+            assert shown != field_id
+
+    def test_the_sixteen_the_profile_never_names_are_covered(self):
+        """The half of the catalog that had no label is the half that matters.
+
+        These are the fields the loop exists to reach, so they are the ones a
+        reader sees most often on the rail.
+        """
+        from src.alpha.envelope import profile_entry_for
+
+        unlabelled = [
+            field_id
+            for field_id in REGISTRY
+            if profile_entry_for(field_id).label == field_id
+        ]
+
+        assert unlabelled, "the gap this table fills has to still exist"
+        for field_id in unlabelled:
+            assert display_name_of(field_id) != field_id
+
+    def test_the_figure_s_own_label_is_left_alone(self):
+        """This table is a rail row, not a second interpretation of a number.
+
+        ``envelope.py`` refuses to invent labels beside a figure and gives its
+        reason; nothing here reaches a payload, a figure, or the model.
+        """
+        from src.alpha.envelope import profile_entry_for
+
+        assert profile_entry_for(NAMED_FIELD).label == "RSI (14)"
+        assert profile_entry_for(UNNAMED_FIELD).label == UNNAMED_FIELD
+        assert display_name_of(UNNAMED_FIELD) == "Sharpe (năm hoá)"
+
+    def test_the_catalog_the_model_reads_is_unchanged(self):
+        """The model picks a field by id and reads the Registry's own wording."""
+        rows = {row["fieldId"]: row for row in catalog()}
+
+        assert rows[NAMED_FIELD]["label"] == "RSI (14)"
+        assert rows[UNNAMED_FIELD]["label"] == UNNAMED_FIELD
+        assert all("displayName" not in row for row in rows.values())
+
+    def test_a_field_read_names_the_figure_and_the_company(self):
+        """One argument cannot say it: the field alone reads the same for every
+        symbol in a Turn that compared two."""
+        assert (
+            summarise_get_field({"field_id": NAMED_FIELD, "symbol": "ssi"})
+            == "Đọc chỉ báo: RSI (14) — SSI"
+        )
+
+    def test_without_a_symbol_the_row_is_the_field_alone(self):
+        """The Analysis lane, where every row is about the one company anyway."""
+        assert (
+            summarise_get_field({"field_id": "liquidity_profile.adtv_vnd"})
+            == "Đọc chỉ báo: Giá trị giao dịch bình quân"
+        )
+
+    def test_a_field_id_nothing_holds_still_produces_a_row(self):
+        """The model may put anything in that argument, and the rail still draws."""
+        assert summarise_get_field({"field_id": "made_up.metric"}) == (
+            "Đọc chỉ báo: made_up.metric"
+        )
+        assert summarise_get_field({}) == "Đọc chỉ báo: chỉ báo"
+
+    def test_a_catalog_read_names_the_axis_when_one_was_asked_for(self):
+        assert summarise_list_fields({}) == "Xem danh mục chỉ báo"
+        assert summarise_list_fields({"axis": "money_flow"}) == (
+            "Xem danh mục chỉ báo: dòng tiền"
+        )
+        assert summarise_list_fields({"axis": "nonsense"}) == "Xem danh mục chỉ báo"
+
+    def test_the_registrations_carry_the_row_builders(self):
+        """So ``summarise_call`` needs no table of its own to consult."""
+        entries = {item.name: item for item in tools_over(None).entries()}
+
+        assert entries["get_field"].display_name == "Đọc chỉ báo"
+        assert entries["get_field"].summarise is summarise_get_field
+        assert entries["list_fields"].summarise is summarise_list_fields

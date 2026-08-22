@@ -84,6 +84,8 @@ class MemoryTools:
                     ("query",),
                 ),
                 handler=self.session_search,
+                display_name="Tìm trong hội thoại trước",
+                summary_detail_arg="query",
                 # The user's own earlier words. Already in the trust position
                 # the conversation gives them, so wrapping them would tell the
                 # model to weigh what it was itself told a moment ago.
@@ -123,6 +125,8 @@ class MemoryTools:
                     ("title", "body"),
                 ),
                 handler=self.remember_fact,
+                display_name="Ghi nhớ",
+                summary_detail_arg="title",
                 reads_external=False,
             ),
             ToolEntry(
@@ -140,6 +144,8 @@ class MemoryTools:
                     ("query",),
                 ),
                 handler=self.recall_facts,
+                display_name="Đọc lại ghi chú",
+                summary_detail_arg="query",
                 reads_external=False,
             ),
         )
