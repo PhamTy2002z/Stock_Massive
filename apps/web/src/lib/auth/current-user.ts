@@ -1,7 +1,8 @@
 import "server-only"
 
-import { AuthApiError, fetchMe, refresh, type AuthUser } from "./api"
-import { clearSessionCookies, getAccessToken, getRefreshToken, setSessionCookies } from "./session"
+import { AuthApiError, fetchMe, type AuthUser } from "./api"
+import { rotateAccessToken } from "./bearer"
+import { clearSessionCookies, getAccessToken } from "./session"
 
 /**
  * Resolve the signed-in user, transparently rotating an expired access token.
@@ -12,6 +13,13 @@ import { clearSessionCookies, getAccessToken, getRefreshToken, setSessionCookies
  * Only callable where cookies are writable (route handlers, server actions).
  * Server Components cannot set cookies; in those, read the user from a parent
  * route handler or accept that a refresh will not persist.
+ *
+ * **The rotation goes through `rotateAccessToken`, never straight to the API.**
+ * This route and the Alpha Desk proxy both hit an expired access token in the
+ * same instant — the page asks who the user is while its data is loading — and
+ * a second exchange of the same refresh token is a replay as far as the
+ * upstream is concerned, which costs every session the user has. Its own copy of
+ * the exchange was exactly that second one.
  */
 export async function getCurrentUser(): Promise<AuthUser | null> {
   const accessToken = await getAccessToken()
@@ -28,20 +36,14 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
     }
   }
 
-  const refreshToken = await getRefreshToken()
-  if (!refreshToken) {
-    return null
-  }
+  const rotated = await rotateAccessToken()
+  if (rotated === null) return null
 
   try {
-    const tokens = await refresh(refreshToken)
-    await setSessionCookies({
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-      expiresIn: tokens.expires_in,
-    })
-    return await fetchMe(tokens.access_token)
+    return await fetchMe(rotated)
   } catch (error) {
+    // A token minted a moment ago and refused already is a session that ended
+    // between the two calls, so the cookies go with it.
     if (error instanceof AuthApiError && error.status === 401) {
       await clearSessionCookies()
       return null
