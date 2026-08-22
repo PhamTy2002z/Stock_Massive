@@ -138,7 +138,13 @@ def test_a_non_image_upstream_response_is_answered_with_404():
     assert response.status_code == 404
     assert response.content == b""
     assert response.headers["cache-control"] == "public, max-age=86400"
-    assert len(calls) == 1
+    # Two calls, not one: `/favicon.ico` came back as markup rather than an
+    # image, so the home page was read for a declared icon. It declares none
+    # here, and the domain is answered as having no icon.
+    assert calls == [
+        "https://no-icon.example/favicon.ico",
+        "https://no-icon.example/",
+    ]
 
 
 def test_an_image_upstream_response_is_served_with_its_content_type_and_cache_control():
@@ -201,4 +207,97 @@ def test_a_failed_fetch_is_also_cached_so_a_second_request_makes_no_new_call():
 
     assert first.status_code == 404
     assert second.status_code == 404
-    assert len(calls) == 1
+    # The first request costs both routes — the icon path and the home page —
+    # and the second costs nothing, because a domain with no icon is cached
+    # exactly like a domain with one.
+    assert len(calls) == 2
+
+
+def test_an_icon_declared_in_the_markup_is_found_when_favicon_ico_is_not():
+    """The route that rescues a site serving a 404 page at /favicon.ico."""
+    calls: list[str] = []
+
+    def download(url: str, max_bytes: int, timeout: float):
+        calls.append(url)
+        if url.endswith("/favicon.ico"):
+            return 404, {"content-type": "text/html"}, b"<html>not found</html>"
+        if url == "https://declared.example/":
+            page = (
+                b'<html><head><link rel="shortcut icon" '
+                b'href="/static/brand/icon-32.png"></head><body></body></html>'
+            )
+            return 200, {"content-type": "text/html; charset=utf-8"}, page
+        return 200, {"content-type": "image/png"}, b"PNGDATA"
+
+    tools = FaviconTools(
+        redis_factory=lambda: FakeRedis(),
+        resolver=resolver_for("93.184.216.34"),
+        download=download,
+    )
+    _use(tools)
+
+    response = _client().get(
+        "/api/v1/assets/favicon", params={"domain": "declared.example"}
+    )
+
+    assert response.status_code == 200
+    assert response.content == b"PNGDATA"
+    assert response.headers["content-type"] == "image/png"
+    # The href was relative, so it is resolved against the page it was found on.
+    assert calls[-1] == "https://declared.example/static/brand/icon-32.png"
+
+
+def test_a_declared_icon_url_is_validated_like_any_other():
+    """Markup is somebody else's writing, so the href it carries is untrusted.
+
+    A page that declares its icon on `localhost` is naming an address inside our
+    own network. The declaration buys it no trust that `/favicon.ico` would not
+    have had: the URL goes through the same public-address check, and the fetch
+    never happens.
+    """
+    calls: list[str] = []
+
+    def download(url: str, max_bytes: int, timeout: float):
+        calls.append(url)
+        if url.endswith("/favicon.ico"):
+            return 404, {"content-type": "text/html"}, b"<html></html>"
+        page = b'<html><head><link rel="icon" href="http://127.0.0.1:8000/x.png"></head></html>'
+        return 200, {"content-type": "text/html"}, page
+
+    tools = FaviconTools(
+        redis_factory=lambda: FakeRedis(),
+        resolver=resolver_for("93.184.216.34"),
+        download=download,
+    )
+    _use(tools)
+
+    response = _client().get(
+        "/api/v1/assets/favicon", params={"domain": "hostile.example"}
+    )
+
+    assert response.status_code == 404
+    assert all("127.0.0.1" not in url for url in calls)
+
+
+def test_an_icon_larger_than_a_hundred_kilobytes_is_still_served():
+    """A `.ico` packs every resolution into one file, so 100 KB is ordinary.
+
+    Measured against a real site whose perfectly good favicon was refused by a
+    ceiling set too low, leaving the reader two grey letters for a brand that
+    had a logo all along.
+    """
+    body = b"\x00" * (120 * 1024)
+    calls: list[str] = []
+    tools = FaviconTools(
+        redis_factory=lambda: FakeRedis(),
+        resolver=resolver_for("93.184.216.34"),
+        download=download_returning(
+            200, {"content-type": "image/x-icon"}, body, calls=calls
+        ),
+    )
+    _use(tools)
+
+    response = _client().get("/api/v1/assets/favicon", params={"domain": "big.example"})
+
+    assert response.status_code == 200
+    assert len(response.content) == len(body)
