@@ -14,7 +14,7 @@ plan). Bảng đúng cột đã thiết kế, `UNIQUE(run_id, round_index, seq)`
 `ON DELETE CASCADE`, không index nào khác.
 
 Xác thực: chuỗi alembic đầy-đủ trên DB nháp → `downgrade -1` → `upgrade` lại, bảng biến mất và
-trở lại; `revision --autogenerate` không phát hiện drift nào cho bảng mới; 8 test mới trong
+trở lại; `revision --autogenerate` không phát hiện drift nào cho bảng mới; 7 test mới trong
 `tests/test_alpha_persistence.py` (UNIQUE, thứ tự không dựa vào đồng hồ, round sau dùng lại
 `seq=1`, FK từ chối `run_id` không tồn tại, cascade xoá trace, run chết giữa đường vẫn giữ
 trace). Đã apply lên DB nội bộ sau khi `pg_dump` — `alembic_version = a3c7e21b8f65`.
