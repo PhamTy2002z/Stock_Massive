@@ -221,6 +221,22 @@ describe("how an answer arrives", () => {
     expect(container.querySelector(`.${CHUNK_CLASS}`)).toBeNull()
   })
 
+  it("does not redraw the prose when the transcript re-renders around it", () => {
+    // The transcript re-renders for every event of a live Turn, and the shell
+    // re-renders on a click in it — including the click that ends a text
+    // selection. Rebuilding the paragraph there took the reader's selection and
+    // restarted the cascade from its first word, which read as the answer
+    // typing itself out again. Node identity is the assertion because it is the
+    // property the browser animates and selects on.
+    const entry = draft({ blocks: [block("một hai ba bốn năm")], appendedIndex: 0 })
+    const { container, rerender } = render(<DraftMessage entry={entry} onRetry={vi.fn()} />)
+    const first = container.querySelector(`.${CHUNK_CLASS}`)
+
+    rerender(<DraftMessage entry={{ ...entry, appendedIndex: null }} onRetry={vi.fn()} />)
+
+    expect(container.querySelector(`.${CHUNK_CLASS}`)).toBe(first)
+  })
+
   it("keeps cascading a block after the next event lands", () => {
     // `appendedIndex` is cleared by the very next event — an activity row, a
     // status. A reveal that read it live would cut itself off mid-sentence, so

@@ -63,7 +63,7 @@ looks at the database the API serves from, and it looks with ``SELECT`` only.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -136,6 +136,18 @@ class OpsSnapshot:
     #: One key per reason in ``FLAG_REASONS``, present even at zero — except on
     #: an unread store, where the mapping is empty rather than zeroed.
     flags: Mapping[str, int]
+    #: Prompt-injection pattern labels found in untrusted tool results, by label
+    #: and busiest first. Only labels that actually fired appear: the scan
+    #: (``agent/tools/threat_patterns.py``) fails open and attaches nothing when
+    #: it recognises nothing, so a zeroed key would be a claim about pages this
+    #: query never saw. Read as a *rate against* ``tool_calls`` above it — the
+    #: scan accepts false positives because it never blocks, and a label firing
+    #: on a large share of ordinary retrievals is the signal to tighten the
+    #: pattern rather than to worry about the field.
+    #:
+    #: Defaulted so a report assembled by an older build still loads; every
+    #: other field here is required because every other field predates this one.
+    injection_labels: Mapping[str, int] = field(default_factory=dict)
     #: Why there are no numbers, where there are none. The battery must not fail
     #: because the application store was unreachable — a gate run measures the
     #: fixture, and this reading is a reconciliation beside it. But a report
@@ -204,6 +216,7 @@ class OpsSnapshot:
             "unknown_tool_calls": dict(self.unknown_tool_calls),
             "answer_kinds": dict(self.answer_kinds),
             "flags": dict(self.flags),
+            "injection_labels": dict(self.injection_labels),
             "error": self.error,
         }
 
@@ -222,6 +235,7 @@ class OpsSnapshot:
             unknown_tool_calls=dict(payload.get("unknown_tool_calls") or {}),
             answer_kinds=dict(payload.get("answer_kinds") or {}),
             flags=dict(payload.get("flags") or {}),
+            injection_labels=dict(payload.get("injection_labels") or {}),
             error=payload.get("error"),
         )
 
@@ -245,6 +259,7 @@ class OpsSnapshot:
             # Empty, not seeded with zeros. A zero here would say *nothing was
             # flagged*, which is the one thing an unread store cannot say.
             flags={},
+            injection_labels={},
             error=reason,
         )
 
@@ -309,6 +324,7 @@ def read_ops_snapshot(
         # in the week the answer was given rather than the week somebody
         # objected to it.
         flags=flag_counts_between(session, since=window.since, until=window.until),
+        injection_labels=_injection_labels(session, window),
     )
 
 
@@ -343,6 +359,55 @@ def _block_counts(session: Session, window: _Window) -> tuple[int, int]:
         {"since": window.since, "until": window.until},
     ).one()
     return int(row.blocks or 0), int(row.downgraded_blocks or 0)
+
+
+def _injection_labels(session: Session, window: _Window) -> dict[str, int]:
+    """Count prompt-injection labels out of the stored tool results themselves.
+
+    ``docs/adr/0016`` refuses a new table, and none is needed: the scan writes
+    its labels into the tool result, and the whole result is already stored
+    (``agent_tool_call.result``, capped at 4KB by the catalog). So the count is
+    a read over rows the product writes anyway, exactly like every other signal
+    in this snapshot.
+
+    The path is the recursive ``$.**`` rather than the three concrete paths the
+    tools write today — ``results[*]``, ``external_claim`` and
+    ``items[*].untrusted_evidence``. A list of paths here would be a second
+    place to remember when a fourth untrusted envelope is added, and the one
+    guaranteed outcome of forgetting it is a signal that silently reads zero.
+
+    ``strict`` with ``silent``, and both halves are load-bearing. Lax mode
+    unwraps an array before applying a member accessor, so ``$.**`` visiting the
+    ``results`` array *and* each of its elements would count every label under
+    an array twice while counting labels under a plain object once — a
+    distribution skewed by the shape of the envelope rather than by the field.
+    Strict mode refuses the unwrapping and ``silent`` turns the resulting type
+    mismatches back into "no match", which is what a tool result carrying no
+    labels — that is, nearly all of them — has to mean here.
+
+    One row per occurrence, so a page carrying two labels counts once under
+    each — the question this answers is *how often is each pattern firing*, and
+    a per-call distinct would answer a different one.
+    """
+    rows = session.execute(
+        text(
+            """
+            SELECT label.value #>> '{}' AS label, count(*) AS hits
+            FROM agent_tool_call AS call_row
+            CROSS JOIN LATERAL jsonb_path_query(
+              coalesce(call_row.result, '{}'::jsonb),
+              'strict $.**.injection_labels[*]',
+              '{}'::jsonb,
+              true
+            ) AS label(value)
+            WHERE call_row.started_at >= :since
+              AND call_row.started_at < :until
+            GROUP BY 1
+            """
+        ),
+        {"since": window.since, "until": window.until},
+    )
+    return _busiest_first(rows)
 
 
 class _Window:

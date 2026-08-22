@@ -113,21 +113,28 @@ export function AssistantMessage({
         />
       )}
 
-      <AnswerActions
-        text={view.blocks.map((block) => block.text).join("\n\n")}
-        sources={sources}
-        onRetry={onRetry}
-      />
-
-      {messageId !== undefined && onFlag !== undefined && onUnflag !== undefined && (
-        <FlagAction
-          messageId={messageId}
-          reason={flaggedReason}
-          failed={flagFailed}
-          onFlag={onFlag}
-          onUnflag={onUnflag}
+      {/* One row, not two. Copy, ask-again, sources and flag are all the same
+          kind of thing — what the reader does *with* the answer — and stacking
+          the flag underneath read as a second, more serious bar. It wraps
+          rather than overflows, because the flag carries its recorded reason
+          as text once one is chosen. */}
+      <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
+        <AnswerActions
+          text={view.blocks.map((block) => block.text).join("\n\n")}
+          sources={sources}
+          onRetry={onRetry}
         />
-      )}
+
+        {messageId !== undefined && onFlag !== undefined && onUnflag !== undefined && (
+          <FlagAction
+            messageId={messageId}
+            reason={flaggedReason}
+            failed={flagFailed}
+            onFlag={onFlag}
+            onUnflag={onUnflag}
+          />
+        )}
+      </div>
 
       {showSuggestions && onAsk !== undefined && (
         <Suggestions questions={view.suggestions} onAsk={onAsk} className="pt-2" />

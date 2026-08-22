@@ -21,6 +21,17 @@ const FOLLOW_THRESHOLD_PX = 120
 const ANCHOR_PAD_PX = 14
 
 /**
+ * How long a smooth scroll is left alone before the pin is enforced outright.
+ *
+ * The jump to a new question is animated, and an animation is a request rather
+ * than a fact: it can be clamped by a spacer that has not finished growing, or
+ * dropped entirely by a frame that never comes. So the pin stops re-asserting
+ * itself for this long — a smooth scroll's own duration — and then goes back to
+ * assignment, which cannot fail.
+ */
+const SETTLE_MS = 420
+
+/**
  * The conversation: a transcript that scrolls, and a composer docked over it.
  *
  * **The transcript scrolls, not the page.** The shell is pinned to one viewport
@@ -53,7 +64,12 @@ export function ChatView() {
   // any scroll the reader performs themselves, and by the spacer running out.
   const pinned = useRef(false)
   const anchor = useRef<HTMLDivElement | null>(null)
-  const [tail, setTail] = useState(0)
+  // The spacer is written straight to the DOM rather than held in state, and
+  // that is what makes the pin reliable: the height has to be in place *before*
+  // the scroll that needs it, and a state update is not readable until React has
+  // committed it. Owning the node means measure, resize and scroll all happen in
+  // one pass, so there is no frame in between for the projection to change under.
+  const spacer = useRef<HTMLDivElement>(null)
   const tailHeight = useRef(0)
 
   // What identifies "the reader asked something". Counted rather than keyed off
@@ -101,8 +117,44 @@ export function ChatView() {
   const setTailHeight = useCallback((next: number) => {
     if (next === tailHeight.current) return
     tailHeight.current = next
-    setTail(next)
+    if (spacer.current) spacer.current.style.height = `${next}px`
   }, [])
+
+  /** While a smooth scroll is still travelling, nothing else touches the scroll. */
+  const settling = useRef(0)
+
+  /**
+   * Hold the pinned question at the top of the viewport.
+   *
+   * `animate` is the arrival — the reader watches the transcript travel to the
+   * question they just asked, which is the motion that says "this is where you
+   * are now". Every later call is enforcement: an assignment, and one that
+   * repeats on every projection, because a pin has to be a fact about where the
+   * transcript is rather than a scroll that was once requested. The animation
+   * used to be the only mechanism, and a single frame that never ran left the
+   * question sitting at the bottom of the screen with nothing to try again.
+   */
+  const holdPin = useCallback((animate = false) => {
+    const element = container.current
+    const target = anchorOffset()
+    if (!element || target === null) return
+
+    if (animate) {
+      const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+      // `scrollTo` is the only way to ask for a smooth scroll, and jsdom has
+      // none — the position is what matters and the animation is not.
+      if (!still && typeof element.scrollTo === "function") {
+        settling.current = performance.now() + SETTLE_MS
+        element.scrollTo({ top: target, behavior: "smooth" })
+        return
+      }
+    } else if (performance.now() < settling.current) {
+      // Mid-flight. Assigning here would cut the animation to a jump.
+      return
+    }
+
+    if (Math.abs(element.scrollTop - target) > 1) element.scrollTop = target
+  }, [anchorOffset])
 
   // A new question, or a different Thread.
   useEffect(() => {
@@ -129,38 +181,44 @@ export function ChatView() {
     pinned.current = true
     following.current = true
     setTailHeight(requiredTail())
-    // After the spacer is laid out, or the scroll is clamped to a transcript
-    // that is still the old height.
-    const frame = requestAnimationFrame(() => {
-      const target = anchorOffset()
-      if (target === null) return
-      scrollTo(element, target)
-    })
-    return () => cancelAnimationFrame(frame)
-  }, [questionCount, desk.threadId, anchorOffset, requiredTail, setTailHeight])
+    holdPin(true)
+
+    // The backstop for a Turn quiet enough to send no event while the animation
+    // is in the air: the effect below enforces the pin on every projection, and
+    // this covers the case where the next projection is slower than the scroll.
+    const settled = window.setTimeout(() => holdPin(), SETTLE_MS + 20)
+    return () => window.clearTimeout(settled)
+  }, [questionCount, desk.threadId, holdPin, requiredTail, setTailHeight])
 
   // The answer arriving. While a question is pinned the spacer gives back
   // exactly the height the answer took, so the transcript does not move at all;
-  // when there is nothing left to give back, the bottom takes over.
+  // once the answer is taller than the screen there is no spacer left, the pin
+  // clamps to the bottom, and following the newest line takes over by itself.
   useEffect(() => {
     const element = container.current
     if (!element) return
 
-    if (tailHeight.current > 0) {
-      const next = requiredTail()
-      setTailHeight(next)
-      if (next === 0) pinned.current = false
+    if (pinned.current) {
+      // Recomputed in both directions, and the pin re-asserted after it. The
+      // trail is the reason it has to go both ways: it opens to several rows
+      // while the Turn works and folds back to one when the answer lands, and a
+      // spacer that could only shrink released the pin on the widest moment of
+      // a Turn — leaving a two-line answer stranded in the middle of the screen.
+      setTailHeight(requiredTail())
+      // With no spacer left this asks for a scroll the transcript cannot reach,
+      // the browser clamps it to the bottom, and that clamp *is* the follow.
+      holdPin()
       return
     }
 
-    if (pinned.current || !following.current) return
+    if (!following.current) return
     // Assigned rather than animated. A smooth scroll per block turns a fast
     // answer into a moving target, and it is motion nobody asked for.
     element.scrollTop = element.scrollHeight
     // Every event the live Turn applies produces a new projection, so this is
     // one dependency for every way the transcript can get taller: a block, a
     // step joining the trail, a status line under an answer that ended.
-  }, [desk.entries, requiredTail, setTailHeight])
+  }, [desk.entries, holdPin, requiredTail, setTailHeight])
 
   function onScroll() {
     const element = container.current
@@ -259,7 +317,7 @@ export function ChatView() {
             answer is taller than the screen, so it never leaves dead space
             under a finished conversation — and it sits outside the stack above
             so that at zero height it contributes no gap either. */}
-        <div aria-hidden="true" style={{ height: tail }} />
+        <div ref={spacer} aria-hidden="true" />
       </div>
 
       {/* Anchored to the main column rather than the viewport, and it follows
@@ -302,22 +360,6 @@ export function ChatView() {
       </div>
     </>
   )
-}
-
-/**
- * Move the transcript, smoothly where the reader has not asked otherwise.
- *
- * `scrollTo` is the only way to ask for a smooth scroll, and it is missing in
- * jsdom, so the assignment stays as the fallback: the position matters and the
- * animation does not.
- */
-function scrollTo(element: HTMLElement, top: number): void {
-  const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
-  if (typeof element.scrollTo !== "function") {
-    element.scrollTop = top
-    return
-  }
-  element.scrollTo({ top, behavior: still ? "auto" : "smooth" })
 }
 
 /** The question an answer is an answer to, or null if the row above is not one. */

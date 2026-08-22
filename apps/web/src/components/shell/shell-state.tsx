@@ -203,6 +203,11 @@ function reduce(state: ShellState, action: Action): ShellState {
       return { ...state, contextSymbol: action.symbol }
 
     case "overlay":
+      // A no-op stays a no-op. The transcript closes overlays on every click in
+      // it, including the click that ends a text selection, and a new state
+      // object there re-rendered the whole shell — which used to rebuild the
+      // answer the reader was in the middle of copying.
+      if (state.overlay === action.overlay) return state
       return { ...state, overlay: action.overlay }
 
     case "dismiss-notice":

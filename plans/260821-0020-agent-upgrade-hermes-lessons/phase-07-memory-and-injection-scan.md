@@ -1,7 +1,7 @@
 ---
 phase: 7
 title: "Ký ức và quét injection"
-status: pending
+status: complete
 priority: P2
 effort: "3-4d"
 dependencies: [6]
@@ -126,16 +126,16 @@ chỉ, kiểm lại từng hop redirect — chắc hơn Hermes.
 
 ## Success Criteria
 
-- [ ] DB đã backup trước migration
-- [ ] Trang publisher chứa "ignore previous instructions" → bị gắn nhãn, ghi log,
+- [x] DB đã backup trước migration
+- [x] Trang publisher chứa "ignore previous instructions" → bị gắn nhãn, ghi log,
       và câu trả lời **vẫn** ra bình thường
-- [ ] Unicode zero-width bị phát hiện
-- [ ] Quét fail-open: pattern lỗi/không chắc → nội dung vẫn qua (test)
-- [ ] `recall_facts` trả đúng fact của user đó; fact toàn cục (`user_id` NULL) dùng chung
-- [ ] `session_search` không gọi LLM (test đếm số lời gọi = 0)
-- [ ] Tìm kiếm khớp được câu tiếng Việt có dấu (test có "cổ phiếu", "tăng trưởng")
+- [x] Unicode zero-width bị phát hiện
+- [x] Quét fail-open: pattern lỗi/không chắc → nội dung vẫn qua (test)
+- [x] `recall_facts` trả đúng fact của user đó; fact toàn cục (`user_id` NULL) dùng chung
+- [x] `session_search` không gọi LLM (test đếm số lời gọi = 0)
+- [x] Tìm kiếm khớp được câu tiếng Việt có dấu (test có "cổ phiếu", "tăng trưởng")
 - [ ] Hỏi lại chuyện phiên trước → model tự gọi `recall_facts`, không bắt kể lại
-- [ ] `prompt/contract.py` vẫn chỉ nhận 5 giá trị typed — bất biến không đổi (test)
+- [x] `prompt/contract.py` vẫn chỉ nhận 5 giá trị typed — bất biến không đổi (test)
 - [ ] `make test` xanh + Eval Report
 
 ## Risk Assessment

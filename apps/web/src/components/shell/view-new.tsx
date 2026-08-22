@@ -7,6 +7,7 @@ import { VisgniteMark } from "@/components/shared/visgnite-logo"
 import { useAuth } from "@/hooks/use-auth"
 import { useMarketIndices } from "@/hooks/use-market-indices"
 import { greetingFor, plainGreeting } from "@/lib/greeting"
+import { stickyRoll } from "@/lib/greeting-roll"
 import { formatVietnamDate, vietnamPartOfDay } from "@/lib/market-session"
 
 import { Composer } from "./composer"
@@ -65,19 +66,20 @@ export function NewConversationView() {
  * where the Vietnamese diacritics sit unevenly at this size, so it is left as
  * `Morning, <name>`.
  *
- * Which of the day's lines gets used is drawn per mount, so starting a new
- * conversation opens on a line the reader did not just see. The draw is gated
- * on the session having resolved, and that gate is what keeps hydration quiet:
- * the roll below is thrown on the server too, and its answer there is not the
- * browser's. Until `/api/auth/me` comes back — which is the state the server
- * renders in and the state the browser hydrates in — the line is the plain
- * `plainGreeting`, identical on both sides. Once the account is in the cache
- * the very first render already has it, so switching back to this screen picks
- * a line without flashing the plain one first.
+ * Which of the day's lines gets used is drawn once and then held for two hours
+ * (`stickyRoll`), so a session opens on one line instead of dealing a new one
+ * every trip back to this screen. The draw is gated on the session having
+ * resolved, and that gate is what keeps hydration quiet: the roll below is
+ * thrown on the server too, where there is no storage to read and the answer is
+ * not the browser's. Until `/api/auth/me` comes back — which is the state the
+ * server renders in and the state the browser hydrates in — the line is the
+ * plain `plainGreeting`, identical on both sides. Once the account is in the
+ * cache the very first render already has it, so switching back to this screen
+ * picks up the held line without flashing the plain one first.
  */
 function Greeting() {
   const { user, isPending } = useAuth()
-  const [roll] = useState(Math.random)
+  const [roll] = useState(stickyRoll)
 
   // The whole name, not the last word of it. A Vietnamese name is read in full,
   // and cutting it to the given name is a Western reading of the order.
@@ -90,8 +92,8 @@ function Greeting() {
   return (
     <div className="flex items-center justify-center gap-3">
       <VisgniteMark className="h-[26px] w-[17px]" />
-      {/* The one serif line in the product. Set at display size and in a warm
-          off-white because at this weight the body's neutral white goes cold
+      {/* The one serif line in the product. Set at display size and one step
+          brighter than body ink, because at this weight the serif thins out
           against the ground — see the note on the font in app/layout. */}
       <h2 className="min-w-0 font-serif text-[clamp(1.6rem,2.7vw,2.15rem)] font-normal leading-[1.1] tracking-[-0.01em] text-ink-display">
         {line}

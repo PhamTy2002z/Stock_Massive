@@ -171,6 +171,10 @@ RECOVERY_HINTS: Mapping[str, str] = {
     "no_remembered_facts": (
         "nothing has been remembered for this; get it from a lookup instead"
     ),
+    "no_matching_messages": (
+        "no earlier message of this reader's matches; ask them for the detail "
+        "rather than searching the transcript again"
+    ),
     "unknown_tool": "call one of the tools this result lists as available",
     "tool_error": (
         "this call failed rather than answered; take a different approach or say "

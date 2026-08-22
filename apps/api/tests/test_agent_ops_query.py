@@ -175,6 +175,7 @@ class _World:
         tool_name: str = "get_price_zone",
         status: str = "ok",
         started_at: datetime = INSIDE,
+        result: dict | None = None,
     ) -> None:
         request_id = self.message(role="user", answer_kind=None, created_at=started_at)
         with self.session() as session:
@@ -184,7 +185,7 @@ class _World:
                     request_message_id=request_id,
                     tool_name=tool_name,
                     arguments={},
-                    result={},
+                    result={} if result is None else result,
                     status=status,
                     started_at=started_at,
                 )
@@ -441,3 +442,100 @@ def test_the_query_writes_nothing(world):
     before = totals()
     snapshot(world)
     assert totals() == before
+
+
+def test_injection_labels_are_counted_out_of_the_stored_tool_results(world):
+    """No new table: the scan's labels are already inside `agent_tool_call.result`.
+
+    The three envelopes the tools write nest differently — a search result is an
+    array element, a fetched page hangs off `external_claim`, a news item sits
+    under `untrusted_evidence` — and the query finds all three without naming
+    any of them. That is the point of the recursive path: a fourth envelope
+    added later is counted the day it ships, rather than reading zero until
+    somebody remembers this file.
+
+    One row per occurrence, so a page carrying two labels counts once under
+    each. The question is how often each pattern fires, not how many pages fired.
+    """
+    world.tool_call(
+        tool_name="web_search",
+        result={
+            "query": "masan",
+            "results": [
+                {"title": "a", "injection_labels": ["instruction_override"]},
+                {
+                    "title": "b",
+                    "injection_labels": ["instruction_override", "credential_probe"],
+                },
+                {"title": "c"},
+            ],
+        },
+    )
+    world.tool_call(
+        tool_name="fetch_url",
+        result={
+            "url": "https://publisher.example/q2",
+            "external_claim": {
+                "content": "…",
+                "injection_labels": ["invisible_characters"],
+            },
+        },
+    )
+    world.tool_call(
+        tool_name="search_news",
+        result={
+            "items": [
+                {
+                    "untrusted_evidence": {
+                        "title": "x",
+                        "injection_labels": ["instruction_override"],
+                    }
+                }
+            ]
+        },
+    )
+    world.tool_call(tool_name="get_price_zone", result={"symbol": "FPT"})
+    world.tool_call(
+        tool_name="fetch_url",
+        started_at=OUTSIDE,
+        result={"external_claim": {"injection_labels": ["credential_probe"]}},
+    )
+
+    reading = snapshot(world)
+
+    assert reading.injection_labels == {
+        "instruction_override": 3,
+        "credential_probe": 1,
+        "invisible_characters": 1,
+    }
+    # Busiest first, so two readings of the same window sort the same way.
+    assert list(reading.injection_labels)[0] == "instruction_override"
+
+
+def test_a_window_with_no_labelled_content_reports_no_labels(world):
+    """Empty rather than zeroed keys: the scan attaches nothing when it sees nothing."""
+    world.tool_call(result={"symbol": "FPT", "close": 100})
+
+    assert snapshot(world).injection_labels == {}
+
+
+def test_an_unread_store_claims_nothing_about_injection_labels():
+    reading = OpsSnapshot.unreadable("connection refused", now=NOW)
+
+    assert reading.injection_labels == {}
+    assert not reading.readable
+
+
+def test_the_label_counts_survive_the_wire_a_stored_report_is_read_back_from(world):
+    """A signal that vanished on round-trip would read as zero in every old report."""
+    world.tool_call(
+        tool_name="fetch_url",
+        result={"external_claim": {"injection_labels": ["credential_probe"]}},
+    )
+
+    reading = snapshot(world)
+
+    assert reading.as_wire()["injection_labels"] == {"credential_probe": 1}
+    assert OpsSnapshot.from_wire(reading.as_wire()).injection_labels == {
+        "credential_probe": 1
+    }

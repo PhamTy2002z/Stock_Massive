@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import http.client
 import ipaddress
+import logging
 import socket
 import ssl
 from collections.abc import Callable, Mapping, Sequence
@@ -27,6 +28,9 @@ from .catalog import (
     serialized_size,
 )
 from .data import _object_schema
+from .threat_patterns import scan_untrusted_text
+
+logger = logging.getLogger(__name__)
 
 MAX_RESULTS = 5
 MAX_REDIRECTS = 4
@@ -159,6 +163,33 @@ def _http_download(
             connection.close()
     assert last_error is not None
     raise last_error
+
+
+def _label(payload: dict[str, Any], *values: str, source: str) -> None:
+    """Add ``injection_labels`` to one untrusted envelope, and only when it hits.
+
+    Mutates rather than returns, so the labels are inside the payload *before*
+    the caller measures it against ``MAX_TOOL_RESULT_BYTES``: a key added after
+    the packing loop would be a key the budget never charged for.
+
+    Absent when nothing matched, rather than an empty list. Every result of
+    every prior build carries no key at all, so a reader — human or model —
+    never has to distinguish "scanned and clean" from "written before the scan
+    existed", and the ordinary payload keeps the shape its consumers know.
+
+    The log line names the labels and the host and nothing else. The matching
+    text is attacker-controlled prose and belongs in the stored tool result,
+    which is bounded and inspectable, not in a log line that is neither.
+    """
+    labels = scan_untrusted_text(*values)
+    if not labels:
+        return
+    payload["injection_labels"] = list(labels)
+    logger.warning(
+        "untrusted web content matched injection patterns: labels=%s source=%s",
+        ",".join(labels),
+        source,
+    )
 
 
 class WebTools:
@@ -319,17 +350,17 @@ class WebTools:
             html = body.decode(charset, errors="replace")
             title, content = extract_page(html, MAX_PAGE_TEXT_CHARS)
             retrieved_at = self._now().astimezone(timezone.utc).isoformat()
-            return {
-                "url": current,
-                "external_claim": {
-                    "title": title,
-                    "content": content,
-                    "source": urlsplit(current).hostname or current,
-                    "source_url": current,
-                    "retrieved_at": retrieved_at,
-                    "claim_class": "external_claim",
-                },
+            source = urlsplit(current).hostname or current
+            claim: dict[str, Any] = {
+                "title": title,
+                "content": content,
+                "source": source,
+                "source_url": current,
+                "retrieved_at": retrieved_at,
+                "claim_class": "external_claim",
             }
+            _label(claim, title, content, source=source)
+            return {"url": current, "external_claim": claim}
         raise ValueError("the URL exceeded the redirect limit")
 
     def _tavily_search(
@@ -358,15 +389,20 @@ class WebTools:
 
     def _search_item(self, raw: Mapping[str, Any]) -> Mapping[str, Any]:
         url = str(raw.get("url") or "")
-        return {
-            "title": visible_text(raw.get("title"), 240),
+        title = visible_text(raw.get("title"), 240)
+        snippet = visible_text(raw.get("content", raw.get("snippet")), MAX_SNIPPET_CHARS)
+        source = urlsplit(url).hostname or str(raw.get("source") or "web")
+        item: dict[str, Any] = {
+            "title": title,
             "url": url,
-            "snippet": visible_text(raw.get("content", raw.get("snippet")), MAX_SNIPPET_CHARS),
+            "snippet": snippet,
             "published_at": raw.get("published_date") or raw.get("published_at"),
             "retrieved_at": self._now().astimezone(timezone.utc).isoformat(),
-            "source": urlsplit(url).hostname or str(raw.get("source") or "web"),
+            "source": source,
             "claim_class": "external_claim",
         }
+        _label(item, title, snippet, source=source)
+        return item
 
 
 __all__ = [

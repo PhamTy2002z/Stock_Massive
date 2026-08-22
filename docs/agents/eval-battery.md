@@ -54,6 +54,62 @@ No migration step. The eval database is disposable and its schema is created
 from the models on load; what actually guards against drift is the fixture's
 `schema_version`, which is checked before anything is written.
 
+### The one drift that check does not cover
+
+`schema_version` protects the **captured** tables — the market data the fixture
+holds. It is a digest of `CAPTURED_TABLES` taken from the models, so it answers
+*was this seed frozen against the shape the code now reads*. It says nothing
+about the tables a run **writes**: `agent_thread`, `agent_message`,
+`agent_turn`, `agent_tool_call`, `agent_knowledge`. Those hold no fixture data,
+so nothing pins them.
+
+That leaves a real gap, because the load path is `Base.metadata.create_all`
+with `checkfirst=True`, and `checkfirst` **skips a table that already exists
+rather than altering it**. On a fresh database the models win. On an eval
+database created before a migration, the old transcript tables survive
+untouched and the run dies at the first `INSERT` — after the fixture loaded
+cleanly and after the first model calls were paid for.
+
+The drift also **accumulates silently across releases**. When this was first
+hit, the eval database was missing a column from the migration under test *and*
+two columns from an earlier one — `agent_tool_call.tool_call_id` and
+`spilled_bytes` — which had gone unnoticed because nothing had asked for them
+since. The second gap was worse than the first: it did not stop the run, it made
+every `search_news` trace fail to record while the Turn carried on, so the
+battery produced a complete-looking report over a category whose tool had been
+quietly broken. Fixing the column you just added is not enough; diff the whole
+schema.
+
+```bash
+q="select table_name||'.'||column_name||' '||data_type||' '||is_nullable
+   from information_schema.columns where table_schema='public' order by 1"
+psql "$DATABASE_URL"      -Atc "$q" > /tmp/dev_cols.txt
+psql "$EVAL_DATABASE_URL" -Atc "$q" > /tmp/eval_cols.txt
+comm -23 /tmp/dev_cols.txt /tmp/eval_cols.txt   # in dev, missing from eval
+```
+
+`alembic_version` is the one row that legitimately differs — the eval database
+is built from the models and has no migration history.
+
+So: **a migration that touches a transcript table must be applied to the eval
+database too.** Two ways, and the choice is about what you are willing to lose.
+
+```bash
+# Keep the history: apply the same DDL the migration applies.
+psql "$EVAL_DATABASE_URL" -f the-migration-as-sql
+```
+
+```bash
+# Or start clean, which also resets the eval spend lane and the baseline.
+dropdb stockmassive_eval && createdb stockmassive_eval
+```
+
+Prefer the first. `eval_run` lives in this database and `baseline.py` reads it,
+so dropping the database discards every baseline comparison the next run would
+have made. After either, confirm the two schemas agree column by column rather
+than assuming they do — the failure this section describes was silent until an
+`INSERT` hit it.
+
 ## Re-freezing a fixture
 
 ```bash

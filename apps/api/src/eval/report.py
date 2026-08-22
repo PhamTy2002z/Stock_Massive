@@ -488,7 +488,7 @@ def _grounding_headline(ops: OpsSnapshot) -> list[str]:
 
 
 def _ops_tables(ops: OpsSnapshot) -> list[str]:
-    """The four distributions, each against the population it was counted over."""
+    """The five distributions, each against the population it was counted over."""
     lines: list[str] = []
     lines.extend(
         _ops_table(
@@ -530,6 +530,22 @@ def _ops_tables(ops: OpsSnapshot) -> list[str]:
             ops.flags_total,
             "Nothing was flagged in this window.",
             note=_flag_note(ops),
+        )
+    )
+    lines.extend(
+        _ops_table(
+            "Injection markers in untrusted prose, by label",
+            "Label",
+            ops.injection_labels,
+            ops.tool_calls,
+            "No retrieved prose carried a recognised marker, in "
+            f"{ops.tool_calls} calls.",
+            note=(
+                "A marker labels a result and never withholds it, so these are "
+                "not blocked answers. Read them for the opposite failure: a "
+                "label firing on ordinary market copy is a pattern to tighten, "
+                "not an attack to answer."
+            ),
         )
     )
     return lines

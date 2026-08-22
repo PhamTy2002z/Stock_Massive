@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -25,6 +26,9 @@ from .catalog import (
 from ._html import _TextExtractor, visible_text
 from .data import SessionFactory, UniverseFactory, _object_schema
 from .scope import structured_universe_refusal
+from .threat_patterns import scan_untrusted_text
+
+logger = logging.getLogger(__name__)
 
 MAX_WINDOW_DAYS = 365
 MAX_NEWS_ITEMS = 5
@@ -224,13 +228,28 @@ class NewsTools:
         )
         if not title and not content:
             return None
-        return {
+        evidence: dict[str, Any] = {
             "source": source,
             "published_at": published.isoformat(),
             "claim_class": "source_claim",
             "title": title,
             "content": content,
         }
+        # Labelled and kept. A cleared publisher carrying an injection marker is
+        # far more likely to be quoting one — a wire about a scam, a column
+        # about model prompts — than to be attacking, and dropping the item
+        # would hide a story from the reader who asked for the news. The label
+        # is a note beside the evidence; the Contract already reads it as data.
+        labels = scan_untrusted_text(title, content)
+        if labels:
+            evidence["injection_labels"] = list(labels)
+            logger.warning(
+                "cleared news item matched injection patterns: "
+                "labels=%s source=%s",
+                ",".join(labels),
+                source,
+            )
+        return evidence
 
     @staticmethod
     def _result(

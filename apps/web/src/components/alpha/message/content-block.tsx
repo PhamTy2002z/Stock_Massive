@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 
 import type { ContentBlock } from "@/lib/alpha-desk/types"
 import { cn } from "@/lib/utils"
@@ -60,6 +60,13 @@ export function ContentBlockView({
 }) {
   const [cascade] = useState(stagger)
   const isRecommendation = block.kind === "recommendation"
+  // Held across renders, because the renderer below is memoised on its props: a
+  // fresh element here every render would defeat that and rebuild the prose —
+  // taking the reader's selection and the cascade's position with it.
+  const trailing = useMemo(
+    () => (block.citations.length > 0 ? <CitationChips citations={block.citations} /> : undefined),
+    [block.citations],
+  )
 
   return (
     <div
@@ -84,15 +91,7 @@ export function ContentBlockView({
           shown verbatim. Rendering it verbatim was the bug: `**Nguyễn Đăng
           Quang**` reached readers with its asterisks. The renderer has no raw
           HTML path, so nothing in a block can produce markup. */}
-      <Markdown
-        text={block.text}
-        stagger={cascade}
-        trailing={
-          block.citations.length > 0 ? (
-            <CitationChips citations={block.citations} />
-          ) : undefined
-        }
-      />
+      <Markdown text={block.text} stagger={cascade} trailing={trailing} />
 
       <BlockSources urls={block.source_ids ?? []} />
     </div>

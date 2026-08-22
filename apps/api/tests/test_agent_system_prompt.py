@@ -287,7 +287,11 @@ def test_the_hash_is_exported_and_changes_when_the_prose_changes():
     # for nothing factual is answered without a lookup, and raises the visual
     # ceiling to three (``docs/adr/0023``) — no section arrived or left, so the
     # section list is unchanged and only prose inside existing sections moved.
-    assert PROMPT_VERSION == "1.9.0"
+    # 1.10.0 tells the model the reader has a past it can look up rather than
+    # ask about again, splits saving a sourced fact from saving one the reader
+    # stated, and says a block the system marked as carrying an instruction is
+    # still evidence to read (``docs/adr/0025``) — again prose only.
+    assert PROMPT_VERSION == "1.10.0"
     assert PROMPT_HASH == contract_hash()
 
     edited = tuple(

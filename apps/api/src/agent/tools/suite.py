@@ -18,6 +18,7 @@ from .compute import ComputeTools
 from .data import SessionFactory, StoreBackedTools, UniverseFactory
 from .news import Clock, NewsFetcher, NewsTools, _fetch_vci_news
 from .knowledge import KnowledgeTools
+from .session_search import SessionSearchTools
 from .web import WebTools
 
 
@@ -61,6 +62,7 @@ class IntelligentQuantCatalog:
             universe_factory=universe_factory,
         )
         self.knowledge = KnowledgeTools(session_factory=session_factory)
+        self.session_search = SessionSearchTools(session_factory=session_factory)
         self.compute = ComputeTools()
         self.web = WebTools(
             settings=self.settings,
@@ -73,6 +75,7 @@ class IntelligentQuantCatalog:
         news = self.news.registrations()
         computations = self.computations.registrations()
         knowledge = self.knowledge.registrations()
+        session_search = self.session_search.registrations()
         mcp_tools = self.mcp.registrations() if self.settings.mcp_enabled else ()
         executor = self.compute.registrations() if self.settings.executor_enabled else ()
         web = self.web.registrations() if self.settings.web_tools_enabled else ()
@@ -84,6 +87,7 @@ class IntelligentQuantCatalog:
             *news,
             *web,
             *knowledge,
+            *session_search,
             *mcp_tools,
             *executor,
             stored["screen_universe"],

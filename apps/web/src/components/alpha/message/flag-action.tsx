@@ -91,13 +91,16 @@ export function FlagAction({
           // thing this must not become.
           aria-label={FLAG_COPY.action}
           title={FLAG_COPY.action}
+          // Sized to the copy and ask-again buttons beside it in the action
+          // row, so the three read as one row of controls rather than as an
+          // afterthought bolted onto the end of it.
           className={cn(
-            "inline-flex items-center gap-1 rounded-md p-1 text-meta text-muted-foreground transition-colors",
-            "hover:bg-foreground/[0.06] hover:text-foreground",
-            reason !== null && "text-caution",
+            "grid size-7 place-items-center rounded-lg text-ink-5 transition-colors",
+            "hover:bg-surface-raised hover:text-ink-2",
+            reason !== null && "text-caution hover:text-caution",
           )}
         >
-          <Flag className="h-3.5 w-3.5" aria-hidden />
+          <Flag className="size-4" aria-hidden />
         </button>
 
         {failed ? (
@@ -126,7 +129,7 @@ export function FlagAction({
         <div
           role="menu"
           aria-label={FLAG_COPY.prompt}
-          className="absolute left-0 top-7 z-10 w-56 rounded-[14px] border border-border bg-popover p-1.5 shadow-menu"
+          className="absolute left-0 top-8 z-10 w-56 rounded-[14px] border border-border bg-popover p-1.5 shadow-menu"
         >
           <p className="px-2.5 py-1.5 text-meta text-muted-foreground">{FLAG_COPY.prompt}</p>
 

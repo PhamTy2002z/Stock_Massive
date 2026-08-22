@@ -32,6 +32,7 @@ is enforced by the database rather than by the code that writes it:
 
 from sqlalchemy import (
     BigInteger,
+    CheckConstraint,
     Column,
     Computed,
     DDL,
@@ -278,6 +279,14 @@ class AgentMessage(Base):
     and not a second opinion — and ``docs/adr/0016`` forbids a new table for
     observability. They are also the one thing about this row that changes; the
     message a flag is about is never rewritten by the flag.
+
+    ``tsv`` makes the transcript searchable without a second copy of it. It
+    reads ``content ->> 'text'`` — the one key both a user message and an
+    assistant message carry — and it is generated rather than trigger-fed so
+    there is no path by which a message exists and its index entry does not.
+    The diacritic handling is ``agent_knowledge``'s, for the same reason: a
+    reader who types *co phieu* is asking about *cổ phiếu*, and Postgres'
+    default configuration answers that question with silence.
     """
 
     __tablename__ = "agent_message"
@@ -297,9 +306,18 @@ class AgentMessage(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     flagged_reason = Column(String(48), nullable=True)
     flagged_at = Column(DateTime(timezone=True), nullable=True)
+    tsv = Column(
+        TSVECTOR,
+        Computed(
+            "to_tsvector('simple', immutable_unaccent(coalesce(content ->> 'text', '')))",
+            persisted=True,
+        ),
+        nullable=False,
+    )
 
     __table_args__ = (
         UniqueConstraint("thread_id", "seq", name="uq_agent_message_thread_seq"),
+        Index("ix_agent_message_tsv", "tsv", postgresql_using="gin"),
         # The ops query counts flags by reason over a date range, and a flag is
         # rare against a table that holds every message ever written. Partial,
         # so the index is the size of the flags rather than of the transcript,
@@ -375,8 +393,51 @@ class AgentToolCall(Base):
         return f"<AgentToolCall {self.tool_name} {self.status}>"
 
 
+# What a remembered row *is*, and where it came from. Declared beside the
+# columns for the reason ``FLAG_REASONS`` is: the tool that writes these, the
+# tool that filters on them and any report that groups by them must read one
+# vocabulary, and a fourth label invented at a call site would be a category
+# nothing else can count.
+#
+# ``kind`` separates the three things worth carrying between Turns. A
+# ``preference`` (risk appetite, investment horizon) stays true until the reader
+# says otherwise; a ``conclusion`` is an earlier reading of the data and ages
+# with it; an ``observation`` is an event that happened once.
+KNOWLEDGE_KIND_PREFERENCE = "preference"
+KNOWLEDGE_KIND_CONCLUSION = "conclusion"
+KNOWLEDGE_KIND_OBSERVATION = "observation"
+
+KNOWLEDGE_KINDS = (
+    KNOWLEDGE_KIND_PREFERENCE,
+    KNOWLEDGE_KIND_CONCLUSION,
+    KNOWLEDGE_KIND_OBSERVATION,
+)
+
+# ``origin`` is who said it, and it is the column that decides whether a source
+# URL exists at all. A reader stating their own risk appetite has no URL to
+# cite, and demanding one would either block the memory or invent a citation —
+# the second being the failure this whole table is arranged against. It does not
+# change the evidence class: a remembered row stays an external claim whoever
+# authored it (``grounding.py::EvidenceSource``).
+KNOWLEDGE_ORIGIN_USER_STATED = "user_stated"
+KNOWLEDGE_ORIGIN_SYSTEM_DERIVED = "system_derived"
+KNOWLEDGE_ORIGIN_EXTERNAL_SOURCE = "external_source"
+
+KNOWLEDGE_ORIGINS = (
+    KNOWLEDGE_ORIGIN_USER_STATED,
+    KNOWLEDGE_ORIGIN_SYSTEM_DERIVED,
+    KNOWLEDGE_ORIGIN_EXTERNAL_SOURCE,
+)
+
+
 class AgentKnowledge(Base):
-    """One deliberately remembered external claim with its original source."""
+    """One deliberately remembered external claim with its original source.
+
+    ``expires_at`` is the answer to memory that outlives its truth. A recall
+    filters on it in SQL rather than leaving the model to judge staleness from a
+    date, because a fact that should no longer be quoted is better absent than
+    present with a caveat the answer may drop.
+    """
 
     __tablename__ = "agent_knowledge"
 
@@ -389,10 +450,23 @@ class AgentKnowledge(Base):
     symbol = Column(String(20), nullable=True)
     title = Column(Text, nullable=False)
     body = Column(Text, nullable=False)
-    source_url = Column(Text, nullable=False)
-    source_name = Column(Text, nullable=False)
+    kind = Column(
+        String(16),
+        nullable=False,
+        server_default=text(f"'{KNOWLEDGE_KIND_OBSERVATION}'"),
+    )
+    origin = Column(
+        String(16),
+        nullable=False,
+        server_default=text(f"'{KNOWLEDGE_ORIGIN_EXTERNAL_SOURCE}'"),
+    )
+    # Nullable only for the origins that genuinely have no source; the CHECK
+    # below keeps an externally sourced row from losing its citation.
+    source_url = Column(Text, nullable=True)
+    source_name = Column(Text, nullable=True)
     retrieved_at = Column(DateTime(timezone=True), nullable=False)
     as_of = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     tsv = Column(
         TSVECTOR,
@@ -413,33 +487,43 @@ class AgentKnowledge(Base):
             text("immutable_unaccent(lower(title)) gin_trgm_ops"),
             postgresql_using="gin",
         ),
+        CheckConstraint(
+            f"origin <> '{KNOWLEDGE_ORIGIN_EXTERNAL_SOURCE}' OR source_url IS NOT NULL",
+            name="ck_agent_knowledge_external_source_url",
+        ),
     )
 
 
 # `Base.metadata.create_all` is a test-only schema path in this repository. It
-# still has to create the same generated column as Alembic, which requires the
-# extensions and immutable wrapper to exist before this table is compiled.
-event.listen(
-    AgentKnowledge.__table__,
-    "before_create",
-    DDL("CREATE EXTENSION IF NOT EXISTS unaccent"),
-)
-event.listen(
-    AgentKnowledge.__table__,
-    "before_create",
-    DDL("CREATE EXTENSION IF NOT EXISTS pg_trgm"),
-)
-event.listen(
-    AgentKnowledge.__table__,
-    "before_create",
-    DDL(
-        """
-        CREATE OR REPLACE FUNCTION public.immutable_unaccent(text)
-        RETURNS text LANGUAGE sql IMMUTABLE PARALLEL SAFE STRICT
-        AS $$ SELECT public.unaccent('public.unaccent', $1) $$
-        """
-    ),
-)
+# still has to create the same generated columns as Alembic, which requires the
+# extensions and immutable wrapper to exist before those tables are compiled.
+# Both tables carry the listeners because a test creates whichever subset it
+# needs, and `create_all` gives no ordering promise between two tables that do
+# not reference each other.
+for _unaccenting_table in (AgentMessage.__table__, AgentKnowledge.__table__):
+    event.listen(
+        _unaccenting_table,
+        "before_create",
+        DDL("CREATE EXTENSION IF NOT EXISTS unaccent"),
+    )
+    event.listen(
+        _unaccenting_table,
+        "before_create",
+        DDL("CREATE EXTENSION IF NOT EXISTS pg_trgm"),
+    )
+    event.listen(
+        _unaccenting_table,
+        "before_create",
+        DDL(
+            """
+            CREATE OR REPLACE FUNCTION public.immutable_unaccent(text)
+            RETURNS text LANGUAGE sql IMMUTABLE PARALLEL SAFE STRICT
+            AS $$ SELECT public.unaccent('public.unaccent', $1) $$
+            """
+        ),
+    )
+
+del _unaccenting_table
 
 
 # The one value of ``agent_tool_call.status`` that something other than the

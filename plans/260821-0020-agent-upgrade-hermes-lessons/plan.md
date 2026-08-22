@@ -73,8 +73,8 @@ Nguồn: `plans/reports/hermes-synthesis-260821-0030.md` + 9 report vùng.
 | 4 | [Phase 4: Độ bền tuyến LLM](./phase-04-route-resilience.md) | **Complete** |
 | 5 | [Phase 5: Lane hội thoại và trình bày](./phase-05-conversation-lane-and-presentation.md) | **Complete** |
 | 6 | [Phase 6: Ngân sách tool và thang guardrail](./phase-06-tool-budget-and-guardrail-ladder.md) | **Complete** |
-| 7 | [Phase 7: Ký ức và quét injection](./phase-07-memory-and-injection-scan.md) | Pending |
-| 8 | [Phase 8: Cổng Eval và baseline](./phase-08-eval-gate-and-baseline.md) | Pending |
+| 7 | [Phase 7: Ký ức và quét injection](./phase-07-memory-and-injection-scan.md) | **Complete** |
+| 8 | [Phase 8: Cổng Eval và baseline](./phase-08-eval-gate-and-baseline.md) | In progress |
 
 Phụ thuộc: 1 → 2 → 3 → (4 ∥ 5) → 6 → 7 → 8. Phase 4 và 5 độc lập về file, chạy
 song song được. Phase 8 chốt toàn bộ.
@@ -111,6 +111,12 @@ tool schema/`tool_catalog_version`, agent loop, Recommendation Validator. Nên:
   **không** đổi ở Phase 6 — tool schema không bị chạm, `hint` là key cộng thêm vào
   envelope refusal — nên Eval Fixture vẫn không phải đóng băng lại. Điều này bác một
   giả định của Phase 6 ("phải đóng băng lại Eval Fixture").
+- **Nợ thêm sau Phase 7**: Contract lên **1.10.0** (`ADR-0025`) và
+  `tool_catalog_version` đổi vì `session_search` là schema mới trong bề mặt được
+  version. Đo được: fixture pin `2d08b9a89e49281f`, deploy hiện tại
+  `f6eb61c8980fd48a`. Hai giá trị này đã lệch **từ trước Phase 7** (HEAD đo được
+  `39e3555fc8c48e30`), nên việc đóng băng lại fixture ở Phase 8 là bắt buộc bất kể
+  Phase 7 — nó chỉ làm khoảng lệch rộng thêm.
 
 Quy trình: `docs/agents/eval-battery.md`.
 

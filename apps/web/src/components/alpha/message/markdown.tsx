@@ -1,6 +1,7 @@
 "use client"
 
-import type { ComponentPropsWithoutRef } from "react"
+import type { ComponentPropsWithoutRef, ReactNode } from "react"
+import { createContext, memo, useContext, useMemo } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
@@ -22,6 +23,87 @@ type RehypePlugins = NonNullable<
 >
 const STAGGERED: RehypePlugins = [chunkedProse] as unknown as RehypePlugins
 const PLAIN: RehypePlugins = []
+
+/** The one field of a hast node this file reads: where the source unit ended. */
+interface Positioned {
+  position?: { end?: { offset?: number } }
+}
+
+/**
+ * Where the trailing chip goes, passed by context rather than by closure.
+ *
+ * **This is what keeps the prose the same DOM across a re-render.** A renderer
+ * declared inline is a new component type every time this file renders, and
+ * React unmounts a subtree whose type changed: the paragraphs would be rebuilt
+ * from scratch, which dropped the reader's text selection mid-drag and restarted
+ * the `vg-chunk` cascade from its first word. The renderers below are therefore
+ * module-level and constant, and the one thing they need per message — which
+ * offset ends the answer, and what to hang there — reaches them through this
+ * context instead.
+ */
+const TrailingSlot = createContext<{ node: ReactNode; end: number }>({
+  node: undefined,
+  end: Number.POSITIVE_INFINITY,
+})
+
+/** The trailing node for this element, or null where it does not belong here. */
+function useTrailing(node: Positioned | undefined): ReactNode {
+  const slot = useContext(TrailingSlot)
+  if (slot.node === undefined) return null
+  return (node?.position?.end?.offset ?? -1) >= slot.end ? slot.node : null
+}
+
+type WithNode<Tag extends keyof React.JSX.IntrinsicElements> =
+  ComponentPropsWithoutRef<Tag> & { node?: Positioned }
+
+/**
+ * The paragraph that carries the chip is a `div`, not a `p`.
+ *
+ * The chip is a disclosure and its panel is a block element, which a `p` may not
+ * contain: the browser closes the paragraph before the panel and hydration then
+ * mismatches the server's markup. Only the tag name differs — nothing here
+ * styles `p` specifically — and every other paragraph keeps its own tag.
+ */
+function Paragraph({ node, children, ...rest }: WithNode<"p">) {
+  const trailing = useTrailing(node)
+  if (trailing === null) return <p {...rest}>{children}</p>
+  return (
+    <div {...(rest as ComponentPropsWithoutRef<"div">)}>
+      {children}
+      {trailing}
+    </div>
+  )
+}
+
+function ListItem({ node, children, ...rest }: WithNode<"li">) {
+  const trailing = useTrailing(node)
+  return (
+    <li {...rest}>
+      {children}
+      {trailing}
+    </li>
+  )
+}
+
+function HeaderCell(props: ComponentPropsWithoutRef<"th">) {
+  return <th {...props} className="border border-border px-2.5 py-1.5 text-left font-semibold" />
+}
+
+function Cell(props: ComponentPropsWithoutRef<"td">) {
+  return <td {...props} className="border border-border px-2.5 py-1.5 align-top" />
+}
+
+type MarkdownComponents = NonNullable<
+  ComponentPropsWithoutRef<typeof ReactMarkdown>["components"]
+>
+const COMPONENTS: MarkdownComponents = {
+  a: Anchor,
+  table: Table,
+  p: Paragraph,
+  li: ListItem,
+  th: HeaderCell,
+  td: Cell,
+}
 
 /**
  * One block's prose, rendered as the Markdown it already is.
@@ -48,8 +130,13 @@ const PLAIN: RehypePlugins = []
  * spans (`word-cadence`), for the one block a `content.block` event just
  * delivered. It runs after parsing, never instead of it: partial Markdown is
  * still never rendered.
+ *
+ * Memoised on its props, because a finished block is a finished block: the
+ * transcript re-renders for every event of a live Turn, and reparsing text that
+ * did not change costs a parse per event and — before the renderers above were
+ * hoisted — cost the reader their selection as well.
  */
-export function Markdown({
+export const Markdown = memo(function Markdown({
   text,
   trailing,
   stagger = false,
@@ -65,14 +152,13 @@ export function Markdown({
    * the claim. Placed by source offset rather than by index, because the last
    * *element* is not the last *block* once a list is involved.
    */
-  trailing?: React.ReactNode
+  trailing?: ReactNode
   /** Cascade this block's prose in, a few words at a time. */
   stagger?: boolean
   className?: string
 }) {
   const end = text.trimEnd().length
-  const isLast = (node: { position?: { end?: { offset?: number } } } | undefined) =>
-    trailing !== undefined && (node?.position?.end?.offset ?? -1) >= end
+  const slot = useMemo(() => ({ node: trailing, end }), [trailing, end])
 
   return (
     <div
@@ -95,51 +181,20 @@ export function Markdown({
         className,
       )}
     >
-      <ReactMarkdown
-        // GFM for the two things a Vietnamese equities answer actually uses:
-        // tables of figures, and strikethrough on a superseded number.
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={stagger ? STAGGERED : PLAIN}
-        components={{
-          a: Anchor,
-          table: Table,
-          // The paragraph that carries the chip is a `div`, not a `p`. The chip
-          // is a disclosure and its panel is a block element, which a `p` may
-          // not contain: the browser closes the paragraph before the panel and
-          // hydration then mismatches the server's markup. Only the tag name
-          // differs — nothing here styles `p` specifically — and every other
-          // paragraph keeps its own tag.
-          p: ({ node, children, ...rest }) =>
-            isLast(node) ? (
-              <div {...(rest as ComponentPropsWithoutRef<"div">)}>
-                {children}
-                {trailing}
-              </div>
-            ) : (
-              <p {...rest}>{children}</p>
-            ),
-          li: ({ node, children, ...rest }) => (
-            <li {...rest}>
-              {children}
-              {isLast(node) && trailing}
-            </li>
-          ),
-          th: (props) => (
-            <th
-              {...props}
-              className="border border-border px-2.5 py-1.5 text-left font-semibold"
-            />
-          ),
-          td: (props) => (
-            <td {...props} className="border border-border px-2.5 py-1.5 align-top" />
-          ),
-        }}
-      >
-        {text}
-      </ReactMarkdown>
+      <TrailingSlot.Provider value={slot}>
+        <ReactMarkdown
+          // GFM for the two things a Vietnamese equities answer actually uses:
+          // tables of figures, and strikethrough on a superseded number.
+          remarkPlugins={[remarkGfm]}
+          rehypePlugins={stagger ? STAGGERED : PLAIN}
+          components={COMPONENTS}
+        >
+          {text}
+        </ReactMarkdown>
+      </TrailingSlot.Provider>
     </div>
   )
-}
+})
 
 /**
  * A table wide enough to need scrolling, scrolling inside its own box.
