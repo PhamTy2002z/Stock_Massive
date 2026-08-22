@@ -55,11 +55,10 @@ def llm_config(**overrides) -> LLMConfig:
             session=TokenPrices(input=2.0, cached_input=0.2, cache_write=2.0, output=5.0),
         ),
         lanes=BudgetLanes(
-            monthly_envelope_usd=50,
+            monthly_envelope_usd=45,
             analysis_usd=10,
             turn_usd=30,
             emergency_usd=5,
-            eval_usd=5,
         ),
     )
     return replace(base, **overrides) if overrides else base
@@ -155,11 +154,10 @@ class TestTheServiceCeilings:
     async def test_an_exhausted_lane_is_a_service_failure_rather_than_a_user_one(self):
         starved = llm_config(
             lanes=BudgetLanes(
-                monthly_envelope_usd=50,
+                monthly_envelope_usd=45,
                 analysis_usd=10,
                 turn_usd=0.000001,
                 emergency_usd=5,
-                eval_usd=5,
             )
         )
         with pytest.raises(TurnRefused) as refused:

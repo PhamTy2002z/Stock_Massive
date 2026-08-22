@@ -62,13 +62,13 @@ class FlagMessageRequest(BaseModel):
 
     Validated against :data:`FLAG_REASONS` rather than restated as an enum
     here, for the reason this module's docstring gives: a second spelling of
-    the four labels is a second place they can disagree, and the count in the
-    Eval Report would then be over a category the store cannot write.
+    the four labels is a second place they can disagree, and a count would then
+    be over a category the store cannot write.
 
     **There is no free-text field, and that is deliberate.** A comment box is a
-    promise that somebody reads it, and v1 has no dispute workflow to read one
-    (``docs/adr/0016``). The label is what the ops query counts; the transcript
-    and its Tool Call Trace are what a reviewer re-reads.
+    promise that somebody reads it, and v1 has no dispute workflow to read one.
+    The label is what the ops query counts; the transcript and its Tool Call
+    Trace are what a reviewer re-reads.
     """
 
     reason: str

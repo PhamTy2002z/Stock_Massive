@@ -1,8 +1,8 @@
 """The user's own transcript and their own notes, and nobody else's.
 
 Runs against a throwaway Postgres database beside whatever ``DATABASE_URL``
-points at, for the same reason the eval tests do: the search is full-text with
-accent folding, which is Postgres behaviour and cannot be proven against SQLite.
+points at, for the reason the search demands it: it is full-text with accent
+folding, which is Postgres behaviour and cannot be proven against SQLite.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from src.alpha.models import AgentKnowledge, AgentMessage, AgentThread
 from src.auth.models import User
 from src.core.database import Base
 
-from .eval_store import create_database, drop_database
+from .throwaway_db import create_database, drop_database
 
 MEMORY_DB = "stockmassive_memory_test"
 

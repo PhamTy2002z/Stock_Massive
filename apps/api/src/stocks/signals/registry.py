@@ -1218,8 +1218,8 @@ def registry_version() -> str:
     Derived from the declarations themselves rather than bumped by hand, for the
     same reason ``contract_hash`` is taken over the prose: a version somebody
     has to remember to bump is a version that eventually names the wrong
-    registry, and this one ends up in the Evidence Manifest and in ``eval_run``,
-    where being wrong is silent.
+    registry, and this one ends up in the Evidence Manifest, where being wrong
+    is silent.
 
     Only the six declarations a reader acts on are hashed — name, unit, sign,
     claim, source and the sanctioned interpretation. A threshold or a null

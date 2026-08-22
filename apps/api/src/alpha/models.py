@@ -248,10 +248,10 @@ class AgentThread(Base):
         return f"<AgentThread {self.id} user={self.user_id}>"
 
 
-# The four reason labels a flag may carry (``docs/adr/0016``). Declared where
-# the column is, for the same reason the Turn statuses are: the store, the
-# transport and the Eval Report all read one vocabulary, and a fifth label
-# invented in one of them would be a category nothing else can count.
+# The four reason labels a flag may carry. Declared where the column is, for the
+# same reason the Turn statuses are: the store, the transport and the ops query
+# all read one vocabulary, and a fifth label invented in one of them would be a
+# category nothing else can count.
 FLAG_WRONG_FIGURE = "wrong_figure"
 FLAG_OVERREACH = "overreach"
 FLAG_WRONGLY_REFUSED = "wrongly_refused"
@@ -460,8 +460,7 @@ event.listen(
 #
 # The other three stay as the literals ``src/agent/tools/catalog.py`` writes.
 # Naming them here would leave three constants with no reader, and adopting them
-# in the catalog is an edit inside ``src/agent/tools/``, which ``docs/adr/0016``
-# makes any pull request carry an Eval Report for.
+# in the catalog is an edit inside ``src/agent/tools/``.
 TOOL_CALL_UNKNOWN_TOOL = "unknown_tool"
 
 
@@ -542,10 +541,10 @@ class LlmCallUsage(Base):
     The four prices are copied onto the row rather than looked up later. A price
     change must not silently rewrite what last month cost.
 
-    ``owner_id`` is text because the four owner kinds are keyed differently — a
-    run by a bigint, a Turn's request message by a bigint, a probe by a run
-    identifier, an eval by a UUID. One nullable column per kind would be four
-    columns of which three are always null.
+    ``owner_id`` is text because the three owner kinds are keyed differently —
+    a run by a bigint, a Turn's request message by a bigint, a probe by a run
+    identifier. One nullable column per kind would be three columns of which
+    two are always null.
     """
 
     __tablename__ = "llm_call_usage"
@@ -555,11 +554,11 @@ class LlmCallUsage(Base):
         primary_key=True,
         autoincrement=True,
     )
-    # analysis_run | turn_request_message | capability_probe | eval_run
+    # analysis_run | turn_request_message | capability_probe
     owner_type = Column(String(32), nullable=False)
     owner_id = Column(String(64), nullable=False)
     user_id = Column(Integer, nullable=True)
-    # analysis | turn | emergency | eval
+    # analysis | turn | emergency
     lane = Column(String(16), nullable=False)
     route = Column(String(64), nullable=False)
     model = Column(String(64), nullable=False)
@@ -597,32 +596,3 @@ class LlmCallUsage(Base):
         return f"<LlmCallUsage {self.owner_type}:{self.owner_id} {self.status}>"
 
 
-class EvalRun(Base):
-    """One pass of the **Eval Battery**, and everything it was run against.
-
-    Every version that could move the score is copied onto the row — prompt,
-    tool catalog, registry, fixture — because a score without them is a number
-    nobody can reproduce or argue with.
-    """
-
-    __tablename__ = "eval_run"
-
-    id = Column(Uuid, primary_key=True)
-    started_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    finished_at = Column(DateTime(timezone=True), nullable=True)
-    # smoke | gate (``src/eval/harness.py``). Only ``gate`` runs the production
-    # route and models, and only a gate run may be attached to a pull request.
-    mode = Column(String(16), nullable=False)
-    route = Column(String(64), nullable=False)
-    model = Column(String(64), nullable=False)
-    prompt_version = Column(String(32), nullable=False)
-    tool_catalog_version = Column(String(32), nullable=False)
-    registry_version = Column(String(32), nullable=False)
-    fixture_version = Column(String(32), nullable=False)
-    # Per-category pass/fail totals. JSONB because the categories are the
-    # battery's business and adding one must not be a migration.
-    category_totals = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
-    report_path = Column(Text, nullable=True)
-
-    def __repr__(self) -> str:
-        return f"<EvalRun {self.id} {self.mode}>"

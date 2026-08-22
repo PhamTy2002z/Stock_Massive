@@ -3,7 +3,7 @@
 Every assertion here is about a *count*, and a count is the one thing a shared
 test database cannot give: another module's leftover Turn would move every rate
 and nobody would know which test was wrong. So this file creates its own
-throwaway Postgres beside the dev store, the same way the Eval Fixture tests do,
+throwaway Postgres beside the dev store, the way an exact-count suite must,
 and drops it afterwards.
 
 Four properties are what the file is for.
@@ -48,10 +48,9 @@ from src.alpha.models import (
     AgentTurn,
 )
 from src.auth.models import User
-from src.core.config import Settings
 from src.core.database import Base
 
-from .eval_store import create_database, drop_database
+from .throwaway_db import create_database, drop_database
 
 OPS_DB = "stockmassive_ops_test"
 
@@ -209,23 +208,6 @@ def test_the_window_is_configurable(world):
 
     assert snapshot(world).turns == 0
     assert snapshot(world, window_days=OPS_WINDOW_DAYS + 3).turns == 1
-
-
-def test_the_configured_default_is_the_window_the_report_is_written_over():
-    """``eval_ops_window_days`` cannot be imported from here, so it is pinned.
-
-    ``src/core/config.py`` cannot import :mod:`src.agent.ops` — the import graph
-    runs the other way — so the seven days is written down twice. This is the
-    assertion that keeps the two copies equal, because a settings default that
-    drifted would silently change the span every report is read over.
-
-    Read off the field rather than off a constructed ``Settings``: this is a
-    claim about the two code constants agreeing, and a developer who exported
-    ``EVAL_OPS_WINDOW_DAYS`` has configured their window rather than broken it.
-    """
-    assert (
-        Settings.model_fields["eval_ops_window_days"].default == OPS_WINDOW_DAYS
-    )
 
 
 def test_the_incomplete_rate_is_over_turns_not_over_incomplete_turns(world):

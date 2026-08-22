@@ -99,7 +99,7 @@ export const CANCELLING_LABEL = "Cancelling…"
 /**
  * What flagging a message says, and — the load-bearing half — what it does not.
  *
- * V1 has **no dispute workflow** (`docs/adr/0016`). One action carries a
+ * V1 has **no dispute workflow**. One action carries a
  * `message_id` and a reason label; it opens no ticket, notifies nobody and
  * suspends no account. So the acknowledgement states what was recorded and
  * stops there. A sentence like *"chúng tôi sẽ phản hồi"* would be a promise the
@@ -107,8 +107,9 @@ export const CANCELLING_LABEL = "Cancelling…"
  * that is never coming — which is worse than an action that admits its limit.
  *
  * What the flag is actually for is said plainly instead: it is read when the
- * answers are reviewed. That is true — a flag confirmed as a genuine failure
- * becomes a new Eval Case — and it promises this reader nothing.
+ * answers are reviewed. That is true — a flag confirmed as a genuine failure is
+ * a defect somebody reads the transcript for — and it promises this reader
+ * nothing.
  *
  * The four labels are the reader's vocabulary rather than the column's, so they
  * describe what went wrong in the answer and never name a mechanism: nobody

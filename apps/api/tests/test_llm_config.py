@@ -64,16 +64,15 @@ class TestConfiguredRoute:
     def test_lane_allocations_come_from_settings(self):
         config = llm_config_from_settings(
             _settings(
-                llm_budget_monthly_usd=50.0,
+                llm_budget_monthly_usd=45.0,
                 llm_budget_analysis_usd=10.0,
                 llm_budget_turn_usd=30.0,
                 llm_budget_emergency_usd=5.0,
-                llm_budget_eval_usd=5.0,
             )
         )
 
-        assert config.lanes.monthly_envelope_usd == 50.0
-        assert config.lanes.allocated_usd == 50.0
+        assert config.lanes.monthly_envelope_usd == 45.0
+        assert config.lanes.allocated_usd == 45.0
 
     def test_per_user_ceilings_come_from_settings(self):
         config = llm_config_from_settings(
@@ -93,7 +92,7 @@ class TestConfiguredRoute:
         assert config.ceilings.rolling_30d_usd == 40.0
 
     def test_zero_reads_as_unlimited_one_ceiling_at_a_time(self):
-        """The convention ``llm_eval_run_cost_ceiling_usd`` already uses."""
+        """``0`` means unlimited, and only for the ceiling that carries it."""
         config = llm_config_from_settings(
             _settings(llm_user_turn_starts_per_day=0, llm_user_daily_usd=0)
         )
@@ -113,14 +112,13 @@ class TestConfiguredRoute:
         assert config.ceilings.daily_usd == 3.0
         assert config.ceilings.rolling_30d_usd == 15.0
 
-    def test_an_unmetered_envelope_is_all_five_values_or_none(self):
+    def test_an_unmetered_envelope_is_all_four_values_or_none(self):
         unmetered = llm_config_from_settings(
             _settings(
                 llm_budget_monthly_usd=0,
                 llm_budget_analysis_usd=0,
                 llm_budget_turn_usd=0,
                 llm_budget_emergency_usd=0,
-                llm_budget_eval_usd=0,
             )
         )
 

@@ -260,11 +260,10 @@ def _config():
             session=prices,
         ),
         lanes=BudgetLanes(
-            monthly_envelope_usd=50.0,
+            monthly_envelope_usd=45,
             analysis_usd=10.0,
             turn_usd=30.0,
             emergency_usd=5.0,
-            eval_usd=5.0,
         ),
     )
 

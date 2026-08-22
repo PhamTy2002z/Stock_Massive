@@ -89,11 +89,10 @@ def llm_config(*, enabled: bool = True) -> LLMConfig:
             session=TokenPrices(input=2.0, cached_input=0.2, cache_write=2.0, output=5.0),
         ),
         lanes=BudgetLanes(
-            monthly_envelope_usd=50,
+            monthly_envelope_usd=45,
             analysis_usd=10,
             turn_usd=30,
             emergency_usd=5,
-            eval_usd=5,
         ),
     )
 

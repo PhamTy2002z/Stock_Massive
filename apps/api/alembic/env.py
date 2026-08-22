@@ -31,7 +31,6 @@ from src.alpha.models import (  # noqa: E402,F401
     AgentTurn,
     Analysis,
     AnalysisRun,
-    EvalRun,
     LlmCallUsage,
     WatchlistEntry,
 )

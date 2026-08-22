@@ -1,8 +1,8 @@
-"""The one fixed ops query: what the field is doing, read into the Eval Report.
+"""The one fixed ops query: what the field is doing, read on demand.
 
-``docs/adr/0016`` settles the shape of production observability for a product
-with **one developer and no on-call rotation**, and the settlement is a refusal:
-*no new tables and no automatic alerting.* Alerts nobody is rostered to answer
+Production observability for a product with **one developer and no on-call
+rotation** is settled here by a refusal: *no new tables and no automatic
+alerting.* Alerts nobody is rostered to answer
 are noise, and a metrics table is a second store to keep true. Every signal that
 would justify one already exists on rows the product writes anyway:
 
@@ -15,31 +15,27 @@ would justify one already exists on rows the product writes anyway:
 - flagged-message counts, the nullable pair on ``agent_message``.
 
 So there is exactly **one** query, it is read-only, it returns a value, and
-nothing pages. What makes it more than a dashboard nobody opens is where its
-output goes: **into the next Eval Report**, written there by the harness rather
-than pasted in by hand. The battery measures a frozen fixture and the field
-measures live traffic, and a number from each in one document is the only place
-the two get reconciled.
+nothing pages. It is read when somebody asks what the field is doing, which is
+the only occasion on which any of these numbers means anything.
 
 There is no threshold on any of these numbers, and that is a change of substance
 rather than of wording. The rule this query used to carry — a sustained
 ``grounding_failed`` rate reopening a category — was a rule about the
-Recommendation Gate, and ``docs/adr/0026`` removed the Gate. A threshold kept
-over a mechanism that no longer exists would be read as a live rule by the next
-person who opened the report.
+Recommendation Gate, and the Gate is gone. A threshold kept over a mechanism
+that no longer exists would be read as a live rule by the next person who read
+these numbers.
 
 ## Two things this module does not do
 
 **It adds no index.** ``agent_turn`` carries only ``(thread_id, started_at)``,
 so a service-wide seven-day scan is a sequential one. That is the right trade
 for a query run twice a month against a store one developer's users write: an
-index is a cost on every Turn ever written, paid forever, to speed up a report.
+index is a cost on every Turn ever written, paid forever, to speed up a reading.
 Revisit it when the scan is slow enough to notice, which is a fact about row
 counts rather than a prediction.
 
-**It reads the application store and never writes to it.** The battery runs
-entirely inside ``EVAL_DATABASE_URL``; this query is the one part of a run that
-looks at the database the API serves from, and it looks with ``SELECT`` only.
+**It reads the application store and never writes to it.** It looks at the
+database the API serves from, and it looks with ``SELECT`` only.
 """
 
 from __future__ import annotations
@@ -61,8 +57,8 @@ from src.alpha.models import (
 
 from .persistence import flag_counts_between
 
-#: The window ``docs/adr/0016`` states its numbers over. Configurable per run,
-#: because a wider window is a useful reading — there is no rule attached to any
+#: The window the numbers are stated over. Configurable per call, because a
+#: wider window is a useful reading — there is no rule attached to any
 #: particular span.
 OPS_WINDOW_DAYS = 7
 
@@ -71,8 +67,8 @@ OPS_WINDOW_DAYS = 7
 class OpsSnapshot:
     """The field signals over one window, and nothing derived stored.
 
-    Rates are properties rather than fields for the reason ``eval_run`` stores
-    counts and not percentages: a stored rate is a number two later readers
+    Rates are properties rather than fields for the reason counts are stored
+    and percentages are not: a stored rate is a number two later readers
     disagree about the denominator of.
     """
 

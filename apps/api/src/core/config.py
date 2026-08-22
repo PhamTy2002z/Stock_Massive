@@ -296,18 +296,13 @@ class Settings(BaseSettings):
     llm_price_session_cache_write_usd_per_mtok: float = 0.0
     llm_price_session_output_usd_per_mtok: float = 0.0
 
-    # Hạn mức $50/tháng và bốn lane chia nhau nó (docs/adr/0014). Là cấu hình
-    # chứ không phải hằng số vì hạn mức là một quyết định chi tiêu, không phải
-    # lời hứa của sản phẩm; Budget Validation kiểm tra bốn lane vẫn cộng đúng
-    # bằng hạn mức đó.
-    llm_budget_monthly_usd: float = 50.0
+    # Hạn mức $45/tháng và ba lane chia nhau nó. Là cấu hình chứ không phải
+    # hằng số vì hạn mức là một quyết định chi tiêu, không phải lời hứa của sản
+    # phẩm; Budget Validation kiểm tra ba lane vẫn cộng đúng bằng hạn mức đó.
+    llm_budget_monthly_usd: float = 45.0
     llm_budget_analysis_usd: float = 10.0
     llm_budget_turn_usd: float = 30.0
     llm_budget_emergency_usd: float = 5.0
-    llm_budget_eval_usd: float = 5.0
-    # Zero keeps Eval metering but disables synthetic USD refusals for the local
-    # CLIProxy/CCS route. Set a positive value for a metered production route.
-    llm_eval_run_cost_ceiling_usd: float = 0.0
 
     # Năm trần per-user của docs/adr/0014. Là cấu hình chứ không phải hằng số vì
     # một account được tiêu bao nhiêu trong ngày là quyết định chi tiêu: bản
@@ -315,48 +310,14 @@ class Settings(BaseSettings):
     # một API tính tiền theo call. Con số của ADR vẫn là mặc định ở đây, nên hợp
     # đồng còn một chỗ được ghi lại và một biến env là đủ để siết lại.
     #
-    # `0` = không giới hạn, cùng quy ước với llm_eval_run_cost_ceiling_usd ở
-    # trên: mọi call vẫn được ghi vào `llm_call_usage`, chỉ bỏ phần từ chối.
+    # `0` = không giới hạn: mọi call vẫn được ghi vào `llm_call_usage`, chỉ bỏ
+    # phần từ chối.
     llm_user_turn_starts_per_day: int = 20
     llm_user_active_turns: int = 1
     llm_system_active_turns: int = 3
     llm_user_daily_usd: float = 3.0
     llm_user_rolling_30d_usd: float = 15.0
 
-    # Eval Battery (src/eval/, docs/adr/0016). Không có giá trị mặc định nào ở
-    # đây trỏ vào database đang phục vụ: pin chạy battery phải là một hành động
-    # cố ý, và một mặc định rỗng từ chối thẳng còn hơn một mặc định tiện tay ghi
-    # đè lên store của dev.
-    #
-    # `eval_database_url` là database riêng mà Eval Fixture được nạp vào. Battery
-    # không đọc và không ghi vào `database_url`; nếu hai URL trỏ cùng một
-    # database thì `src/eval/store.py` từ chối chạy.
-    eval_database_url: str = ""
-    eval_fixture_dir: str = "eval/fixtures"
-    # Ở gốc repo chứ không phải trong `apps/api`. `make eval` chạy từ `apps/api`,
-    # nên "docs/eval" tương đối sẽ rơi vào `apps/api/docs/eval` — trong khi
-    # ADR-0016 yêu cầu report được commit ở `docs/eval/` cạnh chính ADR đó, để
-    # baseline có một lịch sử diff được ở nơi người đọc tìm tài liệu.
-    eval_report_dir: str = "../../docs/eval"
-
-    # Cửa sổ mà ops query cố định đọc năm tín hiệu hiện trường, tính bằng ngày
-    # (`src/agent/ops.py`, ADR-0016). Cấu hình được vì một triển khai có lưu
-    # lượng khác có thể cần cửa sổ rộng hơn để con số nói lên điều gì đó. Ngưỡng
-    # 5% thì **không** cấu hình được: "5% số Turn trong 7 ngày" là một câu, và
-    # một tỷ lệ đo trên khoảng khác không còn là đại lượng mà quy tắc nói tới —
-    # nên khi đổi số này, dòng ngưỡng trong Eval Report cũng nói rõ nó đang đọc
-    # trên cửa sổ nào.
-    eval_ops_window_days: int = 7
-
-    # Tuyến dev mà chế độ `smoke` chạy trên đó — CLIProxyAPI cục bộ hoặc một
-    # model dev — và nó không có giá trị gating vì không chạm tới model
-    # production. Giá bằng 0 là sự thật về tuyến này chứ không phải một cách lách
-    # trần: một lần chạy smoke không tiêu tiền, nên nó chứng minh harness còn
-    # sống mà không tiêu vào lane $5.
-    eval_smoke_base_url: str = ""
-    eval_smoke_api_key: str = ""
-    eval_smoke_model_batch: str = ""
-    eval_smoke_model_session: str = ""
 
     # Rate Limiting
     rate_limit_enabled: bool = True

@@ -44,12 +44,11 @@ TURN_COST_CEILING_USD = 0.50
 # Money compared in floating point needs a tolerance, and the unit the ledger
 # is denominated in is the honest one: a micro-USD (``docs/adr/0014``).
 MICRO_USD = 1e-6
-HARD_MONTHLY_ENVELOPE_USD = 50.0
+HARD_MONTHLY_ENVELOPE_USD = 45.0
 HARD_LANE_ALLOCATIONS_USD = {
     "analysis": 10.0,
     "turn": 30.0,
     "emergency": 5.0,
-    "eval": 5.0,
 }
 
 
@@ -175,10 +174,9 @@ def _lane_failures(config: LLMConfig, analysis: float, turn: float) -> list[Budg
     lanes = config.lanes
 
     if lanes.unmetered:
-        # A zero envelope across all four lanes is a deployment that declares no
-        # monthly ceiling at all — the ``0`` of ``LLM_EVAL_RUN_COST_CEILING_USD``
-        # widened to the whole envelope, for a route billed by subscription
-        # rather than per call. The price table above is still validated, so
+        # A zero envelope across all three lanes is a deployment that declares
+        # no monthly ceiling at all, for a route billed by subscription rather
+        # than per call. The price table above is still validated, so
         # every token and cost row remains priced and comparable; what goes away
         # is the synthetic USD refusal.
         #
@@ -191,7 +189,7 @@ def _lane_failures(config: LLMConfig, analysis: float, turn: float) -> list[Budg
         failures.append(
             BudgetFailure(
                 "monthly_envelope",
-                f"the four lanes allocate ${lanes.allocated_usd:.2f} against a "
+                f"the three lanes allocate ${lanes.allocated_usd:.2f} against a "
                 f"${lanes.monthly_envelope_usd:.2f} envelope",
             )
         )
@@ -200,7 +198,6 @@ def _lane_failures(config: LLMConfig, analysis: float, turn: float) -> list[Budg
         "analysis": lanes.analysis_usd,
         "turn": lanes.turn_usd,
         "emergency": lanes.emergency_usd,
-        "eval": lanes.eval_usd,
     }
     if (
         abs(lanes.monthly_envelope_usd - HARD_MONTHLY_ENVELOPE_USD) > MICRO_USD
@@ -212,8 +209,8 @@ def _lane_failures(config: LLMConfig, analysis: float, turn: float) -> list[Budg
         failures.append(
             BudgetFailure(
                 "monthly_envelope",
-                "the configured envelope must remain $50 split as $10 Analysis, "
-                "$30 Turn, $5 emergency and $5 eval",
+                "the configured envelope must remain $45 split as $10 Analysis, "
+                "$30 Turn and $5 emergency",
             )
         )
 

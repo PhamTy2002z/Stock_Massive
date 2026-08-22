@@ -39,15 +39,6 @@ TURN_COST_MICRO_USD = 500_000
 # unlimited; the per-Turn and per-Analysis ceilings above are the contract and
 # stay constants.
 PROBE_DAILY_MICRO_USD = 250_000
-# The hard ceiling on one Eval Battery run (``docs/adr/0016``). Enforced here
-# rather than by the harness counting its own spend, and that placement is the
-# whole point: it is the same locked transaction every other call passes
-# through, so a run cannot exceed it by racing itself, and there is no second
-# arithmetic that could disagree with the ledger about what has been spent.
-#
-# ~168 runs at roughly 6k input / 800 output is $2.5–3, which is about two gate
-# runs a month inside the $5 eval lane of ``docs/adr/0014``.
-EVAL_RUN_COST_MICRO_USD = 2_500_000
 ICT = ZoneInfo("Asia/Ho_Chi_Minh")
 
 
@@ -55,14 +46,12 @@ class BudgetLane(str, Enum):
     ANALYSIS = "analysis"
     TURN = "turn"
     EMERGENCY = "emergency"
-    EVAL = "eval"
 
 
 class OwnerType(str, Enum):
     ANALYSIS_RUN = "analysis_run"
     TURN_REQUEST_MESSAGE = "turn_request_message"
     CAPABILITY_PROBE = "capability_probe"
-    EVAL_RUN = "eval_run"
 
 
 @dataclass(frozen=True)
@@ -142,10 +131,9 @@ class BudgetRefusal(RuntimeError):
 #: The agent loop turns a refusal into a Turn's ``terminal_reason`` and ends the
 #: Turn where it is, so a caller holding only the finished Turn has a *string*
 #: and no exception to catch. Matching that string against a literal it chose
-#: itself is how a caller comes to recognise one refusal and sail past the rest:
-#: the Eval Battery did exactly that, stopping on ``eval_budget_exhausted`` while
-#: an exhausted lane let it run to the end and publish a score over Turns that
-#: never reached the model.
+#: itself is how a caller comes to recognise one refusal and sail past the rest,
+#: which is how a caller comes to treat an exhausted lane as a result rather
+#: than a stop.
 #:
 #: Kept beside the refusals rather than at the reading end, and pinned by a test
 #: that scans this module for every reason actually raised — a set maintained by
@@ -155,7 +143,6 @@ BUDGET_REFUSAL_REASONS: frozenset[str] = frozenset(
         "analysis_cost",
         "analysis_input_per_call",
         "analysis_output_per_call",
-        "eval_budget_exhausted",
         "lane_budget_exhausted",
         "probe_budget_exhausted",
         "system_active_turns",
@@ -254,24 +241,14 @@ class SpendAdmission:
                         called_at = dispatch_at
                         break
                     called_at = dispatch_at
-                unlimited_eval = (
-                    candidate.owner.type is OwnerType.EVAL_RUN
-                    and self._config.eval_run_cost_ceiling_usd is None
+                lane_spent, lane_limit = _assert_lane_headroom(
+                    session,
+                    config=self._config,
+                    lane=candidate.lane,
+                    reserved=reserved,
+                    month_start=month_start,
+                    month_reset=month_reset,
                 )
-                if unlimited_eval:
-                    # Local CLIProxy/CCS runs are metered but not refused by a
-                    # synthetic USD envelope. Production sets a positive
-                    # per-run ceiling, restoring both Eval budget checks.
-                    lane_spent, lane_limit = 0, float("inf")
-                else:
-                    lane_spent, lane_limit = _assert_lane_headroom(
-                        session,
-                        config=self._config,
-                        lane=candidate.lane,
-                        reserved=reserved,
-                        month_start=month_start,
-                        month_reset=month_reset,
-                    )
                 if candidate.owner.type is OwnerType.CAPABILITY_PROBE:
                     probe_spent = _charged_cost(
                         session,
@@ -334,33 +311,6 @@ class SpendAdmission:
                         day_start,
                         day_reset,
                     )
-                elif candidate.owner.type is OwnerType.EVAL_RUN:
-                    owner_cost = _owner_cost(session, candidate.owner)
-                    configured_ceiling = self._config.eval_run_cost_ceiling_usd
-                    ceiling_micro_usd = (
-                        None
-                        if configured_ceiling is None
-                        else int(round(configured_ceiling * 1_000_000))
-                    )
-                    if (
-                        ceiling_micro_usd is not None
-                        and owner_cost + reserved > ceiling_micro_usd
-                    ):
-                        # ``docs/adr/0016``: the harness stops and reports this.
-                        # It must never drop the remaining cases and publish a
-                        # score — a battery that truncates itself is a battery
-                        # that lies — so this refusal is fatal to the run rather
-                        # than something a case skips past.
-                        raise BudgetRefusal(
-                            "eval_budget_exhausted",
-                            "This Eval Battery run has exhausted its allowance.",
-                            operator_detail=(
-                                f"eval_run {candidate.owner.id} has {owner_cost} "
-                                f"micro-USD charged against "
-                                f"{ceiling_micro_usd} and requested "
-                                f"{reserved} more"
-                            ),
-                        )
                 row = LlmCallUsage(
                     owner_type=candidate.owner.type.value,
                     owner_id=candidate.owner.id,
@@ -687,13 +637,10 @@ def _micro_usd(
 def check_candidate_shape(candidate: SpendRequest) -> None:
     """The per-call ceilings, which depend on what kind of artifact is paying.
 
-    Public because the Eval Battery reaches it. The battery charges every
-    provider call to its ``eval_run`` (``docs/adr/0016``), so an Analysis
-    generation run over the fixture arrives at :meth:`SpendAdmission.reserve`
-    under a different owner and would skip the Analysis per-call ceilings
-    entirely — and a battery that admitted an envelope production would refuse
-    is a battery measuring a system nobody runs. It asks this the same way, on
-    the spend the production path built, before redirecting the owner.
+    Public because a caller that redirects the owner of a call still owes the
+    ceilings of the work that produced it: asked here, on the spend the
+    production path built, the answer does not depend on whose name the row
+    ends up carrying.
     """
     if candidate.owner.type is OwnerType.ANALYSIS_RUN:
         if candidate.input_tokens > ANALYSIS_INPUT_PER_CALL:
@@ -843,7 +790,6 @@ def _lane_limit_micro_usd(config: LLMConfig, lane: BudgetLane) -> int | float:
         BudgetLane.ANALYSIS: config.lanes.analysis_usd,
         BudgetLane.TURN: config.lanes.turn_usd,
         BudgetLane.EMERGENCY: config.lanes.emergency_usd,
-        BudgetLane.EVAL: config.lanes.eval_usd,
     }[lane]
     return int(
         (Decimal(str(amount)) * Decimal(1_000_000)).to_integral_value(
@@ -929,7 +875,6 @@ def _read_turn_state(
 __all__ = [
     "BUDGET_REFUSAL_REASONS",
     "check_candidate_shape",
-    "EVAL_RUN_COST_MICRO_USD",
     "AdmissionLedger",
     "BudgetLane",
     "BudgetRefusal",
