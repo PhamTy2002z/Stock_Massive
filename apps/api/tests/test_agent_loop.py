@@ -30,6 +30,8 @@ from src.agent.loop import (
     CONTEXT_OVERFLOW,
     DEADLINE_EXPIRED,
     DEFAULT_MAX_OUTPUT_TOKENS,
+    EMPTY_AFTER_TOOLS_NOTE,
+    EMPTY_ANSWER,
     EXTERNAL_TOOL_EXHAUSTED_MESSAGE,
     GATEWAY_TIMEOUT,
     LLM_CALL_TIMEOUT,
@@ -116,11 +118,10 @@ def config() -> LLMConfig:
             version="2026-08", effective_from=None, batch=prices, session=prices
         ),
         lanes=BudgetLanes(
-            monthly_envelope_usd=100.0,
+            monthly_envelope_usd=90,
             analysis_usd=40.0,
             turn_usd=40.0,
             emergency_usd=10.0,
-            eval_usd=10.0,
         ),
     )
 
@@ -321,14 +322,94 @@ async def test_prose_before_a_tool_call_is_narration_and_not_the_answer() -> Non
 
 
 @pytest.mark.asyncio
-async def test_a_turn_that_never_speaks_publishes_no_delta() -> None:
+async def test_a_turn_that_never_answers_is_incomplete_and_buys_no_call() -> None:
+    # No delta, because there was nothing to say — but not ``complete``: a Turn
+    # that says it finished and holds nothing to read is the worst of both. And
+    # no tool ran, so there is nothing a nudge could point the model at; asking
+    # again here would be the apology call.
     publisher = RecordingPublisher()
-    outcome = await loop(
-        FakeClient([Completion(model=SESSION_MODEL, text=None)]), publisher=publisher
-    ).run(turn_request())
+    client = FakeClient([Completion(model=SESSION_MODEL, text=None)])
+
+    outcome = await loop(client, publisher=publisher).run(turn_request())
 
     assert publisher.deltas == []
     assert outcome.text is None
+    assert outcome.status is TurnStatus.INCOMPLETE
+    assert outcome.terminal_reason == EMPTY_ANSWER
+    assert len(client.requests) == 1
+
+
+def narrated(text: str, *, tool: str = "web_search", query: str = "lãi suất") -> Completion:
+    """A round that introduces its tool call, which is what the Contract asks for."""
+    return Completion(
+        model=SESSION_MODEL,
+        text=text,
+        tool_calls=(
+            ToolCall(id="c0", name=tool, arguments={"query": query}, output_index=0),
+        ),
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_round_of_tools_with_no_reply_is_nudged_once_and_then_answers() -> None:
+    # The failure this treats is not silence. The Contract asks for a sentence
+    # before every tool call, so a Turn that ran tools nearly always has prose —
+    # what it can lack is a reply, and publishing the introduction as the
+    # conclusion is what ``turns.py`` would otherwise do.
+    client = FakeClient(
+        [
+            narrated("Để tôi tra đã."),
+            Completion(model=SESSION_MODEL, text=None),
+            answer("Kết quả là 6,5%."),
+        ]
+    )
+
+    outcome = await loop(client).run(turn_request())
+
+    assert outcome.status is TurnStatus.COMPLETE
+    assert outcome.answer == "Kết quả là 6,5%."
+    # Three calls: the round, the round that answered nothing, and the one the
+    # nudge bought. The nudge does not spend a round.
+    assert len(client.requests) == 3
+    assert outcome.rounds_used == 1
+    assert any(
+        message.content == EMPTY_AFTER_TOOLS_NOTE for message in client.requests[2].messages
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_nudge_is_spent_once_and_the_narration_survives_the_turn() -> None:
+    client = FakeClient(
+        [
+            narrated("Để tôi tra đã."),
+            Completion(model=SESSION_MODEL, text=None),
+            Completion(model=SESSION_MODEL, text=None),
+        ]
+    )
+
+    outcome = await loop(client).run(turn_request())
+
+    assert outcome.status is TurnStatus.INCOMPLETE
+    assert outcome.terminal_reason == EMPTY_ANSWER
+    # One nudge, not two: the second empty answer is not asked about again.
+    assert len(client.requests) == 3
+    # The narration is not thrown away — it is what ``turns.py`` builds the
+    # message from, so the reader keeps what the Turn did say.
+    assert outcome.text == "Để tôi tra đã."
+    assert outcome.answer is None
+    # And the evidence the Turn paid for is still attached.
+    assert [call.name for call in outcome.tool_calls] == ["web_search"]
+
+
+@pytest.mark.asyncio
+async def test_a_reply_that_arrives_without_narration_is_not_nudged() -> None:
+    client = FakeClient([wants("web_search"), answer("Kết quả là 6,5%.")])
+
+    outcome = await loop(client).run(turn_request())
+
+    assert outcome.status is TurnStatus.COMPLETE
+    assert len(client.requests) == 2
 
 
 # -- rounds ------------------------------------------------------------------

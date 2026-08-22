@@ -115,17 +115,16 @@ services:
       LLM_PRICE_SESSION_CACHED_INPUT_USD_PER_MTOK: ${LLM_PRICE_SESSION_CACHED_INPUT_USD_PER_MTOK:-0}
       LLM_PRICE_SESSION_CACHE_WRITE_USD_PER_MTOK: ${LLM_PRICE_SESSION_CACHE_WRITE_USD_PER_MTOK:-0}
       LLM_PRICE_SESSION_OUTPUT_USD_PER_MTOK: ${LLM_PRICE_SESSION_OUTPUT_USD_PER_MTOK:-0}
-      # Trần chi tiêu. `0` = không giới hạn, và với bốn lane thì phải cả bốn
-      # cùng 0 (một lane 0 lẫn giữa ba lane có tiền là biến bị bỏ trống, và
+      # Trần chi tiêu. `0` = không giới hạn, và với ba lane thì phải cả ba
+      # cùng 0 (một lane 0 lẫn giữa hai lane có tiền là biến bị bỏ trống, và
       # Budget Validation chặn startup vì lane không được cấp vốn từ chối mọi
       # call). Bản dev/nội bộ chạy qua route thuê bao nên mặc định là 0: ledger
       # vẫn ghi đủ token và giá, chỉ bỏ phần từ chối bằng USD tổng hợp. Trỏ vào
-      # API tính tiền theo call thì đặt lại 50/10/30/5/5 của docs/adr/0014.
+      # API tính tiền theo call thì đặt lại 45/10/30/5.
       LLM_BUDGET_MONTHLY_USD: ${LLM_BUDGET_MONTHLY_USD:-0}
       LLM_BUDGET_ANALYSIS_USD: ${LLM_BUDGET_ANALYSIS_USD:-0}
       LLM_BUDGET_TURN_USD: ${LLM_BUDGET_TURN_USD:-0}
       LLM_BUDGET_EMERGENCY_USD: ${LLM_BUDGET_EMERGENCY_USD:-0}
-      LLM_BUDGET_EVAL_USD: ${LLM_BUDGET_EVAL_USD:-0}
       # Năm trần per-user của docs/adr/0014 (20 Turn/ngày ICT, $3/ngày, $15/30
       # ngày, 1 Turn đang chạy mỗi account, 3 Turn toàn hệ thống). `0` = không
       # giới hạn từng cái một. LLM_SYSTEM_ACTIVE_TURNS cấu hình cả semaphore
@@ -135,7 +134,6 @@ services:
       LLM_SYSTEM_ACTIVE_TURNS: ${LLM_SYSTEM_ACTIVE_TURNS:-0}
       LLM_USER_DAILY_USD: ${LLM_USER_DAILY_USD:-0}
       LLM_USER_ROLLING_30D_USD: ${LLM_USER_ROLLING_30D_USD:-0}
-      LLM_EVAL_RUN_COST_CEILING_USD: ${LLM_EVAL_RUN_COST_CEILING_USD:-0}
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       WEB_TOOLS_ENABLED: ${WEB_TOOLS_ENABLED:-false}
       WEB_FETCH_MAX_BYTES: ${WEB_FETCH_MAX_BYTES:-524288}

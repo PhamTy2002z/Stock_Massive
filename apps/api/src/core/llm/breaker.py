@@ -4,8 +4,8 @@
 the reason it exists: *"Before this module there were three pacers and none of
 them was the quota."* The LLM route has the same arrangement one layer up. The
 Collector's nightly lane and an interactive Turn share one route allowance, they
-run in separate processes whenever the Eval Battery or a second worktree is up,
-and neither can see the 429 the other just received — so both keep asking, and
+run in separate processes whenever a second worktree is up, and neither can see
+the 429 the other just received — so both keep asking, and
 each answer costs a paid request to be told *not now*.
 
 So a 429 is written once, to Redis, keyed by route and model, and every caller

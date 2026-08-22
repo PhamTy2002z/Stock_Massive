@@ -34,6 +34,14 @@ their budget is spent so the terminal branch still names the condition.
 with its partial answer and the traces of what ran. Spending a call to
 apologise for having no budget is the one thing that must not happen here.
 
+**An absent answer is not an answer.** A Turn whose reply is empty is
+``incomplete`` under :data:`EMPTY_ANSWER`, never ``complete``. The one paid call
+this loop buys on a failure is the exception that proves the rule above: after a
+round of tools returned results and the model replied with nothing, one nudge is
+bought because the evidence is already paid for and a call can still turn it into
+an answer. A Turn that has run no tool buys nothing, because there would be
+nothing for the note to point at — that is the apology call.
+
 **The text the reader gets is the sum of the deltas.** Every piece of prose the
 model produces is recorded and published as a delta in the same step, so a
 reconnecting browser rebuilding from a checkpoint and a browser that followed
@@ -171,6 +179,12 @@ AUTH_UNAVAILABLE = "auth_unavailable"
 CANCELLED_BY_USER = "cancelled_by_user"
 CONTENT_POLICY_BLOCKED = "content_policy_blocked"
 CONTEXT_OVERFLOW = "context_overflow"
+# The route answered, was paid for, and said nothing a reader can use. Its own
+# reason because its remedy is its own: neither the transcript nor the output
+# ceiling is wrong, and there is nothing to retry that has not been retried —
+# ``core/llm/client.py`` already asked again and swapped the model before
+# handing this back.
+EMPTY_ANSWER = "empty_answer"
 GATEWAY_TIMEOUT = "gateway_timeout"
 LLM_CALL_TIMEOUT = "llm_call_timeout"
 MODEL_REFUSAL = "model_refusal"
@@ -275,6 +289,22 @@ ROUNDS_EXHAUSTED_NOTE = (
 # that funds the call and the ceiling the context is constructed against must
 # not disagree with the message that actually goes out.
 SYSTEM_NOTE_TOKENS = 160
+
+# What the model is told when it came back from a round of tools with no reply,
+# and how many times a Turn may say it. One, and low on purpose: the same shape
+# Hermes gives ``_post_tool_empty_retried``, a once-only flag. A second nudge
+# buys a second paid call to learn what the first one already established.
+#
+# Said only where it can be acted on. A Turn that has not run a tool has nothing
+# for this note to point at, and spending a call to ask it to try again would be
+# the apology call this loop does not make.
+MAX_EMPTY_NUDGES = 1
+EMPTY_AFTER_TOOLS_NOTE = (
+    "Your last message contained no answer for the reader — only the sentence "
+    "introducing the tool calls. The results of those calls are above. Write the "
+    "answer now from what they returned, and say plainly which part of the "
+    "question they did not settle."
+)
 
 # How long one round's tools may take, all of them together. The calls of a
 # round run concurrently, so this is a per-call ceiling for the ordinary batch
@@ -496,41 +526,6 @@ class TurnRequest:
     summarised_turns: int = 0
 
 
-@dataclass(frozen=True)
-class SpendIdentity:
-    """Which durable artifact this loop's provider calls are charged to.
-
-    ``docs/adr/0014`` requires every provider call to name an owner with a
-    non-null id, and there are two artifacts that can be that owner for a run of
-    *this* loop: the user's request message, which is a Turn, and an eval run,
-    which is a battery running the very same loop.
-
-    A parameter rather than a branch inside :meth:`AgentLoop._complete`, because
-    the alternative to a seam here is an eval-only code path through the agent
-    loop — and a battery that exercises a different loop from the one that
-    answers users measures the wrong thing.
-
-    ``charge_to_user`` is off for a battery deliberately: an eval actor is not a
-    customer, and charging it the per-user daily allowance would refuse the run
-    for a reason that has nothing to do with what it is measuring.
-    """
-
-    owner_type: OwnerType = OwnerType.TURN_REQUEST_MESSAGE
-    lane: BudgetLane = BudgetLane.TURN
-    owner_id: str | None = None
-    charge_to_user: bool = True
-
-    def owner(self, request: "TurnRequest") -> CallOwner:
-        return CallOwner(
-            type=self.owner_type,
-            id=self.owner_id or str(request.request_message_id),
-            user_id=request.user_id if self.charge_to_user else None,
-        )
-
-
-#: What a Turn served to a user is charged to, and the default everywhere.
-TURN_SPEND = SpendIdentity()
-
 
 @dataclass(frozen=True)
 class TurnDraft:
@@ -666,6 +661,10 @@ class _TurnState:
     compressions: int = 0
     output_reductions: int = 0
     external_calls: int = 0
+    # Per-Turn like the two above, and for the same reason: a route that answered
+    # without a reply once has been asked again already, and rediscovering that in
+    # a later round costs another call.
+    empty_nudges: int = 0
     # The note waiting for the next call to carry it, and cleared by the call
     # that sent it: a Turn told twice about one observation has been charged
     # twice for it.
@@ -718,7 +717,6 @@ class AgentLoop:
         call_timeout_seconds: float = LLM_CALL_TIMEOUT_SECONDS,
         tool_timeout_seconds: float = TOOL_TIMEOUT_SECONDS,
         deadline_seconds: float | None = TURN_DEADLINE_SECONDS,
-        spend: SpendIdentity = TURN_SPEND,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._client = client
@@ -732,7 +730,6 @@ class AgentLoop:
         self._call_timeout = call_timeout_seconds
         self._tool_timeout = tool_timeout_seconds
         self._deadline = deadline_seconds
-        self._spend = spend
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         # Resolved once, here. ``docs/adr/0008``: models split by workload and
         # never inside the loop, because an in-loop cheap-router split adds a
@@ -866,6 +863,33 @@ class AgentLoop:
                 )
 
             if final or not completion.tool_calls:
+                if not state.answer:
+                    # No reply, and ``_call`` either had nothing to point the
+                    # model at or has already spent its one nudge. A Turn with
+                    # no answer is not a finished answer: released as
+                    # ``complete`` it puts a Turn on screen that says it is done
+                    # and holds nothing to read, or — worse, because it looks
+                    # deliberate — holds only the sentence that introduced the
+                    # tool calls. Whatever narration there was still travels on
+                    # the message; what changes is that the Turn admits it never
+                    # answered.
+                    logger.warning(
+                        "Turn %s ended without an answer after %d round(s) of "
+                        "tools and %d nudge(s)",
+                        request.request_message_id,
+                        state.tool_rounds,
+                        state.empty_nudges,
+                    )
+                    return await self._ended(
+                        state,
+                        TurnStatus.INCOMPLETE,
+                        EMPTY_ANSWER,
+                        # Still true, and still the reader's business: a Turn that
+                        # spent every round and then answered nothing is a
+                        # different thing to fix from one that answered nothing on
+                        # its first call.
+                        rounds_exhausted=exhausted,
+                    )
                 return await self._ended(
                     state, TurnStatus.COMPLETE, None, rounds_exhausted=exhausted
                 )
@@ -994,8 +1018,15 @@ class AgentLoop:
         """
         output_tokens = self._output_tokens(state)
         spend = SpendRequest(
-            owner=self._spend.owner(request),
-            lane=self._spend.lane,
+            # ``docs/adr/0014``: every provider call names a durable owner with
+            # a non-null id, and for this loop that owner is always the user's
+            # request message.
+            owner=CallOwner(
+                type=OwnerType.TURN_REQUEST_MESSAGE,
+                id=str(request.request_message_id),
+                user_id=request.user_id,
+            ),
+            lane=BudgetLane.TURN,
             workload=Workload.SESSION,
             input_tokens=context.estimated_tokens + reserved_tokens,
             output_tokens=output_tokens,
@@ -1075,6 +1106,9 @@ class AgentLoop:
                     self._lower_output_cap(request, state, error, started)
                     continue
                 raise
+
+            if self._nudge_empty(request, state, completion, started):
+                continue
 
             # Spent on the call that carried it, so a model that answers a note
             # with tool calls does not carry it into a third attempt.
@@ -1182,6 +1216,61 @@ class AgentLoop:
             reduced,
             redact(str(error)),
         )
+
+    def _nudge_empty(
+        self,
+        request: TurnRequest,
+        state: _TurnState,
+        completion: Completion,
+        started: float,
+    ) -> bool:
+        """Ask once more for the answer a round of tools never produced.
+
+        A bool rather than the raise the other two recoveries use, and the
+        difference is not a style choice: they are handed a route condition and
+        every exit but one is that condition re-raised. Here nothing failed. The
+        route answered, the answer was paid for, and it contained no reply — so
+        there is no exception to carry and the caller decides what an absent
+        answer means.
+
+        The condition is ``state.answer`` and not ``state.text``. The Contract
+        asks the model for one sentence before every tool call
+        (``prompt/sections.py``), and :meth:`_append_text` files those sentences
+        as thoughts, so a Turn that ran tools almost always has prose. What it
+        can lack is a *reply*, and a Turn whose whole reply is "let me look that
+        up" is the failure this treats: ``turns.py`` falls back to the narration
+        when there is no answer, which publishes the introduction as though it
+        were the conclusion.
+
+        Only where the note can be acted on, which means only after a round of
+        tools. Before that there is nothing above for the model to read and the
+        call would buy an apology.
+        """
+        # ``completion.text`` and not only ``state.answer``: this runs inside the
+        # call, before :meth:`_append_text` has filed anything, so the state still
+        # describes the rounds *before* this one. A completion that brought prose
+        # of its own is about to become the reply.
+        if completion.tool_calls or completion.text or state.answer:
+            return False
+        if state.tool_rounds == 0 or state.empty_nudges >= MAX_EMPTY_NUDGES:
+            return False
+        if self._round_spent(started) or self._expired(state):
+            # Same bound the other two recoveries take: a round that has spent
+            # its share of the Turn is not given another call, because the next
+            # thing it would meet is the Turn deadline — which ends the Turn
+            # without naming this condition.
+            return False
+        state.empty_nudges += 1
+        state.note = EMPTY_AFTER_TOOLS_NOTE
+        logger.warning(
+            "Turn %s produced no reply after %d round(s) of tools "
+            "(model=%s finish_reason=%r); asking once more",
+            request.request_message_id,
+            state.tool_rounds,
+            completion.model,
+            completion.finish_reason,
+        )
+        return True
 
     # -- one round of tools -----------------------------------------------
 
@@ -1559,7 +1648,6 @@ __all__ = [
     "TRUNCATED",
     "TURN_DEADLINE",
     "TURN_DEADLINE_SECONDS",
-    "TURN_SPEND",
     "UNMAPPED_ADMISSION_STATUS",
     "AgentLoop",
     "ConstructedContext",
@@ -1567,7 +1655,6 @@ __all__ = [
     "ContextBudget",
     "SessionCapacityExceeded",
     "SessionSlots",
-    "SpendIdentity",
     "ToolCallIdMismatch",
     "ToolCallStatus",
     "Transcript",

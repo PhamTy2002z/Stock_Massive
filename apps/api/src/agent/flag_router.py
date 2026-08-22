@@ -17,10 +17,9 @@ and asks the reader nothing. That asymmetry is the whole difference between the
 two halves of this file.
 
 **It opens nothing.** No ticket is created, nobody is notified, no account is
-suspended, and no background job is dispatched. ADR-0016 is explicit that v1 has
-no dispute workflow; the value of the action is downstream and manual — a
-flagged message confirmed as a genuine failure becomes a new Eval Case, frozen
-with its fixture, and that is the only sanctioned way the battery grows.
+suspended, and no background job is dispatched. v1 has no dispute workflow; the
+value of the action is downstream and manual — a flagged message confirmed as a
+genuine failure is a defect somebody reads the transcript for.
 
 **Replay means re-reading the Evidence Manifest, not reproducing the answer.**
 The Manifest is on the message and is kept indefinitely; the full Tool Call

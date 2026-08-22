@@ -49,7 +49,7 @@ class Workload(str, Enum):
     """The two lanes a model is chosen for, never inside a loop.
 
     ``docs/adr/0008``: an in-loop split adds a decision point whose quality
-    cannot be measured until the Eval Battery exists.
+    nothing here can measure.
     """
 
     BATCH = "batch"
@@ -164,35 +164,32 @@ class LLMRoute:
 
 @dataclass(frozen=True)
 class BudgetLanes:
-    """The monthly envelope and the four lanes that share it."""
+    """The monthly envelope and the three lanes that share it."""
 
     monthly_envelope_usd: float
     analysis_usd: float
     turn_usd: float
     emergency_usd: float
-    eval_usd: float
 
     @property
     def allocated_usd(self) -> float:
-        return self.analysis_usd + self.turn_usd + self.emergency_usd + self.eval_usd
+        return self.analysis_usd + self.turn_usd + self.emergency_usd
 
     @property
     def unmetered(self) -> bool:
         """Whether this deployment declares no monthly envelope at all.
 
-        ``0`` is unlimited here, the convention ``eval_run_cost_ceiling_usd``
-        already uses, widened to the whole envelope for a route billed by
-        subscription rather than per call. It has to be all five values or
-        none: a single zero among four funded lanes is a variable somebody
-        forgot to fill in, and Budget Validation keeps failing that, because an
-        unfunded lane refuses every call rather than admitting it.
+        ``0`` is unlimited here, widened to the whole envelope for a route
+        billed by subscription rather than per call. It has to be all four
+        values or none: a single zero among three funded lanes is a variable
+        somebody forgot to fill in, and Budget Validation keeps failing that,
+        because an unfunded lane refuses every call rather than admitting it.
         """
         return (
             self.monthly_envelope_usd <= 0
             and self.analysis_usd <= 0
             and self.turn_usd <= 0
             and self.emergency_usd <= 0
-            and self.eval_usd <= 0
         )
 
 
@@ -233,7 +230,6 @@ class LLMConfig:
     #: an expiry here is a ``DeadlineExpired``, while a 504 from the route is a
     #: ``GatewayTimeout``, and the two have different remedies.
     request_timeout_seconds: float = 120.0
-    eval_run_cost_ceiling_usd: float | None = 2.5
     #: The five per-user ceilings, each of which may be unlimited.
     ceilings: UserCeilings = UserCeilings()
     #: The shared Redis rate-limit breaker (``core/llm/breaker.py``). A kill
@@ -308,7 +304,6 @@ def llm_config_from_settings(settings: Any | None = None) -> LLMConfig:
 
         settings = get_settings()
 
-    eval_ceiling = float(settings.llm_eval_run_cost_ceiling_usd)
     return LLMConfig(
         enabled=bool(settings.alpha_desk_enabled),
         route=LLMRoute(
@@ -337,10 +332,8 @@ def llm_config_from_settings(settings: Any | None = None) -> LLMConfig:
             analysis_usd=settings.llm_budget_analysis_usd,
             turn_usd=settings.llm_budget_turn_usd,
             emergency_usd=settings.llm_budget_emergency_usd,
-            eval_usd=settings.llm_budget_eval_usd,
         ),
         request_timeout_seconds=clamp_timeout(settings.llm_request_timeout_seconds),
-        eval_run_cost_ceiling_usd=eval_ceiling if eval_ceiling > 0 else None,
         ceilings=_user_ceilings_from_settings(settings),
         route_breaker_enabled=bool(getattr(settings, "llm_route_breaker_enabled", True)),
     )

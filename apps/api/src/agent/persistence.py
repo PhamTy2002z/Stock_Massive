@@ -460,8 +460,8 @@ class AgentPersistence:
         a script, the ops lane — from writing a reason nothing can count.
 
         **This opens nothing.** No ticket, no notification, no suspension. The
-        value is downstream and manual: a flag confirmed as a genuine failure
-        becomes a new Eval Case, frozen with its fixture.
+        value is downstream and manual: a flag confirmed as a genuine failure is
+        a defect somebody reads the transcript for.
         """
         if reason not in FLAG_REASONS:
             raise ValueError(

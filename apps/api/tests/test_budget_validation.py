@@ -110,14 +110,13 @@ class TestImpossibleConfiguration:
         assert not report.ok
         assert "monthly_envelope" in _failed_ceilings(report)
 
-    def test_the_hard_fifty_dollar_envelope_cannot_be_configured_upward(self):
+    def test_the_hard_envelope_cannot_be_configured_upward(self):
         report = validate_budget(
             _config(
-                llm_budget_monthly_usd=100.0,
+                llm_budget_monthly_usd=90.0,
                 llm_budget_analysis_usd=20.0,
                 llm_budget_turn_usd=60.0,
                 llm_budget_emergency_usd=10.0,
-                llm_budget_eval_usd=10.0,
             )
         )
 
@@ -172,7 +171,7 @@ class TestImpossibleConfiguration:
             _config(
                 llm_price_batch_input_usd_per_mtok=5.0,
                 llm_price_session_output_usd_per_mtok=100.0,
-                llm_budget_eval_usd=6.0,
+                llm_budget_emergency_usd=6.0,
             )
         )
 
@@ -182,7 +181,7 @@ class TestImpossibleConfiguration:
 
 
 class TestAnUnmeteredEnvelope:
-    """Zero across all five values is a deployment with no monthly ceiling.
+    """Zero across all four values is a deployment with no monthly ceiling.
 
     The prices are not part of that decision. They are what the ledger records
     against every call, so they stay validated — an unmetered envelope must not
@@ -194,10 +193,9 @@ class TestAnUnmeteredEnvelope:
         llm_budget_analysis_usd=0,
         llm_budget_turn_usd=0,
         llm_budget_emergency_usd=0,
-        llm_budget_eval_usd=0,
     )
 
-    def test_all_five_at_zero_passes(self):
+    def test_all_four_at_zero_passes(self):
         report = validate_budget(_config(**self.UNMETERED))
 
         assert report.ok, report.summary()

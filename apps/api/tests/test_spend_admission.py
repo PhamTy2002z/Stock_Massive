@@ -190,11 +190,10 @@ def llm_config() -> LLMConfig:
             ),
         ),
         lanes=BudgetLanes(
-            monthly_envelope_usd=50,
+            monthly_envelope_usd=45,
             analysis_usd=10,
             turn_usd=30,
             emergency_usd=5,
-            eval_usd=5,
         ),
     )
 
@@ -452,11 +451,10 @@ class TestBudgetLanes:
         config = replace(
             llm_config(),
             lanes=BudgetLanes(
-                monthly_envelope_usd=40.001,
+                monthly_envelope_usd=35.001,
                 analysis_usd=0.001,
                 turn_usd=30,
                 emergency_usd=5,
-                eval_usd=5,
             ),
         )
         admission, _ = admission_with(config)
@@ -474,21 +472,20 @@ class TestBudgetLanes:
         assert refused.value.reason == "lane_budget_exhausted"
         assert turn_reservation.lane is BudgetLane.TURN
 
-    def test_eval_never_borrows_from_another_lane(self):
+    def test_a_lane_never_borrows_from_another_lane(self):
         config = replace(
             llm_config(),
             lanes=BudgetLanes(
-                monthly_envelope_usd=45.000001,
+                monthly_envelope_usd=40.000001,
                 analysis_usd=10,
                 turn_usd=30,
-                emergency_usd=5,
-                eval_usd=0.000001,
+                emergency_usd=0.000001,
             ),
         )
         admission, _ = admission_with(config)
         candidate = SpendRequest(
-            owner=CallOwner(OwnerType.EVAL_RUN, "eval-1"),
-            lane=BudgetLane.EVAL,
+            owner=CallOwner(OwnerType.CAPABILITY_PROBE, "probe-1"),
+            lane=BudgetLane.EMERGENCY,
             workload=Workload.SESSION,
             input_tokens=1,
             output_tokens=0,
@@ -503,11 +500,10 @@ class TestBudgetLanes:
         config = replace(
             llm_config(),
             lanes=BudgetLanes(
-                monthly_envelope_usd=40.001,
+                monthly_envelope_usd=35.001,
                 analysis_usd=0.001,
                 turn_usd=30,
                 emergency_usd=5,
-                eval_usd=5,
             ),
         )
         admission, _ = admission_with(config)
@@ -522,11 +518,10 @@ class TestBudgetLanes:
         config = replace(
             llm_config(),
             lanes=BudgetLanes(
-                monthly_envelope_usd=40.001,
+                monthly_envelope_usd=35.001,
                 analysis_usd=0.001,
                 turn_usd=30,
                 emergency_usd=5,
-                eval_usd=5,
             ),
         )
         moments = [datetime(2026, 8, 31, 16, 59, tzinfo=timezone.utc)]
@@ -873,7 +868,6 @@ class TestCeilingsTurnedOff:
                 analysis_usd=0,
                 turn_usd=0,
                 emergency_usd=0,
-                eval_usd=0,
             ),
             pricing=replace(
                 llm_config().pricing, session=TokenPrices(10, 10, 10, 10)
