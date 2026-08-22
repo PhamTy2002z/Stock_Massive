@@ -1,5 +1,14 @@
 # The Eval Fixture and the Eval Battery
 
+> **Superseded in part, 2026-08-22.** The interactive agent this document
+> specifies no longer exists. `docs/adr/0026` replaced it with a general
+> assistant on a Hermes-shaped harness that reads none of this project's data:
+> the Tool Catalog, the Recommendation Validator, the Evidence Manifest, the
+> typed Widget protocol and the labelled analysis blocks are all gone. What
+> still holds here is everything about the **price board** and the
+> deterministic **Analysis** lane — the signals package, the serving path, the
+> collector and the nightly pipeline. Read the agent sections as history.
+
 Implements `docs/adr/0016` and `docs/specs/0003-intelligent-quant-architecture.md` §A7.
 Code lives in `apps/api/src/eval/`.
 

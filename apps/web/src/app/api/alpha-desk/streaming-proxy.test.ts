@@ -98,7 +98,7 @@ describe("carrying an event stream", () => {
     const second = gate()
     fetchMock.mockResolvedValue(
       slowEventStream(
-        ["id: 1\nevent: turn.snapshot\ndata: {}\n\n", "id: 2\nevent: content.block\ndata: {}\n\n"],
+        ["id: 1\nevent: turn.snapshot\ndata: {}\n\n", "id: 2\nevent: content.delta\ndata: {}\n\n"],
         [second.opened],
       ),
     )
@@ -115,7 +115,7 @@ describe("carrying an event stream", () => {
     expect(first).toContain("event: turn.snapshot")
     second.open()
     const next = new TextDecoder().decode((await reader.read()).value)
-    expect(next).toContain("event: content.block")
+    expect(next).toContain("event: content.delta")
     await reader.cancel()
   })
 
@@ -215,7 +215,7 @@ describe("an expired token", () => {
     const second = gate()
     fetchMock.mockResolvedValue(
       slowEventStream(
-        ["id: 1\nevent: turn.snapshot\ndata: {}\n\n", "id: 2\nevent: content.block\ndata: {}\n\n"],
+        ["id: 1\nevent: turn.snapshot\ndata: {}\n\n", "id: 2\nevent: content.delta\ndata: {}\n\n"],
         [second.opened],
       ),
     )
@@ -233,7 +233,7 @@ describe("an expired token", () => {
     second.open()
 
     const next = await reader.read()
-    expect(new TextDecoder().decode(next.value)).toContain("event: content.block")
+    expect(new TextDecoder().decode(next.value)).toContain("event: content.delta")
     // Nothing re-asked, because there is nothing left to ask on this path.
     expect(rotateAccessToken).not.toHaveBeenCalled()
     expect(fetchMock).toHaveBeenCalledTimes(1)

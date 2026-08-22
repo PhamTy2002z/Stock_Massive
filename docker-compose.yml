@@ -140,15 +140,9 @@ services:
       WEB_TOOLS_ENABLED: ${WEB_TOOLS_ENABLED:-false}
       WEB_FETCH_MAX_BYTES: ${WEB_FETCH_MAX_BYTES:-524288}
       WEB_DOMAIN_DENYLIST: ${WEB_DOMAIN_DENYLIST:-}
-      MCP_ENABLED: ${MCP_ENABLED:-false}
-      MCP_SERVERS: ${MCP_SERVERS:-{}}
-      EXECUTOR_ENABLED: ${EXECUTOR_ENABLED:-false}
-      EXECUTOR_QUEUE_DIR: /var/run/stock-massive-executor
-      EXECUTOR_TIMEOUT_SECONDS: ${EXECUTOR_TIMEOUT_SECONDS:-10}
     volumes:
       - ./apps/api/src:/code/src
       - ./apps/api/alembic:/code/alembic
-      - executor_queue:/var/run/stock-massive-executor
     ports:
       # Host port is configurable so a second worktree stack can run alongside
       - "${API_PORT:-8000}:8000"
@@ -159,27 +153,6 @@ services:
         condition: service_healthy
     networks:
       - stockmassive-network
-
-  executor:
-    build:
-      context: ./apps/executor
-      dockerfile: Dockerfile
-    environment:
-      EXECUTOR_QUEUE_DIR: /queue
-    network_mode: none
-    read_only: true
-    user: "65534:65534"
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    tmpfs:
-      - /tmp:size=64m,noexec,nosuid,nodev
-    volumes:
-      - executor_queue:/queue
-    cpus: 0.5
-    mem_limit: 256m
-    pids_limit: 64
 
   # Opt-in only. The default dev flow runs the frontend on the host so Next.js
   # gets native file watching and fast rebuilds; start this with
@@ -208,7 +181,6 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  executor_queue:
 
 networks:
   stockmassive-network:

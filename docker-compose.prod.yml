@@ -148,12 +148,6 @@ services:
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       WEB_FETCH_MAX_BYTES: ${WEB_FETCH_MAX_BYTES:-524288}
       WEB_DOMAIN_DENYLIST: ${WEB_DOMAIN_DENYLIST:-}
-      MCP_ENABLED: ${MCP_ENABLED:-false}
-      MCP_SERVERS: ${MCP_SERVERS:-{}}
-      # The networkless executor (docs/adr/0019) is a sidecar this file does not
-      # define, so it stays off here: enabling it without the queue container
-      # would offer the model a tool nothing answers.
-      EXECUTOR_ENABLED: ${EXECUTOR_ENABLED:-false}
     ports:
       - "8000:8000"
     networks:

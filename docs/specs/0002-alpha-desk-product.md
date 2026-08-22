@@ -1,5 +1,14 @@
 # Product specification — Alpha Desk
 
+> **Superseded in part, 2026-08-22.** The interactive agent this document
+> specifies no longer exists. `docs/adr/0026` replaced it with a general
+> assistant on a Hermes-shaped harness that reads none of this project's data:
+> the Tool Catalog, the Recommendation Validator, the Evidence Manifest, the
+> typed Widget protocol and the labelled analysis blocks are all gone. What
+> still holds here is everything about the **price board** and the
+> deterministic **Analysis** lane — the signals package, the serving path, the
+> collector and the nightly pipeline. Read the agent sections as history.
+
 The user-facing half of **Intelligent Quant**. It turns the decisions closed on the
 Wayfinder map ([issue #16](https://github.com/PhamTy2002z/Stock_Massive/issues/16))
 into buildable product behaviour: the flows, the Watchlist rail, the
