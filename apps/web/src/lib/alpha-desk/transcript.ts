@@ -13,7 +13,8 @@
  */
 
 import type { LivePhase, LiveTurn } from "./live-turn"
-import type { FlagReason, ThreadMessage, ToolCall } from "./types"
+import { readStrings, readThoughts, readToolCalls } from "./read-content"
+import type { FlagReason, Thought, ThreadMessage, ToolCall } from "./types"
 
 export interface UserEntry {
   kind: "user"
@@ -25,10 +26,29 @@ export interface UserEntry {
 
 /** One canonical assistant message, read defensively because it is stored JSONB. */
 export interface AssistantView {
-  /** The whole answer, as Markdown the message stored. */
+  /**
+   * The reply, as Markdown the message stored.
+   *
+   * The message also stores `text`, which is every piece of prose the Turn
+   * produced including its narration — that one is what the model reads next
+   * Turn. This is the half the reader is shown, and it falls back to `text` for
+   * a message written before the two were told apart.
+   */
   text: string
   /** The calls the Turn made, as the message stored them. Empty on most answers. */
   toolCalls: ToolCall[]
+  /** What the Turn said on the way to the answer. Empty on most answers. */
+  thoughts: Thought[]
+  /**
+   * Questions the model offered as sensible next steps, or none.
+   *
+   * Stored on the message rather than derived, because they were written in
+   * the same breath as the answer and about the answer that was actually
+   * given. Regenerating produces a different answer and different suggestions.
+   */
+  followUps: string[]
+  /** How long the Turn took, for the line that says so. Zero when unrecorded. */
+  elapsedMs: number
   /**
    * Whether the Turn behind this answer ran to completion.
    *
@@ -57,6 +77,15 @@ export interface AssistantEntry {
    * has anywhere to put it.
    */
   flaggedReason: FlagReason | null
+  /**
+   * Whether the reader already marked this answer helpful.
+   *
+   * A boolean rather than the stamp, because nothing on this surface renders
+   * *when* the mark was left — only that it is there. Projected onto the same
+   * entry kind as the flag, for the same reason: a draft has no message id to
+   * mark, and a question is not what the verdict is about.
+   */
+  helpful: boolean
 }
 
 export interface DraftEntry {
@@ -65,6 +94,8 @@ export interface DraftEntry {
   /** The answer so far. Grows by whole deltas, never re-ordered. */
   text: string
   toolCalls: ToolCall[]
+  thoughts: Thought[]
+  elapsedMs: number
   phase: LivePhase
   terminalReason: string | null
 }
@@ -152,6 +183,7 @@ export function buildTranscript(input: TranscriptInput): TranscriptEntry[] {
         messageId: message.id,
         view: assistantView(message),
         flaggedReason: message.flagged_reason ?? null,
+        helpful: message.helpful_at !== null && message.helpful_at !== undefined,
       })
     }
   }
@@ -176,6 +208,8 @@ export function buildTranscript(input: TranscriptInput): TranscriptEntry[] {
       key: `draft-${input.live.turnId}`,
       text: input.live.text,
       toolCalls: input.live.toolCalls,
+      thoughts: input.live.thoughts,
+      elapsedMs: input.live.elapsedMs,
       phase: input.live.phase,
       terminalReason: input.live.terminalReason,
     })
@@ -206,33 +240,21 @@ function textOf(message: ThreadMessage): string {
 
 function assistantView(message: ThreadMessage): AssistantView {
   const content = message.content
+  // `answer` is the reply; `text` is the reply plus everything narrated on the
+  // way to it. A message stored before the two were told apart has only `text`,
+  // and all of it was the reply then — so that is the fallback.
+  const answer = typeof content.answer === "string" ? content.answer : ""
   return {
-    text: textOf(message),
-    toolCalls: Array.isArray(content.tool_calls) ? toolCalls(content.tool_calls) : [],
+    text: answer !== "" ? answer : textOf(message),
+    // A stored call cannot still be running: the Turn that made it is over.
+    toolCalls: readToolCalls(content.tool_calls, "ok"),
+    thoughts: readThoughts(content.thoughts),
+    followUps: readStrings(content.follow_ups),
+    elapsedMs:
+      typeof content.elapsed_ms === "number" && Number.isFinite(content.elapsed_ms)
+        ? content.elapsed_ms
+        : 0,
     completed: content.status !== "incomplete",
   }
 }
 
-/**
- * The tool calls a stored message can be rendered from, and nothing else.
- *
- * The column is JSONB, so the interface saying `ToolCall[]` describes the
- * contract rather than the bytes. A row missing the two fields the list is
- * drawn from is dropped instead of rendering as a blank line, because a blank
- * line in this list reads as a call the reader cannot see the result of.
- */
-function toolCalls(rows: unknown[]): ToolCall[] {
-  const calls: ToolCall[] = []
-  for (const row of rows) {
-    if (typeof row !== "object" || row === null) continue
-    const { id, name, status, summary } = row as Partial<ToolCall>
-    if (typeof id !== "string" || typeof name !== "string") continue
-    calls.push({
-      id,
-      name,
-      status: status === "running" || status === "error" ? status : "ok",
-      summary: typeof summary === "string" && summary !== "" ? summary : name,
-    })
-  }
-  return calls
-}

@@ -9,9 +9,9 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, render, screen, within } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 
-import { TOOL_CALL_COPY, terminalSentence } from "@/lib/alpha-desk/copy"
+import { FLAG_COPY, TOOL_CALL_COPY, terminalSentence } from "@/lib/alpha-desk/copy"
 import type { AssistantView, DraftEntry } from "@/lib/alpha-desk/transcript"
 import type { ToolCall } from "@/lib/alpha-desk/types"
 import { AssistantMessage } from "./assistant-message"
@@ -25,12 +25,23 @@ function call(overrides: Partial<ToolCall> = {}): ToolCall {
     name: "web_search",
     status: "running",
     summary: "Đang tìm trên web",
+    round: 0,
+    result_count: 0,
+    results: [],
     ...overrides,
   }
 }
 
 function view(overrides: Partial<AssistantView> = {}): AssistantView {
-  return { text: "một câu trả lời", toolCalls: [], completed: true, ...overrides }
+  return {
+    text: "một câu trả lời",
+    toolCalls: [],
+    thoughts: [],
+    followUps: [],
+    elapsedMs: 0,
+    completed: true,
+    ...overrides,
+  }
 }
 
 function draft(overrides: Partial<DraftEntry> = {}): DraftEntry {
@@ -39,6 +50,8 @@ function draft(overrides: Partial<DraftEntry> = {}): DraftEntry {
     key: "draft-1",
     text: "",
     toolCalls: [],
+    thoughts: [],
+    elapsedMs: 0,
     phase: "running",
     terminalReason: null,
     ...overrides,
@@ -87,7 +100,7 @@ describe("the answer's prose", () => {
 })
 
 describe("the tool calls behind an answer", () => {
-  it("names each call by the summary the backend sent, with its outcome beside it", () => {
+  it("names each call by the summary the backend sent, and marks the one that failed", () => {
     render(
       <AssistantMessage
         view={view({
@@ -99,25 +112,57 @@ describe("the tool calls behind an answer", () => {
       />,
     )
 
-    const list = within(screen.getByRole("list", { name: TOOL_CALL_COPY.label }))
-    const rows = list.getAllByRole("listitem")
-    expect(rows).toHaveLength(2)
-    expect(rows[0]).toHaveTextContent("Đã tìm trên web")
-    expect(rows[0]).toHaveTextContent(TOOL_CALL_COPY.ok)
-    expect(rows[1]).toHaveTextContent(TOOL_CALL_COPY.error)
+    // A finished Turn keeps its work folded away; the reader opens it.
+    fireEvent.click(screen.getByRole("button", { name: /Đã làm việc trong/ }))
+
+    // Two calls in one round, so the timeline groups them under a count and
+    // lists each by the sentence the backend wrote — never one it composed.
+    expect(screen.getByText("Đã chạy 2 truy vấn")).toBeInTheDocument()
+    expect(screen.getByText("Đã tìm trên web")).toBeInTheDocument()
+    expect(screen.getByText("Không mở được trang")).toBeInTheDocument()
+    // A call that failed must not read as a call that found nothing.
+    expect(screen.getByText(TOOL_CALL_COPY.error)).toBeInTheDocument()
   })
 
-  it("draws no list at all on an answer that used no tool", () => {
+  it("draws no timeline at all on an answer that used no tool and said nothing on the way", () => {
     render(<AssistantMessage view={view()} />)
 
-    expect(screen.queryByRole("list", { name: TOOL_CALL_COPY.label })).not.toBeInTheDocument()
+    expect(screen.queryByText(/Đã làm việc trong/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Đã chạy/)).not.toBeInTheDocument()
   })
 
-  it("shows a call still running as running, on the draft it belongs to", () => {
+  it("shows the work open while the Turn is still running", () => {
     render(<DraftMessage entry={draft({ toolCalls: [call()] })} onRetry={vi.fn()} />)
 
-    expect(screen.getByText(TOOL_CALL_COPY.running)).toBeInTheDocument()
+    // Open by default while running, because the point of it is to show the
+    // reader that something is happening rather than to be discoverable.
+    expect(screen.getByText("Đang làm việc…")).toBeInTheDocument()
     expect(screen.getByText("Đang tìm trên web")).toBeInTheDocument()
+  })
+
+  it("keeps the narration out of the answer and in the timeline", () => {
+    render(
+      <AssistantMessage
+        view={view({
+          text: "Câu trả lời.",
+          thoughts: [{ round: 0, text: "Đang tra tin hôm nay" }],
+          toolCalls: [call({ id: "a", status: "ok", summary: "Đã tìm trên web" })],
+        })}
+      />,
+    )
+
+    // The answer is readable without opening anything; the narration is not
+    // part of it and lives behind the toggle.
+    expect(screen.getByText("Câu trả lời.")).toBeInTheDocument()
+
+    // Folded away rather than absent: the rows stay mounted so the fold can
+    // animate, so what says "collapsed" is the disclosure state.
+    const toggle = screen.getByRole("button", { name: /Đã làm việc trong/ })
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByText("Đang tra tin hôm nay")).toBeInTheDocument()
   })
 })
 
@@ -188,5 +233,70 @@ describe("the Turn in flight", () => {
     render(<DraftMessage entry={draft({ text: "một nửa" })} onRetry={vi.fn()} />)
 
     expect(screen.queryByRole("button", { name: /báo lỗi/i })).not.toBeInTheDocument()
+  })
+})
+
+describe("the positive verdict", () => {
+  it("offers no thumb at all on a surface with nowhere to record it", () => {
+    render(<AssistantMessage view={view()} messageId={7} />)
+
+    // A control that lights up and forgets is worse than a control that is not
+    // offered, so the button is conditional on the handler and not on the
+    // message.
+    expect(
+      screen.queryByRole("button", { name: "Hữu ích" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("marks the answer and takes the mark back through the same control", () => {
+    const onHelpful = vi.fn()
+    const { rerender } = render(
+      <AssistantMessage view={view()} messageId={7} onHelpful={onHelpful} />,
+    )
+
+    const thumb = screen.getByRole("button", { name: "Hữu ích" })
+    expect(thumb).toHaveAttribute("aria-pressed", "false")
+    fireEvent.click(thumb)
+    expect(onHelpful).toHaveBeenCalledWith(7, true)
+
+    // The pressed state comes from the caller, so a mark that was recorded
+    // survives a re-render instead of resetting.
+    rerender(
+      <AssistantMessage
+        view={view()}
+        messageId={7}
+        helpful
+        onHelpful={onHelpful}
+      />,
+    )
+    const marked = screen.getByRole("button", { name: "Hữu ích" })
+    expect(marked).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(marked)
+    expect(onHelpful).toHaveBeenLastCalledWith(7, false)
+  })
+
+  it("puts away the dispute control the down-vote opened, because it is the other answer", () => {
+    render(
+      <AssistantMessage
+        view={view()}
+        messageId={7}
+        onHelpful={vi.fn()}
+        onFlag={vi.fn()}
+        onUnflag={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Chưa đúng" }))
+    expect(
+      screen.getByRole("button", { name: FLAG_COPY.action }),
+    ).toBeInTheDocument()
+
+    // The two verdicts are one question with two answers on this surface: the
+    // reader who changes their mind should not be left with the dispute half
+    // still open under a message they just approved.
+    fireEvent.click(screen.getByRole("button", { name: "Hữu ích" }))
+    expect(
+      screen.queryByRole("button", { name: FLAG_COPY.action }),
+    ).not.toBeInTheDocument()
   })
 })

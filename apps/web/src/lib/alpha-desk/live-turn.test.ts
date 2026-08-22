@@ -116,7 +116,15 @@ describe("tool calls", () => {
       event("tool.call", 2, { id: "a", name: "web_search", status: "ok", summary: "Đã tìm" }),
     )
     expect(state.toolCalls).toEqual([
-      { id: "a", name: "web_search", status: "ok", summary: "Đã tìm" },
+      {
+        id: "a",
+        name: "web_search",
+        status: "ok",
+        summary: "Đã tìm",
+        round: 0,
+        result_count: 0,
+        results: [],
+      },
     ])
   })
 
@@ -140,13 +148,116 @@ describe("tool calls", () => {
   it("falls back to the tool's name when no summary was sent, and to running on an unknown status", () => {
     const state = apply(started(), event("tool.call", 1, { id: "a", name: "recall_facts" }))
     expect(state.toolCalls).toEqual([
-      { id: "a", name: "recall_facts", status: "running", summary: "recall_facts" },
+      {
+        id: "a",
+        name: "recall_facts",
+        status: "running",
+        summary: "recall_facts",
+        round: 0,
+        result_count: 0,
+        results: [],
+      },
     ])
+  })
+
+  it("carries the sources a call turned up, and the count the backend reported", () => {
+    const state = apply(
+      started(),
+      event("tool.call", 1, {
+        id: "a",
+        name: "web_search",
+        status: "ok",
+        summary: "Tìm trên web: AI",
+        round: 2,
+        result_count: 15,
+        results: [
+          {
+            title: "Technology + AI",
+            url: "https://theguardian.com/x",
+            source: "theguardian.com",
+            snippet: "Skip to main content",
+          },
+        ],
+      }),
+    )
+    const [call] = state.toolCalls
+    expect(call.round).toBe(2)
+    // The backend caps what it sends, so a count larger than the list is the
+    // truth about the search rather than a bug in the list.
+    expect(call.result_count).toBe(15)
+    expect(call.results).toHaveLength(1)
+    expect(call.results[0].source).toBe("theguardian.com")
+  })
+
+  it("drops a result that is neither titled nor linked, rather than drawing a blank row", () => {
+    const state = apply(
+      started(),
+      event("tool.call", 1, {
+        id: "a",
+        name: "web_search",
+        status: "ok",
+        results: [{ snippet: "orphan" }, { title: "kept", url: "https://x.test" }],
+      }),
+    )
+    expect(state.toolCalls[0].results.map((result) => result.title)).toEqual(["kept"])
+  })
+})
+
+describe("narration", () => {
+  const thought = (seq: number, text: string, round = 0) =>
+    event("content.delta", seq, { text, kind: "thought", round })
+
+  it("keeps a thought out of the answer", () => {
+    const state = apply(started(), thought(1, "Đang tra tin"), delta(2, "Xong."))
+    expect(state.text).toBe("Xong.")
+    expect(state.thoughts).toEqual([{ round: 0, text: "Đang tra tin" }])
+  })
+
+  it("joins two deltas of one round into the one sentence they are", () => {
+    const state = apply(started(), thought(1, "Đang tra "), thought(2, "tin hôm nay"))
+    expect(state.thoughts).toEqual([{ round: 0, text: "Đang tra tin hôm nay" }])
+  })
+
+  it("keeps each round's narration on its own line", () => {
+    const state = apply(started(), thought(1, "một", 0), thought(2, "hai", 1))
+    expect(state.thoughts).toEqual([
+      { round: 0, text: "một" },
+      { round: 1, text: "hai" },
+    ])
+  })
+
+  it("treats a delta with no kind as the answer, because that is where it shows", () => {
+    const state = apply(started(), event("content.delta", 1, { text: "Xong." }))
+    expect(state.text).toBe("Xong.")
+    expect(state.thoughts).toEqual([])
   })
 })
 
 describe("a snapshot", () => {
   const snapshot = (data: Record<string, unknown>) => event("turn.snapshot", 0, data)
+
+  it("restates the narration and the clock a reconnecting tab missed", () => {
+    const state = apply(
+      started(),
+      snapshot({
+        through_seq: 6,
+        status: "running",
+        terminal_reason: null,
+        text: "Đang trả lời",
+        thoughts: [
+          { round: 0, text: "Đang tra tin" },
+          { round: 1, text: "Đang tổng hợp" },
+        ],
+        tool_calls: [],
+        message_id: null,
+        elapsed_ms: 8200,
+      }),
+    )
+    expect(state.thoughts).toHaveLength(2)
+    // The Turn's clock, not this tab's: a reader who joined late is told how
+    // long the work took, not how long they have been watching it.
+    expect(state.elapsedMs).toBe(8200)
+  })
 
   it("replaces the answer rather than merging into it", () => {
     const state = apply(

@@ -20,7 +20,14 @@ import { FlagAction } from "./flag-action"
 afterEach(cleanup)
 
 function view(): AssistantView {
-  return { text: "kết luận", toolCalls: [], completed: true }
+  return {
+    text: "kết luận",
+    toolCalls: [],
+    thoughts: [],
+    followUps: [],
+    elapsedMs: 0,
+    completed: true,
+  }
 }
 
 function action(overrides: Partial<React.ComponentProps<typeof FlagAction>> = {}) {
@@ -191,7 +198,7 @@ describe("the control itself", () => {
 })
 
 describe("where the action lives", () => {
-  it("sits on a canonical assistant message", () => {
+  it("sits behind the down-vote on a canonical assistant message", () => {
     render(
       <AssistantMessage
         view={view()}
@@ -201,6 +208,13 @@ describe("where the action lives", () => {
         onUnflag={vi.fn()}
       />,
     )
+
+    // The four reasons are the vocabulary a reviewer reads, so they are kept
+    // rather than replaced by a bare down-vote — but they are asked for only
+    // once the reader says something went wrong.
+    expect(screen.queryByRole("button", { name: /báo lỗi/i })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /chưa đúng/i }))
 
     expect(screen.getByRole("button", { name: /báo lỗi/i })).toBeInTheDocument()
   })

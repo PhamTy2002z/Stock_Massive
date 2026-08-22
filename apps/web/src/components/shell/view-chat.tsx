@@ -1,11 +1,13 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { AlertCircle, Check, Copy, Pencil, RotateCcw, X } from "lucide-react"
 
 import { AnalysisCard } from "@/components/alpha/analysis"
 import { AssistantMessage } from "@/components/alpha/message/assistant-message"
 import { DraftMessage } from "@/components/alpha/message/draft-message"
+import { pinStep } from "@/lib/alpha-desk/pin-question"
+import type { TranscriptEntry } from "@/lib/alpha-desk/transcript"
 import { cn } from "@/lib/utils"
 
 import { Composer } from "./composer"
@@ -13,11 +15,49 @@ import { useDesk } from "./desk-state"
 import { IconButton } from "./primitives"
 import { useShell } from "./shell-state"
 
+/**
+ * Put one answer on the clipboard, and say nothing when the browser refuses.
+ *
+ * A browser can refuse — no permission, an insecure origin — and that is not
+ * worth an error over text the reader can still select by hand. The button's
+ * own "Đã chép" is optimistic for the same reason the question bubble's is.
+ */
+function copyText(text: string): void {
+  void navigator.clipboard?.writeText(text).catch(() => {})
+}
+
+/**
+ * The question this answer answers, or nothing.
+ *
+ * Read backwards from the answer rather than carried on it, because the pairing
+ * is a fact about the transcript's order and the message does not record which
+ * question produced it. Nothing happens when there is no question above — an
+ * answer with nothing before it is not something to re-ask.
+ */
+function questionBefore(entries: TranscriptEntry[], key: string): string | null {
+  const index = entries.findIndex((entry) => entry.key === key)
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const entry = entries[cursor]
+    if (entry.kind === "user") return entry.text
+  }
+  return null
+}
+
 /** How close to the bottom still counts as "following" the newest content. */
 const FOLLOW_THRESHOLD_PX = 120
 
 /** Breathing room left above a question pinned to the top of the viewport. */
 const ANCHOR_PAD_PX = 14
+
+/**
+ * A layout effect in the browser, an ordinary one on the server.
+ *
+ * The pin has to be applied *before the browser paints*, or the reader sees the
+ * transcript at its old position for a frame and then jump. `useLayoutEffect` is
+ * the only hook that promises that, and it warns when React renders this tree on
+ * the server — where there is no layout to read and nothing to scroll.
+ */
+const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect
 
 /**
  * The conversation: a transcript that scrolls, and a composer docked over it.
@@ -51,6 +91,12 @@ export function ChatView() {
   // The newest question, while it is held at the top of the viewport. Cleared by
   // any scroll the reader performs themselves, and by the spacer running out.
   const pinned = useRef(false)
+  // A pin asked for and not yet applied. The scroll cannot happen in the same
+  // commit as the question: the room it needs is a spacer that does not exist
+  // until React has laid one out, and scrolling before then is clamped to the
+  // transcript's old height — which is a question that stops halfway up the
+  // screen with the previous answer still under it.
+  const landing = useRef(false)
   const anchor = useRef<HTMLDivElement | null>(null)
   const [tail, setTail] = useState(0)
   const tailHeight = useRef(0)
@@ -83,18 +129,22 @@ export function ChatView() {
   }, [])
 
   /**
-   * The spacer the pin still needs, given how much answer has arrived.
+   * What the pin needs from the layout right now: the spacer it wants, and
+   * whether the room for the scroll is already there.
    *
-   * `scrollHeight` already includes the current spacer, so the shortfall is
-   * added to it rather than replacing it — and once the answer fills the screen
-   * the shortfall is negative and this returns zero.
+   * The arithmetic lives in `pin-question.ts`, where it has tests. Twice it was
+   * wrong in here, in ways the view could not show — that file says how.
    */
-  const requiredTail = useCallback(() => {
+  const step = useCallback((): { tail: number; scroll: number | null } => {
     const element = container.current
     const target = anchorOffset()
-    if (!element || target === null) return 0
-    const reachable = element.scrollHeight - element.clientHeight
-    return Math.max(0, Math.round(tailHeight.current + target - reachable))
+    if (!element || target === null) return { tail: 0, scroll: null }
+    return pinStep({
+      target,
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+      tail: tailHeight.current,
+    })
   }, [anchorOffset])
 
   const setTailHeight = useCallback((next: number) => {
@@ -103,8 +153,9 @@ export function ChatView() {
     setTail(next)
   }, [])
 
-  // A new question, or a different Thread.
-  useEffect(() => {
+  // A new question, or a different Thread. Before the browser paints, so a
+  // question never appears at the bottom for a frame on its way to the top.
+  useIsoLayoutEffect(() => {
     const element = container.current
     if (!element) return
 
@@ -117,6 +168,7 @@ export function ChatView() {
       // Reopening a Thread lands at its end. The last answer is what the reader
       // came back for, not the question that produced it.
       pinned.current = false
+      landing.current = false
       following.current = true
       setTailHeight(0)
       element.scrollTop = element.scrollHeight
@@ -127,16 +179,44 @@ export function ChatView() {
 
     pinned.current = true
     following.current = true
-    setTailHeight(requiredTail())
-    // After the spacer is laid out, or the scroll is clamped to a transcript
-    // that is still the old height.
-    const frame = requestAnimationFrame(() => {
-      const target = anchorOffset()
-      if (target === null) return
-      scrollTo(element, target)
-    })
-    return () => cancelAnimationFrame(frame)
-  }, [questionCount, desk.threadId, anchorOffset, requiredTail, setTailHeight])
+    // Only the intention. The spacer and the scroll are the effect below, which
+    // is the one place that knows whether the layout can carry them yet.
+    landing.current = true
+  }, [questionCount, desk.threadId, setTailHeight])
+
+  /**
+   * Putting the new question at the top, on whichever commit the layout can.
+   *
+   * Two steps, and the order between them is the whole point. The top of the
+   * viewport is only a scroll position the transcript *has* if the transcript is
+   * tall enough, so the spacer has to exist in the DOM before the scroll is
+   * asked for. Asking for both in one frame is what made the pin land sometimes
+   * and stop halfway other times — the frame either won the race with React's
+   * commit or it did not, and a heavier answer above made it lose.
+   *
+   * When the room is there, `pinStep` hands back the position to scroll to;
+   * until then it hands back the spacer to make and nothing to scroll.
+   *
+   * Runs after every commit and leaves on its first line unless a pin is
+   * waiting, which is why it has no dependency list: every way the transcript
+   * can change height is a commit, and naming them would be naming them twice.
+   */
+  useIsoLayoutEffect(() => {
+    if (!landing.current) return
+    const element = container.current
+    if (!element) return
+
+    const plan = step()
+    if (plan.scroll === null) {
+      // The room is not in the DOM yet. Put it there and finish on the commit
+      // that carries it.
+      setTailHeight(plan.tail)
+      return
+    }
+
+    landing.current = false
+    scrollTo(element, plan.scroll)
+  })
 
   // The answer arriving. While a question is pinned the spacer gives back
   // exactly the height the answer took, so the transcript does not move at all;
@@ -145,8 +225,14 @@ export function ChatView() {
     const element = container.current
     if (!element) return
 
+    // A pin still landing owns the spacer. Recomputing it here on the same
+    // commit would measure a DOM that does not carry the new spacer yet and ask
+    // for it twice over — a spacer of double the height, and a scrollbar that
+    // lurches before settling back.
+    if (landing.current) return
+
     if (tailHeight.current > 0) {
-      const next = requiredTail()
+      const next = step().tail
       setTailHeight(next)
       if (next === 0) pinned.current = false
       return
@@ -159,7 +245,7 @@ export function ChatView() {
     // Every event the live Turn applies produces a new projection, so this is
     // one dependency for every way the transcript can get taller: a delta, a
     // tool call joining the list, a status line under an answer that ended.
-  }, [desk.entries, requiredTail, setTailHeight])
+  }, [desk.entries, step, setTailHeight])
 
   function onScroll() {
     const element = container.current
@@ -174,6 +260,7 @@ export function ChatView() {
   /** The reader taking the scroll back. A wheel or a drag outranks the pin. */
   function onUserScroll() {
     pinned.current = false
+    landing.current = false
   }
 
   return (
@@ -218,8 +305,24 @@ export function ChatView() {
                   messageId={entry.messageId}
                   flaggedReason={entry.flaggedReason}
                   flagFailed={entry.messageId === desk.flagFailedFor}
+                  helpful={entry.helpful}
                   onFlag={desk.flag}
                   onUnflag={desk.unflag}
+                  onHelpful={desk.helpful}
+                  onCopy={copyText}
+                  onShare={() => dispatch({ type: "overlay", overlay: "share" })}
+                  // Regenerating an answer is asking its question again, so it
+                  // goes out as the question rather than as a reference to the
+                  // answer: `resend` already knows whether that is a retry of a
+                  // Turn that ended badly or a fresh ask.
+                  onRegenerate={() => {
+                    const asked = questionBefore(desk.entries, entry.key)
+                    if (asked !== null) desk.resend(asked)
+                  }}
+                  onFollowUp={desk.submit}
+                  onOpenSources={(messageId) =>
+                    dispatch({ type: "open-sources", messageId })
+                  }
                 />
               )
             }
@@ -274,8 +377,6 @@ export function ChatView() {
               </IconButton>
             </div>
           )}
-
-          {!desk.refusal && !state.noticeDismissed && <SnapshotNotice />}
 
           <Composer />
 
@@ -397,29 +498,3 @@ function UserMessage({
   )
 }
 
-/**
- * The one standing caveat about the data behind every answer.
- *
- * Tucked under the composer's top edge rather than floated above it, so the two
- * read as one object: the notice is a property of what the field is about to
- * ask, not a separate alert competing with it.
- */
-function SnapshotNotice() {
-  const { dispatch } = useShell()
-  return (
-    <div className="mx-2.5 mb-[-8px] flex items-center gap-2.5 rounded-t-[14px] border border-b-0 border-border bg-surface-menu px-3.5 pb-4 pt-2.5 text-control text-ink-4">
-      <i aria-hidden="true" className="block size-[5px] shrink-0 rounded-full bg-caution" />
-      <span className="min-w-0 flex-1">
-        Câu trả lời dựa trên dữ liệu đã chốt phiên, không phải giá khớp lệnh thời gian thực.
-      </span>
-      <IconButton
-        label="Ẩn thông báo"
-        size="sm"
-        onClick={() => dispatch({ type: "dismiss-notice" })}
-        className="size-6"
-      >
-        <X className="size-3.5" strokeWidth={1.8} />
-      </IconButton>
-    </div>
-  )
-}

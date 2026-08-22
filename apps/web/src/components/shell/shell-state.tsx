@@ -29,7 +29,7 @@ import {
 export type ShellView = "chat" | "board" | "new" | "news"
 
 /** Which tab the right-hand inspector shows, or `null` when it is closed. */
-export type InspectorTab = "market" | "symbol" | "news"
+export type InspectorTab = "market" | "symbol" | "news" | "sources"
 
 /** The things that float above the surface. One at a time, always. */
 export type Overlay = "account" | "attach" | "thread" | "share" | "palette" | "settings"
@@ -49,11 +49,19 @@ interface ShellState {
   inspectorWide: boolean
   /** True while the handle is held: transitions are suppressed so the drag tracks. */
   dragging: boolean
+  /**
+   * Which answer the sources tab is showing, or null.
+   *
+   * A message id rather than the sources themselves: the transcript already
+   * owns them, and a copy here would be a second version of one answer's
+   * sources that could disagree with the one on screen. Null closes the tab's
+   * subject — the tab has nothing to show without an answer to show it for.
+   */
+  sourcesMessageId: number | null
   selected: SelectedSymbol
   /** The symbol the composer sends as the Turn's analysis context. */
   contextSymbol: string | null
   overlay: Overlay | null
-  noticeDismissed: boolean
   /** Viewport width, measured after mount. 0 until then — see `useViewport`. */
   viewport: number
   /**
@@ -82,6 +90,8 @@ type Action =
   | { type: "view"; view: ShellView }
   | { type: "toggle-sidebar" }
   | { type: "open-inspector"; tab: InspectorTab }
+  // Opens the sources tab *and* says whose sources, which is one user action.
+  | { type: "open-sources"; messageId: number }
   | { type: "close-inspector" }
   | { type: "toggle-inspector-wide" }
   | { type: "resize-inspector"; width: number }
@@ -90,7 +100,6 @@ type Action =
   | { type: "select-symbol"; selected: SelectedSymbol; open?: boolean }
   | { type: "context-symbol"; symbol: string | null }
   | { type: "overlay"; overlay: Overlay | null }
-  | { type: "dismiss-notice" }
   | { type: "viewport"; width: number }
   | { type: "draft"; text: string }
   /** Open one article in the news view, or `null` to go back to the feed. */
@@ -126,11 +135,11 @@ const INITIAL: ShellState = {
   inspector: null,
   inspectorWidth: null,
   inspectorWide: false,
+  sourcesMessageId: null,
   dragging: false,
   selected: { symbol: "VCB", name: "Ngân hàng TMCP Ngoại thương Việt Nam", exchange: "HOSE" },
   contextSymbol: null,
   overlay: null,
-  noticeDismissed: false,
   viewport: 0,
   draft: "",
   newsArticle: null,
@@ -165,6 +174,14 @@ function reduce(state: ShellState, action: Action): ShellState {
 
     case "open-inspector":
       return foldSidebarIfCramped({ ...state, inspector: action.tab, overlay: null })
+
+    case "open-sources":
+      return foldSidebarIfCramped({
+        ...state,
+        inspector: "sources",
+        sourcesMessageId: action.messageId,
+        overlay: null,
+      })
 
     case "close-inspector":
       // The width goes back to the default with it. A panel reopened at
@@ -204,9 +221,6 @@ function reduce(state: ShellState, action: Action): ShellState {
 
     case "overlay":
       return { ...state, overlay: action.overlay }
-
-    case "dismiss-notice":
-      return { ...state, noticeDismissed: true }
 
     case "viewport":
       return foldSidebarIfCramped({ ...state, viewport: action.width })

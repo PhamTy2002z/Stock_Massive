@@ -26,6 +26,7 @@ import type {
   CreatedTurn,
   FlagReason,
   MessageFlag,
+  MessageHelpful,
   Thread,
   ThreadDetail,
   Turn,
@@ -139,6 +140,26 @@ export function flagMessage(messageId: number, reason: FlagReason): Promise<Mess
 /** Clear the flag. Both columns, never one of them. */
 export function unflagMessage(messageId: number): Promise<MessageFlag> {
   return alphaFetch<MessageFlag>(`/messages/${messageId}/flag`, { method: "DELETE" })
+}
+
+/**
+ * Mark one assistant message helpful.
+ *
+ * No body, because the mark carries no reason — the asymmetry with the flag is
+ * the point of it. Idempotent per message: a second call answers with the
+ * existing stamp rather than moving it.
+ */
+export function markHelpful(messageId: number): Promise<MessageHelpful> {
+  return alphaFetch<MessageHelpful>(`/messages/${messageId}/helpful`, {
+    method: "POST",
+  })
+}
+
+/** Take the mark back, answering with the cleared stamp. */
+export function clearHelpful(messageId: number): Promise<MessageHelpful> {
+  return alphaFetch<MessageHelpful>(`/messages/${messageId}/helpful`, {
+    method: "DELETE",
+  })
 }
 
 /** Where the browser's `EventSource` points. Same origin, so cookies travel. */

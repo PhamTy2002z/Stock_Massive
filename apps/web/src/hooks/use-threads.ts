@@ -3,17 +3,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import {
+  clearHelpful,
   createThread,
   deleteThread,
   fetchThread,
   flagMessage,
   listThreads,
+  markHelpful,
   unflagMessage,
   updateThread,
 } from "@/lib/alpha-desk/api"
 import type {
   FlagReason,
   MessageFlag,
+  MessageHelpful,
   Thread,
   ThreadDetail,
 } from "@/lib/alpha-desk/types"
@@ -226,4 +229,49 @@ export function useFlagMessage(threadId: string | null) {
       : null
 
   return { flag, unflag, failedMessageId }
+}
+
+/**
+ * Mark one assistant message helpful, or take the mark back.
+ *
+ * The same shape as `useFlagMessage` and for the same reasons: the answer is
+ * patched into the cached Thread rather than invalidating it, and the write is
+ * **not optimistic** — a mark that appeared instantly and then vanished on a
+ * 401 would tell the reader their approval was recorded when it was not.
+ *
+ * The patch touches `helpful_at` alone. The flag on the same message is left
+ * exactly as it was, because the store keeps both: an answer that was useful
+ * and got one figure wrong is both, and the UI showing one at a time is a fact
+ * about pressing buttons rather than about the record.
+ */
+export function useHelpfulMessage(threadId: string | null) {
+  const queryClient = useQueryClient()
+
+  function applyToThread(mark: MessageHelpful): void {
+    if (threadId === null) return
+    queryClient.setQueryData<ThreadDetail>(queryKeys.thread(threadId), (thread) =>
+      thread === undefined
+        ? thread
+        : {
+            ...thread,
+            messages: thread.messages.map((message) =>
+              message.id === mark.message_id
+                ? { ...message, helpful_at: mark.helpful_at }
+                : message,
+            ),
+          },
+    )
+  }
+
+  const mark = useMutation({
+    mutationFn: (messageId: number) => markHelpful(messageId),
+    onSuccess: applyToThread,
+  })
+
+  const unmark = useMutation({
+    mutationFn: (messageId: number) => clearHelpful(messageId),
+    onSuccess: applyToThread,
+  })
+
+  return { mark, unmark }
 }
