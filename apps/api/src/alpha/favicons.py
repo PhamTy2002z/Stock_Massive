@@ -28,6 +28,7 @@ import re
 import socket
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import urljoin
 
@@ -43,7 +44,26 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/assets", tags=["assets"])
 
 FAVICON_TIMEOUT_SECONDS = 3.0
-FAVICON_MAX_BYTES = 64 * 1024
+#: How large an icon may be before it is refused.
+#:
+#: Measured rather than guessed: a real Vietnamese news site was found serving a
+#: perfectly ordinary favicon at 103 KB, because a ``.ico`` is a container and
+#: sites pack every resolution from 16px to 256px into one file. A 64 KB ceiling
+#: rejected it and the reader saw two grey letters for a site that had a logo
+#: all along. The cost of the higher ceiling is paid once per domain per week,
+#: because the answer is cached either way.
+FAVICON_MAX_BYTES = 256 * 1024
+#: How large a home page may be before the icon hunt gives up on it.
+#:
+#: Only the ``<head>`` is wanted, but the reader underneath refuses an oversized
+#: response rather than truncating it — correct for its own job, feeding a page
+#: to the model, and unhelpful here. So the ceiling has to clear a whole home
+#: page instead of a head: measured, Vietnamese news front pages run 200–400 KB,
+#: and a 192 KB ceiling silently lost every one of them. A megabyte clears them
+#: with room to spare, and is paid at most once per domain per week — only for a
+#: domain whose ``/favicon.ico`` already failed, and never twice, because the
+#: outcome is cached whichever way it goes.
+FAVICON_PAGE_MAX_BYTES = 1024 * 1024
 FAVICON_MAX_REDIRECTS = 2
 FAVICON_SUCCESS_TTL_SECONDS = 7 * 24 * 60 * 60
 FAVICON_FAILURE_TTL_SECONDS = 24 * 60 * 60
@@ -58,6 +78,56 @@ _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 # ``urlsplit`` to be judged — that parser is exactly what lets a scheme, a
 # path or an ``@`` change what a downstream check believes the host is.
 _HOSTNAME_ALLOWED_CHARS = re.compile(r"^[A-Za-z0-9.-]+$")
+
+#: The ``rel`` values that name a site's icon, lower-cased.
+#:
+#: ``rel`` is a space-separated token list, so this is matched token by token
+#: rather than by substring: ``rel="icon"`` and ``rel="shortcut icon"`` both
+#: qualify, while ``rel="apple-touch-icon-precomposed"`` is matched only by its
+#: own token and never by containing the word *icon*.
+_ICON_REL_TOKENS = frozenset(
+    {"icon", "shortcut", "apple-touch-icon", "apple-touch-icon-precomposed"}
+)
+
+
+def _content_type_of(headers: Mapping[str, str]) -> str:
+    """The bare media type, lower-cased, with any parameters dropped."""
+    raw = headers.get("content-type") or headers.get("Content-Type") or ""
+    return raw.split(";", 1)[0].strip().lower()
+
+
+class _IconLinkParser(HTMLParser):
+    """The first icon a page declares, and nothing else about the page.
+
+    Stops at ``</head>``. Everything that declares an icon does so in the head,
+    and a parser that read on would spend its time on the body of a news site
+    for no possible gain.
+
+    First match wins rather than best match: choosing between a 16px and a 180px
+    declaration would mean parsing ``sizes``, and the two are equally usable at
+    the 19 pixels this is drawn at.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.href: str | None = None
+        self._done = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if self._done or tag.lower() != "link":
+            return
+        values = {key.lower(): (value or "") for key, value in attrs}
+        rel = {token for token in values.get("rel", "").lower().split() if token}
+        if not rel & _ICON_REL_TOKENS:
+            return
+        href = values.get("href", "").strip()
+        if href:
+            self.href = href
+            self._done = True
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() == "head":
+            self._done = True
 
 Download = Callable[[str, int, float], tuple[int, Mapping[str, str], bytes]]
 
@@ -143,39 +213,93 @@ class FaviconTools:
         )
 
     def _fetch(self, domain: str) -> FaviconResult:
-        """Download ``/favicon.ico`` for ``domain``, re-validating every hop."""
+        """This domain's icon, by the two routes a site can offer one.
+
+        ``/favicon.ico`` first, because it costs one request and most sites
+        still honour it. When that comes back empty — a 404, an HTML error page,
+        anything that is not an image — the home page is read for a
+        ``<link rel="icon">``, which is where a site that has moved its icon to
+        a CDN or a hashed filename declares it. Measured: a listed company's
+        site answered ``/favicon.ico`` with a 404 page while declaring a
+        perfectly good icon in its markup.
+
+        The second route is only ever taken after the first fails, so an
+        ordinary domain still costs one request, and a domain with no icon at
+        all costs two — once a week, because the failure is cached too.
+        """
+        direct = self._download_icon(f"https://{domain}/favicon.ico")
+        if direct.found:
+            return direct
+        declared = self._declared_icon_url(domain)
+        if declared is None:
+            return FaviconResult(found=False)
+        return self._download_icon(declared)
+
+    def _declared_icon_url(self, domain: str) -> str | None:
+        """The icon a home page declares in its markup, as an absolute URL."""
+        page = self._read(f"https://{domain}/", FAVICON_PAGE_MAX_BYTES)
+        if page is None:
+            return None
+        url, headers, body = page
+        content_type = _content_type_of(headers)
+        if not content_type.startswith("text/html"):
+            return None
+        parser = _IconLinkParser()
+        try:
+            # ``errors="replace"`` rather than a guessed codec: this is being
+            # scanned for one attribute, and a page whose encoding we got wrong
+            # still yields a correct ASCII href.
+            parser.feed(body.decode("utf-8", errors="replace"))
+            parser.close()
+        except Exception as exc:  # noqa: BLE001 - somebody else's markup
+            logger.info("Favicon markup for %s could not be parsed: %s", domain, exc)
+            return None
+        # Resolved against the URL the page was actually served from, which is
+        # not the one asked for when a redirect moved it.
+        return urljoin(url, parser.href) if parser.href else None
+
+    def _download_icon(self, url: str) -> FaviconResult:
+        """Fetch one candidate icon URL, and judge what came back."""
+        fetched = self._read(url, FAVICON_MAX_BYTES)
+        if fetched is None:
+            return FaviconResult(found=False)
+        _, headers, body = fetched
+        content_type = _content_type_of(headers)
+        if not content_type.startswith("image/") or not body:
+            return FaviconResult(found=False)
+        return FaviconResult(found=True, content_type=content_type, body=body)
+
+    def _read(
+        self, url: str, max_bytes: int
+    ) -> tuple[str, Mapping[str, str], bytes] | None:
+        """One GET, re-validating every hop. ``None`` for anything but a 2xx."""
         denylist = self._denylist()
-        current = f"https://{domain}/favicon.ico"
+        current = url
         for redirect_count in range(FAVICON_MAX_REDIRECTS + 1):
             try:
                 current = validate_public_url(
                     current, denylist=denylist, resolver=self._resolver
                 )
             except ValueError as exc:
-                logger.info("Favicon URL for %s rejected: %s", domain, exc)
-                return FaviconResult(found=False)
+                logger.info("Favicon URL %s rejected: %s", current, exc)
+                return None
             try:
                 status, headers, body = self._download(
-                    current, FAVICON_MAX_BYTES, FAVICON_TIMEOUT_SECONDS
+                    current, max_bytes, FAVICON_TIMEOUT_SECONDS
                 )
             except (OSError, ValueError) as exc:
-                logger.info("Favicon download for %s failed: %s", domain, exc)
-                return FaviconResult(found=False)
+                logger.info("Favicon download of %s failed: %s", current, exc)
+                return None
             if status in _REDIRECT_STATUSES:
                 location = headers.get("location") or headers.get("Location")
                 if not location or redirect_count == FAVICON_MAX_REDIRECTS:
-                    return FaviconResult(found=False)
+                    return None
                 current = urljoin(current, location)
                 continue
             if not 200 <= status < 300:
-                return FaviconResult(found=False)
-            content_type = (
-                (headers.get("content-type") or "").split(";", 1)[0].strip().lower()
-            )
-            if not content_type.startswith("image/"):
-                return FaviconResult(found=False)
-            return FaviconResult(found=True, content_type=content_type, body=body)
-        return FaviconResult(found=False)
+                return None
+            return current, headers, body
+        return None
 
     @staticmethod
     def _cache_key(domain: str) -> str:
