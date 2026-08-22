@@ -5,12 +5,16 @@ themselves are ``alpha/envelope.py``'s and are tested there; what is under test
 is who may ask for one, what they are allowed to name when they ask, and what
 comes back when the store cannot answer.
 
-*A conversation cannot reach them.* The chat lane selects two bundles and this
-is not one of them, which is the whole of the boundary ``1e7b936`` drew.
+*Both lanes reach them, and they get two signatures out of one registration.*
+An Analysis is keyed by ``(symbol, trading_day)`` and the symbol arrives through
+the context; a conversation is keyed by nothing, so there the symbol is the
+user's own request and arrives as an argument. Where the context names one it
+wins, and an argument disagreeing with it is refused — the Analysis lane's
+boundary is enforced rather than merely unmentioned in a schema.
 
-*The model names a field and nothing else.* No symbol, no Trading Day, no peer
-list — all three are trusted facts, and an argument for any of them is a route
-to reading something this call was not opened for.
+*Nobody names a Trading Day or a peer list.* A day is a route to a session that
+has not closed; a peer list is the sample a percentile is a position within, and
+a model choosing its own comparison group chooses its own answer.
 
 *A refusal is an answer.* A field the store cannot compute comes back with its
 ``reasonCode``, the sentence beside it, and a null value. That is the shape the
@@ -49,6 +53,7 @@ from src.alpha.field_profile import (
     profile_for,
 )
 from src.stocks.signals.registry import REGISTRY
+from src.stocks.universe import forget_cohort_cache
 
 from .test_envelope import (
     PEERS,
@@ -58,6 +63,7 @@ from .test_envelope import (
     store_peers,
     store_window,
 )
+from .test_volume_spike import seat_cohort
 
 # A registered field the Analysis Field Profile has never named, and therefore
 # one no Analysis has ever carried. Reaching these is what the pair exists for.
@@ -87,10 +93,11 @@ def tools_over(session) -> SignalTools:
 
 
 class TestWhoMayReachThem:
-    def test_the_chat_lane_does_not_select_the_signals_bundle(self):
-        assert "signals" not in CHAT_TOOLSETS
-        assert "list_fields" not in resolve_toolset(CHAT_TOOLSETS)
-        assert "get_field" not in resolve_toolset(CHAT_TOOLSETS)
+    def test_the_chat_lane_selects_the_signals_bundle(self):
+        """The reversal of ``1e7b936``, asserted where it is easiest to notice."""
+        assert "signals" in CHAT_TOOLSETS
+        assert "list_fields" in resolve_toolset(CHAT_TOOLSETS)
+        assert "get_field" in resolve_toolset(CHAT_TOOLSETS)
 
     def test_the_bundle_holds_the_two_store_reads_and_the_price_check(self):
         expected = ("list_fields", "get_field", "check_price_claim")
@@ -98,7 +105,12 @@ class TestWhoMayReachThem:
         assert resolve_toolset("signals") == expected
 
     def test_the_agent_loop_defaults_to_the_chat_selection(self):
-        """Not to "every registered bundle", which would hand chat the store."""
+        """Not to "every registered bundle", which is still not the same thing.
+
+        The selection now includes ``signals``, so the difference is no longer
+        about this bundle — it is that a fourth bundle added tomorrow does not
+        reach a conversation until ``CHAT_TOOLSETS`` names it.
+        """
         import inspect
 
         from src.agent.loop import AgentLoop
@@ -106,13 +118,13 @@ class TestWhoMayReachThem:
         source = inspect.getsource(AgentLoop.__init__)
         assert "CHAT_TOOLSETS if toolsets is None" in source
 
-    def test_a_chat_selection_naming_signals_fails_at_import(self):
+    def test_a_chat_selection_naming_a_bundle_nobody_has_fails_at_import(self):
         from src.agent import toolsets as module
 
         original = module.CHAT_TOOLSETS
-        module.CHAT_TOOLSETS = ("web", "memory", "signals")
+        module.CHAT_TOOLSETS = ("web", "memory", "signls")
         try:
-            with pytest.raises(ValueError, match="Analysis lane"):
+            with pytest.raises(KeyError):
                 module._check_the_chat_selection_holds()
         finally:
             module.CHAT_TOOLSETS = original
@@ -123,17 +135,19 @@ class TestWhoMayReachThem:
 
 
 class TestWhatTheModelMayName:
-    def test_neither_schema_admits_a_symbol_a_day_or_a_peer_list(self):
-        forbidden = {"symbol", "trading_day", "tradingDay", "peers", "end", "date"}
+    def test_neither_schema_admits_a_day_or_a_peer_list(self):
+        forbidden = {"trading_day", "tradingDay", "peers", "end", "date"}
         for entry in tools_over(None).entries():
             named = set(entry.schema["properties"])
             assert not named & forbidden, entry.name
 
-    def test_get_field_takes_one_required_argument_and_no_others(self):
+    def test_get_field_takes_a_field_and_optionally_a_symbol(self):
         entry = next(
             item for item in tools_over(None).entries() if item.name == "get_field"
         )
-        assert set(entry.schema["properties"]) == {"field_id"}
+        assert set(entry.schema["properties"]) == {"field_id", "symbol"}
+        # Only the field is required: an Analysis is already opened for a symbol
+        # and naming one there is refused.
         assert entry.schema["required"] == ["field_id"]
         assert entry.schema["additionalProperties"] is False
 
@@ -146,15 +160,13 @@ class TestWhatTheModelMayName:
             axis.value for axis in Axis
         ]
 
-    def test_a_context_naming_neither_symbol_nor_day_is_refused(self):
-        tools = tools_over(None)
-        with pytest.raises(ValueError, match="Trading Day"):
-            tools.get_field(registry.ToolContext(user_id=3), {"field_id": NAMED_FIELD})
+    def test_a_context_with_a_symbol_and_no_day_has_no_session_to_read(self):
+        result = tools_over(None).get_field(
+            a_context(day=None), {"field_id": NAMED_FIELD}
+        )
 
-    def test_a_context_with_a_symbol_and_no_day_is_still_refused(self):
-        tools = tools_over(None)
-        with pytest.raises(ValueError, match="Trading Day"):
-            tools.get_field(a_context(day=None), {"field_id": NAMED_FIELD})
+        assert result["error"] == "cannot_read"
+        assert "no session" in result["detail"]
 
 
 class TestTheCatalog:
@@ -378,3 +390,137 @@ class TestThroughTheExecutor:
     def test_both_declare_a_result_cap_that_stops_a_bug(self):
         for entry in tools_over(None).entries():
             assert entry.max_result_size_chars == MAX_RESULT_CHARS
+
+
+class TestTheChatLaneSignature:
+    """A conversation is keyed by nothing, so there the symbol is an argument.
+
+    This is the half of the reversal that had to be designed rather than
+    switched on: the Analysis lane knows its symbol because a Run is keyed by
+    one, and a conversation knows it because the user typed it. Two facts of
+    different standing, so two ways in — and the handler keeps them apart rather
+    than merging them into one field that means either.
+    """
+
+    @staticmethod
+    def _seated(session):
+        """A store holding one symbol that is genuinely in the Universe."""
+        store_window(session)
+        seat_cohort(session, [SYMBOL])
+        forget_cohort_cache()
+
+    def test_a_symbol_argument_reads_that_symbol_with_no_context(self):
+        with open_session() as session:
+            self._seated(session)
+            figure = tools_over(session).get_field(
+                registry.ToolContext(user_id=7),
+                {"field_id": NAMED_FIELD, "symbol": SYMBOL.lower()},
+            )
+
+        assert figure["fieldId"] == NAMED_FIELD
+        # The newest closed session the store holds, which is what the chat lane
+        # resolves rather than accepting a day from the model.
+        assert figure["asOf"] is not None
+
+    def test_a_symbol_outside_the_universe_is_a_sentence_and_not_a_raise(self):
+        """And the sentence says it is about collection, not about the company."""
+        with open_session() as session:
+            self._seated(session)
+            result = tools_over(session).get_field(
+                registry.ToolContext(user_id=7),
+                {"field_id": NAMED_FIELD, "symbol": "ZZZQQQ"},
+            )
+
+        assert result["error"] == "cannot_read"
+        assert "Universe" in result["detail"]
+        assert "not a statement" in result["detail"]
+
+    def test_a_ticker_of_the_wrong_shape_is_a_sentence_and_not_a_raise(self):
+        with open_session() as session:
+            self._seated(session)
+            result = tools_over(session).get_field(
+                registry.ToolContext(user_id=7),
+                {"field_id": NAMED_FIELD, "symbol": "not a ticker"},
+            )
+
+        assert result["error"] == "cannot_read"
+
+    def test_no_symbol_and_no_context_says_which_one_is_missing(self):
+        with open_session() as session:
+            self._seated(session)
+            result = tools_over(session).get_field(
+                registry.ToolContext(user_id=7), {"field_id": NAMED_FIELD}
+            )
+
+        assert result["error"] == "cannot_read"
+        assert "none was named" in result["detail"]
+
+    def test_a_store_with_no_closed_session_has_no_day_to_read_on(self):
+        with open_session() as session:
+            seat_cohort(session, [SYMBOL])
+            forget_cohort_cache()
+            result = tools_over(session).get_field(
+                registry.ToolContext(user_id=7),
+                {"field_id": NAMED_FIELD, "symbol": SYMBOL},
+            )
+
+        assert result["error"] == "cannot_read"
+        assert "no closed session" in result["detail"]
+
+
+class TestTheAnalysisLaneBoundaryIsEnforced:
+    """The context wins, and a disagreeing argument is refused.
+
+    Before the chat signature existed the boundary was the *absence* of a symbol
+    field from the schema, which is a statement about what the model was told. A
+    schema is not an enforcement, and now that the field exists the handler has
+    to be.
+    """
+
+    def test_an_argument_naming_another_symbol_is_refused(self):
+        with open_session() as session:
+            store_window(session)
+            result = tools_over(session).get_field(
+                a_context(), {"field_id": NAMED_FIELD, "symbol": "OTHER"}
+            )
+
+        assert result["error"] == "cannot_read"
+        assert SYMBOL in result["detail"]
+        assert "OTHER" in result["detail"]
+
+    def test_an_argument_naming_the_same_symbol_is_not_a_request_for_anything_else(
+        self,
+    ):
+        with open_session() as session:
+            store_window(session)
+            figure = tools_over(session).get_field(
+                a_context(), {"field_id": NAMED_FIELD, "symbol": SYMBOL.lower()}
+            )
+
+        assert figure["fieldId"] == NAMED_FIELD
+
+    def test_the_analysis_lane_never_consults_the_universe(self):
+        """An Analysis Run is opened by the pipeline, which decided that already.
+
+        Re-asking here would make an Analysis fail on a symbol that left the
+        Universe after its Run was created, which is a different failure from the
+        one the Universe rule exists for.
+        """
+        with open_session() as session:
+            store_window(session)
+            figure = tools_over(session).get_field(
+                a_context(), {"field_id": NAMED_FIELD}
+            )
+
+        assert figure["fieldId"] == NAMED_FIELD
+
+    def test_a_refusal_carries_no_field_id_so_the_loop_cannot_bank_it(self):
+        """``alpha/analysis_loop._figure_in`` folds a payload with a fieldId into
+        the envelope. A refusal wearing one would become evidence."""
+        with open_session() as session:
+            store_window(session)
+            result = tools_over(session).get_field(
+                a_context(), {"field_id": NAMED_FIELD, "symbol": "OTHER"}
+            )
+
+        assert "fieldId" not in result

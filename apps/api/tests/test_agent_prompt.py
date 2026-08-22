@@ -90,6 +90,12 @@ def test_the_cache_key_never_carries_a_runtime_value() -> None:
     assert "2026" not in cache_key("m", "t")
 
 
+# Two words left this list rather than the prompt, and both for the same reason:
+# the chat lane now reads registered Signal Fields out of this system's store.
+# "Universe" is the membership rule that decides which symbols it can read at
+# all, and "unverified" is a check_price_claim verdict — the state that says a
+# price could not be checked, which is precisely not the Recommendation Gate
+# label of the same spelling that this list was built to keep out.
 VANISHED_VOCABULARY = (
     # The grounding contract and its markers.
     "[ev:",
@@ -99,7 +105,6 @@ VANISHED_VOCABULARY = (
     "Evidence Manifest",
     "Recommendation Gate",
     "Recommendation Validator",
-    "unverified",
     # The labelled block shape.
     "[technical]",
     "[fundamental]",
@@ -112,7 +117,6 @@ VANISHED_VOCABULARY = (
     "Trading Day",
     "trading_day",
     "market_state",
-    "Universe",
     "Watchlist",
     "widget",
     "Widget",
@@ -132,10 +136,34 @@ def test_the_prompt_does_not_speak_the_old_harnesss_language(phrase: str) -> Non
 
 
 def test_the_prompt_names_every_tool_the_agent_actually_has() -> None:
+    """Every tool the chat lane's selection expands to, and nothing it lacks."""
+    from src.agent import tools as agent_tools
+    from src.agent.toolsets import CHAT_TOOLSETS, resolve_toolset
+
+    from .agent_tool_world import isolated_registry
+
     rendered = render(RuntimeContext(today=date(2026, 8, 22)))
 
-    for tool in ("web_search", "fetch_url", "session_search", "remember_fact", "recall_facts"):
-        assert tool in rendered
+    with isolated_registry():
+        agent_tools.register_all()
+        offered = resolve_toolset(CHAT_TOOLSETS)
+
+    for tool in offered:
+        assert tool in rendered, tool
+
+
+def test_the_prompt_separates_reading_outside_from_reading_this_store() -> None:
+    """The kind of a tool is the load-bearing thing about it.
+
+    A figure out of the store has a date and a health and reads the same
+    tomorrow; a page does not. A prompt that listed all eight in one flat list
+    would be teaching the model that they are interchangeable.
+    """
+    rendered = render(RuntimeContext(today=date(2026, 8, 22)))
+
+    assert "thế giới bên ngoài" in rendered
+    assert "dữ liệu của chính hệ thống này" in rendered
+    assert "Số của store thắng số của web" in rendered
 
 
 def test_the_prompt_says_where_untrusted_content_arrives() -> None:

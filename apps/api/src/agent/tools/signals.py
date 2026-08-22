@@ -1,10 +1,12 @@
 """Asking the evidence plane a question, one registered field at a time.
 
-Two tools, and neither of them is offered to a conversation. The chat surface's
-toolset selection is ``web`` and ``memory``; this bundle is selected by the
-Analysis lane alone, which is what keeps the boundary ``1e7b936`` drew — a
-general assistant that reads none of this system's data — intact while the
-nightly lane reads all of it.
+Two tools, and both lanes have them. That is a reversal of ``1e7b936`` — *a
+general assistant that reads none of this system's data* — and it is a reversal
+rather than a drift because the decision was taken when there was no way to read
+the store that carried a figure's ``health`` and its ``asOf`` along with it.
+These two tools are that way. A conversation reading a figure it can name the
+date and the condition of is a different thing from a conversation reading a bare
+number out of a table.
 
 What they are for is measured rather than assumed. A fixed **Analysis Field
 Profile** hands every symbol on every Trading Day the same eleven figures, and
@@ -20,13 +22,23 @@ loop is indistinguishable from a figure that was seeded. Nothing about how a
 served field becomes a figure is written here; ``alpha/envelope.py`` owns that
 and is asked.
 
-**Neither tool takes a symbol, a Trading Day or a peer list.** All three are
-trusted facts and arrive through ``ToolContext``. An argument naming a symbol is
-a route to reading a symbol this Analysis was not opened for; an argument naming
-a day is a route to a session that has not closed; a peer list is the sample a
-percentile is a position within, and a model choosing its own comparison group
-chooses its own answer. ``registry.py`` states the general form of this rule for
-a user and a thread, and it is the same rule.
+**One tool, two signatures, and the difference is not a compromise.** In the
+Analysis lane the symbol arrives through ``ToolContext``: the Run is keyed by
+``(symbol, trading_day)``, so an argument naming a symbol would be a route to
+reading a company this Analysis was not opened for. In a conversation there is no
+such key — the symbol *is* the user's request, typed into the message — so there
+it is an argument, checked against the Universe. The handler resolves one before
+the other: a context that names a symbol wins, and an argument disagreeing with
+it is refused rather than obeyed. The Analysis lane's boundary is therefore
+enforced by the handler rather than by the absence of a field from a schema,
+which is the stronger of the two — a schema is what the model is *told*.
+
+**No lane may name a Trading Day or a peer list.** A day is a route to a session
+that has not closed; a peer list is the sample a percentile is a position within,
+and a model choosing its own comparison group chooses its own answer. In a
+conversation the day is the newest session the store holds, resolved here.
+``registry.py`` states the general form of this rule for a user and a thread, and
+it is the same rule.
 
 **No spill layer.** A figure measures about 730 bytes and the whole catalog of
 thirty is roughly 22KB; the worst case here is a model asking for everything
@@ -59,7 +71,11 @@ from src.alpha.field_profile import (
     profile_for,
 )
 from src.core.database import get_sync_db
+from src.stocks.shared.exceptions import StockServiceError
+from src.stocks.shared.validators import validate_symbol
 from src.stocks.signals.registry import REGISTRY
+from src.stocks.trading_day import latest_trading_day
+from src.stocks.universe import build_universe
 
 from ..registry import ToolContext, ToolEntry, object_schema, register
 
@@ -187,10 +203,12 @@ class SignalTools:
                 name="get_field",
                 toolset=TOOLSET,
                 description=(
-                    "Read one Signal Field for the symbol and Trading Day under "
-                    "analysis. Returns the figure with its unit, its sanctioned "
-                    "reading, its health and the date it is as of — or the named "
-                    "reason the store cannot answer it."
+                    "Read one Signal Field out of this system's own store for one "
+                    "symbol, on the most recent closed session. Returns the figure "
+                    "with its unit, its sanctioned reading, its health and the "
+                    "date it is as of — or the named reason the store cannot "
+                    "answer it. There is no way to ask for a session that has not "
+                    "closed."
                 ),
                 schema=object_schema(
                     {
@@ -201,7 +219,17 @@ class SignalTools:
                                 "A fieldId from list_fields, exactly as it is "
                                 "spelled there."
                             ),
-                        }
+                        },
+                        "symbol": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": (
+                                "The ticker to read it for. Omit it where the "
+                                "caller is already opened for one symbol, which "
+                                "is what an Analysis is; naming a different one "
+                                "there is refused."
+                            ),
+                        },
                     },
                     ("field_id",),
                 ),
@@ -238,7 +266,6 @@ class SignalTools:
     def get_field(
         self, context: ToolContext, arguments: Mapping[str, Any]
     ) -> Mapping[str, Any]:
-        symbol, trading_day = _pair(context)
         field_id = str(arguments.get("field_id") or "").strip()
         if not field_id:
             raise ValueError("field_id must name a registered field")
@@ -252,6 +279,10 @@ class SignalTools:
                 "for the ids this system computes."
             )
         with self._open() as session:
+            pair = _pair(context, arguments, session)
+            if isinstance(pair, dict):
+                return pair
+            symbol, trading_day = pair
             figure = figure_for_field(session, symbol, trading_day, field_id)
         return figure.as_wire()
 
@@ -261,21 +292,81 @@ class SignalTools:
             yield session
 
 
-def _pair(context: ToolContext) -> tuple[str, Any]:
-    """The symbol and Trading Day this call is for, or a refusal naming what is
-    missing.
+def _pair(
+    context: ToolContext, arguments: Mapping[str, Any], session: Session
+) -> tuple[str, Any] | dict[str, Any]:
+    """The symbol and Trading Day this call is for, or a sentence saying why not.
 
-    Both are trusted facts and neither has a default. A caller that selected
-    this toolset without them is wired wrong, and answering for "the newest
-    session" instead would produce a figure stamped with a day nobody asked
-    about — which is the manufactured Analysis the availability rule forbids.
+    **The context is asked first and it is final.** An Analysis is opened for one
+    pair, so where the context names a symbol that is the symbol; an argument
+    naming a different one is refused rather than obeyed, which closes the route
+    that the argument's absence from the Analysis lane's schema only discouraged.
+    An argument naming the *same* symbol is allowed through, because it is not a
+    request for anything else.
+
+    **Without a context, the symbol is the user's own request.** A conversation
+    is not keyed by anything, so a ticker typed into the message is the only place
+    the subject can come from. It is validated and checked against the Universe:
+    a symbol this system never collected has no figures, and a refusal saying so
+    is the honest answer where an empty one reads as "nothing is happening at that
+    company".
+
+    **The Trading Day is never an argument in either lane.** The newest closed
+    session in the store, resolved here — a day the model could name is a day it
+    could name before it closed.
     """
-    if not context.symbol or context.trading_day is None:
-        raise ValueError(
-            "this tool reads one symbol on one Trading Day and the context names "
-            "neither"
+    named = str(arguments.get("symbol") or "").strip().upper()
+    if context.symbol:
+        held = context.symbol.upper()
+        if named and named != held:
+            return _cannot(
+                f"This call reads {held} and cannot read {named}. It was opened "
+                f"for one symbol, and the figures it serves are {held}'s."
+            )
+        if context.trading_day is None:
+            return _cannot(
+                "This call names a symbol and no Trading Day, so there is no "
+                "session to read it on."
+            )
+        return held, context.trading_day
+
+    if not named:
+        return _cannot(
+            "get_field reads one symbol and none was named. Give the ticker the "
+            "question is about."
         )
-    return context.symbol.upper(), context.trading_day
+    try:
+        symbol = validate_symbol(named)
+    except StockServiceError:
+        return _cannot(
+            f"{named!r} is not the shape of a ticker on this market, so this "
+            "system holds nothing under it."
+        )
+    if not build_universe(session).contains(symbol):
+        return _cannot(
+            f"{symbol} is outside the Universe this system collects, so there is "
+            "no stored session to compute a field from. It is not a statement "
+            "about the company."
+        )
+    trading_day = latest_trading_day(session)
+    if trading_day is None:
+        return _cannot(
+            "This system holds no closed session yet, so there is no day to read "
+            "a field on."
+        )
+    return symbol, trading_day
+
+
+def _cannot(sentence: str) -> dict[str, Any]:
+    """A refusal shaped so the model reads it and the loop does not mistake it.
+
+    Returned rather than raised: the question was well formed and the answer is
+    that the store has nothing to say, which is a fact the model should relay
+    rather than a tool failure it will read as the tool being broken. It carries
+    no ``fieldId``, so ``alpha/analysis_loop`` cannot fold it into an envelope as
+    a figure.
+    """
+    return {"error": "cannot_read", "detail": sentence}
 
 
 def _labels() -> Mapping[str, str]:
