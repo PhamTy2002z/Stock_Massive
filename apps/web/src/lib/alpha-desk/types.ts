@@ -56,6 +56,17 @@ export interface ToolCall {
    * round is the fact the backend already knows.
    */
   round: number
+  /**
+   * Why the call ended in `error`, as the backend's stable code — or `null`.
+   *
+   * `status` alone cannot answer what the reader wants to know, because three of
+   * the codes are not failures: the Turn spent its allowance of external calls,
+   * the round asked for more than it may dispatch, the tool loop was halted.
+   * Those were refused here before anything left the deployment, and drawing
+   * them like a search engine going down asks the reader to retry something
+   * retrying will not fix.
+   */
+  error: string | null
   /** How many results the call produced, which is not always `results.length`. */
   result_count: number
   /** The sources behind this call, already flattened and capped by the backend. */

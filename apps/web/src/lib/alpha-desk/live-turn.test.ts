@@ -122,9 +122,38 @@ describe("tool calls", () => {
         status: "ok",
         summary: "Đã tìm",
         round: 0,
+        error: null,
         result_count: 0,
         results: [],
       },
+    ])
+  })
+
+  it("carries the reason a call failed, and drops a blank one", () => {
+    // The reason is what lets the surface tell a ceiling of ours apart from a
+    // tool that broke. A payload with no reason is not an error about nothing:
+    // it is a call whose status is all there is to say.
+    const state = apply(
+      started(),
+      event("tool.call", 1, {
+        id: "a",
+        name: "web_search",
+        status: "error",
+        summary: "Tìm trên web: x",
+        error: "external_budget_exhausted",
+      }),
+      event("tool.call", 2, {
+        id: "b",
+        name: "fetch_url",
+        status: "error",
+        summary: "Đọc trang: y",
+        error: "",
+      }),
+    )
+
+    expect(state.toolCalls.map((call) => call.error)).toEqual([
+      "external_budget_exhausted",
+      null,
     ])
   })
 
@@ -154,6 +183,7 @@ describe("tool calls", () => {
         status: "running",
         summary: "recall_facts",
         round: 0,
+        error: null,
         result_count: 0,
         results: [],
       },

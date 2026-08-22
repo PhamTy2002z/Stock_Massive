@@ -2,7 +2,7 @@
 
 import { AlertCircle, Check, Loader2 } from "lucide-react"
 
-import { TOOL_CALL_COPY } from "@/lib/alpha-desk/copy"
+import { TOOL_CALL_COPY, toolCallErrorLabel } from "@/lib/alpha-desk/copy"
 import type { ToolCall } from "@/lib/alpha-desk/types"
 import { cn } from "@/lib/utils"
 
@@ -41,7 +41,9 @@ export function ToolCallList({
           <StatusIcon status={call.status} />
           <span className="min-w-0 flex-1 truncate">{call.summary}</span>
           <span className={cn("shrink-0 text-micro", call.status === "error" && "text-destructive")}>
-            {TOOL_CALL_COPY[call.status]}
+            {call.status === "error"
+              ? toolCallErrorLabel(call.error)
+              : TOOL_CALL_COPY[call.status]}
           </span>
         </li>
       ))}

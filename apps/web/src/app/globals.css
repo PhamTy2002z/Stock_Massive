@@ -246,13 +246,19 @@
     to { opacity: 1; transform: none; }
   }
 
-  /* One chunk of an answer arriving: a few words lifting out of a soft blur.
-     Staggered by an inline `animation-delay` the renderer writes per chunk
-     (`word-cadence`), so the cascade is CSS time rather than React state — the
-     whole block is in the DOM the moment it lands and nothing reflows. */
+  /* One word of an answer arriving, out of a soft blur.
+
+     Nothing here staggers them: a word fades in when it is mounted, and what
+     mounts it is the pacer growing the revealed text one commit at a time
+     (`reveal.ts`). Staggering with `animation-delay` instead would mean text
+     laid out before it is visible — height that appeared with no commit, which
+     is exactly what the transcript's pin and spacer cannot absorb.
+
+     Opacity and blur only: a word is `display: inline`, and a transform on
+     inline text is ignored by every engine. */
   @keyframes vg-chunk-in {
-    from { opacity: 0; filter: blur(3px); transform: translateY(2px); }
-    to { opacity: 1; filter: none; transform: none; }
+    from { opacity: 0; filter: blur(3px); }
+    to { opacity: 1; filter: none; }
   }
 
   @keyframes vg-row-in {
@@ -293,11 +299,13 @@
     animation: vg-bar-grow 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
-  /* `both` keeps a chunk invisible through its delay; without it every chunk
-     would be on screen before its turn and the cascade would be a no-op. */
+  /* 0.26s is `CHUNK_FADE_MS` in `word-cadence.ts`, which is how the surface
+     knows when the last word has finished arriving and the canonical message
+     may take the draft's place. `backwards` keeps the first frame at zero
+     opacity, so a word never flashes at full opacity before it fades. */
   .vg-chunk {
     display: inline;
-    animation: vg-chunk-in 0.26s cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation: vg-chunk-in 0.26s cubic-bezier(0.16, 1, 0.3, 1) backwards;
   }
 
   @media (prefers-reduced-motion: reduce) {

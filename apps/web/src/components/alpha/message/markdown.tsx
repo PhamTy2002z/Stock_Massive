@@ -1,9 +1,10 @@
 "use client"
 
 import type { ComponentPropsWithoutRef } from "react"
-import ReactMarkdown from "react-markdown"
+import ReactMarkdown, { type Options } from "react-markdown"
 import remarkGfm from "remark-gfm"
 
+import { rehypeWordCadence } from "@/lib/alpha-desk/word-cadence"
 import { cn } from "@/lib/utils"
 
 /**
@@ -15,7 +16,9 @@ import { cn } from "@/lib/utils"
  * **No raw HTML.** `rehype-raw` is deliberately absent, so the plugin chain has
  * no path from model output to markup. An `<img onerror>` in an answer renders
  * as the text it is. This is why no sanitiser is needed rather than why one was
- * skipped: nothing here can produce an element the code below did not name.
+ * skipped: nothing here can produce an element the code below did not name, and
+ * the one plugin that adds elements adds `span`s it writes itself around text it
+ * never reads as markup.
  *
  * **No autolinked bare URL becomes a live anchor without a rel.** Every link
  * goes through the component below, which opens in a new tab and sends no
@@ -27,8 +30,24 @@ import { cn } from "@/lib/utils"
  * accepted cost of prose that appears as it is written; the alternative is
  * holding each sentence back until it closes, which is the buffering the
  * streaming path exists to avoid.
+ *
+ * **`animate` splits the prose into one element per word** (`word-cadence`), so
+ * each word fades in as the pacer reveals it. Only an answer being written asks
+ * for it: the same message rendered from history is text that was always there,
+ * and a fade on a re-render would animate a paragraph the reader is part-way
+ * through.
  */
-export function Markdown({ text, className }: { text: string; className?: string }) {
+export function Markdown({
+  text,
+  animate = false,
+  className,
+}: {
+  text: string
+  /** Whether this prose is arriving, and its words should fade in as it does. */
+  animate?: boolean
+  className?: string
+}) {
+  const rehypePlugins: Options["rehypePlugins"] = animate ? [rehypeWordCadence] : undefined
   return (
     <div
       className={cn(
@@ -54,6 +73,7 @@ export function Markdown({ text, className }: { text: string; className?: string
         // GFM for the two things an answer actually uses beyond plain prose:
         // tables, and strikethrough on a superseded line.
         remarkPlugins={[remarkGfm]}
+        rehypePlugins={rehypePlugins}
         components={{
           a: Anchor,
           table: Table,

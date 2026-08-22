@@ -58,6 +58,9 @@ export function readToolCall(
         ? status
         : fallbackStatus,
     summary: summary === "" ? name : summary,
+    // Absent, empty, or the wrong type all mean the same thing here: nothing to
+    // say beyond the status. Only a non-empty string is a reason.
+    error: typeof record.error === "string" && record.error !== "" ? record.error : null,
     round: asNumber(record.round, 0),
     // The backend caps how many results it sends, so a count larger than the
     // list is correct and is what the reader should be told. Only a payload

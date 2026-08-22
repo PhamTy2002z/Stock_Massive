@@ -31,6 +31,30 @@ export const TOOL_CALL_COPY = {
 } as const
 
 /**
+ * What a failed call says, when the reason is not that anything failed.
+ *
+ * Keyed by the backend's stable `error` code. Every entry here shares one
+ * property: the call was refused by our own ceilings and never dispatched, so
+ * nothing outside this deployment was even asked. Calling that "Lỗi" tells the
+ * reader to retry a search engine that is working perfectly well.
+ *
+ * A code with no entry keeps `TOOL_CALL_COPY.error`, which is the right default:
+ * everything not listed here — a tool that threw, a page that would not load, a
+ * name no tool answers to — really is a failure.
+ */
+const REFUSED_CALL_LABELS: Record<string, string> = {
+  external_budget_exhausted: "Hết lượt tra",
+  round_fanout_exceeded: "Không chạy",
+  halted_turn: "Đã dừng",
+}
+
+/** The word shown beside a call that did not succeed. */
+export function toolCallErrorLabel(error: string | null): string {
+  if (error === null) return TOOL_CALL_COPY.error
+  return REFUSED_CALL_LABELS[error] ?? TOOL_CALL_COPY.error
+}
+
+/**
  * How a Turn that stopped early is described.
  *
  * Keyed by the stable `terminal_reason` the lifecycle writes. A reason with no
@@ -46,6 +70,9 @@ const TERMINAL_REASONS: Record<string, string> = {
   turn_failed: "Lượt này gặp sự cố nên dừng lại.",
   llm_call_timeout: "Mô hình không trả lời kịp nên lượt này dừng lại.",
   answer_truncated: "Câu trả lời bị cắt giữa chừng vì vượt giới hạn độ dài cho một lượt.",
+  empty_answer:
+    "Tuyến mô hình không trả về câu trả lời nào cho lượt này. Bạn thử hỏi lại.",
+  deadline_expired: "Không kết nối kịp tới tuyến mô hình nên lượt này dừng lại.",
   gateway_timeout: "Tuyến mô hình không phản hồi nên lượt này dừng lại.",
   route_rate_limited:
     "Tuyến mô hình đã dùng hết lượt gọi được cấp nên lượt này dừng lại. Chờ hạn mức được cấp lại rồi thử lại.",
