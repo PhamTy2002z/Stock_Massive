@@ -24,6 +24,7 @@ function call(id: string, status: ToolCall["status"] = "ok"): ToolCall {
     status,
     summary: "Đã tìm trên web",
     round: 0,
+    error: null,
     result_count: 0,
     results: [],
   }
@@ -241,6 +242,60 @@ describe("the draft", () => {
     })
 
     expect(entries.map((entry) => entry.kind)).toEqual(["user", "assistant"])
+  })
+
+  it("shows what the reveal says is on screen, not everything received", () => {
+    const entries = transcript({
+      live: live({ text: "cả câu trả lời" }),
+      reveal: { text: "cả câu", working: false, handedOver: false },
+    })
+    const draft = entries.at(-1)
+
+    expect(draft?.kind === "draft" && draft.text).toBe("cả câu")
+  })
+
+  it("keeps the screen while the answer is still arriving", () => {
+    // The Turn is over and the message has landed, and the words are still
+    // coming: handing over now would put every one still waiting on screen at
+    // once, because the canonical message draws them with no cadence.
+    const entries = transcript({
+      messages: [userMessage(1, "hỏi"), assistantMessage(2, "đáp")],
+      live: live({ phase: "completed", messageId: 2, text: "đáp" }),
+      reveal: { text: "đ", working: false, handedOver: false },
+    })
+
+    expect(entries.map((entry) => entry.kind)).toEqual(["user", "draft"])
+  })
+
+  it("hands over the moment the reveal says the answer is on screen", () => {
+    const entries = transcript({
+      messages: [userMessage(1, "hỏi"), assistantMessage(2, "đáp")],
+      live: live({ phase: "completed", messageId: 2, text: "đáp" }),
+      reveal: { text: "đáp", working: false, handedOver: true },
+    })
+
+    expect(entries.map((entry) => entry.kind)).toEqual(["user", "assistant"])
+  })
+
+  it("holds nothing back in a Thread it does not belong to", () => {
+    // The hold is about one draft finishing. Another Thread's answers are
+    // history and are drawn whatever this draft is doing.
+    const entries = transcript({
+      threadId: "33333333-3333-4333-8333-333333333333",
+      messages: [userMessage(1, "hỏi"), assistantMessage(2, "đáp")],
+      live: live({ phase: "completed", messageId: 2, text: "đáp" }),
+      reveal: { text: "đ", working: false, handedOver: false },
+    })
+
+    expect(entries.map((entry) => entry.kind)).toEqual(["user", "assistant"])
+  })
+
+  it("shows everything received when nothing is pacing it", () => {
+    const entries = transcript({ live: live({ text: "phần đầu" }) })
+    const draft = entries.at(-1)
+
+    expect(draft?.kind === "draft" && draft.text).toBe("phần đầu")
+    expect(draft?.kind === "draft" && draft.working).toBe(true)
   })
 
   it("stands until that message actually arrives, so the answer never blinks out", () => {

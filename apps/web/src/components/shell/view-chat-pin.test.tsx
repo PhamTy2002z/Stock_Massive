@@ -203,6 +203,7 @@ describe("asking a follow-up", () => {
         kind: "draft",
         key: "d1",
         text: "Phiên 21/08…",
+        working: false,
         toolCalls: [],
         thoughts: [],
         elapsedMs: 0,

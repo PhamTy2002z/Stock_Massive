@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { Loader2 } from "lucide-react"
 
-import { TOOL_CALL_COPY } from "@/lib/alpha-desk/copy"
+import { toolCallErrorLabel } from "@/lib/alpha-desk/copy"
 import type { Thought, ToolCall } from "@/lib/alpha-desk/types"
 import { cn } from "@/lib/utils"
 import { SourceChips } from "./source-chips"
@@ -21,6 +21,14 @@ import { SourceList } from "./source-list"
  * until the next run/finish transition resets it, so a reader who opened it
  * mid-run to watch does not have it slammed shut under them by an unrelated
  * re-render.
+ *
+ * **It always ends in a row that is moving, while the Turn is running.** A tool
+ * call carries its own spinner for as long as it is out, so the rail is alive
+ * until the last call returns and then goes completely still — through the whole
+ * stretch where the model is deciding what to do next, or writing the answer,
+ * which on a hard question is most of the wait. Nothing moving reads as nothing
+ * happening. The seconds go in the fold's own line instead of in that row,
+ * because the line is the half that survives a reader folding the rail shut.
  *
  * Grouping tool calls by `round` rather than by arrival order is the point of
  * carrying `round` on `ToolCall` at all — the model asks for several searches
@@ -70,11 +78,15 @@ export function ReasoningTimeline({
         aria-expanded={open}
         className="flex items-center gap-[0.4rem] text-meta text-muted-foreground transition-colors hover:text-ink-2"
       >
-        {running ? "Đang làm việc…" : `Đã làm việc trong ${seconds}s`}
+        {running ? workingLabel(seconds) : `Đã làm việc trong ${seconds}s`}
         <ChevronIcon open={open} />
       </button>
 
-      {/* Animated by grid rows rather than by height, because the content has
+      {/* The fold. `duration-300` and the `visibility` transition below are
+          `TIMELINE_FOLD_MS` in `reveal.ts`, which is what the answer waits for
+          before it starts growing underneath.
+
+          Animated by grid rows rather than by height, because the content has
           no height anybody can name: it grows by whole rows while the Turn
           runs. A grid track going 0fr→1fr resolves to the content's own height
           at both ends, so the fold is smooth without measuring anything and
@@ -109,7 +121,9 @@ export function ReasoningTimeline({
         >
           <div className="mt-[10px]">
           {items.map((item, index) => {
-            const isLast = index === items.length - 1
+            // The live row below is the last one whenever there is one, so a
+            // trace that is still growing keeps its connecting line.
+            const isLast = !running && index === items.length - 1
             if (item.kind === "thought") {
               return (
                 <RailRow key={item.key} icon={<BulbIcon />} isLast={isLast}>
@@ -124,10 +138,61 @@ export function ReasoningTimeline({
             }
             return <GroupRow key={item.key} calls={item.calls} isLast={isLast} />
           })}
+
+          {/* The one row that says the Turn has not stopped. A tool call spins
+              while it runs, so the rail looks alive right up to the moment the
+              last call returns — and then looks finished, for however long the
+              model spends deciding what to do next or writing the answer. That
+              stretch is most of the wait on a hard question, and a rail with
+              nothing moving in it reads as a Turn that died. */}
+          {running && (
+            <RailRow icon={<WorkingDots />} isLast>
+              <span
+                role="status"
+                className="text-meta leading-[22px] text-muted-foreground"
+              >
+                {items.length === 0 ? "Đang chuẩn bị…" : "Đang xử lý…"}
+              </span>
+            </RailRow>
+          )}
           </div>
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * What the fold's own line says while the Turn is running.
+ *
+ * The seconds go here rather than in the row below, because this is the half
+ * that survives the reader folding the rail shut — and because a timer next to
+ * the words `Đang làm việc` is the same sentence the finished state ends on,
+ * rather than a second one. Under a second there is no figure worth printing.
+ */
+function workingLabel(seconds: number): string {
+  return seconds > 0 ? `Đang làm việc · ${seconds}s` : "Đang làm việc…"
+}
+
+/**
+ * Three dots keeping time, as the rail's live icon.
+ *
+ * The design's own pulse (`vg-dot-pulse`) rather than another spinner: a
+ * spinner is what a single tool call uses while it waits for an answer, and
+ * this is not waiting on anything in particular. Staggered by an inline delay,
+ * which is also what makes it read as travelling left to right.
+ */
+function WorkingDots() {
+  return (
+    <span className="flex items-center gap-[3px]" aria-hidden>
+      {[0, 160, 320].map((delay) => (
+        <span
+          key={delay}
+          style={{ animationDelay: `${delay}ms` }}
+          className="size-[3px] rounded-full bg-current animate-vg-dot-pulse"
+        />
+      ))}
+    </span>
   )
 }
 
@@ -206,10 +271,12 @@ function SingleCallRow({ call, isLast }: { call: ToolCall; isLast: boolean }) {
       {/* A call that failed says so instead of reporting nought results. The
           design has no failure state because its data never fails; leaving one
           out would draw a call that returned nothing exactly like a call that
-          found nothing, and only one of those is worth retrying. */}
+          found nothing, and only one of those is worth retrying. Which word it
+          gets depends on the reason: a ceiling of ours refusing the call is not
+          the same event as a page that would not load. */}
       {call.status === "error" && (
         <span className="ml-auto flex-none text-meta leading-[22px] text-destructive">
-          {TOOL_CALL_COPY.error}
+          {toolCallErrorLabel(call.error)}
         </span>
       )}
       {call.status === "ok" && (
@@ -268,7 +335,7 @@ function GroupRow({ calls, isLast }: { calls: ToolCall[]; isLast: boolean }) {
             </span>
             {call.status === "error" && (
               <span className="flex-none text-meta leading-[22px] text-destructive">
-                {TOOL_CALL_COPY.error}
+                {toolCallErrorLabel(call.error)}
               </span>
             )}
           </div>

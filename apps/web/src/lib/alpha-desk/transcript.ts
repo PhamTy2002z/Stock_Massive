@@ -91,8 +91,20 @@ export interface AssistantEntry {
 export interface DraftEntry {
   kind: "draft"
   key: string
-  /** The answer so far. Grows by whole deltas, never re-ordered. */
+  /**
+   * The answer as far as it should be on screen. Grows by whole words, never
+   * re-ordered — which is not the same as everything that has arrived, because
+   * prose reaches the browser faster than a reader can be shown it.
+   */
   text: string
+  /**
+   * Whether the timeline still reads as running.
+   *
+   * Carried rather than derived from `text`, because it is a fact about what has
+   * *arrived*: the work is over the moment there is a reply to read, and at that
+   * moment none of the reply is on screen yet.
+   */
+  working: boolean
   toolCalls: ToolCall[]
   thoughts: Thought[]
   elapsedMs: number
@@ -142,12 +154,43 @@ export interface TranscriptInput {
   pendingUserText: string | null
   /** Analyses opened into this Thread, in the order they were opened. */
   openedAnalyses?: OpenedAnalysis[]
+  /**
+   * How much of the live Turn is on screen, when something is pacing it.
+   *
+   * A Turn's prose reaches the browser faster than a reader can be shown it
+   * (`use-answer-reveal`), so what the draft draws is a prefix, and the Turn is
+   * over well before the last word of it has arrived. Two consequences, and both
+   * are decided here rather than in a component:
+   *
+   * The draft's `text` and `working` come from this rather than from `live`.
+   *
+   * And **the canonical message waits.** Handing over on the terminal event
+   * alone would cut the arrival off: that message draws the same text with no
+   * cadence, so every word still waiting would appear at once. So it is held
+   * back rather than drawn beside the draft.
+   *
+   * Absent means nothing is pacing: the draft shows everything received, and its
+   * canonical twin replaces it as soon as it lands.
+   */
+  reveal?: DraftReveal
+}
+
+/** What a pacer says about the answer on screen (`use-answer-reveal`). */
+export interface DraftReveal {
+  text: string
+  working: boolean
+  handedOver: boolean
 }
 
 export function buildTranscript(input: TranscriptInput): TranscriptEntry[] {
   const ordered = [...input.messages].sort((left, right) => left.seq - right.seq)
   const entries: TranscriptEntry[] = []
   const pendingArtifacts = [...(input.openedAnalyses ?? [])]
+  const reveal = input.reveal ?? received(input.live)
+  const drafting = showsDraft(input, ordered, reveal)
+  // The one message the draft is still standing in for. Skipped rather than
+  // drawn, because the draft below is the same answer still arriving.
+  const heldBack = drafting && !reveal.handedOver ? input.live.messageId : null
 
   /** Every artifact anchored at or before this point in the conversation. */
   function flushArtifactsBefore(seq: number | null): void {
@@ -174,7 +217,7 @@ export function buildTranscript(input: TranscriptInput): TranscriptEntry[] {
         text: textOf(message),
         pending: false,
       })
-    } else if (message.role === "assistant") {
+    } else if (message.role === "assistant" && message.id !== heldBack) {
       // `summary` is context compaction. It is a fact about what the model was
       // handed, not about what the user said or was told, so it is not a row.
       entries.push({
@@ -202,11 +245,12 @@ export function buildTranscript(input: TranscriptInput): TranscriptEntry[] {
     })
   }
 
-  if (showsDraft(input, ordered)) {
+  if (drafting) {
     entries.push({
       kind: "draft",
       key: `draft-${input.live.turnId}`,
-      text: input.live.text,
+      text: reveal.text,
+      working: reveal.working,
       toolCalls: input.live.toolCalls,
       thoughts: input.live.thoughts,
       elapsedMs: input.live.elapsedMs,
@@ -225,13 +269,35 @@ export function buildTranscript(input: TranscriptInput): TranscriptEntry[] {
  * message is the same answer as the draft, and showing both would print it
  * twice. Until then the draft stands, including when it ended with nothing: a
  * Turn that failed still owes the user a status and a retry.
+ *
+ * A reveal still writing the answer out postpones exactly that swap and nothing
+ * else: the draft is still the newest thing on screen while it is the only copy
+ * of the answer that is arriving rather than already there.
  */
-function showsDraft(input: TranscriptInput, ordered: ThreadMessage[]): boolean {
+function showsDraft(
+  input: TranscriptInput,
+  ordered: ThreadMessage[],
+  reveal: DraftReveal,
+): boolean {
   const { live } = input
   if (live.turnId === null || live.phase === "idle") return false
   if (live.threadId !== input.threadId) return false
   if (live.messageId === null) return true
+  if (!reveal.handedOver) return true
   return !ordered.some((message) => message.id === live.messageId)
+}
+
+/**
+ * The reveal for a surface that is not pacing anything: everything received is
+ * on screen, and the Turn's own phase decides whether the work reads as running.
+ */
+function received(live: LiveTurn): DraftReveal {
+  return {
+    text: live.text,
+    working:
+      live.phase === "starting" || live.phase === "running" || live.phase === "cancelling",
+    handedOver: true,
+  }
 }
 
 function textOf(message: ThreadMessage): string {

@@ -26,6 +26,7 @@ function call(overrides: Partial<ToolCall> = {}): ToolCall {
     status: "ok",
     summary: "Đã tra dữ liệu cho STB giá 12 tháng",
     round: 0,
+    error: null,
     result_count: 0,
     results: [],
     ...overrides,
@@ -120,6 +121,124 @@ describe("the order rounds render in", () => {
   })
 })
 
+describe("what a failed call is called", () => {
+  /**
+   * The distinction the reader acts on. A ceiling of ours refusing a call and a
+   * page that would not load both end `error`, and they ask opposite things:
+   * one is worth trying again, the other is the product saying it has looked
+   * enough. Drawing both as "Lỗi" sent readers back to a search engine that was
+   * working the whole time.
+   */
+  it("names the ceiling when the Turn spent its allowance of lookups", () => {
+    render(
+      <ReasoningTimeline
+        thoughts={[]}
+        toolCalls={[call({ status: "error", error: "external_budget_exhausted" })]}
+        elapsedMs={5000}
+        running={false}
+      />,
+    )
+
+    expect(screen.getByText("Hết lượt tra")).toBeInTheDocument()
+    expect(screen.queryByText("Lỗi")).not.toBeInTheDocument()
+  })
+
+  it("names it inside a grouped round too, where the refusals actually arrive", () => {
+    // The shape that produced the complaint: a round fans out, the allowance is
+    // already gone, and every call in the group is refused at once.
+    render(
+      <ReasoningTimeline
+        thoughts={[]}
+        toolCalls={[
+          call({ id: "a", status: "error", error: "external_budget_exhausted" }),
+          call({ id: "b", status: "error", error: "external_budget_exhausted" }),
+        ]}
+        elapsedMs={5000}
+        running={false}
+      />,
+    )
+
+    expect(screen.getAllByText("Hết lượt tra")).toHaveLength(2)
+    expect(screen.queryByText("Lỗi")).not.toBeInTheDocument()
+  })
+
+  it("still says Lỗi for a call that really did fail", () => {
+    render(
+      <ReasoningTimeline
+        thoughts={[]}
+        toolCalls={[call({ status: "error", error: "tool_failed" })]}
+        elapsedMs={5000}
+        running={false}
+      />,
+    )
+
+    expect(screen.getByText("Lỗi")).toBeInTheDocument()
+  })
+
+  it("falls back to Lỗi for a reason this build has not learned", () => {
+    // A backend that grows a new code must not put the code itself on screen.
+    render(
+      <ReasoningTimeline
+        thoughts={[]}
+        toolCalls={[call({ status: "error", error: "some_future_reason" })]}
+        elapsedMs={5000}
+        running={false}
+      />,
+    )
+
+    expect(screen.getByText("Lỗi")).toBeInTheDocument()
+    expect(screen.queryByText("some_future_reason")).not.toBeInTheDocument()
+  })
+})
+
+describe("saying the Turn has not stopped", () => {
+  it("ends in a live row, so the rail is never still while the Turn runs", () => {
+    // The stretch that has no other sign of life: every call has returned and
+    // the model is deciding what to do next, or writing the answer.
+    render(
+      <ReasoningTimeline
+        thoughts={[]}
+        toolCalls={[call({ status: "ok", summary: "Đã tra dữ liệu cho STB" })]}
+        elapsedMs={21000}
+        running
+      />,
+    )
+
+    expect(screen.getByRole("status")).toHaveTextContent("Đang xử lý…")
+  })
+
+  it("says it is preparing while there is nothing to show yet", () => {
+    render(<ReasoningTimeline thoughts={[]} toolCalls={[]} elapsedMs={0} running />)
+
+    expect(screen.getByRole("status")).toHaveTextContent("Đang chuẩn bị…")
+  })
+
+  it("counts the seconds on the line that survives the fold being shut", () => {
+    render(<ReasoningTimeline thoughts={[]} toolCalls={[]} elapsedMs={21400} running />)
+
+    expect(screen.getByRole("button", { name: /Đang làm việc · 21s/ })).toBeInTheDocument()
+  })
+
+  it("prints no figure before there is a second of it", () => {
+    render(<ReasoningTimeline thoughts={[]} toolCalls={[]} elapsedMs={300} running />)
+
+    expect(screen.getByText("Đang làm việc…")).toBeInTheDocument()
+  })
+
+  it("takes the live row away the moment the Turn is over", () => {
+    render(
+      <ReasoningTimeline
+        thoughts={[]}
+        toolCalls={[call({ summary: "Đã tra dữ liệu cho STB" })]}
+        elapsedMs={12000}
+        running={false}
+      />,
+    )
+
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+  })
+})
+
 describe("opening and closing by default", () => {
   it("opens on its own while the Turn is still running", () => {
     render(
@@ -131,7 +250,7 @@ describe("opening and closing by default", () => {
       />,
     )
 
-    expect(screen.getByText("Đang làm việc…")).toBeInTheDocument()
+    expect(screen.getByText("Đang làm việc · 3s")).toBeInTheDocument()
     expect(screen.getByText("Đã tra dữ liệu cho STB")).toBeInTheDocument()
   })
 

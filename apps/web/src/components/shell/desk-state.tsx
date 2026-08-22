@@ -12,6 +12,7 @@ import {
 } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 
+import { useAnswerReveal } from "@/hooks/use-answer-reveal"
 import { useLiveTurn } from "@/hooks/use-live-turn"
 import {
   useCreateThread,
@@ -208,6 +209,12 @@ export function DeskProvider({ children }: { children: ReactNode }) {
 
   // -- what is on screen --------------------------------------------------
 
+  // How much of the answer is on screen. Held here rather than in the view for
+  // two reasons that are one: every step of it has to be a commit of the
+  // transcript, which is what the pin and the spacer are built on, and it has to
+  // survive the reader switching views mid-answer.
+  const reveal = useAnswerReveal(turn.state)
+
   const entries = useMemo(
     () =>
       buildTranscript({
@@ -216,8 +223,9 @@ export function DeskProvider({ children }: { children: ReactNode }) {
         live: turn.state,
         pendingUserText: unconfirmedQuestion,
         openedAnalyses,
+        reveal,
       }),
-    [threadId, messages, turn.state, unconfirmedQuestion, openedAnalyses],
+    [threadId, messages, turn.state, unconfirmedQuestion, openedAnalyses, reveal],
   )
 
   // Read through a ref so opening an Analysis does not re-create the callback

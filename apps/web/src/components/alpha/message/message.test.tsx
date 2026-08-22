@@ -9,11 +9,12 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 
 import { FLAG_COPY, TOOL_CALL_COPY, terminalSentence } from "@/lib/alpha-desk/copy"
 import type { AssistantView, DraftEntry } from "@/lib/alpha-desk/transcript"
 import type { ToolCall } from "@/lib/alpha-desk/types"
+import { CHUNK_CLASS } from "@/lib/alpha-desk/word-cadence"
 import { AssistantMessage } from "./assistant-message"
 import { DraftMessage } from "./draft-message"
 
@@ -26,6 +27,7 @@ function call(overrides: Partial<ToolCall> = {}): ToolCall {
     status: "running",
     summary: "Đang tìm trên web",
     round: 0,
+    error: null,
     result_count: 0,
     results: [],
     ...overrides,
@@ -45,17 +47,35 @@ function view(overrides: Partial<AssistantView> = {}): AssistantView {
 }
 
 function draft(overrides: Partial<DraftEntry> = {}): DraftEntry {
+  const text = overrides.text ?? ""
+  const phase = overrides.phase ?? "running"
+  const inFlight = phase === "starting" || phase === "running" || phase === "cancelling"
   return {
     kind: "draft",
     key: "draft-1",
-    text: "",
+    text,
+    phase,
+    // Exactly what the projection carries: the work is over the moment there is
+    // a reply to read, whatever the Turn does next, and a Turn that has ended is
+    // not working either.
+    working: inFlight && text === "",
     toolCalls: [],
     thoughts: [],
     elapsedMs: 0,
-    phase: "running",
     terminalReason: null,
     ...overrides,
   }
+}
+
+/**
+ * The answer as a reader reads it, across the words it was split into.
+ *
+ * A streaming answer is one element per word (`word-cadence`), and Testing
+ * Library's text queries only match an element's own text nodes — so a
+ * `getByText` for a phrase would find nothing at all.
+ */
+function answerText(): string {
+  return document.querySelector("article")?.textContent ?? ""
 }
 
 describe("the answer's prose", () => {
@@ -192,7 +212,7 @@ describe("the Turn in flight", () => {
     render(<DraftMessage entry={draft({ text: "câu đầu" })} onRetry={vi.fn()} />)
 
     expect(screen.queryByText("Đang chuẩn bị…")).not.toBeInTheDocument()
-    expect(screen.getByText("câu đầu")).toBeInTheDocument()
+    expect(answerText()).toContain("câu đầu")
   })
 
   it("keeps what arrived and offers a retry when the Turn ended badly", () => {
@@ -206,7 +226,7 @@ describe("the Turn in flight", () => {
       />,
     )
 
-    expect(screen.getByText("một nửa")).toBeInTheDocument()
+    expect(answerText()).toContain("một nửa")
     expect(screen.getByText(terminalSentence("turn_deadline"))).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
   })
@@ -298,5 +318,92 @@ describe("the positive verdict", () => {
     expect(
       screen.queryByRole("button", { name: FLAG_COPY.action }),
     ).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * How the answer arrives, which is the whole difference between prose appearing
+ * and prose being written. How *much* of it is on screen is decided above the
+ * view (`use-answer-reveal`, and its own test); what is asserted here is what the
+ * draft does with the prefix it is handed, and what it says about the wait.
+ */
+describe("the answer arriving", () => {
+  /** Every word the answer was split into, in reading order. */
+  function words(): string[] {
+    return Array.from(document.querySelectorAll(`.${CHUNK_CLASS}`)).map(
+      (word) => word.textContent ?? "",
+    )
+  }
+
+  it("splits the answer into words, so each one can fade in as it lands", () => {
+    render(<DraftMessage entry={draft({ text: "một hai ba" })} onRetry={vi.fn()} />)
+
+    expect(words()).toEqual(["một", "hai", "ba"])
+  })
+
+  it("leaves a message from history whole, because it was always there", () => {
+    // A fade on re-rendered history would animate a paragraph the reader is
+    // part-way through.
+    render(<AssistantMessage view={view({ text: "một hai ba" })} messageId={7} />)
+
+    expect(words()).toEqual([])
+    expect(screen.getByText("một hai ba")).toBeInTheDocument()
+  })
+
+  it("calls the work finished as soon as there is a reply, not when the Turn ends", () => {
+    // The reader is waiting on the answer, and the Turn is still running for as
+    // long as it takes the terminal event to land. Leaving the rows spinning
+    // through that would keep the reply underneath a list that says it has not
+    // started yet.
+    render(
+      <DraftMessage
+        entry={draft({ text: "đáp", toolCalls: [call({ status: "ok" })], phase: "running" })}
+        onRetry={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole("button", { name: /Đã làm việc trong/ })).toBeInTheDocument()
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+  })
+
+  it("counts the wait, because the backend only reports it at the end", () => {
+    // `elapsed_ms` comes on the snapshot and on the terminal event and on
+    // nothing in between, so a line reading it straight sits at 0s for the whole
+    // of a Turn and then jumps.
+    vi.useFakeTimers()
+    try {
+      render(<DraftMessage entry={draft({ toolCalls: [call()] })} onRetry={vi.fn()} />)
+
+      expect(screen.getByText("Đang làm việc…")).toBeInTheDocument()
+
+      act(() => vi.advanceTimersByTime(3000))
+      expect(screen.getByText("Đang làm việc · 3s")).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("keeps the figure it reached when the work ended, not the stale one", () => {
+    // The answer exists, so the line reads as finished — and the Turn has not
+    // reported its own figure yet. Falling back to what the last event carried
+    // would say the work took no time at all.
+    vi.useFakeTimers()
+    try {
+      const view = render(
+        <DraftMessage entry={draft({ toolCalls: [call()] })} onRetry={vi.fn()} />,
+      )
+      act(() => vi.advanceTimersByTime(5000))
+
+      view.rerender(
+        <DraftMessage
+          entry={draft({ text: "đáp", toolCalls: [call({ status: "ok" })] })}
+          onRetry={vi.fn()}
+        />,
+      )
+
+      expect(screen.getByText("Đã làm việc trong 5s")).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
