@@ -120,7 +120,7 @@ nào để chấm, và chấm cần ≥20 phiên (sàn T+2). Nó là bar thứ h
 | 3 | [Hai tool store-only](phase-03-store-tools.md) | `agent/tools/signals.py`, `registry`, `toolsets`, `envelope` | — | ✅ |
 | 4 | [Vòng lặp thay `generate_fragment`](phase-04-analysis-loop.md) | `alpha/analysis_loop.py`, `production.py`, `core/llm/budget`+`admission` | 2, 3 | ✅ |
 | 5 | [Substitution rate](phase-05-substitution-rate.md) | `alpha/analysis_reads.py`, ops | 2, 4 | pending |
-| 6 | [Chat đọc store](phase-06-chat-store-tools.md) | `toolsets.py`, `prompt/sections.py` | 3, 7 | pending |
+| 6 | [Chat đọc store](phase-06-chat-store-tools.md) | `toolsets.py`, `prompt/sections.py`, `tools/signals.py`, `loop.py` | 3, 7 | ✅ |
 | 7 | [Cổng kiểm số](phase-07-figure-plausibility-gate.md) | `agent/tools/price_check.py`, `untrusted.py`, `registry`, `ops` | 3 | ✅ |
 
 Phase 1–3 độc lập về file. **Phase 7 phải xong trước Phase 6**: Phase 6 thêm tool vào chat, và
@@ -172,11 +172,13 @@ docstring của `field_profile.py`.
 
 ## Câu hỏi chưa giải quyết
 
-1. **Ranh giới tư vấn.** Lượt HAG cho thấy model đã khuyên tỷ trọng cụ thể. Sau Phase 6 nó sẽ
-   khuyên kèm số liệu thật. AI được nói *"45% là tập trung, đây là các mức và hệ quả"* — hay
-   được nói *"bán đi"*? Quyết định sản phẩm, chặn Phase 6.
-2. **Store vs web khi khác nhau**: nói ra sự khác biệt (đề xuất trong Phase 6), hay chỉ trình
-   bày cả hai và để người đọc chọn?
+1. ~~**Ranh giới tư vấn.**~~ **Đã chốt ở Phase 6**, trong `INVARIANTS`: được nêu các mức và hệ
+   quả, không ra chỉ thị hành động cho một vị thế cụ thể. Không "bán đi", không "chốt một
+   phần", không tỷ trọng mục tiêu, không mức vào/ra. Lý do ghi trong prompt: số liệu thật làm
+   lời khuyên *nghe* đáng tin hơn mà không *trở nên* đáng tin hơn.
+2. ~~**Store vs web khi khác nhau.**~~ **Đã chốt ở Phase 6**: số của store thắng, và sự khác
+   nhau **phải được nói ra**. Store là số đã chuẩn hoá, đã ghim ngày và tra lại được; một trang
+   web là phương pháp của người khác. Luật nằm trong `HONESTY` và trong luật
+   `check_price_claim` của `UNTRUSTED`.
 3. `generation.py:175` nói *"a Vietnamese equities Analysis"* nhưng **không ghim ngôn ngữ
-   output** và schema không có field ngôn ngữ. Phase 4 nên ghim, hay để model suy từ ngôn ngữ
-   người dùng?
+   output** và schema không có field ngôn ngữ. Còn mở — Phase 4 đã land mà không ghim.

@@ -1,7 +1,7 @@
 ---
 phase: 6
 title: "Chat đọc store qua hai tool đã dựng"
-status: pending
+status: implemented
 ---
 
 # Phase 6 — Chat đọc store qua hai tool đã dựng
@@ -120,3 +120,57 @@ Rủi ro thật: chat trở thành bề mặt tư vấn đầu tư. Lượt HAG 
 20–30%"* — dù `INVARIANTS` nói nó không phải người tư vấn đầu tư. Thêm số liệu thật vào sẽ làm
 lời khuyên đó **nghe** đáng tin hơn mà không **trở nên** đáng tin hơn. Ranh giới tư vấn là
 quyết định sản phẩm còn mở, và nó nên được chốt trong Phase 6 chứ không để trôi.
+
+
+## Đã làm (2026-08-23)
+
+`CHAT_TOOLSETS = ("web", "memory", "signals")`. Cổng import cũ — dòng từ chối `signals` — bị bỏ
+**có chủ đích**, và lý do nằm trong docstring của `toolsets.py` và trong commit, không chỉ ở
+đây. Cái còn giữ là: selection vẫn được **viết ra**, nên bundle thứ tư thêm mai không tới được
+hội thoại cho tới khi tuple này gọi tên nó.
+
+**Một registration, hai chữ ký.** `registry` chỉ cho một tên thuộc một toolset, nên không có
+đường nào hai lane có hai schema cho cùng tên `get_field`. Cách giải: schema có `symbol` là
+thuộc tính **optional**, và handler phân giải theo thứ tự — `ToolContext.symbol` có thì nó
+thắng, và một argument nêu mã **khác** bị từ chối. Kết quả là ranh giới lane Analysis giờ được
+**cưỡng chế bởi handler** thay vì chỉ được *không nhắc tới* trong schema, tức là chặt hơn bản
+plan mô tả: một schema là điều model được *bảo*, không phải điều harness *làm*.
+
+`trading_day` vẫn không phải argument ở lane nào. Lane chat lấy phiên gần nhất đã đóng từ
+`latest_trading_day`; mã ngoài Universe, mã sai hình dạng, store chưa có phiên nào — cả ba trả
+`{"error": "cannot_read", "detail": ...}`, **không** raise, và **không** mang `fieldId` nên
+`analysis_loop._figure_in` không thể gấp một lời từ chối thành figure.
+
+`PROMPT_VERSION` `2.2.0` → `2.3.0`. Ba khối đổi:
+
+- **HONESTY** viết lại từ "không đọc được bất cứ dữ liệu nào" thành ranh giới đúng: đọc được
+  Signal Field cho mã trong Universe ở phiên gần nhất đã đóng; không đọc được bảng giá, danh
+  mục, tin tức, BCTC thô. Thêm luật **số của store thắng số của web** và sự khác nhau phải nói
+  ra — đây là câu trả lời cho câu hỏi mở số 2 của plan.
+- **TOOLS** năm → **tám**, chia ba loại (đọc thế giới ngoài · đọc dữ liệu hệ thống này · đọc
+  chính người dùng). Loại là điều quan trọng nhất về một tool, và một danh sách phẳng tám dòng
+  sẽ dạy model rằng chúng thay thế được cho nhau.
+- **UNTRUSTED** nhận luật `check_price_claim` của Phase 7, câu nói rõ cổng đó **chỉ phủ giá**,
+  và yêu cầu tách hai khối bằng chứng trong câu trả lời.
+
+**Ranh giới tư vấn — câu hỏi mở số 1, đã chốt.** `INVARIANTS` giờ nói cụ thể: được nêu **các
+mức và hệ quả** (tỷ trọng tập trung tới đâu, giá cách vùng nào bao xa, lỗ giả định cỡ nào,
+thanh khoản đủ ra trong bao lâu); **không** ra chỉ thị hành động cho một vị thế cụ thể — không
+"bán đi", không "chốt một phần", không tỷ trọng mục tiêu, không mức vào/ra. Người dùng hỏi
+thẳng thì nói quyết định là của họ rồi đưa mức và hệ quả. Lý do ghi ngay trong prompt: số liệu
+thật làm lời khuyên *nghe* đáng tin hơn mà không *trở nên* đáng tin hơn, nên ranh giới chặt lại
+khi đọc được store, không lỏng ra.
+
+**Trần external tách theo lớp tool.** `loop.py::EXTERNAL_TOOLS` frozenset bị bỏ;
+`MAX_EXTERNAL_TOOL_CALLS` giờ chỉ tính các tool có `registry.reads_external` bật. Ba tool
+`signals` đọc Postgres trong deployment — tính chúng vào một trần tồn tại vì search tốn tiền và
+trang web là của người khác sẽ tiêu hạn mức web cho bằng chứng không có tính chất nào trong hai.
+`MAX_TOOL_ROUNDS = 4` giữ nguyên.
+
+Test: `tests/test_agent_signal_tools.py` (+9 case cho hai chữ ký), `tests/test_agent_prompt.py`
+(+1, và `unverified`/`Universe` rời khỏi `VANISHED_VOCABULARY` kèm lý do),
+`tests/test_agent_loop.py` (+2: store read không bị tính vào trần external, và trong một Turn
+dùng cả hai loại thì chỉ kết quả web bị bọc).
+
+**Chưa làm: đo lại `Phân tích HPG` thật.** Cần một lượt thật trên deployment có store đầy, so
+với lượt `a81c94f1`. Đó là phép đo, không phải code, và nó là việc kế tiếp.

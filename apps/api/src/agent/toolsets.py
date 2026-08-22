@@ -47,11 +47,12 @@ TOOLSETS: dict[str, Toolset] = {
         ),
         "tools": ("session_search", "remember_fact", "recall_facts"),
     },
-    # Selected by the Analysis lane and by nothing else. A Turn that named it
-    # would be reading the evidence plane through a surface whose whole boundary
-    # is that it does not (``1e7b936``), and the two lanes select their bundles
-    # in two different modules — so the separation is the selection rather than a
-    # rule stated twice.
+    # Selected by both lanes now. It was the Analysis lane's alone while the
+    # chat surface's whole boundary was that it read none of this system's data
+    # (``1e7b936``); what changed is that these tools carry a figure's health and
+    # its asOf with it, so a conversation using one can say what session it is
+    # from and under what condition. The two lanes get two signatures out of one
+    # registration — see ``tools/signals.py``.
     "signals": {
         "description": (
             "Read one registered Signal Field out of this system's own store, "
@@ -71,7 +72,11 @@ TOOLSETS: dict[str, Toolset] = {
 #: alternative is a default of "everything registered", and the day a bundle was
 #: added for another lane that default would hand it to every Turn without a
 #: single line changing.
-CHAT_TOOLSETS: tuple[str, ...] = ("web", "memory")
+#:
+#: ``signals`` is here as of the reversal recorded in ``tools/signals.py``. It is
+#: still a written-down choice rather than a default: a fourth bundle added
+#: tomorrow does not reach a conversation until this tuple says so.
+CHAT_TOOLSETS: tuple[str, ...] = ("web", "memory", "signals")
 
 
 class UnknownToolsetError(KeyError):
@@ -173,22 +178,21 @@ def known_toolsets(*, toolsets: Mapping[str, Toolset] | None = None) -> tuple[st
 
 
 def _check_the_chat_selection_holds() -> None:
-    """Refuse to import a chat selection that names something it should not.
+    """Refuse to import a chat selection naming a bundle nobody registered.
 
-    The boundary ``1e7b936`` drew — an assistant that reads none of this
-    system's data — survives now only because the chat lane does not select the
-    bundle that does. That is one tuple, and a tuple is one edit away from being
-    wrong, so the condition is asserted at import rather than left to a review.
+    A misspelled name here is the worst kind of wrong: the chat lane would offer
+    the model fewer tools than the deployment has, and from the outside that
+    reads as a model choosing not to call anything rather than as a typo.
+
+    This used to also refuse ``signals``, on the boundary ``1e7b936`` drew. That
+    refusal is gone deliberately and not by omission — the reason is in
+    ``tools/signals.py`` and in the commit that moved it. What still holds is
+    that the selection is *written down*: a bundle added for another lane does
+    not reach a conversation until this tuple names it.
     """
     unknown = [name for name in CHAT_TOOLSETS if name not in TOOLSETS]
     if unknown:
         raise UnknownToolsetError(unknown[0], tuple(TOOLSETS))
-    if "signals" in CHAT_TOOLSETS:
-        raise ValueError(
-            "the signals bundle reads this system's own evidence plane and is "
-            "selected by the Analysis lane; a conversation that could call it "
-            "would be the surface this agent was rebuilt not to be"
-        )
 
 
 _check_the_chat_selection_holds()

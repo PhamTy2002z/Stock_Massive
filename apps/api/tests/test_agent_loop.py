@@ -240,6 +240,11 @@ def install(*entries: registry.ToolEntry) -> None:
         entry("session_search"),
         entry("recall_facts"),
         entry("remember_fact"),
+        # This system's own store, offered to a conversation as of the reversal
+        # in ``tools/signals.py``. Present here because two ceilings and one
+        # wrapper all branch on where a tool reads, and a stub surface without it
+        # would let those branches go untested.
+        entry("get_field", toolset="signals"),
         entry("broken", _boom),
         entry("slow", _slow),
     ):
@@ -814,6 +819,46 @@ async def test_a_turn_cannot_spend_more_than_its_external_call_budget() -> None:
     # all is a transcript the model has to guess at.
     assert all(call.result_text == EXTERNAL_TOOL_EXHAUSTED_MESSAGE for call in refused)
     assert all(call.dispatched is False for call in refused)
+
+
+@pytest.mark.asyncio
+async def test_a_store_read_is_not_charged_to_the_external_budget() -> None:
+    """The ceiling exists because a search costs money and a page is somebody
+    else's. A Postgres query in this deployment has neither property, so
+    spending the web allowance on it would buy nothing and cost the evidence."""
+    client = FakeClient(
+        [
+            wants("get_field", prefix=f"s{index}", query=f"q{index}")
+            for index in range(MAX_TOOL_ROUNDS)
+        ]
+    )
+
+    outcome = await loop(client).run(turn_request())
+
+    assert outcome.tool_calls
+    assert all(call.error is None for call in outcome.tool_calls)
+    assert all(call.dispatched for call in outcome.tool_calls)
+
+
+def test_a_store_read_is_not_wrapped_while_a_web_read_beside_it_is() -> None:
+    """One Turn, both kinds, and the wrapper tells them apart by registration."""
+    page = TurnToolCall(
+        id="c1",
+        name="web_search",
+        arguments={"query": "giá HPG"},
+        status=ToolCallStatus.OK,
+        result_text="Vùng 52 tuần: 20.100–27.542 đồng." * 4,
+    )
+    figure = TurnToolCall(
+        id="c2",
+        name="get_field",
+        arguments={"symbol": "HPG", "field_id": "indicator_pack.rsi_14"},
+        status=ToolCallStatus.OK,
+        result_text='{"fieldId": "indicator_pack.rsi_14", "value": 54.2}' * 4,
+    )
+
+    assert shown_result(page).startswith("<untrusted_tool_result")
+    assert shown_result(figure) == figure.result_text
 
 
 @pytest.mark.asyncio
