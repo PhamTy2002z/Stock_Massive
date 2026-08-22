@@ -2,7 +2,7 @@
 title: "Evidence-Adjudicating Loop: số liệu đúng, kiểm được, và một vòng lặp biết tự phán xử"
 status: in-progress
 created: 2026-08-22
-updated: 2026-08-22
+updated: 2026-08-23
 branch: feat/evidence-adjudicating-loop
 base: develop@1974c24
 ---
@@ -117,8 +117,8 @@ nào để chấm, và chấm cần ≥20 phiên (sàn T+2). Nó là bar thứ h
 |---|---|---|---|---|
 | 1 | [Baseline one-shot trên dữ liệu thật](phase-01-baseline.md) | cờ config, script đo | — | ✅ đo xong, 2/5 phiên |
 | 2 | [Trace: bảng `analysis_tool_call`](phase-02-trace-table.md) | `alpha/models.py`, 1 migration | — | ✅ |
-| 3 | [Hai tool store-only](phase-03-store-tools.md) | `agent/tools/signals.py`, `registry`, `toolsets` | — | pending |
-| 4 | [Vòng lặp thay `generate_fragment`](phase-04-analysis-loop.md) | `alpha/analysis_loop.py`, `production.py` | 2, 3 | pending |
+| 3 | [Hai tool store-only](phase-03-store-tools.md) | `agent/tools/signals.py`, `registry`, `toolsets`, `envelope` | — | ✅ |
+| 4 | [Vòng lặp thay `generate_fragment`](phase-04-analysis-loop.md) | `alpha/analysis_loop.py`, `production.py`, `core/llm/budget`+`admission` | 2, 3 | ✅ |
 | 5 | [Substitution rate](phase-05-substitution-rate.md) | `alpha/analysis_reads.py`, ops | 2, 4 | pending |
 | 6 | [Chat đọc store](phase-06-chat-store-tools.md) | `toolsets.py`, `prompt/sections.py` | 3, 7 | pending |
 | 7 | [Cổng kiểm số](phase-07-figure-plausibility-gate.md) | `agent/tools/price_check.py`, `untrusted.py` | 3 | pending |

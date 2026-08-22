@@ -1,10 +1,61 @@
 ---
 phase: 4
 title: "Vòng lặp thay generate_fragment"
-status: pending
+status: done
 ---
 
 # Phase 4 — Vòng lặp thay `generate_fragment`
+
+## Kết quả (2026-08-23)
+
+Đã land. `src/alpha/analysis_loop.py::generate_fragment_in_loop()` trả
+`LoopOutcome(fragment, envelope, rounds_used, calls, fetched_field_ids)`; `production.py`
+chọn giữa nó và `generate_fragment` qua `ANALYSIS_EVIDENCE_LOOP_ENABLED` (mặc định **on**).
+35 test trong `tests/test_analysis_loop.py` + 7 test cấp producer trong `test_real_producer.py`
+(chạy trên Postgres thật, store thật). `make test` pass với đúng hai fail có sẵn.
+
+**Số thật, không phải số đề xuất:**
+
+| | plan | đã land | vì sao |
+|---|---|---|---|
+| round | 6 | 6 | — |
+| output/round | không nêu | **380** | `6×380 + 700 = 2.980 ≤ 3.000`, assert lúc import |
+| `ANALYSIS_INPUT_TOKENS` | 24.000 | 24.000 | — |
+| `ANALYSIS_OUTPUT_TOKENS` | 3.000 | 3.000 | — |
+| `ANALYSIS_COST_CEILING_USD` | "tính lại" | **0,015** | `24.000×$0,5/Mtok + 3.000×$1,0/Mtok`, bảng giá cấu hình thật |
+| `ANALYSIS_COST_MICRO_USD` | — | **15.000** | cùng số, đơn vị ledger; có test so hai chỗ |
+| `ANALYSIS_INPUT_PER_CALL` | — | **24.000** | trần một-lời-gọi nâng bằng trần cả-Analysis: cái chặn qua nhiều lời gọi là trần **chi phí** trên owner, không phải trần token mỗi lời |
+| `ANALYSIS_OUTPUT_PER_CALL` | — | **3.000** | như trên |
+
+Chi phí thật/tháng ở cohort 30 mã × 21 phiên: **$9,45** (plan đoán $9,70), vừa lane $10.
+
+**Ngưỡng guardrail — đọc lại như plan yêu cầu, không chép của chat.** Base vẫn là 5/8 của
+Hermes, không tới được bằng 4 round. Lane này: `warn 1 / block 2` cho lời gọi trùng khít,
+`warn 2 / halt 4` cho cùng một tool, `no_progress 2`. Mọi rung **tới được** trong 6 round, và
+có test khẳng định điều đó.
+
+**Prompt: `LOOP_SYSTEM_PROMPT = SYSTEM_PROMPT + LOOP_CONTRACT`, `LOOP_PROMPT_VERSION = "v2"`.**
+Khác plan một chỗ: `generation.PROMPT_VERSION` **giữ** `v1` thay vì bị bump. Lý do là quyết định
+rollback của chính plan này — one-shot vẫn ship, và nếu `SYSTEM_PROMPT` mang thêm đoạn nói về
+tool thì một Analysis one-shot sẽ được dán nhãn contract mà nó không hề chạy. `analysis_payload()`
+nhận `prompt_version` làm tham số; mỗi shape tự dán nhãn của mình.
+
+**Chi phí của "không gọi tool nào": 2 lời gọi, không phải 1.** Plan viết đúng như vậy
+(`không có tool_call → sang lời gọi cuối`) và test cấp producer khẳng định **payload** bằng
+one-shot từng byte ở `evidence`/`judgment`/`citedFieldIds` — chỉ số lời gọi là 2. Đã cân nhắc
+gộp `response_format` vào lời gọi round 0 để về lại 1 lời gọi và **bỏ**: trộn structured output
+với tool calling là đúng lớp hành vi gateway mà `generation.py` đã đo được là không tin cậy.
+
+**Trace ghi từ `outcome.results` theo thứ tự model phát lệnh**, không qua `trace` hook của
+executor: hook chạy đồng thời cho segment song song nên `seq` sẽ không còn là thứ tự của model.
+`session.commit()` tường minh trong `_record_round` — `sync_session_factory` không tự commit,
+và không có nó thì trace im lặng biến mất (đã bắt được bằng test cấp producer).
+
+**`TurnBudget` không dùng.** Plan liệt kê nó ở bảng tái dùng, nhưng chính Phase 3 nói "không port
+tầng spillover/truncate/dedup" — và rung ba của `TurnBudget` (`PER_TURN_MIN_CHARS = 16_000`) sẽ
+**cắt** đúng những figure store mà Analysis vừa trả tiền để đọc (30 figure ≈ 22KB). Chỉ dùng
+`trim_text` + `registry.get_max_result_size` cho từng kết quả, tức rung hai, đúng khuôn
+"chặn một bug" của Phase 3.
 
 ## Seam: đúng một hàm
 

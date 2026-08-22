@@ -139,22 +139,39 @@ def says(payload) -> Completion:
 
 
 class FakeClient:
-    """Every answer scripted, every request and reservation kept."""
+    """Every answer scripted, every request and reservation kept.
 
-    def __init__(self, *answers) -> None:
+    ``rounds`` and ``final`` are the open-ended form, used once the positional
+    script runs out: a tool round gets ``rounds`` and the fragment call gets
+    ``final``, told apart by whether a response format was asked for. It exists
+    so a test about the round ceiling does not have to know how many rounds the
+    guardrail ladder will actually allow — pinning a script's length to a
+    threshold is how a test starts asserting its own arithmetic.
+    """
+
+    def __init__(self, *answers, rounds=None, final=None) -> None:
         self._answers = list(answers)
+        self._rounds = rounds
+        self._final = final
         self.requests: list = []
         self.spends: list = []
 
     async def complete(self, request, spend=None):
         self.requests.append(request)
         self.spends.append(spend)
-        if not self._answers:
-            raise AssertionError("the loop asked for more calls than scripted")
-        answer = self._answers.pop(0)
+        answer = self._next(request)
         if isinstance(answer, Exception):
             raise answer
         return answer
+
+    def _next(self, request):
+        if self._answers:
+            return self._answers.pop(0)
+        asking_for_the_fragment = request.response_format is not None
+        chosen = self._final if asking_for_the_fragment else self._rounds
+        if chosen is None:
+            raise AssertionError("the loop asked for more calls than scripted")
+        return chosen
 
     @property
     def calls(self) -> int:
@@ -218,17 +235,37 @@ def install(tools: FakeTools) -> FakeTools:
     return tools
 
 
+class Recorder:
+    """A stand-in for the trace store that keeps the rows instead of writing them.
+
+    Every test runs with one, because the trace is not optional in production and
+    a test that silently skipped it would not notice the day writing one started
+    failing for a real reason.
+    """
+
+    def __init__(self) -> None:
+        self.rows: list = []
+        self.committed = False
+
+    def __call__(self):
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def add_all(self, rows) -> None:
+        self.rows.extend(rows)
+
+    def commit(self) -> None:
+        self.committed = True
+
+
 async def run_loop(client, envelope=None, **overrides):
-    """The loop with its trace writer disconnected unless a test asks for one."""
-
-    class _NoStore:
-        def __enter__(self):
-            raise AssertionError("this test did not expect a trace write")
-
-        def __exit__(self, *exc):
-            return False
-
-    overrides.setdefault("session_opener", _NoStore)
+    """The loop, with a recording trace store unless a test supplies its own."""
+    overrides.setdefault("session_opener", Recorder())
     return await generate_fragment_in_loop(
         client,
         envelope or an_envelope(),
@@ -480,9 +517,8 @@ class TestTheRoundCeiling:
     async def test_the_loop_stops_at_the_ceiling_and_still_answers(self):
         install(FakeTools(get_field=a_figure_payload()))
         client = FakeClient(
-            *[wants("get_field", f"t{index}", field_id=SUBSTITUTE)
-              for index in range(MAX_TOOL_ROUNDS + 3)],
-            says(a_fragment()),
+            rounds=wants("get_field", field_id=SUBSTITUTE),
+            final=says(a_fragment()),
         )
 
         outcome = await run_loop(client, max_rounds=2)
@@ -497,9 +533,8 @@ class TestTheRoundCeiling:
     ):
         install(FakeTools(get_field=ValueError("the store is not answering")))
         client = FakeClient(
-            *[wants("get_field", f"t{index}", field_id=SUBSTITUTE)
-              for index in range(MAX_TOOL_ROUNDS)],
-            says(a_fragment()),
+            rounds=wants("get_field", field_id=SUBSTITUTE),
+            final=says(a_fragment()),
         )
 
         outcome = await run_loop(client)
@@ -606,3 +641,141 @@ class TestEveryCallIsReserved:
 
         assert client.spends[0].output_tokens == ROUND_OUTPUT_TOKENS
         assert client.spends[-1].output_tokens == MAX_OUTPUT_TOKENS
+
+
+class TestTheTrace:
+    """The audit record that is what this lane bought with reproducibility."""
+
+    @pytest.mark.asyncio
+    async def test_one_row_per_call_in_the_order_the_model_issued_them(self):
+        install(
+            FakeTools(
+                get_field=a_figure_payload(),
+                list_fields={"count": 30, "fields": []},
+            )
+        )
+        recorder = Recorder()
+        client = FakeClient(
+            wants_many(
+                ("a", "list_fields", {}),
+                ("b", "get_field", {"field_id": SUBSTITUTE}),
+            ),
+            wants("get_field", "c", field_id="factor_percentiles.size_percentile"),
+            says(""),
+            says(a_fragment()),
+        )
+
+        outcome = await run_loop(client, session_opener=recorder)
+
+        assert len(recorder.rows) == outcome.calls == 3
+        assert [row.tool_name for row in recorder.rows] == [
+            "list_fields",
+            "get_field",
+            "get_field",
+        ]
+        assert [(row.round_index, row.seq) for row in recorder.rows] == [
+            (0, 1),
+            (0, 2),
+            (1, 1),
+        ]
+        assert [row.tool_call_id for row in recorder.rows] == ["a", "b", "c"]
+
+    @pytest.mark.asyncio
+    async def test_every_row_is_anchored_to_the_run_and_carries_its_status(self):
+        install(FakeTools(get_field=a_figure_payload()))
+        recorder = Recorder()
+        client = FakeClient(
+            wants("get_field", field_id=SUBSTITUTE), says(""), says(a_fragment())
+        )
+
+        await run_loop(client, session_opener=recorder)
+
+        row = recorder.rows[0]
+        assert row.run_id == RUN_ID
+        assert row.status == "ok"
+        assert row.error is None
+        assert row.arguments == {"field_id": SUBSTITUTE}
+        assert row.result["fieldId"] == SUBSTITUTE
+        assert row.started_at == datetime(2026, 8, 12, tzinfo=timezone.utc)
+
+    @pytest.mark.asyncio
+    async def test_a_failed_call_is_recorded_with_the_reason_it_failed(self):
+        install(FakeTools(get_field=ValueError("nope.nope is not registered")))
+        recorder = Recorder()
+        client = FakeClient(
+            wants("get_field", field_id="nope.nope"), says(""), says(a_fragment())
+        )
+
+        await run_loop(client, session_opener=recorder)
+
+        row = recorder.rows[0]
+        assert row.status == "tool_error"
+        assert "nope.nope" in row.error
+        # The text is kept as well as the code: a status alone is blank to a
+        # person reading the trace six weeks later.
+        assert row.result["text"]
+
+    @pytest.mark.asyncio
+    async def test_a_call_the_guardrail_refused_is_recorded_as_blocked(self):
+        install(FakeTools(get_field=ValueError("the store is not answering")))
+        recorder = Recorder()
+        client = FakeClient(
+            rounds=wants("get_field", field_id=SUBSTITUTE),
+            final=says(a_fragment()),
+        )
+
+        await run_loop(client, session_opener=recorder)
+
+        statuses = [row.status for row in recorder.rows]
+        assert "tool_error" in statuses
+        assert "blocked" in statuses
+
+    @pytest.mark.asyncio
+    async def test_a_lost_trace_row_does_not_lose_the_analysis(self):
+        """A bookkeeping failure must not turn into a missing artifact."""
+
+        class _Broken:
+            def __call__(self):
+                return self
+
+            def __enter__(self):
+                raise RuntimeError("the trace table is gone")
+
+            def __exit__(self, *exc):
+                return False
+
+        install(FakeTools(get_field=a_figure_payload()))
+        client = FakeClient(
+            wants("get_field", field_id=SUBSTITUTE), says(""), says(a_fragment())
+        )
+
+        outcome = await run_loop(client, session_opener=_Broken())
+
+        assert outcome.fragment.verdict is Verdict.HOLD
+        assert SUBSTITUTE in outcome.envelope.field_ids
+
+    @pytest.mark.asyncio
+    async def test_a_round_that_never_answers_is_recorded_as_a_timeout(
+        self, monkeypatch
+    ):
+        async def never(awaitable, _timeout):
+            # Closed rather than abandoned, so the test does not leave a
+            # never-awaited coroutine behind for the next one to trip over.
+            awaitable.close()
+            raise TimeoutError
+
+        monkeypatch.setattr(
+            "src.alpha.analysis_loop.asyncio.wait_for", never, raising=True
+        )
+        install(FakeTools(get_field=a_figure_payload()))
+        recorder = Recorder()
+        client = FakeClient(
+            wants("get_field", field_id=SUBSTITUTE), says(a_fragment())
+        )
+
+        outcome = await run_loop(client, session_opener=recorder)
+
+        assert [row.status for row in recorder.rows] == ["timeout"]
+        # And the Analysis is still written, from the evidence it already had.
+        assert outcome.fragment.verdict is Verdict.HOLD
+        assert outcome.fetched_field_ids == ()
