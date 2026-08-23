@@ -38,6 +38,12 @@ logger = logging.getLogger(__name__)
 # generation can carry still arrives here reserved at its real size and is
 # refused under ``analysis_input_per_call``, which is the only way that defect
 # ever surfaces.
+#
+# The cost ceilings below are lifted on a deployment that declares no monthly
+# lane (``_owner_cost_ceiling``), because what they protect is the lane. The two
+# token bounds are not, for the reason in the paragraph above: on an unmetered
+# route the loop is bounded by rounds and by these, and an oversized envelope
+# still has to be caught by something.
 ANALYSIS_INPUT_PER_CALL = 24_000
 ANALYSIS_OUTPUT_PER_CALL = 3_000
 # ``budget.ANALYSIS_COST_CEILING_USD`` in the ledger's own unit. One number in
@@ -282,7 +288,10 @@ class SpendAdmission:
                         )
                 if candidate.owner.type is OwnerType.ANALYSIS_RUN:
                     owner_cost = _owner_cost(session, candidate.owner)
-                    if owner_cost + reserved > ANALYSIS_COST_MICRO_USD:
+                    ceiling = _owner_cost_ceiling(
+                        self._config, ANALYSIS_COST_MICRO_USD
+                    )
+                    if owner_cost + reserved > ceiling:
                         raise BudgetRefusal(
                             "analysis_cost",
                             "This Analysis has exhausted its generation allowance.",
@@ -306,7 +315,8 @@ class SpendAdmission:
                             "turn_output_total",
                             "This Turn has exhausted its aggregate output allowance.",
                         )
-                    if owner_cost + reserved > TURN_COST_MICRO_USD:
+                    ceiling = _owner_cost_ceiling(self._config, TURN_COST_MICRO_USD)
+                    if owner_cost + reserved > ceiling:
                         raise BudgetRefusal(
                             "turn_cost",
                             "This Turn has exhausted its generation allowance.",
@@ -789,6 +799,25 @@ def _micro_usd_ceiling(amount: float | None) -> int | None:
             rounding=ROUND_FLOOR
         )
     )
+
+
+def _owner_cost_ceiling(config: LLMConfig, metered: int) -> int | float:
+    """One owner's cost ceiling, or ``inf`` when the deployment is unmetered.
+
+    The per-owner cost ceilings exist to protect the *monthly lane*: the $0.015
+    Analysis figure was arrived at by pricing an internal cohort of thirty
+    symbols at about $9.45 against the $10 lane. A deployment that declares no
+    lane has nothing for them to protect, so they come off with it, exactly as
+    :func:`_lane_limit_micro_usd` does.
+
+    The **token** ceilings beside them do not, and the difference is the point.
+    ``analysis_input_per_call`` is not a budget: it is the only way an envelope
+    that grew past what one generation can carry ever surfaces. Money follows the
+    money; a contract about what one call can hold stays a contract.
+    """
+    if config.lanes.unmetered:
+        return float("inf")
+    return metered
 
 
 def _lane_limit_micro_usd(config: LLMConfig, lane: BudgetLane) -> int | float:
