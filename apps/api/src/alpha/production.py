@@ -1,12 +1,20 @@
 """The real producer: evidence in, a published Analysis out, and the audit trail.
 
 This is the thing the **Analysis Run** lifecycle has been taking as a parameter
-since A2. It assembles the evidence envelope, sends it to the model exactly once,
-and merges the validated fragment into a payload the backend owns — and it is the
-only place those three steps meet. The lifecycle still imports none of it: a
-producer arrives as an argument, which is what let the state machine ship before
-any of this existed and what lets a test drive every state with a three-line
-function.
+since A2. It assembles the evidence envelope, sends it to the model, and merges
+the validated fragment into a payload the backend owns — and it is the only place
+those three steps meet. The lifecycle still imports none of it: a producer
+arrives as an argument, which is what let the state machine ship before any of
+this existed and what lets a test drive every state with a three-line function.
+
+**The middle step has two shapes and this module chooses between them.** The
+evidence loop (``analysis_loop.py``) lets the model read more of the evidence
+plane before it answers; the one shot (``generation.py``) hands it a fixed
+envelope and takes what comes back. Which one runs is configuration, because the
+loop trades reproducibility for audit and that trade belongs to a deployment
+rather than to a release. Everything after the choice is identical — the same six
+semantic rules, the same payload split, the same publication order — and the
+``promptVersion`` in the audit block is what says which shape produced a row.
 
 **The backend owns the envelope and merges in only the model's five things.**
 Every displayed number lives under ``evidence``, which is the envelope verbatim;
@@ -48,6 +56,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from src.core.config import get_settings
 from src.core.database import get_sync_db
 from src.core.llm import (
     LLMClient,
@@ -58,6 +67,7 @@ from src.core.llm import (
 )
 from src.stocks.signals.serving import CrossSection
 
+from .analysis_loop import LOOP_PROMPT_VERSION, generate_fragment_in_loop
 from .analysis_run import stored_run
 from .envelope import EvidenceEnvelope, build_envelope, measure_cross_sections
 from .generation import PROMPT_VERSION, AnalysisFragment, generate_fragment
@@ -92,6 +102,7 @@ def analysis_payload(
     model: str,
     route: str,
     generated_at: datetime,
+    prompt_version: str = PROMPT_VERSION,
 ) -> dict[str, Any]:
     """The immutable payload, with the backend's half and the model's half apart.
 
@@ -110,12 +121,18 @@ def analysis_payload(
     thesis, and one reading per axis. ``verdict`` is absent because it is the
     extracted column, and ``citedFieldIds`` is stored complete beside it — the
     inline artifact shows how many there were, and an audit view shows which.
+
+    ``prompt_version`` is a parameter rather than the constant it used to be,
+    because there are now two instruction sets: the one-shot contract and the
+    loop's, which adds to it. Two Analyses generated under different
+    instructions cannot be compared, and this stamp is the only thing that says
+    which was which.
     """
     return {
         "audit": {
             "schemaVersion": ANALYSIS_SCHEMA_VERSION,
             "fieldProfileVersion": envelope.field_profile_version,
-            "promptVersion": PROMPT_VERSION,
+            "promptVersion": prompt_version,
             "model": model,
             "route": route,
             "generatedAt": generated_at.isoformat(),
@@ -139,6 +156,7 @@ def analysis_producer(
     session_factory: Callable[[], Session] | None = None,
     clock: Callable[[], datetime] | None = None,
     cross_sections: Mapping[str, CrossSection] | None = None,
+    evidence_loop: bool | None = None,
 ) -> Producer:
     """A producer that publishes real Analyses, for one evening's worth of work.
 
@@ -159,12 +177,24 @@ def analysis_producer(
     ``httpx.AsyncClient`` binds its connection pool to the event loop that made
     it, and this producer runs each generation in a loop of its own, so a pooled
     client kept across calls would be a pool bound to a loop that has closed.
+
+    ``evidence_loop`` chooses which generation runs: the loop that may read more
+    of the evidence plane (``analysis_loop.py``), or the single fixed call it
+    replaced (``generation.py``). Both are kept reachable because the loop trades
+    a real property away — an Analysis it produced cannot be rebuilt from the
+    store, only audited — and a deployment that finds that trade wrong turns it
+    off rather than waiting for a revert. ``None`` reads the configured default.
     """
     resolved_config = config or llm_config_from_settings()
     model = resolved_config.model_for(Workload.BATCH)
     route = resolved_config.route.base_url
     now = clock or (lambda: datetime.now(timezone.utc))
     open_session = session_factory or get_sync_db
+    looping = (
+        get_settings().analysis_evidence_loop_enabled
+        if evidence_loop is None
+        else evidence_loop
+    )
     rankings: dict[date, Mapping[str, CrossSection]] = {}
 
     def produce(symbol: str, trading_day: date) -> AnalysisDraft:
@@ -200,21 +230,29 @@ def analysis_producer(
                 session, symbol, trading_day, cross_sections=sample
             )
 
-        fragment = _run_generation(
+        # The envelope comes back as well as the fragment, because the loop may
+        # have added figures to it and the payload is rendered from an envelope.
+        # A figure the model cited has to be in the one that is rendered, or the
+        # citation points at nothing.
+        fragment, evidence, prompt_version = _run_generation(
             envelope,
             client=client,
             config=resolved_config,
             model=model,
             run_id=run_id,
+            looping=looping,
+            open_session=open_session,
+            clock=now,
         )
         return AnalysisDraft(
             verdict=fragment.verdict.value,
             payload=analysis_payload(
-                envelope,
+                evidence,
                 fragment,
                 model=model,
                 route=route,
                 generated_at=now(),
+                prompt_version=prompt_version,
             ),
         )
 
@@ -255,15 +293,49 @@ def _run_generation(
     config: LLMConfig,
     model: str,
     run_id: int | str,
-) -> AnalysisFragment:
-    """Run the one async call from synchronous code."""
+    looping: bool,
+    open_session: Callable[[], Any],
+    clock: Callable[[], datetime],
+) -> tuple[AnalysisFragment, EvidenceEnvelope, str]:
+    """Run the async generation from synchronous code, either shape of it.
 
-    async def run() -> AnalysisFragment:
+    Answers the fragment, the evidence it is to be rendered against, and the
+    instruction set it was produced under. Three values rather than one because
+    the looping shape can widen the envelope, and a payload rendered from the
+    seed while the fragment cited a figure the loop fetched would carry a
+    citation pointing at nothing.
+
+    The one-shot shape widens nothing, so it hands back the envelope it was
+    given — the tuple is the same shape for both, which is what keeps the caller
+    free of a branch.
+    """
+
+    async def run() -> tuple[AnalysisFragment, EvidenceEnvelope, str]:
         llm = client if client is not None else build_client(config)
         try:
-            return await generate_fragment(
-                llm, envelope, model=model, run_id=run_id
+            if not looping:
+                fragment = await generate_fragment(
+                    llm, envelope, model=model, run_id=run_id
+                )
+                return fragment, envelope, PROMPT_VERSION
+            outcome = await generate_fragment_in_loop(
+                llm,
+                envelope,
+                model=model,
+                run_id=run_id,
+                session_opener=open_session,
+                clock=clock,
             )
+            if outcome.fetched_field_ids:
+                logger.info(
+                    "Analysis Run %s read %d field(s) the profile does not name "
+                    "over %d round(s): %s",
+                    run_id,
+                    len(outcome.fetched_field_ids),
+                    outcome.rounds_used,
+                    ", ".join(outcome.fetched_field_ids),
+                )
+            return outcome.fragment, outcome.envelope, LOOP_PROMPT_VERSION
         finally:
             if client is None:
                 await llm.aclose()

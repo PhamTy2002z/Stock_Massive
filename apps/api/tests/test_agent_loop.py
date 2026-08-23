@@ -222,13 +222,37 @@ async def _slow(_context: registry.ToolContext, _arguments) -> Any:
     return {"found": "eventually"}
 
 
+WEB_TOOLS = {"web_search", "fetch_url"}
+
+# What production declares each of these tools is called on a reader's screen,
+# and which argument is worth naming beside it. Mirrored here because several
+# tests below assert the row a reader actually gets; that the *registrations*
+# carry these is asserted where each tool is tested.
+DISPLAY: dict[str, tuple[str, str | None]] = {
+    "web_search": ("Tìm trên web", "query"),
+    "fetch_url": ("Đọc trang", "url"),
+    "session_search": ("Tìm trong hội thoại trước", "query"),
+    "remember_fact": ("Ghi nhớ", "title"),
+    "recall_facts": ("Đọc lại ghi chú", "query"),
+    "get_field": ("Đọc chỉ báo", None),
+}
+
+
 def entry(name: str, handler=_ok, **overrides: Any) -> registry.ToolEntry:
+    shown, detail = DISPLAY.get(name, (f"Stub {name}", None))
     fields: dict[str, Any] = {
         "name": name,
-        "toolset": "web" if name in {"web_search", "fetch_url"} else "memory",
+        "toolset": "web" if name in WEB_TOOLS else "memory",
         "schema": registry.object_schema({"query": {"type": "string"}}),
         "handler": handler,
         "description": f"stub {name}",
+        "display_name": shown,
+        "summary_detail_arg": detail,
+        # Declared, because the message layer reads it: a stub memory tool left
+        # at the conservative default would have its results wrapped as a
+        # stranger's writing, and these tests would be asserting against a
+        # surface the process does not have.
+        "reads_external": name in WEB_TOOLS,
     }
     fields.update(overrides)
     return registry.ToolEntry(**fields)
@@ -241,6 +265,11 @@ def install(*entries: registry.ToolEntry) -> None:
         entry("session_search"),
         entry("recall_facts"),
         entry("remember_fact"),
+        # This system's own store, offered to a conversation as of the reversal
+        # in ``tools/signals.py``. Present here because two ceilings and one
+        # wrapper all branch on where a tool reads, and a stub surface without it
+        # would let those branches go untested.
+        entry("get_field", toolset="signals"),
         entry("broken", _boom),
         entry("slow", _slow),
     ):
@@ -589,7 +618,12 @@ async def test_context_overflow_ends_the_turn_once_compression_is_spent() -> Non
     client = FakeClient(
         [ContextOverflow("nope")] * (MAX_CONTEXT_COMPRESSIONS + 1) + [answer()]
     )
-    request = turn_request(history=long_history())
+    # Deep enough that every rung of the ladder still has an older Turn to drop.
+    # At fourteen the system prompt is a large enough share of the ceiling that
+    # the second compression has nothing left to give up, and the loop rightly
+    # refuses to pay for a call it already knows the shape of — which is the
+    # neighbouring test, not this one.
+    request = turn_request(history=long_history(turns=40))
 
     outcome = await loop(
         client, budget=ContextBudget(max_tokens=snug_ceiling(request))
@@ -821,6 +855,46 @@ async def test_a_turn_cannot_spend_more_than_its_external_call_budget() -> None:
     # all is a transcript the model has to guess at.
     assert all(call.result_text == EXTERNAL_TOOL_EXHAUSTED_MESSAGE for call in refused)
     assert all(call.dispatched is False for call in refused)
+
+
+@pytest.mark.asyncio
+async def test_a_store_read_is_not_charged_to_the_external_budget() -> None:
+    """The ceiling exists because a search costs money and a page is somebody
+    else's. A Postgres query in this deployment has neither property, so
+    spending the web allowance on it would buy nothing and cost the evidence."""
+    client = FakeClient(
+        [
+            wants("get_field", prefix=f"s{index}", query=f"q{index}")
+            for index in range(MAX_TOOL_ROUNDS)
+        ]
+    )
+
+    outcome = await loop(client).run(turn_request())
+
+    assert outcome.tool_calls
+    assert all(call.error is None for call in outcome.tool_calls)
+    assert all(call.dispatched for call in outcome.tool_calls)
+
+
+def test_a_store_read_is_not_wrapped_while_a_web_read_beside_it_is() -> None:
+    """One Turn, both kinds, and the wrapper tells them apart by registration."""
+    page = TurnToolCall(
+        id="c1",
+        name="web_search",
+        arguments={"query": "giá HPG"},
+        status=ToolCallStatus.OK,
+        result_text="Vùng 52 tuần: 20.100–27.542 đồng." * 4,
+    )
+    figure = TurnToolCall(
+        id="c2",
+        name="get_field",
+        arguments={"symbol": "HPG", "field_id": "indicator_pack.rsi_14"},
+        status=ToolCallStatus.OK,
+        result_text='{"fieldId": "indicator_pack.rsi_14", "value": 54.2}' * 4,
+    )
+
+    assert shown_result(page).startswith("<untrusted_tool_result")
+    assert shown_result(figure) == figure.result_text
 
 
 @pytest.mark.asyncio
@@ -1264,6 +1338,7 @@ def test_web_content_is_wrapped_and_our_own_guidance_stays_outside_it() -> None:
 
 
 def test_a_local_tools_result_is_not_wrapped() -> None:
+    """Read off the registration, so the surface has to be installed to ask."""
     call = TurnToolCall(
         id="c1",
         name="recall_facts",
@@ -1271,7 +1346,11 @@ def test_a_local_tools_result_is_not_wrapped() -> None:
         result_text="x" * 200,
     )
 
-    assert shown_result(call) == "x" * 200
+    from src.agent.tools import register_all
+
+    with isolated_registry():
+        register_all()
+        assert shown_result(call) == "x" * 200
 
 
 def test_a_summary_is_a_sentence_and_names_one_allowlisted_argument() -> None:
@@ -1319,6 +1398,10 @@ def test_the_wire_payload_is_exactly_the_fields_of_the_contract() -> None:
         "round": 2,
         "results": [],
         "result_count": 0,
+        # Which kind of evidence the call went and got, so a surface cannot draw
+        # a read of this store the way it draws a stranger's page. External for
+        # an unregistered name, conservatively, the same way the wrapper reads it.
+        "kind": "external",
     }
     # The two the allowlist exists to keep off a rendered channel. ``results``
     # and ``error`` widened it; these did not come with them.
@@ -1364,6 +1447,46 @@ async def test_a_call_the_turn_refused_tells_the_surface_which_ceiling_refused_i
         if payload["status"] == "error"
     }
     assert set(seen.values()) == {"external_budget_exhausted"}
+
+
+def test_the_wire_says_which_kind_of_evidence_a_call_went_and_got() -> None:
+    """So a surface cannot draw a read of this store like a stranger's page.
+
+    Read off the same declaration the untrusted wrapper reads, rather than off a
+    second list of names that would drift from it.
+    """
+    from src.agent.tools import register_all
+
+    with isolated_registry():
+        register_all()
+        page = TurnToolCall(id="c1", name="fetch_url").as_wire()
+        figure = TurnToolCall(id="c2", name="get_field").as_wire()
+
+    assert page["kind"] == "external"
+    assert figure["kind"] == "store"
+
+
+def test_a_tool_the_registry_does_not_hold_reads_as_outside_content() -> None:
+    """Conservative in the same direction as the wrapper's own default."""
+    with isolated_registry():
+        assert TurnToolCall(id="c1", name="mystery").as_wire()["kind"] == "external"
+
+
+def test_the_row_a_reader_gets_is_the_registration_s_own_words() -> None:
+    """Not a table in ``messages.py``, which is why three tools added after it
+    was written showed a reader their raw names."""
+    from src.agent.tools import register_all
+
+    with isolated_registry():
+        register_all()
+
+        assert summarise_call("web_search", {"query": "lãi suất"}) == (
+            "Tìm trên web: lãi suất"
+        )
+        assert summarise_call("get_field", {"field_id": "indicator_pack.rsi_14"}) == (
+            "Đọc chỉ báo: RSI (14)"
+        )
+        assert summarise_call("list_fields", {}) == "Xem danh mục chỉ báo"
 
 
 def test_one_message_is_charged_deterministically() -> None:

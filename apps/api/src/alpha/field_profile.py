@@ -29,6 +29,26 @@ The price-zone field is deliberately not in the Technical block. It is core
 artifact evidence — the artifact requires it, and a refused one fails the run —
 so it travels beside the axes rather than inside one, and it does not consume a
 Technical slot.
+
+## What ``fieldProfileVersion`` means once a loop can widen an envelope
+
+It used to mean *exactly these fields*. Under the evidence loop
+(``src/alpha/analysis_loop.py``) it means *this version of the profile was the
+seed, and this catalog was reachable from it* — two Analyses stamped ``v1`` can
+now carry different figures, because one of them asked for more.
+
+That is the very thing the third rule above exists to prevent, and it is now
+happening on purpose. The reason it is tolerable is that the difference is no
+longer silent: ``analysis_tool_call`` records every field an Analysis asked for
+and what came back, so a reader meeting two ``v1`` Analyses with different
+figures can see exactly why. Without that table this would be a straight
+downgrade, which is why it landed first.
+
+What has not changed: the seed is still bounded, still reviewable, still capped
+at :data:`MAX_FIELDS_PER_AXIS` per axis, and still emits a named field that
+nothing computes rather than dropping it. The cap bounds what every Analysis pays
+for before the model has said anything; the loop is how a symbol that needs more
+reaches past it.
 """
 
 from __future__ import annotations

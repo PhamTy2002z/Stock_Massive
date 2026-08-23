@@ -116,6 +116,7 @@ TOOL_CALL_FIELDS = (
     "round",
     "results",
     "result_count",
+    "kind",
 )
 
 

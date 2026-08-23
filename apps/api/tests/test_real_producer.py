@@ -46,6 +46,7 @@ from src.alpha.analysis_run import (
     stored_run,
     write_analysis,
 )
+from src.alpha.analysis_loop import LOOP_PROMPT_VERSION
 from src.alpha.generation import PROMPT_VERSION, SYSTEM_PROMPT, Verdict
 from src.alpha.models import Analysis, AnalysisRun, WatchlistEntry
 from src.alpha.producer import (
@@ -224,8 +225,17 @@ def a_producer(*answers, **overrides):
     Everything except the model call is the shipped path: the envelope is built
     from the store, the payload is the shipped shape, and only the network is
     fake — a real route would make these tests measure a model.
+
+    ``evidence_loop`` defaults to off here, which is deliberate rather than
+    incidental. What this file proves is the seam between backend evidence and
+    model judgment: one envelope in, one payload out, seven audit fields, no
+    number the model supplied. That seam is the same under both generation
+    shapes, and the one-shot shape lets a test script one answer and count one
+    call. The loop shape has its own file, and the class below proves that it is
+    what the producer actually reaches for by default.
     """
     client = FakeClient(*(answers or (a_fragment(),)))
+    overrides.setdefault("evidence_loop", False)
     producer = analysis_producer(
         client=client,
         config=_config(),
@@ -531,6 +541,206 @@ class TestTheSynchronousSeam:
             production.measure_cross_sections = original
 
         assert measured == [TRADING_DAY]
+
+
+class TestTheEvidenceLoopIsWhatShips:
+    """The producer's default generation, and what it stamps on what it wrote.
+
+    The loop's own control flow is proved in ``test_analysis_loop.py`` against a
+    fake store. What is proved here is the wiring, against the real one: that the
+    producer reaches for the loop unless it is told not to, that a figure the loop
+    actually read out of Postgres reaches the payload it is cited from, and that
+    the two generation shapes are told apart by the audit block rather than by a
+    reader guessing.
+    """
+
+    # Registered, computable, and named by no industry's profile — so it can only
+    # reach an Analysis through a tool call. A 61-session window, well inside the
+    # 320 this module seeds, and one the seeded series can actually answer: the
+    # deeper risk-adjusted fields refuse on it for ``autocorrelation_unusable``,
+    # which is honest about a synthetic sawtooth and useless as a fixture.
+    FETCHED = "mean_reversion.trailing_z"
+
+    @pytest.fixture(autouse=True)
+    def _store_tools(self):
+        """The real store tools, reading the real seeded window."""
+        from src.agent import definitions, registry
+        from src.agent.tools.signals import register_signal_tools
+
+        registry.clear()
+        definitions.clear_cache()
+        register_signal_tools()
+        yield
+        registry.clear()
+        definitions.clear_cache()
+
+    def test_the_configured_default_is_the_loop(self):
+        assert get_settings().analysis_evidence_loop_enabled is True
+
+    def test_a_loop_that_asks_for_nothing_publishes_the_one_shot_answer(
+        self, session
+    ):
+        one_shot, _ = a_producer(a_fragment())
+        expected = produce_analysis(
+            session, SYMBOL, TRADING_DAY, one_shot
+        ).analysis.payload
+        _wipe_runs()
+
+        looping, client = a_producer(
+            _no_tool_call(), a_fragment(), evidence_loop=True
+        )
+        published = produce_analysis(
+            session, SYMBOL, TRADING_DAY, looping
+        ).analysis.payload
+
+        assert published["evidence"] == expected["evidence"]
+        assert published["judgment"] == expected["judgment"]
+        assert published["citedFieldIds"] == expected["citedFieldIds"]
+        # The one difference, and it is the honest one: two calls rather than
+        # one, because the model was given a round in which to ask.
+        assert client.calls == 2
+
+    def test_it_stamps_the_contract_the_fragment_was_produced_under(self, session):
+        looping, _ = a_producer(_no_tool_call(), a_fragment(), evidence_loop=True)
+
+        outcome = produce_analysis(session, SYMBOL, TRADING_DAY, looping)
+        audit = outcome.analysis.payload["audit"]
+
+        assert audit["promptVersion"] == LOOP_PROMPT_VERSION
+        assert audit["promptVersion"] != PROMPT_VERSION
+        assert tuple(audit) == AUDIT_FIELDS
+
+    def test_a_figure_the_loop_read_reaches_the_payload_it_is_cited_from(
+        self, session
+    ):
+        """A citation the rendered envelope cannot answer would point at nothing."""
+        looping, _ = a_producer(
+            _asks_for(self.FETCHED),
+            _no_tool_call(),
+            a_fragment(citedFieldIds=[self.FETCHED]),
+            evidence_loop=True,
+        )
+
+        payload = produce_analysis(
+            session, SYMBOL, TRADING_DAY, looping
+        ).analysis.payload
+
+        rendered = {
+            figure["fieldId"]
+            for section in payload["evidence"]["sections"]
+            for figure in section["figures"]
+        }
+        assert self.FETCHED in rendered
+        assert self.FETCHED in payload["citedFieldIds"]
+        # Read out of the store rather than supplied: a real number, with the
+        # registry's own sanctioned reading beside it.
+        fetched = next(
+            figure
+            for section in payload["evidence"]["sections"]
+            for figure in section["figures"]
+            if figure["fieldId"] == self.FETCHED
+        )
+        assert fetched["health"] in {"ok", "degraded"}
+        assert fetched["value"] is not None
+        assert fetched["interpretation"]
+        # And the fingerprint still describes the evidence that was stored rather
+        # than the seed the loop started from.
+        assert payload["audit"]["inputFingerprint"] == _rehash(payload["evidence"])
+
+    def test_a_field_the_seed_never_named_is_absent_without_the_loop(self, session):
+        """Or the assertion above is measuring the profile rather than the loop."""
+        one_shot, _ = a_producer(a_fragment())
+
+        payload = produce_analysis(
+            session, SYMBOL, TRADING_DAY, one_shot
+        ).analysis.payload
+
+        rendered = {
+            figure["fieldId"]
+            for section in payload["evidence"]["sections"]
+            for figure in section["figures"]
+        }
+        assert self.FETCHED not in rendered
+
+    def test_the_trace_records_what_the_analysis_asked_the_store_for(self, session):
+        from src.alpha.models import AnalysisToolCall
+
+        looping, _ = a_producer(
+            _asks_for(self.FETCHED),
+            _no_tool_call(),
+            a_fragment(),
+            evidence_loop=True,
+        )
+        produce_analysis(session, SYMBOL, TRADING_DAY, looping)
+
+        run = stored_run(session, SYMBOL, TRADING_DAY)
+        rows = (
+            session.query(AnalysisToolCall)
+            .filter(AnalysisToolCall.run_id == run.id)
+            .order_by(AnalysisToolCall.round_index, AnalysisToolCall.seq)
+            .all()
+        )
+        assert [(row.round_index, row.seq, row.tool_name) for row in rows] == [
+            (0, 1, "get_field")
+        ]
+        assert rows[0].arguments == {"field_id": self.FETCHED}
+        assert rows[0].status == "ok"
+        assert rows[0].result["fieldId"] == self.FETCHED
+
+    def test_dropping_the_run_takes_its_trace_with_it(self, session):
+        from src.alpha.models import AnalysisToolCall
+
+        looping, _ = a_producer(
+            _asks_for(self.FETCHED),
+            _no_tool_call(),
+            a_fragment(),
+            evidence_loop=True,
+        )
+        produce_analysis(session, SYMBOL, TRADING_DAY, looping)
+        run_id = stored_run(session, SYMBOL, TRADING_DAY).id
+        assert session.query(AnalysisToolCall).filter_by(run_id=run_id).count() == 1
+
+        _wipe_runs()
+        session.expire_all()
+
+        assert session.query(AnalysisToolCall).filter_by(run_id=run_id).count() == 0
+
+
+def _wipe_runs() -> None:
+    with get_sync_db() as inner:
+        inner.execute(delete(Analysis).where(Analysis.symbol == SYMBOL))
+        inner.execute(delete(AnalysisRun).where(AnalysisRun.symbol == SYMBOL))
+
+
+def _no_tool_call():
+    """A completion with no tool calls: the model has stopped asking."""
+    from src.core.llm import Completion, Usage
+
+    return Completion(
+        model=MODEL, text="", usage=Usage(input_tokens=5_000, output_tokens=20)
+    )
+
+
+def _asks_for(field_id: str):
+    from src.core.llm import Completion, ToolCall, Usage
+
+    return Completion(
+        model=MODEL,
+        tool_calls=(
+            ToolCall(id="t1", name="get_field", arguments={"field_id": field_id}),
+        ),
+        usage=Usage(input_tokens=5_000, output_tokens=40),
+    )
+
+
+def _rehash(evidence: dict) -> str:
+    """The fingerprint recomputed from the stored evidence, as a dispute would."""
+    import hashlib
+
+    canonical = json.dumps(
+        evidence, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _analysis_id(session) -> int:

@@ -53,6 +53,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
+from types import MappingProxyType
 from typing import Any, Callable
 
 from sqlalchemy.orm import Session
@@ -453,6 +454,20 @@ def ranked_field_ids() -> tuple[str, ...]:
     )
 
 
+# Every field the profile names anywhere, by id. Built once at import over all
+# five industries rather than searched per call: a bank's block and a retailer's
+# both name fields no other industry does, and a lookup that walked one profile
+# would miss whichever industry it was not handed.
+_PROFILE_ENTRIES: Mapping[str, ProfileField] = MappingProxyType(
+    {
+        entry.field_id: entry
+        for industry in AnalysisIndustry
+        for fields in profile_for(industry).values()
+        for entry in fields
+    }
+)
+
+
 def price_zone_entry() -> ProfileField:
     """The price zone as a profile entry, so one figure builder serves both.
 
@@ -465,6 +480,81 @@ def price_zone_entry() -> ProfileField:
         label="Ordinary daily range",
         description=REGISTRY[PRICE_ZONE_FIELD_ID].interpretation,
     )
+
+
+def profile_entry_for(field_id: str) -> ProfileField:
+    """The profile entry a registered field is dressed as, named or not.
+
+    A field the **Analysis Field Profile** names carries the profile's own
+    label, so a figure fetched one at a time reads identically to the same
+    figure inside a seeded envelope — two labels for one field would make the
+    same number look like two.
+
+    A registered field the profile never names has no label anywhere, and its id
+    stands in for one. That is not a gap to be filled with an invented phrase:
+    sixteen of the thirty registered fields are in exactly this position
+    (``plans/reports/baseline-oneshot-260822.md``), and a label written here
+    would be a second interpretation of a field whose only sanctioned reading
+    lives in the **Signal Registry**.
+    """
+    if field_id == PRICE_ZONE_FIELD_ID:
+        return price_zone_entry()
+    named = _PROFILE_ENTRIES.get(field_id)
+    if named is not None:
+        return named
+    field = REGISTRY.get(field_id)
+    if field is None:
+        raise KeyError(field_id)
+    return ProfileField(
+        field_id=field_id,
+        label=field_id,
+        description=field.interpretation,
+    )
+
+
+def figure_for_field(
+    session: Session,
+    symbol: str,
+    trading_day: date,
+    field_id: str,
+    *,
+    cross_sections: Mapping[str, CrossSection] | None = None,
+    peers: Sequence[str] | None = None,
+) -> EvidenceFigure:
+    """One registered field, answered for one pair, as the wire's figure.
+
+    The same three shapes :func:`_figure_for` handles, reached by id rather than
+    by walking a profile — which is what a caller asking for a field the profile
+    never named needs. Every rule about how a served field becomes a figure
+    stays in this module: a second place that dressed one would be a second set
+    of rules, and the health mapping is the rule that matters.
+
+    ``cross_sections`` left out means "measure what this field needs", the same
+    thing it means to :func:`build_envelope`: a cohort measures its rankings
+    once and passes them in, and a single answer measures its own.
+
+    Raises ``KeyError`` for an id the **Signal Registry** does not hold. The
+    caller decides what that is — for a tool it is a result the model reads, and
+    inventing a refused figure for a field that does not exist would tell the
+    model the store had looked.
+    """
+    field = REGISTRY.get(field_id)
+    if field is None:
+        raise KeyError(field_id)
+
+    entry = profile_entry_for(field_id)
+    sample = tuple(peers) if peers is not None else _sample_around(session, symbol)
+
+    if field.ranked is None:
+        return _from_field_value(
+            entry,
+            serve_field(session, symbol, field, end=trading_day, peers=sample),
+        )
+
+    ranking = None if cross_sections is None else cross_sections.get(field_id)
+    if ranking is None and cross_sections is None:
+        ranking = serve_cross_section(session, sample, field, end=trading_day)
+    return _from_cross_section(symbol, entry, field, ranking)
 
 
 def _figure_for(
@@ -732,8 +822,10 @@ __all__ = [
     "Health",
     "IndustryResolver",
     "build_envelope",
+    "figure_for_field",
     "measure_cross_sections",
     "price_zone_entry",
+    "profile_entry_for",
     "ranked_field_ids",
     "stored_industry",
 ]

@@ -42,6 +42,9 @@ def stub_entry(name: str, *, toolset: str = "stub", **overrides: Any) -> registr
         "schema": registry.object_schema({"value": {"type": "string"}}),
         "handler": echo,
         "description": f"stub tool {name}",
+        # The registry refuses a registration with no reader-facing name, which
+        # is the point of that field: a tool cannot reach a screen as its own id.
+        "display_name": f"Stub {name}",
     }
     fields.update(overrides)
     return registry.ToolEntry(**fields)

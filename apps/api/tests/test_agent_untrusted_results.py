@@ -1,8 +1,26 @@
-"""Outside content is marked as outside content, and cannot unmark itself."""
+"""Outside content is marked as outside content, and cannot unmark itself.
+
+Which tool counts as outside is read off its own registration rather than off a
+list kept here, so these tests install the real tool surface: a registry holding
+nothing would answer "outside" for every name, which is the safe answer and not
+the one that proves anything.
+"""
 
 from __future__ import annotations
 
-from src.agent import untrusted
+import pytest
+
+from src.agent import tools, untrusted
+
+from .agent_tool_world import isolated_registry
+
+
+@pytest.fixture(autouse=True)
+def the_real_tool_surface():
+    """Every tool this build offers, and nothing another test left behind."""
+    with isolated_registry():
+        tools.register_all()
+        yield
 
 PAGE = (
     "Interest rates were unchanged this month, the central bank said in a "
@@ -75,3 +93,18 @@ def test_the_untrusted_tools_are_the_ones_that_read_the_open_web():
     assert untrusted.is_untrusted("web_search") is True
     assert untrusted.is_untrusted("fetch_url") is True
     assert untrusted.is_untrusted("remember_fact") is False
+    # The two store reads and the price check are this system answering about
+    # its own data. Wrapping them would tell the model to weigh its own
+    # harness's answer as a stranger's claim.
+    assert untrusted.is_untrusted("get_field") is False
+    assert untrusted.is_untrusted("list_fields") is False
+    assert untrusted.is_untrusted("check_price_claim") is False
+
+
+def test_a_tool_nobody_registered_is_treated_as_outside():
+    """The safe default, and the defect this replaced.
+
+    The decision used to be membership in a frozenset written in the module, so
+    a tool added later was unwrapped until somebody remembered to edit the list.
+    """
+    assert untrusted.is_untrusted("a_tool_added_later") is True

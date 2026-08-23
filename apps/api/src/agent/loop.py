@@ -144,6 +144,7 @@ from .messages import (
     summarise_call,
 )
 from .prompt import RuntimeContext, prefix as prompt_prefix, render
+from .toolsets import CHAT_TOOLSETS
 
 logger = logging.getLogger(__name__)
 
@@ -274,10 +275,15 @@ TOOL_TIMEOUT_SECONDS = 30.0
 # attached and a task that is simply cancelled.
 TURN_DEADLINE_SECONDS = 600.0
 
-# The tools that cost money or reach off this deployment, and how many calls to
-# them one Turn may make. A round cap alone does not bound this: one round may
-# fan out to five searches.
-EXTERNAL_TOOLS = frozenset({"web_search", "fetch_url"})
+# How many calls to tools that cost money or reach off this deployment one Turn
+# may make. A round cap alone does not bound this: one round may fan out to five
+# searches.
+#
+# *Which* tools those are is asked of the registry rather than listed here. A
+# Turn can now also read this system's own store, and those reads are a Postgres
+# query inside the deployment — charging them against a ceiling that exists
+# because a search costs money and a page belongs to somebody else would spend
+# the web allowance on evidence that has neither property.
 MAX_EXTERNAL_TOOL_CALLS = 6
 EXTERNAL_TOOL_EXHAUSTED_MESSAGE = (
     "This turn has reached its limit on external tool calls. Answer from what has "
@@ -751,7 +757,11 @@ class AgentLoop:
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._client = client
-        self._toolsets = toolsets
+        # A conversation's selection, never "every bundle this build registered".
+        # One of those bundles reads this system's evidence plane for the
+        # Analysis lane, and a default that expanded to everything would hand it
+        # to every Turn (``toolsets.CHAT_TOOLSETS``).
+        self._toolsets = CHAT_TOOLSETS if toolsets is None else toolsets
         self._budget = budget or ContextBudget()
         self._slots = slots or SessionSlots()
         self._max_output_tokens = max_output_tokens
@@ -1342,7 +1352,7 @@ class AgentLoop:
                 signature=call.signature,
                 round=state.tool_rounds,
             )
-            if call.name in EXTERNAL_TOOLS:
+            if registry.reads_external(call.name):
                 if state.external_calls >= MAX_EXTERNAL_TOOL_CALLS:
                     record = replace(
                         record,
@@ -1657,7 +1667,6 @@ __all__ = [
     "CONTEXT_OVERFLOW",
     "DEADLINE_EXPIRED",
     "DEFAULT_MAX_OUTPUT_TOKENS",
-    "EXTERNAL_TOOLS",
     "EXTERNAL_TOOL_EXHAUSTED_MESSAGE",
     "GATEWAY_TIMEOUT",
     "LLM_CALL_TIMEOUT",
