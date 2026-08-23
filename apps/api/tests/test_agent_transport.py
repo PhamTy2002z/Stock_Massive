@@ -882,6 +882,10 @@ class TestThreads:
             "results",
             "result_count",
             "kind",
+            # Whether the call answered, beside whether it ran: a store read that
+            # comes back with no figure is a successful call, and the surface
+            # cannot say so without this.
+            "outcome",
         }
 
     async def test_a_tool_call_reaches_the_wire_and_rides_the_snapshot(
@@ -910,6 +914,7 @@ class TestThreads:
                 "results": [],
                 "result_count": 0,
                 "kind": "external",
+                "outcome": None,
             }
         ]
 

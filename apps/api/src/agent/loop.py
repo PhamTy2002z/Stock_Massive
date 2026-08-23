@@ -140,6 +140,7 @@ from .messages import (
     build_messages,
     display_results,
     estimate_tokens,
+    outcome_of,
     shown_result,
     summarise_call,
 )
@@ -1418,6 +1419,11 @@ class AgentLoop:
                         # the object, and a second parse is a second chance to
                         # read a provider's JSON differently from the first.
                         results=display_results(result.tool_name, result.payload),
+                        # Read off the same payload, for the same reason, and
+                        # answering the question ``status`` cannot: whether this
+                        # call came back with a number or with the reason there
+                        # is none.
+                        outcome=outcome_of(result.tool_name, result.payload),
                     )
                     state.calls[position] = finished
                     turn_budget.add(
@@ -1510,6 +1516,7 @@ class AgentLoop:
                         ),
                     ),
                     "error": entry.get("error"),
+                    "outcome": entry.get("outcome"),
                     "latency_ms": entry.get("duration_ms"),
                 }
             )

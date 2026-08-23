@@ -11,7 +11,7 @@
  */
 
 import { afterEach, describe, expect, it } from "vitest"
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 
 import type { Thought, ToolCall, ToolResult } from "@/lib/alpha-desk/types"
 import { ReasoningTimeline } from "./reasoning-timeline"
@@ -317,6 +317,101 @@ describe("a source result's text", () => {
 })
 
 
+describe("a call that ran and answered nothing", () => {
+  /**
+   * Measured on the trace: of 151 `get_field` calls, 42 came back with no figure
+   * and 15 declined the question, and all 157 rows drew identically to the 94
+   * that returned a number. A reader watching four rows of `Đọc chỉ báo` go by
+   * had no way to see that three of them were empty.
+   */
+  const empty = call({
+    id: "a",
+    kind: "store",
+    status: "ok",
+    summary: "Đọc chỉ báo: Phân vị lợi suất sổ sách — VHM",
+    outcome: "no_value:market_cap_absent",
+  })
+
+  it("says so, in words that are neither a failure nor a success", () => {
+    render(
+      <ReasoningTimeline
+        thoughts={[]}
+        toolCalls={[empty]}
+        elapsedMs={5000}
+        running
+      />,
+    )
+
+    expect(screen.getByText("Không có số")).toBeInTheDocument()
+    expect(screen.queryByText("Lỗi")).not.toBeInTheDocument()
+  })
+
+  it("carries the reason it was empty, from the one table that owns them", () => {
+    render(
+      <ReasoningTimeline
+        thoughts={[]}
+        toolCalls={[empty]}
+        elapsedMs={5000}
+        running
+      />,
+    )
+
+    expect(screen.getByText("Không có số")).toHaveAttribute(
+      "title",
+      "Không phiên nào trong cửa sổ có vốn hoá nên chưa lập được tỷ số này",
+    )
+  })
+
+  it("draws a declined question differently from an empty answer", () => {
+    render(
+      <ReasoningTimeline
+        thoughts={[]}
+        toolCalls={[call({ id: "b", kind: "store", outcome: "cannot_read" })]}
+        elapsedMs={5000}
+        running
+      />,
+    )
+
+    expect(screen.getByText("Ngoài phạm vi")).toBeInTheDocument()
+  })
+
+  it("leaves a call that answered alone", () => {
+    render(
+      <ReasoningTimeline
+        thoughts={[]}
+        toolCalls={[call({ id: "c", kind: "store", outcome: "value" })]}
+        elapsedMs={5000}
+        running
+      />,
+    )
+
+    expect(screen.queryByText("Không có số")).not.toBeInTheDocument()
+    expect(screen.queryByText("Ngoài phạm vi")).not.toBeInTheDocument()
+  })
+
+  it("says it inside a grouped round too", () => {
+    render(
+      <ReasoningTimeline
+        thoughts={[]}
+        toolCalls={[
+          empty,
+          call({
+            id: "d",
+            kind: "store",
+            summary: "Đọc chỉ báo: RSI (14) — VHM",
+            outcome: "value",
+          }),
+        ]}
+        elapsedMs={5000}
+        running
+      />,
+    )
+
+    expect(screen.getByText("Không có số")).toBeInTheDocument()
+  })
+})
+
+
 describe("a round of store reads", () => {
   /**
    * A Turn analysing HPG read twelve figures in one breath. The rail called them
@@ -360,6 +455,70 @@ describe("a round of store reads", () => {
     )
 
     expect(screen.getByText("Đã chạy 2 truy vấn")).toBeInTheDocument()
+  })
+
+  /**
+   * A Turn analysing a portfolio reads the same four figures for seven symbols,
+   * and twenty-eight near-identical lines are longer than the answer they were
+   * gathered for. The count is what the reader needs at that size; the lines are
+   * what they can ask for.
+   */
+  describe("at portfolio size", () => {
+    const portfolio = (status: ToolCall["status"] = "ok") =>
+      ["VCB", "BID", "CTG", "MBB", "TCB", "ACB", "VPB"].flatMap((symbol) =>
+        ["Phân vị động lượng", "Phân vị ROE"].map((field) =>
+          call({
+            id: `${symbol}-${field}`,
+            kind: "store",
+            status,
+            summary: `Đọc chỉ báo: ${field} — ${symbol}`,
+          }),
+        ),
+      )
+
+    it("arrives folded, with the count standing in for the lines", () => {
+      const calls = portfolio()
+      render(
+        <ReasoningTimeline thoughts={[]} toolCalls={calls} elapsedMs={5000} running />,
+      )
+
+      expect(screen.getByText("Đọc 14 chỉ báo")).toBeInTheDocument()
+      expect(screen.queryByText(calls[0].summary)).not.toBeInTheDocument()
+    })
+
+    it("opens on a press, and names every figure it read", () => {
+      const calls = portfolio()
+      render(
+        <ReasoningTimeline thoughts={[]} toolCalls={calls} elapsedMs={5000} running />,
+      )
+
+      fireEvent.click(screen.getByRole("button", { name: /Đọc 14 chỉ báo/ }))
+
+      for (const read of calls) {
+        expect(screen.getByText(read.summary)).toBeInTheDocument()
+      }
+    })
+
+    it("says how many are back while the rows that would say it are folded", () => {
+      const calls = [...portfolio(), call({ id: "late", kind: "store", status: "running" })]
+      render(
+        <ReasoningTimeline thoughts={[]} toolCalls={calls} elapsedMs={5000} running />,
+      )
+
+      expect(screen.getByText("· 14/15")).toBeInTheDocument()
+    })
+
+    it("says how many failed, which folding them away would have hidden", () => {
+      const calls = [
+        ...portfolio(),
+        call({ id: "bad", kind: "store", status: "error", error: "tool_error" }),
+      ]
+      render(
+        <ReasoningTimeline thoughts={[]} toolCalls={calls} elapsedMs={5000} running />,
+      )
+
+      expect(screen.getByText("· 1 lỗi")).toBeInTheDocument()
+    })
   })
 
   it("falls back to the query wording when the round mixed both kinds", () => {

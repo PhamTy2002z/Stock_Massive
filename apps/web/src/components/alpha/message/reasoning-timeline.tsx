@@ -3,8 +3,15 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { Loader2 } from "lucide-react"
 
-import { toolCallErrorLabel } from "@/lib/alpha-desk/copy"
-import { toolCallKind, type Thought, type ToolCall } from "@/lib/alpha-desk/types"
+import { toolCallEmptyLabel, toolCallErrorLabel } from "@/lib/alpha-desk/copy"
+import { signalIssueSentence } from "@/lib/signal-issues"
+import {
+  answeredNothing,
+  outcomeIssue,
+  toolCallKind,
+  type Thought,
+  type ToolCall,
+} from "@/lib/alpha-desk/types"
 import { cn } from "@/lib/utils"
 import { SourceChips } from "./source-chips"
 import { SourceList } from "./source-list"
@@ -279,10 +286,24 @@ function SingleCallRow({ call, isLast }: { call: ToolCall; isLast: boolean }) {
           {toolCallErrorLabel(call.error)}
         </span>
       )}
+      {/* A call that ran and came back with nothing says so, in its own words.
+          It is neither a failure nor a plain success: the tool worked, the
+          question was well formed, and there was no number at the end of it.
+          Drawn like a success it was invisible, and a third of the store reads
+          in the trace were exactly this. The reason rides in the title, where
+          the Signal Issue vocabulary already owns one sentence per code. */}
+      {call.status === "ok" && answeredNothing(call) && (
+        <span
+          className="ml-auto flex-none text-meta leading-[22px] text-muted-foreground/70"
+          title={emptyReason(call)}
+        >
+          {toolCallEmptyLabel(call.outcome)}
+        </span>
+      )}
       {/* A result count only where results are what came back. A store read
           answers with one figure and no sources, so "0 kết quả" beside a call
           that succeeded said the opposite of what happened. */}
-      {call.status === "ok" && toolCallKind(call) === "external" && (
+      {call.status === "ok" && !answeredNothing(call) && toolCallKind(call) === "external" && (
         <span className="ml-auto flex flex-none items-center gap-[0.55rem] text-meta leading-[22px] text-muted-foreground">
           {call.result_count} kết quả
           <SourceChips sources={call.results.map((result) => result.source)} />
@@ -317,6 +338,19 @@ function SingleCallRow({ call, isLast }: { call: ToolCall; isLast: boolean }) {
 }
 
 /**
+ * From how many calls a round arrives folded.
+ *
+ * One symbol's worth of a round is four figures, and those four stay on screen:
+ * they are the work, and a reader watching one symbol being read can follow
+ * them. A portfolio's worth is the same round times seven, and twenty-eight
+ * near-identical lines are longer than the answer they were gathered for — at
+ * that size the list is no longer telling the reader anything the count does
+ * not. So the threshold sits above the single-symbol round and below the
+ * portfolio one.
+ */
+const GROUP_FOLD_FROM = 7
+
+/**
  * A round with two or more tool calls: one header, and the calls branching off it.
  *
  * Drawn as a tree rather than as a second flat list, because the calls *are*
@@ -330,22 +364,58 @@ function SingleCallRow({ call, isLast }: { call: ToolCall; isLast: boolean }) {
  * it down the branch says nothing after the first row. A round that mixed a
  * search with a store read has no single kind to state up there, so in that one
  * case each branch keeps its own.
+ *
+ * **Past `GROUP_FOLD_FROM` calls the branch list arrives folded**, and the
+ * header carries what folding it away would otherwise have taken with it: how
+ * many of the calls are back, and how many failed. Neither is in the count on
+ * its own, and both are things a reader watching a portfolio being read is
+ * actually waiting on — the header stays a sentence about the work rather than
+ * becoming a lid over it.
+ *
+ * Whether it is open is derived rather than stored, so a round that grows past
+ * the threshold as its calls arrive folds itself without an effect to resync:
+ * the stream announces a round's calls one at a time, so a state initialised on
+ * the first of them would have been initialised on a group of one.
  */
 function GroupRow({ calls, isLast }: { calls: ToolCall[]; isLast: boolean }) {
+  const [pressed, setPressed] = useState<boolean | null>(null)
   const anyRunning = calls.some((call) => call.status === "running")
   const allStore = calls.every((call) => toolCallKind(call) === "store")
   const mixed = !allStore && calls.some((call) => toolCallKind(call) === "store")
+
+  // A press always wins, for as long as this round is on screen. Nothing else
+  // reopens it: the count only ever grows, so a group that folded itself cannot
+  // unfold under a reader who left it shut.
+  const open = pressed ?? calls.length < GROUP_FOLD_FROM
+  const settled = calls.filter((call) => call.status !== "running").length
+  const failed = calls.filter((call) => call.status === "error").length
 
   return (
     <RailRow
       icon={anyRunning ? <Spinner /> : allStore ? <ChartIcon /> : <SearchIcon />}
       isLast={isLast}
     >
-      <span className="text-meta leading-[22px] text-muted-foreground">
+      <button
+        type="button"
+        onClick={() => setPressed(!open)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-[0.55rem] text-left text-meta leading-[22px] text-muted-foreground transition-colors hover:text-ink-2"
+      >
         {/* A store read is not a query against anything outside, and calling a
             dozen of them "truy vấn" borrowed the wrong word for the work. */}
-        {allStore ? `Đọc ${calls.length} chỉ báo` : `Đã chạy ${calls.length} truy vấn`}
-      </span>
+        <span className="min-w-0">
+          {allStore ? `Đọc ${calls.length} chỉ báo` : `Đã chạy ${calls.length} truy vấn`}
+        </span>
+        {/* Only while the rows that would say it themselves are folded away. */}
+        {!open && anyRunning && (
+          <span className="flex-none tabular-nums">{`· ${settled}/${calls.length}`}</span>
+        )}
+        {!open && failed > 0 && (
+          <span className="flex-none text-destructive">{`· ${failed} lỗi`}</span>
+        )}
+        <ChevronIcon open={open} />
+      </button>
+      {open && (
       <div className="mt-[11px] grid gap-[9px]">
         {calls.map((call) => (
           <div key={call.id} className="flex items-center gap-[0.55rem]">
@@ -365,11 +435,34 @@ function GroupRow({ calls, isLast }: { calls: ToolCall[]; isLast: boolean }) {
                 {toolCallErrorLabel(call.error)}
               </span>
             )}
+            {call.status === "ok" && answeredNothing(call) && (
+              <span
+                className="flex-none text-meta leading-[22px] text-muted-foreground/70"
+                title={emptyReason(call)}
+              >
+                {toolCallEmptyLabel(call.outcome)}
+              </span>
+            )}
           </div>
         ))}
       </div>
+      )}
     </RailRow>
   )
+}
+
+/**
+ * The sentence behind an empty answer, for the row's title attribute.
+ *
+ * Read out of `signalIssueSentence` rather than written here: that module holds
+ * the one Vietnamese sentence per **Signal Issue** code, and a second copy of
+ * any of them is the drift it exists to prevent. It already answers an unknown
+ * code with a readable sentence rather than the code itself, so there is nothing
+ * to guard here.
+ */
+function emptyReason(call: ToolCall): string {
+  const issue = outcomeIssue(call)
+  return issue === null ? toolCallEmptyLabel(call.outcome) : signalIssueSentence(issue)
 }
 
 function Spinner({ className }: { className?: string }) {

@@ -146,6 +146,23 @@ class TurnToolCall:
     #: text the web tools ran through ``visible_text`` and therefore stripped of
     #: markup. Empty for every tool that has nothing worth showing.
     results: tuple[Mapping[str, Any], ...] = ()
+    #: What this call actually yielded, for the calls where "it ran" and "it
+    #: answered" are different facts.
+    #:
+    #: ``status`` cannot carry this. A store read that comes back saying the
+    #: store has nothing to say is a successful call — the tool worked, the
+    #: question was well formed, and the answer is that there is no figure — so
+    #: it is ``ok``, and it was drawn and recorded exactly like a call that
+    #: returned a number. Measured over the trace: of 151 ``get_field`` calls,
+    #: 94 carried a figure, 42 carried a refusal and 15 said the symbol was
+    #: outside the Universe, and all 151 were stored as ``ok``. That is a third
+    #: of the evidence path invisible to anyone reading either the rail or the
+    #: table.
+    #:
+    #: ``None`` for every tool with nothing to classify, which is the default: a
+    #: tool added later says nothing here until somebody decides what its
+    #: outcomes are.
+    outcome: str | None = None
     #: The route's own opaque token for the reasoning behind this call, when the
     #: route issued one. Held for the length of the Turn and no longer: a route
     #: that demands it back demands it for the rounds of the Turn it is
@@ -187,6 +204,7 @@ class TurnToolCall:
             # registry does not hold reads as external, conservatively, exactly
             # as it does for the wrapper.
             "kind": EXTERNAL_KIND if registry.reads_external(self.name) else STORE_KIND,
+            "outcome": self.outcome,
         }
 
 
@@ -293,6 +311,48 @@ def display_results(name: str, payload: Any) -> tuple[Mapping[str, Any], ...]:
             return ()
         return (_display_item(payload),)
     return ()
+
+
+#: What a call yielded, where that is a different question from whether it ran.
+#:
+#: Three values, and the middle one is the one this exists for. Kept short and
+#: stable because they are stored in a column and grouped by in a query, and
+#: because a surface holds one sentence per value the way it already does for a
+#: **Signal Issue**.
+OUTCOME_VALUE = "value"
+OUTCOME_NO_VALUE = "no_value"
+OUTCOME_CANNOT_READ = "cannot_read"
+
+#: Every tool whose result carries a figure that may be absent. Named rather
+#: than sniffed from the payload shape: a tool answering with a ``value`` key
+#: that is legitimately null would otherwise be reported as having refused.
+_FIGURE_TOOLS = frozenset({"get_field"})
+
+
+def outcome_of(name: str, payload: Any) -> str | None:
+    """What one call yielded, or ``None`` where the question does not apply.
+
+    Read off the structured payload rather than the result text, for the reason
+    :func:`display_results` is: the executor is holding the object, and a second
+    parse is a second chance to read it differently from the first.
+
+    A refusal keeps the **Signal Issue** that caused it, not a flat "nothing".
+    The whole value of separating these is that ``insufficient_cross_section``
+    and ``market_cap_absent`` are different operational facts with different
+    fixes, and folding them into one word rebuilds the blind spot one level up.
+    """
+    if name not in _FIGURE_TOOLS or not isinstance(payload, Mapping):
+        return None
+    if payload.get("error"):
+        # The tool declined the question itself — a symbol outside the Universe,
+        # a call opened for another one. It never reached the store.
+        return OUTCOME_CANNOT_READ
+    if "value" not in payload:
+        return None
+    if payload.get("value") is not None:
+        return OUTCOME_VALUE
+    code = payload.get("reasonCode")
+    return f"{OUTCOME_NO_VALUE}:{code}" if code else OUTCOME_NO_VALUE
 
 
 def _display_item(item: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -608,6 +668,9 @@ __all__ = [
     "MAX_DISPLAY_RESULTS",
     "MAX_SUMMARY_CHARS",
     "MESSAGE_OVERHEAD_TOKENS",
+    "OUTCOME_CANNOT_READ",
+    "OUTCOME_NO_VALUE",
+    "OUTCOME_VALUE",
     "SUMMARY_LABEL",
     "THOUGHT",
     "ConstructedContext",
@@ -620,6 +683,7 @@ __all__ = [
     "build_messages",
     "display_results",
     "estimate_tokens",
+    "outcome_of",
     "shown_result",
     "summarise_call",
 ]

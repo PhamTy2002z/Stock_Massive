@@ -86,10 +86,48 @@ export interface ToolCall {
    * and `external` is the safe reading of a call whose provenance is unstated.
    */
   kind?: ToolCallKind
+  /**
+   * What the call *yielded*, where that is a different question from whether it
+   * ran.
+   *
+   * A store read that comes back saying the store has nothing to say is a
+   * successful call: the tool worked and the answer is that there is no figure.
+   * So it arrives as `ok` and was drawn exactly like a call that returned a
+   * number — which, measured over the trace, was a third of them. A reader
+   * watching four rows of `Đọc chỉ báo` go by had no way to see that three of
+   * them came back empty.
+   *
+   * `value` when a figure came back; `cannot_read` when the tool declined the
+   * question itself; `no_value:<signal issue>` when the store was asked and had
+   * no number, carrying the reason so the surface can say which. Optional
+   * because most tools have nothing to classify and because a Turn stored before
+   * the field existed does not carry it.
+   */
+  outcome?: string | null
 }
 
 /** Where a tool call's result came from: outside this deployment, or its store. */
 export type ToolCallKind = "external" | "store"
+
+/**
+ * Whether this call ran and came back with nothing, which `status` cannot say.
+ *
+ * A prefix test rather than an equality one: the backend appends the refusal's
+ * own **Signal Issue** to `no_value`, and the surface asks a coarser question
+ * than the trace stores.
+ */
+export function answeredNothing(call: ToolCall): boolean {
+  const outcome = call.outcome
+  if (!outcome) return false
+  return outcome === "cannot_read" || outcome.startsWith("no_value")
+}
+
+/** The Signal Issue behind an empty answer, when the outcome names one. */
+export function outcomeIssue(call: ToolCall): string | null {
+  const outcome = call.outcome
+  if (!outcome || !outcome.startsWith("no_value:")) return null
+  return outcome.slice("no_value:".length)
+}
 
 /** What a call read, defaulting the way the backend defaults an unknown tool. */
 export function toolCallKind(call: ToolCall): ToolCallKind {
