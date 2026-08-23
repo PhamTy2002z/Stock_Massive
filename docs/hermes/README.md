@@ -1,7 +1,8 @@
 # Hermes Agent — hồ sơ khảo sát
 
-Đợt đọc code `NousResearch/hermes-agent` (MIT, sparse clone HEAD `f43eabe`,
-2026-08-20/21) để rút bài học cho `apps/api/src/agent` của Stock_Massive.
+Hồ sơ này gồm đợt đọc code `NousResearch/hermes-agent` ngày 20–21/08/2026 và
+bản cập nhật kiến trúc/SOTA ngày 23/08/2026 để rút bài học cho
+`apps/api/src/agent` của Stock_Massive.
 
 Chỉ giữ **research**. Plan `260821-0020-agent-upgrade-hermes-lessons`, các report
 thi công (B1/B2a/Frontend C), lần chạy Golden Question Set và hai brainstorm nằm
@@ -15,9 +16,10 @@ Phủ: **365 file Python / 349.505 dòng, UNASSIGNED = 0** — kiểm chứng �
 
 | # | File | Dòng | Nội dung |
 |---|---|---|---|
-| 1 | [hermes-synthesis-260821-0030.md](hermes-synthesis-260821-0030.md) | 203 | **Bản hợp nhất** — kết luận của cả 9 vùng khảo sát. Vào đây trước. |
-| 2 | [research-260820-2338-hermes-agent-teardown.md](research-260820-2338-hermes-agent-teardown.md) | 368 | Mổ tổng quan: quy mô, giá trị thật nằm ở đâu, cái gì đem được sang |
-| 3 | [hermes-coverage-260820-2352.md](hermes-coverage-260820-2352.md) | 50 | Ma trận phủ — mỗi file Hermes gán cho đúng một report hoặc bị loại kèm lý do |
+| 1 | [research-260823-1649-hermes-agent-architecture-sota.md](research-260823-1649-hermes-agent-architecture-sota.md) | 551 | **Bản hiện hành** — kiến trúc, tool runtime, harness, subagent, bảo mật, eval và ma trận SOTA tại commit `30d4555` |
+| 2 | [hermes-synthesis-260821-0030.md](hermes-synthesis-260821-0030.md) | 203 | Bản hợp nhất lịch sử — kết luận của cả 9 vùng khảo sát ngày 20–21/08 |
+| 3 | [research-260820-2338-hermes-agent-teardown.md](research-260820-2338-hermes-agent-teardown.md) | 368 | Mổ tổng quan: quy mô, giá trị thật nằm ở đâu, cái gì đem được sang |
+| 4 | [hermes-coverage-260820-2352.md](hermes-coverage-260820-2352.md) | 50 | Ma trận phủ — mỗi file Hermes gán cho đúng một report hoặc bị loại kèm lý do |
 
 ## Report theo vùng
 
