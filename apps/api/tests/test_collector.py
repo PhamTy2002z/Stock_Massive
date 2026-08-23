@@ -135,6 +135,21 @@ class GatewayBoundMarketProvider:
         return tuple(market_snapshot(symbol) for symbol in symbols)
 
 
+class PartialOnceMarketProvider:
+    """Drop one ticker from a multi-symbol response, then answer its retry."""
+
+    source = ProviderSource.FIINQUANT
+
+    def __init__(self):
+        self.batches: list[list[str]] = []
+
+    def fetch_market(self, symbols):
+        self.batches.append(list(symbols))
+        if len(self.batches) == 1:
+            return tuple(market_snapshot(symbol) for symbol in symbols[:-1])
+        return tuple(market_snapshot(symbol) for symbol in symbols)
+
+
 class FakeValuationProvider:
     source = ProviderSource.FIINQUANT
 
@@ -252,6 +267,73 @@ class TestGatewayTimeout:
             failure.capability is Capability.MARKET for failure in summary.failures
         )
         assert store.latest(Capability.MARKET, "HPG") is None
+
+
+class TestPartialResponse:
+    def test_only_missing_symbols_are_retried_once(self):
+        market = PartialOnceMarketProvider()
+        symbols = [f"S{index:03d}" for index in range(50)]
+        store = snapshot_store()
+
+        summary = collector(store, symbols=symbols, market=market).run()
+
+        assert market.batches == [symbols, [symbols[-1]]]
+        assert not [
+            missing
+            for missing in summary.missing
+            if missing.capability is Capability.MARKET
+        ]
+        assert summary.failures == ()
+        for symbol in symbols:
+            assert store.latest(Capability.MARKET, symbol) is not None
+
+    def test_a_permanently_missing_symbol_is_retried_only_once(self):
+        class PermanentlyPartialMarketProvider:
+            source = ProviderSource.FIINQUANT
+
+            def __init__(self):
+                self.batches: list[list[str]] = []
+
+            def fetch_market(self, symbols):
+                self.batches.append(list(symbols))
+                return tuple(
+                    market_snapshot(symbol) for symbol in symbols if symbol != "HPG"
+                )
+
+        market = PermanentlyPartialMarketProvider()
+        store = snapshot_store()
+
+        summary = collector(store, market=market).run()
+
+        assert market.batches == [["HPG", "VCB"], ["HPG"]]
+        assert summary.failures == ()
+        assert [
+            (missing.symbol, missing.capability) for missing in summary.missing
+        ] == [("HPG", Capability.MARKET)]
+
+    def test_a_normal_valuation_absence_does_not_spend_a_retry(self):
+        class PartialValuationProvider:
+            source = ProviderSource.FIINQUANT
+
+            def __init__(self):
+                self.batches: list[list[str]] = []
+
+            def fetch_valuation(self, symbols, _from_date, _to_date):
+                self.batches.append(list(symbols))
+                return tuple(
+                    valuation_snapshot(symbol)
+                    for symbol in symbols
+                    if symbol != "HPG"
+                )
+
+        valuation = PartialValuationProvider()
+
+        summary = collector(snapshot_store(), valuation=valuation).run()
+
+        assert valuation.batches == [["HPG", "VCB"]]
+        assert ("HPG", Capability.VALUATION) in [
+            (missing.symbol, missing.capability) for missing in summary.missing
+        ]
 
 
 class TestIsolation:
