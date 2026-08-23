@@ -3,6 +3,7 @@ title: "Harness core theo kiến trúc Hermes: fail-open, số học tới đư�
 status: in-progress
 created: 2026-08-22
 branch: develop
+blocks: [260823-1744-investment-intelligence-eval-replay-harness]
 ---
 
 # Harness core theo kiến trúc Hermes

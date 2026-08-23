@@ -5,6 +5,7 @@ created: 2026-08-22
 updated: 2026-08-23
 branch: feat/evidence-adjudicating-loop
 base: develop@1974c24
+blocks: [260823-1744-investment-intelligence-eval-replay-harness]
 ---
 
 # Evidence-Adjudicating Loop
