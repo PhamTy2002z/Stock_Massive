@@ -316,14 +316,35 @@ function SingleCallRow({ call, isLast }: { call: ToolCall; isLast: boolean }) {
   )
 }
 
-/** A round with two or more tool calls: one header, one plain row per call. */
+/**
+ * A round with two or more tool calls: one header, and the calls branching off it.
+ *
+ * Drawn as a tree rather than as a second flat list, because the calls *are*
+ * subordinate to the header — they are the one decision it names, broken out.
+ * A dozen rows each carrying their own icon read as a dozen peers of the line
+ * above them, which is both wrong and, at a dozen, most of the rail's height.
+ * The branch glyph is the one the follow-up questions use, so a reader meets the
+ * same mark for the same idea in both places.
+ *
+ * **The kind icon moves to the header where every call shares one.** Repeating
+ * it down the branch says nothing after the first row. A round that mixed a
+ * search with a store read has no single kind to state up there, so in that one
+ * case each branch keeps its own.
+ */
 function GroupRow({ calls, isLast }: { calls: ToolCall[]; isLast: boolean }) {
   const anyRunning = calls.some((call) => call.status === "running")
+  const allStore = calls.every((call) => toolCallKind(call) === "store")
+  const mixed = !allStore && calls.some((call) => toolCallKind(call) === "store")
 
   return (
-    <RailRow icon={anyRunning ? <Spinner /> : <SearchIcon />} isLast={isLast}>
+    <RailRow
+      icon={anyRunning ? <Spinner /> : allStore ? <ChartIcon /> : <SearchIcon />}
+      isLast={isLast}
+    >
       <span className="text-meta leading-[22px] text-muted-foreground">
-        Đã chạy {calls.length} truy vấn
+        {/* A store read is not a query against anything outside, and calling a
+            dozen of them "truy vấn" borrowed the wrong word for the work. */}
+        {allStore ? `Đọc ${calls.length} chỉ báo` : `Đã chạy ${calls.length} truy vấn`}
       </span>
       <div className="mt-[11px] grid gap-[9px]">
         {calls.map((call) => (
@@ -331,6 +352,9 @@ function GroupRow({ calls, isLast }: { calls: ToolCall[]; isLast: boolean }) {
             {call.status === "running" ? (
               <Spinner className="flex-none" />
             ) : (
+              <BranchIcon className="flex-none text-muted-foreground/70" />
+            )}
+            {mixed && call.status !== "running" && (
               <CallIcon call={call} className="flex-none text-muted-foreground" />
             )}
             <span className="min-w-0 text-meta leading-[22px] text-muted-foreground">
@@ -472,6 +496,34 @@ function ChartIcon({ className }: { className?: string }) {
       <path d="M7 16v-5" />
       <path d="M12 16V7" />
       <path d="M17 16v-8" />
+    </svg>
+  )
+}
+
+
+/**
+ * The mark on a row that hangs off the one above it.
+ *
+ * The same path the follow-up questions use, inlined here the way every other
+ * icon in this file is — the class comment at the top says why the design's own
+ * path data lives beside the component that draws it.
+ */
+function BranchIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.6}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M5 5v9h11" />
+      <polyline points="12 10 16 14 12 18" />
     </svg>
   )
 }
