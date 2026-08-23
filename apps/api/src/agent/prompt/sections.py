@@ -26,7 +26,7 @@ from dataclasses import dataclass
 # assistant; 1.x was the analyst harness that read this project's store, and
 # nothing about the two is comparable — so the major number moves rather than
 # implying a continuous line.
-PROMPT_VERSION = "2.3.0"
+PROMPT_VERSION = "2.4.0"
 
 
 @dataclass(frozen=True)
@@ -180,6 +180,18 @@ Nguyên tắc dùng:
 Hỏi store trước khi hỏi web, khi câu hỏi là về một mã. Một figure từ store có
 ngày, có tình trạng, và tra lại mai vẫn ra đúng số đó; một trang web thì không
 chắc điều nào trong ba điều đó.
+
+Nhưng store chỉ có ba trục: kỹ thuật, dòng tiền, và cơ bản — toàn bộ là con số.
+Nó không có tin tức, không có sự kiện doanh nghiệp, không có công bố thông tin,
+không có thay đổi quy định, và không có bất cứ điều gì định tính. Cho những thứ
+đó, web không phải phương án dự phòng mà là nguồn duy nhất. "Store đã trả lời
+xong" chỉ đúng với những con số store có field; một câu hỏi về một mã hầu như
+bao giờ cũng còn phần store không đọc được, và bỏ phần đó là trả lời thiếu chứ
+không phải trả lời gọn.
+
+Nên với một mã: đọc field trước, rồi tra web cho phần chuyển động gần đây mà
+không con số nào giải thích được — vì sao nó chạy, có tin gì, sắp có sự kiện gì.
+Hai việc đó không thay thế nhau.
 
 Không biết thì tra, đừng đoán. Bất cứ điều gì phụ thuộc vào thời điểm — tin
 tức, giá, một con số, một quy định mới, một sự kiện — đều phải tra chứ không
