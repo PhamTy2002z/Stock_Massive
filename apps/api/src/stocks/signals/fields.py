@@ -45,6 +45,7 @@ flag, and the list of fields an answer rested on.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
@@ -68,6 +69,42 @@ CATALOG_NULL_FPR_CEILING = 0.01
 # has no range at all, so past this the estimate is measuring the band rather
 # than the market.
 DEGRADED_LIMIT_LOCK_SHARE = 0.20
+
+# How much of a sample has to survive exclusion before a percentile taken over
+# it means anything (``docs/adr/0010``). A share of the sample plus an absolute
+# floor, and both halves are load-bearing:
+#
+# * A **share** rather than a count, because the count that matters is relative.
+#   A Universe of thirty answering with twenty-seven is a ranking over almost
+#   everything; a Universe of three hundred answering with twenty-seven is a
+#   ranking over a ninth of it wearing the same clothes.
+# * A **floor**, because no share rescues a small sample. Sixty percent of ten is
+#   six, and a position among six names is a rank, not a distribution.
+#
+# It was a constant 30, and against a Universe of exactly 30 that left no
+# tolerance at all: one newly listed symbol without the history a field needs
+# refused the field for every symbol, including the twenty-nine that had it. The
+# sample size and the exclusions already travel with every percentile
+# (``FieldValue.extras``), so a reader can see a thinner sample rather than
+# having to be protected from one by a blank.
+PERCENTILE_MIN_SAMPLE_SHARE = 0.6
+PERCENTILE_ABSOLUTE_FLOOR = 15
+
+
+def min_sample_for(sample_size: int) -> int:
+    """How many members must answer before a percentile over them is served.
+
+    Taken from the sample that was *asked for*, not from the survivors: a floor
+    derived from what survived would be satisfied by definition.
+
+    Deliberately not clamped down to ``sample_size``. A sample smaller than the
+    absolute floor can never answer, and clamping would quietly turn a
+    three-symbol request into a three-symbol percentile.
+    """
+    return max(
+        math.ceil(PERCENTILE_MIN_SAMPLE_SHARE * max(0, sample_size)),
+        PERCENTILE_ABSOLUTE_FLOOR,
+    )
 
 # Keys a `descriptive` field may not return, whatever it calls itself. Matched on
 # the **whole key**, so `expected_return` is refused and `return_window_days` is
@@ -392,6 +429,24 @@ class SignalField:
     min_sessions: int
     threshold: Threshold | None
     null_fpr: NullCalibration | None
+    # How many trailing sessions the window *spans*, when that is more than the
+    # floor above. Two numbers rather than one because they answer two
+    # questions: ``min_sessions`` is how much history the computation refuses
+    # below, and this is how far back the window may look for an input the
+    # provider writes on some sessions and not others.
+    #
+    # They were one number, and that made a fallback unreachable: a factor
+    # declaring ``min_sessions = 1`` got a one-bar window, so the loop in
+    # ``cross_sectional._market_cap`` that walks back for the newest session
+    # carrying a market capitalisation had nothing to walk. It read as a
+    # tolerance and was dead code.
+    #
+    # Left unset it *is* ``min_sessions``, which is what every field wanting one
+    # window means. A window shorter than the floor is refused at import: it
+    # would ask the gateway for fewer sessions than the field then demands, and
+    # the refusal would name the history rather than the declaration that caused
+    # it.
+    lookback_sessions: int | None = None
     output_keys: tuple[str, ...] = ()
     reading: Callable[[FieldWindow], FieldReading] | None = None
     # The cross-sectional half of the same mechanism: the per-symbol quantity a
@@ -407,6 +462,14 @@ class SignalField:
             raise ValueError(f"{self.name} must say how it is to be read")
         if self.min_sessions < 1:
             raise ValueError(f"{self.name} must declare the history it needs")
+        if self.lookback_sessions is not None and (
+            self.lookback_sessions < self.min_sessions
+        ):
+            raise ValueError(
+                f"{self.name} looks back over {self.lookback_sessions} sessions "
+                f"and refuses below {self.min_sessions}: a window shorter than "
+                "the floor it is measured against can only refuse"
+            )
 
         if self.claim is Claim.DESCRIPTIVE:
             pointing = sorted(DIRECTION_BEARING_KEYS.intersection(self.output_keys))
@@ -451,6 +514,17 @@ class SignalField:
     @property
     def fires(self) -> bool:
         return self.kind is FieldKind.SIGNAL
+
+    @property
+    def window_sessions(self) -> int:
+        """How many trailing sessions the gateway is asked for.
+
+        The declared lookback where there is one, and the floor otherwise. Every
+        caller asks for this rather than reading ``min_sessions`` as a window:
+        the two agree for most fields, and the ones they do not agree for are
+        exactly the ones where reading the wrong number is silent.
+        """
+        return self.lookback_sessions or self.min_sessions
 
 
 @dataclass(frozen=True)

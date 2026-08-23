@@ -74,7 +74,7 @@ from src.stocks.providers.contracts import (
     SnapshotMetadata,
 )
 from src.stocks.providers.normalize import VN_TZ
-from src.stocks.signals.cross_sectional import CROSS_SECTION_MIN_SYMBOLS
+from src.stocks.signals.fields import min_sample_for
 from src.stocks.signals.issues import SignalIssue
 from src.stocks.signals.reference import REFERENCE_STALE_DAYS
 from src.stocks.universe import forget_cohort_cache
@@ -95,8 +95,11 @@ TRADING_DAY = date(2026, 8, 12)
 SESSIONS = 320
 
 # The sample a percentile needs to mean anything, plus enough headroom that one
-# excluded member does not collapse the whole ranking.
-PEERS = tuple(f"ENVP{index:02d}" for index in range(CROSS_SECTION_MIN_SYMBOLS + 2))
+# excluded member does not collapse the whole ranking. Solved rather than
+# asserted: the floor is a share of the sample, so a size satisfying it is the
+# smallest one where ``min_sample_for(size) <= size``.
+PEER_COUNT = next(size for size in range(1, 200) if min_sample_for(size) <= size) + 2
+PEERS = tuple(f"ENVP{index:02d}" for index in range(PEER_COUNT))
 
 FOREIGN_ROOM_FIELD = "company_profile.foreign_room_pct"
 MOMENTUM_FIELD = "momentum_rank.percentile_12_2"
@@ -779,7 +782,7 @@ class TestTheCrossSection:
 
         assert roe.health is Health.OK
         assert 0.0 <= roe.value <= 100.0
-        assert roe.extras["n"] >= CROSS_SECTION_MIN_SYMBOLS
+        assert roe.extras["n"] >= min_sample_for(len(PEERS) + 1)
         assert roe.as_of == TRADING_DAY - timedelta(days=40)
         session.close()
 

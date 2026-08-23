@@ -50,6 +50,7 @@ from .fields import (
     Unit,
 )
 from .cross_sectional import (
+    FACTOR_LOOKBACK_SESSIONS,
     FACTOR_MIN_SESSIONS,
     MOMENTUM_FORMATION_SESSIONS,
     MOMENTUM_MIN_SESSIONS,
@@ -807,7 +808,12 @@ _FACTOR_KEYS = (
     "excluded_symbols",
     "period_end",
     "period_age_days",
+    # The session the market side of the ratio was read from, and the session the
+    # window ends on. Two keys because the Main Source writes a capitalisation on
+    # some sessions and not others: where they differ the figure is degraded
+    # under ``stale_market_cap``, and a reader can only see that if both are here.
     "price_session",
+    "window_session",
 )
 
 EARNINGS_YIELD_PERCENTILE = SignalField(
@@ -827,6 +833,7 @@ EARNINGS_YIELD_PERCENTILE = SignalField(
     claim=Claim.DESCRIPTIVE,
     source=FieldSource.STORED,
     min_sessions=FACTOR_MIN_SESSIONS,
+    lookback_sessions=FACTOR_LOOKBACK_SESSIONS,
     threshold=None,
     null_fpr=None,
     output_keys=_FACTOR_KEYS,
@@ -847,6 +854,7 @@ BOOK_YIELD_PERCENTILE = SignalField(
     claim=Claim.DESCRIPTIVE,
     source=FieldSource.STORED,
     min_sessions=FACTOR_MIN_SESSIONS,
+    lookback_sessions=FACTOR_LOOKBACK_SESSIONS,
     threshold=None,
     null_fpr=None,
     output_keys=_FACTOR_KEYS,
@@ -867,6 +875,7 @@ ROE_PERCENTILE = SignalField(
     claim=Claim.DESCRIPTIVE,
     source=FieldSource.STORED,
     min_sessions=FACTOR_MIN_SESSIONS,
+    lookback_sessions=FACTOR_LOOKBACK_SESSIONS,
     threshold=None,
     null_fpr=None,
     output_keys=_FACTOR_KEYS,
@@ -890,6 +899,7 @@ SIZE_PERCENTILE = SignalField(
     claim=Claim.DESCRIPTIVE,
     source=FieldSource.STORED,
     min_sessions=FACTOR_MIN_SESSIONS,
+    lookback_sessions=FACTOR_LOOKBACK_SESSIONS,
     threshold=None,
     null_fpr=None,
     output_keys=_FACTOR_KEYS,

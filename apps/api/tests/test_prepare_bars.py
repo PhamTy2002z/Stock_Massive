@@ -34,7 +34,11 @@ from sqlalchemy.pool import StaticPool
 
 from src.stocks.models import CorporateAction, ListingRoster, ProviderSnapshot
 from src.stocks.providers import Exchange, PriceBasis, ProviderSource
-from src.stocks.signals.bars import ADTV_MIN_PEERS, prepare_bars
+from src.stocks.signals.bars import prepare_bars
+from src.stocks.signals.fields import (
+    PERCENTILE_ABSOLUTE_FLOOR,
+    min_sample_for,
+)
 from src.stocks.signals.corporate_actions import CorporateActionStore
 from src.stocks.signals.issues import SignalIssue
 from src.stocks.signals.price_band import LimitLock
@@ -604,7 +608,9 @@ class TestHowThinTheSymbolIs:
             )
 
         assert health.adtv is None
-        assert ADTV_MIN_PEERS == 30
+        # Eleven names is under the absolute floor, so no share of the sample
+        # rescues it.
+        assert min_sample_for(11) == PERCENTILE_ABSOLUTE_FLOOR
 
 
 def _store_flat_cross_section(

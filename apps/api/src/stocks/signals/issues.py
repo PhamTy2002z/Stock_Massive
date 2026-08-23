@@ -209,6 +209,31 @@ class SignalIssue(str, Enum):
     # code above, which is about a figure that exists and is old.
     FUNDAMENTAL_NOT_STORED = "fundamental_not_stored"
 
+    # A statement is stored for this symbol, and the line this particular ratio
+    # divides is not in it. Distinct from the code above, and the distinction is
+    # the whole point: `fundamental_not_stored` sends a reader to look for a
+    # filing that is already there, while this one names a gap inside a filing
+    # that was collected. Two ratios over the same statement can disagree about
+    # which of them is answerable, and this is the code that says so.
+    STATEMENT_LINE_MISSING = "statement_line_missing"
+
+    # No session in the window read carries a market capitalisation, so a ratio
+    # measured against what the market values the company at cannot be formed.
+    # It is not a statement about the filings: the quarter behind the numerator
+    # may be stored, current and perfectly readable, and a ratio over it still
+    # has no denominator. Reported under its own name because the fix is on the
+    # market side of the store rather than the fundamental one.
+    MARKET_CAP_ABSENT = "market_cap_absent"
+
+    # The market capitalisation a ratio was formed against comes from an earlier
+    # session than the newest one in the window — the provider wrote one on some
+    # sessions and not on others. A degradation rather than a refusal: the ratio
+    # is real as of the session its denominator came from, and that session is
+    # stamped beside it. Its own code rather than `stale_market_data`, which is
+    # about a whole window falling behind the calendar; here the window is
+    # current and one field inside it is not.
+    STALE_MARKET_CAP = "stale_market_cap"
+
     # The newest reference reading behind a stored figure is old enough that
     # narrating it as current would be wrong. The reference twin of
     # `stale_fundamental_period`, and a separate code because the two are

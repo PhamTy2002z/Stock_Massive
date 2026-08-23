@@ -135,7 +135,8 @@ class EvidenceFigure:
     on the envelope, for the reason **Window Health** exists at all: a number
     drawn from twelve sessions and one drawn from two hundred look identical
     until the answer says which it is, and the fields in one envelope do not
-    share a window — each declares its own ``min_sessions``.
+    share a window — each declares its own ``window_sessions``, which is not
+    always the ``min_sessions`` it refuses below.
     """
 
     field_id: str
@@ -655,7 +656,7 @@ def _refused(
         reason=sentence_for(issue),
         as_of=None,
         sessions_used=None,
-        window_days=None if field is None else field.min_sessions,
+        window_days=None if field is None else field.window_sessions,
         extras={},
     )
 
@@ -690,7 +691,10 @@ def _from_field_value(entry: ProfileField, served: FieldValue) -> EvidenceFigure
         # can make its age visible, and the age is this.
         as_of=None if served.refusal is not None else _as_of_of(served),
         sessions_used=served.health.sessions_used,
-        window_days=served.field.min_sessions,
+        # The window the gateway was asked for, which is not always the floor
+        # the field refuses below: a factor looks back a month for a market
+        # capitalisation and still answers off one session of history.
+        window_days=served.field.window_sessions,
         extras=served.extras,
     )
 

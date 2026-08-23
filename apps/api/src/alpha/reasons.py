@@ -162,6 +162,19 @@ SIGNAL_ISSUE_SENTENCES: Mapping[SignalIssue, str] = MappingProxyType(
             "The store holds no quarterly statement for this symbol at or before "
             "this session."
         ),
+        SignalIssue.STATEMENT_LINE_MISSING: (
+            "A quarterly statement is stored for this symbol and the line this "
+            "figure divides is not in it."
+        ),
+        SignalIssue.MARKET_CAP_ABSENT: (
+            "No session in the window read carries a market capitalisation, so "
+            "there is nothing to measure this figure against."
+        ),
+        SignalIssue.STALE_MARKET_CAP: (
+            "The market capitalisation behind this figure comes from an earlier "
+            "session than the newest one in the window; that session is stamped "
+            "beside it."
+        ),
         SignalIssue.STALE_REFERENCE_READING: (
             "The reference reading behind this figure is old enough that "
             "narrating it as current would be wrong; the date it was read is "

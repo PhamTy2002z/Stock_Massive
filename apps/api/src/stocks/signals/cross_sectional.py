@@ -158,10 +158,19 @@ RELATIVE_STRENGTH_MIN_SESSIONS = 250
 # look like a trailing statistic.
 FACTOR_MIN_SESSIONS = 1
 
-# Below this many surviving symbols a percentile stops meaning anything, and the
-# whole call refuses rather than each survivor answering with a number nobody
-# can read. The same floor the gateway's own liquidity standing uses.
-CROSS_SECTION_MIN_SYMBOLS = 30
+# How far back a factor may look for a market capitalisation. A month of
+# sessions, and it is a window rather than a floor: the Main Source writes a
+# capitalisation on some sessions and not on others, and with the window equal
+# to ``FACTOR_MIN_SESSIONS`` the walk-back in :func:`_market_cap` had exactly one
+# bar to walk and could never find the one written yesterday.
+#
+# A month rather than a year because a capitalisation is a price times a share
+# count: past a few weeks the number stops describing what the market values the
+# company at today, and a ratio formed against it is stale in a way no stamp
+# repairs. Anything older than the newest session in the window is degraded
+# under ``stale_market_cap`` and carries the session it came from.
+FACTOR_LOOKBACK_SESSIONS = 21
+
 
 
 # --- Shared arithmetic ----------------------------------------------------
@@ -323,11 +332,21 @@ def relative_strength_reading(window: FieldWindow) -> FieldReading:
 # --- Factor percentiles ---------------------------------------------------
 
 
-def _market_cap(frame: BarFrame) -> float | None:
-    """What the newest session of the window valued the company at."""
+def _market_cap(frame: BarFrame) -> tuple[float, Bar] | None:
+    """The newest session in the window that valued the company, and its bar.
+
+    The bar comes back with the number because the two are one fact. A ratio
+    formed against a capitalisation written three sessions ago is as of *that*
+    session, and a caller handed the value alone would stamp it with the
+    window's newest date — which is the one thing about it that would be wrong.
+
+    The walk backwards is the tolerance for a Main Source that writes this on
+    some sessions and not others. It is only a tolerance if the window has more
+    than one bar in it, which is what ``FACTOR_LOOKBACK_SESSIONS`` is for.
+    """
     for bar in reversed(frame.bars):
         if bar.market_cap_vnd is not None and bar.market_cap_vnd > 0:
-            return bar.market_cap_vnd
+            return bar.market_cap_vnd, bar
     return None
 
 
@@ -335,33 +354,58 @@ def _stamped(
     value: float,
     standing: FundamentalStanding | None,
     frame: BarFrame,
+    *,
+    priced_on: Bar | None = None,
 ) -> FieldReading:
     """One factor figure with the age of what it was computed from on it.
 
     A quarterly figure narrated as current is a false positive by a mechanism no
     threshold catches, so the quarter travels with every one of these and the
     answer degrades past the staleness bound rather than being served flat.
+
+    ``priced_on`` is the session the market side of the ratio was read from,
+    where that is not the window's newest — the capitalisation the Main Source
+    happened to write. Left out it *is* the newest, which is what a figure with
+    no market input means. Either way ``price_session`` names the session the
+    number is as of rather than the session the window ends on.
+
+    Two staleness codes can be true at once, and only one is reported: a quarter
+    that is months old outranks a capitalisation that is days old. Both dates are
+    stamped regardless, so the one that lost is still readable.
     """
     newest: Bar | None = frame.bars[-1] if frame.bars else None
+    priced = priced_on or newest
+    cap_is_stale = (
+        priced is not None
+        and newest is not None
+        and priced.session_date != newest.session_date
+    )
+    degraded: SignalIssue | None = None
+    if standing is not None and standing.stale:
+        degraded = SignalIssue.STALE_FUNDAMENTAL_PERIOD
+    elif cap_is_stale:
+        degraded = SignalIssue.STALE_MARKET_CAP
     return FieldReading(
         value=value,
         extras={
             "period_end": None if standing is None else standing.period_end.isoformat(),
             "period_age_days": None if standing is None else standing.age_days,
-            "price_session": None if newest is None else newest.session_date.isoformat(),
+            "price_session": None if priced is None else priced.session_date.isoformat(),
+            # The session the window ends on, which is what makes a stale
+            # capitalisation legible: the two dates differing is the whole
+            # statement, and one of them alone cannot make it.
+            "window_session": (
+                None if newest is None else newest.session_date.isoformat()
+            ),
         },
-        degraded_reason=(
-            SignalIssue.STALE_FUNDAMENTAL_PERIOD
-            if standing is not None and standing.stale
-            else None
-        ),
+        degraded_reason=degraded,
     )
 
 
 def _quarterly_ratio(
     window: FieldWindow,
     numerator: Callable[[FundamentalStanding], float | None],
-    denominator: Callable[[FundamentalStanding, BarFrame], float | None],
+    denominator: Callable[[FundamentalStanding], float | None] | None = None,
 ) -> FieldReading:
     """One factor as a percentage, or the reason the store cannot form it.
 
@@ -369,15 +413,57 @@ def _quarterly_ratio(
     refusal and the staleness stamp are written once: three copies of them would
     be three chances for one factor to refuse under a different code than its
     neighbours for the same missing statement.
+
+    **What is written once is the stamp, not the reason.** These refused under a
+    single code, and that code said the store held no quarterly statement — which
+    for two of the three ratios was usually false. Both are divided by market
+    capitalisation, and a capitalisation the Main Source did not write is not a
+    missing filing: the ROE over the same statement answered perfectly while its
+    neighbours refused, and a reader sent to look for an absent filing found one
+    sitting there. Three causes now say three things:
+
+    * ``fundamental_not_stored`` — no statement at or before this session.
+    * ``market_cap_absent`` — a statement, and no session in the window valuing
+      the company to divide it by.
+    * ``statement_line_missing`` — a statement that does not carry this
+      particular line.
+
+    ``denominator`` left out means "divide by what the market values the company
+    at". Declared by its absence rather than by a flag beside it because the two
+    would be the same statement twice, and a caller could disagree with itself.
+    A denominator that is given reads a statement line, and a ``None`` from it is
+    therefore a line that was not filed — which is the distinction a shared
+    refusal code could not make.
     """
     standing = window.fundamental
     if standing is None:
         return FieldReading(value=None, refusal=SignalIssue.FUNDAMENTAL_NOT_STORED)
+
+    priced: Bar | None = None
+    if denominator is None:
+        found = _market_cap(window.frame)
+        if found is None:
+            return FieldReading(value=None, refusal=SignalIssue.MARKET_CAP_ABSENT)
+        bottom, priced = found
+    else:
+        bottom = denominator(standing)
+        if bottom is None:
+            return FieldReading(
+                value=None, refusal=SignalIssue.STATEMENT_LINE_MISSING
+            )
+
     top = numerator(standing)
-    bottom = denominator(standing, window.frame)
-    if top is None or bottom is None or bottom <= 0:
-        return FieldReading(value=None, refusal=SignalIssue.FUNDAMENTAL_NOT_STORED)
-    return _stamped(100.0 * top / bottom, standing, window.frame)
+    if top is None:
+        return FieldReading(value=None, refusal=SignalIssue.STATEMENT_LINE_MISSING)
+    if bottom <= 0:
+        # A capitalisation or an equity that is zero or negative. Reported as the
+        # line being unusable rather than absent, and not as a division the
+        # caller has to guard: a negative book value is a real filing and a
+        # percentage of it is not a position within anything.
+        return FieldReading(value=None, refusal=SignalIssue.STATEMENT_LINE_MISSING)
+    return _stamped(
+        100.0 * top / bottom, standing, window.frame, priced_on=priced
+    )
 
 
 def earnings_yield_ranked(window: FieldWindow) -> FieldReading:
@@ -391,7 +477,6 @@ def earnings_yield_ranked(window: FieldWindow) -> FieldReading:
     return _quarterly_ratio(
         window,
         lambda standing: standing.trailing_12_month_net_income_vnd,
-        lambda _standing, frame: _market_cap(frame),
     )
 
 
@@ -400,7 +485,6 @@ def book_yield_ranked(window: FieldWindow) -> FieldReading:
     return _quarterly_ratio(
         window,
         lambda standing: standing.parent_equity_vnd,
-        lambda _standing, frame: _market_cap(frame),
     )
 
 
@@ -409,7 +493,7 @@ def roe_ranked(window: FieldWindow) -> FieldReading:
     return _quarterly_ratio(
         window,
         lambda standing: standing.trailing_12_month_net_income_vnd,
-        lambda standing, _frame: standing.parent_equity_vnd,
+        lambda standing: standing.parent_equity_vnd,
     )
 
 
@@ -421,10 +505,14 @@ def size_ranked(window: FieldWindow) -> FieldReading:
     returns that a descriptive field may not make in v1. The staleness here is a
     session's rather than a quarter's, and is stamped as one.
     """
-    cap = _market_cap(window.frame)
-    if cap is None:
-        return FieldReading(value=None, refusal=SignalIssue.MISSING_TARGET_SESSION)
-    return _stamped(cap, None, window.frame)
+    found = _market_cap(window.frame)
+    if found is None:
+        # Not ``missing_target_session``: the session is there and was read, and
+        # what it does not carry is a capitalisation. The old code sent a reader
+        # to look for a session the store holds.
+        return FieldReading(value=None, refusal=SignalIssue.MARKET_CAP_ABSENT)
+    cap, priced = found
+    return _stamped(cap, None, window.frame, priced_on=priced)
 
 
 def percentile_of(value: float, sample: Sequence[float]) -> float:
