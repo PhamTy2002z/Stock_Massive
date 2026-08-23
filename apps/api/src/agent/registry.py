@@ -24,9 +24,22 @@ flag takes effect without a restart.
 cache the built schema list; they cannot know when a tool appeared or left
 unless the registry says so with a number they can compare.
 
-Nothing here reads the market store, a provider, or a Signal Registry: the
-agent's tools are general capabilities, and the market data path is a separate
-serving surface that the model does not read.
+**A tool names itself twice, for two audiences.** ``name`` is what the model
+calls; :attr:`ToolEntry.display_name` is what a person reads on the rail of what
+a Turn did. Both are declared on the registration, and a blank display name is
+refused, so there is no path by which a raw tool name reaches a screen.
+
+**Provenance is declared, not remembered.** A registration says whether its
+results are content from outside this deployment
+(:attr:`ToolEntry.reads_external`), and the layer that builds the message asks
+this rather than checking a hand-written list of tool names. A list is a thing
+somebody has to remember to extend, and the tool that gets forgotten is by
+definition the newest one — the failure ``untrusted.py`` describes and, until
+this attribute existed, also had.
+
+Which *bundle* a caller selects is still what decides what a lane may call
+(``toolsets.py``). This attribute answers a different question: given that it
+was called, is what came back somebody else's writing.
 """
 
 from __future__ import annotations
@@ -37,7 +50,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from src.core.llm import ToolSchema
@@ -70,17 +83,33 @@ class ToolShadowError(ValueError):
 
 @dataclass(frozen=True)
 class ToolContext:
-    """Trusted Turn facts handed to a handler out of band.
+    """Trusted facts handed to a handler out of band.
 
-    Never part of a tool schema: the model must not be able to name a user or a
-    thread it does not own, so identity arrives here and arguments arrive from
-    the model, and the two are never merged.
+    Never part of a tool schema: the model must not be able to name a user, a
+    thread, a symbol or a Trading Day it was not given, so identity arrives here
+    and arguments arrive from the model, and the two are never merged.
+
+    **Every field is optional because the callers are not one kind of caller.**
+    A Turn is owned by a user and belongs to a Thread; an Analysis is owned by
+    neither. An Analysis is keyed by ``(symbol, trading_day)`` and shared
+    system-wide (``src/alpha/watchlist.py``), so ``user_id`` on it would be a
+    number invented to fill a field. A handler that genuinely needs one refuses
+    when it is absent, in the same spirit as ``requires_env``: the condition is
+    stated where the handler is rather than assumed by its type.
     """
 
-    user_id: int
+    user_id: int | None = None
     thread_id: uuid.UUID | None = None
-    #: The Turn's clock. Injected so a handler that stamps a row and a test that
-    #: asserts the stamp read the same instant.
+    #: The symbol one Analysis is being produced for. Trusted rather than an
+    #: argument for the reason above: an argument naming a symbol is a route to
+    #: reading a symbol this call was not opened for.
+    symbol: str | None = None
+    #: The Trading Day that Analysis is keyed by. Trusted for the same reason,
+    #: and for one more: an argument naming a day is a route to a session that
+    #: has not closed yet.
+    trading_day: date | None = None
+    #: The caller's clock. Injected so a handler that stamps a row and a test
+    #: that asserts the stamp read the same instant.
     now: datetime | None = None
 
 
@@ -96,6 +125,30 @@ class ToolEntry:
     schema: Mapping[str, Any]
     handler: Handler
     description: str = ""
+    #: The reader-facing name of what this tool does, in the reader's language.
+    #:
+    #: **Every tool carries two names and they are for different audiences.**
+    #: ``name`` is the identifier the model calls and the trace records;
+    #: ``display_name`` is the phrase a person reads on the rail of what a Turn
+    #: did. They are never the same string: a rail row saying ``get_field`` tells
+    #: a reader nothing about what was looked up, and a model asked to call
+    #: "Đọc chỉ báo" has nothing to call.
+    #:
+    #: Required — :func:`register` refuses a blank one. That refusal is the whole
+    #: mechanism: the alternative is a table of display names kept somewhere else,
+    #: which is a list somebody has to remember to extend, and the tool that gets
+    #: forgotten is by definition the newest one. This is the same failure
+    #: ``untrusted.py`` used to have with its frozenset.
+    display_name: str = ""
+    #: Which argument, if any, is worth appending to :attr:`display_name` on that
+    #: rail row — a query, a URL. ``None`` for a tool whose arguments say nothing
+    #: a reader would recognise.
+    summary_detail_arg: str | None = None
+    #: A tool that composes its own rail row, when one argument cannot say what
+    #: the call was for. ``get_field`` needs a field and a symbol and a curated
+    #: label for the field, so it builds the sentence itself. Takes the model's
+    #: arguments and returns the whole row, :attr:`display_name` included.
+    summarise: Callable[[Mapping[str, Any]], str] | None = None
     #: Whether this tool can run here. ``None`` means unconditionally available.
     #: A raising ``check_fn`` reads as unavailable: a broken probe must not take
     #: the whole schema list down with it.
@@ -103,6 +156,18 @@ class ToolEntry:
     #: Environment variables that must be set and non-empty. Kept separate from
     #: ``check_fn`` so a missing credential is stated declaratively.
     requires_env: tuple[str, ...] = ()
+    #: Whether this tool's results are content somebody outside this deployment
+    #: wrote. ``untrusted.py`` wraps those at the layer that builds the message,
+    #: and it asks this rather than consulting a list of names it has to
+    #: remember to extend.
+    #:
+    #: **The default is the unsafe answer stated safely.** A registration that
+    #: says nothing is treated as external, so a tool added without a thought
+    #: about provenance is wrapped rather than trusted. The cost of being wrong
+    #: this way is a delimiter around a store read; the cost the other way is a
+    #: web page reaching the model in the position the harness's own
+    #: instructions occupy.
+    reads_external: bool = True
     #: ``False`` for a blocking handler; the executor moves those off the event
     #: loop rather than letting them stall every other call in the round.
     is_async: bool = True
@@ -148,6 +213,14 @@ def register(entry: ToolEntry, *, override: bool = False) -> ToolEntry:
         raise ValueError(f"tool {entry.name!r} needs a toolset")
     if not entry.description.strip():
         raise ValueError(f"tool {entry.name!r} needs a description the model can read")
+    if not entry.display_name.strip():
+        # Refused rather than defaulted to the tool's own name. A default here
+        # would put `get_field` on a reader's screen and look deliberate, which
+        # is exactly what happened before this field existed.
+        raise ValueError(
+            f"tool {entry.name!r} needs a display_name a person can read; the "
+            "model's name for it is not one"
+        )
     if not isinstance(entry.schema, Mapping):
         raise TypeError(f"tool {entry.name!r} needs a JSON Schema mapping")
     existing = _ENTRIES.get(entry.name)
@@ -262,6 +335,18 @@ def get_max_result_size(name: str) -> int | None:
     return None if entry is None else entry.max_result_size_chars
 
 
+def reads_external(name: str) -> bool:
+    """Whether this tool's results are content from outside this deployment.
+
+    An unregistered name answers ``True``. That is not a placeholder: the only
+    callers are the wrapper and the external-call ceiling, and both are asking
+    "must I be careful about this", where the honest answer about a tool nobody
+    registered is yes.
+    """
+    entry = _ENTRIES.get(name)
+    return True if entry is None else entry.reads_external
+
+
 def object_schema(
     properties: Mapping[str, Mapping[str, Any]], required: Sequence[str] = ()
 ) -> dict[str, Any]:
@@ -305,5 +390,6 @@ __all__ = [
     "is_available",
     "names",
     "object_schema",
+    "reads_external",
     "register",
 ]

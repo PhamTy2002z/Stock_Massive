@@ -14,6 +14,7 @@ from src.agent.service import close_alpha_desk
 from src.agent.turns import sweep_interrupted_turns
 from src.alpha.analysis_router import router as analysis_router
 from src.alpha.favicons import router as favicons_router
+from src.alpha.loop_ops_router import router as loop_ops_router
 from src.alpha.router import router as watchlist_router
 from src.alpha.refusals import AlphaRefusal
 from src.auth.router import router as auth_router
@@ -176,6 +177,10 @@ app.include_router(message_flag_router, prefix="/api/v1")
 # reading and from what IP. The server fetches once, through the same
 # public-URL guard as `fetch_url`, and caches both the hit and the miss.
 app.include_router(favicons_router, prefix="/api/v1")
+# What the Analysis lane's loop bought, in raw counts. Admin-only, read-only, no
+# threshold and no new table — the same refusal `agent/ops.py` makes, for the
+# same reason: one developer and nobody rostered to answer an alert.
+app.include_router(loop_ops_router, prefix="/api/v1")
 
 
 @app.exception_handler(AlphaRefusal)

@@ -456,7 +456,7 @@ async def generate_fragment(
         try:
             completion = await client.complete(request, spend_for(request, run_id))
         except BudgetRefusal as refusal:
-            raise _budget_failure(refusal, rejection) from refusal
+            raise budget_failure(refusal, rejection) from refusal
         except AuthUnavailable as exc:
             raise ProductionFailure(
                 "auth_unavailable",
@@ -480,7 +480,7 @@ async def generate_fragment(
 
         previous = completion.text or ""
         try:
-            return validate_fragment(_parsed(completion), envelope)
+            return validate_fragment(parsed_fragment(completion), envelope)
         except FragmentRejected as rejected:
             rejection = rejected
 
@@ -492,11 +492,15 @@ async def generate_fragment(
     )
 
 
-def _budget_failure(
+def budget_failure(
     refusal: BudgetRefusal,
     rejection: FragmentRejected | None,
 ) -> ProductionFailure:
     """What a refused reservation means, which depends on which call it was.
+
+    Public because the looping lane (``analysis_loop.py``) maps the same five
+    provider failures onto the same five codes, and a second taxonomy for them
+    would be a second set of ``error_code``s the interface has to learn.
 
     A first generation admission would not fund is a spend failure and says so.
     A *regeneration* it would not fund is not: the attempt failed because the
@@ -524,8 +528,11 @@ def _budget_failure(
     )
 
 
-def _parsed(completion: Completion) -> Any:
+def parsed_fragment(completion: Completion) -> Any:
     """The fragment as an object, or the rejection a non-JSON answer earns.
+
+    Public for the same reason ``budget_failure`` is: the looping lane makes the
+    same final call and has to treat prose the same way.
 
     A gateway that silently drops ``response_format`` answers with prose, and
     prose is caught here rather than trusted: it becomes an ordinary validation
@@ -729,8 +736,10 @@ __all__ = [
     "FragmentError",
     "FragmentRejected",
     "Verdict",
+    "budget_failure",
     "build_request",
     "generate_fragment",
+    "parsed_fragment",
     "spend_for",
     "validate_fragment",
 ]

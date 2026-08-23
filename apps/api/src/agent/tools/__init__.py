@@ -12,12 +12,30 @@ from __future__ import annotations
 
 from ..registry import ToolEntry
 from .memory import register_memory_tools
+from .price_check import register_price_check_tool
+from .signals import register_signal_tools
 from .web import register_web_tools
 
 
 def register_all() -> tuple[ToolEntry, ...]:
-    """Install every tool this build offers. Safe to call more than once."""
-    return (*register_web_tools(), *register_memory_tools())
+    """Install every tool this build offers. Safe to call more than once.
+
+    Every tool, not every tool a conversation may call. Registration is what
+    makes a name dispatchable at all; whether a given caller is *offered* one is
+    decided by which toolsets it selects (``toolsets.py``).
+    """
+    return (
+        *register_web_tools(),
+        *register_memory_tools(),
+        *register_signal_tools(),
+        *register_price_check_tool(),
+    )
 
 
-__all__ = ["register_all", "register_memory_tools", "register_web_tools"]
+__all__ = [
+    "register_all",
+    "register_memory_tools",
+    "register_price_check_tool",
+    "register_signal_tools",
+    "register_web_tools",
+]

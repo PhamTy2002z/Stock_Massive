@@ -47,7 +47,36 @@ TOOLSETS: dict[str, Toolset] = {
         ),
         "tools": ("session_search", "remember_fact", "recall_facts"),
     },
+    # Selected by both lanes now. It was the Analysis lane's alone while the
+    # chat surface's whole boundary was that it read none of this system's data
+    # (``1e7b936``); what changed is that these tools carry a figure's health and
+    # its asOf with it, so a conversation using one can say what session it is
+    # from and under what condition. The two lanes get two signatures out of one
+    # registration — see ``tools/signals.py``.
+    "signals": {
+        "description": (
+            "Read one registered Signal Field out of this system's own store, "
+            "and check a price published elsewhere against the exchange that "
+            "would have had to produce it."
+        ),
+        "tools": ("list_fields", "get_field", "check_price_claim"),
+    },
 }
+
+
+#: What a conversation may reach for, and the only selection the chat lane makes.
+#:
+#: A list of *toolset names* rather than of tools, which is the distinction this
+#: module's opening paragraph is about: the members of a bundle move when a
+#: capability is switched on, and this does not. It is written down because the
+#: alternative is a default of "everything registered", and the day a bundle was
+#: added for another lane that default would hand it to every Turn without a
+#: single line changing.
+#:
+#: ``signals`` is here as of the reversal recorded in ``tools/signals.py``. It is
+#: still a written-down choice rather than a default: a fourth bundle added
+#: tomorrow does not reach a conversation until this tuple says so.
+CHAT_TOOLSETS: tuple[str, ...] = ("web", "memory", "signals")
 
 
 class UnknownToolsetError(KeyError):
@@ -148,7 +177,29 @@ def known_toolsets(*, toolsets: Mapping[str, Toolset] | None = None) -> tuple[st
     return tuple(TOOLSETS if toolsets is None else toolsets)
 
 
+def _check_the_chat_selection_holds() -> None:
+    """Refuse to import a chat selection naming a bundle nobody registered.
+
+    A misspelled name here is the worst kind of wrong: the chat lane would offer
+    the model fewer tools than the deployment has, and from the outside that
+    reads as a model choosing not to call anything rather than as a typo.
+
+    This used to also refuse ``signals``, on the boundary ``1e7b936`` drew. That
+    refusal is gone deliberately and not by omission — the reason is in
+    ``tools/signals.py`` and in the commit that moved it. What still holds is
+    that the selection is *written down*: a bundle added for another lane does
+    not reach a conversation until this tuple names it.
+    """
+    unknown = [name for name in CHAT_TOOLSETS if name not in TOOLSETS]
+    if unknown:
+        raise UnknownToolsetError(unknown[0], tuple(TOOLSETS))
+
+
+_check_the_chat_selection_holds()
+
+
 __all__ = [
+    "CHAT_TOOLSETS",
     "CORE_TOOLS",
     "TOOLSETS",
     "Toolset",

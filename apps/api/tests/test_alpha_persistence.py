@@ -20,6 +20,11 @@ millisecond, and a timestamp cannot express inserting between two rows.
 user's message, which already exists before the first tool call — so the column
 can be NOT NULL and a Turn that dies mid-flight still leaves a readable chain.
 
+*An Analysis trace is anchored to the run and ordered by a pair of columns.* The
+run exists before the ``analysis`` row does, and two calls dispatched together in
+one round share a millisecond — so the order is ``(round_index, seq)``, and the
+trace dies with the run that owns it.
+
 Run against a live Postgres rather than SQLite, because what is being tested is
 what the database refuses.
 """
@@ -37,6 +42,7 @@ from src.alpha.models import (
     AgentToolCall,
     Analysis,
     AnalysisRun,
+    AnalysisToolCall,
 )
 from src.auth.models import User
 from src.core.database import Base, get_sync_db, sync_engine, sync_session_factory
@@ -56,6 +62,7 @@ def alpha_schema():
             AgentToolCall.__table__,
             Analysis.__table__,
             AnalysisRun.__table__,
+            AnalysisToolCall.__table__,
         ],
         checkfirst=True,
     )
@@ -63,7 +70,11 @@ def alpha_schema():
 
 @pytest.fixture
 def analysis_rows():
-    """Anything written under the test symbol, removed afterwards."""
+    """Anything written under the test symbol, removed afterwards.
+
+    Traces go with the run they belong to, by cascade rather than by a second
+    delete — which is also one of the things under test.
+    """
     yield
     with get_sync_db() as session:
         session.execute(delete(Analysis).where(Analysis.symbol == SYMBOL))
@@ -262,3 +273,127 @@ class TestTraceAnchor:
                 select(AgentToolCall).where(AgentToolCall.thread_id == thread_id)
             ).scalar_one()
         assert anchored.request_message_id == message_id
+
+
+def _trace(run_id: int, **overrides) -> AnalysisToolCall:
+    return AnalysisToolCall(
+        **{
+            "run_id": run_id,
+            "round_index": 1,
+            "seq": 1,
+            "tool_name": "read_signal_field",
+            "arguments": {"symbol": SYMBOL},
+            "status": "ok",
+            **overrides,
+        }
+    )
+
+
+@pytest.fixture
+def run_id(analysis_rows):
+    """A run to hang a trace off, cleaned up with its trace."""
+    with get_sync_db() as session:
+        run = _run(status="producing")
+        session.add(run)
+        session.flush()
+        return run.id
+
+
+class TestAnalysisTraceOrder:
+    """`(round_index, seq)` is the order, and it is unique per run."""
+
+    def test_two_calls_cannot_share_a_place_in_a_round(self, run_id):
+        with get_sync_db() as session:
+            session.add(_trace(run_id))
+
+        _refuses(_trace(run_id, tool_name="read_price_zone"))
+
+    def test_two_calls_in_one_round_are_ordered_by_seq_not_by_the_clock(self, run_id):
+        """The case a timestamp cannot serve: a round that dispatches two calls
+        together, both stamped the same millisecond."""
+        stamp = datetime(2026, 8, 22, 21, 0, 0, 500, tzinfo=timezone.utc)
+
+        with get_sync_db() as session:
+            session.add(_trace(run_id, seq=1, started_at=stamp))
+            session.add(_trace(run_id, seq=2, started_at=stamp))
+
+        with get_sync_db() as session:
+            rows = session.execute(
+                select(AnalysisToolCall.seq, AnalysisToolCall.started_at)
+                .where(AnalysisToolCall.run_id == run_id)
+                .order_by(AnalysisToolCall.round_index, AnalysisToolCall.seq)
+            ).all()
+
+        assert [row.seq for row in rows] == [1, 2]
+        assert rows[0].started_at == rows[1].started_at
+
+    def test_a_later_round_reuses_seq_one(self, run_id):
+        with get_sync_db() as session:
+            session.add(_trace(run_id, round_index=1, seq=1))
+            session.add(_trace(run_id, round_index=2, seq=1))
+
+        with get_sync_db() as session:
+            rounds = session.execute(
+                select(AnalysisToolCall.round_index)
+                .where(AnalysisToolCall.run_id == run_id)
+                .order_by(AnalysisToolCall.round_index)
+            ).scalars().all()
+        assert rounds == [1, 2]
+
+
+class TestAnalysisTraceAnchor:
+    """The trace is owned by the run, not by the published Analysis."""
+
+    def test_a_trace_without_a_run_is_refused(self):
+        _refuses(_trace(run_id=None))
+
+    def test_a_trace_pointing_at_no_run_is_refused(self):
+        """The anchor is a foreign key, so an id nobody issued is refused rather
+        than stored as a dangling number."""
+        _refuses(_trace(run_id=-1))
+
+    def test_deleting_the_run_deletes_its_trace(self, analysis_rows):
+        with get_sync_db() as session:
+            run = _run(status="producing")
+            session.add(run)
+            session.flush()
+            run_id = run.id
+            session.add(_trace(run_id, seq=1))
+            session.add(_trace(run_id, seq=2))
+
+        with get_sync_db() as session:
+            session.execute(delete(AnalysisRun).where(AnalysisRun.id == run_id))
+
+        with get_sync_db() as session:
+            left = session.execute(
+                select(AnalysisToolCall).where(AnalysisToolCall.run_id == run_id)
+            ).scalars().all()
+        assert left == []
+
+    def test_a_run_that_never_published_still_keeps_its_trace(self, run_id):
+        """The reason the anchor is the run: a run that dies mid-flight writes no
+        `analysis` row, and that is exactly when the trace is worth the most."""
+        with get_sync_db() as session:
+            session.add(
+                _trace(
+                    run_id,
+                    status="tool_error",
+                    error="the store had nothing for that field",
+                    latency_ms=41,
+                )
+            )
+            session.execute(
+                delete(Analysis).where(Analysis.symbol == SYMBOL)
+            )
+
+        with get_sync_db() as session:
+            published = session.execute(
+                select(Analysis).where(Analysis.symbol == SYMBOL)
+            ).scalars().all()
+            trace = session.execute(
+                select(AnalysisToolCall).where(AnalysisToolCall.run_id == run_id)
+            ).scalar_one()
+
+        assert published == []
+        assert trace.status == "tool_error"
+        assert trace.error == "the store had nothing for that field"

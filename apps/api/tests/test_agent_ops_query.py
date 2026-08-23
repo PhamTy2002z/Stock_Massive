@@ -33,8 +33,15 @@ import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
+from src.agent import tools as agent_tools
 from src.agent.loop import EMPTY_ANSWER
-from src.agent.ops import OPS_WINDOW_DAYS, OpsSnapshot, read_ops_snapshot
+from src.agent.ops import (
+    OPS_WINDOW_DAYS,
+    OpsSnapshot,
+    names_a_price,
+    read_ops_snapshot,
+    read_price_check_compliance,
+)
 from src.alpha.models import (
     FLAG_OTHER,
     FLAG_OVERREACH,
@@ -53,6 +60,7 @@ from src.alpha.models import (
 from src.auth.models import User
 from src.core.database import Base
 
+from .agent_tool_world import isolated_registry
 from .throwaway_db import create_database, drop_database
 
 OPS_DB = "stockmassive_ops_test"
@@ -110,9 +118,10 @@ class _World:
         created_at: datetime = INSIDE,
         flagged_reason: str | None = None,
         flagged_at: datetime | None = None,
+        text: str = "x",
     ) -> int:
         self._seq += 1
-        content: dict = {"text": "x", "tool_calls": [], "status": "complete"}
+        content: dict = {"text": text, "tool_calls": [], "status": "complete"}
         with self.session() as session:
             row = AgentMessage(
                 thread_id=self.thread_id,
@@ -175,6 +184,47 @@ class _World:
                     started_at=started_at,
                 )
             )
+            session.commit()
+
+
+    def answered_turn(
+        self,
+        *,
+        answer: str,
+        tools_used: tuple[str, ...] = (),
+        started_at: datetime = INSIDE,
+    ) -> None:
+        """One Turn, its answer, and the calls it made — all on one request id.
+
+        ``agent_tool_call`` is anchored to the request message rather than to the
+        Turn, so a helper that minted a second message per call would produce a
+        store in which no Turn ever called anything.
+        """
+        request_id = self.message(role="user", created_at=started_at)
+        response_id = self.message(created_at=started_at, text=answer)
+        with self.session() as session:
+            session.add(
+                AgentTurn(
+                    id=uuid.uuid4(),
+                    thread_id=self.thread_id,
+                    request_message_id=request_id,
+                    response_message_id=response_id,
+                    status=TURN_COMPLETE,
+                    started_at=started_at,
+                )
+            )
+            for name in tools_used:
+                session.add(
+                    AgentToolCall(
+                        thread_id=self.thread_id,
+                        request_message_id=request_id,
+                        tool_name=name,
+                        arguments={},
+                        result={},
+                        status="ok",
+                        started_at=started_at,
+                    )
+                )
             session.commit()
 
 
@@ -376,3 +426,118 @@ def test_the_query_writes_nothing(world):
     before = totals()
     snapshot(world)
     assert totals() == before
+
+
+# -- did the model check the price it quoted -----------------------------------
+#
+# The rule this counts lives in the system prompt, and a prompt is not an
+# enforcement: the model can state a price without calling the check. So the
+# rate is measured rather than assumed, which is the whole reason no text-scanning
+# backstop was built into the message layer alongside the tool. Build the fence
+# when the number says the contract is being ignored, not before.
+
+
+@pytest.fixture
+def the_real_tool_surface():
+    """The registry decides which tools read outside content."""
+    with isolated_registry():
+        agent_tools.register_all()
+        yield
+
+
+def compliance(world: _World):
+    with world.session() as session:
+        return read_price_check_compliance(session, now=NOW)
+
+
+PRICE_ANSWER = "Giá đóng cửa phiên 21/08 là 21.700 đồng."
+NO_PRICE_ANSWER = "Doanh thu quý II đạt 55.557 tỷ đồng, biên gộp khoảng 19%."
+
+
+class TestWhatCountsAsNamingAPrice:
+    def test_a_grouped_number_in_the_range_of_a_share_price_counts(self):
+        assert names_a_price(PRICE_ANSWER) is True
+
+    def test_a_revenue_in_billions_is_not_a_price(self):
+        """The real Turn quoted 55.557 tỷ beside the price. Same shape, not a price."""
+        assert names_a_price(NO_PRICE_ANSWER) is False
+
+    def test_a_percentage_is_not_a_price(self):
+        assert names_a_price("Tăng 12.500% so với cùng kỳ") is False
+
+    def test_prose_with_no_number_at_all_counts_nothing(self):
+        assert names_a_price("Không có dữ liệu cho mã này.") is False
+
+
+class TestTheComplianceReading:
+    def test_a_turn_that_quoted_a_price_after_a_web_read_is_eligible(
+        self, world, the_real_tool_surface
+    ):
+        world.answered_turn(answer=PRICE_ANSWER, tools_used=("web_search",))
+
+        reading = compliance(world)
+
+        assert reading.eligible == 1
+        assert reading.checked == 0
+        assert reading.rate == 0.0
+
+    def test_a_turn_that_checked_is_counted_as_having_checked(
+        self, world, the_real_tool_surface
+    ):
+        world.answered_turn(
+            answer=PRICE_ANSWER, tools_used=("web_search", "check_price_claim")
+        )
+
+        reading = compliance(world)
+
+        assert reading.eligible == 1
+        assert reading.checked == 1
+        assert reading.rate == 1.0
+
+    def test_a_turn_that_read_nothing_outside_is_not_in_the_denominator(
+        self, world, the_real_tool_surface
+    ):
+        """A price out of this system's own store owed no check against itself."""
+        world.answered_turn(answer=PRICE_ANSWER, tools_used=("get_field",))
+
+        assert compliance(world).eligible == 0
+
+    def test_a_turn_that_quoted_no_price_is_not_in_the_denominator(
+        self, world, the_real_tool_surface
+    ):
+        world.answered_turn(answer=NO_PRICE_ANSWER, tools_used=("web_search",))
+
+        assert compliance(world).eligible == 0
+
+    def test_an_empty_window_has_no_rate_rather_than_a_rate_of_zero(
+        self, world, the_real_tool_surface
+    ):
+        """Zero of zero is a failure that never had the chance to happen."""
+        reading = compliance(world)
+
+        assert reading.eligible == 0
+        assert reading.rate is None
+
+    def test_the_window_is_the_same_half_open_span_as_the_snapshot(
+        self, world, the_real_tool_surface
+    ):
+        world.answered_turn(
+            answer=PRICE_ANSWER, tools_used=("web_search",), started_at=OUTSIDE
+        )
+
+        reading = compliance(world)
+
+        assert reading.since == SINCE
+        assert reading.until == NOW
+        assert reading.turns_with_answers == 0
+
+    def test_it_writes_nothing(self, world, the_real_tool_surface):
+        world.answered_turn(answer=PRICE_ANSWER, tools_used=("web_search",))
+        with world.session() as session:
+            before = session.execute(select(func.count()).select_from(AgentTurn)).scalar()
+
+        compliance(world)
+
+        with world.session() as session:
+            after = session.execute(select(func.count()).select_from(AgentTurn)).scalar()
+        assert before == after

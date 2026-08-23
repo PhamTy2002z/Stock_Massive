@@ -105,6 +105,10 @@ def test_a_tool_call_carries_the_contract_fields_and_never_its_arguments():
         "round",
         "results",
         "result_count",
+        # Which kind of evidence the call went and got. On the allowlist so a
+        # surface can draw a store read differently from a stranger's page,
+        # which is the distinction the whole evidence boundary rests on.
+        "kind",
     }
     assert event.data["summary"] == "Tìm trên web: lãi suất"
     # Widening the allowlist for the sources a reader is shown did not let the

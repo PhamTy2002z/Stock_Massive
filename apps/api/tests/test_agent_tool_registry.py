@@ -6,7 +6,7 @@ import pytest
 
 from src.agent import registry
 
-from .agent_tool_world import isolated_registry, stub_entry
+from .agent_tool_world import echo, isolated_registry, stub_entry
 
 
 @pytest.fixture(autouse=True)
@@ -123,3 +123,50 @@ def test_a_declared_result_size_is_readable_by_the_budget():
 def test_a_registration_without_a_description_is_refused():
     with pytest.raises(ValueError):
         registry.register(stub_entry("silent", description="  "))
+
+
+# -- the two names every tool carries ------------------------------------------
+
+
+class TestAToolNamesItselfTwice:
+    """``name`` is what the model calls; ``display_name`` is what a person reads.
+
+    Kept as a refusal in ``register`` rather than as a table somewhere else,
+    because a table is a list somebody has to remember to extend and the tool
+    that gets forgotten is the newest one. A real Turn showed fourteen rows
+    reading ``get_field`` for exactly that reason.
+    """
+
+    def test_a_registration_with_no_reader_facing_name_is_refused(self):
+        with isolated_registry():
+            with pytest.raises(ValueError, match="display_name"):
+                registry.register(
+                    registry.ToolEntry(
+                        name="nameless",
+                        toolset="stub",
+                        schema=registry.object_schema({}),
+                        handler=echo,
+                        description="the model can read this",
+                    )
+                )
+
+    def test_a_blank_reader_facing_name_is_refused_too(self):
+        with isolated_registry():
+            with pytest.raises(ValueError, match="display_name"):
+                registry.register(stub_entry("blank", display_name="   "))
+
+    def test_every_tool_this_build_offers_declares_both_names(self):
+        """The structural guarantee, over the real surface rather than a stub."""
+        from src.agent import tools
+
+        with isolated_registry():
+            tools.register_all()
+            entries = registry.entries()
+
+            assert entries
+            for item in entries:
+                assert item.display_name.strip(), item.name
+                # The two are for two audiences and are never the same string:
+                # a rail row saying `get_field` tells a reader nothing, and a
+                # model asked to call "Đọc chỉ báo" has nothing to call.
+                assert item.display_name != item.name, item.name
