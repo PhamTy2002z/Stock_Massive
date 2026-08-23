@@ -27,12 +27,22 @@ but the registry lookup, the availability check and the trace write sit outside
 those guards, and an exception there used to cancel every sibling in the
 ``gather`` and take the round's gathered results with it.
 
-**A round has a ceiling.** :data:`MAX_CALLS_PER_ROUND` calls are dispatched and
-the rest are answered with the reason, in the order the model issued them, so
-the head of a batch runs and the tail is told it was cut. Unbounded fan-out is
-two problems at once: a round timeout shared by forty concurrent reads, and a
-way past the repetition ladder, whose ``before_call`` verdicts for one batch are
-all decided before its first ``after_call`` records anything.
+**A round has two ceilings, because a round has two kinds of call.**
+:data:`MAX_EXTERNAL_CALLS_PER_ROUND` bounds the calls that leave this deployment
+and :data:`MAX_STORE_CALLS_PER_ROUND` the ones that do not; the rest are answered
+with the reason, in the order the model issued them, so the head of a batch runs
+and the tail is told it was cut. Unbounded fan-out is two problems at once: a
+round timeout shared by forty concurrent reads, and a way past the repetition
+ladder, whose ``before_call`` verdicts for one batch are all decided before its
+first ``after_call`` records anything.
+
+Two ceilings rather than one because the single ceiling this replaces was derived
+from the *external* allowance and then applied to every call — which is the same
+conflation ``loop.MAX_EXTERNAL_TOOL_CALLS`` already refuses to make. Reading a
+symbol's field catalog is thirty Postgres queries inside the deployment, and it
+is the shape a question about one symbol legitimately has; refusing it under a
+number that exists because a web search costs money spends the web allowance on
+evidence that costs nothing.
 
 Concurrency is ``asyncio`` and not a thread pool: this codebase is async
 throughout, and the one case that genuinely blocks — a handler that declares
@@ -87,13 +97,25 @@ DISPATCH_FAILED = "dispatch_failed"
 #: ceiling is a limit on what runs, not on what the model hears back.
 ROUND_FANOUT_EXCEEDED = "round_fanout_exceeded"
 
-#: How many calls of one round are dispatched. Arithmetic rather than taste: a
-#: Turn gets four rounds (``loop.MAX_TOOL_ROUNDS``) and six calls to the tools
-#: that leave this deployment (``loop.MAX_EXTERNAL_TOOL_CALLS``), so a round
-#: needing more than six calls is not a Turn making progress. Eight leaves a
-#: round room to spend that whole external allowance beside a memory read, and
-#: still refuses the fan-out that has no legitimate shape.
-MAX_CALLS_PER_ROUND = 8
+#: How many calls that leave this deployment one round dispatches. Arithmetic
+#: rather than taste: a Turn gets six of them in total
+#: (``loop.MAX_EXTERNAL_TOOL_CALLS``), so a round asking for more than eight has
+#: already asked for more than the whole Turn can fund. Eight rather than six
+#: keeps the refusal here about the *shape* of the batch and leaves the budget
+#: itself to be spent, and refused, where it is counted.
+MAX_EXTERNAL_CALLS_PER_ROUND = 8
+
+#: How many calls that stay inside this deployment one round dispatches. Also
+#: arithmetic: the Signal Field catalog holds thirty fields
+#: (``tools/signals.py``), so a question about one symbol can legitimately want
+#: all thirty in a single round, and two spare leave room for the ``list_fields``
+#: that found them and a price claim checked beside them.
+#:
+#: It is a ceiling and not an absence of one. Thirty-two concurrent reads share a
+#: round timeout, and the repetition ladder still decides a whole batch's
+#: ``before_call`` verdicts before its first ``after_call`` records anything —
+#: both of those hold however cheap the individual read is.
+MAX_STORE_CALLS_PER_ROUND = 32
 
 Mode = Literal["parallel", "sequential"]
 Segment = tuple[Mode, tuple["ToolCall", ...]]
@@ -170,16 +192,58 @@ class ToolExecutor:
     lookup: Callable[[str], registry.ToolEntry | None] = registry.get
     availability: Callable[[str], bool] = registry.is_available
 
+    def _reads_external(self, name: str) -> bool:
+        """Whether this call leaves the deployment, asked through ``lookup``.
+
+        Through ``lookup`` rather than ``registry.reads_external`` so the two
+        reasons ``lookup`` is injectable still hold for the ceiling: a test
+        registers tools without touching the process-wide registry, and a
+        per-user surface narrows what is visible. Reading the global registry
+        here would answer for a tool this executor cannot even dispatch.
+
+        Unknown means external, which is the registry's own default and the same
+        direction of caution: a tool nobody classified is charged the expensive
+        ceiling rather than the cheap one.
+
+        A ``lookup`` that *raises* is unknown too, and is caught here rather than
+        left to propagate. This runs while admitting the batch — before anything
+        is dispatched and outside ``_dispatch``'s guards — so an exception
+        escaping would take the whole round down over a classification, which is
+        the failure the module docstring's third rule exists to prevent. The call
+        still meets its real lookup on the dispatch path, and is answered there.
+        """
+        try:
+            entry = self.lookup(name)
+        except Exception:  # noqa: BLE001 - classification must not end a round
+            return True
+        return True if entry is None else entry.reads_external
+
+    def _admit(self, calls: Sequence[ToolCall]) -> set[str]:
+        """Which of this batch's calls are dispatched, by kind and in issued order."""
+        remaining = {
+            True: MAX_EXTERNAL_CALLS_PER_ROUND,
+            False: MAX_STORE_CALLS_PER_ROUND,
+        }
+        admitted: set[str] = set()
+        for call in calls:
+            kind = self._reads_external(call.name)
+            if remaining[kind] > 0:
+                remaining[kind] -= 1
+                admitted.add(call.id)
+        return admitted
+
     async def run(self, calls: Sequence[ToolCall]) -> ExecutionOutcome:
         """Execute one batch and return its results in the issued order."""
         results: dict[str, ToolResult] = {}
         halt_reason: str | None = None
         guidance: str | None = None
-        # The ceiling is taken over the batch as the model issued it rather than
-        # segment by segment: the head of the batch runs and the tail is
+        # The ceilings are taken over the batch as the model issued it rather
+        # than segment by segment: the head of the batch runs and the tail is
         # refused, so the model reads its own order back with the cut where it
-        # made it.
-        admitted = {call.id for call in calls[:MAX_CALLS_PER_ROUND]}
+        # made it. Each kind of call is counted against its own ceiling, so a
+        # batch of thirty store reads does not push a single web search out and
+        # a batch of thirty searches does not push a store read out.
+        admitted = self._admit(calls)
         for mode, segment in plan_segments(calls):
             for call in segment:
                 if call.id not in admitted:
@@ -368,11 +432,17 @@ class ToolExecutor:
         a trace about a failed trace write here: nothing has been dispatched and
         nothing has failed except the model asking for too much at once.
         """
+        external = self._reads_external(call.name)
+        ceiling = (
+            MAX_EXTERNAL_CALLS_PER_ROUND if external else MAX_STORE_CALLS_PER_ROUND
+        )
+        kind = "calls that leave this deployment" if external else "store reads"
         logger.warning(
-            "A round issued %d tool calls; %s was past the ceiling of %d",
+            "A round issued %d tool calls; %s was past the ceiling of %d %s",
             issued,
             call.name,
-            MAX_CALLS_PER_ROUND,
+            ceiling,
+            kind,
         )
         return await self._record(
             call,
@@ -383,9 +453,9 @@ class ToolExecutor:
                 ok=False,
                 error=ROUND_FANOUT_EXCEEDED,
                 text=(
-                    f"This round issued {issued} tool calls and only the first "
-                    f"{MAX_CALLS_PER_ROUND} were run, so this one was not "
-                    "dispatched. Ask for fewer at a time, and reissue what still "
+                    f"This round issued {issued} tool calls, and only the first "
+                    f"{ceiling} {kind} were run, so this one was not dispatched. "
+                    "Ask for fewer of that kind at a time, and reissue what still "
                     "matters."
                 ),
                 dispatched=False,
@@ -479,7 +549,8 @@ __all__ = [
     "DISPATCH_FAILED",
     "HALTED_TURN",
     "INVALID_ARGUMENTS",
-    "MAX_CALLS_PER_ROUND",
+    "MAX_EXTERNAL_CALLS_PER_ROUND",
+    "MAX_STORE_CALLS_PER_ROUND",
     "PARALLEL_SAFE_TOOLS",
     "ROUND_FANOUT_EXCEEDED",
     "TOOL_FAILED",

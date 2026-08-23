@@ -30,6 +30,7 @@ class Surface:
         delay: float = 0.0,
         fails: bool = False,
         is_async: bool = True,
+        reads_external: bool = True,
     ) -> None:
         async def handler(_context: registry.ToolContext, arguments: Mapping[str, Any]) -> Any:
             self.running += 1
@@ -56,6 +57,7 @@ class Surface:
             description=f"stub {name}",
             display_name=f"Stub {name}",
             is_async=is_async,
+            reads_external=reads_external,
         )
 
     def executor(self, **kwargs: Any) -> executor.ToolExecutor:
@@ -277,7 +279,7 @@ async def test_a_sequential_barrier_that_cannot_be_dispatched_answers_too():
 async def test_a_batch_past_the_round_ceiling_runs_its_head_and_answers_its_tail():
     surface = Surface()
     surface.add("session_search")
-    issued = executor.MAX_CALLS_PER_ROUND + 4
+    issued = executor.MAX_EXTERNAL_CALLS_PER_ROUND + 4
     calls = [call("session_search", f"c{index}") for index in range(issued)]
 
     # Planning is unchanged: the ceiling is a limit on what is dispatched, not on
@@ -290,11 +292,11 @@ async def test_a_batch_past_the_round_ceiling_runs_its_head_and_answers_its_tail
     assert [result.call_id for result in outcome.results] == [
         f"c{index}" for index in range(issued)
     ]
-    assert len(surface.order) == executor.MAX_CALLS_PER_ROUND
-    refused = outcome.results[executor.MAX_CALLS_PER_ROUND :]
+    assert len(surface.order) == executor.MAX_EXTERNAL_CALLS_PER_ROUND
+    refused = outcome.results[executor.MAX_EXTERNAL_CALLS_PER_ROUND :]
     assert all(result.error == executor.ROUND_FANOUT_EXCEEDED for result in refused)
     assert all(result.dispatched is False for result in refused)
-    assert all(result.ok for result in outcome.results[: executor.MAX_CALLS_PER_ROUND])
+    assert all(result.ok for result in outcome.results[: executor.MAX_EXTERNAL_CALLS_PER_ROUND])
     # The refusal says what happened, in numbers the model can act on.
     assert f"{issued} tool calls" in refused[0].text
 
@@ -305,13 +307,13 @@ async def test_a_batch_at_the_round_ceiling_is_dispatched_whole():
     surface.add("session_search")
     calls = [
         call("session_search", f"c{index}")
-        for index in range(executor.MAX_CALLS_PER_ROUND)
+        for index in range(executor.MAX_EXTERNAL_CALLS_PER_ROUND)
     ]
 
     outcome = await surface.executor().run(calls)
 
     assert all(result.ok for result in outcome.results)
-    assert len(surface.order) == executor.MAX_CALLS_PER_ROUND
+    assert len(surface.order) == executor.MAX_EXTERNAL_CALLS_PER_ROUND
 
 
 @pytest.mark.asyncio
@@ -422,3 +424,101 @@ async def test_a_tool_that_exists_but_is_switched_off_says_so():
 
     assert outcome.results[0].error == executor.TOOL_UNAVAILABLE
     assert surface.order == []
+
+
+@pytest.mark.asyncio
+async def test_a_symbols_whole_field_catalog_fits_in_one_round():
+    """The shape a question about one symbol has, under the store ceiling.
+
+    Thirty reads is what asking for every Signal Field of one symbol looks like.
+    Under the single ceiling this replaced — derived from the *external*
+    allowance and applied to every call — the first eight ran and twenty-two came
+    back ``round_fanout_exceeded``, which is what the model was told to work
+    around instead of being given its evidence.
+    """
+    surface = Surface()
+    surface.add("get_field", reads_external=False)
+    calls = [call("get_field", f"c{index}") for index in range(30)]
+
+    outcome = await surface.executor().run(calls)
+
+    assert all(result.ok for result in outcome.results)
+    assert len(surface.order) == 30
+
+
+@pytest.mark.asyncio
+async def test_the_two_kinds_of_call_are_counted_against_their_own_ceilings():
+    """A batch of store reads does not push a web search out of the round."""
+    surface = Surface()
+    surface.add("get_field", reads_external=False)
+    surface.add("web_search", reads_external=True)
+    # More store reads than the external ceiling, with the search issued last so
+    # a shared counter would have spent the round before reaching it.
+    calls = [call("get_field", f"s{index}") for index in range(20)]
+    calls.append(call("web_search", "w"))
+
+    outcome = await surface.executor().run(calls)
+
+    assert all(result.ok for result in outcome.results)
+    assert surface.order.count("get_field") == 20
+    assert surface.order.count("web_search") == 1
+
+
+@pytest.mark.asyncio
+async def test_the_store_ceiling_still_cuts_a_batch_that_passes_it():
+    surface = Surface()
+    surface.add("get_field", reads_external=False)
+    issued = executor.MAX_STORE_CALLS_PER_ROUND + 3
+    calls = [call("get_field", f"c{index}") for index in range(issued)]
+
+    outcome = await surface.executor().run(calls)
+
+    assert len(surface.order) == executor.MAX_STORE_CALLS_PER_ROUND
+    refused = outcome.results[executor.MAX_STORE_CALLS_PER_ROUND :]
+    assert all(result.error == executor.ROUND_FANOUT_EXCEEDED for result in refused)
+    # The refusal names the kind it cut, so the model reissues the right thing.
+    assert "store reads" in refused[0].text
+
+
+@pytest.mark.asyncio
+async def test_an_unclassified_tool_is_charged_the_expensive_ceiling():
+    """Unknown means external: the cautious direction, and the registry's own."""
+    surface = Surface()
+    calls = [
+        call("never_registered", f"c{index}")
+        for index in range(executor.MAX_EXTERNAL_CALLS_PER_ROUND + 2)
+    ]
+
+    outcome = await surface.executor().run(calls)
+
+    over = outcome.results[executor.MAX_EXTERNAL_CALLS_PER_ROUND :]
+    assert all(result.error == executor.ROUND_FANOUT_EXCEEDED for result in over)
+
+
+@pytest.mark.asyncio
+async def test_a_lookup_that_raises_while_admitting_does_not_end_the_round():
+    """Classification runs outside ``_dispatch``'s guards, so it must not throw.
+
+    The batch is admitted before anything is dispatched. A ``lookup`` that raises
+    there would take the whole round down over a classification — the failure the
+    module's third rule exists to prevent — so the call is treated as unknown and
+    meets its real lookup on the dispatch path instead.
+    """
+    surface = Surface()
+    surface.add("session_search")
+
+    def lookup(name: str) -> registry.ToolEntry | None:
+        if name == "explodes":
+            raise RuntimeError("the registry is mid-reload")
+        return surface.entries.get(name)
+
+    calls = [call("session_search", "a"), call("explodes", "b")]
+    outcome = await executor.ToolExecutor(
+        context=CONTEXT,
+        lookup=lookup,
+        availability=lambda name: name in surface.entries,
+    ).run(calls)
+
+    assert [result.call_id for result in outcome.results] == ["a", "b"]
+    assert outcome.results[0].ok is True
+    assert outcome.results[1].ok is False
