@@ -76,3 +76,37 @@ describe("where the reveal may stop", () => {
     expect(revealedLength("", 5)).toBe(0)
   })
 })
+
+/**
+ * A table is paced by the row, because it is the one construct whose layout is
+ * measured from every cell it holds. A cell that grows re-measures the whole
+ * grid, so a word at a time is a column shift per commit — and a header row on
+ * its own is not a table at all, it is a line of pipe characters.
+ */
+describe("where the reveal may stop inside a table", () => {
+  const TABLE = ["| Mã | ROE |", "| --- | ---: |", "| CTG | 70,0 |", "| MBB | 66,7 |"]
+  const text = "Bảng:\n\n" + TABLE.join("\n") + "\n\nSau bảng."
+  const at = (line: number) => text.indexOf(TABLE[line])
+
+  it("holds the header row back until the row that makes it a table", () => {
+    const inHeader = at(0) + "| Mã | ".length
+
+    expect(revealedLength(text, inHeader)).toBe(at(0))
+  })
+
+  it("holds a half-arrived row back whole, not word by word", () => {
+    const inRow = at(2) + "| CTG | ".length
+
+    expect(revealedLength(text, inRow)).toBe(at(2))
+  })
+
+  it("shows a row as soon as the line that holds it is complete", () => {
+    expect(revealedLength(text, at(3))).toBe(at(3))
+  })
+
+  it("paces the prose after a table by the word again", () => {
+    const inWord = text.indexOf("bảng.") + 2
+
+    expect(revealedLength(text, inWord)).toBe(text.indexOf("bảng."))
+  })
+})
