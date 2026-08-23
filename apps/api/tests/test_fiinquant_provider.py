@@ -5,6 +5,9 @@ recorded on the ``prototype/fiinquant-free-tier`` branch, so the adapter is
 exercised without touching the network.
 """
 
+import base64
+import json
+import logging
 import os
 from datetime import date, datetime, timezone
 from unittest.mock import Mock
@@ -20,12 +23,15 @@ from src.stocks.providers.contracts import (
 )
 from src.stocks.providers.fiinquant import (
     FiinQuantCircuitOpen,
+    FiinQuantEntitlementExpired,
     FiinQuantMarketIndexProvider,
     FiinQuantMarketProvider,
     FiinQuantProviderError,
     FiinQuantValuationProvider,
     ProviderCircuitBreaker,
+    _check_entitlement,
     ensure_ca_bundle,
+    read_entitlement,
     shared_session_factory,
 )
 from src.stocks.providers.normalize import VN_TZ
@@ -1040,3 +1046,91 @@ def test_an_index_window_the_wrong_way_round_is_refused():
 
     with pytest.raises(ValueError):
         provider.fetch_index_history("VNINDEX", date(2026, 8, 7), date(2026, 8, 1))
+
+
+def make_token(**claims) -> str:
+    """A login token carrying the given claims, shaped the way the provider's is.
+
+    Unsigned on purpose: nothing verifies this token, and the parser decodes
+    without verifying because the real one arrives straight from the provider.
+    """
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+    return f"header.{payload}.signature"
+
+
+class TestEntitlement:
+    """The claims the provider states about the account, and what we do with them.
+
+    Written after a trial lapsed mid-flight: credentials still logged in, every
+    data endpoint answered 401, and the first collection surfaced it as
+    ``market fetch failed (KeyError)``.
+    """
+
+    def test_the_window_and_packages_are_read_from_the_token(self):
+        entitlement = read_entitlement(
+            make_token(
+                enabled=True,
+                start_date="09/08/2026",
+                end_date="06/09/2026",
+                list_package="FiinQuant.Trial,FiinQuantFA.Trial",
+            )
+        )
+
+        assert entitlement is not None
+        assert entitlement.enabled is True
+        assert entitlement.ends_on == date(2026, 9, 6)
+        assert "FiinQuant.Trial" in entitlement.packages
+
+    @pytest.mark.parametrize(
+        "token",
+        [
+            "not-a-token",
+            "header.@@@not-base64@@@.signature",
+            make_token(end_date="2026-09-06"),  # a different date order
+            make_token(end_date="the sixth of September"),
+        ],
+    )
+    def test_an_unreadable_claim_set_is_not_an_outage(self, token):
+        """A login the provider accepted must not be undone by our own parser."""
+        assert read_entitlement(token) is None
+
+    def test_a_lapsed_window_refuses_the_login_by_name(self):
+        """The named error is the point: no retry, backoff or halving helps."""
+        session = Mock(access_token=make_token(enabled=True, end_date="22/08/2026"))
+
+        with pytest.raises(FiinQuantEntitlementExpired):
+            _check_entitlement(session, today=date(2026, 8, 23))
+
+    def test_a_disabled_account_refuses_the_login_too(self):
+        session = Mock(access_token=make_token(enabled=False, end_date="06/09/2026"))
+
+        with pytest.raises(FiinQuantEntitlementExpired):
+            _check_entitlement(session, today=date(2026, 8, 23))
+
+    def test_the_last_day_warns_and_still_lets_the_call_through(self, caplog):
+        """The boundary is the provider's to interpret, not ours.
+
+        A trial was observed refusing data on its own end date, so today may
+        already be dead — but refusing here on that guess would take down an
+        account the provider is still serving.
+        """
+        session = Mock(access_token=make_token(enabled=True, end_date="23/08/2026"))
+
+        with caplog.at_level(logging.WARNING):
+            _check_entitlement(session, today=date(2026, 8, 23))
+
+        assert "ends today" in caplog.text
+
+    def test_the_token_is_never_logged(self, caplog):
+        token = make_token(enabled=True, end_date="06/09/2026", list_package="P")
+        session = Mock(access_token=token)
+
+        with caplog.at_level(logging.INFO):
+            _check_entitlement(session, today=date(2026, 8, 23))
+
+        assert token not in caplog.text
+        assert token.split(".")[1] not in caplog.text
+
+    def test_a_session_without_a_token_is_left_alone(self):
+        """Older or mocked sessions have no token; that is not a refusal."""
+        _check_entitlement(Mock(spec=[]), today=date(2026, 8, 23))

@@ -6,9 +6,12 @@ circuit breaker and error-hygiene rule.
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import os
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from time import monotonic
 from typing import Any
@@ -196,13 +199,116 @@ def ensure_ca_bundle() -> str:
     return bundle
 
 
+@dataclass(frozen=True)
+class Entitlement:
+    """What the account is allowed, as the access token itself states it.
+
+    Read here rather than declared in config because the provider is the only
+    authority on it, and because a trial that lapses does so on the provider's
+    calendar and not on ours. Only the two claims worth acting on are kept: the
+    published request ceilings arrive as ``0`` on a trial, so a capacity vector
+    read from this token would be a vector of zeroes.
+    """
+
+    enabled: bool
+    ends_on: date | None
+    packages: str
+
+    def expired(self, today: date) -> bool:
+        """True only when the provider has definitely stopped answering.
+
+        ``ends_on`` equal to ``today`` is *not* counted as expired. A trial has
+        been observed refusing data on its own end date, so the boundary is not
+        ours to interpret — and refusing a login on the strength of that guess
+        would take down an account the provider is still serving. It warns.
+
+        The day arrives as an argument rather than being read here, so the two
+        boundary cases are testable without holding the clock still.
+        """
+        return not self.enabled or (self.ends_on is not None and self.ends_on < today)
+
+    def expires_today(self, today: date) -> bool:
+        return self.ends_on is not None and self.ends_on == today
+
+
+class FiinQuantEntitlementExpired(FiinQuantProviderError):
+    """The account's data entitlement has lapsed.
+
+    Its own error because it is not a failure any retry, backoff or smaller
+    batch can help: every data endpoint answers 401 while the credentials still
+    log in fine. Before this existed the first data call surfaced it as
+    ``market fetch failed (KeyError)`` — the 401 never becomes an exception
+    upstream, it is printed, and a dict lookup fails afterwards on the empty
+    frame. That named nothing an operator could act on.
+    """
+
+
+def read_entitlement(access_token: str) -> Entitlement | None:
+    """The entitlement claims carried in a login token, or None if unreadable.
+
+    Returns None rather than raising on anything unexpected: a claim set that
+    changed shape must not be able to stop a login that the provider accepted.
+    Decodes without verifying, which is correct here — the token came straight
+    from the provider over TLS, and nothing is authorised on the strength of it.
+    """
+    try:
+        payload = access_token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(payload))
+        ends_on = None
+        raw_end = claims.get("end_date")
+        if raw_end:
+            # Observed as dd/mm/yyyy. Anything else leaves ends_on unset rather
+            # than guessing a different order and warning on the wrong day.
+            ends_on = datetime.strptime(str(raw_end), "%d/%m/%Y").date()
+        return Entitlement(
+            enabled=bool(claims.get("enabled", True)),
+            ends_on=ends_on,
+            packages=str(claims.get("list_package") or ""),
+        )
+    except Exception:  # noqa: BLE001 - an unreadable claim set is not an outage
+        return None
+
+
+def _check_entitlement(session: Any, today: date | None = None) -> None:
+    """Log what the account is allowed, and refuse a login that cannot serve.
+
+    Nothing here is logged that the token did not state, and the token itself
+    is never logged: a bearer credential in a log file outlives the run.
+    """
+    today = today or datetime.now(VN_TZ).date()
+    entitlement = read_entitlement(getattr(session, "access_token", "") or "")
+    if entitlement is None:
+        return
+    if entitlement.expired(today):
+        raise FiinQuantEntitlementExpired(
+            "the FiinQuant entitlement has lapsed "
+            f"(enabled={entitlement.enabled}, ends_on={entitlement.ends_on})"
+        )
+    if entitlement.expires_today(today):
+        logger.warning(
+            "FiinQuant entitlement ends today (%s) on packages %s — data calls "
+            "may already be refused; renew before the next collection cycle",
+            entitlement.ends_on,
+            entitlement.packages,
+        )
+    else:
+        logger.info(
+            "FiinQuant entitlement runs to %s on packages %s",
+            entitlement.ends_on,
+            entitlement.packages,
+        )
+
+
 def _default_session_factory(username: str, password: str) -> Any:
     ensure_ca_bundle()
     try:
         from FiinQuantX import FiinSession
     except ImportError as exc:  # pragma: no cover - exercised in built image
         raise FiinQuantProviderError("FiinQuantX is not installed") from exc
-    return FiinSession(username=username, password=password).login()
+    session = FiinSession(username=username, password=password).login()
+    _check_entitlement(session)
+    return session
 
 
 def shared_session_factory(
