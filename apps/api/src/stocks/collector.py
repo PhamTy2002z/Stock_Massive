@@ -195,17 +195,39 @@ class Collector:
         """
         collected: list[SymbolSnapshot] = []
         accounted: set[str] = set()
-        pending = deque(self._batches(symbols))
+        # FiinQuant market reads may return a valid-looking frame that contains
+        # only part of the requested batch. Give exactly the missing symbols one
+        # more call. Other capabilities commonly have legitimate per-symbol
+        # absences, and an entirely empty market response is not retried either.
+        pending = deque((batch, True) for batch in self._batches(symbols))
 
         while pending:
-            batch = pending.popleft()
+            batch, retry_partial = pending.popleft()
             try:
-                collected.extend(fetch(batch))
+                received = list(fetch(batch))
+                collected.extend(received)
+                returned = {snapshot.symbol for snapshot in received}
+                missing = tuple(symbol for symbol in batch if symbol not in returned)
+                if (
+                    capability is Capability.MARKET
+                    and retry_partial
+                    and returned
+                    and missing
+                ):
+                    logger.warning(
+                        "Collector received partial %s data for %d of %d symbols; "
+                        "retrying the %d missing symbols once",
+                        capability.value,
+                        len(returned),
+                        len(batch),
+                        len(missing),
+                    )
+                    pending.appendleft((missing, False))
             except Exception as exc:
                 if isinstance(exc, BatchTooLarge) and len(batch) > MIN_BATCH_SIZE:
                     middle = len(batch) // 2
-                    pending.appendleft(batch[middle:])
-                    pending.appendleft(batch[:middle])
+                    pending.appendleft((batch[middle:], retry_partial))
+                    pending.appendleft((batch[:middle], retry_partial))
                     continue
                 # One source failing is not the other sources failing: each
                 # capability has an owner of its own (docs/adr/0002), and losing
