@@ -16,6 +16,9 @@ from src.core.quota import (
     ACCOUNT_KEY,
     ACCOUNT_SPACING_WITH_KEY,
     ACCOUNT_SPACING_WITHOUT_KEY,
+    HOURLY_ALLOWANCE,
+    MINUTE_ALLOWANCE_WITH_KEY,
+    MINUTE_ALLOWANCE_WITHOUT_KEY,
     COLLECTOR_LEASE_KEY,
     LEGACY_MAX_WAIT_SECONDS,
     NEWS_KEY,
@@ -77,7 +80,7 @@ class TestAccountSpacing:
         assert arbiter.acquire(QuotaLane.COLLECTOR) == 0.0
         assert clock.slept == []
 
-    def test_a_guest_account_is_spaced_by_three_seconds(self):
+    def test_a_guest_account_is_spaced_by_the_guest_allowance(self):
         arbiter, _, clock = build(api_key="")
 
         arbiter.acquire(QuotaLane.COLLECTOR)
@@ -85,13 +88,28 @@ class TestAccountSpacing:
 
         assert waited == pytest.approx(ACCOUNT_SPACING_WITHOUT_KEY, abs=0.01)
 
-    def test_an_api_key_buys_one_second_spacing(self):
+    def test_an_api_key_buys_the_keyed_allowance(self):
         arbiter, _, clock = build(api_key="a-key")
 
         arbiter.acquire(QuotaLane.COLLECTOR)
         waited = arbiter.acquire(QuotaLane.COLLECTOR)
 
         assert waited == pytest.approx(ACCOUNT_SPACING_WITH_KEY, abs=0.01)
+
+    def test_the_pace_fits_the_hour_and_not_only_the_minute(self):
+        """Both tiers, against both windows vnstock publishes.
+
+        The keyed pace was one second: inside 60 rpm, and 3600 requests in an
+        hour that allows 3000. Every other test here names the spacing constant
+        instead of its value, so the suite was green either way — which is why
+        this one asserts the rate the spacing produces rather than the constant.
+        """
+        for spacing, per_minute in (
+            (ACCOUNT_SPACING_WITHOUT_KEY, MINUTE_ALLOWANCE_WITHOUT_KEY),
+            (ACCOUNT_SPACING_WITH_KEY, MINUTE_ALLOWANCE_WITH_KEY),
+        ):
+            assert 60.0 / spacing <= per_minute
+            assert 3600.0 / spacing <= HOURLY_ALLOWANCE
 
     def test_ten_concurrent_callers_cannot_outpace_the_account(self):
         """The failure the three old pacers had, written down as a test.

@@ -11,9 +11,9 @@ with it, an hour into a run nobody is watching.
 So the allowance lives in one place, keyed in Redis, and every live vnstock
 path passes through it (``docs/adr/0014``, which amends ``docs/adr/0001``):
 
-- **The account bucket** spaces every call by at least 3 seconds without
-  ``VNSTOCK_API_KEY`` and 1 second with it — the 20 / 60 rpm allowance vnstock's
-  own quota layer grants.
+- **The account bucket** spaces every call by the tightest of the two windows
+  vnstock grants — 20 / 60 rpm by the minute, 3000 an hour on either tier — so
+  the keyed pace is set by the hour rather than by the minute it looks like.
 - **The Collector lease** gives the Collector exclusive live-provider access
   while it runs. Every other lane is refused for its duration.
 - **News** has its own lower lane at 5 / 15 rpm and still passes through the
@@ -61,9 +61,34 @@ logger = logging.getLogger(__name__)
 # arbiter keeps while the account stayed on the guest tier.
 API_KEY_ENV_VAR = "VNSTOCK_API_KEY"
 
-# The account allowance, as spacing between calls. 20 rpm guest, 60 rpm keyed.
-ACCOUNT_SPACING_WITHOUT_KEY = 3.0
-ACCOUNT_SPACING_WITH_KEY = 1.0
+# The account allowance, as spacing between calls — derived from the two windows
+# vnstock publishes rather than written down as a pace. The minute window is
+# 20 rpm on the guest tier and 60 with a key; the hour window is 3000 for both
+# tiers, and what a sustained run can keep is whichever of the two is tighter.
+#
+# Written as a pace instead, the keyed tier read 1.0s: that satisfies 60 rpm and
+# quietly spends 3600 requests in an hour where 3000 are allowed. Nothing caught
+# it, because every test in this module names these constants rather than their
+# values and stays green at either number — so the guarantee is asserted against
+# both windows in ``tests/test_vnstock_quota.py`` and not against a literal.
+#
+# The margin lives here rather than in the published figures: running level with
+# a hard limit makes the first clock skew an overrun, and vnstock answers an
+# exhausted quota by calling ``sys.exit()``.
+MINUTE_ALLOWANCE_WITHOUT_KEY = 20
+MINUTE_ALLOWANCE_WITH_KEY = 60
+HOURLY_ALLOWANCE = 3000
+ALLOWANCE_SAFETY_FACTOR = 0.9
+
+
+def _tightest_spacing(per_minute: int) -> float:
+    """Seconds between calls that both published windows allow at once."""
+    sustained = min(per_minute / 60.0, HOURLY_ALLOWANCE / 3600.0)
+    return 1.0 / (sustained * ALLOWANCE_SAFETY_FACTOR)
+
+
+ACCOUNT_SPACING_WITHOUT_KEY = _tightest_spacing(MINUTE_ALLOWANCE_WITHOUT_KEY)
+ACCOUNT_SPACING_WITH_KEY = _tightest_spacing(MINUTE_ALLOWANCE_WITH_KEY)
 
 # The news lane's own lower allowance: 5 rpm guest, 15 rpm keyed. Lower than the
 # account on purpose — news is the one cache-aside exception to the rule that
