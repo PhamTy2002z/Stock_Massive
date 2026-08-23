@@ -315,3 +315,64 @@ describe("a source result's text", () => {
     expect(link).toHaveAttribute("rel", "noopener noreferrer nofollow")
   })
 })
+
+
+describe("a round of store reads", () => {
+  /**
+   * A Turn analysing HPG read twelve figures in one breath. The rail called them
+   * "truy vấn" — a word for a query against something outside — and gave each of
+   * the twelve its own icon, which made a dozen subordinate rows read as a dozen
+   * peers of the line naming them.
+   */
+  const reads = [
+    call({ id: "a", kind: "store", summary: "Đọc chỉ báo: RSI (14) — HPG" }),
+    call({ id: "b", kind: "store", summary: "Đọc chỉ báo: Phân vị ROE — HPG" }),
+    call({ id: "c", kind: "store", summary: "Đọc chỉ báo: Biến động thực tế — HPG" }),
+  ]
+
+  it("is counted in the words for the work it actually did", () => {
+    render(
+      <ReasoningTimeline thoughts={[]} toolCalls={reads} elapsedMs={5000} running />,
+    )
+
+    expect(screen.getByText("Đọc 3 chỉ báo")).toBeInTheDocument()
+    expect(screen.queryByText(/truy vấn/)).not.toBeInTheDocument()
+  })
+
+  it("still names every figure it read", () => {
+    render(
+      <ReasoningTimeline thoughts={[]} toolCalls={reads} elapsedMs={5000} running />,
+    )
+
+    for (const read of reads) {
+      expect(screen.getByText(read.summary)).toBeInTheDocument()
+    }
+  })
+
+  it("keeps the query wording for a round of searches", () => {
+    render(
+      <ReasoningTimeline
+        thoughts={[]}
+        toolCalls={[call({ id: "a" }), call({ id: "b" })]}
+        elapsedMs={5000}
+        running
+      />,
+    )
+
+    expect(screen.getByText("Đã chạy 2 truy vấn")).toBeInTheDocument()
+  })
+
+  it("falls back to the query wording when the round mixed both kinds", () => {
+    /* No single kind to state in the header, so the header does not claim one. */
+    render(
+      <ReasoningTimeline
+        thoughts={[]}
+        toolCalls={[call({ id: "a", kind: "store" }), call({ id: "b" })]}
+        elapsedMs={5000}
+        running
+      />,
+    )
+
+    expect(screen.getByText("Đã chạy 2 truy vấn")).toBeInTheDocument()
+  })
+})
