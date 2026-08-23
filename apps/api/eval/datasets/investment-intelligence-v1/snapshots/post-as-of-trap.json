@@ -1,0 +1,25 @@
+{
+  "schema": "eval.snapshot@1",
+  "snapshot_id": "post-as-of-trap",
+  "description": "A deliberately unavailable post-as-of publication used to prove lookahead refusal.",
+  "evidence": [
+    {
+      "source": "vnstock",
+      "capability": "fundamental",
+      "entity": "FPT",
+      "unit": "percent",
+      "value": 30.0,
+      "health": "ok",
+      "effective_at": "2026-06-30T00:00:00+07:00",
+      "published_at": "2026-08-22T09:00:00+07:00",
+      "ingested_at": "2026-08-22T09:05:00+07:00",
+      "provenance": "synthetic deliberately unavailable lookahead fixture",
+      "price_basis": null,
+      "available_after_as_of": true,
+      "metadata": {
+        "period": "2026Q2",
+        "field": "future_revision"
+      }
+    }
+  ]
+}

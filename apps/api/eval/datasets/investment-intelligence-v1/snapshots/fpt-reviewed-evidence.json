@@ -1,0 +1,175 @@
+{
+  "schema": "eval.snapshot@1",
+  "snapshot_id": "fpt-reviewed-evidence",
+  "description": "Synthetic point-in-time FPT evidence spanning market, valuation, reference, and fundamentals.",
+  "evidence": [
+    {
+      "source": "fiinquant",
+      "capability": "market",
+      "entity": "FPT",
+      "unit": "VND",
+      "value": 100000,
+      "health": "ok",
+      "effective_at": "2026-08-21T15:00:00+07:00",
+      "published_at": "2026-08-21T15:01:00+07:00",
+      "ingested_at": "2026-08-21T15:02:00+07:00",
+      "provenance": "synthetic reviewed FiinQuant market fixture",
+      "price_basis": "raw",
+      "metadata": {
+        "fixture_kind": "tool_result",
+        "tool_name": "get_field",
+        "arguments": {
+          "field_id": "price.close"
+        },
+        "result": {
+          "fieldId": "price.close",
+          "value": 100000,
+          "unit": "VND",
+          "asOf": "2026-08-21",
+          "evidence_references": [
+            "snapshot:fpt-reviewed-evidence"
+          ]
+        }
+      }
+    },
+    {
+      "source": "vnstock",
+      "capability": "reference",
+      "entity": "FPT",
+      "unit": null,
+      "value": "FPT Corporation",
+      "health": "ok",
+      "effective_at": "2026-08-21T00:00:00+07:00",
+      "published_at": "2026-08-21T00:00:00+07:00",
+      "ingested_at": "2026-08-21T08:00:00+07:00",
+      "provenance": "synthetic reviewed VNStock reference fixture",
+      "price_basis": null,
+      "metadata": {
+        "fixture_kind": "listing_roster",
+        "exchange": "HOSE",
+        "company_name": "FPT Corporation",
+        "icb_code": "9530"
+      }
+    },
+    {
+      "source": "fiinquant",
+      "capability": "valuation",
+      "entity": "FPT",
+      "unit": "multiple",
+      "value": 20.5,
+      "health": "ok",
+      "effective_at": "2026-08-21T15:00:00+07:00",
+      "published_at": "2026-08-21T15:01:00+07:00",
+      "ingested_at": "2026-08-21T15:02:00+07:00",
+      "provenance": "synthetic reviewed FiinQuant valuation fixture",
+      "price_basis": null,
+      "metadata": {}
+    },
+    {
+      "source": "vnstock",
+      "capability": "fundamental",
+      "entity": "FPT",
+      "unit": "percent",
+      "value": 18.2,
+      "health": "ok",
+      "effective_at": "2026-06-30T00:00:00+07:00",
+      "published_at": "2026-07-25T09:00:00+07:00",
+      "ingested_at": "2026-07-25T09:05:00+07:00",
+      "provenance": "synthetic reviewed VNStock quarterly fundamental fixture",
+      "price_basis": null,
+      "metadata": {
+        "period": "2026Q2",
+        "field": "revenue_growth_yoy"
+      }
+    },
+    {
+      "source": "vnstock",
+      "capability": "fundamental",
+      "entity": "FPT",
+      "unit": "VND",
+      "value": null,
+      "health": "absent",
+      "effective_at": "2026-06-30T00:00:00+07:00",
+      "published_at": "2026-07-25T09:00:00+07:00",
+      "ingested_at": "2026-07-25T09:05:00+07:00",
+      "provenance": "synthetic reviewed missing cash-flow field",
+      "price_basis": null,
+      "metadata": {
+        "period": "2026Q2",
+        "field": "free_cash_flow"
+      }
+    },
+    {
+      "source": "fiinquant",
+      "capability": "market",
+      "entity": "FPT",
+      "unit": "VND",
+      "value": 100000,
+      "health": "ok",
+      "effective_at": "2026-08-21T15:00:00+07:00",
+      "published_at": "2026-08-21T15:01:00+07:00",
+      "ingested_at": "2026-08-21T15:02:00+07:00",
+      "provenance": "synthetic normalized market row for Analysis replay",
+      "price_basis": "raw",
+      "metadata": {
+        "fixture_kind": "provider_snapshot",
+        "schema_version": 2,
+        "payload": {
+          "symbol": "FPT",
+          "metadata": {
+            "source": "fiinquant",
+            "effective_at": "2026-08-21T15:00:00+07:00",
+            "observed_at": "2026-08-21T15:02:00+07:00",
+            "schema_version": 2
+          },
+          "price_basis": "raw",
+          "price_unit": "VND",
+          "last_price": 100000,
+          "open_price": 99000,
+          "high_price": 101000,
+          "low_price": 98500,
+          "change_pct": 1.0,
+          "volume": 1000000,
+          "total_value_vnd": 100000000000,
+          "reference_price": 99000,
+          "ceiling_price": 105900,
+          "floor_price": 92100,
+          "active_buy_volume": null,
+          "active_sell_volume": null,
+          "foreign_buy_volume": null,
+          "foreign_sell_volume": null,
+          "foreign_buy_value_vnd": null,
+          "foreign_sell_value_vnd": null,
+          "foreign_net_value_vnd": null,
+          "market_cap_vnd": 10000000000000
+        }
+      }
+    },
+    {
+      "source": "fiinquant",
+      "capability": "market",
+      "entity": "FPT",
+      "unit": null,
+      "value": "field catalog",
+      "health": "ok",
+      "effective_at": "2026-08-21T15:00:00+07:00",
+      "published_at": "2026-08-21T15:01:00+07:00",
+      "ingested_at": "2026-08-21T15:02:00+07:00",
+      "provenance": "synthetic Analysis field-catalog result",
+      "price_basis": null,
+      "metadata": {
+        "fixture_kind": "tool_result",
+        "tool_name": "list_fields",
+        "arguments": {},
+        "result": {
+          "fields": [
+            "market.last_price"
+          ],
+          "evidence_references": [
+            "snapshot:fpt-reviewed-evidence"
+          ]
+        }
+      }
+    }
+  ]
+}

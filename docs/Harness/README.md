@@ -77,6 +77,21 @@ dùng để biến best practice tổng quát thành kiến trúc tài chính ri
 - [Quant methods for Vietnamese EOD equities](../research/quant-methods-eod-vn.md)
   sở hữu các ràng buộc microstructure và statistical honesty đã nghiên cứu.
 
+## Vận hành measurement authority
+
+Các target `eval-*` trong [`apps/api/Makefile`](../../apps/api/Makefile) là
+entry point ổn định cho validation, offline smoke, paid run, comparison và
+release gate. CLI thực thi nằm tại
+[`src/eval/cli.py`](../../apps/api/src/eval/cli.py); JSON artifact là authority,
+còn Markdown chỉ là projection có thể tạo lại từ JSON.
+
+Repository policy nằm tại
+[`eval/gate-policy.json`](../../apps/api/eval/gate-policy.json). Trạng thái
+baseline được fail closed bởi
+[`investment-intelligence-v1.json`](../../apps/api/eval/baselines/investment-intelligence-v1.json):
+Stage 0 không tốt nghiệp khi chưa có paid distribution được owner review và
+artifact digest được phê duyệt.
+
 ## Quy tắc bảo trì
 
 SOT phải ngắn hơn implementation và bền hơn tên helper. Khi cập nhật, trỏ đến

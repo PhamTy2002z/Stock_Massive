@@ -48,7 +48,7 @@ deepening từ đây thay vì reset kiến trúc.
 
 **Binding gaps:**
 
-- không còn evaluation battery/release gate;
+- chưa có paid baseline được owner review, approved digest và threshold khóa;
 - evidence identity chưa thống nhất xuyên chat, Analysis, news và portfolio;
 - capability declaration vẫn chưa phải owner duy nhất cho mọi policy/trace/UI;
 - context quality/cache/compaction chưa có baseline đầy đủ;
@@ -84,7 +84,7 @@ mỗi stage, chọn vertical slice nhỏ nhất tạo measurable user outcome.
 ## Stage 0 — Restore measurement authority
 
 **Target.** Mọi thay đổi harness có baseline và release evidence. Đây là blocker
-cho các stage còn lại vì project hiện không có eval gate tổng quát.
+cho các stage còn lại cho tới khi paid baseline đầu tiên được phê duyệt.
 
 ### Capability delivered
 
@@ -105,6 +105,15 @@ Stage tốt nghiệp khi một maintainer có thể thay prompt hoặc tool sche
 một command owner trong repo và nhận report tái tạo được gồm outcome quality,
 hard-dimension regressions, token/cost/latency và failure samples. Threshold ban
 đầu được khóa sau baseline review, không để candidate tự đặt.
+
+Replay, grader, artifact và command owner hiện nằm tại
+[`src/eval`](../../apps/api/src/eval/),
+[`eval/gate-policy.json`](../../apps/api/eval/gate-policy.json) và các target
+`eval-*` trong [`apps/api/Makefile`](../../apps/api/Makefile). Stage vẫn ở trạng
+thái **Target** cho tới khi
+[`baseline summary`](../../apps/api/eval/baselines/investment-intelligence-v1.json)
+trỏ tới một paid artifact hoàn chỉnh đã được owner review; offline smoke không
+tự nâng trạng thái này.
 
 ### Do not build yet
 
@@ -385,19 +394,14 @@ Các mục sau ở ngoài roadmap hiện tại dù harness tham khảo có hỗ 
 
 ## Next execution slice
 
-Roadmap bắt đầu bằng một slice duy nhất: **Stage 0 measurement authority**. Sau
-khi baseline tồn tại, slice đầu của Stage 1 là resolved capability contract vì
-nó giảm drift và tạo observer data cần cho mọi capability sau.
+Slice còn lại của Stage 0 là baseline approval, không phải thêm measurement
+surface. Owner cần chạy paid policy đã khóa, review distribution, failure,
+cost và latency, sau đó ghi approved artifact digest và threshold được chấp
+nhận vào repository policy. Chỉ sau gate đó mới mở slice resolved capability
+contract của Stage 1.
 
-Một implementation plan tiếp theo cần giới hạn vào:
-
-1. xác định golden task families và frozen evidence format;
-2. dựng deterministic graders trên contracts hiện có;
-3. tạo reproducible run/report owner;
-4. baseline current harness;
-5. khóa threshold và regression policy với product owner.
-
-Không gộp context redesign, subagent hoặc proactive execution vào slice đầu.
+Không gộp context redesign, subagent hoặc proactive execution vào baseline
+approval.
 
 ## Câu hỏi chưa giải quyết
 

@@ -1,0 +1,61 @@
+{
+  "schema": "eval.case@1",
+  "case_id": "fact-close-price",
+  "surface": "conversation",
+  "family": "fact-unit-as-of",
+  "title": "Closing price with correct tick and unit",
+  "as_of": "2026-08-21",
+  "input": {
+    "prompt": "What was FPT's close on 2026-08-21?",
+    "symbol": null,
+    "trading_day": null
+  },
+  "user_context": {
+    "synthetic_user_id": "synthetic-fact-close",
+    "display_name": "Eval User"
+  },
+  "expectations": [
+    {
+      "kind": "terminal_completed",
+      "params": {}
+    },
+    {
+      "kind": "figure",
+      "params": {
+        "value": 100000,
+        "tolerance": 0,
+        "unit": "VND",
+        "evidence_reference": "snapshot:fpt-reviewed-evidence"
+      }
+    },
+    {
+      "kind": "entity_scope",
+      "params": {
+        "required": [
+          "FPT"
+        ]
+      }
+    },
+    {
+      "kind": "material_evidence",
+      "params": {
+        "required": [
+          "snapshot:fpt-reviewed-evidence"
+        ]
+      }
+    },
+    {
+      "kind": "as_of",
+      "params": {}
+    }
+  ],
+  "traps": [
+    "A naive fluent answer uses an off-tick price or omits VND."
+  ],
+  "snapshots": [
+    {
+      "snapshot_id": "fpt-reviewed-evidence",
+      "digest": "ec8939ace80be801"
+    }
+  ]
+}

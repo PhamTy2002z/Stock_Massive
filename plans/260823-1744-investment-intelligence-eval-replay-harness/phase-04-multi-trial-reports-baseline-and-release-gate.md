@@ -1,6 +1,6 @@
 ---
 title: "Phase 4: Multi-trial reports, baseline, and release gate"
-status: todo
+status: in-progress
 priority: P1
 effort: 16h
 depends_on: [1, 2, 3]
@@ -33,27 +33,27 @@ Quality/cost thresholds remain absent until the first baseline is reviewed.
 
 ## Requirements
 
-- [ ] CLI supports dataset validation, offline smoke, explicit paid run,
+- [x] CLI supports dataset validation, offline smoke, explicit paid run,
       baseline comparison, and report rendering.
-- [ ] Paid policy runs at least three trials per case; repository policy owns
+- [x] Paid policy runs at least three trials per case; repository policy owns
       trial count, not candidate flags.
-- [ ] Run ceiling stops before overspend and marks incomplete; incomplete runs
+- [x] Run ceiling stops before overspend and marks incomplete; incomplete runs
       can't pass or become baseline.
-- [ ] Canonical JSON contains manifest, trials, findings, rubric, usage, cost,
+- [x] Canonical JSON contains manifest, trials, findings, rubric, usage, cost,
       latency, failures, completeness, and artifact digest.
-- [ ] Aggregation reports counts and uncertainty by case, family, surface, and
+- [x] Aggregation reports counts and uncertainty by case, family, surface, and
       dimension; hard dimensions expose any-trial failure.
-- [ ] Baseline comparison requires compatible dataset/case/grader/rubric
+- [x] Baseline comparison requires compatible dataset/case/grader/rubric
       identity or explicit reviewed reset.
-- [ ] Gate policy is committed and separately versioned. Candidates can't
+- [x] Gate policy is committed and separately versioned. Candidates can't
       override hard dimensions, trials, ceilings, or thresholds.
-- [ ] Initial policy fails on incomplete run and new hard regression. Quality,
+- [x] Initial policy fails on incomplete run and new hard regression. Quality,
       cost, and latency remain report-only until baseline review locks them.
-- [ ] Markdown includes reproduction command, environment stamp, comparison,
+- [x] Markdown includes reproduction command, environment stamp, comparison,
       failed samples, and artifact digest.
-- [ ] Artifacts are private/redacted by default. Approved baseline summaries
+- [x] Artifacts are private/redacted by default. Approved baseline summaries
       contain no secret/private content.
-- [ ] Reports prove `data_provider_calls = 0` and summarize frozen provider,
+- [x] Reports prove `data_provider_calls = 0` and summarize frozen provider,
       capability, price basis, and freshness used by the cases.
 
 ## Architecture
@@ -122,12 +122,12 @@ stable maintainer surface.
 
 ## Todo
 
-- [ ] Write harness/report/gate tests first.
-- [ ] Implement trials, ceiling, canonical report, and digest.
-- [ ] Implement compatibility, reset lineage, and gate policy.
-- [ ] Add Make targets and CLI exits.
-- [ ] Add store-only materialization and zero-provider-call report assertion.
-- [ ] Pass focused/full tests and repeat smoke.
+- [x] Write harness/report/gate tests first.
+- [x] Implement trials, ceiling, canonical report, and digest.
+- [x] Implement compatibility, reset lineage, and gate policy.
+- [x] Add Make targets and CLI exits.
+- [x] Add store-only materialization and zero-provider-call report assertion.
+- [x] Pass focused/full tests and repeat smoke.
 - [ ] Obtain explicit baseline/threshold approval.
 - [ ] Commit approved baseline/policy and update Stage 0 status.
 
@@ -165,6 +165,21 @@ full gate when a candidate is difficult; targeted runs are diagnostic only.
 Artifacts are local/ignored. Write atomically, redact before persistence, and
 never publish automatically. Baseline summaries include IDs, scores, usage, and
 redacted failure excerpts only.
+
+## Validation evidence
+
+- Full Phase 1-4 eval suite: 162 passed. `py_compile` and CLI-import network
+  capture were clean.
+- `make eval-validate`: 16 cases, 3 snapshots, 9 hard graders; dataset digest
+  `8e829faa380d64f2`.
+- Two full offline smokes completed 16/16 cases each with `hard_failures=0`,
+  `rubric.available=16`, and `data_provider_calls=0`; canonical content was
+  identical after excluding run identity and artifact digest.
+- Independent code review: DONE, no concerns. No eval database or leftover
+  eval process remained after validation.
+- Paid baseline execution and threshold approval were intentionally not run:
+  the plan requires an explicitly approved paid route/spend ceiling and owner
+  review. Stage 0 therefore remains Target.
 
 ## Next steps
 

@@ -1,6 +1,6 @@
 # API Development Commands
 
-.PHONY: dev run test lint clean
+.PHONY: dev run test lint clean eval-validate eval-smoke eval-run eval-compare eval-gate
 
 # Use venv python if exists
 PYTHON := $(shell if [ -d ".venv" ]; then echo ".venv/bin/python"; else echo "python"; fi)
@@ -32,3 +32,25 @@ lint:
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
+
+eval-validate:
+	$(PYTHON) -m src.eval validate
+
+eval-smoke:
+	$(PYTHON) -m src.eval smoke
+
+eval-run:
+	@test -n "$(EVAL_ROUTE)" || (echo "EVAL_ROUTE is required" >&2; exit 2)
+	@test -n "$(EVAL_CEILING)" || (echo "EVAL_CEILING is required" >&2; exit 2)
+	$(PYTHON) -m src.eval run --route "$(EVAL_ROUTE)" --ceiling "$(EVAL_CEILING)"
+
+eval-compare:
+	@test -n "$(EVAL_BASELINE)" || (echo "EVAL_BASELINE is required" >&2; exit 2)
+	@test -n "$(EVAL_CANDIDATE)" || (echo "EVAL_CANDIDATE is required" >&2; exit 2)
+	$(PYTHON) -m src.eval compare "$(EVAL_BASELINE)" "$(EVAL_CANDIDATE)"
+
+eval-gate:
+	@test -n "$(EVAL_ROUTE)" || (echo "EVAL_ROUTE is required" >&2; exit 2)
+	@test -n "$(EVAL_CEILING)" || (echo "EVAL_CEILING is required" >&2; exit 2)
+	@test -n "$(EVAL_BASELINE)" || (echo "EVAL_BASELINE is required" >&2; exit 2)
+	$(PYTHON) -m src.eval gate --route "$(EVAL_ROUTE)" --ceiling "$(EVAL_CEILING)" --baseline-artifact "$(EVAL_BASELINE)"

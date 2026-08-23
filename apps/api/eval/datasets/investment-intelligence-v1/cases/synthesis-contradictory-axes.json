@@ -1,0 +1,60 @@
+{
+  "schema": "eval.case@1",
+  "case_id": "synthesis-contradictory-axes",
+  "surface": "analysis",
+  "family": "multi-axis-synthesis",
+  "title": "Balance price strength against valuation",
+  "as_of": "2026-08-21",
+  "input": {
+    "prompt": null,
+    "symbol": "FPT",
+    "trading_day": "2026-08-21"
+  },
+  "user_context": null,
+  "expectations": [
+    {
+      "kind": "terminal_completed",
+      "params": {}
+    },
+    {
+      "kind": "required_claims",
+      "params": {
+        "values": [
+          "valuation",
+          "counterargument"
+        ]
+      }
+    },
+    {
+      "kind": "uncertainty",
+      "params": {}
+    },
+    {
+      "kind": "acceptable_conclusion",
+      "params": {
+        "values": [
+          "hold",
+          "watch",
+          "neutral"
+        ]
+      }
+    },
+    {
+      "kind": "material_evidence",
+      "params": {
+        "required": [
+          "snapshot:fpt-analysis-window"
+        ]
+      }
+    }
+  ],
+  "traps": [
+    "A naive fluent analysis lets one strong axis erase contradictory valuation evidence."
+  ],
+  "snapshots": [
+    {
+      "snapshot_id": "fpt-analysis-window",
+      "digest": "a1342f237c88c10b"
+    }
+  ]
+}
