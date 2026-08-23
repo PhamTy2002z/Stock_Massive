@@ -920,6 +920,54 @@ class TestCeilingsTurnedOff:
             "session-model",
         ).id == 71
 
+    def test_an_unmetered_envelope_lifts_the_per_owner_cost_ceilings(self):
+        """One Analysis may loop past $0.015 when no lane funds it.
+
+        The $0.015 was arrived at by pricing a thirty-symbol cohort against the
+        $10 Analysis lane. With no lane declared there is nothing left for that
+        number to protect, and holding it would cut the evidence loop short in a
+        deployment that has no reason to cut it.
+        """
+        config = replace(
+            llm_config(),
+            lanes=BudgetLanes(
+                monthly_envelope_usd=0,
+                analysis_usd=0,
+                turn_usd=0,
+                emergency_usd=0,
+            ),
+            pricing=replace(llm_config().pricing, batch=TokenPrices(10, 10, 10, 10)),
+        )
+        admission, _ = admission_with(config)
+
+        # Five rounds of one Analysis at $0.10 each: ~$0.50 against a ceiling of
+        # $0.015, all on the same owner so each round sees the last one charged.
+        for round_index in range(5):
+            reservation = admission.reserve(
+                analysis_spend(owner_id="looping", input_tokens=10_000, output_tokens=0),
+                config.model_for(Workload.BATCH),
+            )
+            assert reservation.id == round_index + 1
+
+    def test_a_funded_lane_still_holds_the_per_owner_cost_ceiling(self):
+        """The lift is the unmetered declaration, not a removal."""
+        config = replace(
+            llm_config(),
+            pricing=replace(llm_config().pricing, batch=TokenPrices(10, 10, 10, 10)),
+        )
+        admission, _ = admission_with(config)
+
+        with pytest.raises(BudgetRefusal) as refused:
+            for _ in range(5):
+                admission.reserve(
+                    analysis_spend(
+                        owner_id="looping", input_tokens=10_000, output_tokens=0
+                    ),
+                    config.model_for(Workload.BATCH),
+                )
+
+        assert refused.value.reason == "analysis_cost"
+
 
 class FailingTransport:
     def __init__(self, failure: Exception) -> None:
