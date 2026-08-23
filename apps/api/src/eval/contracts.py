@@ -366,6 +366,7 @@ class TrialOutcome(_Artifact):
         "completed", "incomplete", "refused", "cancelled", "failed"
     ]
     usage_tokens: int = Field(ge=0, default=0)
+    usage_known: bool = True
     cost_usd: float | None = None
     latency_ms: int = Field(ge=0, default=0)
     tool_calls: int = Field(ge=0, default=0)
@@ -436,10 +437,15 @@ class ModelIdentityWire(_Artifact):
     session_model: str
     batch_model: str
     route_base_url: str
+    streaming: bool
+    reasoning_history: bool
+    prompt_cache_control: bool
     pricing_version: str
+    pricing_effective_from: str | None
     session_prices: PriceBlock
     batch_prices: PriceBlock
     request_timeout_seconds: float
+    route_breaker_enabled: bool
 
 
 class RunManifest(_Artifact):
@@ -455,11 +461,14 @@ class RunManifest(_Artifact):
     code: CodeStampWire
     dataset_id: str = Field(min_length=2, max_length=64)
     dataset_digest: str = Field(min_length=DIGEST_LENGTH, max_length=DIGEST_LENGTH)
+    case_contract_digest: str = Field(min_length=DIGEST_LENGTH, max_length=DIGEST_LENGTH)
     prompts: PromptIdentityWire
     tools: ToolCatalogWire
     model: ModelIdentityWire
+    provider_capabilities: dict[str, Any]
     graders: dict[str, str] = Field(default_factory=dict)
     rubric_version: str | None = None
+    policy_version: str
     trials: int = Field(ge=1)
 
 

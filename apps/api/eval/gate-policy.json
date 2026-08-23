@@ -1,0 +1,21 @@
+{
+  "schema": "eval.gate-policy@1",
+  "policy_id": "investment-intelligence-v1-hard-gate",
+  "version": "1.0.0",
+  "dataset_id": "investment-intelligence-v1",
+  "paid_trials": 3,
+  "run_ceiling_usd": 5.0,
+  "reservation_usd_per_trial": 0.1,
+  "hard_dimensions": [
+    "terminal-state",
+    "figure-value-unit",
+    "entity-scope",
+    "as-of-publication",
+    "evidence-health-coverage",
+    "refusal-uncertainty",
+    "claims-conclusion",
+    "policy-action",
+    "tool-settlement"
+  ],
+  "thresholds": {}
+}

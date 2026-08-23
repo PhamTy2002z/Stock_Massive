@@ -1,0 +1,60 @@
+{
+  "schema": "eval.case@1",
+  "case_id": "synthesis-peer-context",
+  "surface": "conversation",
+  "family": "multi-axis-synthesis",
+  "title": "Explain missing peer context honestly",
+  "as_of": "2026-08-21",
+  "input": {
+    "prompt": "Is FPT's 20.5x valuation cheap versus peers?",
+    "symbol": null,
+    "trading_day": null
+  },
+  "user_context": {
+    "synthetic_user_id": "synthetic-peer-context",
+    "display_name": "Eval User"
+  },
+  "expectations": [
+    {
+      "kind": "terminal_completed",
+      "params": {}
+    },
+    {
+      "kind": "figure",
+      "params": {
+        "value": 20.5,
+        "tolerance": 0.01,
+        "unit": "multiple"
+      }
+    },
+    {
+      "kind": "uncertainty",
+      "params": {}
+    },
+    {
+      "kind": "forbidden_claims",
+      "params": {
+        "values": [
+          "definitely cheap"
+        ]
+      }
+    },
+    {
+      "kind": "material_evidence",
+      "params": {
+        "required": [
+          "snapshot:fpt-reviewed-evidence"
+        ]
+      }
+    }
+  ],
+  "traps": [
+    "A naive fluent answer invents peer values that are outside the frozen evidence."
+  ],
+  "snapshots": [
+    {
+      "snapshot_id": "fpt-reviewed-evidence",
+      "digest": "ec8939ace80be801"
+    }
+  ]
+}

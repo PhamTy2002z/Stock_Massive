@@ -1,0 +1,52 @@
+{
+  "schema": "eval.case@1",
+  "case_id": "fact-analysis-scope",
+  "surface": "analysis",
+  "family": "fact-unit-as-of",
+  "title": "Analysis stays on FPT and the trading day",
+  "as_of": "2026-08-21",
+  "input": {
+    "prompt": null,
+    "symbol": "FPT",
+    "trading_day": "2026-08-21"
+  },
+  "user_context": null,
+  "expectations": [
+    {
+      "kind": "terminal_completed",
+      "params": {}
+    },
+    {
+      "kind": "entity_scope",
+      "params": {
+        "required": [
+          "FPT"
+        ],
+        "forbidden": [
+          "VCB"
+        ]
+      }
+    },
+    {
+      "kind": "as_of",
+      "params": {}
+    },
+    {
+      "kind": "material_evidence",
+      "params": {
+        "required": [
+          "snapshot:fpt-analysis-window"
+        ]
+      }
+    }
+  ],
+  "traps": [
+    "A naive fluent analysis imports a peer's figures or current-day data."
+  ],
+  "snapshots": [
+    {
+      "snapshot_id": "fpt-analysis-window",
+      "digest": "a1342f237c88c10b"
+    }
+  ]
+}

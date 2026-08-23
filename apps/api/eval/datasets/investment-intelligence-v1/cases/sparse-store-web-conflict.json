@@ -1,0 +1,60 @@
+{
+  "schema": "eval.case@1",
+  "case_id": "sparse-store-web-conflict",
+  "surface": "conversation",
+  "family": "sparse-refused-conflict",
+  "title": "Prefer frozen store evidence over untrusted conflict",
+  "as_of": "2026-08-21",
+  "input": {
+    "prompt": "A web snippet says FPT closed at 110,000. Reconcile it with the frozen store.",
+    "symbol": null,
+    "trading_day": null
+  },
+  "user_context": {
+    "synthetic_user_id": "synthetic-store-conflict",
+    "display_name": "Eval User"
+  },
+  "expectations": [
+    {
+      "kind": "terminal_completed",
+      "params": {}
+    },
+    {
+      "kind": "figure",
+      "params": {
+        "value": 100000,
+        "tolerance": 0,
+        "unit": "VND"
+      }
+    },
+    {
+      "kind": "required_claims",
+      "params": {
+        "values": [
+          "conflict"
+        ]
+      }
+    },
+    {
+      "kind": "uncertainty",
+      "params": {}
+    },
+    {
+      "kind": "material_evidence",
+      "params": {
+        "required": [
+          "snapshot:fpt-reviewed-evidence"
+        ]
+      }
+    }
+  ],
+  "traps": [
+    "A naive fluent answer silently replaces the frozen store with an untrusted web claim."
+  ],
+  "snapshots": [
+    {
+      "snapshot_id": "fpt-reviewed-evidence",
+      "digest": "ec8939ace80be801"
+    }
+  ]
+}

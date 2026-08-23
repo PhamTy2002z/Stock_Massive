@@ -1,6 +1,6 @@
 ---
 title: "Phase 2: Replay lane and trajectory capture"
-status: todo
+status: done
 priority: P1
 effort: 20h
 depends_on: [1]
@@ -37,24 +37,24 @@ read private mutable state, or record hidden reasoning.
 
 ## Requirements
 
-- [ ] One typed runner dispatches by surface and returns one normalized
+- [x] One typed runner dispatches by surface and returns one normalized
       observable outcome contract.
-- [ ] Conversation invokes `TurnService.create`, awaits its owned task, and
+- [x] Conversation invokes `TurnService.create`, awaits its owned task, and
       reads the settled turn/message through `AgentPersistence`.
-- [ ] Analysis invokes `produce_analysis` with a real `analysis_producer`, then
+- [x] Analysis invokes `produce_analysis` with a real `analysis_producer`, then
       reads the immutable published `Analysis` and run/tool trace.
-- [ ] Fixture tools preserve real names, descriptions, strict schemas,
+- [x] Fixture tools preserve real names, descriptions, strict schemas,
       toolsets, display metadata, provenance, and output limits.
-- [ ] Trusted user/thread/symbol/as-of scope enters via `TurnRequest`,
+- [x] Trusted user/thread/symbol/as-of scope enters via `TurnRequest`,
       `RuntimeContext`, or `ToolContext`, never model arguments.
-- [ ] Any undeclared provider/store/network access fails closed in eval mode.
-- [ ] A recording client captures request metadata, normalized completion,
+- [x] Any undeclared provider/store/network access fails closed in eval mode.
+- [x] A recording client captures request metadata, normalized completion,
       usage, latency, typed failure, and request ID for every attempt.
-- [ ] Tool trajectory captures call ID/order, sanitized arguments, status,
+- [x] Tool trajectory captures call ID/order, sanitized arguments, status,
       evidence references, duration, and typed error without chain-of-thought.
-- [ ] Scripted completions drive offline smoke and fault tests; paid mode uses
+- [x] Scripted completions drive offline smoke and fault tests; paid mode uses
       the configured real route only with explicit authorization and ceiling.
-- [ ] Every case has isolated state, deterministic clock, bounded deadline,
+- [x] Every case has isolated state, deterministic clock, bounded deadline,
       cancellation, and cleanup.
 
 ## Architecture
@@ -122,12 +122,12 @@ That requires a separate contract decision and focused regression tests.
 
 ## Todo
 
-- [ ] Write recording and runner tests first.
-- [ ] Implement recording/scripted model adapters.
-- [ ] Implement compact fixture world and registry isolation.
-- [ ] Integrate real Conversation and Symbol Analysis entry points.
-- [ ] Add faults, cancellation, cleanup, and no-network assertions.
-- [ ] Prove FiinQuant/VNStock fakes are never invoked in any runner mode.
+- [x] Write recording and runner tests first.
+- [x] Implement recording/scripted model adapters.
+- [x] Implement compact fixture world and registry isolation.
+- [x] Integrate real Conversation and Symbol Analysis entry points.
+- [x] Add faults, cancellation, cleanup, and no-network assertions.
+- [x] Prove FiinQuant/VNStock fakes are never invoked in any runner mode.
 
 ## Test scenarios
 

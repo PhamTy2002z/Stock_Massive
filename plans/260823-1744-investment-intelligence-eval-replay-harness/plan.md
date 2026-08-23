@@ -1,7 +1,7 @@
 ---
 title: "Investment Intelligence Eval & Replay Harness v1"
 description: "Restore measurement authority with frozen finance cases, outcome-first graders, multi-trial replay, and a reproducible release report."
-status: pending
+status: in-progress
 priority: P1
 effort: 72h
 branch: develop
@@ -9,7 +9,8 @@ tags: [feature, backend, eval, critical]
 blockedBy:
   - 260822-1908-agent-core-fail-open
   - 260822-2010-evidence-adjudicating-loop
-blocks: []
+blocks:
+  - 260823-2104-resolved-capability-contract-v1
 created: 2026-08-23
 ---
 
@@ -110,7 +111,7 @@ without spending their scarce allowance during evaluation.
 | Market index | FiinQuant only | No VNStock cover is implemented because price-basis semantics differ. | Run only with a frozen FiinQuant index series; otherwise assert a named data gap. |
 | Valuation | FiinQuant implementation only | Ownership declares VNStock cover, but no VNStock valuation adapter exists. | Don't assume fallback. Freeze FiinQuant valuation when available; otherwise refuse. |
 | Reference/share/foreign room | VNStock main | One batched board call is affordable; FiinQuant free tier has empty share counts and 403 foreign-room behavior. | Replay persisted VNStock-normalized data. Don't infer outstanding from listed shares. |
-| Fundamentals | VNStock main | No batch; two live calls per symbol; community response exposes at most eight periods. | Keep cases narrow/frozen. Missing periods and fields remain explicit gaps. |
+| Fundamentals | VNStock main | No batch; three live calls per symbol (income and balance required, cash flow degradable); community response exposes at most eight periods. | Keep cases narrow/frozen. Missing periods and fields remain explicit gaps. |
 | VNStock account quota | Shared Redis arbiter | 20 requests/min guest, 60/min keyed, 3,000/hour; collector lease excludes other lanes; Redis failure fails closed. | Eval consumes zero live-provider quota. Materialization reads persisted rows under `store_only_execution()`. |
 
 The gate measures harness/model behavior over a known evidence boundary. It
@@ -148,31 +149,31 @@ cannot be approved from a dirty or partially integrated runtime.
 
 | # | Phase | Status | Depends on |
 |---|---|---|---|
-| 1 | [Contracts, compact fixtures, and version identity](./phase-01-start.md) | Pending | Dependency contracts understood |
-| 2 | [Replay lane and trajectory capture](./phase-02-replay-lane-and-trajectory-capture.md) | Pending | Phase 1 |
-| 3 | [Deterministic graders and golden battery](./phase-03-deterministic-graders-and-golden-battery.md) | Pending | Phases 1-2 |
-| 4 | [Multi-trial reports, baseline, and release gate](./phase-04-multi-trial-reports-baseline-and-release-gate.md) | Pending | Phases 1-3; blockers stabilized |
+| 1 | [Contracts, compact fixtures, and version identity](./phase-01-start.md) | Done | Dependency contracts understood |
+| 2 | [Replay lane and trajectory capture](./phase-02-replay-lane-and-trajectory-capture.md) | Done | Phase 1 |
+| 3 | [Deterministic graders and golden battery](./phase-03-deterministic-graders-and-golden-battery.md) | Done | Phases 1-2 |
+| 4 | [Multi-trial reports, baseline, and release gate](./phase-04-multi-trial-reports-baseline-and-release-gate.md) | In Progress | Phases 1-3; blockers stabilized |
 
 ## Success criteria
 
-- [ ] One repository-owned command runs all 16 cases against one frozen dataset
+- [x] One repository-owned command runs all 16 cases against one frozen dataset
       and emits reproducible JSON and Markdown artifacts.
-- [ ] Conversation uses `TurnService.create` and its persisted assistant
+- [x] Conversation uses `TurnService.create` and its persisted assistant
       message; Symbol Analysis uses `produce_analysis` with `analysis_producer`
       and its published immutable payload. Both retain current model/tool/
       evidence/budget contracts underneath.
-- [ ] Every artifact stamps code SHA, dirty state, dataset digest, case
+- [x] Every artifact stamps code SHA, dirty state, dataset digest, case
       contract, prompt, tool catalog, model route, pricing/config, and trials.
-- [ ] Deterministic graders cover figures, units, as-of, evidence references,
+- [x] Deterministic graders cover figures, units, as-of, evidence references,
       refusal/uncertainty, terminal settlement, and policy.
-- [ ] A blinded rubric covers synthesis, counterargument, uncertainty, and
+- [x] A blinded rubric covers synthesis, counterargument, uncertainty, and
       decision utility without deciding deterministic financial facts.
-- [ ] Baseline-versus-candidate output separates hard regressions from quality,
+- [x] Baseline-versus-candidate output separates hard regressions from quality,
       cost, and latency trade-offs and shows failed samples.
-- [ ] Smoke validation is offline and free; a paid multi-trial run requires an
+- [x] Smoke validation is offline and free; a paid multi-trial run requires an
       explicit model mode and a run-level LLM spend ceiling. Data-provider
       spend remains zero in every mode.
-- [ ] No eval package is imported by production, no migration is added for eval
+- [x] No eval package is imported by production, no migration is added for eval
       state, and no raw private trajectory is retained by default.
 - [ ] Initial numeric thresholds are committed only after baseline review; a
       candidate cannot supply or weaken its own gate policy.
@@ -206,6 +207,56 @@ dataset and approved gate policy.
 | Eval burns development data quota | Wrap materialization/runs in `store_only_execution()` and fail before credentials, quota arbitration, or network. |
 
 ## Validation log
+
+### Phases 3-4 — implementation complete; paid approval pending (2026-08-23)
+
+- Phase 3 deterministic graders, blinded rubric, and 16-case golden battery are
+  complete. Phase 4 multi-trial harness, canonical reports, compatibility,
+  gate policy, CLI/Make surfaces, and offline release checks are implemented.
+- Full Phase 1-4 eval suite: 162 passed. An invalid cold-race cancellation test
+  sentinel was corrected; the cancellation coverage and full suite are green.
+- `make eval-validate`: 16 cases, 3 snapshots, 9 hard graders; dataset digest
+  `8e829faa380d64f2`.
+- Two full offline smokes completed 16/16 cases each with `hard_failures=0`,
+  `rubric.available=16`, and `data_provider_calls=0`. Canonical content was
+  identical after excluding run identity and artifact digest.
+- `py_compile` and CLI-import network capture were clean. Independent code
+  review completed with no concerns. Teardown left no eval database or process.
+- Paid baseline/threshold approval was intentionally not run without the
+  required approved paid route, spend ceiling, and owner review. Phase 4 stays
+  `in-progress`, the plan stays `in-progress`, and Stage 0 stays Target.
+- Current checklist progress: 68/70 (97%); 3/4 phases done.
+
+### Phase 2 — done (2026-08-23)
+
+- Replay and trajectory capture implemented in `src/eval/recording.py`,
+  `src/eval/world.py`, and `src/eval/runner.py`, with builders and coverage in
+  `tests/eval_world.py`, `tests/test_eval_recording.py`, and
+  `tests/test_eval_runner.py`.
+- Focused Phase 2 suite: 37 passed. Phase 1+2 eval suite: 106 passed. Broader
+  blast-radius suite: 277 passed.
+- Independent review clean: no actionable findings.
+- Teardown verification clean: no leftover throwaway database or process; the
+  development LLM usage ledger remained unchanged.
+- Plan progress: 37/70 checklist items (52%); 2/4 phases done. Phases 3-4 remain
+  pending, so the plan stays `in-progress`.
+- Docs impact: none. This eval-only internal lane changes no user setup,
+  commands, or public production contract.
+
+### Phase 1 — done (2026-08-23)
+
+- 69 tests across `test_eval_contracts.py` / `test_eval_dataset.py` pass.
+- Shell manifest `investment-intelligence-v1` loads with digest
+  `e6806c3785fb81be`; budgets committed at review time (64 KiB / 250 rows per
+  snapshot, 512 KiB / 2 000 rows total).
+- Provider-capability identity derived by parsing adapter source with `ast`
+  (never importing): fiinquant executes market/market_index/valuation; vnstock
+  executes reference/fundamental/corporate_action; valuation's declared
+  vnstock cover is reported unavailable, matching the plan boundary table.
+- Boundary proof: no production module imports `src.eval`.
+- Pre-existing develop failures (25 failed / ~70 errors in transport, auth,
+  analysis-reads, message-flags, on-demand-lane suites) reproduce without this
+  change and are unrelated.
 
 ### Planner verification results
 

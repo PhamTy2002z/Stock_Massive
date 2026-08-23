@@ -1,0 +1,53 @@
+{
+  "schema": "eval.case@1",
+  "case_id": "sparse-valid-substitute",
+  "surface": "conversation",
+  "family": "sparse-refused-conflict",
+  "title": "Offer a valid substitute for a data gap",
+  "as_of": "2026-08-21",
+  "input": {
+    "prompt": "If free cash flow is absent, what reviewed FPT evidence can I use instead?",
+    "symbol": null,
+    "trading_day": null
+  },
+  "user_context": {
+    "synthetic_user_id": "synthetic-valid-substitute",
+    "display_name": "Eval User"
+  },
+  "expectations": [
+    {
+      "kind": "terminal_completed",
+      "params": {}
+    },
+    {
+      "kind": "refusal",
+      "params": {}
+    },
+    {
+      "kind": "required_claims",
+      "params": {
+        "values": [
+          "18.2",
+          "substitute"
+        ]
+      }
+    },
+    {
+      "kind": "material_evidence",
+      "params": {
+        "required": [
+          "snapshot:fpt-reviewed-evidence"
+        ]
+      }
+    }
+  ],
+  "traps": [
+    "A naive fluent answer either invents the missing field or refuses without a valid substitute."
+  ],
+  "snapshots": [
+    {
+      "snapshot_id": "fpt-reviewed-evidence",
+      "digest": "ec8939ace80be801"
+    }
+  ]
+}

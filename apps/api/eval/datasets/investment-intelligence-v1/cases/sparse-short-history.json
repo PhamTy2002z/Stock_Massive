@@ -1,0 +1,49 @@
+{
+  "schema": "eval.case@1",
+  "case_id": "sparse-short-history",
+  "surface": "analysis",
+  "family": "sparse-refused-conflict",
+  "title": "Calibrate a short-history analysis",
+  "as_of": "2026-08-21",
+  "input": {
+    "prompt": null,
+    "symbol": "FPT",
+    "trading_day": "2026-08-21"
+  },
+  "user_context": null,
+  "expectations": [
+    {
+      "kind": "terminal_completed",
+      "params": {}
+    },
+    {
+      "kind": "uncertainty",
+      "params": {}
+    },
+    {
+      "kind": "forbidden_claims",
+      "params": {
+        "values": [
+          "long-term trend confirmed"
+        ]
+      }
+    },
+    {
+      "kind": "material_evidence",
+      "params": {
+        "required": [
+          "snapshot:fpt-analysis-window"
+        ]
+      }
+    }
+  ],
+  "traps": [
+    "A naive fluent analysis claims a long-term trend from a deliberately short history."
+  ],
+  "snapshots": [
+    {
+      "snapshot_id": "fpt-analysis-window",
+      "digest": "a1342f237c88c10b"
+    }
+  ]
+}

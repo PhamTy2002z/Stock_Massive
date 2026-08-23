@@ -276,6 +276,7 @@ class TestRunManifestContract:
             code={"git_sha": "f" * 40, "dirty": False},
             dataset_id="investment-intelligence-v1",
             dataset_digest="a" * 16,
+            case_contract_digest="c" * 16,
             prompts={
                 "version": "2.4.0",
                 "contract_sha": PROMPT_HASH,
@@ -287,7 +288,11 @@ class TestRunManifestContract:
                 "session_model": "m-session",
                 "batch_model": "m-batch",
                 "route_base_url": "https://gateway.example/v1",
+                "streaming": True,
+                "reasoning_history": False,
+                "prompt_cache_control": False,
                 "pricing_version": "2026-08",
+                "pricing_effective_from": None,
                 "session_prices": {
                     "input": 1.0,
                     "cached_input": 0.5,
@@ -301,12 +306,17 @@ class TestRunManifestContract:
                     "output": 3.0,
                 },
                 "request_timeout_seconds": 120.0,
+                "route_breaker_enabled": True,
             },
+            provider_capabilities={"digest": "d" * 16},
+            policy_version="1.0.0",
             trials=1,
         )
         revived = RunManifest.model_validate(json.loads(manifest.model_dump_json()))
         assert revived.code.git_sha == "f" * 40
         assert revived.mode == "smoke"
+        assert revived.case_contract_digest == "c" * 16
+        assert revived.policy_version == "1.0.0"
 
 
 class TestIdentityDerivation:

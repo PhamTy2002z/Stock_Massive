@@ -1,6 +1,6 @@
 ---
 title: "Phase 3: Deterministic graders and golden battery"
-status: todo
+status: done
 priority: P1
 effort: 24h
 depends_on: [1, 2]
@@ -33,21 +33,21 @@ conflicting, or malicious inputs.
 
 ## Requirements
 
-- [ ] Grader registry declares ID, version, hard/trade-off class, applicable
+- [x] Grader registry declares ID, version, hard/trade-off class, applicable
       surfaces/families, and deterministic/rubric mode.
-- [ ] Hard graders cover outcome/terminal state, figure/value/unit, entity
+- [x] Hard graders cover outcome/terminal state, figure/value/unit, entity
       scope, as-of/publication lag, evidence health, material citation coverage,
       refusal/uncertainty, policy, and one-call-one-result settlement.
-- [ ] Expectations support exact values, tolerances, required/forbidden
+- [x] Expectations support exact values, tolerances, required/forbidden
       claims/actions, clarification, acceptable conclusions, and evidence.
-- [ ] Findings include case, trial, dimension, expected, observed, evidence
+- [x] Findings include case, trial, dimension, expected, observed, evidence
       reference, and remediation clue.
-- [ ] Rubric receives blinded task, authorized context, frozen evidence summary,
+- [x] Rubric receives blinded task, authorized context, frozen evidence summary,
       outcome, and rubric. No candidate label or hard pass/fail result.
-- [ ] Rubric covers synthesis, counterargument, uncertainty, and utility with
+- [x] Rubric covers synthesis, counterargument, uncertainty, and utility with
       strict JSON and concise justification.
-- [ ] Judge failure marks rubric unavailable and never overrides hard failure.
-- [ ] Dataset has exactly 16 reviewed cases across four required families and
+- [x] Judge failure marks rubric unavailable and never overrides hard failure.
+- [x] Dataset has exactly 16 reviewed cases across four required families and
       both current surfaces.
 
 ## Battery design
@@ -116,12 +116,12 @@ grade the strongest existing structured evidence and record the gap for Stage
 
 ## Todo
 
-- [ ] Write hard-dimension mutation tests first.
-- [ ] Implement grader registry and structured findings.
-- [ ] Implement fact, temporal, evidence, settlement, and policy graders.
-- [ ] Implement blinded rubric and strict judge response.
-- [ ] Author/review 16 compact cases and snapshots.
-- [ ] Run full offline smoke; verify all families are counted.
+- [x] Write hard-dimension mutation tests first.
+- [x] Implement grader registry and structured findings.
+- [x] Implement fact, temporal, evidence, settlement, and policy graders.
+- [x] Implement blinded rubric and strict judge response.
+- [x] Author/review 16 compact cases and snapshots.
+- [x] Run full offline smoke; verify all families are counted.
 
 ## Test scenarios
 
@@ -153,6 +153,18 @@ as Stage 1 gaps instead of pretending regex proves semantics.
 
 Adversarial fixtures are inert. Never execute embedded URLs, scripts, tool
 names, or instructions. Redact judge input and exclude credentials/reasoning.
+
+## Validation evidence
+
+- Full Phase 1-4 eval suite: 162 passed after correcting an invalid cold-race
+  cancellation test sentinel; the repaired cancellation coverage remains
+  green.
+- `make eval-validate`: 16 cases, 3 snapshots, 9 hard graders; dataset digest
+  `8e829faa380d64f2`.
+- Two full offline smokes completed all 16 cases with `hard_failures=0`,
+  `rubric.available=16`, and `data_provider_calls=0`; canonical content was
+  identical after excluding run identity and artifact digest.
+- Independent code review: DONE, no concerns.
 
 ## Next steps
 

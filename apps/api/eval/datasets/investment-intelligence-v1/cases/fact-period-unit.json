@@ -1,0 +1,56 @@
+{
+  "schema": "eval.case@1",
+  "case_id": "fact-period-unit",
+  "surface": "conversation",
+  "family": "fact-unit-as-of",
+  "title": "Quarterly growth period and percent unit",
+  "as_of": "2026-08-21",
+  "input": {
+    "prompt": "State FPT Q2 2026 revenue growth with its unit and period.",
+    "symbol": null,
+    "trading_day": null
+  },
+  "user_context": {
+    "synthetic_user_id": "synthetic-period-unit",
+    "display_name": "Eval User"
+  },
+  "expectations": [
+    {
+      "kind": "terminal_completed",
+      "params": {}
+    },
+    {
+      "kind": "figure",
+      "params": {
+        "value": 18.2,
+        "tolerance": 0.01,
+        "unit": "percent"
+      }
+    },
+    {
+      "kind": "required_claims",
+      "params": {
+        "values": [
+          "2026Q2"
+        ]
+      }
+    },
+    {
+      "kind": "material_evidence",
+      "params": {
+        "required": [
+          "snapshot:fpt-reviewed-evidence"
+        ]
+      }
+    }
+  ],
+  "traps": [
+    "A naive fluent answer turns a quarterly percentage into currency or an annual period."
+  ],
+  "snapshots": [
+    {
+      "snapshot_id": "fpt-reviewed-evidence",
+      "digest": "ec8939ace80be801"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "schema": "eval.baseline-summary@1",
+  "dataset_id": "investment-intelligence-v1",
+  "status": "pending-owner-review",
+  "approved_artifact_digest": null,
+  "approved_at": null,
+  "reviewer": null,
+  "thresholds": {},
+  "note": "No paid baseline or trade-off threshold is approved. The release gate may validate and report hard dimensions, but comparison cannot graduate Stage 0 until an owner reviews a complete paid distribution."
+}

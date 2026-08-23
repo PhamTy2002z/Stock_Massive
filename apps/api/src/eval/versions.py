@@ -30,16 +30,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
-from src.agent.prompt.contract import PROMPT_HASH, PROMPT_VERSION
-from src.alpha.analysis_loop import LOOP_PROMPT_VERSION
-from src.alpha.generation import PROMPT_VERSION as GENERATION_PROMPT_VERSION
 from src.core.llm import ToolSchema
 from src.core.llm.config import LLMConfig, Workload, llm_config_from_settings
-from src.stocks.providers.contracts import (
-    MARKET_SCHEMA_VERSION,
-    SOURCE_OWNERSHIP_BY_CAPABILITY,
-    Capability,
-)
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +115,10 @@ class PromptIdentity:
 
 def prompt_identity() -> PromptIdentity:
     """Identity of both lanes' prompt contracts, from their owners."""
+    from src.agent.prompt.contract import PROMPT_HASH, PROMPT_VERSION
+    from src.alpha.analysis_loop import LOOP_PROMPT_VERSION
+    from src.alpha.generation import PROMPT_VERSION as GENERATION_PROMPT_VERSION
+
     return PromptIdentity(
         version=PROMPT_VERSION,
         contract_sha=PROMPT_HASH,
@@ -424,6 +420,11 @@ def provider_capability_identity(
     with no executable class is reported as exactly that — unavailable — which
     is the honest answer, and the one the plan table records for valuation.
     """
+    from src.stocks.providers.contracts import (
+        MARKET_SCHEMA_VERSION,
+        SOURCE_OWNERSHIP_BY_CAPABILITY,
+    )
+
     resolved_inventory: dict[str, dict[str, tuple[str, ...]]] = {
         source: dict(by_cap)
         for source, by_cap in (
