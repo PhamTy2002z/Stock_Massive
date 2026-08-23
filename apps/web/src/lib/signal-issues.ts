@@ -91,6 +91,12 @@ export const SIGNAL_ISSUE_SENTENCES = {
   insufficient_cross_section: "Quá ít mã đủ điều kiện để lập phân vị",
   stale_fundamental_period: "Báo cáo quý gần nhất phía sau con số này đã cũ",
   fundamental_not_stored: "Chưa có báo cáo quý nào được lưu tính đến ngày này",
+  statement_line_missing:
+    "Báo cáo quý đã lưu nhưng thiếu chỉ tiêu mà con số này cần",
+  market_cap_absent:
+    "Không phiên nào trong cửa sổ có vốn hoá nên chưa lập được tỷ số này",
+  stale_market_cap:
+    "Vốn hoá dùng để tính lấy từ phiên cũ hơn phiên mới nhất trong cửa sổ",
   stale_reference_reading: "Số liệu tham chiếu gần nhất phía sau con số này đã cũ",
   half_life_exceeds_window:
     "Nhịp hồi quy ước lượng dài hơn cửa sổ nên chỉ số z được giữ lại",

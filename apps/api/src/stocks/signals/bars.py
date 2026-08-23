@@ -133,7 +133,7 @@ from ..providers.contracts import (
 from ..trading_day import latest_trading_day, trading_days_before
 from ..universe import build_universe
 from .corporate_actions import CorporateActionStore, adjustment_factor
-from .fields import DEGRADED_LIMIT_LOCK_SHARE
+from .fields import DEGRADED_LIMIT_LOCK_SHARE, min_sample_for
 from .issues import SignalIssue
 from .price_band import (
     EXCHANGE_MIGRATIONS,
@@ -159,8 +159,10 @@ logger = logging.getLogger(__name__)
 ADTV_SESSIONS = 20
 
 # Below this many peers a percentile stops meaning anything, so none is reported
-# (``docs/adr/0010``, the same floor the cross-sectional fields refuse under).
-ADTV_MIN_PEERS = 30
+# (``docs/adr/0010``). Asked of the same function the cross-sectional fields
+# refuse under rather than restated as a number: the two floors were both
+# written as 30 with each comment claiming to be "the same floor", which is a
+# claim nothing checked. Now they are one rule, and it scales with the sample.
 
 
 class BarProjection(str, Enum):
@@ -1078,7 +1080,8 @@ def _adtv_standing(
 
     names = tuple(peers) if peers is not None else build_universe(session).symbols
     others = [name.upper() for name in names if name.upper() != symbol]
-    if len(others) < ADTV_MIN_PEERS:
+    floor = min_sample_for(len(others))
+    if len(others) < floor:
         return None
 
     # A context already holds every one of these symbols' sessions across the
@@ -1096,7 +1099,7 @@ def _adtv_standing(
         for name in others
         if (value := _peer_average(held.get(name, {}), days)) is not None
     ]
-    if len(measured) < ADTV_MIN_PEERS:
+    if len(measured) < floor:
         return None
 
     below = sum(1 for value in measured if value <= mine)

@@ -51,7 +51,6 @@ from src.stocks.providers.contracts import (
 )
 from src.stocks.providers.normalize import VN_TZ
 from src.stocks.signals.cross_sectional import (
-    CROSS_SECTION_MIN_SYMBOLS,
     MOMENTUM_FORMATION_SESSIONS,
     MOMENTUM_MIN_FORMATION_SESSIONS,
     MOMENTUM_MIN_SESSIONS,
@@ -62,7 +61,14 @@ from src.stocks.signals.cross_sectional import (
     relative_strength_reading,
     trend_reading,
 )
-from src.stocks.signals.fields import Claim, FieldKind, Sign, Unit
+from src.stocks.signals.fields import (
+    PERCENTILE_ABSOLUTE_FLOOR,
+    Claim,
+    FieldKind,
+    Sign,
+    Unit,
+    min_sample_for,
+)
 from src.stocks.signals.fundamentals import (
     FUNDAMENTAL_STALE_DAYS,
     fundamentals_on_or_before,
@@ -385,7 +391,7 @@ class TestServingACrossSection:
         assert section.ranked == len(names)
         assert section.values["S00"].extras["excluded_symbols"] == 1
 
-    def test_the_whole_call_refuses_below_thirty_survivors(self):
+    def test_a_sample_under_the_absolute_floor_cannot_be_ranked_at_all(self):
         """A percentile over eleven names is a rank with a percent sign on it."""
         with open_session() as session:
             names, days = a_sample(
@@ -399,22 +405,45 @@ class TestServingACrossSection:
         assert section.refusal is SignalIssue.INSUFFICIENT_CROSS_SECTION
         assert section.values == {}
         assert section.ranked == 11
-        assert CROSS_SECTION_MIN_SYMBOLS == 30
+        # No share of eleven reaches the floor, which is the point of having one:
+        # the share alone would have ranked seven of them.
+        assert min_sample_for(11) == PERCENTILE_ABSOLUTE_FLOOR
 
-    def test_the_refusal_counts_survivors_after_exclusion_and_not_before(self):
-        """Thirty-two names of which most are too short is not a cross-section."""
+    def test_the_refusal_counts_survivors_and_the_floor_counts_the_request(self):
+        """Thirty names of which half are too short is not a cross-section."""
         with open_session() as session:
             names, days = a_sample(session, sessions=MOMENTUM_MIN_SESSIONS + 5)
-            short = [f"N{index:02d}" for index in range(10)]
+            short = [f"N{index:02d}" for index in range(14)]
             for name in short:
                 store_flat(session, name, days[-20:])
 
+            asked = [*names[:16], *short]
             section = serve_cross_section(
-                session, [*names[:20], *short], MOMENTUM_RANK, end=days[-1]
+                session, asked, MOMENTUM_RANK, end=days[-1]
             )
 
+        # Sixteen survivors against a floor taken from the thirty that were
+        # asked for. Counting the floor off the survivors instead would make the
+        # test pass by construction, whatever survived.
+        assert min_sample_for(len(asked)) == 18
         assert section.refusal is SignalIssue.INSUFFICIENT_CROSS_SECTION
-        assert len(section.excluded) == 10
+        assert len(section.excluded) == 14
+
+    def test_one_short_symbol_no_longer_collapses_the_whole_ranking(self):
+        """The tolerance the floor exists to leave, measured rather than assumed."""
+        with open_session() as session:
+            names, days = a_sample(session, sessions=MOMENTUM_MIN_SESSIONS + 5)
+            store_flat(session, "NEW", days[-20:])
+
+            asked = [*names, "NEW"]
+            section = serve_cross_section(
+                session, asked, MOMENTUM_RANK, end=days[-1]
+            )
+
+        assert section.refusal is None
+        assert section.excluded["NEW"] is SignalIssue.INSUFFICIENT_HISTORY
+        assert section.values["S00"].extras["n"] == len(names)
+        assert section.values["S00"].extras["excluded_symbols"] == 1
 
     def test_a_field_answered_for_one_symbol_is_not_served_as_a_cross_section(self):
         with open_session() as session:
@@ -452,6 +481,102 @@ class TestTheFactorPercentiles:
         stamped = sections["factor_percentiles.roe_percentile"].values["S00"]
         assert stamped.extras["period_end"] == period_end.isoformat()
         assert stamped.extras["period_age_days"] > 0
+
+    def test_a_capitalisation_nobody_wrote_is_not_a_missing_statement(self):
+        """The refusal that sent a reader to look for a filing already there.
+
+        Measured on production before this test existed: VHM's book yield and
+        earnings yield refused under ``fundamental_not_stored`` while its ROE —
+        the same statement, the same session — answered with 93.3. What was
+        missing was the market capitalisation, on a window one bar long.
+        """
+        with open_session() as session:
+            names, days = a_sample(session, sessions=30, with_statements=True)
+            capless = "NOCAP"
+            store_flat(session, capless, days, market_cap=None)
+            store_statement(
+                session,
+                capless,
+                period_end=days[-1] - timedelta(days=40),
+                net_income=2e11,
+                equity=8e11,
+            )
+
+            asked = [*names, capless]
+            over_cap = serve_cross_section(
+                session, asked, BOOK_YIELD_PERCENTILE, end=days[-1]
+            )
+            over_equity = serve_cross_section(
+                session, asked, ROE_PERCENTILE, end=days[-1]
+            )
+
+        assert over_cap.excluded[capless] is SignalIssue.MARKET_CAP_ABSENT
+        # The distinction, stated as one assertion: the same symbol, the same
+        # stored statement, answered by the ratio that does not need a
+        # capitalisation.
+        assert capless in over_equity.values
+
+    def test_a_statement_missing_the_line_a_ratio_divides_says_so(self):
+        with open_session() as session:
+            names, days = a_sample(session, sessions=30, with_statements=True)
+            no_equity = "NOEQ"
+            store_flat(session, no_equity, days, market_cap=1e12)
+            store_statement(
+                session,
+                no_equity,
+                period_end=days[-1] - timedelta(days=40),
+                net_income=2e11,
+                equity=None,
+            )
+
+            section = serve_cross_section(
+                session, [*names, no_equity], ROE_PERCENTILE, end=days[-1]
+            )
+
+        assert section.excluded[no_equity] is SignalIssue.STATEMENT_LINE_MISSING
+
+    def test_a_capitalisation_from_an_earlier_session_degrades_and_stamps_both(self):
+        """The tolerance the lookback window exists for, and its honest cost."""
+        with open_session() as session:
+            names, days = a_sample(session, sessions=30, with_statements=True)
+            # The Main Source writes a capitalisation on some sessions and not
+            # others, which is what production does: 130 of 67,658 stored market
+            # rows carried one, and never on the newest session.
+            stale_name = "STALECAP"
+            store_flat(session, stale_name, days[:-1], market_cap=1e12)
+            write_session(
+                session,
+                stale_name,
+                days[-1],
+                close=20_000.0,
+                high=20_040.0,
+                low=19_960.0,
+                open_price=20_000.0,
+                volume=800_000,
+                total_value_vnd=16e9,
+                market_cap_vnd=None,
+            )
+            store_statement(
+                session,
+                stale_name,
+                period_end=days[-1] - timedelta(days=40),
+                net_income=2e11,
+                equity=8e11,
+            )
+
+            section = serve_cross_section(
+                session, [*names, stale_name], BOOK_YIELD_PERCENTILE, end=days[-1]
+            )
+
+        stale = section.values[stale_name]
+        assert stale.value is not None
+        assert stale.degraded_reason is SignalIssue.STALE_MARKET_CAP
+        # Both dates, because one of them alone cannot make the statement.
+        assert stale.extras["price_session"] == days[-2].isoformat()
+        assert stale.extras["window_session"] == days[-1].isoformat()
+        # A quarter that is genuinely old outranks a capitalisation that is days
+        # old, so the neighbours ranked on the newest session are not degraded.
+        assert section.values["S00"].degraded_reason is None
 
     def test_size_is_ranked_large_first(self):
         """A departure from the shortlist, and a deliberate one.

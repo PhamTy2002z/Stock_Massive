@@ -6,7 +6,6 @@ still answers — with an older session, and saying so.
 """
 
 from .bars import (
-    ADTV_MIN_PEERS,
     ADTV_SESSIONS,
     AdjustmentReport,
     AdtvStanding,
@@ -32,7 +31,7 @@ from .corporate_actions import (
     terms_of,
 )
 from .cross_sectional import (
-    CROSS_SECTION_MIN_SYMBOLS,
+    FACTOR_LOOKBACK_SESSIONS,
     FACTOR_MIN_SESSIONS,
     MOMENTUM_FORMATION_SESSIONS,
     MOMENTUM_MIN_FORMATION_SESSIONS,
@@ -55,6 +54,8 @@ from .cross_sectional import (
 from .fields import (
     CATALOG_NULL_FPR_CEILING,
     DEGRADED_LIMIT_LOCK_SHARE,
+    PERCENTILE_ABSOLUTE_FLOOR,
+    PERCENTILE_MIN_SAMPLE_SHARE,
     Claim,
     FieldKind,
     FieldReading,
@@ -68,6 +69,7 @@ from .fields import (
     Threshold,
     ThresholdOrigin,
     Unit,
+    min_sample_for,
     schema_description,
 )
 from .foreign_flow import (
@@ -237,7 +239,6 @@ __all__ = [
     "ActionTerms",
     "adjustment_factor",
     "AdjustmentReport",
-    "ADTV_MIN_PEERS",
     "ADTV_MONEY",
     "adtv_money_reading",
     "ADTV_PERCENTILE",
@@ -281,7 +282,6 @@ __all__ = [
     "ConfirmationVerdict",
     "CorporateActionStore",
     "CoverageState",
-    "CROSS_SECTION_MIN_SYMBOLS",
     "CROSS_SECTIONAL_FIELDS",
     "CrossSection",
     "CURRENT_DRAWDOWN",
@@ -290,6 +290,8 @@ __all__ = [
     "days_underwater_reading",
     "degradation_of",
     "DEGRADED_LIMIT_LOCK_SHARE",
+    "PERCENTILE_ABSOLUTE_FLOOR",
+    "PERCENTILE_MIN_SAMPLE_SHARE",
     "Denomination",
     "detect_limit_lock",
     "Drawdown",
@@ -304,6 +306,7 @@ __all__ = [
     "ExchangeAsOf",
     "ExchangeMigration",
     "expected_max_drawdown",
+    "FACTOR_LOOKBACK_SESSIONS",
     "FACTOR_MIN_SESSIONS",
     "FactorReading",
     "FieldKind",
@@ -370,6 +373,7 @@ __all__ = [
     "net_value_over_adtv_reading",
     "net_volume_over_adtv_reading",
     "NullCalibration",
+    "min_sample_for",
     "percentile_of",
     "persistence_run_days",
     "persistence_run_days_reading",

@@ -22,8 +22,15 @@ from sqlalchemy.orm import Session
 
 from ..trading_day import latest_trading_day
 from .bars import WindowHealth, prepare_bars, prepare_bars_context
-from .cross_sectional import CROSS_SECTION_MIN_SYMBOLS, percentile_of
-from .fields import FieldReading, FieldValue, FieldWindow, SignalField, Unit
+from .cross_sectional import percentile_of
+from .fields import (
+    FieldReading,
+    FieldValue,
+    FieldWindow,
+    SignalField,
+    Unit,
+    min_sample_for,
+)
 from .fundamentals import fundamentals_on_or_before
 from .issues import SignalIssue
 from .reference import foreign_room_on_or_before
@@ -58,7 +65,7 @@ def serve_field(
     frame, health = prepare_bars(
         session,
         symbol,
-        field.min_sessions,
+        field.window_sessions,
         min_sessions=field.min_sessions,
         end=end,
         peers=peers,
@@ -176,14 +183,14 @@ def serve_cross_section(
         )
 
     statements = fundamentals_on_or_before(session, names, end)
-    context = prepare_bars_context(session, names, field.min_sessions, end=end)
+    context = prepare_bars_context(session, names, field.window_sessions, end=end)
     measured: dict[str, tuple[FieldReading, WindowHealth]] = {}
     excluded: dict[str, SignalIssue] = {}
     for name in names:
         frame, health = prepare_bars(
             session,
             name,
-            field.min_sessions,
+            field.window_sessions,
             min_sessions=field.min_sessions,
             end=end,
             peers=names,
@@ -202,7 +209,7 @@ def serve_cross_section(
             continue
         measured[name] = (reading, health)
 
-    if len(measured) < CROSS_SECTION_MIN_SYMBOLS:
+    if len(measured) < min_sample_for(len(names)):
         return CrossSection(
             field=field,
             as_of=end,
