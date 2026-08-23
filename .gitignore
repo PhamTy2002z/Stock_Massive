@@ -69,5 +69,10 @@ apps/api/AGENTS.md
 # Local scratch (venvs, throwaway scripts)
 .scratch/
 
+# Generated eval run artifacts. Committed eval material lives in
+# apps/api/eval/datasets (tracked) and apps/api/eval/baselines (tracked);
+# everything a run writes under .artifacts is disposable output.
+apps/api/.artifacts/
+
 # Feature worktrees live here; each is its own checkout
 .claude/worktrees/

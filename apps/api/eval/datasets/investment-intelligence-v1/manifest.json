@@ -1,0 +1,14 @@
+{
+  "schema": "eval.dataset@1",
+  "dataset_id": "investment-intelligence-v1",
+  "created": "2026-08-23",
+  "description": "Frozen finance cases for the Conversation and Symbol Analysis lanes. Shell manifest: Phase 3 populates cases after graders define executable expectations. Budgets are reviewed ceilings — a fixture that outgrows them must be re-reviewed, not re-silenced.",
+  "cases": [],
+  "snapshots": [],
+  "budget": {
+    "max_snapshot_bytes": 65536,
+    "max_snapshot_rows": 250,
+    "max_total_bytes": 524288,
+    "max_total_rows": 2000
+  }
+}
