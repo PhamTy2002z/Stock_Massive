@@ -77,13 +77,13 @@ export function Markdown({
         components={{
           a: Anchor,
           table: Table,
-          th: (props) => (
+          th: ({ node: _node, ...props }) => (
             <th
               {...props}
               className="border border-border px-2.5 py-1.5 text-left font-semibold"
             />
           ),
-          td: (props) => (
+          td: ({ node: _node, ...props }) => (
             <td {...props} className="border border-border px-2.5 py-1.5 align-top" />
           ),
         }}
@@ -95,13 +95,22 @@ export function Markdown({
 }
 
 /**
+ * The hast node react-markdown hands a component alongside the element's own
+ * props. Every component here drops it: spread into the element it becomes a
+ * `node="[object Object]"` attribute on every cell of every table.
+ */
+type WithNode<T> = T & { node?: unknown }
+type TableProps = WithNode<ComponentPropsWithoutRef<"table">>
+type AnchorProps = WithNode<ComponentPropsWithoutRef<"a">>
+
+/**
  * A table wide enough to need scrolling, scrolling inside its own box.
  *
  * The transcript column is fixed and the inspector can take half of it; a table
  * that pushed the column wider would move the composer and the question above
  * it, so the overflow is the table's own problem to hold.
  */
-function Table(props: ComponentPropsWithoutRef<"table">) {
+function Table({ node: _node, ...props }: TableProps) {
   return (
     <div className="overflow-x-auto">
       <table {...props} className="w-full border-collapse text-meta" />
@@ -109,7 +118,7 @@ function Table(props: ComponentPropsWithoutRef<"table">) {
   )
 }
 
-function Anchor({ href, children, ...rest }: ComponentPropsWithoutRef<"a">) {
+function Anchor({ href, children, node: _node, ...rest }: AnchorProps) {
   return (
     <a
       {...rest}
