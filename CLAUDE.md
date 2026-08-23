@@ -2,6 +2,12 @@
 
 Nền tảng dữ liệu chứng khoán Việt Nam (HOSE/HNX/UPCOM): `apps/api` (FastAPI) phục vụ dữ liệu, `apps/web` (Next.js App Router) hiển thị.
 
+# Tham chiếu bắt buộc — `docs/hermes/`
+Mọi đề xuất và mọi lần triển khai **phải** đọc hồ sơ khảo sát Hermes ở `docs/hermes/` trước, không chỉ khi chạm `src/agent/`.
+- Vào `hermes-synthesis-260821-0030.md` trước (bản hợp nhất 9 vùng), rồi mở đúng report của vùng đang làm: `hermes-core-loop` · `hermes-turn-lifecycle` · `hermes-route-subagent` · `hermes-context` · `hermes-tools` · `hermes-memory` · `hermes-orchestrator-state` · `hermes-mcp-ops-eval` · `hermes-web-security`. `README.md` là mục lục kèm số dòng.
+- Đề xuất phải nói rõ mình theo hay lệch bài học nào trong đó, kèm lý do — đừng thiết kế lại từ đầu cái hồ sơ đã trả lời.
+- Đây là **research**, không phải mô tả code hiện tại: trích dẫn `path:line` trỏ vào sparse clone Hermes `f43eabe` đã mất, và phần đối chiếu với `apps/api/src/agent` viết trước `1e7b936` (trước khi lane chat đọc được store). Kiểm lại với code thật trước khi dựa vào một câu đối chiếu.
+
 # Commands
 - Dev: `pnpm dev` (db/redis/api trong Docker + web trên host — API 8000, web 3000). Web trong container: `pnpm dev:full`
 - Debug Python trên host: `pnpm dev:api:detach` rồi `make dev` tại `apps/api`
