@@ -447,6 +447,22 @@ class AgentToolCall(Base):
     spilled_bytes = Column(Integer, nullable=True)
     status = Column(String(16), nullable=False)  # one of TOOL_CALL_STATUSES below
     error = Column(String(500), nullable=True)
+    # What the call *yielded*, where that is a different question from whether it
+    # ran. ``status`` answers which kind of outcome the call had and ``error``
+    # names the failure; neither can say that a successful store read came back
+    # with no figure, which is what a third of ``get_field`` calls did while
+    # every one of them was stored as ``ok``.
+    #
+    # Nullable because it is additive and because most tools have nothing to
+    # classify: a web search either failed or returned results, and a row from
+    # before this column existed cannot be told what it was.
+    #
+    # Holds the refusal's own **Signal Issue** rather than a flat "nothing" —
+    # ``no_value:market_cap_absent`` and ``no_value:insufficient_cross_section``
+    # are different operational facts, and one word for both would rebuild the
+    # blind spot this column exists to close. The vocabulary is
+    # ``agent/messages.py``.
+    outcome = Column(String(64), nullable=True)
     latency_ms = Column(Integer, nullable=True)
     prompt_tokens = Column(Integer, nullable=True)
     completion_tokens = Column(Integer, nullable=True)

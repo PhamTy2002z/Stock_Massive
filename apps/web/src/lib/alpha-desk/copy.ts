@@ -28,6 +28,10 @@ export const TOOL_CALL_COPY = {
   running: "Đang chạy…",
   ok: "Xong",
   error: "Lỗi",
+  /** Ran, asked the store, and there was no number to give. */
+  noFigure: "Không có số",
+  /** Declined before asking: outside the Universe, or not this call's symbol. */
+  outOfScope: "Ngoài phạm vi",
 } as const
 
 /**
@@ -52,6 +56,27 @@ const REFUSED_CALL_LABELS: Record<string, string> = {
 export function toolCallErrorLabel(error: string | null): string {
   if (error === null) return TOOL_CALL_COPY.error
   return REFUSED_CALL_LABELS[error] ?? TOOL_CALL_COPY.error
+}
+
+/**
+ * The word shown beside a call that ran and came back with nothing.
+ *
+ * Deliberately not "Lỗi" and deliberately not "Xong". The call worked and the
+ * question was well formed, so calling it a failure would send the reader to
+ * retry something that is not broken; but the row drew identically to a call
+ * that returned a number, and that is what made a third of the evidence path
+ * invisible.
+ *
+ * Two words rather than one because two facts arrive here: the store was asked
+ * and had no figure, or the tool declined the question before asking anything.
+ * The specific **Signal Issue** behind the first is rendered from
+ * `SIGNAL_ISSUE_SENTENCES`, which already owns one sentence per code — a second
+ * table of them here would be the drift that module exists to prevent.
+ */
+export function toolCallEmptyLabel(outcome: string | null | undefined): string {
+  return outcome === "cannot_read"
+    ? TOOL_CALL_COPY.outOfScope
+    : TOOL_CALL_COPY.noFigure
 }
 
 /**

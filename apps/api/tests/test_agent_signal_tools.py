@@ -35,6 +35,12 @@ import pytest
 
 from src.agent import registry
 from src.agent.executor import ToolExecutor
+from src.agent.messages import (
+    OUTCOME_CANNOT_READ,
+    OUTCOME_NO_VALUE,
+    OUTCOME_VALUE,
+    outcome_of,
+)
 from src.agent.executor import ToolCall as ExecutorToolCall
 from src.agent.tools.signals import (
     CATALOG_AXES,
@@ -391,6 +397,41 @@ class TestThroughTheExecutor:
         assert json.loads(outcome.results[0].text)["fieldId"] == NAMED_FIELD
         assert json.loads(outcome.results[1].text)["count"] == len(REGISTRY)
 
+    def test_the_trace_entry_says_whether_the_call_answered(self):
+        """The one place the outcome has to survive: the executor writes it into
+        the trace entry, because it is the layer holding the payload."""
+        entries: list[dict] = []
+        with open_session() as session:
+            store_window(session)
+            available = {
+                entry.name: entry for entry in tools_over(session).entries()
+            }
+            executor = ToolExecutor(
+                context=a_context(),
+                lookup=available.get,
+                availability=lambda name: name in available,
+                trace=entries.append,
+            )
+            asyncio.run(
+                executor.run(
+                    [
+                        ExecutorToolCall(
+                            id="a",
+                            name="get_field",
+                            arguments={"field_id": NAMED_FIELD},
+                        ),
+                        ExecutorToolCall(id="b", name="list_fields", arguments={}),
+                    ]
+                )
+            )
+
+        recorded = {entry["tool"]: entry for entry in entries}
+        assert recorded["get_field"]["ok"] is True
+        assert recorded["get_field"]["outcome"] == OUTCOME_VALUE
+        # The catalog has no figure that could be missing, so it classifies
+        # nothing rather than claiming to have answered one.
+        assert recorded["list_fields"]["outcome"] is None
+
     def test_both_declare_a_result_cap_that_stops_a_bug(self):
         for entry in tools_over(None).entries():
             assert entry.max_result_size_chars == MAX_RESULT_CHARS
@@ -624,3 +665,46 @@ class TestWhatAReaderIsShown:
         assert entries["get_field"].display_name == "Đọc chỉ báo"
         assert entries["get_field"].summarise is summarise_get_field
         assert entries["list_fields"].summarise is summarise_list_fields
+
+
+class TestWhetherACallAnswered:
+    """The question ``status`` could not be asked, and a third of calls were.
+
+    Measured on the trace before this existed: of 151 ``get_field`` calls, 94
+    carried a figure, 42 carried a refusal and 15 said the symbol was outside
+    the Universe — and all 151 were stored as ``ok``, because all 151 were. The
+    tool returns a refusal as a result the model reads rather than as an
+    exception, which is right, and left the trace and the rail unable to draw
+    the difference.
+    """
+
+    def test_a_figure_that_came_back_reads_as_a_value(self):
+        assert outcome_of("get_field", {"fieldId": NAMED_FIELD, "value": 51.1}) == (
+            OUTCOME_VALUE
+        )
+
+    def test_an_empty_answer_keeps_the_reason_it_was_empty(self):
+        """``market_cap_absent`` and ``insufficient_cross_section`` are different
+        operational facts with different fixes, so one word for both would
+        rebuild the blind spot one level up."""
+        assert outcome_of(
+            "get_field",
+            {"value": None, "reasonCode": "market_cap_absent"},
+        ) == f"{OUTCOME_NO_VALUE}:market_cap_absent"
+
+    def test_an_empty_answer_with_no_named_reason_still_reads_as_empty(self):
+        assert outcome_of("get_field", {"value": None}) == OUTCOME_NO_VALUE
+
+    def test_a_declined_question_is_not_an_empty_answer(self):
+        """The store was never asked: a symbol outside the Universe, or a call
+        opened for another one."""
+        assert outcome_of(
+            "get_field", {"error": "cannot_read", "detail": "..."}
+        ) == OUTCOME_CANNOT_READ
+
+    def test_a_tool_with_no_figure_to_be_missing_says_nothing(self):
+        """The default, so a tool added later classifies nothing until somebody
+        decides what its outcomes are."""
+        assert outcome_of("web_search", {"results": [{"title": "x"}]}) is None
+        assert outcome_of("list_fields", {"count": 30, "fields": []}) is None
+        assert outcome_of("get_field", "not a mapping") is None

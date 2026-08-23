@@ -63,6 +63,7 @@ from typing import Any, Literal
 
 from . import registry
 from .guardrails import HALT_GUIDANCE, TurnGuardrails, Verdict, result_signature
+from .messages import outcome_of
 
 logger = logging.getLogger(__name__)
 
@@ -499,6 +500,10 @@ class ToolExecutor:
             # knows the Turn's budget.
             "result_text": result.text,
             "result_chars": len(result.text),
+            # Whether the call *answered*, which ``ok`` above cannot say: a store
+            # read that comes back with no figure is a successful call and a
+            # missing number at the same time.
+            "outcome": outcome_of(result.tool_name, result.payload),
         }
         try:
             written = self.trace(entry)

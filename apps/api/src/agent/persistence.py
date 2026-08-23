@@ -145,6 +145,10 @@ class ToolCallRecord:
     #: two places. The size the model was shown a preview of now rides
     #: ``result`` beside the preview itself, so nothing writes this column.
     spilled_bytes: int | None = None
+    #: What the call yielded, where "it ran" and "it answered" are different
+    #: facts (``agent/messages.py::outcome_of``). ``None`` for tools with nothing
+    #: to classify and for rows written before the column existed.
+    outcome: str | None = None
 
 
 @dataclass(frozen=True)
@@ -286,6 +290,7 @@ def _trace_record(row: AgentToolCall) -> ToolCallRecord:
         started_at=row.started_at,
         tool_call_id=row.tool_call_id,
         spilled_bytes=row.spilled_bytes,
+        outcome=row.outcome,
     )
 
 
@@ -756,6 +761,9 @@ class AgentPersistence:
                 ),
                 status=str(trace["status"]),
                 error=str(trace["error"])[:500] if trace.get("error") else None,
+                outcome=(
+                    str(trace["outcome"])[:64] if trace.get("outcome") else None
+                ),
                 latency_ms=trace.get("latency_ms"),
                 prompt_tokens=trace.get("prompt_tokens"),
                 completion_tokens=trace.get("completion_tokens"),

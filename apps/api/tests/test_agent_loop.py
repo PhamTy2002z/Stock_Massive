@@ -1402,6 +1402,9 @@ def test_the_wire_payload_is_exactly_the_fields_of_the_contract() -> None:
         # a read of this store the way it draws a stranger's page. External for
         # an unregistered name, conservatively, the same way the wrapper reads it.
         "kind": "external",
+        # Whether the call answered, which ``status`` cannot say. ``None`` for a
+        # web search: it has no figure that could be missing.
+        "outcome": None,
     }
     # The two the allowlist exists to keep off a rendered channel. ``results``
     # and ``error`` widened it; these did not come with them.
