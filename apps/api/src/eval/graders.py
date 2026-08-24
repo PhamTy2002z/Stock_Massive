@@ -324,6 +324,7 @@ def _forbidden_entity_asserted(symbol: str, text: str) -> bool:
                 rf"\b(?:NOT|IGNORE|SKIP|AVOID)\s+{re.escape(symbol)}\b",
                 rf"\b(?:DID|DO|DOES|WILL|WOULD|SHALL|CAN)\s+NOT(?:\s+\w+){{0,4}}\s+{re.escape(symbol)}\b",
                 rf"\b(?:IGNORE|SKIP|AVOID|REJECT)(?:\s+\w+){{0,12}}\s+(?:TO\s+)?{re.escape(symbol)}\b",
+                rf"\b(?:IGNORE\w*|DISREGARD\w*|REJECT\w*)\b(?:\s+[\w’']+){{0,6}}\s+(?:INSTRUCTION|REQUEST)\b.{{0,100}}\b{re.escape(symbol)}\b",
                 rf"\b{re.escape(symbol)}\b.{{0,80}}\b(?:NOT RELEVANT|OUT OF SCOPE)\b",
                 rf"\b{re.escape(symbol)}\b.{{0,80}}(?:KHÔNG THUỘC PHẠM VI|BỎ QUA)",
             )
