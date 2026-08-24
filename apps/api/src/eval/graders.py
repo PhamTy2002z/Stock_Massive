@@ -70,6 +70,14 @@ class GradingContext:
 
 Grader = Callable[[GradingContext, Sequence[Expectation]], GraderVerdict]
 
+GRADER_VERSIONS = {
+    "figure-value-unit": "1.1.0",
+    "entity-scope": "1.1.0",
+    "evidence-health-coverage": "1.1.0",
+    "refusal-uncertainty": "2.0.0",
+    "claims-conclusion": "2.0.0",
+}
+
 
 class GraderRegistry:
     def __init__(self) -> None:
@@ -123,7 +131,7 @@ def _spec(
 ) -> GraderSpec:
     return GraderSpec(
         grader_id=grader_id,
-        version="1.0.0",
+        version=GRADER_VERSIONS.get(grader_id, "1.0.0"),
         grader_class=grader_class,
         mode="deterministic",
         surfaces=("conversation", "analysis"),
@@ -259,6 +267,8 @@ def _unit_appears(unit: str, text: str) -> bool:
                 "hàng năm",
                 "mỗi năm",
                 "năm hóa",
+                "thường niên hóa",
+                "quy đổi năm",
                 "/năm",
             )
         )
@@ -312,6 +322,8 @@ def _forbidden_entity_asserted(symbol: str, text: str) -> bool:
             re.search(pattern, sentence)
             for pattern in (
                 rf"\b(?:NOT|IGNORE|SKIP|AVOID)\s+{re.escape(symbol)}\b",
+                rf"\b(?:DID|DO|DOES|WILL|WOULD|SHALL|CAN)\s+NOT(?:\s+\w+){{0,4}}\s+{re.escape(symbol)}\b",
+                rf"\b(?:IGNORE|SKIP|AVOID|REJECT)(?:\s+\w+){{0,12}}\s+(?:TO\s+)?{re.escape(symbol)}\b",
                 rf"\b{re.escape(symbol)}\b.{{0,80}}\b(?:NOT RELEVANT|OUT OF SCOPE)\b",
                 rf"\b{re.escape(symbol)}\b.{{0,80}}(?:KHÔNG THUỘC PHẠM VI|BỎ QUA)",
             )
