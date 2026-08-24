@@ -19,7 +19,7 @@ from .grading import GradePipeline
 from .harness import EvalHarness, GatePolicy
 from .report import build_artifact, load_artifact, persist_artifact, render_markdown
 from .rubric import RUBRIC_VERSION, StaticRubricJudge
-from .smoke import execute_live_case, execute_scripted_case, live_rubric_judge, smoke_config, tool_catalog_for_case
+from .smoke import execute_live_case, execute_scripted_case, live_rubric_judge, smoke_config, tool_catalog_for_case, validate_fixture_contract
 from .versions import code_stamp, llm_identity, prompt_identity, provider_capability_identity, tool_catalog_identity
 
 API_ROOT = Path(__file__).resolve().parents[2]
@@ -37,7 +37,14 @@ def _policy(path: Path) -> GatePolicy:
 def _identity(dataset: Any, policy: GatePolicy, *, mode: str) -> dict[str, Any]:
     config = smoke_config() if mode == "smoke" else llm_config_from_settings()
     registry = default_registry()
-    catalog = tuple(tool_catalog_for_case(case)[0].as_schema() for case in dataset.cases.values() if tool_catalog_for_case(case))
+    catalog = tuple(
+        entry.as_schema()
+        for case in dataset.cases.values()
+        for entry in tool_catalog_for_case(
+            case,
+            tuple(dataset.snapshots[pin.snapshot_id] for pin in case.snapshots),
+        )
+    )
     unique = {item.name: item for item in catalog}
     tools = tool_catalog_identity(tuple(unique[name] for name in sorted(unique)))
     provider = provider_capability_identity()
@@ -101,6 +108,11 @@ def _validate(args: argparse.Namespace) -> int:
     dataset = load_dataset(args.dataset)
     policy = _policy(args.policy)
     GradePipeline().validate_cases(tuple(dataset.cases.values()))
+    for case in dataset.cases.values():
+        validate_fixture_contract(
+            case,
+            tuple(dataset.snapshots[pin.snapshot_id] for pin in case.snapshots),
+        )
     if policy.dataset_id != dataset.manifest.dataset_id:
         raise ValueError("gate policy targets another dataset")
     print(json.dumps({"dataset_id": dataset.manifest.dataset_id, "dataset_digest": dataset.dataset_digest, "cases": len(dataset.cases), "snapshots": len(dataset.snapshots), "graders": default_registry().versions}, sort_keys=True))

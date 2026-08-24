@@ -7,25 +7,35 @@
       "source": "fiinquant",
       "capability": "market",
       "entity": "FPT",
-      "unit": "VND",
-      "value": 100000,
+      "unit": "percent_annualized",
+      "value": 13.991745966790258,
       "health": "ok",
       "effective_at": "2026-08-21T15:00:00+07:00",
       "published_at": "2026-08-21T15:01:00+07:00",
       "ingested_at": "2026-08-21T15:02:00+07:00",
-      "provenance": "synthetic reviewed FiinQuant market fixture",
-      "price_basis": "raw",
+      "provenance": "synthetic reviewed Signal Field result",
+      "price_basis": null,
       "metadata": {
         "fixture_kind": "tool_result",
         "tool_name": "get_field",
         "arguments": {
-          "field_id": "price.close"
+          "field_id": "realized_volatility.yang_zhang_annualized_pct"
         },
         "result": {
-          "fieldId": "price.close",
-          "value": 100000,
-          "unit": "VND",
+          "fieldId": "realized_volatility.yang_zhang_annualized_pct",
+          "label": "Realized volatility",
+          "value": 13.991745966790258,
+          "unit": "percent_annualized",
+          "kind": "estimator",
+          "source": "computed",
+          "interpretation": "Annualized realized volatility over the available 60-session window; it measures past move size, not direction.",
+          "health": "ok",
+          "reasonCode": null,
+          "reason": null,
           "asOf": "2026-08-21",
+          "sessionsUsed": 61,
+          "windowDays": 61,
+          "extras": {},
           "evidence_references": [
             "snapshot:fpt-reviewed-evidence"
           ]
@@ -162,12 +172,150 @@
         "tool_name": "list_fields",
         "arguments": {},
         "result": {
+          "axis": null,
+          "count": 4,
           "fields": [
-            "market.last_price"
+            {
+              "fieldId": "realized_volatility.yang_zhang_annualized_pct",
+              "label": "Realized volatility",
+              "axis": "technical",
+              "unit": "percent_annualized",
+              "kind": "estimator",
+              "minSessions": 61
+            },
+            {
+              "fieldId": "liquidity_profile.adtv_vnd",
+              "label": "Average daily traded value",
+              "axis": "money_flow",
+              "unit": "vnd",
+              "kind": "estimator",
+              "minSessions": 21
+            },
+            {
+              "fieldId": "drawdown_stats.current_drawdown_pct",
+              "label": "Current drawdown",
+              "axis": "technical",
+              "unit": "percent",
+              "kind": "estimator",
+              "minSessions": 250
+            },
+            {
+              "fieldId": "factor_percentiles.earnings_yield_percentile",
+              "label": "Earnings yield percentile",
+              "axis": "fundamental",
+              "unit": "percentile",
+              "kind": "percentile",
+              "minSessions": 1
+            }
           ],
           "evidence_references": [
             "snapshot:fpt-reviewed-evidence"
           ]
+        }
+      }
+    },
+    {
+      "source": "fiinquant",
+      "capability": "market",
+      "entity": "FPT",
+      "unit": "vnd",
+      "value": 100000000000,
+      "health": "ok",
+      "effective_at": "2026-08-21T15:00:00+07:00",
+      "published_at": "2026-08-21T15:01:00+07:00",
+      "ingested_at": "2026-08-21T15:02:00+07:00",
+      "provenance": "synthetic reviewed Signal Field result",
+      "price_basis": null,
+      "metadata": {
+        "fixture_kind": "tool_result",
+        "tool_name": "get_field",
+        "arguments": {"field_id": "liquidity_profile.adtv_vnd"},
+        "result": {
+          "fieldId": "liquidity_profile.adtv_vnd",
+          "label": "Average daily traded value",
+          "value": 100000000000,
+          "unit": "vnd",
+          "kind": "estimator",
+          "source": "computed",
+          "interpretation": "Average money traded per session over the available 20-session window; it describes liquidity, not price direction.",
+          "health": "ok",
+          "reasonCode": null,
+          "reason": null,
+          "asOf": "2026-08-21",
+          "sessionsUsed": 21,
+          "windowDays": 21,
+          "extras": {},
+          "evidence_references": ["snapshot:fpt-reviewed-evidence"]
+        }
+      }
+    },
+    {
+      "source": "fiinquant",
+      "capability": "market",
+      "entity": "FPT",
+      "unit": "percent",
+      "value": null,
+      "health": "absent",
+      "effective_at": "2026-08-21T15:00:00+07:00",
+      "published_at": "2026-08-21T15:01:00+07:00",
+      "ingested_at": "2026-08-21T15:02:00+07:00",
+      "provenance": "synthetic reviewed Signal Field refusal",
+      "price_basis": null,
+      "metadata": {
+        "fixture_kind": "tool_result",
+        "tool_name": "get_field",
+        "arguments": {"field_id": "drawdown_stats.current_drawdown_pct"},
+        "result": {
+          "fieldId": "drawdown_stats.current_drawdown_pct",
+          "label": "Current drawdown",
+          "value": null,
+          "unit": "percent",
+          "kind": "estimator",
+          "source": "computed",
+          "interpretation": "Distance below the running high over 250 sessions.",
+          "health": "refused",
+          "reasonCode": "insufficient_history",
+          "reason": "The store holds fewer sessions than this figure needs, so it was not computed over a shortened window.",
+          "asOf": null,
+          "sessionsUsed": 61,
+          "windowDays": 250,
+          "extras": {},
+          "evidence_references": ["snapshot:fpt-reviewed-evidence"]
+        }
+      }
+    },
+    {
+      "source": "fiinquant",
+      "capability": "valuation",
+      "entity": "FPT",
+      "unit": "percentile",
+      "value": null,
+      "health": "absent",
+      "effective_at": "2026-08-21T15:00:00+07:00",
+      "published_at": "2026-08-21T15:01:00+07:00",
+      "ingested_at": "2026-08-21T15:02:00+07:00",
+      "provenance": "synthetic reviewed Signal Field refusal",
+      "price_basis": null,
+      "metadata": {
+        "fixture_kind": "tool_result",
+        "tool_name": "get_field",
+        "arguments": {"field_id": "factor_percentiles.earnings_yield_percentile"},
+        "result": {
+          "fieldId": "factor_percentiles.earnings_yield_percentile",
+          "label": "Earnings yield percentile",
+          "value": null,
+          "unit": "percentile",
+          "kind": "percentile",
+          "source": "stored",
+          "interpretation": "Relative earnings-yield position in the reviewed universe.",
+          "health": "refused",
+          "reasonCode": "ranking_unavailable",
+          "reason": "No ranking is currently published for this figure to be placed in.",
+          "asOf": null,
+          "sessionsUsed": null,
+          "windowDays": 21,
+          "extras": {},
+          "evidence_references": ["snapshot:fpt-reviewed-evidence"]
         }
       }
     }

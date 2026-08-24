@@ -17,7 +17,7 @@ import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
-from src.agent import registry
+from src.agent import definitions, registry, toolsets
 from src.agent.registry import ToolEntry, object_schema
 from src.alpha.models import (
     AgentToolCall,
@@ -108,6 +108,85 @@ def test_eval_smoke_cold_import_registers_user_fk_target():
     )
 
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.asyncio
+async def test_fixture_world_accepts_catalog_filter_and_scoped_symbol(case_store):
+    snapshot = conversation_snapshot()
+    catalog_result = snapshot.evidence[0].model_copy(
+        update={
+            "metadata": {
+                "fixture_kind": "tool_result",
+                "tool_name": "list_fields",
+                "arguments": {},
+                "result": {
+                    "axis": None,
+                    "count": 2,
+                    "fields": [
+                        {"fieldId": "technical.one", "axis": "technical"},
+                        {"fieldId": "money.one", "axis": "money_flow"},
+                    ],
+                    "evidence_references": ["snapshot:frozen-market"],
+                },
+            }
+        }
+    )
+    field_result = snapshot.evidence[0].model_copy(
+        update={
+            "metadata": {
+                "fixture_kind": "tool_result",
+                "tool_name": "get_field",
+                "arguments": {"field_id": "technical.one"},
+                "result": {
+                    "fieldId": "technical.one",
+                    "value": 1.0,
+                    "unit": "ratio",
+                    "health": "ok",
+                    "evidence_references": ["snapshot:frozen-market"],
+                },
+            }
+        }
+    )
+    snapshot = snapshot.model_copy(update={"evidence": (catalog_result, field_result)})
+    world = FixtureWorld(
+        case=conversation_case(),
+        snapshots=(snapshot,),
+        session_factory=case_store,
+        tool_catalog=(list_fields_entry([]), get_field_entry([])),
+        clock=lambda: NOW,
+    )
+    original_signals = toolsets.TOOLSETS["signals"]
+
+    with world:
+        assert toolsets.TOOLSETS["signals"]["tools"] == (
+            "list_fields",
+            "get_field",
+        )
+        offered = definitions.get_tool_definitions(world.toolsets)
+        assert tuple(tool.name for tool in offered) == (
+            "list_fields",
+            "get_field",
+        )
+        assert world.user_id is not None
+        thread = await world.store.create_thread(world.user_id, title="fixture")
+        world.bind_thread(thread.id)
+        context = registry.ToolContext(user_id=world.user_id, thread_id=thread.id)
+        assert registry.get("get_field").is_async is True
+        listed = await registry.get("list_fields").handler(
+            context, {"axis": "technical"}
+        )
+        listed_all = await registry.get("list_fields").handler(
+            context, {"axis": None}
+        )
+        figure = await registry.get("get_field").handler(
+            context, {"field_id": "technical.one", "symbol": SYMBOL}
+        )
+
+    assert toolsets.TOOLSETS["signals"] is original_signals
+    assert listed["count"] == 1
+    assert listed["fields"][0]["fieldId"] == "technical.one"
+    assert listed_all["count"] == 2
+    assert figure["value"] == 1.0
 
 
 @pytest.fixture

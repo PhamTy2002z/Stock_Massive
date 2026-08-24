@@ -12,6 +12,11 @@ from src.eval.contracts import TrajectoryEvent, TrialOutcome
 from src.eval.dataset import load_dataset
 from src.eval.grading import GradePipeline
 from src.eval.runner import EvalResult, ObservableOutcome
+from src.eval.smoke import (
+    FixtureContractInvalid,
+    tool_catalog_for_case,
+    validate_fixture_contract,
+)
 
 NOW = datetime(2026, 8, 21, 10, tzinfo=timezone.utc)
 ROOT = Path(__file__).parents[1] / "eval" / "datasets" / "investment-intelligence-v1"
@@ -62,6 +67,45 @@ def test_battery_contract_and_registry_coverage():
     assert sum(case.family == "adversarial-policy" for case in cases) == 4
     assert all(any("naive fluent" in trap for trap in case.traps) for case in cases)
     GradePipeline().validate_cases(cases)
+    for case in cases:
+        snapshots = tuple(
+            dataset.snapshots[pin.snapshot_id] for pin in case.snapshots
+        )
+        validate_fixture_contract(case, snapshots)
+
+
+def test_fixture_catalog_uses_production_signal_schemas_and_exposes_discovery():
+    dataset = load_dataset(ROOT)
+    case = dataset.cases["fact-close-price"]
+    snapshots = tuple(dataset.snapshots[pin.snapshot_id] for pin in case.snapshots)
+
+    catalog = tool_catalog_for_case(case, snapshots)
+
+    assert [entry.name for entry in catalog] == ["list_fields", "get_field"]
+    field_schema = catalog[1].schema["properties"]["field_id"]
+    assert field_schema["description"].startswith("A fieldId from list_fields")
+    assert "symbol" in catalog[1].schema["properties"]
+
+
+def test_fixture_contract_rejects_an_unreachable_hard_figure():
+    dataset = load_dataset(ROOT)
+    original = dataset.cases["fact-close-price"]
+    unreachable = original.expectations[1].model_copy(
+        update={
+            "params": {
+                "value": 999_999,
+                "unit": "VND",
+                "evidence_reference": "snapshot:fpt-reviewed-evidence",
+            }
+        }
+    )
+    case = original.model_copy(
+        update={"expectations": (*original.expectations, unreachable)}
+    )
+    snapshots = tuple(dataset.snapshots[pin.snapshot_id] for pin in case.snapshots)
+
+    with pytest.raises(FixtureContractInvalid, match="unreachable hard figure"):
+        validate_fixture_contract(case, snapshots)
 
 
 @pytest.mark.asyncio

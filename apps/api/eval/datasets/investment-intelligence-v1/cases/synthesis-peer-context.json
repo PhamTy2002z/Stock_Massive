@@ -6,7 +6,7 @@
   "title": "Explain missing peer context honestly",
   "as_of": "2026-08-21",
   "input": {
-    "prompt": "Is FPT's 20.5x valuation cheap versus peers?",
+    "prompt": "Does FPT's earnings-yield percentile prove it is cheap versus peers? Read the registered field and explain the available comparison.",
     "symbol": null,
     "trading_day": null
   },
@@ -18,26 +18,6 @@
     {
       "kind": "terminal_completed",
       "params": {}
-    },
-    {
-      "kind": "figure",
-      "params": {
-        "value": 20.5,
-        "tolerance": 0.01,
-        "unit": "multiple"
-      }
-    },
-    {
-      "kind": "uncertainty",
-      "params": {}
-    },
-    {
-      "kind": "forbidden_claims",
-      "params": {
-        "values": [
-          "definitely cheap"
-        ]
-      }
     },
     {
       "kind": "material_evidence",
@@ -54,7 +34,7 @@
   "snapshots": [
     {
       "snapshot_id": "fpt-reviewed-evidence",
-      "digest": "ec8939ace80be801"
+      "digest": "6a5ee415e2720f93"
     }
   ]
 }

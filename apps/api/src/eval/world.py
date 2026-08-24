@@ -76,6 +76,7 @@ class FixtureWorld:
         self.provider_access_attempts: list[str] = []
         self.scope_violations: list[str] = []
         self._previous_entries: tuple[registry.ToolEntry, ...] = ()
+        self._previous_toolsets: dict[str, toolsets.Toolset | None] = {}
         self._stack: ExitStack | None = None
         self._responses = self._fixture_responses()
 
@@ -98,6 +99,18 @@ class FixtureWorld:
         registry.clear()
         definitions.clear_cache()
         toolsets.clear_memo()
+        selected_tools: dict[str, list[str]] = {}
+        for entry in self.tool_catalog:
+            selected_tools.setdefault(entry.toolset, []).append(entry.name)
+        for name, tools in selected_tools.items():
+            previous = toolsets.TOOLSETS.get(name)
+            self._previous_toolsets[name] = previous
+            toolsets.TOOLSETS[name] = {
+                "description": (
+                    "Case-local replay tools backed by this evaluation fixture."
+                ),
+                "tools": tuple(dict.fromkeys(tools)),
+            }
         self._stack = ExitStack()
         self._stack.enter_context(store_only_execution())
         try:
@@ -109,6 +122,7 @@ class FixtureWorld:
                         handler=self._handler(entry.name),
                         check_fn=None,
                         requires_env=(),
+                        is_async=True,
                     )
                 )
             return self
@@ -128,6 +142,12 @@ class FixtureWorld:
         registry.clear()
         for entry in self._previous_entries:
             registry.register(entry)
+        for name, previous in self._previous_toolsets.items():
+            if previous is None:
+                toolsets.TOOLSETS.pop(name, None)
+            else:
+                toolsets.TOOLSETS[name] = previous
+        self._previous_toolsets.clear()
         definitions.clear_cache()
         toolsets.clear_memo()
 
@@ -160,12 +180,11 @@ class FixtureWorld:
         async def invoke(context: registry.ToolContext, arguments: Mapping[str, Any]) -> Any:
             try:
                 self._assert_scope(context, arguments)
-                key = (tool_name, canonical_json(dict(arguments)))
-                if key not in self._responses:
+                found, result = self._response_for(tool_name, arguments)
+                if not found:
                     raise FixtureMiss(
                         f"no frozen result for {tool_name} with {dict(arguments)!r}"
                     )
-                result = self._responses[key]
                 if isinstance(result, BaseException):
                     raise result
                 if callable(result):
@@ -202,6 +221,40 @@ class FixtureWorld:
                 raise
 
         return invoke
+
+    def _response_for(
+        self, tool_name: str, arguments: Mapping[str, Any]
+    ) -> tuple[bool, Any]:
+        key = (tool_name, canonical_json(dict(arguments)))
+        if key in self._responses:
+            return True, self._responses[key]
+
+        without_nulls = {
+            key: value for key, value in arguments.items() if value is not None
+        }
+        fallback = (tool_name, canonical_json(without_nulls))
+        if fallback in self._responses:
+            return True, self._responses[fallback]
+
+        if tool_name == "get_field" and "symbol" in arguments:
+            scoped = {key: value for key, value in arguments.items() if key != "symbol"}
+            fallback = (tool_name, canonical_json(scoped))
+            if fallback in self._responses:
+                return True, self._responses[fallback]
+
+        if tool_name == "list_fields" and arguments.get("axis"):
+            fallback = (tool_name, canonical_json({}))
+            result = self._responses.get(fallback)
+            if isinstance(result, Mapping):
+                axis = str(arguments["axis"])
+                fields = [
+                    item
+                    for item in result.get("fields", [])
+                    if isinstance(item, Mapping) and item.get("axis") == axis
+                ]
+                return True, {**result, "axis": axis, "count": len(fields), "fields": fields}
+
+        return False, None
 
     def _assert_scope(
         self, context: registry.ToolContext, arguments: Mapping[str, Any]

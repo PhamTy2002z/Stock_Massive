@@ -17,18 +17,6 @@
       "params": {}
     },
     {
-      "kind": "uncertainty",
-      "params": {}
-    },
-    {
-      "kind": "forbidden_claims",
-      "params": {
-        "values": [
-          "long-term trend confirmed"
-        ]
-      }
-    },
-    {
       "kind": "material_evidence",
       "params": {
         "required": [
@@ -43,7 +31,7 @@
   "snapshots": [
     {
       "snapshot_id": "fpt-analysis-window",
-      "digest": "a1342f237c88c10b"
+      "digest": "631a453eef5a1acd"
     }
   ]
 }

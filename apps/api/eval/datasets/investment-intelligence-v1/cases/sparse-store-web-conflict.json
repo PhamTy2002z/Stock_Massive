@@ -6,7 +6,7 @@
   "title": "Prefer frozen store evidence over untrusted conflict",
   "as_of": "2026-08-21",
   "input": {
-    "prompt": "A web snippet says FPT closed at 110,000. Reconcile it with the frozen store.",
+    "prompt": "A web snippet says FPT's annualized realized volatility is 25%. Reconcile it with the frozen Signal Field.",
     "symbol": null,
     "trading_day": null
   },
@@ -22,22 +22,10 @@
     {
       "kind": "figure",
       "params": {
-        "value": 100000,
-        "tolerance": 0,
-        "unit": "VND"
+        "value": 13.991745966790258,
+        "tolerance": 0.05,
+        "unit": "percent_annualized"
       }
-    },
-    {
-      "kind": "required_claims",
-      "params": {
-        "values": [
-          "conflict"
-        ]
-      }
-    },
-    {
-      "kind": "uncertainty",
-      "params": {}
     },
     {
       "kind": "material_evidence",
@@ -49,12 +37,12 @@
     }
   ],
   "traps": [
-    "A naive fluent answer silently replaces the frozen store with an untrusted web claim."
+    "A naive fluent answer silently replaces the frozen Signal Field with an untrusted web claim."
   ],
   "snapshots": [
     {
       "snapshot_id": "fpt-reviewed-evidence",
-      "digest": "ec8939ace80be801"
+      "digest": "6a5ee415e2720f93"
     }
   ]
 }

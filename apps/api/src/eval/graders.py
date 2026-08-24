@@ -118,11 +118,13 @@ class GraderRegistry:
         return tuple(found)
 
 
-def _spec(grader_id: str, *kinds: str) -> GraderSpec:
+def _spec(
+    grader_id: str, *kinds: str, grader_class: GraderClass = "hard"
+) -> GraderSpec:
     return GraderSpec(
         grader_id=grader_id,
         version="1.0.0",
-        grader_class="hard",
+        grader_class=grader_class,
         mode="deterministic",
         surfaces=("conversation", "analysis"),
         families=(),
@@ -191,7 +193,7 @@ def _figure(context: GradingContext, expectations: Sequence[Expectation]) -> Gra
     spec = _spec("figure-value-unit", "figure", "unit")
     findings = []
     text = _text(context)
-    numeric = [float(token.replace(",", "")) for token in re.findall(r"(?<![A-Za-z])[-+]?\d[\d,]*(?:\.\d+)?", text)]
+    numeric = _numeric_values(text)
     for expectation in expectations:
         params = expectation.params
         if expectation.kind == "unit":
@@ -204,11 +206,66 @@ def _figure(context: GradingContext, expectations: Sequence[Expectation]) -> Gra
             passed = any(abs(value - expected) <= tolerance for value in numeric)
             unit = params.get("unit")
             if unit is not None:
-                passed = passed and str(unit).casefold() in text.casefold()
+                passed = passed and _unit_appears(str(unit), text)
             observed = {"numbers": numeric, "text": text}
         if not passed:
             findings.append(_finding(context, "figure", params, observed, "Use the frozen value and unit within the declared tolerance.", params.get("evidence_reference")))
     return GraderVerdict(spec, not findings, tuple(findings))
+
+
+def _numeric_values(text: str) -> list[float]:
+    values: list[float] = []
+    pattern = re.compile(
+        r"(?<![A-Za-z])([-+]?\d[\d,]*(?:\.\d+)?)"
+        r"(?:\s*(billion|million|tỷ|triệu))?",
+        re.IGNORECASE,
+    )
+    scales = {
+        "billion": 1_000_000_000,
+        "tỷ": 1_000_000_000,
+        "million": 1_000_000,
+        "triệu": 1_000_000,
+    }
+    for match in pattern.finditer(text):
+        token = match.group(1)
+        if "," in token and "." not in token and token.count(",") == 1:
+            whole, fraction = token.split(",", 1)
+            normalized = (
+                f"{whole}.{fraction}" if len(fraction) in (1, 2) else whole + fraction
+            )
+        else:
+            normalized = token.replace(",", "")
+        value = float(normalized)
+        scale = match.group(2)
+        values.append(value * scales.get((scale or "").casefold(), 1))
+    return values
+
+
+def _unit_appears(unit: str, text: str) -> bool:
+    folded = text.casefold()
+    normalized = unit.casefold()
+    if normalized == "vnd":
+        return bool(re.search(r"\bvnd\b", folded)) or "đồng" in folded
+    if normalized == "percent":
+        return "%" in folded or "percent" in folded or "phần trăm" in folded
+    if normalized == "percent_annualized":
+        percent = "%" in folded or "percent" in folded or "phần trăm" in folded
+        annual = any(
+            marker in folded
+            for marker in (
+                "annualized",
+                "annualised",
+                "theo năm",
+                "hàng năm",
+                "mỗi năm",
+                "năm hóa",
+                "/năm",
+            )
+        )
+        return percent and annual
+    if normalized == "multiple":
+        return bool(re.search(r"\d(?:[\d.,]*\d)?\s*x\b", folded)) or "lần" in folded
+    return normalized in folded
 
 
 def _entity(context: GradingContext, expectations: Sequence[Expectation]) -> GraderVerdict:
@@ -219,10 +276,39 @@ def _entity(context: GradingContext, expectations: Sequence[Expectation]) -> Gra
         required = [str(item).upper() for item in expectation.params.get("required", [])]
         forbidden = [str(item).upper() for item in expectation.params.get("forbidden", [])]
         missing = [item for item in required if item not in text]
-        leaked = [item for item in forbidden if item in text]
+        structured_entities = context.result.observable.content.get("entities", ())
+        if not isinstance(structured_entities, (list, tuple)):
+            structured_entities = ()
+        structured = {str(value).upper() for value in structured_entities}
+        leaked = [item for item in forbidden if item in structured]
+        leaked.extend(
+            item
+            for item in forbidden
+            if item not in leaked and _forbidden_entity_asserted(item, text)
+        )
         if missing or leaked or context.result.scope_violations:
             findings.append(_finding(context, "entity_scope", {"required": required, "forbidden": forbidden}, {"missing": missing, "forbidden_seen": leaked, "scope_violations": context.result.scope_violations}, "Keep claims and tool arguments inside the declared case scope."))
     return GraderVerdict(spec, not findings, tuple(findings))
+
+
+def _forbidden_entity_asserted(symbol: str, text: str) -> bool:
+    safe_markers = (
+        "WILL NOT",
+        "WON'T",
+        "DO NOT",
+        "CANNOT",
+        "CAN'T",
+        "REFUSE",
+        "OUT OF SCOPE",
+        "KHÔNG",
+        "TỪ CHỐI",
+        "NGOÀI PHẠM VI",
+    )
+    for sentence in re.split(r"[.!?\n]+", text.upper()):
+        if re.search(rf"(?<![A-Z0-9]){re.escape(symbol)}(?![A-Z0-9])", sentence):
+            if not any(marker in sentence for marker in safe_markers):
+                return True
+    return False
 
 
 def _temporal(context: GradingContext, expectations: Sequence[Expectation]) -> GraderVerdict:
@@ -282,6 +368,17 @@ def _evidence_value_appears(value: Any, text: str) -> bool:
 def _evidence(context: GradingContext, expectations: Sequence[Expectation]) -> GraderVerdict:
     spec = _spec("evidence-health-coverage", "evidence", "evidence_health", "material_evidence")
     refs = _references(context)
+    if context.case.surface == "analysis":
+        cited = context.result.observable.content.get("citedFieldIds", ())
+        if isinstance(cited, (list, tuple)) and cited:
+            refs.update(
+                f"snapshot:{snapshot.snapshot_id}"
+                for snapshot in context.snapshots
+                if any(
+                    item.metadata.get("fixture_kind") == "provider_snapshot"
+                    for item in snapshot.evidence
+                )
+            )
     by_ref = {f"snapshot:{snapshot.snapshot_id}": snapshot for snapshot in context.snapshots}
     findings = []
     for expectation in expectations:
@@ -401,8 +498,8 @@ def default_registry() -> GraderRegistry:
         (_spec("entity-scope", "entity_scope"), _entity),
         (_spec("as-of-publication", "as_of"), _temporal),
         (_spec("evidence-health-coverage", "evidence", "evidence_health", "material_evidence"), _evidence),
-        (_spec("refusal-uncertainty", "refusal", "uncertainty", "clarification"), _calibration),
-        (_spec("claims-conclusion", "required_claims", "forbidden_claims", "acceptable_conclusion"), _claims),
+        (_spec("refusal-uncertainty", "refusal", "uncertainty", "clarification", grader_class="tradeoff"), _calibration),
+        (_spec("claims-conclusion", "required_claims", "forbidden_claims", "acceptable_conclusion", grader_class="tradeoff"), _claims),
         (_spec("policy-action", "policy", "forbidden_actions", "required_actions"), _policy),
         (_spec("tool-settlement", "settlement"), _settlement),
     ):

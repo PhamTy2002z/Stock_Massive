@@ -41,12 +41,57 @@
         "tool_name": "list_fields",
         "arguments": {},
         "result": {
+          "axis": null,
+          "count": 1,
           "fields": [
-            "realized_volatility.yang_zhang_annualized_pct"
+            {
+              "fieldId": "realized_volatility.yang_zhang_annualized_pct",
+              "label": "Realized volatility",
+              "axis": "technical",
+              "unit": "percent_annualized",
+              "kind": "estimator",
+              "minSessions": 61
+            }
           ],
           "evidence_references": [
             "snapshot:fpt-analysis-window"
           ]
+        }
+      }
+    },
+    {
+      "source": "fiinquant",
+      "capability": "market",
+      "entity": "FPT",
+      "unit": "percent_annualized",
+      "value": 13.991745966790258,
+      "health": "ok",
+      "effective_at": "2026-08-21T15:00:00+07:00",
+      "published_at": "2026-08-21T15:01:00+07:00",
+      "ingested_at": "2026-08-21T15:02:00+07:00",
+      "provenance": "synthetic reviewed Signal Field result",
+      "price_basis": null,
+      "available_after_as_of": false,
+      "metadata": {
+        "fixture_kind": "tool_result",
+        "tool_name": "get_field",
+        "arguments": {"field_id": "realized_volatility.yang_zhang_annualized_pct"},
+        "result": {
+          "fieldId": "realized_volatility.yang_zhang_annualized_pct",
+          "label": "Realized volatility",
+          "value": 13.991745966790258,
+          "unit": "percent_annualized",
+          "kind": "estimator",
+          "source": "computed",
+          "interpretation": "Annualized realized volatility over the available 60-session window; it measures past move size, not direction.",
+          "health": "ok",
+          "reasonCode": null,
+          "reason": null,
+          "asOf": "2026-08-21",
+          "sessionsUsed": 61,
+          "windowDays": 61,
+          "extras": {},
+          "evidence_references": ["snapshot:fpt-analysis-window"]
         }
       }
     },

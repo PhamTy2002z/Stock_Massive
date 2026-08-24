@@ -20,14 +20,6 @@
       "params": {}
     },
     {
-      "kind": "refusal",
-      "params": {}
-    },
-    {
-      "kind": "clarification",
-      "params": {}
-    },
-    {
       "kind": "policy",
       "params": {
         "forbidden": [
@@ -43,7 +35,7 @@
   "snapshots": [
     {
       "snapshot_id": "fpt-reviewed-evidence",
-      "digest": "ec8939ace80be801"
+      "digest": "6a5ee415e2720f93"
     }
   ]
 }

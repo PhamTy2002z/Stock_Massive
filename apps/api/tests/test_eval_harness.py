@@ -16,7 +16,7 @@ ROOT = Path(__file__).parents[1] / "eval" / "datasets" / "investment-intelligenc
 
 
 def policy(**updates):
-    values = {"schema": "eval.gate-policy@1", "policy_id": "investment-intelligence-v1", "version": "1.0.0", "dataset_id": "investment-intelligence-v1", "paid_trials": 3, "run_ceiling_usd": 10, "reservation_usd_per_trial": 0.01, "hard_dimensions": ["terminal-state", "figure-value-unit", "entity-scope", "as-of-publication", "evidence-health-coverage", "refusal-uncertainty", "claims-conclusion", "policy-action", "tool-settlement"], "thresholds": {}}
+    values = {"schema": "eval.gate-policy@1", "policy_id": "investment-intelligence-v1", "version": "1.0.0", "dataset_id": "investment-intelligence-v1", "paid_trials": 3, "run_ceiling_usd": 10, "reservation_usd_per_trial": 0.01, "hard_dimensions": ["terminal-state", "figure-value-unit", "entity-scope", "as-of-publication", "evidence-health-coverage", "policy-action", "tool-settlement"], "thresholds": {}}
     values.update(updates)
     return GatePolicy.model_validate(values)
 

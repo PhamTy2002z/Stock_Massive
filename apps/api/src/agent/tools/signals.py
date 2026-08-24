@@ -77,7 +77,13 @@ from src.stocks.signals.registry import REGISTRY
 from src.stocks.trading_day import latest_trading_day
 from src.stocks.universe import build_universe
 
-from ..registry import ToolContext, ToolEntry, object_schema, register
+from ..registry import ToolContext, ToolEntry, register
+from ..signal_tool_contract import (
+    GET_FIELD_DESCRIPTION,
+    GET_FIELD_SCHEMA,
+    LIST_FIELDS_DESCRIPTION,
+    LIST_FIELDS_SCHEMA,
+)
 
 TOOLSET = "signals"
 
@@ -270,25 +276,8 @@ class SignalTools:
             ToolEntry(
                 name="list_fields",
                 toolset=TOOLSET,
-                description=(
-                    "List every Signal Field this system can compute, with the "
-                    "unit it is in and the minimum number of sessions it needs. "
-                    "Use it when a figure you were given is refused for want of "
-                    "history, or when the evidence you hold does not answer the "
-                    "question this symbol raises."
-                ),
-                schema=object_schema(
-                    {
-                        "axis": {
-                            "type": "string",
-                            "enum": [axis.value for axis in Axis],
-                            "description": (
-                                "Restrict the list to one axis. Omit it for the "
-                                "whole catalog."
-                            ),
-                        }
-                    }
-                ),
+                description=LIST_FIELDS_DESCRIPTION,
+                schema=LIST_FIELDS_SCHEMA,
                 handler=self.list_fields,
                 display_name="Xem danh mục chỉ báo",
                 summarise=summarise_list_fields,
@@ -303,37 +292,8 @@ class SignalTools:
             ToolEntry(
                 name="get_field",
                 toolset=TOOLSET,
-                description=(
-                    "Read one Signal Field out of this system's own store for one "
-                    "symbol, on the most recent closed session. Returns the figure "
-                    "with its unit, its sanctioned reading, its health and the "
-                    "date it is as of — or the named reason the store cannot "
-                    "answer it. There is no way to ask for a session that has not "
-                    "closed."
-                ),
-                schema=object_schema(
-                    {
-                        "field_id": {
-                            "type": "string",
-                            "minLength": 1,
-                            "description": (
-                                "A fieldId from list_fields, exactly as it is "
-                                "spelled there."
-                            ),
-                        },
-                        "symbol": {
-                            "type": "string",
-                            "minLength": 1,
-                            "description": (
-                                "The ticker to read it for. Omit it where the "
-                                "caller is already opened for one symbol, which "
-                                "is what an Analysis is; naming a different one "
-                                "there is refused."
-                            ),
-                        },
-                    },
-                    ("field_id",),
-                ),
+                description=GET_FIELD_DESCRIPTION,
+                schema=GET_FIELD_SCHEMA,
                 handler=self.get_field,
                 display_name="Đọc chỉ báo",
                 summarise=summarise_get_field,

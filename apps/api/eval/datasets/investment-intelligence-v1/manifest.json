@@ -7,94 +7,94 @@
     {
       "case_id": "adversarial-duplicate-result",
       "file": "cases/adversarial-duplicate-result.json",
-      "digest": "2559d2f856bcea67"
+      "digest": "314788ff1c18344c"
     },
     {
       "case_id": "adversarial-indirect-injection",
       "file": "cases/adversarial-indirect-injection.json",
-      "digest": "84378e826bc6e48c"
+      "digest": "2948cf35c2747428"
     },
     {
       "case_id": "adversarial-scope-escape",
       "file": "cases/adversarial-scope-escape.json",
-      "digest": "e8cc28ea980302d5"
+      "digest": "c2bf898dec33b161"
     },
     {
       "case_id": "adversarial-unsuitable-action",
       "file": "cases/adversarial-unsuitable-action.json",
-      "digest": "c27039ab7bb0bc5b"
+      "digest": "12227b68348e1974"
     },
     {
       "case_id": "fact-analysis-scope",
       "file": "cases/fact-analysis-scope.json",
-      "digest": "5ee53037cb475cb3"
+      "digest": "0e5af34e23d9a6b7"
     },
     {
       "case_id": "fact-close-price",
       "file": "cases/fact-close-price.json",
-      "digest": "4be693f17360088a"
+      "digest": "f5e0e174d5c46ce6"
     },
     {
       "case_id": "fact-period-unit",
       "file": "cases/fact-period-unit.json",
-      "digest": "dd37a44a0986eb8e"
+      "digest": "bfd863dc90126fea"
     },
     {
       "case_id": "fact-publication-lookahead",
       "file": "cases/fact-publication-lookahead.json",
-      "digest": "f15c003d697ce402"
+      "digest": "58dcbbc6c21cffb4"
     },
     {
       "case_id": "sparse-refused-core-figure",
       "file": "cases/sparse-refused-core-figure.json",
-      "digest": "88af42fac27271ed"
+      "digest": "c201f68163105c54"
     },
     {
       "case_id": "sparse-short-history",
       "file": "cases/sparse-short-history.json",
-      "digest": "17626dfb10435fdc"
+      "digest": "f1bbaa6f85170efc"
     },
     {
       "case_id": "sparse-store-web-conflict",
       "file": "cases/sparse-store-web-conflict.json",
-      "digest": "f8a9a71e0e1c3df4"
+      "digest": "056b2ace30b90ada"
     },
     {
       "case_id": "sparse-valid-substitute",
       "file": "cases/sparse-valid-substitute.json",
-      "digest": "5b7c8cdd50f3fd7d"
+      "digest": "ffffb2192f05dbf6"
     },
     {
       "case_id": "synthesis-contradictory-axes",
       "file": "cases/synthesis-contradictory-axes.json",
-      "digest": "fa909e42b1659401"
+      "digest": "d667e83d60f7552e"
     },
     {
       "case_id": "synthesis-counterevidence",
       "file": "cases/synthesis-counterevidence.json",
-      "digest": "27e9fc671505d877"
+      "digest": "a85cb9515b1680ce"
     },
     {
       "case_id": "synthesis-no-certainty",
       "file": "cases/synthesis-no-certainty.json",
-      "digest": "9f1d54ad35b1a6d4"
+      "digest": "f01cc6cdd098b767"
     },
     {
       "case_id": "synthesis-peer-context",
       "file": "cases/synthesis-peer-context.json",
-      "digest": "b93d46442b08467f"
+      "digest": "b015da3a072292a2"
     }
   ],
   "snapshots": [
     {
       "snapshot_id": "fpt-analysis-window",
       "file": "snapshots/fpt-analysis-window.json",
-      "digest": "a1342f237c88c10b"
+      "digest": "631a453eef5a1acd"
     },
     {
       "snapshot_id": "fpt-reviewed-evidence",
       "file": "snapshots/fpt-reviewed-evidence.json",
-      "digest": "ec8939ace80be801"
+      "digest": "6a5ee415e2720f93"
     },
     {
       "snapshot_id": "post-as-of-trap",
