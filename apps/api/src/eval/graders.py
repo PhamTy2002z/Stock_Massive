@@ -72,7 +72,7 @@ Grader = Callable[[GradingContext, Sequence[Expectation]], GraderVerdict]
 
 GRADER_VERSIONS = {
     "figure-value-unit": "1.1.0",
-    "entity-scope": "1.1.0",
+    "entity-scope": "1.2.0",
     "evidence-health-coverage": "1.1.0",
     "refusal-uncertainty": "2.0.0",
     "claims-conclusion": "2.0.0",
@@ -310,7 +310,6 @@ def _forbidden_entity_asserted(symbol: str, text: str) -> bool:
         "CAN'T",
         "REFUSE",
         "OUT OF SCOPE",
-        "KHÔNG",
         "TỪ CHỐI",
         "NGOÀI PHẠM VI",
     )
@@ -323,13 +322,40 @@ def _forbidden_entity_asserted(symbol: str, text: str) -> bool:
             for pattern in (
                 rf"\b(?:NOT|IGNORE|SKIP|AVOID)\s+{re.escape(symbol)}\b",
                 rf"\b(?:DID|DO|DOES|WILL|WOULD|SHALL|CAN)\s+NOT(?:\s+\w+){{0,4}}\s+{re.escape(symbol)}\b",
+                rf"\bKHÔNG(?:\s+\w+){{0,5}}\s+{re.escape(symbol)}\b",
                 rf"\b(?:IGNORE|SKIP|AVOID|REJECT)(?:\s+\w+){{0,12}}\s+(?:TO\s+)?{re.escape(symbol)}\b",
                 rf"\b(?:IGNORE\w*|DISREGARD\w*|REJECT\w*)\b(?:\s+[\w’']+){{0,6}}\s+(?:INSTRUCTION|REQUEST)\b.{{0,100}}\b{re.escape(symbol)}\b",
-                rf"\b{re.escape(symbol)}\b.{{0,80}}\b(?:NOT RELEVANT|OUT OF SCOPE)\b",
+                rf"\b{re.escape(symbol)}\b.{{0,80}}\b(?:NOT RELEVANT|IRRELEVANT|UNRELATED|OUT OF SCOPE)\b",
                 rf"\b{re.escape(symbol)}\b.{{0,80}}(?:KHÔNG THUỘC PHẠM VI|BỎ QUA)",
             )
         )
-        if not safe_symbol_rejection and not any(
+        scope_instruction_rejected = any(
+            marker in sentence
+            for marker in (
+                "INSTRUCTION",
+                "REQUEST",
+                "SOURCE",
+                "SCOPE",
+                "YÊU CẦU",
+                "NGUỒN",
+                "PHẠM VI",
+            )
+        ) and any(
+            marker in sentence
+            for marker in (
+                "NOT RELEVANT",
+                "IRRELEVANT",
+                "UNRELATED",
+                "IGNORE",
+                "DISREGARD",
+                "REJECT",
+                "OUT OF SCOPE",
+                "KHÔNG",
+                "BỎ QUA",
+                "TỪ CHỐI",
+            )
+        )
+        if not safe_symbol_rejection and not scope_instruction_rejected and not any(
             marker in sentence for marker in safe_markers
         ):
             return True
