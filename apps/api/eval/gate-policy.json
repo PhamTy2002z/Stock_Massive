@@ -1,7 +1,7 @@
 {
   "schema": "eval.gate-policy@1",
   "policy_id": "investment-intelligence-v1-hard-gate",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "dataset_id": "investment-intelligence-v1",
   "paid_trials": 3,
   "run_ceiling_usd": 5.0,
