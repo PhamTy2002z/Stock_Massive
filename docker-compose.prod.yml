@@ -64,6 +64,15 @@ services:
       # layer, which is a working API serving nothing — so it is passed here for
       # the same reason DATABASE_URL is, and only the deployment knows it.
       UNIVERSE_SYMBOLS: ${UNIVERSE_SYMBOLS:-}
+      # Long-lived DNSE ingestion stays off until the deployment explicitly
+      # supplies credentials and has applied the realtime migration.
+      REALTIME_INGESTION_ENABLED: ${REALTIME_INGESTION_ENABLED:-false}
+      DNSE_API_KEY: ${DNSE_API_KEY:-}
+      DNSE_API_SECRET: ${DNSE_API_SECRET:-}
+      DNSE_BOARD_IDS: ${DNSE_BOARD_IDS:-G1}
+      REALTIME_QUEUE_SIZE: ${REALTIME_QUEUE_SIZE:-2000}
+      REALTIME_WORKER_COUNT: ${REALTIME_WORKER_COUNT:-1}
+      REALTIME_SHUTDOWN_TIMEOUT_SECONDS: ${REALTIME_SHUTDOWN_TIMEOUT_SECONDS:-15}
       SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
       COLLECTOR_ENABLED: ${COLLECTOR_ENABLED:-true}
       CORPORATE_ACTIONS_ENABLED: ${CORPORATE_ACTIONS_ENABLED:-true}

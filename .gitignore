@@ -76,3 +76,9 @@ apps/api/.artifacts/
 
 # Feature worktrees live here; each is its own checkout
 .claude/worktrees/
+
+# Agent/editor-local state. Keep portable design artifacts under .impeccable,
+# but never commit machine-specific hooks, consent, or session caches.
+.codex/
+.impeccable/config.local.json
+.impeccable/hook.cache.json

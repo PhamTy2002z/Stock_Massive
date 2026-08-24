@@ -160,6 +160,11 @@ export function MenuItem({
       {icon}
       <span className="min-w-0 flex-1 truncate">{children}</span>
       {hint && <span className="shrink-0 font-mono text-micro text-ink-6">{hint}</span>}
+      {disabled && (
+        <span className="shrink-0 rounded-md border border-border px-1.5 py-0.5 text-micro font-medium uppercase tracking-[0.04em] text-ink-5">
+          Sắp ra mắt
+        </span>
+      )}
       {trailing}
     </button>
   )
@@ -266,9 +271,40 @@ export function QuietLine({ children }: { children: ReactNode }) {
  */
 export function SampleDataNote({ children }: { children?: ReactNode }) {
   return (
-    <p className="flex items-start gap-1.5 rounded-lg border border-caution/30 bg-caution/[0.07] px-2.5 py-1.5 text-micro leading-relaxed text-ink-4">
-      <i className="mt-[6px] block size-1 shrink-0 rounded-full bg-caution" aria-hidden="true" />
-      <span>{children ?? "Số liệu mẫu — API chưa phục vụ mục này."}</span>
+    <p
+      role="note"
+      className="flex items-start gap-2 rounded-lg border border-caution/45 bg-caution/[0.1] px-2.5 py-2 text-micro leading-relaxed text-ink-3"
+    >
+      <i className="mt-[5px] block size-1.5 shrink-0 rounded-full bg-caution" aria-hidden="true" />
+      <span>
+        <strong className="block font-semibold uppercase tracking-[0.04em] text-caution">
+          Dữ liệu minh họa · Không dùng để ra quyết định
+        </strong>
+        <span className="mt-0.5 block">
+          {children ?? "API chưa phục vụ mục này."}
+        </span>
+      </span>
+    </p>
+  )
+}
+
+/** Marks an illustrative panel before the reader reaches any of its figures. */
+export function SampleBadge() {
+  return (
+    <span className="rounded-md border border-caution/40 bg-caution/[0.1] px-1.5 py-0.5 text-micro font-semibold uppercase tracking-[0.05em] text-caution">
+      Minh họa
+    </span>
+  )
+}
+
+/** A capability-shaped surface that is present but not connected yet. */
+export function UnavailableNote({ children }: { children: ReactNode }) {
+  return (
+    <p role="status" className="rounded-lg border border-border bg-foreground/[0.035] px-2.5 py-2 text-micro leading-relaxed text-ink-4">
+      <strong className="block font-semibold uppercase tracking-[0.04em] text-ink-3">
+        Tính năng sắp ra mắt
+      </strong>
+      <span className="mt-0.5 block">{children}</span>
     </p>
   )
 }

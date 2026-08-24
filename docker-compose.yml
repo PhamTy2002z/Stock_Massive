@@ -65,6 +65,13 @@ services:
       # The symbols the system commits to collecting and serving. Empty is a
       # legitimate Universe — the app runs and the Collector has nothing to do.
       UNIVERSE_SYMBOLS: ${UNIVERSE_SYMBOLS:-}
+      REALTIME_INGESTION_ENABLED: ${REALTIME_INGESTION_ENABLED:-false}
+      DNSE_API_KEY: ${DNSE_API_KEY:-}
+      DNSE_API_SECRET: ${DNSE_API_SECRET:-}
+      DNSE_BOARD_IDS: ${DNSE_BOARD_IDS:-G1}
+      REALTIME_QUEUE_SIZE: ${REALTIME_QUEUE_SIZE:-2000}
+      REALTIME_WORKER_COUNT: ${REALTIME_WORKER_COUNT:-1}
+      REALTIME_SHUTDOWN_TIMEOUT_SECONDS: ${REALTIME_SHUTDOWN_TIMEOUT_SECONDS:-15}
       COLLECTOR_ENABLED: ${COLLECTOR_ENABLED:-true}
       BACKFILL_ENABLED: ${BACKFILL_ENABLED:-false}
       # The weekly Corporate Action load. Forwarded like the other job switches

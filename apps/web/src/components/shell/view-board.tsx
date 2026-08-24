@@ -10,6 +10,7 @@ import { useVN30Overview } from "@/hooks/use-vn30-overview"
 import type { PriceBoardItem } from "@/lib/api"
 import { formatVolume } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 
 import {
   Bar,
@@ -19,6 +20,7 @@ import {
   Figure,
   peakChange,
   price,
+  SampleBadge,
   SampleDataNote,
   sectorTint,
   signedPercent,
@@ -249,16 +251,25 @@ interface Row {
 function BoardRow({ row }: { row: Row }) {
   const { dispatch } = useShell()
 
+  function openSymbol() {
+    dispatch({
+      type: "select-symbol",
+      selected: { symbol: row.symbol, name: row.name, exchange: "HOSE" },
+      open: true,
+    })
+  }
+
   return (
     <tr
-      onClick={() =>
-        dispatch({
-          type: "select-symbol",
-          selected: { symbol: row.symbol, name: row.name, exchange: "HOSE" },
-          open: true,
-        })
-      }
-      className="cursor-pointer transition-colors hover:bg-foreground/[0.035]"
+      tabIndex={0}
+      aria-label={`Mở chi tiết ${row.symbol} — ${row.name}`}
+      onClick={openSymbol}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return
+        event.preventDefault()
+        openSymbol()
+      }}
+      className="cursor-pointer transition-colors hover:bg-foreground/[0.035] focus-visible:bg-foreground/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
     >
       <td className="border-b border-hairline px-3.5 py-2">
         <Figure className="font-semibold">{row.symbol}</Figure>
@@ -364,7 +375,10 @@ function SectorTile({
 function LiquidityCard() {
   return (
     <Card>
-      <Eyebrow>Thanh khoản toàn thị trường</Eyebrow>
+      <div className="flex items-center justify-between gap-2">
+        <Eyebrow>Thanh khoản toàn thị trường</Eyebrow>
+        <SampleBadge />
+      </div>
       <Figure className="mt-1.5 block text-[1.4rem] font-semibold tracking-[-0.02em]">
         24.680 tỷ
       </Figure>
@@ -380,7 +394,7 @@ function LiquidityCard() {
         <span className="text-ink-6">So với BQ 20 phiên</span>
         <Figure className="text-positive">1,18×</Figure>
       </div>
-      <SampleDataNote>Số liệu mẫu — API chưa tổng hợp thanh khoản toàn thị trường.</SampleDataNote>
+      <SampleDataNote>API chưa tổng hợp thanh khoản toàn thị trường.</SampleDataNote>
     </Card>
   )
 }
@@ -399,7 +413,10 @@ function ForeignFlowCard() {
 
   return (
     <Card>
-      <Eyebrow>Khối ngoại ròng</Eyebrow>
+      <div className="flex items-center justify-between gap-2">
+        <Eyebrow>Khối ngoại ròng</Eyebrow>
+        <SampleBadge />
+      </div>
       <Figure className="mt-1.5 block text-[1.4rem] font-semibold tracking-[-0.02em] text-negative">
         −1.240 tỷ
       </Figure>
@@ -424,7 +441,7 @@ function ForeignFlowCard() {
         ))}
       </div>
       <div className="pt-2.5">
-        <SampleDataNote>Số liệu mẫu — API chưa phục vụ dòng tiền khối ngoại.</SampleDataNote>
+        <SampleDataNote>API chưa phục vụ dòng tiền khối ngoại.</SampleDataNote>
       </div>
     </Card>
   )
@@ -523,18 +540,19 @@ function AskAboutSession() {
         Muốn hiểu vì sao thị trường đi như phiên nay? Đưa bảng giá này vào hội thoại để
         VisgniteAI phân tích.
       </span>
-      <button
+      <Button
         type="button"
+        size="action"
         onClick={() =>
           dispatch({
             type: "ask",
             text: "Phiên hôm nay thị trường diễn biến ra sao? Nhóm nào dẫn dắt và nhóm nào kéo VN-INDEX xuống?",
           })
         }
-        className="ml-auto shrink-0 rounded-[10px] bg-primary px-3.5 py-2.5 text-control font-medium text-primary-foreground transition-[filter] hover:brightness-110"
+        className="ml-auto shrink-0"
       >
         Hỏi VisgniteAI
-      </button>
+      </Button>
     </div>
   )
 }

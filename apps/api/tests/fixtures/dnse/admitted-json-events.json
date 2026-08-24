@@ -1,0 +1,90 @@
+[
+  {
+    "T": "te",
+    "marketId": "STO",
+    "boardId": "G1",
+    "symbol": "FPT",
+    "time": "2026-08-24T07:00:00Z",
+    "tradingSessionId": 2,
+    "matchPrice": "71.4",
+    "matchQtty": 10,
+    "grossTradeAmount": "0.000714",
+    "side": 1,
+    "tradeId": "sanitized-trade-1"
+  },
+  {
+    "T": "f",
+    "marketId": "STO",
+    "boardId": "G1",
+    "symbol": "FPT",
+    "time": "2026-08-24T07:00:00Z",
+    "transactTime": "2026-08-24T07:00:00Z",
+    "tradingSessionId": 2,
+    "totalBuyVolume": 100,
+    "totalSellVolume": 50,
+    "totalBuyTradedAmount": 7140000,
+    "totalSellTradedAmount": 3570000,
+    "foreignerBuyPossibleQuantity": 1000,
+    "foreignerOrderLimitQuantity": 2000
+  },
+  {
+    "T": "ep",
+    "marketId": "STO",
+    "boardId": "G1",
+    "symbol": "FPT",
+    "time": "2026-08-24T07:00:00Z",
+    "tradingSessionId": 3,
+    "auctionSession": "ATC",
+    "expectedTradePrice": "71.4",
+    "expectedTradeQuantity": 500
+  },
+  {
+    "T": "s",
+    "marketId": "STO",
+    "boardId": "G1",
+    "symbol": "MARKET",
+    "time": "2026-08-24T07:00:00Z",
+    "tradingSessionId": 2,
+    "eventId": "session-2",
+    "isTrading": true
+  },
+  {
+    "T": "mi",
+    "marketId": "STO",
+    "indexName": "VNINDEX",
+    "time": "2026-08-24T07:00:00Z",
+    "valueIndexes": "1285.42",
+    "changedValue": "3.1",
+    "changedRatio": "0.24"
+  },
+  {
+    "T": "sd",
+    "marketId": "STO",
+    "boardId": "G1",
+    "symbol": "FPT",
+    "time": "2026-08-24T07:00:00Z",
+    "tradingSessionId": 2,
+    "productGrpId": "ST",
+    "securityGroupId": "ST",
+    "securityStatus": "listed",
+    "isin": "VN000000FPT1",
+    "basicPrice": "71.4",
+    "ceilingPrice": "76.3",
+    "floorPrice": "66.5"
+  },
+  {
+    "T": "oc",
+    "marketId": "STO",
+    "boardId": "G1",
+    "symbol": "FPT",
+    "time": "2026-08-24T07:00:00Z",
+    "endTime": "2026-08-24T07:00:00Z",
+    "tradingSessionId": 2,
+    "resolution": "1",
+    "open": "71.5",
+    "high": "71.6",
+    "low": "71.3",
+    "close": "71.4",
+    "volume": 1000
+  }
+]

@@ -1,6 +1,6 @@
 ---
 title: "Phase 4: Multi-trial reports, baseline, and release gate"
-status: in-progress
+status: completed
 priority: P1
 effort: 16h
 depends_on: [1, 2, 3]
@@ -10,8 +10,8 @@ depends_on: [1, 2, 3]
 
 ## Context links
 
-Close Stage 0 in
-[`ai-capability-roadmap.md`](../../docs/Harness/ai-capability-roadmap.md). Apply
+Close Phase H0 in
+[`harness-roadmap.md`](../../docs/harness-roadmap.md). Apply
 the release matrix and hard/trade-off split from
 [`quality-safety-and-operations.md`](../../docs/Harness/quality-safety-and-operations.md).
 Don't approve a baseline until both blocking plans are integrated and their
@@ -93,7 +93,7 @@ stable maintainer surface.
 | Create | `/Users/typham/Dev/Stock_Massive/apps/api/tests/test_eval_harness.py` | Trial, ceiling, completeness, aggregation. |
 | Create | `/Users/typham/Dev/Stock_Massive/apps/api/tests/test_eval_report.py` | Artifacts, compatibility, policy, exits. |
 | Modify | `/Users/typham/Dev/Stock_Massive/docs/Harness/README.md` | Link operational Stage 0 only after completion. |
-| Modify | `/Users/typham/Dev/Stock_Massive/docs/Harness/ai-capability-roadmap.md` | Record actual Stage 0 evidence/status. |
+| Modify | `/Users/typham/Dev/Stock_Massive/docs/harness-roadmap.md` | Record actual H0 evidence/status. |
 
 ## Implementation steps
 
@@ -134,10 +134,10 @@ stable maintainer surface.
 - [x] Calibrate hard graders to machine-observable finance, lifecycle, scope,
       evidence, and policy contracts; leave prose quality and semantic labels
       such as counterargument/falsifier to the blinded rubric.
-- [ ] Re-run the clean paid 3 x 16 baseline and require 48/48 hard passes with
+- [x] Re-run the clean paid 3 x 16 baseline and require 48/48 hard passes with
       zero provider calls before baseline approval.
-- [ ] Obtain explicit baseline/threshold approval.
-- [ ] Commit approved baseline/policy and update Stage 0 status.
+- [x] Obtain explicit baseline/threshold approval.
+- [x] Commit approved baseline/policy and update Stage 0 status.
 
 ## Test scenarios
 
@@ -233,6 +233,21 @@ redacted failure excerpts only.
   `9f40fe732d9a85b9`. The manifest correctly records `dirty: true`, so this run
   proves the repaired harness/model contract but is not yet the clean approved
   baseline required by the next checklist item.
+
+### Clean baseline approval — 2026-08-24
+
+- Clean commit `b6ea20eee8e651817781f50de669ebead832ff8c`, dataset
+  `85eb3484ddf286b3`, policy `2.0.0`: 48/48 trials completed and hard-passed,
+  with zero live data-provider calls. Approved artifact digest:
+  `36bc44f7c00966cd`.
+- Blinded rubric remained report-only: synthesis `4.625`, counterargument
+  `3.9375`, uncertainty `4.6875`, utility `4.270833`; candidate usage was
+  630,520 tokens and mean latency was 18,610.271 ms.
+- Owner approved `thresholds: {}` explicitly. One local-route distribution with
+  zero-stamped pricing is insufficient to set defensible quality, cost, or
+  latency deltas; repository-owned hard dimensions remain the release gate.
+- Baseline comparison reproduced against the approved artifact. Phase 4 and
+  Harness Stage 0 are complete.
 
 ## Next steps
 

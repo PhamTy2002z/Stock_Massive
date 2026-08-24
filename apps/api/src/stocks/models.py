@@ -143,6 +143,92 @@ class ProviderSnapshot(Base):
     )
 
 
+class RealtimeEvent(Base):
+    """Append-only normalized realtime evidence, separate from EOD snapshots."""
+
+    __tablename__ = "realtime_events"
+
+    evidence_id = Column(String(68), primary_key=True)
+    trading_day = Column(Date, nullable=False)
+    event_family = Column(String(32), nullable=False)
+    symbol = Column(String(32), nullable=False)
+    source = Column(String(32), nullable=False)
+    provider_time = Column(DateTime(timezone=True), nullable=False)
+    observed_time = Column(DateTime(timezone=True), nullable=False)
+    schema_version = Column(Integer, nullable=False)
+    normalization_version = Column(Integer, nullable=False)
+    retention_policy_version = Column(Integer, nullable=False)
+    quality_state = Column(String(16), nullable=False)
+    payload = Column(JSON, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index(
+            "ix_realtime_event_replay",
+            "trading_day",
+            "event_family",
+            "provider_time",
+            "observed_time",
+            "evidence_id",
+        ),
+        Index(
+            "ix_realtime_event_symbol_latest",
+            "event_family",
+            "symbol",
+            "provider_time",
+        ),
+    )
+
+
+class RealtimeCheckpoint(Base):
+    """At-least-once resume position for one ingestion partition."""
+
+    __tablename__ = "realtime_checkpoints"
+
+    consumer = Column(String(64), primary_key=True)
+    partition_key = Column(String(96), primary_key=True)
+    evidence_id = Column(String(68), nullable=False)
+    provider_time = Column(DateTime(timezone=True), nullable=False)
+    observed_time = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class RealtimeSpill(Base):
+    """Durable overflow awaiting normal ingestion after queue pressure."""
+
+    __tablename__ = "realtime_spills"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    evidence_id = Column(String(68), nullable=False, unique=True)
+    trading_day = Column(Date, nullable=False)
+    event_family = Column(String(32), nullable=False)
+    payload = Column(JSON, nullable=False)
+    reason = Column(String(32), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    recovered_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_realtime_spill_pending", "recovered_at", "created_at", "id"),
+    )
+
+
+class RealtimeHealth(Base):
+    """Durable feed and data health visible across process restarts."""
+
+    __tablename__ = "realtime_health"
+
+    scope = Column(String(64), primary_key=True)
+    status = Column(String(32), nullable=False)
+    reason = Column(String(64), nullable=True)
+    observed_at = Column(DateTime(timezone=True), nullable=False)
+    payload = Column(JSON, nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class ListingRoster(Base):
     """Which symbols the exchanges list, and on which board, market-wide.
 

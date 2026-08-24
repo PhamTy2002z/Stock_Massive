@@ -33,6 +33,8 @@ const buttonVariants = cva(
       },
       size: {
         default: "h-9 px-4 py-2",
+        /** The 40px high-emphasis action repeated at the edge of desk panels. */
+        action: "h-10 px-3.5 py-2",
         sm: "h-8 px-3 text-micro",
         lg: "h-10 px-8 text-[0.92rem]",
         icon: "h-9 w-9",

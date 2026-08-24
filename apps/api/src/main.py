@@ -38,6 +38,8 @@ from src.stocks.jobs_router import router as jobs_router
 from src.stocks.signals.router import router as signals_router
 from src.stocks.shared import StockServiceError
 from src.stocks.universe import Universe
+from src.stocks.realtime.runtime import build_realtime_runtime
+from src.stocks.realtime.router import router as realtime_router
 
 # Configure logging at module level - ensures INFO logs are visible
 logging.basicConfig(
@@ -104,30 +106,45 @@ async def lifespan(app: FastAPI):
     # for good.
     await sweep_interrupted_turns()
 
-    if settings.scheduler_enabled:
-        async with AsyncScheduler() as scheduler:
-            await setup_scheduler(scheduler)
-            await scheduler.start_in_background()
+    realtime_runtime = None
+    if settings.realtime_ingestion_enabled:
+        realtime_runtime = build_realtime_runtime(settings, universe.symbols)
+        app.state.realtime_runtime = realtime_runtime
 
-            # Log scheduler state for visibility
-            schedules = await scheduler.get_schedules()
-            logger.info(f"Scheduler started with {len(schedules)} schedules")
-            for s in schedules:
-                logger.info(f"  Schedule: {s.id} -> next_fire={s.next_fire_time}")
+    try:
+        if settings.scheduler_enabled:
+            async with AsyncScheduler() as scheduler:
+                await setup_scheduler(scheduler)
+                await scheduler.start_in_background()
 
-            # Store scheduler reference in app state for health checks
-            app.state.scheduler = scheduler
+                # Log scheduler state for visibility
+                schedules = await scheduler.get_schedules()
+                logger.info(f"Scheduler started with {len(schedules)} schedules")
+                for s in schedules:
+                    logger.info(f"  Schedule: {s.id} -> next_fire={s.next_fire_time}")
+
+                # Store scheduler reference in app state for health checks
+                app.state.scheduler = scheduler
+                if realtime_runtime is not None:
+                    await realtime_runtime.start()
+                yield
+        else:
+            logger.info("Scheduler disabled by config")
+            if realtime_runtime is not None:
+                await realtime_runtime.start()
             yield
-    else:
-        logger.info("Scheduler disabled by config")
-        yield
-    # Shutdown. Active Turns get their thirty seconds to reach a safe
-    # checkpoint before the pool goes away, because the checkpoint that window
-    # buys is written through it (docs/adr/0013). Whatever does not make it is
-    # left for the startup sweep, which is the same honest `incomplete` a crash
-    # would have produced.
-    await close_alpha_desk()
-    await engine.dispose()
+    finally:
+        # Shutdown. Active work gets its bounded checkpoint/drain window before
+        # the shared database pool goes away. Whatever does not make it remains
+        # explicitly incomplete or in the durable realtime spill queue.
+        try:
+            await close_alpha_desk()
+        finally:
+            try:
+                if realtime_runtime is not None:
+                    await realtime_runtime.stop()
+            finally:
+                await engine.dispose()
 
 
 app = FastAPI(
@@ -155,6 +172,7 @@ app.include_router(jobs_router, prefix="/api/v1")
 # a set of symbols, and mounting it under a path that reads as one symbol's data
 # would misdescribe every route added here later.
 app.include_router(signals_router, prefix="/api/v1")
+app.include_router(realtime_router, prefix="/api/v1")
 # The Watchlist is one user's choice rather than market data, so it sits beside
 # /stocks rather than under it.
 app.include_router(watchlist_router, prefix="/api/v1")

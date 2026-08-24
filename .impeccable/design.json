@@ -1,0 +1,257 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-24T12:47:03Z",
+  "title": "Design System: VisgniteAI",
+  "extensions": {
+    "colorMeta": {
+      "ignition-amber": {
+        "role": "primary",
+        "displayName": "Ignition Amber",
+        "canonical": "hsl(30 91% 58%)",
+        "tonalRamp": ["hsl(30 91% 15%)", "hsl(30 91% 26%)", "hsl(30 91% 38%)", "hsl(30 91% 49%)", "hsl(30 91% 61%)", "hsl(30 91% 72%)", "hsl(30 91% 84%)", "hsl(30 91% 95%)"]
+      },
+      "ignition-amber-day": {
+        "role": "primary",
+        "displayName": "Day Ignition Amber",
+        "canonical": "hsl(30 76% 36%)",
+        "tonalRamp": ["hsl(30 76% 15%)", "hsl(30 76% 26%)", "hsl(30 76% 38%)", "hsl(30 76% 49%)", "hsl(30 76% 61%)", "hsl(30 76% 72%)", "hsl(30 76% 84%)", "hsl(30 76% 95%)"]
+      },
+      "cool-night": {
+        "role": "neutral",
+        "displayName": "Cool Night",
+        "canonical": "hsl(210 6% 7%)",
+        "tonalRamp": ["hsl(210 6% 15%)", "hsl(210 6% 26%)", "hsl(210 6% 38%)", "hsl(210 6% 49%)", "hsl(210 6% 61%)", "hsl(210 6% 72%)", "hsl(210 6% 84%)", "hsl(210 6% 95%)"]
+      },
+      "slate-panel": {
+        "role": "neutral",
+        "displayName": "Slate Panel",
+        "canonical": "hsl(220 6% 10%)",
+        "tonalRamp": ["hsl(220 6% 15%)", "hsl(220 6% 26%)", "hsl(220 6% 38%)", "hsl(220 6% 49%)", "hsl(220 6% 61%)", "hsl(220 6% 72%)", "hsl(220 6% 84%)", "hsl(220 6% 95%)"]
+      },
+      "slate-raised": {
+        "role": "neutral",
+        "displayName": "Slate Raised",
+        "canonical": "hsl(220 5% 12%)",
+        "tonalRamp": ["hsl(220 5% 15%)", "hsl(220 5% 26%)", "hsl(220 5% 38%)", "hsl(220 5% 49%)", "hsl(220 5% 61%)", "hsl(220 5% 72%)", "hsl(220 5% 84%)", "hsl(220 5% 95%)"]
+      },
+      "slate-sunken": {
+        "role": "neutral",
+        "displayName": "Slate Sunken",
+        "canonical": "hsl(220 4% 13%)",
+        "tonalRamp": ["hsl(220 4% 15%)", "hsl(220 4% 26%)", "hsl(220 4% 38%)", "hsl(220 4% 49%)", "hsl(220 4% 61%)", "hsl(220 4% 72%)", "hsl(220 4% 84%)", "hsl(220 4% 95%)"]
+      },
+      "slate-menu": {
+        "role": "neutral",
+        "displayName": "Slate Menu",
+        "canonical": "hsl(220 4% 14%)",
+        "tonalRamp": ["hsl(220 4% 15%)", "hsl(220 4% 26%)", "hsl(220 4% 38%)", "hsl(220 4% 49%)", "hsl(220 4% 61%)", "hsl(220 4% 72%)", "hsl(220 4% 84%)", "hsl(220 4% 95%)"]
+      },
+      "slate-bubble": {
+        "role": "neutral",
+        "displayName": "Slate Bubble",
+        "canonical": "hsl(210 5% 16%)",
+        "tonalRamp": ["hsl(210 5% 15%)", "hsl(210 5% 26%)", "hsl(210 5% 38%)", "hsl(210 5% 49%)", "hsl(210 5% 61%)", "hsl(210 5% 72%)", "hsl(210 5% 84%)", "hsl(210 5% 95%)"]
+      },
+      "paper-ink": {
+        "role": "neutral",
+        "displayName": "Paper Ink",
+        "canonical": "hsl(0 0% 98%)",
+        "tonalRamp": ["hsl(0 0% 15%)", "hsl(0 0% 26%)", "hsl(0 0% 38%)", "hsl(0 0% 49%)", "hsl(0 0% 61%)", "hsl(0 0% 72%)", "hsl(0 0% 84%)", "hsl(0 0% 95%)"]
+      },
+      "quiet-ink": {
+        "role": "neutral",
+        "displayName": "Quiet Ink",
+        "canonical": "hsl(214 3% 56%)",
+        "tonalRamp": ["hsl(214 3% 15%)", "hsl(214 3% 26%)", "hsl(214 3% 38%)", "hsl(214 3% 49%)", "hsl(214 3% 61%)", "hsl(214 3% 72%)", "hsl(214 3% 84%)", "hsl(214 3% 95%)"]
+      },
+      "day-paper": {
+        "role": "neutral",
+        "displayName": "Day Paper",
+        "canonical": "hsl(220 12% 97%)",
+        "tonalRamp": ["hsl(220 12% 15%)", "hsl(220 12% 26%)", "hsl(220 12% 38%)", "hsl(220 12% 49%)", "hsl(220 12% 61%)", "hsl(220 12% 72%)", "hsl(220 12% 84%)", "hsl(220 12% 95%)"]
+      },
+      "day-ink": {
+        "role": "neutral",
+        "displayName": "Day Ink",
+        "canonical": "hsl(220 10% 10%)",
+        "tonalRamp": ["hsl(220 10% 15%)", "hsl(220 10% 26%)", "hsl(220 10% 38%)", "hsl(220 10% 49%)", "hsl(220 10% 61%)", "hsl(220 10% 72%)", "hsl(220 10% 84%)", "hsl(220 10% 95%)"]
+      },
+      "market-green": {
+        "role": "tertiary",
+        "displayName": "Market Green",
+        "canonical": "hsl(140 50% 50%)",
+        "tonalRamp": ["hsl(140 50% 15%)", "hsl(140 50% 26%)", "hsl(140 50% 38%)", "hsl(140 50% 49%)", "hsl(140 50% 61%)", "hsl(140 50% 72%)", "hsl(140 50% 84%)", "hsl(140 50% 95%)"]
+      },
+      "market-red": {
+        "role": "tertiary",
+        "displayName": "Market Red",
+        "canonical": "hsl(3 72% 60%)",
+        "tonalRamp": ["hsl(3 72% 15%)", "hsl(3 72% 26%)", "hsl(3 72% 38%)", "hsl(3 72% 49%)", "hsl(3 72% 61%)", "hsl(3 72% 72%)", "hsl(3 72% 84%)", "hsl(3 72% 95%)"]
+      },
+      "ceiling-violet": {
+        "role": "tertiary",
+        "displayName": "Ceiling Violet",
+        "canonical": "hsl(262 77% 75%)",
+        "tonalRamp": ["hsl(262 77% 15%)", "hsl(262 77% 26%)", "hsl(262 77% 38%)", "hsl(262 77% 49%)", "hsl(262 77% 61%)", "hsl(262 77% 72%)", "hsl(262 77% 84%)", "hsl(262 77% 95%)"]
+      },
+      "reference-gold": {
+        "role": "tertiary",
+        "displayName": "Reference Gold",
+        "canonical": "hsl(45 76% 62%)",
+        "tonalRamp": ["hsl(45 76% 15%)", "hsl(45 76% 26%)", "hsl(45 76% 38%)", "hsl(45 76% 49%)", "hsl(45 76% 61%)", "hsl(45 76% 72%)", "hsl(45 76% 84%)", "hsl(45 76% 95%)"]
+      },
+      "floor-cyan": {
+        "role": "tertiary",
+        "displayName": "Floor Cyan",
+        "canonical": "hsl(187 59% 61%)",
+        "tonalRamp": ["hsl(187 59% 15%)", "hsl(187 59% 26%)", "hsl(187 59% 38%)", "hsl(187 59% 49%)", "hsl(187 59% 61%)", "hsl(187 59% 72%)", "hsl(187 59% 84%)", "hsl(187 59% 95%)"]
+      },
+      "widget-blue": {
+        "role": "secondary",
+        "displayName": "Widget Blue",
+        "canonical": "hsl(213 84% 72%)",
+        "tonalRamp": ["hsl(213 84% 15%)", "hsl(213 84% 26%)", "hsl(213 84% 38%)", "hsl(213 84% 49%)", "hsl(213 84% 61%)", "hsl(213 84% 72%)", "hsl(213 84% 84%)", "hsl(213 84% 95%)"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Human Address", "purpose": "Greetings and select editorial headlines only." },
+      "body": { "displayName": "Interface Body", "purpose": "Vietnamese prose and default interface copy." },
+      "row": { "displayName": "Operational Row", "purpose": "Navigation, tables, and list content." },
+      "control": { "displayName": "Control Label", "purpose": "Buttons, tabs, and field labels." },
+      "metadata": { "displayName": "Metadata", "purpose": "Timestamps, hints, and supporting labels." },
+      "eyebrow": { "displayName": "Eyebrow", "purpose": "Uppercase section and category labels." },
+      "figure": { "displayName": "Comparable Figure", "purpose": "Prices, percentages, codes, and tabular data." },
+      "figure-sm": { "displayName": "Small Emphasis Figure", "purpose": "Compact emphasized figures inside cards." },
+      "figure-md": { "displayName": "Medium Emphasis Figure", "purpose": "Primary figures in compact market summaries." },
+      "figure-lg": { "displayName": "Large Emphasis Figure", "purpose": "Primary symbol and price figures in the inspector." },
+      "ticker-chip": { "displayName": "Ticker Chip", "purpose": "Compact company symbols in article metadata and navigation chips." },
+      "media-symbol-md": { "displayName": "Medium Media Symbol", "purpose": "Ticker fallback when a medium news image is unavailable." },
+      "media-symbol-lg": { "displayName": "Large Media Symbol", "purpose": "Ticker fallback when a large news image is unavailable." }
+    },
+    "shadows": [
+      { "name": "menu", "value": "0 26px 60px rgba(0, 0, 0, 0.65)", "purpose": "Dropdowns and popovers." },
+      { "name": "composer", "value": "0 20px 50px rgba(0, 0, 0, 0.45)", "purpose": "Docked composer over a scrolling transcript." },
+      { "name": "panel", "value": "-30px 0 70px rgba(0, 0, 0, 0.5)", "purpose": "Open right-hand inspector." },
+      { "name": "modal", "value": "0 40px 90px rgba(0, 0, 0, 0.7)", "purpose": "Dialogs and blocking overlays." }
+    ],
+    "motion": [
+      { "name": "panel", "value": "340ms cubic-bezier(0.22, 1, 0.28, 1)", "purpose": "Sidebar and inspector width changes." },
+      { "name": "message", "value": "300ms cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "Messages and modal content entering." },
+      { "name": "row", "value": "160ms ease", "purpose": "Rows and menus entering." },
+      { "name": "data-draw", "value": "1200ms cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "Price-line and comparison-bar reveals." },
+      { "name": "reduced-motion", "value": "none", "purpose": "Disable nonessential animation when prefers-reduced-motion is active." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px" },
+      { "name": "lg", "value": "1024px" },
+      { "name": "xl", "value": "1280px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single filled amber action allowed in a view.",
+      "html": "<button class=\"ds-btn-primary\">Tiếp tục</button>",
+      "css": ".ds-btn-primary { height: 36px; padding: 8px 16px; border: 0; border-radius: 10px; background: hsl(var(--primary, 30 91% 58%)); color: hsl(var(--primary-foreground, 210 6% 7%)); font: 500 0.86rem/1.25rem Inter, Arial, sans-serif; transition: filter 200ms; } .ds-btn-primary:hover { filter: brightness(1.1); } .ds-btn-primary:focus-visible { outline: 2px solid hsl(var(--ring, 30 91% 58%)); outline-offset: 2px; } .ds-btn-primary:active { filter: brightness(0.94); }"
+    },
+    {
+      "name": "Primary Action Button",
+      "kind": "button",
+      "refersTo": "button-primary-action",
+      "description": "The shared 40px high-emphasis action used at panel and view edges.",
+      "html": "<button class=\"ds-btn-primary-action\">Hỏi VisgniteAI</button>",
+      "css": ".ds-btn-primary-action { height: 40px; padding: 8px 14px; border: 0; border-radius: 10px; background: hsl(var(--primary, 30 91% 58%)); color: hsl(var(--primary-foreground, 210 6% 7%)); font: 500 0.86rem/1.25rem Inter, Arial, sans-serif; transition: filter 200ms; } .ds-btn-primary-action:hover { filter: brightness(1.1); } .ds-btn-primary-action:focus-visible { outline: 2px solid hsl(var(--ring, 30 91% 58%)); outline-offset: 2px; } .ds-btn-primary-action:active { filter: brightness(0.94); } .ds-btn-primary-action:disabled { pointer-events: none; opacity: 0.5; }"
+    },
+    {
+      "name": "Outline Button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "A quiet secondary action that gains only a neutral wash.",
+      "html": "<button class=\"ds-btn-outline\">Chi tiết</button>",
+      "css": ".ds-btn-outline { height: 36px; padding: 8px 16px; border: 1px solid hsl(var(--border, 220 4% 16%)); border-radius: 10px; background: transparent; color: hsl(var(--ink-3, 216 6% 83%)); font: 500 0.86rem/1.25rem Inter, Arial, sans-serif; transition: background-color 200ms, color 200ms; } .ds-btn-outline:hover { background: hsl(var(--foreground, 0 0% 98%) / 0.06); color: hsl(var(--foreground, 0 0% 98%)); } .ds-btn-outline:focus-visible { outline: 2px solid hsl(var(--ring, 30 91% 58%)); outline-offset: 2px; }"
+    },
+    {
+      "name": "Icon Button",
+      "kind": "button",
+      "refersTo": "icon-button",
+      "description": "Compact accessible chrome control for the shell.",
+      "html": "<button class=\"ds-icon-button\" aria-label=\"Tìm kiếm\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"11\" cy=\"11\" r=\"7\"></circle><path d=\"m20 20-3.5-3.5\"></path></svg></button>",
+      "css": ".ds-icon-button { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 8px; background: transparent; color: hsl(var(--ink-5, 214 4% 65%)); transition: background-color 200ms, color 200ms; } .ds-icon-button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; } .ds-icon-button:hover { background: hsl(var(--foreground, 0 0% 98%) / 0.06); color: hsl(var(--foreground, 0 0% 98%)); } .ds-icon-button:focus-visible { outline: 2px solid hsl(var(--ring, 30 91% 58%)); }"
+    },
+    {
+      "name": "Raised Evidence Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "A tonal content surface with one hairline and no shadow.",
+      "html": "<article class=\"ds-card\"><span class=\"ds-card-label\">AS OF 24/08</span><strong>1.284,17</strong><p>VN-Index · +0,42%</p></article>",
+      "css": ".ds-card { padding: 14px; border: 1px solid hsl(var(--border, 220 4% 16%)); border-radius: 14px; background: hsl(var(--surface-raised, 220 5% 12%)); color: hsl(var(--ink-2, 220 6% 90%)); font: 400 0.9rem/1.3rem Inter, Arial, sans-serif; } .ds-card-label { display: block; margin-bottom: 6px; color: hsl(var(--ink-6, 214 3% 56%)); font-size: 0.7rem; font-weight: 600; letter-spacing: 0.08em; } .ds-card strong { display: block; color: hsl(var(--ink-1, 0 0% 98%)); font: 500 1.1rem/1.3 JetBrains Mono, monospace; font-variant-numeric: tabular-nums; } .ds-card p { margin: 6px 0 0; color: hsl(var(--positive, 140 50% 50%)); }"
+    },
+    {
+      "name": "Composer Field",
+      "kind": "input",
+      "refersTo": "composer",
+      "description": "One lifted shell containing the message field and actions.",
+      "html": "<label class=\"ds-composer\"><span class=\"ds-sr-only\">Câu hỏi</span><textarea rows=\"1\" placeholder=\"Hỏi về một mã, một ngành hay cả thị trường…\"></textarea><button aria-label=\"Gửi\">↑</button></label>",
+      "css": ".ds-composer { display: flex; align-items: flex-end; gap: 10px; padding: 12px 14px 10px; border: 1px solid hsl(var(--border, 220 4% 16%)); border-radius: 18px; background: hsl(var(--surface-sunken, 220 4% 13%)); box-shadow: 0 20px 50px rgba(0,0,0,.45); } .ds-composer textarea { min-height: 26px; flex: 1; resize: none; border: 0; outline: 0; background: transparent; color: hsl(var(--foreground, 0 0% 98%)); font: 400 0.98rem/1.5 Inter, Arial, sans-serif; } .ds-composer textarea::placeholder { color: hsl(var(--ink-6, 214 3% 56%)); } .ds-composer button { width: 34px; height: 34px; border: 0; border-radius: 50%; background: hsl(var(--foreground, 0 0% 98%)); color: hsl(var(--background, 210 6% 7%)); transition: transform 150ms, filter 150ms; } .ds-composer button:hover { transform: translateY(-1px); filter: brightness(1.1); } .ds-composer button:focus-visible { outline: 2px solid hsl(var(--ring, 30 91% 58%)); outline-offset: 2px; } .ds-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }"
+    },
+    {
+      "name": "Navigation Row",
+      "kind": "nav",
+      "refersTo": "nav-row",
+      "description": "Dense sidebar navigation with a quiet neutral hover.",
+      "html": "<button class=\"ds-nav-row\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg><span>Trò chuyện mới</span></button>",
+      "css": ".ds-nav-row { width: 100%; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: hsl(var(--ink-2, 220 6% 90%)); font: 400 0.9rem/1.3rem Inter, Arial, sans-serif; text-align: left; transition: background-color 200ms, color 200ms; } .ds-nav-row svg { width: 17px; height: 17px; fill: none; stroke: hsl(var(--ink-4, 214 5% 71%)); stroke-width: 1.6; stroke-linecap: round; } .ds-nav-row:hover { background: hsl(var(--foreground, 0 0% 98%) / 0.045); color: hsl(var(--foreground, 0 0% 98%)); } .ds-nav-row:focus-visible { outline: 2px solid hsl(var(--ring, 30 91% 58%)); }"
+    },
+    {
+      "name": "Context Chip",
+      "kind": "chip",
+      "description": "A compact amber-tinted chip for explicit analysis context.",
+      "html": "<span class=\"ds-context-chip\">FPT <button aria-label=\"Bỏ ngữ cảnh\">×</button></span>",
+      "css": ".ds-context-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 4px 4px 10px; border: 1px solid hsl(var(--primary, 30 91% 58%) / 0.3); border-radius: 8px; background: hsl(var(--primary, 30 91% 58%) / 0.09); color: hsl(var(--primary, 30 91% 58%)); font: 400 0.8rem/1.15rem JetBrains Mono, monospace; } .ds-context-chip button { width: 17px; height: 17px; border: 0; border-radius: 5px; background: transparent; color: inherit; } .ds-context-chip button:hover { background: hsl(var(--primary, 30 91% 58%) / 0.2); } .ds-context-chip button:focus-visible { outline: 1px solid currentColor; }"
+    },
+    {
+      "name": "Floating Menu Item",
+      "kind": "custom",
+      "description": "A menu row on the only static surface that receives a strong shadow.",
+      "html": "<div class=\"ds-menu\" role=\"menu\"><button class=\"ds-menu-item\" role=\"menuitem\">Đổi tên <kbd>R</kbd></button></div>",
+      "css": ".ds-menu { min-width: 220px; padding: 6px; border: 1px solid hsl(var(--border, 220 4% 16%)); border-radius: 14px; background: hsl(var(--surface-menu, 220 4% 14%)); box-shadow: 0 26px 60px rgba(0,0,0,.65); } .ds-menu-item { width: 100%; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 0; border-radius: 9px; background: transparent; color: hsl(var(--ink-2, 220 6% 90%)); font: 400 0.9rem/1.3rem Inter, Arial, sans-serif; text-align: left; } .ds-menu-item kbd { margin-left: auto; color: hsl(var(--ink-6, 214 3% 56%)); font: 400 0.74rem/1.05rem JetBrains Mono, monospace; } .ds-menu-item:hover { background: hsl(var(--foreground, 0 0% 98%) / 0.06); } .ds-menu-item:focus-visible { outline: 2px solid hsl(var(--ring, 30 91% 58%)); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Analyst's Instrument Panel",
+    "overview": "VisgniteAI is a precise, calm, serious workspace for people who need to inspect evidence rather than be entertained by market motion. Its dark-first surface feels like a purpose-built financial instrument: dense enough for comparison, quiet enough for sustained reading, and explicit about where attention belongs.\n\nThe system is evidence-led in both information and appearance. Tonal hierarchy, tabular figures, compact controls, and persistent contextual panels make the interface feel operational. It rejects casino energy, neon-fintech spectacle, generic AI glow, and decorative effects that compete with financial meaning.",
+    "keyCharacteristics": [
+      "Cool, dark tonal surfaces with a coherent slate cast.",
+      "One rationed amber accent for the most important action or selected state.",
+      "Compact, comparison-friendly typography with a dedicated numeric face.",
+      "Stable, single-viewport workspace with contextual panels instead of page churn.",
+      "Restrained motion that explains arrival, progress, and spatial change."
+    ],
+    "rules": [
+      { "name": "The Rationed Amber Rule", "body": "Allow roughly one filled amber control per view. Amber is a scarce action signal, not decoration or body text.", "section": "colors" },
+      { "name": "The Data Is Not Brand Rule", "body": "Green, red, violet, gold, cyan, and widget blue carry market or chart meaning. Never reuse them merely to make a control vivid, and never rely on color alone to communicate the state.", "section": "colors" },
+      { "name": "The Three Jobs Rule", "body": "Newsreader addresses, Inter operates, and JetBrains Mono compares. Do not trade roles for novelty.", "section": "typography" },
+      { "name": "The Vietnamese Is Native Rule", "body": "Every loaded face must include the Vietnamese subset; mid-sentence fallback is a broken design, not a harmless optimization.", "section": "typography" },
+      { "name": "The Tonal-First Rule", "body": "Static content earns hierarchy through its surface step and one hairline. Shadow is reserved for real overlap.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do use the cool tonal ladder to express nesting and hierarchy.",
+      "Do reserve filled amber for the single most important action or selection.",
+      "Do render comparable figures in mono with tabular numerals.",
+      "Do preserve the Vietnamese market palette and accompany color with text.",
+      "Do keep sidebar, draft, transcript, and inspector context stable as views change.",
+      "Do disable nonessential motion under prefers-reduced-motion."
+    ],
+    "donts": [
+      "Don't add casino-like glow, neon gradients, generic AI auroras, or ambient decoration that competes with evidence.",
+      "Don't use green or red as brand colors, or amber for ordinary body text.",
+      "Don't add shadows to static cards; shadows belong to floating surfaces.",
+      "Don't introduce a fourth type role or use Newsreader for routine UI copy.",
+      "Don't hide missing, stale, sample, or refused data behind color, hover, or an empty space.",
+      "Don't navigate away merely to reveal context that belongs beside the user's current task."
+    ]
+  }
+}

@@ -8,7 +8,6 @@ import {
   Globe,
   Grid2x2,
   LayoutList,
-  Mic,
   Paperclip,
   Plus,
   Search,
@@ -154,7 +153,7 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
         }}
         onKeyDown={onKeyDown}
         rows={1}
-        aria-label="Ask Alpha Desk"
+        aria-label="Hỏi VisgniteAI"
         placeholder={
           state.contextSymbol
             ? `Hỏi về ${state.contextSymbol}, hay bất kỳ mã nào…`
@@ -184,10 +183,6 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
             Visgnite Pro
             <ChevronDown className="size-3 text-ink-6" strokeWidth={1.8} />
           </span>
-          <IconButton label="Nhập bằng giọng nói" disabled>
-            <Mic className="size-[17px]" strokeWidth={1.6} />
-          </IconButton>
-
           {desk.canCancel ? (
             <button
               type="button"
@@ -196,7 +191,7 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
               className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[10px] border border-border px-3 text-control text-ink-3 transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-50"
             >
               <Square className="size-3.5" />
-              {desk.isCancelling ? CANCELLING_LABEL : "Stop"}
+              {desk.isCancelling ? CANCELLING_LABEL : "Dừng"}
             </button>
           ) : (
             <button

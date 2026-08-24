@@ -19,6 +19,7 @@ import { formatVolume } from "@/lib/format"
 import { STALE_TIME } from "@/lib/query-config"
 import { queryKeys } from "@/lib/query-keys"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 
 import { NewsSourcesTab } from "./news-sources"
 import {
@@ -30,11 +31,12 @@ import {
   PanelCard,
   peakChange,
   price,
+  SampleBadge,
   SampleDataNote,
   sectorTint,
   signedPercent,
 } from "./primitives"
-import { useInspectorDrag, useShell } from "./shell-state"
+import { maxInspectorWidth, useInspectorDrag, useShell } from "./shell-state"
 import { SourcesTab } from "./sources-tab"
 
 /**
@@ -63,10 +65,25 @@ export function Inspector() {
       <div
         role="separator"
         aria-orientation="vertical"
-        aria-label="Kéo để đổi độ rộng bảng"
+        aria-label="Đổi độ rộng bảng thông tin"
+        aria-valuemin={320}
+        aria-valuemax={maxInspectorWidth(state.viewport)}
+        aria-valuenow={open ? panelWidth : undefined}
+        tabIndex={open ? 0 : -1}
         onPointerDown={onDrag}
+        onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+          const step = event.shiftKey ? 64 : 24
+          let width: number | null = null
+          if (event.key === "ArrowLeft") width = panelWidth + step
+          if (event.key === "ArrowRight") width = panelWidth - step
+          if (event.key === "Home") width = 320
+          if (event.key === "End") width = maxInspectorWidth(state.viewport)
+          if (width === null) return
+          event.preventDefault()
+          dispatch({ type: "resize-inspector", width })
+        }}
         onDoubleClick={() => dispatch({ type: "reset-inspector-width" })}
-        className="absolute inset-y-0 left-0 z-[6] flex w-[9px] cursor-col-resize items-center justify-center transition-colors hover:bg-primary/[0.16]"
+        className="absolute inset-y-0 left-0 z-[6] flex w-[9px] cursor-col-resize items-center justify-center transition-colors hover:bg-primary/[0.16] focus-visible:bg-primary/[0.16] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         <span className="h-8 w-0.5 rounded-pill bg-foreground/[0.16]" />
       </div>
@@ -346,6 +363,9 @@ function MarketTab() {
 
       <SectionHeading className="mt-5">Tác động tới chỉ số</SectionHeading>
       <div className="mt-2.5 rounded-xl border border-border bg-surface-raised p-3">
+        <div className="mb-2 flex justify-end">
+          <SampleBadge />
+        </div>
         {SAMPLE_CONTRIBUTION.map((row) => (
           <div key={row.symbol} className="flex items-center gap-2.5 px-0.5 py-1 text-control">
             <Figure className="w-11 shrink-0">{row.symbol}</Figure>
@@ -372,7 +392,7 @@ function MarketTab() {
         ))}
         <div className="pt-2.5">
           <SampleDataNote>
-            Số liệu mẫu — API chưa tính đóng góp điểm số của từng mã.
+            API chưa tính đóng góp điểm số của từng mã.
           </SampleDataNote>
         </div>
       </div>
@@ -471,10 +491,21 @@ function SymbolTab() {
 
   if (detail.isError) {
     return (
-      <p className="rounded-card border border-border bg-surface-sunken p-4 text-meta text-ink-4">
-        Không đọc được dữ liệu của {symbol}.{" "}
-        {detail.error instanceof Error ? detail.error.message : ""}
-      </p>
+      <div className="rounded-card border border-border bg-surface-sunken p-4">
+        <p className="text-meta leading-relaxed text-ink-4">
+          Chưa đọc được dữ liệu của {symbol}. Kết nối có thể đang gián đoạn hoặc nguồn dữ liệu chưa phản hồi.
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={detail.isFetching}
+          onClick={() => void detail.refetch()}
+          className="mt-3"
+        >
+          {detail.isFetching ? "Đang thử lại…" : "Thử lại"}
+        </Button>
+      </div>
     )
   }
 
@@ -620,8 +651,9 @@ function SymbolTab() {
       </div>
 
       <div className="mt-3.5 flex gap-2">
-        <button
+        <Button
           type="button"
+          size="action"
           onClick={() => {
             dispatch({ type: "context-symbol", symbol })
             dispatch({
@@ -629,20 +661,22 @@ function SymbolTab() {
               text: `${symbol} đang rẻ hay đắt so với nhóm cùng ngành?`,
             })
           }}
-          className="flex-1 rounded-[11px] bg-primary px-3 py-2.5 text-control font-medium text-primary-foreground transition-[filter] hover:brightness-110"
+          className="flex-1 px-3"
         >
           Hỏi VisgniteAI về {symbol}
-        </button>
+        </Button>
         {/* No alerting resource exists. Inert rather than absent, so the panel
             keeps the reference's shape. */}
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="action"
           disabled
           title="Sắp có"
-          className="rounded-[11px] border border-border px-3 py-2.5 text-control text-ink-3 opacity-60"
+          className="px-3 disabled:pointer-events-auto"
         >
-          Cảnh báo giá
-        </button>
+          Cảnh báo giá · Sắp ra mắt
+        </Button>
       </div>
     </div>
   )

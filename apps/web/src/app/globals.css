@@ -326,10 +326,10 @@
 @layer utilities {
   /* Sidebar animation optimization - prevent flicker */
   .sidebar-transition {
-    transition-property: width, left, right, margin;
+    transition-property: transform, opacity;
     transition-duration: 340ms;
     transition-timing-function: theme('transitionTimingFunction.sidebar');
-    will-change: width, left, right, margin;
+    will-change: transform, opacity;
   }
 
   /* GPU acceleration for sidebar animations */

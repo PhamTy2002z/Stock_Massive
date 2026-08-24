@@ -16,6 +16,65 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 
+const queryMock = vi.hoisted(() => ({
+  detailError: false,
+  detailFetching: false,
+  refetch: vi.fn(),
+}))
+
+vi.mock("@tanstack/react-query", () => ({
+  useQuery: ({ queryKey }: { queryKey: readonly unknown[] }) =>
+    queryKey[queryKey.length - 1] === "detail"
+      ? {
+          data: undefined,
+          isError: queryMock.detailError,
+          isFetching: queryMock.detailFetching,
+          isPending: false,
+          refetch: queryMock.refetch,
+        }
+      : {
+          data: undefined,
+          isError: false,
+          isFetching: false,
+          isPending: false,
+          refetch: vi.fn(),
+        },
+}))
+
+vi.mock("@/hooks/use-market-indices", () => ({
+  useMarketIndices: () => ({ data: [], isPending: false }),
+}))
+
+vi.mock("@/hooks/use-sector-performance", () => ({
+  useSectorPerformance: () => ({ data: { sectors: [] }, isPending: false }),
+}))
+
+vi.mock("@/hooks/use-vn30-overview", () => ({
+  useVN30Overview: () => ({
+    data: {
+      stocks: [
+        {
+          symbol: "FPT",
+          company_name: "Công ty Cổ phần FPT",
+          price: 123_000,
+          change_pct: 1.2,
+          volume: 1_000_000,
+        },
+      ],
+    },
+    isPending: false,
+  }),
+}))
+
+vi.mock("@/hooks/use-price-board", () => ({
+  indexBySymbol: () => new Map(),
+  usePriceBoard: () => ({ data: [] }),
+}))
+
+vi.mock("@/hooks/use-price-history", () => ({
+  usePriceHistory: () => ({ data: [], isPending: false }),
+}))
+
 const desk = {
   threadId: null as string | null,
   entries: [] as unknown[],
@@ -42,7 +101,11 @@ vi.mock("./desk-state", () => ({
 }))
 
 import { Composer } from "./composer"
+import { Inspector } from "./inspector"
+import { focusableElements, Overlays } from "./overlays"
+import { MenuItem, SampleDataNote, UnavailableNote } from "./primitives"
 import { ChatView } from "./view-chat"
+import { BoardView } from "./view-board"
 import {
   inspectorWidth,
   maxInspectorWidth,
@@ -62,6 +125,9 @@ beforeEach(() => {
   desk.submit.mockClear()
   desk.cancel.mockClear()
   desk.resend.mockClear()
+  queryMock.detailError = false
+  queryMock.detailFetching = false
+  queryMock.refetch.mockReset()
 })
 
 /** A window the reducer can decide against. jsdom defaults to 1024 × 768. */
@@ -155,6 +221,59 @@ describe("the inspector against the sidebar", () => {
 
     expect(inspectorWidth(shell.state)).toBe(0)
   })
+
+  it("resizes from the keyboard and supports boundary shortcuts", () => {
+    setViewport(1600)
+    mount(<Inspector />)
+    act(() => shell.dispatch({ type: "open-inspector", tab: "market" }))
+
+    const separator = screen.getByRole("separator", { name: "Đổi độ rộng bảng thông tin" })
+    fireEvent.keyDown(separator, { key: "ArrowLeft" })
+    expect(inspectorWidth(shell.state)).toBe(432)
+
+    fireEvent.keyDown(separator, { key: "ArrowRight" })
+    expect(inspectorWidth(shell.state)).toBe(408)
+
+    fireEvent.keyDown(separator, { key: "Home" })
+    expect(inspectorWidth(shell.state)).toBe(320)
+
+    fireEvent.keyDown(separator, { key: "End" })
+    expect(inspectorWidth(shell.state)).toBe(maxInspectorWidth(1600))
+  })
+
+  it("offers a retry for symbol failures and reports retry progress", () => {
+    queryMock.detailError = true
+    setViewport(1600)
+    const { rerender } = mount(<Inspector />)
+    act(() => shell.dispatch({ type: "open-inspector", tab: "symbol" }))
+
+    fireEvent.click(screen.getByRole("button", { name: "Thử lại" }))
+    expect(queryMock.refetch).toHaveBeenCalledOnce()
+
+    queryMock.detailFetching = true
+    rerender(
+      <ShellProvider>
+        <Probe />
+        <Inspector />
+      </ShellProvider>,
+    )
+    expect(screen.getByRole("button", { name: "Đang thử lại…" })).toBeDisabled()
+  })
+})
+
+describe("the price board", () => {
+  it.each(["Enter", " "])("opens a row with the %s key", (key) => {
+    setViewport(1600)
+    mount(<BoardView />)
+
+    fireEvent.keyDown(
+      screen.getByRole("row", { name: "Mở chi tiết FPT — Công ty Cổ phần FPT" }),
+      { key },
+    )
+
+    expect(shell.state.selected.symbol).toBe("FPT")
+    expect(shell.state.inspector).toBe("symbol")
+  })
 })
 
 describe("what floats above the surface", () => {
@@ -206,7 +325,7 @@ describe("a question offered by a panel", () => {
     act(() => shell.dispatch({ type: "ask", text: "Vì sao VN-INDEX giảm?" }))
 
     expect(shell.state.view).toBe("chat")
-    expect(screen.getByLabelText("Ask Alpha Desk")).toHaveValue("Vì sao VN-INDEX giảm?")
+    expect(screen.getByLabelText("Hỏi VisgniteAI")).toHaveValue("Vì sao VN-INDEX giảm?")
     // Offered, not asked. Nothing was submitted on the reader's behalf.
     expect(desk.submit).not.toHaveBeenCalled()
   })
@@ -217,7 +336,7 @@ describe("a question offered by a panel", () => {
     // is concerned.
     const { rerender } = mount(<Composer variant="opening" />)
 
-    fireEvent.change(screen.getByLabelText("Ask Alpha Desk"), {
+    fireEvent.change(screen.getByLabelText("Hỏi VisgniteAI"), {
       target: { value: "nửa câu" },
     })
 
@@ -236,7 +355,7 @@ describe("the composer", () => {
   it("sends what was typed and clears the field", () => {
     mount(<Composer />)
 
-    const field = screen.getByLabelText("Ask Alpha Desk")
+    const field = screen.getByLabelText("Hỏi VisgniteAI")
     fireEvent.change(field, { target: { value: "FPT thế nào?" } })
     fireEvent.submit(field.closest("form")!)
 
@@ -244,23 +363,23 @@ describe("the composer", () => {
     expect(shell.state.draft).toBe("")
   })
 
-  it("keeps the field open while a Turn runs, and offers Stop instead of Send", () => {
+  it("keeps the field open while a Turn runs, and offers Dừng instead of Gửi", () => {
     // Composing the next question while an answer arrives is the ordinary way
     // anyone uses a conversation; locking the box would make this a form.
     desk.canCancel = true
     mount(<Composer />)
 
-    expect(screen.getByLabelText("Ask Alpha Desk")).not.toBeDisabled()
-    expect(screen.queryByRole("button", { name: /^send$/i })).not.toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /stop/i })).toBeInTheDocument()
+    expect(screen.getByLabelText("Hỏi VisgniteAI")).not.toBeDisabled()
+    expect(screen.queryByRole("button", { name: "Gửi" })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Dừng" })).toBeInTheDocument()
   })
 
-  it("goes inert the moment Stop is pressed, before the terminal event", () => {
+  it("goes inert the moment Dừng is pressed, before the terminal event", () => {
     desk.canCancel = true
     desk.isCancelling = true
     mount(<Composer />)
 
-    expect(screen.getByRole("button", { name: /cancelling/i })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Đang dừng…" })).toBeDisabled()
   })
 
   it("drops the analysis context without touching the Watchlist", () => {
@@ -270,6 +389,77 @@ describe("the composer", () => {
     fireEvent.click(screen.getByRole("button", { name: /Bỏ ngữ cảnh/ }))
 
     expect(shell.state.contextSymbol).toBeNull()
+  })
+})
+
+describe("honest incomplete states", () => {
+  it("labels unavailable menu actions without removing them", () => {
+    render(<MenuItem disabled>Mẫu phân tích</MenuItem>)
+
+    expect(screen.getByRole("menuitem", { name: /Mẫu phân tích/ })).toBeDisabled()
+    expect(screen.getByText("Sắp ra mắt")).toBeInTheDocument()
+  })
+
+  it("warns before illustrative figures can be treated as evidence", () => {
+    render(<SampleDataNote>API chưa phục vụ dữ liệu này.</SampleDataNote>)
+
+    expect(screen.getByText("Dữ liệu minh họa · Không dùng để ra quyết định")).toBeInTheDocument()
+    expect(screen.getByText("API chưa phục vụ dữ liệu này.")).toBeInTheDocument()
+  })
+
+  it("describes unavailable features without calling them illustrative data", () => {
+    render(<UnavailableNote>API chưa có endpoint chia sẻ.</UnavailableNote>)
+
+    expect(screen.getByText("Tính năng sắp ra mắt")).toBeInTheDocument()
+    expect(screen.queryByText(/Dữ liệu minh họa/)).not.toBeInTheDocument()
+  })
+})
+
+describe("dialog focus", () => {
+  it("keeps Tab navigation inside the active dialog", () => {
+    mount(<Overlays />)
+    act(() => shell.dispatch({ type: "overlay", overlay: "share" }))
+
+    const dialog = screen.getByRole("dialog", { name: "Chia sẻ hội thoại" })
+    const close = screen.getByRole("button", { name: "Đóng" })
+    const team = screen.getByRole("radio", { name: /Chia sẻ nội bộ/ })
+
+    expect(dialog).toContainElement(document.activeElement as HTMLElement)
+    team.focus()
+    fireEvent.keyDown(team, { key: "Tab" })
+    expect(close).toHaveFocus()
+
+    fireEvent.keyDown(close, { key: "Tab", shiftKey: true })
+    expect(team).toHaveFocus()
+  })
+
+  it("restores focus to the control that opened the dialog", () => {
+    mount(
+      <>
+        <button type="button">Mở chia sẻ</button>
+        <Overlays />
+      </>,
+    )
+    const launcher = screen.getByRole("button", { name: "Mở chia sẻ" })
+    launcher.focus()
+
+    act(() => shell.dispatch({ type: "overlay", overlay: "share" }))
+    fireEvent.click(screen.getByRole("button", { name: "Đóng" }))
+
+    expect(launcher).toHaveFocus()
+  })
+
+  it("excludes controls hidden by a responsive ancestor", () => {
+    const root = document.createElement("div")
+    root.innerHTML = `
+      <div style="display: none"><button type="button">Ẩn</button></div>
+      <button type="button">Hiện</button>
+    `
+    document.body.appendChild(root)
+
+    expect(focusableElements(root).map((element) => element.textContent)).toEqual(["Hiện"])
+
+    root.remove()
   })
 })
 
@@ -285,7 +475,7 @@ describe("what a question can be done with again", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Sửa câu hỏi" }))
 
-    expect(screen.getByLabelText("Ask Alpha Desk")).toHaveValue("VCB thế nào?")
+    expect(screen.getByLabelText("Hỏi VisgniteAI")).toHaveValue("VCB thế nào?")
     expect(desk.submit).not.toHaveBeenCalled()
     expect(desk.resend).not.toHaveBeenCalled()
   })

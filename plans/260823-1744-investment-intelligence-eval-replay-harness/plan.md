@@ -1,7 +1,7 @@
 ---
 title: "Investment Intelligence Eval & Replay Harness v1"
 description: "Restore measurement authority with frozen finance cases, outcome-first graders, multi-trial replay, and a reproducible release report."
-status: in-progress
+status: completed
 priority: P1
 effort: 72h
 branch: develop
@@ -152,7 +152,7 @@ cannot be approved from a dirty or partially integrated runtime.
 | 1 | [Contracts, compact fixtures, and version identity](./phase-01-start.md) | Done | Dependency contracts understood |
 | 2 | [Replay lane and trajectory capture](./phase-02-replay-lane-and-trajectory-capture.md) | Done | Phase 1 |
 | 3 | [Deterministic graders and golden battery](./phase-03-deterministic-graders-and-golden-battery.md) | Done | Phases 1-2 |
-| 4 | [Multi-trial reports, baseline, and release gate](./phase-04-multi-trial-reports-baseline-and-release-gate.md) | In Progress | Phases 1-3; blockers stabilized |
+| 4 | [Multi-trial reports, baseline, and release gate](./phase-04-multi-trial-reports-baseline-and-release-gate.md) | Done | Phases 1-3; blockers stabilized |
 
 ## Success criteria
 
@@ -175,9 +175,9 @@ cannot be approved from a dirty or partially integrated runtime.
       spend remains zero in every mode.
 - [x] No eval package is imported by production, no migration is added for eval
       state, and no raw private trajectory is retained by default.
-- [ ] Initial numeric thresholds are committed only after baseline review; a
+- [x] Initial numeric thresholds are committed only after baseline review; a
       candidate cannot supply or weaken its own gate policy.
-- [ ] The clean paid 3 x 16 baseline hard-passes all 48 trials with every
+- [x] The clean paid 3 x 16 baseline hard-passes all 48 trials with every
       expected hard fact reachable through the offered frozen tool surface;
       prose quality remains visible in the blinded rubric, not a keyword gate.
 
@@ -210,6 +210,32 @@ dataset and approved gate policy.
 | Eval burns development data quota | Wrap materialization/runs in `store_only_execution()` and fail before credentials, quota arbitration, or network. |
 
 ## Validation log
+
+### Stage 0 graduation — 2026-08-24
+
+- Repository owner approved clean artifact `36bc44f7c00966cd`, reproduced from
+  commit `b6ea20eee8e651817781f50de669ebead832ff8c`, dataset
+  `85eb3484ddf286b3`, and policy `2.0.0`.
+- All 48/48 paid trials completed and hard-passed; live data-provider calls
+  remained zero. Rubric means: synthesis `4.625`, counterargument `3.9375`,
+  uncertainty `4.6875`, utility `4.270833`.
+- `thresholds: {}` is the reviewed initial trade-off policy: quality, cost, and
+  latency remain visible but non-blocking until multiple comparable
+  distributions and non-zero pricing support defensible numeric thresholds.
+- All four phases and 73/73 checklist items are complete. Stage 0 measurement
+  authority is graduated; Stage 1 may consume the approved baseline gate.
+
+### Roadmap reconciliation — 2026-08-24
+
+This audit maps durable plan state to the split Harness and System roadmaps.
+
+- This plan maps to Harness Phase H0. The roadmap reflects the implemented
+  evaluation surface and keeps clean baseline reproduction, owner approval, and
+  policy graduation unchecked.
+- DNSE does not change this plan's scope. Future DNSE evaluation cases must use
+  frozen normalized evidence and preserve the zero-live-provider-call contract.
+- Status remains `in-progress`: Phase 4 has three unchecked items and the
+  committed baseline summary remains `pending-owner-review`.
 
 ### Paid-baseline contract audit — 2026-08-24
 

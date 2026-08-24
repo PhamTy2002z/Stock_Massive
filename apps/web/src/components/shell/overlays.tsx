@@ -1,13 +1,14 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Building2, Check, Lock, MessageSquare, Search, X } from "lucide-react"
 
 import { useThreads } from "@/hooks/use-threads"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 
 import { useDesk } from "./desk-state"
-import { IconButton, SampleDataNote } from "./primitives"
+import { IconButton, UnavailableNote } from "./primitives"
 import { SettingsDialog } from "./settings-dialog"
 import { threadTitle } from "./sidebar"
 import { useShell } from "./shell-state"
@@ -44,12 +45,41 @@ function Scrim({
   label: string
 }) {
   const { dispatch } = useShell()
+  const dialog = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    focusableElements(dialog.current)[0]?.focus()
+    return () => previous?.focus()
+  }, [])
+
+  function keepFocusInside(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Tab" || !dialog.current) return
+    const focusable = focusableElements(dialog.current)
+    if (focusable.length === 0) {
+      event.preventDefault()
+      dialog.current.focus()
+      return
+    }
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first.focus()
+    }
+  }
 
   return (
     <div
+      ref={dialog}
       role="dialog"
       aria-modal="true"
       aria-label={label}
+      tabIndex={-1}
+      onKeyDown={keepFocusInside}
       onClick={() => dispatch({ type: "overlay", overlay: null })}
       className={cn(
         "fixed inset-0 z-[60] flex animate-vg-fade-in justify-center bg-[hsl(45_9%_4%/0.58)] p-5",
@@ -59,6 +89,23 @@ function Scrim({
       {children}
     </div>
   )
+}
+
+const FOCUSABLE_SELECTOR =
+  'input, textarea, select, button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+
+/** Responsive panels may leave hidden controls in the DOM; they cannot anchor a trap. */
+export function focusableElements(root: HTMLElement | null): HTMLElement[] {
+  if (!root) return []
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter((element) => {
+    let current: HTMLElement | null = element
+    while (current && current !== root) {
+      const style = window.getComputedStyle(current)
+      if (style.display === "none" || style.visibility === "hidden") return false
+      current = current.parentElement
+    }
+    return true
+  })
 }
 
 /**
@@ -200,19 +247,20 @@ function ShareDialog() {
         </div>
 
         <div className="mt-4">
-          <SampleDataNote>
+          <UnavailableNote>
             Chưa tạo được liên kết — API chưa có endpoint chia sẻ hội thoại.
-          </SampleDataNote>
+          </UnavailableNote>
         </div>
 
         <div className="mt-4 flex justify-end">
-          <button
+          <Button
             type="button"
+            size="action"
             disabled
-            className="rounded-[11px] bg-primary px-4 py-2.5 text-row font-medium text-primary-foreground opacity-50"
+            className="px-4 text-row"
           >
-            Tạo liên kết chia sẻ
-          </button>
+            Tạo liên kết chia sẻ · Sắp ra mắt
+          </Button>
         </div>
       </div>
     </Scrim>
