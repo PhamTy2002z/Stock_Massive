@@ -55,29 +55,37 @@ variants.
 
 ## Roll back
 
-Stop the API, downgrade the realtime migration, and rebuild the previous source
-revision:
+Stop the API and downgrade while the current source still contains the
+migration. Then switch to a checkout of the previous source revision before
+rebuilding; rebuilding from the current checkout would run the entrypoint and
+upgrade the schema again:
 
 ```bash
 docker compose stop api
 docker compose run --rm --entrypoint alembic api downgrade b7f4e9c21a08
+# Check out the verified pre-deployment revision, preferably in a temporary
+# worktree, and run the rebuild from that checkout.
 docker compose up -d --build --no-deps api
 ```
 
 If a downgrade cannot preserve the required data, restore the verified
-pre-deployment custom-format dump with `pg_restore`. Restoring a dump replaces
+pre-deployment custom-format dump with PostgreSQL 16 `pg_restore` (for example,
+the binary inside the `postgres:16-alpine` database container). The host's older
+`pg_restore` may not understand the archive format. Restoring a dump replaces
 database state, so resolve the exact target and stop writers before running it.
 
 ## Latest deployment evidence
 
-On August 24, 2026, the local API image was rebuilt with the S0-S2 realtime
-code and migrated to Alembic head `c8f2a6d31e04`. The deployment kept realtime
-ingestion disabled. The root health check returned `200`, all four realtime
-tables existed, and the focused S0-S2 suite passed 76 tests.
+On August 24, 2026, the local API image was rebuilt from commit `f52e69a` and
+migrated to Alembic head `c8f2a6d31e04`. The deployment kept realtime ingestion
+disabled. The root health check returned `200`, the container remained healthy
+with a zero failing streak, and the realtime health endpoint returned its
+expected disabled-state `404`.
 
 The verified backup is
-`.backups/stockmassive-pre-realtime-20260824T2200.dump`. Its SHA-256 digest is
-`0293db3341c0d9660f6e66018012e2dc27b679b52cbc54f7b84c5cec84a87df3`.
+`.backups/stockmassive-pre-deploy-f52e69a-20260824T2204.dump`. Its SHA-256
+digest is
+`b395697f313060874fad3027cde3325f84b70db687b14fefe05f6d7df5202a75`.
 
 ## Next steps
 
