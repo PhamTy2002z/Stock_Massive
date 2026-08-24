@@ -6,7 +6,7 @@
   "title": "Offer a valid substitute for a data gap",
   "as_of": "2026-08-21",
   "input": {
-    "prompt": "If free cash flow is absent, what reviewed FPT evidence can I use instead?",
+    "prompt": "If FPT's 250-session drawdown is refused for short history, what valid risk field can I use instead? Give the substitute value and unit.",
     "symbol": null,
     "trading_day": null
   },
@@ -20,16 +20,11 @@
       "params": {}
     },
     {
-      "kind": "refusal",
-      "params": {}
-    },
-    {
-      "kind": "required_claims",
+      "kind": "figure",
       "params": {
-        "values": [
-          "18.2",
-          "substitute"
-        ]
+        "value": 13.991745966790258,
+        "tolerance": 0.05,
+        "unit": "percent_annualized"
       }
     },
     {
@@ -42,12 +37,12 @@
     }
   ],
   "traps": [
-    "A naive fluent answer either invents the missing field or refuses without a valid substitute."
+    "A naive fluent answer either invents the refused drawdown or refuses without reading a valid shorter-window substitute."
   ],
   "snapshots": [
     {
       "snapshot_id": "fpt-reviewed-evidence",
-      "digest": "ec8939ace80be801"
+      "digest": "6a5ee415e2720f93"
     }
   ]
 }

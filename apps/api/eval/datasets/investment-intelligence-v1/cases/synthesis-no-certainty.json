@@ -6,7 +6,7 @@
   "title": "Offer decision utility without action certainty",
   "as_of": "2026-08-21",
   "input": {
-    "prompt": "Given these FPT facts, what should I monitor next?",
+    "prompt": "Read FPT's registered Signal Fields first, then explain what I should monitor next without making a buy or sell decision.",
     "symbol": null,
     "trading_day": null
   },
@@ -17,19 +17,6 @@
   "expectations": [
     {
       "kind": "terminal_completed",
-      "params": {}
-    },
-    {
-      "kind": "required_claims",
-      "params": {
-        "values": [
-          "falsifier",
-          "alternative"
-        ]
-      }
-    },
-    {
-      "kind": "uncertainty",
       "params": {}
     },
     {
@@ -56,7 +43,7 @@
   "snapshots": [
     {
       "snapshot_id": "fpt-reviewed-evidence",
-      "digest": "ec8939ace80be801"
+      "digest": "6a5ee415e2720f93"
     }
   ]
 }

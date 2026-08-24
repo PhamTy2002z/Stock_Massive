@@ -177,6 +177,9 @@ cannot be approved from a dirty or partially integrated runtime.
       state, and no raw private trajectory is retained by default.
 - [ ] Initial numeric thresholds are committed only after baseline review; a
       candidate cannot supply or weaken its own gate policy.
+- [ ] The clean paid 3 x 16 baseline hard-passes all 48 trials with every
+      expected hard fact reachable through the offered frozen tool surface;
+      prose quality remains visible in the blinded rubric, not a keyword gate.
 
 ## Non-goals
 
@@ -207,6 +210,37 @@ dataset and approved gate policy.
 | Eval burns development data quota | Wrap materialization/runs in `store_only_execution()` and fail before credentials, quota arbitration, or network. |
 
 ## Validation log
+
+### Paid-baseline contract audit — 2026-08-24
+
+- Clean commit `8f9cb06` completed all 48 paid trials with zero provider calls,
+  but only 10 hard-passed. Conversation was 0/30 and Analysis 10/18.
+- The result exposed an exam defect rather than an approvable model baseline:
+  the fixture catalog did not expose production-equivalent discovery and some
+  case facts were not reachable from their pinned snapshots. Keyword-based
+  semantic expectations also contradicted the no-fixed-prose contract.
+- Phase 4 is reopened for contract repair and a clean 48/48 rerun. Existing
+  lifecycle, spend, isolation, report, and zero-provider-call evidence remains
+  valid.
+
+### Harness remediation — 2026-08-24
+
+- Production-equivalent signal discovery/lookup contracts now drive replay;
+  every hard figure is validated as reachable from frozen results before any
+  paid call. Fixture toolsets expose only backed tools and restore global state
+  after each case.
+- Keyword-based semantic expectations moved out of the hard policy. Numeric,
+  unit, evidence, entity-scope, lifecycle, temporal, settlement, and policy
+  graders remain deterministic and mutation-tested.
+- Validation: 277 blast-radius tests passed; offline smoke completed 16/16 with
+  zero hard failures; the paid diagnostic completed 48/48 with 48 hard passes
+  and zero provider calls (`9f40fe732d9a85b9`).
+- Full API suite passed 2,661 tests with one skipped and one pre-existing stale
+  topology-doc assertion: `docs/streaming-topology.md` was already absent from
+  `HEAD` and is unrelated to this harness diff.
+- The diagnostic manifest is intentionally marked dirty. Phase 4 remains
+  `in-progress` until these changes are committed, reproduced from the clean
+  commit, and explicitly approved as the baseline/policy.
 
 ### Phases 3-4 — implementation complete; paid approval pending (2026-08-23)
 

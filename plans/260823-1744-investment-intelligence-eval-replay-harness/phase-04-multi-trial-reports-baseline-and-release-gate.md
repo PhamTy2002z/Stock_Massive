@@ -128,6 +128,14 @@ stable maintainer surface.
 - [x] Add Make targets and CLI exits.
 - [x] Add store-only materialization and zero-provider-call report assertion.
 - [x] Pass focused/full tests and repeat smoke.
+- [x] Repair the paid replay contract: derive the offered tool catalog from
+      reachable frozen tool results, expose field discovery before lookup on
+      both lanes, and reject cases whose expected facts are unreachable.
+- [x] Calibrate hard graders to machine-observable finance, lifecycle, scope,
+      evidence, and policy contracts; leave prose quality and semantic labels
+      such as counterargument/falsifier to the blinded rubric.
+- [ ] Re-run the clean paid 3 x 16 baseline and require 48/48 hard passes with
+      zero provider calls before baseline approval.
 - [ ] Obtain explicit baseline/threshold approval.
 - [ ] Commit approved baseline/policy and update Stage 0 status.
 
@@ -180,6 +188,51 @@ redacted failure excerpts only.
 - Paid baseline execution and threshold approval were intentionally not run:
   the plan requires an explicitly approved paid route/spend ceiling and owner
   review. Stage 0 therefore remains Target.
+
+### Paid-baseline contract audit — 2026-08-24
+
+- The first clean paid run completed 48/48 trials but hard-passed only 10. Its
+  transport/lifecycle result is valid; its model-quality result is not yet an
+  approvable baseline.
+- Root cause: the replay catalog registered only `get_field` for Conversation
+  and only `list_fields` for Analysis while the production `signals` toolset
+  resolves both. `get_field.field_id` was an unconstrained string, so the model
+  had no machine-readable route to the exact frozen IDs.
+- The three committed snapshots exposed only three tool results. At least one
+  Analysis case required a fact absent from its reachable snapshot. Several
+  hard expectations also required prose labels rather than a structured or
+  deterministic runtime contract.
+- Remediation is part of Phase 4, not a new product phase: make every expected
+  hard fact reachable through the real tool names, validate that reachability
+  before spend, and move prose-quality judgments back to the blinded rubric.
+
+### Harness remediation validation — 2026-08-24
+
+- The replay catalog now reuses the production `list_fields` and `get_field`
+  schemas, narrows each case to tools backed by frozen results, validates hard
+  figure reachability before spend, and restores the production registry and
+  toolset after every case. Offline smoke no longer reports an unregistered
+  `check_price_claim` tool.
+- Hard policy now contains seven machine-observable dimensions. Semantic prose
+  expectations remain report-only trade-offs. Figure grading supports human
+  scales and Vietnamese decimal commas while still requiring a real
+  annualization marker for `percent_annualized`.
+- Focused remediation suite: 42 passed. Eval and production-contract blast
+  radius: 277 passed. Compile checks and `git diff --check` passed. Repository
+  `make lint` could not locate a `python` binary; its exact `py_compile` target
+  passed with `.venv/bin/python`.
+- Offline smoke completed 16/16 with zero hard failures and no missing-tool
+  warnings; artifact digest `614e19da48b16240`.
+- Full API suite: 2,661 passed, 1 skipped, 56 deselected, and one unrelated
+  pre-existing documentation failure. `tests/test_deployment_topology.py`
+  requires `docs/streaming-topology.md`, which is absent from both the current
+  worktree and `HEAD` after commit `b352417`; no harness change touches that
+  test or path.
+- Paid diagnostic run completed all 48/48 trials with 48 hard passes and zero
+  provider calls; dataset digest `85eb3484ddf286b3`, artifact digest
+  `9f40fe732d9a85b9`. The manifest correctly records `dirty: true`, so this run
+  proves the repaired harness/model contract but is not yet the clean approved
+  baseline required by the next checklist item.
 
 ## Next steps
 

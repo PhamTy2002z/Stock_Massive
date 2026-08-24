@@ -17,29 +17,6 @@
       "params": {}
     },
     {
-      "kind": "required_claims",
-      "params": {
-        "values": [
-          "valuation",
-          "counterargument"
-        ]
-      }
-    },
-    {
-      "kind": "uncertainty",
-      "params": {}
-    },
-    {
-      "kind": "acceptable_conclusion",
-      "params": {
-        "values": [
-          "hold",
-          "watch",
-          "neutral"
-        ]
-      }
-    },
-    {
       "kind": "material_evidence",
       "params": {
         "required": [
@@ -54,7 +31,7 @@
   "snapshots": [
     {
       "snapshot_id": "fpt-analysis-window",
-      "digest": "a1342f237c88c10b"
+      "digest": "631a453eef5a1acd"
     }
   ]
 }

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import replace
 from datetime import datetime, time, timezone
@@ -16,7 +16,13 @@ import requests
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
-from src.agent.registry import ToolEntry, object_schema
+from src.agent.registry import ToolEntry
+from src.agent.signal_tool_contract import (
+    GET_FIELD_DESCRIPTION,
+    GET_FIELD_SCHEMA,
+    LIST_FIELDS_DESCRIPTION,
+    LIST_FIELDS_SCHEMA,
+)
 from src.auth import models as _auth_models  # noqa: F401  # register FK targets
 from src.core.config import get_settings
 from src.core.database import Base
@@ -118,30 +124,106 @@ def _answer(case: CaseFile) -> str:
     return " ".join(filter(None, words))
 
 
-def _tool(name: str) -> ToolEntry:
-    properties = {"field_id": {"type": "string"}} if name == "get_field" else {}
-    return ToolEntry(
-        name=name,
-        toolset="signals",
-        schema=object_schema(properties),
-        handler=lambda _context, _arguments: {},
-        description="Read one declared value from the frozen evaluation world.",
-        display_name="Read frozen evidence",
-        reads_external=False,
+class FixtureContractInvalid(ValueError):
+    """A paid case asks for evidence its frozen tool surface cannot return."""
+
+
+def _fixture_results(snapshots: tuple[SnapshotFile, ...]) -> tuple[dict[str, Any], ...]:
+    return tuple(
+        evidence.metadata
+        for snapshot in snapshots
+        for evidence in snapshot.evidence
+        if evidence.metadata.get("fixture_kind") == "tool_result"
     )
 
 
-def _script(case: CaseFile) -> tuple[list[Completion], tuple[ToolEntry, ...]]:
+def tool_catalog_for_case(
+    case: CaseFile, snapshots: tuple[SnapshotFile, ...]
+) -> tuple[ToolEntry, ...]:
+    """Production signal schemas narrowed to tools backed by frozen results."""
+    if case.case_id == "fact-publication-lookahead":
+        return ()
+    backed = {
+        str(item.get("tool_name") or "") for item in _fixture_results(snapshots)
+    }
+    entries = (
+        ToolEntry(
+            name="list_fields",
+            toolset="signals",
+            schema=LIST_FIELDS_SCHEMA,
+            handler=lambda _context, _arguments: {},
+            description=LIST_FIELDS_DESCRIPTION,
+            display_name="Xem danh mục chỉ báo",
+            reads_external=False,
+            max_result_size_chars=32_000,
+        ),
+        ToolEntry(
+            name="get_field",
+            toolset="signals",
+            schema=GET_FIELD_SCHEMA,
+            handler=lambda _context, _arguments: {},
+            description=GET_FIELD_DESCRIPTION,
+            display_name="Đọc chỉ báo",
+            reads_external=False,
+            is_async=False,
+            max_result_size_chars=32_000,
+        ),
+    )
+    return tuple(entry for entry in entries if entry.name in backed)
+
+
+def validate_fixture_contract(
+    case: CaseFile, snapshots: tuple[SnapshotFile, ...]
+) -> None:
+    """Fail before spend when a hard fact is absent from frozen tool results."""
+    offered = {entry.name for entry in tool_catalog_for_case(case, snapshots)}
+    results = [
+        item.get("result")
+        for item in _fixture_results(snapshots)
+        if item.get("tool_name") in offered
+        if isinstance(item.get("result"), Mapping)
+    ]
+    errors: list[str] = []
+    for expectation in case.expectations:
+        if expectation.kind != "figure":
+            continue
+        expected = float(expectation.params["value"])
+        tolerance = float(expectation.params.get("tolerance", 0))
+        unit = expectation.params.get("unit")
+        reachable = any(
+            isinstance(result.get("value"), (int, float))
+            and abs(float(result["value"]) - expected) <= tolerance
+            and (
+                unit is None
+                or str(result.get("unit") or "").casefold()
+                == str(unit).casefold()
+            )
+            for result in results
+        )
+        if not reachable:
+            errors.append(
+                f"case {case.case_id!r}: unreachable hard figure "
+                f"{expectation.params!r}"
+            )
+    if errors:
+        raise FixtureContractInvalid("\n".join(errors))
+
+
+def _script(
+    case: CaseFile, snapshots: tuple[SnapshotFile, ...]
+) -> tuple[list[Completion], tuple[ToolEntry, ...]]:
     answer = _answer(case)
+    tools = tool_catalog_for_case(case, snapshots)
     if case.surface == "conversation":
         # Every Conversation snapshot except the deliberate lookahead trap has
         # get_field.  For the trap, a direct refusal is the correct trajectory.
         if case.case_id == "fact-publication-lookahead":
             return [Completion(model="eval-scripted-session", text=answer, usage=Usage(input_tokens=10, output_tokens=10))], ()
+        call_name = "list_fields" if any(item.name == "list_fields" for item in tools) else tools[0].name
         return [
-            Completion(model="eval-scripted-session", tool_calls=(ToolCall(id="field-1", name="get_field", arguments={"field_id": "price.close"}),), usage=Usage(input_tokens=10, output_tokens=2), finish_reason="tool_calls"),
+            Completion(model="eval-scripted-session", tool_calls=(ToolCall(id="field-1", name=call_name, arguments={}),), usage=Usage(input_tokens=10, output_tokens=2), finish_reason="tool_calls"),
             Completion(model="eval-scripted-session", text=answer, usage=Usage(input_tokens=10, output_tokens=10)),
-        ], (_tool("get_field"),)
+        ], tools
 
     fragment = {
         "verdict": "hold",
@@ -157,21 +239,14 @@ def _script(case: CaseFile) -> tuple[list[Completion], tuple[ToolEntry, ...]]:
         Completion(model="eval-scripted-batch", tool_calls=(ToolCall(id="catalog-1", name="list_fields", arguments={}),), usage=Usage(input_tokens=10, output_tokens=2), finish_reason="tool_calls"),
         Completion(model="eval-scripted-batch", text="The frozen catalog is sufficient.", usage=Usage(input_tokens=10, output_tokens=3)),
         Completion(model="eval-scripted-batch", text=json.dumps(fragment), usage=Usage(input_tokens=20, output_tokens=20)),
-    ], (_tool("list_fields"),)
-
-
-def tool_catalog_for_case(case: CaseFile) -> tuple[ToolEntry, ...]:
-    if case.surface == "analysis":
-        return (_tool("list_fields"),)
-    if case.case_id == "fact-publication-lookahead":
-        return ()
-    return (_tool("get_field"),)
+    ], tools
 
 
 async def execute_scripted_case(*, case: CaseFile, snapshots: tuple[SnapshotFile, ...], run_id: str, trial_index: int, mode: str, remaining_ceiling_usd: float) -> "EvalResult":
     if mode != "smoke":
         raise ValueError("the scripted executor is offline-smoke only")
-    script, tools = _script(case)
+    validate_fixture_contract(case, snapshots)
+    script, tools = _script(case, snapshots)
     fixed_now = datetime.combine(case.as_of, time(12), tzinfo=timezone.utc)
     with _offline_runtime_import() as runner_type:
         with disposable_store() as factory:
@@ -236,7 +311,7 @@ async def execute_live_case(*, case: CaseFile, snapshots: tuple[SnapshotFile, ..
                 return await runner_type(config=config, session_factory=factory).run(
                     case=case,
                     snapshots=snapshots,
-                    tool_catalog=tool_catalog_for_case(case),
+                    tool_catalog=tool_catalog_for_case(case, snapshots),
                     client=client,
                     run_id=run_id,
                     trial_index=trial_index,
@@ -277,4 +352,4 @@ async def live_rubric_judge() -> Iterator[Any]:
             await client.aclose()
 
 
-__all__ = ["disposable_store", "execute_live_case", "execute_scripted_case", "live_rubric_judge", "smoke_config", "tool_catalog_for_case"]
+__all__ = ["FixtureContractInvalid", "disposable_store", "execute_live_case", "execute_scripted_case", "live_rubric_judge", "smoke_config", "tool_catalog_for_case", "validate_fixture_contract"]

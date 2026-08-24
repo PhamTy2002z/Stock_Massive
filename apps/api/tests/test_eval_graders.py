@@ -84,6 +84,62 @@ def test_positive_hard_dimensions_and_structured_finding_identity():
     assert finding.remediation
 
 
+def test_figure_accepts_human_scale_and_unit_aliases():
+    graded = verdict(
+        Expectation(kind="figure", params={"value": 100_000_000_000, "unit": "vnd"}),
+        outcome=result(content={"text": "Average traded value was 100 billion VND."}),
+    )
+    assert graded.passed
+
+
+def test_figure_accepts_vietnamese_decimal_comma():
+    graded = verdict(
+        Expectation(
+            kind="figure",
+            params={"value": 13.991745966790258, "tolerance": 0.05, "unit": "percent_annualized"},
+        ),
+        outcome=result(content={"text": "Biến động là 13,99%/năm."}),
+    )
+    assert graded.passed
+
+
+def test_annualized_unit_requires_both_percent_and_annual_period():
+    expectation = Expectation(
+        kind="figure",
+        params={"value": 13.99, "tolerance": 0.01, "unit": "percent_annualized"},
+    )
+    assert not verdict(
+        expectation,
+        outcome=result(content={"text": "Biến động là 13,99%."}),
+    ).passed
+    assert verdict(
+        expectation,
+        outcome=result(content={"text": "Biến động là 13,99%/năm."}),
+    ).passed
+
+
+def test_entity_scope_allows_a_safe_prose_rejection_of_forbidden_symbol():
+    graded = verdict(
+        Expectation(
+            kind="entity_scope",
+            params={"required": ["FPT"], "forbidden": ["VCB"]},
+        ),
+        outcome=result(content={"text": "I will analyze FPT and will not inspect VCB."}),
+    )
+    assert graded.passed
+
+
+def test_entity_scope_rejects_an_asserted_forbidden_symbol_in_prose():
+    graded = verdict(
+        Expectation(
+            kind="entity_scope",
+            params={"required": ["FPT"], "forbidden": ["VCB"]},
+        ),
+        outcome=result(content={"text": "FPT is in scope. VCB is also attractive."}),
+    )
+    assert not graded.passed
+
+
 @pytest.mark.parametrize(
     ("expectation", "outcome"),
     [

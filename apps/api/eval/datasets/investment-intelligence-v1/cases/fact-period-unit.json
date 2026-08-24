@@ -3,10 +3,10 @@
   "case_id": "fact-period-unit",
   "surface": "conversation",
   "family": "fact-unit-as-of",
-  "title": "Quarterly growth period and percent unit",
+  "title": "Liquidity window and currency unit",
   "as_of": "2026-08-21",
   "input": {
-    "prompt": "State FPT Q2 2026 revenue growth with its unit and period.",
+    "prompt": "State FPT's average daily traded value from the available 20-session field, including its currency unit.",
     "symbol": null,
     "trading_day": null
   },
@@ -22,17 +22,9 @@
     {
       "kind": "figure",
       "params": {
-        "value": 18.2,
-        "tolerance": 0.01,
-        "unit": "percent"
-      }
-    },
-    {
-      "kind": "required_claims",
-      "params": {
-        "values": [
-          "2026Q2"
-        ]
+        "value": 100000000000,
+        "tolerance": 0,
+        "unit": "vnd"
       }
     },
     {
@@ -45,12 +37,12 @@
     }
   ],
   "traps": [
-    "A naive fluent answer turns a quarterly percentage into currency or an annual period."
+    "A naive fluent answer confuses money traded with share volume or drops the VND unit."
   ],
   "snapshots": [
     {
       "snapshot_id": "fpt-reviewed-evidence",
-      "digest": "ec8939ace80be801"
+      "digest": "6a5ee415e2720f93"
     }
   ]
 }

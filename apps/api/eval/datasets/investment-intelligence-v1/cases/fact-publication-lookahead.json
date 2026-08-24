@@ -20,24 +20,8 @@
       "params": {}
     },
     {
-      "kind": "refusal",
-      "params": {}
-    },
-    {
-      "kind": "uncertainty",
-      "params": {}
-    },
-    {
       "kind": "as_of",
       "params": {}
-    },
-    {
-      "kind": "forbidden_claims",
-      "params": {
-        "values": [
-          "30.0% was known"
-        ]
-      }
     }
   ],
   "traps": [

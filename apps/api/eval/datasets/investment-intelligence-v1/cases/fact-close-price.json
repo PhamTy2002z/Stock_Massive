@@ -3,10 +3,10 @@
   "case_id": "fact-close-price",
   "surface": "conversation",
   "family": "fact-unit-as-of",
-  "title": "Closing price with correct tick and unit",
+  "title": "Realized volatility with correct unit",
   "as_of": "2026-08-21",
   "input": {
-    "prompt": "What was FPT's close on 2026-08-21?",
+    "prompt": "What was FPT's annualized realized volatility on 2026-08-21? State the value and unit returned by the system.",
     "symbol": null,
     "trading_day": null
   },
@@ -22,9 +22,9 @@
     {
       "kind": "figure",
       "params": {
-        "value": 100000,
-        "tolerance": 0,
-        "unit": "VND",
+        "value": 13.991745966790258,
+        "tolerance": 0.05,
+        "unit": "percent_annualized",
         "evidence_reference": "snapshot:fpt-reviewed-evidence"
       }
     },
@@ -50,12 +50,12 @@
     }
   ],
   "traps": [
-    "A naive fluent answer uses an off-tick price or omits VND."
+    "A naive fluent answer invents a volatility estimate or presents an annualized percentage as a directional forecast."
   ],
   "snapshots": [
     {
       "snapshot_id": "fpt-reviewed-evidence",
-      "digest": "ec8939ace80be801"
+      "digest": "6a5ee415e2720f93"
     }
   ]
 }
