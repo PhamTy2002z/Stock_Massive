@@ -1,10 +1,10 @@
 {
   "schema": "eval.baseline-summary@1",
   "dataset_id": "investment-intelligence-v1",
-  "status": "pending-owner-review",
-  "approved_artifact_digest": null,
-  "approved_at": null,
-  "reviewer": null,
+  "status": "approved",
+  "approved_artifact_digest": "36bc44f7c00966cd",
+  "approved_at": "2026-08-24",
+  "reviewer": "repository-owner",
   "thresholds": {},
-  "note": "No paid baseline or trade-off threshold is approved. The release gate may validate and report hard dimensions, but comparison cannot graduate Stage 0 until an owner reviews a complete paid distribution."
+  "note": "Owner-approved clean baseline from b6ea20eee8e651817781f50de669ebead832ff8c: 48/48 hard passes, zero data-provider calls, dataset 85eb3484ddf286b3, policy 2.0.0. Quality, cost, and latency remain report-only until multiple comparable distributions justify numeric trade-off thresholds."
 }

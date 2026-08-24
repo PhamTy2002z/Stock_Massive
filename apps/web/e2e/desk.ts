@@ -63,8 +63,8 @@ export async function ask(
   request: APIRequestContext,
   text: string,
 ): Promise<void> {
-  const field = page.getByLabel("Ask Alpha Desk")
-  const send = page.getByRole("button", { name: "Send" })
+  const field = page.getByLabel("Hỏi VisgniteAI")
+  const send = page.getByRole("button", { name: "Gửi" })
 
   await expect(async () => {
     await field.fill(text)

@@ -31,6 +31,7 @@ import {
   relatedArticles,
 } from "@/lib/news"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 
 import { Card, deltaClass, Figure, QuietLine, signedPercent } from "./primitives"
 import { useShell } from "./shell-state"
@@ -1031,16 +1032,13 @@ function RelatedCard({ item }: { item: FeedNewsItem }) {
 /** Re-asks for the feed. Both screens read the same query, so both offer it. */
 function RetryButton({ onClick, className }: { onClick: () => void; className?: string }) {
   return (
-    <button
+    <Button
       type="button"
       onClick={onClick}
-      className={cn(
-        "rounded-[10px] bg-primary px-3.5 py-2 text-control font-medium text-primary-foreground transition-[filter] hover:brightness-110",
-        className,
-      )}
+      className={cn("px-3.5", className)}
     >
       Thử lại
-    </button>
+    </Button>
   )
 }
 

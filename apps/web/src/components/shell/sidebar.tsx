@@ -189,6 +189,11 @@ function NavRow({
     >
       {icon}
       <span className="min-w-0 flex-1 truncate">{children}</span>
+      {disabled && (
+        <span className="shrink-0 text-micro font-medium uppercase tracking-[0.04em] text-ink-6">
+          Sắp ra mắt
+        </span>
+      )}
     </button>
   )
 }

@@ -139,14 +139,10 @@ export const SEND_LABEL = "Gửi"
 /**
  * What the stop control says once it has been pressed.
  *
- * Still English, unlike {@link SEND_LABEL}, and the difference is deliberate:
- * this is the label of the control the composer shows *instead of* send while a
- * Turn runs, and the two are never on screen together. Shared because the
- * composer and the status line both say it, and a Turn that read *Cancelling…*
- * in one place and something else in the other would look like two different
- * things happening.
+ * Shared by the composer and status line so both places describe one state in
+ * the product's Vietnamese-first operational language.
  */
-export const CANCELLING_LABEL = "Cancelling…"
+export const CANCELLING_LABEL = "Đang dừng…"
 
 /**
  * What flagging a message says, and — the load-bearing half — what it does not.

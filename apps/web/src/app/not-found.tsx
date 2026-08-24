@@ -1,6 +1,7 @@
 import Link from "next/link"
 
 import { VisgniteMark } from "@/components/shared/visgnite-logo"
+import { Button } from "@/components/ui/button"
 
 export default function NotFound() {
   return (
@@ -12,12 +13,9 @@ export default function NotFound() {
       <p className="max-w-sm text-row text-ink-4">
         Đường dẫn bạn mở không còn tồn tại. Toàn bộ VisgniteAI nằm trên một màn hình duy nhất.
       </p>
-      <Link
-        href="/"
-        className="mt-2 rounded-[11px] bg-primary px-4 py-2.5 text-control font-medium text-primary-foreground transition-[filter] hover:brightness-110"
-      >
-        Về màn hình chính
-      </Link>
+      <Button asChild size="action" className="mt-2 px-4">
+        <Link href="/">Về màn hình chính</Link>
+      </Button>
     </div>
   )
 }

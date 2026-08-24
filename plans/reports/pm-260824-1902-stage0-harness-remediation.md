@@ -7,9 +7,10 @@
 | Full API suite | 2,661 passed, 1 skipped, 1 pre-existing failure |
 | Offline smoke | 16/16, 0 hard failures |
 | Paid diagnostic | 48/48 hard pass |
+| Clean approved baseline | 48/48 hard pass |
 | Data-provider calls | 0 |
 | Dataset digest | `85eb3484ddf286b3` |
-| Paid artifact digest | `9f40fe732d9a85b9` |
+| Approved artifact digest | `36bc44f7c00966cd` |
 
 ## Delivered
 
@@ -18,12 +19,14 @@
 - Vietnamese decimal-comma and annualized-unit grading corrected.
 - Fixture advertises exact replay-backed tool subset; global state restored.
 
-## Remaining
+## Closure
 
-- Commit the remediation.
-- Re-run paid 3 x 16 from the clean commit.
-- Review and approve baseline/policy; then close Phase 4 and Stage 0.
+- Remediation committed through `b6ea20e`.
+- Clean 3 x 16 run completed from that commit with 48/48 hard passes.
+- Repository owner approved policy `2.0.0` and baseline digest
+  `36bc44f7c00966cd`; numeric trade-off thresholds remain intentionally unset.
+- Phase 4 and Stage 0 complete: 73/73 checklist items.
 
 ## Unresolved questions
 
-- None technical. Baseline approval remains an explicit owner gate.
+- None.

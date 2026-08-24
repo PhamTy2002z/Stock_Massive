@@ -109,6 +109,14 @@ streaming URL `https://fc-data.ssi.com.vn/`).
 
 ### DNSE LightSpeed / Entrade X — official docs, MQTT websocket feed
 
+> **Current OpenAPI update (2026-08-24):** DNSE now exposes an authenticated
+> REST and WebSocket market-data platform at `openapi.dnse.com.vn` and
+> `ws-openapi.dnse.com.vn`. The live capability, coverage, units, data-quality,
+> SDK, and Stock_Massive integration audit is recorded in
+> [DNSE OpenAPI market-data capability audit](./dnse-lightspeed-market-data-audit.md).
+> The MQTT material below documents the prior LightSpeed generation and should
+> not be used as the current integration contract.
+
 Official handbook at [hdsd.dnse.com.vn](https://hdsd.dnse.com.vn/san-pham-dich-vu/dnse-lightspeed-api)
 (Trading REST API + Market Data), aimed at individual investors, fintechs and
 institutions. The KRX-era docs live under `lightspeed-api_krx`; several deep URLs

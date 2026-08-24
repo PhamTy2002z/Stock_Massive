@@ -43,7 +43,7 @@ test.beforeEach(async ({ page, request }) => {
   await resetTurn(request)
   await signUp(page, email)
   await page.goto("/")
-  await expect(page.getByLabel("Ask Alpha Desk")).toBeVisible()
+  await expect(page.getByLabel("Hỏi VisgniteAI")).toBeVisible()
 })
 
 test.afterEach(async ({ request }) => {

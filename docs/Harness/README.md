@@ -1,10 +1,11 @@
 # Investment Intelligence Harness — Source of Truth
 
-Thư mục này là authority cho hướng phát triển AI của Stock_Massive. Nó định
-nghĩa sản phẩm phải trở thành loại intelligence system nào, harness phải giữ
-những invariant nào, và capability nào chỉ được mở sau khi có bằng chứng. Code
-và test vẫn là authority cho hành vi đang chạy; tài liệu này sở hữu mục tiêu,
-quyết định, ranh giới và thứ tự tiến hóa.
+Thư mục này là authority cho contract và kiến trúc AI của Stock_Massive. Nó
+định nghĩa sản phẩm phải trở thành loại intelligence system nào và harness phải
+giữ những invariant nào. Thứ tự tiến hóa nằm ở
+[`docs/harness-roadmap.md`](../harness-roadmap.md), tách khỏi delivery của data
+platform trong [`docs/system-roadmap.md`](../system-roadmap.md). Code và test vẫn
+là authority cho hành vi đang chạy.
 
 ## Tuyên bố sản phẩm
 
@@ -57,7 +58,8 @@ Bộ SOT được chia theo câu hỏi mà một maintainer hoặc coding agent 
 | 1 | [Investment Intelligence contract](investment-intelligence-contract.md) | AI tồn tại để làm gì, truth model là gì và quyền dừng ở đâu |
 | 2 | [Target architecture](target-architecture.md) | Các deep module, interface, turn lifecycle và dependency direction |
 | 3 | [Quality, safety and operations](quality-safety-and-operations.md) | Cách chứng minh correctness, quality, reliability, security và cost |
-| 4 | [AI capability roadmap](ai-capability-roadmap.md) | Thứ tự mở capability, dependency và graduation gate |
+| 4 | [Harness roadmap](../harness-roadmap.md) | Thứ tự mở AI capability, dependency và graduation gate |
+| 5 | [System roadmap](../system-roadmap.md) | Thứ tự xây data platform, DNSE realtime, product surface và vận hành |
 
 ## Nguồn evidence
 
@@ -89,8 +91,9 @@ Repository policy nằm tại
 [`eval/gate-policy.json`](../../apps/api/eval/gate-policy.json). Trạng thái
 baseline được fail closed bởi
 [`investment-intelligence-v1.json`](../../apps/api/eval/baselines/investment-intelligence-v1.json):
-Stage 0 không tốt nghiệp khi chưa có paid distribution được owner review và
-artifact digest được phê duyệt.
+Stage 0 đã tốt nghiệp với paid distribution được owner review và artifact
+digest `36bc44f7c00966cd`; các gate sau tiếp tục fail closed nếu identity này hoặc
+repository-owned policy không tương thích.
 
 ## Quy tắc bảo trì
 
@@ -99,7 +102,9 @@ executable owner thay vì sao chép code hoặc danh sách tool đang biến đ�
 
 - Cập nhật product contract chỉ khi mục tiêu, quyền hoặc domain invariant đổi.
 - Cập nhật architecture khi seam hoặc dependency direction đổi.
-- Cập nhật roadmap khi capability tốt nghiệp, bị từ chối hoặc dependency đổi.
+- Cập nhật `docs/harness-roadmap.md` khi AI capability tốt nghiệp, bị từ chối
+  hoặc dependency đổi; cập nhật `docs/system-roadmap.md` khi data/system phase
+  đổi trạng thái.
 - Cập nhật quality gates trước khi mở một lớp autonomy mới.
 - Không đưa benchmark result, incident log hoặc phase report vào authority
   evergreen; link đến artifact sở hữu chúng.

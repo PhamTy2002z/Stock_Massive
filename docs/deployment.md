@@ -1,0 +1,86 @@
+# Backend deployment
+
+The backend currently deploys to the local Docker Compose service named
+`stockmassive-api-1`. The service listens on `http://127.0.0.1:8000`; the
+repository does not define a remote deployment environment or public backend
+URL.
+
+## Deploy the backend
+
+Create a PostgreSQL backup before a deployment that includes a migration. Then
+rebuild and replace only the API container:
+
+```bash
+REALTIME_INGESTION_ENABLED=false \
+  docker compose up -d --build --no-deps api
+```
+
+The API entrypoint runs `alembic upgrade head` before Uvicorn starts. A local
+migration failure stops the container instead of serving an older schema.
+
+The realtime ingestion runtime remains disabled until the controlled S1 probe
+passes during an open-market window. Enabling it also requires PostgreSQL,
+Redis, `DNSE_API_KEY`, and `DNSE_API_SECRET`.
+
+## Verify the deployment
+
+Verify the container, schema, and HTTP contract after every deploy:
+
+```bash
+docker compose ps
+docker compose exec -T api alembic current
+curl --fail http://127.0.0.1:8000/health
+curl http://127.0.0.1:8000/api/v1/realtime/health
+```
+
+When realtime ingestion is disabled and has never recorded a health state, the
+realtime health endpoint returns `404` with `Realtime health is not recorded`.
+This response does not indicate a failed API deployment.
+
+## Environment variables
+
+The deployment forwards these realtime settings without storing their values
+in the repository:
+
+- `REALTIME_INGESTION_ENABLED`
+- `DNSE_API_KEY`
+- `DNSE_API_SECRET`
+- `DNSE_BOARD_IDS`
+- `REALTIME_QUEUE_SIZE`
+- `REALTIME_WORKER_COUNT`
+- `REALTIME_SHUTDOWN_TIMEOUT_SECONDS`
+
+Use `.env` for local values. Git ignores that file and its timestamped backup
+variants.
+
+## Roll back
+
+Stop the API, downgrade the realtime migration, and rebuild the previous source
+revision:
+
+```bash
+docker compose stop api
+docker compose run --rm --entrypoint alembic api downgrade b7f4e9c21a08
+docker compose up -d --build --no-deps api
+```
+
+If a downgrade cannot preserve the required data, restore the verified
+pre-deployment custom-format dump with `pg_restore`. Restoring a dump replaces
+database state, so resolve the exact target and stop writers before running it.
+
+## Latest deployment evidence
+
+On August 24, 2026, the local API image was rebuilt with the S0-S2 realtime
+code and migrated to Alembic head `c8f2a6d31e04`. The deployment kept realtime
+ingestion disabled. The root health check returned `200`, all four realtime
+tables existed, and the focused S0-S2 suite passed 76 tests.
+
+The verified backup is
+`.backups/stockmassive-pre-realtime-20260824T2200.dump`. Its SHA-256 digest is
+`0293db3341c0d9660f6e66018012e2dc27b679b52cbc54f7b84c5cec84a87df3`.
+
+## Next steps
+
+Run the controlled S1 probe during an open-market window. Record quote quantity
+scale, throughput, subscription limits, ordering, and reconnect gaps before
+setting `REALTIME_INGESTION_ENABLED=true`.

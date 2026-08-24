@@ -2,7 +2,7 @@
 from datetime import date
 from functools import lru_cache
 
-from pydantic import field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -48,6 +48,18 @@ class Settings(BaseSettings):
     # Universe — tập mã được thu thập và phục vụ, trần 100 mã (src/stocks/universe.py).
     # Rỗng là hợp lệ: ứng dụng chạy được và Collector không có gì để làm.
     universe_symbols: str = ""  # Comma-separated
+
+    # DNSE realtime ingestion is opt-in because it opens a long-lived external
+    # feed and writes continuously. Enabling it requires credentials and Redis;
+    # startup rejects a partial configuration instead of running without hot
+    # projections or reconnect-safe health.
+    realtime_ingestion_enabled: bool = False
+    dnse_api_key: SecretStr | None = None
+    dnse_api_secret: SecretStr | None = None
+    dnse_board_ids: str = "G1"
+    realtime_queue_size: int = Field(default=2_000, ge=1, le=100_000)
+    realtime_worker_count: int = Field(default=1, ge=1, le=8)
+    realtime_shutdown_timeout_seconds: float = Field(default=15.0, gt=0, le=120)
 
     # Upstash Redis (supports both naming conventions)
     upstash_redis_url: str = ""
@@ -381,6 +393,44 @@ class Settings(BaseSettings):
         """
         _parse_catchup_times(value)
         return value
+
+    @model_validator(mode="after")
+    def _complete_realtime_configuration(self):
+        if not self.realtime_ingestion_enabled:
+            return self
+        if (
+            self.dnse_api_key is None
+            or self.dnse_api_secret is None
+            or not self.dnse_api_key.get_secret_value().strip()
+            or not self.dnse_api_secret.get_secret_value().strip()
+        ):
+            raise ValueError(
+                "realtime ingestion requires DNSE_API_KEY and DNSE_API_SECRET"
+            )
+        if not self.cache_redis_url and not (self.redis_url and self.redis_token):
+            raise ValueError("realtime ingestion requires a configured Redis service")
+        boards = [board.strip().upper() for board in self.dnse_board_ids.split(",")]
+        if not boards or any(
+            not board
+            or len(board) > 32
+            or any(
+                character not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+                for character in board
+            )
+            for board in boards
+        ):
+            raise ValueError("DNSE_BOARD_IDS contains an invalid board")
+        return self
+
+    @property
+    def realtime_boards(self) -> tuple[str, ...]:
+        return tuple(
+            dict.fromkeys(
+                board.strip().upper()
+                for board in self.dnse_board_ids.split(",")
+                if board.strip()
+            )
+        )
 
     @property
     def market_catchup_schedule(self) -> tuple[tuple[int, int], ...]:
