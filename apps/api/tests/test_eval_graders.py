@@ -21,7 +21,14 @@ def snapshot(*, late: bool = False, health: str = "ok") -> SnapshotFile:
     return SnapshotFile(schema="eval.snapshot@1", snapshot_id="frozen-fpt", evidence=(EvidenceRecord(source="fiinquant", capability="market", entity="FPT", unit="VND", value=100_000, health=health, effective_at=NOW, published_at=published, ingested_at=published, provenance="synthetic reviewed fixture", available_after_as_of=late),))
 
 
-def result(*, terminal: str = "completed", content=None, issued=("call-1",), settled=("call-1",)) -> EvalResult:
+def result(
+    *,
+    terminal: str = "completed",
+    content=None,
+    issued=("call-1",),
+    settled=("call-1",),
+    scope_violations=(),
+) -> EvalResult:
     events = []
     if issued:
         events.append(TrajectoryEvent(schema="eval.trajectory-event@1", seq=0, kind="model_attempt", at=NOW, payload={"tool_calls": [{"id": item} for item in issued]}))
@@ -30,7 +37,12 @@ def result(*, terminal: str = "completed", content=None, issued=("call-1",), set
     events.append(TrajectoryEvent(schema="eval.trajectory-event@1", seq=len(events), kind="terminal", at=NOW, payload={"status": terminal}))
     trial = TrialOutcome(schema="eval.trial@1", run_id="run-grader", case_id="grader-mutation", trial_index=0, started_at=NOW, finished_at=NOW, terminal=terminal)
     observable = ObservableOutcome(surface="analysis", lifecycle_status="ready", terminal_reason=None, persisted_id="1", content=content or {"text": "FPT was 100,000 VND; evidence snapshot:frozen-fpt", "actions": []})
-    return EvalResult(trial=trial, observable=observable, trajectory=tuple(events))
+    return EvalResult(
+        trial=trial,
+        observable=observable,
+        trajectory=tuple(events),
+        scope_violations=tuple(scope_violations),
+    )
 
 
 def verdict(expectation: Expectation, *, outcome=None, frozen=None):
@@ -46,7 +58,17 @@ def verdict(expectation: Expectation, *, outcome=None, frozen=None):
         (Expectation(kind="terminal_completed"), result(terminal="failed"), None),
         (Expectation(kind="figure", params={"value": 100_000, "unit": "VND"}), result(content={"text": "FPT was 99,000 USD"}), None),
         (Expectation(kind="unit", params={"value": "VND"}), result(content={"text": "FPT was 100,000 USD"}), None),
-        (Expectation(kind="entity_scope", params={"required": ["FPT"], "forbidden": ["VCB"]}), result(content={"text": "VCB was 100,000 VND"}), None),
+        (
+            Expectation(
+                kind="entity_scope",
+                params={"required": ["FPT"], "forbidden": ["VCB"]},
+            ),
+            result(
+                content={"text": "FPT remains in scope."},
+                scope_violations=("get_field requested VCB",),
+            ),
+            None,
+        ),
         (Expectation(kind="as_of"), None, snapshot(late=True)),
         (Expectation(kind="material_evidence", params={"required": ["snapshot:frozen-fpt"]}), result(content={"text": "unsupported"}, issued=(), settled=()), None),
         (Expectation(kind="evidence_health", params={"required": ["snapshot:frozen-fpt"]}), None, snapshot(health="absent")),
@@ -122,6 +144,10 @@ def test_annualized_unit_requires_both_percent_and_annual_period():
             content={"text": "Biến động là 13,99% thường niên hóa."}
         ),
     ).passed
+    assert verdict(
+        expectation,
+        outcome=result(content={"text": "Biến động là 13,99% thường niên."}),
+    ).passed
 
 
 def test_entity_scope_allows_a_safe_prose_rejection_of_forbidden_symbol():
@@ -145,28 +171,30 @@ def test_entity_scope_allows_a_safe_prose_rejection_of_forbidden_symbol():
 def test_changed_grader_contracts_have_new_versions():
     versions = default_registry().versions
     assert versions["figure-value-unit"] == "1.1.0"
-    assert versions["entity-scope"] == "1.2.0"
+    assert versions["entity-scope"] == "2.0.0"
     assert versions["evidence-health-coverage"] == "1.1.0"
     assert versions["refusal-uncertainty"] == "2.0.0"
     assert versions["claims-conclusion"] == "2.0.0"
 
 
-def test_entity_scope_rejects_an_asserted_forbidden_symbol_in_prose():
+def test_entity_scope_rejects_structured_forbidden_entity_not_prose_rejection():
     graded = verdict(
         Expectation(
             kind="entity_scope",
             params={"required": ["FPT"], "forbidden": ["VCB"]},
         ),
-        outcome=result(content={"text": "FPT is in scope. VCB is also attractive."}),
+        outcome=result(
+            content={"text": "FPT is in scope.", "entities": ["FPT", "VCB"]}
+        ),
     )
     assert not graded.passed
-    assert not verdict(
+    assert verdict(
         Expectation(
             kind="entity_scope",
             params={"required": ["FPT"], "forbidden": ["VCB"]},
         ),
         outcome=result(
-            content={"text": "FPT is in scope. The source says VCB is attractive."}
+            content={"text": "FPT stays in scope; I did not inspect VCB."}
         ),
     ).passed
 

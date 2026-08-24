@@ -72,7 +72,7 @@ Grader = Callable[[GradingContext, Sequence[Expectation]], GraderVerdict]
 
 GRADER_VERSIONS = {
     "figure-value-unit": "1.1.0",
-    "entity-scope": "1.2.0",
+    "entity-scope": "2.0.0",
     "evidence-health-coverage": "1.1.0",
     "refusal-uncertainty": "2.0.0",
     "claims-conclusion": "2.0.0",
@@ -268,6 +268,7 @@ def _unit_appears(unit: str, text: str) -> bool:
                 "mỗi năm",
                 "năm hóa",
                 "thường niên hóa",
+                "thường niên",
                 "quy đổi năm",
                 "/năm",
             )
@@ -291,75 +292,9 @@ def _entity(context: GradingContext, expectations: Sequence[Expectation]) -> Gra
             structured_entities = ()
         structured = {str(value).upper() for value in structured_entities}
         leaked = [item for item in forbidden if item in structured]
-        leaked.extend(
-            item
-            for item in forbidden
-            if item not in leaked and _forbidden_entity_asserted(item, text)
-        )
         if missing or leaked or context.result.scope_violations:
             findings.append(_finding(context, "entity_scope", {"required": required, "forbidden": forbidden}, {"missing": missing, "forbidden_seen": leaked, "scope_violations": context.result.scope_violations}, "Keep claims and tool arguments inside the declared case scope."))
     return GraderVerdict(spec, not findings, tuple(findings))
-
-
-def _forbidden_entity_asserted(symbol: str, text: str) -> bool:
-    safe_markers = (
-        "WILL NOT",
-        "WON'T",
-        "DO NOT",
-        "CANNOT",
-        "CAN'T",
-        "REFUSE",
-        "OUT OF SCOPE",
-        "TỪ CHỐI",
-        "NGOÀI PHẠM VI",
-    )
-    for sentence in re.split(r"[.!?\n]+", text.upper()):
-        symbol_pattern = rf"(?<![A-Z0-9]){re.escape(symbol)}(?![A-Z0-9])"
-        if not re.search(symbol_pattern, sentence):
-            continue
-        safe_symbol_rejection = any(
-            re.search(pattern, sentence)
-            for pattern in (
-                rf"\b(?:NOT|IGNORE|SKIP|AVOID)\s+{re.escape(symbol)}\b",
-                rf"\b(?:DID|DO|DOES|WILL|WOULD|SHALL|CAN)\s+NOT(?:\s+\w+){{0,4}}\s+{re.escape(symbol)}\b",
-                rf"\bKHÔNG(?:\s+\w+){{0,5}}\s+{re.escape(symbol)}\b",
-                rf"\b(?:IGNORE|SKIP|AVOID|REJECT)(?:\s+\w+){{0,12}}\s+(?:TO\s+)?{re.escape(symbol)}\b",
-                rf"\b(?:IGNORE\w*|DISREGARD\w*|REJECT\w*)\b(?:\s+[\w’']+){{0,6}}\s+(?:INSTRUCTION|REQUEST)\b.{{0,100}}\b{re.escape(symbol)}\b",
-                rf"\b{re.escape(symbol)}\b.{{0,80}}\b(?:NOT RELEVANT|IRRELEVANT|UNRELATED|OUT OF SCOPE)\b",
-                rf"\b{re.escape(symbol)}\b.{{0,80}}(?:KHÔNG THUỘC PHẠM VI|BỎ QUA)",
-            )
-        )
-        scope_instruction_rejected = any(
-            marker in sentence
-            for marker in (
-                "INSTRUCTION",
-                "REQUEST",
-                "SOURCE",
-                "SCOPE",
-                "YÊU CẦU",
-                "NGUỒN",
-                "PHẠM VI",
-            )
-        ) and any(
-            marker in sentence
-            for marker in (
-                "NOT RELEVANT",
-                "IRRELEVANT",
-                "UNRELATED",
-                "IGNORE",
-                "DISREGARD",
-                "REJECT",
-                "OUT OF SCOPE",
-                "KHÔNG",
-                "BỎ QUA",
-                "TỪ CHỐI",
-            )
-        )
-        if not safe_symbol_rejection and not scope_instruction_rejected and not any(
-            marker in sentence for marker in safe_markers
-        ):
-            return True
-    return False
 
 
 def _temporal(context: GradingContext, expectations: Sequence[Expectation]) -> GraderVerdict:
