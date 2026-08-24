@@ -305,9 +305,21 @@ def _forbidden_entity_asserted(symbol: str, text: str) -> bool:
         "NGOÀI PHẠM VI",
     )
     for sentence in re.split(r"[.!?\n]+", text.upper()):
-        if re.search(rf"(?<![A-Z0-9]){re.escape(symbol)}(?![A-Z0-9])", sentence):
-            if not any(marker in sentence for marker in safe_markers):
-                return True
+        symbol_pattern = rf"(?<![A-Z0-9]){re.escape(symbol)}(?![A-Z0-9])"
+        if not re.search(symbol_pattern, sentence):
+            continue
+        safe_symbol_rejection = any(
+            re.search(pattern, sentence)
+            for pattern in (
+                rf"\b(?:NOT|IGNORE|SKIP|AVOID)\s+{re.escape(symbol)}\b",
+                rf"\b{re.escape(symbol)}\b.{{0,80}}\b(?:NOT RELEVANT|OUT OF SCOPE)\b",
+                rf"\b{re.escape(symbol)}\b.{{0,80}}(?:KHÔNG THUỘC PHẠM VI|BỎ QUA)",
+            )
+        )
+        if not safe_symbol_rejection and not any(
+            marker in sentence for marker in safe_markers
+        ):
+            return True
     return False
 
 

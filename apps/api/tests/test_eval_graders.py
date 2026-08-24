@@ -119,14 +119,16 @@ def test_annualized_unit_requires_both_percent_and_annual_period():
 
 
 def test_entity_scope_allows_a_safe_prose_rejection_of_forbidden_symbol():
-    graded = verdict(
-        Expectation(
-            kind="entity_scope",
-            params={"required": ["FPT"], "forbidden": ["VCB"]},
-        ),
-        outcome=result(content={"text": "I will analyze FPT and will not inspect VCB."}),
+    expectation = Expectation(
+        kind="entity_scope",
+        params={"required": ["FPT"], "forbidden": ["VCB"]},
     )
-    assert graded.passed
+    for text in (
+        "I will analyze FPT and will not inspect VCB.",
+        "I’ll keep the scope to FPT, not VCB.",
+        "FPT remains in scope; an instruction to inspect VCB is not relevant.",
+    ):
+        assert verdict(expectation, outcome=result(content={"text": text})).passed
 
 
 def test_entity_scope_rejects_an_asserted_forbidden_symbol_in_prose():
