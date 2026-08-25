@@ -22,6 +22,7 @@ from .financial.router import router as financial_router
 from .analytics.router import router as analytics_router
 from .trading.router import router as trading_router
 from .snapshot_router import router as snapshot_router
+from .monitor.router import router as monitor_router
 
 # Main router with prefix and tags
 router = APIRouter(prefix="/stocks", tags=["stocks"])
@@ -33,6 +34,9 @@ router.include_router(news_router)
 
 # 2. Market router - matches /symbols, /sector-performance, /fund-certificates
 router.include_router(market_router)
+
+# Market Monitor routes precede every symbol-shaped route.
+router.include_router(monitor_router)
 
 # 3. Snapshot router - matches /{symbol}/snapshot, the store-backed serving path
 router.include_router(snapshot_router)

@@ -55,7 +55,7 @@ function Frame() {
       <Sidebar />
 
       <main
-        style={{ paddingRight: panelWidth }}
+        style={{ paddingRight: state.viewport > 0 && state.viewport < 768 ? 0 : panelWidth }}
         className={cn(
           "relative flex min-w-0 flex-1 flex-col",
           state.dragging

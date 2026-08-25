@@ -1,10 +1,11 @@
 "use client"
 
-import { useMemo, useState, type KeyboardEvent } from "react"
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Maximize2, Search, X } from "lucide-react"
 
 import { usePriceHistory } from "@/hooks/use-price-history"
+import { useMarketStockDetail } from "@/hooks/use-market-monitor"
 import { useMarketIndices } from "@/hooks/use-market-indices"
 import { useSectorPerformance } from "@/hooks/use-sector-performance"
 import { useVN30Overview } from "@/hooks/use-vn30-overview"
@@ -19,6 +20,15 @@ import { formatVolume } from "@/lib/format"
 import { STALE_TIME } from "@/lib/query-config"
 import { queryKeys } from "@/lib/query-keys"
 import { cn } from "@/lib/utils"
+import { useMarketMonitorUrlState } from "@/lib/market-monitor/url-state"
+import type { MarketStockDetailResponse } from "@/lib/market-monitor/api"
+import {
+  directionClass as monitorDirectionClass,
+  formatMetric as formatMonitorMetric,
+  formatMonitorTime,
+  issueText,
+  signedMetric as signedMonitorMetric,
+} from "@/components/market-monitor/monitor-primitives"
 import { Button } from "@/components/ui/button"
 
 import { NewsSourcesTab } from "./news-sources"
@@ -31,8 +41,6 @@ import {
   PanelCard,
   peakChange,
   price,
-  SampleBadge,
-  SampleDataNote,
   sectorTint,
   signedPercent,
 } from "./primitives"
@@ -52,12 +60,39 @@ export function Inspector() {
   const { state, dispatch, panelWidth } = useShell()
   const onDrag = useInspectorDrag()
   const open = state.inspector !== null
+  const compact = state.viewport > 0 && state.viewport < 768
+  const closeRef = useRef<HTMLButtonElement>(null)
+  const returnFocusRef = useRef<HTMLElement | null>(null)
+  const wasOpen = useRef(false)
+
+  useEffect(() => {
+    if (open && !wasOpen.current && compact) {
+      returnFocusRef.current = document.activeElement as HTMLElement | null
+      requestAnimationFrame(() => closeRef.current?.focus())
+    }
+    if (!open && wasOpen.current && compact) returnFocusRef.current?.focus()
+    wasOpen.current = open
+  }, [compact, open])
 
   return (
+    <>
+    {compact && open && (
+      <button
+        type="button"
+        aria-label="Đóng bảng thông tin"
+        onClick={() => dispatch({ type: "close-inspector" })}
+        className="fixed inset-0 z-[39] cursor-default bg-background/70"
+      />
+    )}
     <div
-      style={{ width: panelWidth }}
+      style={{ width: compact ? "100%" : panelWidth }}
       className={cn(
-        "absolute inset-y-0 right-0 z-40 overflow-hidden",
+        "absolute right-0 z-40 overflow-hidden",
+        compact
+          ? open
+            ? "inset-x-0 bottom-0 h-[92dvh] rounded-t-card"
+            : "pointer-events-none inset-x-0 bottom-0 h-0"
+          : "inset-y-0",
         open && "shadow-panel",
         state.dragging ? "transition-none" : "transition-[width] duration-panel ease-panel",
       )}
@@ -83,19 +118,34 @@ export function Inspector() {
           dispatch({ type: "resize-inspector", width })
         }}
         onDoubleClick={() => dispatch({ type: "reset-inspector-width" })}
-        className="absolute inset-y-0 left-0 z-[6] flex w-[9px] cursor-col-resize items-center justify-center transition-colors hover:bg-primary/[0.16] focus-visible:bg-primary/[0.16] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        className={cn("absolute inset-y-0 left-0 z-[6] w-[9px] cursor-col-resize items-center justify-center transition-colors hover:bg-primary/[0.16] focus-visible:bg-primary/[0.16] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring", compact ? "hidden" : "flex")}
       >
         <span className="h-8 w-0.5 rounded-pill bg-foreground/[0.16]" />
       </div>
 
       <aside
         aria-label="Bảng thông tin thị trường"
+        role={compact ? "dialog" : undefined}
+        aria-modal={compact ? true : undefined}
         aria-hidden={!open}
+        onKeyDown={(event) => {
+          if (!compact || event.key !== "Tab") return
+          const focusable = event.currentTarget.querySelectorAll<HTMLElement>(
+            'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          )
+          if (focusable.length === 0) return
+          const first = focusable[0]
+          const last = focusable[focusable.length - 1]
+          if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+          if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+        }}
         className={cn(
-          "flex h-full w-full flex-col border-l border-border bg-surface-panel transition-opacity duration-panel",
+          "flex h-full w-full flex-col bg-surface-panel transition-opacity duration-panel",
+          compact ? "rounded-t-card border-t border-border" : "border-l border-border",
           open ? "opacity-100" : "opacity-0",
         )}
       >
+        {compact && <span className="mx-auto mt-2 h-1 w-10 rounded-pill bg-foreground/[0.16]" aria-hidden="true" />}
         <div className="flex flex-none items-center gap-0.5 border-b border-border py-2.5 pl-3.5 pr-2.5">
           <div className="flex gap-0.5">
             <TabButton
@@ -140,11 +190,12 @@ export function Inspector() {
             label={state.inspectorWide ? "Thu hẹp bảng" : "Mở rộng bảng"}
             size="sm"
             onClick={() => dispatch({ type: "toggle-inspector-wide" })}
-            className="ml-auto"
+            className={cn("ml-auto", compact && "hidden")}
           >
             <Maximize2 className="size-4" strokeWidth={1.6} />
           </IconButton>
           <IconButton
+            ref={closeRef}
             label="Đóng bảng"
             size="sm"
             onClick={() => dispatch({ type: "close-inspector" })}
@@ -156,10 +207,10 @@ export function Inspector() {
         {/* Not on the sources tab: that tab is about one answer, and a symbol
             search above it would offer to navigate away from the thing the
             reader opened it to check. */}
-        {state.inspector !== "sources" && <SymbolSearch />}
+        {open && state.inspector !== "sources" && <SymbolSearch />}
 
         <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-3.5">
-          {state.inspector === "market" ? (
+          {open && (state.inspector === "market" ? (
             <MarketTab />
           ) : state.inspector === "news" ? (
             <NewsSourcesTab />
@@ -167,10 +218,11 @@ export function Inspector() {
             <SourcesTab />
           ) : (
             <SymbolTab />
-          )}
+          ))}
         </div>
       </aside>
     </div>
+    </>
   )
 }
 
@@ -361,42 +413,6 @@ function MarketTab() {
         ))}
       </div>
 
-      <SectionHeading className="mt-5">Tác động tới chỉ số</SectionHeading>
-      <div className="mt-2.5 rounded-xl border border-border bg-surface-raised p-3">
-        <div className="mb-2 flex justify-end">
-          <SampleBadge />
-        </div>
-        {SAMPLE_CONTRIBUTION.map((row) => (
-          <div key={row.symbol} className="flex items-center gap-2.5 px-0.5 py-1 text-control">
-            <Figure className="w-11 shrink-0">{row.symbol}</Figure>
-            <span className="flex min-w-0 flex-1 justify-center">
-              <span className="flex w-1/2 justify-end">
-                <i
-                  className="block h-2 rounded-[3px] bg-negative"
-                  style={{ width: row.points < 0 ? `${Math.round((-row.points / 4.2) * 100)}%` : "0%" }}
-                />
-              </span>
-              <span className="w-px bg-foreground/[0.14]" />
-              <span className="w-1/2">
-                <i
-                  className="block h-2 rounded-[3px] bg-positive"
-                  style={{ width: row.points > 0 ? `${Math.round((row.points / 4.2) * 100)}%` : "0%" }}
-                />
-              </span>
-            </span>
-            <Figure className={cn("w-16 shrink-0 text-right", deltaClass(row.points))}>
-              {row.points > 0 ? "+" : "−"}
-              {Math.abs(row.points).toFixed(1).replace(".", ",")} đ
-            </Figure>
-          </div>
-        ))}
-        <div className="pt-2.5">
-          <SampleDataNote>
-            API chưa tính đóng góp điểm số của từng mã.
-          </SampleDataNote>
-        </div>
-      </div>
-
       <SectionHeading className="mt-5">Nhiệt độ ngành</SectionHeading>
       <div className="mt-2.5 grid gap-[7px] [grid-template-columns:repeat(auto-fit,minmax(104px,1fr))]">
         {(sectors.data?.sectors ?? []).map((sector) => (
@@ -457,21 +473,13 @@ function MarketTab() {
 }
 
 /** Per-symbol index contribution. No endpoint computes it; the reference's own. */
-const SAMPLE_CONTRIBUTION = [
-  { symbol: "VHM", points: -4.2 },
-  { symbol: "VIC", points: -3.8 },
-  { symbol: "GAS", points: -1.6 },
-  { symbol: "CTG", points: -1.2 },
-  { symbol: "TCB", points: 0.9 },
-  { symbol: "FPT", points: 0.6 },
-]
-
 // ---------------------------------------------------------------------------
 // Symbol
 
 function SymbolTab() {
   const { state, dispatch } = useShell()
   const symbol = state.selected.symbol
+  const monitorUrl = useMarketMonitorUrlState()
 
   const detail = useQuery<StockDetail>({
     queryKey: queryKeys.stockDetail(symbol),
@@ -485,6 +493,11 @@ function SymbolTab() {
     retry: false,
   })
   const history = usePriceHistory(symbol, "1D")
+  const monitor = useMarketStockDetail(
+    symbol,
+    { exchange: monitorUrl.state.exchange, asOf: monitorUrl.state.asOf },
+    state.view === "board",
+  )
 
   const data = detail.data
   const changePct = data?.change_pct ?? null
@@ -558,6 +571,15 @@ function SymbolTab() {
           <p className="pt-2 text-micro text-ink-6">Đang tải chuỗi giá…</p>
         )}
       </PanelCard>
+
+      {state.view === "board" && (
+        <MonitorSymbolEvidence
+          data={monitor.data}
+          pending={monitor.isPending}
+          error={monitor.isError}
+          retry={() => void monitor.refetch()}
+        />
+      )}
 
       <div className="mt-3 grid gap-2.5">
         <PanelCard>
@@ -680,6 +702,52 @@ function SymbolTab() {
       </div>
     </div>
   )
+}
+
+function MonitorSymbolEvidence({
+  data,
+  pending,
+  error,
+  retry,
+}: {
+  data: MarketStockDetailResponse | undefined
+  pending: boolean
+  error: boolean
+  retry: () => void
+}) {
+  if (pending) {
+    return <div role="status" className="mt-3.5 h-32 animate-pulse rounded-card bg-foreground/[0.045]"><span className="sr-only">Đang tải bằng chứng Market Monitor</span></div>
+  }
+  if (error || !data) {
+    return <div className="mt-3.5 rounded-card bg-surface-sunken p-3 shadow-[inset_0_0_0_1px_hsl(var(--foreground)/0.07)]"><p className="text-meta text-ink-4">Chưa đọc được bằng chứng xu hướng, dòng tiền và định giá.</p><button type="button" onClick={retry} className="mt-2 min-h-10 text-meta font-medium text-ink-2 underline decoration-foreground/25 underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Thử lại phần này</button></div>
+  }
+  const stock = data.stock
+  const valuation = data.evidence.valuation
+  return <div className="mt-3.5 grid gap-2.5">
+    <PanelCard>
+      <h3 className="text-control font-medium text-ink-2">Xu hướng</h3>
+      <div className="mt-2 grid grid-cols-3 gap-2">
+        {[1, 5, 20].map((window) => { const metric = stock.metrics[`return_${window}d_pct`]; return <div key={window}><p className="text-micro text-ink-6">{window} phiên</p><Figure className={cn("mt-1 block text-meta font-semibold", monitorDirectionClass(metric?.value))}>{signedMonitorMetric(metric)}</Figure></div> })}
+      </div>
+      <p className="mt-2 border-t border-hairline pt-2 text-micro text-ink-5">{[20, 50, 200].map((window) => { const value = stock.trend[`above_ma${window}`]?.value; return value === null || value === undefined ? `MA${window} —` : `${value ? "Trên" : "Dưới"} MA${window}` }).join(" · ")}</p>
+    </PanelCard>
+    <PanelCard>
+      <h3 className="text-control font-medium text-ink-2">Dòng tiền</h3>
+      <div className="mt-2 grid grid-cols-2 gap-3"><div><p className="text-micro text-ink-6">Khối ngoại 20 phiên</p><Figure className={cn("mt-1 block text-meta font-semibold", monitorDirectionClass(stock.metrics.foreign_net_20d_vnd?.value))}>{signedMonitorMetric(stock.metrics.foreign_net_20d_vnd)}</Figure></div><div><p className="text-micro text-ink-6">Khối ngoại / ADTV</p><Figure className="mt-1 block text-meta font-semibold">{formatMonitorMetric(stock.metrics.foreign_flow_over_adtv)}</Figure></div></div>
+    </PanelCard>
+    <PanelCard>
+      <h3 className="text-control font-medium text-ink-2">Định giá</h3>
+      <div className="mt-2 grid grid-cols-2 gap-3"><div><p className="text-micro text-ink-6">P/E</p><Figure className="mt-1 block text-meta font-semibold">{formatMonitorMetric(stock.metrics.pe)}</Figure></div><div><p className="text-micro text-ink-6">P/B</p><Figure className="mt-1 block text-meta font-semibold">{formatMonitorMetric(stock.metrics.pb)}</Figure></div></div>
+      <p className="mt-2 text-micro text-ink-6">{valuation ? `FiinQuant · phiên ${valuation.session_date}` : "Chưa có quan sát định giá dương hợp lệ."}</p>
+    </PanelCard>
+    <PanelCard>
+      <h3 className="text-control font-medium text-ink-2">Nguồn và phương pháp</h3>
+      <p className="mt-1.5 text-micro leading-relaxed text-ink-5">As-of {formatMonitorTime(data.meta.as_of)} · {data.meta.coverage.evaluated}/{data.meta.coverage.eligible} mã · {data.meta.state}</p>
+      <ul className="mt-2 grid gap-1 text-micro text-ink-5">{data.meta.sources.map((source) => <li key={source.source}>{source.source} · {formatMonitorTime(source.effective_at)}{source.stale ? " · cũ" : ""}</li>)}</ul>
+      {data.meta.issues.length > 0 && <p className="mt-2 text-micro leading-relaxed text-ink-6">{data.meta.issues.map(issueText).join(" · ")}</p>}
+      <p className="mt-2 break-words font-mono text-micro text-ink-6">{Object.values(data.meta.method_versions).join(" · ")}</p>
+    </PanelCard>
+  </div>
 }
 
 /** Where today's price sits inside the 52-week band, as a percentage. */

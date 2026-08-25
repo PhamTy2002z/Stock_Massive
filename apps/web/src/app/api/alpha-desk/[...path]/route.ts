@@ -44,7 +44,9 @@ import { currentAccessToken, rotateAccessToken } from "@/lib/auth/bearer"
  * defaults below.
  */
 
-// The resources this proxy will carry, matched on the first path segment.
+// The resources this proxy will carry. Most are matched on the first segment;
+// Market Monitor is the sole stocks subtree admitted because its browser reads
+// require the same httpOnly-cookie-to-bearer bridge.
 // `threads` and `turns` are the Alpha Desk transport (ADR-0013); `watchlist` and
 // `analyses` are the rail and the Analyses behind it. `messages` is the flag
 // action of ADR-0016 and nothing else: upstream mounts `POST` and `DELETE` on
@@ -62,6 +64,13 @@ const FORWARDED_RESOURCES = new Set([
   "messages",
   "assets",
 ])
+
+function isForwardedPath(path: string[]): boolean {
+  return (
+    (path.length > 0 && FORWARDED_RESOURCES.has(path[0])) ||
+    (path[0] === "stocks" && path[1] === "market-monitor")
+  )
+}
 
 const EVENT_STREAM = "text/event-stream"
 
@@ -161,7 +170,7 @@ function sameOrigin(request: NextRequest): boolean {
 }
 
 async function forward(request: NextRequest, path: string[]): Promise<NextResponse> {
-  if (path.length === 0 || !FORWARDED_RESOURCES.has(path[0])) {
+  if (!isForwardedPath(path)) {
     return NextResponse.json({ detail: "Unknown Alpha Desk resource" }, { status: 404 })
   }
 

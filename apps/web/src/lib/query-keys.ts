@@ -1,4 +1,5 @@
 import type { PeriodType, OfficerFilterType, VolumeSpikeParams, SectorHistoricalPeriod } from "./api"
+import type { MonitorScope, StockPageInput } from "./market-monitor/api"
 
 export const queryKeys = {
   // Auth
@@ -11,6 +12,16 @@ export const queryKeys = {
   fundCertificates: (fundType?: string) =>
     ["market", "fundCertificates", fundType] as const,
   vn30Overview: ["market", "vn30Overview"] as const,
+  marketMonitor: {
+    root: ["market", "monitor"] as const,
+    overview: (scope: MonitorScope) => ["market", "monitor", "overview", scope] as const,
+    breadth: (scope: MonitorScope) => ["market", "monitor", "breadth", scope] as const,
+    flows: (scope: MonitorScope) => ["market", "monitor", "flows", scope] as const,
+    sectors: (scope: MonitorScope) => ["market", "monitor", "sectors", scope] as const,
+    stocks: (input: StockPageInput) => ["market", "monitor", "stocks", input] as const,
+    stockDetail: (symbol: string, scope: MonitorScope) =>
+      ["market", "monitor", "stock", symbol, scope] as const,
+  },
 
   // Stock detail
   stock: (symbol: string) => ["stock", symbol] as const,
