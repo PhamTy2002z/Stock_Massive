@@ -11,7 +11,9 @@ import {
   type ReactNode,
 } from "react"
 
-import { shellViewFromSearch, writeShellViewToHistory } from "@/lib/market-monitor/url-state"
+// URL-state helpers for the market-monitor views were removed with those
+// views on 2026-08-25. Only the chat view survives, so there is nothing left
+// to encode in ``?view=…``; declarations live after ``ShellView`` below.
 
 /**
  * Every piece of chrome state the shell owns, in one reducer.
@@ -29,6 +31,10 @@ import { shellViewFromSearch, writeShellViewToHistory } from "@/lib/market-monit
 /** What fills the main column. Client state, deliberately: the reference switches
  *  these without a navigation, and the composer must survive the switch. */
 export type ShellView = "chat" | "board" | "new" | "news"
+
+// See top-of-file comment: only "chat" is ever rendered now.
+const writeShellViewToHistory = (_view: ShellView): void => {}
+const shellViewFromSearch = (_search: string): ShellView | null => null
 
 /** Which tab the right-hand inspector shows, or `null` when it is closed. */
 export type InspectorTab = "market" | "symbol" | "news" | "sources"

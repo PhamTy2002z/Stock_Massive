@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { AlertCircle, Check, Copy, Pencil, RotateCcw, X } from "lucide-react"
 
-import { AnalysisCard } from "@/components/alpha/analysis"
 import { AssistantMessage } from "@/components/alpha/message/assistant-message"
 import { DraftMessage } from "@/components/alpha/message/draft-message"
 import { pinStep } from "@/lib/alpha-desk/pin-question"
@@ -327,16 +326,11 @@ export function ChatView() {
               )
             }
 
-            if (entry.kind === "analysis") {
-              return (
-                <AnalysisCard
-                  key={entry.key}
-                  symbol={entry.symbol}
-                  tradingDay={entry.tradingDay}
-                />
-              )
-            }
-
+            // Analysis cards were removed with the analysis lane
+            // (2026-08-25). A transcript entry that would have opened one
+            // renders nothing rather than falling through to the draft
+            // renderer, which has no fields to show for it.
+            if (entry.kind === "analysis") return null
             return <DraftMessage key={entry.key} entry={entry} onRetry={desk.retry} />
           })}
         </div>

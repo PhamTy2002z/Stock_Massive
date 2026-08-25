@@ -164,11 +164,9 @@ vi.mock("./desk-state", () => ({
 }))
 
 import { Composer } from "./composer"
-import { Inspector } from "./inspector"
 import { focusableElements, Overlays } from "./overlays"
 import { MenuItem, SampleDataNote, UnavailableNote } from "./primitives"
 import { ChatView } from "./view-chat"
-import { BoardView } from "./view-board"
 import {
   inspectorWidth,
   maxInspectorWidth,
@@ -227,21 +225,6 @@ describe("the inspector against the sidebar", () => {
     expect(shell.state.sidebarOpen).toBe(false)
   })
 
-  it("uses a modal bottom sheet on mobile and closes it with Escape", () => {
-    setViewport(390)
-
-    function Trigger() {
-      const { dispatch } = useShell()
-      return <button type="button" onClick={() => dispatch({ type: "open-inspector", tab: "symbol" })}>Mở chi tiết</button>
-    }
-
-    mount(<><Trigger /><Inspector /></>)
-    fireEvent.click(screen.getByRole("button", { name: "Mở chi tiết" }))
-
-    expect(screen.getByRole("dialog", { name: "Bảng thông tin thị trường" })).toBeVisible()
-    fireEvent.keyDown(window, { key: "Escape" })
-    expect(screen.queryByRole("dialog", { name: "Bảng thông tin thị trường" })).not.toBeInTheDocument()
-  })
 
   it("folds the sidebar rather than crushing the conversation", () => {
     // 1024 − 408 (inspector) − 274 (sidebar) leaves 342px of conversation, well
@@ -308,58 +291,7 @@ describe("the inspector against the sidebar", () => {
     expect(inspectorWidth(shell.state)).toBe(0)
   })
 
-  it("resizes from the keyboard and supports boundary shortcuts", () => {
-    setViewport(1600)
-    mount(<Inspector />)
-    act(() => shell.dispatch({ type: "open-inspector", tab: "market" }))
 
-    const separator = screen.getByRole("separator", { name: "Đổi độ rộng bảng thông tin" })
-    fireEvent.keyDown(separator, { key: "ArrowLeft" })
-    expect(inspectorWidth(shell.state)).toBe(432)
-
-    fireEvent.keyDown(separator, { key: "ArrowRight" })
-    expect(inspectorWidth(shell.state)).toBe(408)
-
-    fireEvent.keyDown(separator, { key: "Home" })
-    expect(inspectorWidth(shell.state)).toBe(320)
-
-    fireEvent.keyDown(separator, { key: "End" })
-    expect(inspectorWidth(shell.state)).toBe(maxInspectorWidth(1600))
-  })
-
-  it("offers a retry for symbol failures and reports retry progress", () => {
-    queryMock.detailError = true
-    setViewport(1600)
-    const { rerender } = mount(<Inspector />)
-    act(() => shell.dispatch({ type: "open-inspector", tab: "symbol" }))
-
-    fireEvent.click(screen.getByRole("button", { name: "Thử lại" }))
-    expect(queryMock.refetch).toHaveBeenCalledOnce()
-
-    queryMock.detailFetching = true
-    rerender(
-      <ShellProvider>
-        <Probe />
-        <Inspector />
-      </ShellProvider>,
-    )
-    expect(screen.getByRole("button", { name: "Đang thử lại…" })).toBeDisabled()
-  })
-})
-
-describe("the price board", () => {
-  it.each(["Enter", " "])("opens a row with the %s key", (key) => {
-    setViewport(1600)
-    mount(<BoardView />)
-
-    fireEvent.keyDown(
-      screen.getByRole("button", { name: "Mở chi tiết FPT — Công ty Cổ phần FPT" }),
-      { key },
-    )
-
-    expect(shell.state.selected.symbol).toBe("FPT")
-    expect(shell.state.inspector).toBe("symbol")
-  })
 })
 
 describe("what floats above the surface", () => {

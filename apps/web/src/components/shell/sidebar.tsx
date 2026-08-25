@@ -28,7 +28,6 @@ import { AccountMenu } from "./account-menu"
 import { useDesk } from "./desk-state"
 import { IconButton, Menu, MenuItem, MenuSeparator, QuietLine } from "./primitives"
 import { SIDEBAR_WIDTH, useShell, type ShellView } from "./shell-state"
-import { WatchlistSection } from "./watchlist-section"
 
 /**
  * The left column: identity, the two main modes, and everything the user keeps.
@@ -78,8 +77,6 @@ export function Sidebar() {
         <Nav />
 
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scrollbar-thin">
-          <WatchlistSection />
-
           <Conversations />
         </div>
 

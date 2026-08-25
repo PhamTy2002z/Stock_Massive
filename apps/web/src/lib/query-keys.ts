@@ -1,118 +1,14 @@
-import type { PeriodType, OfficerFilterType, VolumeSpikeParams, SectorHistoricalPeriod } from "./api"
-import type { MonitorScope, StockPageInput } from "./market-monitor/api"
+// Query keys — trimmed to what the chat lane still reads.
+//
+// Every market key (indices, price board, monitor, sectors, fund
+// certificates, stock detail, financials, insider deals, sector peers,
+// intraday order stats, volume analysis) was dropped on 2026-08-25 with the
+// market surfaces. What survives is the auth key and the thread keys, which
+// are what ``use-auth``, ``use-threads`` and ``use-live-turn`` reach for.
 
 export const queryKeys = {
-  // Auth
   currentUser: ["auth", "currentUser"] as const,
 
-  // Market data
-  marketIndices: ["market", "indices"] as const,
-  priceBoard: (symbols: string[]) => ["market", "priceBoard", symbols] as const,
-  sectorPerformance: ["market", "sectorPerformance"] as const,
-  fundCertificates: (fundType?: string) =>
-    ["market", "fundCertificates", fundType] as const,
-  vn30Overview: ["market", "vn30Overview"] as const,
-  marketMonitor: {
-    root: ["market", "monitor"] as const,
-    overview: (scope: MonitorScope) => ["market", "monitor", "overview", scope] as const,
-    breadth: (scope: MonitorScope) => ["market", "monitor", "breadth", scope] as const,
-    flows: (scope: MonitorScope) => ["market", "monitor", "flows", scope] as const,
-    sectors: (scope: MonitorScope) => ["market", "monitor", "sectors", scope] as const,
-    stocks: (input: StockPageInput) => ["market", "monitor", "stocks", input] as const,
-    stockDetail: (symbol: string, scope: MonitorScope) =>
-      ["market", "monitor", "stock", symbol, scope] as const,
-  },
-
-  // Stock detail
-  stock: (symbol: string) => ["stock", symbol] as const,
-  stockDetail: (symbol: string) => [...queryKeys.stock(symbol), "detail"] as const,
-  symbolSnapshot: (symbol: string) => [...queryKeys.stock(symbol), "snapshot"] as const,
-  valuationSeries: (symbol: string, days: number) =>
-    [...queryKeys.stock(symbol), "valuationSeries", days] as const,
-
-  // Financials
-  incomeStatement: (symbol: string, period: PeriodType, limit: number) =>
-    [...queryKeys.stock(symbol), "income", period, limit] as const,
-  balanceSheet: (symbol: string, period: PeriodType, limit: number) =>
-    [...queryKeys.stock(symbol), "balance", period, limit] as const,
-  cashFlow: (symbol: string, period: PeriodType, limit: number) =>
-    [...queryKeys.stock(symbol), "cashFlow", period, limit] as const,
-
-  // Ownership
-  shareholders: (symbol: string) =>
-    [...queryKeys.stock(symbol), "shareholders"] as const,
-  officers: (symbol: string, filterBy: OfficerFilterType) =>
-    [...queryKeys.stock(symbol), "officers", filterBy] as const,
-  insiderDeals: (symbol: string) =>
-    [...queryKeys.stock(symbol), "insiderDeals"] as const,
-
-  // Search
-  stockSearch: (query: string, limit: number) =>
-    ["search", "stocks", query, limit] as const,
-
-  // Analytics
-  volumeAnalysis: (symbol: string, days: number = 20) =>
-    [...queryKeys.stock(symbol), "volumeAnalysis", days] as const,
-  volumeSpikes: (params: VolumeSpikeParams) =>
-    ["signals", "volumeSpikes", params] as const,
-
-  // Advanced Tab - Technical
-  ratioSummary: (symbol: string) =>
-    [...queryKeys.stock(symbol), "ratioSummary"] as const,
-
-  // Advanced Tab - Order Flow
-  intradayOrderStats: (symbol: string) =>
-    [...queryKeys.stock(symbol), "intradayOrderStats"] as const,
-
-  // Financial Health
-  healthScore: (symbol: string) =>
-    [...queryKeys.stock(symbol), "healthScore"] as const,
-
-  // Trend Metrics (Phase 3)
-  trendMetrics: (symbol: string, periods: number = 8) =>
-    [...queryKeys.stock(symbol), "trendMetrics", periods] as const,
-
-  // Sector Peers (Phase 2 - Sector Comparison Dashboard)
-  sectorPeers: (symbol: string) =>
-    [...queryKeys.stock(symbol), "sectorPeers"] as const,
-  priceHistory: (symbol: string, range: string) =>
-    [...queryKeys.stock(symbol), "priceHistory", range] as const,
-
-  // FCF Analysis
-  fcfAnalysis: (symbol: string) =>
-    [...queryKeys.stock(symbol), "fcfAnalysis"] as const,
-
-  // Sector Historical Performance
-  sectorHistoricalPerformance: (period: SectorHistoricalPeriod) =>
-    ["analytics", "sectorHistorical", period] as const,
-
-  // News. The category is part of the feed's identity, not a parameter of it:
-  // one key for every facet would serve the previous pill's articles from cache
-  // the instant the reader pressed the next one.
-  newsFeed: (category: string) => ["news", "feed", category] as const,
-  newsCategories: ["news", "categories"] as const,
-  // Keyed on the publisher URL, which is the article's identity across a
-  // feed refresh — the feed position is not.
-  newsArticle: (url: string) => ["news", "article", url] as const,
-  companyNews: (symbol: string) => [...queryKeys.stock(symbol), "news"] as const,
-
-  // Background jobs (global, not symbol-scoped)
-  jobsStatus: ["jobs", "status"] as const,
-
-  // Alpha Desk. Keyed under one root so a mutation can invalidate the rail and
-  // every Analysis view behind it in one call — they are one screen's worth of
-  // state, and refreshing half of it shows two moments at once.
-  alpha: ["alpha"] as const,
-  watchlistRail: ["alpha", "rail"] as const,
-  analysisHistory: (symbol: string) => ["alpha", "analyses", symbol] as const,
-  analysis: (symbol: string, tradingDay: string) =>
-    ["alpha", "analyses", symbol, tradingDay] as const,
-
-  // The conversation, under the same root as the rail because they are one
-  // screen: a Turn that discussed a symbol changes what the rail should show.
-  // The *live* Turn is deliberately absent — it has its own reducer, and only
-  // the canonical Thread is a query (ADR-0013).
-  threads: ["alpha", "threads"] as const,
-  thread: (threadId: string) => ["alpha", "threads", threadId] as const,
-
-} as const
+  threads: ["threads"] as const,
+  thread: (threadId: string) => ["thread", threadId] as const,
+}
