@@ -2,6 +2,10 @@ const path = require("path");
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Keep production E2E builds away from a developer's active `.next` tree.
+  // Docker and normal builds keep Next's default unless the harness opts in.
+  distDir: Reflect.get(process, "env").E2E_NEXT_DIST_DIR || ".next",
+
   // Enable standalone output for Docker production builds
   output: "standalone",
 
