@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Consumer Migration and Duplicate Owner Removal"
-status: pending
+status: completed
 priority: P1
 effort: "16h"
 dependencies: [2]
@@ -25,31 +25,31 @@ duplicate generic owners proven unused afterward.
 
 ### Functional
 
-- [ ] Conversation resolves one surface at turn start; Analysis resolves one at
+- [x] Conversation resolves one surface at turn start; Analysis resolves one at
       run start. Both send its schemas and dispatch through its handlers/policy.
-- [ ] Executor plans parallel/serial segments from declared effect/concurrency,
+- [x] Executor plans parallel/serial segments from declared effect/concurrency,
       admits external/store fanout from access class, and uses resolved output
       limits. Unknown names retain conservative settled errors.
-- [ ] Turn aggregate external budget, `TurnBudget` registry rung, call summaries,
+- [x] Turn aggregate external budget, `TurnBudget` registry rung, call summaries,
       result projection, untrusted wrapping, and current-task trace metadata read
       the same surface.
-- [ ] Remove `PARALLEL_SAFE_TOOLS`. Replace generic name branches only where an
+- [x] Remove `PARALLEL_SAFE_TOOLS`. Replace generic name branches only where an
       existing declaration-owned projector reproduces exact output.
-- [ ] Preserve explicit policy names: `CHAT_TOOLSETS`, Analysis `signals`,
+- [x] Preserve explicit policy names: `CHAT_TOOLSETS`, Analysis `signals`,
       `PRICE_CHECK_TOOL`, and `_STATUS_BY_ERROR` remain intentional owners.
-- [ ] Availability revocation after offer returns `tool_unavailable`; no alternate
+- [x] Availability revocation after offer returns `tool_unavailable`; no alternate
       provider/tool/handler attempt.
-- [ ] A globally registered name outside the selected surface cannot dispatch,
+- [x] A globally registered name outside the selected surface cannot dispatch,
       even if a model/provider fabricates it. It settles once with the existing
       conservative unknown/unavailable vocabulary.
 
 ### Non-functional
 
-- [ ] No public SSE/event/version, endpoint, prompt, durable model, migration,
+- [x] No public SSE/event/version, endpoint, prompt, durable model, migration,
       timeout, fanout ceiling, or output-budget arithmetic change. The only
       intentional behavior change is closing lane-unselected dispatch.
-- [ ] No dual dispatch or shadow execution; comparison is metadata/test-only.
-- [ ] No loop merger. Conversation and Analysis retain distinct lifecycle and
+- [x] No dual dispatch or shadow execution; comparison is metadata/test-only.
+- [x] No loop merger. Conversation and Analysis retain distinct lifecycle and
       persistence ownership.
 
 ## Architecture
@@ -96,13 +96,13 @@ compatibility projections that remain legitimate APIs.
 
 ## Interface checklist
 
-- [ ] `ToolExecutor` receives resolved lookup and revocation check separately.
-- [ ] `plan_segments` uses effect + concurrency, never tool names.
-- [ ] Per-round/per-turn external counts use one access classification.
-- [ ] `TurnBudget` uses resolved limits with unchanged precedence.
-- [ ] Summary, display/outcome, and wrapper use resolved entry for current calls.
-- [ ] `TurnToolCall.as_wire()` field set/version stays exact.
-- [ ] Analysis trace states and one-call-one-result settlement stay exact.
+- [x] `ToolExecutor` receives resolved lookup and revocation check separately.
+- [x] `plan_segments` uses effect + concurrency, never tool names.
+- [x] Per-round/per-turn external counts use one access classification.
+- [x] `TurnBudget` uses resolved limits with unchanged precedence.
+- [x] Summary, display/outcome, and wrapper use resolved entry for current calls.
+- [x] `TurnToolCall.as_wire()` field set/version stays exact.
+- [x] Analysis trace states and one-call-one-result settlement stay exact.
 
 ## Implementation steps
 
@@ -141,13 +141,13 @@ Phase 2 surface -> executor -> Conversation + Analysis -> display/trust/ops -> P
 
 ## Success criteria
 
-- [ ] Focused executor/loop/Analysis/message/untrusted/ops/transport suites pass.
-- [ ] `rg` finds no `PARALLEL_SAFE_TOOLS` or new generic name-policy table.
-- [ ] Schemas/order, errors, traces, budgets and wire bytes match Phase 1.
-- [ ] Both lanes use same resolver without sharing lifecycle.
-- [ ] Lane-unselected registered tools are non-dispatchable and covered by a
+- [x] Focused executor/loop/Analysis/message/untrusted/ops/transport suites pass.
+- [x] `rg` finds no `PARALLEL_SAFE_TOOLS` or new generic name-policy table.
+- [x] Schemas/order, errors, traces, budgets and wire bytes match Phase 1.
+- [x] Both lanes use same resolver without sharing lifecycle.
+- [x] Lane-unselected registered tools are non-dispatchable and covered by a
       hard security regression case.
-- [ ] No provider adapter, quota owner, DB schema, public API, or web code changed.
+- [x] No provider adapter, quota owner, DB schema, public API, or web code changed.
 
 ## Risk assessment
 
@@ -171,3 +171,20 @@ authorization or let model arguments select trusted scope.
 ## Next steps
 
 Phase 4 stamps the contract into eval identity and proves baseline parity.
+
+## Validation log
+
+### 2026-08-24
+
+- Conversation and Analysis now resolve one task-local surface and use it for
+  offered schemas, dispatch, concurrency, access budgets, result limits,
+  summaries, trust wrapping, display kind, and current-call trace metadata.
+- Frozen availability can only narrow after resolution: initially unavailable
+  tools stay unavailable, revocation settles as `tool_unavailable`, and
+  re-registration cannot swap the captured handler or policy.
+- Focused post-review integration passed 414 tests, including exact transport,
+  lane-unselected dispatch, access/trust orthogonality, and lifecycle coverage.
+  `PARALLEL_SAFE_TOOLS` has no remaining source or test reference.
+- Review found no Critical or Important issue. The only review concern is the
+  eval harness's documented sequential global-state limitation, owned by Phase
+  4 and non-blocking for the current single-flight runner.

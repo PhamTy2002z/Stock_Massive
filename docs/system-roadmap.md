@@ -231,34 +231,44 @@ Universe.
 
 **Delivery checklist:**
 
-- [ ] Ingest round-lot and odd-lot trades with board-specific quantity units.
-- [ ] Aggregate trades into one-minute bars and accepted higher resolutions
+- [x] Ingest round-lot and odd-lot trades with board-specific quantity units.
+- [x] Aggregate trades into one-minute bars and accepted higher resolutions
   with deterministic session boundaries.
-- [ ] Persist source, resolution, board policy, price unit/basis, schema version,
+- [x] Persist source, resolution, board policy, price unit/basis, schema version,
   and collision-safe identity for intraday bars.
-- [ ] Ingest foreign buy/sell volume, value, room, and observation health.
-- [ ] Reconcile trade volume to minute bars and minute bars to DNSE daily data.
-- [ ] Compare DNSE daily reconciliation with FiinQuant without overwriting
+- [x] Ingest foreign buy/sell volume, value, room, and observation health.
+- [x] Reconcile trade volume to minute bars and minute bars to DNSE daily data.
+- [x] Compare DNSE daily reconciliation with FiinQuant without overwriting
   either source.
-- [ ] Publish session VWAP, signed flow, trade intensity, volume acceleration,
+- [x] Publish session VWAP, signed flow, trade intensity, volume acceleration,
   and foreign-flow projections through source-neutral service contracts.
-- [ ] Reconstruct UPCOM reference-price inputs from eligible prior-day boards
+- [x] Reconstruct UPCOM reference-price inputs from eligible prior-day boards
   while excluding negotiated and odd-lot activity.
-- [ ] Add APIs for bars, trades, foreign flow, and health with bounded windows
+- [x] Add APIs for bars, trades, foreign flow, and health with bounded windows
   and pagination.
-- [ ] Prove Universe filtering and full-market instrument refresh are separate
+- [x] Prove Universe filtering and full-market instrument refresh are separate
   concerns.
 
 **Exit gate:**
 
-- [ ] Accepted sessions reconcile within owner-approved tolerances; failures
+- [x] Accepted comparisons reconcile under the owner-approved exact-zero v1
+  shadow profile; failures are durably audited and
   produce quality states instead of adjusted data.
-- [ ] Foreign traded share volume is sufficient to remove the current
+- [x] Foreign traded share volume is sufficient to remove the current
   `net_volume_over_adtv` refusal through its existing signal contract.
-- [ ] Replay produces the same bars and projections as live ingestion for the
+- [x] Replay produces the same bars and projections as live ingestion for the
   same normalized events.
 
 **Dependencies:** S2 plus stable S0 unit and trading-day contracts.
+
+The deterministic reconciliation implementation records the immutable
+exact-zero v1 profile, both evidence sources, comparisons and actual deltas in
+an append-only audit. It emits match, mismatch, incomplete, or not-comparable
+quality in shadow mode and never adjusts evidence or blocks ingestion. The
+owner approved this profile on August 24, 2026. Keep v1 unchanged and introduce
+a v2 only if 10–20 live sessions prove a legitimate repeatable difference.
+Production activation remains subject to the deferred S1 market-hours
+conformance probe.
 
 ## Phase S4 — Deliver depth, auction, session, and market pulse
 

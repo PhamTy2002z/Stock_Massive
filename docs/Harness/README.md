@@ -91,9 +91,13 @@ Repository policy nằm tại
 [`eval/gate-policy.json`](../../apps/api/eval/gate-policy.json). Trạng thái
 baseline được fail closed bởi
 [`investment-intelligence-v1.json`](../../apps/api/eval/baselines/investment-intelligence-v1.json):
-Stage 0 đã tốt nghiệp với paid distribution được owner review và artifact
-digest `36bc44f7c00966cd`; các gate sau tiếp tục fail closed nếu identity này hoặc
-repository-owned policy không tương thích.
+Stage 0 đã tốt nghiệp và resolved-capability slice đầu tiên của H1 đã qua
+owner-reviewed identity reset. Baseline hiện hành là paid distribution 48/48
+hard pass, zero data-provider call, artifact digest `e78715254eb08800`; evidence
+chi tiết nằm trong [candidate report](../../plans/reports/eval-260825-0003-resolved-capability-phase-4-candidate.md).
+Các gate sau tiếp tục fail closed nếu identity này hoặc repository-owned policy
+không tương thích. Việc slice này tốt nghiệp không đánh dấu typed lifecycle,
+evidence identity, recovery hoặc toàn bộ H1 là Current.
 
 ## Quy tắc bảo trì
 

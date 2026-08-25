@@ -1,7 +1,7 @@
 ---
 title: "Resolved Capability Contract v1"
 description: "Unify the declared and resolved tool contract consumed by model schema, execution, budget, trust, trace, and display without changing public contracts or provider semantics."
-status: pending
+status: completed
 priority: P1
 effort: 48h
 branch: develop
@@ -78,26 +78,26 @@ resolver inference.
 
 | # | Phase | Status | Depends on |
 |---|---|---|---|
-| 1 | [Freeze contracts and provider boundary](./phase-01-start.md) | Pending | Stage 0 graduation |
-| 2 | [Resolved capability model and resolver](./phase-02-resolved-capability-model-and-resolver.md) | Pending | Phase 1 |
-| 3 | [Consumer migration and duplicate owner removal](./phase-03-consumer-migration-and-duplicate-owner-removal.md) | Pending | Phase 2 |
-| 4 | [Cross-lane eval and graduation gate](./phase-04-cross-lane-eval-and-graduation-gate.md) | Pending | Phase 3 |
+| 1 | [Freeze contracts and provider boundary](./phase-01-start.md) | Completed | Stage 0 graduation |
+| 2 | [Resolved capability model and resolver](./phase-02-resolved-capability-model-and-resolver.md) | Completed | Phase 1 |
+| 3 | [Consumer migration and duplicate owner removal](./phase-03-consumer-migration-and-duplicate-owner-removal.md) | Completed | Phase 2 |
+| 4 | [Cross-lane eval and graduation gate](./phase-04-cross-lane-eval-and-graduation-gate.md) | Completed | Phase 3 |
 
 ## Success criteria
 
-- [ ] All eight shipped tools have explicit, test-locked effect, idempotency,
+- [x] All eight shipped tools have explicit, test-locked effect, idempotency,
       access, trust, concurrency, output, display, handler, and version facts.
-- [ ] Offered schema and dispatched handler/policy come from one frozen surface;
+- [x] Offered schema and dispatched handler/policy come from one frozen surface;
       dispatch rechecks revocation without swapping handler/policy mid-task.
-- [ ] `PARALLEL_SAFE_TOOLS` and generic name-based result/display branches are
+- [x] `PARALLEL_SAFE_TOOLS` and generic name-based result/display branches are
       removed where declaration-owned; lane allowlists and domain metrics remain.
-- [ ] Conversation and Analysis retain names, ordering, results, errors, budgets,
+- [x] Conversation and Analysis retain names, ordering, results, errors, budgets,
       traces, transcript/SSE v2 wire bytes, and fail-open behavior.
-- [ ] A globally registered but lane-unselected name settles as unavailable/
+- [x] A globally registered but lane-unselected name settles as unavailable/
       unknown and never dispatches; this is the only intentional narrowing.
-- [ ] Provider mismatches resolve as named unavailable/gap states; no implicit
+- [x] Provider mismatches resolve as named unavailable/gap states; no implicit
       FiinQuant/VNStock fallback and zero provider calls in eval.
-- [ ] Approved baseline comparison has no new hard regression; quality,
+- [x] Approved baseline comparison/reset has no new hard regression; quality,
       cost, and latency changes are reviewed rather than hidden.
 
 ## Research
@@ -119,6 +119,32 @@ choices in this plan.
 
 ## Validation log
 
+### Phase 3–4 implementation and offline gate — 2026-08-24
+
+- Phase 3 is completed. Phase 4's code-owned and offline criteria are complete;
+  its approved candidate comparison and graduation remain open.
+- Fresh focused integration passed 414 tests. Two offline smoke runs each
+  completed 16/16 cases (Conversation 10, Analysis 6), with zero hard failures,
+  zero provider calls, and identical stable canonical content.
+- Code review reported no Critical or Important findings. See the
+  [test report](../reports/test-260824-2303-resolved-capability-phases-3-4.md)
+  and [review report](../reports/code-review-260824-2352-resolved-capability-phases-3-4.md).
+- Paid candidate `e78715254eb08800` completed 48/48 with zero hard failures and
+  zero provider calls. The approved baseline differs only in the intentionally
+  expanded tool identity; the fail-loud comparison was resolved by an explicit
+  owner-reviewed reset on 2026-08-25. The accepted artifact is now the approved
+  baseline and the smallest clean Harness authority surface links its evidence.
+  No commit, push, or PR was performed. This plan is completed; it does not
+  claim typed lifecycle, evidence identity, recovery, or all of H1 complete.
+
+### Phase 1–2 delivery — 2026-08-24
+
+- Phase 1 and Phase 2 are completed; Phase 3 and Phase 4 remain pending.
+- Focused, compatibility, broadened, and default-offline verification is
+  recorded in [the progress report](../reports/pm-260824-2301-resolved-capability-phases-1-2.md).
+- The plan remains `in-progress` and advances to Phase 3. No whole-plan
+  graduation or Harness H1 completion is claimed.
+
 ### Roadmap reconciliation — 2026-08-24
 
 This audit separates plan preparation from implemented Harness progress.
@@ -129,8 +155,9 @@ This audit separates plan preparation from implemented Harness progress.
 - DNSE adapters and normalized market events remain in System phases S0–S3 and
   are not added to this plan. Future DNSE tools must register through the
   resolved surface after this plan graduates.
-- Status remains `pending`: H0 has not graduated, all four phases remain pending,
-  and no `ResolvedTool` or `ResolvedToolSurface` implementation exists.
+- At the time of this pre-implementation audit, status was `pending`: H0 had
+  not graduated, all four phases were pending, and no `ResolvedTool` or
+  `ResolvedToolSurface` implementation existed.
 
 ### Deep planning and red-team — 2026-08-23
 
