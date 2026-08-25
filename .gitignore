@@ -9,6 +9,7 @@ env/
 
 # Build outputs
 .next/
+.next-e2e/
 out/
 dist/
 build/

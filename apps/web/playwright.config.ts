@@ -25,6 +25,7 @@ const WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 3010)
 
 const API_ORIGIN = `http://127.0.0.1:${API_PORT}`
 const WEB_ORIGIN = `http://127.0.0.1:${WEB_PORT}`
+const E2E_DIST_DIR = ".next-e2e"
 
 export default defineConfig({
   testDir: "./e2e",
@@ -69,10 +70,7 @@ export default defineConfig({
       // `next start` is not what the image runs, and Next says so out loud when
       // `output: "standalone"` is configured.
       command:
-        "pnpm build" +
-        " && cp -R .next/static .next/standalone/apps/web/.next/static" +
-        " && cp -R public .next/standalone/apps/web/public" +
-        " && node .next/standalone/apps/web/server.js",
+        "bash scripts/run-e2e-web-server.sh",
       cwd: ".",
       url: WEB_ORIGIN,
       reuseExistingServer: !process.env.CI,
@@ -91,6 +89,7 @@ export default defineConfig({
         // Build-time, and therefore part of the build this test drives.
         NEXT_PUBLIC_API_URL: `${API_ORIGIN}/api/v1`,
         NODE_ENV: "production",
+        E2E_NEXT_DIST_DIR: E2E_DIST_DIR,
       },
     },
   ],
