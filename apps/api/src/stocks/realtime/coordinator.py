@@ -66,6 +66,55 @@ class DnseIngestionCoordinator:
                 await self._spine.submit(_required_event(parsed.event))
         return tuple(outcomes)
 
+    async def refresh_instrument_catalog(
+        self,
+        *,
+        page_size: int = 1_000,
+        max_pages: int = 10,
+    ) -> tuple[DataOutcome, ...]:
+        """Refresh full-market definitions independently of the live Universe."""
+        if not 1 <= page_size <= 1_000 or not 1 <= max_pages <= 100:
+            raise ValueError("invalid instrument catalog refresh bound")
+        outcomes: list[DataOutcome] = []
+        completed = False
+        for page in range(1, max_pages + 1):
+            result = await self._rest.instruments(limit=page_size, page=page)
+            if result.outcome is not None:
+                if (
+                    page > 1
+                    and result.outcome.kind is DataOutcomeKind.SILENT_EMPTY
+                ):
+                    completed = True
+                    break
+                outcomes.append(result.outcome)
+                break
+            payload = result.data
+            if isinstance(payload, dict):
+                payload = payload.get("data", payload.get("items"))
+            if not isinstance(payload, list):
+                outcomes.append(_invalid_outcome(result.request_id))
+                break
+            for index, item in enumerate(payload):
+                if not isinstance(item, dict):
+                    outcomes.append(_invalid_outcome(f"{result.request_id}-{index}"))
+                    continue
+                wire = dict(item)
+                wire.setdefault("T", "sd")
+                parsed = self._parser.parse(
+                    wire,
+                    request_id=f"{result.request_id}-{index}",
+                )
+                if parsed.outcome is not None:
+                    outcomes.append(parsed.outcome)
+                else:
+                    await self._spine.submit(_required_event(parsed.event))
+            if len(payload) < page_size:
+                completed = True
+                break
+        if not completed and not outcomes:
+            outcomes.append(_invalid_outcome("instrument-catalog-page-limit"))
+        return tuple(outcomes)
+
     async def reconcile(
         self,
         *,

@@ -240,7 +240,13 @@ def evaluate_symbols(
         return ()
 
     exchanges = _exchanges_of(session, wanted)
-    context = prepare_bars_context(session, wanted, baseline_days + 1, end=day)
+    context = prepare_bars_context(
+        session,
+        wanted,
+        baseline_days + 1,
+        end=day,
+        projection=BarProjection.VOLUME,
+    )
     return tuple(
         _prepare_symbol(
             session,

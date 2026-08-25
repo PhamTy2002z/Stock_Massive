@@ -299,13 +299,17 @@ class BandRegimeResolver:
         symbol: str,
         *,
         migrations: Sequence[ExchangeMigration] = EXCHANGE_MIGRATIONS,
+        listed_exchange: Exchange | None = None,
+        listing_resolved: bool = False,
     ) -> None:
         self.symbol = symbol.upper()
         self._migrations = sorted(
             (entry for entry in migrations if entry.symbol.upper() == self.symbol),
             key=lambda entry: entry.first_session,
         )
-        self._listed = self._current_exchange(session)
+        self._listed = (
+            listed_exchange if listing_resolved else self._current_exchange(session)
+        )
 
     def on(self, day: date) -> BandRegime:
         """Which band applied on this session, and on whose authority."""

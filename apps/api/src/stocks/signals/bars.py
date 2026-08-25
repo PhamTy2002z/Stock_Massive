@@ -119,9 +119,10 @@ from datetime import date
 from decimal import Decimal
 from enum import Enum
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.stocks.models import CorporateAction
+from src.stocks.models import CorporateAction, ListingRoster
 
 from ..providers.contracts import (
     Capability,
@@ -345,6 +346,8 @@ class BarPreparationContext:
     _anchor_date: date | None
     _sessions: dict[str, dict[date, SessionSnapshot]]
     _actions: dict[str, tuple[CorporateAction, ...]]
+    _listed_exchanges: dict[str, Exchange | None]
+    _projection: BarProjection = BarProjection.PRICE
     _series: BarSeries = BarSeries.EQUITY
 
 
@@ -489,6 +492,7 @@ def prepare_bars_context(
     window_days: int,
     *,
     end: date | None = None,
+    projection: BarProjection = BarProjection.PRICE,
     series: BarSeries = BarSeries.EQUITY,
 ) -> BarPreparationContext:
     """Load one canonical window for several later ``prepare_bars`` calls."""
@@ -504,6 +508,8 @@ def prepare_bars_context(
             _anchor_date=None,
             _sessions={},
             _actions={},
+            _listed_exchanges={},
+            _projection=projection,
             _series=series,
         )
 
@@ -525,6 +531,20 @@ def prepare_bars_context(
         if series.has_corporate_actions
         else {}
     )
+    listed_exchanges: dict[str, Exchange | None] = {}
+    if series.has_price_band and projection is BarProjection.PRICE:
+        roster = session.execute(
+            select(ListingRoster.symbol, ListingRoster.exchange).where(
+                ListingRoster.symbol.in_(wanted)
+            )
+        ).all()
+        for symbol, exchange in roster:
+            try:
+                listed_exchanges[symbol] = Exchange.parse(str(exchange))
+            except ValueError:
+                listed_exchanges[symbol] = None
+        for symbol in wanted:
+            listed_exchanges.setdefault(symbol, None)
     return BarPreparationContext(
         _symbols=wanted,
         _window_days=window_days,
@@ -533,6 +553,8 @@ def prepare_bars_context(
         _anchor_date=anchor_date,
         _sessions=held,
         _actions=actions,
+        _listed_exchanges=listed_exchanges,
+        _projection=projection,
         _series=series,
     )
 
@@ -586,6 +608,8 @@ def prepare_bars(
             # rather than answered with an empty window, which would read as a
             # symbol with no history.
             raise ValueError("bar context series does not match the request")
+        if context._projection is not projection:
+            raise ValueError("bar context projection does not match the request")
         if symbol not in context._symbols:
             raise ValueError(f"bar context does not contain {symbol}")
         end = context._end
@@ -673,7 +697,17 @@ def prepare_bars(
     # not asking is why `unexplained_price_gap` and `volume_basis_break` cannot
     # reach an index window.
     if projection is BarProjection.PRICE and series.has_price_band:
-        resolver = BandRegimeResolver(session, symbol, migrations=migrations)
+        resolver = BandRegimeResolver(
+            session,
+            symbol,
+            migrations=migrations,
+            listed_exchange=(
+                context._listed_exchanges[symbol] if context is not None else None
+            ),
+            listing_resolved=(
+                context is not None and context._projection is BarProjection.PRICE
+            ),
+        )
         regimes = {day: resolver.on(day) for day in usable}
         bands, gap_refusal, undecided = _read_bands(
             window,

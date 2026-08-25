@@ -206,8 +206,39 @@ class MetricComparison(RealtimeContract):
     absolute_tolerance: Decimal = Field(ge=0)
 
     @property
+    def absolute_delta(self) -> Decimal:
+        return abs(self.left_value - self.right_value)
+
+    @property
     def matches(self) -> bool:
-        return abs(self.left_value - self.right_value) <= self.absolute_tolerance
+        return self.absolute_delta <= self.absolute_tolerance
+
+
+class MetricComparisonOutcome(RealtimeContract):
+    metric: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
+    absolute_delta: Decimal = Field(ge=0)
+    matches: bool
+
+
+class ReconciliationEnforcementMode(str, Enum):
+    SHADOW = "shadow"
+
+
+class ReconciliationToleranceProfile(RealtimeContract):
+    """Owner-approved absolute tolerances for one deterministic method."""
+
+    version: int = Field(ge=1)
+    price: Decimal = Field(ge=0)
+    volume: Decimal = Field(ge=0)
+    value: Decimal = Field(ge=0)
+
+
+STRICT_RECONCILIATION_PROFILE_V1 = ReconciliationToleranceProfile(
+    version=1,
+    price=Decimal(0),
+    volume=Decimal(0),
+    value=Decimal(0),
+)
 
 
 class ReconciliationResult(RealtimeContract):
@@ -238,6 +269,49 @@ class ReconciliationResult(RealtimeContract):
             raise ValueError("match status conflicts with metric comparisons")
         if self.status is ReconciliationStatus.MISMATCH and computed_match:
             raise ValueError("mismatch status conflicts with metric comparisons")
+        return self
+
+
+class ReconciliationAudit(RealtimeContract):
+    """Immutable shadow-mode record of one evidence comparison."""
+
+    audit_id: str = Field(pattern=r"^rec_[0-9a-f]{64}$")
+    profile: ReconciliationToleranceProfile
+    enforcement_mode: ReconciliationEnforcementMode
+    result: ReconciliationResult
+    comparison_outcomes: tuple[MetricComparisonOutcome, ...]
+    quality_state: QualityState
+    checked_at: datetime
+
+    @field_validator("checked_at")
+    @classmethod
+    def require_aware_checked_at(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("reconciliation checked_at must be timezone-aware")
+        return value
+
+    @model_validator(mode="after")
+    def require_profile_and_quality_consistency(self) -> Self:
+        if self.profile.version != self.result.method_version:
+            raise ValueError("reconciliation profile and method versions must match")
+        expected_outcomes = tuple(
+            MetricComparisonOutcome(
+                metric=item.metric,
+                absolute_delta=item.absolute_delta,
+                matches=item.matches,
+            )
+            for item in self.result.comparisons
+        )
+        if self.comparison_outcomes != expected_outcomes:
+            raise ValueError("reconciliation comparison outcomes conflict with result")
+        expected = {
+            ReconciliationStatus.MATCH: QualityState.VALID,
+            ReconciliationStatus.MISMATCH: QualityState.DEGRADED,
+            ReconciliationStatus.INCOMPLETE: QualityState.GAP,
+            ReconciliationStatus.NOT_COMPARABLE: QualityState.INVALID,
+        }[self.result.status]
+        if self.quality_state is not expected:
+            raise ValueError("reconciliation quality conflicts with its status")
         return self
 
 

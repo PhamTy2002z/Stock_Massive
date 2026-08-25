@@ -48,6 +48,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import date
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
@@ -392,6 +393,7 @@ class FieldWindow:
     health: "WindowHealth"
     fundamental: "FundamentalStanding | None" = None
     foreign_room: "ForeignRoomStanding | None" = None
+    foreign_net_volume_by_session: Mapping[date, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -447,6 +449,7 @@ class SignalField:
     # the refusal would name the history rather than the declaration that caused
     # it.
     lookback_sessions: int | None = None
+    requires_foreign_share_flow: bool = False
     output_keys: tuple[str, ...] = ()
     reading: Callable[[FieldWindow], FieldReading] | None = None
     # The cross-sectional half of the same mechanism: the per-symbol quantity a
