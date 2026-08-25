@@ -206,7 +206,9 @@ def _external_tool_names() -> frozenset[str]:
     ``untrusted.py`` stopped keeping a list.
     """
     return frozenset(
-        entry.name for entry in registry.entries() if entry.reads_external
+        entry.name
+        for entry in registry.entries()
+        if entry.access is registry.ToolAccess.NETWORK
     )
 
 

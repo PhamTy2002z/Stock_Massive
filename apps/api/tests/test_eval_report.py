@@ -61,6 +61,34 @@ def test_baseline_mismatch_requires_reviewed_reset():
     assert "not compared" in reviewed.reason
 
 
+def test_resolved_tool_contract_mismatch_requires_reviewed_reset():
+    identity_wire = {
+        "dataset_digest": "same",
+        "case_contract_digest": "cases",
+        "tools": {"digest": "a" * 16, "names": ["get_field"], "unavailable": []},
+        "graders": {},
+        "rubric_version": None,
+        "policy_version": "1",
+        "trials": 3,
+    }
+    baseline = {
+        "identity": identity_wire,
+        "completeness": {"complete": True},
+        "aggregate": {"dimension": {}},
+        "usage": {},
+    }
+    candidate = {
+        **baseline,
+        "identity": {
+            **identity_wire,
+            "tools": {**identity_wire["tools"], "digest": "b" * 16},
+        },
+    }
+
+    with pytest.raises(IncompatibleBaseline, match="tools"):
+        compare(baseline, candidate)
+
+
 def test_incomplete_or_new_hard_regression_cannot_pass():
     identity_wire = {"dataset_digest": "same", "case_contract_digest": "cases", "graders": {}, "rubric_version": None, "policy_version": "1", "trials": 3}
     baseline = {"identity": identity_wire, "completeness": {"complete": True}, "aggregate": {"dimension": {"policy-action": {"any_trial_hard_failure": False}}}, "usage": {}}

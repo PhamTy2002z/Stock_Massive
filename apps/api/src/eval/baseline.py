@@ -10,7 +10,15 @@ class IncompatibleBaseline(ValueError):
     pass
 
 
-IDENTITY_FIELDS = ("dataset_digest", "case_contract_digest", "graders", "rubric_version", "policy_version", "trials")
+IDENTITY_FIELDS = (
+    "dataset_digest",
+    "case_contract_digest",
+    "tools",
+    "graders",
+    "rubric_version",
+    "policy_version",
+    "trials",
+)
 
 
 @dataclass(frozen=True)

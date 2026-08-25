@@ -51,6 +51,8 @@ import uuid
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
+from enum import Enum
+from types import MappingProxyType
 from typing import Any
 
 from src.core.llm import ToolSchema
@@ -61,11 +63,76 @@ logger = logging.getLogger(__name__)
 #: between switching a feature flag and the model seeing the tool; long enough
 #: that a multi-round Turn probes each tool once rather than once per round.
 CHECK_TTL_SECONDS = 30.0
+MAX_RESOLUTION_RETRIES = 3
 
 #: A handler takes the Turn's trusted context and the model's arguments, and may
 #: be a coroutine function or a blocking one — the executor decides how to run
 #: it from ``ToolEntry.is_async``.
 Handler = Callable[["ToolContext", Mapping[str, Any]], "Awaitable[Any] | Any"]
+
+
+class ToolEffect(str, Enum):
+    """Whether invoking a tool changes durable state."""
+
+    READ = "read"
+    WRITE = "write"
+    UNKNOWN = "unknown"
+
+
+class ToolIdempotency(str, Enum):
+    """Whether repeating the same call has the same externally visible effect."""
+
+    IDEMPOTENT = "idempotent"
+    NON_IDEMPOTENT = "non_idempotent"
+    UNKNOWN = "unknown"
+
+
+class ToolAccess(str, Enum):
+    """The boundary crossed by a tool invocation."""
+
+    NETWORK = "network"
+    STORE = "store"
+
+
+class ContentTrust(str, Enum):
+    """How result content is positioned when returned to the model."""
+
+    UNTRUSTED = "untrusted"
+    TRUSTED_STRUCTURED = "trusted_structured"
+
+
+class ToolConcurrency(str, Enum):
+    """Whether calls may overlap without changing their observable order."""
+
+    PARALLEL_SAFE = "parallel_safe"
+    SERIALIZED = "serialized"
+
+
+class AvailabilityReason(str, Enum):
+    """Sanitized reasons a declaration was not offered."""
+
+    NOT_REGISTERED = "not_registered"
+    REQUIREMENTS_MISSING = "requirements_missing"
+    CHECK_REFUSED = "check_refused"
+    CHECK_FAILED = "check_failed"
+
+
+def _freeze_json(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType(
+            {str(key): _freeze_json(item) for key, item in value.items()}
+        )
+    if isinstance(value, list):
+        return tuple(_freeze_json(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_freeze_json(item) for item in value)
+    return value
+
+
+def _callable_identity(value: Callable[..., Any]) -> str:
+    module = getattr(value, "__module__", type(value).__module__)
+    qualified = getattr(value, "__qualname__", type(value).__qualname__)
+    return f"{module}.{qualified}"
 
 
 class ToolShadowError(ValueError):
@@ -167,11 +234,48 @@ class ToolEntry:
     #: this way is a delimiter around a store read; the cost the other way is a
     #: web page reaching the model in the position the harness's own
     #: instructions occupy.
-    reads_external: bool = True
+    reads_external: bool | None = None
     #: ``False`` for a blocking handler; the executor moves those off the event
     #: loop rather than letting them stall every other call in the round.
     is_async: bool = True
     max_result_size_chars: int | None = None
+    effect: ToolEffect = ToolEffect.UNKNOWN
+    idempotency: ToolIdempotency = ToolIdempotency.NON_IDEMPOTENT
+    access: ToolAccess = ToolAccess.NETWORK
+    content_trust: ContentTrust | None = None
+    concurrency: ToolConcurrency = ToolConcurrency.SERIALIZED
+    contract_version: str = "1"
+
+    def __post_init__(self) -> None:
+        for field_name, enum_type in (
+            ("effect", ToolEffect),
+            ("idempotency", ToolIdempotency),
+            ("access", ToolAccess),
+            ("concurrency", ToolConcurrency),
+        ):
+            object.__setattr__(self, field_name, enum_type(getattr(self, field_name)))
+        trust = (
+            None
+            if self.content_trust is None
+            else ContentTrust(self.content_trust)
+        )
+        external = self.reads_external
+        if trust is None:
+            trust = (
+                ContentTrust.TRUSTED_STRUCTURED
+                if external is False
+                else ContentTrust.UNTRUSTED
+            )
+        object.__setattr__(self, "content_trust", trust)
+        projected_external = trust is ContentTrust.UNTRUSTED
+        if external is None:
+            object.__setattr__(self, "reads_external", projected_external)
+        elif external is not projected_external:
+            raise ValueError(
+                f"tool {self.name!r} has conflicting reads_external and content_trust"
+            )
+        if not isinstance(self.contract_version, str) or not self.contract_version.strip():
+            raise ValueError(f"tool {self.name!r} needs a contract_version")
 
     def as_schema(self) -> ToolSchema:
         return ToolSchema(
@@ -180,12 +284,90 @@ class ToolEntry:
             parameters=dict(self.schema),
         )
 
+    @property
+    def handler_identity(self) -> str:
+        """Stable code identity without a callable repr or object address."""
+        return _callable_identity(self.handler)
+
+
+@dataclass(frozen=True)
+class ResolvedTool:
+    """One immutable declaration and its availability verdict for a task."""
+
+    name: str
+    toolset: str
+    schema: ToolSchema
+    handler: Handler
+    handler_identity: str
+    display_name: str
+    summary_detail_arg: str | None
+    summarise: Callable[[Mapping[str, Any]], str] | None
+    summarise_identity: str | None
+    available: bool
+    unavailable_reason: AvailabilityReason | None
+    availability_expires_at: float
+    effect: ToolEffect
+    idempotency: ToolIdempotency
+    access: ToolAccess
+    content_trust: ContentTrust
+    concurrency: ToolConcurrency
+    contract_version: str
+    is_async: bool
+    max_result_size_chars: int | None
+
+    @property
+    def reads_external(self) -> bool:
+        """Compatibility projection for trust-aware consumers."""
+        return self.content_trust is ContentTrust.UNTRUSTED
+
+    @classmethod
+    def from_entry(
+        cls,
+        entry: ToolEntry,
+        *,
+        available: bool,
+        unavailable_reason: AvailabilityReason | None,
+        availability_expires_at: float,
+    ) -> "ResolvedTool":
+        schema = entry.as_schema()
+        return cls(
+            name=entry.name,
+            toolset=entry.toolset,
+            schema=ToolSchema(
+                name=schema.name,
+                description=schema.description,
+                parameters=_freeze_json(schema.parameters),
+                strict=schema.strict,
+            ),
+            handler=entry.handler,
+            handler_identity=entry.handler_identity,
+            display_name=entry.display_name,
+            summary_detail_arg=entry.summary_detail_arg,
+            summarise=entry.summarise,
+            summarise_identity=(
+                None if entry.summarise is None else _callable_identity(entry.summarise)
+            ),
+            available=available,
+            unavailable_reason=unavailable_reason,
+            availability_expires_at=availability_expires_at,
+            effect=entry.effect,
+            idempotency=entry.idempotency,
+            access=entry.access,
+            content_trust=entry.content_trust,
+            concurrency=entry.concurrency,
+            contract_version=entry.contract_version,
+            is_async=entry.is_async,
+            max_result_size_chars=entry.max_result_size_chars,
+        )
+
 
 # Registration order is preserved, and that is deliberate: the schema list is
 # part of the cacheable prompt prefix, so a stable order keeps the prefix
 # stable across processes that imported the same modules.
 _ENTRIES: dict[str, ToolEntry] = {}
-_CHECKS: dict[str, tuple[float, bool]] = {}
+_CHECKS: dict[
+    str, tuple[float, bool, AvailabilityReason | None, ToolEntry]
+] = {}
 _GENERATION = 0
 
 
@@ -279,29 +461,71 @@ def is_available(name: str, *, now: float | None = None) -> bool:
     ``now`` is a monotonic reading, injectable so a test can age the cache
     instead of sleeping through :data:`CHECK_TTL_SECONDS`.
     """
-    entry = _ENTRIES.get(name)
-    if entry is None:
-        return False
-    instant = time.monotonic() if now is None else float(now)
-    cached = _CHECKS.get(name)
-    if cached is not None and instant < cached[0]:
-        return cached[1]
-    available = _probe(entry)
-    _CHECKS[name] = (instant + CHECK_TTL_SECONDS, available)
+    available, _, _ = availability(name, now=now)
     return available
 
 
-def _probe(entry: ToolEntry) -> bool:
+def availability(
+    name: str, *, now: float | None = None
+) -> tuple[bool, AvailabilityReason | None, float]:
+    """Return a cached verdict, sanitized reason, and monotonic expiry."""
+    instant = time.monotonic() if now is None else float(now)
+    for _ in range(MAX_RESOLUTION_RETRIES):
+        entry = _ENTRIES.get(name)
+        if entry is None:
+            return False, AvailabilityReason.NOT_REGISTERED, instant
+        cached = _CHECKS.get(name)
+        if cached is not None and cached[3] is entry and instant < cached[0]:
+            return cached[1], cached[2], cached[0]
+        available, reason = _probe(entry)
+        if _ENTRIES.get(name) is not entry:
+            continue
+        expires_at = instant + CHECK_TTL_SECONDS
+        _CHECKS[name] = (expires_at, available, reason, entry)
+        if _ENTRIES.get(name) is entry:
+            return available, reason, expires_at
+    return False, AvailabilityReason.CHECK_FAILED, instant
+
+
+def _probe(entry: ToolEntry) -> tuple[bool, AvailabilityReason | None]:
     for variable in entry.requires_env:
         if not os.environ.get(variable, "").strip():
-            return False
+            return False, AvailabilityReason.REQUIREMENTS_MISSING
     if entry.check_fn is None:
-        return True
+        return True, None
     try:
-        return bool(entry.check_fn())
+        if entry.check_fn():
+            return True, None
+        return False, AvailabilityReason.CHECK_REFUSED
     except Exception as exc:  # noqa: BLE001 - a broken probe hides one tool, not all
         logger.warning("Availability check for tool %s failed: %s", entry.name, exc)
-        return False
+        return False, AvailabilityReason.CHECK_FAILED
+
+
+def resolve(name: str, *, now: float | None = None) -> ResolvedTool | None:
+    """Snapshot one registered declaration and its current availability."""
+    instant = time.monotonic() if now is None else float(now)
+    for _ in range(MAX_RESOLUTION_RETRIES):
+        entry = _ENTRIES.get(name)
+        if entry is None:
+            return None
+        available, reason, expires_at = availability(name, now=instant)
+        if _ENTRIES.get(name) is entry:
+            return ResolvedTool.from_entry(
+                entry,
+                available=available,
+                unavailable_reason=reason,
+                availability_expires_at=expires_at,
+            )
+    entry = _ENTRIES.get(name)
+    if entry is None:
+        return None
+    return ResolvedTool.from_entry(
+        entry,
+        available=False,
+        unavailable_reason=AvailabilityReason.CHECK_FAILED,
+        availability_expires_at=instant,
+    )
 
 
 def definitions(
@@ -347,6 +571,18 @@ def reads_external(name: str) -> bool:
     return True if entry is None else entry.reads_external
 
 
+def accesses_network(name: str) -> bool:
+    """Whether a registered tool leaves the deployment.
+
+    This is deliberately separate from :func:`reads_external`, whose legacy
+    compatibility meaning is content trust.  Unknown names take the
+    conservative network answer so budget and wire projections never grant an
+    undeclared call the cheaper store classification.
+    """
+    entry = get(name)
+    return True if entry is None else entry.access is ToolAccess.NETWORK
+
+
 def object_schema(
     properties: Mapping[str, Mapping[str, Any]], required: Sequence[str] = ()
 ) -> dict[str, Any]:
@@ -374,11 +610,21 @@ def declared_result_sizes() -> Mapping[str, int]:
 
 
 __all__ = [
+    "AvailabilityReason",
     "CHECK_TTL_SECONDS",
+    "ContentTrust",
     "Handler",
+    "MAX_RESOLUTION_RETRIES",
+    "ResolvedTool",
+    "ToolAccess",
+    "ToolConcurrency",
     "ToolContext",
+    "ToolEffect",
     "ToolEntry",
+    "ToolIdempotency",
     "ToolShadowError",
+    "availability",
+    "accesses_network",
     "clear",
     "declared_result_sizes",
     "definitions",
@@ -392,4 +638,5 @@ __all__ = [
     "object_schema",
     "reads_external",
     "register",
+    "resolve",
 ]

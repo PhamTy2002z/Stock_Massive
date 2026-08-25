@@ -168,10 +168,23 @@ class TurnToolCall:
     #: that demands it back demands it for the rounds of the Turn it is
     #: answering, and a closed Turn in the history is accepted without it.
     signature: str | None = None
+    #: Task-local declaration snapshot. It is deliberately absent from
+    #: :meth:`as_wire`; reconnects have only the persisted public call and use
+    #: the conservative registry fallback until typed lifecycle identity lands.
+    resolved_tool: registry.ResolvedTool | None = field(
+        default=None, repr=False, compare=False
+    )
 
     @property
     def finished(self) -> bool:
         return self.status is not ToolCallStatus.RUNNING
+
+    @property
+    def reads_external(self) -> bool:
+        """Classify current calls from their snapshot, legacy calls conservatively."""
+        if self.resolved_tool is not None:
+            return self.resolved_tool.access is registry.ToolAccess.NETWORK
+        return registry.accesses_network(self.name)
 
     def as_wire(self) -> dict[str, Any]:
         """The ``tool.call`` payload of the SSE contract, and nothing else.
@@ -203,12 +216,17 @@ class TurnToolCall:
             # — the distinction the whole evidence boundary rests on. A name the
             # registry does not hold reads as external, conservatively, exactly
             # as it does for the wrapper.
-            "kind": EXTERNAL_KIND if registry.reads_external(self.name) else STORE_KIND,
+            "kind": EXTERNAL_KIND if self.reads_external else STORE_KIND,
             "outcome": self.outcome,
         }
 
 
-def summarise_call(name: str, arguments: Mapping[str, Any]) -> str:
+def summarise_call(
+    name: str,
+    arguments: Mapping[str, Any],
+    *,
+    resolved: registry.ResolvedTool | None = None,
+) -> str:
     """The one line a reader is shown about a tool call.
 
     The whole sentence, in the reader's language, because the interactive
@@ -233,7 +251,7 @@ def summarise_call(name: str, arguments: Mapping[str, Any]) -> str:
     would be this function guessing; it happens in a process whose tool surface
     has not been installed, and a raw name there is a symptom worth seeing.
     """
-    entry = registry.get(name)
+    entry = resolved if resolved is not None else registry.get(name)
     if entry is None:
         return name
     if entry.summarise is not None:
@@ -387,7 +405,12 @@ def shown_result(call: TurnToolCall) -> str:
     guardrail's warning is appended *after* the wrapper closes, so a page cannot
     be mistaken for the harness or the harness for a page.
     """
-    body = wrap_result(call.name, call.result_text or "", source=_source_of(call))
+    body = wrap_result(
+        call.name,
+        call.result_text or "",
+        source=_source_of(call),
+        resolved=call.resolved_tool,
+    )
     if call.guidance:
         return f"{body}\n\n{call.guidance}" if body else call.guidance
     return body

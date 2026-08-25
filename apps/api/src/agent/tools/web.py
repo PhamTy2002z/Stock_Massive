@@ -49,7 +49,17 @@ import httpx
 from src.core.config import Settings, get_settings
 from src.core.web_lane import WebLane, WebUnavailable
 
-from ..registry import ToolContext, ToolEntry, object_schema, register
+from ..registry import (
+    ContentTrust,
+    ToolAccess,
+    ToolConcurrency,
+    ToolContext,
+    ToolEffect,
+    ToolEntry,
+    ToolIdempotency,
+    object_schema,
+    register,
+)
 
 MAX_RESULTS = 5
 MAX_REDIRECTS = 4
@@ -322,7 +332,12 @@ class WebTools:
                 # tool the default exists for: what comes back is a stranger's
                 # writing, and the message layer wraps it on the strength of
                 # this line.
-                reads_external=True,
+                effect=ToolEffect.READ,
+                idempotency=ToolIdempotency.IDEMPOTENT,
+                access=ToolAccess.NETWORK,
+                content_trust=ContentTrust.UNTRUSTED,
+                concurrency=ToolConcurrency.PARALLEL_SAFE,
+                contract_version="1",
                 # Both halves are required: the flag is the deployment's decision
                 # and the key is whether the call can be made at all. Offering the
                 # tool without one of them buys a refusal the model has to spend a
@@ -345,7 +360,12 @@ class WebTools:
                 handler=self.fetch_url,
                 display_name="Đọc trang",
                 summary_detail_arg="url",
-                reads_external=True,
+                effect=ToolEffect.READ,
+                idempotency=ToolIdempotency.IDEMPOTENT,
+                access=ToolAccess.NETWORK,
+                content_trust=ContentTrust.UNTRUSTED,
+                concurrency=ToolConcurrency.PARALLEL_SAFE,
+                contract_version="1",
                 check_fn=lambda: bool(self._settings.web_tools_enabled),
                 max_result_size_chars=PAGE_RESULT_CHARS,
             ),

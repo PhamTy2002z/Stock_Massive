@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from src.agent import definitions, registry
 from src.agent.prompt.contract import PROMPT_HASH, contract_hash
 from src.agent.prompt.sections import SECTIONS, PromptSection
 from src.core.llm import ToolSchema
@@ -40,6 +41,51 @@ from src.eval.contracts import (
     find_secret_shapes,
 )
 from src.stocks.providers import Capability, PriceBasis, ProviderSource
+
+
+async def _identity_handler(_context, _arguments):
+    return {}
+
+
+def _resolved_tool_entry(name: str = "resolved") -> registry.ToolEntry:
+    return registry.ToolEntry(
+        name=name,
+        toolset="signals",
+        schema=registry.object_schema({}),
+        handler=_identity_handler,
+        description=f"Resolve {name}.",
+        display_name=f"Resolved {name}",
+        reads_external=False,
+        effect=registry.ToolEffect.READ,
+        idempotency=registry.ToolIdempotency.IDEMPOTENT,
+        access=registry.ToolAccess.STORE,
+        content_trust=registry.ContentTrust.TRUSTED_STRUCTURED,
+        concurrency=registry.ToolConcurrency.SERIALIZED,
+        contract_version="1",
+        max_result_size_chars=8_000,
+    )
+
+
+def _surface(
+    *entries: registry.ToolEntry,
+    available: bool = True,
+    reason: registry.AvailabilityReason | None = None,
+) -> definitions.ResolvedToolSurface:
+    tools = tuple(
+        registry.ResolvedTool.from_entry(
+            entry,
+            available=available,
+            unavailable_reason=reason,
+            availability_expires_at=30.0,
+        )
+        for entry in entries
+    )
+    return definitions.ResolvedToolSurface(
+        tools=tools,
+        registry_generation=1,
+        expanded_names=tuple(entry.name for entry in entries),
+        expires_at=30.0,
+    )
 
 
 def _evidence(**overrides: Any) -> dict[str, Any]:
@@ -339,6 +385,106 @@ class TestIdentityDerivation:
         )
         assert identity.names == ("present",)
         assert identity.unavailable == ("missing",)
+
+    @pytest.mark.parametrize(
+        "change",
+        (
+            {"effect": registry.ToolEffect.WRITE},
+            {"idempotency": registry.ToolIdempotency.NON_IDEMPOTENT},
+            {"access": registry.ToolAccess.NETWORK},
+            {
+                "content_trust": registry.ContentTrust.UNTRUSTED,
+                "reads_external": True,
+            },
+            {"concurrency": registry.ToolConcurrency.PARALLEL_SAFE},
+            {"max_result_size_chars": 9_999},
+            {"display_name": "Another display"},
+            {"contract_version": "2"},
+        ),
+    )
+    def test_each_resolved_behavior_field_moves_catalog_identity(
+        self, change: dict[str, Any]
+    ) -> None:
+        from src.eval.versions import tool_catalog_identity
+
+        base = _resolved_tool_entry()
+        changed = registry.ToolEntry(**{**base.__dict__, **change})
+
+        assert (
+            tool_catalog_identity(_surface(base)).catalog_digest
+            != tool_catalog_identity(_surface(changed)).catalog_digest
+        )
+
+    def test_availability_handler_schema_and_selection_order_move_identity(self) -> None:
+        from src.eval.versions import tool_catalog_identity
+
+        first = _resolved_tool_entry()
+
+        async def replacement(_context, _arguments):
+            return "replacement"
+
+        changed_handler = registry.ToolEntry(
+            **{**first.__dict__, "handler": replacement}
+        )
+        changed_schema = registry.ToolEntry(
+            **{**first.__dict__, "description": "Changed schema description."}
+        )
+        unavailable = _surface(
+            first,
+            available=False,
+            reason=registry.AvailabilityReason.CHECK_REFUSED,
+        )
+        second = _resolved_tool_entry(name="second")
+        forward = _surface(first, second)
+        backward = _surface(second, first)
+        original = tool_catalog_identity(_surface(first)).catalog_digest
+
+        assert tool_catalog_identity(_surface(changed_handler)).catalog_digest != original
+        assert tool_catalog_identity(_surface(changed_schema)).catalog_digest != original
+        assert tool_catalog_identity(unavailable).catalog_digest != original
+        assert tool_catalog_identity(forward).catalog_digest != tool_catalog_identity(
+            backward
+        ).catalog_digest
+
+    def test_case_and_lane_surface_membership_moves_run_catalog_identity(self) -> None:
+        from src.eval.versions import scoped_tool_catalog_identity
+
+        tool = _resolved_tool_entry()
+        offered = _surface(tool)
+        empty = _surface()
+        before = scoped_tool_catalog_identity(
+            (
+                ("case-a", "conversation", offered),
+                ("case-b", "analysis", empty),
+            )
+        )
+        after = scoped_tool_catalog_identity(
+            (
+                ("case-a", "conversation", empty),
+                ("case-b", "analysis", offered),
+            )
+        )
+
+        assert before.names == after.names == (tool.name,)
+        assert before.catalog_digest != after.catalog_digest
+
+    def test_resolved_catalog_artifact_excludes_callable_secret_and_object_identity(
+        self,
+    ) -> None:
+        secret = "sk-" + "x" * 40
+
+        async def handler(_context, _arguments):
+            return secret
+
+        entry = registry.ToolEntry(
+            **{**_resolved_tool_entry().__dict__, "handler": handler}
+        )
+        encoded = json.dumps(_surface(entry).identity_payload(), sort_keys=True)
+
+        assert secret not in encoded
+        assert "0x" not in encoded
+        assert "requires_env" not in encoded
+        assert "check_fn" not in encoded
 
     def test_prompt_contract_hash_moves_without_a_version_bump(self) -> None:
         """An edit that forgets the bump still changes the hash."""

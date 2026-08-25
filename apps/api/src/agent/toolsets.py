@@ -105,6 +105,21 @@ class ToolsetCycleError(ValueError):
 
 
 _MEMO: dict[str, tuple[str, ...]] = {}
+_MEMO_CATALOGUE_IDENTITY: tuple[object, ...] | None = None
+
+
+def _catalogue_identity(catalogue: Mapping[str, Toolset]) -> tuple[object, ...]:
+    return (
+        CORE_TOOLS,
+        *(
+            (
+                name,
+                tuple(toolset.get("includes", ())),
+                tuple(toolset.get("tools", ())),
+            )
+            for name, toolset in catalogue.items()
+        ),
+    )
 
 
 def resolve_toolset(
@@ -117,10 +132,18 @@ def resolve_toolset(
     :data:`CORE_TOOLS` comes first so the prompt prefix does not move when a
     Turn selects a different bundle.
     """
+    global _MEMO_CATALOGUE_IDENTITY
     catalogue = TOOLSETS if toolsets is None else toolsets
     # The module-level memo is only valid for the module's own table; a caller
     # passing its own catalogue gets a fresh expansion.
-    memo = _MEMO if toolsets is None else {}
+    if toolsets is None:
+        identity = _catalogue_identity(catalogue)
+        if identity != _MEMO_CATALOGUE_IDENTITY:
+            _MEMO.clear()
+            _MEMO_CATALOGUE_IDENTITY = identity
+        memo = _MEMO
+    else:
+        memo = {}
     wanted = (names,) if isinstance(names, str) else tuple(names)
     resolved: list[str] = list(CORE_TOOLS)
     for name in wanted:
@@ -161,7 +184,14 @@ def _expand(
 
 def clear_memo() -> None:
     """Forget every expansion. For a table that changed, and for tests."""
+    global _MEMO_CATALOGUE_IDENTITY
     _MEMO.clear()
+    _MEMO_CATALOGUE_IDENTITY = None
+
+
+def expansion_identity(names: Sequence[str] | str) -> tuple[str, ...]:
+    """Ordered membership identity used by resolved-surface cache keys."""
+    return resolve_toolset(names)
 
 
 def describe(name: str, *, toolsets: Mapping[str, Toolset] | None = None) -> str:
@@ -207,6 +237,7 @@ __all__ = [
     "UnknownToolsetError",
     "clear_memo",
     "describe",
+    "expansion_identity",
     "known_toolsets",
     "resolve_toolset",
 ]

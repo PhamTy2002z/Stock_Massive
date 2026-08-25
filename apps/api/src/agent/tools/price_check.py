@@ -57,7 +57,17 @@ from src.stocks.signals.price_band import band_limits, resolve_band_regime, tick
 from src.stocks.signals.sessions import sessions_on_days
 from src.stocks.trading_day import latest_trading_day, trading_days_before
 
-from ..registry import ToolContext, ToolEntry, object_schema, register
+from ..registry import (
+    ContentTrust,
+    ToolAccess,
+    ToolConcurrency,
+    ToolContext,
+    ToolEffect,
+    ToolEntry,
+    ToolIdempotency,
+    object_schema,
+    register,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +167,12 @@ class PriceCheckTool:
                 # It reads this system's own store to judge somebody else's
                 # number. The number came from outside; what comes back from here
                 # did not.
-                reads_external=False,
+                effect=ToolEffect.READ,
+                idempotency=ToolIdempotency.IDEMPOTENT,
+                access=ToolAccess.STORE,
+                content_trust=ContentTrust.TRUSTED_STRUCTURED,
+                concurrency=ToolConcurrency.SERIALIZED,
+                contract_version="1",
                 # Three store reads behind a synchronous Session.
                 is_async=False,
                 max_result_size_chars=MAX_RESULT_CHARS,

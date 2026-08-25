@@ -116,7 +116,7 @@ from src.core.llm.errors import redact
 
 from . import registry
 from .budget import TurnBudget, thresholds_for_context, trim_text
-from .definitions import get_tool_definitions
+from .definitions import resolve_tool_surface
 from .executor import UNKNOWN_TOOL, ExecutionOutcome, ToolExecutor
 from .executor import ToolCall as ExecutorToolCall
 from .guardrails import TurnGuardrails
@@ -793,10 +793,15 @@ class AgentLoop:
 
     async def _run(self, request: TurnRequest, cancelled: Cancelled) -> TurnOutcome:
         state = _TurnState()
-        tools = get_tool_definitions(self._toolsets)
+        surface = resolve_tool_surface(self._toolsets)
+        tools = surface.offered_schemas
         turn_budget = TurnBudget(
             thresholds_for_context(self._context_tokens),
-            registry_limits=registry.declared_result_sizes(),
+            registry_limits={
+                tool.name: tool.max_result_size_chars
+                for tool in surface.tools
+                if tool.max_result_size_chars is not None
+            },
         )
         executor = ToolExecutor(
             context=registry.ToolContext(
@@ -806,6 +811,7 @@ class AgentLoop:
             ),
             guardrails=TurnGuardrails(),
             trace=self._trace_writer(request, turn_budget),
+            surface=surface,
         )
         system_prompt = render(request.runtime)
 
@@ -1345,15 +1351,21 @@ class AgentLoop:
             # answers the model with what was wrong with it. Crashing here would
             # turn a route's contract violation into a 500.
             arguments = dict(call.arguments) if isinstance(call.arguments, Mapping) else {}
+            resolved = (
+                None
+                if executor.surface is None
+                else executor.surface.by_name.get(call.name)
+            )
             record = TurnToolCall(
                 id=call.id,
                 name=call.name,
                 arguments=arguments,
-                summary=summarise_call(call.name, arguments),
+                summary=summarise_call(call.name, arguments, resolved=resolved),
                 signature=call.signature,
                 round=state.tool_rounds,
+                resolved_tool=resolved,
             )
-            if registry.reads_external(call.name):
+            if record.reads_external:
                 if state.external_calls >= MAX_EXTERNAL_TOOL_CALLS:
                     record = replace(
                         record,

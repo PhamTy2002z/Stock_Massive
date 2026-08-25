@@ -62,26 +62,11 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from . import registry
+from .definitions import ResolvedToolSurface
 from .guardrails import HALT_GUIDANCE, TurnGuardrails, Verdict, result_signature
 from .messages import outcome_of
 
 logger = logging.getLogger(__name__)
-
-#: The tools that answer a question and change nothing, so a round may run them
-#: at once. Listed by name rather than derived from a toolset, because "reads the
-#: open web" and "changes nothing" are different properties: ``fetch_url`` is
-#: external and idempotent, ``remember_fact`` is local and not.
-#:
-#: ``remember_fact`` is the one tool in the current surface that is absent here,
-#: and that is the whole point of the allowlist.
-PARALLEL_SAFE_TOOLS = frozenset(
-    {
-        "web_search",
-        "fetch_url",
-        "session_search",
-        "recall_facts",
-    }
-)
 
 UNKNOWN_TOOL = "unknown_tool"
 TOOL_UNAVAILABLE = "tool_unavailable"
@@ -164,12 +149,26 @@ class ExecutionOutcome:
     guidance: str | None = None
 
 
-def plan_segments(calls: Sequence[ToolCall]) -> tuple[Segment, ...]:
+ToolDeclaration = registry.ToolEntry | registry.ResolvedTool
+ToolLookup = Callable[[str], ToolDeclaration | None]
+
+
+def plan_segments(
+    calls: Sequence[ToolCall], *, lookup: ToolLookup = registry.get
+) -> tuple[Segment, ...]:
     """Group a batch into what may overlap and what must not, order intact."""
     segments: list[Segment] = []
     run: list[ToolCall] = []
     for call in calls:
-        if call.name in PARALLEL_SAFE_TOOLS:
+        try:
+            declared = lookup(call.name)
+        except Exception:  # noqa: BLE001 - unknown policy is a serial barrier
+            declared = None
+        if (
+            declared is not None
+            and declared.effect is registry.ToolEffect.READ
+            and declared.concurrency is registry.ToolConcurrency.PARALLEL_SAFE
+        ):
             run.append(call)
             continue
         if run:
@@ -188,10 +187,19 @@ class ToolExecutor:
     context: registry.ToolContext
     guardrails: TurnGuardrails = field(default_factory=TurnGuardrails)
     trace: TraceWriter | None = None
+    #: The immutable lane-selected declaration snapshot for this task. When it
+    #: is present, a globally registered name outside the selection is unknown
+    #: to this executor and cannot dispatch.
+    surface: ResolvedToolSurface | None = None
     #: Injectable so a test can register tools without touching the process-wide
     #: registry, and so a future per-user surface can narrow what is visible.
-    lookup: Callable[[str], registry.ToolEntry | None] = registry.get
+    lookup: ToolLookup = registry.get
     availability: Callable[[str], bool] = registry.is_available
+
+    def _lookup(self, name: str) -> ToolDeclaration | None:
+        if self.surface is not None:
+            return self.surface.by_name.get(name)
+        return self.lookup(name)
 
     def _reads_external(self, name: str) -> bool:
         """Whether this call leaves the deployment, asked through ``lookup``.
@@ -214,10 +222,10 @@ class ToolExecutor:
         still meets its real lookup on the dispatch path, and is answered there.
         """
         try:
-            entry = self.lookup(name)
+            entry = self._lookup(name)
         except Exception:  # noqa: BLE001 - classification must not end a round
             return True
-        return True if entry is None else entry.reads_external
+        return True if entry is None else entry.access is registry.ToolAccess.NETWORK
 
     def _admit(self, calls: Sequence[ToolCall]) -> set[str]:
         """Which of this batch's calls are dispatched, by kind and in issued order."""
@@ -245,7 +253,7 @@ class ToolExecutor:
         # batch of thirty store reads does not push a single web search out and
         # a batch of thirty searches does not push a store read out.
         admitted = self._admit(calls)
-        for mode, segment in plan_segments(calls):
+        for mode, segment in plan_segments(calls, lookup=self._lookup):
             for call in segment:
                 if call.id not in admitted:
                     results[call.id] = await self._over_ceiling(call, len(calls))
@@ -290,7 +298,7 @@ class ToolExecutor:
         )
 
     async def _dispatch(self, call: ToolCall) -> ToolResult:
-        entry = self.lookup(call.name)
+        entry = self._lookup(call.name)
         if entry is None:
             return await self._record(
                 call,
@@ -304,7 +312,12 @@ class ToolExecutor:
                     dispatched=False,
                 ),
             )
-        if not self.availability(call.name):
+        # A tool absent from the offered schema cannot become callable during
+        # the task.  The live check may only revoke an offered capability; it
+        # cannot widen the frozen surface after the model request was built.
+        if (
+            isinstance(entry, registry.ResolvedTool) and not entry.available
+        ) or not self.availability(call.name):
             return await self._record(
                 call,
                 {},
@@ -381,7 +394,7 @@ class ToolExecutor:
         )
 
     async def _invoke(
-        self, entry: registry.ToolEntry, arguments: Mapping[str, Any]
+        self, entry: ToolDeclaration, arguments: Mapping[str, Any]
     ) -> Any:
         if entry.is_async:
             outcome = entry.handler(self.context, arguments)
@@ -556,7 +569,6 @@ __all__ = [
     "INVALID_ARGUMENTS",
     "MAX_EXTERNAL_CALLS_PER_ROUND",
     "MAX_STORE_CALLS_PER_ROUND",
-    "PARALLEL_SAFE_TOOLS",
     "ROUND_FANOUT_EXCEEDED",
     "TOOL_FAILED",
     "TOOL_UNAVAILABLE",

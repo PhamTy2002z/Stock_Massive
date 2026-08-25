@@ -44,7 +44,7 @@ def _nullable(prop: Mapping[str, Any]) -> dict[str, Any]:
         if declared == "null":
             return widened
         widened["type"] = [declared, "null"]
-    elif isinstance(declared, list):
+    elif isinstance(declared, Sequence) and not isinstance(declared, (str, bytes)):
         if "null" in declared:
             return widened
         widened["type"] = [*declared, "null"]
@@ -75,7 +75,11 @@ def strict_parameters(schema: Mapping[str, Any]) -> dict[str, Any]:
 
     restated = dict(schema)
     declared = restated.get("type")
-    kinds = declared if isinstance(declared, list) else [declared]
+    kinds = (
+        declared
+        if isinstance(declared, Sequence) and not isinstance(declared, (str, bytes))
+        else [declared]
+    )
 
     if "object" in kinds:
         properties = {
