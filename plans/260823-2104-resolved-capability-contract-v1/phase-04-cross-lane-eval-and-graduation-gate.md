@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Cross-Lane Eval and Graduation Gate"
-status: pending
+status: completed
 priority: P1
 effort: "12h"
 dependencies: [3]
@@ -27,30 +27,30 @@ provider/data boundaries remain intact.
 
 ### Functional
 
-- [ ] Stamp deterministic resolved-contract identity: schema, availability
+- [x] Stamp deterministic resolved-contract identity: schema, availability
       class, effect, idempotency, access, trust, concurrency, output limit,
       display identity, stable handler identity, contract version, ordered
       toolset selection, and resolver version.
-- [ ] Exclude callables, secrets, raw env/probe errors, credentials, account
+- [x] Exclude callables, secrets, raw env/probe errors, credentials, account
       state, and volatile object identity from artifacts.
-- [ ] Add mutation tests proving each behavior-changing field changes catalog/
+- [x] Add mutation tests proving each behavior-changing field changes catalog/
       run compatibility identity.
-- [ ] Run Conversation and Symbol Analysis through real lifecycle entry points
+- [x] Run Conversation and Symbol Analysis through real lifecycle entry points
       with frozen evidence; verify all calls settle and provider calls remain 0.
-- [ ] Compare candidate versus approved compatible baseline. Any new hard
-      regression or incomplete case blocks graduation; cost/latency changes are
-      explicit trade-offs.
-- [ ] Verify one hypothetical read-only registration requires only its
+- [x] Compare candidate versus the approved baseline or fail loud into an
+      owner-reviewed identity reset. Any new hard regression or incomplete case
+      blocks graduation; cost/latency changes are explicit trade-offs.
+- [x] Verify one hypothetical read-only registration requires only its
       registration plus intentional toolset selection and tests—no executor,
       budget, wrapper, trace, or display name-table edit.
 
 ### Non-functional
 
-- [ ] Offline smoke is deterministic/free. Paid multi-trial comparison uses the
+- [x] Offline smoke is deterministic/free. Paid multi-trial comparison uses the
       repository policy and ceiling; candidate cannot weaken it.
-- [ ] No eval import from production, eval migration, live materialization,
+- [x] No eval import from production, eval migration, live materialization,
       provider/quota access, or raw private trajectory persistence.
-- [ ] Update evergreen Harness docs only after evidence exists.
+- [x] Update evergreen Harness docs only after evidence exists.
 
 ## Architecture
 
@@ -92,12 +92,12 @@ untracked files or infer final APIs from current partial work.
 
 ## Interface checklist
 
-- [ ] Tool catalog/run manifest uses resolved surface, not reconstructed table.
-- [ ] Serialization is deterministic; offered tool order remains semantic.
-- [ ] Compatibility mismatch names changed field/version.
-- [ ] Fixture world installs/restores registry/surface without cross-case leak.
-- [ ] Provider guard trips before credentials, quota, network, or method.
-- [ ] Report states provider calls = 0 and frozen source/basis/time.
+- [x] Tool catalog/run manifest uses resolved surface, not reconstructed table.
+- [x] Serialization is deterministic; offered tool order remains semantic.
+- [x] Compatibility mismatch names changed field/version.
+- [x] Fixture world installs/restores registry/surface without cross-case leak.
+- [x] Provider guard trips before credentials, quota, network, or method.
+- [x] Report states provider calls = 0 and frozen source/basis/time.
 
 ## Implementation steps
 
@@ -154,13 +154,13 @@ Phase 3 parity -> catalog mutation proof -> offline smoke -> baseline compare ->
 
 ## Success criteria
 
-- [ ] Focused/broad suites pass; pre-existing failures are dispositioned without
+- [x] Focused/broad suites pass; pre-existing failures are dispositioned without
       weakening tests.
-- [ ] Offline smoke complete/deterministic across two runs on stable fields.
-- [ ] Candidate comparison compatible, complete, zero-provider-call, no new hard
-      regression.
-- [ ] Hypothetical tool proof meets Stage 1 graduation criterion.
-- [ ] Docs link actual artifacts/commands; no future capability marked complete.
+- [x] Offline smoke complete/deterministic across two runs on stable fields.
+- [x] Candidate is complete, zero-provider-call, and has no new hard regression;
+      the owner accepted the fail-loud resolved-identity reset and trade-offs.
+- [x] Hypothetical tool proof meets Stage 1 graduation criterion.
+- [x] Docs link actual artifacts/commands; no future capability marked complete.
 
 ## Risk assessment
 
@@ -185,3 +185,38 @@ weaken repository policy.
 
 After approval, create a separate plan for typed lifecycle and stable root/
 attempt/call/evidence identity. Do not begin Stage 2 planner work here.
+
+## Validation log
+
+### 2026-08-24 — code and offline gate
+
+- Run identity now hashes the ordered case/lane-to-resolved-surface mapping,
+  including execution, access, trust, display, availability, handler, version,
+  and selection facts while excluding callables, secrets, probes, env names,
+  expiry, and object identity.
+- Post-review focused integration passed 414 tests. The earlier broad run
+  completed with 2,828 passes and one dispositioned out-of-slice failure for
+  the absent `docs/streaming-topology.md` file.
+- Two fresh offline smoke runs each completed 16/16 cases: Conversation 10,
+  Analysis 6, zero hard failures, zero provider calls. Stable canonical JSON
+  was byte-identical after removing run ids, timestamps, and artifact digest;
+  the scoped tool identity digest was `ee10c69a9f909d30`.
+- Code review passed with no Critical or Important finding. Eval registry and
+  toolset installation remains intentionally single-flight; in-process parallel
+  eval must add explicit ownership before it is enabled.
+- Owner-authorized paid candidate `e78715254eb08800` completed 48/48 trials
+  with zero hard failures, zero provider attempts, and USD 0.6309487 recorded
+  candidate-plus-rubric cost. The old approved baseline differs only in the
+  intentionally expanded tool identity, so mechanical comparison fails loud
+  and records that a reviewed reset is required.
+- Quality review versus the old exam: counterargument mean +0.145833,
+  synthesis -0.125, uncertainty unchanged, utility -0.104166; tokens +2.77%
+  and mean latency +9.38%. The repository owner accepted the reviewed reset and
+  these report-only trade-offs on 2026-08-25.
+- Candidate `e78715254eb08800` is now the approved baseline; its canonical JSON
+  is promoted as `approved-baseline-e78715254eb08800.json`, and the baseline
+  summary records lineage from `36bc44f7c00966cd` plus tool identity
+  `ee10c69a9f909d30`.
+- The smallest clean Harness authority surface links the paid artifact and
+  explicitly graduates only this H1 resolved-capability slice. The concurrently
+  edited Harness roadmap was not modified or used to claim all of H1 complete.

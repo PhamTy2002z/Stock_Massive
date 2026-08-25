@@ -6,6 +6,7 @@ priority: P1
 effort: "3d"
 tags: [system, market-data, dnse, adapter, conformance]
 created: 2026-08-24
+blocks: [260824-2208-phase-s3-trades-bars-foreign-flow-mvp]
 ---
 
 # Phase S1 DNSE adapter and conformance

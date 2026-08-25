@@ -73,6 +73,18 @@ replace either source. The executable owners are
 [`ReconciliationResult`](../apps/api/src/stocks/realtime/policy.py) and
 [`merge_evidence`](../apps/api/src/stocks/realtime/policy.py).
 
+The owner-approved v1 profile uses exact absolute tolerances of zero VND for
+price, zero shares for volume, and zero VND for value. It runs only in shadow
+mode: every completed comparison is appended to
+`realtime_reconciliation_audits` with both evidence identities and sources,
+scope, comparison values and deltas, profile version, status, quality, and
+deterministic checked time. A mismatch degrades the audit quality but never
+blocks ingestion or changes either source. The executable owners are
+[`STRICT_RECONCILIATION_PROFILE_V1`](../apps/api/src/stocks/realtime/policy.py),
+[`ReconciliationProjector`](../apps/api/src/stocks/realtime/reconciliation_projection.py),
+and the
+[`reconciliation audit migration`](../apps/api/alembic/versions/e2c4a7d19b63_add_reconciliation_audit.py).
+
 The design rejects last-write-wins source mixing. A repeated identity must be
 declared as a duplicate, and distinct providers remain separately addressable
 even when their source-neutral observation key matches.
@@ -153,6 +165,66 @@ boards. Queue size, worker count, and shutdown timeout remain bounded settings.
 Book subscriptions stay disabled until the deferred S1 market-hours probe
 proves quote quantity scale.
 
+## Trades, bars, projections, and serving
+
+Phase S3 derives one-minute and accepted higher-resolution bars only from
+durable normalized trades. Derived bars carry their input evidence IDs and
+method version; a DNSE daily close rolls stored internal one-minute bars into a
+separate daily observation. Reconciliation retains both observations and an
+explicit tolerance profile. No comparison rewrites provider or derived values.
+
+Trade, foreign-flow, and UPCOM reference-input metrics are rebuildable Redis
+projections with board identity, units, quality, evidence IDs, as-of time, and a
+method version. The UPCOM input admits only G1 continuous trades, excluding
+odd-lot, negotiated, and auction activity. The share-denominated foreign-flow
+signal reads DNSE share counts directly from `realtime_events`; it never writes
+them into `provider_snapshots` and refuses when any requested session is
+missing or invalid.
+
+The read-only trades, bars, foreign-flow, projection, and health routes under
+`/api/v1/realtime` never call a provider. Event reads require a timezone-aware
+bounded window, use query-bound stable cursors, enforce current Universe
+membership, and expose normalized source, board, units, freshness, quality,
+and evidence without raw DNSE payloads. Full-market instrument-catalog refresh
+is a separate bounded runtime operation with no Universe argument; symbol live
+subscriptions remain Universe-filtered.
+
+## Market Monitor serving contract
+
+Market Monitor derives cross-sectional HOSE and HNX readings from stored
+evidence only. FiinQuant owns EOD price, index, foreign-flow, and valuation
+history; vnstock owns listing and classification reference data; and DNSE owns
+the admitted realtime overlay. Request handlers don't instantiate providers or
+replace one source with another.
+
+Authenticated reads are available under
+`/api/v1/stocks/market-monitor` through the `overview`, `breadth`, `flows`,
+`sectors`, `stocks`, and `stocks/{symbol}` resources. Every response includes
+the requested exchange scope, as-of and generation times, separate EOD and
+realtime evaluated/eligible coverage where live evidence is used, source
+freshness, method versions, and typed issues. Selected 1/5/20-session horizons
+apply consistently to foreign flow, sector return, and sector relative
+strength. A
+partial, stale, disconnected, or unavailable result remains an HTTP success
+when the request itself is valid, and a missing value remains `null` rather
+than becoming zero. Market valuation coverage uses the requested exchange
+cohort as its denominator, and valuation percentiles require at least 20 stored
+sessions. Overview active flow is the admitted DNSE signed value divided by
+ADTV for the realtime-evaluable cohort.
+
+The browser reaches this authenticated API through the narrow same-origin
+`/api/alpha-desk/stocks/market-monitor` proxy subtree. Durable workspace state
+is URL-addressable across the five lenses: Overview, Breadth, Money Flow,
+Sectors, and Stocks. The implementation owners are
+[`stocks.monitor`](../apps/api/src/stocks/monitor/),
+[`use-market-monitor.ts`](../apps/web/src/hooks/use-market-monitor.ts), and the
+[`market-monitor components`](../apps/web/src/components/market-monitor/).
+
+The realtime overlay remains limited to admitted DNSE G1 evidence. A
+disconnected overlay keeps historical EOD evidence visible with its own state;
+it doesn't claim full-market realtime coverage. Production activation remains
+blocked on the separate S1 market-hours probe.
+
 ## Rejected alternatives
 
 The architecture rejects four shortcuts because they produce plausible but
@@ -167,6 +239,9 @@ incorrect market data:
 ## Next steps
 
 Run the deferred S1 market-hours probe before production graduation. Outside
-market hours, Phase S3 may build trades, bars, and foreign-flow projections on
-the S2 durable replay boundary, but it must not treat unmeasured live capacity
-or quote quantity scale as proven.
+market hours, the implemented S3 contracts can be rebuilt and verified through
+deterministic replay. The S3 tolerance decision is complete, but production
+graduation still requires the S1 live probe. Keep v1 immutable; consider a v2
+non-zero tolerance only after 10–20 live sessions demonstrate a legitimate,
+repeatable provider difference. Fixture evidence must not be described as
+measured live capacity or quote quantity scale.

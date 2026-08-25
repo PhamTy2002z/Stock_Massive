@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Resolved Capability Model and Resolver"
-status: pending
+status: completed
 priority: P1
 effort: "12h"
 dependencies: [1]
@@ -26,30 +26,30 @@ execution classifications explicit and conservatively defaulted.
 
 ### Functional
 
-- [ ] Add typed current-behavior dimensions: effect, idempotency, access class,
+- [x] Add typed current-behavior dimensions: effect, idempotency, access class,
       content trust, concurrency/ordering, contract version, handler identity,
       output limit, and existing display projection.
-- [ ] Add frozen `ResolvedTool` and ordered `ResolvedToolSurface`; surface owns
+- [x] Add frozen `ResolvedTool` and ordered `ResolvedToolSurface`; surface owns
       every selected entry plus availability state, an offered-schema projection,
       selected-only by-name lookup, sanitized unavailable reasons, registry
       generation, expanded tool names, and TTL/expiry identity.
-- [ ] Resolve toolsets once per task. Cache by registry generation, ordered
+- [x] Resolve toolsets once per task. Cache by registry generation, ordered
       expanded names, and availability TTL; toolset-only membership mutation
       cannot serve a stale surface.
-- [ ] Keep `get_tool_definitions()` as a projection from the resolved surface;
+- [x] Keep `get_tool_definitions()` as a projection from the resolved surface;
       it must not rebuild or recalculate policy.
-- [ ] Resolve handler/policy atomically. Dispatch may recheck current
+- [x] Resolve handler/policy atomically. Dispatch may recheck current
       availability/revocation, but cannot swap to a re-registered handler.
-- [ ] Make every shipped registration explicit. Defaults exist only for legacy,
+- [x] Make every shipped registration explicit. Defaults exist only for legacy,
       test, or unknown inputs and take the conservative direction.
 
 ### Non-functional
 
-- [ ] No principal-aware/global authorization cache in v1. Toolset selection and
+- [x] No principal-aware/global authorization cache in v1. Toolset selection and
       handler-enforced `ToolContext` checks remain current policy owners.
-- [ ] No remote provider probe, blocking network probe, cache serialization,
+- [x] No remote provider probe, blocking network probe, cache serialization,
       provider import, or unbounded cache.
-- [ ] Prompt schema bytes and stable registration order remain unchanged.
+- [x] Prompt schema bytes and stable registration order remain unchanged.
 
 ## Architecture
 
@@ -95,6 +95,7 @@ behavior change for a later candidate.
 | Modify | `/Users/typham/Dev/Stock_Massive/apps/api/src/agent/tools/memory.py` | Explicit read/write/idempotency classifications. | Memory tests. |
 | Modify | `/Users/typham/Dev/Stock_Massive/apps/api/src/agent/tools/signals.py` | Explicit store/trust/effect/concurrency/version. | Signal tests. |
 | Modify | `/Users/typham/Dev/Stock_Massive/apps/api/src/agent/tools/price_check.py` | Explicit store/trust/effect/concurrency/version. | Price-check tests. |
+| Modify | `/Users/typham/Dev/Stock_Massive/apps/api/src/core/llm/protocol.py` | Accept immutable schema sequences while preserving exact model wire output. | Capability contract + protocol suites. |
 | Modify | `/Users/typham/Dev/Stock_Massive/apps/api/tests/test_agent_tool_registry.py` | Defaults, serialization, availability reasons. | Focused. |
 | Modify | `/Users/typham/Dev/Stock_Massive/apps/api/tests/test_agent_tool_definitions.py` | Surface/cache/invalidation/atomicity. | Focused. |
 | Modify | `/Users/typham/Dev/Stock_Massive/apps/api/tests/agent_tool_world.py` | Test factories declare or intentionally default classifications. | Shared isolation. |
@@ -103,14 +104,14 @@ No provider, persistence, API, web, prompt, or eval file changes.
 
 ## Interface checklist
 
-- [ ] `ToolEntry.as_schema()` remains exact.
-- [ ] Registry generation changes on registration/deregistration.
-- [ ] `resolve_tool_surface(toolsets, now=...)` returns ordered immutable state.
-- [ ] `get_tool_definitions()` projects from the same cached surface.
-- [ ] Availability reason is typed/sanitized; env names and exceptions never
+- [x] `ToolEntry.as_schema()` remains exact.
+- [x] Registry generation changes on registration/deregistration.
+- [x] `resolve_tool_surface(toolsets, now=...)` returns ordered immutable state.
+- [x] `get_tool_definitions()` projects from the same cached surface.
+- [x] Availability reason is typed/sanitized; env names and exceptions never
       enter model/UI output.
-- [ ] Handler identity/version is deterministic; no callable repr/address.
-- [ ] Surface wire/digest excludes credentials, callables, raw probe text.
+- [x] Handler identity/version is deterministic; no callable repr/address.
+- [x] Surface wire/digest excludes credentials, callables, raw probe text.
 
 ## Implementation steps
 
@@ -145,11 +146,11 @@ Phase 1 fixtures -> registry types -> definitions resolver/cache -> Phase 3 cons
 
 ## Success criteria
 
-- [ ] Registry, toolset, definitions, and contract tests pass.
-- [ ] Schema names/order/wire equal Phase 1 baseline.
-- [ ] One cached surface owns all metadata projections.
-- [ ] All shipped registrations explicit; legacy/unknown defaults conservative.
-- [ ] No consumer behavior changes yet.
+- [x] Registry, toolset, definitions, and contract tests pass.
+- [x] Schema names/order/wire equal Phase 1 baseline.
+- [x] One cached surface owns all metadata projections.
+- [x] All shipped registrations explicit; legacy/unknown defaults conservative.
+- [x] No consumer behavior changes yet.
 
 ## Risk assessment
 
@@ -172,3 +173,20 @@ identity.
 ## Next steps
 
 Phase 3 migrates consumers and removes duplicate owners only after parity tests.
+
+## Validation log
+
+### 2026-08-24
+
+- Focused capability/registry/definitions/provider verification: 99 passed.
+- Nine-suite agent/provider compatibility matrix: 240 passed, 4 explicitly
+  network-marked tests deselected.
+- Broadened verification: 821 passed. Default offline suite: 2786 passed with
+  one unrelated pre-existing documentation-topology failure and one intentional
+  skip; the failure requires a file deliberately deleted before this work.
+- Regression tests cover recursive immutability, registry mutation during an
+  availability probe, descriptor-bypass resistance, synchronized bounded LRU
+  access, deterministic identity, and exact schema wire parity.
+- Three review passes ended at 9.5/10 with no critical, warning, or blocking
+  findings. Public API, SSE, database, provider executable behavior, and
+  credential/network boundaries remain unchanged.

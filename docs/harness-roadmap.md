@@ -203,7 +203,7 @@ evaluation. The System owns connections, normalization, storage, and serving.
   index-relative movement.
 - [ ] Keep venue depth limits, board quantity rules, and market-session rules
   out of model arithmetic.
-- [ ] Unblock `foreign_flow_pressure.net_volume_over_adtv` only after the
+- [x] Unblock `foreign_flow_pressure.net_volume_over_adtv` only after the
   normalized share-volume contract is proven.
 - [ ] Add the “explain a material move” slice across price, volume, regime,
   liquidity, foreign flow, auction, and known events.

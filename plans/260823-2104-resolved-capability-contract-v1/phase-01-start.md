@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Freeze Contracts and Provider Boundary"
-status: pending
+status: completed
 priority: P1
 effort: "8h"
 dependencies: []
@@ -28,26 +28,26 @@ later phases cannot silently broaden tool authority or data fallback.
 
 ### Functional
 
-- [ ] Refuse implementation until Stage 0 has a complete approved baseline and
+- [x] Refuse implementation until Stage 0 has a complete approved baseline and
       committed gate policy; targeted smoke alone does not satisfy the blocker.
-- [ ] Characterize eight shipped tools: names, toolsets, schemas, order,
+- [x] Characterize eight shipped tools: names, toolsets, schemas, order,
       availability, handler, read/write behavior, idempotency, external/store
       access, trust wrapping, concurrency, output limit, display, and errors.
-- [ ] Pin Conversation `CHAT_TOOLSETS` and Analysis `signals` selection; record
+- [x] Pin Conversation `CHAT_TOOLSETS` and Analysis `signals` selection; record
       the current gap that executor lookup is global even when lane exposure is
       narrower. Do not encode that bypass as desired behavior.
-- [ ] Pin current model names/schema bytes, transcript/SSE v2 fields, trace
+- [x] Pin current model names/schema bytes, transcript/SSE v2 fields, trace
       vocabulary, budget precedence, one-call-one-result, and issued order.
-- [ ] Verify provider ownership separately from executable adapters. Cover must
+- [x] Verify provider ownership separately from executable adapters. Cover must
       never imply live fallback or equivalent price/data semantics.
-- [ ] Correct the stale VNStock adapter module documentation from two to three
+- [x] Correct the stale VNStock adapter module documentation from two to three
       calls per fundamental symbol; do not change executable provider behavior.
 
 ### Non-functional
 
-- [ ] No production behavior, provider/network call, credential read, database
+- [x] No production behavior, provider/network call, credential read, database
       write, migration, or threshold change.
-- [ ] Static and fixture-backed tests only; preserve dirty Stage 0 work until its
+- [x] Static and fixture-backed tests only; preserve dirty Stage 0 work until its
       owner finishes it.
 
 ## Architecture
@@ -83,6 +83,7 @@ point-in-time truth.
 | Action | File | Purpose | Test impact |
 |---|---|---|---|
 | Create | `/Users/typham/Dev/Stock_Massive/apps/api/tests/test_agent_capability_contract.py` | Cross-consumer characterization and provider-boundary seam tests. | New focused suite. |
+| Create | `/Users/typham/Dev/Stock_Massive/apps/api/tests/test_agent_provider_boundary_static.py` | Parse provider ownership and adapter source without importing provider packages. | Isolated static boundary suite. |
 | Modify | `/Users/typham/Dev/Stock_Massive/apps/api/tests/test_agent_tool_registry.py` | Lock registration and safe unknown behavior. | Existing 14 tests retained. |
 | Modify | `/Users/typham/Dev/Stock_Massive/apps/api/tests/test_agent_tool_definitions.py` | Lock selection/order/cache behavior. | Existing 7 tests retained. |
 | Modify | `/Users/typham/Dev/Stock_Massive/apps/api/tests/test_agent_tool_executor.py` | Characterize barriers, fanout, handler lookup, failure codes. | Existing 25 tests retained. |
@@ -96,12 +97,12 @@ No executable provider logic is modified in this phase.
 
 ## Interface checklist
 
-- [ ] `ToolEntry`, `ToolContext`, `register`, `get`, `is_available`.
-- [ ] `get_tool_definitions`, `resolve_toolset`, definition cache helpers.
-- [ ] `ToolExecutor.run`, `plan_segments`, `_dispatch`, `_record`.
-- [ ] `TurnToolCall.as_wire`, `summarise_call`, result projection/wrapping.
-- [ ] Conversation and Analysis schema construction/trace settlement.
-- [ ] Provider `Capability`, `SourceOwnership`, executable `fetch_*` methods.
+- [x] `ToolEntry`, `ToolContext`, `register`, `get`, `is_available`.
+- [x] `get_tool_definitions`, `resolve_toolset`, definition cache helpers.
+- [x] `ToolExecutor.run`, `plan_segments`, `_dispatch`, `_record`.
+- [x] `TurnToolCall.as_wire`, `summarise_call`, result projection/wrapping.
+- [x] Conversation and Analysis schema construction/trace settlement.
+- [x] Provider `Capability`, `SourceOwnership`, executable `fetch_*` methods.
 
 ## Implementation steps
 
@@ -134,12 +135,12 @@ Stage 0 approved baseline -> Phase 1 contract fixtures -> Phase 2 resolver
 
 ## Success criteria
 
-- [ ] Focused characterization and existing provider contract suites pass.
-- [ ] Every future migration claim maps to a test or a named gap.
-- [ ] Provider boundary matches current code, including 3 VNStock fundamental
+- [x] Focused characterization and existing provider contract suites pass.
+- [x] Every future migration claim maps to a test or a named gap.
+- [x] Provider boundary matches current code, including 3 VNStock fundamental
       calls/symbol and non-executable valuation cover.
-- [ ] No production or database change exists in the phase diff.
-- [ ] VNStock module prose and executable three-call tests agree.
+- [x] No production or database change exists in the phase diff.
+- [x] VNStock module prose and executable three-call tests agree.
 
 ## Risk assessment
 
@@ -158,3 +159,18 @@ fixtures. Static inventory makes no network call.
 ## Next steps
 
 Phase 2 introduces the frozen resolved model under these locked contracts.
+
+## Validation log
+
+### 2026-08-24
+
+- Stage 0 dependency was verified complete with its approved baseline and gate
+  policy before implementation began.
+- Static provider-boundary execution passed under isolated Python and imported
+  neither `vnstock` nor `src.core.vnstock_client`; provider/network calls were
+  zero.
+- Characterization locked the eight shipped registrations, ordered lane
+  exposure, exact schema wire, conservative unknown defaults, and the existing
+  transport/provider contracts.
+- VNStock provider documentation now matches the executable three-call
+  fundamentals path: income statement, balance sheet, and cash flow.
