@@ -32,6 +32,7 @@ from .fields import (
     min_sample_for,
 )
 from .fundamentals import fundamentals_on_or_before
+from .foreign_share_flow import foreign_share_flows_for_sessions
 from .issues import SignalIssue
 from .reference import foreign_room_on_or_before
 
@@ -81,11 +82,21 @@ def serve_field(
     # read it — it is one indexed row, and a declaration saying which fields
     # need it would cost more than it saves.
     cutoff = health.last_session or frame.bars[-1].session_date
+    foreign_share_flows = (
+        foreign_share_flows_for_sessions(
+            session,
+            symbol,
+            tuple(bar.session_date for bar in frame.bars),
+        )
+        if field.requires_foreign_share_flow
+        else None
+    )
     reading = field.reading(
         FieldWindow(
             frame=frame,
             health=health,
             foreign_room=foreign_room_on_or_before(session, symbol, cutoff),
+            foreign_net_volume_by_session=foreign_share_flows,
         )
     )
     if reading.value is None:

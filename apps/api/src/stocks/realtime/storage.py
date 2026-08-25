@@ -17,6 +17,7 @@ from src.stocks.models import (
     RealtimeCheckpoint,
     RealtimeEvent,
     RealtimeHealth,
+    RealtimeReconciliationAudit,
     RealtimeSpill,
 )
 
@@ -31,9 +32,16 @@ from .contracts import (
     SecurityDefinition,
     SessionState,
     TradeTick,
+    MarketDataSource,
 )
 from .health import HealthSnapshot
-from .policy import RETENTION_POLICY_VERSION, RetentionClass, retention_rule
+from .policy import (
+    RETENTION_POLICY_VERSION,
+    ComparisonScope,
+    ReconciliationAudit,
+    RetentionClass,
+    retention_rule,
+)
 
 
 _EVENT_MODEL_BY_FAMILY = {
@@ -88,6 +96,12 @@ class SpillRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class EventPage:
+    events: tuple[NormalizedMarketEvent, ...]
+    next_cursor: Checkpoint | None
+
+
+@dataclass(frozen=True, slots=True)
 class RetentionPurge:
     events: int
     recovered_spills: int
@@ -116,6 +130,32 @@ class RealtimeEventStore:
     ) -> tuple[NormalizedMarketEvent, ...]:
         return await asyncio.to_thread(self._replay, trading_day, family, after)
 
+    async def query(
+        self,
+        family: EventFamily,
+        symbol: str,
+        *,
+        start: datetime,
+        end: datetime,
+        source: MarketDataSource | None = None,
+        after: Checkpoint | None = None,
+        limit: int = 200,
+    ) -> EventPage:
+        if start.tzinfo is None or end.tzinfo is None or start >= end:
+            raise ValueError("realtime query requires a valid timezone-aware window")
+        if not 1 <= limit <= 1_000:
+            raise ValueError("realtime query limit must be between 1 and 1000")
+        return await asyncio.to_thread(
+            self._query,
+            family,
+            symbol.upper(),
+            start.astimezone(UTC),
+            end.astimezone(UTC),
+            source,
+            after,
+            limit,
+        )
+
     async def save_checkpoint(self, consumer: str, event: NormalizedMarketEvent) -> Checkpoint:
         return await asyncio.to_thread(self._save_checkpoint, consumer, event)
 
@@ -135,6 +175,27 @@ class RealtimeEventStore:
 
     async def save_health(self, snapshot: HealthSnapshot) -> None:
         await asyncio.to_thread(self._save_health, snapshot)
+
+    async def append_reconciliation(self, audit: ReconciliationAudit) -> bool:
+        return await asyncio.to_thread(self._append_reconciliation, audit)
+
+    async def read_reconciliations(
+        self,
+        symbol: str,
+        trading_day: date,
+        *,
+        scope: ComparisonScope | None = None,
+        limit: int = 200,
+    ) -> tuple[ReconciliationAudit, ...]:
+        if not 1 <= limit <= 1_000:
+            raise ValueError("reconciliation query limit must be between 1 and 1000")
+        return await asyncio.to_thread(
+            self._read_reconciliations,
+            symbol.upper(),
+            trading_day,
+            scope,
+            limit,
+        )
 
     async def read_health(self, scope: str) -> HealthSnapshot | None:
         return await asyncio.to_thread(self._read_health, scope)
@@ -172,8 +233,8 @@ class RealtimeEventStore:
                     event_family=metadata.event_family.value,
                     symbol=metadata.symbol,
                     source=metadata.source.value,
-                    provider_time=metadata.provider_time,
-                    observed_time=metadata.observed_time,
+                    provider_time=metadata.provider_time.astimezone(UTC),
+                    observed_time=metadata.observed_time.astimezone(UTC),
                     schema_version=metadata.schema_version,
                     normalization_version=metadata.normalization_version,
                     retention_policy_version=RETENTION_POLICY_VERSION,
@@ -188,6 +249,66 @@ class RealtimeEventStore:
             return self._write(write)
         except IntegrityError:
             return False
+
+    def _append_reconciliation(self, audit: ReconciliationAudit) -> bool:
+        result = audit.result
+
+        def write(session: Session) -> bool:
+            if session.get(RealtimeReconciliationAudit, audit.audit_id) is not None:
+                return False
+            session.add(
+                RealtimeReconciliationAudit(
+                    audit_id=audit.audit_id,
+                    trading_day=result.left.trading_day,
+                    scope=result.scope.value,
+                    symbol=result.left.symbol,
+                    status=result.status.value,
+                    quality_state=audit.quality_state.value,
+                    left_evidence_id=result.left.evidence_id,
+                    right_evidence_id=result.right.evidence_id,
+                    left_source=result.left.source.value,
+                    right_source=result.right.source.value,
+                    profile_version=audit.profile.version,
+                    enforcement_mode=audit.enforcement_mode.value,
+                    checked_at=audit.checked_at.astimezone(UTC),
+                    payload=audit.model_dump(mode="json"),
+                )
+            )
+            session.flush()
+            return True
+
+        try:
+            return self._write(write)
+        except IntegrityError:
+            return False
+
+    def _read_reconciliations(
+        self,
+        symbol: str,
+        trading_day: date,
+        scope: ComparisonScope | None,
+        limit: int,
+    ) -> tuple[ReconciliationAudit, ...]:
+        def read(session: Session) -> tuple[ReconciliationAudit, ...]:
+            statement = select(RealtimeReconciliationAudit).where(
+                RealtimeReconciliationAudit.symbol == symbol,
+                RealtimeReconciliationAudit.trading_day == trading_day,
+            )
+            if scope is not None:
+                statement = statement.where(
+                    RealtimeReconciliationAudit.scope == scope.value
+                )
+            rows: Sequence[RealtimeReconciliationAudit] = session.scalars(
+                statement.order_by(
+                    RealtimeReconciliationAudit.checked_at,
+                    RealtimeReconciliationAudit.audit_id,
+                ).limit(limit)
+            ).all()
+            return tuple(
+                ReconciliationAudit.model_validate(row.payload) for row in rows
+            )
+
+        return self._read(read)
 
     def _replay(
         self, trading_day: date, family: EventFamily, after: Checkpoint | None
@@ -223,6 +344,63 @@ class RealtimeEventStore:
 
         return self._read(read)
 
+    def _query(
+        self,
+        family: EventFamily,
+        symbol: str,
+        start: datetime,
+        end: datetime,
+        source: MarketDataSource | None,
+        after: Checkpoint | None,
+        limit: int,
+    ) -> EventPage:
+        def read(session: Session) -> EventPage:
+            statement = select(RealtimeEvent).where(
+                RealtimeEvent.event_family == family.value,
+                RealtimeEvent.symbol == symbol,
+                RealtimeEvent.provider_time >= start,
+                RealtimeEvent.provider_time < end,
+            )
+            if source is not None:
+                statement = statement.where(RealtimeEvent.source == source.value)
+            if after is not None:
+                statement = statement.where(
+                    or_(
+                        RealtimeEvent.provider_time > after.provider_time,
+                        and_(
+                            RealtimeEvent.provider_time == after.provider_time,
+                            RealtimeEvent.observed_time > after.observed_time,
+                        ),
+                        and_(
+                            RealtimeEvent.provider_time == after.provider_time,
+                            RealtimeEvent.observed_time == after.observed_time,
+                            RealtimeEvent.evidence_id > after.evidence_id,
+                        ),
+                    )
+                )
+            rows: Sequence[RealtimeEvent] = session.scalars(
+                statement.order_by(
+                    RealtimeEvent.provider_time,
+                    RealtimeEvent.observed_time,
+                    RealtimeEvent.evidence_id,
+                ).limit(limit + 1)
+            ).all()
+            visible = rows[:limit]
+            events = tuple(deserialize_event(row.payload) for row in visible)
+            cursor = None
+            if len(rows) > limit and visible:
+                last = visible[-1]
+                cursor = Checkpoint(
+                    consumer="query",
+                    partition_key="query",
+                    evidence_id=last.evidence_id,
+                    provider_time=_aware(last.provider_time),
+                    observed_time=_aware(last.observed_time),
+                )
+            return EventPage(events=events, next_cursor=cursor)
+
+        return self._read(read)
+
     def _save_checkpoint(self, consumer: str, event: NormalizedMarketEvent) -> Checkpoint:
         if not consumer or len(consumer) > 64:
             raise ValueError("invalid realtime checkpoint consumer")
@@ -232,8 +410,8 @@ class RealtimeEventStore:
             consumer=consumer,
             partition_key=key,
             evidence_id=metadata.evidence_id,
-            provider_time=metadata.provider_time,
-            observed_time=metadata.observed_time,
+            provider_time=metadata.provider_time.astimezone(UTC),
+            observed_time=metadata.observed_time.astimezone(UTC),
         )
 
         def write(session: Session) -> Checkpoint:

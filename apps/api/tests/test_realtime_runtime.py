@@ -60,12 +60,12 @@ class FakeSpine:
 
 class FakeCoordinator:
     def __init__(self):
-        self.bootstrapped = None
+        self.catalog_refreshes = 0
         self.subscriptions = None
         self.running = asyncio.Event()
 
-    async def bootstrap_instruments(self, symbols):
-        self.bootstrapped = symbols
+    async def refresh_instrument_catalog(self):
+        self.catalog_refreshes += 1
         return ()
 
     async def run_live(self, subscriptions):
@@ -100,7 +100,7 @@ async def test_runtime_starts_one_feed_and_owns_clean_shutdown():
     await coordinator.running.wait()
     subscriptions = coordinator.subscriptions
     assert spine.started is True
-    assert coordinator.bootstrapped == ("FPT", "HPG")
+    assert coordinator.catalog_refreshes == 1
     assert subscriptions is not None
     assert len({subscription.identity for subscription in subscriptions}) == len(
         subscriptions
@@ -108,6 +108,15 @@ async def test_runtime_starts_one_feed_and_owns_clean_shutdown():
     assert not any(
         subscription.channel.startswith("top_price")
         for subscription in subscriptions
+    )
+    assert not any(
+        subscription.channel.startswith("security_definition")
+        for subscription in subscriptions
+    )
+    assert all(
+        subscription.symbols == ("FPT", "HPG")
+        for subscription in subscriptions
+        if subscription.symbols
     )
 
     await runtime.stop()

@@ -477,6 +477,8 @@ class ClosedBar(NormalizedEvent):
     volume: int = Field(ge=0)
     total_value_vnd: Decimal | None = Field(default=None, ge=0)
     price_basis: PriceBasis
+    method_version: int | None = Field(default=None, ge=1)
+    input_evidence_ids: tuple[str, ...] = ()
 
     @field_validator("window_start", "window_end")
     @classmethod
@@ -513,6 +515,24 @@ class ClosedBar(NormalizedEvent):
             # A missing optional value is valid; the unit still declares how a
             # future populated value must be interpreted.
             pass
+        if len(self.input_evidence_ids) != len(set(self.input_evidence_ids)):
+            raise ValueError("bar input evidence IDs must be unique")
+        if any(
+            len(item) != 68
+            or not item.startswith("evt_")
+            or any(character not in "0123456789abcdef" for character in item[4:])
+            for item in self.input_evidence_ids
+        ):
+            raise ValueError("bar input evidence IDs must be canonical event identities")
+        if self.metadata.source is MarketDataSource.INTERNAL:
+            if self.method_version is None or not self.input_evidence_ids:
+                raise ValueError(
+                    "derived bars require a method version and input evidence"
+                )
+        elif self.method_version is not None or self.input_evidence_ids:
+            raise ValueError(
+                "provider bars cannot claim internal derivation provenance"
+            )
         return self
 
 

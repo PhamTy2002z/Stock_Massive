@@ -1,5 +1,16 @@
 """Normalized realtime market contracts and policy declarations."""
 
+from .aggregation import (
+    ACCEPTED_TRADE_BAR_RESOLUTIONS,
+    AGGREGATION_METHOD_VERSION,
+    BAR_ROLLUP_METHOD_VERSION,
+    aggregate_trades,
+    aggregate_bars_to_daily,
+    bar_window_start,
+)
+from .bar_projection import TradeBarProjector
+from .reconciliation_projection import ReconciliationProjector
+
 from .contracts import (
     AggressorSide,
     AuctionSnapshot,
@@ -36,6 +47,19 @@ from .normalization import (
     normalize_dnse_value,
 )
 from .health import DataHealthState, FeedHealthState, HealthSnapshot, HealthTracker
+from .metric_projection import CompositeProjector, MetricProjector
+from .metrics import (
+    FOREIGN_FLOW_METHOD_VERSION,
+    TRADE_METRICS_METHOD_VERSION,
+    UPCOM_REFERENCE_INPUT_METHOD_VERSION,
+    ForeignFlowProjection,
+    ProjectionIdentity,
+    TradeMetricsProjection,
+    UpcomReferenceInput,
+    project_foreign_flow,
+    project_trade_metrics,
+    project_upcom_reference_input,
+)
 from .policy import (
     OUTCOME_DISPOSITION,
     RETENTION_POLICY,
@@ -47,12 +71,17 @@ from .policy import (
     DataOutcomeKind,
     EvidenceReference,
     MetricComparison,
+    MetricComparisonOutcome,
     OutcomeDisposition,
     ReconciliationResult,
+    ReconciliationAudit,
+    ReconciliationEnforcementMode,
     ReconciliationStatus,
+    ReconciliationToleranceProfile,
     RetentionClass,
     RetentionRule,
     SourceOwnership,
+    STRICT_RECONCILIATION_PROFILE_V1,
     merge_evidence,
     retention_rule,
 )
@@ -60,6 +89,7 @@ from .projections import HotProjectionStore, ProjectionUnavailable
 from .spine import IngestionSpine
 from .storage import (
     Checkpoint,
+    EventPage,
     RealtimeEventStore,
     RetentionPurge,
     SpillRecord,
@@ -68,8 +98,16 @@ from .storage import (
     serialize_event,
 )
 from .coordinator import DnseIngestionCoordinator
+from .reconciliation import (
+    build_reconciliation_audit,
+    reconciliation_quality,
+    reconcile_bars,
+)
 
 __all__ = [
+    "ACCEPTED_TRADE_BAR_RESOLUTIONS",
+    "AGGREGATION_METHOD_VERSION",
+    "BAR_ROLLUP_METHOD_VERSION",
     "AggressorSide",
     "AuctionSnapshot",
     "BarResolution",
@@ -79,6 +117,7 @@ __all__ = [
     "CanonicalUnits",
     "ClosedBar",
     "ComparisonScope",
+    "CompositeProjector",
     "Checkpoint",
     "DataHealthState",
     "DnseIngestionCoordinator",
@@ -87,8 +126,11 @@ __all__ = [
     "DataOutcomeKind",
     "EventFamily",
     "EventMetadata",
+    "EventPage",
     "EvidenceReference",
     "FeedHealthState",
+    "FOREIGN_FLOW_METHOD_VERSION",
+    "ForeignFlowProjection",
     "Exchange",
     "ForeignFlowSnapshot",
     "HealthSnapshot",
@@ -98,6 +140,8 @@ __all__ = [
     "IngestionSpine",
     "MarketDataSource",
     "MetricComparison",
+    "MetricComparisonOutcome",
+    "MetricProjector",
     "NORMALIZATION_RULES",
     "NO_UNITS",
     "NormalizedMarketEvent",
@@ -108,30 +152,50 @@ __all__ = [
     "PriceBasis",
     "PriceUnit",
     "ProjectionUnavailable",
+    "ProjectionIdentity",
     "ProductGroup",
     "QualityState",
     "QuantityUnit",
     "RETENTION_POLICY",
     "RETENTION_POLICY_VERSION",
     "ReconciliationResult",
+    "ReconciliationAudit",
+    "ReconciliationEnforcementMode",
+    "ReconciliationProjector",
     "ReconciliationStatus",
+    "ReconciliationToleranceProfile",
     "RealtimeEventStore",
     "RetentionPurge",
     "RetentionClass",
     "RetentionRule",
     "SOURCE_OWNERSHIP",
+    "STRICT_RECONCILIATION_PROFILE_V1",
     "SecurityDefinition",
     "SessionState",
     "SourceOwnership",
     "SpillRecord",
     "TradeTick",
+    "TRADE_METRICS_METHOD_VERSION",
+    "TradeBarProjector",
+    "TradeMetricsProjection",
     "TradingSession",
     "ValueUnit",
+    "UPCOM_REFERENCE_INPUT_METHOD_VERSION",
+    "UpcomReferenceInput",
+    "aggregate_trades",
+    "aggregate_bars_to_daily",
+    "bar_window_start",
+    "build_reconciliation_audit",
     "merge_evidence",
     "deserialize_event",
     "normalization_rule",
     "normalize_dnse_value",
     "partition_key",
+    "project_foreign_flow",
+    "project_trade_metrics",
+    "project_upcom_reference_input",
     "retention_rule",
+    "reconcile_bars",
+    "reconciliation_quality",
     "serialize_event",
 ]

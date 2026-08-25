@@ -34,19 +34,18 @@ That is not a degradation: the room changes over months, its absence is a
 collection gap the state already names, and a warning attached to every window
 is a warning nobody reads.
 
-## Money over money, and the share-denominated ratio that is refused
+## Money over money, and shares over shares when DNSE evidence is complete
 
 The Main Source writes foreign buy, sell and net **value** for each session, so a
-money-denominated ratio over a money ADTV has stored inputs and is served. It
-writes no foreign **volume** at all — no adapter in this system does — so the
-share-denominated ratio has no inputs, and it is registered as refused
-``unavailable`` with the missing input named rather than quietly filled with the
-money figure. The naming split between traded quantity and traded money exists
-precisely to make that swap impossible to do by accident, and this is the field
-where the temptation is largest.
+money-denominated ratio over a money ADTV has stored inputs and is served. DNSE
+realtime evidence separately supplies cumulative foreign buy and sell **share
+volume**. The share-denominated ratio is served only when every session in the
+same window has that evidence; otherwise it refuses with the missing input
+named. It is never filled from the money figure.
 
-An ADTV in money crosses an ex-date safely; an ADTV in shares does not, which is
-the second reason the served ratio is the money one.
+An ADTV in money crosses an ex-date safely; an ADTV in shares does not. The
+share ratio therefore retains the gateway's volume-basis degradation across a
+share-count action instead of pretending the quantities stayed comparable.
 
 ## The null is a block permutation of the daily flows
 
@@ -335,25 +334,48 @@ def foreign_room_pct_reading(window: FieldWindow) -> FieldReading:
 
 
 def net_volume_over_adtv_reading(window: FieldWindow) -> FieldReading:
-    """Refused: no adapter in this system writes foreign traded volume.
+    """Net DNSE foreign share flow over average daily traded shares.
 
-    The share-denominated twin of the served ratio, registered so the profile
-    stays honest about the difference between a figure this system does not have
-    and a figure it has in another unit. Nothing here falls back to the money
-    ratio: the two are not the same number, an ADTV in shares does not survive an
-    ex-date, and the naming split exists to make the substitution impossible to
-    make by accident rather than merely discouraged.
+    Every session must have both a stored DNSE cumulative share count and an EOD
+    traded share count. Money flow is never substituted for either quantity.
     """
+    bars = window.frame.bars[-FOREIGN_FLOW_SESSIONS:]
+    if len(bars) < FOREIGN_FLOW_SESSIONS:
+        return FieldReading(value=None, refusal=SignalIssue.INSUFFICIENT_HISTORY)
+    stored = window.foreign_net_volume_by_session
+    if stored is None or any(bar.session_date not in stored for bar in bars):
+        return FieldReading(
+            value=None,
+            refusal=SignalIssue.FOREIGN_FLOW_NOT_STORED,
+            extras={
+                "missing_input": "DNSE foreign net share volume for every session",
+                **_room_extras(window.foreign_room),
+            },
+        )
+    adtv = average_over_sessions(bar.volume for bar in bars)
+    if adtv is None:
+        return FieldReading(
+            value=None, refusal=SignalIssue.TRADED_FIGURE_NOT_STORED
+        )
+    if adtv <= 0:
+        return FieldReading(value=None, refusal=SignalIssue.NO_TRADED_SESSIONS)
+    flows = [float(stored[bar.session_date]) for bar in bars]
+    net = sum(flows)
+    mean_error = _long_run_standard_error(flows)
     return FieldReading(
-        value=None,
-        refusal=SignalIssue.UNAVAILABLE,
+        value=net / adtv,
         extras={
-            "missing_input": (
-                "foreign traded volume per session; the Main Source reports "
-                "foreign buy and sell as money and no adapter writes the share "
-                "counts, so no share-denominated ratio can be formed"
+            "standard_error": (
+                None if mean_error is None else len(flows) * mean_error / adtv
             ),
-            "available_instead": "foreign_flow_pressure.net_value_over_adtv",
+            "standard_error_basis": "newey_west_bartlett",
+            "standard_error_lags": min(FLOW_NEWEY_WEST_LAGS, len(flows) - 1),
+            "net_volume_shares": net,
+            "adtv_shares": adtv,
+            "numerator_basis": Denomination.SHARES.value,
+            "denominator_basis": Denomination.SHARES.value,
+            "sessions": len(flows),
             **_room_extras(window.foreign_room),
         },
+        degraded_reason=_room_degradation(window.foreign_room),
     )

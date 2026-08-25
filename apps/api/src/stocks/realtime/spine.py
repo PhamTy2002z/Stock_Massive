@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date
+from typing import Protocol
 
 from .contracts import EventFamily, NormalizedMarketEvent
 from .health import DataHealthState, FeedHealthState, HealthSnapshot, HealthTracker
 from .projections import HotProjectionStore, ProjectionUnavailable
 from .storage import RealtimeEventStore
+
+
+class DerivedProjector(Protocol):
+    async def project(
+        self, event: NormalizedMarketEvent
+    ) -> tuple[NormalizedMarketEvent, ...]: ...
 
 
 class IngestionSpine:
@@ -23,6 +30,7 @@ class IngestionSpine:
         queue_size: int = 2_000,
         worker_count: int = 1,
         health: HealthTracker | None = None,
+        derived_projector: DerivedProjector | None = None,
     ) -> None:
         if queue_size < 1 or not 1 <= worker_count <= 8:
             raise ValueError("invalid realtime queue or worker count")
@@ -34,6 +42,7 @@ class IngestionSpine:
         self._workers: list[asyncio.Task[None]] = []
         self._accepting = False
         self._health = health or HealthTracker()
+        self._derived_projector = derived_projector
         self._health_lock = asyncio.Lock()
         self._published_health: dict[str, tuple[str, str | None]] = {}
 
@@ -98,6 +107,8 @@ class IngestionSpine:
         events = await self._store.replay(trading_day, family, after=checkpoint)
         for event in events:
             await self._apply_projection(event)
+            if self._derived_projector is not None:
+                await self._derived_projector.project(event)
             await self._store.save_checkpoint(self._consumer, event)
         return events
 
@@ -140,6 +151,8 @@ class IngestionSpine:
     async def _process(self, event: NormalizedMarketEvent) -> None:
         inserted = await self._store.append(event)
         await self._apply_projection(event)
+        if inserted and self._derived_projector is not None:
+            await self._derived_projector.project(event)
         await self._store.save_checkpoint(self._consumer, event)
         self._health.processed(duplicate=not inserted)
         await self._publish_health(self._health.data(DataHealthState.HEALTHY))

@@ -29,22 +29,34 @@ class CapturingSpine:
 
 
 class FakeRest:
+    async def instruments(self, **_filters):
+        return RestResult(
+            request_id="instruments-1",
+            data=[
+                await self._security_definition_payload("FPT"),
+                await self._security_definition_payload("HPG"),
+            ],
+        )
+
+    async def _security_definition_payload(self, symbol):
+        return {
+            "T": "sd",
+            "symbol": symbol,
+            "marketId": "STO",
+            "boardId": "G1",
+            "time": "2026-08-24T02:00:00Z",
+            "securityGroupId": "ST",
+            "securityStatus": "listed",
+            "isin": f"VN000000{symbol}1",
+            "basicPrice": "71.4",
+            "ceilingPrice": "76.3",
+            "floorPrice": "66.5",
+        }
+
     async def security_definition(self, symbol, _board=None):
         return RestResult(
             request_id=f"secdef-{symbol}",
-            data={
-                "T": "sd",
-                "symbol": symbol,
-                "marketId": "STO",
-                "boardId": "G1",
-                "time": "2026-08-24T02:00:00Z",
-                "securityGroupId": "ST",
-                "securityStatus": "listed",
-                "isin": "VN000000FPT1",
-                "basicPrice": "71.4",
-                "ceilingPrice": "76.3",
-                "floorPrice": "66.5",
-            },
+            data=await self._security_definition_payload(symbol),
         )
 
     async def close_price(self, _symbol, _board=None):
@@ -123,6 +135,19 @@ async def test_rest_bootstrap_and_reconnect_use_the_same_submit_path():
         "trade",
     ]
     assert spine.health[-1] == (FeedHealthState.CONNECTED, None)
+
+
+@pytest.mark.asyncio
+async def test_full_market_catalog_refresh_has_no_universe_argument():
+    spine = CapturingSpine()
+    parser = DnseEventParser(clock=lambda: datetime(2026, 8, 24, 2, 0, 1, tzinfo=UTC))
+    recovered = parser.parse(trade_payload("recovered"), request_id="gap").event
+    assert recovered is not None
+    service = coordinator(spine, FakeWebSocket(trade_payload()), FakeReconciler(recovered))
+
+    assert await service.refresh_instrument_catalog() == ()
+
+    assert [event.metadata.symbol for event in spine.events] == ["FPT", "HPG"]
 
 
 @pytest.mark.asyncio

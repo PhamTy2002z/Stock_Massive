@@ -8,7 +8,8 @@ The binding constraint here is quota rather than the gateway — 20 requests a
 minute without an API key, 60 with one — so the two adapters read very
 differently. Reference comes off one batched price board that covers the whole
 Universe in a single request. Statements have no batched form at all, so
-fundamental pays two requests per symbol against that same allowance.
+fundamental pays three requests per symbol against that same allowance: income,
+balance, and cash flow.
 
 Neither adapter paces itself. The allowance belongs to the account, so it is
 spent in one place for every live path (``src/core/quota.py``,

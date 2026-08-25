@@ -229,6 +229,44 @@ class RealtimeHealth(Base):
     )
 
 
+class RealtimeReconciliationAudit(Base):
+    """Append-only evidence comparison emitted by shadow reconciliation."""
+
+    __tablename__ = "realtime_reconciliation_audits"
+
+    audit_id = Column(String(68), primary_key=True)
+    trading_day = Column(Date, nullable=False)
+    scope = Column(String(32), nullable=False)
+    symbol = Column(String(32), nullable=False)
+    status = Column(String(32), nullable=False)
+    quality_state = Column(String(16), nullable=False)
+    left_evidence_id = Column(String(68), nullable=False)
+    right_evidence_id = Column(String(68), nullable=False)
+    left_source = Column(String(32), nullable=False)
+    right_source = Column(String(32), nullable=False)
+    profile_version = Column(Integer, nullable=False)
+    enforcement_mode = Column(String(16), nullable=False)
+    checked_at = Column(DateTime(timezone=True), nullable=False)
+    payload = Column(JSON, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index(
+            "ix_realtime_reconciliation_session",
+            "trading_day",
+            "symbol",
+            "scope",
+            "checked_at",
+        ),
+        Index(
+            "ix_realtime_reconciliation_status",
+            "status",
+            "quality_state",
+            "checked_at",
+        ),
+    )
+
+
 class ListingRoster(Base):
     """Which symbols the exchanges list, and on which board, market-wide.
 

@@ -1033,12 +1033,10 @@ FOREIGN_FLOW_SHARE_PRESSURE = SignalField(
     sign=Sign.SIGNED,
     interpretation=(
         "Net foreign buying in **shares** over this symbol's average daily "
-        "traded share count. **Unavailable**: the Main Source reports foreign "
-        "buy and sell as money and no adapter in this system writes the share "
-        "counts, so the ratio has no inputs. It is registered refused rather "
-        "than filled with the money-denominated ratio beside it, which is a "
-        "different number — an average in shares does not survive an ex-date "
-        "and an average in dong does."
+        "traded share count. The numerator comes from stored DNSE G1 cumulative "
+        "foreign buy/sell share counts and is served only when every session in "
+        "the window is present. It never substitutes the money-denominated "
+        "ratio beside it."
     ),
     kind=FieldKind.ESTIMATOR,
     claim=Claim.DESCRIPTIVE,
@@ -1046,9 +1044,17 @@ FOREIGN_FLOW_SHARE_PRESSURE = SignalField(
     min_sessions=FOREIGN_FLOW_MIN_SESSIONS,
     threshold=None,
     null_fpr=None,
+    requires_foreign_share_flow=True,
     output_keys=(
+        "standard_error",
+        "standard_error_basis",
+        "standard_error_lags",
+        "net_volume_shares",
+        "adtv_shares",
+        "numerator_basis",
+        "denominator_basis",
+        "sessions",
         "missing_input",
-        "available_instead",
         "foreign_room_state",
         "foreign_room_available_share",
         "foreign_room_as_of",

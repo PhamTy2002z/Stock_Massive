@@ -202,7 +202,7 @@ async def test_projection_rejects_older_delivery_and_exposes_health():
 
     assert await projections.apply(later) is True
     assert await projections.apply(earlier) is False
-    current = await projections.read(EventFamily.TRADE, "FPT")
+    current = await projections.read(EventFamily.TRADE, "FPT", board="G1")
     assert current and current["evidence_id"] == later.metadata.evidence_id
 
     snapshot = HealthTracker(clock=lambda: BASE_TIME).feed(FeedHealthState.CONNECTED)
@@ -232,7 +232,7 @@ async def test_restart_rebuild_is_deterministic_without_live_provider(event_stor
 
     assert replayed == (trade(1), trade(2))
     current = await HotProjectionStore(replacement_redis).read(
-        EventFamily.TRADE, "FPT"
+        EventFamily.TRADE, "FPT", board="G1"
     )
     assert current and current["evidence_id"] == trade(2).metadata.evidence_id
 

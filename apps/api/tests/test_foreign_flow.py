@@ -7,12 +7,11 @@ net buying forecasts returns, so the field is descriptive — a schema constrain
 not a disclaimer — and the sentence saying so is in the field's own contract
 rather than in whatever a model happens to narrate.
 
-*It does not swap a unit to fill a slot.* The Main Source writes foreign buy,
-sell and net **value**; no adapter writes foreign **volume**. So the
-money-denominated ratio is served and the share-denominated one is registered
-refused with its missing input named. Filling the second from the first is the
-one substitution the money/quantity naming split exists to make impossible, and
-it is asserted here rather than trusted.
+*It does not swap a unit to fill a slot.* EOD history supplies foreign **value**
+while DNSE realtime evidence supplies foreign **share volume**. The money ratio
+uses the former and the share ratio uses the latter only for a complete window.
+Filling either from the other is the substitution the money/quantity naming
+split exists to make impossible, and it is asserted here rather than trusted.
 
 *It does not present a room-capped flow as an ordinary one.* A statutory ceiling
 stops buying mechanically, and a field that cannot tell that apart from a change
@@ -41,6 +40,7 @@ from src.stocks.models import (
     CorporateAction,
     ListingRoster,
     ProviderSnapshot,
+    RealtimeEvent,
 )
 from src.stocks.providers import Exchange, ProviderSource
 from src.stocks.providers.contracts import (
@@ -51,6 +51,21 @@ from src.stocks.providers.contracts import (
     SnapshotMetadata,
 )
 from src.stocks.providers.normalize import VN_TZ
+from src.stocks.realtime import (
+    CanonicalUnits,
+    EventFamily,
+    EventMetadata,
+    Exchange as RealtimeExchange,
+    ForeignFlowSnapshot,
+    MarketDataSource,
+    PriceUnit,
+    ProductGroup,
+    QualityState,
+    QuantityUnit,
+    TradingSession,
+    ValueUnit,
+    serialize_event,
+)
 from src.stocks.signals.bars import Bar, BarFrame
 from src.stocks.signals.fields import Claim, FieldKind, FieldWindow, Sign, Unit
 from src.stocks.signals.foreign_flow import (
@@ -107,6 +122,7 @@ def open_session() -> Session:
         CorporateAction.__table__,
         CohortVersion.__table__,
         CohortMember.__table__,
+        RealtimeEvent.__table__,
     ):
         table.create(engine)
     forget_cohort_cache()
@@ -140,6 +156,71 @@ def frame_of_flows(flows: list[float | None], *, value: float = 10e9) -> BarFram
 
 def window_with_room(frame: BarFrame, room: ForeignRoomStanding | None) -> FieldWindow:
     return FieldWindow(frame=frame, health=health_of(frame), foreign_room=room)
+
+
+def window_with_share_flows(frame: BarFrame, net_volume: int) -> FieldWindow:
+    return FieldWindow(
+        frame=frame,
+        health=health_of(frame),
+        foreign_net_volume_by_session={
+            bar.session_date: net_volume for bar in frame.bars
+        },
+    )
+
+
+def store_foreign_share_flow(
+    session: Session,
+    symbol: str,
+    day: date,
+    net_volume: int,
+    sequence: int,
+) -> None:
+    stamp = datetime.combine(day, time(hour=14), tzinfo=VN_TZ)
+    event = ForeignFlowSnapshot(
+        metadata=EventMetadata(
+            source=MarketDataSource.DNSE,
+            event_family=EventFamily.FOREIGN_FLOW,
+            symbol=symbol,
+            exchange=RealtimeExchange.HOSE,
+            board="G1",
+            product_group=ProductGroup.EQUITY,
+            trading_day=day,
+            session=TradingSession.CONTINUOUS,
+            provider_time=stamp,
+            observed_time=stamp,
+            units=CanonicalUnits(
+                price=PriceUnit.NONE,
+                quantity=QuantityUnit.SHARE,
+                value=ValueUnit.VND,
+            ),
+            schema_version=1,
+            normalization_version=1,
+            raw_payload_hash=f"{sequence + 500:064x}",
+            quality_state=QualityState.VALID,
+        ),
+        buy_volume=max(net_volume, 0),
+        sell_volume=max(-net_volume, 0),
+        buy_value_vnd=Decimal(max(net_volume, 0) * 20_000),
+        sell_value_vnd=Decimal(max(-net_volume, 0) * 20_000),
+    )
+    metadata = event.metadata
+    session.add(
+        RealtimeEvent(
+            evidence_id=metadata.evidence_id,
+            trading_day=metadata.trading_day,
+            event_family=metadata.event_family.value,
+            symbol=metadata.symbol,
+            source=metadata.source.value,
+            provider_time=metadata.provider_time,
+            observed_time=metadata.observed_time,
+            schema_version=metadata.schema_version,
+            normalization_version=metadata.normalization_version,
+            retention_policy_version=1,
+            quality_state=metadata.quality_state.value,
+            payload=serialize_event(event),
+        )
+    )
+    session.flush()
 
 
 def store_history(
@@ -497,15 +578,15 @@ class TestTheForeignRoomPercentage:
         assert value.extras["foreign_room_state"] == "unknown"
 
 
-class TestTheShareDenominatedRatioIsRefused:
+class TestTheShareDenominatedRatioUsesStoredShares:
     def test_it_refuses_and_names_the_input_it_is_short_of(self):
         reading = net_volume_over_adtv_reading(
             window_of(frame_of_flows([1e9] * FOREIGN_FLOW_SESSIONS))
         )
 
         assert reading.value is None
-        assert reading.refusal is SignalIssue.UNAVAILABLE
-        assert "foreign traded volume" in reading.extras["missing_input"]
+        assert reading.refusal is SignalIssue.FOREIGN_FLOW_NOT_STORED
+        assert "DNSE foreign net share volume" in reading.extras["missing_input"]
 
     def test_it_never_answers_with_the_money_ratio_instead(self):
         """The one substitution the money/quantity naming split exists to stop."""
@@ -516,24 +597,21 @@ class TestTheShareDenominatedRatioIsRefused:
 
         assert money.value is not None
         assert shares.value is None
-        assert shares.extras["available_instead"] == (
-            "foreign_flow_pressure.net_value_over_adtv"
+        assert shares.refusal is SignalIssue.FOREIGN_FLOW_NOT_STORED
+        assert "net_volume_shares" not in shares.extras
+
+    def test_complete_dnse_share_window_is_quantity_over_quantity(self):
+        frame = frame_of_flows([1e9] * FOREIGN_FLOW_SESSIONS)
+
+        reading = net_volume_over_adtv_reading(
+            window_with_share_flows(frame, 100_000)
         )
 
-    def test_no_adapter_in_this_system_writes_a_foreign_share_count(self):
-        """The premise of the refusal, asserted rather than assumed.
-
-        The snapshot contract declares the two fields; nothing populates them.
-        The day something does, this test fails and the refusal above is the
-        thing to revisit.
-        """
-        from src.stocks.providers import fiinquant, vnstock_provider
-
-        for module in (fiinquant, vnstock_provider):
-            with open(module.__file__, encoding="utf-8") as handle:
-                text = handle.read()
-            assert "foreign_buy_volume=" not in text
-            assert "foreign_sell_volume=" not in text
+        assert reading.value == pytest.approx(2.5)
+        assert reading.extras["net_volume_shares"] == 2_000_000
+        assert reading.extras["adtv_shares"] == 800_000
+        assert reading.extras["numerator_basis"] == "shares"
+        assert reading.extras["denominator_basis"] == "shares"
 
 
 class TestTheClusterContract:
@@ -582,7 +660,7 @@ class TestEveryFieldReachesBarsThroughTheGatewayAlone:
         assert value.value is None
         assert value.refusal is SignalIssue.INSUFFICIENT_HISTORY
 
-    def test_the_refused_share_ratio_keeps_its_reason_through_serving(self):
+    def test_an_incomplete_share_ratio_keeps_its_reason_through_serving(self):
         with open_session() as session:
             days = store_history(session, 30)
 
@@ -591,5 +669,19 @@ class TestEveryFieldReachesBarsThroughTheGatewayAlone:
             )
 
         assert value.value is None
-        assert value.refusal is SignalIssue.UNAVAILABLE
-        assert "foreign traded volume" in value.extras["missing_input"]
+        assert value.refusal is SignalIssue.FOREIGN_FLOW_NOT_STORED
+        assert "DNSE foreign net share volume" in value.extras["missing_input"]
+
+    def test_a_complete_dnse_share_window_is_served_without_touching_eod_flow(self):
+        with open_session() as session:
+            days = store_history(session, 30)
+            for sequence, day in enumerate(days[-FOREIGN_FLOW_SESSIONS:]):
+                store_foreign_share_flow(session, "AAA", day, 100_000, sequence)
+
+            value = serve_field(
+                session, "AAA", FOREIGN_FLOW_SHARE_PRESSURE, end=days[-1]
+            )
+
+        assert value.value == pytest.approx(2.5)
+        assert value.extras["net_volume_shares"] == 2_000_000
+        assert value.extras["adtv_shares"] == 800_000

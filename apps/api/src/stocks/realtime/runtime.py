@@ -20,6 +20,9 @@ from .dnse import (
     WebSocketSigner,
 )
 from .projections import HotProjectionStore
+from .bar_projection import TradeBarProjector
+from .metric_projection import CompositeProjector, MetricProjector
+from .reconciliation_projection import ReconciliationProjector
 from .spine import IngestionSpine
 from .storage import RealtimeEventStore
 
@@ -52,12 +55,11 @@ class RealtimeRuntime:
     async def start(self) -> None:
         await self._spine.start()
         self._started = True
-        if self._symbols:
-            outcomes = await self._coordinator.bootstrap_instruments(self._symbols)
-            if outcomes:
-                logger.warning(
-                    "DNSE bootstrap refused %d instrument response(s)", len(outcomes)
-                )
+        outcomes = await self._coordinator.refresh_instrument_catalog()
+        if outcomes:
+            logger.warning(
+                "DNSE catalog refresh refused %d instrument response(s)", len(outcomes)
+            )
         subscriptions = self._subscriptions()
         self._feed_task = asyncio.create_task(
             self._coordinator.run_live(subscriptions), name="dnse-realtime-feed"
@@ -84,7 +86,6 @@ class RealtimeRuntime:
                     "tick_extra",
                     "foreign",
                     "expected_price",
-                    "security_definition",
                 ):
                     subscriptions.append(
                         Subscription(f"{prefix}.{board}.json", self._symbols)
@@ -121,11 +122,17 @@ def build_realtime_runtime(
     rest = DnseRestClient(RestSigner(credentials))
     websocket = DnseWebSocketClient(WebSocketSigner(credentials))
     store = RealtimeEventStore()
+    projections = HotProjectionStore()
     spine = IngestionSpine(
         store,
-        HotProjectionStore(),
+        projections,
         queue_size=settings.realtime_queue_size,
         worker_count=settings.realtime_worker_count,
+        derived_projector=CompositeProjector(
+            TradeBarProjector(store, projections),
+            ReconciliationProjector(store),
+            MetricProjector(store, projections),
+        ),
     )
     reconciler = ReconnectReconciler(
         rest,
