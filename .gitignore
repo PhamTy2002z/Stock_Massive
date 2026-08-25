@@ -83,3 +83,5 @@ apps/api/.artifacts/
 .codex/
 .impeccable/config.local.json
 .impeccable/hook.cache.json
+backups/
+.DS_Store
