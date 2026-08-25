@@ -54,7 +54,9 @@ _DELIMITER = re.compile(r"<\s*(/?)\s*untrusted_tool_result", re.IGNORECASE)
 _SOURCE_UNSAFE = re.compile(r'[^0-9A-Za-z._:\-/ ]')
 
 
-def is_untrusted(tool_name: str) -> bool:
+def is_untrusted(
+    tool_name: str, *, resolved: registry.ResolvedTool | None = None
+) -> bool:
     """Whether this tool's results are outside content.
 
     Answered by the registration, so a tool nobody registered — a name a route
@@ -62,6 +64,8 @@ def is_untrusted(tool_name: str) -> bool:
     wrapped. Wrapping a store read costs a delimiter; not wrapping a stranger's
     page costs the boundary this module exists to hold.
     """
+    if resolved is not None:
+        return resolved.content_trust is registry.ContentTrust.UNTRUSTED
     return registry.reads_external(tool_name)
 
 
@@ -89,13 +93,19 @@ def wrap_untrusted(text: str, *, source: str) -> str:
     )
 
 
-def wrap_result(tool_name: str, text: str, *, source: str | None = None) -> str:
+def wrap_result(
+    tool_name: str,
+    text: str,
+    *,
+    source: str | None = None,
+    resolved: registry.ResolvedTool | None = None,
+) -> str:
     """Wrap ``text`` when this tool reads outside content, otherwise pass it on.
 
     The single entry point the message layer calls for every tool result, so the
     decision is made in one place and cannot be forgotten for one branch.
     """
-    if not is_untrusted(tool_name):
+    if not is_untrusted(tool_name, resolved=resolved):
         return text
     return wrap_untrusted(text, source=source or tool_name)
 

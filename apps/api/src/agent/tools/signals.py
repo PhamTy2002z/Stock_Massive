@@ -77,7 +77,16 @@ from src.stocks.signals.registry import REGISTRY
 from src.stocks.trading_day import latest_trading_day
 from src.stocks.universe import build_universe
 
-from ..registry import ToolContext, ToolEntry, register
+from ..registry import (
+    ContentTrust,
+    ToolAccess,
+    ToolConcurrency,
+    ToolContext,
+    ToolEffect,
+    ToolEntry,
+    ToolIdempotency,
+    register,
+)
 from ..signal_tool_contract import (
     GET_FIELD_DESCRIPTION,
     GET_FIELD_SCHEMA,
@@ -283,7 +292,12 @@ class SignalTools:
                 summarise=summarise_list_fields,
                 # This system's own field registry. Nothing here was written
                 # outside the deployment, so the message layer does not wrap it.
-                reads_external=False,
+                effect=ToolEffect.READ,
+                idempotency=ToolIdempotency.IDEMPOTENT,
+                access=ToolAccess.STORE,
+                content_trust=ContentTrust.TRUSTED_STRUCTURED,
+                concurrency=ToolConcurrency.SERIALIZED,
+                contract_version="1",
                 # Pure: a registry read, no session, no socket. There is nothing
                 # here to move off the event loop.
                 is_async=True,
@@ -297,7 +311,12 @@ class SignalTools:
                 handler=self.get_field,
                 display_name="Đọc chỉ báo",
                 summarise=summarise_get_field,
-                reads_external=False,
+                effect=ToolEffect.READ,
+                idempotency=ToolIdempotency.IDEMPOTENT,
+                access=ToolAccess.STORE,
+                content_trust=ContentTrust.TRUSTED_STRUCTURED,
+                concurrency=ToolConcurrency.SERIALIZED,
+                contract_version="1",
                 # ``serve_field`` takes a synchronous Session, so this blocks;
                 # the executor moves it to a worker thread rather than letting
                 # one store read stall the rest of the round.

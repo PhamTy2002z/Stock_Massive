@@ -81,7 +81,6 @@ from src.core.llm import (
     Message,
     ModelRefusal,
     Role,
-    ToolSchema,
 )
 from src.stocks.signals.registry import REGISTRY
 
@@ -263,8 +262,13 @@ async def generate_fragment_in_loop(
         now=now(),
     )
     guardrails = TurnGuardrails(thresholds=ANALYSIS_THRESHOLDS)
-    executor = ToolExecutor(context=context, guardrails=guardrails)
-    tools = _tool_schemas()
+    surface = _tool_surface()
+    executor = ToolExecutor(
+        context=context,
+        guardrails=guardrails,
+        surface=surface,
+    )
+    tools = surface.offered_schemas
 
     messages: list[Message] = [
         Message(role=Role.SYSTEM, content=LOOP_SYSTEM_PROMPT),
@@ -337,7 +341,8 @@ async def generate_fragment_in_loop(
         )
         for call, result in zip(requested, outcome.results, strict=True):
             body = result.text
-            limit = registry.get_max_result_size(call.name)
+            resolved = surface.by_name.get(call.name)
+            limit = None if resolved is None else resolved.max_result_size_chars
             if limit is not None:
                 shown, cursor = trim_text(body, limit)
                 body = shown if cursor is None else f"{shown}\n{cursor.sentence}"
@@ -458,24 +463,11 @@ async def _call(
         ) from exc
 
 
-def _tool_schemas() -> tuple[ToolSchema, ...]:
-    """The two store tools, asked for by bundle rather than by name.
+def _tool_surface():
+    """Resolve after startup registration so offer and dispatch share authority."""
+    from src.agent.definitions import resolve_tool_surface
 
-    Through the toolset name and the shared builder, so this lane offers what the
-    bundle holds rather than a list copied into a caller — the failure the toolset
-    table exists to prevent — and so there is still exactly one place that decides
-    what a model was shown. Availability still applies: both tools are
-    unconditional, and a build that somehow had neither would answer here with an
-    empty tuple and produce exactly the one-shot Analysis.
-
-    Imported inside the call rather than at module scope: ``definitions`` reaches
-    the registry, the registry is populated by ``tools.register_all()`` at
-    startup, and a module-level import would tie the import order of this lane to
-    that of the tool surface.
-    """
-    from src.agent.definitions import get_tool_definitions
-
-    return get_tool_definitions(SIGNALS_TOOLSET)
+    return resolve_tool_surface(SIGNALS_TOOLSET)
 
 
 def _figure_in(result: Any) -> EvidenceFigure | None:

@@ -35,7 +35,7 @@ async def echo(_context: registry.ToolContext, arguments: Mapping[str, Any]) -> 
 
 
 def stub_entry(name: str, *, toolset: str = "stub", **overrides: Any) -> registry.ToolEntry:
-    """One registration with everything the registry insists on filled in."""
+    """One registration intentionally exercising conservative policy defaults."""
     fields: dict[str, Any] = {
         "name": name,
         "toolset": toolset,

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from collections.abc import Callable, Mapping, Sequence
-from contextlib import ExitStack
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 from datetime import date, datetime, timezone
 from typing import Any
@@ -33,6 +33,50 @@ from .contracts import CaseFile, SnapshotFile, canonical_json
 SessionFactory = Callable[[], Session]
 Clock = Callable[[], datetime]
 StopReason = Callable[[], str | None]
+
+
+@contextmanager
+def resolved_surface_for_catalog(
+    tool_catalog: Sequence[registry.ToolEntry],
+) -> Iterator[definitions.ResolvedToolSurface]:
+    """Resolve the exact fixture surface while restoring process globals.
+
+    Eval identity must describe what the real lanes receive, including
+    execution and safety policy. Installing the catalog through the production
+    registry/resolver keeps this a projection of that owner instead of a second
+    schema-only reconstruction.
+    """
+    previous_entries = registry.entries()
+    selected: dict[str, list[str]] = {}
+    previous_toolsets: dict[str, toolsets.Toolset | None] = {}
+    for entry in tool_catalog:
+        selected.setdefault(entry.toolset, []).append(entry.name)
+    registry.clear()
+    definitions.clear_cache()
+    toolsets.clear_memo()
+    try:
+        for name, names in selected.items():
+            previous_toolsets[name] = toolsets.TOOLSETS.get(name)
+            toolsets.TOOLSETS[name] = {
+                "description": "Case-local replay capability surface.",
+                "tools": tuple(dict.fromkeys(names)),
+            }
+        for entry in tool_catalog:
+            registry.register(
+                replace(entry, check_fn=None, requires_env=())
+            )
+        yield definitions.resolve_tool_surface(tuple(selected), now=0.0)
+    finally:
+        registry.clear()
+        for entry in previous_entries:
+            registry.register(entry)
+        for name, previous in previous_toolsets.items():
+            if previous is None:
+                toolsets.TOOLSETS.pop(name, None)
+            else:
+                toolsets.TOOLSETS[name] = previous
+        definitions.clear_cache()
+        toolsets.clear_memo()
 
 
 class FixtureMiss(LookupError):
@@ -363,4 +407,5 @@ __all__ = [
     "FixtureScopeViolation",
     "FixtureStoreNotEmpty",
     "FixtureWorld",
+    "resolved_surface_for_catalog",
 ]

@@ -16,7 +16,14 @@ import requests
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
-from src.agent.registry import ToolEntry
+from src.agent.registry import (
+    ContentTrust,
+    ToolAccess,
+    ToolConcurrency,
+    ToolEffect,
+    ToolEntry,
+    ToolIdempotency,
+)
 from src.agent.signal_tool_contract import (
     GET_FIELD_DESCRIPTION,
     GET_FIELD_SCHEMA,
@@ -155,6 +162,11 @@ def tool_catalog_for_case(
             description=LIST_FIELDS_DESCRIPTION,
             display_name="Xem danh mục chỉ báo",
             reads_external=False,
+            effect=ToolEffect.READ,
+            idempotency=ToolIdempotency.IDEMPOTENT,
+            access=ToolAccess.STORE,
+            content_trust=ContentTrust.TRUSTED_STRUCTURED,
+            concurrency=ToolConcurrency.SERIALIZED,
             max_result_size_chars=32_000,
         ),
         ToolEntry(
@@ -165,6 +177,11 @@ def tool_catalog_for_case(
             description=GET_FIELD_DESCRIPTION,
             display_name="Đọc chỉ báo",
             reads_external=False,
+            effect=ToolEffect.READ,
+            idempotency=ToolIdempotency.IDEMPOTENT,
+            access=ToolAccess.STORE,
+            content_trust=ContentTrust.TRUSTED_STRUCTURED,
+            concurrency=ToolConcurrency.SERIALIZED,
             is_async=False,
             max_result_size_chars=32_000,
         ),

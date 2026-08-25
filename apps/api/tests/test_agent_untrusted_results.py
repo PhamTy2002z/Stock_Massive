@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from src.agent import tools, untrusted
+from src.agent import registry, tools, untrusted
+from src.agent.messages import EXTERNAL_KIND, STORE_KIND, TurnToolCall, shown_result
 
 from .agent_tool_world import isolated_registry
 
@@ -108,3 +109,82 @@ def test_a_tool_nobody_registered_is_treated_as_outside():
     a tool added later was unwrapped until somebody remembered to edit the list.
     """
     assert untrusted.is_untrusted("a_tool_added_later") is True
+
+
+def test_current_call_trust_uses_its_resolved_snapshot_after_registration_changes():
+    resolved = registry.resolve("fetch_url", now=1_000.0)
+    assert resolved is not None
+    entry = registry.get("fetch_url")
+    assert entry is not None
+    registry.register(
+        registry.ToolEntry(
+            **{
+                **entry.__dict__,
+                "reads_external": False,
+                "content_trust": registry.ContentTrust.TRUSTED_STRUCTURED,
+                "access": registry.ToolAccess.STORE,
+            }
+        )
+    )
+
+    wrapped = untrusted.wrap_result(
+        "fetch_url", PAGE, source="vnexpress.net", resolved=resolved
+    )
+
+    assert wrapped.startswith('<untrusted_tool_result source="vnexpress.net">')
+
+
+@pytest.mark.parametrize(
+    ("access", "trust", "kind", "wrapped"),
+    (
+        (
+            registry.ToolAccess.NETWORK,
+            registry.ContentTrust.TRUSTED_STRUCTURED,
+            EXTERNAL_KIND,
+            False,
+        ),
+        (
+            registry.ToolAccess.STORE,
+            registry.ContentTrust.UNTRUSTED,
+            STORE_KIND,
+            True,
+        ),
+    ),
+)
+def test_access_and_content_trust_stay_orthogonal_for_live_and_legacy_calls(
+    access, trust, kind, wrapped
+):
+    async def handler(_context, _arguments):
+        return PAGE
+
+    name = f"orthogonal_{access.value}_{trust.value}"
+    registry.register(
+        registry.ToolEntry(
+            name=name,
+            toolset="orthogonal",
+            schema=registry.object_schema({}),
+            handler=handler,
+            description="Exercise orthogonal access and content provenance.",
+            display_name="Orthogonal tool",
+            reads_external=trust is registry.ContentTrust.UNTRUSTED,
+            effect=registry.ToolEffect.READ,
+            idempotency=registry.ToolIdempotency.IDEMPOTENT,
+            access=access,
+            content_trust=trust,
+            concurrency=registry.ToolConcurrency.SERIALIZED,
+        )
+    )
+    resolved = registry.resolve(name, now=1_000.0)
+    assert resolved is not None
+    current = TurnToolCall(
+        id="current",
+        name=name,
+        result_text=PAGE,
+        resolved_tool=resolved,
+    )
+    legacy = TurnToolCall(id="legacy", name=name, result_text=PAGE)
+
+    assert current.as_wire()["kind"] == kind
+    assert legacy.as_wire()["kind"] == kind
+    assert shown_result(current).startswith("<untrusted_tool_result") is wrapped
+    assert shown_result(legacy).startswith("<untrusted_tool_result") is wrapped

@@ -223,6 +223,11 @@ def get_field_entry(live_calls: list[str]) -> ToolEntry:
         description="Read one frozen signal field.",
         display_name="Read frozen field",
         reads_external=False,
+        effect=registry.ToolEffect.READ,
+        idempotency=registry.ToolIdempotency.IDEMPOTENT,
+        access=registry.ToolAccess.STORE,
+        content_trust=registry.ContentTrust.TRUSTED_STRUCTURED,
+        concurrency=registry.ToolConcurrency.SERIALIZED,
         is_async=True,
         max_result_size_chars=8_000,
     )
@@ -242,6 +247,11 @@ def list_fields_entry(live_calls: list[str]) -> ToolEntry:
         description="List frozen signal fields.",
         display_name="List frozen fields",
         reads_external=False,
+        effect=registry.ToolEffect.READ,
+        idempotency=registry.ToolIdempotency.IDEMPOTENT,
+        access=registry.ToolAccess.STORE,
+        content_trust=registry.ContentTrust.TRUSTED_STRUCTURED,
+        concurrency=registry.ToolConcurrency.SERIALIZED,
         is_async=True,
         max_result_size_chars=8_000,
     )
@@ -271,6 +281,19 @@ def generic_entry(name: str, *, toolset: str, reads_external: bool = False) -> T
         description=f"Fixture {name}.",
         display_name=f"Fixture {name}",
         reads_external=reads_external,
+        effect=registry.ToolEffect.READ,
+        idempotency=registry.ToolIdempotency.IDEMPOTENT,
+        access=(
+            registry.ToolAccess.NETWORK
+            if reads_external
+            else registry.ToolAccess.STORE
+        ),
+        content_trust=(
+            registry.ContentTrust.UNTRUSTED
+            if reads_external
+            else registry.ContentTrust.TRUSTED_STRUCTURED
+        ),
+        concurrency=registry.ToolConcurrency.PARALLEL_SAFE,
         is_async=True,
         max_result_size_chars=8_000,
     )
@@ -405,6 +428,74 @@ async def test_analysis_traverses_real_producer_and_publishes_only_ready(case_st
         assert session.scalar(select(func.count()).select_from(AnalysisRun)) == 1
         assert session.scalar(select(func.count()).select_from(AnalysisToolCall)) == 1
         assert session.scalar(select(func.count()).select_from(LlmCallUsage)) == 3
+
+
+@pytest.mark.asyncio
+async def test_analysis_cannot_dispatch_a_registered_tool_outside_signals(
+    case_store, monkeypatch
+):
+    monkeypatch.setenv("UNIVERSE_SYMBOLS", SYMBOL)
+    from src.core.config import get_settings
+    from src.stocks.universe import forget_cohort_cache
+
+    get_settings.cache_clear()
+    forget_cohort_cache()
+    web_result = snapshot_with_tool_result(
+        tool_name="web_search",
+        arguments={"query": "FPT"},
+        result={"results": [], "evidence_references": ["snapshot:web"]},
+        reads_external=True,
+    ).evidence[0]
+    snapshot = analysis_snapshot().model_copy(
+        update={"evidence": (*analysis_snapshot().evidence, web_result)}
+    )
+    script = ScriptedLLMClient(
+        [
+            Completion(
+                model="eval-batch-model",
+                tool_calls=(
+                    ToolCall(
+                        id="fabricated-web",
+                        name="web_search",
+                        arguments={"query": "FPT"},
+                    ),
+                ),
+                usage=Usage(input_tokens=10, output_tokens=2),
+                finish_reason="tool_calls",
+            ),
+            Completion(
+                model="eval-batch-model",
+                text="The cross-lane capability was unavailable.",
+                usage=Usage(input_tokens=11, output_tokens=2),
+            ),
+            Completion(
+                model="eval-batch-model",
+                text=json.dumps(analysis_fragment()),
+                usage=Usage(input_tokens=30, output_tokens=10),
+            ),
+        ]
+    )
+
+    result = await EvalRunner(
+        config=config(), session_factory=case_store, clock=lambda: NOW
+    ).run(
+        case=analysis_case(),
+        snapshots=(snapshot,),
+        tool_catalog=(
+            list_fields_entry([]),
+            generic_entry("web_search", toolset="web", reads_external=True),
+        ),
+        client=script,
+        run_id="run-analysis-cross-lane",
+        trial_index=0,
+    )
+
+    calls = [event for event in result.trajectory if event.kind == "tool_call"]
+    assert len(calls) == 1
+    assert calls[0].payload["call_id"] == "fabricated-web"
+    assert calls[0].payload["status"] == "unknown_tool"
+    assert result.provider_access_attempts == ()
+    assert result.trial.terminal == "completed"
 
 
 @pytest.mark.asyncio

@@ -86,6 +86,9 @@ def test_a_raising_check_hides_only_its_own_tool():
     registry.register(stub_entry("healthy"))
 
     assert registry.is_available("broken", now=0.0) is False
+    assert registry.availability("broken", now=0.0)[1] is (
+        registry.AvailabilityReason.CHECK_FAILED
+    )
     assert [schema.name for schema in registry.definitions(now=0.0)] == ["healthy"]
 
 
@@ -123,6 +126,38 @@ def test_a_declared_result_size_is_readable_by_the_budget():
 def test_a_registration_without_a_description_is_refused():
     with pytest.raises(ValueError):
         registry.register(stub_entry("silent", description="  "))
+
+
+def test_legacy_or_unknown_metadata_defaults_conservatively():
+    entry = stub_entry("legacy")
+
+    assert entry.effect is registry.ToolEffect.UNKNOWN
+    assert entry.idempotency is registry.ToolIdempotency.NON_IDEMPOTENT
+    assert entry.access is registry.ToolAccess.NETWORK
+    assert entry.content_trust is registry.ContentTrust.UNTRUSTED
+    assert entry.concurrency is registry.ToolConcurrency.SERIALIZED
+    assert entry.reads_external is True
+
+
+def test_conflicting_trust_compatibility_fields_are_refused():
+    with pytest.raises(ValueError, match="conflicting"):
+        stub_entry(
+            "conflict",
+            reads_external=False,
+            content_trust=registry.ContentTrust.UNTRUSTED,
+        )
+
+
+def test_availability_reasons_are_sanitized(monkeypatch):
+    secret_name = "STOCK_MASSIVE_SECRET_TOKEN"
+    monkeypatch.delenv(secret_name, raising=False)
+    registry.register(stub_entry("missing", requires_env=(secret_name,)))
+
+    available, reason, _ = registry.availability("missing", now=0.0)
+
+    assert available is False
+    assert reason is registry.AvailabilityReason.REQUIREMENTS_MISSING
+    assert secret_name not in reason.value
 
 
 # -- the two names every tool carries ------------------------------------------

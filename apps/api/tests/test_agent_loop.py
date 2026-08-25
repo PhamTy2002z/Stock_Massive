@@ -19,8 +19,7 @@ from typing import Any
 import pytest
 
 from .agent_tool_world import isolated_registry
-from src.agent import registry
-from src.agent.executor import DISPATCH_FAILED, ToolExecutor
+from src.agent import registry, toolsets
 from src.agent.guardrails import HALT_GUIDANCE
 from src.alpha.models import (
     TOOL_CALL_OK,
@@ -253,6 +252,26 @@ def entry(name: str, handler=_ok, **overrides: Any) -> registry.ToolEntry:
         # stranger's writing, and these tests would be asserting against a
         # surface the process does not have.
         "reads_external": name in WEB_TOOLS,
+        "effect": (
+            registry.ToolEffect.WRITE
+            if name == "remember_fact"
+            else registry.ToolEffect.READ
+        ),
+        "idempotency": (
+            registry.ToolIdempotency.NON_IDEMPOTENT
+            if name == "remember_fact"
+            else registry.ToolIdempotency.IDEMPOTENT
+        ),
+        "access": (
+            registry.ToolAccess.NETWORK
+            if name in WEB_TOOLS
+            else registry.ToolAccess.STORE
+        ),
+        "concurrency": (
+            registry.ToolConcurrency.SERIALIZED
+            if name in {"remember_fact", "broken", "slow"}
+            else registry.ToolConcurrency.PARALLEL_SAFE
+        ),
     }
     fields.update(overrides)
     return registry.ToolEntry(**fields)
@@ -301,8 +320,18 @@ def loop(client, **overrides: Any) -> AgentLoop:
 @pytest.fixture(autouse=True)
 def _world():
     with isolated_registry():
-        install()
-        yield
+        original_memory = toolsets.TOOLSETS["memory"]
+        toolsets.TOOLSETS["memory"] = {
+            **original_memory,
+            "tools": (*original_memory.get("tools", ()), "broken", "slow"),
+        }
+        toolsets.clear_memo()
+        try:
+            install()
+            yield
+        finally:
+            toolsets.TOOLSETS["memory"] = original_memory
+            toolsets.clear_memo()
 
 
 # -- the answer and its deltas -----------------------------------------------
@@ -970,25 +999,26 @@ async def test_a_halt_still_keeps_the_results_the_round_gathered() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_call_the_harness_cannot_dispatch_does_not_end_the_turn(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Injected through the loop's executor because the failure being tested is
-    # the harness's own: the registry lookup sits outside every try block in
-    # ``_dispatch``, so nothing a tool or a route does can reach it. That is why
-    # it went unnoticed while it was cancelling whole rounds.
-    def failing_lookup(name: str):
-        if name == "fetch_url":
-            raise RuntimeError("the registry is mid-reload")
-        return registry.get(name)
+async def test_a_registered_tool_outside_the_lane_cannot_dispatch() -> None:
+    calls: list[str] = []
 
-    def build(**kwargs: Any) -> ToolExecutor:
-        return ToolExecutor(**kwargs, lookup=failing_lookup)
+    async def hidden(_context, _arguments):
+        calls.append("hidden")
+        return {"hidden": True}
 
-    monkeypatch.setattr("src.agent.loop.ToolExecutor", build)
-    client = FakeClient([wants("web_search", "fetch_url"), answer("Được nhiêu đó.")])
+    registry.register(entry("hidden", hidden, toolset="admin"))
+    toolsets.TOOLSETS["admin"] = {
+        "description": "Not selected by Conversation.",
+        "tools": ("hidden",),
+    }
+    toolsets.clear_memo()
+    client = FakeClient([wants("web_search", "hidden"), answer("Được nhiêu đó.")])
 
-    outcome = await loop(client).run(turn_request())
+    try:
+        outcome = await loop(client).run(turn_request())
+    finally:
+        toolsets.TOOLSETS.pop("admin", None)
+        toolsets.clear_memo()
 
     # Not ``turn_failed``: one dead call is not a dead Turn, and the round's
     # other result is still there to answer from.
@@ -997,10 +1027,11 @@ async def test_a_call_the_harness_cannot_dispatch_does_not_end_the_turn(
     assert outcome.answer == "Được nhiêu đó."
     by_name = {call.name: call for call in outcome.tool_calls}
     assert by_name["web_search"].status is ToolCallStatus.OK
-    assert by_name["fetch_url"].error == DISPATCH_FAILED
-    assert by_name["fetch_url"].dispatched is False
+    assert by_name["hidden"].error == "unknown_tool"
+    assert calls == []
+    assert by_name["hidden"].dispatched is False
     # The model reads the failure back rather than guessing at a missing result.
-    assert "fetch_url" in (by_name["fetch_url"].result_text or "")
+    assert "hidden" in (by_name["hidden"].result_text or "")
 
 
 # -- the route's failures ----------------------------------------------------

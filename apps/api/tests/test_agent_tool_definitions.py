@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
+from threading import Event, Thread, current_thread
+
 import pytest
 
 from src.agent import definitions, registry, toolsets
@@ -115,3 +118,227 @@ def test_no_toolsets_named_means_everything_this_build_offers(surface):
     schemas = definitions.get_tool_definitions(now=1_000.0)
 
     assert {schema.name for schema in schemas} == {"read_thing", "write_thing"}
+
+
+def test_surface_owns_schema_policy_lookup_and_availability(surface):
+    resolved = definitions.resolve_tool_surface(["reads", "writes"], now=1_000.0)
+
+    assert resolved.expanded_names == ("read_thing", "write_thing")
+    assert tuple(resolved.by_name) == resolved.expanded_names
+    assert resolved.offered_schemas == tuple(
+        tool.schema for tool in resolved.tools if tool.available
+    )
+    assert resolved.unavailable_reasons == {}
+    with pytest.raises(TypeError):
+        resolved.by_name["other"] = resolved.tools[0]
+
+
+def test_frozen_sequence_schemas_keep_exact_strict_wire_projection(surface):
+    entry = stub_entry(
+        "read_thing",
+        toolset="reads",
+        schema=registry.object_schema(
+            {"value": {"type": ["string", "number"]}},
+        ),
+    )
+    registry.register(entry)
+
+    resolved = definitions.resolve_tool_surface("reads", now=1_000.0)
+
+    assert resolved.by_name["read_thing"].schema.as_wire() == entry.as_schema().as_wire()
+
+
+def test_surface_keeps_handler_and_policy_atomic_after_re_registration(surface):
+    async def replacement(_context, _arguments):
+        return "replacement"
+
+    before = definitions.resolve_tool_surface(["reads"], now=1_000.0)
+    registry.register(
+        stub_entry(
+            "read_thing",
+            toolset="reads",
+            handler=replacement,
+            effect=registry.ToolEffect.WRITE,
+        )
+    )
+    after = definitions.resolve_tool_surface(["reads"], now=1_000.0)
+
+    assert before.by_name["read_thing"].handler is not replacement
+    assert before.by_name["read_thing"].effect is registry.ToolEffect.UNKNOWN
+    assert after.by_name["read_thing"].handler is replacement
+    assert after.by_name["read_thing"].effect is registry.ToolEffect.WRITE
+    assert before.registry_generation != after.registry_generation
+
+
+def test_resolved_schema_is_detached_from_later_declaration_mutation(surface):
+    resolved = definitions.resolve_tool_surface(["reads"], now=1_000.0)
+    declared = registry.get("read_thing")
+    assert declared is not None
+
+    declared.schema["properties"]["value"]["type"] = "integer"
+
+    assert resolved.by_name["read_thing"].schema.parameters["properties"]["value"][
+        "type"
+    ] == "string"
+    with pytest.raises(TypeError):
+        resolved.by_name["read_thing"].schema.parameters["type"] = "array"
+    with pytest.raises(TypeError):
+        resolved.by_name["read_thing"].schema.parameters["properties"]["value"][
+            "type"
+        ] = "number"
+    with pytest.raises((AttributeError, TypeError)):
+        resolved.by_name["read_thing"].schema.parameters["required"].append("other")
+    with pytest.raises(TypeError):
+        list.append(
+            resolved.by_name["read_thing"].schema.parameters["required"],
+            "other",
+        )
+
+
+def test_registry_mutation_during_probe_retries_to_one_atomic_generation():
+    async def old_handler(_context, _arguments):
+        return "old"
+
+    async def new_handler(_context, _arguments):
+        return "new"
+
+    def replace_during_probe():
+        registry.register(
+            stub_entry(
+                "probe",
+                toolset="reads",
+                handler=new_handler,
+                check_fn=lambda: False,
+            )
+        )
+        return True
+
+    registry.register(
+        stub_entry(
+            "probe",
+            toolset="reads",
+            handler=old_handler,
+            check_fn=replace_during_probe,
+        )
+    )
+    toolsets.TOOLSETS["reads"] = {
+        "description": "reads",
+        "tools": ("probe",),
+    }
+    try:
+        resolved = definitions.resolve_tool_surface("reads", now=1_000.0)
+        tool = resolved.by_name["probe"]
+
+        assert resolved.registry_generation == registry.generation()
+        assert tool.handler is new_handler
+        assert tool.available is False
+        assert tool.unavailable_reason is registry.AvailabilityReason.CHECK_REFUSED
+        assert definitions.resolve_tool_surface("reads", now=1_001.0) is resolved
+    finally:
+        toolsets.TOOLSETS.pop("reads", None)
+        toolsets.clear_memo()
+
+
+def test_concurrent_generation_eviction_cannot_break_a_cache_hit(surface, monkeypatch):
+    initial = definitions.resolve_tool_surface("reads", now=1_000.0)
+    reader_at_move = Event()
+    release_reader = Event()
+    replacement_stored = Event()
+    reader_errors: list[BaseException] = []
+
+    class PausingCache(OrderedDict):
+        def __setitem__(self, key, value):
+            super().__setitem__(key, value)
+            if key[0] != initial.registry_generation:
+                replacement_stored.set()
+
+        def move_to_end(self, key, last=True):
+            if (
+                current_thread().name == "surface-reader"
+                and key[0] == initial.registry_generation
+            ):
+                reader_at_move.set()
+                assert release_reader.wait(2.0)
+            super().move_to_end(key, last=last)
+
+    monkeypatch.setattr(definitions, "_CACHE", PausingCache(definitions._CACHE))
+
+    def read_cached_surface():
+        try:
+            definitions.resolve_tool_surface("reads", now=1_001.0)
+        except BaseException as exc:  # noqa: BLE001 - assertion captures the race
+            reader_errors.append(exc)
+
+    reader = Thread(target=read_cached_surface, name="surface-reader")
+    reader.start()
+    assert reader_at_move.wait(2.0)
+
+    registry.register(stub_entry("read_thing", toolset="reads", description="new"))
+    builder = Thread(
+        target=lambda: definitions.resolve_tool_surface("reads", now=1_001.0),
+        name="surface-builder",
+    )
+    builder.start()
+    replacement_stored.wait(0.25)
+    release_reader.set()
+    reader.join(2.0)
+    builder.join(2.0)
+
+    assert not reader.is_alive()
+    assert not builder.is_alive()
+    assert replacement_stored.is_set()
+    assert reader_errors == []
+
+
+def test_toolset_only_membership_mutation_cannot_serve_a_stale_surface():
+    registry.register(stub_entry("first", toolset="reads"))
+    registry.register(stub_entry("second", toolset="reads"))
+    toolsets.TOOLSETS["reads"] = {"description": "reads", "tools": ("first",)}
+    try:
+        before = definitions.resolve_tool_surface(["reads"], now=1_000.0)
+        toolsets.TOOLSETS["reads"] = {
+            "description": "reads",
+            "tools": ("second",),
+        }
+        after = definitions.resolve_tool_surface(["reads"], now=1_000.0)
+
+        assert before.expanded_names == ("first",)
+        assert after.expanded_names == ("second",)
+        assert before is not after
+    finally:
+        toolsets.TOOLSETS.pop("reads", None)
+        toolsets.clear_memo()
+
+
+def test_unavailable_and_missing_names_are_sanitized_without_hiding_siblings():
+    registry.register(
+        stub_entry("hidden", toolset="reads", check_fn=lambda: False)
+    )
+    registry.register(stub_entry("visible", toolset="reads"))
+    toolsets.TOOLSETS["reads"] = {
+        "description": "reads",
+        "tools": ("hidden", "missing", "visible"),
+    }
+    try:
+        resolved = definitions.resolve_tool_surface(["reads"], now=1_000.0)
+
+        assert [schema.name for schema in resolved.offered_schemas] == ["visible"]
+        assert resolved.unavailable_reasons == {
+            "hidden": registry.AvailabilityReason.CHECK_REFUSED,
+            "missing": registry.AvailabilityReason.NOT_REGISTERED,
+        }
+    finally:
+        toolsets.TOOLSETS.pop("reads", None)
+        toolsets.clear_memo()
+
+
+def test_surface_identity_is_stable_and_contains_no_callable_repr(surface):
+    first = definitions.resolve_tool_surface(["reads", "writes"], now=1_000.0)
+    second = definitions.resolve_tool_surface(["reads", "writes"], now=1_001.0)
+    wire = first.identity_payload()
+
+    assert first is second
+    assert first.identity_digest == second.identity_digest
+    assert "0x" not in str(wire)
+    assert "handler" not in wire["tools"][0]
+    assert wire["tools"][0]["handler_identity"].endswith(".echo")

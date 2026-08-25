@@ -30,6 +30,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
+from src.agent.definitions import ResolvedToolSurface
 from src.core.llm import ToolSchema
 from src.core.llm.config import LLMConfig, Workload, llm_config_from_settings
 
@@ -149,17 +150,32 @@ class ToolCatalogIdentity:
 
 
 def tool_catalog_identity(
-    schemas: Sequence[ToolSchema],
+    catalog: ResolvedToolSurface | Sequence[ToolSchema],
     *,
     requested: Sequence[str] | None = None,
     unavailable: Sequence[str] | None = None,
 ) -> ToolCatalogIdentity:
-    """Digest the wire forms the model would actually receive.
+    """Digest the resolved execution contract, with a schema-only fallback.
 
-    Taken over ``ToolSchema.as_wire()`` — the strict-mode restatement included —
-    because that is what crossed to the route. A description edit therefore
-    moves this digest without anyone bumping anything.
+    Production eval composition passes :class:`ResolvedToolSurface`, so fields
+    that change dispatch, safety, trust, ordering, display, or result limits all
+    move compatibility identity. Accepting schemas preserves the small public
+    helper used by legacy artifact readers; it is not used to stamp new runs.
     """
+    if isinstance(catalog, ResolvedToolSurface):
+        resolved_names = tuple(schema.name for schema in catalog.offered_schemas)
+        wanted = catalog.expanded_names
+        missing = tuple(catalog.unavailable_reasons)
+        from .contracts import content_digest
+
+        return ToolCatalogIdentity(
+            catalog_digest=content_digest(catalog.identity_payload()),
+            names=resolved_names,
+            requested=wanted,
+            unavailable=missing,
+        )
+
+    schemas = tuple(catalog)
     wanted = tuple(requested) if requested is not None else tuple(
         schema.name for schema in schemas
     )
@@ -174,6 +190,42 @@ def tool_catalog_identity(
         names=resolved_names,
         requested=wanted,
         unavailable=missing,
+    )
+
+
+def scoped_tool_catalog_identity(
+    catalogs: Sequence[tuple[str, str, ResolvedToolSurface]],
+) -> ToolCatalogIdentity:
+    """Digest each case/lane surface without flattening execution authority.
+
+    A run can narrow the same registered catalog differently for Conversation
+    and Analysis cases.  The case id and lane therefore belong in identity:
+    hashing only the union would miss a tool moving between those surfaces and
+    would silently collapse conflicting declarations with the same name.
+    """
+    payload: list[dict[str, Any]] = []
+    names: list[str] = []
+    requested: list[str] = []
+    unavailable: list[str] = []
+    for case_id, lane, surface in catalogs:
+        payload.append(
+            {
+                "case_id": case_id,
+                "lane": lane,
+                "surface": surface.identity_payload(),
+            }
+        )
+        names.extend(schema.name for schema in surface.offered_schemas)
+        requested.extend(surface.expanded_names)
+        unavailable.extend(surface.unavailable_reasons)
+
+    from .contracts import content_digest
+
+    return ToolCatalogIdentity(
+        catalog_digest=content_digest(payload),
+        names=tuple(dict.fromkeys(names)),
+        requested=tuple(dict.fromkeys(requested)),
+        unavailable=tuple(dict.fromkeys(unavailable)),
     )
 
 
@@ -487,4 +539,5 @@ __all__ = [
     "prompt_identity",
     "provider_capability_identity",
     "tool_catalog_identity",
+    "scoped_tool_catalog_identity",
 ]

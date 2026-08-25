@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from src.agent import executor, registry
+from src.agent import definitions, executor, registry
 from src.agent.guardrails import GuardrailThresholds, TurnGuardrails
 
 CONTEXT = registry.ToolContext(user_id=7)
@@ -58,6 +58,26 @@ class Surface:
             display_name=f"Stub {name}",
             is_async=is_async,
             reads_external=reads_external,
+            effect=(
+                registry.ToolEffect.WRITE
+                if name in {"remember_fact", "forget_fact"}
+                else registry.ToolEffect.READ
+            ),
+            idempotency=(
+                registry.ToolIdempotency.NON_IDEMPOTENT
+                if name in {"remember_fact", "forget_fact"}
+                else registry.ToolIdempotency.IDEMPOTENT
+            ),
+            access=(
+                registry.ToolAccess.NETWORK
+                if reads_external
+                else registry.ToolAccess.STORE
+            ),
+            concurrency=(
+                registry.ToolConcurrency.SERIALIZED
+                if name in {"remember_fact", "forget_fact"}
+                else registry.ToolConcurrency.PARALLEL_SAFE
+            ),
         )
 
     def executor(self, **kwargs: Any) -> executor.ToolExecutor:
@@ -73,10 +93,35 @@ def call(name: str, call_id: str | None = None, arguments: Any = None) -> execut
     return executor.ToolCall(id=call_id or f"call-{name}", name=name, arguments=arguments)
 
 
+def resolved_surface(
+    surface: Surface, *, available: bool = True
+) -> definitions.ResolvedToolSurface:
+    tools = tuple(
+        registry.ResolvedTool.from_entry(
+            entry,
+            available=available,
+            unavailable_reason=(
+                None if available else registry.AvailabilityReason.CHECK_REFUSED
+            ),
+            availability_expires_at=1_030.0,
+        )
+        for entry in surface.entries.values()
+    )
+    return definitions.ResolvedToolSurface(
+        tools=tools,
+        registry_generation=1,
+        expanded_names=tuple(surface.entries),
+        expires_at=1_030.0,
+    )
+
+
 def test_a_batch_of_read_only_calls_is_one_parallel_segment():
     calls = [call("web_search", "a"), call("fetch_url", "b"), call("recall_facts", "c")]
 
-    segments = executor.plan_segments(calls)
+    surface = Surface()
+    for name in ("web_search", "fetch_url", "recall_facts"):
+        surface.add(name)
+    segments = executor.plan_segments(calls, lookup=surface.entries.get)
 
     assert len(segments) == 1
     assert segments[0][0] == "parallel"
@@ -91,7 +136,10 @@ def test_a_write_becomes_its_own_barrier_without_reordering_the_batch():
         call("session_search", "d"),
     ]
 
-    segments = executor.plan_segments(calls)
+    surface = Surface()
+    for name in ("web_search", "fetch_url", "remember_fact", "session_search"):
+        surface.add(name)
+    segments = executor.plan_segments(calls, lookup=surface.entries.get)
 
     assert [(mode, [item.id for item in group]) for mode, group in segments] == [
         ("parallel", ["a", "b"]),
@@ -103,10 +151,11 @@ def test_a_write_becomes_its_own_barrier_without_reordering_the_batch():
 def test_an_unknown_tool_is_treated_as_unsafe_to_overlap():
     calls = [call("web_search", "a"), call("mcp__server__do_thing", "b")]
 
-    segments = executor.plan_segments(calls)
+    surface = Surface()
+    surface.add("web_search")
+    segments = executor.plan_segments(calls, lookup=surface.entries.get)
 
     assert [mode for mode, _ in segments] == ["parallel", "sequential"]
-    assert "remember_fact" not in executor.PARALLEL_SAFE_TOOLS
 
 
 @pytest.mark.asyncio
@@ -284,7 +333,7 @@ async def test_a_batch_past_the_round_ceiling_runs_its_head_and_answers_its_tail
 
     # Planning is unchanged: the ceiling is a limit on what is dispatched, not on
     # how a batch is grouped.
-    segments = executor.plan_segments(calls)
+    segments = executor.plan_segments(calls, lookup=surface.entries.get)
     assert [(mode, len(group)) for mode, group in segments] == [("parallel", issued)]
 
     outcome = await surface.executor().run(calls)
@@ -423,6 +472,59 @@ async def test_a_tool_that_exists_but_is_switched_off_says_so():
     outcome = await unavailable.run([call("web_search")])
 
     assert outcome.results[0].error == executor.TOOL_UNAVAILABLE
+    assert surface.order == []
+
+
+@pytest.mark.asyncio
+async def test_a_resolved_handler_and_policy_stay_atomic_after_re_registration():
+    surface = Surface()
+    surface.add("web_search")
+    frozen = resolved_surface(surface)
+
+    replacement = Surface()
+    replacement.add("web_search")
+    surface.entries["web_search"] = replacement.entries["web_search"]
+
+    outcome = await executor.ToolExecutor(
+        context=CONTEXT,
+        surface=frozen,
+        availability=lambda _name: True,
+    ).run([call("web_search")])
+
+    assert outcome.results[0].ok is True
+    assert surface.order == ["web_search"]
+    assert replacement.order == []
+
+
+@pytest.mark.asyncio
+async def test_availability_revocation_blocks_without_swapping_or_fallback():
+    surface = Surface()
+    surface.add("web_search")
+
+    outcome = await executor.ToolExecutor(
+        context=CONTEXT,
+        surface=resolved_surface(surface),
+        availability=lambda _name: False,
+    ).run([call("web_search")])
+
+    assert outcome.results[0].error == executor.TOOL_UNAVAILABLE
+    assert outcome.results[0].dispatched is False
+    assert surface.order == []
+
+
+@pytest.mark.asyncio
+async def test_an_unoffered_snapshot_cannot_be_enabled_during_the_task():
+    surface = Surface()
+    surface.add("web_search")
+
+    outcome = await executor.ToolExecutor(
+        context=CONTEXT,
+        surface=resolved_surface(surface, available=False),
+        availability=lambda _name: True,
+    ).run([call("web_search")])
+
+    assert outcome.results[0].error == executor.TOOL_UNAVAILABLE
+    assert outcome.results[0].dispatched is False
     assert surface.order == []
 
 

@@ -9,6 +9,7 @@ from datetime import date, datetime, timezone
 import pytest
 from sqlalchemy import delete, select
 
+from src.agent import toolsets
 from src.agent.events import EventType
 from src.agent.loop import AgentLoop, ContextBudget, TurnDraft
 from src.agent.persistence import (
@@ -48,8 +49,18 @@ TODAY = date(2026, 8, 14)
 def _tools():
     """A registry of this file's own, so a tool here reaches no other test."""
     with isolated_registry():
-        install()
-        yield
+        original_memory = toolsets.TOOLSETS["memory"]
+        toolsets.TOOLSETS["memory"] = {
+            **original_memory,
+            "tools": (*original_memory.get("tools", ()), "slow", "sleepy"),
+        }
+        toolsets.clear_memo()
+        try:
+            install()
+            yield
+        finally:
+            toolsets.TOOLSETS["memory"] = original_memory
+            toolsets.clear_memo()
 
 
 @pytest.fixture(scope="module", autouse=True)

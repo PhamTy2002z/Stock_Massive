@@ -37,7 +37,17 @@ from sqlalchemy.orm import Session
 from src.alpha.models import AgentKnowledge
 from src.core.database import sync_session_factory
 
-from ..registry import ToolContext, ToolEntry, object_schema, register
+from ..registry import (
+    ContentTrust,
+    ToolAccess,
+    ToolConcurrency,
+    ToolContext,
+    ToolEffect,
+    ToolEntry,
+    ToolIdempotency,
+    object_schema,
+    register,
+)
 
 MAX_MATCHES = 8
 MAX_FACTS = 5
@@ -89,7 +99,12 @@ class MemoryTools:
                 # The user's own earlier words. Already in the trust position
                 # the conversation gives them, so wrapping them would tell the
                 # model to weigh what it was itself told a moment ago.
-                reads_external=False,
+                effect=ToolEffect.READ,
+                idempotency=ToolIdempotency.IDEMPOTENT,
+                access=ToolAccess.STORE,
+                content_trust=ContentTrust.TRUSTED_STRUCTURED,
+                concurrency=ToolConcurrency.PARALLEL_SAFE,
+                contract_version="1",
             ),
             ToolEntry(
                 name="remember_fact",
@@ -127,7 +142,12 @@ class MemoryTools:
                 handler=self.remember_fact,
                 display_name="Ghi nhớ",
                 summary_detail_arg="title",
-                reads_external=False,
+                effect=ToolEffect.WRITE,
+                idempotency=ToolIdempotency.UNKNOWN,
+                access=ToolAccess.STORE,
+                content_trust=ContentTrust.TRUSTED_STRUCTURED,
+                concurrency=ToolConcurrency.SERIALIZED,
+                contract_version="1",
             ),
             ToolEntry(
                 name="recall_facts",
@@ -146,7 +166,12 @@ class MemoryTools:
                 handler=self.recall_facts,
                 display_name="Đọc lại ghi chú",
                 summary_detail_arg="query",
-                reads_external=False,
+                effect=ToolEffect.READ,
+                idempotency=ToolIdempotency.IDEMPOTENT,
+                access=ToolAccess.STORE,
+                content_trust=ContentTrust.TRUSTED_STRUCTURED,
+                concurrency=ToolConcurrency.PARALLEL_SAFE,
+                contract_version="1",
             ),
         )
 
