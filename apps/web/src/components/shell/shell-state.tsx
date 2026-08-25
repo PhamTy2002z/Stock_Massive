@@ -11,6 +11,8 @@ import {
   type ReactNode,
 } from "react"
 
+import { shellViewFromSearch, writeShellViewToHistory } from "@/lib/market-monitor/url-state"
+
 /**
  * Every piece of chrome state the shell owns, in one reducer.
  *
@@ -223,6 +225,7 @@ function reduce(state: ShellState, action: Action): ShellState {
       return { ...state, overlay: action.overlay }
 
     case "viewport":
+      if (action.width < 768) return { ...state, viewport: action.width, sidebarOpen: false }
       return foldSidebarIfCramped({ ...state, viewport: action.width })
 
     case "draft":
@@ -250,7 +253,21 @@ interface ShellApi {
 const ShellContext = createContext<ShellApi | null>(null)
 
 export function ShellProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(reduce, INITIAL)
+  const [state, rawDispatch] = useReducer(reduce, INITIAL)
+  const dispatch = useCallback((action: Action): void => {
+    if (action.type === "view") writeShellViewToHistory(action.view)
+    rawDispatch(action)
+  }, [])
+
+  useEffect(() => {
+    const restore = (): void => {
+      const linked = shellViewFromSearch(window.location.search)
+      rawDispatch({ type: "view", view: linked ?? "chat" })
+    }
+    restore()
+    window.addEventListener("popstate", restore)
+    return () => window.removeEventListener("popstate", restore)
+  }, [])
 
   // Measured after mount rather than read during render: `window` does not
   // exist on the server, and seeding a guess would make the first client tree
@@ -260,13 +277,16 @@ export function ShellProvider({ children }: { children: ReactNode }) {
     measure()
     window.addEventListener("resize", measure)
     return () => window.removeEventListener("resize", measure)
-  }, [])
+  }, [dispatch])
 
   // Escape closes whatever floats; ⌘K / Ctrl+K opens the palette and ⇧⌘, the
   // settings dialog, from anywhere.
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") dispatch({ type: "overlay", overlay: null })
+      if (event.key === "Escape") {
+        dispatch({ type: "overlay", overlay: null })
+        if (state.inspector !== null) dispatch({ type: "close-inspector" })
+      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault()
         dispatch({ type: "overlay", overlay: "palette" })
@@ -280,11 +300,11 @@ export function ShellProvider({ children }: { children: ReactNode }) {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [])
+  }, [dispatch, state.inspector])
 
   const value = useMemo<ShellApi>(
     () => ({ state, dispatch, panelWidth: inspectorWidth(state) }),
-    [state],
+    [dispatch, state],
   )
 
   return <ShellContext.Provider value={value}>{children}</ShellContext.Provider>

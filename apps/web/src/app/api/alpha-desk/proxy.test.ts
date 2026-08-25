@@ -24,6 +24,26 @@ function context(path: string[]) {
 }
 
 describe("the resource allowlist", () => {
+  it("admits only the market-monitor subtree under stocks", async () => {
+    const monitor = await POST(
+      request(`${ORIGIN}/api/alpha-desk/stocks/market-monitor/overview`, {
+        method: "POST",
+        headers: { origin: "https://evil.example" },
+      }),
+      context(["stocks", "market-monitor", "overview"]),
+    )
+    const unrelatedStock = await POST(
+      request(`${ORIGIN}/api/alpha-desk/stocks/jobs`, {
+        method: "POST",
+        headers: { origin: ORIGIN },
+      }),
+      context(["stocks", "jobs"]),
+    )
+
+    expect(monitor.status).toBe(403)
+    expect(unrelatedStock.status).toBe(404)
+  })
+
   it("carries the flag action, which is a write on a message the user owns", async () => {
     // Not a 404: `messages` is on the allowlist for the flag of ADR-0016.
     // Upstream still resolves the Thread's owner, so widening the proxy here

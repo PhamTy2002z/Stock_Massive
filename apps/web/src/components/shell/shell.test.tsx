@@ -20,11 +20,74 @@ const queryMock = vi.hoisted(() => ({
   detailError: false,
   detailFetching: false,
   refetch: vi.fn(),
+  monitorOverview: {
+    meta: {
+      exchange: "ALL",
+      as_of: "2026-08-24T00:00:00+07:00",
+      generated_at: "2026-08-24T09:00:00Z",
+      state: "complete",
+      coverage: { eligible: 1, evaluated: 1, missing: 0, state: "complete" },
+      realtime_coverage: null,
+      sources: [],
+      issues: [],
+      method_versions: { breadth: "breadth-v1" },
+    },
+    indices: [],
+    breadth: {
+      advancing: { value: 1, unit: "symbol", as_of: "2026-08-24T00:00:00+07:00", method: "breadth-v1", issues: [] },
+      declining: { value: 0, unit: "symbol", as_of: "2026-08-24T00:00:00+07:00", method: "breadth-v1", issues: [] },
+      unchanged: { value: 0, unit: "symbol", as_of: "2026-08-24T00:00:00+07:00", method: "breadth-v1", issues: [] },
+      advance_decline_ratio: { value: null, unit: "ratio", as_of: "2026-08-24T00:00:00+07:00", method: "breadth-v1", issues: ["declining_zero"] },
+      above_ma20_pct: { value: 100, unit: "%", as_of: "2026-08-24T00:00:00+07:00", method: "breadth-v1", issues: [] },
+      above_ma50_pct: { value: 100, unit: "%", as_of: "2026-08-24T00:00:00+07:00", method: "breadth-v1", issues: [] },
+      above_ma200_pct: { value: 100, unit: "%", as_of: "2026-08-24T00:00:00+07:00", method: "breadth-v1", issues: [] },
+    },
+    liquidity: { value: 1.2, unit: "ratio", as_of: "2026-08-24T00:00:00+07:00", method: "breadth-v1", issues: [] },
+    foreign_flow: { value: 1_000_000, unit: "VND", as_of: "2026-08-24T00:00:00+07:00", method: "foreign-flow-v1", issues: [] },
+    active_flow_over_adtv: { value: null, unit: "ratio", as_of: "2026-08-24T00:00:00+07:00", method: "dnse-active-flow-v1", issues: ["realtime_projection_unavailable"] },
+    valuation: {
+      market_pe: { value: 14, unit: "ratio", as_of: "2026-08-24T00:00:00+07:00", method: "valuation-regime-v1", issues: [] },
+      market_pb: { value: 1.8, unit: "ratio", as_of: "2026-08-24T00:00:00+07:00", method: "valuation-regime-v1", issues: [] },
+      pe_percentile: { value: 60, unit: "%", as_of: "2026-08-24T00:00:00+07:00", method: "valuation-regime-v1", issues: [] },
+      pb_percentile: { value: 55, unit: "%", as_of: "2026-08-24T00:00:00+07:00", method: "valuation-regime-v1", issues: [] },
+      coverage: { eligible: 1, evaluated: 1, missing: 0, state: "complete" },
+    },
+    leading_sectors: [],
+    lagging_sectors: [],
+    notable_stocks: [{
+      symbol: "FPT",
+      name: "Công ty Cổ phần FPT",
+      exchange: "HOSE",
+      sector_code: "10",
+      sector_name: "Công nghệ",
+      metrics: { return_1d_pct: { value: 1.2, unit: "%", as_of: "2026-08-24T00:00:00+07:00", method: "stock-screen-v1", issues: [] } },
+      trend: {},
+      issues: [],
+    }],
+  },
 }))
 
 vi.mock("@tanstack/react-query", () => ({
+  useInfiniteQuery: () => ({
+    data: undefined,
+    isError: false,
+    isFetching: false,
+    isFetchingNextPage: false,
+    isPending: false,
+    hasNextPage: false,
+    fetchNextPage: vi.fn(),
+    refetch: vi.fn(),
+  }),
   useQuery: ({ queryKey }: { queryKey: readonly unknown[] }) =>
-    queryKey[queryKey.length - 1] === "detail"
+    queryKey[0] === "market" && queryKey[1] === "monitor" && queryKey[2] === "overview"
+      ? {
+          data: queryMock.monitorOverview,
+          isError: false,
+          isFetching: false,
+          isPending: false,
+          refetch: vi.fn(),
+        }
+      : queryKey[queryKey.length - 1] === "detail"
       ? {
           data: undefined,
           isError: queryMock.detailError,
@@ -157,6 +220,29 @@ function mount(children?: React.ReactNode) {
 }
 
 describe("the inspector against the sidebar", () => {
+  it("folds the sidebar when the workspace enters a mobile viewport", () => {
+    setViewport(390)
+    mount()
+
+    expect(shell.state.sidebarOpen).toBe(false)
+  })
+
+  it("uses a modal bottom sheet on mobile and closes it with Escape", () => {
+    setViewport(390)
+
+    function Trigger() {
+      const { dispatch } = useShell()
+      return <button type="button" onClick={() => dispatch({ type: "open-inspector", tab: "symbol" })}>Mở chi tiết</button>
+    }
+
+    mount(<><Trigger /><Inspector /></>)
+    fireEvent.click(screen.getByRole("button", { name: "Mở chi tiết" }))
+
+    expect(screen.getByRole("dialog", { name: "Bảng thông tin thị trường" })).toBeVisible()
+    fireEvent.keyDown(window, { key: "Escape" })
+    expect(screen.queryByRole("dialog", { name: "Bảng thông tin thị trường" })).not.toBeInTheDocument()
+  })
+
   it("folds the sidebar rather than crushing the conversation", () => {
     // 1024 − 408 (inspector) − 274 (sidebar) leaves 342px of conversation, well
     // under the 520 the column needs to still be one.
@@ -267,7 +353,7 @@ describe("the price board", () => {
     mount(<BoardView />)
 
     fireEvent.keyDown(
-      screen.getByRole("row", { name: "Mở chi tiết FPT — Công ty Cổ phần FPT" }),
+      screen.getByRole("button", { name: "Mở chi tiết FPT — Công ty Cổ phần FPT" }),
       { key },
     )
 
