@@ -175,27 +175,22 @@ _cohort_cache: dict[int | None, tuple[str, ...]] = {}
 
 
 def build_universe(session: Session, settings: Settings | None = None) -> Universe:
-    """The Universe as it stands: declared symbols plus the active cohort.
+    """The Universe as it stands.
+
+    Post-rip-out (2026-08-25): the Profit Leaders Cohort seating path was
+    removed with the collector, so this call returns only the declared half.
+    The ``session`` argument stays in the signature because both the chat lane
+    and its tests reach for it that way; it is intentionally unused now.
+
+    Legacy docstring below for the shape callers still expect.
 
     Reads the active Cohort Version rather than a stored symbol list, so the
     Universe and the cohort can never drift apart. The result is cached per
     version id — the query is cheap but it runs on the serving path, and the
     answer only changes when a version is promoted.
     """
-    from .cohort import CohortStore
-
     settings = settings or get_settings()
-    declared = Universe.from_settings(settings)
-
-    version = CohortStore(session).active()
-    version_id = version.id if version is not None else None
-    if version_id not in _cohort_cache:
-        _cohort_cache.clear()
-        _cohort_cache[version_id] = (
-            () if version is None else CohortStore(session).symbols(version_id)
-        )
-
-    return declared.with_cohort(_cohort_cache[version_id])
+    return Universe.from_settings(settings)
 
 
 def forget_cohort_cache() -> None:

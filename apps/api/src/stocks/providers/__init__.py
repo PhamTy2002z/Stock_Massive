@@ -1,4 +1,10 @@
-"""Internal contracts for normalized stock data providers."""
+"""Internal contracts for normalized stock data providers.
+
+Snapshot store and adapters (vnstock, FiinQuant, DNSE, CafeF) were dropped when
+the market surfaces were ripped out. Only the source-neutral contract types
+survive, because the agent tool ``price_check`` reads ``PriceBasis`` and
+``SessionSnapshot`` off this package by name.
+"""
 
 from .contracts import (
     BatchTooLarge,
@@ -35,11 +41,6 @@ from .contracts import (
     main_source,
     owns_capability,
 )
-from .store import SnapshotRead, SnapshotStore
-
-# Adapters are deliberately absent: importing one pulls in its provider library,
-# and this package is what the contracts are imported from. Reach for an adapter
-# by its own module, the way the collector and its tests do.
 
 __all__ = [
     "BatchTooLarge",
@@ -68,8 +69,6 @@ __all__ = [
     "ShareCount",
     "ShareType",
     "SnapshotMetadata",
-    "SnapshotRead",
-    "SnapshotStore",
     "SourceOwnership",
     "SymbolSnapshot",
     "ValuationDataProvider",

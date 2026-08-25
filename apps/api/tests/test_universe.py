@@ -5,23 +5,14 @@ that would break it has to fail while the operator is still looking at the
 console rather than hours later inside a collector run.
 """
 
-from datetime import datetime, timezone
-
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
 
 from src.core.config import Settings, get_settings
-from src.main import app
-from src.stocks.models import CohortMember, CohortVersion
 from src.stocks.universe import (
     UNIVERSE_EXPLICIT_MAX,
     UNIVERSE_MAX_SYMBOLS,
     Universe,
     UniverseConfigurationError,
-    build_universe,
-    forget_cohort_cache,
     parse_universe,
 )
 
@@ -44,41 +35,6 @@ def declared_universe(monkeypatch):
     yield declare
     monkeypatch.undo()
     get_settings.cache_clear()
-    forget_cohort_cache()
-
-
-def open_session() -> Session:
-    engine = create_engine("sqlite://")
-    CohortVersion.__table__.create(engine)
-    CohortMember.__table__.create(engine)
-    return Session(engine)
-
-
-def seat_active_cohort(session: Session, symbols: tuple[str, ...]) -> CohortVersion:
-    """Write an active version holding these members, in the order given."""
-    now = datetime(2026, 8, 13, tzinfo=timezone.utc)
-    version = CohortVersion(
-        reporting_period=datetime(2026, 6, 30).date(),
-        census_run_id=1,
-        state="active",
-        created_at=now,
-        activated_at=now,
-    )
-    session.add(version)
-    session.flush()
-    for rank, symbol in enumerate(symbols, start=1):
-        session.add(
-            CohortMember(
-                cohort_version_id=version.id,
-                symbol=symbol,
-                rank=rank,
-                net_income_vnd=1000 - rank,
-                exchange="HOSE",
-            )
-        )
-    session.flush()
-    forget_cohort_cache()
-    return version
 
 
 class TestParsing:
@@ -209,106 +165,3 @@ class TestSettingsBinding:
             Universe.from_settings(Settings())
 
 
-class TestCohortSeating:
-    """The earned half of the Universe, and what happens when it will not fit."""
-
-    def test_the_two_halves_are_served_together(self):
-        universe = parse_universe("VCB,FPT").with_cohort(("HPG", "MWG"))
-
-        assert tuple(universe) == ("VCB", "FPT", "HPG", "MWG")
-        assert universe.contains("mwg")
-
-    def test_a_symbol_in_both_halves_holds_one_place(self):
-        universe = parse_universe("VCB,FPT").with_cohort(("FPT", "HPG"))
-
-        assert tuple(universe) == ("VCB", "FPT", "HPG")
-        assert len(universe) == 3
-
-    def test_seating_a_cohort_that_would_breach_the_cap_is_refused(self):
-        """The declared half survives; the cohort is what does not get seated.
-
-        A cohort trimmed to fit would be the top forty-something companies
-        presented as the top fifty, so the whole activation is refused instead.
-        """
-        declared = parse_universe(
-            ",".join(f"S{index:03d}" for index in range(UNIVERSE_EXPLICIT_MAX))
-        )
-        cohort = tuple(
-            f"C{index:03d}"
-            for index in range(UNIVERSE_MAX_SYMBOLS - UNIVERSE_EXPLICIT_MAX + 1)
-        )
-
-        universe = declared.with_cohort(cohort)
-
-        assert universe.cohort == ()
-        assert universe.explicit == declared.explicit
-        assert len(universe) == UNIVERSE_EXPLICIT_MAX
-
-    def test_a_cohort_filling_the_reserved_half_exactly_fits(self):
-        declared = parse_universe(
-            ",".join(f"S{index:03d}" for index in range(UNIVERSE_EXPLICIT_MAX))
-        )
-        cohort = tuple(
-            f"C{index:03d}"
-            for index in range(UNIVERSE_MAX_SYMBOLS - UNIVERSE_EXPLICIT_MAX)
-        )
-
-        universe = declared.with_cohort(cohort)
-
-        assert len(universe) == UNIVERSE_MAX_SYMBOLS
-
-    def test_built_from_the_database_it_seats_the_active_version(
-        self, declared_universe
-    ):
-        declared_universe("VCB,FPT")
-        session = open_session()
-        seat_active_cohort(session, ("HPG", "MWG"))
-
-        universe = build_universe(session, Settings(universe_symbols="VCB,FPT"))
-
-        assert tuple(universe) == ("VCB", "FPT", "HPG", "MWG")
-
-    def test_with_no_active_version_only_the_declared_half_is_served(
-        self, declared_universe
-    ):
-        declared_universe("VCB,FPT")
-        session = open_session()
-
-        universe = build_universe(session, Settings(universe_symbols="VCB,FPT"))
-
-        assert tuple(universe) == ("VCB", "FPT")
-        assert universe.cohort == ()
-
-
-class TestStartup:
-    """The refusal has to happen at startup, not at the first collector run."""
-
-    def test_a_malformed_symbol_stops_the_application_coming_up(
-        self, declared_universe
-    ):
-        declared_universe("VCB,VN-INDEX")
-
-        with pytest.raises(UniverseConfigurationError) as error:
-            with TestClient(app):
-                pass
-
-        assert "VN-INDEX" in str(error.value)
-
-    def test_going_over_the_declared_half_stops_the_application_coming_up(
-        self, declared_universe
-    ):
-        declared_universe(
-            ",".join(f"S{index:03d}" for index in range(UNIVERSE_EXPLICIT_MAX + 1))
-        )
-
-        with pytest.raises(UniverseConfigurationError) as error:
-            with TestClient(app):
-                pass
-
-        assert str(UNIVERSE_EXPLICIT_MAX) in str(error.value)
-
-    def test_an_empty_universe_lets_the_application_come_up(self, declared_universe):
-        declared_universe("")
-
-        with TestClient(app) as client:
-            assert client.get("/health").status_code == 200

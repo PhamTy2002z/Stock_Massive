@@ -72,8 +72,8 @@ from ..providers import (
     CorporateActionEvent,
     MarketSnapshot,
     ProviderSource,
-    SnapshotStore,
 )
+from ..providers.store import resolve_sessions
 from .issues import SignalIssue
 from .price_band import detect_limit_lock
 
@@ -702,11 +702,30 @@ def _session_low(session: Session, symbol: str, day: date) -> Decimal | None:
     can be held on two different price bases, and the Main-Source-wins
     resolution is what decides which of them the verdict is made against.
     """
-    series = SnapshotStore(session, redis=None).series(
-        Capability.MARKET, symbol.upper(), start=day, end=day
+    # Post-rip-out: SnapshotStore was removed. Read directly from ProviderSnapshot
+    # rows for the requested day, then reuse the pre-existing session resolver so
+    # a Main-Source row wins over a Cover-Source row on the same effective_at.
+    from src.stocks.models import ProviderSnapshot
+    day_start = datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc)
+    day_end = datetime.combine(day, datetime.max.time(), tzinfo=timezone.utc)
+    rows = (
+        session.execute(
+            select(ProviderSnapshot)
+            .where(
+                ProviderSnapshot.symbol == symbol.upper(),
+                ProviderSnapshot.capability == Capability.MARKET.value,
+                ProviderSnapshot.effective_at >= day_start,
+                ProviderSnapshot.effective_at <= day_end,
+            )
+            .order_by(ProviderSnapshot.written_at)
+        )
+        .scalars()
+        .all()
     )
-    for snapshot in series.snapshots:
-        if isinstance(snapshot, MarketSnapshot) and snapshot.low_price is not None:
+    resolved = resolve_sessions(rows, Capability.MARKET)
+    for row in resolved.values():
+        snapshot = MarketSnapshot.model_validate(row.payload)
+        if snapshot.low_price is not None:
             return Decimal(str(snapshot.low_price))
     return None
 

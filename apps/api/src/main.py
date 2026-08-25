@@ -1,4 +1,4 @@
-"""FastAPI application entry point."""
+"""FastAPI application entry point — post-rip-out, chat-lane baseline."""
 import logging
 import sys
 from contextlib import asynccontextmanager
@@ -12,14 +12,11 @@ from src.agent.flag_router import router as message_flag_router
 from src.agent.router import router as alpha_desk_router
 from src.agent.service import close_alpha_desk
 from src.agent.turns import sweep_interrupted_turns
-from src.alpha.analysis_router import router as analysis_router
 from src.alpha.favicons import router as favicons_router
-from src.alpha.loop_ops_router import router as loop_ops_router
-from src.alpha.router import router as watchlist_router
 from src.alpha.refusals import AlphaRefusal
 from src.auth.router import router as auth_router
-from src.core.config import get_settings
 from src.core.cache import CacheRefreshUnavailable
+from src.core.config import get_settings
 from src.core.database import engine
 from src.core.llm import (
     CapabilityProbe,
@@ -31,17 +28,10 @@ from src.core.llm import (
 )
 from src.core.quota import QuotaRefused
 from src.core.scheduler import setup_scheduler
-from src.core.vnstock_client import VnstockUnavailable, VnstockUnsupported
-from src.stocks.providers.cafef_rss import CafeFUnavailable
-from src.stocks.router import router as stocks_router
-from src.stocks.jobs_router import router as jobs_router
-from src.stocks.signals.router import router as signals_router
 from src.stocks.shared import StockServiceError
 from src.stocks.universe import Universe
-from src.stocks.realtime.runtime import build_realtime_runtime
-from src.stocks.realtime.router import router as realtime_router
 
-# Configure logging at module level - ensures INFO logs are visible
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -72,89 +62,48 @@ async def run_capability_probe_at_startup(config) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage application lifespan - startup and shutdown."""
-    # Before anything else starts: a Universe that cannot be honoured is a
-    # configuration mistake, and the operator should meet it here rather than
-    # hours later inside a collector run nobody is watching.
-    #
-    # Only the declared half is checked here. The cohort half is seated from the
-    # database by whoever collects or serves, and a startup that refused to boot
-    # over it would take the API down for a data problem it cannot fix.
+    """Manage application lifespan.
+
+    The market surfaces were ripped out on 2026-08-25; the lifespan block now
+    only seats what the chat lane needs — Universe check, Budget Validation,
+    Capability Probe, sweep of interrupted Turns, an empty scheduler seam.
+    """
     universe = Universe.from_settings(get_settings())
     logger.info(f"Universe declares {len(universe)} symbols")
 
-    # Immediately after the Universe and before the scheduler starts, for the
-    # same reason and at zero cost: Budget Validation is arithmetic over the
-    # configured models and prices (docs/adr/0014). A route that cannot fund
-    # one Analysis or one Turn fails here rather than midway through the first
-    # real Turn — and with Alpha Desk off it only logs, because there is
-    # nothing to protect.
     llm_config = llm_config_from_settings(get_settings())
     enforce_budget_validation(llm_config)
 
-    # The paid route contract comes after the local Universe and budget checks
-    # and before the scheduler can create any workload that depends on it.
     await run_capability_probe_at_startup(llm_config)
 
-    # Any Turn a crash or a deploy left active is frozen here, from its own
-    # checkpoint, and marked incomplete (docs/adr/0013). V1 never resumes model
-    # or tool execution after a restart: replaying a non-deterministic model
-    # against a store that has moved overnight would produce a plausible
-    # continuation rather than the answer that was interrupted. Unconditional,
-    # and not behind `alpha_desk_enabled` — a deployment that switched Alpha
-    # Desk off is exactly the one that would otherwise leave Turns stuck active
-    # for good.
     await sweep_interrupted_turns()
-
-    realtime_runtime = None
-    if settings.realtime_ingestion_enabled:
-        realtime_runtime = build_realtime_runtime(settings, universe.symbols)
-        app.state.realtime_runtime = realtime_runtime
 
     try:
         if settings.scheduler_enabled:
             async with AsyncScheduler() as scheduler:
                 await setup_scheduler(scheduler)
                 await scheduler.start_in_background()
-
-                # Log scheduler state for visibility
                 schedules = await scheduler.get_schedules()
                 logger.info(f"Scheduler started with {len(schedules)} schedules")
-                for s in schedules:
-                    logger.info(f"  Schedule: {s.id} -> next_fire={s.next_fire_time}")
-
-                # Store scheduler reference in app state for health checks
                 app.state.scheduler = scheduler
-                if realtime_runtime is not None:
-                    await realtime_runtime.start()
                 yield
         else:
             logger.info("Scheduler disabled by config")
-            if realtime_runtime is not None:
-                await realtime_runtime.start()
             yield
     finally:
-        # Shutdown. Active work gets its bounded checkpoint/drain window before
-        # the shared database pool goes away. Whatever does not make it remains
-        # explicitly incomplete or in the durable realtime spill queue.
         try:
             await close_alpha_desk()
         finally:
-            try:
-                if realtime_runtime is not None:
-                    await realtime_runtime.stop()
-            finally:
-                await engine.dispose()
+            await engine.dispose()
 
 
 app = FastAPI(
     title="Stock Massive API",
-    description="Stock analysis platform API with Vietnamese market data",
-    version="0.1.0",
+    description="AI chat lane over Vietnamese equity signal store",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
-# CORS middleware - origins from config (comma-separated)
 cors_origins = [origin.strip() for origin in settings.cors_origins.split(",")]
 app.add_middleware(
     CORSMiddleware,
@@ -164,54 +113,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
 app.include_router(auth_router, prefix="/api/v1")
-app.include_router(stocks_router, prefix="/api/v1")
-app.include_router(jobs_router, prefix="/api/v1")
-# Signals sit beside /stocks rather than inside it: a signal is an answer about
-# a set of symbols, and mounting it under a path that reads as one symbol's data
-# would misdescribe every route added here later.
-app.include_router(signals_router, prefix="/api/v1")
-app.include_router(realtime_router, prefix="/api/v1")
-# The Watchlist is one user's choice rather than market data, so it sits beside
-# /stocks rather than under it.
-app.include_router(watchlist_router, prefix="/api/v1")
-# An Analysis is keyed by (symbol, trading_day) and shared system-wide, so it
-# sits beside the Watchlist rather than under it: it never belonged to one
-# user's list, which is why removing a symbol deletes nothing.
-app.include_router(analysis_router, prefix="/api/v1")
-# Threads and Turns, mounted beside the Watchlist for the same reason: they are
-# one user's conversation rather than market data. The browser reaches them at
-# `/api/alpha-desk/threads/...` through the Next proxy, whose allowlist names
-# `threads` and `turns` as two of the resources it will carry (docs/adr/0013).
 app.include_router(alpha_desk_router, prefix="/api/v1")
-# A verdict on a message is not a Turn — it admits nothing and reaches no model
-# — so both of them are mounted separately and take only the store. They must
-# stay possible on a transcript the model route is too broke or too broken to
-# add to.
 app.include_router(message_flag_router, prefix="/api/v1")
-# Favicons the browser must never fetch itself: a direct request would tell the
-# target domain, and the network path to it, which page a signed-in user is
-# reading and from what IP. The server fetches once, through the same
-# public-URL guard as `fetch_url`, and caches both the hit and the miss.
 app.include_router(favicons_router, prefix="/api/v1")
-# What the Analysis lane's loop bought, in raw counts. Admin-only, read-only, no
-# threshold and no new table — the same refusal `agent/ops.py` makes, for the
-# same reason: one developer and nobody rostered to answer an alert.
-app.include_router(loop_ops_router, prefix="/api/v1")
 
 
 @app.exception_handler(AlphaRefusal)
 async def alpha_refusal_handler(request: Request, exc: AlphaRefusal):
-    """An Alpha Desk request refused for a named reason (`src/alpha/refusals.py`).
-
-    A refusal that knows when its allowance resets says so. `reset_at` is the
-    actionable half of a 429 — a rule the caller can act on has a moment it
-    stops applying — and the refusals that have no such moment simply omit the
-    key rather than carry a guess: `docs/adr/0013` is deliberate that a capacity
-    refusal carries no retry hint, because the only number that could go there
-    would be a guess at when someone else's Turn ends.
-    """
     detail = {"reason": exc.reason, "message": exc.message}
     reset_at = getattr(exc, "reset_at", None)
     if reset_at is not None:
@@ -221,50 +130,12 @@ async def alpha_refusal_handler(request: Request, exc: AlphaRefusal):
 
 @app.exception_handler(StockServiceError)
 async def stock_service_error_handler(request: Request, exc: StockServiceError):
-    """Map upstream stock service failures to HTTP 502."""
-    return JSONResponse(
-        status_code=502,
-        content={"detail": str(exc)},
-    )
-
-
-@app.exception_handler(VnstockUnavailable)
-async def vnstock_unavailable_handler(request: Request, exc: VnstockUnavailable):
-    """Upstream quota exhausted — a retryable condition, not a server fault."""
-    logger.warning(f"vnstock unavailable on {request.url.path}: {exc}")
-    return JSONResponse(
-        status_code=503,
-        content={"detail": str(exc)},
-        headers={"Retry-After": "60"},
-    )
-
-
-@app.exception_handler(CafeFUnavailable)
-async def cafef_unavailable_handler(request: Request, exc: CafeFUnavailable):
-    """CafeF's RSS refused or answered unreadably — a third-party outage.
-
-    Kept apart from the vnstock handler: no allowance was spent here, so naming
-    the quota would send a reader looking in the wrong place.
-    """
-    logger.warning(f"CafeF unavailable on {request.url.path}: {exc}")
-    return JSONResponse(
-        status_code=503,
-        content={"detail": f"CafeF news feed unavailable: {exc}"},
-        headers={"Retry-After": "60"},
-    )
+    return JSONResponse(status_code=502, content={"detail": str(exc)})
 
 
 @app.exception_handler(QuotaRefused)
 async def quota_refused_handler(request: Request, exc: QuotaRefused):
-    """The account allowance would not admit this call (`src/core/quota.py`).
-
-    Retryable and not a server fault, like an exhausted upstream quota: the
-    Collector is holding the provider, or Redis is down and a Provider Source
-    call with no arbiter is one nothing is counting. Store-backed endpoints
-    never reach this handler, and that is the point of failing closed here
-    rather than falling back to a pace no other process can see.
-    """
-    logger.warning("vnstock allowance refused %s: %s", request.url.path, exc)
+    logger.warning("account allowance refused %s: %s", request.url.path, exc)
     return JSONResponse(
         status_code=503,
         content={"detail": str(exc)},
@@ -272,19 +143,8 @@ async def quota_refused_handler(request: Request, exc: QuotaRefused):
     )
 
 
-@app.exception_handler(VnstockUnsupported)
-async def vnstock_unsupported_handler(request: Request, exc: VnstockUnsupported):
-    """The provider has no such capability. Say so instead of returning empty."""
-    logger.info(f"vnstock unsupported on {request.url.path}: {exc}")
-    return JSONResponse(status_code=501, content={"detail": str(exc)})
-
-
 @app.exception_handler(CacheRefreshUnavailable)
-async def cache_refresh_unavailable_handler(
-    request: Request,
-    exc: CacheRefreshUnavailable,
-):
-    """Suppress duplicate cold-miss retries while an upstream is unavailable."""
+async def cache_refresh_unavailable_handler(request: Request, exc: CacheRefreshUnavailable):
     logger.warning("cache refresh suppressed on %s", request.url.path)
     return JSONResponse(
         status_code=503,
@@ -293,38 +153,29 @@ async def cache_refresh_unavailable_handler(
     )
 
 
-
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Global exception handler to ensure CORS headers on errors."""
     logger.error(f"Unhandled exception: {exc}", exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal server error"},
-    )
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 @app.get("/")
 async def root():
-    """Health check endpoint."""
     return {"status": "ok", "message": "Stock Massive API"}
 
 
 @app.get("/health")
 async def health():
-    """Health check endpoint."""
     return {"status": "healthy"}
 
 
 @app.get("/scheduler/status")
 async def scheduler_status():
-    """Scheduler health check - shows registered schedules and their next fire times."""
     if not hasattr(app.state, "scheduler"):
         return {"enabled": False, "message": "Scheduler not initialized"}
 
     scheduler = app.state.scheduler
     schedules = await scheduler.get_schedules()
-
     return {
         "enabled": True,
         "state": scheduler.state.name,

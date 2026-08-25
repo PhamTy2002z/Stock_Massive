@@ -1,19 +1,11 @@
-"""Stocks module with domain-based architecture.
+"""Stocks module — post-rip-out.
 
-Domain services:
-- price: Historical prices, intraday, price board, market indices
-- company: Company overview, shareholders, officers, insider deals
-- financial: Financial ratios, income statement, balance sheet, cash flow
-- market: Symbol listings, search, sector performance, fund certificates
-
-The StockService facade provides backward-compatible access to all domains.
+The domain services (price/company/financial/market/monitor/news/analytics)
+were removed with the market surfaces. Only the store-side pieces the chat
+lane reads survive here: signal fields, the universe, the trading-day helpers,
+and shared exceptions/validators.
 """
 
-from .service import StockService, get_stock_service
 from .shared import StockServiceError
 
-__all__ = [
-    "StockService",
-    "get_stock_service",
-    "StockServiceError",
-]
+__all__ = ["StockServiceError"]
