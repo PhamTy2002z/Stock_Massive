@@ -1,7 +1,7 @@
 ---
 title: "Phase 0 cleanup and restore map"
 description: "Dọn hết nợ Phase 0 rip-out để nền sạch, đồng thời ghi bản đồ restore cho brief Text.txt (không triển khai restore trong plan này)."
-status: in-progress (phase 1-5 done)
+status: done (phases 1-6; 7-10 reference-only)
 priority: P1
 effort: "1-2 ngày"
 tags: [refactor, cleanup, rip-out]
@@ -37,7 +37,7 @@ thứ đó **và** ghi bản đồ khôi phục sau này (theo brief `docs/Text.
 | 3 | [Rip 12 orphan signal modules and reconcile registry](./phase-03-rip-12-orphan-signal-modules-and-reconcile-registry.md) | Done (only nulls; 11 kept live) |
 | 4 | [Prune stale config settings and validator](./phase-04-prune-stale-config-settings-and-validator.md) | Done |
 | 5 | [Verify backup and drop rip-out tables via alembic](./phase-05-verify-backup-and-drop-rip-out-tables-via-alembic.md) | Done |
-| 6 | [Tidy Phase 1 stub, push archive tag, refresh CLAUDE.md](./phase-06-tidy-phase-1-stub-push-archive-tag-refresh-claudemd.md) | Pending |
+| 6 | [Tidy Phase 1 stub, push archive tag, refresh CLAUDE.md](./phase-06-tidy-phase-1-stub-push-archive-tag-refresh-claudemd.md) | Done |
 | 7 | [Restore map: vnstock Diamond intraday spine](./phase-07-restore-map-vnstock-diamond-intraday-spine.md) | Reference only |
 | 8 | [Restore map: financial statement store market-wide](./phase-08-restore-map-financial-statement-store-market-wide.md) | Reference only |
 | 9 | [Restore map: market indices and sector membership](./phase-09-restore-map-market-indices-and-sector-membership.md) | Reference only |

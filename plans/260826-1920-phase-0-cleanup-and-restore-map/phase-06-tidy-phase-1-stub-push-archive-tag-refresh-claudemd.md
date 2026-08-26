@@ -1,6 +1,6 @@
 ---
 title: "Phase 6: Tidy Phase 1 stub, push archive tag, refresh CLAUDE.md"
-status: todo
+status: done
 ---
 
 # Phase 6: Tidy Phase 1 stub, push archive tag, refresh CLAUDE.md

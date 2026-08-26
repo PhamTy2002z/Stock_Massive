@@ -29,17 +29,19 @@ Nguồn data ngoài duy nhất được phép: **vnstock Bronze giai đoạn dev
 (180 req/phút), Diamond khi lên prod (600 req/phút, licence phân phối
 ≤500 user)**. DNSE, FiinQuant, CafeF **vi phạm điều khoản SaaS** — đã rip.
 
-Rollback: tag `v-with-market-surfaces` (local, chưa push) + backup
-`backups/pre-rip-out-260825.sql.gz` (7.2M dump full DB).
+Rollback: tag `v-with-market-surfaces` trên `origin` (đã push 2026-08-26)
++ backup `backups/pre-rip-out-260825.sql.gz` (7.2M dump full DB).
 
 # Roadmap harness
 
 - **Phase 0 (đã xong 2026-08-25):** rip market surfaces xuống lane chat.
   940 test API pass, 406 test web pass, type-check/lint/build xanh.
-- **Phase 1 (kế tiếp):** tham số hoá `agent/prompt/` + `agent/toolsets.py`
-  thành **domain pack** — `signals` bundle chuyển thành pack `vn-equity`
-  (prompt fragment + tool bundle + universe khái niệm). Bundle `web` +
-  `memory` là core.
+- **Phase 1 (hoãn — chờ quyết brief canvas dynamic):** tham số hoá
+  `agent/prompt/` + `agent/toolsets.py` thành **domain pack** — `signals`
+  bundle chuyển thành pack `vn-equity` (prompt fragment + tool bundle +
+  universe khái niệm). Bundle `web` + `memory` là core. Hoãn vì brief
+  `docs/Text.txt` có thể đảo lại shape pack trước khi ta chốt (xem section
+  "Định hướng đang chờ quyết định" bên dưới).
 - **Phase 2:** B2B foundations — multi-tenant workspace, thread ownership
   theo tenant, budget owner đổi khoá `(tenant, user)`, memory tenant
   isolation. Mở rộng phạm vi hard freeze thành `src/agent/*` + `src/auth/*`
@@ -48,6 +50,18 @@ Rollback: tag `v-with-market-surfaces` (local, chưa push) + backup
   nhất".
 - **Backlog:** realtime path (unfreeze sau harness đa domain, chỉ chạy
   trên vnstock Diamond staging/prod).
+
+## Định hướng đang chờ quyết định — canvas dynamic
+
+Brief `docs/Text.txt` đề nghị lane chat kết xuất **canvas view động**
+(Intraday Liquidity cho STB, Earnings Screener toàn HOSE+HNX, Buy
+Decision, Peer Comparison, News catalyst) thay vì chỉ trả text về 30 mã
+declared. Nếu chốt hướng này, restore backend tương ứng theo bản đồ trong
+`plans/260826-1920-phase-0-cleanup-and-restore-map/phase-{07..10}-*.md`
+(intraday spine vnstock Diamond · financial store market-wide · market
+indices + sector membership · news RSS + universe expansion). **Chưa thi
+công, chưa unfreeze `src/stocks/*`** — cần user quyết định trước khi
+mở lại Phase 1.
 
 # Tham chiếu bắt buộc — `docs/hermes/`
 
@@ -165,6 +179,39 @@ Mọi đề xuất và triển khai vào `src/agent/` phải đọc `docs/hermes
 4. Không thêm dependency mới nếu chưa hỏi
 
 # Không còn tồn tại
+
+**2026-08-26 (Phase 0 cleanup):**
+- **Empty stocks shells** (không track, dọn khỏi disk): `apps/api/src/
+  stocks/{analytics,company,financial,market,monitor,news,price,trading}`
+  + `apps/api/src/stocks/realtime/dnse`. Còn lại trong `stocks/`:
+  `providers`, `realtime`, `signals`, `schemas`, `shared`, `models.py`,
+  `universe.py`, `trading_day.py`, `listing_roster.py`.
+- **Signal module mồ côi:** `stocks/signals/nulls.py` + test kèm.
+  11 module `corporate_actions` · `cross_sectional` · `foreign_flow` ·
+  `foreign_share_flow` · `fundamentals` · `indicators` ·
+  `market_behavior` · `moments` · `reference` · `risk` · `volatility`
+  **giữ nguyên** — reverse-import từ registry / serving / test.
+- **Config settings mồ côi khỏi `src/core/config.py`:** `fiinquant_*`,
+  `dnse_*`, `realtime_ingestion_enabled`, `realtime_queue_size`,
+  `realtime_worker_count`, `realtime_shutdown_timeout_seconds`,
+  `realtime_boards`, `_complete_realtime_configuration`, `backfill_*`,
+  `warmup_window_trading_days`, `alpha_desk_suggestions_enabled`,
+  intraday collector / profit census / cohort / collector /
+  corporate-action job / market-index / catch-up / Analysis dispatcher /
+  sector-historical job settings, `git_sha` (Evidence Manifest). **Giữ:**
+  `alpha_desk_enabled` — `core/llm/config.py` + capability enforcement +
+  test vẫn đọc.
+- **Bảng DB đã drop qua alembic revision mới** (upgrade path;
+  downgrade raise `NotImplementedError` — restore từ backup):
+  `analysis_tool_call`, `analysis_run`, `watchlist_entries`, `analysis`,
+  `cohort_members`, `cohort_versions`, `profit_ranking_census_runs`,
+  `symbol_backfills`, `stock_intraday_bars`, `stock_daily_ohlcv`.
+  **Giữ:** `realtime_events`, `realtime_checkpoints`, `realtime_spills`,
+  `realtime_health`, `realtime_reconciliation_audits` —
+  `stocks/realtime/storage.py` và `signals/foreign_share_flow.py` vẫn đọc.
+- **Stub Phase 1 domain pack:** `apps/api/plans/260826-1909-phase-1-
+  domain-pack/` + `apps/api/src/agent/domain/` (không có importer).
+  Hoãn Phase 1 chờ quyết brief canvas dynamic (`docs/Text.txt`).
 
 **2026-08-25 (rip-out harness-first):**
 - **Web UI:** `view-board`, `view-news`, `view-new`, `watchlist-section`,
