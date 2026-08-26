@@ -8,9 +8,7 @@ import os
 os.environ["LLM_CAPABILITY_PROBE_ENABLED"] = "false"
 
 import pytest
-import pytest_asyncio
 from fastapi.testclient import TestClient
-from sqlalchemy import select
 
 from src.main import app
 from src.stocks.providers import PriceBasis, ProviderSource
@@ -57,20 +55,3 @@ def valid_symbol():
 def valid_symbols():
     """List of known valid symbols."""
     return ["VCB", "ACB", "TCB"]
-
-
-@pytest_asyncio.fixture
-async def cleanup_intraday_test_data():
-    """Fixture to clean up test data after async tests."""
-    yield  # Run test first
-    from src.core.database import async_session_factory
-    from src.stocks.models import StockIntradayBar
-
-    async with async_session_factory() as session:
-        result = await session.execute(
-            select(StockIntradayBar).where(StockIntradayBar.symbol.in_(["TEST", "UNIQ"]))
-        )
-        test_records = result.scalars().all()
-        for record in test_records:
-            await session.delete(record)
-        await session.commit()

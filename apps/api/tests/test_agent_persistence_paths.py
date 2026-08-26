@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import delete
 
 from src.agent.persistence import (
     THREAD_TITLE_LENGTH,
@@ -16,7 +16,7 @@ from src.agent.persistence import (
 )
 from src.agent.executor import ToolCall, ToolExecutor
 from src.agent.registry import ToolContext
-from src.alpha.models import AgentThread, Analysis
+from src.alpha.models import AgentThread
 from src.auth.models import User
 from src.core.database import Base, get_sync_db, sync_engine, sync_session_factory
 
@@ -42,7 +42,6 @@ def owner():
     with get_sync_db() as session:
         session.execute(delete(AgentThread).where(AgentThread.user_id == user_id))
         session.execute(delete(User).where(User.id == user_id))
-        session.execute(delete(Analysis).where(Analysis.symbol == SYMBOL))
 
 
 def persistence() -> AgentPersistence:
@@ -50,7 +49,7 @@ def persistence() -> AgentPersistence:
 
 
 @pytest.mark.asyncio
-async def test_thread_lifecycle_keeps_an_unrelated_shared_analysis(owner):
+async def test_thread_lifecycle_deletes_only_the_owned_thread(owner):
     store = persistence()
     older = await store.create_thread(owner, title="Older")
     newer = await store.create_thread(owner, title="Newer")
@@ -72,17 +71,6 @@ async def test_thread_lifecycle_keeps_an_unrelated_shared_analysis(owner):
             "latency_ms": 2,
         }
     )
-    with get_sync_db() as session:
-        session.add(
-            Analysis(
-                symbol=SYMBOL,
-                trading_day=date(2026, 8, 14),
-                verdict="watch",
-                payload={"stable": True},
-                schema_version=7,
-            )
-        )
-
     listed = await store.list_threads(owner)
     loaded = await store.read_thread(owner, older.id)
     discussing = await store.threads_discussing(owner, SYMBOL)
@@ -95,10 +83,6 @@ async def test_thread_lifecycle_keeps_an_unrelated_shared_analysis(owner):
     assert await store.delete_thread(owner, older.id) is True
     assert await store.read_thread(owner, older.id) is None
     assert await store.traces_for_request(message.id) == ()
-    with get_sync_db() as session:
-        assert session.execute(
-            select(Analysis).where(Analysis.symbol == SYMBOL)
-        ).scalar_one().schema_version == 7
 
 
 @pytest.mark.asyncio

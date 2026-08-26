@@ -29,10 +29,7 @@ from src.alpha.models import (  # noqa: E402,F401
     AgentThread,
     AgentToolCall,
     AgentTurn,
-    Analysis,
-    AnalysisRun,
     LlmCallUsage,
-    WatchlistEntry,
 )
 
 config = context.config
