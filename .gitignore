@@ -83,3 +83,7 @@ apps/api/.artifacts/
 .codex/
 .impeccable/config.local.json
 .impeccable/hook.cache.json
+
+# Ghi chú env cục bộ — chứa credential, không bao giờ commit
+text.md
+*.local.md
