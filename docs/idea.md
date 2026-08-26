@@ -1,0 +1,556 @@
+Có. Với câu hỏi này, tôi sẽ không trả một chart duy nhất, mà biến canvas bên phải thành một màn hình phân tích intraday.
+
+Ví dụ user hỏi:
+
+“Phân tích cho tôi thời gian trong phiên mà thanh khoản STB tăng cao nhất trong 30 phiên gần nhất.”
+
+Agent sẽ hiểu bài toán thành:
+
+Lấy 30 phiên gần nhất của STB.
+Chia mỗi phiên thành các khung thời gian, ví dụ 5 phút / 15 phút.
+Tính volume hoặc value traded theo từng bucket.
+Chuẩn hóa theo tổng thanh khoản từng phiên để tránh phiên volume lớn làm lệch kết quả.
+Tìm khung giờ thường xuyên xuất hiện spike thanh khoản nhất.
+Phân biệt ATO / sáng / trước nghỉ trưa / đầu chiều / ATC.
+
+UI kiểu Lovable có thể như này:
+
+┌───────────────────────────────────────┬─────────────────────────────────────────────────────────────────────┐
+│                                       │  STB — INTRADAY LIQUIDITY ANALYSIS                                  │
+│  AI FINANCIAL ANALYST                 │                                                                     │
+│                                       │  Last 30 sessions       15m interval      Volume ▾                   │
+│  You                                  │                                                                     │
+│  Phân tích cho tôi thời gian trong    │  ┌────────────────┐ ┌────────────────┐ ┌────────────────┐           │
+│  phiên mà thanh khoản STB tăng cao    │  │ Peak Window    │ │ Avg Volume     │ │ Occurrence     │           │
+│  nhất trong 30 phiên gần nhất.        │  │ 14:15–14:30    │ │ 4.8M shares    │ │ 21 / 30 days   │           │
+│                                       │  │                 │ │ ▲ 86% vs avg   │ │ 70% sessions   │           │
+│                                       │  └────────────────┘ └────────────────┘ └────────────────┘           │
+│  FinAgent                             │                                                                     │
+│  Tôi đã chia mỗi phiên thành các      │  INTRADAY LIQUIDITY PROFILE                                         │
+│  bucket 15 phút và so sánh thanh      │                                                                     │
+│  khoản trung bình của 30 phiên.       │  Volume                                                             │
+│                                       │    ▲                                                                │
+│  Thanh khoản tập trung mạnh nhất      │  5M│                                            ███                 │
+│  trong khoảng 14:15–14:30.            │    │                                            ███                 │
+│                                       │  4M│                           ██               ███     ███         │
+│  Ngoài ra có 2 vùng đáng chú ý:       │    │                           ██       ██       ███     ███         │
+│                                       │  3M│       ██                  ██       ██       ███     ███         │
+│  • 09:15–09:30                        │    │       ██        ██        ██       ██       ███     ███         │
+│  • 14:15–14:30                        │  2M│ ██    ██   ██   ██   ██   ██   ██  ██   ██  ███ ██  ███         │
+│                                       │    └──────────────────────────────────────────────────────────────►  │
+│  [Explain spike]                      │     09:00   09:30   10:00   11:00   13:30   14:00   14:30   ATC   │
+│                                       │                                                                     │
+│                                       │  ↑ Highest average liquidity                                        │
+│                                       │                                                                     │
+│                                       │  ────────────────────────────────────────────────────────────────   │
+│                                       │                                                                     │
+│                                       │  30-SESSION HEATMAP                                                 │
+│                                       │                                                                     │
+│                                       │             09:00 09:30 10:00 10:30 11:00 13:00 13:30 14:00 14:30 │
+│                                       │  Session 01   ░     ░     ▒     ░     ░     ▒     ▒     █     █    │
+│                                       │  Session 02   ░     ▒     ░     ░     ▒     ░     ▒     █     █    │
+│                                       │  Session 03   ▒     ▒     ░     ░     ░     ▒     ▒     ▓     █    │
+│                                       │  Session 04   ░     ░     ░     ▒     ░     ░     ▒     █     █    │
+│                                       │  Session 05   ▒     ░     ░     ░     ▒     ▒     ▓     █     █    │
+│                                       │      ...                                                            │
+│                                       │  Session 30   ░     ▒     ░     ░     ▒     ▒     ▒     █     █    │
+│                                       │                                                                     │
+│                                       │  ░ Low     ▒ Medium     ▓ High     █ Very High                      │
+│                                       │                                                                     │
+│                                       │  TOP LIQUIDITY WINDOWS                                              │
+│                                       │                                                                     │
+│                                       │  #1  14:15–14:30     ████████████████████   4.8M                    │
+│                                       │  #2  14:00–14:15     ████████████████       3.9M                    │
+│                                       │  #3  09:15–09:30     ████████████           3.1M                    │
+│                                       │  #4  13:30–13:45     ██████████             2.7M                    │
+│                                       │                                                                     │
+│                                       │  AI INSIGHT                                                         │
+│                                       │                                                                     │
+│                                       │  Thanh khoản STB có xu hướng tập trung mạnh vào cuối phiên.         │
+│                                       │  Khoảng 14:15–14:30 có thanh khoản trung bình cao nhất và xuất      │
+│                                       │  hiện spike trong 21/30 phiên.                                      │
+│                                       │                                                                     │
+│ ┌───────────────────────────────────┐ │  [View by value] [5m interval] [Compare price movement]              │
+│ │ Ask follow-up...                ↑ │ │                                                                     │
+│ └───────────────────────────────────┘ │                                                                     │
+└───────────────────────────────────────┴─────────────────────────────────────────────────────────────────────┘
+
+Tôi thấy heatmap là visualization quan trọng nhất cho case này, vì line chart trung bình chỉ cho biết “14:15 thường cao”, còn heatmap cho thấy nó có lặp lại ổn định qua 30 phiên hay chỉ do vài phiên đột biến.
+
+Ví dụ logic phía Agent có thể là:
+
+30 trading sessions
+        │
+        ▼
+Split each session into 15m buckets
+        │
+        ├── 09:00–09:15
+        ├── 09:15–09:30
+        ├── ...
+        ├── 14:15–14:30
+        └── ATC
+        │
+        ▼
+Calculate per bucket
+        │
+        ├── Avg Volume
+        ├── Median Volume
+        ├── % of daily volume
+        ├── Spike frequency
+        └── Price reaction
+        │
+        ▼
+Rank liquidity windows
+
+Một điểm rất quan trọng: tôi sẽ không chỉ dùng volume tuyệt đối. Nên có thêm metric:
+
+Liquidity Share
+=
+Volume trong bucket
+────────────────────
+Total volume của phiên
+
+Ví dụ:
+
+14:15–14:30
+
+Average volume       4.8M shares
+Average daily share  18.6%
+Median daily share   17.9%
+Spike sessions       21 / 30
+
+Như vậy kết luận đáng tin hơn nhiều.
+
+Sau đó user có thể hỏi tiếp:
+
+“Trong lúc thanh khoản tăng mạnh thì giá thường tăng hay giảm?”
+
+Canvas lập tức drill-down thành:
+
+14:15–14:30 — PRICE REACTION
+
+                Sessions
+                   30
+                    │
+        ┌───────────┼───────────┐
+        │           │           │
+        ▼           ▼           ▼
+     Price ↑      Flat        Price ↓
+       18           4            8
+      60%          13%          27%
+
+
+Average return during spike
+
++0.8% ┤                  ●
++0.4% ┤             ●
+ 0.0% ┼────────────────────────────
+-0.4% ┤
+      └─────────────────────────────
+       14:00  14:15  14:30  ATC
+
+Và đây mới bắt đầu thành một AI trading/research workstation thực sự, vì từ một câu hỏi “thanh khoản cao lúc nào”, user có thể drill tiếp:
+
+Thanh khoản cao lúc nào?
+        ↓
+Giá thường phản ứng thế nào?
+        ↓
+Khối ngoại mua hay bán?
+        ↓
+Lệnh lớn hay lệnh nhỏ?
+        ↓
+Có liên quan ATC không?
+        ↓
+STB có pattern khác MBB / TCB / CTG không?
+
+Theo tôi, UI bên phải nên được thiết kế theo kiểu dynamic analytical canvas như vậy, chứ không phải dashboard cố định. Mỗi câu hỏi của user sẽ tạo ra một “analysis view” phù hợp với chính câu hỏi đó.
+
+
+Vậy nếu tôi hỏi: Trong báo cáo tài chính quý 3 năm 2026 -> Top mã 10 cổ phiếu có lợi nhuận cao nhất và giá cổ phiếu vẫn chưa tăng -> thửu thể hiện nào
+
+Có. Với câu hỏi này, cách thể hiện tốt nhất không phải chỉ là bảng Top 10, mà là Ranking + Scatter Plot + “Opportunity Score” để thấy ngay nhóm lợi nhuận mạnh nhưng giá chưa phản ánh.
+
+Giả sử đây là màn hình sau khi mùa BCTC Q3/2026 đã công bố đầy đủ:
+
+┌───────────────────────────────────────┬────────────────────────────────────────────────────────────────────────────┐
+│                                       │  Q3/2026 — EARNINGS OPPORTUNITY SCREENER                                   │
+│  AI FINANCIAL ANALYST                 │                                                                            │
+│                                       │  Universe: HOSE + HNX       Period: Q3/2026        Updated: Latest ▾        │
+│  You                                  │                                                                            │
+│  Trong BCTC quý 3/2026, tìm Top 10    │  FILTER LOGIC                                                              │
+│  cổ phiếu có lợi nhuận cao nhất       │                                                                            │
+│  nhưng giá cổ phiếu vẫn chưa tăng.    │  ✓ Net Profit > 0      ✓ YoY Profit Growth > 20%                           │
+│                                       │  ✓ Price Change < 5%   ✓ Exclude extraordinary profit ▾                    │
+│                                       │                                                                            │
+│  FinAgent                             │  ┌────────────────┐ ┌────────────────┐ ┌────────────────┐                  │
+│                                       │  │ Companies      │ │ Candidates     │ │ Strong Signal  │                  │
+│  Tôi đã scan toàn bộ doanh nghiệp     │  │ 1,2xx          │ │ 47             │ │ 10             │                  │
+│  đã công bố BCTC Q3/2026.             │  │ screened       │ │ matched        │ │ Top ranked     │                  │
+│                                       │  └────────────────┘ └────────────────┘ └────────────────┘                  │
+│  Tôi ưu tiên doanh nghiệp:            │                                                                            │
+│                                       │  PROFIT GROWTH vs STOCK PRICE PERFORMANCE                                  │
+│  • LNST tăng mạnh YoY                 │                                                                            │
+│  • Lợi nhuận đến từ core business     │  Profit growth YoY                                                        │
+│  • Giá chưa tăng tương ứng            │        ▲                                                                   │
+│  • Thanh khoản đủ lớn                 │  +150% │         ● STK03                                                   │
+│                                       │        │                                                                   │
+│  [Change criteria]                    │  +120% │              ● STK07                                              │
+│                                       │        │       ● STK01                                                     │
+│                                       │   +90% │                    ● STK05                                        │
+│                                       │        │           ● STK02                                                 │
+│                                       │   +60% │                              ● STK09                              │
+│                                       │        │                                                                   │
+│                                       │   +30% │                                        ●                          │
+│                                       │        └──────────────────────────────────────────────────────►            │
+│                                       │          -10%       0%       +5%       +10%       +20%                     │
+│                                       │                         Stock price change                                  │
+│                                       │                                                                            │
+│                                       │        ◄────── OPPORTUNITY ZONE ──────►                                    │
+│                                       │        High earnings growth + Low price appreciation                        │
+│                                       │                                                                            │
+│                                       │ ────────────────────────────────────────────────────────────────────────── │
+│                                       │                                                                            │
+│                                       │  TOP 10 EARNINGS / PRICE DISLOCATION                                       │
+│                                       │                                                                            │
+│                                       │  #   Code    Q3 Net Profit   YoY      Price*    vs VNIndex    Score         │
+│                                       │  ───────────────────────────────────────────────────────────────────────   │
+│                                       │  1   STK03      2.8T        +148%      -2.1%       -7.4%       92           │
+│                                       │  2   STK07      1.9T        +121%      +0.8%       -4.5%       89           │
+│                                       │  3   STK01      4.1T         +96%      +1.3%       -4.0%       87           │
+│                                       │  4   STK05      1.2T         +88%      +2.0%       -3.3%       84           │
+│                                       │  5   STK02      3.7T         +72%      -0.4%       -5.7%       82           │
+│                                       │  6   STK08      980B         +68%      +1.8%       -3.5%       79           │
+│                                       │  7   STK04      1.5T         +61%      +2.9%       -2.4%       77           │
+│                                       │  8   STK09      860B         +55%      +3.1%       -2.2%       74           │
+│                                       │  9   STK06      720B         +49%      -1.0%       -6.3%       73           │
+│                                       │ 10   STK10      650B         +43%      +0.6%       -4.7%       71           │
+│                                       │                                                                            │
+│                                       │  * Price performance measured from 20 sessions before earnings release     │
+│                                       │                                                                            │
+│                                       │ ────────────────────────────────────────────────────────────────────────── │
+│                                       │                                                                            │
+│                                       │  AI FINDINGS                                                               │
+│                                       │                                                                            │
+│                                       │  ● STK03  Earnings accelerated sharply while price declined 2.1%.         │
+│                                       │             Core operating profit accounted for most of the improvement.   │
+│                                       │                                                                            │
+│                                       │  ● STK07  Profit +121% YoY but price almost flat.                          │
+│                                       │             Valuation remains below sector median.                         │
+│                                       │                                                                            │
+│                                       │  ● STK01  Highest absolute profit among candidates.                       │
+│                                       │             Market has not repriced earnings improvement yet.             │
+│                                       │                                                                            │
+│                                       │  [Analyze #1]   [Valuation]   [Why price hasn't moved?]   [Compare peers] │
+│                                       │                                                                            │
+│ ┌───────────────────────────────────┐ │                                                                            │
+│ │ Ask about these stocks...       ↑ │ │                                                                            │
+│ └───────────────────────────────────┘ │                                                                            │
+└───────────────────────────────────────┴────────────────────────────────────────────────────────────────────────────┘
+
+Các số/mã ở mockup trên chỉ là dữ liệu minh họa.
+
+Scatter plot là phần quan trọng nhất
+
+Tôi sẽ coi đây là chart “hero” của câu hỏi:
+
+                         LỢI NHUẬN TĂNG YoY
+                                ▲
+                                │
+              RẤT HẤP DẪN       │       ĐÃ PHẢN ÁNH VÀO GIÁ
+                                │
+                  ● A           │              ● D
+            ● B                 │        ● E
+                       ● C      │
+                                │
+ ───────────────────────────────┼──────────────────────────────► GIÁ TĂNG
+          -10%         0%       │       +10%        +20%
+                                │
+                                │
+              YẾU              │       GIÁ TĂNG NHƯNG
+                                │       EARNINGS KHÔNG THEO KỊP
+
+User chỉ cần nhìn góc trên bên trái:
+
+Lợi nhuận tăng rất mạnh nhưng giá chưa tăng.
+
+Đó chính là vùng cần nghiên cứu tiếp.
+
+Nhưng “giá vẫn chưa tăng” phải được Agent định nghĩa chặt
+
+Tôi sẽ không dùng đơn giản:
+
+Giá hôm nay < giá đầu quý
+
+mà cho Agent đánh giá ít nhất:
+
+                         PRICE REACTION
+                               │
+             ┌─────────────────┼──────────────────┐
+             │                 │                  │
+             ▼                 ▼                  ▼
+       Absolute return   Relative return     Post-earnings
+             │                 │                  │
+       Giá tăng/giảm      So với VNIndex      Phản ứng từ ngày
+       trong 20/30        và ngành             công bố BCTC
+       phiên
+
+Ví dụ một cổ phiếu:
+
+STK03
+
+Q3 Profit Growth                    +148%
+Stock Return                         -2.1%
+VNIndex                               +5.3%
+Relative Performance                 -7.4%
+Sector Performance                   +6.8%
+
+                      → PRICE HAS NOT REACTED
+
+Cách này mạnh hơn nhiều vì nếu cổ phiếu tăng +4% nhưng VNIndex tăng +15%, về tương đối nó vẫn là một cổ phiếu chưa được market re-rate.
+
+Khi click vào một mã
+
+Ví dụ click STK03, Canvas đổi ngay thành:
+
+┌──────────────────────────────────────────────────────────────────────────────────────┐
+│ STK03 — WHY HASN'T THE MARKET REPRICED IT?                                           │
+│                                                                                      │
+│ Q3 Net Profit       YoY Growth       Price Change       P/E        Opportunity Score │
+│ 2.8T                +148%            -2.1%              8.7x       92 / 100          │
+│                                                                                      │
+│ EARNINGS TREND                                                                        │
+│                                                                                      │
+│ 3.0T ┤                                                    ● Q3/26                    │
+│      │                                                   ╱                           │
+│ 2.0T ┤                                  ●───────────────╯                            │
+│      │                         ●                                                      │
+│ 1.0T ┤       ●────────────────╯                                                      │
+│      └──────────────────────────────────────────────────────────                     │
+│          Q4/25       Q1/26       Q2/26       Q3/26                                   │
+│                                                                                      │
+│ STOCK PRICE                                                                          │
+│                                                                                      │
+│  ↑                                                                                   │
+│  │          ╭────╮              ╭───╮                                                │
+│  │    ╭─────╯    ╰──────╮   ╭──╯   ╰──────                                         │
+│  │────╯                  ╰───╯                                                       │
+│  └────────────────────────────────────────────────────►                              │
+│                                                 ↑                                    │
+│                                           Q3 earnings                                │
+│                                                                                      │
+│ WHY THE GAP?                                                                         │
+│                                                                                      │
+│ ✓ Core profit improved                                                              │
+│ ✓ Operating cash flow improved                                                      │
+│ ✓ Margin expansion                                                                  │
+│                                                                                      │
+│ ⚠ Market concerned about sector outlook                                             │
+│ ⚠ Foreign investors net selling                                                     │
+│ ⚠ Earnings surprise may not yet be priced in                                        │
+│                                                                                      │
+│ [DCF valuation] [Peer comparison] [Analyze cash flow] [Check institutional flow]    │
+└──────────────────────────────────────────────────────────────────────────────────────┘
+
+Tôi nghĩ đây là một use case rất đúng với sản phẩm mà mình đang hình dung: user không phải mở từng BCTC rồi Excel lọc hàng trăm mã. Agent thực hiện:
+
+All Q3/2026 Financial Statements
+                │
+                ▼
+        Earnings Screener
+                │
+        ┌───────┴────────┐
+        ▼                ▼
+ Absolute Profit    Profit Growth
+        │                │
+        └───────┬────────┘
+                ▼
+        Earnings Quality
+                │
+                ▼
+          Market Price
+                │
+        ┌───────┴────────┐
+        ▼                ▼
+Absolute Return    Relative Return
+                │
+                ▼
+       Valuation / Liquidity
+                │
+                ▼
+       OPPORTUNITY SCORE
+                │
+                ▼
+             TOP 10
+
+Thực tế tôi còn muốn Agent hiểu được câu “Top cổ phiếu lợi nhuận cao nhưng giá chưa tăng” không phải chỉ là một query data, mà là một screening strategy. Khi đó user có thể Save thành screen và chạy lại mỗi mùa BCTC.
+
+Vậy giờ ví dụ tôi hỏi: Có thể mua STB giá hiện tại được không ?
+
+Đúng. Với câu hỏi kiểu “Có thể mua STB ở giá hiện tại được không?”, tôi sẽ cho Canvas chuyển sang Investment Decision View. Nó phải trả lời được 3 thứ ngay: có nên mua bây giờ không → vì sao → nếu chưa mua thì chờ điều kiện nào.
+
+Dữ liệu ngày 26/08/2026 đang cho thấy STB quanh 74,6–75,0k, khá sát đỉnh 52 tuần 76,8k. Trong khi đó H1/2026 LNTT đạt khoảng 4.136 tỷ, giảm 43,6% YoY, và NPL được SBBS ghi nhận khoảng 7,5%; kế hoạch LNTT cả năm của Sacombank là 8.100 tỷ.
+
+Tôi sẽ thể hiện kiểu này:
+
+┌──────────────────────────────────────┬─────────────────────────────────────────────────────────────────────────────┐
+│                                      │  STB — SHOULD I BUY NOW?                                                    │
+│  AI FINANCIAL ANALYST                │                                                                             │
+│                                      │  Current price      52W High        Decision                                 │
+│  You                                 │  74,600             76,800          WAIT / DON'T CHASE                       │
+│                                      │                                     ─────────────────                        │
+│  Có thể mua STB ở giá hiện tại       │                                                                             │
+│  được không?                         │  Agent view                                                                   │
+│                                      │  Giá hiện tại chưa tạo Risk/Reward đủ hấp dẫn để mua đuổi.                  │
+│  FinAgent                            │  Nên chờ giá hoặc fundamentals cho tín hiệu tốt hơn.                         │
+│                                      │                                                                             │
+│  Tôi đang đánh giá trên 5 yếu tố:    │  ┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐              │
+│                                      │  │ FUNDAMENTALS     │ │ PRICE SETUP      │ │ CATALYST         │              │
+│  • Earnings                          │  │ Mixed            │ │ Near resistance  │ │ Positive/Pending │              │
+│  • Asset quality                     │  │                  │ │                  │ │                  │              │
+│  • Valuation                         │  │ H1 profit ↓      │ │ ~74.6k vs        │ │ Restructuring    │              │
+│  • Price / Technical                 │  │ NPL elevated     │ │ 76.8k 52W high   │ │ story remains    │              │
+│  • Catalysts                         │  └──────────────────┘ └──────────────────┘ └──────────────────┘              │
+│                                      │                                                                             │
+│  Kết luận hiện tại:                  │  WHY NOT BUY AGGRESSIVELY NOW?                                               │
+│                                      │                                                                             │
+│  → Không phải vùng mua đuổi đẹp      │  H1/2026 Profit Before Tax                                                  │
+│  → Nhưng vẫn đáng đưa vào watchlist  │                                                                             │
+│                                      │  H1/25  ████████████████████████████████                                    │
+│  [Show evidence]                     │  H1/26  ██████████████████                  4.14T   ▼ 43.6% YoY             │
+│                                      │                                                                             │
+│                                      │  Asset quality                                                              │
+│                                      │                                                                             │
+│                                      │  NPL                                                                7.5%    │
+│                                      │  ███████████████████████████████████████████                                │
+│                                      │                                                                             │
+│                                      │  2026 PROFIT PLAN                                                           │
+│                                      │                                                                             │
+│                                      │  4.14T                         8.10T                                         │
+│                                      │    ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━●                                            │
+│                                      │    └────── ~51% completed ──────┘                                            │
+│                                      │                                                                             │
+│                                      │ ──────────────────────────────────────────────────────────────────────────  │
+│                                      │                                                                             │
+│                                      │  PRICE POSITION                                                             │
+│                                      │                                                                             │
+│                                      │  78k ┤                                  52W HIGH 76.8                       │
+│                                      │      │                                    ───────                          │
+│                                      │  76k ┤                              ╭────●────╮                             │
+│                                      │      │                        ╭─────╯         ╰─●  74.6                    │
+│                                      │  74k ┤                  ╭─────╯                                                   │
+│                                      │      │       ╭──────────╯                                                     │
+│                                      │  72k ┤───────╯             ← potential pullback zone                       │
+│                                      │      │                                                                     │
+│                                      │  70k ┤                                                                   │
+│                                      │      └──────────────────────────────────────────────────►                   │
+│                                      │          Jun             Jul                Aug                            │
+│                                      │                                                                             │
+│                                      │               ▲                          ▲                                  │
+│                                      │             SUPPORT                  RESISTANCE                              │
+│                                      │            ~71–72.5k                 ~76–77k                                │
+│                                      │                                                                             │
+│                                      │ ──────────────────────────────────────────────────────────────────────────  │
+│                                      │                                                                             │
+│                                      │  ACTION SCENARIOS                                                           │
+│                                      │                                                                             │
+│                                      │  ┌───────────────────────────────────────────────────────────────────────┐  │
+│                                      │  │ ① BUY NOW — 74.6k                                                    │  │
+│                                      │  │                                                                       │  │
+│                                      │  │   ⚠ Risk/Reward: NOT ATTRACTIVE                                      │  │
+│                                      │  │                                                                       │  │
+│                                      │  │   Price is already near 52W high while earnings quality remains      │  │
+│                                      │  │   under pressure.                                                     │  │
+│                                      │  └───────────────────────────────────────────────────────────────────────┘  │
+│                                      │                                                                             │
+│                                      │  ┌───────────────────────────────────────────────────────────────────────┐  │
+│                                      │  │ ② WAIT FOR PULLBACK                                  PREFERRED       │  │
+│                                      │  │                                                                       │  │
+│                                      │  │   Watch zone: ~71–72.5k                                              │  │
+│                                      │  │                                                                       │  │
+│                                      │  │   ✓ Better entry price                                               │  │
+│                                      │  │   ✓ Better Risk/Reward                                               │  │
+│                                      │  │   ✓ Recheck NPL / earnings before entering                           │  │
+│                                      │  └───────────────────────────────────────────────────────────────────────┘  │
+│                                      │                                                                             │
+│                                      │  ┌───────────────────────────────────────────────────────────────────────┐  │
+│                                      │  │ ③ BUY BREAKOUT                                                       │  │
+│                                      │  │                                                                       │  │
+│                                      │  │   Price > ~76.8k                                                     │  │
+│                                      │  │   + strong volume                                                    │  │
+│                                      │  │   + positive fundamental catalyst                                   │  │
+│                                      │  │                                                                       │  │
+│                                      │  │   → Accept higher entry in exchange for confirmation                 │  │
+│                                      │  └───────────────────────────────────────────────────────────────────────┘  │
+│                                      │                                                                             │
+│                                      │  KEY RISK                                                                  │
+│                                      │                                                                             │
+│                                      │  ⚠ NPL / provision remains elevated                                       │
+│                                      │  ⚠ H1 earnings materially below last year                                │
+│                                      │  ⚠ Current price already reflects part of restructuring expectation      │
+│                                      │                                                                             │
+│                                      │  KEY CATALYST                                                              │
+│                                      │                                                                             │
+│                                      │  ✓ Completion of restructuring                                            │
+│                                      │  ✓ Resolution of legacy/VAMC-related assets                               │
+│                                      │  ✓ Lower provisioning → earnings normalization                           │
+│                                      │                                                                             │
+│                                      │  [Set price alert] [Compare MBB/TCB] [Valuation] [Analyze restructuring]  │
+│                                      │                                                                             │
+│ ┌──────────────────────────────────┐ │                                                                             │
+│ │ Ask follow-up...              ↑ │ │                                                                             │
+│ └──────────────────────────────────┘ │                                                                             │
+└──────────────────────────────────────┴─────────────────────────────────────────────────────────────────────────────┘
+
+Các vùng 71–72.5k và 76–77k ở mockup là vùng technical mà Agent tự suy ra từ recent price structure, nên khi build thật phải tính lại realtime chứ không hard-code. Lịch sử giá gần đây đúng là STB đã tích lũy khá nhiều quanh vùng 71–73k trước khi tiến lên 74–76k.
+
+Điểm tôi thấy quan trọng nhất là không để AI nói đơn giản “Mua STB”. Nó nên đưa ra một decision tree:
+
+                       STB @ 74.6k
+                           │
+                  Có nên mua ngay?
+                           │
+                 ┌─────────┴─────────┐
+                 │                   │
+          Fundamentals tốt?       Price đẹp?
+                 │                   │
+              CHƯA RÕ              CHƯA
+                 │                   │
+                 └─────────┬─────────┘
+                           ▼
+                         WAIT
+                           │
+              ┌────────────┴────────────┐
+              │                         │
+              ▼                         ▼
+       Pullback ~71–72.5          Break > ~76.8
+              │                         │
+       Fundamentals OK?             Volume mạnh?
+              │                         │
+             YES                       YES
+              │                         │
+              ▼                         ▼
+         BUY ON WEAKNESS          BUY CONFIRMATION
+
+Và sau đó conversation trở nên rất tự nhiên. User có thể hỏi:
+
+“Nếu tôi muốn giữ STB 6 tháng thì sao?”
+
+Agent sẽ đổi từ Technical Decision View sang 6-Month Investment Thesis.
+
+Hoặc:
+
+“Giá bao nhiêu thì Risk/Reward đạt 1:3?”
+
+Canvas chuyển sang Entry / Stop / Target simulator.
+
+Hoặc:
+
+“So STB với MBB, TCB thì hiện tại mã nào đáng mua hơn?”
+
+Canvas đổi thành Bank Stock Comparison / Ranking.
+
+Đây là chỗ tôi nghĩ concept Chat bên trái + Dynamic Financial Canvas bên phải bắt đầu rất mạnh: cùng một mã STB nhưng Canvas không cố định; câu hỏi của user quyết định loại analytical workspace được sinh ra.
+
+Về STB hiện tại, nếu chỉ dựa trên dữ liệu công khai mới nhất mà chưa xét khẩu vị rủi ro cá nhân, tôi nghiêng về “watch / không mua đuổi quanh vùng hiện tại” hơn là “mua ngay”, chủ yếu vì giá đã sát đỉnh 52 tuần trong khi H1/2026 còn chịu áp lực lợi nhuận và chất lượng tài sản. Đây là đánh giá thông tin, không phải khuyến nghị đầu tư cá nhân.
+
+Nếu product đi hướng này, tôi còn muốn thêm một component rất đáng giá: “What must happen for me to BUY?” — AI tự liệt kê 3–5 điều kiện cần đạt và liên tục cập nhật trạng thái ✓ / ✕. Nó sẽ làm màn hình decision hữu ích hơn rất nhiều so với dashboard chứng khoán thông thường.
