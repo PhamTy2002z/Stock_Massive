@@ -31,6 +31,10 @@ SIGNAL_ISSUE_SENTENCES: Mapping[SignalIssue, str] = MappingProxyType(
             "The store holds no session for this symbol on the day being "
             "answered for."
         ),
+        SignalIssue.INSUFFICIENT_SESSIONS: (
+            "The store holds fewer whole intraday sessions than this study needs, "
+            "so no profile was computed over a shortened window."
+        ),
         SignalIssue.INSUFFICIENT_HISTORY: (
             "The store holds fewer sessions than this figure needs, so it was "
             "not computed over a shortened window."

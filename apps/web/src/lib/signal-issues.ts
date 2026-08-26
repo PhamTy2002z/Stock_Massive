@@ -36,6 +36,7 @@ import type { SignalCoverageState, SignalFreshness } from "@/lib/api"
 export const SIGNAL_ISSUE_SENTENCES = {
   missing_target_session: "Chưa có dữ liệu phiên này",
   insufficient_history: "Chưa đủ số phiên tối thiểu để tính chỉ số này",
+  insufficient_sessions: "Chưa đủ số phiên trong ngày để dựng bức tranh này",
   recently_inactive: "Có phiên không phát sinh giao dịch trong cửa sổ tính",
   cohort_warming: "Nhóm được so sánh vẫn đang nạp dữ liệu",
   lagging_market_data: "Đã có phiên mới hơn nhưng chưa đủ dữ liệu để tính",

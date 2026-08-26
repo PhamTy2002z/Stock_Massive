@@ -23,6 +23,11 @@ from .contracts import (
 from .registry import REGISTRY, catalog, register, study
 from .runner import StudyParamsInvalid, run
 
+# Registration is an import. Keep this last: the modules below reach back into
+# the registry above, and a Study nobody imports is absent from the catalog
+# however correctly it is written.
+from . import intraday_liquidity  # noqa: F401  (imported for its side effect)
+
 __all__ = [
     "CanvasBlock",
     "CanvasSpec",

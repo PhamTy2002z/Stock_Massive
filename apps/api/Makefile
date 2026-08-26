@@ -29,6 +29,12 @@ test-one:
 	@test -n "$(T)" || (echo "T=<path> is required" >&2; exit 2)
 	$(PYTEST) $(T) -q $(if $(K),-k "$(K)",)
 
+# Regenerate the contract files both apps read. Deterministic: a synthetic
+# window and a pinned as-of, so no code change means no diff.
+contracts:
+	$(PYTHON) -c "import json;from src.studies import widgets;print(json.dumps(widgets.catalog_payload(),ensure_ascii=False,indent=2))" > ../../contracts/canvas-widget-catalog.json
+	$(PYTHON) -m tests.studies.artifact_fixture > ../../contracts/fixtures/artifact-intraday-liquidity.json
+
 # Type check
 lint:
 	python -m py_compile src/main.py

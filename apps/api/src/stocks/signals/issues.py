@@ -35,6 +35,12 @@ class SignalIssue(str, Enum):
     STALE_MARKET_DATA = "stale_market_data"
     RANKING_UNAVAILABLE = "ranking_unavailable"
 
+    # A Study needs whole sessions rather than a shortened window: a liquidity
+    # profile over eight sessions is a picture of eight days, not of a habit.
+    # Distinct from INSUFFICIENT_HISTORY, which is about a field's lookback over
+    # daily bars; this one counts intraday sessions actually stored.
+    INSUFFICIENT_SESSIONS = "insufficient_sessions"
+
     # --- Price Basis, from ADR-0006 -------------------------------------
     # The sessions being read together do not share a basis: the window crosses
     # the seam between a symbol's Cover Source history and its collected era.
