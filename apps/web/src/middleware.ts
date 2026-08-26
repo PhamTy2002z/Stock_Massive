@@ -2,7 +2,9 @@ import { NextResponse, type NextRequest } from "next/server"
 
 // Public routes - accessible without authentication
 // All other routes are protected by default
-const publicRoutes = ["/login", "/register"]
+// PROTOTYPE: "/prototype" is throwaway and must stay out of main — remove this
+// entry together with src/app/prototype when the variant is chosen.
+const publicRoutes = ["/login", "/register", "/prototype"]
 
 // Guest-only routes - redirect to home if already authenticated
 const guestOnlyRoutes = ["/login", "/register"]
