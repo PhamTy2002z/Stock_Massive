@@ -106,7 +106,7 @@ EXPECTED_MDD_CONSTANT = math.sqrt(math.pi / 2.0)  # ≈ 1.2533
 # not an exact fact about a symbol, it is one draw from a wide distribution, and
 # two symbols' drawdowns are usually the same number.
 #
-# Measured by ``src.stocks.signals.nulls`` at the registry's derivation seed and
+# Measured by the offline null harness at the registry's derivation seed and
 # frozen here; ``tests/test_risk_metrics.py`` re-measures them at fewer paths.
 MAX_DRAWDOWN_NULL_SCATTER = 0.38
 CURRENT_DRAWDOWN_NULL_SCATTER = 0.48

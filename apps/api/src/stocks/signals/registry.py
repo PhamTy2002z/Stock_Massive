@@ -27,9 +27,8 @@ It is the measured rate at which a field fires on data containing no signal, the
 maximum of the two nulls, and it rides in the **tool schema description** rather
 than in a payload: the model reads it once before deciding to call, at no
 per-call cost against the response budget. The numbers below were measured by
-``src.stocks.signals.nulls`` at the seed and path count each records, and
-``tests/test_null_harness.py`` re-measures them on every run — at fewer paths, so
-it re-derives nothing and only fails when a field drifts past the ceiling.
+the offline null harness at the seed and path count each records, then frozen
+here so runtime code cannot recalibrate its own thresholds.
 """
 
 from __future__ import annotations
