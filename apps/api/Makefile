@@ -24,6 +24,11 @@ test:
 test-file:
 	@read -p "Test file: " file; pytest tests/$$file -v
 
+# Run a named subset non-interactively:  make test-one T=tests/studies -K "refusal"
+test-one:
+	@test -n "$(T)" || (echo "T=<path> is required" >&2; exit 2)
+	$(PYTEST) $(T) -q $(if $(K),-k "$(K)",)
+
 # Type check
 lint:
 	python -m py_compile src/main.py

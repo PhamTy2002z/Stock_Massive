@@ -23,7 +23,11 @@ Repo vừa rẽ khỏi "nền tảng dữ liệu chứng khoán" sang "AI produc
    schemas}`. Web còn `AppShell → ChatView` + `SourcesTab`.
 3. **Hard freeze ngoài `src/agent/*`** — PR duy nhất được nhận là harness,
    auth tenant, budget schema. Bug feature chứng khoán (không còn) không
-   fix. Feature stocks mới không nhận.
+   fix. Feature stocks mới không nhận. **Mở từ 2026-08-26** cho đúng bốn
+   surface của canvas dynamic: `src/studies/*` (mới) · `src/stocks/
+   intraday/*` (mới) · bundle `studies` trong `src/agent/` · surface canvas
+   trong `apps/web`. Phần còn lại của `src/stocks/*` vẫn freeze tới khi
+   phase 08 của plan canvas mở spine market-wide.
 
 Nguồn data ngoài duy nhất được phép: **vnstock Bronze giai đoạn dev
 (180 req/phút), Diamond khi lên prod (600 req/phút, licence phân phối
@@ -36,12 +40,12 @@ Rollback: tag `v-with-market-surfaces` trên `origin` (đã push 2026-08-26)
 
 - **Phase 0 (đã xong 2026-08-25):** rip market surfaces xuống lane chat.
   940 test API pass, 406 test web pass, type-check/lint/build xanh.
-- **Phase 1 (hoãn — chờ quyết brief canvas dynamic):** tham số hoá
-  `agent/prompt/` + `agent/toolsets.py` thành **domain pack** — `signals`
-  bundle chuyển thành pack `vn-equity` (prompt fragment + tool bundle +
-  universe khái niệm). Bundle `web` + `memory` là core. Hoãn vì brief
-  `docs/Text.txt` có thể đảo lại shape pack trước khi ta chốt (xem section
-  "Định hướng đang chờ quyết định" bên dưới).
+- **Phase 1 (hoãn sau canvas):** tham số hoá `agent/prompt/` +
+  `agent/toolsets.py` thành **domain pack** — `signals` bundle chuyển
+  thành pack `vn-equity` (prompt fragment + tool bundle + universe khái
+  niệm). Bundle `web` + `memory` là core. Hoãn vì Study/canvas thêm bundle
+  `studies` vào cùng chỗ pack sẽ tham số hoá; làm pack trước sẽ phải sửa
+  hai lần.
 - **Phase 2:** B2B foundations — multi-tenant workspace, thread ownership
   theo tenant, budget owner đổi khoá `(tenant, user)`, memory tenant
   isolation. Mở rộng phạm vi hard freeze thành `src/agent/*` + `src/auth/*`
@@ -51,17 +55,25 @@ Rollback: tag `v-with-market-surfaces` trên `origin` (đã push 2026-08-26)
 - **Backlog:** realtime path (unfreeze sau harness đa domain, chỉ chạy
   trên vnstock Diamond staging/prod).
 
-## Định hướng đang chờ quyết định — canvas dynamic
+## Đã chốt 2026-08-26 — canvas dynamic qua Study
 
-Brief `docs/Text.txt` đề nghị lane chat kết xuất **canvas view động**
-(Intraday Liquidity cho STB, Earnings Screener toàn HOSE+HNX, Buy
-Decision, Peer Comparison, News catalyst) thay vì chỉ trả text về 30 mã
-declared. Nếu chốt hướng này, restore backend tương ứng theo bản đồ trong
-`plans/260826-1920-phase-0-cleanup-and-restore-map/phase-{07..10}-*.md`
-(intraday spine vnstock Diamond · financial store market-wide · market
-indices + sector membership · news RSS + universe expansion). **Chưa thi
-công, chưa unfreeze `src/stocks/*`** — cần user quyết định trước khi
-mở lại Phase 1.
+Lane chat kết xuất **canvas view động** thay vì chỉ trả text. Cơ chế:
+model chọn một **Study** (recipe phân tích có tên, có version,
+deterministic) và điền params; **engine tính, artifact giữ số, registry
+vẽ**. Ba luật cứng:
+
+- `StudyResult.frames` — dãy/ma trận số — **không bao giờ** vào message
+  gửi model. Model chỉ thấy `headline` (~300 token). Test đọc transcript
+  giữ luật này.
+- Widget có **name + version**, danh mục ở `contracts/canvas-widget-
+  catalog.json` (sinh từ `src/studies/widgets.py`, test giữ đồng bộ).
+  Viewer gặp version không biết → fallback `data_table`, không crash.
+- `as_of` đóng băng lúc tạo artifact; mở lại thread là **render lại
+  artifact**, không tính lại.
+
+Plan thi công: `plans/260826-2158-study-artifact-canvas/`. Bảng
+`agent_artifact` giữ một lần chạy Study. Ba case đầu: intraday liquidity
+profile · condition review · earnings dislocation screener.
 
 # Tham chiếu bắt buộc — `docs/hermes/`
 

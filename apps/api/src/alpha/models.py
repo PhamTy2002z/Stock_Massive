@@ -442,3 +442,55 @@ class LlmCallUsage(Base):
     def __repr__(self) -> str:
         return f"<LlmCallUsage {self.owner_type}:{self.owner_id} {self.status}>"
 
+
+
+class AgentArtifact(Base):
+    """One Study run, kept so the picture can be re-opened rather than re-run.
+
+    Its own table rather than a column on ``agent_message``: the payload is
+    numbers by the thousand and the message is text the browser needs
+    immediately, so a join on the message would drag a heatmap into every
+    transcript scroll. Split, the transcript loads at text weight and the canvas
+    is fetched by whoever opens it.
+
+    ``frames`` is the whole point of the row and the one part no model ever
+    reads. It is served straight to the browser (``docs`` — the canvas panel),
+    and the test that proves the separation reads the transcript for these keys.
+
+    ``turn_id`` and ``thread_id`` are nullable because a Study also runs outside
+    a Turn — the smoke script, and any later precompute. An artifact with
+    neither is reachable by id alone, which is what such a run wants; one with
+    both is what a reader re-opens.
+    """
+
+    __tablename__ = "agent_artifact"
+
+    id = Column(Uuid, primary_key=True)
+    turn_id = Column(
+        Uuid,
+        ForeignKey("agent_turn.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    thread_id = Column(
+        Uuid,
+        ForeignKey("agent_thread.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    study_name = Column(String(64), nullable=False)
+    study_version = Column(Integer, nullable=False)
+    # What the model asked for, after validation — not what it typed. A rejected
+    # call never reaches this table, so these are always parameters that ran.
+    params = Column(JSONB, nullable=False)
+    frames = Column(JSONB, nullable=False)
+    canvas_spec = Column(JSONB, nullable=False)
+    provenance = Column(JSONB, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        # Re-opening a thread asks for its artifacts newest first.
+        Index("ix_agent_artifact_thread_created", "thread_id", created_at.desc()),
+        Index("ix_agent_artifact_turn", "turn_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AgentArtifact {self.id} {self.study_name} v{self.study_version}>"

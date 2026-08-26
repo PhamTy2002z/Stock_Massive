@@ -1,0 +1,50 @@
+{
+  "fallback": {
+    "widget": "data_table",
+    "version": 1
+  },
+  "widgets": [
+    {
+      "name": "bar_series",
+      "version": 1,
+      "frameKinds": [
+        "series"
+      ],
+      "purpose": "Cột theo trục thời gian hoặc theo nhóm rời rạc"
+    },
+    {
+      "name": "data_table",
+      "version": 1,
+      "frameKinds": [
+        "series",
+        "matrix",
+        "table"
+      ],
+      "purpose": "Bảng số thuần — cũng là fallback khi viewer không biết widget"
+    },
+    {
+      "name": "ranked_bars",
+      "version": 1,
+      "frameKinds": [
+        "table"
+      ],
+      "purpose": "Xếp hạng có nhãn, dài nhất trên cùng"
+    },
+    {
+      "name": "session_heatmap",
+      "version": 1,
+      "frameKinds": [
+        "matrix"
+      ],
+      "purpose": "Ma trận phiên × khung giờ, ô trống là thiếu dữ liệu"
+    },
+    {
+      "name": "stat_tiles",
+      "version": 1,
+      "frameKinds": [
+        "table"
+      ],
+      "purpose": "Vài con số dẫn dắt, mỗi ô một dòng của frame"
+    }
+  ]
+}
