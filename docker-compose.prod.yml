@@ -56,33 +56,12 @@ services:
     stop_grace_period: 60s
     environment:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
-      # Which build answered — one of the Evidence Manifest's fields
-      # (docs/adr/0015). Only the deployment knows it.
-      GIT_SHA: ${GIT_SHA:-unknown}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       # The covered Universe. Empty means *every* symbol is refused by the tool
       # layer, which is a working API serving nothing — so it is passed here for
       # the same reason DATABASE_URL is, and only the deployment knows it.
       UNIVERSE_SYMBOLS: ${UNIVERSE_SYMBOLS:-}
-      # Long-lived DNSE ingestion stays off until the deployment explicitly
-      # supplies credentials and has applied the realtime migration.
-      REALTIME_INGESTION_ENABLED: ${REALTIME_INGESTION_ENABLED:-false}
-      DNSE_API_KEY: ${DNSE_API_KEY:-}
-      DNSE_API_SECRET: ${DNSE_API_SECRET:-}
-      DNSE_BOARD_IDS: ${DNSE_BOARD_IDS:-G1}
-      REALTIME_QUEUE_SIZE: ${REALTIME_QUEUE_SIZE:-2000}
-      REALTIME_WORKER_COUNT: ${REALTIME_WORKER_COUNT:-1}
-      REALTIME_SHUTDOWN_TIMEOUT_SECONDS: ${REALTIME_SHUTDOWN_TIMEOUT_SECONDS:-15}
       SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
-      COLLECTOR_ENABLED: ${COLLECTOR_ENABLED:-true}
-      CORPORATE_ACTIONS_ENABLED: ${CORPORATE_ACTIONS_ENABLED:-true}
-      MARKET_INDEX_ENABLED: ${MARKET_INDEX_ENABLED:-true}
-      # Both default off: they are the two jobs that spend the vnstock quota in
-      # bulk, and a deployment that wants them says so.
-      BACKFILL_ENABLED: ${BACKFILL_ENABLED:-false}
-      SECTOR_HISTORICAL_ENABLED: ${SECTOR_HISTORICAL_ENABLED:-false}
-      FIINQUANT_USERNAME: ${FIINQUANT_USERNAME:-}
-      FIINQUANT_PASSWORD: ${FIINQUANT_PASSWORD:-}
       # A self-hosted Redis is not part of this file; a deployment either points
       # this at one it runs or uses the Upstash pair below. Empty is handled:
       # the cache degrades and the LLM route breaker fails open.

@@ -49,7 +49,6 @@ services:
     stop_grace_period: 45s
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/stockmassive}
-      GIT_SHA: ${GIT_SHA:-unknown}
       AUTH_SECRET: ${AUTH_SECRET:-dev-secret-change-in-production}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
@@ -57,35 +56,10 @@ services:
       CACHE_REDIS_URL: ${CACHE_REDIS_URL:-redis://redis:6379/0}
       # Read by vnstock; without it the quota is 20 req/min instead of 60
       VNSTOCK_API_KEY: ${VNSTOCK_API_KEY:-}
-      # The Collector is the only path that logs into FiinQuant. Left unpassed,
-      # the container starts perfectly well and collects nothing — the same
-      # silent-empty failure mode the CA bundle fix exists to prevent.
-      FIINQUANT_USERNAME: ${FIINQUANT_USERNAME:-}
-      FIINQUANT_PASSWORD: ${FIINQUANT_PASSWORD:-}
       # The symbols the system commits to collecting and serving. Empty is a
       # legitimate Universe — the app runs and the Collector has nothing to do.
       UNIVERSE_SYMBOLS: ${UNIVERSE_SYMBOLS:-}
-      REALTIME_INGESTION_ENABLED: ${REALTIME_INGESTION_ENABLED:-false}
-      DNSE_API_KEY: ${DNSE_API_KEY:-}
-      DNSE_API_SECRET: ${DNSE_API_SECRET:-}
-      DNSE_BOARD_IDS: ${DNSE_BOARD_IDS:-G1}
-      REALTIME_QUEUE_SIZE: ${REALTIME_QUEUE_SIZE:-2000}
-      REALTIME_WORKER_COUNT: ${REALTIME_WORKER_COUNT:-1}
-      REALTIME_SHUTDOWN_TIMEOUT_SECONDS: ${REALTIME_SHUTDOWN_TIMEOUT_SECONDS:-15}
-      COLLECTOR_ENABLED: ${COLLECTOR_ENABLED:-true}
-      BACKFILL_ENABLED: ${BACKFILL_ENABLED:-false}
-      # The weekly Corporate Action load. Forwarded like the other job switches
-      # so an operator can turn it off from the environment the container
-      # actually reads — the setting defaults to on, and a switch that only
-      # exists in the settings class is one a container never sees.
-      CORPORATE_ACTIONS_ENABLED: ${CORPORATE_ACTIONS_ENABLED:-true}
-      # The daily load of the benchmark's session series (docs/adr/0017).
-      # Forwarded for the same reason the switch above is: it defaults to on,
-      # and a switch that only exists in the settings class is one a container
-      # never sees.
-      MARKET_INDEX_ENABLED: ${MARKET_INDEX_ENABLED:-true}
       SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
-      SECTOR_HISTORICAL_ENABLED: ${SECTOR_HISTORICAL_ENABLED:-false}
       # Alpha Desk's LLM route (docs/adr/0014). Forwarded for the same reason as
       # the job switches above: a switch that only exists in the settings class
       # is one a container never sees. With ALPHA_DESK_ENABLED true, Budget
