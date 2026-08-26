@@ -1,5 +1,6 @@
 """SQLAlchemy models for stocks module."""
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Column,
     Date,
@@ -351,3 +352,47 @@ class CorporateAction(Base):
             f"<CorporateAction {self.symbol} {self.event_code} "
             f"{self.ex_date} {self.confirmation}>"
         )
+
+
+class BarIntraday15m(Base):
+    """One fifteen-minute bucket of one session, session hours only.
+
+    The primary key is ``(symbol, bucket_start)`` because that is the identity of
+    the thing: a bucket is the interval, and re-fetching a day has to land on the
+    same rows rather than beside them. Ingest upserts on it — the provider does
+    revise a session's last bucket after the close, and a second row for the same
+    quarter hour would double the volume that a liquidity profile is built from.
+
+    ``trading_day`` is stored rather than derived because every read groups by it
+    and deriving it needs the Vietnamese zone: ``bucket_start`` comes back from
+    PostgreSQL in UTC, where a 09:15 Vietnamese bucket is 02:15 the same day but a
+    hypothetical late one would not be.
+
+    Prices are **VND**, matching ``provider_snapshots.payload.price_unit``. The
+    provider answers intraday quotes in thousands (74.5 for a 74,500đ share), and
+    the scaling happens once, at ingest, so nothing downstream has to remember
+    which store it is reading.
+    """
+
+    __tablename__ = "bar_intraday_15m"
+
+    symbol = Column(String(20), primary_key=True)
+    bucket_start = Column(DateTime(timezone=True), primary_key=True)
+    trading_day = Column(Date, nullable=False)
+    # ato | am | pm | atc — src/stocks/intraday/session_window.py owns the set.
+    phase = Column(String(4), nullable=False)
+    open = Column(Numeric(20, 4), nullable=False)
+    high = Column(Numeric(20, 4), nullable=False)
+    low = Column(Numeric(20, 4), nullable=False)
+    close = Column(Numeric(20, 4), nullable=False)
+    volume = Column(BigInteger, nullable=False)
+    source = Column(String(32), nullable=False)
+    observed_at = Column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        # Every read asks for the last N sessions of one symbol.
+        Index("ix_bar_intraday_15m_symbol_day", "symbol", trading_day.desc()),
+    )
+
+    def __repr__(self) -> str:
+        return f"<BarIntraday15m {self.symbol} {self.bucket_start} {self.phase}>"

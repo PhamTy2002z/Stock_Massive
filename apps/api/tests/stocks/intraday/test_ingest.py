@@ -1,0 +1,291 @@
+"""Ingest: the padding filter, the upsert, and the delta the second call makes.
+
+The provider is a callable here, never the network. The frames it returns are
+built to the shape observed on 2026-08-26 — a full 96-bucket grid with ``NaN``
+prices outside session hours — because that shape is the thing the code under
+test exists to survive.
+"""
+
+from __future__ import annotations
+
+from datetime import date, datetime, time, timedelta
+
+import pandas as pd
+import pytest
+from sqlalchemy import delete, func, select
+
+from src.core.database import Base, get_sync_db, sync_engine
+from src.stocks.intraday import ingest, session_window
+from src.stocks.models import BarIntraday15m
+
+SYMBOL = "INGST"
+
+#: The full grid the provider answers on: 96 quarter hours from midnight.
+GRID = tuple(
+    (datetime.min + timedelta(minutes=15 * step)).time() for step in range(96)
+)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def schema():
+    Base.metadata.create_all(sync_engine, checkfirst=True)
+
+
+@pytest.fixture(autouse=True)
+def no_leftover_bars():
+    yield
+    with get_sync_db() as session:
+        session.execute(delete(BarIntraday15m).where(BarIntraday15m.symbol == SYMBOL))
+
+
+def provider_frame(days: list[date], *, volume: int = 100_000) -> pd.DataFrame:
+    """A day of the real grid: session buckets filled, everything else NaN."""
+    records = []
+    for day in days:
+        for moment in GRID:
+            stamp = datetime.combine(day, moment)
+            if session_window.phase_of(moment) is None:
+                records.append(
+                    {
+                        "time": stamp,
+                        "open": float("nan"),
+                        "high": float("nan"),
+                        "low": float("nan"),
+                        "close": float("nan"),
+                        "volume": 0,
+                    }
+                )
+            else:
+                records.append(
+                    {
+                        "time": stamp,
+                        "open": 74.5,
+                        "high": 74.9,
+                        "low": 74.2,
+                        "close": 74.6,
+                        "volume": volume,
+                    }
+                )
+    return pd.DataFrame.from_records(records)
+
+
+def a_week(end: date) -> list[date]:
+    return [end - timedelta(days=offset) for offset in range(4, -1, -1)]
+
+
+def test_only_session_buckets_are_written_and_the_padding_is_counted():
+    days = a_week(date(2026, 8, 21))
+
+    with get_sync_db() as session:
+        outcome = ingest.ensure_bars(
+            session,
+            SYMBOL,
+            sessions=5,
+            fetch=lambda symbol, start, end: provider_frame(days),
+            today=date(2026, 8, 21),
+        )
+        session.commit()
+
+        stored = session.execute(
+            select(func.count()).select_from(BarIntraday15m).where(
+                BarIntraday15m.symbol == SYMBOL
+            )
+        ).scalar_one()
+        phases = set(
+            session.execute(
+                select(BarIntraday15m.phase).where(BarIntraday15m.symbol == SYMBOL)
+            ).scalars()
+        )
+
+    assert outcome.rows_written == 5 * len(session_window.SESSION_BUCKETS)
+    assert outcome.padding_dropped == 5 * (96 - len(session_window.SESSION_BUCKETS))
+    assert stored == outcome.rows_written
+    assert phases == {"ato", "am", "pm", "atc"}
+    assert outcome.sessions_stored == 5
+    assert outcome.last_session == date(2026, 8, 21)
+
+
+def test_running_the_same_ingest_twice_does_not_double_the_volume():
+    days = a_week(date(2026, 8, 21))
+    fetch = lambda symbol, start, end: provider_frame(days)
+
+    with get_sync_db() as session:
+        ingest.ensure_bars(
+            session, SYMBOL, sessions=5, fetch=fetch, today=date(2026, 8, 21)
+        )
+        session.commit()
+        first = _totals(session)
+
+        ingest.ensure_bars(
+            session, SYMBOL, sessions=5, fetch=fetch, today=date(2026, 8, 21)
+        )
+        session.commit()
+        second = _totals(session)
+
+    assert first == second
+
+
+def test_a_revised_last_bucket_is_corrected_rather_than_duplicated():
+    days = [date(2026, 8, 21)]
+
+    with get_sync_db() as session:
+        ingest.ensure_bars(
+            session,
+            SYMBOL,
+            sessions=1,
+            fetch=lambda *_: provider_frame(days, volume=100_000),
+            today=date(2026, 8, 21),
+        )
+        session.commit()
+
+        ingest.ensure_bars(
+            session,
+            SYMBOL,
+            sessions=1,
+            fetch=lambda *_: provider_frame(days, volume=250_000),
+            today=date(2026, 8, 21),
+        )
+        session.commit()
+
+        rows, total = _totals(session)
+
+    assert rows == len(session_window.SESSION_BUCKETS)
+    assert total == 250_000 * len(session_window.SESSION_BUCKETS)
+
+
+def test_a_cold_symbol_is_asked_for_the_provider_ceiling():
+    asked: list[tuple[date, date]] = []
+
+    def fetch(symbol, start, end):
+        asked.append((start, end))
+        return provider_frame([date(2026, 8, 21)])
+
+    with get_sync_db() as session:
+        ingest.ensure_bars(
+            session, SYMBOL, sessions=30, fetch=fetch, today=date(2026, 8, 21)
+        )
+        session.commit()
+
+    start, end = asked[0]
+    assert start == date(2026, 8, 21) - timedelta(days=ingest.COLD_START_DAYS)
+    assert end == date(2026, 8, 21)
+
+
+def test_a_warm_symbol_is_asked_only_from_its_last_stored_session():
+    days = a_week(date(2026, 8, 21))
+    asked: list[date] = []
+
+    def fetch(symbol, start, end):
+        asked.append(start)
+        return provider_frame(days)
+
+    with get_sync_db() as session:
+        ingest.ensure_bars(
+            session, SYMBOL, sessions=5, fetch=fetch, today=date(2026, 8, 21)
+        )
+        session.commit()
+        ingest.ensure_bars(
+            session, SYMBOL, sessions=5, fetch=fetch, today=date(2026, 8, 21)
+        )
+        session.commit()
+
+    assert asked[0] == date(2026, 8, 21) - timedelta(days=ingest.COLD_START_DAYS)
+    # The last stored session, not the day after it: the provider revises it.
+    assert asked[1] == date(2026, 8, 21)
+
+
+def test_a_store_shorter_than_the_question_is_refilled_from_the_ceiling():
+    """Two stored sessions cannot answer a thirty-session question.
+
+    Asking from the store's own edge would leave it permanently short, so a
+    store thinner than the window is treated as cold.
+    """
+    asked: list[date] = []
+
+    def fetch(symbol, start, end):
+        asked.append(start)
+        return provider_frame([date(2026, 8, 20), date(2026, 8, 21)])
+
+    with get_sync_db() as session:
+        ingest.ensure_bars(
+            session, SYMBOL, sessions=2, fetch=fetch, today=date(2026, 8, 21)
+        )
+        session.commit()
+        ingest.ensure_bars(
+            session, SYMBOL, sessions=30, fetch=fetch, today=date(2026, 8, 21)
+        )
+        session.commit()
+
+    assert asked[1] == date(2026, 8, 21) - timedelta(days=ingest.COLD_START_DAYS)
+
+
+def test_prices_are_scaled_from_thousands_to_dong():
+    with get_sync_db() as session:
+        ingest.ensure_bars(
+            session,
+            SYMBOL,
+            sessions=1,
+            fetch=lambda *_: provider_frame([date(2026, 8, 21)]),
+            today=date(2026, 8, 21),
+        )
+        session.commit()
+        row = session.execute(
+            select(BarIntraday15m).where(BarIntraday15m.symbol == SYMBOL).limit(1)
+        ).scalar_one()
+
+    assert float(row.close) == 74_600.0
+    assert float(row.open) == 74_500.0
+
+
+def test_a_response_missing_a_column_writes_nothing():
+    frame = provider_frame([date(2026, 8, 21)]).drop(columns=["volume"])
+
+    with get_sync_db() as session:
+        with pytest.raises(ingest.IntradayIngestError, match="volume"):
+            ingest.ensure_bars(
+                session,
+                SYMBOL,
+                sessions=1,
+                fetch=lambda *_: frame,
+                today=date(2026, 8, 21),
+            )
+        session.rollback()
+        rows, _ = _totals(session)
+
+    assert rows == 0
+
+
+def test_a_session_bucket_with_no_trade_is_left_out_rather_than_zeroed():
+    """An untraded quarter hour is missing data, not a measured zero."""
+    frame = provider_frame([date(2026, 8, 21)])
+    quiet = frame["time"] == datetime.combine(date(2026, 8, 21), time(10, 30))
+    frame.loc[quiet, ["open", "high", "low", "close"]] = float("nan")
+    frame.loc[quiet, "volume"] = 0
+
+    with get_sync_db() as session:
+        ingest.ensure_bars(
+            session,
+            SYMBOL,
+            sessions=1,
+            fetch=lambda *_: frame,
+            today=date(2026, 8, 21),
+        )
+        session.commit()
+        labels = set(
+            session.execute(
+                select(BarIntraday15m.bucket_start).where(
+                    BarIntraday15m.symbol == SYMBOL
+                )
+            ).scalars()
+        )
+
+    assert len(labels) == len(session_window.SESSION_BUCKETS) - 1
+
+
+def _totals(session) -> tuple[int, int]:
+    row = session.execute(
+        select(func.count(), func.coalesce(func.sum(BarIntraday15m.volume), 0)).where(
+            BarIntraday15m.symbol == SYMBOL
+        )
+    ).one()
+    return int(row[0]), int(row[1])
