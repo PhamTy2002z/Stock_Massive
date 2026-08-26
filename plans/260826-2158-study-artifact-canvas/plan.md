@@ -28,9 +28,9 @@ Nguồn quyết định: `plans/reports/proposal-260826-2107-ai-core-dynamic-can
 
 | # | Phase | Nhóm | Phụ thuộc | Trạng thái |
 |---|---|---|---|---|
-| 01 | [Studies core + agent_artifact store](phase-01-studies-core-and-artifact-store.md) | A | — | pending |
-| 02 | [Intraday ingest vnstock 15m](phase-02-intraday-ingest-vnstock.md) | A | — | pending |
-| 03 | [Study intraday_liquidity_profile](phase-03-study-intraday-liquidity-profile.md) | A | 01, 02 | pending |
+| 01 | [Studies core + agent_artifact store](phase-01-studies-core-and-artifact-store.md) | A | — | **done** |
+| 02 | [Intraday ingest vnstock 15m](phase-02-intraday-ingest-vnstock.md) | A | — | **done** |
+| 03 | [Study intraday_liquidity_profile](phase-03-study-intraday-liquidity-profile.md) | A | 01, 02 | **done** |
 | 04 | [Bundle `studies` + event canvas.ready](phase-04-agent-tools-and-canvas-ready-event.md) | A | 01, 03 | pending |
 | 05 | [Web canvas panel + widget registry v1](phase-05-web-canvas-panel-and-widget-registry.md) | A | **bước 0 (widgets trên fixture): chỉ cần 01-contracts — chạy song song 02–04**; wiring SSE: 04 | pending |
 | 06 | [get_series + composition render_canvas](phase-06-series-evidence-and-composition.md) | B | 05 | pending |
@@ -41,6 +41,51 @@ Nguồn quyết định: `plans/reports/proposal-260826-2107-ai-core-dynamic-can
 
 Song song, không chặn code: **email `support@vnstocks.com` xin điều khoản
 thương mại bằng văn bản** (R1 — chặn ngày launch). Việc của user, plan chỉ nhắc.
+
+## Sửa lại spec khi thi công (2026-08-26, đo thật)
+
+Phase 02 probe live `Quote(source="VCI")` trên STB (75 phiên) + SHS (70 phiên).
+Ba chỗ spec trong plan lệch dữ liệu thật; code theo dữ liệu:
+
+1. **ATC nằm ở bucket `14:45`, không phải `14:30`.** Đấu giá đóng cửa *chạy*
+   14:30–14:45 nhưng không khớp gì tới lúc đóng, nên bucket `14:30` rỗng ở
+   **mọi phiên đo được** và toàn bộ volume ATC — bucket lớn nhất phiên của
+   phần lớn mã — mang nhãn `14:45`. Window viết theo giờ đấu giá sẽ **xoá
+   sạch** volume ATC.
+2. **Grid là union hai sàn.** HNX/UPCoM giao dịch liên tục từ `09:00`; HOSE
+   khớp ATO vào bucket `09:15`. Grid gồm 17 bucket; mã HOSE không bao giờ có
+   cột đầu, và đó không phải lỗ dữ liệu.
+3. **Giá vnstock intraday là nghìn VND** (74.5); store dùng `price_unit: VND`
+   (74900.0). Scale ×1000 một lần ở ingest.
+
+Lệch thiết kế có chủ ý so với plan (ghi để phase sau không hiểu nhầm):
+
+- **4 frame, không 3** — thêm frame `tiles` (table) vì `stat_tiles` phải vẽ từ
+  một frame, không vẽ từ headline.
+- `compute` dùng Python thuần + `statistics.median` trên row đã typed thay vì
+  pandas; pandas vẫn dùng ở ingest. Ít một lần chuyển đổi hai chiều.
+- Headline dùng `peakAvgAmount` (không `peakAvgVolume`) vì `metric` có thể là
+  `value`.
+- `StudyDefinition` khai thêm `frames` + `widgets` (tuple) để kiểm widget được
+  **lúc import**, không đợi một câu hỏi thật.
+- `agent_artifact.turn_id`/`thread_id` nullable — Study cũng chạy ngoài Turn
+  (smoke, precompute sau này).
+- `sessions` **kẹp** 10–60 thay vì refuse: `sessionsUsed` trong headline đã nói
+  đúng số phiên thật đọc được, nên một vòng round-trip "60 là max" không mua
+  thêm gì.
+
+## Kết quả nghiệm thu phase 01–03
+
+- `make test` (apps/api, host): **1024 pass** (baseline trước phase 01: 940).
+- `pnpm type-check` · `lint` · `test` (**406 pass**) · `build` tại apps/web: xanh.
+- Alembic: một head `c2e94a7b1f30`; `downgrade -1` → `upgrade head` sạch cho cả
+  hai revision mới.
+- Smoke ingest thật: `ensure_bars('STB', sessions=30)` → 3.985 dòng / 250 phiên
+  (15,94 bucket/phiên ≈ 16 của HOSE); chạy lần hai: **row count không đổi**.
+- Smoke study thật trên STB 30 phiên: `peakWindow=14:45`, share 0,1307,
+  occurrence 14/30, `phaseSummary.pm=0,5788`. Đỉnh thuộc {14:45, 14:00, 14:15}
+  — đúng tập probe đã đo trước khi code.
+- Backup trước migration: `backups/pre-agent-artifact-260826.sql.gz` (5,8M).
 
 ## Phát hiện sửa lại restore map
 
