@@ -1,6 +1,6 @@
 ---
 title: "Phase 5: Verify backup and drop rip-out tables via alembic"
-status: todo
+status: done
 ---
 
 # Phase 5: Verify backup & drop rip-out tables via alembic

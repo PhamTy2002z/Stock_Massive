@@ -1,6 +1,6 @@
 ---
 title: "Phase 4: Prune stale config settings and validator"
-status: todo
+status: done
 ---
 
 # Phase 4: Prune stale config settings & validator

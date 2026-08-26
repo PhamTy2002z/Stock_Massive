@@ -1,6 +1,6 @@
 ---
 title: "Phase 1: Kick-off and inventory verification"
-status: todo
+status: done
 ---
 
 # Phase 1: Kick-off & inventory verification

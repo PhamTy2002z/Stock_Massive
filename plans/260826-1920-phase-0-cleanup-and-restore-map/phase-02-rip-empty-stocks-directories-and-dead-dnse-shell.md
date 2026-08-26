@@ -1,6 +1,6 @@
 ---
 title: "Phase 2: Rip empty stocks directories and dead dnse shell"
-status: todo
+status: na (dirs untracked)
 ---
 
 # Phase 2: Rip empty stocks directories & dead dnse shell

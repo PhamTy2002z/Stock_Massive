@@ -1,7 +1,7 @@
 ---
 title: "Phase 0 cleanup and restore map"
 description: "Dọn hết nợ Phase 0 rip-out để nền sạch, đồng thời ghi bản đồ restore cho brief Text.txt (không triển khai restore trong plan này)."
-status: pending
+status: in-progress (phase 1-5 done)
 priority: P1
 effort: "1-2 ngày"
 tags: [refactor, cleanup, rip-out]
@@ -32,11 +32,11 @@ thứ đó **và** ghi bản đồ khôi phục sau này (theo brief `docs/Text.
 
 | # | Phase | Status |
 |---|-------|--------|
-| 1 | [Kick-off & inventory verification](./phase-01-start.md) | Pending |
-| 2 | [Rip empty stocks directories and dead dnse shell](./phase-02-rip-empty-stocks-directories-and-dead-dnse-shell.md) | Pending |
-| 3 | [Rip 12 orphan signal modules and reconcile registry](./phase-03-rip-12-orphan-signal-modules-and-reconcile-registry.md) | Pending |
-| 4 | [Prune stale config settings and validator](./phase-04-prune-stale-config-settings-and-validator.md) | Pending |
-| 5 | [Verify backup and drop rip-out tables via alembic](./phase-05-verify-backup-and-drop-rip-out-tables-via-alembic.md) | Pending |
+| 1 | [Kick-off & inventory verification](./phase-01-start.md) | Done |
+| 2 | [Rip empty stocks directories and dead dnse shell](./phase-02-rip-empty-stocks-directories-and-dead-dnse-shell.md) | N/A (dirs untracked) |
+| 3 | [Rip 12 orphan signal modules and reconcile registry](./phase-03-rip-12-orphan-signal-modules-and-reconcile-registry.md) | Done (only nulls; 11 kept live) |
+| 4 | [Prune stale config settings and validator](./phase-04-prune-stale-config-settings-and-validator.md) | Done |
+| 5 | [Verify backup and drop rip-out tables via alembic](./phase-05-verify-backup-and-drop-rip-out-tables-via-alembic.md) | Done |
 | 6 | [Tidy Phase 1 stub, push archive tag, refresh CLAUDE.md](./phase-06-tidy-phase-1-stub-push-archive-tag-refresh-claudemd.md) | Pending |
 | 7 | [Restore map: vnstock Diamond intraday spine](./phase-07-restore-map-vnstock-diamond-intraday-spine.md) | Reference only |
 | 8 | [Restore map: financial statement store market-wide](./phase-08-restore-map-financial-statement-store-market-wide.md) | Reference only |

@@ -1,6 +1,6 @@
 ---
 title: "Phase 3: Rip 12 orphan signal modules and reconcile registry"
-status: todo
+status: done (only nulls removed; 11 modules verified live)
 ---
 
 # Phase 3: Rip 12 orphan signal modules & reconcile registry
