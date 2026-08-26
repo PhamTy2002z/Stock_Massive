@@ -31,7 +31,7 @@ import math
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Callable
+from typing import Any, Callable
 
 import pandas as pd
 from sqlalchemy import func, select
@@ -222,6 +222,21 @@ def _vnd(value: float) -> Decimal:
 
 
 def _upsert(session: Session, rows: list[dict]) -> int:
+    """Write one fetch, with the provider's own duplicates resolved first.
+
+    ``ON CONFLICT DO UPDATE`` refuses a statement whose *own* values hold a key
+    twice — Postgres raises ``CardinalityViolation``, and it aborts the whole
+    transaction rather than the statement. In this path that would take the
+    caller's session down with it: a Study runs its ingest and its artifact
+    write in one session, so a provider that repeated a quarter hour would cost
+    the answer as well as the fetch.
+
+    So the last row for each ``(symbol, bucket_start)`` wins here, before the
+    statement is built. Last rather than first for the same reason the write is
+    an upsert at all: the provider revises a session's final bucket, and the
+    later value is the revision.
+    """
+    rows = _deduplicated(rows)
     if not rows:
         return 0
     statement = insert(BarIntraday15m).values(rows)
@@ -241,6 +256,14 @@ def _upsert(session: Session, rows: list[dict]) -> int:
     )
     session.execute(statement)
     return len(rows)
+
+
+def _deduplicated(rows: list[dict]) -> list[dict]:
+    """One row per bucket, in the order they arrived, the last value kept."""
+    by_bucket: dict[tuple[str, Any], dict] = {}
+    for row in rows:
+        by_bucket[(row["symbol"], row["bucket_start"])] = row
+    return list(by_bucket.values())
 
 
 __all__ = [

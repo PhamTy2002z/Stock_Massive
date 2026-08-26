@@ -207,6 +207,17 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     }
   }, [messages, unconfirmedQuestion])
 
+  // A canvas the Turn produced opens the panel on it — once, and only while the
+  // reader has not pinned another tab themselves. Keyed on the newest
+  // announcement rather than the list, so re-renders of an unchanged Turn do
+  // not keep re-opening a panel the reader has closed.
+  const newestCanvas = turn.state.canvases[turn.state.canvases.length - 1]
+  const newestCanvasId = newestCanvas?.artifactId ?? null
+  useEffect(() => {
+    if (newestCanvasId === null) return
+    shellDispatch({ type: "canvas-ready", artifactId: newestCanvasId })
+  }, [newestCanvasId, shellDispatch])
+
   // -- what is on screen --------------------------------------------------
 
   // How much of the answer is on screen. Held here rather than in the view for

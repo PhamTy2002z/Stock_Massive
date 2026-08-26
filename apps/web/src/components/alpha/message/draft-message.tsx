@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 
 import type { DraftEntry } from "@/lib/alpha-desk/transcript"
+import { CanvasCard } from "./canvas-card"
 import { Markdown } from "./markdown"
 import { MessageShell } from "./message-shell"
 import { ReasoningTimeline } from "./reasoning-timeline"
@@ -33,10 +34,19 @@ import { TurnStatus } from "./turn-status"
 export function DraftMessage({
   entry,
   onRetry,
+  onOpenCanvas,
   className,
 }: {
   entry: DraftEntry
   onRetry: () => void
+  /**
+   * Opens one of the pictures this Turn has already produced.
+   *
+   * On the draft as well as on the canonical answer, because the panel opens
+   * itself when the canvas is announced and a reader who closes it would
+   * otherwise have no way back to it until the answer lands.
+   */
+  onOpenCanvas?: (artifactId: string) => void
   className?: string
 }) {
   const elapsedMs = useTickingElapsed(entry.elapsedMs, entry.working)
@@ -59,6 +69,10 @@ export function DraftMessage({
           that appears as it is written, and holding it back until it parsed
           cleanly would be the buffering this whole path exists to avoid. */}
       {entry.text !== "" && <Markdown text={entry.text} animate />}
+
+      {onOpenCanvas !== undefined && (
+        <CanvasCard canvases={entry.canvases} onOpen={onOpenCanvas} />
+      )}
 
       <TurnStatus
         phase={entry.phase}

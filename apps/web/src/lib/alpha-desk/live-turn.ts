@@ -28,8 +28,21 @@
  * rules is a statement about a sequence of events rather than about React.
  */
 
-import { appendThought, readThoughts, readToolCall, readToolCalls } from "./read-content"
-import type { SnapshotData, Thought, ToolCall, TurnEvent, TurnEventType } from "./types"
+import {
+  appendThought,
+  readCanvases,
+  readThoughts,
+  readToolCall,
+  readToolCalls,
+} from "./read-content"
+import type {
+  CanvasAnnouncement,
+  SnapshotData,
+  Thought,
+  ToolCall,
+  TurnEvent,
+  TurnEventType,
+} from "./types"
 
 /**
  * Where a Turn is, as the surface needs to render it.
@@ -80,6 +93,14 @@ export interface LiveTurn {
    */
   thoughts: Thought[]
   /**
+   * The canvases this Turn has produced, in the order they were announced.
+   *
+   * Ids and titles, never cells: the numbers are a row the panel fetches. Kept
+   * as a list rather than one value because a Turn may draw more than one
+   * picture, and the newest is the one the panel opens on.
+   */
+  canvases: CanvasAnnouncement[]
+  /**
    * How long the Turn has been running, as the backend last reported it.
    *
    * The backend's number rather than a timer this tab started, so a reader who
@@ -119,6 +140,7 @@ export const IDLE: LiveTurn = {
   text: "",
   toolCalls: [],
   thoughts: [],
+  canvases: [],
   elapsedMs: 0,
   terminalReason: null,
   messageId: null,
@@ -252,6 +274,16 @@ function applyEvent(state: LiveTurn, event: TurnEvent): LiveTurn {
       return call === null ? advanced : { ...advanced, toolCalls: upsert(state.toolCalls, call) }
     }
 
+    case "canvas.ready": {
+      // Read through the same defensive path a snapshot's list takes, and
+      // upserted by artifact id for the reason a tool call is: one Study run
+      // has one id, so a second announcement of it is a republish rather than
+      // a second picture.
+      const [canvas] = readCanvases([event.data])
+      if (canvas === undefined) return advanced
+      return { ...advanced, canvases: upsertCanvas(state.canvases, canvas) }
+    }
+
     default: {
       const phase = TERMINAL_PHASE[event.type]
       return phase === undefined
@@ -281,6 +313,20 @@ function upsert(calls: ToolCall[], call: ToolCall): ToolCall[] {
   return next
 }
 
+/** The same, by artifact id. */
+function upsertCanvas(
+  canvases: CanvasAnnouncement[],
+  canvas: CanvasAnnouncement,
+): CanvasAnnouncement[] {
+  const index = canvases.findIndex(
+    (existing) => existing.artifactId === canvas.artifactId,
+  )
+  if (index === -1) return [...canvases, canvas]
+  const next = [...canvases]
+  next[index] = canvas
+  return next
+}
+
 function fromSnapshot(state: LiveTurn, event: TurnEvent): LiveTurn {
   const data = event.data as unknown as SnapshotData
   const terminal = data.status !== "admitted" && data.status !== "running"
@@ -298,6 +344,7 @@ function fromSnapshot(state: LiveTurn, event: TurnEvent): LiveTurn {
     // trusting it more than the stream would make a reconnect the way to get a
     // malformed call onto the screen.
     thoughts: readThoughts(data.thoughts),
+    canvases: readCanvases(data.canvases),
     elapsedMs: typeof data.elapsed_ms === "number" ? data.elapsed_ms : state.elapsedMs,
     terminalReason: data.terminal_reason ?? null,
     // A terminal snapshot names the message that replaces this draft, exactly

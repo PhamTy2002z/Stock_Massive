@@ -153,6 +153,47 @@ def test_a_revised_last_bucket_is_corrected_rather_than_duplicated():
     assert total == 250_000 * len(session_window.SESSION_BUCKETS)
 
 
+def test_a_quarter_hour_the_provider_repeats_does_not_abort_the_transaction():
+    """The provider sending one bucket twice must cost the fetch, not the answer.
+
+    ``ON CONFLICT DO UPDATE`` refuses a statement whose own values hold a key
+    twice, and Postgres raises ``CardinalityViolation`` — which aborts the whole
+    transaction rather than the statement. A Study runs its ingest and writes its
+    artifact in one session, so an unresolved duplicate here would take the
+    answer down with the fetch, and the row recording the failure with it.
+
+    The later value wins, for the same reason the write is an upsert at all: the
+    provider revises a session's last bucket.
+    """
+    day = date(2026, 8, 21)
+    frame = provider_frame([day], volume=100_000)
+    # The closing auction, sent a second time with a different number — which is
+    # the bucket the provider has actually been seen to revise.
+    closing = frame[frame["volume"] > 0].tail(1)
+    repeated = pd.concat([frame, closing.assign(volume=777_000)])
+
+    with get_sync_db() as session:
+        ingest.ensure_bars(
+            session, SYMBOL, sessions=1, fetch=lambda *_: repeated, today=day
+        )
+        session.commit()
+        rows, _total = _totals(session)
+        # The session is still usable, which is the whole point: a write after
+        # the ingest is what a Study does next.
+        assert session.execute(select(func.count(BarIntraday15m.symbol))).scalar() >= 1
+
+    assert rows == len(session_window.SESSION_BUCKETS)
+
+    with get_sync_db() as session:
+        last = session.execute(
+            select(BarIntraday15m.volume)
+            .where(BarIntraday15m.symbol == SYMBOL)
+            .order_by(BarIntraday15m.bucket_start.desc())
+            .limit(1)
+        ).scalar_one()
+    assert last == 777_000
+
+
 def test_a_cold_symbol_is_asked_for_the_provider_ceiling():
     asked: list[tuple[date, date]] = []
 

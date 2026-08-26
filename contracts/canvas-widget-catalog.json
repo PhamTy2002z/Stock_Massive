@@ -23,12 +23,28 @@
       "purpose": "Bảng số thuần — cũng là fallback khi viewer không biết widget"
     },
     {
+      "name": "line_series",
+      "version": 1,
+      "frameKinds": [
+        "series"
+      ],
+      "purpose": "Đường theo trục thời gian, tối đa hai trục giá trị"
+    },
+    {
       "name": "ranked_bars",
       "version": 1,
       "frameKinds": [
         "table"
       ],
       "purpose": "Xếp hạng có nhãn, dài nhất trên cùng"
+    },
+    {
+      "name": "scatter_quadrant",
+      "version": 1,
+      "frameKinds": [
+        "table"
+      ],
+      "purpose": "Điểm trên hai trục, chia bốn vùng bằng đường tham chiếu"
     },
     {
       "name": "session_heatmap",

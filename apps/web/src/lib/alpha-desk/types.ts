@@ -2,8 +2,8 @@
  * The shapes the transport puts on the wire, as the browser reads them.
  *
  * Hand-written against the event contract in `docs/streaming-topology.md` and
- * the backend's own `as_wire()` methods rather than generated: the seven event
- * types and the envelope are a fixed contract with a version field, and a
+ * the backend's own `as_wire()` methods rather than generated: the event types
+ * and the envelope are a fixed contract with a version field, and a
  * generator would produce a moving type for something that is deliberately not
  * moving.
  *
@@ -12,11 +12,19 @@
  * disagree about a field that already has exactly one name.
  */
 
-/** The seven event types of the current contract. */
+/** The eight event types of the current contract. */
 export type TurnEventType =
   | "turn.snapshot"
   | "content.delta"
   | "tool.call"
+  /**
+   * A Study produced a canvas and the row holding it is committed.
+   *
+   * Additive rather than an envelope bump, which is why it sits in the same
+   * union: a client subscribes by event name, so one that never asks for this
+   * reads the Turn exactly as it did before.
+   */
+  | "canvas.ready"
   | "turn.completed"
   | "turn.incomplete"
   | "turn.failed"
@@ -153,6 +161,84 @@ export interface ToolResult {
 }
 
 /**
+ * One canvas a Turn produced, as the stream announces it and a message keeps it.
+ *
+ * **No numbers.** The matrix a picture is drawn from lives in one row and
+ * travels on one request — the fetch that happens when a reader opens the panel.
+ * Every open tab receives this, and a payload carrying the cells would put them
+ * back on the channel the whole arrangement exists to keep them off.
+ *
+ * `blockCount` is here so the panel can draw a skeleton of the right height the
+ * instant it hears, rather than an empty box that jumps when the fetch lands.
+ */
+export interface CanvasAnnouncement {
+  artifactId: string
+  studyName: string
+  title: string
+  blockCount: number
+  /** Which round of the tool loop produced it. Files it beside that round. */
+  round: number
+}
+
+/**
+ * One frame: a series, a matrix, or a table, positional against its columns.
+ *
+ * Rows are arrays rather than objects because a heatmap is mostly cells, and a
+ * list of objects would repeat every column name once per session.
+ *
+ * `labels` is the Vietnamese a person reads, and it comes from the server
+ * because the column names were chosen by whoever wrote the Study — a label
+ * invented here would be this layer interpreting a number it does not own.
+ */
+export interface Frame {
+  kind: "series" | "matrix" | "table"
+  columns: string[]
+  rows: unknown[][]
+  unit: string | null
+  labels: Record<string, string>
+}
+
+/** One widget on the canvas, the frame it draws, and the options the server chose. */
+export interface CanvasBlock {
+  widget: string
+  widgetVersion: number
+  frame: string
+  options: Record<string, unknown>
+}
+
+export interface CanvasSpec {
+  title: string
+  blocks: CanvasBlock[]
+}
+
+/**
+ * Where the numbers came from, frozen when they were computed.
+ *
+ * `asOf` is the freeze, and the reason a re-opened Thread renders rather than
+ * recomputes. The four fields are shown together: a date without the health, or
+ * a health without the session count, is a fact a reader cannot weigh.
+ */
+export interface Provenance {
+  source: string
+  asOf: string
+  sessionsUsed: number
+  health: "normal" | "degraded" | "unavailable"
+  reason: string | null
+}
+
+/** One Study run, as the canvas endpoint serves it. Immutable by design. */
+export interface ArtifactPayload {
+  id: string
+  study_name: string
+  study_version: number
+  params: Record<string, unknown>
+  canvas_spec: CanvasSpec
+  frames: Record<string, Frame>
+  provenance: Provenance
+  created_at: string
+}
+
+/**
  * One thing the Turn said on its way to the answer.
  *
  * Prose from a round that went on to call tools: the model saying what it is
@@ -173,6 +259,8 @@ export interface SnapshotData {
   /** What was said on the way to it, by round. Never part of `text`. */
   thoughts: Thought[]
   tool_calls: ToolCall[]
+  /** The canvases announced so far. Restated so a reconnect is still told. */
+  canvases: CanvasAnnouncement[]
   /** The canonical assistant message, once a terminal transaction wrote one. */
   message_id: number | null
   /**
@@ -198,6 +286,8 @@ export interface TurnEvent {
 export interface AssistantContent {
   text: string
   tool_calls: ToolCall[]
+  /** The pictures this answer was written about. Ids and titles, never cells. */
+  canvases: CanvasAnnouncement[]
 }
 
 /** The user message, as the create transaction wrote it. */

@@ -226,40 +226,67 @@ def _bucket_statistics(
 ) -> list[_Bucket]:
     """Statistics for every bucket the window actually contains.
 
-    A bucket present in no session is left out entirely rather than reported as
-    zero everywhere: the axis it would occupy is the heatmap's, and the heatmap
-    keeps the full grid so the columns line up. Here, a bucket nobody traded in
-    on any session is not a finding.
+    A bucket present in **no** session is left out entirely: for a HOSE symbol
+    ``09:00`` is not a quiet quarter hour, it is a quarter hour the exchange does
+    not have, and a row of zeroes for it would be a finding about nothing. The
+    heatmap keeps the full grid so the columns line up; this list does not.
+
+    A bucket present in **some** sessions is a different thing, and every average
+    here is taken over the whole window rather than over the sessions the bucket
+    appeared in. That distinction is the correctness of the whole picture:
+    dividing by appearances says a bucket that traded once in thirty sessions had
+    a share of eighteen percent, and the four phases then sum to more than one.
+    Absent means nothing traded in that quarter hour that day, which is a zero.
     """
+    sessions = len(by_session)
     amounts: dict[str, list[float]] = {}
     shares: dict[str, list[float]] = {}
     spikes: dict[str, int] = {}
 
     for buckets in by_session.values():
         total = sum(buckets.values())
-        top = {
-            label
-            for label, _ in sorted(
-                buckets.items(), key=lambda item: item[1], reverse=True
-            )[:SPIKE_TOP_N]
-        }
+        for label in _spiking(buckets):
+            spikes[label] = spikes.get(label, 0) + 1
         for label, amount in buckets.items():
             amounts.setdefault(label, []).append(amount)
             shares.setdefault(label, []).append(amount / total if total else 0.0)
-            if label in top:
-                spikes[label] = spikes.get(label, 0) + 1
 
     return [
         _Bucket(
             label=label,
-            avg_amount=sum(amounts[label]) / len(amounts[label]),
-            median_amount=float(median(amounts[label])),
-            avg_share=sum(shares[label]) / len(shares[label]),
+            avg_amount=sum(amounts[label]) / sessions,
+            # Padded to the window before the median is taken, for the same
+            # reason the averages divide by it: the sessions this bucket is
+            # missing from are sessions it was worth nothing in.
+            median_amount=float(
+                median(amounts[label] + [0.0] * (sessions - len(amounts[label])))
+            ),
+            avg_share=sum(shares[label]) / sessions,
             spike_sessions=spikes.get(label, 0),
         )
         for label in session_window.SESSION_BUCKET_LABELS
         if label in amounts
     ]
+
+
+def _spiking(buckets: Mapping[str, float]) -> frozenset[str]:
+    """Which buckets are *unambiguously* among this session's largest.
+
+    Strictly greater than the largest amount that is not in the top
+    :data:`SPIKE_TOP_N`, which is the only tie-break that means anything. Taking
+    the first two of a sorted list breaks ties by whatever order the buckets
+    arrived in, which is the clock — so on a session where every bucket traded
+    the same amount, ``09:15`` and ``09:30`` collected a spike apiece and the
+    frequency became a fact about sorting rather than about liquidity.
+
+    A session with no more buckets than the cut awards nothing: where everything
+    is in the top two, being in the top two distinguishes nothing.
+    """
+    if len(buckets) <= SPIKE_TOP_N:
+        return frozenset()
+    ordered = sorted(buckets.values(), reverse=True)
+    cut = ordered[SPIKE_TOP_N]
+    return frozenset(label for label, amount in buckets.items() if amount > cut)
 
 
 def _phase_summary(buckets: Sequence[_Bucket]) -> dict[str, float]:

@@ -138,6 +138,7 @@ from .messages import (
     TranscriptTurn,
     TurnToolCall,
     build_messages,
+    canvas_of,
     display_results,
     estimate_tokens,
     outcome_of,
@@ -562,6 +563,15 @@ class TurnRequest:
     history: tuple[TranscriptTurn, ...] = ()
     summary: str | None = None
     summarised_turns: int = 0
+    #: The Turn's own id, where the caller has one.
+    #:
+    #: Optional because the loop has always been runnable without one — a test
+    #: drives it directly, and nothing in answering a question needs it. What
+    #: needs it is a tool that writes a row a reader will re-open: an artifact
+    #: has to say which answer it belongs to, and the model must not be the one
+    #: to say, so it travels here and into ``ToolContext`` rather than into a
+    #: schema.
+    turn_id: uuid.UUID | str | None = None
 
 
 
@@ -585,6 +595,10 @@ class TurnDraft:
     #: drew — a reader who reconnected must not lose the timeline.
     answer: str | None = None
     thoughts: tuple[Mapping[str, Any], ...] = ()
+    #: The canvases produced so far, as the ``canvas.ready`` events announced
+    #: them. Checkpointed for the same reason the thoughts are: a snapshot built
+    #: from a checkpoint has to say everything the stream already said.
+    canvases: tuple[Mapping[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -604,6 +618,8 @@ class TurnOutcome:
     #: from, and these two are what a screen draws.
     answer: str | None = None
     thoughts: tuple[Mapping[str, Any], ...] = ()
+    #: The canvases this Turn produced, so the canonical message can name them.
+    canvases: tuple[Mapping[str, Any], ...] = ()
     #: Wall-clock milliseconds this Turn took, for the line that says so.
     elapsed_ms: int = 0
     #: The route's id for the last call it answered, so a disputed answer can be
@@ -613,12 +629,18 @@ class TurnOutcome:
 
 
 class TurnPublisher(Protocol):
-    """The two events this loop emits, as the transport must accept them.
+    """The three events this loop emits, as the transport must accept them.
 
     A protocol rather than an import so that the loop depends on the shape of
-    the transport and not on its module: the same two methods are all a test
-    needs to observe, and the SSE layer is free to add events of its own that
-    the loop knows nothing about.
+    the transport and not on its module: these methods are all a test needs to
+    observe, and the SSE layer is free to add events of its own that the loop
+    knows nothing about.
+
+    ``canvas_ready`` is reached through :func:`getattr` rather than called
+    outright, so a transport written before Studies existed — a test double, an
+    older surface — still streams a Turn that produced one instead of failing on
+    the announcement. The artifact is committed either way; what such a reader
+    loses is the prompt to open it, not the picture.
     """
 
     def content_delta(self, text: str) -> Any:
@@ -626,6 +648,9 @@ class TurnPublisher(Protocol):
 
     def tool_call(self, payload: Mapping[str, Any]) -> Any:
         """One tool call's current state: ``id``, ``name``, ``status``, ``summary``."""
+
+    def canvas_ready(self, payload: Mapping[str, Any]) -> Any:
+        """One canvas a Study produced: the id to fetch it by, and its shape."""
 
 
 Checkpoint = Callable[[TurnDraft], Awaitable[None] | None]
@@ -686,6 +711,11 @@ class _TurnState:
     answer: str | None = None
     #: Prose written in a round that went on to call tools, keyed by that round.
     thoughts: dict[int, str] = field(default_factory=dict)
+    #: The canvases this Turn's tools produced, keyed by artifact id and in the
+    #: order they were announced. Held so a checkpoint carries them: a reader
+    #: rebuilding from one has to be told a picture exists, and the numbers it
+    #: draws are in a row this loop never sees.
+    canvases: dict[str, Mapping[str, Any]] = field(default_factory=dict)
     tool_rounds: int = 0
     usage: Usage = field(default_factory=Usage)
     calls: list[TurnToolCall] = field(default_factory=list)
@@ -733,6 +763,7 @@ class _TurnState:
             thoughts=self.narration(),
             rounds_used=self.tool_rounds,
             tool_calls=tuple(self.calls),
+            canvases=tuple(self.canvases.values()),
             boundary=boundary,
         )
 
@@ -806,7 +837,8 @@ class AgentLoop:
         executor = ToolExecutor(
             context=registry.ToolContext(
                 user_id=request.user_id,
-                thread_id=_thread_uuid(request.thread_id),
+                thread_id=_as_uuid(request.thread_id),
+                turn_id=_as_uuid(request.turn_id),
                 now=self._clock(),
             ),
             guardrails=TurnGuardrails(),
@@ -1466,6 +1498,16 @@ class AgentLoop:
         for position in range(offset, len(state.calls)):
             self._publish_call(state.calls[position])
 
+        # After the calls, because a reader watches the row that produced the
+        # picture settle and then the picture arrive. Read off the structured
+        # payload rather than the result text, for the reason ``outcome`` above
+        # is: the executor is holding the object.
+        if outcome is not None:
+            for result in outcome.results:
+                canvas = canvas_of(result.tool_name, result.payload)
+                if canvas is not None:
+                    self._publish_canvas(state, canvas)
+
         if timed_out:
             return TOOL_TIMEOUT
 
@@ -1581,6 +1623,19 @@ class AgentLoop:
         if self._publisher is not None:
             self._publisher.tool_call(call.as_wire())
 
+    def _publish_canvas(self, state: _TurnState, canvas: Mapping[str, Any]) -> None:
+        """Remember one canvas and announce it, in that order.
+
+        Remembered first because the checkpoint is what a reconnecting browser
+        rebuilds from, and a picture announced but not written down would be
+        lost to exactly the reader who most needs to be told about it.
+        """
+        payload = {**canvas, "round": state.tool_rounds}
+        state.canvases[str(payload["artifactId"])] = payload
+        announce = getattr(self._publisher, "canvas_ready", None)
+        if announce is not None:
+            announce(payload)
+
     async def _save(self, state: _TurnState, *, boundary: bool = False) -> None:
         if self._checkpoint is None:
             return
@@ -1635,6 +1690,7 @@ class AgentLoop:
             text=state.text,
             answer=state.answer,
             thoughts=state.narration(),
+            canvases=tuple(state.canvases.values()),
             elapsed_ms=int((time.monotonic() - state.started) * 1000),
             rounds_used=state.tool_rounds,
             rounds_exhausted=rounds_exhausted,
@@ -1660,17 +1716,20 @@ class AgentLoop:
         return time.monotonic() - state.started >= self._deadline
 
 
-def _thread_uuid(thread_id: uuid.UUID | str) -> uuid.UUID | None:
-    """The thread id as a UUID, or ``None`` when it is not one.
+def _as_uuid(identifier: uuid.UUID | str | None) -> uuid.UUID | None:
+    """One of the Turn's ids as a UUID, or ``None`` when it is not one.
 
-    ``None`` rather than a raise: the id reaches the tools only as the scope of a
-    memory read, and a Turn whose thread id is a test fixture should still be
-    answerable — the tools ask about the *user*, who is always known.
+    ``None`` rather than a raise: these ids reach the tools as the scope of a
+    read and as the owner of a row, and a Turn whose thread id is a test fixture
+    should still be answerable — the tools ask about the *user*, who is always
+    known, and a row with no owner is reachable by its own id.
     """
-    if isinstance(thread_id, uuid.UUID):
-        return thread_id
+    if isinstance(identifier, uuid.UUID):
+        return identifier
+    if identifier is None:
+        return None
     try:
-        return uuid.UUID(str(thread_id))
+        return uuid.UUID(str(identifier))
     except (TypeError, ValueError):
         return None
 

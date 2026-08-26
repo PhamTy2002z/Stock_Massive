@@ -17,7 +17,7 @@ because nothing on screen says it moved.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
@@ -29,8 +29,23 @@ from src.alpha.models import AgentArtifact
 from src.stocks.universe import build_universe
 
 from . import widgets
-from .contracts import CanvasSpec, StoredArtifact, StudyContext, StudyResult
+from .contracts import (
+    CanvasSpec,
+    StoredArtifact,
+    StudyContext,
+    StudyDefinition,
+    StudyResult,
+)
 from .registry import study
+
+#: Makes a Study's declared inputs present before it reads the store.
+#:
+#: Injected rather than imported, because the module that implements it holds
+#: the provider client: the suite, a smoke run and a live question should each
+#: choose whether this call reaches the network, and a default of ``None`` means
+#: the store is served exactly as it stands. ``tools/studies.py`` passes
+#: ``warmup.warm``; nothing else does.
+Warm = Callable[["StudyDefinition", "StudyContext"], None]
 
 
 class StudyParamsInvalid(ValueError):
@@ -51,6 +66,7 @@ def run(
     session: Session,
     turn_id: UUID | None = None,
     thread_id: UUID | None = None,
+    warm: Warm | None = None,
 ) -> StoredArtifact:
     """Run a registered Study and persist what it produced.
 
@@ -58,6 +74,13 @@ def run(
     outside a Turn — the smoke script, and any later precompute. An artifact
     with neither is reachable by id and by nothing else, which is exactly what a
     smoke run wants.
+
+    ``warm`` runs after the parameters are validated and before ``compute``
+    reads anything, so a question about a symbol the store has never held gets
+    its bars fetched rather than a refusal that reads as a statement about the
+    company. It runs inside the same session: the rows it writes are what the
+    read that follows sees, and a caller that rolls back loses the fetch with
+    the artifact rather than keeping half of it.
     """
     definition = study(name)
 
@@ -72,6 +95,9 @@ def run(
         as_of=datetime.now(timezone.utc),
         universe=build_universe(session).symbols,
     )
+
+    if warm is not None:
+        warm(definition, context)
 
     result = definition.compute(context)
     _check_frames_match_declaration(name, definition.frames, result)
@@ -127,7 +153,7 @@ def _check_frames_match_declaration(
 
 
 def _check_canvas_draws_what_exists(
-    name: str, spec: CanvasSpec, result: StudyResult, definition: Any
+    name: str, spec: CanvasSpec, result: StudyResult, definition: StudyDefinition
 ) -> None:
     declared = set(definition.widgets)
     for block in spec.blocks:
@@ -149,4 +175,4 @@ def _check_canvas_draws_what_exists(
             )
 
 
-__all__ = ["StudyParamsInvalid", "run"]
+__all__ = ["StudyParamsInvalid", "Warm", "run"]

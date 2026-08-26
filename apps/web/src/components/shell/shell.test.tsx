@@ -108,6 +108,14 @@ vi.mock("@/hooks/use-market-indices", () => ({
   useMarketIndices: () => ({ data: [], isPending: false }),
 }))
 
+// The Greeting in the empty conversation view reads the signed-in account.
+// The shell test cares about the layout, not the account query, so the auth
+// call is faked into a settled, signed-out state — enough for the plain
+// English line to render deterministically.
+vi.mock("@/hooks/use-auth", () => ({
+  useAuth: () => ({ user: null, isPending: false, isSigningOut: false }),
+}))
+
 vi.mock("@/hooks/use-sector-performance", () => ({
   useSectorPerformance: () => ({ data: { sectors: [] }, isPending: false }),
 }))
@@ -292,6 +300,53 @@ describe("the inspector against the sidebar", () => {
   })
 
 
+})
+
+describe("a canvas arriving mid-answer", () => {
+  it("opens the panel on it when the reader is not already reading something", () => {
+    setViewport(1600)
+    mount()
+
+    act(() => shell.dispatch({ type: "canvas-ready", artifactId: "artifact-1" }))
+
+    expect(shell.state.inspector).toBe("canvas")
+    expect(shell.state.canvasArtifactId).toBe("artifact-1")
+  })
+
+  it("leaves a tab the reader chose alone, and still remembers the picture", () => {
+    // Auto-open means auto-open *once*. A reader who has deliberately gone to
+    // the sources of an answer must not have the panel taken off them by the
+    // next round of the same Turn.
+    setViewport(1600)
+    mount()
+    act(() => shell.dispatch({ type: "open-sources", messageId: 7 }))
+
+    act(() => shell.dispatch({ type: "canvas-ready", artifactId: "artifact-1" }))
+
+    expect(shell.state.inspector).toBe("sources")
+    expect(shell.state.canvasArtifactId).toBe("artifact-1")
+  })
+
+  it("may open the panel again once the reader has closed it", () => {
+    setViewport(1600)
+    mount()
+    act(() => shell.dispatch({ type: "open-sources", messageId: 7 }))
+    act(() => shell.dispatch({ type: "close-inspector" }))
+
+    act(() => shell.dispatch({ type: "canvas-ready", artifactId: "artifact-2" }))
+
+    expect(shell.state.inspector).toBe("canvas")
+  })
+
+  it("opens on the picture the reader picked out of the transcript", () => {
+    setViewport(1600)
+    mount()
+
+    act(() => shell.dispatch({ type: "open-canvas", artifactId: "artifact-3" }))
+
+    expect(shell.state.inspector).toBe("canvas")
+    expect(shell.state.canvasArtifactId).toBe("artifact-3")
+  })
 })
 
 describe("what floats above the surface", () => {

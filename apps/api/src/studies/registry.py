@@ -10,10 +10,12 @@ silent at runtime:
   catalog with nothing raised;
 * a widget the browser has no component for — a blank panel, discovered by a
   person, in Vietnamese;
+* an input nothing fetches — a refusal on a live question that reads as a
+  statement about the company rather than about the store;
 * a ``view`` that names a frame ``compute`` never produces — an exception on a
   live question rather than at the moment the mismatch was written.
 
-The first two are refused here. The third cannot be known without data, so the
+The first three are refused here. The last cannot be known without data, so the
 runner checks it on every run (``runner.py``) and a test pins it per Study.
 """
 
@@ -24,7 +26,7 @@ from collections.abc import Mapping
 from pydantic import BaseModel
 
 from . import widgets
-from .contracts import StudyDefinition
+from .contracts import KNOWN_REQUIREMENTS, StudyDefinition
 
 REGISTRY: dict[str, StudyDefinition] = {}
 
@@ -60,6 +62,14 @@ def _check(definition: StudyDefinition) -> None:
             f"study {definition.name!r} must declare params as a pydantic model "
             "so the schema the model reads and the validation the server runs "
             "come from one source"
+        )
+    unfetchable = [
+        name for name in definition.requires if name not in KNOWN_REQUIREMENTS
+    ]
+    if unfetchable:
+        raise ImportError(
+            f"study {definition.name!r} requires inputs nothing knows how to "
+            "fetch: " + ", ".join(unfetchable)
         )
     if not definition.frames:
         raise ImportError(
@@ -105,6 +115,11 @@ def catalog() -> tuple[Mapping[str, object], ...]:
             "question": definition.question,
             "displayName": definition.display_name,
             "params": definition.params_schema,
+            # What this Study reads before it computes. In the catalog because
+            # the answer to "can I ask this now" is a fact about the inputs, and
+            # a model that cannot see them would have to discover the answer by
+            # asking.
+            "requires": list(definition.requires),
         }
         for definition in sorted(REGISTRY.values(), key=lambda item: item.name)
     )

@@ -37,7 +37,7 @@ const writeShellViewToHistory = (_view: ShellView): void => {}
 const shellViewFromSearch = (_search: string): ShellView | null => null
 
 /** Which tab the right-hand inspector shows, or `null` when it is closed. */
-export type InspectorTab = "market" | "symbol" | "news" | "sources"
+export type InspectorTab = "market" | "symbol" | "news" | "sources" | "canvas"
 
 /** The things that float above the surface. One at a time, always. */
 export type Overlay = "account" | "attach" | "thread" | "share" | "palette" | "settings"
@@ -66,6 +66,23 @@ interface ShellState {
    * subject — the tab has nothing to show without an answer to show it for.
    */
   sourcesMessageId: number | null
+  /**
+   * Which canvas the inspector is showing, or null.
+   *
+   * An artifact id rather than the spec: the numbers are a TanStack Query
+   * resource keyed by that id, and a copy here would be a second version of one
+   * picture that could disagree with the one being fetched.
+   */
+  canvasArtifactId: string | null
+  /**
+   * Whether the reader chose the tab they are on.
+   *
+   * A canvas arriving mid-answer opens its tab, which is right the first time
+   * and wrong every time after a reader has deliberately gone back to Sources.
+   * Set by any tab the reader opens themselves and cleared when the panel
+   * closes, so "auto-open" means *auto-open once*, not "take the panel over".
+   */
+  inspectorPinned: boolean
   selected: SelectedSymbol
   /** The symbol the composer sends as the Turn's analysis context. */
   contextSymbol: string | null
@@ -100,6 +117,11 @@ type Action =
   | { type: "open-inspector"; tab: InspectorTab }
   // Opens the sources tab *and* says whose sources, which is one user action.
   | { type: "open-sources"; messageId: number }
+  // The same for a canvas: which picture, opened by the reader.
+  | { type: "open-canvas"; artifactId: string }
+  // A canvas the Turn produced. Opens the panel only where the reader has not
+  // pinned another tab — an answer must not take the panel off them mid-read.
+  | { type: "canvas-ready"; artifactId: string }
   | { type: "close-inspector" }
   | { type: "toggle-inspector-wide" }
   | { type: "resize-inspector"; width: number }
@@ -144,6 +166,8 @@ const INITIAL: ShellState = {
   inspectorWidth: null,
   inspectorWide: false,
   sourcesMessageId: null,
+  canvasArtifactId: null,
+  inspectorPinned: false,
   dragging: false,
   selected: { symbol: "VCB", name: "Ngân hàng TMCP Ngoại thương Việt Nam", exchange: "HOSE" },
   contextSymbol: null,
@@ -181,20 +205,51 @@ function reduce(state: ShellState, action: Action): ShellState {
       return { ...state, sidebarOpen: !state.sidebarOpen }
 
     case "open-inspector":
-      return foldSidebarIfCramped({ ...state, inspector: action.tab, overlay: null })
+      return foldSidebarIfCramped({
+        ...state,
+        inspector: action.tab,
+        inspectorPinned: true,
+        overlay: null,
+      })
 
     case "open-sources":
       return foldSidebarIfCramped({
         ...state,
         inspector: "sources",
         sourcesMessageId: action.messageId,
+        inspectorPinned: true,
         overlay: null,
       })
 
+    case "open-canvas":
+      return foldSidebarIfCramped({
+        ...state,
+        inspector: "canvas",
+        canvasArtifactId: action.artifactId,
+        inspectorPinned: true,
+        overlay: null,
+      })
+
+    case "canvas-ready": {
+      // The id is remembered whatever the reader is looking at: they may open
+      // the tab a minute later, and the panel has to know which picture.
+      const next: ShellState = { ...state, canvasArtifactId: action.artifactId }
+      if (state.inspectorPinned && state.inspector !== null) return next
+      return foldSidebarIfCramped({ ...next, inspector: "canvas", overlay: null })
+    }
+
     case "close-inspector":
       // The width goes back to the default with it. A panel reopened at
-      // yesterday's drag width would be a setting nobody asked to keep.
-      return { ...state, inspector: null, inspectorWide: false, inspectorWidth: null }
+      // yesterday's drag width would be a setting nobody asked to keep — and
+      // the pin goes with it, so the next answer's canvas may open the panel
+      // the reader has just put away.
+      return {
+        ...state,
+        inspector: null,
+        inspectorWide: false,
+        inspectorWidth: null,
+        inspectorPinned: false,
+      }
 
     case "toggle-inspector-wide":
       return foldSidebarIfCramped({

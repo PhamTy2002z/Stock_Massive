@@ -237,6 +237,79 @@ describe("tool calls", () => {
   })
 })
 
+describe("a canvas", () => {
+  const CANVAS = {
+    artifactId: "artifact-1",
+    studyName: "intraday_liquidity_profile",
+    title: "Thanh khoản trong phiên — STB",
+    blockCount: 4,
+    round: 0,
+  }
+
+  it("is remembered by the id the panel will fetch it with", () => {
+    const state = apply(started(), event("canvas.ready", 1, CANVAS))
+
+    expect(state.canvases).toEqual([CANVAS])
+    expect(state.seq).toBe(1)
+  })
+
+  it("is replaced rather than duplicated when it is announced twice", () => {
+    // One Study run has one id, so a second announcement is a republish. The
+    // sequence still advances: both events happened.
+    const state = apply(
+      started(),
+      event("canvas.ready", 1, CANVAS),
+      event("canvas.ready", 2, { ...CANVAS, title: "Đã đổi tên" }),
+    )
+
+    expect(state.canvases).toHaveLength(1)
+    expect(state.canvases[0].title).toBe("Đã đổi tên")
+    expect(state.seq).toBe(2)
+  })
+
+  it("is dropped when it names no artifact, because a card with no id opens nothing", () => {
+    const state = apply(started(), event("canvas.ready", 1, { title: "Không có id" }))
+
+    expect(state.canvases).toEqual([])
+    expect(state.seq).toBe(1)
+  })
+
+  it("survives a reconnect, because a snapshot restates it", () => {
+    const state = apply(
+      started(),
+      event("canvas.ready", 1, CANVAS),
+      event("turn.snapshot", 0, {
+        through_seq: 5,
+        status: "running",
+        terminal_reason: null,
+        text: "Thanh khoản STB",
+        tool_calls: [],
+        canvases: [CANVAS],
+        message_id: null,
+      }),
+    )
+
+    expect(state.canvases).toEqual([CANVAS])
+  })
+
+  it("is gone from a snapshot that names none, because a snapshot replaces", () => {
+    const state = apply(
+      started(),
+      event("canvas.ready", 1, CANVAS),
+      event("turn.snapshot", 0, {
+        through_seq: 5,
+        status: "running",
+        terminal_reason: null,
+        text: "",
+        tool_calls: [],
+        message_id: null,
+      }),
+    )
+
+    expect(state.canvases).toEqual([])
+  })
+})
+
 describe("narration", () => {
   const thought = (seq: number, text: string, round = 0) =>
     event("content.delta", seq, { text, kind: "thought", round })

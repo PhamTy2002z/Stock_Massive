@@ -18,8 +18,12 @@ export const API_ORIGIN = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8010}`
  * A flag names a message id, and the draft above it does not have one yet, so
  * the flag control is mounted on the persisted message and nowhere else. Seeing
  * it is how the test knows the draft was replaced rather than added to.
+ *
+ * The name is the *entry point* to the four reasons rather than the reason
+ * dialogue itself: pressing it opens them, and the row of actions is what the
+ * canonical message grew when the verdict was split in two.
  */
-export const CANONICAL_MARK = { role: "button" as const, name: "Báo lỗi câu trả lời" }
+export const CANONICAL_MARK = { role: "button" as const, name: "Chưa đúng" }
 
 /** The answer on screen, draft or canonical: they share one shell by design. */
 export const ANSWER_LABEL = "Assistant message"
@@ -102,6 +106,35 @@ export async function churn(
 export async function finish(request: APIRequestContext): Promise<void> {
   const response = await request.post(`${API_ORIGIN}/e2e/turn/finish`)
   expect(response.ok()).toBeTruthy()
+}
+
+/** The Thread this tab is in, read from where the desk remembers it. */
+export async function liveThreadId(page: Page): Promise<string> {
+  const threadId = await page.evaluate(() => {
+    const raw = window.sessionStorage.getItem("alpha-desk.session")
+    return raw ? (JSON.parse(raw).threadId as string | null) : null
+  })
+  expect(threadId, "the desk should have remembered its Thread").toBeTruthy()
+  return threadId as string
+}
+
+/**
+ * Write one artifact for this Turn and announce it on the stream.
+ *
+ * Both halves, because the browser does both: the event opens the panel and the
+ * id it carried is what fetches the row. Announcing without writing would prove
+ * only that a tab can render a spinner.
+ */
+export async function draw(
+  request: APIRequestContext,
+  threadId: string,
+  turnId: string,
+): Promise<string> {
+  const response = await request.post(`${API_ORIGIN}/e2e/turn/draw`, {
+    data: { thread_id: threadId, turn_id: turnId },
+  })
+  expect(response.ok()).toBeTruthy()
+  return (await response.json()).artifact_id as string
 }
 
 /** The Turn this tab is watching, read from where the desk remembers it. */

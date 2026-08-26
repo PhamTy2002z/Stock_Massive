@@ -71,8 +71,44 @@ EXPECTED_CATALOG = {
         registry.ContentTrust.TRUSTED_STRUCTURED,
         registry.ToolConcurrency.SERIALIZED,
     ),
+    "get_series": (
+        "signals",
+        registry.ToolEffect.READ,
+        registry.ToolIdempotency.IDEMPOTENT,
+        registry.ToolAccess.STORE,
+        registry.ContentTrust.TRUSTED_STRUCTURED,
+        registry.ToolConcurrency.SERIALIZED,
+    ),
     "check_price_claim": (
         "signals",
+        registry.ToolEffect.READ,
+        registry.ToolIdempotency.IDEMPOTENT,
+        registry.ToolAccess.STORE,
+        registry.ContentTrust.TRUSTED_STRUCTURED,
+        registry.ToolConcurrency.SERIALIZED,
+    ),
+    "list_studies": (
+        "studies",
+        registry.ToolEffect.READ,
+        registry.ToolIdempotency.IDEMPOTENT,
+        registry.ToolAccess.STORE,
+        registry.ContentTrust.TRUSTED_STRUCTURED,
+        registry.ToolConcurrency.SERIALIZED,
+    ),
+    # ``run_study`` writes a row and can reach a provider, and is still declared
+    # a store read: what it hands the model is arithmetic this deployment
+    # performed, and the row it writes is the answer being kept rather than
+    # anything a reader already holds changing.
+    "run_study": (
+        "studies",
+        registry.ToolEffect.READ,
+        registry.ToolIdempotency.IDEMPOTENT,
+        registry.ToolAccess.STORE,
+        registry.ContentTrust.TRUSTED_STRUCTURED,
+        registry.ToolConcurrency.SERIALIZED,
+    ),
+    "render_canvas": (
+        "studies",
         registry.ToolEffect.READ,
         registry.ToolIdempotency.IDEMPOTENT,
         registry.ToolAccess.STORE,
@@ -112,7 +148,11 @@ def test_shipped_schema_bytes_order_output_and_display_are_locked():
         "recall_facts": ("Đọc lại ghi chú", True, None, "query", False),
         "list_fields": ("Xem danh mục chỉ báo", True, 32_000, None, True),
         "get_field": ("Đọc chỉ báo", False, 32_000, None, True),
+        "get_series": ("Đọc chuỗi chỉ báo", False, 32_000, None, True),
         "check_price_claim": ("Kiểm mức giá", False, 4_000, None, True),
+        "list_studies": ("Xem danh mục phân tích", True, 32_000, None, True),
+        "run_study": ("Chạy phân tích", False, 32_000, None, True),
+        "render_canvas": ("Vẽ canvas", False, 32_000, None, True),
     }
     with isolated_registry():
         tools.register_all()
@@ -125,7 +165,7 @@ def test_shipped_schema_bytes_order_output_and_display_are_locked():
                 separators=(",", ":"),
                 ensure_ascii=False,
             ).encode("utf-8")
-        ).hexdigest() == "492ce59feb54827f2863ba29ffc383bb6fa022a663dcdc0ba9a0f40a056d3502"
+        ).hexdigest() == "55b9ea0a0b42d94eacd401282ddcfcf34d62e378c91a4511c21555937d1d7a79"
         assert {
             entry.name: (
                 entry.display_name,
@@ -139,12 +179,18 @@ def test_shipped_schema_bytes_order_output_and_display_are_locked():
 
 
 def test_lane_selection_and_order_are_explicit_and_do_not_share_authority():
-    assert toolsets.CHAT_TOOLSETS == ("web", "memory", "signals")
+    assert toolsets.CHAT_TOOLSETS == ("web", "memory", "signals", "studies")
     assert toolsets.resolve_toolset(toolsets.CHAT_TOOLSETS) == tuple(EXPECTED_CATALOG)
     assert toolsets.resolve_toolset("signals") == (
         "list_fields",
         "get_field",
+        "get_series",
         "check_price_claim",
+    )
+    assert toolsets.resolve_toolset("studies") == (
+        "list_studies",
+        "run_study",
+        "render_canvas",
     )
 
 

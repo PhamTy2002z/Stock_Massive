@@ -51,6 +51,7 @@ from src.agent.persistence import AgentPersistence
 from src.agent.service import AlphaDeskService, set_alpha_desk
 from src.agent.turns import TurnService
 from src.alpha.models import (
+    AgentArtifact,
     AgentKnowledge,
     AgentMessage,
     AgentThread,
@@ -118,12 +119,14 @@ class Control:
         self.release = asyncio.Event()
         self.text = ""
         self.publisher: Any | None = None
+        self.canvases: list[dict[str, Any]] = []
 
     def reset(self) -> None:
         self.started = asyncio.Event()
         self.release = asyncio.Event()
         self.text = ""
         self.publisher = None
+        self.canvases = []
 
     def say(self, text: str) -> None:
         """Publish one ``content.delta``, exactly as the loop would.
@@ -153,6 +156,26 @@ class Control:
         ).as_wire()
         for _ in range(count):
             self.publisher.tool_call(payload)
+
+
+    def draw(self, artifact_id: str) -> None:
+        """Persist one canvas and announce it, exactly as a Study round would.
+
+        Both halves, because the browser does both: it opens the panel on the
+        event and then fetches the row by the id the event carried. Announcing
+        without writing would prove only that a tab can render a spinner.
+        """
+        if self.publisher is None:
+            raise HTTPException(status_code=409, detail="No Turn is running")
+        canvas = {
+            "artifactId": artifact_id,
+            "studyName": "intraday_liquidity_profile",
+            "title": "Thanh khoản trong phiên — STB",
+            "blockCount": 1,
+            "round": 0,
+        }
+        self.canvases.append(canvas)
+        self.publisher.canvas_ready(canvas)
 
 
 CONTROL = Control()
@@ -195,6 +218,7 @@ class ScriptedLoop:
             rounds_used=0,
             rounds_exhausted=False,
             tool_calls=calls,
+            canvases=tuple(self._control.canvases),
             usage=Usage(),
         )
 
@@ -236,6 +260,7 @@ Base.metadata.create_all(
         AgentMessage.__table__,
         AgentToolCall.__table__,
         AgentTurn.__table__,
+        AgentArtifact.__table__,
         AgentKnowledge.__table__,
         LlmCallUsage.__table__,
     ],
@@ -256,6 +281,13 @@ class SayRequest(BaseModel):
 
 class ChurnRequest(BaseModel):
     count: int = 400
+
+
+class DrawRequest(BaseModel):
+    """Which Thread and Turn the canvas belongs to, so the fetch authorises."""
+
+    thread_id: str
+    turn_id: str
 
 
 class PurgeRequest(BaseModel):
@@ -296,6 +328,64 @@ async def churn(request: ChurnRequest) -> dict[str, int]:
     return {"published": request.count}
 
 
+@control_router.post("/turn/draw")
+async def draw(request: DrawRequest) -> dict[str, str]:
+    """Write one artifact for this Turn and announce it on the stream.
+
+    The frames are a small real one rather than the golden fixture: what the
+    browser acceptance is about is that the event opens the panel and the id
+    fetches the row through the real ownership join, and a thirty-by-seventeen
+    matrix would prove the same thing more slowly.
+    """
+    import uuid as _uuid
+
+    artifact_id = _uuid.uuid4()
+    with get_sync_db() as session:
+        session.add(
+            AgentArtifact(
+                id=artifact_id,
+                thread_id=_uuid.UUID(request.thread_id),
+                turn_id=_uuid.UUID(request.turn_id),
+                study_name="intraday_liquidity_profile",
+                study_version=1,
+                params={"symbol": "STB", "sessions": 30},
+                frames={
+                    "profile": {
+                        "kind": "series",
+                        "columns": ["bucket", "avg_volume"],
+                        "rows": [["09:15", 100000], ["14:45", 420000]],
+                        "unit": "shares",
+                        "labels": {
+                            "bucket": "Khung giờ",
+                            "avg_volume": "KL trung bình",
+                        },
+                    }
+                },
+                canvas_spec={
+                    "title": "Thanh khoản trong phiên — STB",
+                    "blocks": [
+                        {
+                            "widget": "bar_series",
+                            "widgetVersion": 1,
+                            "frame": "profile",
+                            "options": {"x": "bucket", "y": "avg_volume"},
+                        }
+                    ],
+                },
+                provenance={
+                    "source": "vnstock",
+                    "asOf": "2026-08-21T09:00:00+00:00",
+                    "sessionsUsed": 30,
+                    "health": "normal",
+                    "reason": None,
+                },
+            )
+        )
+        session.commit()
+    CONTROL.draw(str(artifact_id))
+    return {"artifact_id": str(artifact_id)}
+
+
 @control_router.post("/turn/finish")
 async def finish() -> dict[str, bool]:
     CONTROL.release.set()
@@ -322,6 +412,11 @@ async def purge(request: PurgeRequest) -> dict[str, bool]:
             .all()
         )
         if threads:
+            # Before the Turns: an artifact points at both, and the cascade is
+            # the database's rather than this endpoint's to rely on.
+            session.execute(
+                delete(AgentArtifact).where(AgentArtifact.thread_id.in_(threads))
+            )
             session.execute(delete(AgentTurn).where(AgentTurn.thread_id.in_(threads)))
             session.execute(
                 delete(AgentToolCall).where(AgentToolCall.thread_id.in_(threads))

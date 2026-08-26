@@ -5,6 +5,7 @@ import { useState } from "react"
 import { terminalSentence } from "@/lib/alpha-desk/copy"
 import type { AssistantView } from "@/lib/alpha-desk/transcript"
 import type { FlagReason } from "@/lib/alpha-desk/types"
+import { CanvasCard } from "./canvas-card"
 import { FlagAction } from "./flag-action"
 import { FollowUps } from "./follow-ups"
 import { Markdown } from "./markdown"
@@ -49,6 +50,7 @@ export function AssistantMessage({
   onRegenerate,
   onFollowUp,
   onOpenSources,
+  onOpenCanvas,
   className,
 }: {
   view: AssistantView
@@ -66,6 +68,8 @@ export function AssistantMessage({
   onFollowUp?: (text: string) => void
   /** Opens the panel listing every page behind this answer. */
   onOpenSources?: (messageId: number) => void
+  /** Opens the panel drawing one of the pictures this answer produced. */
+  onOpenCanvas?: (artifactId: string) => void
   className?: string
 }) {
   // Whether the reason menu is open. Held here rather than inside the action
@@ -97,6 +101,12 @@ export function AssistantMessage({
         <p role="status" className="text-meta text-muted-foreground">
           {terminalSentence(null)}
         </p>
+      )}
+
+      {/* Above the actions and above the sources, because a picture the answer
+          was written about is closer to the answer than the pages behind it. */}
+      {onOpenCanvas !== undefined && (
+        <CanvasCard canvases={view.canvases} onOpen={onOpenCanvas} />
       )}
 
       {/* Above the actions, because it is about the answer rather than about

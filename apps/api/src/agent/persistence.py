@@ -27,6 +27,7 @@ from src.alpha.models import (
     TURN_COMPLETE,
     TURN_INCOMPLETE,
     TURN_RUNNING,
+    AgentArtifact,
     AgentMessage,
     AgentThread,
     AgentToolCall,
@@ -106,6 +107,33 @@ class MessageRecord:
     # the same transcript read for the same purpose: an answer already marked
     # helpful must come back marked.
     helpful_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class ArtifactRecord:
+    """One persisted Study run, as the canvas endpoint serves it.
+
+    ``frames`` is here and nowhere near a message: this record is built for the
+    browser, which draws the numbers, and the model's whole view of the same run
+    was the headline it was handed when the tool answered.
+
+    ``as_of`` rides inside ``provenance`` rather than as a column of its own,
+    because it is one of four facts a reader needs together — where the numbers
+    came from, when they were frozen, how many sessions they cover, and under
+    what condition — and splitting one out invites a surface that shows it
+    without the other three.
+    """
+
+    id: uuid.UUID
+    thread_id: uuid.UUID | None
+    turn_id: uuid.UUID | None
+    study_name: str
+    study_version: int
+    params: Mapping[str, Any]
+    frames: Mapping[str, Any]
+    canvas_spec: Mapping[str, Any]
+    provenance: Mapping[str, Any]
+    created_at: datetime
 
 
 @dataclass(frozen=True)
@@ -271,6 +299,21 @@ def _message_record(row: AgentMessage) -> MessageRecord:
         flagged_reason=row.flagged_reason,
         flagged_at=row.flagged_at,
         helpful_at=row.helpful_at,
+    )
+
+
+def _artifact_record(row: AgentArtifact) -> ArtifactRecord:
+    return ArtifactRecord(
+        id=row.id,
+        thread_id=row.thread_id,
+        turn_id=row.turn_id,
+        study_name=row.study_name,
+        study_version=row.study_version,
+        params=dict(row.params),
+        frames=dict(row.frames),
+        canvas_spec=dict(row.canvas_spec),
+        provenance=dict(row.provenance),
+        created_at=row.created_at,
     )
 
 
@@ -443,6 +486,40 @@ class AgentPersistence:
                 .where(AgentMessage.id == message_id, AgentThread.user_id == user_id)
             ).scalar_one_or_none()
             return None if row is None else _message_record(row)
+
+    # -- one canvas ------------------------------------------------------
+
+    async def read_artifact(
+        self, user_id: int, artifact_id: uuid.UUID | str
+    ) -> ArtifactRecord | None:
+        """One Study run, but only if this user owns the Thread it was run in.
+
+        Ownership is a join for the reason :meth:`read_message` joins:
+        ``agent_artifact`` has no ``user_id`` and should not grow one.
+
+        A row with no Thread — a smoke run, a precompute — is therefore
+        unreadable through this route, by anybody. That is the intended answer
+        rather than a gap: such a run belongs to no conversation, so there is no
+        reader it could be *theirs*, and the alternative is an endpoint whose
+        authorisation depends on a nullable column being non-null.
+        """
+        return await asyncio.to_thread(
+            self._read_artifact, user_id, _uuid(artifact_id)
+        )
+
+    def _read_artifact(
+        self, user_id: int, artifact_id: uuid.UUID
+    ) -> ArtifactRecord | None:
+        with self._session_factory() as session:
+            row = session.execute(
+                select(AgentArtifact)
+                .join(AgentThread, AgentThread.id == AgentArtifact.thread_id)
+                .where(
+                    AgentArtifact.id == artifact_id,
+                    AgentThread.user_id == user_id,
+                )
+            ).scalar_one_or_none()
+            return None if row is None else _artifact_record(row)
 
     # -- flagging a message (#99) -----------------------------------------
 
@@ -1123,6 +1200,7 @@ __all__ = [
     "TURN_INCOMPLETE",
     "TURN_RUNNING",
     "AgentPersistence",
+    "ArtifactRecord",
     "MessageRecord",
     "ThreadRecord",
     "ThreadView",

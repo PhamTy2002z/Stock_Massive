@@ -1531,12 +1531,13 @@ def test_one_message_is_charged_deterministically() -> None:
 
 
 def test_a_thread_id_that_is_not_a_uuid_still_answers() -> None:
-    from src.agent.loop import _thread_uuid
+    from src.agent.loop import _as_uuid
 
-    assert _thread_uuid("not-a-uuid") is None
+    assert _as_uuid("not-a-uuid") is None
+    assert _as_uuid(None) is None
     identifier = uuid.uuid4()
-    assert _thread_uuid(identifier) is identifier
-    assert _thread_uuid(str(identifier)) == identifier
+    assert _as_uuid(identifier) is identifier
+    assert _as_uuid(str(identifier)) == identifier
 
 
 def test_a_result_larger_than_its_budget_is_previewed_rather_than_refused() -> None:

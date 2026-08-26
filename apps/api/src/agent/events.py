@@ -1,6 +1,7 @@
 """The in-process publisher a Turn emits through, and the subscription seam.
 
-``docs/adr/0026`` fixes the seven event types and the replay contract; this
+``docs/adr/0026`` fixed the original seven event types and the replay
+contract, and a canvas announcement has since joined them additively; this
 module builds them, and :mod:`src.agent.sse` puts them on the wire. The split is
 deliberate: the publisher is what the loop emits through, so it has to exist
 before there is anywhere to stream from.
@@ -71,11 +72,16 @@ SUBSCRIBER_QUEUE_SIZE = 256
 
 
 class EventType(str, Enum):
-    """The seven v2 event types."""
+    """The eight v2 event types."""
 
     SNAPSHOT = "turn.snapshot"
     CONTENT_DELTA = "content.delta"
     TOOL_CALL = "tool.call"
+    #: A Study produced a canvas and the row holding it is committed. Additive
+    #: rather than a version bump: a client subscribes by event name, so one
+    #: that has never heard of this never asks for it and reads the Turn exactly
+    #: as it did before.
+    CANVAS_READY = "canvas.ready"
     COMPLETED = "turn.completed"
     INCOMPLETE = "turn.incomplete"
     FAILED = "turn.failed"
@@ -117,6 +123,21 @@ TOOL_CALL_FIELDS = (
     "results",
     "result_count",
     "kind",
+)
+
+#: The keys a ``canvas.ready`` payload is allowed to carry.
+#:
+#: An allowlist for the reason the tool call's is one, and a narrower one: the
+#: numbers a canvas draws are the whole point of keeping them out of a message,
+#: and an event that carried them would put them back on a channel every open
+#: tab receives. What travels is the id to fetch by and just enough to draw a
+#: skeleton of the right height while the fetch is in flight.
+CANVAS_FIELDS = (
+    "artifactId",
+    "studyName",
+    "title",
+    "blockCount",
+    "round",
 )
 
 
@@ -237,6 +258,10 @@ class TurnPublisher:
         # published twice — running, then its outcome — and the second event
         # replaces the first rather than adding a row.
         self._tool_calls: dict[str, dict[str, Any]] = {}
+        # The canvases this Turn produced, in the order they were announced and
+        # keyed by artifact id: a Study runs once per id, so a second event for
+        # one is a republish rather than a second picture.
+        self._canvases: dict[str, dict[str, Any]] = {}
         self._status = TURN_RUNNING
         self._terminal_reason: str | None = None
         # The canonical assistant message, once the terminal transaction has
@@ -299,6 +324,11 @@ class TurnPublisher:
         )
 
     @property
+    def canvases(self) -> tuple[Mapping[str, Any], ...]:
+        """Every canvas announced, in the order it was announced."""
+        return tuple(dict(canvas) for canvas in self._canvases.values())
+
+    @property
     def subscriber_count(self) -> int:
         return len(self._subscribers)
 
@@ -353,6 +383,13 @@ class TurnPublisher:
             {key: payload.get(key) for key in TOOL_CALL_FIELDS},
         )
 
+    def canvas_ready(self, payload: Mapping[str, Any]) -> TurnEvent:
+        """Announce one canvas, by the id the browser fetches it with."""
+        return self.publish(
+            EventType.CANVAS_READY,
+            {key: payload.get(key) for key in CANVAS_FIELDS},
+        )
+
     def terminal(
         self,
         event_type: EventType,
@@ -400,6 +437,10 @@ class TurnPublisher:
                 "text": self._text,
                 "thoughts": [dict(thought) for thought in self.thoughts],
                 "tool_calls": [dict(call) for call in self._tool_calls.values()],
+                # Restated rather than replayed, like the thoughts above: a
+                # reader who reconnects after the picture was announced must
+                # still be told there is one, or the panel never opens.
+                "canvases": [dict(canvas) for canvas in self._canvases.values()],
                 "message_id": self._message_id,
                 "elapsed_ms": self.elapsed_ms,
             },
@@ -428,6 +469,11 @@ class TurnPublisher:
             identifier = call.get("id")
             if identifier:
                 self._tool_calls[str(identifier)] = call
+        elif event.type is EventType.CANVAS_READY:
+            canvas = dict(event.data)
+            identifier = canvas.get("artifactId")
+            if identifier:
+                self._canvases[str(identifier)] = canvas
 
     def _fan_out(self, event: TurnEvent) -> None:
         surviving: list[Subscriber] = []
@@ -481,10 +527,12 @@ def snapshot_from_draft(
     text = ""
     tool_calls: Sequence[Mapping[str, Any]] = ()
     thoughts: Sequence[Mapping[str, Any]] = ()
+    canvases: Sequence[Mapping[str, Any]] = ()
     if draft:
         text = str(draft.get("text") or "")
         tool_calls = tuple(draft.get("tool_calls") or ())
         thoughts = tuple(draft.get("thoughts") or ())
+        canvases = tuple(draft.get("canvases") or ())
     return TurnEvent(
         seq=through_seq,
         type=EventType.SNAPSHOT,
@@ -496,6 +544,7 @@ def snapshot_from_draft(
             "text": text,
             "thoughts": [dict(thought) for thought in thoughts],
             "tool_calls": [dict(call) for call in tool_calls],
+            "canvases": [dict(canvas) for canvas in canvases],
             "message_id": message_id,
             "elapsed_ms": elapsed_ms,
         },
@@ -504,6 +553,7 @@ def snapshot_from_draft(
 
 __all__ = [
     "ANSWER",
+    "CANVAS_FIELDS",
     "ENVELOPE_VERSION",
     "SUBSCRIBER_QUEUE_SIZE",
     "TERMINAL_EVENTS",

@@ -55,11 +55,29 @@ TOOLSETS: dict[str, Toolset] = {
     # registration — see ``tools/signals.py``.
     "signals": {
         "description": (
-            "Read one registered Signal Field out of this system's own store, "
-            "and check a price published elsewhere against the exchange that "
-            "would have had to produce it."
+            "Read one registered Signal Field out of this system's own store — "
+            "as one figure or as a series across sessions — and check a price "
+            "published elsewhere against the exchange that would have had to "
+            "produce it."
         ),
-        "tools": ("list_fields", "get_field", "check_price_claim"),
+        "tools": (
+            "list_fields",
+            "get_field",
+            "get_series",
+            "check_price_claim",
+        ),
+    },
+    # A Study answers what a figure cannot: a shape rather than a number. The
+    # bundle is separate from ``signals`` because the two are different kinds of
+    # read — one returns a number the model puts in a sentence, the other
+    # returns a picture the model never sees and a reader does.
+    "studies": {
+        "description": (
+            "Run a named, versioned analysis recipe over this system's own "
+            "store, or compose a canvas out of numbers already gathered, and "
+            "draw either as a panel the reader can open."
+        ),
+        "tools": ("list_studies", "run_study", "render_canvas"),
     },
 }
 
@@ -73,10 +91,11 @@ TOOLSETS: dict[str, Toolset] = {
 #: added for another lane that default would hand it to every Turn without a
 #: single line changing.
 #:
-#: ``signals`` is here as of the reversal recorded in ``tools/signals.py``. It is
-#: still a written-down choice rather than a default: a fourth bundle added
-#: tomorrow does not reach a conversation until this tuple says so.
-CHAT_TOOLSETS: tuple[str, ...] = ("web", "memory", "signals")
+#: ``signals`` is here as of the reversal recorded in ``tools/signals.py``, and
+#: ``studies`` since a conversation gained a canvas to draw on. Both are written
+#: down rather than defaulted: a fifth bundle added tomorrow does not reach a
+#: conversation until this tuple says so.
+CHAT_TOOLSETS: tuple[str, ...] = ("web", "memory", "signals", "studies")
 
 
 class UnknownToolsetError(KeyError):

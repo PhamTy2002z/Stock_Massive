@@ -55,13 +55,17 @@ import { currentAccessToken, rotateAccessToken } from "@/lib/auth/bearer"
 // browser must never reach a search result's domain directly to load its
 // icon — that would tell the domain, and the network path to it, which page a
 // signed-in user is reading and from what IP — so the API fetches it and this
-// allowlist is what lets the browser reach that endpoint at all.
+// allowlist is what lets the browser reach that endpoint at all. `artifacts` is
+// the canvas fetch: upstream mounts a single `GET /artifacts/{id}` that resolves
+// ownership through the Thread the Study ran in, so the same argument as
+// `messages` covers it.
 const FORWARDED_RESOURCES = new Set([
   "watchlist",
   "analyses",
   "threads",
   "turns",
   "messages",
+  "artifacts",
   "assets",
 ])
 

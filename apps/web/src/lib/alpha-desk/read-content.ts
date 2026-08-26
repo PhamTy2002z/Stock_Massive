@@ -21,7 +21,7 @@
  * only that they *are* strings.
  */
 
-import type { Thought, ToolCall, ToolResult } from "./types"
+import type { CanvasAnnouncement, Thought, ToolCall, ToolResult } from "./types"
 
 /** The three statuses a call can be in, as either source may spell it. */
 type CallStatus = ToolCall["status"]
@@ -105,6 +105,43 @@ export function readResults(value: unknown): ToolResult[] {
     })
   }
   return results
+}
+
+/**
+ * Every canvas announced, malformed ones dropped.
+ *
+ * Read through the same defensive path whether it arrived on the stream or out
+ * of a stored message, for the reason the tool calls are: two readers for one
+ * shape drift, and the drift shows up only on a reconnect.
+ *
+ * An announcement with no id is dropped rather than rendered. The id is the
+ * whole of what the row is fetched by, so a card without one is a button that
+ * opens nothing — which reads to a reader as a picture they are not allowed to
+ * see.
+ */
+export function readCanvases(value: unknown): CanvasAnnouncement[] {
+  if (!Array.isArray(value)) return []
+  const canvases: CanvasAnnouncement[] = []
+  for (const item of value) {
+    const record = asRecord(item)
+    if (record === null) continue
+    const artifactId = asString(record.artifactId)
+    if (artifactId === "") continue
+    const title = asString(record.title)
+    const studyName = asString(record.studyName)
+    canvases.push({
+      artifactId,
+      studyName,
+      // A canvas with no title still gets a name a person can read: the panel
+      // and the card in the transcript are both labelled by it.
+      title: title === "" ? "Phân tích" : title,
+      // Zero is honest when nothing said otherwise — the skeleton is then one
+      // block tall and grows when the fetch lands, rather than guessing high.
+      blockCount: asNumber(record.blockCount, 0),
+      round: asNumber(record.round, 0),
+    })
+  }
+  return canvases
 }
 
 /** The narration of a Turn, by round, empty entries dropped. */

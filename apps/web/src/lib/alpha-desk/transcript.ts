@@ -13,8 +13,14 @@
  */
 
 import type { LivePhase, LiveTurn } from "./live-turn"
-import { readStrings, readThoughts, readToolCalls } from "./read-content"
-import type { FlagReason, Thought, ThreadMessage, ToolCall } from "./types"
+import { readCanvases, readStrings, readThoughts, readToolCalls } from "./read-content"
+import type {
+  CanvasAnnouncement,
+  FlagReason,
+  Thought,
+  ThreadMessage,
+  ToolCall,
+} from "./types"
 
 export interface UserEntry {
   kind: "user"
@@ -39,6 +45,14 @@ export interface AssistantView {
   toolCalls: ToolCall[]
   /** What the Turn said on the way to the answer. Empty on most answers. */
   thoughts: Thought[]
+  /**
+   * The pictures this answer was written about. Empty on most answers.
+   *
+   * Ids and titles only. The numbers behind one are fetched by the panel that
+   * draws it, so a transcript scrolled past a dozen answers carries no heatmaps
+   * with it.
+   */
+  canvases: CanvasAnnouncement[]
   /**
    * Questions the model offered as sensible next steps, or none.
    *
@@ -107,6 +121,8 @@ export interface DraftEntry {
   working: boolean
   toolCalls: ToolCall[]
   thoughts: Thought[]
+  /** The canvases announced so far, as the stream has reported them. */
+  canvases: CanvasAnnouncement[]
   elapsedMs: number
   phase: LivePhase
   terminalReason: string | null
@@ -253,6 +269,7 @@ export function buildTranscript(input: TranscriptInput): TranscriptEntry[] {
       working: reveal.working,
       toolCalls: input.live.toolCalls,
       thoughts: input.live.thoughts,
+      canvases: input.live.canvases,
       elapsedMs: input.live.elapsedMs,
       phase: input.live.phase,
       terminalReason: input.live.terminalReason,
@@ -315,6 +332,7 @@ function assistantView(message: ThreadMessage): AssistantView {
     // A stored call cannot still be running: the Turn that made it is over.
     toolCalls: readToolCalls(content.tool_calls, "ok"),
     thoughts: readThoughts(content.thoughts),
+    canvases: readCanvases(content.canvases),
     followUps: readStrings(content.follow_ups),
     elapsedMs:
       typeof content.elapsed_ms === "number" && Number.isFinite(content.elapsed_ms)

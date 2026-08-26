@@ -31,9 +31,9 @@ Nguồn quyết định: `plans/reports/proposal-260826-2107-ai-core-dynamic-can
 | 01 | [Studies core + agent_artifact store](phase-01-studies-core-and-artifact-store.md) | A | — | **done** |
 | 02 | [Intraday ingest vnstock 15m](phase-02-intraday-ingest-vnstock.md) | A | — | **done** |
 | 03 | [Study intraday_liquidity_profile](phase-03-study-intraday-liquidity-profile.md) | A | 01, 02 | **done** |
-| 04 | [Bundle `studies` + event canvas.ready](phase-04-agent-tools-and-canvas-ready-event.md) | A | 01, 03 | pending |
-| 05 | [Web canvas panel + widget registry v1](phase-05-web-canvas-panel-and-widget-registry.md) | A | **bước 0 (widgets trên fixture): chỉ cần 01-contracts — chạy song song 02–04**; wiring SSE: 04 | pending |
-| 06 | [get_series + composition render_canvas](phase-06-series-evidence-and-composition.md) | B | 05 | pending |
+| 04 | [Bundle `studies` + event canvas.ready](phase-04-agent-tools-and-canvas-ready-event.md) | A | 01, 03 | **done** |
+| 05 | [Web canvas panel + widget registry v1](phase-05-web-canvas-panel-and-widget-registry.md) | A | **bước 0 (widgets trên fixture): chỉ cần 01-contracts — chạy song song 02–04**; wiring SSE: 04 | **done** |
+| 06 | [get_series + composition render_canvas](phase-06-series-evidence-and-composition.md) | B | 05 | **done** |
 | 07 | [Study entry_condition_review](phase-07-condition-review-study.md) | C | 06 | pending |
 | 08 | [Spine dữ liệu market-wide (trả nợ FiinQuant)](phase-08-market-wide-daily-spine.md) | D | 02 | pending |
 | 09 | [Store BCTC quý market-wide](phase-09-financial-statement-store.md) | E | 08 | pending |
@@ -73,6 +73,84 @@ Lệch thiết kế có chủ ý so với plan (ghi để phase sau không hiể
 - `sessions` **kẹp** 10–60 thay vì refuse: `sessionsUsed` trong headline đã nói
   đúng số phiên thật đọc được, nên một vòng round-trip "60 là max" không mua
   thêm gì.
+
+## Sửa lại spec khi thi công (2026-08-27, phase 04–06)
+
+Bốn chỗ code đi khác plan, và lý do:
+
+1. **`run_study` nhận tham số phẳng, không nhận `{name, params}`.** Strict mode
+   viết lại mọi object với `additionalProperties: false`
+   (`core/llm/protocol.py`), nên một `params` tự do thành object **không nhận
+   được key nào**. Tham số của mọi Study nằm cạnh nhau trên một object;
+   `_check_the_parameters_agree()` từ chối build khi hai Study hiểu khác nhau
+   về một tên; handler chỉ chuyển cho Study đúng những key nó khai.
+2. **Ingest on-demand qua tham số `warm` của runner, không phải mặc định.**
+   `runner.run(..., warm=None)` giữ runner offline cho suite và smoke; lane chat
+   truyền `warmup.warm`. Bảng requirement → hàm fetch ở `src/studies/warmup.py`;
+   tên khai được nằm ở `contracts.KNOWN_REQUIREMENTS` để registry kiểm lúc
+   import mà không kéo vnstock vào mọi import của `src.studies`.
+3. **Danh sách canvas nằm trên `agent_message.content`, không join.** Chỉ id +
+   title + blockCount — **không** spec, **không** frames. Cùng khuôn với
+   `tool_calls` vốn đã nhân bản từ `agent_tool_call`, và transcript đọc được
+   ngay trong lần đọc nó vẫn làm.
+4. **`canvas.ready` do loop phát, không do handler.** Handler thuần (không cầm
+   publisher); loop đọc `result.payload` qua `messages.canvas_of` đúng chỗ nó đã
+   đọc `outcome_of`/`display_results`. `TurnPublisher` protocol gọi
+   `canvas_ready` qua `getattr`, nên transport cũ vẫn chạy Turn có canvas.
+
+### Ba lỗi phase 03 sửa cùng đợt này (audit `code-reviewer-260826-2255`)
+
+- **`avg_share`/`avg_amount` chia theo số phiên trong cửa sổ**, không theo số
+  phiên bucket *xuất hiện*. Trước đó một bucket khớp 1/30 phiên được tính như
+  bucket bận nhất ngày, và `phaseSummary` cộng ra 1,25 trên dữ liệu thật.
+  `median` cũng đệm 0 cho các phiên bucket vắng, cùng một lý do. Bucket vắng ở
+  **mọi** phiên (09:00 của mã HOSE) vẫn bị loại khỏi thống kê — đó là khung giờ
+  sàn không có, không phải khung giờ ế.
+- **Spike đo được thay vì phá hoà theo đồng hồ.** `_spiking()` chỉ tính bucket
+  **lớn hơn hẳn** giá trị lớn nhất nằm ngoài top 2; phiên hoà nhau ở mức cắt
+  không cho ai điểm, phiên có ≤2 bucket cũng vậy. Trong chính fixture cũ,
+  `09:15` được `30/30` và `09:30` được `9/30` dù volume hai bucket giống hệt
+  nhau ở mọi phiên — giờ là `0/30`.
+- **Bucket provider gửi trùng không còn abort transaction.** `ON CONFLICT DO
+  UPDATE` từ chối statement có key trùng trong chính values của nó
+  (`CardinalityViolation`, abort cả transaction). `_deduplicated()` giữ giá trị
+  sau cùng trước khi dựng statement — lane chat chạy ingest và ghi artifact
+  trong **một** session, nên lỗi này sẽ nuốt luôn câu trả lời.
+
+Fixture đã sinh lại (`make contracts`); `peakShare`/`phaseSummary` không đổi,
+`occurrence` của các bucket không phải đỉnh về `0/30`.
+
+Ngoài ra: `get_series` kẹp **hai** trần — `MAX_SERIES_SESSIONS=120` cho bức
+tranh và `MAX_WINDOW_READS=12.000` cho chi phí thật (`điểm × window`), nên một
+field 273 phiên chỉ được ~44 điểm. `frame_id` địa chỉ hoá là `<artifactId>` cho
+frame đơn và `<artifactId>#<tên>` cho frame của Study.
+
+## Kết quả nghiệm thu phase 04–06
+
+- `make test` (apps/api, host): **1060 pass** (baseline sau phase 03: 1025).
+- `pnpm type-check` · `lint` · `test` (**435 pass**) · `build` tại apps/web: xanh.
+- `pnpm test:e2e streaming.spec.ts canvas.spec.ts`: **6 pass** — gồm hai case
+  canvas mới đi hết ba chặng (browser → Next → FastAPI thật).
+- Bundle: route `/` giảm còn **82,2 kB** (First Load 214 kB) — recharts nằm sau
+  `next/dynamic` của panel canvas, nên lane chat không trả phí chart lib.
+- 12 tool: 8 cũ + `list_studies` · `run_study` · `get_series` · `render_canvas`.
+  `PROMPT_VERSION` 2.4.0 → **2.6.0** (thêm tên tool vào prompt; catalog Study
+  vẫn đến qua schema).
+
+### Nợ để lại, đã đo
+
+- `e2e/market-monitor.spec.ts` (2 case) **đỏ từ trước**: nó kiểm surface đã bị
+  rip 2026-08-25. Nên xoá cùng PR dọn e2e, không thuộc phạm vi phase này.
+- `e2e/desk.ts::CANONICAL_MARK` trỏ nút "Báo lỗi câu trả lời" không còn tồn tại
+  (đổi thành "Chưa đúng" ở `dc35b37`) — đã sửa, vì nó làm hai case streaming đỏ
+  và che mất cổng của chính phase 05.
+- `scripts/smoke_canvas.py` + `make smoke-canvas` đã có; **chưa chạy** vì tốn
+  model call thật. Perf budget của plan chưa được đo.
+- Audit phase 01–03 còn các mục **chưa** sửa:
+  `_round` dùng ROUND_HALF_EVEN nên `_round(0.5)` ra `0`; volume `NaN` kèm giá
+  hợp lệ ném `ValueError` trần; lỗ hổng ở giữa cửa sổ không được nạp lại và
+  `health` vẫn báo `normal`; mã có ít phiên hơn số hỏi thì lần nào cũng refetch
+  cả năm; `reads.latest_closed_session` không có caller.
 
 ## Kết quả nghiệm thu phase 01–03
 

@@ -152,7 +152,7 @@ Mọi đề xuất và triển khai vào `src/agent/` phải đọc `docs/hermes
   chữ ký từ một registration**: `ToolContext.symbol` có (từng cho lane
   Analysis — lane đó đã bỏ) thì nó thắng; không có context (lane chat) thì
   `symbol` là argument. `trading_day` **không bao giờ** là argument.
-- Luật đã ghim trong prompt (`PROMPT_VERSION` 2.3.0): **số của store
+- Luật đã ghim trong prompt (`PROMPT_VERSION` 2.6.0): **số của store
   thắng số của web** · tách hai khối bằng chứng · nêu mức và hệ quả,
   **không** ra chỉ thị hành động cho vị thế cụ thể.
 - `MAX_EXTERNAL_TOOL_CALLS = 6` chỉ tính tool có `reads_external` bật,
@@ -160,6 +160,11 @@ Mọi đề xuất và triển khai vào `src/agent/` phải đọc `docs/hermes
 - Kết quả tool có bọc `<untrusted_tool_result>` do
   `registry.ToolEntry.reads_external` quyết, mặc định `True`. Tool đọc
   store khai `reads_external=False`.
+- **Canvas đi hai đường, cùng một luật.** `run_study` chạy công thức có tên;
+  `get_series` + `render_canvas` cho câu hỏi chưa có công thức. Cả hai trả
+  model **id + tóm tắt**, không bao giờ trả `frames`; loop phát `canvas.ready`
+  từ payload qua `messages.canvas_of`. Frame chỉ vẽ được bởi chính Turn tạo ra
+  nó (`studies/frames_buffer.py`).
 - **"Chạy" và "trả về số" là hai việc.** `agent_tool_call.status` là `ok`
   cho ba loại: có số · `no_value:<signal issue>` · `cannot_read`.
   Cột `outcome` là chỗ duy nhất phân biệt. Vốn từ ở
@@ -179,8 +184,13 @@ Mọi đề xuất và triển khai vào `src/agent/` phải đọc `docs/hermes
   5 emergency. Analysis lane đã bỏ (rip-out) — envelope chưa reweight,
   ledger vẫn ghi. Đặt cả bốn giá trị về `0` cho route thuê bao.
 - Web: sản phẩm là **một màn hình duy nhất** ở `/` — shell 2 vùng chính ở
-  `src/components/shell/` (sidebar + cột chat). Inspector phải chỉ còn
-  panel Sources. Chỉ `(auth)` là trang riêng.
+  `src/components/shell/` (sidebar + cột chat). Inspector có đúng hai tab:
+  Nguồn và Phân tích (canvas). Chỉ `(auth)` là trang riêng.
+- Widget canvas có **name + version**; FE giữ registry ở
+  `components/canvas/widget-registry.ts` và test khớp nó với
+  `contracts/canvas-widget-catalog.json`. Không vẽ được → `data_table` kèm ghi
+  chú, không bao giờ khối trắng. Panel canvas nạp qua `next/dynamic` để
+  recharts không nằm trên đường first paint của lane chat.
 
 # Definition of done
 

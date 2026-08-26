@@ -49,6 +49,17 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to a checker
 
 FrameKind = Literal["series", "matrix", "table"]
 
+#: Every input a Study may name in ``StudyDefinition.requires``.
+#:
+#: Names only, and deliberately here rather than beside the functions that fetch
+#: them: ``warmup.py`` imports the provider client, and a registry that checked
+#: against that module would drag a network dependency into every import of a
+#: Study. So the set is declared where nothing is imported, the registry checks a
+#: declaration against it, and ``warmup`` holds itself equal to it at its own
+#: import — a requirement can therefore neither be declared without a fetcher nor
+#: fetched without being declarable.
+KNOWN_REQUIREMENTS: frozenset[str] = frozenset({"intraday_bar_15m"})
+
 #: How the health of a Study's inputs is described to a reader. Same three words
 #: the signal serving path uses, for the same reason: a person comparing a
 #: figure with a picture should not have to learn two vocabularies for "this is
@@ -271,6 +282,7 @@ class StoredArtifact:
 
 
 __all__ = [
+    "KNOWN_REQUIREMENTS",
     "CanvasBlock",
     "CanvasSpec",
     "Frame",

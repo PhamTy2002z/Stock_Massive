@@ -167,6 +167,12 @@ class ToolContext:
 
     user_id: int | None = None
     thread_id: uuid.UUID | None = None
+    #: The Turn this call belongs to, where there is one. A handler that writes
+    #: a row a reader will re-open needs to say which answer it belongs to, and
+    #: an *argument* naming a Turn would be a route to attaching a picture to
+    #: somebody else's conversation. ``None`` outside a Turn — an Analysis, a
+    #: smoke run — and the row is then reachable by its own id alone.
+    turn_id: uuid.UUID | None = None
     #: The symbol one Analysis is being produced for. Trusted rather than an
     #: argument for the reason above: an argument naming a symbol is a route to
     #: reading a symbol this call was not opened for.

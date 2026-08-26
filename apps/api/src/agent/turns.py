@@ -200,12 +200,18 @@ def draft_content(draft: TurnDraft) -> dict[str, Any]:
     rather than recomputed, because the split is made from a fact only the loop
     has (whether a round went on to call tools), and a reader rebuilding from
     here has no way to work it out from ``text`` alone.
+
+    ``canvases`` are the pictures the Turn produced, as ids and titles rather
+    than as numbers: the numbers are in ``agent_artifact`` and are fetched by
+    whoever opens the panel. Checkpointed so a browser that reconnects after the
+    announcement is still told there is one to open.
     """
     return {
         "text": draft.text or "",
         "answer": draft.answer or "",
         "thoughts": [dict(thought) for thought in draft.thoughts],
         "tool_calls": [call.as_wire() for call in draft.tool_calls],
+        "canvases": [dict(canvas) for canvas in draft.canvases],
         "rounds_used": draft.rounds_used,
     }
 
@@ -217,6 +223,7 @@ def assistant_message(
     status: str,
     answer: str | None = None,
     thoughts: Sequence[Mapping[str, Any]] = (),
+    canvases: Sequence[Mapping[str, Any]] = (),
     elapsed_ms: int = 0,
 ) -> dict[str, Any]:
     """The canonical assistant message, in the one place its shape is decided.
@@ -242,6 +249,11 @@ def assistant_message(
         "answer": text if answer is None else answer,
         "thoughts": [dict(thought) for thought in thoughts],
         "tool_calls": [dict(call) for call in tool_calls],
+        # The pictures this answer was written about, as ids and titles. The
+        # spec and the numbers are not here and never will be: they are a row of
+        # their own, and a transcript that carried them would drag a heatmap
+        # through every scroll of the conversation.
+        "canvases": [dict(canvas) for canvas in canvases],
         "status": status,
         "elapsed_ms": elapsed_ms,
     }
@@ -270,6 +282,7 @@ def frozen_message(record: TurnRecord) -> Mapping[str, Any] | None:
         answer=draft.get("answer") or None,
         thoughts=tuple(draft.get("thoughts") or ()),
         tool_calls=tuple(draft.get("tool_calls") or ()),
+        canvases=tuple(draft.get("canvases") or ()),
         status=TURN_INCOMPLETE,
     )
 
@@ -369,6 +382,7 @@ class TurnService:
         self._running[record.id] = running
         request = TurnRequest(
             thread_id=record.thread_id,
+            turn_id=record.id,
             request_message_id=record.request_message_id,
             user_id=user_id,
             user_text=user_text,
@@ -433,6 +447,7 @@ class TurnService:
                 answer=outcome.answer,
                 thoughts=outcome.thoughts,
                 tool_calls=calls,
+                canvases=outcome.canvases,
                 status=status,
                 elapsed_ms=outcome.elapsed_ms,
             )
@@ -486,6 +501,7 @@ class TurnService:
                 answer=None if draft is None else (draft.answer or None),
                 thoughts=() if draft is None else draft.thoughts,
                 tool_calls=calls,
+                canvases=() if draft is None else draft.canvases,
                 status=status,
             )
             if text

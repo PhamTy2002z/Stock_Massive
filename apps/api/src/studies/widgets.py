@@ -65,6 +65,18 @@ CATALOG: Mapping[tuple[str, int], Widget] = MappingProxyType(
             frame_kinds=("table",),
             purpose="Xếp hạng có nhãn, dài nhất trên cùng",
         ),
+        ("line_series", 1): Widget(
+            name="line_series",
+            version=1,
+            frame_kinds=("series",),
+            purpose="Đường theo trục thời gian, tối đa hai trục giá trị",
+        ),
+        ("scatter_quadrant", 1): Widget(
+            name="scatter_quadrant",
+            version=1,
+            frame_kinds=("table",),
+            purpose="Điểm trên hai trục, chia bốn vùng bằng đường tham chiếu",
+        ),
         ("data_table", 1): Widget(
             name="data_table",
             version=1,

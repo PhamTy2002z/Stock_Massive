@@ -14,6 +14,7 @@ from ..registry import ToolEntry
 from .memory import register_memory_tools
 from .price_check import register_price_check_tool
 from .signals import register_signal_tools
+from .studies import register_study_tools
 from .web import register_web_tools
 
 
@@ -29,6 +30,7 @@ def register_all() -> tuple[ToolEntry, ...]:
         *register_memory_tools(),
         *register_signal_tools(),
         *register_price_check_tool(),
+        *register_study_tools(),
     )
 
 
@@ -37,5 +39,6 @@ __all__ = [
     "register_memory_tools",
     "register_price_check_tool",
     "register_signal_tools",
+    "register_study_tools",
     "register_web_tools",
 ]

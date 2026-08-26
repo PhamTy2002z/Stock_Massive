@@ -11,4 +11,9 @@ export const queryKeys = {
 
   threads: ["threads"] as const,
   thread: (threadId: string) => ["thread", threadId] as const,
+
+  // One Study run. Immutable by design — the row is written once and never
+  // updated — so the panel caches it with `staleTime: Infinity` and re-opening
+  // a Thread renders what was frozen rather than refetching a moved store.
+  artifact: (artifactId: string) => ["artifact", artifactId] as const,
 }

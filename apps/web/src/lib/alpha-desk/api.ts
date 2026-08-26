@@ -23,6 +23,7 @@
 import { alphaFetch, alphaSend } from "@/lib/alpha"
 
 import type {
+  ArtifactPayload,
   CreatedTurn,
   FlagReason,
   MessageFlag,
@@ -108,6 +109,21 @@ export function createTurn(input: CreateTurnInput): Promise<CreatedTurn> {
       retry_of_turn_id: input.retryOfTurnId ?? null,
     }),
   })
+}
+
+/**
+ * The numbers behind one canvas.
+ *
+ * A separate request from the transcript, deliberately: a heatmap is thousands
+ * of cells and a conversation scrolls, so the text loads at text weight and the
+ * picture is fetched by whoever opens the panel.
+ *
+ * The row is immutable, so the answer may be cached for as long as the tab
+ * lives. Re-opening a Thread renders what was frozen; nothing here ever asks
+ * the store for a fresher slice.
+ */
+export function fetchArtifact(artifactId: string): Promise<ArtifactPayload> {
+  return alphaFetch<ArtifactPayload>(`/artifacts/${encodeURIComponent(artifactId)}`)
 }
 
 /** Idempotent. A second cancel returns the same answer and dispatches nothing. */

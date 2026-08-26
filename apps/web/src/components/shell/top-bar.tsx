@@ -1,11 +1,8 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { BarChart3, ChevronDown, Download, LineChart, PanelLeft, Pencil, Pin, Trash2 } from "lucide-react"
+import { ChevronDown, Download, PanelLeft, Pencil, Pin, Trash2 } from "lucide-react"
 
 import { useThreads } from "@/hooks/use-threads"
-import { getMarketSession } from "@/lib/market-session"
-import { cn } from "@/lib/utils"
 
 import { useDesk } from "./desk-state"
 import { IconButton, Menu, MenuItem, MenuSeparator } from "./primitives"
@@ -13,14 +10,15 @@ import { threadTitle } from "./sidebar"
 import { useShell } from "./shell-state"
 
 /**
- * The bar above the main column: what you are looking at, and the two panels.
+ * The bar above the main column: what you are looking at, and the share action.
  *
- * The session stamp is dropped rather than truncated once the inspector has
- * taken enough width — it is the least load-bearing thing in the row, and a
- * header that wraps is a header that has stopped being one.
+ * The market/symbol inspector buttons and the HOSE session stamp were removed
+ * with the last of the market surfaces (2026-08-26). What stays is the title
+ * of the current conversation and the share affordance — everything else in
+ * the row belonged to lenses the harness lane no longer offers.
  */
 export function TopBar() {
-  const { state, dispatch, panelWidth } = useShell()
+  const { state, dispatch } = useShell()
   const desk = useDesk()
   const threads = useThreads(true)
 
@@ -36,8 +34,6 @@ export function TopBar() {
             ? threadTitle(current.title, current.updated_at)
             : "Hội thoại"
 
-  // 1100px of main column is where the reference stops showing the stamp.
-  const showStamp = state.viewport > 0 && state.viewport - panelWidth > 1100
   const menuOpen = state.overlay === "thread"
 
   return (
@@ -92,21 +88,6 @@ export function TopBar() {
       </div>
 
       <div className="ml-auto flex items-center gap-2">
-        <PanelButton
-          label="Thị trường"
-          icon={<BarChart3 className="size-[15px]" strokeWidth={1.6} />}
-          active={state.inspector === "market"}
-          onClick={() => dispatch({ type: "open-inspector", tab: "market" })}
-        />
-        <PanelButton
-          label="Chi tiết mã"
-          icon={<LineChart className="size-[15px]" strokeWidth={1.6} />}
-          active={state.inspector === "symbol"}
-          onClick={() => dispatch({ type: "open-inspector", tab: "symbol" })}
-        />
-
-        {showStamp && <SessionStamp />}
-
         <button
           type="button"
           onClick={() => dispatch({ type: "overlay", overlay: "share" })}
@@ -116,68 +97,5 @@ export function TopBar() {
         </button>
       </div>
     </header>
-  )
-}
-
-function PanelButton({
-  label,
-  icon,
-  active,
-  onClick,
-}: {
-  label: string
-  icon: React.ReactNode
-  active: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      title={label}
-      className={cn(
-        "flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[9px] border border-border px-2.5 py-1.5 text-meta transition-colors",
-        active
-          ? "bg-foreground/[0.08] text-foreground"
-          : "text-ink-4 hover:bg-foreground/[0.06] hover:text-foreground",
-      )}
-    >
-      {icon}
-      <span className="hidden md:inline">{label}</span>
-    </button>
-  )
-}
-
-/**
- * Which phase of the HOSE session the clock is in, from the clock alone.
- *
- * Rendered only after mount: the phase is read from the viewer's own moment,
- * and a server that stamped "đã đóng cửa" into HTML a browser hydrates at
- * 10:30 would be a mismatch rather than a stale label.
- */
-function SessionStamp() {
-  const [session, setSession] = useState<ReturnType<typeof getMarketSession> | null>(null)
-
-  useEffect(() => {
-    const tick = () => setSession(getMarketSession())
-    tick()
-    const timer = window.setInterval(tick, 30_000)
-    return () => window.clearInterval(timer)
-  }, [])
-
-  if (session === null) return null
-
-  return (
-    <span className="flex items-center gap-1.5 whitespace-nowrap font-mono text-micro text-ink-6">
-      <i
-        aria-hidden="true"
-        className={cn(
-          "block size-[5px] rounded-full",
-          session.isLive ? "bg-positive" : "bg-ink-6",
-        )}
-      />
-      HOSE · {session.label}
-    </span>
   )
 }

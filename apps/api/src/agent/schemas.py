@@ -120,6 +120,27 @@ class MessageResponse(BaseModel):
     helpful_at: datetime | None = None
 
 
+class ArtifactResponse(BaseModel):
+    """One Study run, as the canvas panel fetches it.
+
+    Immutable by design, which is what lets the browser cache it forever: the
+    row is written once and re-opening a Thread renders it rather than
+    recomputing. ``provenance`` carries the ``asOf`` that freeze is measured by.
+
+    ``frames`` is the numbers themselves. This is the only route they travel,
+    and the model is not on it.
+    """
+
+    id: uuid.UUID
+    study_name: str
+    study_version: int
+    params: dict[str, Any]
+    canvas_spec: dict[str, Any]
+    frames: dict[str, Any]
+    provenance: dict[str, Any]
+    created_at: datetime
+
+
 class ThreadResponse(BaseModel):
     id: uuid.UUID
     title: str | None
@@ -200,6 +221,7 @@ class CreatedTurnResponse(TurnResponse):
 
 
 __all__ = [
+    "ArtifactResponse",
     "CreateThreadRequest",
     "CreateTurnRequest",
     "CreatedTurnResponse",

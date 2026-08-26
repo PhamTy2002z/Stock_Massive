@@ -6,6 +6,8 @@ import { QueryProvider } from "@/components/providers/query-provider";
 import { QueryErrorBoundary } from "@/components/providers/query-error-boundary";
 import { ConnectionGate } from "@/components/providers/connection-gate";
 import { Toaster } from "@/components/ui/sonner";
+import { AgentationToolbar } from "@/components/dev/agentation-toolbar";
+import { CanvasFixtureToolbar } from "@/components/dev/canvas-fixture-toolbar";
 
 /**
  * The body face, and the one every label in the product is set in.
@@ -98,6 +100,13 @@ export default function RootLayout({
             <Toaster />
           </QueryProvider>
         </ThemeProvider>
+        {/* Devtool annotate UI cho AI coding agent — component tự no-op ở
+            production build, xem `components/dev/agentation-toolbar.tsx`. */}
+        <AgentationToolbar />
+        {/* Every canvas widget drawn from the real artifact fixture, so the
+            look of a chart can be worked on without a backend. Dev only —
+            see `components/dev/canvas-fixture-toolbar.tsx`. */}
+        <CanvasFixtureToolbar />
       </body>
     </html>
   );

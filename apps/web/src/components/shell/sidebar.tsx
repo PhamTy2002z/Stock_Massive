@@ -2,14 +2,11 @@
 
 import * as React from "react"
 import {
-  BarChart3,
   ExternalLink,
   FileText,
   Filter,
   Layers,
-  MessageSquare,
   MoreVertical,
-  Newspaper,
   PanelLeft,
   Pencil,
   Pin,
@@ -27,7 +24,7 @@ import { cn } from "@/lib/utils"
 import { AccountMenu } from "./account-menu"
 import { useDesk } from "./desk-state"
 import { IconButton, Menu, MenuItem, MenuSeparator, QuietLine } from "./primitives"
-import { SIDEBAR_WIDTH, useShell, type ShellView } from "./shell-state"
+import { SIDEBAR_WIDTH, useShell } from "./shell-state"
 
 /**
  * The left column: identity, the two main modes, and everything the user keeps.
@@ -72,8 +69,6 @@ export function Sidebar() {
           </div>
         </div>
 
-        <ViewSwitch />
-
         <Nav />
 
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scrollbar-thin">
@@ -82,46 +77,6 @@ export function Sidebar() {
 
         <AccountMenu />
       </aside>
-    </div>
-  )
-}
-
-/** The two modes the reference puts above everything else. */
-function ViewSwitch() {
-  const { state, dispatch } = useShell()
-
-  const tabs: { view: ShellView; label: string; icon: React.ReactNode }[] = [
-    { view: "chat", label: "Hỏi đáp", icon: <MessageSquare className="size-[15px]" strokeWidth={1.6} /> },
-    { view: "board", label: "Bảng giá", icon: <BarChart3 className="size-[15px]" strokeWidth={1.6} /> },
-  ]
-
-  return (
-    <div className="mx-3.5 mb-3.5 mt-1 grid grid-cols-2 gap-1 rounded-[10px] bg-foreground/[0.035] p-1">
-      {tabs.map((tab) => {
-        // The new-conversation screen is still the conversation mode: switching
-        // to the board and back must not lose which half of the app you were in.
-        // The news view belongs to neither segment, so it lights up neither —
-        // `!== "board"` would have claimed it for the conversation.
-        const active =
-          tab.view === "board"
-            ? state.view === "board"
-            : state.view === "chat" || state.view === "new"
-        return (
-          <button
-            key={tab.view}
-            type="button"
-            aria-pressed={active}
-            onClick={() => dispatch({ type: "view", view: tab.view })}
-            className={cn(
-              "relative flex items-center justify-center gap-1.5 rounded-[7px] py-2 text-control transition-colors",
-              active ? "bg-accent text-foreground" : "text-ink-3 hover:text-foreground",
-            )}
-          >
-            {tab.icon}
-            {tab.label}
-          </button>
-        )
-      })}
     </div>
   )
 }
@@ -140,12 +95,6 @@ function Nav() {
         }}
       >
         Trò chuyện mới
-      </NavRow>
-      <NavRow
-        icon={<Newspaper className="size-[17px] text-ink-4" strokeWidth={1.6} />}
-        onClick={() => dispatch({ type: "view", view: "news" })}
-      >
-        Tin tức
       </NavRow>
       {/* No screener and no saved-report resource exists yet. Drawn because the
           reference draws them, inert because pressing them would do nothing. */}
@@ -238,7 +187,7 @@ export function Conversations() {
   return (
     <>
       <SectionLabel>Đã ghim</SectionLabel>
-      <div className="grid flex-none content-start gap-px px-2.5">
+      <div className="grid grid-cols-fit flex-none content-start gap-px px-2.5">
         <NavRow icon={<Layers className="size-[17px] text-primary" strokeWidth={1.6} />} disabled>
           Danh mục theo dõi
         </NavRow>
@@ -255,7 +204,7 @@ export function Conversations() {
           {pinned.length === 0 ? "Chưa có hội thoại nào." : "Tất cả hội thoại đang được ghim."}
         </QuietLine>
       ) : (
-        <div className="grid flex-none content-start gap-px px-2.5 pb-2.5">
+        <div className="grid grid-cols-fit flex-none content-start gap-px px-2.5 pb-2.5">
           {rest.map((row) => (
             <ThreadRow key={row.id} row={row} {...rowProps} />
           ))}

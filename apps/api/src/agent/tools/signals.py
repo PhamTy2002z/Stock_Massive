@@ -58,6 +58,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
+from datetime import datetime, time, timezone
+from statistics import median
 from types import MappingProxyType
 from typing import Any
 
@@ -74,8 +76,10 @@ from src.core.database import get_sync_db
 from src.stocks.shared.exceptions import StockServiceError
 from src.stocks.shared.validators import validate_symbol
 from src.stocks.signals.registry import REGISTRY
-from src.stocks.trading_day import latest_trading_day
+from src.stocks.trading_day import latest_trading_day, trading_days_before
 from src.stocks.universe import build_universe
+from src.studies import frames_buffer
+from src.studies.contracts import Frame, Provenance
 
 from ..registry import (
     ContentTrust,
@@ -90,6 +94,8 @@ from ..registry import (
 from ..signal_tool_contract import (
     GET_FIELD_DESCRIPTION,
     GET_FIELD_SCHEMA,
+    GET_SERIES_DESCRIPTION,
+    GET_SERIES_SCHEMA,
     LIST_FIELDS_DESCRIPTION,
     LIST_FIELDS_SCHEMA,
 )
@@ -100,6 +106,23 @@ TOOLSET = "signals"
 #: honest answer either tool can give is the whole catalog, and that is an order
 #: of magnitude under this.
 MAX_RESULT_CHARS = 32_000
+
+#: The most sessions a series may span, whatever the field costs to read.
+#:
+#: A ceiling on the *picture* rather than on the work: past a hundred and twenty
+#: points a chart four hundred pixels wide is a texture, and the question it
+#: answers is the same one sixty points answer.
+MAX_SERIES_SESSIONS = 120
+
+#: The most sessions-of-bars one series may read, in total.
+#:
+#: The real cost, and the reason the ceiling above is not the only one. A field
+#: is computed over its own window, so a series is ``points × window`` session
+#: reads: a momentum field declaring 273 sessions costs two hundred times what a
+#: twenty-session field costs for the same picture. This number is what stops a
+#: perfectly reasonable-looking request from spending a round — the clamp lands
+#: on the number of points, and the answer says how many were actually read.
+MAX_WINDOW_READS = 12_000
 
 #: Which axis of an Analysis a field's namespace belongs to.
 #:
@@ -265,6 +288,28 @@ def summarise_get_field(arguments: Mapping[str, Any]) -> str:
     return f"Đọc chỉ báo: {label} — {symbol}" if symbol else f"Đọc chỉ báo: {label}"
 
 
+def summarise_get_series(arguments: Mapping[str, Any]) -> str:
+    """The rail row for a series read: which figure, which company, how far back."""
+    field_id = str(arguments.get("field_id") or "").strip()
+    label = display_name_of(field_id) if field_id else "chỉ báo"
+    symbol = str(arguments.get("symbol") or "").strip().upper()
+    sessions = arguments.get("sessions")
+    span = f" · {sessions} phiên" if isinstance(sessions, int) else ""
+    return f"Đọc chuỗi: {label} — {symbol}{span}" if symbol else f"Đọc chuỗi: {label}{span}"
+
+
+def points_affordable(window_sessions: int, asked: int) -> int:
+    """How many points a series of this field may hold, given what it costs.
+
+    Written as its own function because it is the whole of the cost rule and a
+    test should be able to state it without a store: a field's window multiplied
+    by the points asked for is the number of session reads, and this is where
+    that product is held under :data:`MAX_WINDOW_READS`.
+    """
+    ceiling = max(1, MAX_WINDOW_READS // max(1, window_sessions))
+    return max(1, min(MAX_SERIES_SESSIONS, ceiling, asked))
+
+
 def summarise_list_fields(arguments: Mapping[str, Any]) -> str:
     """The rail row for a catalog read, naming the axis when one was asked for."""
     raw = str(arguments.get("axis") or "").strip()
@@ -323,6 +368,26 @@ class SignalTools:
                 is_async=False,
                 max_result_size_chars=MAX_RESULT_CHARS,
             ),
+            ToolEntry(
+                name="get_series",
+                toolset=TOOLSET,
+                description=GET_SERIES_DESCRIPTION,
+                schema=GET_SERIES_SCHEMA,
+                handler=self.get_series,
+                display_name="Đọc chuỗi chỉ báo",
+                summarise=summarise_get_series,
+                effect=ToolEffect.READ,
+                idempotency=ToolIdempotency.IDEMPOTENT,
+                access=ToolAccess.STORE,
+                content_trust=ContentTrust.TRUSTED_STRUCTURED,
+                concurrency=ToolConcurrency.SERIALIZED,
+                contract_version="1",
+                # Sixty windows of a synchronous store read, and a row written
+                # at the end of them. It belongs on a worker thread more than
+                # anything else in this file does.
+                is_async=False,
+                max_result_size_chars=MAX_RESULT_CHARS,
+            ),
         )
 
     def list_fields(
@@ -367,6 +432,127 @@ class SignalTools:
             symbol, trading_day = pair
             figure = figure_for_field(session, symbol, trading_day, field_id)
         return figure.as_wire()
+
+    def get_series(
+        self, context: ToolContext, arguments: Mapping[str, Any]
+    ) -> Mapping[str, Any]:
+        """Read one field across a window of sessions, and keep the series.
+
+        Every rule ``get_field`` holds, held here per point: a registered field
+        only, a symbol in the Universe only, and no session that has not closed.
+        A point the store refuses is a ``null`` in the series with its reason
+        counted in the provenance — dropping it would close a gap the reader
+        should see, and writing a zero would invent a number.
+
+        The series does not come back. What comes back is a summary small enough
+        to read in a sentence and the id the canvas draws it by.
+        """
+        field_id = str(arguments.get("field_id") or "").strip()
+        if not field_id:
+            raise ValueError("field_id must name a registered Signal Field")
+        field = REGISTRY.get(field_id)
+        if field is None:
+            raise ValueError(
+                f"{field_id!r} is not a registered Signal Field. Call list_fields "
+                "for the ids this system computes."
+            )
+
+        asked = arguments.get("sessions")
+        wanted = asked if isinstance(asked, int) and asked > 0 else 60
+
+        with self._open() as session:
+            pair = _pair(context, arguments, session)
+            if isinstance(pair, dict):
+                return pair
+            symbol, newest = pair
+
+            points = points_affordable(field.window_sessions, wanted)
+            # Newest first out of the store, oldest first on the chart: a series
+            # read right to left is a series nobody reads.
+            days = [newest, *trading_days_before(session, newest, points - 1)]
+            days.sort()
+
+            rows: list[tuple[Any, ...]] = []
+            reasons: dict[str, int] = {}
+            answered = 0
+            unit: str | None = None
+            for day in days:
+                figure = figure_for_field(session, symbol, day, field_id)
+                if figure.value is None:
+                    code = figure.reason_code or "refused"
+                    reasons[code] = reasons.get(code, 0) + 1
+                else:
+                    answered += 1
+                    unit = unit or figure.unit
+                rows.append((day.isoformat(), figure.value))
+
+            if answered == 0:
+                # Every point refused is a refusal about the window rather than
+                # a series with holes, and there is nothing to draw.
+                return _cannot(
+                    f"{display_name_of(field_id)} could not be computed for "
+                    f"{symbol} on any of the {len(days)} sessions read"
+                    + (f" ({', '.join(sorted(reasons))})" if reasons else "")
+                )
+
+            frame = Frame(
+                kind="series",
+                columns=("session", "value"),
+                rows=tuple(rows),
+                unit=unit,
+                labels={"session": "Phiên", "value": display_name_of(field_id)},
+            )
+            provenance = Provenance(
+                source="store",
+                as_of=_as_of(context, days[-1]),
+                sessions_used=answered,
+                health="normal" if not reasons else "degraded",
+                reason=(
+                    None
+                    if not reasons
+                    else ", ".join(
+                        f"{code}: {count}" for code, count in sorted(reasons.items())
+                    )
+                ),
+            )
+            frame_id = frames_buffer.store_series(
+                session,
+                frame=frame,
+                provenance=provenance,
+                params={
+                    "field_id": field_id,
+                    "symbol": symbol,
+                    "sessions": len(days),
+                },
+                turn_id=context.turn_id,
+                thread_id=context.thread_id,
+            )
+
+        values = [value for _, value in rows if value is not None]
+        return {
+            "fieldId": field_id,
+            "symbol": symbol,
+            "label": display_name_of(field_id),
+            "unit": unit,
+            # The whole model-facing surface. Enough to say what the series does
+            # in a sentence, and not enough to describe a point the reader can
+            # see and the model cannot.
+            "summary": {
+                "first": values[0],
+                "last": values[-1],
+                "min": min(values),
+                "max": max(values),
+                "median": median(values),
+            },
+            "sessionsRead": len(days),
+            "sessionsUsed": answered,
+            "sessionsAsked": wanted,
+            "health": provenance.health,
+            "refusals": dict(sorted(reasons.items())),
+            # What render_canvas draws it by. The series itself is in the row
+            # this names, and there is no way to ask for it here.
+            "frameId": str(frame_id),
+        }
 
     @contextmanager
     def _open(self) -> Iterator[Session]:
@@ -437,6 +623,18 @@ def _pair(
             "a field on."
         )
     return symbol, trading_day
+
+
+def _as_of(context: ToolContext, newest: Any) -> datetime:
+    """The instant this series is frozen at.
+
+    The caller's clock where there is one, so a test asserting the stamp and the
+    handler writing it read the same instant; otherwise the end of the newest
+    session read, which is the honest answer for a run outside a Turn.
+    """
+    if context.now is not None:
+        return context.now
+    return datetime.combine(newest, time(), tzinfo=timezone.utc)
 
 
 def _cannot(sentence: str) -> dict[str, Any]:
@@ -566,7 +764,11 @@ __all__ = [
     "catalog",
     "display_name_of",
     "namespace_of",
+    "MAX_SERIES_SESSIONS",
+    "MAX_WINDOW_READS",
+    "points_affordable",
     "summarise_get_field",
+    "summarise_get_series",
     "summarise_list_fields",
     "register_signal_tools",
 ]

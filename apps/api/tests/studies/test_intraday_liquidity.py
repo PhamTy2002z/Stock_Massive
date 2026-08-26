@@ -153,6 +153,69 @@ def test_the_value_metric_reads_money_rather_than_shares(window):
     )
 
 
+def test_a_bucket_missing_from_most_sessions_is_averaged_over_the_whole_window():
+    """A quiet quarter hour is quiet, not absent.
+
+    Dividing by the sessions a bucket *appeared* in makes a bucket that traded
+    once in thirty look like the busiest of the day, and makes the four phases
+    sum to more than one. The sessions it is missing from are sessions it was
+    worth nothing in.
+    """
+    from src.studies.intraday_liquidity import _bucket_statistics, _phase_summary
+
+    by_session = {
+        "d1": {"09:15": 50.0, "14:45": 50.0},
+        "d2": {"14:45": 100.0},
+        "d3": {"14:45": 100.0},
+        "d4": {"14:45": 100.0},
+    }
+
+    buckets = {bucket.label: bucket for bucket in _bucket_statistics(by_session)}
+
+    # Present in one session of four, at half of it: a share of an eighth.
+    assert buckets["09:15"].avg_share == pytest.approx(0.125)
+    assert buckets["09:15"].avg_amount == pytest.approx(50.0 / 4)
+    # And the whole picture still adds to one session's worth.
+    assert sum(_phase_summary(list(buckets.values())).values()) == pytest.approx(1.0)
+
+
+def test_a_spike_is_measured_rather_than_broken_by_the_clock():
+    """Being in the top two has to mean something to be worth counting.
+
+    Taking the first two of a sorted list breaks ties by the order the buckets
+    arrived in, which is the clock — so on a session where everything traded the
+    same amount, the two earliest quarter hours collected a spike apiece and the
+    frequency became a fact about sorting.
+    """
+    from src.studies.intraday_liquidity import _bucket_statistics
+
+    flat = {label: 100.0 for label in ("09:15", "09:30", "09:45", "10:00")}
+    spiked = {"09:15": 100.0, "09:30": 100.0, "09:45": 100.0, "14:45": 900.0}
+
+    buckets = {
+        bucket.label: bucket
+        for bucket in _bucket_statistics({"d1": flat, "d2": spiked})
+    }
+
+    # Nobody is distinguished on the flat session, and only the real spike is on
+    # the other — the second slot is a three-way tie that spans the cut.
+    assert buckets["14:45"].spike_sessions == 1
+    assert buckets["09:15"].spike_sessions == 0
+    assert buckets["09:30"].spike_sessions == 0
+
+
+def test_a_session_with_no_more_buckets_than_the_cut_distinguishes_nothing():
+    from src.studies.intraday_liquidity import _bucket_statistics
+
+    buckets = {
+        bucket.label: bucket
+        for bucket in _bucket_statistics({"d1": {"09:15": 10.0, "09:30": 90.0}})
+    }
+
+    assert buckets["09:15"].spike_sessions == 0
+    assert buckets["09:30"].spike_sessions == 0
+
+
 def test_a_window_shorter_than_the_minimum_refuses_with_the_matching_code(window):
     with get_sync_db() as session:
         session.execute(

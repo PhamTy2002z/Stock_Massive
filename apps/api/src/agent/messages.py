@@ -346,6 +346,15 @@ OUTCOME_CANNOT_READ = "cannot_read"
 #: that is legitimately null would otherwise be reported as having refused.
 _FIGURE_TOOLS = frozenset({"get_field"})
 
+#: Every tool that answers with a whole picture rather than one figure.
+#:
+#: Named for the same reason and classified apart, because the two say "nothing
+#: this time" differently: a figure is a ``value`` that came back null, and a
+#: Study is a refusal carrying the input that was short. Folding them together
+#: would mean sniffing for whichever key happened to be present, which is the
+#: guess this table exists to avoid.
+_STUDY_TOOLS = frozenset({"run_study", "render_canvas"})
+
 
 def outcome_of(name: str, payload: Any) -> str | None:
     """What one call yielded, or ``None`` where the question does not apply.
@@ -354,12 +363,25 @@ def outcome_of(name: str, payload: Any) -> str | None:
     :func:`display_results` is: the executor is holding the object, and a second
     parse is a second chance to read it differently from the first.
 
+    A Study answers the same three ways for the same reasons: an ``artifactId``
+    is a picture that exists, an ``issue`` is the input that was too short, and
+    an ``error`` is the question itself being declined.
+
     A refusal keeps the **Signal Issue** that caused it, not a flat "nothing".
     The whole value of separating these is that ``insufficient_cross_section``
     and ``market_cap_absent`` are different operational facts with different
     fixes, and folding them into one word rebuilds the blind spot one level up.
     """
-    if name not in _FIGURE_TOOLS or not isinstance(payload, Mapping):
+    if not isinstance(payload, Mapping):
+        return None
+    if name in _STUDY_TOOLS:
+        if payload.get("error"):
+            return OUTCOME_CANNOT_READ
+        if payload.get("artifactId"):
+            return OUTCOME_VALUE
+        issue = payload.get("issue")
+        return f"{OUTCOME_NO_VALUE}:{issue}" if issue else OUTCOME_NO_VALUE
+    if name not in _FIGURE_TOOLS:
         return None
     if payload.get("error"):
         # The tool declined the question itself — a symbol outside the Universe,
@@ -371,6 +393,29 @@ def outcome_of(name: str, payload: Any) -> str | None:
         return OUTCOME_VALUE
     code = payload.get("reasonCode")
     return f"{OUTCOME_NO_VALUE}:{code}" if code else OUTCOME_NO_VALUE
+
+
+def canvas_of(name: str, payload: Any) -> Mapping[str, Any] | None:
+    """The canvas one call produced, or ``None`` where it produced none.
+
+    Read off the structured payload for the reason :func:`outcome_of` is, and
+    projected rather than passed through: what the stream may carry about a
+    canvas is the id to fetch it by and enough to draw a skeleton of the right
+    height. The numbers stay in the row, which is the whole arrangement.
+    """
+    if name not in _STUDY_TOOLS or not isinstance(payload, Mapping):
+        return None
+    artifact_id = payload.get("artifactId")
+    if not artifact_id:
+        return None
+    return {
+        "artifactId": str(artifact_id),
+        "studyName": str(payload.get("studyName") or ""),
+        "title": str(payload.get("title") or ""),
+        "blockCount": (
+            payload["blockCount"] if isinstance(payload.get("blockCount"), int) else 0
+        ),
+    }
 
 
 def _display_item(item: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -691,6 +736,7 @@ __all__ = [
     "MAX_DISPLAY_RESULTS",
     "MAX_SUMMARY_CHARS",
     "MESSAGE_OVERHEAD_TOKENS",
+    "canvas_of",
     "OUTCOME_CANNOT_READ",
     "OUTCOME_NO_VALUE",
     "OUTCOME_VALUE",

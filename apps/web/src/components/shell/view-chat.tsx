@@ -5,8 +5,12 @@ import { AlertCircle, Check, Copy, Pencil, RotateCcw, X } from "lucide-react"
 
 import { AssistantMessage } from "@/components/alpha/message/assistant-message"
 import { DraftMessage } from "@/components/alpha/message/draft-message"
+import { VisgniteMark } from "@/components/shared/visgnite-logo"
+import { useAuth } from "@/hooks/use-auth"
 import { pinStep } from "@/lib/alpha-desk/pin-question"
 import type { TranscriptEntry } from "@/lib/alpha-desk/transcript"
+import { greetingFor, plainGreeting } from "@/lib/greeting"
+import { vietnamPartOfDay } from "@/lib/market-session"
 import { cn } from "@/lib/utils"
 
 import { Composer } from "./composer"
@@ -82,6 +86,34 @@ const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayout
  * no shortfall left, the spacer is gone, and following the bottom takes over
  * again.
  */
+/**
+ * The mark, and the time of day, on Vietnam's clock.
+ *
+ * Kept here rather than in its own file: the greeting is only ever shown by
+ * this view's empty state, and pulling it out would cost an import without
+ * saving anything. Random line per mount is drawn once and gated on the auth
+ * query settling — until then the safe `plainGreeting` renders on both sides
+ * so hydration stays quiet.
+ */
+function Greeting() {
+  const { user, isPending } = useAuth()
+  const [roll] = useState(Math.random)
+  const name = user?.full_name?.trim() || user?.email?.split("@")[0] || null
+  const partOfDay = vietnamPartOfDay()
+  const line = isPending
+    ? plainGreeting(partOfDay, name)
+    : greetingFor(partOfDay, name, roll)
+
+  return (
+    <div className="flex items-center justify-center gap-3">
+      <VisgniteMark className="h-[26px] w-[17px]" />
+      <h2 className="min-w-0 font-serif text-[clamp(1.6rem,2.7vw,2.15rem)] font-normal leading-[1.1] tracking-[-0.01em] text-ink-display">
+        {line}
+      </h2>
+    </div>
+  )
+}
+
 export function ChatView() {
   const desk = useDesk()
   const { state, dispatch, panelWidth } = useShell()
@@ -262,6 +294,28 @@ export function ChatView() {
     landing.current = false
   }
 
+  // A new conversation opens on the greeting and the composer, centred.
+  // Both guards are needed: no Thread means nothing has been asked yet, and no
+  // entries means the pending question a submit puts in the transcript before
+  // the server hands back a Thread id still routes to the transcript branch
+  // rather than flashing back onto the greeting for a frame. A reopened Thread
+  // that arrives with no entries yet keeps its non-null id, so its history
+  // fade-in also never sees the greeting. The transcript's own hooks above
+  // still run — they all early-return on a null container ref — so React's
+  // hook order stays stable across this branch.
+  if (desk.threadId === null && desk.entries.length === 0) {
+    return (
+      <div className="scrollbar-thin flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-5 pb-16 pt-5">
+        <div className="w-full max-w-[680px]">
+          <Greeting />
+          <div className="mt-5">
+            <Composer variant="opening" />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <>
       <div
@@ -322,6 +376,9 @@ export function ChatView() {
                   onOpenSources={(messageId) =>
                     dispatch({ type: "open-sources", messageId })
                   }
+                  onOpenCanvas={(artifactId) =>
+                    dispatch({ type: "open-canvas", artifactId })
+                  }
                 />
               )
             }
@@ -331,7 +388,16 @@ export function ChatView() {
             // renders nothing rather than falling through to the draft
             // renderer, which has no fields to show for it.
             if (entry.kind === "analysis") return null
-            return <DraftMessage key={entry.key} entry={entry} onRetry={desk.retry} />
+            return (
+              <DraftMessage
+                key={entry.key}
+                entry={entry}
+                onRetry={desk.retry}
+                onOpenCanvas={(artifactId) =>
+                  dispatch({ type: "open-canvas", artifactId })
+                }
+              />
+            )
           })}
         </div>
 

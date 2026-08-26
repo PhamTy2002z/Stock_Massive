@@ -24,6 +24,7 @@ function view(): AssistantView {
     text: "kết luận",
     toolCalls: [],
     thoughts: [],
+    canvases: [],
     followUps: [],
     elapsedMs: 0,
     completed: true,
