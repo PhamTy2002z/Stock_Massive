@@ -124,6 +124,115 @@ export function terminalSentence(reason: string | null): string {
 }
 
 /**
+ * Everything the Signal Desk says, and the one thing it deliberately does not.
+ *
+ * The workspace's name is a proper noun the client chose, so it is not
+ * translated and not paraphrased: the pill in the composer, the pane it opens
+ * and the tab a picture files itself under are one feature, and a reader who
+ * met it under three names would count three.
+ *
+ * **There is no "Lưu".** The design draws a save control beside the export one,
+ * and there is no endpoint behind it — the sidebar's own "Báo cáo đã lưu" still
+ * says "Sắp ra mắt". A button that swallowed the press would promise a reader
+ * their work was kept, which is the one failure this surface cannot recover
+ * from, so the control is absent rather than inert.
+ */
+export const SIGNAL_DESK_COPY = {
+  /** The feature, wherever it is named. */
+  name: "Signal Desk",
+  /**
+   * What the pane says while the desk is on and nothing has been drawn yet.
+   *
+   * A sentence rather than an illustration or a button: the composer is the
+   * call to action, three hundred pixels to the left, and a second one here
+   * would send the reader looking for a control that is already under their
+   * hands.
+   */
+  empty:
+    "Signal Desk đang bật. Hỏi về một mã, một ngành hay cả thị trường để dựng bảng đầu tiên.",
+  /** What the pane says with the desk off and no picture in the conversation. */
+  noDeskView: "Chưa có Signal Desk nào trong hội thoại này.",
+  /** An artifact this reader may not open, which is almost always another Thread's. */
+  unreachable: "Không mở được bảng này. Nó có thể thuộc một hội thoại khác.",
+  /**
+   * Everything else that can go wrong reaching this row is said by
+   * `lib/failure.ts`, in the same words the rest of the product uses for it.
+   * Only the 404 keeps a sentence here, because only this surface knows that an
+   * artifact which resolves to nothing is almost always another Thread's.
+   */
+  /**
+   * A run that produced no block to draw.
+   *
+   * Reachable, frozen, and empty is a different fact from unreachable, and the
+   * provenance strip above it stays: when the picture is missing, where the
+   * numbers would have come from and when they were frozen is the only thing
+   * left that a reader can weigh.
+   */
+  noBlocks: "Lần chạy này không dựng được khối nào để vẽ.",
+  /**
+   * The two modes the composer switches between, and what the desk says while a
+   * Study is running.
+   *
+   * Named rather than implied: the control used to be one pill that was either
+   * lit or not, and "lit" is not a state a first-time reader can read off a
+   * single button. Two labelled segments say what the other mode *is*, which is
+   * the whole reason a segmented control beats a switch for a pair of named
+   * modes.
+   */
+  chatMode: "Chat",
+  toggle: "Signal Desk",
+  running: "Đang dựng…",
+  /**
+   * The line over the build skeleton.
+   *
+   * Used when the tool call carries no sentence of its own. The backend writes
+   * one per call and it names the Study, which is more than this layer could
+   * say without interpreting arguments it does not own.
+   */
+  building: "Đang dựng deskView",
+  /** The tab that is not a desk view: what one answer rested on. */
+  sources: "Nguồn",
+  /** Takes the numbers out of the browser as a file. See the note above. */
+  export: "Xuất",
+  /**
+   * The line the narrow column carries before the first question.
+   *
+   * English, and the one place in the transcript that is: it is the product
+   * naming itself, the same way the wordmark does, rather than the system
+   * narrating. The greeting it replaces stays on the ordinary chat opening —
+   * a reader who has switched the desk on has told us what they came for, and
+   * being greeted a second time is not it.
+   */
+  deskEmptyHeadline: "Signal on your Desk",
+} as const
+
+/**
+ * The three questions the desk offers before it has been asked anything.
+ *
+ * One per registered Study — intraday liquidity, condition review, earnings
+ * dislocation — because the point of the row is to say what the desk can *draw*.
+ * A starter that leads somewhere no Study answers teaches the reader the wrong
+ * shape of question, and the empty column is the only place they have to learn
+ * it from.
+ *
+ * They are offered into the field **unsent**. Two of them name a symbol, and
+ * which symbols exist is a deployment's Universe rather than something this
+ * bundle can know — so the reader gets the sentence with the ticker selected to
+ * change, which is the same contract every other offered question follows
+ * (`shell-state`, `ask`). Sending on the press would spend a Turn on whichever
+ * ticker happened to be written here.
+ *
+ * Neither starter asks whether to buy or sell. The lane's prompt states levels
+ * and consequences and declines instructions for a position, so a starter that
+ * asks for one would be teaching the reader to ask for a refusal.
+ */
+export const SIGNAL_DESK_STARTERS = [
+  "Thanh khoản của VCB dồn về khung giờ nào trong phiên?",
+  "VCB đang ở đâu trong dải 52 tuần và lợi nhuận quý đi hướng nào?",
+  "Mã nào lợi nhuận quý tăng mạnh mà giá chưa theo?",
+] as const
+
+/**
  * What the send control is called.
  *
  * Vietnamese, following the design: the composer is the one place in the shell

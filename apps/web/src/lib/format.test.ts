@@ -33,8 +33,9 @@ describe("formatPercent", () => {
     expect(formatPercent(-2.5)).toBe("-2.50%")
   })
 
-  it("renders null as a dash", () => {
-    expect(formatPercent(null)).toBe("-")
+  it("renders null as the em dash the rest of the product uses for absence", () => {
+    // Not a hyphen: in a column of signed percentages that reads as a minus.
+    expect(formatPercent(null)).toBe("—")
   })
 })
 
@@ -49,8 +50,12 @@ describe("formatBillions", () => {
     expect(formatBillions(-3e9)).toBe("-3.0B")
   })
 
-  it("falls back to locale digits below 1 million", () => {
-    expect(formatBillions(1234)).toBe((1234).toLocaleString())
+  it("groups digits below 1 million the Vietnamese way, wherever it is read", () => {
+    // Pinned to the literal rather than to `toLocaleString()` with no locale:
+    // the old assertion asked the environment the same question the code was
+    // asking, so it agreed with the bug in every environment and would only
+    // have failed where nobody runs it.
+    expect(formatBillions(1234)).toBe("1.234")
   })
 })
 

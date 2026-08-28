@@ -30,13 +30,13 @@
 
 import {
   appendThought,
-  readCanvases,
+  readDeskViews,
   readThoughts,
   readToolCall,
   readToolCalls,
 } from "./read-content"
 import type {
-  CanvasAnnouncement,
+  SignalDeskAnnouncement,
   SnapshotData,
   Thought,
   ToolCall,
@@ -93,13 +93,13 @@ export interface LiveTurn {
    */
   thoughts: Thought[]
   /**
-   * The canvases this Turn has produced, in the order they were announced.
+   * The desk views this Turn has produced, in the order they were announced.
    *
    * Ids and titles, never cells: the numbers are a row the panel fetches. Kept
    * as a list rather than one value because a Turn may draw more than one
    * picture, and the newest is the one the panel opens on.
    */
-  canvases: CanvasAnnouncement[]
+  deskViews: SignalDeskAnnouncement[]
   /**
    * How long the Turn has been running, as the backend last reported it.
    *
@@ -140,7 +140,7 @@ export const IDLE: LiveTurn = {
   text: "",
   toolCalls: [],
   thoughts: [],
-  canvases: [],
+  deskViews: [],
   elapsedMs: 0,
   terminalReason: null,
   messageId: null,
@@ -274,14 +274,14 @@ function applyEvent(state: LiveTurn, event: TurnEvent): LiveTurn {
       return call === null ? advanced : { ...advanced, toolCalls: upsert(state.toolCalls, call) }
     }
 
-    case "canvas.ready": {
+    case "signal_desk.ready": {
       // Read through the same defensive path a snapshot's list takes, and
       // upserted by artifact id for the reason a tool call is: one Study run
       // has one id, so a second announcement of it is a republish rather than
       // a second picture.
-      const [canvas] = readCanvases([event.data])
-      if (canvas === undefined) return advanced
-      return { ...advanced, canvases: upsertCanvas(state.canvases, canvas) }
+      const [deskView] = readDeskViews([event.data])
+      if (deskView === undefined) return advanced
+      return { ...advanced, deskViews: upsertDeskView(state.deskViews, deskView) }
     }
 
     default: {
@@ -314,16 +314,16 @@ function upsert(calls: ToolCall[], call: ToolCall): ToolCall[] {
 }
 
 /** The same, by artifact id. */
-function upsertCanvas(
-  canvases: CanvasAnnouncement[],
-  canvas: CanvasAnnouncement,
-): CanvasAnnouncement[] {
-  const index = canvases.findIndex(
-    (existing) => existing.artifactId === canvas.artifactId,
+function upsertDeskView(
+  deskViews: SignalDeskAnnouncement[],
+  deskView: SignalDeskAnnouncement,
+): SignalDeskAnnouncement[] {
+  const index = deskViews.findIndex(
+    (existing) => existing.artifactId === deskView.artifactId,
   )
-  if (index === -1) return [...canvases, canvas]
-  const next = [...canvases]
-  next[index] = canvas
+  if (index === -1) return [...deskViews, deskView]
+  const next = [...deskViews]
+  next[index] = deskView
   return next
 }
 
@@ -344,7 +344,10 @@ function fromSnapshot(state: LiveTurn, event: TurnEvent): LiveTurn {
     // trusting it more than the stream would make a reconnect the way to get a
     // malformed call onto the screen.
     thoughts: readThoughts(data.thoughts),
-    canvases: readCanvases(data.canvases),
+    // Snapshots use the same wire spelling as canonical messages. Accept the
+    // canvas-era key as well so reconnecting across the rename does not make a
+    // card disappear until the next live announcement.
+    deskViews: readDeskViews(data.signal_desks ?? data.canvases),
     elapsedMs: typeof data.elapsed_ms === "number" ? data.elapsed_ms : state.elapsedMs,
     terminalReason: data.terminal_reason ?? null,
     // A terminal snapshot names the message that replaces this draft, exactly

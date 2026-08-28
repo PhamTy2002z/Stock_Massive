@@ -3,11 +3,8 @@
 import {
   Check,
   ChevronDown,
-  ChevronRight,
   Download,
-  Globe,
   HelpCircle,
-  ListChecks,
   LogOut,
   Settings,
 } from "lucide-react"
@@ -54,22 +51,21 @@ export function AccountMenu() {
           >
             Cài đặt
           </MenuItem>
-          <MenuItem
-            icon={<Globe className="size-[17px] text-ink-4" />}
-            trailing={<ChevronRight className="size-4 shrink-0 text-ink-6" />}
-            disabled
-          >
-            Ngôn ngữ
-          </MenuItem>
+          {/* No language row. The product is Vietnamese-first by commitment and
+              carries no translation layer, so an entry here — disabled, with a
+              chevron promising a submenu — advertised a choice that does not
+              exist and will not be built. */}
           <MenuItem icon={<HelpCircle className="size-[17px] text-ink-4" />} disabled>
             Trợ giúp
           </MenuItem>
 
           <MenuSeparator />
 
-          <MenuItem icon={<ListChecks className="size-[17px] text-ink-4" />} disabled>
-            Gói &amp; hạn mức
-          </MenuItem>
+          {/* No plan row either. Its two halves resolved in opposite directions:
+              the allowance is now a real pane inside Cài đặt, two rows above,
+              and the plan it would sit beside does not exist until entitlement
+              lands. A disabled row reading "hạn mức" beside a working one is
+              worse than no row at all. */}
           <MenuItem icon={<Download className="size-[17px] text-ink-4" />} disabled>
             Tải ứng dụng
           </MenuItem>

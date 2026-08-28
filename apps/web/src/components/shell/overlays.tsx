@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react"
 import { Building2, Check, Lock, MessageSquare, Search, X } from "lucide-react"
 
 import { useThreads } from "@/hooks/use-threads"
+import { FailureState } from "@/components/ui/failure-state"
+import { describeFailure } from "@/lib/failure"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 
@@ -180,11 +182,22 @@ function CommandPalette() {
             </button>
           ))}
 
-          {rows.length === 0 && (
-            <p className="px-2.5 py-6 text-center text-row text-ink-6">
-              {threads.isPending ? "Đang tải…" : "Không có hội thoại nào khớp."}
-            </p>
-          )}
+          {rows.length === 0 &&
+            (threads.isError ? (
+              // "Không có hội thoại nào khớp" over a list that never loaded
+              // tells the reader their search failed when their connection did.
+              <div className="px-2.5 py-4">
+                <FailureState
+                  failure={describeFailure(threads.error)}
+                  density="inline"
+                  onRetry={() => void threads.refetch()}
+                />
+              </div>
+            ) : (
+              <p className="px-2.5 py-6 text-center text-row text-ink-6">
+                {threads.isPending ? "Đang tải…" : "Không có hội thoại nào khớp."}
+              </p>
+            ))}
         </div>
       </div>
     </Scrim>

@@ -11,7 +11,7 @@
 import { describe, expect, it } from "vitest"
 
 import { IDLE, type LiveTurn } from "./live-turn"
-import { buildTranscript, type TranscriptInput } from "./transcript"
+import { buildTranscript, storedDeskViews, type TranscriptInput } from "./transcript"
 import type { FlagReason, ThreadMessage, ToolCall } from "./types"
 
 const THREAD = "11111111-1111-4111-8111-111111111111"
@@ -454,5 +454,97 @@ describe("a stored answer", () => {
     expect(entry.kind === "assistant" && entry.view.text).toBe("Câu trả lời cũ.")
     expect(entry.kind === "assistant" && entry.view.thoughts).toEqual([])
     expect(entry.kind === "assistant" && entry.view.elapsedMs).toBe(0)
+  })
+
+  it("restores the Signal Desk card from the canonical message contract", () => {
+    const announcement = {
+      artifactId: "artifact-stb5",
+      studyName: "entry_condition_review",
+      title: "Điều kiện hiện tại — STB5",
+      blockCount: 4,
+      round: 1,
+    }
+    const [entry] = buildTranscript({
+      threadId: THREAD,
+      messages: [
+        stored({
+          text: "Đã rà soát điều kiện hiện tại.",
+          tool_calls: [],
+          signal_desks: [announcement],
+        }),
+      ],
+      live: IDLE,
+      pendingUserText: null,
+    })
+
+    expect(entry.kind === "assistant" && entry.view.deskViews).toEqual([
+      announcement,
+    ])
+  })
+
+  it("keeps cards stored before the Signal Desk rename readable", () => {
+    const announcement = {
+      artifactId: "artifact-legacy",
+      studyName: "intraday_liquidity_profile",
+      title: "Thanh khoản trong phiên — STB",
+      blockCount: 3,
+      round: 0,
+    }
+    const [entry] = buildTranscript({
+      threadId: THREAD,
+      messages: [
+        stored({
+          text: "Câu trả lời cũ.",
+          tool_calls: [],
+          canvases: [announcement],
+        }),
+      ],
+      live: IDLE,
+      pendingUserText: null,
+    })
+
+    expect(entry.kind === "assistant" && entry.view.deskViews).toEqual([
+      announcement,
+    ])
+  })
+})
+
+describe("the desk views a stored Thread already made", () => {
+  function answerWith(id: number, deskViews: unknown, key = "signal_desks"): ThreadMessage {
+    const message = assistantMessage(id, "đáp")
+    return { ...message, content: { ...message.content, [key]: deskViews } }
+  }
+
+  const FIRST = { artifactId: "a-1", studyName: "s", title: "Thanh khoản STB", blockCount: 2 }
+  const SECOND = { artifactId: "a-2", studyName: "s", title: "Điều kiện hiện tại", blockCount: 5 }
+
+  it("collects them oldest first, across the whole conversation", () => {
+    // The order is the strip's order, and the strip reads left to right as the
+    // conversation ran.
+    const found = storedDeskViews([answerWith(3, [SECOND]), answerWith(1, [FIRST])])
+
+    expect(found.map((view) => view.artifactId)).toEqual(["a-1", "a-2"])
+    expect(found[1].title).toBe("Điều kiện hiện tại")
+  })
+
+  it("files one run under one tab however often it was announced", () => {
+    // A retried Turn republishes the announcement it already made. Two tabs for
+    // one picture would be the reader choosing between identical things.
+    const found = storedDeskViews([answerWith(1, [FIRST]), answerWith(2, [FIRST])])
+
+    expect(found).toHaveLength(1)
+  })
+
+  it("still reads Threads written before the Signal Desk rename", () => {
+    // The JSONB already on disk says `canvases`. A reader that only knew the
+    // new key would quietly lose every picture made before the rename.
+    expect(storedDeskViews([answerWith(1, [FIRST], "canvases")])).toHaveLength(1)
+  })
+
+  it("ignores what the user said and what the column did not hold", () => {
+    const question = { ...assistantMessage(1, "hỏi"), role: "user" as const }
+    expect(storedDeskViews([question])).toEqual([])
+    expect(storedDeskViews([answerWith(1, undefined)])).toEqual([])
+    expect(storedDeskViews([])).toEqual([])
   })
 })

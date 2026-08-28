@@ -1,9 +1,21 @@
 "use client"
 
-import { AlertCircle, RefreshCw, WifiOff } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
-import { cn } from "@/lib/utils"
+/**
+ * What an error boundary shows, in the product's own vocabulary.
+ *
+ * This used to sniff the error's *message* for the words "network" or "fetch"
+ * and otherwise print the raw `error.message` under a fixed heading — so a 403
+ * and a dropped connection arrived as the same card, and an unlucky reader got
+ * an English exception string in the middle of a Vietnamese product. The
+ * classification now happens in `lib/failure.ts`, which reads the status rather
+ * than guessing at prose, and this component only chooses the density.
+ *
+ * The signature is unchanged because `QueryErrorBoundary` is mounted in several
+ * places and every one of them keeps working.
+ */
+
+import { FailureState } from "@/components/ui/failure-state"
+import { describeFailure } from "@/lib/failure"
 
 interface ErrorFallbackProps {
   error: Error
@@ -18,60 +30,15 @@ export function ErrorFallback({
   compact,
   className,
 }: ErrorFallbackProps) {
-  const isNetworkError =
-    error.message.toLowerCase().includes("network") ||
-    error.message.toLowerCase().includes("fetch") ||
-    error.message.toLowerCase().includes("failed to load")
-
-  if (compact) {
-    return (
-      <div
-        className={cn(
-          "flex items-center gap-2 p-3 rounded-lg border border-destructive/50 bg-destructive/10",
-          className
-        )}
-      >
-        {isNetworkError ? (
-          <WifiOff className="h-4 w-4 text-destructive shrink-0" />
-        ) : (
-          <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
-        )}
-        <span className="text-sm text-destructive truncate">
-          {isNetworkError ? "Lỗi kết nối mạng" : error.message}
-        </span>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={resetErrorBoundary}
-          className="shrink-0 h-7 px-2"
-        >
-          <RefreshCw className="h-3 w-3" />
-        </Button>
-      </div>
-    )
-  }
-
   return (
-    <Card className={cn("border-destructive/50 bg-destructive/5", className)}>
-      <CardContent className="flex flex-col items-center gap-4 p-8">
-        {isNetworkError ? (
-          <WifiOff className="h-12 w-12 text-destructive" />
-        ) : (
-          <AlertCircle className="h-12 w-12 text-destructive" />
-        )}
-        <div className="text-center space-y-1">
-          <h3 className="font-semibold">Đã xảy ra lỗi</h3>
-          <p className="text-sm text-muted-foreground">
-            {isNetworkError
-              ? "Không thể kết nối. Vui lòng kiểm tra mạng của bạn."
-              : error.message}
-          </p>
-        </div>
-        <Button onClick={resetErrorBoundary} variant="outline">
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Thử lại
-        </Button>
-      </CardContent>
-    </Card>
+    <FailureState
+      failure={describeFailure(error)}
+      density={compact ? "inline" : "region"}
+      // Resetting the boundary is what re-runs the render that threw, and for a
+      // query that is also what refetches it: `QueryErrorBoundary` wires this to
+      // TanStack's own reset.
+      onRetry={resetErrorBoundary}
+      className={className}
+    />
   )
 }

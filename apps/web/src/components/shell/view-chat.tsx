@@ -5,12 +5,15 @@ import { AlertCircle, Check, Copy, Pencil, RotateCcw, X } from "lucide-react"
 
 import { AssistantMessage } from "@/components/alpha/message/assistant-message"
 import { DraftMessage } from "@/components/alpha/message/draft-message"
+import { FollowUps } from "@/components/alpha/message/follow-ups"
 import { VisgniteMark } from "@/components/shared/visgnite-logo"
 import { useAuth } from "@/hooks/use-auth"
+import { SIGNAL_DESK_COPY, SIGNAL_DESK_STARTERS } from "@/lib/alpha-desk/copy"
 import { pinStep } from "@/lib/alpha-desk/pin-question"
 import type { TranscriptEntry } from "@/lib/alpha-desk/transcript"
 import { greetingFor, plainGreeting } from "@/lib/greeting"
 import { vietnamPartOfDay } from "@/lib/market-session"
+import Link from "next/link"
 import { cn } from "@/lib/utils"
 
 import { Composer } from "./composer"
@@ -114,9 +117,33 @@ function Greeting() {
   )
 }
 
+/**
+ * What the narrow column says before the desk has been asked anything.
+ *
+ * The product naming itself, where an ordinary opening greets the reader. A
+ * reader who has switched the desk on has already said what they came for, and
+ * the greeting's warmth belongs to the screen where that is still an open
+ * question — here it would be a second hello over a workspace waiting to be
+ * used.
+ *
+ * Held at the column's centre with the composer under it rather than sharing a
+ * centred stack with it: the composer is where it will be for the rest of the
+ * conversation, so nothing jumps when the first question lands.
+ */
+function DeskHeadline() {
+  return (
+    <div className="flex animate-vg-fade-in items-center justify-center gap-3">
+      <VisgniteMark className="h-[23px] w-[15px]" />
+      <h2 className="min-w-0 font-serif text-[1.6rem] font-light leading-[1.2] tracking-[-0.015em] text-ink-display [text-wrap:pretty]">
+        {SIGNAL_DESK_COPY.deskEmptyHeadline}
+      </h2>
+    </div>
+  )
+}
+
 export function ChatView() {
   const desk = useDesk()
-  const { state, dispatch, panelWidth } = useShell()
+  const { dispatch } = useShell()
   const container = useRef<HTMLDivElement>(null)
   const following = useRef(true)
   // The newest question, while it is held at the top of the viewport. Cleared by
@@ -304,8 +331,27 @@ export function ChatView() {
   // still run — they all early-return on a null container ref — so React's
   // hook order stays stable across this branch.
   if (desk.threadId === null && desk.entries.length === 0) {
+    // The desk's opening is the column the rest of the conversation happens in,
+    // already at its width, with the composer already docked where it will
+    // stay. The ordinary opening centres a greeting and a field together
+    // because there is no second region to be beside.
+    if (desk.signalDesk) {
+      return (
+        <>
+          <div className="flex min-h-0 flex-1 items-center justify-center px-5 pb-6 pt-2">
+            <DeskHeadline />
+          </div>
+          <DockedFooter starters anchored={false} />
+        </>
+      )
+    }
+
     return (
       <div className="scrollbar-thin flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-5 pb-16 pt-5">
+        {/* Narrower than the docked composer's 760 on purpose. The opening is
+            one field under one line of type, and a field that runs the full
+            width of the transcript reads as a page rather than as a prompt.
+            What the opening gets instead of width is height — see the card. */}
         <div className="w-full max-w-[680px]">
           <Greeting />
           <div className="mt-5">
@@ -376,8 +422,8 @@ export function ChatView() {
                   onOpenSources={(messageId) =>
                     dispatch({ type: "open-sources", messageId })
                   }
-                  onOpenCanvas={(artifactId) =>
-                    dispatch({ type: "open-canvas", artifactId })
+                  onOpenDeskView={(artifactId) =>
+                    dispatch({ type: "open-desk-view", artifactId })
                   }
                 />
               )
@@ -393,8 +439,8 @@ export function ChatView() {
                 key={entry.key}
                 entry={entry}
                 onRetry={desk.retry}
-                onOpenCanvas={(artifactId) =>
-                  dispatch({ type: "open-canvas", artifactId })
+                onOpenDeskView={(artifactId) =>
+                  dispatch({ type: "open-desk-view", artifactId })
                 }
               />
             )
@@ -409,43 +455,116 @@ export function ChatView() {
         <div aria-hidden="true" style={{ height: tail }} />
       </div>
 
-      {/* Anchored to the main column rather than the viewport, and it follows
-          the inspector: a composer that stayed put would slide under the panel
-          the moment it opened. */}
-      <div
-        style={{ right: panelWidth }}
-        className={cn(
-          "absolute bottom-0 left-0 bg-gradient-to-t from-background from-[62%] to-transparent px-5 pb-3",
-          state.dragging ? "transition-none" : "transition-[right] duration-panel ease-panel",
-        )}
-      >
-        <div className="mx-auto w-full max-w-[760px]">
-          {desk.refusal && (
-            <div
-              role="alert"
-              className="mx-2.5 mb-[-8px] flex items-start gap-2 rounded-t-[14px] border border-b-0 border-destructive/40 bg-destructive/[0.07] px-3.5 pb-4 pt-2.5 text-meta text-destructive"
+      <DockedFooter />
+    </>
+  )
+}
+
+/**
+ * The composer, anchored to the main column rather than to the viewport.
+ *
+ * It follows the inspector: a composer that stayed put would slide under the
+ * panel the moment it opened. Extracted because two openings dock it — the
+ * transcript and the desk's empty column — and a second copy of the gradient,
+ * the refusal banner and the disclaimer is two places for one footer to drift.
+ *
+ * `starters` offers the desk's opening questions above the field. Only the
+ * empty desk column passes it: once there is an answer in the transcript the
+ * questions worth asking next come from that answer, and they are already drawn
+ * under it.
+ *
+ * `anchored` is what the transcript needs and an empty column does not. Over a
+ * transcript the footer floats, so the last answer stays visually continuous
+ * with the field asking the next question and a gradient hides the text running
+ * under it. With nothing to scroll there is nothing to float over: it sits in
+ * the column as the last flex row, which is also the only way the region above
+ * it can centre anything — a floating footer's height is not a number the
+ * layout above it can know, and reserving a guess for it puts the headline off
+ * centre by however much the guess was wrong.
+ */
+function DockedFooter({
+  starters = false,
+  anchored = true,
+}: {
+  starters?: boolean
+  anchored?: boolean
+}) {
+  const desk = useDesk()
+  const { state, dispatch, panelWidth } = useShell()
+
+  return (
+    <div
+      style={anchored ? { right: panelWidth } : undefined}
+      className={cn(
+        "px-5 pb-3",
+        anchored
+          ? cn(
+              "absolute bottom-0 left-0 bg-gradient-to-t from-background from-[62%] to-transparent",
+              state.dragging
+                ? "transition-none"
+                : "transition-[right] duration-panel ease-panel",
+            )
+          : "flex-none",
+      )}
+    >
+      <div className="mx-auto w-full max-w-[760px]">
+        {desk.refusal && (
+          <div
+            role="alert"
+            className="mx-2.5 mb-[-8px] flex items-start gap-2 rounded-t-[14px] border border-b-0 border-destructive/40 bg-destructive/[0.07] px-3.5 pb-4 pt-2.5 text-meta text-destructive"
+          >
+            <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+            <p className="min-w-0 flex-1">
+              {desk.refusal}
+              {/* The banner used to end here, so the most common way to lose
+                  a question — a session that expired between opening the tab
+                  and pressing send — was a red sentence with nothing to press
+                  and a draft the reader had to copy out by hand. The route
+                  out comes from the classification beside the message. */}
+              {desk.refusalFailure?.recovery === "signin" && (
+                  <Link
+                    href="/login"
+                    className="ml-1.5 rounded-sm font-medium underline underline-offset-2 hover:brightness-110 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                  >
+                    {desk.refusalFailure.action}
+                  </Link>
+                )}
+            </p>
+            <IconButton
+              label="Đóng thông báo"
+              size="sm"
+              onClick={desk.dismissRefusal}
+              className="size-5 text-destructive hover:bg-destructive/15 hover:text-destructive"
             >
-              <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
-              <p className="min-w-0 flex-1">{desk.refusal}</p>
-              <IconButton
-                label="Đóng thông báo"
-                size="sm"
-                onClick={desk.dismissRefusal}
-                className="size-5 text-destructive hover:bg-destructive/15 hover:text-destructive"
-              >
-                <X className="size-3.5" />
-              </IconButton>
-            </div>
-          )}
+              <X className="size-3.5" />
+            </IconButton>
+          </div>
+        )}
 
-          <Composer />
+        {starters && (
+          <FollowUps
+            items={[...SIGNAL_DESK_STARTERS]}
+            onPick={(text) => dispatch({ type: "ask", text })}
+            boxed
+            className="pb-2.5"
+          />
+        )}
 
+        <Composer />
+
+        {/* The desk does not carry the caveat. Under a ~427px column it takes
+            two lines to say what fits on one everywhere else, and the numbers
+            on the desk beside it are not the ones it is warning about: a Study
+            is drawn from the store, frozen at its `as_of`, with its provenance
+            named on the panel itself. The caveat is about the prose answer, so
+            it stays on the surface that shows prose across the full column. */}
+        {!desk.signalDesk && (
           <p className="mt-2.5 text-center text-micro text-ink-6">
             VisgniteAI có thể sai sót. Hãy đối chiếu nguồn dữ liệu trước khi ra quyết định đầu tư.
           </p>
-        </div>
+        )}
       </div>
-    </>
+    </div>
   )
 }
 

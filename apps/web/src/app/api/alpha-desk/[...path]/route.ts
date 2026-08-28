@@ -56,9 +56,12 @@ import { currentAccessToken, rotateAccessToken } from "@/lib/auth/bearer"
 // icon — that would tell the domain, and the network path to it, which page a
 // signed-in user is reading and from what IP — so the API fetches it and this
 // allowlist is what lets the browser reach that endpoint at all. `artifacts` is
-// the canvas fetch: upstream mounts a single `GET /artifacts/{id}` that resolves
+// the desk view fetch: upstream mounts a single `GET /artifacts/{id}` that resolves
 // ownership through the Thread the Study ran in, so the same argument as
-// `messages` covers it.
+// `messages` covers it. `usage` is this account's own allowance: upstream mounts
+// a single `GET /usage` that takes no parameters and reads the user id from the
+// resolved session, so there is no shape of the request that reaches another
+// account's ledger.
 const FORWARDED_RESOURCES = new Set([
   "watchlist",
   "analyses",
@@ -67,6 +70,7 @@ const FORWARDED_RESOURCES = new Set([
   "messages",
   "artifacts",
   "assets",
+  "usage",
 ])
 
 function isForwardedPath(path: string[]): boolean {

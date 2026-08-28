@@ -10,13 +10,12 @@ import {
   LayoutList,
   Paperclip,
   Plus,
-  Search,
   Square,
   Wallet,
   X,
 } from "lucide-react"
 
-import { CANCELLING_LABEL, SEND_LABEL } from "@/lib/alpha-desk/copy"
+import { CANCELLING_LABEL, SEND_LABEL, SIGNAL_DESK_COPY } from "@/lib/alpha-desk/copy"
 import { cn } from "@/lib/utils"
 
 import { useDesk } from "./desk-state"
@@ -59,10 +58,22 @@ const MAX_FIELD_HEIGHT_PX = 150
 /**
  * Where the user says something.
  *
- * One lifted card rather than a field with a button beside it: 18px corners, a
+ * One lifted card rather than a field with a button beside it: deep corners, a
  * hairline, a shadow deep enough to separate it from the transcript running
  * underneath, and every control *inside* the card. The field itself carries no
  * border — it would be a second box inside the first.
+ *
+ * **The card is deliberately larger than the sum of what is in it.** The field
+ * is the one thing on the screen the reader has to act in rather than read, and
+ * a box sized tightly to a single line of placeholder reads as a search input —
+ * something you type a phrase into. The padding above the field and the air
+ * between it and the control row are what make it read as somewhere a question
+ * gets composed. The corner radius grew with it, in `tailwind.config.js`.
+ *
+ * The height is where that room comes from, never the width. Widening the card
+ * pushes the first line of a question across the reader's whole field of view
+ * and turns the prompt into a page; the opening screen keeps its narrower
+ * column for exactly that reason.
  *
  * The field is **never disabled by anything happening elsewhere**. A Turn in
  * flight does not lock it: composing the next question while an answer arrives
@@ -111,6 +122,16 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    // Enter while an IME is still composing belongs to the IME, not to us.
+    //
+    // This is a Vietnamese product and Vietnamese is very often typed through
+    // one: Telex and VNI build "ườ" out of several keystrokes, and the Enter
+    // that commits the syllable is the same Enter that sends. Submitting on it
+    // sends a half-typed word and swallows the keystroke that would have
+    // finished it. `isComposing` is exactly the flag that separates the two,
+    // and it is false for a keyboard that never opens an IME at all — so the
+    // ordinary path is unchanged.
+    if (event.nativeEvent.isComposing) return
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault()
       submit(event)
@@ -121,19 +142,26 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
     <form
       onSubmit={submit}
       className={cn(
-        "relative rounded-composer border border-border bg-surface-sunken px-3.5 pb-2.5 pt-3",
+        "composer-shell relative rounded-composer border border-border bg-surface-sunken px-4 pb-4 pt-6",
         variant === "docked" && "shadow-composer",
       )}
     >
       {state.contextSymbol && (
         <div className="flex items-center gap-2 pb-2.5">
-          <span className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/[0.09] py-1 pl-2.5 pr-1 font-mono text-meta text-primary">
+          {/* Neutral rather than amber, and it used to be amber. The desk's own
+              pill a few pixels away is now the selected state on this card, and
+              the send button's note below states the rule this follows: two
+              oranges in one card compete. Of the two selections the mode is the
+              consequential one — it changes the whole layout — so the accent
+              went to it and the lens kept the ticker in mono, which is what
+              made it legible as a symbol in the first place. */}
+          <span className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-bubble py-1 pl-2.5 pr-1 font-mono text-meta text-ink-2">
             {state.contextSymbol}
             <IconButton
               label="Bỏ ngữ cảnh phân tích"
               size="sm"
               onClick={() => dispatch({ type: "context-symbol", symbol: null })}
-              className="size-[17px] rounded-[5px] text-primary hover:bg-primary/20 hover:text-primary"
+              className="size-[17px] rounded-[5px] text-ink-4 hover:bg-foreground/10 hover:text-foreground"
             >
               <X className="size-2.5" strokeWidth={2.4} />
             </IconButton>
@@ -154,16 +182,22 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
         onKeyDown={onKeyDown}
         rows={1}
         aria-label="Hỏi VisgniteAI"
+        // Short enough to fit the desk's narrowest column on one line. The
+        // longer sentence this used to ask ("…một ngành hay cả thị trường") is
+        // 43 characters, which wants ~330px and had ~305px to sit in once the
+        // desk narrowed the conversation — so it wrapped, and the second line
+        // was clipped by a box measured for one. Naming two of the three scopes
+        // says the same thing in the width that exists.
         placeholder={
           state.contextSymbol
-            ? `Hỏi về ${state.contextSymbol}, hay bất kỳ mã nào…`
-            : "Hỏi về một mã, một ngành hay cả thị trường…"
+            ? `Hỏi về ${state.contextSymbol}, hay mã nào khác…`
+            : "Hỏi về một mã hay cả thị trường…"
         }
-        className="block max-h-[150px] min-h-[26px] w-full resize-none border-0 bg-transparent p-0 pb-2 text-[0.98rem] leading-[1.5] text-foreground outline-none placeholder:text-ink-6"
+        className="composer-field block max-h-[150px] min-h-[28px] w-full resize-none border-0 bg-transparent p-0 pb-5 text-[0.92rem] leading-[1.5] text-foreground outline-none placeholder:text-ink-6"
       />
 
       <div className="flex items-center gap-1.5">
-        <div className="relative flex">
+        <div className="relative flex shrink-0">
           {attachOpen && <AttachMenu />}
           <IconButton
             label="Đính kèm"
@@ -173,22 +207,28 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
               event.stopPropagation()
               dispatch({ type: "overlay", overlay: attachOpen ? null : "attach" })
             }}
+            className="composer-icon size-9"
           >
-            <Plus className="size-[18px]" strokeWidth={1.6} />
+            <Plus className="size-[19px]" strokeWidth={1.6} />
           </IconButton>
         </div>
 
-        <div className="ml-auto flex items-center gap-1.5">
-          <span className="hidden items-center gap-1.5 rounded-lg px-2 py-1 text-control text-ink-3 md:flex">
+        <SignalDeskToggle />
+
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          {/* `composer-model` is a container query, not a breakpoint: the row
+              has to lay out for the width of this card and the desk makes that
+              card narrow on a wide display. See `globals.css`. */}
+          <span className="composer-model items-center gap-1.5 rounded-lg px-2 py-1 text-control text-ink-3">
             Visgnite Pro
-            <ChevronDown className="size-3 text-ink-6" strokeWidth={1.8} />
+            <ChevronDown className="size-3 shrink-0 text-ink-6" strokeWidth={1.8} />
           </span>
           {desk.canCancel ? (
             <button
               type="button"
               onClick={desk.cancel}
               disabled={desk.isCancelling}
-              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[10px] border border-border px-3 text-control text-ink-3 transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-50"
+              className="inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[10px] border border-border px-3.5 text-control text-ink-3 transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-50"
             >
               <Square className="size-3.5" />
               {desk.isCancelling ? CANCELLING_LABEL : "Dừng"}
@@ -211,7 +251,7 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
               // whether it registered. Lift on hover, settle and darken on
               // press, and no pointer events at all while there is nothing to
               // send — a disabled control that still reacts reads as broken.
-              className="inline-flex size-[34px] shrink-0 items-center justify-center rounded-full bg-foreground text-background transition-[filter,transform] duration-150 hover:-translate-y-px hover:brightness-110 active:translate-y-0 active:brightness-90 disabled:pointer-events-none disabled:opacity-40 motion-reduce:transition-none motion-reduce:hover:translate-y-0"
+              className="composer-icon inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-foreground text-background transition-[filter,transform] duration-150 hover:-translate-y-px hover:brightness-110 active:translate-y-0 active:brightness-90 disabled:pointer-events-none disabled:opacity-40 motion-reduce:transition-none motion-reduce:hover:translate-y-0"
             >
               <WaveformIcon />
               <span className="sr-only">{SEND_LABEL}</span>
@@ -220,6 +260,112 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
         </div>
       </div>
     </form>
+  )
+}
+
+/**
+ * The mode the composer is in, as two named segments.
+ *
+ * A mode the reader enters, which is why it sits in the control row and not in
+ * a menu: turning it on inverts the layout there and then — the conversation
+ * narrows to its column, the workspace opens beside it — with or without a
+ * picture in hand. Nothing about asking changes. The chat in the narrow column
+ * is the same chat, and a question that draws nothing is answered exactly as it
+ * was.
+ *
+ * **It was a switch and it is a segmented control now.** One pill that was
+ * either lit or unlit put the whole burden of the mode on a colour: a reader
+ * meeting it for the first time could see that something was on, and had no way
+ * to learn what was off. Two segments name both halves, so the choice is
+ * legible before it is made — and the design system already had the pattern
+ * written down for exactly this, down to what the selected one looks like.
+ *
+ * **The selected segment is a raised neutral surface, not a filled accent.**
+ * That is the system's own rule for segmented controls, and it is the right one
+ * here: the lift says "this is the segment you are in" without spending the
+ * page's one filled colour on a control that is not an action. The amber comes
+ * back as *text* on the selected Signal Desk segment only — the accent marks
+ * the consequential mode, and marks nothing at all while the reader is simply
+ * chatting.
+ *
+ * **Three states, and the third is a status light.** While a Study is in flight
+ * the segment says so, from the same `building` the pane's skeleton is drawn
+ * from — one fact, two places. There is deliberately no fourth: the feature is
+ * free for everyone in this release, so there is no locked state, no upgrade
+ * path and no popover explaining a limit that does not exist.
+ *
+ * The decision is read from `useDesk` and written back through one function, so
+ * an entitlement check later has exactly one edge to attach to.
+ */
+function SignalDeskToggle() {
+  const desk = useDesk()
+  const running = desk.signalDesk && desk.building !== null
+
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Chế độ trả lời"
+      className="inline-flex h-9 shrink-0 items-center gap-0.5 rounded-[11px] bg-foreground/[0.05] p-0.5"
+    >
+      <ModeSegment
+        selected={!desk.signalDesk}
+        onSelect={() => desk.setSignalDesk(false)}
+        label={SIGNAL_DESK_COPY.chatMode}
+      />
+      <ModeSegment
+        selected={desk.signalDesk}
+        onSelect={() => desk.setSignalDesk(true)}
+        busy={running}
+        accent
+        label={running ? SIGNAL_DESK_COPY.running : SIGNAL_DESK_COPY.toggle}
+      />
+    </div>
+  )
+}
+
+/**
+ * One segment of the mode control.
+ *
+ * `radio` rather than a pressed button: these are two values of one setting, and
+ * the difference matters to anything not looking at the screen — a radio group
+ * announces "one of two" and reads the unselected label out, which is precisely
+ * the information the old single switch could not carry.
+ */
+function ModeSegment({
+  selected,
+  onSelect,
+  label,
+  accent = false,
+  busy = false,
+}: {
+  selected: boolean
+  onSelect: () => void
+  label: string
+  /** Whether this segment carries the accent while it is the selected one. */
+  accent?: boolean
+  busy?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      aria-busy={busy || undefined}
+      // Only the selected segment is in the tab order, which is how a radio
+      // group behaves everywhere else: one stop, then the arrow keys.
+      tabIndex={selected ? 0 : -1}
+      onClick={onSelect}
+      className={cn(
+        "composer-mode-segment inline-flex h-8 items-center whitespace-nowrap rounded-[9px] px-3 text-control transition-colors",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-surface-sunken",
+        selected
+          ? cn("bg-surface-bubble", accent ? "text-primary" : "text-foreground")
+          : "text-ink-5 hover:text-ink-2",
+        busy && "animate-pulse motion-reduce:animate-none",
+      )}
+    >
+      {label}
+    </button>
   )
 }
 
@@ -235,7 +381,7 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
  */
 function AttachMenu() {
   return (
-    <Menu className="absolute bottom-[38px] left-0 min-w-[250px]">
+    <Menu className="absolute bottom-[44px] left-0 min-w-[250px]">
       <MenuItem icon={<Paperclip className="size-[17px] text-ink-4" strokeWidth={1.6} />} hint="⌘U" disabled>
         Thêm tệp hoặc ảnh
       </MenuItem>
@@ -265,9 +411,9 @@ function AttachMenu() {
         Nguồn dữ liệu kết nối
       </MenuItem>
       <MenuSeparator />
-      <MenuItem icon={<Search className="size-[17px] text-ink-4" strokeWidth={1.6} />} disabled>
-        Nghiên cứu sâu
-      </MenuItem>
+      {/* The row that used to sit here was a calque of a competitor's feature
+          name for work this product now does under its own: the desk is a
+          switch in the control row, not a hidden menu item. */}
       <MenuItem icon={<Globe className="size-[17px] text-ink-4" strokeWidth={1.6} />} disabled>
         Tra tin tức thị trường
       </MenuItem>

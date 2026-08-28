@@ -18,13 +18,13 @@ export type TurnEventType =
   | "content.delta"
   | "tool.call"
   /**
-   * A Study produced a canvas and the row holding it is committed.
+   * A Study produced a desk view and the row holding it is committed.
    *
    * Additive rather than an envelope bump, which is why it sits in the same
    * union: a client subscribes by event name, so one that never asks for this
    * reads the Turn exactly as it did before.
    */
-  | "canvas.ready"
+  | "signal_desk.ready"
   | "turn.completed"
   | "turn.incomplete"
   | "turn.failed"
@@ -161,7 +161,7 @@ export interface ToolResult {
 }
 
 /**
- * One canvas a Turn produced, as the stream announces it and a message keeps it.
+ * One desk view a Turn produced, as the stream announces it and a message keeps it.
  *
  * **No numbers.** The matrix a picture is drawn from lives in one row and
  * travels on one request — the fetch that happens when a reader opens the panel.
@@ -171,7 +171,7 @@ export interface ToolResult {
  * `blockCount` is here so the panel can draw a skeleton of the right height the
  * instant it hears, rather than an empty box that jumps when the fetch lands.
  */
-export interface CanvasAnnouncement {
+export interface SignalDeskAnnouncement {
   artifactId: string
   studyName: string
   title: string
@@ -198,17 +198,17 @@ export interface Frame {
   labels: Record<string, string>
 }
 
-/** One widget on the canvas, the frame it draws, and the options the server chose. */
-export interface CanvasBlock {
+/** One widget on the desk view, the frame it draws, and the options the server chose. */
+export interface SignalDeskBlock {
   widget: string
   widgetVersion: number
   frame: string
   options: Record<string, unknown>
 }
 
-export interface CanvasSpec {
+export interface SignalDeskSpec {
   title: string
-  blocks: CanvasBlock[]
+  blocks: SignalDeskBlock[]
 }
 
 /**
@@ -226,13 +226,13 @@ export interface Provenance {
   reason: string | null
 }
 
-/** One Study run, as the canvas endpoint serves it. Immutable by design. */
+/** One Study run, as the desk view endpoint serves it. Immutable by design. */
 export interface ArtifactPayload {
   id: string
   study_name: string
   study_version: number
   params: Record<string, unknown>
-  canvas_spec: CanvasSpec
+  signal_desk_spec: SignalDeskSpec
   frames: Record<string, Frame>
   provenance: Provenance
   created_at: string
@@ -259,8 +259,10 @@ export interface SnapshotData {
   /** What was said on the way to it, by round. Never part of `text`. */
   thoughts: Thought[]
   tool_calls: ToolCall[]
-  /** The canvases announced so far. Restated so a reconnect is still told. */
-  canvases: CanvasAnnouncement[]
+  /** The desk views announced so far. Restated so a reconnect is still told. */
+  signal_desks: SignalDeskAnnouncement[]
+  /** Stored by the canvas-era contract; accepted while old Turns remain readable. */
+  canvases?: SignalDeskAnnouncement[]
   /** The canonical assistant message, once a terminal transaction wrote one. */
   message_id: number | null
   /**
@@ -287,7 +289,9 @@ export interface AssistantContent {
   text: string
   tool_calls: ToolCall[]
   /** The pictures this answer was written about. Ids and titles, never cells. */
-  canvases: CanvasAnnouncement[]
+  signal_desks: SignalDeskAnnouncement[]
+  /** Stored by the canvas-era contract; accepted while old Threads remain readable. */
+  canvases?: SignalDeskAnnouncement[]
 }
 
 /** The user message, as the create transaction wrote it. */
@@ -383,4 +387,35 @@ export interface Turn {
 export interface CreatedTurn extends Turn {
   /** False when the id was already known: nothing was created, nothing started. */
   created: boolean
+}
+
+/**
+ * One ceiling, what has gone against it, and when it next frees.
+ *
+ * `limit: null` is a ceiling the deployment turned off, which is **not** a
+ * ceiling of zero: a subscription route sets all of them to zero in its config
+ * and the API reports that as unlimited. Zero here would draw a full meter and
+ * tell the reader they had run out of something they cannot run out of.
+ *
+ * `resets_at: null` means nothing is waiting to be released — an empty window
+ * rather than an unknown one.
+ */
+export interface Allowance {
+  used: number
+  limit: number | null
+  resets_at: string | null
+}
+
+/**
+ * What this account has consumed against its own ceilings.
+ *
+ * Spend arrives in micro-USD, the ledger's integer unit, so rounding happens
+ * once and here. It is an operating limit on generation rather than an amount
+ * owed, and the panel is responsible for not implying a bill.
+ */
+export interface Usage {
+  as_of: string
+  turns_today: Allowance
+  spend_today_micro_usd: Allowance
+  spend_rolling_30d_micro_usd: Allowance
 }

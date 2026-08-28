@@ -261,6 +261,14 @@
     to { opacity: 1; filter: none; }
   }
 
+  /* The list arriving over the workspace rather than beside it. Travels from
+     its own edge, so it reads as a rail sliding out rather than as a card
+     appearing in place. */
+  @keyframes vg-sidebar-in {
+    from { opacity: 0; transform: translateX(-12px); }
+    to { opacity: 1; transform: none; }
+  }
+
   @keyframes vg-row-in {
     from { opacity: 0; transform: translateY(6px); }
     to { opacity: 1; transform: none; }
@@ -284,6 +292,9 @@
   .animate-vg-fade-in { animation: vg-fade-in 0.3s ease both; }
   .animate-vg-message-in { animation: vg-message-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) both; }
   .animate-vg-row-in { animation: vg-row-in 0.16s ease both; }
+  .animate-vg-sidebar-in {
+    animation: vg-sidebar-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
 
   .animate-vg-dot-pulse { animation: vg-dot-pulse 1.2s ease-in-out infinite; }
 
@@ -312,6 +323,7 @@
     .animate-vg-fade-in,
     .animate-vg-message-in,
     .animate-vg-row-in,
+    .animate-vg-sidebar-in,
     .animate-vg-dot-pulse,
     .animate-vg-draw-line,
     .animate-vg-bar-grow,
@@ -324,6 +336,73 @@
 }
 
 @layer utilities {
+  /* ---------------------------------------------------------------------------
+     The composer measures its own column, not the window.
+
+     Media queries are the wrong ruler for this card. The desk narrows the
+     conversation to ~420px on a 1600px display, so every `md:` on the control
+     row reads "roomy" and lays out for a width the card does not have — which
+     is how the model name ended up wrapping onto two lines inside a control
+     that is one line tall. A container query asks the only question that
+     matters: how wide is this card.
+
+     Two rules, in the order things are allowed to go:
+
+     1. The model name is the first to leave. It names a plan the reader cannot
+        change from here, so it is the one thing in the row that is purely
+        informational — everything else is a control.
+     2. The field never breaks a line while it is empty. An auto-growing
+        textarea sizes itself from its *content*, and a placeholder is not
+        content: a placeholder that wraps is drawn into a box that was measured
+        for one line, so the second line is simply clipped. Holding it to one
+        line is what makes that impossible rather than merely unlikely.
+     --------------------------------------------------------------------------- */
+  .composer-shell {
+    container-type: inline-size;
+    container-name: composer;
+  }
+
+  .composer-model {
+    display: flex;
+    white-space: nowrap;
+  }
+
+  /* 26rem of card — about a 480px column — is where the row still holds the
+     attach control, both mode segments, the name and the send button without
+     any of them giving up width. */
+  @container composer (max-width: 25.999rem) {
+    .composer-model {
+      display: none;
+    }
+  }
+
+  .composer-field:placeholder-shown {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* 3. The last 40px, for a 320px phone. Below an 18rem card the row runs out
+        of room even with the model name gone, so the controls give up padding
+        rather than a line: the segments narrow and the two round buttons drop
+        one step. Nothing here changes what the row *contains* — a mode you
+        cannot see is worse than a mode drawn tight.
+
+        Padding on the card itself cannot answer this. The card is the query
+        container, and a container query may not change a property that would
+        resize its own container. */
+  @container composer (max-width: 17.999rem) {
+    .composer-mode-segment {
+      padding-left: 0.5rem;
+      padding-right: 0.5rem;
+    }
+
+    .composer-icon {
+      width: 2rem;
+      height: 2rem;
+    }
+  }
+
   /* Sidebar animation optimization - prevent flicker */
   .sidebar-transition {
     transition-property: transform, opacity;

@@ -69,6 +69,15 @@ export default function AuthForm({ mode, action }: AuthFormProps) {
       if (result?.error) {
         toast.error(result.error)
         setIsLoading(false)
+      } else if (result === undefined) {
+        // A sign-in that worked never arrives here: it ends in `redirect()`,
+        // which rejects this promise and is rethrown below. Reaching this line
+        // means the action came back having neither redirected nor named a
+        // reason — and the spinner was left running forever on a form the
+        // reader could no longer submit. Releasing the control is the part
+        // that matters; the sentence is what stops it reading as success.
+        toast.error("Không nhận được phản hồi từ máy chủ. Vui lòng thử lại.")
+        setIsLoading(false)
       }
     } catch (error) {
       // A successful sign-in ends in `redirect()`, which Next reports by

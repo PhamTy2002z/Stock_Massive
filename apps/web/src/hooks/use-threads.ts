@@ -1,6 +1,7 @@
 "use client"
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 
 import {
   clearHelpful,
@@ -119,6 +120,14 @@ export function useUpdateThread() {
         thread === undefined ? thread : { ...thread, ...updated },
       )
     },
+    // The list is written on success only, so a failure leaves the rail
+    // showing the truth. What it did not do was say so: a rename that did not
+    // take snapped back to the old title with no explanation, which reads as
+    // the app having ignored the edit rather than as the request having
+    // failed.
+    onError: () => {
+      toast.error("Không lưu được thay đổi cho hội thoại này.")
+    },
   })
 }
 
@@ -144,6 +153,13 @@ export function useDeleteThread() {
           : { threads: cached.threads.filter((row) => row.id !== threadId) },
       )
       queryClient.removeQueries({ queryKey: queryKeys.thread(threadId) })
+    },
+    // A delete that failed leaves the row exactly where it was, which is the
+    // correct list and a silent one: the reader pressed delete and the thread
+    // stayed, with nothing to distinguish a refused request from a control
+    // that does not work.
+    onError: () => {
+      toast.error("Không xoá được hội thoại này.")
     },
   })
 }

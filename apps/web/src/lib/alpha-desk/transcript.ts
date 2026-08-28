@@ -13,9 +13,9 @@
  */
 
 import type { LivePhase, LiveTurn } from "./live-turn"
-import { readCanvases, readStrings, readThoughts, readToolCalls } from "./read-content"
+import { readDeskViews, readStrings, readThoughts, readToolCalls } from "./read-content"
 import type {
-  CanvasAnnouncement,
+  SignalDeskAnnouncement,
   FlagReason,
   Thought,
   ThreadMessage,
@@ -52,7 +52,7 @@ export interface AssistantView {
    * draws it, so a transcript scrolled past a dozen answers carries no heatmaps
    * with it.
    */
-  canvases: CanvasAnnouncement[]
+  deskViews: SignalDeskAnnouncement[]
   /**
    * Questions the model offered as sensible next steps, or none.
    *
@@ -121,8 +121,8 @@ export interface DraftEntry {
   working: boolean
   toolCalls: ToolCall[]
   thoughts: Thought[]
-  /** The canvases announced so far, as the stream has reported them. */
-  canvases: CanvasAnnouncement[]
+  /** The desk views announced so far, as the stream has reported them. */
+  deskViews: SignalDeskAnnouncement[]
   elapsedMs: number
   phase: LivePhase
   terminalReason: string | null
@@ -198,6 +198,36 @@ export interface DraftReveal {
   handedOver: boolean
 }
 
+/**
+ * Every desk view a stored Thread has ever produced, oldest first.
+ *
+ * The tab strip is per-conversation state, and until now it was only ever
+ * *written* by a Turn running in this tab: reopening a Thread cleared the strip
+ * and nothing put it back, so a picture the reader had made an hour earlier was
+ * reachable only by scrolling the transcript until the card that opened it went
+ * past. The announcements were in the messages the whole time — this is the
+ * reader for them, beside the one `buildTranscript` uses, so both learn about a
+ * new field in the stored shape at the same moment.
+ *
+ * Deduplicated on `artifactId` keeping first position: one run is one tab, and
+ * an announcement repeated across a retried Turn is the same picture.
+ */
+export function storedDeskViews(messages: ThreadMessage[]): SignalDeskAnnouncement[] {
+  const ordered = [...messages].sort((left, right) => left.seq - right.seq)
+  const seen = new Set<string>()
+  const deskViews: SignalDeskAnnouncement[] = []
+  for (const message of ordered) {
+    if (message.role !== "assistant") continue
+    const content = message.content
+    for (const deskView of readDeskViews(content.signal_desks ?? content.canvases)) {
+      if (seen.has(deskView.artifactId)) continue
+      seen.add(deskView.artifactId)
+      deskViews.push(deskView)
+    }
+  }
+  return deskViews
+}
+
 export function buildTranscript(input: TranscriptInput): TranscriptEntry[] {
   const ordered = [...input.messages].sort((left, right) => left.seq - right.seq)
   const entries: TranscriptEntry[] = []
@@ -269,7 +299,7 @@ export function buildTranscript(input: TranscriptInput): TranscriptEntry[] {
       working: reveal.working,
       toolCalls: input.live.toolCalls,
       thoughts: input.live.thoughts,
-      canvases: input.live.canvases,
+      deskViews: input.live.deskViews,
       elapsedMs: input.live.elapsedMs,
       phase: input.live.phase,
       terminalReason: input.live.terminalReason,
@@ -332,7 +362,10 @@ function assistantView(message: ThreadMessage): AssistantView {
     // A stored call cannot still be running: the Turn that made it is over.
     toolCalls: readToolCalls(content.tool_calls, "ok"),
     thoughts: readThoughts(content.thoughts),
-    canvases: readCanvases(content.canvases),
+    // The JSONB contract stays snake_case. `canvases` keeps Threads written
+    // before the Signal Desk rename readable without teaching the renderer two
+    // names for the same in-memory value.
+    deskViews: readDeskViews(content.signal_desks ?? content.canvases),
     followUps: readStrings(content.follow_ups),
     elapsedMs:
       typeof content.elapsed_ms === "number" && Number.isFinite(content.elapsed_ms)
@@ -341,4 +374,3 @@ function assistantView(message: ThreadMessage): AssistantView {
     completed: content.status !== "incomplete",
   }
 }
-

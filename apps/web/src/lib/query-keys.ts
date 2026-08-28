@@ -16,4 +16,8 @@ export const queryKeys = {
   // updated — so the panel caches it with `staleTime: Infinity` and re-opening
   // a Thread renders what was frozen rather than refetching a moved store.
   artifact: (artifactId: string) => ["artifact", artifactId] as const,
+
+  // This account's allowance. Unlike `artifact`, it moves: every Turn spends
+  // against it and the daily half expires at Vietnamese midnight.
+  usage: ["usage"] as const,
 }

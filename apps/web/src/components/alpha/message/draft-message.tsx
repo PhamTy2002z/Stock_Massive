@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 
 import type { DraftEntry } from "@/lib/alpha-desk/transcript"
-import { CanvasCard } from "./canvas-card"
+import { SignalDeskCard } from "./signal-desk-card"
 import { Markdown } from "./markdown"
 import { MessageShell } from "./message-shell"
 import { ReasoningTimeline } from "./reasoning-timeline"
@@ -34,7 +34,7 @@ import { TurnStatus } from "./turn-status"
 export function DraftMessage({
   entry,
   onRetry,
-  onOpenCanvas,
+  onOpenDeskView,
   className,
 }: {
   entry: DraftEntry
@@ -43,10 +43,10 @@ export function DraftMessage({
    * Opens one of the pictures this Turn has already produced.
    *
    * On the draft as well as on the canonical answer, because the panel opens
-   * itself when the canvas is announced and a reader who closes it would
+   * itself when the desk view is announced and a reader who closes it would
    * otherwise have no way back to it until the answer lands.
    */
-  onOpenCanvas?: (artifactId: string) => void
+  onOpenDeskView?: (artifactId: string) => void
   className?: string
 }) {
   const elapsedMs = useTickingElapsed(entry.elapsedMs, entry.working)
@@ -70,8 +70,8 @@ export function DraftMessage({
           cleanly would be the buffering this whole path exists to avoid. */}
       {entry.text !== "" && <Markdown text={entry.text} animate />}
 
-      {onOpenCanvas !== undefined && (
-        <CanvasCard canvases={entry.canvases} onOpen={onOpenCanvas} />
+      {onOpenDeskView !== undefined && (
+        <SignalDeskCard deskViews={entry.deskViews} onOpen={onOpenDeskView} />
       )}
 
       <TurnStatus

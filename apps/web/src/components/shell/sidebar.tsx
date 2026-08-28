@@ -19,12 +19,14 @@ import {
 import { VisgniteWordmark } from "@/components/shared/visgnite-logo"
 import { useDeleteThread, useThreads, useUpdateThread } from "@/hooks/use-threads"
 import type { Thread } from "@/lib/alpha-desk/types"
+import { FailureState } from "@/components/ui/failure-state"
+import { describeFailure } from "@/lib/failure"
 import { cn } from "@/lib/utils"
 
 import { AccountMenu } from "./account-menu"
 import { useDesk } from "./desk-state"
 import { IconButton, Menu, MenuItem, MenuSeparator, QuietLine } from "./primitives"
-import { SIDEBAR_WIDTH, useShell } from "./shell-state"
+import { SIDEBAR_WIDTH, sidebarFloats, useShell } from "./shell-state"
 
 /**
  * The left column: identity, the two main modes, and everything the user keeps.
@@ -38,6 +40,42 @@ import { SIDEBAR_WIDTH, useShell } from "./shell-state"
 export function Sidebar() {
   const { state, dispatch } = useShell()
   const open = state.sidebarOpen
+  const floats = sidebarFloats(state)
+
+  // Escape belongs to the floating list only. As a column it is part of the
+  // workspace and there is nothing to dismiss; over the workspace it is a
+  // surface laid on top, and every other one of those closes on Escape.
+  React.useEffect(() => {
+    if (!floats) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") dispatch({ type: "toggle-sidebar" })
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [floats, dispatch])
+
+  if (floats) {
+    return (
+      <>
+        {/* Dimmed rather than clear: the list is over a workspace the reader is
+            still meant to see, and the wash is what says the workspace is not
+            what they are pointing at. Clicking it puts the list away, which is
+            the gesture every floating surface in this product answers to. */}
+        <div
+          aria-hidden
+          onClick={() => dispatch({ type: "toggle-sidebar" })}
+          className="fixed inset-0 z-[28] animate-vg-fade-in bg-background/50"
+        />
+        <aside
+          aria-label="Thanh bên"
+          style={{ width: SIDEBAR_WIDTH }}
+          className="absolute inset-y-0 left-0 z-[29] flex flex-col border-r border-border bg-surface-panel shadow-sidebar motion-safe:animate-vg-sidebar-in"
+        >
+          <SidebarBody />
+        </aside>
+      </>
+    )
+  }
 
   return (
     <div
@@ -54,30 +92,46 @@ export function Sidebar() {
           open ? "opacity-100" : "-translate-x-4 opacity-0",
         )}
       >
-        <div className="flex items-center gap-2 py-2.5 pl-[18px] pr-3.5 pt-4">
-          <VisgniteWordmark />
-          <div className="ml-auto flex gap-0.5">
-            <IconButton label="Thu gọn thanh bên" onClick={() => dispatch({ type: "toggle-sidebar" })}>
-              <PanelLeft className="size-[17px]" strokeWidth={1.6} />
-            </IconButton>
-            <IconButton
-              label="Tìm hội thoại"
-              onClick={() => dispatch({ type: "overlay", overlay: "palette" })}
-            >
-              <Search className="size-[17px]" strokeWidth={1.6} />
-            </IconButton>
-          </div>
-        </div>
-
-        <Nav />
-
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scrollbar-thin">
-          <Conversations />
-        </div>
-
-        <AccountMenu />
+        <SidebarBody />
       </aside>
     </div>
+  )
+}
+
+/**
+ * The list itself, which is the same list either way.
+ *
+ * Written once and mounted by both layouts, because the difference between them
+ * is where the rail sits and nothing about what is on it.
+ */
+function SidebarBody() {
+  const { dispatch } = useShell()
+
+  return (
+    <>
+      <div className="flex items-center gap-2 py-2.5 pl-[18px] pr-3.5 pt-4">
+        <VisgniteWordmark />
+        <div className="ml-auto flex gap-0.5">
+          <IconButton label="Thu gọn thanh bên" onClick={() => dispatch({ type: "toggle-sidebar" })}>
+            <PanelLeft className="size-[17px]" strokeWidth={1.6} />
+          </IconButton>
+          <IconButton
+            label="Tìm hội thoại"
+            onClick={() => dispatch({ type: "overlay", overlay: "palette" })}
+          >
+            <Search className="size-[17px]" strokeWidth={1.6} />
+          </IconButton>
+        </div>
+      </div>
+
+      <Nav />
+
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scrollbar-thin">
+        <Conversations />
+      </div>
+
+      <AccountMenu />
+    </>
   )
 }
 
@@ -199,6 +253,19 @@ export function Conversations() {
       <SectionLabel>Hội thoại</SectionLabel>
       {threads.isPending ? (
         <QuietLine>Đang tải hội thoại…</QuietLine>
+      ) : threads.isError ? (
+        // A list that failed to load is not an empty list, and this is the one
+        // place in the product where confusing the two reads as *data loss*: a
+        // reader whose rail says "Chưa có hội thoại nào" after a dropped
+        // request believes their history is gone. It says what happened and
+        // offers the one thing that fixes it.
+        <div className="px-2.5">
+          <FailureState
+            failure={describeFailure(threads.error)}
+            density="inline"
+            onRetry={() => void threads.refetch()}
+          />
+        </div>
       ) : rest.length === 0 ? (
         <QuietLine>
           {pinned.length === 0 ? "Chưa có hội thoại nào." : "Tất cả hội thoại đang được ghim."}

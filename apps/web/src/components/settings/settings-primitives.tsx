@@ -104,3 +104,86 @@ export function ReadOnlyField({ value }: { value: string }) {
     </div>
   )
 }
+
+/** Where an allowance stands: comfortable, close, or spent. */
+export type MeterTone = "normal" | "caution" | "spent"
+
+const TONE: Record<MeterTone, { bar: string; figure: string }> = {
+  // Not the amber: it is rationed to one filled control per view, and a meter
+  // sitting at a third is not that control. Ink carries the neutral case, and
+  // the two states that want attention borrow the vocabulary the provenance
+  // strip already uses for the same idea.
+  normal: { bar: "bg-ink-4", figure: "text-foreground" },
+  caution: { bar: "bg-caution", figure: "text-caution" },
+  spent: { bar: "bg-negative", figure: "text-negative" },
+}
+
+/**
+ * One allowance as a figure and a bar.
+ *
+ * The figure leads and the bar follows, rather than the reverse: the reader's
+ * question is "how many left", which is a number, and the bar is only there to
+ * make the answer legible at a glance. A bar alone would turn a countable
+ * allowance into an impression of one.
+ *
+ * `role="meter"` rather than `progressbar` — this reports a level within a
+ * known range, not progress toward completion — and the value is announced as
+ * text as well, because a meter conveying its state only through the width of
+ * a div says nothing to a reader who cannot see it.
+ *
+ * `label` is required rather than optional, and is not the same thing as the
+ * row's visible label: that one is a heading beside the control, not a name
+ * attached to it, so a reader arriving on the meter alone would otherwise hear
+ * a figure with nothing to say what it measured.
+ */
+export function AllowanceMeter({
+  label,
+  value,
+  ceiling,
+  tone,
+  figure,
+  note,
+}: {
+  /** What this allowance is of, for a reader who cannot see the row it sits in. */
+  label: string
+  value: number
+  ceiling: number
+  tone: MeterTone
+  /** The reader-facing form of the numbers, already rounded and worded. */
+  figure: string
+  note?: string
+}) {
+  // A spent allowance still draws a full bar rather than overflowing it: going
+  // over a ceiling is what the tone says, and a bar wider than its track would
+  // just look broken.
+  const filled = ceiling <= 0 ? 0 : Math.min(100, Math.round((value / ceiling) * 100))
+  const palette = TONE[tone]
+
+  return (
+    <div className="w-full md:w-[250px]">
+      <div
+        className={cn(
+          "text-right font-mono text-[0.95rem] tabular-nums",
+          palette.figure
+        )}
+      >
+        {figure}
+      </div>
+      <div
+        role="meter"
+        aria-label={label}
+        aria-valuenow={value}
+        aria-valuemin={0}
+        aria-valuemax={ceiling}
+        aria-valuetext={figure}
+        className="mt-1.5 h-1.5 w-full overflow-hidden rounded-pill bg-foreground/[0.09]"
+      >
+        <div
+          className={cn("h-full rounded-pill transition-[width] duration-300", palette.bar)}
+          style={{ width: `${filled}%` }}
+        />
+      </div>
+      {note ? <p className="mt-1.5 text-right text-micro text-ink-6">{note}</p> : null}
+    </div>
+  )
+}

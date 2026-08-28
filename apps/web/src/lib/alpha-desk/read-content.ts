@@ -21,7 +21,8 @@
  * only that they *are* strings.
  */
 
-import type { CanvasAnnouncement, Thought, ToolCall, ToolResult } from "./types"
+import { SIGNAL_DESK_COPY } from "./copy"
+import type { SignalDeskAnnouncement, Thought, ToolCall, ToolResult } from "./types"
 
 /** The three statuses a call can be in, as either source may spell it. */
 type CallStatus = ToolCall["status"]
@@ -108,7 +109,7 @@ export function readResults(value: unknown): ToolResult[] {
 }
 
 /**
- * Every canvas announced, malformed ones dropped.
+ * Every desk view announced, malformed ones dropped.
  *
  * Read through the same defensive path whether it arrived on the stream or out
  * of a stored message, for the reason the tool calls are: two readers for one
@@ -119,9 +120,9 @@ export function readResults(value: unknown): ToolResult[] {
  * opens nothing — which reads to a reader as a picture they are not allowed to
  * see.
  */
-export function readCanvases(value: unknown): CanvasAnnouncement[] {
+export function readDeskViews(value: unknown): SignalDeskAnnouncement[] {
   if (!Array.isArray(value)) return []
-  const canvases: CanvasAnnouncement[] = []
+  const deskViews: SignalDeskAnnouncement[] = []
   for (const item of value) {
     const record = asRecord(item)
     if (record === null) continue
@@ -129,19 +130,19 @@ export function readCanvases(value: unknown): CanvasAnnouncement[] {
     if (artifactId === "") continue
     const title = asString(record.title)
     const studyName = asString(record.studyName)
-    canvases.push({
+    deskViews.push({
       artifactId,
       studyName,
-      // A canvas with no title still gets a name a person can read: the panel
+      // A desk view with no title still gets a name a person can read: the panel
       // and the card in the transcript are both labelled by it.
-      title: title === "" ? "Phân tích" : title,
+      title: title === "" ? SIGNAL_DESK_COPY.name : title,
       // Zero is honest when nothing said otherwise — the skeleton is then one
       // block tall and grows when the fetch lands, rather than guessing high.
       blockCount: asNumber(record.blockCount, 0),
       round: asNumber(record.round, 0),
     })
   }
-  return canvases
+  return deskViews
 }
 
 /** The narration of a Turn, by round, empty entries dropped. */

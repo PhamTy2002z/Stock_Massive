@@ -75,9 +75,14 @@ module.exports = {
         md: 'calc(var(--radius) - 2px)',
         sm: 'calc(var(--radius) - 4px)',
         // Cards are 14px in the reference and controls are 8–11px; the composer
-        // is the one 18px surface, and pills are fully round.
+        // is the one deeply-rounded surface, and pills are fully round.
+        //
+        // 24px rather than the reference's 18: the field grew taller and a
+        // corner that reads as a soft radius on an 88px card reads as a clipped
+        // one on a 110px card. The curve has to keep pace with the box or the
+        // whole surface stops looking drawn on purpose.
         card: '14px',
-        composer: '18px',
+        composer: '24px',
         pill: '99px',
       },
       boxShadow: {
@@ -86,6 +91,10 @@ module.exports = {
         menu: '0 26px 60px rgba(0, 0, 0, 0.65)',
         composer: '0 20px 50px rgba(0, 0, 0, 0.45)',
         panel: '-30px 0 70px rgba(0, 0, 0, 0.5)',
+        // The same panel shadow, mirrored: the inspector floats in from the
+        // right and the list floats in from the left, so each casts away from
+        // its own edge.
+        sidebar: '30px 0 70px rgba(0, 0, 0, 0.5)',
         modal: '0 40px 90px rgba(0, 0, 0, 0.7)',
       },
       colors: {

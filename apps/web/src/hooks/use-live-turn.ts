@@ -42,7 +42,7 @@ const EVENT_TYPES: TurnEventType[] = [
   "turn.snapshot",
   "content.delta",
   "tool.call",
-  "canvas.ready",
+  "signal_desk.ready",
   "turn.completed",
   "turn.incomplete",
   "turn.failed",

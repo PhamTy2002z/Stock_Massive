@@ -25,9 +25,32 @@ export interface DeskSession {
   turnId: string | null
   /** The workspace lens. Remembered so a reload does not lose the context. */
   activeSymbol: string | null
+  /**
+   * The Threads this tab has the Signal Desk switched on for, newest first.
+   *
+   * A list rather than one flag, because the desk is a property of a
+   * conversation and not of the tab: opening yesterday's Thread has to restore
+   * what *that* conversation was doing, and carrying the previous Thread's
+   * answer forward would open a workspace over a conversation that never had
+   * one. Only the "on" Threads are named — "off" is the default and needs no
+   * record — and the list is capped, because a tab that ran forty conversations
+   * does not need to remember the first thirty.
+   *
+   * Optional because a record written before the desk existed does not carry
+   * it, and "this tab remembers no desks" is the correct reading of that.
+   */
+  signalDeskThreads?: string[]
 }
 
-const EMPTY: DeskSession = { threadId: null, turnId: null, activeSymbol: null }
+/** How many Threads' worth of desk state one tab keeps. */
+const SIGNAL_DESK_MEMORY = 24
+
+const EMPTY: DeskSession = {
+  threadId: null,
+  turnId: null,
+  activeSymbol: null,
+  signalDeskThreads: [],
+}
 
 export function readDeskSession(): DeskSession {
   const raw = safeRead()
@@ -35,11 +58,17 @@ export function readDeskSession(): DeskSession {
   try {
     const parsed: unknown = JSON.parse(raw)
     if (typeof parsed !== "object" || parsed === null) return EMPTY
-    const { threadId, turnId, activeSymbol } = parsed as Partial<DeskSession>
+    const { threadId, turnId, activeSymbol, signalDeskThreads } =
+      parsed as Partial<DeskSession>
     return {
       threadId: typeof threadId === "string" ? threadId : null,
       turnId: typeof turnId === "string" ? turnId : null,
       activeSymbol: typeof activeSymbol === "string" ? activeSymbol : null,
+      // Written by a build that predates the desk, or by a hand-edited value.
+      // Either way an unreadable list is no list rather than a crash.
+      signalDeskThreads: Array.isArray(signalDeskThreads)
+        ? signalDeskThreads.filter((id): id is string => typeof id === "string")
+        : [],
     }
   } catch {
     // Written by an older build, or by something else entirely. Starting fresh
@@ -52,12 +81,37 @@ export function writeDeskSession(session: DeskSession): void {
   if (
     session.threadId === null &&
     session.turnId === null &&
-    session.activeSymbol === null
+    session.activeSymbol === null &&
+    (session.signalDeskThreads?.length ?? 0) === 0
   ) {
     safeRemove()
     return
   }
   safeWrite(JSON.stringify(session))
+}
+
+/** Whether the Signal Desk was left on for one Thread. Off is the default. */
+export function signalDeskOn(session: DeskSession, threadId: string | null): boolean {
+  return threadId !== null && (session.signalDeskThreads ?? []).includes(threadId)
+}
+
+/**
+ * The remembered list with one Thread's answer written into it.
+ *
+ * Newest first and capped, so the entry that falls off the end is the
+ * conversation this tab has gone longest without touching. Returns the list it
+ * was given when nothing changed, so the caller's state does not churn on every
+ * render that re-states the same fact.
+ */
+export function rememberSignalDesk(
+  threads: string[],
+  threadId: string,
+  on: boolean,
+): string[] {
+  const without = threads.filter((id) => id !== threadId)
+  if (!on) return without.length === threads.length ? threads : without
+  if (threads[0] === threadId) return threads
+  return [threadId, ...without].slice(0, SIGNAL_DESK_MEMORY)
 }
 
 /**

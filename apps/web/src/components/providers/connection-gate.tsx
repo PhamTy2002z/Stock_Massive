@@ -2,14 +2,25 @@
 
 import { useQueryClient } from "@tanstack/react-query"
 import { Loader2 } from "lucide-react"
-import { useEffect, useSyncExternalStore } from "react"
+import { useEffect, useState, useSyncExternalStore } from "react"
 import { toast } from "sonner"
 
+import { FailureState } from "@/components/ui/failure-state"
 import { getApiBaseUrl } from "@/lib/api"
 import { connectionStatus, healthUrlFrom } from "@/lib/connection-status"
+import { describeFailure } from "@/lib/failure"
 
 /** How often to ask whether the API is back. Restarts take a second or two. */
 const PROBE_INTERVAL_MS = 3000
+/**
+ * How long a wait may stay wordless before it owes the reader an explanation.
+ *
+ * A restart is over in a second or two, and narrating that would be noise. Past
+ * twenty seconds it is no longer a blip: the spinner has become a screen with
+ * no exit, and "it is still trying" is information the reader needs in order to
+ * decide whether to keep waiting or go and check their own connection.
+ */
+const PROLONGED_AFTER_MS = 20_000
 const TOAST_ID = "connection-waiting"
 
 /**
@@ -36,6 +47,16 @@ export function ConnectionGate({ children }: { children: React.ReactNode }) {
     () => "ready" as const
   )
   const waiting = state === "waiting"
+  const [prolonged, setProlonged] = useState(false)
+
+  useEffect(() => {
+    if (!waiting) {
+      setProlonged(false)
+      return
+    }
+    const timer = setTimeout(() => setProlonged(true), PROLONGED_AFTER_MS)
+    return () => clearTimeout(timer)
+  }, [waiting])
 
   useEffect(() => {
     if (!waiting) {
@@ -89,10 +110,27 @@ export function ConnectionGate({ children }: { children: React.ReactNode }) {
         <div
           role="status"
           aria-live="polite"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-background/40 backdrop-blur-[1px]"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/40 px-6 backdrop-blur-[1px]"
         >
-          <span className="sr-only">Đang chờ hệ thống phản hồi</span>
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-hidden />
+          {prolonged ? (
+            // The probe keeps running underneath this — the veil still lifts by
+            // itself the moment the API answers. What changes is that the
+            // reader is no longer looking at an unlabelled spinner with nothing
+            // to press.
+            <div className="max-w-[34rem] rounded-card border border-hairline bg-surface-raised px-5 py-4">
+              <FailureState
+                failure={describeFailure(new TypeError("offline"))}
+                density="region"
+                onRetry={() => void queryClient.refetchQueries({ type: "active" })}
+                className="py-0"
+              />
+            </div>
+          ) : (
+            <>
+              <span className="sr-only">Đang chờ hệ thống phản hồi</span>
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-hidden />
+            </>
+          )}
         </div>
       )}
     </>

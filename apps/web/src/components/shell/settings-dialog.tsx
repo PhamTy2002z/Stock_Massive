@@ -1,11 +1,12 @@
 "use client"
 
 import { useState, type ReactNode } from "react"
-import { Monitor, Search, SlidersHorizontal, User, X } from "lucide-react"
+import { Gauge, MessagesSquare, Search, SlidersHorizontal, User, X } from "lucide-react"
 
 import { AccountSection } from "@/components/settings/account-section"
 import { AppearanceSection } from "@/components/settings/appearance-section"
-import { SystemSection } from "@/components/settings/system-section"
+import { ConversationSection } from "@/components/settings/conversation-section"
+import { UsageSection } from "@/components/settings/usage-section"
 import { cn } from "@/lib/utils"
 
 import { IconButton } from "./primitives"
@@ -15,19 +16,27 @@ import { useShell } from "./shell-state"
  * Settings, over the workspace rather than instead of it.
  *
  * It used to be a route, which meant leaving the shell — the conversation, the
- * inspector and a half-typed question all torn down — to change a colour mode
- * and read back two fixed facts. None of that is worth a navigation, so the
- * whole surface is a dialog: the workspace stays mounted behind the scrim and
- * closing puts the user back exactly where they were.
+ * inspector and a half-typed question all torn down — to change a colour mode.
+ * That is not worth a navigation, so the whole surface is a dialog: the
+ * workspace stays mounted behind the scrim and closing puts the user back
+ * exactly where they were.
+ *
+ * **Four panes in two groups, and each one has something to do.** `Cấu hình`
+ * holds the two decisions a reader actually makes — how the product looks, and
+ * how a new conversation opens. `Tài khoản` holds who is signed in and what
+ * that account is allowed to spend. A fifth pane once carried the display
+ * timezone and the exchange list as read-only text; both are answered better
+ * where the numbers are, by `signal-desk/provenance-strip`, which says the
+ * source, the as-of and the age of the thing on screen rather than a constant
+ * in a modal the reader has to go and find.
  *
  * The rail switches panes rather than scrolling to anchors. A dialog is short
- * enough that scroll-spy would be answering a question nobody asked, and the
- * search field above it filters the rail — which only means something if a rail
- * entry is a destination in its own right. Below md the rail folds into a strip
- * of tabs along the top, because a 262px column and a phone do not both fit.
+ * enough that scroll-spy would be answering a question nobody asked. Below md
+ * the rail folds into a strip of tabs along the top, because a 262px column and
+ * a phone do not both fit.
  */
 
-type PaneId = "appearance" | "account" | "system"
+type PaneId = "appearance" | "conversation" | "account" | "usage"
 
 interface Pane {
   id: PaneId
@@ -46,6 +55,13 @@ const PANES: Pane[] = [
     render: () => <AppearanceSection />,
   },
   {
+    id: "conversation",
+    label: "Hội thoại",
+    group: "Cấu hình",
+    icon: MessagesSquare,
+    render: () => <ConversationSection />,
+  },
+  {
     id: "account",
     label: "Hồ sơ",
     group: "Tài khoản",
@@ -53,11 +69,11 @@ const PANES: Pane[] = [
     render: () => <AccountSection />,
   },
   {
-    id: "system",
-    label: "Hệ thống",
+    id: "usage",
+    label: "Hạn mức",
     group: "Tài khoản",
-    icon: Monitor,
-    render: () => <SystemSection />,
+    icon: Gauge,
+    render: () => <UsageSection />,
   },
 ]
 

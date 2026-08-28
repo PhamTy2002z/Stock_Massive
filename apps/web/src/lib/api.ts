@@ -46,7 +46,17 @@ export interface MarketIndex {
 
 export const MARKET_INDEX_SYMBOLS = ["VNINDEX", "VN30", "HNXINDEX", "UPCOMINDEX"]
 
-class ApiError extends Error {
+/**
+ * A request the server answered, and refused.
+ *
+ * Exported because the status is the whole discriminator: `lib/failure.ts`
+ * turns a 401 into "sign in again" and a 403 into "this is not yours to open",
+ * and it reads that field off whatever was thrown rather than from a message.
+ * Kept distinct from
+ * {@link ApiUnavailableError} for the reason written over that class — a 404 is
+ * an answer, a 503 is silence.
+ */
+export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message)
     this.name = "ApiError"

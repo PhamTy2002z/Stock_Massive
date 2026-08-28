@@ -33,11 +33,17 @@ describe("what the tab remembers", () => {
       threadId: "thread-1",
       turnId: "turn-1",
       activeSymbol: null,
+      signalDeskThreads: [],
     })
   })
 
   it("starts empty when nothing was stored", () => {
-    expect(readDeskSession()).toEqual({ threadId: null, turnId: null, activeSymbol: null })
+    expect(readDeskSession()).toEqual({
+      threadId: null,
+      turnId: null,
+      activeSymbol: null,
+      signalDeskThreads: [],
+    })
   })
 
   it("forgets the Turn on its own, keeping the Thread, once it settles", () => {
@@ -48,6 +54,7 @@ describe("what the tab remembers", () => {
       threadId: "thread-1",
       turnId: null,
       activeSymbol: null,
+      signalDeskThreads: [],
     })
   })
 
@@ -66,7 +73,12 @@ describe("what the tab remembers", () => {
 
     clearDeskSession()
 
-    expect(readDeskSession()).toEqual({ threadId: null, turnId: null, activeSymbol: null })
+    expect(readDeskSession()).toEqual({
+      threadId: null,
+      turnId: null,
+      activeSymbol: null,
+      signalDeskThreads: [],
+    })
     expect(window.sessionStorage.getItem(KEY)).toBeNull()
   })
 })
@@ -161,7 +173,12 @@ describe("a value this build cannot read", () => {
   it("starts fresh rather than throwing on the way to a render", () => {
     window.sessionStorage.setItem(KEY, "not json at all")
 
-    expect(readDeskSession()).toEqual({ threadId: null, turnId: null, activeSymbol: null })
+    expect(readDeskSession()).toEqual({
+      threadId: null,
+      turnId: null,
+      activeSymbol: null,
+      signalDeskThreads: [],
+    })
   })
 
   it("ignores fields of the wrong shape", () => {

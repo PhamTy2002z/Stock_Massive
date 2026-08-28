@@ -31,6 +31,7 @@ import type {
   Thread,
   ThreadDetail,
   Turn,
+  Usage,
 } from "./types"
 
 const BASE = "/api/alpha-desk"
@@ -112,7 +113,7 @@ export function createTurn(input: CreateTurnInput): Promise<CreatedTurn> {
 }
 
 /**
- * The numbers behind one canvas.
+ * The numbers behind one deskView.
  *
  * A separate request from the transcript, deliberately: a heatmap is thousands
  * of cells and a conversation scrolls, so the text loads at text weight and the
@@ -200,4 +201,18 @@ export function newTurnId(): string {
     const value = char === "x" ? random : (random & 0x3) | 0x8
     return value.toString(16)
   })
+}
+
+/**
+ * This account's allowance and what has gone against it.
+ *
+ * Takes no parameters on purpose: the user is resolved from the session
+ * upstream, so there is no shape of this call that reads another account.
+ *
+ * The numbers move as Turns run, and the daily figures stop being true at
+ * Vietnamese midnight — so the caller refetches rather than caching this for
+ * the life of the tab.
+ */
+export function fetchUsage(): Promise<Usage> {
+  return alphaFetch<Usage>("/usage")
 }

@@ -9,15 +9,30 @@ export function formatVolume(value: number): string {
 }
 
 export function formatPercent(value: number | null): string {
-  if (value === null) return "-"
-  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`
+  // An em dash, like `units.ts` and `frame.ts` and every other absent value in
+  // the product. A hyphen here read as a minus sign in a column of signed
+  // percentages — the one place in this interface where the wrong glyph does
+  // not merely look inconsistent but states a direction the data never had.
+  if (value === null) return "—"
+  // Rounded first, then signed. `-0.001` is negative, so the sign test skips
+  // the plus, and `toFixed(2)` rounds it to `0.00` — which printed "-0.00%",
+  // a fall the reader cannot act on dressed as a fall. Deciding the sign from
+  // the number that actually gets printed keeps the two in agreement.
+  const rounded = Number(value.toFixed(2))
+  const shown = rounded === 0 ? 0 : rounded
+  return `${shown >= 0 ? "+" : ""}${shown.toFixed(2)}%`
 }
 
 export function formatBillions(value: number): string {
   if (Math.abs(value) >= 1e12) return `${(value / 1e12).toFixed(1)}T`
   if (Math.abs(value) >= 1e9) return `${(value / 1e9).toFixed(1)}B`
   if (Math.abs(value) >= 1e6) return `${(value / 1e6).toFixed(1)}M`
-  return value.toLocaleString()
+  // Explicitly Vietnamese, like every other number in this file. Bare
+  // `toLocaleString()` takes the *browser's* locale, so the same figure was
+  // grouped "1.234" for a reader in Hanoi and "1,234" for the same account
+  // opened abroad — with the separators swapped, which is the one difference
+  // that changes what the digits say.
+  return value.toLocaleString("vi-VN")
 }
 
 /** Age units from coarsest down, so the first that fits is the one to name. */
