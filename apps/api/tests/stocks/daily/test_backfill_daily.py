@@ -20,6 +20,7 @@ from src.core.database import Base, get_sync_db, sync_engine, sync_session_facto
 from src.stocks import backfill_daily
 from src.stocks.models import BarDaily, ListingRoster
 from src.stocks.providers import vnstock_daily
+from src.stocks.trading_day import STALE_AFTER_DAYS, SpineFreshness
 
 from .test_vnstock_daily import synthetic
 
@@ -38,6 +39,7 @@ def rollback_session():
 FIRST = "ZZJOB1"
 SECOND = "ZZJOB2"
 TODAY = date(2026, 6, 16)
+NOW = datetime(2026, 6, 16, 9, 30, tzinfo=timezone.utc)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -65,7 +67,19 @@ def two_symbols(monkeypatch):
 
 
 def days_back(count: int, *, end: date = TODAY) -> list[date]:
-    return [end - timedelta(days=offset) for offset in range(count - 1, -1, -1)]
+    """``count`` weekday sessions ending on or before ``end``, oldest first.
+
+    Weekdays because ingest refuses a weekend row outright: the Trading Day
+    calendar is derived from this table, so a Saturday would move the window
+    every symbol in the market is measured against.
+    """
+    days: list[date] = []
+    cursor = end
+    while len(days) < count:
+        if cursor.weekday() < 5:
+            days.append(cursor)
+        cursor -= timedelta(days=1)
+    return list(reversed(days))
 
 
 def a_page(symbol, *, end, sessions):
@@ -326,11 +340,52 @@ class TestCli:
 
         assert backfill_daily.main(["--scope", "index"]) == 1
 
-    def test_a_clean_run_exits_zero(self, monkeypatch):
+    def test_a_clean_run_over_a_current_spine_exits_zero(self, monkeypatch):
         monkeypatch.setattr(
             backfill_daily,
             "run",
             lambda **kwargs: backfill_daily.BackfillReport(scope="index", sessions=1),
         )
+        _freshness(monkeypatch, age_days=0)
 
         assert backfill_daily.main(["--scope", "index"]) == 0
+
+    def test_a_clean_run_that_left_the_spine_behind_exits_non_zero(self, monkeypatch):
+        """Nothing failed and the market still stopped moving.
+
+        This is the state R2 exists for: the job is the only thing feeding the
+        Trading Day calendar, so a run that wrote nothing and said "fine" would
+        let the newest session freeze while every answer still carries a date.
+        """
+        monkeypatch.setattr(
+            backfill_daily,
+            "run",
+            lambda **kwargs: backfill_daily.BackfillReport(scope="index", sessions=1),
+        )
+        _freshness(monkeypatch, age_days=STALE_AFTER_DAYS + 1)
+
+        assert backfill_daily.main(["--scope", "index"]) == 1
+
+    def test_a_clean_run_over_an_empty_spine_exits_non_zero(self, monkeypatch):
+        monkeypatch.setattr(
+            backfill_daily,
+            "run",
+            lambda **kwargs: backfill_daily.BackfillReport(scope="index", sessions=1),
+        )
+        _freshness(monkeypatch, age_days=None)
+
+        assert backfill_daily.main(["--scope", "index"]) == 1
+
+
+def _freshness(monkeypatch, *, age_days: int | None) -> None:
+    """State what the spine looks like, instead of depending on the test database."""
+    latest = None if age_days is None else TODAY - timedelta(days=age_days)
+    monkeypatch.setattr(
+        backfill_daily,
+        "spine_freshness",
+        lambda session, **_: SpineFreshness(
+            latest_session=latest,
+            last_observed_at=None if latest is None else NOW,
+            age_days=age_days,
+        ),
+    )

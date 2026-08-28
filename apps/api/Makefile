@@ -1,6 +1,6 @@
 # API Development Commands
 
-.PHONY: dev run test lint clean contracts smoke-signal-desk
+.PHONY: dev run test lint clean contracts smoke-signal-desk backfill-daily
 
 # Use venv python if exists
 PYTHON := $(shell if [ -d ".venv" ]; then echo ".venv/bin/python"; else echo "python"; fi)
@@ -40,6 +40,25 @@ contracts:
 # by hand and never in CI. Needs SMOKE_EMAIL and SMOKE_PASSWORD.
 smoke-signal-desk:
 	$(PYTHON) -m scripts.smoke_signal_desk
+
+# Fill the daily spine the Trading Day calendar is derived from. This is the
+# one way bar_daily stays current: there is no scheduler inside the app, so it
+# is driven from outside, after the close.
+#
+#   make backfill-daily SCOPE=index      # VNINDEX — defines the calendar
+#   make backfill-daily SCOPE=declared   # the 30 Universe symbols
+#   make backfill-daily SCOPE=market     # every listed share, 52 weeks
+#
+# Run index first: every other scope's window ends on a day the calendar names.
+# The run exits non-zero when a symbol failed *or* when the spine is still not
+# current afterwards, so cron reports a market that has stopped moving instead
+# of succeeding quietly. A crontab entry at 16:00 Asia/Ho_Chi_Minh, weekdays:
+#
+#   0 16 * * 1-5 cd <repo>/apps/api && make backfill-daily SCOPE=index && \
+#                make backfill-daily SCOPE=declared
+backfill-daily:
+	@test -n "$(SCOPE)" || (echo "SCOPE=index|declared|market is required" >&2; exit 2)
+	$(PYTHON) -m src.stocks.backfill_daily --scope "$(SCOPE)" $(if $(SESSIONS),--sessions "$(SESSIONS)",)
 
 # Type check
 lint:

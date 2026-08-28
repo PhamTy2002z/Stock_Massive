@@ -59,8 +59,21 @@ def synthetic(
 
 
 def sessions_back(count: int, *, end: date) -> list[date]:
-    """``count`` consecutive calendar days ending at ``end``, oldest first."""
-    return [end - timedelta(days=offset) for offset in range(count - 1, -1, -1)]
+    """``count`` consecutive **weekday** sessions ending on or before ``end``.
+
+    Weekdays and not calendar days: ingest refuses a Saturday or a Sunday
+    outright, because the Trading Day calendar is derived from this table and a
+    weekend row would move the window every symbol is measured against. A
+    fixture handing the provider a weekend would be asserting a response the
+    exchange cannot produce.
+    """
+    days: list[date] = []
+    cursor = end
+    while len(days) < count:
+        if cursor.weekday() < 5:
+            days.append(cursor)
+        cursor -= timedelta(days=1)
+    return list(reversed(days))
 
 
 def _stored(session, symbol: str = SYMBOL) -> tuple[int, int]:
@@ -192,6 +205,63 @@ class TestNormalize:
                     fetch=lambda symbol, **_: fixtures.stb_daily(),
                     today=TODAY,
                 )
+
+
+class TestASessionDateThisMarketCannotHaveHeld:
+    """The boundary where a date is judged at all.
+
+    ``bar_daily`` carries no CHECK constraint on ``trading_day`` and the shape
+    check reads column names only, so a malformed date would otherwise be
+    written — and the Trading Day calendar is derived from this table, which
+    makes one bad row a shift in the window every symbol is measured against.
+    """
+
+    def test_a_weekend_session_is_refused_and_nothing_is_written(self):
+        frame = synthetic([date(2026, 6, 12), date(2026, 6, 13)])
+
+        with get_sync_db() as session:
+            with pytest.raises(vnstock_daily.DailyIngestError, match="Saturday"):
+                vnstock_daily.ensure_daily_bars(
+                    session,
+                    SYMBOL,
+                    sessions=2,
+                    fetch=lambda symbol, **_: frame,
+                    today=TODAY,
+                )
+            session.rollback()
+            rows, _ = _stored(session)
+
+        assert rows == 0
+
+    def test_a_session_after_today_is_refused(self):
+        frame = synthetic([date(2026, 6, 15), date(2026, 6, 17)])
+
+        with get_sync_db() as session:
+            with pytest.raises(vnstock_daily.DailyIngestError, match="2026-06-17"):
+                vnstock_daily.ensure_daily_bars(
+                    session,
+                    SYMBOL,
+                    sessions=2,
+                    fetch=lambda symbol, **_: frame,
+                    today=TODAY,
+                )
+            session.rollback()
+            rows, _ = _stored(session)
+
+        assert rows == 0
+
+    def test_today_itself_is_not_a_future_session(self):
+        """A run during trading hours writes the current session, as it always has."""
+        with get_sync_db() as session:
+            outcome = vnstock_daily.ensure_daily_bars(
+                session,
+                SYMBOL,
+                sessions=1,
+                fetch=lambda symbol, **_: synthetic([TODAY]),
+                today=TODAY,
+            )
+
+        assert outcome.last_session == TODAY
 
 
 class TestIdempotence:

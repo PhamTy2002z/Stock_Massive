@@ -7,12 +7,14 @@ resumes for free — and there is no second record of progress that can disagree
 with the rows sitting next to it. A checkpoint table would have to be kept true
 against the very thing it describes.
 
-**"The newest session" is the spine's own, not the market plane's.** ``trading
-_day.latest_trading_day`` derives from the ``market`` Capability in ``provider
-_snapshots``, whose price basis is exactly the question the next phase decides.
-Reading it here would couple a table that owes nothing to that decision to the
-decision, so the reference is ``max(trading_day)`` within the same series of
-``bar_daily``. On a first run there is none, and nothing is skipped.
+**"The newest session" is the series' own, and it has to stay that way.**
+``trading_day.latest_trading_day`` now reads this very table, so using it as the
+skip reference would make the job's progress depend on its own output: it
+returns only *closed* sessions, so a run during trading hours would compare
+every symbol against yesterday and skip the whole market rather than write
+today's partial bar the next run replaces. The reference is ``max(trading_day)``
+within the same series instead. On a first run there is none, and nothing is
+skipped.
 
 **One symbol failing does not end the run.** Market scope is 1,523 network
 calls against a provider with no SLA; a run that stopped on the first timeout
@@ -47,6 +49,7 @@ from src.core.database import get_sync_db
 from src.stocks.models import BarDaily
 from src.stocks.providers import vnstock_daily
 from src.stocks.providers.vnstock_daily import SERIES_EQUITY, SERIES_INDEX
+from src.stocks.trading_day import spine_freshness
 from src.stocks.universe import build_universe
 
 logger = logging.getLogger(__name__)
@@ -310,10 +313,26 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = _parse_args(argv)
     report = run(scope=args.scope, sessions=args.sessions)
+
+    # Said out loud at the end of every run, because this is the one moment
+    # somebody is looking. The Trading Day calendar is derived from this table,
+    # so a spine nobody is feeding is not a stale table — it is a market whose
+    # newest session stops moving while every answer still carries a date.
+    with get_sync_db() as session:
+        freshness = spine_freshness(session)
+    logger.info("Daily spine: %s", freshness.describe())
+
     if report.failures:
         # A non-zero exit so an operator sees it, after every other symbol has
         # been written. Re-running the same command retries only what failed.
         logger.warning("Symbols that failed: %s", ", ".join(report.failures))
+        return 1
+    if freshness.is_empty or freshness.is_stale:
+        logger.warning(
+            "The daily spine is not current after a clean run: %s. Nothing "
+            "downstream can serve a session it does not hold.",
+            freshness.describe(),
+        )
         return 1
     return 0
 

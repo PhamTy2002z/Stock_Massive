@@ -209,7 +209,7 @@ def ensure_daily_bars(
             )
             break
         calls += 1
-        rows = _rows_from(symbol, series, frame)
+        rows = _rows_from(symbol, series, frame, today=today)
         written += _upsert(session, rows)
 
         if not rows:
@@ -251,7 +251,9 @@ def _what_is_stored(
     return int(row[0] or 0), row[1], row[2]
 
 
-def _rows_from(symbol: str, series: str, frame: pd.DataFrame) -> list[dict]:
+def _rows_from(
+    symbol: str, series: str, frame: pd.DataFrame, *, today: date
+) -> list[dict]:
     """Sessions as rows, scaled to the unit the table stores."""
     missing = [name for name in REQUIRED_COLUMNS if name not in frame.columns]
     if missing:
@@ -270,10 +272,12 @@ def _rows_from(symbol: str, series: str, frame: pd.DataFrame) -> list[dict]:
             # padded. Left out rather than written as a zero, which would read
             # downstream as a measured collapse.
             continue
+        day = _as_day(record.time)
+        _refuse_impossible_day(symbol, day, today)
         rows.append(
             {
                 "symbol": symbol,
-                "trading_day": _as_day(record.time),
+                "trading_day": day,
                 "series": series,
                 "open": _price(record.open, scale),
                 "high": _price(record.high, scale),
@@ -290,6 +294,34 @@ def _rows_from(symbol: str, series: str, frame: pd.DataFrame) -> list[dict]:
 
 def _is_priceless(record) -> bool:
     return bool(pd.isna(record.open)) or bool(pd.isna(record.close))
+
+
+def _refuse_impossible_day(symbol: str, day: date, today: date) -> None:
+    """Refuse a session date this market cannot have held, before it is written.
+
+    The Trading Day calendar is derived from this table, so a malformed date is
+    not one bad bar — it moves the window every symbol in the market is measured
+    against. ``bar_daily`` carries no CHECK constraint on ``trading_day`` and the
+    response check above reads column *names* only, so this is the boundary
+    where a date is judged at all.
+
+    Two impossibilities, and only two. A date in the future is one the exchange
+    has not reached. A Saturday or Sunday is one it does not open on — unlike a
+    public holiday, which is indistinguishable from an ordinary quiet day
+    without a calendar this system deliberately does not keep. Anything subtler
+    than these is a data question rather than a shape question, and refusing it
+    here would mean guessing.
+    """
+    if day > today:
+        raise DailyIngestError(
+            f"vnstock answered for {symbol} with session {day}, which is after "
+            f"{today}: a future session would move the market's calendar forward"
+        )
+    if day.weekday() >= 5:
+        raise DailyIngestError(
+            f"vnstock answered for {symbol} with session {day}, a "
+            f"{day.strftime('%A')}: this market holds no weekend session"
+        )
 
 
 def _as_day(value: Any) -> date:
