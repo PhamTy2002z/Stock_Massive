@@ -152,8 +152,8 @@ declaration** (kiểu `requires_foreign_share_flow`), không phải mã refusal 
 | # | Phase | Lớp | Phụ thuộc | Trạng thái |
 |---|---|---|---|---|
 | 01 | [Mở freeze và chốt nền](./phase-01-green-baseline.md) | docs + web | — | **done** |
-| 02 | [Lịch giao dịch chuyển sang bar_daily](./phase-02-trading-day-on-bar-daily.md) | api | 01 | pending |
-| 03 | [Cầu bar_daily → bars.py + luật basis mới](./phase-03-bar-daily-into-bars.md) | api | 02 | pending |
+| 02 | [Lịch giao dịch chuyển sang bar_daily](./phase-02-trading-day-on-bar-daily.md) | api | 01 | **done** |
+| 03 | [Cầu bar_daily → bars.py + luật basis mới](./phase-03-bar-daily-into-bars.md) | api | 02 | **done** |
 | 04 | [Projection cho 30 field + refusal đúng input](./phase-04-basis-law-and-retired-source.md) | api + web | 03 | pending |
 | 05 | [traded_value suy diễn — ba field liquidity](./phase-05-derived-traded-value.md) | api | 04 | pending |
 | 06 | [band_pressure trên lưới bước giá](./phase-06-band-from-exchange-rule.md) | api | 05 | pending |

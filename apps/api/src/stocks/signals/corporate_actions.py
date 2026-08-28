@@ -67,15 +67,10 @@ from sqlalchemy.orm import Session
 
 from src.stocks.models import CorporateAction
 
-from ..providers import (
-    Capability,
-    CorporateActionEvent,
-    MarketSnapshot,
-    ProviderSource,
-)
-from ..providers.store import resolve_sessions
+from ..providers import CorporateActionEvent, ProviderSource
 from .issues import SignalIssue
 from .price_band import detect_limit_lock
+from .sessions import sessions_in_range
 
 logger = logging.getLogger(__name__)
 
@@ -695,39 +690,27 @@ class CorporateActionStore:
 
 
 def _session_low(session: Session, symbol: str, day: date) -> Decimal | None:
-    """The lowest raw price this session traded at, if the store holds one.
+    """The lowest price this session traded at, if the spine holds one.
 
-    Read through ``SnapshotStore.series`` rather than with a query of its own,
-    for the reason the band regime reads it that way: two copies of a session
-    can be held on two different price bases, and the Main-Source-wins
-    resolution is what decides which of them the verdict is made against.
+    Read straight off ``bar_daily``, keyed on the ``Date`` column the session is
+    stored under. The two shapes this function had before were both broken and
+    for different reasons, so the fix is the query rather than a patch to it:
+    it ordered by a column that does not exist (``ProviderSnapshot.written_at``
+    — the model has ``created_at``), which raised, *and* it built the day's
+    bounds in UTC while a session is stamped at midnight in Vietnam, which would
+    have silently read the wrong seven hours once the raise was gone. A date
+    column has no bounds to build and no zone to get wrong.
+
+    Read through ``sessions_in_range`` rather than with a query of its own, for
+    the reason the band regime reads it that way: there is one reader that turns
+    stored rows into a symbol's sessions, and a second one here could disagree
+    with it about which row a day has.
     """
-    # Post-rip-out: SnapshotStore was removed. Read directly from ProviderSnapshot
-    # rows for the requested day, then reuse the pre-existing session resolver so
-    # a Main-Source row wins over a Cover-Source row on the same effective_at.
-    from src.stocks.models import ProviderSnapshot
-    day_start = datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc)
-    day_end = datetime.combine(day, datetime.max.time(), tzinfo=timezone.utc)
-    rows = (
-        session.execute(
-            select(ProviderSnapshot)
-            .where(
-                ProviderSnapshot.symbol == symbol.upper(),
-                ProviderSnapshot.capability == Capability.MARKET.value,
-                ProviderSnapshot.effective_at >= day_start,
-                ProviderSnapshot.effective_at <= day_end,
-            )
-            .order_by(ProviderSnapshot.written_at)
-        )
-        .scalars()
-        .all()
-    )
-    resolved = resolve_sessions(rows, Capability.MARKET)
-    for row in resolved.values():
-        snapshot = MarketSnapshot.model_validate(row.payload)
-        if snapshot.low_price is not None:
-            return Decimal(str(snapshot.low_price))
-    return None
+    held = sessions_in_range(session, symbol, day, day)
+    row = held.get(day)
+    if row is None or row.low_price is None:
+        return None
+    return Decimal(str(row.low_price))
 
 
 def _decimal(value: object) -> Decimal | None:

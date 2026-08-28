@@ -42,9 +42,9 @@ as *the figures were checked*.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -53,6 +53,7 @@ from sqlalchemy.orm import Session
 from src.core.database import get_sync_db
 from src.stocks.providers.contracts import PriceBasis, SessionSnapshot
 from src.stocks.shared.validators import validate_symbol
+from src.stocks.signals.corporate_actions import CorporateActionStore
 from src.stocks.signals.price_band import band_limits, resolve_band_regime, tick_size
 from src.stocks.signals.sessions import sessions_on_days
 from src.stocks.trading_day import latest_trading_day, trading_days_before
@@ -72,6 +73,13 @@ from ..registry import (
 logger = logging.getLogger(__name__)
 
 TOOLSET = "signals"
+
+#: How far a claimed price may sit outside the stored range and still agree.
+#: Both sides of this comparison are arithmetic over the same session, so the
+#: only gap it is meant to absorb is the provider's own rounding. Stated rather
+#: than left at zero because a comparison between two sources with no declared
+#: tolerance is one whose tolerance nobody chose.
+STORE_TOLERANCE = Decimal("0.001")
 
 #: What the result may weigh. Three checks and a handful of numbers; this is a
 #: bug-stop, not a budget.
@@ -252,7 +260,7 @@ def _judge(
         _band_check(exchange, price, bars.get(anchor_day), anchor_day)
         if day is not None
         else _unverified(BAND, no_session),
-        _store_check(price, bars.get(day), day)
+        _store_check(price, bars.get(day), day, _rescaled_since(session, symbol, day))
         if day is not None
         else _unverified(STORE, no_session),
     ]
@@ -312,6 +320,30 @@ def _tick_check(exchange: Any, price: Decimal) -> dict[str, Any]:
             "was never a matched price — it is a figure somebody rescaled."
         ),
     }
+
+
+def _rescaled_since(session: Session, symbol: str, day: date) -> tuple[date, ...]:
+    """The ex-dates that stand between this session and the newest stored one.
+
+    Each is a moment the provider restated the whole series at, so each is a
+    reason the stored prices for ``day`` are no longer the prices the exchange
+    printed. Empty is the ordinary answer and the one that lets the stored check
+    speak: most sessions have no entitlement behind them.
+
+    Undated actions are deliberately not in this answer — ``for_symbol`` cannot
+    return them, because an action with no date is in every window and none. An
+    undated action is a gap in this control, and it is the same gap the window
+    gateway already reports as ``unconfirmed_corporate_action``.
+    """
+    newest = latest_trading_day(session)
+    if newest is None or newest <= day:
+        return ()
+    actions = CorporateActionStore(session).for_symbol(
+        symbol, start=day + timedelta(days=1), end=newest
+    )
+    return tuple(
+        sorted({action.ex_date for action in actions if action.ex_date is not None})
+    )
 
 
 def _band_check(
@@ -380,7 +412,10 @@ def _band_check(
 
 
 def _store_check(
-    price: Decimal, bar: SessionSnapshot | None, day: date
+    price: Decimal,
+    bar: SessionSnapshot | None,
+    day: date,
+    rescaled_since: Sequence[date] = (),
 ) -> dict[str, Any]:
     """Whether the session this system stored could contain this price.
 
@@ -393,6 +428,20 @@ def _store_check(
 
     Both figures travel, and the store's ``asOf``, because a disagreement the
     reader cannot see both sides of is an assertion rather than a check.
+
+    **On an ``adjusted_at_source`` session the comparison is still made, under
+    one condition.** The provider restates the whole series to the moment it
+    answered, so a session with no entitlement between it and the newest stored
+    one has been rescaled by nothing: its stored prices *are* the prices the
+    exchange printed. ``rescaled_since`` carries the ex-dates that fall in
+    between, and one of them is enough to withhold the verdict — the stored
+    prices are then a real measurement of a different quantity, and no factor
+    this system holds can be trusted to undo the provider's own.
+
+    This check is a security control: the price it is handed came out of web
+    content nobody vouches for. Losing it to a source change would have left the
+    tick grid as the only thing standing between a fabricated but plausible price
+    and an answer, so the condition above is written out rather than assumed.
     """
     if bar is None:
         return _unverified(STORE, f"this system holds no session for {day.isoformat()}")
@@ -408,19 +457,33 @@ def _store_check(
         "close": bar.last_price,
         "priceBasis": bar.price_basis.value,
     }
-    if bar.price_basis is not PriceBasis.RAW:
+    if bar.price_basis is not PriceBasis.RAW and rescaled_since:
+        named = ", ".join(item.isoformat() for item in rescaled_since)
         return _unverified(
             STORE,
-            "the stored session is adjusted at source, so its prices and a "
-            "published raw price are not the same quantity",
-            extra={"stored": stored, "asOf": day.isoformat()},
+            "the stored session is adjusted at source and the provider has "
+            f"rescaled it since — {named} — so its prices and a published price "
+            "are not the same quantity",
+            extra={
+                "stored": stored,
+                "asOf": day.isoformat(),
+                "rescaledSince": [item.isoformat() for item in rescaled_since],
+            },
         )
-    inside = Decimal(str(low)) <= price <= Decimal(str(high))
+
+    # What the provider's own rounding can move a price by. Equity history
+    # arrives in thousands of dong and is scaled once at ingest, so today this
+    # absorbs nothing; it is here because the check is a comparison between two
+    # sources' arithmetic and a comparison with no stated tolerance is one whose
+    # tolerance is nobody's decision.
+    slack = Decimal(str(high)) * STORE_TOLERANCE
+    inside = Decimal(str(low)) - slack <= price <= Decimal(str(high)) + slack
     return {
         "check": STORE,
         "verdict": STORE_AGREES if inside else STORE_DISAGREES,
         "claimed": float(price),
         "stored": stored,
+        "tolerancePct": float(STORE_TOLERANCE * 100),
         "asOf": day.isoformat(),
         "detail": (
             f"This system stored {day.isoformat()} as trading between {low} and "

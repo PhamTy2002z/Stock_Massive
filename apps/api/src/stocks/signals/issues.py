@@ -48,9 +48,18 @@ class SignalIssue(str, Enum):
     # two measurements of the same thing.
     MIXED_PRICE_BASIS = "mixed_price_basis"
 
-    # The sessions being read are all `adjusted_at_source`. Refused not for
-    # being mixed but because that basis was fixed at `observed_at`, decays with
-    # every corporate action since, and cannot be recomputed from what is stored.
+    # The sessions being read are all `adjusted_at_source`, and the question
+    # asked of them is about a *published* price.
+    #
+    # **Narrowed when the daily spine became the source of sessions.** It used
+    # to refuse any window on this basis, which today would refuse every window
+    # there is. A window that is adjusted throughout is internally consistent and
+    # is served: every ratio taken over it is unchanged by the constant it is
+    # scaled by. What it cannot answer is what the exchange printed — the band a
+    # session traded inside is a percentage of a published reference price, and
+    # a rebased close is not that number. So this now names one question that
+    # cannot be answered rather than one window that cannot be read, and it is
+    # raised by `price_band._basis_of_the_pair`, never by the window gateway.
     UNADJUSTABLE_PRICE_BASIS = "unadjustable_price_basis"
 
     # --- Price band, dated per session ----------------------------------

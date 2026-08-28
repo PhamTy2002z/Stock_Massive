@@ -29,19 +29,15 @@ from datetime import date, datetime, time, timezone
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from src.stocks.models import ListingRoster, ProviderSnapshot
-from src.stocks.providers import Capability, Exchange, PriceBasis, ProviderSource
-from src.stocks.providers.contracts import (
-    MARKET_SCHEMA_VERSION,
-    MarketSnapshot,
-    SnapshotMetadata,
-)
+from src.stocks.models import BarDaily, CorporateAction, ListingRoster
+from src.stocks.providers import Exchange, PriceBasis, ProviderSource
 from src.stocks.providers.normalize import VN_TZ
 from src.stocks.signals.issues import SignalIssue
+from src.stocks.trading_day import CALENDAR_SERIES
 from src.stocks.signals.price_band import (
     MIGRATION_PROGRAMME_END,
     BandAnchorBasis,
@@ -58,6 +54,9 @@ from .conftest import basis_of
 
 NOW = datetime(2026, 8, 13, 11, 0, tzinfo=timezone.utc)
 
+#: The one symbol whose sessions define the calendar.
+CALENDAR_SYMBOL = "VNINDEX"
+
 
 def open_session() -> Session:
     engine = create_engine(
@@ -65,7 +64,14 @@ def open_session() -> Session:
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    for table in (ProviderSnapshot.__table__, ListingRoster.__table__):
+    for table in (
+        BarDaily.__table__,
+        ListingRoster.__table__,
+        # The stored action series: what tells an ex-date gap from a wrong
+        # anchor, and what says whether the provider has rescaled a session
+        # since it printed.
+        CorporateAction.__table__,
+    ):
         table.create(engine)
     return Session(engine)
 
@@ -84,53 +90,75 @@ def write_session(
     low: float | None = None,
     open_price: float | None = None,
     volume: int = 1_000_000,
-    total_value_vnd: float | None = None,
-    market_cap_vnd: float | None = None,
-    foreign_net_value_vnd: float | None = None,
-    source: ProviderSource = ProviderSource.FIINQUANT,
-    basis: PriceBasis | None = None,
+    source: ProviderSource = ProviderSource.VNSTOCK,
+    basis: PriceBasis = PriceBasis.RAW,
+    series: str = "equity",
 ) -> None:
-    """Store one session, defaulting the intraday range to the close.
+    """Store one session in the daily spine, defaulting the range to the close.
 
     ``high``/``low`` default to the close rather than to nothing, because an
     anchor session only ever needs its close and spelling out a range on every
     one of them would bury the ranges that are the point of the test.
 
-    ``basis`` defaults to the one that source has always written, which is the
-    only pairing the store has ever held. It is overridable so that a test can
-    prove the code reads the basis off the row rather than deriving it from the
-    source — the separation the field exists for.
+    ``basis`` is stated rather than derived from ``source``, because in this
+    table it is not derivable: ``bar_daily`` has one writer and the basis is a
+    column. It defaults to ``raw`` because that is still the only basis the band
+    machine can measure — a band is a percentage of a *published* reference
+    price, and a rebased close is not one. Teaching it to read the spine's own
+    adjusted rows is Phase 06 of the price-basis plan; until then this default is
+    what keeps these tests about the band arithmetic instead of about the
+    refusal in front of it.
     """
-    snapshot = MarketSnapshot(
-        symbol=symbol,
-        metadata=SnapshotMetadata(
-            source=source,
-            effective_at=_stamp(day),
-            observed_at=NOW,
-            schema_version=MARKET_SCHEMA_VERSION,
-        ),
-        price_basis=basis if basis is not None else basis_of(source),
-        total_value_vnd=total_value_vnd,
-        open_price=open_price if open_price is not None else close,
-        high_price=high if high is not None else close,
-        low_price=low if low is not None else close,
-        last_price=close,
-        volume=volume,
-        market_cap_vnd=market_cap_vnd,
-        foreign_net_value_vnd=foreign_net_value_vnd,
-    )
-    session.add(
-        ProviderSnapshot(
-            capability=Capability.MARKET.value,
+    resolved = basis
+    if series == "equity":
+        # The Trading Day calendar is the index series, so a market that held a
+        # session has to say so there too. In production VNINDEX is filled by
+        # its own backfill scope; a fixture writing only the equity row would be
+        # describing a day the market never opened, and every anchor would go
+        # missing.
+        _mark_session_on_the_calendar(session, day)
+    session.merge(
+        BarDaily(
             symbol=symbol,
+            trading_day=day,
+            series=series,
+            open=_decimal(open_price if open_price is not None else close),
+            high=_decimal(high if high is not None else close),
+            low=_decimal(low if low is not None else close),
+            close=_decimal(close),
+            volume=volume,
+            price_basis=resolved.value,
             source=source.value,
-            effective_at=_stamp(day),
-            observed_at=NOW,
-            schema_version=MARKET_SCHEMA_VERSION,
-            payload=snapshot.model_dump(mode="json"),
+            # When a run that waited for the close would have read it. Derived
+            # from the session rather than pinned, because a row read before the
+            # session it describes is one the store cannot hold.
+            observed_at=datetime.combine(day, time(16, 30), tzinfo=VN_TZ),
         )
     )
     session.flush()
+
+
+def _mark_session_on_the_calendar(session: Session, day: date) -> None:
+    """One VNINDEX row, which is what makes ``day`` a Trading Day."""
+    session.merge(
+        BarDaily(
+            symbol=CALENDAR_SYMBOL,
+            trading_day=day,
+            series=CALENDAR_SERIES,
+            open=_decimal(1_800),
+            high=_decimal(1_800),
+            low=_decimal(1_800),
+            close=_decimal(1_800),
+            volume=1,
+            price_basis=PriceBasis.ADJUSTED_AT_SOURCE.value,
+            source=ProviderSource.VNSTOCK.value,
+            observed_at=datetime.combine(day, time(16, 30), tzinfo=VN_TZ),
+        )
+    )
+
+
+def _decimal(value: float) -> Decimal:
+    return Decimal(str(value))
 
 
 def list_on(session: Session, symbol: str, exchange: Exchange) -> None:
@@ -520,11 +548,12 @@ class TestWhatTheDetectorRefusesToDecide:
         assert reading.degraded_reason is SignalIssue.MISSING_TARGET_SESSION
 
     def test_an_adjusted_session_cannot_be_judged_against_a_band(self):
-        """Rescaled closes sit off the tick grid the band is defined on.
+        """Rescaled closes are not the prices a band is a percentage of.
 
-        The Cover Source's era is `adjusted_at_source` for every row it wrote,
-        so this is most of the history before each symbol's own seam, not an
-        edge case.
+        This is not an edge case any more — it is the whole spine. Every row
+        ``bar_daily`` holds today is ``adjusted_at_source``, so this refusal is
+        what the band machine answers for every session until Phase 06 of the
+        price-basis plan teaches it to decide one from the tick grid instead.
         """
         with open_session() as session:
             list_on(session, "MBB", Exchange.HOSE)
@@ -533,7 +562,7 @@ class TestWhatTheDetectorRefusesToDecide:
                 "MBB",
                 date(2019, 3, 1),
                 close=25_800,
-                source=ProviderSource.VNSTOCK,
+                basis=PriceBasis.ADJUSTED_AT_SOURCE,
             )
             write_session(
                 session,
@@ -542,7 +571,7 @@ class TestWhatTheDetectorRefusesToDecide:
                 high=27_600,
                 low=27_600,
                 close=27_600,
-                source=ProviderSource.VNSTOCK,
+                basis=PriceBasis.ADJUSTED_AT_SOURCE,
             )
 
             reading = detect_limit_lock(session, "MBB", date(2019, 3, 4))
@@ -561,7 +590,7 @@ class TestWhatTheDetectorRefusesToDecide:
                 "MBB",
                 date(2021, 8, 4),
                 close=25_800,
-                source=ProviderSource.VNSTOCK,
+                basis=PriceBasis.ADJUSTED_AT_SOURCE,
             )
             write_session(
                 session,
@@ -615,36 +644,27 @@ class TestWhatTheDetectorRefusesToDecide:
 
         assert reading.degraded_reason is SignalIssue.ANCHOR_MISSING
 
-    def test_a_session_without_a_range_cannot_be_shown_to_have_been_locked(self):
+    def test_a_session_without_a_usable_range_withholds_the_verdict(self):
         """A close at the ceiling is not a lock, so a bar with no high and low
-        withholds the answer rather than falling back to the close."""
+        withholds the answer rather than falling back to the close.
+
+        ``bar_daily`` types high and low NOT NULL, so the only way a stored
+        session has no range is a value that is not a price. The reader maps a
+        non-positive price to absent for exactly this reason: the session
+        contract bounds every price above zero, so a zero left as a number would
+        fail validation and take the whole window with it.
+        """
         with open_session() as session:
             list_on(session, "MBB", Exchange.HOSE)
             write_session(session, "MBB", date(2025, 8, 13), close=25_800)
-            snapshot = MarketSnapshot(
-                symbol="MBB",
-                metadata=SnapshotMetadata(
-                    source=ProviderSource.FIINQUANT,
-                    effective_at=_stamp(date(2025, 8, 14)),
-                    observed_at=NOW,
-                    schema_version=MARKET_SCHEMA_VERSION,
-                ),
-                price_basis=basis_of(ProviderSource.FIINQUANT),
-                last_price=27_600,
-                volume=40_356_994,
+            write_session(
+                session,
+                "MBB",
+                date(2025, 8, 14),
+                high=0,
+                low=0,
+                close=27_600,
             )
-            session.add(
-                ProviderSnapshot(
-                    capability=Capability.MARKET.value,
-                    symbol="MBB",
-                    source=ProviderSource.FIINQUANT.value,
-                    effective_at=_stamp(date(2025, 8, 14)),
-                    observed_at=NOW,
-                    schema_version=MARKET_SCHEMA_VERSION,
-                    payload=snapshot.model_dump(mode="json"),
-                )
-            )
-            session.flush()
 
             reading = detect_limit_lock(session, "MBB", date(2025, 8, 14))
 
@@ -670,10 +690,16 @@ class TestWhatTheDetectorRefusesToDecide:
 
 
 class TestWhichStoredSessionIsRead:
-    def test_the_main_source_wins_where_both_sources_hold_one_session(self):
-        """The Cover Source's copy of a session is a quote history bar, and it
-        is on the other price basis — so which of the two is read decides
-        whether the question can be asked at all."""
+    """One session is one row, and the band never comes off it.
+
+    Both facts used to need defending against a store that held two copies of a
+    session on two price bases, written by two sources. ``bar_daily`` is keyed
+    ``(symbol, trading_day)`` and ingest upserts on it, so the first is now a
+    property of the schema; the second is still a rule, because a stored ceiling
+    would be today's band applied to an old session.
+    """
+
+    def test_a_session_restated_by_the_provider_replaces_the_row_it_had(self):
         with open_session() as session:
             list_on(session, "MBB", Exchange.HOSE)
             write_session(session, "MBB", date(2025, 8, 13), close=25_800)
@@ -681,10 +707,9 @@ class TestWhichStoredSessionIsRead:
                 session,
                 "MBB",
                 date(2025, 8, 14),
-                high=27_600,
-                low=27_600,
-                close=27_600,
-                source=ProviderSource.VNSTOCK,
+                high=99_000,
+                low=99_000,
+                close=99_000,
             )
             write_session(
                 session,
@@ -695,52 +720,43 @@ class TestWhichStoredSessionIsRead:
                 close=27_600,
             )
 
+            held = (
+                session.execute(
+                    select(BarDaily).where(
+                        BarDaily.symbol == "MBB",
+                        BarDaily.trading_day == date(2025, 8, 14),
+                    )
+                )
+                .scalars()
+                .all()
+            )
             reading = detect_limit_lock(session, "MBB", date(2025, 8, 14))
 
+        assert len(held) == 1
         assert reading.lock is LimitLock.CEILING
 
-    def test_the_band_is_taken_from_the_regime_and_not_from_the_stored_pair(self):
-        """``ceiling_price`` and ``floor_price`` are absent on every history bar
-        by design, and a stored one would be today's band on an old session.
+    def test_the_band_is_taken_from_the_regime_and_never_from_the_stored_row(self):
+        """The spine carries no reference, ceiling or floor at all — by design.
 
-        This row carries a deliberately wrong stored pair; the detector's answer
-        has to come out the same as the row without one.
+        A stored band would be whatever the provider's board rule was on the day
+        it answered, applied to a session years earlier. The regime resolves the
+        board as of the session instead, and the limits come out of that.
         """
         with open_session() as session:
             list_on(session, "MBB", Exchange.HOSE)
             write_session(session, "MBB", date(2025, 8, 13), close=25_800)
-            snapshot = MarketSnapshot(
-                symbol="MBB",
-                metadata=SnapshotMetadata(
-                    source=ProviderSource.FIINQUANT,
-                    effective_at=_stamp(date(2025, 8, 14)),
-                    observed_at=NOW,
-                    schema_version=MARKET_SCHEMA_VERSION,
-                ),
-                price_basis=basis_of(ProviderSource.FIINQUANT),
+            write_session(
+                session,
+                "MBB",
+                date(2025, 8, 14),
                 open_price=27_600,
-                high_price=27_600,
-                low_price=27_600,
-                last_price=27_600,
-                reference_price=99_000,
-                ceiling_price=105_900,
-                floor_price=92_100,
-                volume=40_356_994,
+                high=27_600,
+                low=27_600,
+                close=27_600,
             )
-            session.add(
-                ProviderSnapshot(
-                    capability=Capability.MARKET.value,
-                    symbol="MBB",
-                    source=ProviderSource.FIINQUANT.value,
-                    effective_at=_stamp(date(2025, 8, 14)),
-                    observed_at=NOW,
-                    schema_version=MARKET_SCHEMA_VERSION,
-                    payload=snapshot.model_dump(mode="json"),
-                )
-            )
-            session.flush()
 
             reading = detect_limit_lock(session, "MBB", date(2025, 8, 14))
 
+        assert not hasattr(BarDaily, "ceiling")
         assert reading.lock is LimitLock.CEILING
         assert reading.limits.ceiling == Decimal(27_600)

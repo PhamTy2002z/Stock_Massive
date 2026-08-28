@@ -8,29 +8,10 @@ Study to wait on a socket.
 
 ``session_window`` is pure and has no import from the rest; ``ingest`` writes and
 ``reads`` serves, and a Study only ever touches ``reads``.
+
+**Nothing is re-exported here on purpose.** ``ingest`` imports pandas and
+vnstock at module load, so a package that pulled it in eagerly put both behind
+every reader of ``reads`` — including ``trading_day``, which the whole serving
+path goes through for the market's closing time. Every caller already imports
+the submodule it wants by name.
 """
-
-from .ingest import IngestOutcome, IntradayIngestError, ensure_bars
-from .reads import Bar15m, bars_for, latest_closed_session, sessions_available
-from .session_window import (
-    SESSION_BUCKET_LABELS,
-    SESSION_BUCKETS,
-    Phase,
-    label_of,
-    phase_of,
-)
-
-__all__ = [
-    "Bar15m",
-    "IngestOutcome",
-    "IntradayIngestError",
-    "Phase",
-    "SESSION_BUCKETS",
-    "SESSION_BUCKET_LABELS",
-    "bars_for",
-    "ensure_bars",
-    "label_of",
-    "latest_closed_session",
-    "phase_of",
-    "sessions_available",
-]

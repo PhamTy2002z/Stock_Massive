@@ -1,23 +1,22 @@
-"""Store-side helpers that survived the market-data rip.
+"""The one read-time map the signals package still asks the store for.
 
-The full ``SnapshotStore`` / Redis-cache surface was removed with the provider
-adapters and the collector. What stayed is the pair of read-time helpers the
-signal fields still need — ``SNAPSHOT_MODEL_BY_CAPABILITY`` and
-``resolve_sessions`` — because ``signals/sessions.py::sessions_in_range``
-reaches for them by name to reconstruct a session series from the two rows the
-Main Source and the cover source used to write in overlap.
+The full ``SnapshotStore`` / Redis-cache surface went with the provider adapters
+and the collector. ``resolve_sessions`` went with the daily spine: it picked one
+row out of the two that the Main Source and a cover source used to write for the
+same session, and ``bar_daily`` is keyed ``(symbol, trading_day)`` — one session
+is one row, and there is nothing left to pick between.
 
-Nothing here writes to Postgres or touches Redis anymore. If the harness ever
-wants to reintroduce a cached serving layer for signal fields, do it in a new
-module rather than by growing this shim.
+What stayed is the Capability-to-contract map, because ``signals/sessions.py``
+still has to decide which session contract a stored bar becomes: a listed
+equity's session carries figures a market index has no such thing as, and the
+distinction is the type rather than a null.
+
+Nothing here writes to Postgres or touches Redis. If the harness ever wants a
+cached serving layer for signal fields, do it in a new module rather than by
+growing this shim.
 """
 
 from __future__ import annotations
-
-from collections.abc import Iterable
-from datetime import datetime
-
-from src.stocks.models import ProviderSnapshot
 
 from .contracts import (
     Capability,
@@ -26,7 +25,6 @@ from .contracts import (
     MarketSnapshot,
     ReferenceSnapshot,
     ValuationSnapshot,
-    main_source,
 )
 
 SNAPSHOT_MODEL_BY_CAPABILITY = {
@@ -36,22 +34,3 @@ SNAPSHOT_MODEL_BY_CAPABILITY = {
     Capability.REFERENCE: ReferenceSnapshot,
     Capability.FUNDAMENTAL: FundamentalSnapshot,
 }
-
-
-def resolve_sessions(
-    rows: Iterable[ProviderSnapshot],
-    capability: Capability,
-) -> dict[datetime, ProviderSnapshot]:
-    """One row per session, out of rows that may hold two copies of one.
-
-    Kept as-is from the pre-rip store: the Main Source wins over a Cover Source
-    row for the same effective_at, and among two rows from the same source the
-    later write wins because callers query oldest-written first.
-    """
-    main = main_source(capability).value
-    held: dict[datetime, ProviderSnapshot] = {}
-    for row in rows:
-        standing = held.get(row.effective_at)
-        if standing is None or standing.source != main:
-            held[row.effective_at] = row
-    return held

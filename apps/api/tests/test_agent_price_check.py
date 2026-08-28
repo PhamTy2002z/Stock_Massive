@@ -25,7 +25,8 @@ number named as doubtful.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
+from decimal import Decimal
 
 import pytest
 
@@ -45,6 +46,7 @@ from src.agent.tools.price_check import (
     summarise_check_price_claim,
 )
 from src.agent.toolsets import TOOLSETS, resolve_toolset
+from src.stocks.models import CorporateAction
 from src.stocks.providers import Exchange, PriceBasis
 
 from .test_price_band import list_on, open_session, write_session
@@ -262,6 +264,96 @@ class TestTheStoredSession:
         assert verdict(result, STORE) == UNVERIFIED
         assert verdict(result, STORE) != STORE_AGREES
         assert UNVERIFIED in result["flags"]
+
+
+class TestTheStoredSessionOnAdjustedPrices:
+    """The control that would otherwise have been lost to the source change.
+
+    Every row the daily spine holds is ``adjusted_at_source``. Refusing on that
+    alone would leave the tick grid as the only thing between a fabricated but
+    plausible price and an answer — and a fabricated price is exactly what this
+    tool exists for, since the number comes out of web content nobody vouches
+    for.
+    """
+
+    def test_a_session_with_no_entitlement_behind_it_is_still_compared(self, store):
+        """No ex-date since, so the provider has rescaled it by nothing."""
+        write_session(
+            store,
+            SYMBOL,
+            SESSION,
+            close=float(REAL_CLOSE),
+            high=21_750.0,
+            low=21_150.0,
+            basis=PriceBasis.ADJUSTED_AT_SOURCE,
+        )
+
+        assert verdict(check(store, REAL_CLOSE), STORE) == STORE_AGREES
+        assert verdict(check(store, IMPOSSIBLE), STORE) == STORE_DISAGREES
+
+    def test_an_ex_date_since_the_session_withholds_the_verdict(self, store):
+        """The stored prices are a real measurement of a different quantity."""
+        write_session(
+            store,
+            SYMBOL,
+            SESSION,
+            close=float(REAL_CLOSE),
+            high=21_750.0,
+            low=21_150.0,
+            basis=PriceBasis.ADJUSTED_AT_SOURCE,
+        )
+        later = date(2026, 8, 13)
+        write_session(store, SYMBOL, later, close=18_000.0)
+        _store_ex_date(store, SYMBOL, later)
+
+        entry = _entry(check(store, REAL_CLOSE), STORE)
+
+        assert entry["verdict"] == UNVERIFIED
+        assert entry["rescaledSince"] == [later.isoformat()]
+
+    def test_an_ex_date_before_the_session_does_not_withhold_it(self, store):
+        """Only what came after can have rescaled the session being checked."""
+        write_session(
+            store,
+            SYMBOL,
+            SESSION,
+            close=float(REAL_CLOSE),
+            high=21_750.0,
+            low=21_150.0,
+            basis=PriceBasis.ADJUSTED_AT_SOURCE,
+        )
+        _store_ex_date(store, SYMBOL, BEFORE)
+
+        assert verdict(check(store, REAL_CLOSE), STORE) == STORE_AGREES
+
+    def test_the_comparison_says_what_tolerance_it_allowed(self, store):
+        """Two sources' arithmetic, so the slack between them is a decision."""
+        entry = _entry(check(store, REAL_CLOSE), STORE)
+
+        assert entry["tolerancePct"] == pytest.approx(0.1)
+
+
+def _entry(result, name):
+    return next(item for item in result["checks"] if item["check"] == name)
+
+
+def _store_ex_date(session, symbol: str, ex_date: date) -> None:
+    """One confirmed entitlement, which is a moment the provider restated at."""
+    session.add(
+        CorporateAction(
+            symbol=symbol,
+            source="vnstock",
+            event_code="ISS",
+            title="Stock dividend",
+            kind="stock_dividend",
+            ex_date=ex_date,
+            exercise_ratio=Decimal("0.2"),
+            changes_share_count=True,
+            confirmation="confirmed",
+            observed_at=datetime(2026, 8, 20, 9, 0, tzinfo=timezone.utc),
+        )
+    )
+    session.flush()
 
 
 class TestWhatItRefusesToDo:

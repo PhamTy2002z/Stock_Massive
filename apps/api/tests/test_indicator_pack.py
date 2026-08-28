@@ -8,7 +8,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from src.stocks.models import CorporateAction, ListingRoster, ProviderSnapshot
+from src.stocks.models import (
+    BarDaily,
+    CorporateAction,
+    ListingRoster,
+    ProviderSnapshot,
+)
 from src.stocks.providers import Exchange
 from src.stocks.signals.bars import Bar, BarFrame
 from src.stocks.signals.fields import Claim, FieldKind, Sign, Unit
@@ -57,9 +62,12 @@ def open_session() -> Session:
         poolclass=StaticPool,
     )
     for table in (
-        ProviderSnapshot.__table__,
+        BarDaily.__table__,
         ListingRoster.__table__,
         CorporateAction.__table__,
+        # Sessions come off the daily spine now; the foreign room a served field
+        # carries is still a `reference` Capability row.
+        ProviderSnapshot.__table__,
     ):
         table.create(engine)
     return Session(engine)

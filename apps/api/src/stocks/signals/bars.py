@@ -74,14 +74,30 @@ The following refusals apply to the price projection:
 | --- | --- |
 | ``insufficient_history`` | fewer sessions than the field's minimum |
 | ``mixed_price_basis`` | the window crosses a **Price Basis** seam |
-| ``unadjustable_price_basis`` | the window lies wholly in the adjusted-at-source era |
 | ``unexplained_price_gap`` | a session moved further than its band permits, and no stored action accounts for it |
 
-The two basis refusals are not degradations. A raw close and an
+``mixed_price_basis`` is not a degradation. A raw close and an
 ``adjusted_at_source`` close are not two measurements of the same thing, so a
-window holding both is meaningless rather than weaker, and a window holding only
-the second cannot be recomputed from anything stored — that basis was fixed at
-``observed_at`` and has decayed with every action since.
+window holding both is meaningless rather than weaker.
+
+A window that is ``adjusted_at_source`` *throughout* **is served**, and this is
+the one rule that changed when the daily spine became the source. It used to be
+``unadjustable_price_basis``, on the reasoning that such a window was fixed at
+somebody else's ``observed_at`` and could not be recomputed from anything
+stored. That is still true and it is no longer a reason to refuse: the provider
+restates the whole series when an action changes the factor behind it, so the
+window is internally consistent, and every ratio a field takes over it — a
+return, a range, a drawdown, a z-score — is unchanged by the constant the whole
+window is scaled by. What such a window cannot answer is a question about a
+*published* price: the band it traded inside, and whether a claimed price is the
+one the exchange printed. Those are refused where they are asked rather than by
+withholding the window.
+
+The corollary is that ``_factors`` must not run on it. The adjustment machine
+below rebases a raw window onto its own last session using the stored Corporate
+Action series; run over prices the provider has already rebased, it applies
+every entitlement twice and is wrong silently. It is skipped, and the factor is
+1 for every bar.
 
 ## Two degradations
 
@@ -293,12 +309,22 @@ class Bar:
 
     @property
     def raw_close(self) -> float | None:
-        """This session's close as the exchange published it.
+        """This session's close in the terms its band was measured in.
 
-        The band above is in raw prices and ``close`` is in the window's rebased
-        ones, so a distance between the two is only a distance once the
-        Adjustment Factor is divided back out. On a window with no action in it
-        the factor is 1 and the two are the same number.
+        The band above is in the stored window's own prices and ``close`` is in
+        the window's rebased ones, so a distance between the two is only a
+        distance once the Adjustment Factor is divided back out. On a window with
+        no action in it the factor is 1 and the two are the same number.
+
+        **It is the exchange's published close only on a ``raw`` window.** On an
+        ``adjusted_at_source`` window the factor is 1 by construction — the
+        adjustment machine did not run — so this returns ``close`` unchanged, and
+        ``close`` is the provider's rebased price rather than the one the
+        exchange printed. Nothing here can undo that: the provider's factor and
+        this system's are not guaranteed to be the same number, so multiplying
+        one back through the other would invent a third price. A caller that
+        needs the published figure has to say so and be refused, which is what
+        ``price_band`` and ``check_price_claim`` do.
         """
         if self.close is None:
             return None
@@ -725,7 +751,8 @@ def prepare_bars(
                 gap_refusal,
                 sessions_used=sessions_used,
             )
-        factors, adjustment_issues = _factors(window, usable, by_ex_date)
+        if _adjusts_from_actions(usable.values()):
+            factors, adjustment_issues = _factors(window, usable, by_ex_date)
 
     frame = _frame(symbol, window, usable, bands, factors, projection, series)
 
@@ -814,17 +841,38 @@ def _refused(
 def _basis_of(rows: Iterable[SessionSnapshot]) -> SignalIssue | None:
     """What the window's Price Basis values say about serving it, if anything.
 
-    Only an all-``raw`` window is served. Two bases in one window is a symbol's
-    own Backfill seam falling inside it, which is meaningless rather than
-    degraded; one basis that is ``adjusted_at_source`` throughout is a window
-    fixed at somebody else's ``observed_at``, which nothing stored can undo.
+    Three cases, and only the middle one refuses:
+
+    - **all ``raw``** — served, and the adjustment machine rebases it onto its
+      own last session from the stored Corporate Action series.
+    - **two bases in one window** — ``mixed_price_basis``. A symbol's own
+      Backfill seam has fallen inside the window, and the two halves are not two
+      measurements of the same thing. Meaningless rather than degraded.
+    - **all ``adjusted_at_source``** — served, with the adjustment machine
+      **off**. The provider restated the whole series to one moment, so it is
+      internally consistent, and every ratio taken over it is unchanged by the
+      constant it is scaled by. Running ``_factors`` here would apply each
+      entitlement a second time and be wrong without saying so.
+
+    What such a window cannot answer is a question about a *published* price —
+    the band a session traded inside, and whether a claimed price is the printed
+    one. Those refuse where they are asked (``price_band._basis_of_the_pair``,
+    ``agent.tools.price_check``) rather than by withholding the whole window from
+    the seventeen fields that never look at a published price at all.
     """
     bases = {row.price_basis for row in rows}
-    if not bases or bases == {PriceBasis.RAW}:
-        return None
     if len(bases) > 1:
         return SignalIssue.MIXED_PRICE_BASIS
-    return SignalIssue.UNADJUSTABLE_PRICE_BASIS
+    return None
+
+
+def _adjusts_from_actions(rows: Iterable[SessionSnapshot]) -> bool:
+    """Whether this window's prices still have their entitlements in them.
+
+    True only for a window that is ``raw`` throughout. An empty window answers
+    False, which costs nothing: there is nothing to rebase either way.
+    """
+    return {row.price_basis for row in rows} == {PriceBasis.RAW}
 
 
 def _read_bands(

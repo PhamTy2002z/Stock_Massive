@@ -27,7 +27,7 @@ from __future__ import annotations
 import dataclasses
 import math
 import random
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -35,8 +35,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from src.stocks.models import CorporateAction, ListingRoster, ProviderSnapshot
-from src.stocks.providers import Exchange
+from src.stocks.models import (
+    BarDaily,
+    CorporateAction,
+    ListingRoster,
+    ProviderSnapshot,
+)
+from src.stocks.providers import Exchange, PriceBasis
 from src.stocks.signals.bars import prepare_bars
 from src.stocks.signals.fields import (
     CATALOG_NULL_FPR_CEILING,
@@ -92,9 +97,13 @@ def open_session() -> Session:
         poolclass=StaticPool,
     )
     for table in (
-        ProviderSnapshot.__table__,
+        BarDaily.__table__,
         ListingRoster.__table__,
         CorporateAction.__table__,
+        # Sessions moved to the daily spine; the reference, valuation and
+        # fundamental Capabilities did not, and the foreign room a served field
+        # carries is still read out of here.
+        ProviderSnapshot.__table__,
     ):
         table.create(engine)
     return Session(engine)
@@ -107,6 +116,8 @@ def store_quiet_history(
     sessions: int = VOLATILITY_REGIME_MIN_SESSIONS + 2,
     seed: int = 11,
     locked_from_end: tuple[int, ...] = (),
+    basis: PriceBasis = PriceBasis.RAW,
+    scale: float = 1.0,
 ) -> tuple[date, ...]:
     """An ordinary stretch of sessions, with locked ones where asked for.
 
@@ -115,6 +126,11 @@ def store_quiet_history(
     a robust baseline has something to be robust about. The sessions named in
     ``locked_from_end`` are written as ceiling locks — H=L=O=C at the limit — the
     way the store actually holds one.
+
+    ``basis`` states what the stored prices mean; ``scale`` multiplies the whole
+    window by one constant, which is what a provider does when it restates a
+    series for a corporate action. The two together are how a test asks whether
+    a field reads a ratio or a level.
     """
     rng = random.Random(seed)
     list_on(session, symbol, Exchange.HOSE)
@@ -135,10 +151,11 @@ def store_quiet_history(
                 session,
                 symbol,
                 day,
-                open_price=ceiling,
-                high=ceiling,
-                low=ceiling,
-                close=ceiling,
+                open_price=ceiling * scale,
+                high=ceiling * scale,
+                low=ceiling * scale,
+                close=ceiling * scale,
+                basis=basis,
             )
             close = ceiling
             continue
@@ -153,10 +170,11 @@ def store_quiet_history(
             session,
             symbol,
             day,
-            open_price=round(open_price, 1),
-            high=round(high, 1),
-            low=round(low, 1),
-            close=round(next_close, 1),
+            open_price=round(open_price, 1) * scale,
+            high=round(high, 1) * scale,
+            low=round(low, 1) * scale,
+            close=round(next_close, 1) * scale,
+            basis=basis,
         )
         close = round(next_close, 1)
     return tuple(days)
@@ -603,3 +621,110 @@ class TestTheSeededVolatilityRegimeField:
 
         assert garman_klass_variance(bar) == pytest.approx(expected)
         assert garman_klass_variance(bar) >= 0
+
+
+class TestWhatAWindowsPriceBasisDecides:
+    """The rule that changed when the daily spine became the source.
+
+    ``bar_daily`` is ``adjusted_at_source`` on every row there is. Under the old
+    rule that window was refused outright, which after the source change would
+    have refused every price field for every symbol — silently, since a refusal
+    is a normal answer. The new rule serves it and turns the adjustment machine
+    off instead.
+    """
+
+    def test_a_window_adjusted_throughout_is_served(self):
+        with open_session() as session:
+            days = store_quiet_history(session, basis=PriceBasis.ADJUSTED_AT_SOURCE)
+            value = serve_field(session, "AAA", VOLATILITY_REGIME_Z, end=days[-1])
+
+        assert value.refusal is None
+        assert value.value is not None
+
+    def test_a_window_raw_throughout_is_served_and_still_adjusts_from_actions(self):
+        with open_session() as session:
+            days = store_quiet_history(session, basis=PriceBasis.RAW)
+            frame, health = prepare_bars(session, "AAA", 20, end=days[-1])
+
+        assert health.refusal is None
+        assert frame is not None
+
+    def test_a_window_holding_both_bases_is_refused_where_its_seam_falls(self):
+        """Two bases in one window is a seam, not a weaker measurement."""
+        with open_session() as session:
+            days = store_quiet_history(session, basis=PriceBasis.RAW)
+            write_session(
+                session,
+                "AAA",
+                days[-1],
+                close=20_000,
+                basis=PriceBasis.ADJUSTED_AT_SOURCE,
+            )
+            _, health = prepare_bars(session, "AAA", 20, end=days[-1])
+
+        assert health.refusal is SignalIssue.MIXED_PRICE_BASIS
+
+    def test_the_adjustment_machine_does_not_run_on_prices_already_rebased(self):
+        """Running it would take every entitlement out a second time.
+
+        The stored action is real and the window contains its ex-date, so the
+        raw window below rebases and the adjusted one must not. Read off
+        ``adjustment.applied``, which is what Window Health reports either way.
+        """
+        ex_date = None
+        applied: dict[str, bool] = {}
+        for label, basis in (
+            ("raw", PriceBasis.RAW),
+            ("adjusted", PriceBasis.ADJUSTED_AT_SOURCE),
+        ):
+            with open_session() as session:
+                days = store_quiet_history(session, basis=basis)
+                ex_date = days[-5]
+                _store_stock_dividend(session, "AAA", ex_date)
+                _, health = prepare_bars(session, "AAA", 20, end=days[-1])
+            applied[label] = health.adjustment.applied
+
+        assert applied["raw"] is True
+        assert applied["adjusted"] is False
+
+    def test_every_ratio_a_field_reads_survives_the_window_being_rescaled(self):
+        """Why serving an adjusted window is sound, stated as an assertion.
+
+        A provider that rebases the whole series multiplies every price in the
+        window by one constant. This is the golden test for the seventeen
+        OHLCV-only fields: their arithmetic is ratios, so the constant divides
+        out. It is asserted over the gateway's own bars rather than over hand-made
+        ones, so a future change that made a field read a price *level* would
+        break it here.
+        """
+        with open_session() as session:
+            days = store_quiet_history(session, basis=PriceBasis.ADJUSTED_AT_SOURCE)
+            plain = serve_field(session, "AAA", VOLATILITY_REGIME_Z, end=days[-1])
+
+        with open_session() as session:
+            days = store_quiet_history(
+                session, basis=PriceBasis.ADJUSTED_AT_SOURCE, scale=2.5
+            )
+            rescaled = serve_field(session, "AAA", VOLATILITY_REGIME_Z, end=days[-1])
+
+        assert plain.value is not None
+        assert rescaled.value == pytest.approx(plain.value)
+
+
+def _store_stock_dividend(session: Session, symbol: str, ex_date: date) -> None:
+    """One priceable entitlement on ``ex_date``: a 10% stock dividend."""
+    session.add(
+        CorporateAction(
+            symbol=symbol,
+            source="vnstock",
+            event_code="ISS",
+            title="Stock dividend",
+            kind="stock_dividend",
+            ex_date=ex_date,
+            exercise_ratio=Decimal("0.1"),
+            changes_share_count=True,
+            confirmation="confirmed",
+            observed_at=datetime(2026, 8, 13, 11, 0, tzinfo=timezone.utc),
+        )
+    )
+    session.flush()

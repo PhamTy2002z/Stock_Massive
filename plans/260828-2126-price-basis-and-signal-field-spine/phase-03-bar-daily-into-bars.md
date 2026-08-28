@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Cầu bar_daily → bars.py + luật basis mới"
-status: pending
+status: done
 priority: P1
 effort: "2d"
 dependencies: [2]

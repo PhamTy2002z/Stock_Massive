@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Lịch giao dịch chuyển sang bar_daily"
-status: pending
+status: done
 priority: P1
 effort: "1d"
 dependencies: [1]
