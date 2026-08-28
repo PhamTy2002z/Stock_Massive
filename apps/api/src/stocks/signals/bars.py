@@ -150,7 +150,7 @@ from ..providers.contracts import (
 from ..trading_day import latest_trading_day, trading_days_before
 from ..universe import build_universe
 from .corporate_actions import CorporateActionStore, adjustment_factor
-from .fields import DEGRADED_LIMIT_LOCK_SHARE, min_sample_for
+from .fields import DEGRADED_LIMIT_LOCK_SHARE, BarProjection, min_sample_for
 from .issues import SignalIssue
 from .price_band import (
     EXCHANGE_MIGRATIONS,
@@ -180,13 +180,6 @@ ADTV_SESSIONS = 20
 # refuse under rather than restated as a number: the two floors were both
 # written as 30 with each comment claiming to be "the same floor", which is a
 # claim nothing checked. Now they are one rule, and it scales with the sample.
-
-
-class BarProjection(str, Enum):
-    """Which stored measurement makes a session usable for this computation."""
-
-    PRICE = "price"
-    VOLUME = "volume"
 
 
 class BarSeries(str, Enum):

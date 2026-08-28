@@ -38,6 +38,7 @@ from collections.abc import Mapping
 from types import MappingProxyType
 
 from .fields import (
+    BarProjection,
     Claim,
     FieldKind,
     FieldSource,
@@ -143,6 +144,10 @@ VOLATILITY_REGIME_Z = SignalField(
     # field the nightly pipeline cannot find by name is a field it emits as
     # refused.
     name="volatility_regime.gk_variance_robust_z",
+    # The estimator itself is intra-bar and so basis-invariant, but the
+    # reading carries ``limit_lock_days``, which comes off the band
+    # machine and only the price projection measures one.
+    projection=BarProjection.PRICE,
     unit=Unit.Z_SCORE,
     sign=Sign.SIGNED,
     interpretation=(
@@ -203,6 +208,7 @@ VOLATILITY_REGIME_Z = SignalField(
 
 REALIZED_VOLATILITY = SignalField(
     name="realized_volatility.yang_zhang_annualized_pct",
+    projection=BarProjection.PRICE,
     unit=Unit.PERCENT_ANNUALIZED,
     sign=Sign.NON_NEGATIVE,
     interpretation=(
@@ -236,6 +242,7 @@ REALIZED_VOLATILITY = SignalField(
 # slot.
 PRICE_ZONE = SignalField(
     name="price_zone.ordinary_range_pct",
+    projection=BarProjection.PRICE,
     unit=Unit.PERCENT,
     sign=Sign.NON_NEGATIVE,
     interpretation=(
@@ -279,6 +286,7 @@ _DRAWDOWN_KEYS = (
 
 MAX_DRAWDOWN = SignalField(
     name="drawdown_stats.max_drawdown_pct",
+    projection=BarProjection.PRICE,
     unit=Unit.PERCENT,
     sign=Sign.NON_POSITIVE,
     interpretation=(
@@ -302,6 +310,7 @@ MAX_DRAWDOWN = SignalField(
 
 CURRENT_DRAWDOWN = SignalField(
     name="drawdown_stats.current_drawdown_pct",
+    projection=BarProjection.PRICE,
     unit=Unit.PERCENT,
     sign=Sign.NON_POSITIVE,
     interpretation=(
@@ -323,6 +332,7 @@ CURRENT_DRAWDOWN = SignalField(
 
 DAYS_UNDERWATER = SignalField(
     name="drawdown_stats.days_underwater",
+    projection=BarProjection.PRICE,
     unit=Unit.SESSIONS,
     sign=Sign.NON_NEGATIVE,
     interpretation=(
@@ -344,6 +354,7 @@ DAYS_UNDERWATER = SignalField(
 
 DRAWDOWN_VERSUS_BENCHMARK = SignalField(
     name="drawdown_stats.mdd_over_expected",
+    projection=BarProjection.PRICE,
     unit=Unit.RATIO,
     sign=Sign.NON_NEGATIVE,
     interpretation=(
@@ -400,6 +411,7 @@ DRAWDOWN_VERSUS_BENCHMARK = SignalField(
 
 SHARPE = SignalField(
     name="risk_adjusted.sharpe_annualized",
+    projection=BarProjection.PRICE,
     unit=Unit.RATIO,
     sign=Sign.SIGNED,
     interpretation=(
@@ -435,6 +447,7 @@ SHARPE = SignalField(
 
 SORTINO = SignalField(
     name="risk_adjusted.sortino_annualized",
+    projection=BarProjection.PRICE,
     unit=Unit.RATIO,
     sign=Sign.SIGNED,
     interpretation=(
@@ -481,6 +494,10 @@ SORTINO = SignalField(
 
 ADTV_MONEY = SignalField(
     name="liquidity_profile.adtv_vnd",
+    # Price, not volume: after the traded value is derived it is
+    # arithmetic on ``close``. ``WindowHealth.adtv`` is measured only on
+    # this projection too.
+    projection=BarProjection.PRICE,
     unit=Unit.VND,
     sign=Sign.NON_NEGATIVE,
     interpretation=(
@@ -508,6 +525,10 @@ ADTV_MONEY = SignalField(
 
 ADTV_SHARES = SignalField(
     name="liquidity_profile.adtv_shares",
+    # Only ``volume`` is read, and a share count is a share count on
+    # either price basis. The unit break a stock dividend causes still
+    # travels, as ``volume_basis_break``.
+    projection=BarProjection.VOLUME,
     unit=Unit.SHARES,
     sign=Sign.NON_NEGATIVE,
     interpretation=(
@@ -535,6 +556,9 @@ ADTV_SHARES = SignalField(
 
 AMIHUD_ILLIQUIDITY = SignalField(
     name="liquidity_profile.amihud_illiq",
+    # Price: a move in percent divided by money traded, both read off the
+    # bars.
+    projection=BarProjection.PRICE,
     unit=Unit.PERCENT_PER_BILLION_VND,
     sign=Sign.NON_NEGATIVE,
     interpretation=(
@@ -563,6 +587,10 @@ AMIHUD_ILLIQUIDITY = SignalField(
 
 ADTV_PERCENTILE = SignalField(
     name="liquidity_profile.adtv_percentile",
+    # Price, and it has to be: the peer standing this ranks is measured
+    # only when the projection is price, so anything else locks the field
+    # into ``ranking_unavailable`` for good.
+    projection=BarProjection.PRICE,
     unit=Unit.PERCENTILE,
     sign=Sign.NON_NEGATIVE,
     interpretation=(
@@ -586,6 +614,7 @@ ADTV_PERCENTILE = SignalField(
 BAND_PRESSURE = SignalField(
     # The id the Analysis Field Profile already names (spec 0003 §8.4).
     name="band_pressure.limit_days_in_window",
+    projection=BarProjection.PRICE,
     unit=Unit.SESSIONS,
     sign=Sign.NON_NEGATIVE,
     interpretation=(
@@ -634,6 +663,7 @@ _MEAN_REVERSION_KEYS = (
 
 MEAN_REVERSION_Z = SignalField(
     name="mean_reversion.trailing_z",
+    projection=BarProjection.PRICE,
     unit=Unit.Z_SCORE,
     sign=Sign.SIGNED,
     interpretation=(
@@ -657,6 +687,7 @@ MEAN_REVERSION_Z = SignalField(
 
 MEAN_REVERSION_HALF_LIFE = SignalField(
     name="mean_reversion.half_life_sessions",
+    projection=BarProjection.PRICE,
     unit=Unit.SESSIONS,
     sign=Sign.NON_NEGATIVE,
     interpretation=(
@@ -706,6 +737,7 @@ MOMENTUM_RANK = SignalField(
     # months back — which is the same window ``252 + 21`` describes by the length
     # of its skip. Both spellings, one window (see ``cross_sectional``).
     name="momentum_rank.percentile_12_2",
+    projection=BarProjection.PRICE,
     unit=Unit.PERCENTILE,
     sign=Sign.NON_NEGATIVE,
     interpretation=(
@@ -742,6 +774,7 @@ MOMENTUM_RANK = SignalField(
 
 TREND_SIGNAL = SignalField(
     name="trend_signal.total_return_12m_pct",
+    projection=BarProjection.PRICE,
     unit=Unit.PERCENT,
     sign=Sign.SIGNED,
     interpretation=(
@@ -777,6 +810,7 @@ TREND_SIGNAL = SignalField(
 
 RELATIVE_STRENGTH = SignalField(
     name="relative_strength.beta_vs_market_index",
+    projection=BarProjection.PRICE,
     unit=Unit.RATIO,
     sign=Sign.SIGNED,
     interpretation=(
@@ -817,6 +851,7 @@ _FACTOR_KEYS = (
 
 EARNINGS_YIELD_PERCENTILE = SignalField(
     name="factor_percentiles.earnings_yield_percentile",
+    projection=BarProjection.PRICE,
     unit=Unit.PERCENTILE,
     sign=Sign.NON_NEGATIVE,
     interpretation=(
@@ -841,6 +876,7 @@ EARNINGS_YIELD_PERCENTILE = SignalField(
 
 BOOK_YIELD_PERCENTILE = SignalField(
     name="factor_percentiles.book_yield_percentile",
+    projection=BarProjection.PRICE,
     unit=Unit.PERCENTILE,
     sign=Sign.NON_NEGATIVE,
     interpretation=(
@@ -862,6 +898,10 @@ BOOK_YIELD_PERCENTILE = SignalField(
 
 ROE_PERCENTILE = SignalField(
     name="factor_percentiles.roe_percentile",
+    # A ratio out of the quarterly statements; no price is read at any
+    # point. It needs the window only to be dated against the same cutoff
+    # every other member of the sample is.
+    projection=BarProjection.VOLUME,
     unit=Unit.PERCENTILE,
     sign=Sign.NON_NEGATIVE,
     interpretation=(
@@ -883,6 +923,7 @@ ROE_PERCENTILE = SignalField(
 
 SIZE_PERCENTILE = SignalField(
     name="factor_percentiles.size_percentile",
+    projection=BarProjection.PRICE,
     unit=Unit.PERCENTILE,
     sign=Sign.NON_NEGATIVE,
     interpretation=(
@@ -927,6 +968,7 @@ CROSS_SECTIONAL_FIELDS: tuple[SignalField, ...] = (
 FOREIGN_FLOW_PRESSURE = SignalField(
     # The id the Analysis Field Profile already names (spec 0003 §8.4).
     name="foreign_flow_pressure.net_value_over_adtv",
+    projection=BarProjection.PRICE,
     unit=Unit.RATIO,
     sign=Sign.SIGNED,
     interpretation=(
@@ -965,6 +1007,7 @@ FOREIGN_FLOW_PRESSURE = SignalField(
 
 FOREIGN_FLOW_PERSISTENCE = SignalField(
     name="foreign_flow_pressure.persistence_run_days",
+    projection=BarProjection.PRICE,
     unit=Unit.SESSIONS,
     sign=Sign.NON_NEGATIVE,
     interpretation=(
@@ -1028,6 +1071,7 @@ FOREIGN_FLOW_PERSISTENCE = SignalField(
 
 FOREIGN_FLOW_SHARE_PRESSURE = SignalField(
     name="foreign_flow_pressure.net_volume_over_adtv",
+    projection=BarProjection.PRICE,
     unit=Unit.RATIO,
     sign=Sign.SIGNED,
     interpretation=(
@@ -1067,6 +1111,7 @@ FOREIGN_ROOM_PCT = SignalField(
     # cluster by inputs: it is the fact that says whether a flow beside it was
     # freely chosen or mechanically capped.
     name="company_profile.foreign_room_pct",
+    projection=BarProjection.PRICE,
     unit=Unit.PERCENT,
     sign=Sign.NON_NEGATIVE,
     interpretation=(
@@ -1113,6 +1158,7 @@ _NO_INDICATOR_EDGE = (
 
 RSI = SignalField(
     name="indicator_pack.rsi_14",
+    projection=BarProjection.PRICE,
     unit=Unit.INDEX_0_100,
     sign=Sign.NON_NEGATIVE,
     interpretation=(
@@ -1131,6 +1177,7 @@ RSI = SignalField(
 
 MACD = SignalField(
     name="indicator_pack.macd_12_26_vnd",
+    projection=BarProjection.PRICE,
     unit=Unit.VND,
     sign=Sign.SIGNED,
     interpretation=(
@@ -1150,6 +1197,7 @@ MACD = SignalField(
 
 BOLLINGER_PERCENT_B = SignalField(
     name="indicator_pack.bollinger_percent_b_20",
+    projection=BarProjection.PRICE,
     unit=Unit.RATIO,
     sign=Sign.SIGNED,
     interpretation=(
@@ -1236,10 +1284,17 @@ def registry_version() -> str:
     registry, and this one ends up in the Evidence Manifest, where being wrong
     is silent.
 
-    Only the six declarations a reader acts on are hashed — name, unit, sign,
-    claim, source and the sanctioned interpretation. A threshold or a null
+    Seven declarations are hashed — name, unit, sign, claim, source, the
+    sanctioned interpretation, and the projection. A threshold or a null
     calibration moving does change the numbers, but it is the *reading* of a
     field that an answer is disputed against.
+
+    ``projection`` is in the digest because it decides **whether a field answers
+    at all**: it selects which contract the gateway enforces over the window, and
+    moving a field between the two turns a refusal into a number or back. That is
+    a bigger change to what an answer means than any of the six beside it, and
+    the Evidence Manifest carries this digest precisely so two answers that were
+    produced under different rules cannot be compared as though they were not.
     """
     digest = hashlib.sha256()
     for name in sorted(REGISTRY):
@@ -1253,6 +1308,7 @@ def registry_version() -> str:
                     entry.claim.value,
                     entry.source.value,
                     entry.interpretation,
+                    entry.projection.value,
                 )
             ).encode("utf-8")
         )

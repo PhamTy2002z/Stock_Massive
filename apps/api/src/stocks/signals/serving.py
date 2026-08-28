@@ -70,6 +70,7 @@ def serve_field(
         min_sessions=field.min_sessions,
         end=end,
         peers=peers,
+        projection=field.projection,
     )
     if frame is None or health.refusal is not None:
         return FieldValue(
@@ -194,7 +195,16 @@ def serve_cross_section(
         )
 
     statements = fundamentals_on_or_before(session, names, end)
-    context = prepare_bars_context(session, names, field.window_sessions, end=end)
+    # The projection goes to **both** calls. The gateway compares the two and
+    # raises a bare ValueError when they disagree — a 500 rather than a refusal —
+    # so passing it to one of them is worse than passing it to neither.
+    context = prepare_bars_context(
+        session,
+        names,
+        field.window_sessions,
+        end=end,
+        projection=field.projection,
+    )
     measured: dict[str, tuple[FieldReading, WindowHealth]] = {}
     excluded: dict[str, SignalIssue] = {}
     for name in names:
@@ -205,6 +215,7 @@ def serve_cross_section(
             min_sessions=field.min_sessions,
             end=end,
             peers=names,
+            projection=field.projection,
             context=context,
         )
         if frame is None or health.refusal is not None:

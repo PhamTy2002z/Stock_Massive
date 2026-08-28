@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Projection cho 30 field + refusal đúng input"
-status: pending
+status: done
 priority: P1
 effort: "1d"
 dependencies: [3]

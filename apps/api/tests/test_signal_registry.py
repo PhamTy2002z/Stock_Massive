@@ -43,6 +43,7 @@ from src.stocks.models import (
 )
 from src.stocks.providers import Exchange, PriceBasis
 from src.stocks.signals.bars import prepare_bars
+from src.stocks.signals.fields import BarProjection
 from src.stocks.signals.fields import (
     CATALOG_NULL_FPR_CEILING,
     Claim,
@@ -66,6 +67,7 @@ from src.stocks.signals.registry import (
     VOLATILITY_REGIME_Z,
     fields_of_kind,
     registered_field,
+    registry_version,
     signal_fields,
 )
 from src.stocks.signals.serving import serve_field
@@ -77,7 +79,7 @@ from src.stocks.signals.volatility import (
 
 from .test_price_band import list_on, write_session
 
-NINE_DECLARATIONS = (
+TEN_DECLARATIONS = (
     "unit",
     "sign",
     "interpretation",
@@ -87,6 +89,10 @@ NINE_DECLARATIONS = (
     "min_sessions",
     "threshold",
     "null_fpr",
+    # The tenth, added when the daily spine became the source of sessions: which
+    # stored measurement the field's arithmetic reads, and so which contract the
+    # gateway enforces over its window.
+    "projection",
 )
 
 
@@ -203,6 +209,7 @@ def a_field(**overrides) -> SignalField:
         "min_sessions": 20,
         "threshold": None,
         "null_fpr": None,
+        "projection": BarProjection.PRICE,
     }
     declared.update(overrides)
     return SignalField(**declared)
@@ -213,20 +220,21 @@ def a_health(session: Session, symbol: str, days: tuple[date, ...]):
     return health
 
 
-class TestNineDeclarationsOrItDoesNotShip:
-    def test_every_registered_field_declares_all_nine(self):
+class TestTenDeclarationsOrItDoesNotShip:
+    def test_every_registered_field_declares_all_ten(self):
         """Asserted against the type rather than against an instance.
 
         ``hasattr`` on a dataclass whose fields have no defaults can never fail,
         so it would pass a field renamed out from under the ADR. What has to hold
-        is that the nine names ADR-0010 lists are the nine the type declares.
+        is that the names ADR-0010 lists are the names the type declares — the
+        nine it wrote down, and the projection added beside them.
         """
         declared = {entry.name for entry in dataclasses.fields(SignalField)}
 
-        assert set(NINE_DECLARATIONS) <= declared
+        assert set(TEN_DECLARATIONS) <= declared
 
         for field in REGISTRY.values():
-            for attribute in NINE_DECLARATIONS:
+            for attribute in TEN_DECLARATIONS:
                 # Present *and* answered for: `interpretation` and the two null
                 # attributes are the ones a field can carry emptily.
                 assert getattr(field, attribute) is not None or attribute in (
@@ -728,3 +736,87 @@ def _store_stock_dividend(session: Session, symbol: str, ex_date: date) -> None:
         )
     )
     session.flush()
+
+
+class TestWhichProjectionEachFieldIsServedUnder:
+    """Which contract the gateway enforces, declared per field rather than
+    inherited from the gateway's default.
+
+    The default is the price projection, so before this was declared a field
+    whose arithmetic never touched a price still inherited the price-basis and
+    band refusals — which on the daily spine meant refusing outright. The
+    assertions below are about the two that genuinely do not read a price, and
+    about the three that look as though they might not and do.
+    """
+
+    def test_every_registered_field_names_one(self):
+        for field in REGISTRY.values():
+            assert isinstance(field.projection, BarProjection), field.name
+
+    @pytest.mark.parametrize(
+        "name",
+        ["liquidity_profile.adtv_shares", "factor_percentiles.roe_percentile"],
+    )
+    def test_the_two_that_read_no_price_are_served_on_quantities(self, name):
+        assert registered_field(name).projection is BarProjection.VOLUME
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "liquidity_profile.adtv_vnd",
+            "liquidity_profile.amihud_illiq",
+            "liquidity_profile.adtv_percentile",
+        ],
+    )
+    def test_the_liquidity_fields_that_do_arithmetic_on_close_stay_on_price(
+        self, name
+    ):
+        """``adtv_percentile`` is the one that cannot be moved at all.
+
+        Its peer standing is measured only when the projection is price
+        (``bars._adtv_standing``), so serving it on quantities would lock it into
+        ``ranking_unavailable`` permanently — a refusal produced by the
+        declaration rather than by anything missing from the store.
+        """
+        assert registered_field(name).projection is BarProjection.PRICE
+
+    def test_a_volume_field_is_served_where_a_price_field_is_refused(self):
+        """The whole point, made mechanical, on the seam that still refuses."""
+        with open_session() as session:
+            days = store_quiet_history(session, basis=PriceBasis.RAW)
+            write_session(
+                session,
+                "AAA",
+                days[-1],
+                close=20_000,
+                basis=PriceBasis.ADJUSTED_AT_SOURCE,
+            )
+            _, on_price = prepare_bars(
+                session, "AAA", 20, end=days[-1], projection=BarProjection.PRICE
+            )
+            _, on_volume = prepare_bars(
+                session, "AAA", 20, end=days[-1], projection=BarProjection.VOLUME
+            )
+
+        assert on_price.refusal is SignalIssue.MIXED_PRICE_BASIS
+        assert on_volume.refusal is None
+
+    def test_the_registry_digest_moves_when_a_projection_does(self, monkeypatch):
+        """It decides whether a field answers at all, so two answers made under
+        different projections must not carry the same registry identity.
+
+        The Evidence Manifest carries this digest, and it is silent when wrong:
+        a field moved between projections without it moving would let an answer
+        produced under one rule be compared with one produced under the other.
+        """
+        import src.stocks.signals.registry as registry_module
+
+        before = registry_version()
+        name = "liquidity_profile.adtv_shares"
+        moved = dict(REGISTRY)
+        moved[name] = dataclasses.replace(
+            REGISTRY[name], projection=BarProjection.PRICE
+        )
+        monkeypatch.setattr(registry_module, "REGISTRY", moved)
+
+        assert registry_version() != before

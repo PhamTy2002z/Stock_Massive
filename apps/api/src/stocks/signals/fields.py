@@ -54,6 +54,25 @@ from typing import TYPE_CHECKING, Any
 
 from .issues import SignalIssue
 
+
+class BarProjection(str, Enum):
+    """Which stored measurement makes a session usable for a computation.
+
+    Declared on the field rather than chosen by whoever serves it. The two
+    projections differ in what they refuse: the price one admits a session with
+    a close and enforces the price-basis and band contract over the window; the
+    volume one admits a session with a traded quantity and does not refuse a
+    count for a condition about prices.
+
+    It lives here, beside the declarations, and not in ``bars`` where the
+    gateway reads it, because ``bars`` imports this module. That direction is
+    the right way round: a field says what it needs, and the gateway obeys.
+    """
+
+    PRICE = "price"
+    VOLUME = "volume"
+
+
 if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to a checker
     from .bars import BarFrame, WindowHealth
     from .fundamentals import FundamentalStanding
@@ -431,6 +450,15 @@ class SignalField:
     min_sessions: int
     threshold: Threshold | None
     null_fpr: NullCalibration | None
+    # Which stored measurement this field's arithmetic actually reads, and so
+    # which contract the gateway enforces over its window. Required, with no
+    # default, for the reason the nine above are: the gateway's default is the
+    # price projection, and a field that never touches a price was silently
+    # inheriting the price-basis and band refusals that go with it. Left
+    # optional, "which projection" becomes a thing a reader has to work out
+    # from the computation, which is exactly the checklist this package refuses
+    # to keep.
+    projection: BarProjection
     # How many trailing sessions the window *spans*, when that is more than the
     # floor above. Two numbers rather than one because they answer two
     # questions: ``min_sessions`` is how much history the computation refuses
