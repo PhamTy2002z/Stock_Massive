@@ -9,6 +9,7 @@ from sqlalchemy import (
     Integer,
     JSON,
     Numeric,
+    SmallInteger,
     String,
     UniqueConstraint,
     text,
@@ -396,3 +397,174 @@ class BarIntraday15m(Base):
 
     def __repr__(self) -> str:
         return f"<BarIntraday15m {self.symbol} {self.bucket_start} {self.phase}>"
+
+
+class BarDaily(Base):
+    """One closed session of one series, market-wide, prices in VND.
+
+    The primary key is ``(symbol, trading_day)`` and ingest upserts on it. The
+    provider re-states a session whenever a corporate action changes the
+    adjustment factor behind it, so the same day arriving twice has to land on
+    the same row rather than beside it.
+
+    ``series`` carries ``equity`` or ``index`` in one table rather than giving
+    the index a table of its own. VNINDEX has the same shape as a share, and a
+    screener asking "which symbols beat the index over 52 weeks" reads both
+    sides of that comparison through one path. This is the opposite decision
+    from ``provider_snapshots``, where MARKET_INDEX is a separate Capability
+    because a Trading Day is derived from MARKET and an index session landing
+    there would help define the window every equity is measured against; here
+    nothing is derived from the table, so the distinction is a column.
+
+    ``price_basis`` is a column and not a constant. Every row written today says
+    ``adjusted_at_source`` — the provider offers no unadjusted daily history for
+    this market — but a stored window whose basis is only implied is exactly how
+    the market plane ended up with two sources whose prices could not be
+    compared. A reader can ask this table what its numbers mean.
+
+    Prices are VND: the provider answers equity history in thousands (74.5 for a
+    74,500đ share) and index history in points (1,821.32), so the scaling is
+    decided by ``series`` once, at ingest.
+
+    There is no traded-value column. The provider does not report one, and
+    ``close * volume`` is a derivation a caller can make explicit rather than a
+    number this table should imply it measured.
+    """
+
+    __tablename__ = "bar_daily"
+
+    symbol = Column(String(20), primary_key=True)
+    trading_day = Column(Date, primary_key=True)
+    # equity | index — src/stocks/providers/vnstock_daily.py owns the set.
+    series = Column(String(8), nullable=False)
+    open = Column(Numeric(20, 4), nullable=False)
+    high = Column(Numeric(20, 4), nullable=False)
+    low = Column(Numeric(20, 4), nullable=False)
+    close = Column(Numeric(20, 4), nullable=False)
+    volume = Column(BigInteger, nullable=False)
+    price_basis = Column(String(20), nullable=False)
+    source = Column(String(32), nullable=False)
+    observed_at = Column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        # One symbol's last N sessions: every per-symbol read.
+        Index("ix_bar_daily_symbol_day", "symbol", trading_day.desc()),
+        # One session across the market: what a screener asks for.
+        Index("ix_bar_daily_day_series", "trading_day", "series"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<BarDaily {self.symbol} {self.trading_day} {self.series}>"
+
+
+class FinancialStatementLine(Base):
+    """One line of one quarterly statement, in the provider's own vocabulary.
+
+    Long format, and deliberately not a typed column per line item: the three
+    templates this market reports under share almost nothing. A bank's income
+    statement is 26 lines, a securities house's 79 and a steelmaker's 25
+    (measured 2026-08-27), so a wide table would be mostly nulls and would have
+    to be migrated every time the provider adds a line.
+
+    ``item_seq`` is in the primary key because **the provider's own response
+    holds one ``item_id`` twice**, with different numbers under it. SSI's income
+    statement carries two ``business_income_tax_deferred`` rows for 2026-Q2 —
+    4,585,945,424 and 758,786,600 — and the second one's Vietnamese label is
+    "Lợi nhuận thuần phân bổ cho lợi ích của cổ đông không kiểm soát", i.e. the
+    minority interest line arriving under the wrong id. Its balance sheet
+    carries ``accumulated_depreciation`` four times, one per class of asset. A
+    key without the occurrence index would make the provider's response
+    unstorable, and "last row wins" would silently drop numbers that differ.
+    Readers resolving a named concept take ``item_seq = 0``.
+
+    ``item_id`` is stored raw rather than mapped at ingest. A mapping that turns
+    out to be wrong is then a patch to one resolver rather than a market-wide
+    re-fetch.
+
+    Values are as the provider reports them: VND for statement lines, signed the
+    way the statement signs them (a tax expense is negative, and a bank's
+    interest expense too).
+    """
+
+    __tablename__ = "financial_statement_line"
+
+    symbol = Column(String(20), primary_key=True)
+    # "2026-Q2". Text rather than (year, quarter) because it is what the
+    # provider labels its columns with and what every read asks for.
+    period = Column(String(7), primary_key=True)
+    # income | balance | cashflow — src/stocks/financial/fetch.py owns the set.
+    statement = Column(String(8), primary_key=True)
+    # 101 characters is the longest id measured across the three templates.
+    item_id = Column(String(128), primary_key=True)
+    item_seq = Column(SmallInteger, primary_key=True)
+    # 15 integer digits carry the largest measured number (STB's total assets,
+    # 917,119,803,000,000) with room to spare; the provider reports two decimals
+    # for the non-bank templates.
+    value = Column(Numeric(28, 4), nullable=False)
+    source = Column(String(32), nullable=False)
+    observed_at = Column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        # One line across the market for one quarter: what the earnings screener
+        # asks for. The primary key already leads with the symbol, so it cannot
+        # answer this one.
+        Index(
+            "ix_financial_statement_line_period_item",
+            "period",
+            "statement",
+            "item_id",
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<FinancialStatementLine {self.symbol} {self.period} "
+            f"{self.statement} {self.item_id}#{self.item_seq}>"
+        )
+
+
+class FinancialRatioSnapshot(Base):
+    """One reported ratio for one quarter, long format, from one source.
+
+    Separate from ``financial_statement_line`` because these are not statement
+    lines: they are the provider's own derived indicators, they come from a
+    different provider source, and their units follow that source's convention.
+
+    ``source`` is a column and not a constant for that last reason. Measured
+    2026-08-27: KBS reports ROE as a percent (4.74) where VCI reports the same
+    thing as a fraction (0.0589), so a stored ratio whose source is only implied
+    cannot be compared with anything. Only KBS is written today — VCI's ratio
+    endpoint answers 2018 quarters for a request made in 2026 — and the column
+    is what lets a second source be added without re-reading the first as if it
+    shared the convention.
+
+    ``item_seq`` mirrors the statement table's key. No duplicated ``item_id``
+    has been measured in a ratio response, but the shape is the same shape and a
+    reader that resolves both tables the same way is worth more than a column
+    saved.
+    """
+
+    __tablename__ = "financial_ratio_snapshot"
+
+    symbol = Column(String(20), primary_key=True)
+    period = Column(String(7), primary_key=True)
+    item_id = Column(String(128), primary_key=True)
+    item_seq = Column(SmallInteger, primary_key=True)
+    value = Column(Numeric(28, 4), nullable=False)
+    source = Column(String(32), nullable=False)
+    observed_at = Column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        # One ratio across the market for one quarter, same read as above.
+        Index(
+            "ix_financial_ratio_snapshot_period_item",
+            "period",
+            "item_id",
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<FinancialRatioSnapshot {self.symbol} {self.period} "
+            f"{self.item_id}#{self.item_seq}>"
+        )

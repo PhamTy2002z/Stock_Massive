@@ -450,11 +450,11 @@ class AgentArtifact(Base):
     Its own table rather than a column on ``agent_message``: the payload is
     numbers by the thousand and the message is text the browser needs
     immediately, so a join on the message would drag a heatmap into every
-    transcript scroll. Split, the transcript loads at text weight and the canvas
+    transcript scroll. Split, the transcript loads at text weight and the Signal Desk
     is fetched by whoever opens it.
 
     ``frames`` is the whole point of the row and the one part no model ever
-    reads. It is served straight to the browser (``docs`` — the canvas panel),
+    reads. It is served straight to the browser (``docs`` — the Signal Desk panel),
     and the test that proves the separation reads the transcript for these keys.
 
     ``turn_id`` and ``thread_id`` are nullable because a Study also runs outside
@@ -482,7 +482,7 @@ class AgentArtifact(Base):
     # call never reaches this table, so these are always parameters that ran.
     params = Column(JSONB, nullable=False)
     frames = Column(JSONB, nullable=False)
-    canvas_spec = Column(JSONB, nullable=False)
+    signal_desk_spec = Column(JSONB, nullable=False)
     provenance = Column(JSONB, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
