@@ -135,7 +135,7 @@ def payload(session) -> dict:
         "studyVersion": VERSION,
         "params": params.model_dump(mode="json"),
         "headline": dict(result.headline),
-        "canvasSpec": spec.to_payload(),
+        "signal_deskSpec": spec.to_payload(),
         "frames": {key: frame.to_payload() for key, frame in result.frames.items()},
         "provenance": result.provenance.to_payload(),
     }

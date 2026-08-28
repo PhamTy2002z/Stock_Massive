@@ -12,8 +12,8 @@ from src.alpha.models import AgentArtifact
 from src.core.database import Base, get_sync_db, sync_engine
 from src.studies import registry, runner
 from src.studies.contracts import (
-    CanvasBlock,
-    CanvasSpec,
+    SignalDeskBlock,
+    SignalDeskSpec,
     Frame,
     Provenance,
     StudyDefinition,
@@ -73,11 +73,11 @@ def a_result(context) -> StudyResult:
     )
 
 
-def a_canvas(result: StudyResult) -> CanvasSpec:
-    return CanvasSpec(
+def a_signal_desk(result: StudyResult) -> SignalDeskSpec:
+    return SignalDeskSpec(
         title="Thanh khoản trong phiên",
         blocks=(
-            CanvasBlock(
+            SignalDeskBlock(
                 widget="bar_series",
                 widget_version=1,
                 frame="profile",
@@ -98,7 +98,7 @@ def register(name: str = "runner_study", **overrides) -> StudyDefinition:
         "frames": ("profile",),
         "widgets": (("bar_series", 1),),
         "compute": a_result,
-        "view": a_canvas,
+        "view": a_signal_desk,
     }
     fields.update(overrides)
     return registry.register(StudyDefinition(**fields))
@@ -117,7 +117,7 @@ def test_a_run_persists_the_frames_and_hands_back_only_the_headline():
         assert stored.headline == {"symbol": "STB", "sessionsUsed": 30}
         assert "frames" not in stored.headline
         assert row.frames["profile"]["rows"] == [["09:15", 1000], ["14:45", 4000]]
-        assert row.canvas_spec["blocks"][0]["widgetVersion"] == 1
+        assert row.signal_desk_spec["blocks"][0]["widgetVersion"] == 1
         assert row.params == {"symbol": "STB", "sessions": 30}
         assert row.provenance["sessionsUsed"] == 30
 
@@ -167,11 +167,11 @@ def test_a_compute_that_skips_a_declared_frame_fails_on_that_run():
 
 
 def test_a_view_naming_a_frame_that_is_not_there_fails_on_that_run():
-    def canvas_over_nothing(result: StudyResult) -> CanvasSpec:
-        return CanvasSpec(
+    def signal_desk_over_nothing(result: StudyResult) -> SignalDeskSpec:
+        return SignalDeskSpec(
             title="Sai frame",
             blocks=(
-                CanvasBlock(
+                SignalDeskBlock(
                     widget="bar_series",
                     widget_version=1,
                     frame="heatmap",
@@ -180,7 +180,7 @@ def test_a_view_naming_a_frame_that_is_not_there_fails_on_that_run():
             ),
         )
 
-    register("runner_wrong_view", view=canvas_over_nothing)
+    register("runner_wrong_view", view=signal_desk_over_nothing)
 
     with get_sync_db() as session:
         with pytest.raises(RuntimeError, match="did not produce"):
@@ -188,11 +188,11 @@ def test_a_view_naming_a_frame_that_is_not_there_fails_on_that_run():
 
 
 def test_a_widget_that_cannot_draw_the_frame_kind_is_refused_on_the_run():
-    def heatmap_over_a_series(result: StudyResult) -> CanvasSpec:
-        return CanvasSpec(
+    def heatmap_over_a_series(result: StudyResult) -> SignalDeskSpec:
+        return SignalDeskSpec(
             title="Sai loại frame",
             blocks=(
-                CanvasBlock(
+                SignalDeskBlock(
                     widget="session_heatmap",
                     widget_version=1,
                     frame="profile",

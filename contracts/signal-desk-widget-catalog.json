@@ -13,6 +13,14 @@
       "purpose": "Cột theo trục thời gian hoặc theo nhóm rời rạc"
     },
     {
+      "name": "condition_checklist",
+      "version": 1,
+      "frameKinds": [
+        "table"
+      ],
+      "purpose": "Danh sách điều kiện: đạt, chưa đạt, hay chưa rõ"
+    },
+    {
       "name": "data_table",
       "version": 1,
       "frameKinds": [
@@ -29,6 +37,14 @@
         "series"
       ],
       "purpose": "Đường theo trục thời gian, tối đa hai trục giá trị"
+    },
+    {
+      "name": "range_strip",
+      "version": 1,
+      "frameKinds": [
+        "table"
+      ],
+      "purpose": "Dải giá thấp–cao, marker vị trí hiện tại, dải con tuỳ chọn"
     },
     {
       "name": "ranked_bars",

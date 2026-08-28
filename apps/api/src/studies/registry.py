@@ -74,7 +74,7 @@ def _check(definition: StudyDefinition) -> None:
     if not definition.frames:
         raise ImportError(
             f"study {definition.name!r} declares no frames, so there is nothing "
-            "for a canvas to draw"
+            "for a Signal Desk to draw"
         )
     if not definition.widgets:
         raise ImportError(f"study {definition.name!r} declares no widgets")

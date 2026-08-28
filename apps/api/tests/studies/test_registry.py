@@ -7,8 +7,8 @@ from pydantic import BaseModel, Field
 
 from src.studies import registry, widgets
 from src.studies.contracts import (
-    CanvasBlock,
-    CanvasSpec,
+    SignalDeskBlock,
+    SignalDeskSpec,
     Frame,
     Provenance,
     StudyDefinition,
@@ -137,10 +137,10 @@ def a_result() -> StudyResult:
 def test_a_view_may_only_draw_declared_widgets_over_declared_frames():
     """The pairing the runner enforces, stated once where a reader will look."""
     definition = registry.register(a_definition())
-    spec = CanvasSpec(
+    spec = SignalDeskSpec(
         title="Một study",
         blocks=(
-            CanvasBlock(
+            SignalDeskBlock(
                 widget="bar_series", widget_version=1, frame="profile", options={}
             ),
         ),

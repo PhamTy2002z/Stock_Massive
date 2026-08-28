@@ -46,8 +46,8 @@ from src.stocks.intraday import reads, session_window
 from src.stocks.signals.issues import SignalIssue
 
 from .contracts import (
-    CanvasBlock,
-    CanvasSpec,
+    SignalDeskBlock,
+    SignalDeskSpec,
     Frame,
     Provenance,
     StudyContext,
@@ -402,7 +402,7 @@ def _ranking_frame(ranked: Sequence[_Bucket], metric: Metric) -> Frame:
     )
 
 
-def view(result: StudyResult) -> CanvasSpec:
+def view(result: StudyResult) -> SignalDeskSpec:
     """Four blocks: the numbers, the average, the habit, the ranking.
 
     The heatmap sits above the ranking deliberately. The ranking is the answer a
@@ -410,16 +410,16 @@ def view(result: StudyResult) -> CanvasSpec:
     scrolls past the reason still sees the answer.
     """
     symbol = result.headline["symbol"]
-    return CanvasSpec(
+    return SignalDeskSpec(
         title=f"Thanh khoản trong phiên — {symbol}",
         blocks=(
-            CanvasBlock(
+            SignalDeskBlock(
                 widget="stat_tiles",
                 widget_version=1,
                 frame="tiles",
                 options={"label": "label", "value": "value", "unit": "unit"},
             ),
-            CanvasBlock(
+            SignalDeskBlock(
                 widget="bar_series",
                 widget_version=1,
                 frame="profile",
@@ -430,13 +430,13 @@ def view(result: StudyResult) -> CanvasSpec:
                     "yFormat": "percent",
                 },
             ),
-            CanvasBlock(
+            SignalDeskBlock(
                 widget="session_heatmap",
                 widget_version=1,
                 frame="heatmap",
                 options={"rowKey": "session", "valueFormat": "percent"},
             ),
-            CanvasBlock(
+            SignalDeskBlock(
                 widget="ranked_bars",
                 widget_version=1,
                 frame="ranking",

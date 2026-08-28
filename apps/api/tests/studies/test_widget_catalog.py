@@ -1,13 +1,13 @@
 """The published catalog and the code that generates it, held equal.
 
-``contracts/canvas-widget-catalog.json`` is what the browser reads: it is a
+``contracts/signal-desk-widget-catalog.json`` is what the browser reads: it is a
 generated file, and the only thing that makes a generated file trustworthy is a
 test that fails when someone edits the source and forgets to regenerate — or
 edits the JSON by hand. Regenerate with::
 
     python -c "import json;from src.studies import widgets;\
 print(json.dumps(widgets.catalog_payload(),ensure_ascii=False,indent=2))" \
-      > ../../contracts/canvas-widget-catalog.json
+      > ../../contracts/signal-desk-widget-catalog.json
 
 The path is resolved from this file rather than from the working directory: the
 suite runs from ``apps/api`` and the contract lives at the repository root,
@@ -22,7 +22,7 @@ from pathlib import Path
 from src.studies import widgets
 
 CATALOG_JSON = (
-    Path(__file__).resolve().parents[4] / "contracts" / "canvas-widget-catalog.json"
+    Path(__file__).resolve().parents[4] / "contracts" / "signal-desk-widget-catalog.json"
 )
 
 

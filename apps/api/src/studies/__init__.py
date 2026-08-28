@@ -10,8 +10,8 @@ absent from the catalog no matter how correctly it is written.
 """
 
 from .contracts import (
-    CanvasBlock,
-    CanvasSpec,
+    SignalDeskBlock,
+    SignalDeskSpec,
     Frame,
     Provenance,
     StoredArtifact,
@@ -26,11 +26,15 @@ from .runner import StudyParamsInvalid, run
 # Registration is an import. Keep this last: the modules below reach back into
 # the registry above, and a Study nobody imports is absent from the catalog
 # however correctly it is written.
-from . import intraday_liquidity  # noqa: F401  (imported for its side effect)
+from . import (  # noqa: F401  (imported for their side effect)
+    earnings_dislocation,
+    entry_condition_review,
+    intraday_liquidity,
+)
 
 __all__ = [
-    "CanvasBlock",
-    "CanvasSpec",
+    "SignalDeskBlock",
+    "SignalDeskSpec",
     "Frame",
     "Provenance",
     "REGISTRY",

@@ -8,8 +8,8 @@ import pytest
 
 from src.stocks.signals.issues import SignalIssue
 from src.studies.contracts import (
-    CanvasBlock,
-    CanvasSpec,
+    SignalDeskBlock,
+    SignalDeskSpec,
     Frame,
     Provenance,
     StudyRefused,
@@ -59,15 +59,15 @@ def test_provenance_names_its_freeze_in_the_payload():
     assert payload["health"] == "normal"
 
 
-def test_a_canvas_needs_a_title_and_a_block():
-    block = CanvasBlock(
+def test_a_signal_desk_needs_a_title_and_a_block():
+    block = SignalDeskBlock(
         widget="bar_series", widget_version=1, frame="profile", options={}
     )
 
     with pytest.raises(ValueError, match="title"):
-        CanvasSpec(title="   ", blocks=(block,))
+        SignalDeskSpec(title="   ", blocks=(block,))
     with pytest.raises(ValueError, match="no blocks"):
-        CanvasSpec(title="Thanh khoản", blocks=())
+        SignalDeskSpec(title="Thanh khoản", blocks=())
 
 
 def test_a_result_with_no_frames_has_nothing_to_draw():

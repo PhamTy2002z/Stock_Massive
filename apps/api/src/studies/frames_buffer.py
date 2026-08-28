@@ -37,21 +37,21 @@ from sqlalchemy.orm import Session
 
 from src.alpha.models import AgentArtifact
 
-from .contracts import CanvasBlock, CanvasSpec, Frame, Provenance
+from .contracts import SignalDeskBlock, SignalDeskSpec, Frame, Provenance
 
 #: What a gathered series is filed under. Not a registered Study: nobody chose
 #: this shape as a recipe, and it has no ``compute``. It is a name on a row, so
 #: an operator reading the table can tell a composed picture from a Study's.
 SERIES_KIND = "field_series"
 
-#: What a canvas the model composed is filed under, for the same reason.
-COMPOSITION_KIND = "composed_canvas"
+#: What a Signal Desk the model composed is filed under, for the same reason.
+COMPOSITION_KIND = "composed_signal_desk"
 
-#: How many canvases one Turn may compose. Two, because a comparison is the
+#: How many signal_desks one Turn may compose. Two, because a comparison is the
 #: honest second picture and a third is a model drawing rather than answering.
-MAX_CANVASES_PER_TURN = 2
+MAX_SIGNAL_DESKS_PER_TURN = 2
 
-#: How many blocks one composed canvas may hold. A panel a reader scrolls past
+#: How many blocks one composed signal_desk may hold. A panel a reader scrolls past
 #: is a panel nobody reads.
 MAX_BLOCKS = 6
 
@@ -76,15 +76,15 @@ def store_series(
 ) -> UUID:
     """Persist one gathered series and hand back the id that addresses it.
 
-    Written with a canvas of its own — a plain table — so the row is complete
-    and openable on its own terms. A row whose ``canvas_spec`` was a placeholder
+    Written with a Signal Desk of its own — a plain table — so the row is complete
+    and openable on its own terms. A row whose ``signal_desk_spec`` was a placeholder
     would be a row the artifact endpoint could serve and the panel could not
     draw.
     """
-    spec = CanvasSpec(
+    spec = SignalDeskSpec(
         title=str(params.get("field_id") or "Chuỗi số"),
         blocks=(
-            CanvasBlock(
+            SignalDeskBlock(
                 widget="data_table",
                 widget_version=1,
                 frame="series",
@@ -100,7 +100,7 @@ def store_series(
         study_version=1,
         params=dict(params),
         frames={"series": frame.to_payload()},
-        canvas_spec=spec.to_payload(),
+        signal_desk_spec=spec.to_payload(),
         provenance=provenance.to_payload(),
     )
     session.add(row)
@@ -161,7 +161,7 @@ def store_composition(
     turn_id: UUID | None,
     thread_id: UUID | None,
 ) -> UUID:
-    """Persist a canvas the model composed out of frames it had already made."""
+    """Persist a Signal Desk the model composed out of frames it had already made."""
     row = AgentArtifact(
         id=uuid4(),
         turn_id=turn_id,
@@ -170,7 +170,7 @@ def store_composition(
         study_version=1,
         params={"title": title},
         frames={key: dict(value) for key, value in frames.items()},
-        canvas_spec={"title": title, "blocks": [dict(block) for block in blocks]},
+        signal_desk_spec={"title": title, "blocks": [dict(block) for block in blocks]},
         provenance=dict(provenance),
     )
     session.add(row)
@@ -178,8 +178,8 @@ def store_composition(
     return row.id
 
 
-def canvases_composed(session: Session, turn_id: UUID | None) -> int:
-    """How many canvases this Turn has already composed."""
+def signal_desks_composed(session: Session, turn_id: UUID | None) -> int:
+    """How many signal_desks this Turn has already composed."""
     if turn_id is None:
         return 0
     rows = session.execute(
@@ -194,10 +194,10 @@ def canvases_composed(session: Session, turn_id: UUID | None) -> int:
 __all__ = [
     "COMPOSITION_KIND",
     "MAX_BLOCKS",
-    "MAX_CANVASES_PER_TURN",
+    "MAX_SIGNAL_DESKS_PER_TURN",
     "SERIES_KIND",
     "FrameNotAvailable",
-    "canvases_composed",
+    "signal_desks_composed",
     "read_frame",
     "store_composition",
     "store_series",

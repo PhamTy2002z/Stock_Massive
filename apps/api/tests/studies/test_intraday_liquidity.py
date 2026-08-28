@@ -267,7 +267,7 @@ def test_the_headline_stays_inside_the_budget_the_model_pays_for(window):
     assert len(serialized) < 1_500, serialized
 
 
-def test_the_canvas_draws_four_blocks_over_frames_the_study_produced(window):
+def test_the_signal_desk_draws_four_blocks_over_frames_the_study_produced(window):
     definition = registry.study(NAME)
     result = compute({"symbol": SYMBOL}, at(LAST_SESSION))
     spec = definition.view(result)
@@ -290,7 +290,7 @@ def test_a_run_through_the_runner_persists_the_frames_and_not_the_headline(
 
     assert stored.study_name == NAME
     assert stored.headline["peakWindow"] == SPIKE_BUCKET
-    assert stored.canvas_spec.blocks[2].widget == "session_heatmap"
+    assert stored.signal_desk_spec.blocks[2].widget == "session_heatmap"
 
 
 def test_the_published_artifact_fixture_is_what_this_study_produces(window):

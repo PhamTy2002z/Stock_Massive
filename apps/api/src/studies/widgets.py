@@ -3,11 +3,11 @@
 Two readers, one file. A Study declares the widgets its ``view`` may emit and
 this refuses one the browser has no component for — at import, where the Study
 is written. The browser reads the same set out of
-``contracts/canvas-widget-catalog.json``, which ``tests/studies/
+``contracts/signal-desk-widget-catalog.json``, which ``tests/studies/
 test_widget_catalog.py`` holds equal to this module, so the JSON cannot drift
 into promising a widget that no longer exists.
 
-Why a version per widget rather than per catalog: a canvas persisted last month
+Why a version per widget rather than per catalog: a Signal Desk persisted last month
 has to keep rendering. When ``session_heatmap`` needs a different options shape
 it ships as version 2 and the old artifacts keep asking for version 1. A viewer
 that meets a version it does not know falls back to ``data_table`` — the numbers
@@ -71,6 +71,18 @@ CATALOG: Mapping[tuple[str, int], Widget] = MappingProxyType(
             frame_kinds=("series",),
             purpose="Đường theo trục thời gian, tối đa hai trục giá trị",
         ),
+        ("range_strip", 1): Widget(
+            name="range_strip",
+            version=1,
+            frame_kinds=("table",),
+            purpose="Dải giá thấp–cao, marker vị trí hiện tại, dải con tuỳ chọn",
+        ),
+        ("condition_checklist", 1): Widget(
+            name="condition_checklist",
+            version=1,
+            frame_kinds=("table",),
+            purpose="Danh sách điều kiện: đạt, chưa đạt, hay chưa rõ",
+        ),
         ("scatter_quadrant", 1): Widget(
             name="scatter_quadrant",
             version=1,
@@ -97,7 +109,7 @@ def accepts(widget: str, version: int, kind: FrameKind) -> bool:
 
 
 def catalog_payload() -> dict[str, object]:
-    """The shape published to ``contracts/canvas-widget-catalog.json``."""
+    """The shape published to ``contracts/signal-desk-widget-catalog.json``."""
     return {
         "fallback": {"widget": FALLBACK_WIDGET[0], "version": FALLBACK_WIDGET[1]},
         "widgets": [

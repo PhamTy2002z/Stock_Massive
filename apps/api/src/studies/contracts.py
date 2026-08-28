@@ -19,7 +19,7 @@ transcript.
 
 **The registry draws.** ``view`` picks widgets by name and version out of a
 catalog the browser reads from the same file (``contracts/
-canvas-widget-catalog.json``), so a widget the browser cannot draw is a failure
+signal-desk-widget-catalog.json``), so a widget the browser cannot draw is a failure
 at import here rather than a blank panel there.
 
 **The model reads only the headline.** ``StudyResult.headline`` is the entire
@@ -75,7 +75,7 @@ class StudyRefused(Exception):
     executed correctly and refused correctly, and the tool layer records it as
     ``ok`` with an outcome of ``no_value:<issue>``. An exception carries it
     because a refused Study has no frames, so there is no artifact to persist
-    and nothing for the canvas to draw — a result object would be a shell whose
+    and nothing for the Signal Desk to draw — a result object would be a shell whose
     every field said "not this time".
     """
 
@@ -159,7 +159,7 @@ class Provenance:
 
 
 @dataclass(frozen=True)
-class CanvasBlock:
+class SignalDeskBlock:
     """One widget, the frame it draws, and the options the server chose.
 
     ``options`` is decided here and not in the browser because the choices that
@@ -182,17 +182,17 @@ class CanvasBlock:
 
 
 @dataclass(frozen=True)
-class CanvasSpec:
+class SignalDeskSpec:
     """The panel: a title and the blocks, in the order a reader meets them."""
 
     title: str
-    blocks: tuple[CanvasBlock, ...]
+    blocks: tuple[SignalDeskBlock, ...]
 
     def __post_init__(self) -> None:
         if not self.title.strip():
-            raise ValueError("a canvas with no title is a panel nobody can name")
+            raise ValueError("a Signal Desk with no title is a panel nobody can name")
         if not self.blocks:
-            raise ValueError("a canvas with no blocks draws nothing")
+            raise ValueError("a Signal Desk with no blocks draws nothing")
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -251,7 +251,7 @@ class StudyDefinition:
     frames: tuple[str, ...]
     widgets: tuple[tuple[str, int], ...]
     compute: Callable[[StudyContext], StudyResult]
-    view: Callable[[StudyResult], CanvasSpec]
+    view: Callable[[StudyResult], SignalDeskSpec]
 
     @property
     def params_schema(self) -> Mapping[str, Any]:
@@ -268,7 +268,7 @@ class StoredArtifact:
     """A persisted run: the id to fetch it by, and the parts each reader needs.
 
     The model is handed ``headline`` and ``provenance``; the browser fetches the
-    row by ``id`` and gets ``canvas_spec`` with the frames. Splitting them here
+    row by ``id`` and gets ``signal_desk_spec`` with the frames. Splitting them here
     rather than at the transport is what makes "frames never reach the model" a
     property of the type rather than of everyone's discipline.
     """
@@ -278,13 +278,13 @@ class StoredArtifact:
     study_version: int
     headline: Mapping[str, Any]
     provenance: Provenance
-    canvas_spec: CanvasSpec
+    signal_desk_spec: SignalDeskSpec
 
 
 __all__ = [
     "KNOWN_REQUIREMENTS",
-    "CanvasBlock",
-    "CanvasSpec",
+    "SignalDeskBlock",
+    "SignalDeskSpec",
     "Frame",
     "FrameKind",
     "Health",

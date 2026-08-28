@@ -1,10 +1,10 @@
 """Validate, compute, check, persist — the one path a Study runs through.
 
-Everything here exists so that the two properties the canvas rests on hold for
+Everything here exists so that the two properties the Signal Desk rests on hold for
 every Study rather than for the careful ones:
 
 **The frames the browser gets are the frames the Study promised.** ``compute``
-is checked against ``StudyDefinition.frames`` and every canvas block against the
+is checked against ``StudyDefinition.frames`` and every Signal Desk block against the
 frames that came back. A ``view`` naming a frame that is not there fails on the
 run that produced it, with both names in the message, instead of half-rendering
 a panel.
@@ -30,7 +30,7 @@ from src.stocks.universe import build_universe
 
 from . import widgets
 from .contracts import (
-    CanvasSpec,
+    SignalDeskSpec,
     StoredArtifact,
     StudyContext,
     StudyDefinition,
@@ -103,7 +103,7 @@ def run(
     _check_frames_match_declaration(name, definition.frames, result)
 
     spec = definition.view(result)
-    _check_canvas_draws_what_exists(name, spec, result, definition)
+    _check_signal_desk_draws_what_exists(name, spec, result, definition)
 
     row = AgentArtifact(
         id=uuid4(),
@@ -113,7 +113,7 @@ def run(
         study_version=definition.version,
         params=validated.model_dump(mode="json"),
         frames={key: frame.to_payload() for key, frame in result.frames.items()},
-        canvas_spec=spec.to_payload(),
+        signal_desk_spec=spec.to_payload(),
         provenance=result.provenance.to_payload(),
     )
     session.add(row)
@@ -125,7 +125,7 @@ def run(
         study_version=definition.version,
         headline=result.headline,
         provenance=result.provenance,
-        canvas_spec=spec,
+        signal_desk_spec=spec,
     )
 
 
@@ -152,8 +152,8 @@ def _check_frames_match_declaration(
         )
 
 
-def _check_canvas_draws_what_exists(
-    name: str, spec: CanvasSpec, result: StudyResult, definition: StudyDefinition
+def _check_signal_desk_draws_what_exists(
+    name: str, spec: SignalDeskSpec, result: StudyResult, definition: StudyDefinition
 ) -> None:
     declared = set(definition.widgets)
     for block in spec.blocks:
