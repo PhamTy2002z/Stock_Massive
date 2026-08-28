@@ -60,18 +60,37 @@ class Universe:
     Order is preserved only so logs and batches read predictably; nothing
     depends on it, and two declarations that differ only in order describe the
     same Universe.
+
+    ``market`` is a third set and not a third half: the two halves above are
+    places in a bounded promise, while the market is simply who is listed.
     """
 
     explicit: tuple[str, ...]
     cohort: tuple[str, ...] = field(default=())
+    #: Every share the listing register currently lists — about 1,500 of them,
+    #: which is why it is not part of ``symbols`` and never counts against the
+    #: cap. The declared half is a promise to have data for a symbol; this is
+    #: only the market a market-wide job walks, and a screener reading the daily
+    #: spine needs the whole market to rank one company within it.
+    #:
+    #: Kept out of ``symbols`` deliberately. ``symbols`` is what ``contains``
+    #: answers, and ``contains`` is what the chat lane's ``get_field`` gates on:
+    #: a Signal Field is computed from stored Snapshots the collector never took
+    #: for the market half, so a symbol admitted from here would produce a
+    #: refusal that reads like a broken pipeline instead of an honest "outside
+    #: the Universe".
+    market: tuple[str, ...] = field(default=())
 
     @property
     def symbols(self) -> tuple[str, ...]:
-        """Both halves as one list, explicit first, deduplicated.
+        """The declared and cohort halves as one list, explicit first, deduped.
 
         A symbol in both halves holds one place, not two, and it is the explicit
         entry that survives — the two are the same ticker, so which wins matters
         only in that the answer has to be stable.
+
+        The market half is not in here. It is not a promise to serve a symbol,
+        and everything that gates on membership is gating on the promise.
         """
         merged = dict.fromkeys(self.explicit)
         merged.update(dict.fromkeys(self.cohort))
@@ -108,7 +127,19 @@ class Universe:
                 UNIVERSE_MAX_SYMBOLS,
             )
             return self
-        return Universe(explicit=self.explicit, cohort=cohort)
+        return Universe(explicit=self.explicit, cohort=cohort, market=self.market)
+
+    def with_market(self, market: tuple[str, ...]) -> "Universe":
+        """Attach the listed market, without it counting against anything.
+
+        No cap check: the cap bounds what the system promised to collect, and
+        this half promises nothing. It is the list a market-wide job walks.
+        """
+        return Universe(
+            explicit=self.explicit,
+            cohort=self.cohort,
+            market=tuple(dict.fromkeys(market)),
+        )
 
     def contains(self, symbol: str) -> bool:
         """Answer membership for arbitrary text without raising.
@@ -174,13 +205,23 @@ def parse_universe(declared: str) -> Universe:
 _cohort_cache: dict[int | None, tuple[str, ...]] = {}
 
 
-def build_universe(session: Session, settings: Settings | None = None) -> Universe:
+def build_universe(
+    session: Session,
+    settings: Settings | None = None,
+    *,
+    with_market: bool = False,
+) -> Universe:
     """The Universe as it stands.
 
     Post-rip-out (2026-08-25): the Profit Leaders Cohort seating path was
     removed with the collector, so this call returns only the declared half.
     The ``session`` argument stays in the signature because both the chat lane
-    and its tests reach for it that way; it is intentionally unused now.
+    and its tests reach for it that way.
+
+    ``with_market`` reads the listing register and attaches the market half. Off
+    by default because the serving path calls this on every ``get_field`` and
+    has no use for 1,500 tickers it does not serve; a market-wide job asks for
+    it explicitly.
 
     Legacy docstring below for the shape callers still expect.
 
@@ -190,7 +231,16 @@ def build_universe(session: Session, settings: Settings | None = None) -> Univer
     answer only changes when a version is promoted.
     """
     settings = settings or get_settings()
-    return Universe.from_settings(settings)
+    universe = Universe.from_settings(settings)
+    if not with_market:
+        return universe
+
+    # Imported inside the branch that uses it: this module is imported at
+    # startup to validate the declared list, and that path has no business
+    # pulling in the register and its provider contracts.
+    from .listing_roster import ListingRosterStore
+
+    return universe.with_market(ListingRosterStore(session).listed_symbols())
 
 
 def forget_cohort_cache() -> None:
