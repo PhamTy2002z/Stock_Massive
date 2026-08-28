@@ -54,6 +54,7 @@ from src.agent.loop import (
     ROUTE_ERROR,
     ROUTE_RATE_LIMITED,
     SCHEMA_REJECTED,
+    SIGNAL_DESK_NOTE,
     THOUGHT,
     TOOL_TIMEOUT,
     TURN_DEADLINE,
@@ -1592,7 +1593,7 @@ def test_the_system_notes_fit_the_reservation_they_are_priced_at() -> None:
     # sentence somebody lengthens later has to fail here rather than in a Turn.
     from src.agent.loop import SYSTEM_NOTE_TOKENS
 
-    for note in (ROUNDS_EXHAUSTED_NOTE, HALT_GUIDANCE):
+    for note in (ROUNDS_EXHAUSTED_NOTE, HALT_GUIDANCE, SIGNAL_DESK_NOTE):
         assert (
             estimate_tokens(Message(role=Role.SYSTEM, content=note))
             <= SYSTEM_NOTE_TOKENS

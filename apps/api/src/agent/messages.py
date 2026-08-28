@@ -353,7 +353,7 @@ _FIGURE_TOOLS = frozenset({"get_field"})
 #: Study is a refusal carrying the input that was short. Folding them together
 #: would mean sniffing for whichever key happened to be present, which is the
 #: guess this table exists to avoid.
-_STUDY_TOOLS = frozenset({"run_study", "render_canvas"})
+_STUDY_TOOLS = frozenset({"run_study", "render_signal_desk"})
 
 
 def outcome_of(name: str, payload: Any) -> str | None:
@@ -395,12 +395,62 @@ def outcome_of(name: str, payload: Any) -> str | None:
     return f"{OUTCOME_NO_VALUE}:{code}" if code else OUTCOME_NO_VALUE
 
 
-def canvas_of(name: str, payload: Any) -> Mapping[str, Any] | None:
-    """The canvas one call produced, or ``None`` where it produced none.
+#: The one thing a Signal Desk absence can be that nothing already names.
+#:
+#: Every other reason a Turn drew nothing is a code that exists: the Signal
+#: Issue a Study refused under (:data:`OUTCOME_NO_VALUE` and the issue),
+#: :data:`OUTCOME_CANNOT_READ` for a Study that declined the question, and the
+#: executor's own error code for a call that never ran. This one has no home
+#: among them because it is not a fact about the data at all — the model simply
+#: never reached for a picture — and inventing a Signal Issue to say so would
+#: put a claim about the store on a Turn that never asked it anything.
+NO_SIGNAL_DESK_TOOL_CALLED = "no_signal_desk_tool_called"
+
+
+def signal_desk_absence(calls: Sequence[TurnToolCall]) -> str:
+    """Why this Turn drew nothing, in the vocabulary its calls already wrote.
+
+    Read off :attr:`TurnToolCall.outcome`, which the loop already computed with
+    :func:`outcome_of` at the moment the payload was in hand. Deriving it a
+    second time from the result text would be a second chance to read the same
+    call differently, and the whole value of a named reason is that the surface
+    and the trace agree about it.
+
+    The *last* signal_desk-producing call decides, because a Turn that tried twice
+    gave up on the second one: reporting the first would tell the reader about
+    an attempt the model had already moved past.
+
+    Never ``None``. This is called only where a Turn owes an account of itself,
+    and a caller handed nothing would have to invent a sentence — which is the
+    silence the account exists to prevent.
+    """
+    attempts = [call for call in calls if call.name in _STUDY_TOOLS]
+    if not attempts:
+        return NO_SIGNAL_DESK_TOOL_CALLED
+    last = attempts[-1]
+    if last.outcome:
+        # ``no_value:<signal issue>`` or ``cannot_read``. ``value`` cannot reach
+        # here: a call that carried an ``artifactId`` produced a signal_desk.
+        return last.outcome
+    if last.error:
+        # The call never got as far as an outcome — it was blocked, it timed
+        # out, the budget refused it, or the tool broke. The executor already
+        # named that, in codes the surface holds a sentence for because it draws
+        # them beside the call itself, so the name is carried rather than
+        # restated.
+        return last.error
+    # A call that finished, reported no error, and answered with something no
+    # signal_desk could be read out of. Rare enough to have no code of its own, and
+    # this is what that code would mean.
+    return OUTCOME_CANNOT_READ
+
+
+def signal_desk_of(name: str, payload: Any) -> Mapping[str, Any] | None:
+    """The Signal Desk one call produced, or ``None`` where it produced none.
 
     Read off the structured payload for the reason :func:`outcome_of` is, and
     projected rather than passed through: what the stream may carry about a
-    canvas is the id to fetch it by and enough to draw a skeleton of the right
+    signal_desk is the id to fetch it by and enough to draw a skeleton of the right
     height. The numbers stay in the row, which is the whole arrangement.
     """
     if name not in _STUDY_TOOLS or not isinstance(payload, Mapping):
@@ -736,7 +786,9 @@ __all__ = [
     "MAX_DISPLAY_RESULTS",
     "MAX_SUMMARY_CHARS",
     "MESSAGE_OVERHEAD_TOKENS",
-    "canvas_of",
+    "NO_SIGNAL_DESK_TOOL_CALLED",
+    "signal_desk_absence",
+    "signal_desk_of",
     "OUTCOME_CANNOT_READ",
     "OUTCOME_NO_VALUE",
     "OUTCOME_VALUE",

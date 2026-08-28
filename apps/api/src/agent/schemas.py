@@ -19,6 +19,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from src.agent.loop import CHAT_MODE, TurnMode
 from src.agent.turns import MAX_USER_INPUT_BYTES
 from src.alpha.models import FLAG_REASONS
 from src.stocks.shared import validate_symbol
@@ -121,7 +122,7 @@ class MessageResponse(BaseModel):
 
 
 class ArtifactResponse(BaseModel):
-    """One Study run, as the canvas panel fetches it.
+    """One Study run, as the Signal Desk panel fetches it.
 
     Immutable by design, which is what lets the browser cache it forever: the
     row is written once and re-opening a Thread renders it rather than
@@ -135,7 +136,7 @@ class ArtifactResponse(BaseModel):
     study_name: str
     study_version: int
     params: dict[str, Any]
-    canvas_spec: dict[str, Any]
+    signal_desk_spec: dict[str, Any]
     frames: dict[str, Any]
     provenance: dict[str, Any]
     created_at: datetime
@@ -162,6 +163,34 @@ class ThreadListResponse(BaseModel):
     threads: list[ThreadResponse]
 
 
+class AllowanceResponse(BaseModel):
+    """One ceiling as the client draws it.
+
+    ``limit`` is null for a ceiling a deployment turned off, which is not the
+    same as a ceiling of zero and must not render as an exhausted meter. The
+    client is expected to say "no limit" and draw nothing.
+    """
+
+    used: int
+    limit: int | None
+    resets_at: datetime | None
+
+
+class UsageResponse(BaseModel):
+    """What this account has consumed against its own ceilings.
+
+    Spend is carried in micro-USD — the ledger's own integer unit — rather than
+    as a rounded currency string, so the client owns the presentation and no
+    rounding happens twice. It is an operating limit on generation, not an
+    amount owed, and the interface is responsible for not implying a bill.
+    """
+
+    as_of: datetime
+    turns_today: AllowanceResponse
+    spend_today_micro_usd: AllowanceResponse
+    spend_rolling_30d_micro_usd: AllowanceResponse
+
+
 class CreateTurnRequest(BaseModel):
     """One user message, under an id the browser chose before it asked.
 
@@ -179,6 +208,17 @@ class CreateTurnRequest(BaseModel):
     # Retry creates a *new* Turn that points at the old one; the previous Turn,
     # its spend, its message and its traces stay immutable.
     retry_of_turn_id: uuid.UUID | None = None
+    # Which surface asked, and therefore what the Turn owes back. ``chat`` is
+    # the default, so a client that has never heard of the Signal Desk sends
+    # exactly what it sent before and gets exactly what it got before.
+    #
+    # The type comes from the loop rather than being spelled again here, for the
+    # reason this module's docstring gives about the Turn's other vocabularies:
+    # a second declaration of the two values is a second place they can
+    # disagree. It is part of the idempotency payload — the same question asked
+    # from the desk is a different request from the same question asked in chat,
+    # because only one of them is owed a picture.
+    mode: TurnMode = CHAT_MODE
 
     @field_validator("text")
     @classmethod
@@ -221,6 +261,7 @@ class CreatedTurnResponse(TurnResponse):
 
 
 __all__ = [
+    "AllowanceResponse",
     "ArtifactResponse",
     "CreateThreadRequest",
     "CreateTurnRequest",
@@ -232,4 +273,5 @@ __all__ = [
     "ThreadListResponse",
     "ThreadResponse",
     "TurnResponse",
+    "UsageResponse",
 ]

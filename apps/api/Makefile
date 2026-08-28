@@ -1,6 +1,6 @@
 # API Development Commands
 
-.PHONY: dev run test lint clean contracts smoke-canvas
+.PHONY: dev run test lint clean contracts smoke-signal-desk
 
 # Use venv python if exists
 PYTHON := $(shell if [ -d ".venv" ]; then echo ".venv/bin/python"; else echo "python"; fi)
@@ -32,18 +32,18 @@ test-one:
 # Regenerate the contract files both apps read. Deterministic: a synthetic
 # window and a pinned as-of, so no code change means no diff.
 contracts:
-	$(PYTHON) -c "import json;from src.studies import widgets;print(json.dumps(widgets.catalog_payload(),ensure_ascii=False,indent=2))" > ../../contracts/canvas-widget-catalog.json
+	$(PYTHON) -c "import json;from src.studies import widgets;print(json.dumps(widgets.catalog_payload(),ensure_ascii=False,indent=2))" > ../../contracts/signal-desk-widget-catalog.json
 	$(PYTHON) -m tests.studies.artifact_fixture > ../../contracts/fixtures/artifact-intraday-liquidity.json
 
 # Five real questions against a running deployment: does the model reach for
 # run_study, and where do the seconds go. Spends real model calls, so it is run
 # by hand and never in CI. Needs SMOKE_EMAIL and SMOKE_PASSWORD.
-smoke-canvas:
-	$(PYTHON) -m scripts.smoke_canvas
+smoke-signal-desk:
+	$(PYTHON) -m scripts.smoke_signal_desk
 
 # Type check
 lint:
-	python -m py_compile src/main.py
+	$(PYTHON) -m py_compile src/main.py
 
 # Clean cache files
 clean:

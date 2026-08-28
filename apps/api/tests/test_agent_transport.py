@@ -115,8 +115,8 @@ class ScriptedLoop:
         self._control.started.set()
         for call in self._control.calls:
             self._publisher.tool_call(call.as_wire())
-        for canvas in self._control.canvases:
-            self._publisher.canvas_ready(canvas)
+        for signal_desk in self._control.signal_desks:
+            self._publisher.signal_desk_ready(signal_desk)
         for index, piece in enumerate(self._control.pieces):
             # The separator travels inside the delta, exactly as the real loop
             # sends it, so the answer is the concatenation of what was streamed.
@@ -134,7 +134,7 @@ class ScriptedLoop:
             rounds_used=0,
             rounds_exhausted=False,
             tool_calls=tuple(self._control.calls),
-            canvases=tuple(self._control.canvases),
+            signal_desks=tuple(self._control.signal_desks),
             usage=Usage(),
         )
 
@@ -147,7 +147,7 @@ class Control:
         self.release = asyncio.Event()
         self.pieces: list[str] = []
         self.calls: list[TurnToolCall] = []
-        self.canvases: list[dict] = []
+        self.signal_desks: list[dict] = []
         self.status = TurnStatus.COMPLETE
         self.terminal_reason: str | None = None
 
@@ -161,9 +161,9 @@ class Control:
     def says(self, *texts: str) -> None:
         self.pieces = list(texts)
 
-    def draws_a_canvas(self, artifact_id: str) -> None:
-        """Announce one canvas, exactly as a ``run_study`` round would."""
-        self.canvases = [
+    def draws_a_signal_desk(self, artifact_id: str) -> None:
+        """Announce one Signal Desk, exactly as a ``run_study`` round would."""
+        self.signal_desks = [
             {
                 "artifactId": artifact_id,
                 "studyName": "intraday_liquidity_profile",
@@ -535,6 +535,57 @@ class TestIdempotency:
 
         assert clash.status_code == 409
         desk.control.finish()
+
+
+    async def test_the_surface_a_turn_was_asked_from_is_part_of_that_payload(
+        self, client, auth, desk
+    ):
+        """A mode is part of the question, not a rendering choice.
+
+        The same words asked from the Signal Desk are a different request: only
+        one of the two is owed a picture, so the idempotency key must not answer
+        one with the other.
+        """
+        thread_id = await open_thread(client, auth)
+        turn_id = str(uuid.uuid4())
+
+        await start_turn(client, auth, thread_id, turn_id=turn_id)
+        clash = await start_turn(
+            client, auth, thread_id, turn_id=turn_id, mode="signal_desk"
+        )
+
+        assert clash.status_code == 409
+        desk.control.finish()
+
+    async def test_a_client_that_names_no_mode_sends_what_it_always_sent(
+        self, client, auth, desk
+    ):
+        thread_id = await open_thread(client, auth)
+        turn_id = str(uuid.uuid4())
+
+        created = await start_turn(client, auth, thread_id, turn_id=turn_id)
+        # And the same request repeated is still the same request, which is the
+        # property a new field with a default is most likely to break.
+        again = await start_turn(client, auth, thread_id, turn_id=turn_id)
+
+        assert created.status_code == 201
+        assert again.status_code == 200
+        assert again.json()["created"] is False
+        desk.control.finish()
+
+    async def test_a_mode_nobody_declared_is_refused_before_a_row_exists(
+        self, client, auth, desk
+    ):
+        thread_id = await open_thread(client, auth)
+        turn_id = str(uuid.uuid4())
+
+        response = await start_turn(
+            client, auth, thread_id, turn_id=turn_id, mode="analysis"
+        )
+
+        assert response.status_code == 422
+        with get_sync_db() as session:
+            assert session.get(AgentTurn, uuid.UUID(turn_id)) is None
 
 
 class TestOwnership:
@@ -1146,7 +1197,7 @@ def _dependency_calls(endpoint) -> set:
     return found
 
 
-class TestTheCanvas:
+class TestTheSignalDesk:
     """Announcing a picture, and serving the numbers behind it."""
 
     pytestmark = pytest.mark.asyncio
@@ -1181,7 +1232,7 @@ class TestTheCanvas:
                             },
                         }
                     },
-                    canvas_spec={
+                    signal_desk_spec={
                         "title": "Thanh khoản trong phiên — STB",
                         "blocks": [
                             {
@@ -1219,7 +1270,7 @@ class TestTheCanvas:
         # so the date on screen is the date the answer was written about.
         assert body["provenance"]["asOf"] == "2026-08-21T09:00:00+00:00"
 
-    async def test_another_users_canvas_is_not_found_rather_than_forbidden(
+    async def test_another_users_signal_desk_is_not_found_rather_than_forbidden(
         self, client, auth, desk, other_account
     ):
         thread_id = await open_thread(client, auth)
@@ -1253,14 +1304,14 @@ class TestTheCanvas:
 
         assert response.status_code == 404
 
-    async def test_the_stream_announces_the_canvas_and_the_message_keeps_it(
+    async def test_the_stream_announces_the_signal_desk_and_the_message_keeps_it(
         self, client, auth, desk
     ):
         thread_id = await open_thread(client, auth)
         turn_id = str(uuid.uuid4())
         artifact_id = str(uuid.uuid4())
         desk.control.says("Thanh khoản STB dồn về phiên đóng cửa.")
-        desk.control.draws_a_canvas(artifact_id)
+        desk.control.draws_a_signal_desk(artifact_id)
         await start_turn(client, auth, thread_id, turn_id=turn_id, text="Thanh khoản STB?")
         await asyncio.wait_for(desk.control.started.wait(), 2)
         desk.control.finish()
@@ -1269,11 +1320,11 @@ class TestTheCanvas:
         thread = await client.get(f"{API}/threads/{thread_id}", headers=auth)
         answer = thread.json()["messages"][-1]
 
-        assert answer["content"]["canvases"][0]["artifactId"] == artifact_id
-        assert answer["content"]["canvases"][0]["blockCount"] == 4
+        assert answer["content"]["signal_desks"][0]["artifactId"] == artifact_id
+        assert answer["content"]["signal_desks"][0]["blockCount"] == 4
         # The transcript names the picture and holds none of it: the numbers are
         # a row of their own, fetched by whoever opens the panel.
-        assert "frames" not in answer["content"]["canvases"][0]
+        assert "frames" not in answer["content"]["signal_desks"][0]
 
 
 async def _settle(desk: Desk, turn_id: str):
@@ -1283,3 +1334,102 @@ async def _settle(desk: Desk, turn_id: str):
         await asyncio.wait_for(running.task, 5)
     with get_sync_db() as session:
         return session.get(AgentTurn, uuid.UUID(str(turn_id)))
+
+
+class TestTheAccountsOwnAllowance:
+    """``GET /usage`` — what this account has spent against its ceilings.
+
+    The endpoint takes no parameters, which is the property worth a test: the
+    user is resolved from the session, so there is no shape of the request that
+    reads somebody else's ledger.
+    """
+
+    @pytest.mark.asyncio
+    async def test_refuses_an_unauthenticated_read(self, client):
+        response = await client.get(f"{API}/usage")
+
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_reports_every_window_with_its_ceiling(self, client, auth):
+        response = await client.get(f"{API}/usage", headers=auth)
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert set(body) == {
+            "as_of",
+            "turns_today",
+            "spend_today_micro_usd",
+            "spend_rolling_30d_micro_usd",
+        }
+        for window in ("turns_today", "spend_today_micro_usd", "spend_rolling_30d_micro_usd"):
+            assert set(body[window]) == {"used", "limit", "resets_at"}
+
+    @pytest.mark.asyncio
+    async def test_a_fresh_account_has_spent_nothing(self, client, auth):
+        response = await client.get(f"{API}/usage", headers=auth)
+
+        body = response.json()
+        assert body["turns_today"]["used"] == 0
+        assert body["spend_today_micro_usd"]["used"] == 0
+        assert body["spend_rolling_30d_micro_usd"]["used"] == 0
+
+    @pytest.mark.asyncio
+    async def test_one_accounts_spending_is_invisible_to_another(
+        self, client, auth, other_account
+    ):
+        stranger = await authenticate(client, other_account)
+        _charge_one_turn(client, auth)
+
+        theirs = await client.get(f"{API}/usage", headers=stranger)
+
+        assert theirs.json()["turns_today"]["used"] == 0
+
+    @pytest.mark.asyncio
+    async def test_counts_a_turn_this_account_dispatched(self, client, auth):
+        _charge_one_turn(client, auth)
+
+        mine = await client.get(f"{API}/usage", headers=auth)
+
+        assert mine.json()["turns_today"]["used"] == 1
+
+
+def _charge_one_turn(client: AsyncClient, auth: dict) -> None:
+    """One dispatched Turn in the ledger, for the account holding ``auth``.
+
+    Written directly rather than by running a Turn: what is under test is the
+    read, and a real Turn would drag the whole provider boundary into a test
+    about serialisation.
+    """
+    from src.core.llm import OwnerType
+
+    user_id = _user_id_of(auth)
+    with get_sync_db() as session:
+        session.add(
+            LlmCallUsage(
+                owner_type=OwnerType.TURN_REQUEST_MESSAGE.value,
+                owner_id=f"msg-{uuid.uuid4().hex[:8]}",
+                user_id=user_id,
+                lane="turn",
+                route="test",
+                model="session-model",
+                pricing_version="v1",
+                input_token_price_usd=0,
+                cached_read_token_price_usd=0,
+                cache_write_token_price_usd=0,
+                output_token_price_usd=0,
+                reserved_micro_usd=1_000,
+                actual_micro_usd=1_000,
+                status="reconciled",
+                provider_called_at=datetime.now(timezone.utc),
+            )
+        )
+        session.commit()
+
+
+def _user_id_of(auth: dict) -> int:
+    """The user behind a bearer header, read the way the endpoints read it."""
+    from src.auth.security import decode_access_token
+
+    token = auth["Authorization"].removeprefix("Bearer ")
+    return int(decode_access_token(token)["sub"])

@@ -74,10 +74,10 @@ TOOLSETS: dict[str, Toolset] = {
     "studies": {
         "description": (
             "Run a named, versioned analysis recipe over this system's own "
-            "store, or compose a canvas out of numbers already gathered, and "
+            "store, or compose a Signal Desk out of numbers already gathered, and "
             "draw either as a panel the reader can open."
         ),
-        "tools": ("list_studies", "run_study", "render_canvas"),
+        "tools": ("list_studies", "run_study", "render_signal_desk"),
     },
 }
 
@@ -92,7 +92,7 @@ TOOLSETS: dict[str, Toolset] = {
 #: single line changing.
 #:
 #: ``signals`` is here as of the reversal recorded in ``tools/signals.py``, and
-#: ``studies`` since a conversation gained a canvas to draw on. Both are written
+#: ``studies`` since a conversation gained a Signal Desk to draw on. Both are written
 #: down rather than defaulted: a fifth bundle added tomorrow does not reach a
 #: conversation until this tuple says so.
 CHAT_TOOLSETS: tuple[str, ...] = ("web", "memory", "signals", "studies")

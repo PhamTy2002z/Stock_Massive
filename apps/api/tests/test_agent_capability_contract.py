@@ -107,7 +107,7 @@ EXPECTED_CATALOG = {
         registry.ContentTrust.TRUSTED_STRUCTURED,
         registry.ToolConcurrency.SERIALIZED,
     ),
-    "render_canvas": (
+    "render_signal_desk": (
         "studies",
         registry.ToolEffect.READ,
         registry.ToolIdempotency.IDEMPOTENT,
@@ -152,20 +152,26 @@ def test_shipped_schema_bytes_order_output_and_display_are_locked():
         "check_price_claim": ("Kiểm mức giá", False, 4_000, None, True),
         "list_studies": ("Xem danh mục phân tích", True, 32_000, None, True),
         "run_study": ("Chạy phân tích", False, 32_000, None, True),
-        "render_canvas": ("Vẽ canvas", False, 32_000, None, True),
+        "render_signal_desk": ("Vẽ signal_desk", False, 32_000, None, True),
     }
     with isolated_registry():
         tools.register_all()
         entries = registry.entries()
         schemas = [entry.as_schema().as_wire() for entry in entries]
 
+        # Moves whenever the wire schemas do — including when a Study is
+        # registered, because ``run_study`` carries the catalog in its own
+        # parameters and description. That is the design (``agent/tools/
+        # studies.py``): a Study added later changes the tool signature the
+        # resolved-surface cache keys on and changes nothing in the prompt. So
+        # this is updated in the same commit as the Study, deliberately.
         assert hashlib.sha256(
             json.dumps(
                 schemas,
                 separators=(",", ":"),
                 ensure_ascii=False,
             ).encode("utf-8")
-        ).hexdigest() == "55b9ea0a0b42d94eacd401282ddcfcf34d62e378c91a4511c21555937d1d7a79"
+        ).hexdigest() == "2ff91dfd0cf6c37d14f2c8bd09738cfaffb8ee49b2bdb42c68a8930f0d87774a"
         assert {
             entry.name: (
                 entry.display_name,
@@ -176,6 +182,28 @@ def test_shipped_schema_bytes_order_output_and_display_are_locked():
             )
             for entry in entries
         } == expected_runtime
+
+
+def test_every_offered_schema_survives_the_json_encoder():
+    """The resolved surface is what the route is sent, and it is frozen.
+
+    Freezing turns nested mappings into ``mappingproxy`` and lists into tuples,
+    neither of which the JSON encoder can write. Asking the entries directly
+    would not see it: only a resolved declaration is frozen, so the check has to
+    go through the same surface the loop calls with.
+    """
+
+    with isolated_registry():
+        tools.register_all()
+        surface = definitions.resolve_tool_surface(
+            toolsets.CHAT_TOOLSETS, now=1_000.0
+        )
+
+        for name, resolved in surface.by_name.items():
+            try:
+                json.dumps(resolved.schema.as_wire())
+            except TypeError as unwritable:  # pragma: no cover - failure text
+                pytest.fail(f"{name} cannot go on the wire: {unwritable}")
 
 
 def test_lane_selection_and_order_are_explicit_and_do_not_share_authority():
@@ -190,7 +218,7 @@ def test_lane_selection_and_order_are_explicit_and_do_not_share_authority():
     assert toolsets.resolve_toolset("studies") == (
         "list_studies",
         "run_study",
-        "render_canvas",
+        "render_signal_desk",
     )
 
 

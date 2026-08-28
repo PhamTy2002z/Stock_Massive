@@ -36,6 +36,8 @@ from src.alpha.models import (
 from src.core.database import sync_session_factory
 from src.stocks.shared import validate_symbol
 
+from .loop import CHAT_MODE
+
 T = TypeVar("T")
 SessionFactory = Callable[[], Session]
 MessageBuilder = Callable[["TurnRecord"], Mapping[str, Any] | None]
@@ -111,7 +113,7 @@ class MessageRecord:
 
 @dataclass(frozen=True)
 class ArtifactRecord:
-    """One persisted Study run, as the canvas endpoint serves it.
+    """One persisted Study run, as the Signal Desk endpoint serves it.
 
     ``frames`` is here and nowhere near a message: this record is built for the
     browser, which draws the numbers, and the model's whole view of the same run
@@ -131,7 +133,7 @@ class ArtifactRecord:
     study_version: int
     params: Mapping[str, Any]
     frames: Mapping[str, Any]
-    canvas_spec: Mapping[str, Any]
+    signal_desk_spec: Mapping[str, Any]
     provenance: Mapping[str, Any]
     created_at: datetime
 
@@ -311,7 +313,7 @@ def _artifact_record(row: AgentArtifact) -> ArtifactRecord:
         study_version=row.study_version,
         params=dict(row.params),
         frames=dict(row.frames),
-        canvas_spec=dict(row.canvas_spec),
+        signal_desk_spec=dict(row.signal_desk_spec),
         provenance=dict(row.provenance),
         created_at=row.created_at,
     )
@@ -487,7 +489,7 @@ class AgentPersistence:
             ).scalar_one_or_none()
             return None if row is None else _message_record(row)
 
-    # -- one canvas ------------------------------------------------------
+    # -- one Signal Desk ------------------------------------------------------
 
     async def read_artifact(
         self, user_id: int, artifact_id: uuid.UUID | str
@@ -903,6 +905,7 @@ class AgentPersistence:
         user_text: str,
         symbols: Sequence[str] = (),
         retry_of_turn_id: uuid.UUID | str | None = None,
+        mode: str = CHAT_MODE,
     ) -> TurnCreation:
         """Commit the user message and the Turn, before anything is executed."""
         normalized = tuple(dict.fromkeys(validate_symbol(symbol) for symbol in symbols))
@@ -914,6 +917,7 @@ class AgentPersistence:
             user_text,
             normalized,
             None if retry_of_turn_id is None else _uuid(retry_of_turn_id),
+            mode,
         )
 
     def _create_turn(
@@ -924,6 +928,7 @@ class AgentPersistence:
         user_text: str,
         symbols: Sequence[str],
         retry_of_turn_id: uuid.UUID | None,
+        mode: str,
     ) -> TurnCreation:
         # The whole payload, compared as one value rather than field by field.
         # An idempotency key that only checks the text would return the earlier
@@ -933,6 +938,14 @@ class AgentPersistence:
         payload: dict[str, Any] = {"text": user_text}
         if symbols:
             payload["symbols"] = list(symbols)
+        if mode != CHAT_MODE:
+            # Which surface asked, kept beside the words it asked with: this is
+            # a fact about the request, and ``agent_message`` is where the
+            # request's facts are. Written only when it is not the default, for
+            # the reason the symbols are — the key is part of the idempotency
+            # payload, and adding one to every ordinary Turn would make the same
+            # question asked before this existed compare unequal to itself.
+            payload["mode"] = mode
 
         def write(session: Session) -> TurnCreation:
             existing = self._owned_turn(session, user_id, turn_id)

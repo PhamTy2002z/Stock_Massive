@@ -58,6 +58,24 @@ def _nullable(prop: Mapping[str, Any]) -> dict[str, Any]:
     return widened
 
 
+def _wire_json(value: Any) -> Any:
+    """Restate a schema in the plain JSON types an encoder knows how to write.
+
+    A declaration is held immutable once it is resolved — nested mappings become
+    ``MappingProxyType`` and lists become tuples — and the JSON encoder has no
+    rule for either. The thaw belongs here rather than in the freezing layer,
+    because this is the point where a schema stops being ours and becomes a
+    request body; anywhere earlier and immutability would be a promise only for
+    the schemas that happen to be walked on the way out.
+    """
+
+    if isinstance(value, Mapping):
+        return {str(key): _wire_json(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_wire_json(item) for item in value]
+    return value
+
+
 def strict_parameters(schema: Mapping[str, Any]) -> dict[str, Any]:
     """Restate a parameter schema in the form strict mode actually accepts.
 
@@ -113,7 +131,7 @@ class ToolSchema:
     strict: bool = True
 
     def as_wire(self) -> dict[str, Any]:
-        parameters = dict(self.parameters)
+        parameters = _wire_json(self.parameters)
         return {
             "type": "function",
             "function": {

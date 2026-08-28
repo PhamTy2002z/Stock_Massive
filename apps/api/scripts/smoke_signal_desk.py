@@ -8,7 +8,7 @@ one round of ``run_study`` and one of prose, and the thing that breaks it is a
 question phrased differently from the one the description was written against.
 So the five questions below are deliberately not paraphrases of each other.
 
-**Where the seconds go.** The plan budgets question → ``canvas.ready`` at eight
+**Where the seconds go.** The plan budgets question → ``signal_desk.ready`` at eight
 seconds on a warm store and twelve on a cold one, and the only honest way to
 know is to read the timestamps off a real stream. The route's own latency is
 part of that number and is not separable here — which is the point: a budget
@@ -18,7 +18,7 @@ Run by hand against a dev deployment. It spends real money on real model calls,
 so it is not in the suite and not in CI.
 
     export SMOKE_EMAIL=… SMOKE_PASSWORD=…
-    make smoke-canvas                     # or: python -m scripts.smoke_canvas
+    make smoke-signal-desk                     # or: python -m scripts.smoke_signal_desk
 
 ``SMOKE_BASE`` overrides the API root (default ``http://127.0.0.1:8000/api/v1``).
 """
@@ -63,7 +63,7 @@ class Timeline:
     started: float = field(default_factory=time.monotonic)
     admitted: float | None = None
     first_tool: float | None = None
-    canvas: float | None = None
+    signal_desk: float | None = None
     completed: float | None = None
     study_calls: list[dict] = field(default_factory=list)
     other_calls: list[str] = field(default_factory=list)
@@ -116,8 +116,8 @@ def ask(client: httpx.Client, auth: dict[str, str], thread_id: str, question: st
                     timeline.study_calls.append(dict(data))
                 elif data.get("name"):
                     timeline.other_calls.append(str(data["name"]))
-            elif kind == "canvas.ready":
-                timeline.canvas = time.monotonic()
+            elif kind == "signal_desk.ready":
+                timeline.signal_desk = time.monotonic()
             elif kind and kind.startswith("turn.") and kind != "turn.snapshot":
                 timeline.completed = time.monotonic()
                 break
@@ -127,7 +127,7 @@ def ask(client: httpx.Client, auth: dict[str, str], thread_id: str, question: st
 def main() -> int:
     with httpx.Client(timeout=30) as client:
         auth = login(client)
-        thread = client.post(f"{BASE}/threads", json={"title": "smoke canvas"},
+        thread = client.post(f"{BASE}/threads", json={"title": "smoke signal desk"},
                              headers=auth)
         thread.raise_for_status()
         thread_id = thread.json()["id"]
@@ -137,11 +137,11 @@ def main() -> int:
             for question, expected in QUESTIONS
         ]
 
-    print(f"{'admitted':>9} {'tool':>6} {'canvas':>7} {'done':>6}  question")
+    print(f"{'admitted':>9} {'tool':>6} {'signal_desk':>7} {'done':>6}  question")
     for line in results:
         print(
             f"{line.at(line.admitted):>9} {line.at(line.first_tool):>6} "
-            f"{line.at(line.canvas):>7} {line.at(line.completed):>6}  "
+            f"{line.at(line.signal_desk):>7} {line.at(line.completed):>6}  "
             f"{'ok ' if line.scored else 'MISS'} {line.question}"
         )
         if line.study_calls:
@@ -152,10 +152,10 @@ def main() -> int:
 
     scored = sum(1 for line in results if line.scored)
     print(f"\ntool choice: {scored}/{len(results)} (budget: 4/5)")
-    drawn = [line for line in results if line.canvas is not None]
+    drawn = [line for line in results if line.signal_desk is not None]
     if drawn:
-        slowest = max(line.canvas - line.started for line in drawn)  # type: ignore[operator]
-        print(f"slowest question → canvas.ready: {slowest:.1f}s (budget: 8s warm, 12s cold)")
+        slowest = max(line.signal_desk - line.started for line in drawn)  # type: ignore[operator]
+        print(f"slowest question → signal_desk.ready: {slowest:.1f}s (budget: 8s warm, 12s cold)")
     return 0 if scored >= 4 else 1
 
 

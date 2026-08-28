@@ -58,8 +58,8 @@ GET_SERIES_DESCRIPTION = (
     "Read one Signal Field for one symbol across the most recent closed "
     "sessions, as a series rather than a single number. Returns a small summary "
     "— first, last, min, max, median, how many sessions answered — plus a "
-    "frameId. The series itself is kept where the canvas can draw it and is "
-    "never put in this conversation: pass the frameId to render_canvas to show "
+    "frameId. The series itself is kept where the Signal Desk can draw it and is "
+    "never put in this conversation: pass the frameId to render_signal_desk to show "
     "it to the reader. Use it when the question is about a shape over time — a "
     "trend, a range, a comparison across sessions — and there is no study for it."
 )

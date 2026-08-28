@@ -231,7 +231,7 @@ class SpendAdmission:
             with session.begin():
                 while True:
                     month_start, month_reset = _ict_month(called_at)
-                    day_start, day_reset = _ict_day(called_at)
+                    day_start, day_reset = ict_day(called_at)
                     scopes = [
                         f"lane:{candidate.lane.value}:{month_start.isoformat()}",
                         f"owner:{candidate.owner.type.value}:{candidate.owner.id}",
@@ -256,7 +256,7 @@ class SpendAdmission:
                     dispatch_at = self._clock()
                     if (
                         _ict_month(dispatch_at)[0] == month_start
-                        and _ict_day(dispatch_at)[0] == day_start
+                        and ict_day(dispatch_at)[0] == day_start
                     ):
                         called_at = dispatch_at
                         break
@@ -395,7 +395,7 @@ class SpendAdmission:
         with nothing in it, which a reader cannot tell from a fault.
         """
         called_at = self._clock()
-        day_start, day_reset = _ict_day(called_at)
+        day_start, day_reset = ict_day(called_at)
         month_start, month_reset = _ict_month(called_at)
         prices = self._config.prices_for(Workload.SESSION)
         reserved = _micro_usd(
@@ -851,7 +851,15 @@ def _ict_month(moment: datetime) -> tuple[datetime, datetime]:
     return start.astimezone(timezone.utc), reset.astimezone(timezone.utc)
 
 
-def _ict_day(moment: datetime) -> tuple[datetime, datetime]:
+def ict_day(moment: datetime) -> tuple[datetime, datetime]:
+    """The UTC bounds of the Vietnamese day a moment falls in.
+
+    Public because the daily ceilings are read in two places that must agree
+    about where a day begins: here, where a Turn is refused for exceeding one,
+    and the usage read that tells the account holder the same thing before they
+    ask. A second copy of these four lines is a panel that disagrees with the
+    refusal it exists to explain.
+    """
     local = moment.astimezone(ICT)
     start = local.replace(hour=0, minute=0, second=0, microsecond=0)
     reset = start + timedelta(days=1)
@@ -884,7 +892,7 @@ def _read_turn_state(
     The current owner is excluded and then added back, so the candidate counts
     exactly once whether this is its first call or its eighth.
     """
-    day_start, day_reset = _ict_day(called_at)
+    day_start, day_reset = ict_day(called_at)
     dispatched = session.scalar(
         select(func.count(func.distinct(LlmCallUsage.owner_id))).where(
             LlmCallUsage.owner_type == OwnerType.TURN_REQUEST_MESSAGE.value,
@@ -922,6 +930,7 @@ __all__ = [
     "BudgetLane",
     "BudgetRefusal",
     "CallOwner",
+    "ict_day",
     "OwnerType",
     "Reservation",
     "SpendAdmission",

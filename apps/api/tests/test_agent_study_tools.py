@@ -19,6 +19,7 @@ import uuid
 import pytest
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
+from sqlalchemy.exc import OperationalError
 
 from src.agent.messages import (
     ContextBudget,
@@ -27,7 +28,7 @@ from src.agent.messages import (
     TranscriptTurn,
     TurnToolCall,
     build_messages,
-    canvas_of,
+    signal_desk_of,
     outcome_of,
 )
 from src.agent.registry import ToolContext
@@ -37,8 +38,8 @@ from src.core.database import Base, get_sync_db, sync_engine
 from src.stocks.signals.issues import SignalIssue
 from src.studies import registry as study_registry, warmup
 from src.studies.contracts import (
-    CanvasBlock,
-    CanvasSpec,
+    SignalDeskBlock,
+    SignalDeskSpec,
     Frame,
     Provenance,
     StudyDefinition,
@@ -108,11 +109,11 @@ def a_result(context) -> StudyResult:
     )
 
 
-def a_canvas(_result: StudyResult) -> CanvasSpec:
-    return CanvasSpec(
+def a_signal_desk(_result: StudyResult) -> SignalDeskSpec:
+    return SignalDeskSpec(
         title="Thanh khoản trong phiên — STB",
         blocks=(
-            CanvasBlock(
+            SignalDeskBlock(
                 widget="bar_series",
                 widget_version=1,
                 frame="profile",
@@ -133,7 +134,7 @@ def register(name: str = STUDY, **overrides) -> StudyDefinition:
         "frames": ("profile",),
         "widgets": (("bar_series", 1),),
         "compute": a_result,
-        "view": a_canvas,
+        "view": a_signal_desk,
     }
     fields.update(overrides)
     return study_registry.register(StudyDefinition(**fields))
@@ -207,6 +208,75 @@ def test_the_frames_are_absent_from_the_messages_a_turn_would_send():
     assert answered["artifactId"] in whole
 
 
+@pytest.mark.asyncio
+async def test_the_frames_stay_out_of_a_signal_desk_turn_too():
+    """The same law, over a whole Turn, in the mode that asks for a picture.
+
+    The check above builds one transcript by hand. This one runs the loop end to
+    end against the real registration and reads what the route was actually
+    sent, because a Signal Desk Turn is the one that would be argued into an
+    exception — the mode exists to produce a Signal Desk, and "let the model see the
+    numbers so it can describe them" is precisely the change this forbids.
+    """
+    from datetime import date
+
+    from src.agent.loop import SIGNAL_DESK_MODE, AgentLoop, TurnRequest
+    from src.agent.prompt import RuntimeContext
+    from src.agent.tools.studies import register_study_tools
+    from src.core.llm import Completion, ToolCall
+
+    from .agent_tool_world import isolated_registry
+    from .test_agent_loop import FakeClient, config
+
+    register()
+    with isolated_registry():
+        register_study_tools()
+        client = FakeClient(
+            [
+                Completion(
+                    model="stub",
+                    text="Để tôi vẽ.",
+                    tool_calls=(
+                        ToolCall(
+                            id="c1",
+                            name="run_study",
+                            arguments={"name": STUDY, "symbol": "STB"},
+                            output_index=0,
+                        ),
+                    ),
+                ),
+                Completion(model="stub", text="Đỉnh thanh khoản rơi vào 14:45."),
+            ]
+        )
+        outcome = await AgentLoop(
+            client=client, config=config(), toolsets="studies"
+        ).run(
+            TurnRequest(
+                # Neither id names a stored row, which the loop documents as
+                # supported and the artifact's own columns allow: what is under
+                # test is the transcript, and an owner would only add two
+                # fixtures for the assertion to be unaffected by.
+                thread_id="an unstored thread",
+                request_message_id=1,
+                user_id=1,
+                user_text="Thanh khoản STB?",
+                runtime=RuntimeContext(today=date(2026, 8, 27)),
+                mode=SIGNAL_DESK_MODE,
+            )
+        )
+
+    sent = "\n".join(
+        str(message.content or "")
+        for request in client.requests
+        for message in request.messages
+    )
+    assert "4242424" not in sent.replace(".0", "")
+    assert "avg_volume" not in sent
+    # The picture reached the reader by id, which is the only way it travels.
+    assert [signal_desk["studyName"] for signal_desk in outcome.signal_desks] == [STUDY]
+    assert outcome.signal_desk_absence is None
+
+
 def test_the_row_holds_the_numbers_the_message_does_not():
     register()
 
@@ -219,7 +289,7 @@ def test_the_row_holds_the_numbers_the_message_does_not():
             )
         ).scalar_one()
         assert row.frames["profile"]["rows"] == [["09:15", 1000], ["14:45", 4242424]]
-        assert row.canvas_spec["title"] == answered["title"]
+        assert row.signal_desk_spec["title"] == answered["title"]
 
 
 def test_the_run_is_owned_by_the_context_and_never_by_an_argument(monkeypatch):
@@ -276,16 +346,16 @@ def test_a_refused_study_answers_with_the_input_that_was_short():
     # "Ran" and "returned numbers" are two different things: the call is ``ok``
     # and the outcome is what says there is nothing to draw.
     assert outcome_of("run_study", answered) == "no_value:insufficient_sessions"
-    assert canvas_of("run_study", answered) is None
+    assert signal_desk_of("run_study", answered) is None
 
 
-def test_a_run_that_produced_a_canvas_is_classified_as_a_value():
+def test_a_run_that_produced_a_signal_desk_is_classified_as_a_value():
     register()
 
     answered = run({"name": STUDY, "symbol": "STB"})
 
     assert outcome_of("run_study", answered) == "value"
-    projected = canvas_of("run_study", answered)
+    projected = signal_desk_of("run_study", answered)
     assert projected == {
         "artifactId": answered["artifactId"],
         "studyName": STUDY,
@@ -414,3 +484,34 @@ def test_the_rail_row_names_the_analysis_the_company_and_the_window():
     # A call whose arguments say nothing recognisable still gets a readable row
     # rather than a raw tool name.
     assert study_tools.summarise_run_study({}) == "phân tích"
+
+
+def test_a_store_failure_does_not_carry_the_frames_into_the_message(monkeypatch):
+    """The law has to hold when the write fails, not only when it succeeds.
+
+    ``executor`` renders a failed tool call as ``f"{name} failed: {exc}"`` and
+    hands that text to the model. A SQLAlchemy error stringifies to the
+    statement **and its bound parameters** — for this write, the whole frames
+    payload — so an unwrapped driver error would put every cell in front of the
+    model precisely when the database is unhealthy.
+    """
+    register()
+
+    def refuses_to_store(*_args, **_kwargs):
+        raise OperationalError(
+            "INSERT INTO agent_artifact (frames) VALUES (%(frames)s)",
+            {"frames": {"profile": {"rows": [[4242424]]}}},
+            Exception("connection reset"),
+        )
+
+    monkeypatch.setattr(study_tools.studies, "run", refuses_to_store)
+
+    with pytest.raises(study_tools.ArtifactNotStored) as raised:
+        run({"name": STUDY, "symbol": "STB"})
+
+    # What the executor would put in the transcript is this string and nothing
+    # underneath it, so the assertion is on the whole rendered failure.
+    text = f"run_study failed: {raised.value}"
+    assert "4242424" not in text
+    assert "frames" not in text
+    assert "INSERT" not in text

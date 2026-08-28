@@ -445,7 +445,7 @@ class SignalTools:
         should see, and writing a zero would invent a number.
 
         The series does not come back. What comes back is a summary small enough
-        to read in a sentence and the id the canvas draws it by.
+        to read in a sentence and the id the Signal Desk draws it by.
         """
         field_id = str(arguments.get("field_id") or "").strip()
         if not field_id:
@@ -549,7 +549,7 @@ class SignalTools:
             "sessionsAsked": wanted,
             "health": provenance.health,
             "refusals": dict(sorted(reasons.items())),
-            # What render_canvas draws it by. The series itself is in the row
+            # What render_signal_desk draws it by. The series itself is in the row
             # this names, and there is no way to ask for it here.
             "frameId": str(frame_id),
         }

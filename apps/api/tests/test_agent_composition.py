@@ -3,7 +3,7 @@
 Three claims, and the middle one is the reason this path can exist at all.
 
 *A series is summarised, never sent.* ``get_series`` reads sixty sessions and
-answers with five statistics and an id. Everything the reducer of a canvas
+answers with five statistics and an id. Everything the reducer of a Signal Desk
 needs is in the row it names.
 
 *A frame belongs to the Turn that made it.* The id is a UUID a model has seen,
@@ -12,7 +12,7 @@ So a frame from any other Turn is refused as though it were not there, and the
 scheme rests on the check rather than on the id being unguessable.
 
 *A bad block costs one block.* A model that named the wrong widget for one frame
-has still gathered good ones, and throwing the canvas away over a mistake it
+has still gathered good ones, and throwing the Signal Desk away over a mistake it
 could fix next round is the wrong trade.
 """
 
@@ -181,7 +181,7 @@ def series(arguments: dict, *, turn_id=None, thread_id=None) -> dict:
 
 def render(arguments: dict, *, turn_id=None, thread_id=None) -> dict:
     return dict(
-        study_tools.StudyTools().render_canvas(
+        study_tools.StudyTools().render_signal_desk(
             ToolContext(user_id=1, turn_id=turn_id, thread_id=thread_id), arguments
         )
     )
@@ -326,7 +326,7 @@ def a_frame_for(turn_id) -> str:
     return str(frame_id)
 
 
-def test_a_canvas_is_composed_from_the_frames_this_turn_gathered(turn):
+def test_a_signal_desk_is_composed_from_the_frames_this_turn_gathered(turn):
     turn_id = turn[0]
     frame_id = a_frame_for(turn_id)
 
@@ -346,7 +346,7 @@ def test_a_canvas_is_composed_from_the_frames_this_turn_gathered(turn):
                 AgentArtifact.id == uuid.UUID(answered["artifactId"])
             )
         ).scalar_one()
-        block = row.canvas_spec["blocks"][0]
+        block = row.signal_desk_spec["blocks"][0]
         # The version and the presentation are the server's, not the model's: a
         # version is how an old artifact keeps rendering, and which column is
         # the line is a claim about the numbers.
@@ -367,7 +367,7 @@ def test_a_frame_from_another_turn_draws_nothing(turn, other_turn):
     assert "not a frame id this turn produced" in answered["dropped"][0]["reason"]
 
 
-def test_a_block_that_cannot_be_drawn_costs_one_block_and_not_the_canvas(
+def test_a_block_that_cannot_be_drawn_costs_one_block_and_not_the_signal_desk(
     turn, other_turn
 ):
     turn_id = turn[0]
@@ -398,7 +398,7 @@ def test_a_turn_may_not_keep_drawing(turn):
     frame_id = a_frame_for(turn_id)
     block = {"widget": "line_series", "frame_id": frame_id}
 
-    for index in range(frames_buffer.MAX_CANVASES_PER_TURN):
+    for index in range(frames_buffer.MAX_SIGNAL_DESKS_PER_TURN):
         assert render({"title": f"Lần {index}", "blocks": [block]}, turn_id=turn_id)[
             "blockCount"
         ] == 1
@@ -409,7 +409,7 @@ def test_a_turn_may_not_keep_drawing(turn):
     assert "already drawn" in refused["detail"]
 
 
-def test_a_canvas_may_not_be_longer_than_a_reader_will_read(turn):
+def test_a_signal_desk_may_not_be_longer_than_a_reader_will_read(turn):
     turn_id = turn[0]
     frame_id = a_frame_for(turn_id)
     block = {"widget": "line_series", "frame_id": frame_id}
@@ -450,7 +450,7 @@ def test_a_study_frame_is_addressed_by_name_because_a_study_has_several(turn):
                     "labels": {"bucket": "Khung giờ", "share": "Tỷ trọng"},
                 },
             },
-            canvas_spec={"title": "x", "blocks": []},
+            signal_desk_spec={"title": "x", "blocks": []},
             provenance={"source": "vnstock", "asOf": "", "sessionsUsed": 30,
                         "health": "normal", "reason": None},
         )

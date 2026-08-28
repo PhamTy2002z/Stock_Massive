@@ -64,6 +64,34 @@ def test_a_turn_with_no_name_renders_no_name_line() -> None:
     assert tail.strip() == "- today: 2026-08-22"
 
 
+def test_the_version_names_the_prose_this_build_actually_ships() -> None:
+    """The hand-bumped number, pinned so bumping it is a decision.
+
+    The hash below moves on its own when the prose moves; this line does not,
+    which is the point. Updating it is the moment somebody states that the
+    prompt changed and says what changed — 2.8.0 added the Signal Desk rule to
+    the tools section: in that mode the model reaches for a Signal Desk-producing
+    tool where the question admits one, and none of the framing rules move.
+    """
+    assert PROMPT_VERSION == "2.8.0"
+
+
+def test_the_prompt_carries_the_signal_desk_rule_in_its_cacheable_half() -> None:
+    """One rule, and it says which tools to reach for without listing them.
+
+    In the prefix rather than the rendered tail, like the batching sentence: the
+    rule is identical for every Turn and *which* Turn is in the mode is a
+    runtime fact the loop supplies as a system note. A rule appended per Turn
+    would be paid for once per Turn and would move the cacheable boundary.
+    """
+    tools = next(section for section in SECTIONS if section.key == "tools")
+
+    assert "Signal Desk" in tools.body
+    assert "Signal Desk" in prefix()
+    # And it does not restate the catalog: the tools arrive through their schema.
+    assert tools.body.count("Signal Desk") == 1
+
+
 def test_the_hash_moves_when_the_prose_moves() -> None:
     edited = (*SECTIONS[:-1], PromptSection(key="x", title="X", body="one more rule"))
 

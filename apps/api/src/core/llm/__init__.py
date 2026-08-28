@@ -29,6 +29,7 @@ from .admission import (
     SpendRequest,
     TurnState,
     check_candidate_shape,
+    ict_day,
 )
 from .client import MissingSpendReservation, ReservedLLMClient, build_client
 from .breaker import RouteBreaker, route_key
@@ -129,6 +130,7 @@ __all__ = [
     "Message",
     "ModelRefusal",
     "OwnerType",
+    "ict_day",
     "PricingTable",
     "ProbeCheck",
     "ProbeResult",

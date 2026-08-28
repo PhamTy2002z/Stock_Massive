@@ -59,7 +59,14 @@ from .events import (
     snapshot_from_draft,
     terminal_event_for,
 )
-from .loop import TurnDraft, TurnOutcome, TurnRequest, TurnStatus
+from .loop import (
+    CHAT_MODE,
+    TurnDraft,
+    TurnMode,
+    TurnOutcome,
+    TurnRequest,
+    TurnStatus,
+)
 from .persistence import TURN_INCOMPLETE, AgentPersistence, TurnRecord
 from .prompt import RuntimeContext
 
@@ -201,7 +208,7 @@ def draft_content(draft: TurnDraft) -> dict[str, Any]:
     has (whether a round went on to call tools), and a reader rebuilding from
     here has no way to work it out from ``text`` alone.
 
-    ``canvases`` are the pictures the Turn produced, as ids and titles rather
+    ``signal_desks`` are the pictures the Turn produced, as ids and titles rather
     than as numbers: the numbers are in ``agent_artifact`` and are fetched by
     whoever opens the panel. Checkpointed so a browser that reconnects after the
     announcement is still told there is one to open.
@@ -211,7 +218,7 @@ def draft_content(draft: TurnDraft) -> dict[str, Any]:
         "answer": draft.answer or "",
         "thoughts": [dict(thought) for thought in draft.thoughts],
         "tool_calls": [call.as_wire() for call in draft.tool_calls],
-        "canvases": [dict(canvas) for canvas in draft.canvases],
+        "signal_desks": [dict(signal_desk) for signal_desk in draft.signal_desks],
         "rounds_used": draft.rounds_used,
     }
 
@@ -223,7 +230,8 @@ def assistant_message(
     status: str,
     answer: str | None = None,
     thoughts: Sequence[Mapping[str, Any]] = (),
-    canvases: Sequence[Mapping[str, Any]] = (),
+    signal_desks: Sequence[Mapping[str, Any]] = (),
+    signal_desk_absence: str | None = None,
     elapsed_ms: int = 0,
 ) -> dict[str, Any]:
     """The canonical assistant message, in the one place its shape is decided.
@@ -243,8 +251,14 @@ def assistant_message(
 
     ``answer`` defaults to ``text``, which is what a message written before this
     split existed means: no narration was recorded, so all of it is the reply.
+
+    ``signal_desk_absence`` is written only when there is one, for the reason the
+    Turn's own request payload omits an empty symbol list: a key that is null on
+    every ordinary answer is a key every reader has to learn to ignore, and its
+    presence is exactly the signal — this Turn was asked from the Signal Desk
+    and drew nothing, and here is the named reason.
     """
-    return {
+    content: dict[str, Any] = {
         "text": text,
         "answer": text if answer is None else answer,
         "thoughts": [dict(thought) for thought in thoughts],
@@ -253,10 +267,13 @@ def assistant_message(
         # spec and the numbers are not here and never will be: they are a row of
         # their own, and a transcript that carried them would drag a heatmap
         # through every scroll of the conversation.
-        "canvases": [dict(canvas) for canvas in canvases],
+        "signal_desks": [dict(signal_desk) for signal_desk in signal_desks],
         "status": status,
         "elapsed_ms": elapsed_ms,
     }
+    if signal_desk_absence:
+        content["signal_desk_absence"] = signal_desk_absence
+    return content
 
 
 def frozen_message(record: TurnRecord) -> Mapping[str, Any] | None:
@@ -282,7 +299,11 @@ def frozen_message(record: TurnRecord) -> Mapping[str, Any] | None:
         answer=draft.get("answer") or None,
         thoughts=tuple(draft.get("thoughts") or ()),
         tool_calls=tuple(draft.get("tool_calls") or ()),
-        canvases=tuple(draft.get("canvases") or ()),
+        signal_desks=tuple(draft.get("signal_desks") or ()),
+        # A Turn a restart interrupted never reached the terminal path that
+        # settles a Signal Desk account, so there is nothing to carry here and
+        # nothing to invent: the reader is told the Turn is ``incomplete``,
+        # which is the honest reading of why no picture arrived.
         status=TURN_INCOMPLETE,
     )
 
@@ -350,12 +371,17 @@ class TurnService:
         summary: str | None = None,
         summarised_turns: int = 0,
         retry_of_turn_id: uuid.UUID | str | None = None,
+        mode: TurnMode = CHAT_MODE,
     ) -> TurnHandle:
         """Commit the Turn, then start it. Never the other way round.
 
         A crash between the commit and the task start is recoverable as an
         incomplete Turn rather than as an invisible or duplicated request, which
         is the whole reason the order is this way.
+
+        ``mode`` travels into the committed request as well as into the run: a
+        reopened Thread has to be able to say how a Turn was *asked*, and the
+        answer cannot be recovered from what it happened to produce.
         """
         assert_input_within_cap(user_text)
         creation = await self._store.create_turn(
@@ -365,6 +391,7 @@ class TurnService:
             user_text=user_text,
             symbols=symbols,
             retry_of_turn_id=retry_of_turn_id,
+            mode=mode,
         )
         if not creation.created:
             # Idempotent: the same id and payload returns the Turn that already
@@ -390,6 +417,7 @@ class TurnService:
             history=tuple(history),
             summary=summary,
             summarised_turns=summarised_turns,
+            mode=mode,
         )
         running.task = asyncio.create_task(
             self._execute(running, request),
@@ -447,7 +475,8 @@ class TurnService:
                 answer=outcome.answer,
                 thoughts=outcome.thoughts,
                 tool_calls=calls,
-                canvases=outcome.canvases,
+                signal_desks=outcome.signal_desks,
+                signal_desk_absence=outcome.signal_desk_absence,
                 status=status,
                 elapsed_ms=outcome.elapsed_ms,
             )
@@ -468,11 +497,18 @@ class TurnService:
             ),
             last_event_seq=running.publisher.next_seq,
         )
+        data: dict[str, Any] = {"message_id": record.response_message_id}
+        if outcome.signal_desk_absence:
+            # On the terminal event as well as on the message, because a Turn
+            # that produced no prose writes no message at all — and a Signal
+            # Desk Turn that drew nothing *and* said nothing is exactly the one
+            # whose reader most needs to be told why.
+            data["signal_desk_absence"] = outcome.signal_desk_absence
         running.publisher.terminal(
             terminal_event_for(status, has_content=bool(text)),
             status=status,
             terminal_reason=terminal_reason,
-            data={"message_id": record.response_message_id},
+            data=data,
         )
         return record
 
@@ -501,7 +537,7 @@ class TurnService:
                 answer=None if draft is None else (draft.answer or None),
                 thoughts=() if draft is None else draft.thoughts,
                 tool_calls=calls,
-                canvases=() if draft is None else draft.canvases,
+                signal_desks=() if draft is None else draft.signal_desks,
                 status=status,
             )
             if text

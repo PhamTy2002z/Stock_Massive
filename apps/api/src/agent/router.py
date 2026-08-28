@@ -56,6 +56,7 @@ from src.agent.persistence import (
 )
 from src.agent.prompt import RuntimeContext
 from src.agent.schemas import (
+    AllowanceResponse,
     ArtifactResponse,
     CreatedTurnResponse,
     CreateThreadRequest,
@@ -66,8 +67,10 @@ from src.agent.schemas import (
     ThreadResponse,
     TurnResponse,
     UpdateThreadRequest,
+    UsageResponse,
 )
 from src.agent.service import AlphaDeskService, alpha_desk
+from src.agent.usage import Allowance, read_usage
 from src.agent.sse import frames
 from src.auth.dependencies import CurrentUser
 from src.auth.models import User
@@ -350,6 +353,10 @@ async def create_turn(
     the message and the ``agent_turn`` row and start execution — a crash between
     the commit and the task start is recoverable as an incomplete Turn rather
     than as an invisible or duplicated request.
+
+    ``mode`` is carried through untouched. It is the switch the reader threw,
+    and this layer neither interprets it nor defaults it a second time: the
+    schema owns the two values and the loop owns what they promise.
     """
     desk.assert_enabled()
     view: ThreadView | None = await desk.store.read_thread(current_user.id, thread_id)
@@ -370,6 +377,7 @@ async def create_turn(
             symbols=payload.symbols,
             history=history_of(view.messages),
             retry_of_turn_id=payload.retry_of_turn_id,
+            mode=payload.mode,
         )
     except TurnPayloadConflict as conflict:
         raise HTTPException(
@@ -455,10 +463,44 @@ async def read_turn(
     return TurnResponse(**_turn(record))
 
 
+# -- the account's own allowance ------------------------------------------------
+
+
+@router.get("/usage", response_model=UsageResponse)
+async def read_usage_endpoint(current_user: CurrentUser) -> UsageResponse:
+    """What this account has consumed against its ceilings.
+
+    Read-only, and scoped to the caller: the user id comes from the resolved
+    session and is never accepted as a parameter, so there is no shape of this
+    request that reads another account's ledger.
+
+    It exists because the refusals it explains are otherwise invisible until
+    they happen. ``user_turn_starts_daily`` and ``user_spend_daily`` are decided
+    from the same windows and the same charge expression this reads (see
+    ``agent/usage.py``), so the number here is the number that will refuse the
+    next Turn — not an estimate of it.
+    """
+    snapshot = await read_usage(current_user.id)
+    return UsageResponse(
+        as_of=snapshot.as_of,
+        turns_today=_allowance(snapshot.turns_today),
+        spend_today_micro_usd=_allowance(snapshot.spend_today_micro_usd),
+        spend_rolling_30d_micro_usd=_allowance(snapshot.spend_rolling_30d_micro_usd),
+    )
+
+
+def _allowance(value: Allowance) -> AllowanceResponse:
+    return AllowanceResponse(
+        used=value.used,
+        limit=value.limit,
+        resets_at=value.resets_at,
+    )
+
+
 # -- cancel ----------------------------------------------------------------
 
 
-# -- one canvas ------------------------------------------------------------
+# -- one Signal Desk ------------------------------------------------------------
 
 
 @router.get("/artifacts/{artifact_id}", response_model=ArtifactResponse)
@@ -467,7 +509,7 @@ async def read_artifact(
     current_user: CurrentUser,
     desk: Desk,
 ) -> ArtifactResponse:
-    """The numbers behind one canvas, for the reader whose answer produced it.
+    """The numbers behind one Signal Desk, for the reader whose answer produced it.
 
     The one route ``frames`` travels. It is a separate request from the
     transcript on purpose: a heatmap is thousands of cells and a conversation
@@ -490,7 +532,7 @@ async def read_artifact(
         study_name=record.study_name,
         study_version=record.study_version,
         params=dict(record.params),
-        canvas_spec=dict(record.canvas_spec),
+        signal_desk_spec=dict(record.signal_desk_spec),
         frames=dict(record.frames),
         provenance=dict(record.provenance),
         created_at=record.created_at,

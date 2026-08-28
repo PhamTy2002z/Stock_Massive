@@ -39,10 +39,12 @@ charge against the six external calls a Turn may make.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from typing import Any
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from src import studies
@@ -75,11 +77,11 @@ MAX_RESULT_CHARS = 32_000
 #: for one key.
 STUDY_ARGUMENT = "name"
 
-RENDER_CANVAS_DESCRIPTION = (
-    "Draw a canvas out of frames you gathered earlier in this same turn with "
+RENDER_SIGNAL_DESK_DESCRIPTION = (
+    "Draw a Signal Desk out of frames you gathered earlier in this same turn with "
     "get_series or run_study. Each block names a widget and one frameId; the "
     "server picks the widget's version and its presentation. A block it cannot "
-    "draw is dropped with the reason and the rest of the canvas is still shown, "
+    "draw is dropped with the reason and the rest of the Signal Desk is still shown, "
     "so a mistake in one block costs one block. Use it when there is no study "
     "for the question and you have gathered the numbers yourself."
 )
@@ -89,7 +91,7 @@ RENDER_CANVAS_DESCRIPTION = (
 #: Built from the same catalog the Studies are checked against, so a widget
 #: added for a Study is composable the moment it exists and a widget retired
 #: stops being offered without a second list to remember.
-def render_canvas_schema() -> dict[str, Any]:
+def render_signal_desk_schema() -> dict[str, Any]:
     """The argument object: a title, and the blocks in the order they read."""
     names = sorted({name for name, _ in widgets.CATALOG})
     return {
@@ -145,13 +147,13 @@ def _widget_guide() -> str:
     )
 
 
-def summarise_render_canvas(arguments: Mapping[str, Any]) -> str:
-    """The rail row for a composed canvas: its title and how many blocks."""
+def summarise_render_signal_desk(arguments: Mapping[str, Any]) -> str:
+    """The rail row for a composed signal_desk: its title and how many blocks."""
     title = str(arguments.get("title") or "").strip()
     blocks = arguments.get("blocks")
     count = len(blocks) if isinstance(blocks, list) else 0
     span = f" · {count} khối" if count else ""
-    return f"Vẽ canvas: {title}{span}" if title else f"Vẽ canvas{span}"
+    return f"Vẽ signal_desk: {title}{span}" if title else f"Vẽ signal_desk{span}"
 
 
 SessionOpener = Callable[[], Any]
@@ -213,7 +215,7 @@ def run_study_description() -> str:
     lines = [
         "Run one Study — a named, versioned analysis recipe computed from this "
         "system's own store — and get back the headline figures plus the id of "
-        "the canvas it produced. Use it whenever the honest answer is a shape "
+        "the Signal Desk it produced. Use it whenever the honest answer is a shape "
         "over time or across buckets rather than a single number: a session "
         "profile, a distribution, a ranking, anything a reader would want drawn. "
         "The reader is shown the whole picture; you are shown the headline, "
@@ -304,6 +306,35 @@ def summarise_list_studies(_arguments: Mapping[str, Any]) -> str:
     return "Xem danh mục phân tích"
 
 
+
+logger = logging.getLogger(__name__)
+
+class ArtifactNotStored(RuntimeError):
+    """The numbers were computed and the store would not take them.
+
+    Its own type, and its message says nothing but that, because of where the
+    message ends up. ``executor`` renders a failed tool call as ``f"{name}
+    failed: {exc}"`` and hands that text to the model — and a SQLAlchemy error
+    stringifies to the statement **and its bound parameters**, which for this
+    write is the whole ``frames`` payload. The rule that frames never enter a
+    message the model sees would then hold only while the database was healthy.
+    So the driver's text is logged and never re-raised.
+    """
+
+
+@contextmanager
+def _artifact_write(what: str) -> Iterator[None]:
+    """Let a store failure end the call without the payload riding along."""
+    try:
+        yield
+    except SQLAlchemyError as exc:
+        # ``orig`` is the driver's own error — a constraint name or a connection
+        # message — without SQLAlchemy's rendered statement and parameters.
+        driver = getattr(exc, "orig", None) or exc.__class__.__name__
+        logger.warning("Storing the %s artifact failed: %s", what, driver)
+        raise ArtifactNotStored(f"the {what} artifact could not be stored") from exc
+
+
 class StudyTools:
     """List the recipes, and run one of them into an artifact."""
 
@@ -363,13 +394,13 @@ class StudyTools:
                 max_result_size_chars=MAX_RESULT_CHARS,
             ),
             ToolEntry(
-                name="render_canvas",
+                name="render_signal_desk",
                 toolset=TOOLSET,
-                description=RENDER_CANVAS_DESCRIPTION,
-                schema=render_canvas_schema(),
-                handler=self.render_canvas,
-                display_name="Vẽ canvas",
-                summarise=summarise_render_canvas,
+                description=RENDER_SIGNAL_DESK_DESCRIPTION,
+                schema=render_signal_desk_schema(),
+                handler=self.render_signal_desk,
+                display_name="Vẽ signal_desk",
+                summarise=summarise_render_signal_desk,
                 effect=ToolEffect.READ,
                 idempotency=ToolIdempotency.IDEMPOTENT,
                 access=ToolAccess.STORE,
@@ -424,14 +455,15 @@ class StudyTools:
 
         with self._open() as session:
             try:
-                artifact = studies.run(
-                    name,
-                    _params_for(definition, arguments),
-                    session=session,
-                    turn_id=context.turn_id,
-                    thread_id=context.thread_id,
-                    warm=warmup.warm,
-                )
+                with _artifact_write(name):
+                    artifact = studies.run(
+                        name,
+                        _params_for(definition, arguments),
+                        session=session,
+                        turn_id=context.turn_id,
+                        thread_id=context.thread_id,
+                        warm=warmup.warm,
+                    )
             except StudyParamsInvalid as invalid:
                 raise ValueError(
                     f"{name} cannot run with those parameters — {invalid}"
@@ -451,21 +483,21 @@ class StudyTools:
                 "studyName": artifact.study_name,
                 "studyVersion": artifact.study_version,
                 # What the browser fetches the picture by. The model is given it
-                # so it can say a canvas exists, and it has no way to read one.
+                # so it can say a Signal Desk exists, and it has no way to read one.
                 "artifactId": str(artifact.id),
-                "title": artifact.canvas_spec.title,
-                "blockCount": len(artifact.canvas_spec.blocks),
+                "title": artifact.signal_desk_spec.title,
+                "blockCount": len(artifact.signal_desk_spec.blocks),
                 "headline": dict(artifact.headline),
                 "provenance": artifact.provenance.to_payload(),
             }
 
-    def render_canvas(
+    def render_signal_desk(
         self, context: ToolContext, arguments: Mapping[str, Any]
     ) -> Mapping[str, Any]:
         """Draw the frames this Turn gathered, dropping only what cannot be drawn.
 
         **Degrading is per block.** A model that named the wrong widget for one
-        frame has still gathered four good ones, and refusing the canvas would
+        frame has still gathered four good ones, and refusing the Signal Desk would
         throw those away over a mistake it could fix in the next round. So a bad
         block is dropped with its reason returned, and the reasons are what the
         model reads.
@@ -482,17 +514,17 @@ class StudyTools:
             raise ValueError("blocks must name at least one widget and frame")
         if len(raw) > frames_buffer.MAX_BLOCKS:
             raise ValueError(
-                f"a canvas holds at most {frames_buffer.MAX_BLOCKS} blocks; "
+                f"a Signal Desk holds at most {frames_buffer.MAX_BLOCKS} blocks; "
                 f"{len(raw)} were asked for"
             )
 
         with self._open() as session:
-            already = frames_buffer.canvases_composed(session, context.turn_id)
-            if already >= frames_buffer.MAX_CANVASES_PER_TURN:
+            already = frames_buffer.signal_desks_composed(session, context.turn_id)
+            if already >= frames_buffer.MAX_SIGNAL_DESKS_PER_TURN:
                 return {
                     "error": "cannot_read",
                     "detail": (
-                        f"this turn has already drawn {already} canvases, which "
+                        f"this turn has already drawn {already} signal_desks, which "
                         "is the most it may draw"
                     ),
                 }
@@ -558,15 +590,16 @@ class StudyTools:
                 }
 
             provenance = _merged_provenance(sources)
-            artifact_id = frames_buffer.store_composition(
-                session,
-                title=title,
-                frames=frames,
-                blocks=tuple(blocks),
-                provenance=provenance,
-                turn_id=context.turn_id,
-                thread_id=context.thread_id,
-            )
+            with _artifact_write(frames_buffer.COMPOSITION_KIND):
+                artifact_id = frames_buffer.store_composition(
+                    session,
+                    title=title,
+                    frames=frames,
+                    blocks=tuple(blocks),
+                    provenance=provenance,
+                    turn_id=context.turn_id,
+                    thread_id=context.thread_id,
+                )
 
         return {
             "studyName": frames_buffer.COMPOSITION_KIND,
@@ -629,8 +662,8 @@ def _merged_provenance(sources: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """One claim over several frames: the oldest as-of, the worst health.
 
     Both in the pessimistic direction, because a strip is read as a statement
-    about the whole panel: a canvas holding one week-old frame is a week-old
-    canvas, and one holding a degraded frame is not a healthy one.
+    about the whole panel: a Signal Desk holding one week-old frame is a week-old
+    signal_desk, and one holding a degraded frame is not a healthy one.
     """
     order = {"normal": 0, "degraded": 1, "unavailable": 2}
     health = "normal"
@@ -704,18 +737,18 @@ def register_study_tools(**kwargs: Any) -> tuple[ToolEntry, ...]:
 
 __all__ = [
     "LIST_STUDIES_DESCRIPTION",
-    "RENDER_CANVAS_DESCRIPTION",
+    "RENDER_SIGNAL_DESK_DESCRIPTION",
     "LIST_STUDIES_SCHEMA",
     "MAX_RESULT_CHARS",
     "STUDY_ARGUMENT",
     "TOOLSET",
     "StudyTools",
     "register_study_tools",
-    "render_canvas_schema",
+    "render_signal_desk_schema",
     "run_study_description",
     "run_study_schema",
     "study_parameters",
     "summarise_list_studies",
-    "summarise_render_canvas",
+    "summarise_render_signal_desk",
     "summarise_run_study",
 ]

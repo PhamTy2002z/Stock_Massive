@@ -71,7 +71,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from src.alpha.models import (
     TOOL_CALL_OK,
@@ -128,6 +128,7 @@ from .messages import (
     CHARS_PER_TOKEN,
     MAX_SUMMARY_CHARS,
     MESSAGE_OVERHEAD_TOKENS,
+    NO_SIGNAL_DESK_TOOL_CALLED,
     SUMMARY_LABEL,
     THOUGHT,
     ConstructedContext,
@@ -138,7 +139,8 @@ from .messages import (
     TranscriptTurn,
     TurnToolCall,
     build_messages,
-    canvas_of,
+    signal_desk_absence,
+    signal_desk_of,
     display_results,
     estimate_tokens,
     outcome_of,
@@ -290,6 +292,36 @@ MAX_EXTERNAL_TOOL_CALLS = 6
 EXTERNAL_TOOL_EXHAUSTED_MESSAGE = (
     "This turn has reached its limit on external tool calls. Answer from what has "
     "already been gathered, and say what you could not look up."
+)
+
+# How the Turn was asked, as the surface the reader pressed the switch on.
+#
+# One type, named here rather than in the transport's schema, because the loop
+# is what has to behave differently: the wire shape is a restatement of this and
+# imports it, so the two cannot come to disagree about what a mode is called.
+#
+# ``chat`` is the default and means the reader asked a question. ``signal_desk``
+# means they asked it with the switch that draws thrown, and the difference is a
+# promise rather than a layout: the Turn either produces a Signal Desk or says in a
+# named code why it could not.
+TurnMode = Literal["chat", "signal_desk"]
+CHAT_MODE: TurnMode = "chat"
+SIGNAL_DESK_MODE: TurnMode = "signal_desk"
+
+# What a ``signal_desk`` Turn is told, on every call rather than once.
+#
+# A system note rather than a section of the prompt, because the prompt is
+# identical for every Turn — that is what makes it a cacheable prefix — and the
+# mode is a fact about this one. The *rule* is in the prompt
+# (``prompt/sections.py``); this says which Turn it applies to.
+#
+# Sent with every call of the Turn, like the rounds-exhausted note and unlike
+# ``state.note``: a mode holds for the whole Turn, and a model told once in
+# round one has to remember it through three more rounds of tool results.
+SIGNAL_DESK_NOTE = (
+    "This turn was asked from the Signal Desk, the surface that draws. Reach "
+    "for a Signal Desk-producing tool wherever the question admits one, and when "
+    "none does, answer in prose and say plainly what could not be drawn."
 )
 
 ROUNDS_EXHAUSTED_NOTE = (
@@ -572,7 +604,12 @@ class TurnRequest:
     #: to say, so it travels here and into ``ToolContext`` rather than into a
     #: schema.
     turn_id: uuid.UUID | str | None = None
-
+    #: Which surface asked this Turn, and what it is owed in return.
+    #:
+    #: Defaulted, so every caller written before the Signal Desk existed — a
+    #: test driving the loop, the transport before the switch was added — asks
+    #: for exactly the Turn it always asked for.
+    mode: TurnMode = CHAT_MODE
 
 
 @dataclass(frozen=True)
@@ -595,10 +632,10 @@ class TurnDraft:
     #: drew — a reader who reconnected must not lose the timeline.
     answer: str | None = None
     thoughts: tuple[Mapping[str, Any], ...] = ()
-    #: The canvases produced so far, as the ``canvas.ready`` events announced
+    #: The Signal Desks produced so far, as the ``signal_desk.ready`` events announced
     #: them. Checkpointed for the same reason the thoughts are: a snapshot built
     #: from a checkpoint has to say everything the stream already said.
-    canvases: tuple[Mapping[str, Any], ...] = ()
+    signal_desks: tuple[Mapping[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -618,8 +655,17 @@ class TurnOutcome:
     #: from, and these two are what a screen draws.
     answer: str | None = None
     thoughts: tuple[Mapping[str, Any], ...] = ()
-    #: The canvases this Turn produced, so the canonical message can name them.
-    canvases: tuple[Mapping[str, Any], ...] = ()
+    #: The Signal Desks this Turn produced, so the canonical message can name them.
+    signal_desks: tuple[Mapping[str, Any], ...] = ()
+    #: Why a ``signal_desk`` Turn drew nothing, and ``None`` whenever that
+    #: question does not arise — a Turn that drew something, or one asked as
+    #: ordinary chat.
+    #:
+    #: The switch the reader pressed is a promise, so the Turn has to account
+    #: for it: either a Signal Desk was announced or this names, in a stable code,
+    #: what stopped one. A ``signal_desk`` Turn that ended in prose with nothing
+    #: here would be the silence the mode exists to prevent.
+    signal_desk_absence: str | None = None
     #: Wall-clock milliseconds this Turn took, for the line that says so.
     elapsed_ms: int = 0
     #: The route's id for the last call it answered, so a disputed answer can be
@@ -636,7 +682,7 @@ class TurnPublisher(Protocol):
     observe, and the SSE layer is free to add events of its own that the loop
     knows nothing about.
 
-    ``canvas_ready`` is reached through :func:`getattr` rather than called
+    ``signal_desk_ready`` is reached through :func:`getattr` rather than called
     outright, so a transport written before Studies existed — a test double, an
     older surface — still streams a Turn that produced one instead of failing on
     the announcement. The artifact is committed either way; what such a reader
@@ -649,8 +695,8 @@ class TurnPublisher(Protocol):
     def tool_call(self, payload: Mapping[str, Any]) -> Any:
         """One tool call's current state: ``id``, ``name``, ``status``, ``summary``."""
 
-    def canvas_ready(self, payload: Mapping[str, Any]) -> Any:
-        """One canvas a Study produced: the id to fetch it by, and its shape."""
+    def signal_desk_ready(self, payload: Mapping[str, Any]) -> Any:
+        """One Signal Desk a Study produced: the id to fetch it by, and its shape."""
 
 
 Checkpoint = Callable[[TurnDraft], Awaitable[None] | None]
@@ -703,6 +749,11 @@ class _TurnState:
     #: next Turn, and deliberately unchanged by the split below: how a surface
     #: chooses to draw a sentence must not change what the model saw.
     started: float = field(default_factory=time.monotonic)
+    #: Which surface asked, copied from the request so every terminal path can
+    #: read it: :meth:`AgentLoop._ended` is reached from a dozen call sites and
+    #: threading the request through all of them to answer one question is how
+    #: one of them comes to be forgotten.
+    mode: TurnMode = CHAT_MODE
     text: str | None = None
     #: The same prose minus the thoughts: what the *reader* is shown as the
     #: reply. Held separately rather than derived by subtracting one string from
@@ -711,11 +762,11 @@ class _TurnState:
     answer: str | None = None
     #: Prose written in a round that went on to call tools, keyed by that round.
     thoughts: dict[int, str] = field(default_factory=dict)
-    #: The canvases this Turn's tools produced, keyed by artifact id and in the
+    #: The Signal Desks this Turn's tools produced, keyed by artifact id and in the
     #: order they were announced. Held so a checkpoint carries them: a reader
     #: rebuilding from one has to be told a picture exists, and the numbers it
     #: draws are in a row this loop never sees.
-    canvases: dict[str, Mapping[str, Any]] = field(default_factory=dict)
+    signal_desks: dict[str, Mapping[str, Any]] = field(default_factory=dict)
     tool_rounds: int = 0
     usage: Usage = field(default_factory=Usage)
     calls: list[TurnToolCall] = field(default_factory=list)
@@ -763,7 +814,7 @@ class _TurnState:
             thoughts=self.narration(),
             rounds_used=self.tool_rounds,
             tool_calls=tuple(self.calls),
-            canvases=tuple(self.canvases.values()),
+            signal_desks=tuple(self.signal_desks.values()),
             boundary=boundary,
         )
 
@@ -823,7 +874,7 @@ class AgentLoop:
             return await self._run(request, cancelled)
 
     async def _run(self, request: TurnRequest, cancelled: Cancelled) -> TurnOutcome:
-        state = _TurnState()
+        state = _TurnState(mode=request.mode)
         surface = resolve_tool_surface(self._toolsets)
         tools = surface.offered_schemas
         turn_budget = TurnBudget(
@@ -1025,8 +1076,12 @@ class AgentLoop:
         # Room for whatever is appended after the context is built, so the
         # ceiling the transcript is trimmed against and the request that
         # actually goes out cannot disagree.
-        reserved = (SYSTEM_NOTE_TOKENS if exhausted else 0) + (
-            SYSTEM_NOTE_TOKENS if state.note else 0
+        reserved = (
+            (SYSTEM_NOTE_TOKENS if exhausted else 0)
+            + (SYSTEM_NOTE_TOKENS if state.note else 0)
+            # Every call of a ``signal_desk`` Turn carries the mode note, so the
+            # room for it is reserved every time as well.
+            + (SYSTEM_NOTE_TOKENS if request.mode == SIGNAL_DESK_MODE else 0)
         )
         if reserved:
             budget = replace(budget, max_tokens=budget.max_tokens - reserved)
@@ -1164,6 +1219,11 @@ class AgentLoop:
             state.summary_needed = state.summary_needed or context.summary_needed
             messages = list(context.messages)
             reserved = 0
+            if request.mode == SIGNAL_DESK_MODE:
+                messages.append(
+                    Message(role=Role.SYSTEM, content=SIGNAL_DESK_NOTE)
+                )
+                reserved += SYSTEM_NOTE_TOKENS
             if exhausted:
                 messages.append(
                     Message(role=Role.SYSTEM, content=ROUNDS_EXHAUSTED_NOTE)
@@ -1504,9 +1564,9 @@ class AgentLoop:
         # is: the executor is holding the object.
         if outcome is not None:
             for result in outcome.results:
-                canvas = canvas_of(result.tool_name, result.payload)
-                if canvas is not None:
-                    self._publish_canvas(state, canvas)
+                signal_desk = signal_desk_of(result.tool_name, result.payload)
+                if signal_desk is not None:
+                    self._publish_signal_desk(state, signal_desk)
 
         if timed_out:
             return TOOL_TIMEOUT
@@ -1623,16 +1683,16 @@ class AgentLoop:
         if self._publisher is not None:
             self._publisher.tool_call(call.as_wire())
 
-    def _publish_canvas(self, state: _TurnState, canvas: Mapping[str, Any]) -> None:
-        """Remember one canvas and announce it, in that order.
+    def _publish_signal_desk(self, state: _TurnState, signal_desk: Mapping[str, Any]) -> None:
+        """Remember one Signal Desk and announce it, in that order.
 
         Remembered first because the checkpoint is what a reconnecting browser
         rebuilds from, and a picture announced but not written down would be
         lost to exactly the reader who most needs to be told about it.
         """
-        payload = {**canvas, "round": state.tool_rounds}
-        state.canvases[str(payload["artifactId"])] = payload
-        announce = getattr(self._publisher, "canvas_ready", None)
+        payload = {**signal_desk, "round": state.tool_rounds}
+        state.signal_desks[str(payload["artifactId"])] = payload
+        announce = getattr(self._publisher, "signal_desk_ready", None)
         if announce is not None:
             announce(payload)
 
@@ -1682,15 +1742,27 @@ class AgentLoop:
         cancelled still produced prose, and prose is what makes an ``incomplete``
         useful rather than empty — the difference ``docs/adr/0013`` draws between
         ``incomplete`` and ``failed``.
+
+        It is also where a ``signal_desk`` Turn settles its account. Every way a
+        Turn can end passes through here, including the ones that end badly, so
+        a Turn that was asked for a picture and has none names the reason on
+        exactly the paths where it is most likely to be missed — a route
+        failure, a deadline, a cancellation.
         """
         await self._save(state, boundary=True)
+        absent = (
+            signal_desk_absence(state.calls)
+            if state.mode == SIGNAL_DESK_MODE and not state.signal_desks
+            else None
+        )
         return TurnOutcome(
             status=status,
             terminal_reason=terminal_reason,
             text=state.text,
             answer=state.answer,
             thoughts=state.narration(),
-            canvases=tuple(state.canvases.values()),
+            signal_desks=tuple(state.signal_desks.values()),
+            signal_desk_absence=absent,
             elapsed_ms=int((time.monotonic() - state.started) * 1000),
             rounds_used=state.tool_rounds,
             rounds_exhausted=rounds_exhausted,
@@ -1740,6 +1812,7 @@ __all__ = [
     "AUTH_UNAVAILABLE",
     "CANCELLED_BY_USER",
     "CHARS_PER_TOKEN",
+    "CHAT_MODE",
     "CONTENT_POLICY_BLOCKED",
     "CONTEXT_COMPRESSION_FACTOR",
     "CONTEXT_OVERFLOW",
@@ -1758,6 +1831,7 @@ __all__ = [
     "MIN_OUTPUT_TOKENS",
     "MODEL_REFUSAL",
     "MODEL_UNAVAILABLE",
+    "NO_SIGNAL_DESK_TOOL_CALLED",
     "OUTPUT_CAP_EXCEEDED",
     "OUTPUT_TOKENS_REDUCTION_FACTOR",
     "ROUNDS_EXHAUSTED_NOTE",
@@ -1766,6 +1840,8 @@ __all__ = [
     "ROUTE_RATE_LIMITED",
     "SCHEMA_REJECTED",
     "SESSION_CONCURRENCY",
+    "SIGNAL_DESK_MODE",
+    "SIGNAL_DESK_NOTE",
     "SUMMARY_LABEL",
     "SYSTEM_NOTE_TOKENS",
     "TOOL_TIMEOUT",
@@ -1786,6 +1862,7 @@ __all__ = [
     "TranscriptTurn",
     "TurnDraft",
     "TurnAdmission",
+    "TurnMode",
     "TurnOutcome",
     "TurnPreflight",
     "TurnPublisher",
@@ -1795,6 +1872,7 @@ __all__ = [
     "TurnToolCall",
     "assert_distinct_ids",
     "build_messages",
+    "signal_desk_absence",
     "estimate_tokens",
     "shown_result",
     "summarise_call",

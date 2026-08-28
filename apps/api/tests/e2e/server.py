@@ -119,14 +119,14 @@ class Control:
         self.release = asyncio.Event()
         self.text = ""
         self.publisher: Any | None = None
-        self.canvases: list[dict[str, Any]] = []
+        self.signal_desks: list[dict[str, Any]] = []
 
     def reset(self) -> None:
         self.started = asyncio.Event()
         self.release = asyncio.Event()
         self.text = ""
         self.publisher = None
-        self.canvases = []
+        self.signal_desks = []
 
     def say(self, text: str) -> None:
         """Publish one ``content.delta``, exactly as the loop would.
@@ -159,7 +159,7 @@ class Control:
 
 
     def draw(self, artifact_id: str) -> None:
-        """Persist one canvas and announce it, exactly as a Study round would.
+        """Persist one Signal Desk and announce it, exactly as a Study round would.
 
         Both halves, because the browser does both: it opens the panel on the
         event and then fetches the row by the id the event carried. Announcing
@@ -167,15 +167,15 @@ class Control:
         """
         if self.publisher is None:
             raise HTTPException(status_code=409, detail="No Turn is running")
-        canvas = {
+        signal_desk = {
             "artifactId": artifact_id,
             "studyName": "intraday_liquidity_profile",
             "title": "Thanh khoản trong phiên — STB",
             "blockCount": 1,
             "round": 0,
         }
-        self.canvases.append(canvas)
-        self.publisher.canvas_ready(canvas)
+        self.signal_desks.append(signal_desk)
+        self.publisher.signal_desk_ready(signal_desk)
 
 
 CONTROL = Control()
@@ -218,7 +218,7 @@ class ScriptedLoop:
             rounds_used=0,
             rounds_exhausted=False,
             tool_calls=calls,
-            canvases=tuple(self._control.canvases),
+            signal_desks=tuple(self._control.signal_desks),
             usage=Usage(),
         )
 
@@ -284,7 +284,7 @@ class ChurnRequest(BaseModel):
 
 
 class DrawRequest(BaseModel):
-    """Which Thread and Turn the canvas belongs to, so the fetch authorises."""
+    """Which Thread and Turn the Signal Desk belongs to, so the fetch authorises."""
 
     thread_id: str
     turn_id: str
@@ -361,7 +361,7 @@ async def draw(request: DrawRequest) -> dict[str, str]:
                         },
                     }
                 },
-                canvas_spec={
+                signal_desk_spec={
                     "title": "Thanh khoản trong phiên — STB",
                     "blocks": [
                         {
