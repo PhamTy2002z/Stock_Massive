@@ -24,10 +24,30 @@ Repo vừa rẽ khỏi "nền tảng dữ liệu chứng khoán" sang "AI produc
 3. **Hard freeze ngoài `src/agent/*`** — PR duy nhất được nhận là harness,
    auth tenant, budget schema. Bug feature chứng khoán (không còn) không
    fix. Feature stocks mới không nhận. **Mở từ 2026-08-26** cho đúng bốn
-   surface của canvas dynamic: `src/studies/*` (mới) · `src/stocks/
-   intraday/*` (mới) · bundle `studies` trong `src/agent/` · surface canvas
-   trong `apps/web`. Phần còn lại của `src/stocks/*` vẫn freeze tới khi
-   phase 08 của plan canvas mở spine market-wide.
+   surface của Signal Desk: `src/studies/*` (mới) · `src/stocks/
+   intraday/*` (mới) · bundle `studies` trong `src/agent/` · surface Signal Desk
+   trong `apps/web`. **Mở thêm 2026-08-27** cho spine daily của phase 08a:
+   `src/stocks/providers/vnstock_daily.py` (mới) · `src/stocks/
+   backfill_daily.py` (mới) · `src/stocks/listing_roster.py` ·
+   `src/stocks/universe.py`. **Mở thêm 2026-08-28** cho plan
+   `plans/260828-2126-price-basis-and-signal-field-spine/` — chuyển 30 Signal
+   Field khỏi giá FiinQuant sang `bar_daily`, đúng tám surface dưới đây, mỗi
+   surface kèm giới hạn của nó:
+
+   | Surface | Giới hạn |
+   |---|---|
+   | `stocks/trading_day.py` | đổi nguồn lịch sang `bar_daily`, giữ nguyên chữ ký hàm công khai |
+   | `stocks/signals/{sessions,bars}.py` | chuyển nguồn + luật basis mới; không thêm Signal Field |
+   | `stocks/signals/corporate_actions.py` | vá `_session_low`; không đổi công thức hệ số |
+   | `stocks/signals/{price_band,market_behavior}.py` | cổng basis thứ hai + band từ luật sàn |
+   | `stocks/signals/{registry,serving,issues,cross_sectional,foreign_flow,fields}.py` | khai projection + refusal đúng input; không thêm mã refusal mới |
+   | `stocks/providers/{contracts,store}.py` | gỡ FiinQuant khỏi bản đồ ownership |
+   | `stocks/schemas/snapshot.py` | gỡ echo REST của nguồn đã xoá |
+   | `stocks/signals/earnings.py` (mới) | Signal Field `earnings.*` |
+
+   Bảng này **là** ranh giới. File nằm ngoài bảng cần amendment mới, không
+   phải một dòng nới. Phần còn lại của `src/stocks/*` — `realtime/*`,
+   `providers/normalize.py`, `models.py` ngoài bảng mới — **vẫn freeze**.
 
 Nguồn data ngoài duy nhất được phép: **vnstock Bronze giai đoạn dev
 (180 req/phút), Diamond khi lên prod (600 req/phút, licence phân phối
@@ -38,26 +58,26 @@ Rollback: tag `v-with-market-surfaces` trên `origin` (đã push 2026-08-26)
 
 # Roadmap harness
 
-- **Phase 0 (đã xong 2026-08-25):** rip market surfaces xuống lane chat.
-  940 test API pass, 406 test web pass, type-check/lint/build xanh.
-- **Phase 1 (hoãn sau canvas):** tham số hoá `agent/prompt/` +
-  `agent/toolsets.py` thành **domain pack** — `signals` bundle chuyển
-  thành pack `vn-equity` (prompt fragment + tool bundle + universe khái
-  niệm). Bundle `web` + `memory` là core. Hoãn vì Study/canvas thêm bundle
-  `studies` vào cùng chỗ pack sẽ tham số hoá; làm pack trước sẽ phải sửa
-  hai lần.
-- **Phase 2:** B2B foundations — multi-tenant workspace, thread ownership
-  theo tenant, budget owner đổi khoá `(tenant, user)`, memory tenant
-  isolation. Mở rộng phạm vi hard freeze thành `src/agent/*` + `src/auth/*`
-  + `src/core/config`.
-- **Phase 3:** domain pack thứ hai để phá giả định "chứng khoán là duy
-  nhất".
-- **Backlog:** realtime path (unfreeze sau harness đa domain, chỉ chạy
-  trên vnstock Diamond staging/prod).
+Authority: **`docs/roadmap.md`** — hai track, mỗi phase có Objective ·
+Trước→Sau · checklist · gate. Tóm tắt:
 
-## Đã chốt 2026-08-26 — canvas dynamic qua Study
+- **Track C — Core harness (mọi user):** C0 nền lane chat (Current, xong
+  2026-08-25) · C1 search & tổng hợp có citation · C2 context & cache ·
+  C3 tool plane / nudge có trần / idempotency · C4 evaluator plane (Golden
+  Question Set, dựng lại sau khi rip eval) · C5 domain pack + progressive
+  instruction (Phase 1 cũ) · C6 tenant / permission / entitlement (Phase 2
+  cũ) · C7 delegation có điều kiện · C8 domain pack thứ hai (Phase 3 cũ).
+- **Track S — Signal Desk (paid):** S0 runtime qua Study (Current, đang đóng)
+  · S1 thư viện Study + desk theo mã · S2 thesis + human approval · S3
+  proactive scan. Mọi S mở sau gate C4; entitlement gắn ở C6.
+- **Backlog:** realtime path (sau C8, chỉ vnstock Diamond).
 
-Lane chat kết xuất **canvas view động** thay vì chỉ trả text. Cơ chế:
+## Đã chốt 2026-08-26 — Signal Desk qua Study
+
+Lane chat kết xuất **Signal Desk** — surface phân tích động — thay vì chỉ trả
+text. Từ vựng chuẩn 2026-08-28: **Signal Desk**, không còn "canvas" trong
+code, contract hay tài liệu (cột `agent_artifact.signal_desk_spec`, revision
+`f8c2d4a96e17`). Cơ chế:
 model chọn một **Study** (recipe phân tích có tên, có version,
 deterministic) và điền params; **engine tính, artifact giữ số, registry
 vẽ**. Ba luật cứng:
@@ -65,8 +85,8 @@ vẽ**. Ba luật cứng:
 - `StudyResult.frames` — dãy/ma trận số — **không bao giờ** vào message
   gửi model. Model chỉ thấy `headline` (~300 token). Test đọc transcript
   giữ luật này.
-- Widget có **name + version**, danh mục ở `contracts/canvas-widget-
-  catalog.json` (sinh từ `src/studies/widgets.py`, test giữ đồng bộ).
+- Widget có **name + version**, danh mục ở `contracts/signal-desk-
+  widget-catalog.json` (sinh từ `src/studies/widgets.py`, test giữ đồng bộ).
   Viewer gặp version không biết → fallback `data_table`, không crash.
 - `as_of` đóng băng lúc tạo artifact; mở lại thread là **render lại
   artifact**, không tính lại.
@@ -160,10 +180,10 @@ Mọi đề xuất và triển khai vào `src/agent/` phải đọc `docs/hermes
 - Kết quả tool có bọc `<untrusted_tool_result>` do
   `registry.ToolEntry.reads_external` quyết, mặc định `True`. Tool đọc
   store khai `reads_external=False`.
-- **Canvas đi hai đường, cùng một luật.** `run_study` chạy công thức có tên;
-  `get_series` + `render_canvas` cho câu hỏi chưa có công thức. Cả hai trả
-  model **id + tóm tắt**, không bao giờ trả `frames`; loop phát `canvas.ready`
-  từ payload qua `messages.canvas_of`. Frame chỉ vẽ được bởi chính Turn tạo ra
+- **Signal Desk đi hai đường, cùng một luật.** `run_study` chạy công thức có tên;
+  `get_series` + `render_signal_desk` cho câu hỏi chưa có công thức. Cả hai trả
+  model **id + tóm tắt**, không bao giờ trả `frames`; loop phát `signal_desk.ready`
+  từ payload qua `messages.signal_desk_of`. Frame chỉ vẽ được bởi chính Turn tạo ra
   nó (`studies/frames_buffer.py`).
 - **"Chạy" và "trả về số" là hai việc.** `agent_tool_call.status` là `ok`
   cho ba loại: có số · `no_value:<signal issue>` · `cannot_read`.
@@ -185,11 +205,11 @@ Mọi đề xuất và triển khai vào `src/agent/` phải đọc `docs/hermes
   ledger vẫn ghi. Đặt cả bốn giá trị về `0` cho route thuê bao.
 - Web: sản phẩm là **một màn hình duy nhất** ở `/` — shell 2 vùng chính ở
   `src/components/shell/` (sidebar + cột chat). Inspector có đúng hai tab:
-  Nguồn và Phân tích (canvas). Chỉ `(auth)` là trang riêng.
-- Widget canvas có **name + version**; FE giữ registry ở
-  `components/canvas/widget-registry.ts` và test khớp nó với
-  `contracts/canvas-widget-catalog.json`. Không vẽ được → `data_table` kèm ghi
-  chú, không bao giờ khối trắng. Panel canvas nạp qua `next/dynamic` để
+  Nguồn và Signal Desk. Chỉ `(auth)` là trang riêng.
+- Widget Signal Desk có **name + version**; FE giữ registry ở
+  `components/signal-desk/widget-registry.ts` và test khớp nó với
+  `contracts/signal-desk-widget-catalog.json`. Không vẽ được → `data_table` kèm ghi
+  chú, không bao giờ khối trắng. Panel Signal Desk nạp qua `next/dynamic` để
   recharts không nằm trên đường first paint của lane chat.
 
 # Definition of done
@@ -233,7 +253,7 @@ Mọi đề xuất và triển khai vào `src/agent/` phải đọc `docs/hermes
   `stocks/realtime/storage.py` và `signals/foreign_share_flow.py` vẫn đọc.
 - **Stub Phase 1 domain pack:** `apps/api/plans/260826-1909-phase-1-
   domain-pack/` + `apps/api/src/agent/domain/` (không có importer).
-  Hoãn Phase 1 chờ quyết brief canvas dynamic (`docs/Text.txt`).
+  Hoãn Phase 1 chờ quyết brief Signal Desk (`docs/Text.txt`).
 
 **2026-08-25 (rip-out harness-first):**
 - **Web UI:** `view-board`, `view-news`, `view-new`, `watchlist-section`,

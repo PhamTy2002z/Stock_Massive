@@ -34,10 +34,12 @@ Nguồn quyết định: `plans/reports/proposal-260826-2107-ai-core-dynamic-can
 | 04 | [Bundle `studies` + event canvas.ready](phase-04-agent-tools-and-canvas-ready-event.md) | A | 01, 03 | **done** |
 | 05 | [Web canvas panel + widget registry v1](phase-05-web-canvas-panel-and-widget-registry.md) | A | **bước 0 (widgets trên fixture): chỉ cần 01-contracts — chạy song song 02–04**; wiring SSE: 04 | **done** |
 | 06 | [get_series + composition render_canvas](phase-06-series-evidence-and-composition.md) | B | 05 | **done** |
-| 07 | [Study entry_condition_review](phase-07-condition-review-study.md) | C | 06 | pending |
-| 08 | [Spine dữ liệu market-wide (trả nợ FiinQuant)](phase-08-market-wide-daily-spine.md) | D | 02 | pending |
-| 09 | [Store BCTC quý market-wide](phase-09-financial-statement-store.md) | E | 08 | pending |
-| 10 | [Study earnings_dislocation_screener](phase-10-earnings-screener.md) | E | 06, 09 | pending |
+| 07 | [Study entry_condition_review](phase-07-condition-review-study.md) | C | 06, 08a | **done** |
+| 08a | [Spine daily market-wide `bar_daily`](phase-08-market-wide-daily-spine.md) | D | 02 | **done** |
+| 08b | Luật price basis + xoá dòng fiinquant | D | 08a | **chuyển → `260828-2126-price-basis-and-signal-field-spine/` phase 02-08** |
+| 09a | [Store BCTC quý + ratio + job quét](phase-09-financial-statement-store.md) | E | 08a | **done** |
+| 09b | Signal Field `earnings.*` | E | 09a | **chuyển → `260828-2126-price-basis-and-signal-field-spine/` phase 09** |
+| 10 | [Study earnings_dislocation_screener](phase-10-earnings-screener.md) | E | 06, 08a, 09a | **done** |
 
 Song song, không chặn code: **email `support@vnstocks.com` xin điều khoản
 thương mại bằng văn bản** (R1 — chặn ngày launch). Việc của user, plan chỉ nhắc.
@@ -212,6 +214,27 @@ Nguồn: `plans/reports/audit-260826-2215-study-canvas-bottlenecks.md` (N1–N12
 Đo bằng `scripts/smoke_canvas.py` (phase 04). Tiền đề chưa đo: latency route
 LLM (luna qua proxy) — đo trước khi cam kết 8s là đạt được.
 
+## Quyết định 2026-08-27 — vì sao 08 tách hai và 07 đi sau nó
+
+Đo trước khi thi công: `bars.py::_basis_of` chỉ serve window **toàn `raw`**, và
+vnstock **không có** giá chưa điều chỉnh cho thị trường VN (probe bản đang cài:
+chỉ connector `fmp` có `adj_type`). Dòng `raw` duy nhất trong store là 36.528
+dòng **fiinquant** — nguồn đã tuyên bố vi phạm ToS. Ba hệ quả:
+
+1. **07 không tự ingest daily được** theo cách plan viết ("ghi
+   `provider_snapshots` để tái dùng reader `signals/bars.py`") — reader từ chối
+   mọi dòng vnstock. Nên 07 đi **sau** 08a và chỉ đọc store.
+2. **08 tách hai.** 08a dựng `bar_daily` (bảng typed mới, ghi `price_basis`
+   thành cột) — không đụng đường đọc của signals, blast radius bằng 0. 08b là
+   quyết định đổi luật basis của core rồi mới xoá fiinquant; nó đổi con số 25
+   Signal Field báo ra nên không đi kèm một backfill.
+3. **Acceptance #6 chưa đạt sau 08a** — nêu thẳng thay vì đánh dấu done.
+
+Hai số đo đổi cách chia việc: provider chặn **~2.000 dòng/call** (lấp ngược từ
+`end`; STB và VNINDEX cùng trả 1.997 dòng từ 2018-08-29), và thị trường có
+**1.523 mã STOCK listed** (HSX 405 · HNX 299 · UPCOM 819), không phải ~1.700 —
+`all_symbols()` 1.751 gồm cả bond, CW, ETF, future.
+
 ## Rủi ro cấp plan
 
 - **R1 licence** — không chặn dev, chặn launch. Theo dõi ngoài plan.
@@ -220,3 +243,20 @@ LLM (luna qua proxy) — đo trước khi cam kết 8s là đạt được.
 - **R3 vnstock không SLA** — mọi ingest idempotent + retry; store phục vụ.
 - **R5 mapping BCTC theo ngành** — cô lập trong phase 09, có golden test
   per-industry-template trước khi screener (10) được tin.
+
+## Plan chạy song song — điểm giao duy nhất
+
+`plans/260827-2325-evidence-led-chat-surface/` (UX + harness cho lane chat) chạy
+song song từ 2026-08-27 và **chặn ở đúng một chỗ**: phase 08 của nó thêm 3 cột
+additive trên `agent_thread` và **không được tạo alembic revision trước khi
+phase 09a ở đây merge** — `alembic heads` phải trả một dòng.
+
+Plan đó không đụng `src/stocks/*`, không đụng `src/studies/*`, không bump
+`PROMPT_VERSION`, và không đổi cấu trúc vòng tool của `loop.py` (chỉ đổi trần qua
+tham số ở phase 09 của nó). Hai chỗ nó **đọc** kết quả của plan này: `bar_daily`
++ `bar_intraday_15m.observed_at` cho độ mới dữ liệu, và `Provenance{as_of, health,
+sessions_used}` làm vốn từ cho tóm tắt bằng chứng — nên vốn từ đó không được đổi
+tên mà không nói.
+
+Test giữ luật của plan này (`frames` không reachable trong transcript,
+`test_agent_study_tools.py:155,178`) là **cổng cứng** của phase 10 bên đó.

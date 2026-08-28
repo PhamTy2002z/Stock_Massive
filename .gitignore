@@ -85,3 +85,6 @@ apps/api/.artifacts/
 .impeccable/hook.cache.json
 backups/
 .DS_Store
+
+# Subagent scratch memory: machine-local, not a project artifact.
+.claude/agent-memory/

@@ -1,3 +1,8 @@
+> **Stale sau pivot 2026-08-25.** Thư mục này viết trước rip-out: còn trỏ tới
+> `docs/harness-roadmap.md`, `docs/system-roadmap.md` (đã xoá) và `src/eval/*`
+> (đã rip). Thứ tự phase hiện hành nằm ở [`docs/roadmap.md`](../roadmap.md).
+> Đọc phần dưới như product contract và evidence, không như thứ tự thi công.
+
 # Investment Intelligence Harness — Source of Truth
 
 Thư mục này là authority cho contract và kiến trúc AI của Stock_Massive. Nó

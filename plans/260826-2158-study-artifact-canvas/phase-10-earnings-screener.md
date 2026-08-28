@@ -1,7 +1,19 @@
 # Phase 10 — Study `earnings_dislocation_screener` (nhóm E, chốt)
 
-Phụ thuộc 06 (scatter_quadrant, data_table) + 09 (BCTC store). Case 2 của
-`idea.md`.
+Phụ thuộc 06 (scatter_quadrant, data_table) + 08a (giá daily + VN-Index) +
+09 (BCTC store). Case 2 của `idea.md`.
+
+## Sửa spec 2026-08-27
+
+- **`adtv` suy ra, không đọc cột.** vnstock daily trả `time, open, high, low,
+  close, volume` — **không có cột giá trị giao dịch**. Sàn thanh khoản tính
+  `median(close × volume)` trên cửa sổ, ghi rõ trong provenance là xấp xỉ
+  (giá đóng cửa × khối lượng, không phải giá khớp trung bình).
+- **Basis không ảnh hưởng trục giá của screener.** `bar_daily` là
+  `adjusted_at_source`; return 20 phiên và relative-vs-VNINDEX là tỷ số nên
+  bất biến với adjust, trừ đúng phiên ex-date. Nêu trong provenance.
+- Universe market = **1.523 mã STOCK listed** (số đo 2026-08-27), không phải
+  ~1.600.
 
 ## Context
 
@@ -45,6 +57,43 @@ nhãn 4 vùng mô tả, không mệnh lệnh: "tăng trưởng cao, giá chưa t
 
 Diễn giải model: tường thuật phân bố + mã nổi bật + hạn chế phương pháp;
 luật framing 2.4.0 áp sẵn.
+
+## Kết quả nghiệm thu (2026-08-28)
+
+- `make test`: **1260 pass** (baseline 1232, +26). `make lint` xanh.
+- `loop.py` diff **trống**, không đổi prompt, không migration, không file web —
+  acceptance #5 của plan (Study thêm được mà không đụng cơ chế) đứng vững ở
+  Study **thứ ba**.
+- Chạy thật trên store: **1.523 mã quét, 0,27 giây**, 174 đo được, 77 khớp.
+  Loại trừ cộng khớp tuyệt đối: 1.446 + 77 = 1.523.
+  `no_filing` 399 · `thin_liquidity` 453 · `insufficient_price_history` 239 ·
+  `non_positive_profit` 170 · `non_positive_prior_profit` 74 ·
+  `below_growth_threshold` 70 · `above_price_change` 27 · `no_prior_filing` 14.
+- `health: degraded` đúng như phải thế: store mới có 74,7% mã ở 2026-Q2 và
+  đó là trần của nguồn (xem phase-09).
+- Kiểm tay ba mã top từ store: BVB `264,83/10,338 → +2.461,7%` · KSF
+  `4.535,2/40,98 → +10.967%` · POW `3.707,7/761,35 → +386,99%`. Số học đúng
+  từng con.
+
+### `template_unknown` không tồn tại
+
+Spec liệt `template_unknown` làm một lý do loại. Dữ liệu bác:
+`net_profit_loss_after_tax` giải được **theo nhãn** ở cả ba template, nên
+`concept_unknown` = 0 hôm nay. Lý do loại thật mà dữ liệu ép ra là quý gốc
+thiếu và lợi nhuận không dương.
+
+### Hiệu ứng nền thấp — chưa xử, chờ quyết
+
+Top list đang bị chi phối bởi mã có **quý gốc gần bằng 0**: BVB +2.462% vì quý
+2025-Q2 chỉ 10,3 tỷ; KSF +10.967% từ nền 41 tỷ. Bộ lọc hiện chỉ đòi lợi nhuận
+**dương** ở cả hai quý, mà dương-nhưng-tí-xíu vẫn ra phần trăm khổng lồ.
+`dislocation_rank` dùng percentile nên ảnh hưởng bị chặn, nhưng thứ tự top vẫn
+do nhóm này chiếm.
+
+Đây là **đổi ngữ nghĩa sàng lọc mà plan đã đặc tả**, nên không tự sửa. Hai
+đường: (1) sàn lợi nhuận quý gốc (vd ≥50 tỷ VND) thành một lý do loại đếm
+được; (2) đổi sang tăng trưởng TTM thay YoY một quý — mượt hơn nhưng cần 5 quý
+và giảm số mã đo được. Để nguyên cũng hợp lệ nếu coi đây là màn hình thô.
 
 ## Files
 
