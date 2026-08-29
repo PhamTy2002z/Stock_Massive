@@ -77,7 +77,7 @@ function Frame() {
 
   return (
     <div className="relative flex h-dvh overflow-hidden bg-background text-foreground">
-      {(state.overlay === "account" || state.overlay === "thread") && (
+      {(state.overlay === "account" || state.overlay === "attach" || state.overlay === "thread") && (
         <div
           className="fixed inset-0 z-[25]"
           onClick={() => dispatch({ type: "overlay", overlay: null })}
