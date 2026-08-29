@@ -19,6 +19,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from src.agent.attachments import MAX_IMAGES_PER_TURN
 from src.agent.loop import CHAT_MODE, TurnMode
 from src.agent.turns import MAX_USER_INPUT_BYTES
 from src.alpha.models import FLAG_REASONS
@@ -176,6 +177,27 @@ class AllowanceResponse(BaseModel):
     resets_at: datetime | None
 
 
+class CapabilitiesResponse(BaseModel):
+    """What this deployment's route can do, as the surface needs to know it.
+
+    Separate from :class:`UsageResponse` on purpose. That one is *"one account's
+    consumption"* — a number that moves as a reader works. This is a property of
+    the route the API was configured and measured against, identical for every
+    account and unchanged until a deploy. Folding a capability into a
+    consumption snapshot would give one payload two meanings, and a client
+    polling for fresh spend figures would be polling for a constant.
+
+    One field today. It is a record and not a bare boolean because the next
+    thing the surface has to ask — which is what an entitlement is — belongs
+    here beside it rather than at a second endpoint.
+    """
+
+    #: Whether the configured route reads images. When false the composer still
+    #: accepts and stores them, and says plainly that the model will not see
+    #: them: a picture silently ignored reads as a wrong answer.
+    vision: bool
+
+
 class UsageResponse(BaseModel):
     """What this account has consumed against its own ceilings.
 
@@ -219,6 +241,29 @@ class CreateTurnRequest(BaseModel):
     # from the desk is a different request from the same question asked in chat,
     # because only one of them is owed a picture.
     mode: TurnMode = CHAT_MODE
+    # What the reader attached, by id — the bytes were uploaded before this
+    # request and are read from the store, so the same question asked twice
+    # sends the same short list either time.
+    #
+    # Part of the idempotency payload, and it has to be: the same words with two
+    # different pictures are two different questions, and a key that ignored the
+    # pictures would answer the second with the first one's Turn.
+    #
+    # Capped at the per-Turn image ceiling. One number rather than two, because
+    # the list can hold at most that many entries and therefore at most that
+    # many images — a second cap on the images alone could only ever agree with
+    # this one, and two numbers that must agree are one number and a bug.
+    attachments: list[uuid.UUID] = Field(
+        default_factory=list, max_length=MAX_IMAGES_PER_TURN
+    )
+
+    @field_validator("attachments")
+    @classmethod
+    def _each_attachment_once(cls, value: list[uuid.UUID]) -> list[uuid.UUID]:
+        # The same file twice is one file. Deduplicated rather than refused: a
+        # double click is not a bad request, and sending an image twice would
+        # charge the Turn for it twice.
+        return list(dict.fromkeys(value))
 
     @field_validator("text")
     @classmethod
@@ -254,6 +299,26 @@ class TurnResponse(BaseModel):
     finished_at: datetime | None
 
 
+class AttachmentResponse(BaseModel):
+    """What an upload answers with: an id and what the file turned out to be.
+
+    Never the bytes. Reading them is its own request, so a transcript loads at
+    text weight and a picture is fetched by whoever looks at it — the same split
+    ``ArtifactResponse`` makes for ``frames``.
+
+    ``media_type`` is what the bytes were measured to be, which for an image is
+    not necessarily what the client said. ``estimated_tokens`` is what this file
+    will be charged against the Turn's ceilings, so a client can say so before
+    the reader presses send.
+    """
+
+    id: uuid.UUID
+    media_type: str
+    filename: str
+    byte_size: int
+    estimated_tokens: int | None = None
+
+
 class CreatedTurnResponse(TurnResponse):
     # False when the id was already known: the same payload returns the Turn
     # that exists and starts nothing at all.
@@ -263,6 +328,7 @@ class CreatedTurnResponse(TurnResponse):
 __all__ = [
     "AllowanceResponse",
     "ArtifactResponse",
+    "AttachmentResponse",
     "CreateThreadRequest",
     "CreateTurnRequest",
     "CreatedTurnResponse",

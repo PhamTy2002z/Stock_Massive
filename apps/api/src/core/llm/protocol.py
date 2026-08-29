@@ -221,6 +221,65 @@ class ContentSegment:
     cache_breakpoint: bool = False
 
 
+#: What one image is charged against every ceiling that reads a token count
+#: *before* the call is made.
+#:
+#: Measured, not guessed: ``make probe-vision`` on 2026-08-29 sent the same
+#: request to the configured session model with one image and with two, and
+#: ``usage.input_tokens`` went 1277 → 2207. The difference is one image at
+#: 1024x768 — the size a browser downscales a screenshot to, which is why that
+#: is the size the probe measures. Report:
+#: ``plans/reports/probe-260829-vision-route.md``.
+#:
+#: It matters that this is not small. Everything that decides what fits —
+#: ``build_messages`` climbing down, ``turn_context_per_call``,
+#: ``turn_input_total``, and the recovery ladder asking whether anything was
+#: given up — reads an estimate, and an image estimated at eleven tokens is an
+#: image with no ceiling over it at all.
+#:
+#: It holds only while the attachment store keeps images at or under the size it
+#: was measured on. That cap is the store's job, not this constant's.
+IMAGE_TOKENS = 930
+
+#: The size ``IMAGE_TOKENS`` was measured at. Cost is linear in area on this
+#: route, so anything else is scaled from here rather than assumed equal to it.
+REFERENCE_IMAGE_PIXELS = 1_024 * 768
+
+
+@dataclass(frozen=True)
+class ImageContent:
+    """One image travelling beside a message's text, and what it costs.
+
+    Kept apart from :class:`ContentSegment` on purpose. That type has one
+    meaning — where the cacheable prefix of the System Prompt Contract ends —
+    and all four of its construction sites are that boundary. Carrying pixels
+    in it would give one frozen type two meanings and its validator two rules.
+
+    ``placeholder`` is the text that stands for this image inside the message's
+    ``content``, so the string a ledger measures still narrates the whole
+    prompt. It is a description of the image, never a substitute for its cost:
+    ``estimated_tokens`` is what the estimator actually charges.
+    """
+
+    media_type: str
+    #: Base64, without the ``data:`` prefix — the wire form builds that.
+    data: str
+    placeholder: str
+    estimated_tokens: int = IMAGE_TOKENS
+
+    def __post_init__(self) -> None:
+        if not self.placeholder:
+            raise ValueError("an image content part must carry a placeholder")
+        if self.estimated_tokens <= 0:
+            raise ValueError(
+                "an image content part must declare a positive token cost; a "
+                "free image is one no ceiling can see"
+            )
+
+    def as_data_uri(self) -> str:
+        return f"data:{self.media_type};base64,{self.data}"
+
+
 @dataclass(frozen=True)
 class Message:
     """One turn of the conversation, in the shape the route expects."""
@@ -234,6 +293,9 @@ class Message:
     #: every message that has no such boundary, which is all of them but the
     #: system prompt.
     segments: tuple[ContentSegment, ...] = ()
+    #: Images this message carries. Empty for every message but the one a reader
+    #: attached something to.
+    images: tuple[ImageContent, ...] = ()
 
     def __post_init__(self) -> None:
         if self.segments and "".join(
@@ -244,10 +306,29 @@ class Message:
                 "blocks a route reads and the string a ledger measures cannot "
                 "be two different prompts"
             )
+        content = self.content or ""
+        for image in self.images:
+            if image.placeholder not in content:
+                raise ValueError(
+                    "a message's images must each be named in its content; the "
+                    "blocks a route reads and the string a ledger measures "
+                    "cannot be two different prompts"
+                )
 
     def as_wire(self, cache_control: bool = False) -> dict[str, Any]:
         payload: dict[str, Any] = {"role": self.role.value}
-        if cache_control and self.segments:
+        if self.images:
+            # Blocks regardless of ``cache_control``: a route handed a plain
+            # string has nowhere to put an image, so this is the one shape that
+            # can carry one. Text first, then the images it named.
+            blocks: list[dict[str, Any]] = []
+            if cache_control and self.segments:
+                blocks.extend(_content_block(segment) for segment in self.segments)
+            elif self.content:
+                blocks.append({"type": "text", "text": self.content})
+            blocks.extend(_image_block(image) for image in self.images)
+            payload["content"] = blocks
+        elif cache_control and self.segments:
             # Content blocks only where a breakpoint has to be expressed. A
             # route that accepts ``cache_control`` still accepts a plain string,
             # so every other message keeps the shape it has always had.
@@ -270,6 +351,16 @@ def _content_block(segment: ContentSegment) -> dict[str, Any]:
     if segment.cache_breakpoint:
         block["cache_control"] = dict(CACHE_CONTROL)
     return block
+
+
+def _image_block(image: ImageContent) -> dict[str, Any]:
+    """The one vendor spelling this route speaks.
+
+    The route is OpenAI Chat Completions behind a proxy, not Anthropic Messages,
+    so an image is an ``image_url`` block holding a data URI rather than a
+    ``source``/``base64`` pair.
+    """
+    return {"type": "image_url", "image_url": {"url": image.as_data_uri()}}
 
 
 @dataclass(frozen=True)
@@ -391,9 +482,12 @@ class LLMClient(Protocol):
 
 __all__ = [
     "CACHE_CONTROL",
+    "IMAGE_TOKENS",
+    "REFERENCE_IMAGE_PIXELS",
     "Completion",
     "CompletionRequest",
     "ContentSegment",
+    "ImageContent",
     "JsonSchemaFormat",
     "LLMClient",
     "Message",

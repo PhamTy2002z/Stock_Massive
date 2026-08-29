@@ -61,6 +61,7 @@ from .events import (
 )
 from .loop import (
     CHAT_MODE,
+    TurnAttachment,
     TurnDraft,
     TurnMode,
     TurnOutcome,
@@ -78,9 +79,19 @@ logger = logging.getLogger(__name__)
 LoopFactory = Callable[..., Any]
 CheckpointPayload = Callable[[TurnDraft], dict[str, Any]]
 
-# ``docs/adr/0015``: no attachments, and no user-supplied URL is ever fetched.
-# The cap is on encoded bytes rather than characters, because that is what the
-# request actually carries and what a Vietnamese sentence costs three times over.
+# The cap on what a reader typed. It is on encoded bytes rather than characters,
+# because that is what the request actually carries and what a Vietnamese
+# sentence costs three times over.
+#
+# It used to read "no attachments, and no user-supplied URL is ever fetched",
+# and that was the last surviving record of a decision taken in a document tree
+# since deleted. Half of it still holds: no user-supplied URL is ever fetched
+# here. The other half was reversed on 2026-08-29 by
+# ``plans/260829-0010-composer-attachments`` — a Turn may now carry attachments.
+# They do not travel through this cap: a Turn references them by id, and their
+# size is held down by the attachment store's own per-file cap, per-user quota
+# and token ceiling (``agent/attachments.py``). Widening this number would
+# therefore buy nothing an attachment needs.
 MAX_USER_INPUT_BYTES = 8 * 1024
 
 # ``docs/adr/0013``'s wall-clock ceiling for one Turn, including the time it
@@ -372,6 +383,7 @@ class TurnService:
         summarised_turns: int = 0,
         retry_of_turn_id: uuid.UUID | str | None = None,
         mode: TurnMode = CHAT_MODE,
+        attachments: Sequence[TurnAttachment] = (),
     ) -> TurnHandle:
         """Commit the Turn, then start it. Never the other way round.
 
@@ -382,8 +394,14 @@ class TurnService:
         ``mode`` travels into the committed request as well as into the run: a
         reopened Thread has to be able to say how a Turn was *asked*, and the
         answer cannot be recovered from what it happened to produce.
+
+        ``attachments`` splits the two directions on purpose. The committed
+        request gets metadata, because that is what a reopened Thread needs to
+        draw and what the idempotency key needs to compare. The run gets the
+        payload, because only the newest Turn sends pixels.
         """
         assert_input_within_cap(user_text)
+        attached = tuple(attachments)
         creation = await self._store.create_turn(
             user_id=user_id,
             thread_id=thread_id,
@@ -392,6 +410,9 @@ class TurnService:
             symbols=symbols,
             retry_of_turn_id=retry_of_turn_id,
             mode=mode,
+            # Metadata only, and derived in one place: the committed request
+            # records what was attached, and the payload goes to the run.
+            attachments=[entry.as_metadata() for entry in attached],
         )
         if not creation.created:
             # Idempotent: the same id and payload returns the Turn that already
@@ -418,6 +439,7 @@ class TurnService:
             summary=summary,
             summarised_turns=summarised_turns,
             mode=mode,
+            attachments=attached,
         )
         running.task = asyncio.create_task(
             self._execute(running, request),

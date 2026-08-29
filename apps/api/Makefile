@@ -41,6 +41,13 @@ contracts:
 smoke-signal-desk:
 	$(PYTHON) -m scripts.smoke_signal_desk
 
+# Does the configured route actually read an image, measured through the same
+# serializer production uses. Spends three real model calls, so it is run by
+# hand and never in CI. Turn LLM_VISION_ENABLED on only after this passes, and
+# copy the model it passed on into LLM_VISION_MEASURED_MODEL.
+probe-vision:
+	$(PYTHON) -m scripts.probe_vision
+
 # Fill the daily spine the Trading Day calendar is derived from. This is the
 # one way bar_daily stays current: there is no scheduler inside the app, so it
 # is driven from outside, after the close.

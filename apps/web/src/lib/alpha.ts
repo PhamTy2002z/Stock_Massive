@@ -13,6 +13,12 @@
  * prose is exactly the part allowed to change.
  */
 
+import {
+  ApiUnavailableError,
+  connectionStatus,
+  UPSTREAM_UNREACHABLE,
+} from "./connection-status"
+
 const ALPHA_BASE = "/api/alpha-desk"
 
 /** Whether a symbol is still analysed, which is a question about the Universe. */
@@ -167,6 +173,62 @@ async function readRefusal(response: Response): Promise<AlphaRefusalError> {
 }
 
 /**
+ * One request, with silence separated from an answer.
+ *
+ * `fetch` rejects only when nothing came back at all, and the proxy answers
+ * `upstream_unreachable` when it reached this browser but not the API — which
+ * it does for the half-minute a freshly started container spends migrating and
+ * booting. Neither is a decision the user can act on, so both become
+ * {@link ApiUnavailableError}: ConnectionGate veils and lifts on its own, the
+ * query waits on the defaults' longer retry schedule, and no error boundary
+ * replaces the page over an API that is merely still starting.
+ *
+ * Every other failure stays an {@link AlphaRefusalError}. An admission `429` or
+ * `503` is an answer carrying its own stable reason, and callers branch on it —
+ * mapping those to silence would strip the reason off the one refusal that
+ * exists to explain itself.
+ */
+async function sendAlpha(path: string, init?: RequestInit): Promise<Response> {
+  const url = `${ALPHA_BASE}${path}`
+  // A `FormData` body must set its own `Content-Type` — the browser computes
+  // the multipart boundary from the body at send time and appends it to the
+  // header, so anything set here would either be overwritten with no boundary
+  // (`fetch` refuses to keep a caller-supplied `multipart/form-data` without
+  // one) or, worse, silently shadow the boundary the browser did compute.
+  // `init.headers` can still add headers a `FormData` upload needs — just not
+  // this one.
+  const isFormData = typeof FormData !== "undefined" && init?.body instanceof FormData
+  let response: Response
+  try {
+    response = await fetch(url, {
+      ...init,
+      headers: isFormData
+        ? { ...init?.headers }
+        : { "Content-Type": "application/json", ...init?.headers },
+      credentials: "same-origin",
+    })
+  } catch (cause) {
+    connectionStatus.reportWaiting(url)
+    throw new ApiUnavailableError(undefined, undefined, { cause })
+  }
+
+  if (response.ok) {
+    connectionStatus.reportReady(url)
+    return response
+  }
+
+  const refusal = await readRefusal(response)
+  if (refusal.reason === UPSTREAM_UNREACHABLE) {
+    connectionStatus.reportWaiting(url)
+    throw new ApiUnavailableError(refusal.message, response.status)
+  }
+
+  // Refused, but answered: this operation is not what the page is waiting on.
+  connectionStatus.reportReady(url)
+  throw refusal
+}
+
+/**
  * One request against the Alpha Desk proxy, and one way to read its refusal.
  *
  * Exported rather than private, because the conversation client in
@@ -176,13 +238,7 @@ async function readRefusal(response: Response): Promise<AlphaRefusalError> {
  * shape is the part every caller branches on.
  */
 export async function alphaFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${ALPHA_BASE}${path}`, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers },
-    credentials: "same-origin",
-  })
-
-  if (!response.ok) throw await readRefusal(response)
+  const response = await sendAlpha(path, init)
   return response.json() as Promise<T>
 }
 
@@ -194,13 +250,7 @@ export async function alphaFetch<T>(path: string, init?: RequestInit): Promise<T
  * `response.json()` on a `204` throws before any caller sees it.
  */
 export async function alphaSend(path: string, init?: RequestInit): Promise<void> {
-  const response = await fetch(`${ALPHA_BASE}${path}`, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers },
-    credentials: "same-origin",
-  })
-
-  if (!response.ok) throw await readRefusal(response)
+  await sendAlpha(path, init)
 }
 
 /** The whole rail in one request: the session, the cap, and every symbol's state. */

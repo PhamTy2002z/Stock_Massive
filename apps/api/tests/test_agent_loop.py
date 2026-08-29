@@ -11,6 +11,7 @@ a reason an operator can act on.
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from datetime import date, datetime, timezone
 from types import MappingProxyType
@@ -28,11 +29,15 @@ from src.alpha.models import (
     TOOL_CALL_TOOL_ERROR,
     TOOL_CALL_UNKNOWN_TOOL,
 )
+from src.core.config import get_settings
 from src.agent.loop import (
     ANSWER,
     ANSWER_TRUNCATED,
+    ASKED_LIMIT,
+    ASKED_LIMIT_OUTSIDE_DEBUG,
     AUTH_UNAVAILABLE,
     CANCELLED_BY_USER,
+    CATALOG_TOOL,
     CONTENT_POLICY_BLOCKED,
     CONTEXT_OVERFLOW,
     DEADLINE_EXPIRED,
@@ -53,6 +58,7 @@ from src.agent.loop import (
     ROUNDS_EXHAUSTED_NOTE,
     ROUTE_ERROR,
     ROUTE_RATE_LIMITED,
+    RUN_TOOL,
     SCHEMA_REJECTED,
     SIGNAL_DESK_NOTE,
     THOUGHT,
@@ -86,6 +92,7 @@ from src.core.llm import (
     ContextOverflow,
     DeadlineExpired,
     GatewayTimeout,
+    ImageContent,
     LLMError,
     MalformedArguments,
     Message,
@@ -1531,6 +1538,45 @@ def test_one_message_is_charged_deterministically() -> None:
     assert estimate_tokens(message) > estimate_tokens(Message(role=Role.USER, content="x"))
 
 
+def test_a_message_without_images_is_charged_exactly_what_it_was_before() -> None:
+    """The formula every ceiling in the Turn reads, unchanged for text.
+
+    ``estimate_tokens`` is the whole context ladder's input. If the arithmetic
+    moves for ordinary messages, every ceiling and every climb-down moves with
+    it, and nothing says so.
+    """
+    assert estimate_tokens(Message(role=Role.USER, content="x" * 30)) == 4 + 10
+    assert estimate_tokens(Message(role=Role.USER, content="")) == 4
+    assert estimate_tokens(Message(role=Role.ASSISTANT, content=None)) == 4
+
+
+def test_an_image_is_charged_what_it_costs_not_what_its_placeholder_measures() -> None:
+    """The most expensive thing the first draft of this got wrong.
+
+    A placeholder is nineteen characters; an image is one and a half thousand
+    tokens. Charged at the placeholder, ``build_messages`` believes there is
+    room and gives nothing up, the pre-call ceilings are computed on fiction,
+    and the recovery ladder concludes nothing was surrendered and re-raises.
+    """
+    placeholder = "[ảnh: bang-gia.png]"
+    text_only = Message(role=Role.USER, content=f"Đọc giúp {placeholder}")
+    with_image = Message(
+        role=Role.USER,
+        content=f"Đọc giúp {placeholder}",
+        images=(
+            ImageContent(
+                media_type="image/png",
+                data="iVBORw0KGgo=",
+                placeholder=placeholder,
+                estimated_tokens=1_500,
+            ),
+        ),
+    )
+
+    assert estimate_tokens(with_image) == estimate_tokens(text_only) + 1_500
+    assert estimate_tokens(with_image) > 500
+
+
 def test_a_thread_id_that_is_not_a_uuid_still_answers() -> None:
     from src.agent.loop import _as_uuid
 
@@ -1632,3 +1678,122 @@ async def test_a_round_whose_tools_never_answer_ends_the_turn_and_settles_them()
     # No call is left spinning on a Turn that has stopped.
     assert [call.status for call in outcome.tool_calls] == [ToolCallStatus.ERROR]
     assert [event["status"] for event in publisher.calls] == ["running", "error"]
+
+
+# -- what a Turn leaves behind when the library had no recipe -----------------
+#
+# The one signal that says a reader wanted an analysis nobody has written yet.
+# A model with a Study for the question runs it; a model that reads the whole
+# catalog and then answers in prose has looked and not found, and the question
+# it was answering is what the next Study should be chosen against.
+
+
+@pytest.fixture
+def study_tools():
+    """Both study tools on the stub surface, restored afterwards."""
+    original = toolsets.TOOLSETS["memory"]
+    toolsets.TOOLSETS["memory"] = {
+        **original,
+        "tools": (*original.get("tools", ()), CATALOG_TOOL, RUN_TOOL),
+    }
+    toolsets.clear_memo()
+    install(entry(CATALOG_TOOL), entry(RUN_TOOL))
+    try:
+        yield
+    finally:
+        toolsets.TOOLSETS["memory"] = original
+        toolsets.clear_memo()
+
+
+def misses(caplog) -> list[logging.LogRecord]:
+    return [
+        record
+        for record in caplog.records
+        if getattr(record, "study_catalog_miss", False)
+    ]
+
+
+ASKED = "Mức giá được mua nhiều nhất của VCB trong phiên hôm nay là?"
+
+
+@pytest.mark.asyncio
+async def test_reading_the_catalog_and_running_nothing_records_the_question(
+    study_tools, caplog
+) -> None:
+    client = FakeClient([wants(CATALOG_TOOL), answer("Chưa có phân tích cho câu này.")])
+
+    with caplog.at_level(logging.INFO, logger="src.agent.loop"):
+        outcome = await loop(client).run(
+            turn_request(
+                user_text=ASKED,
+                turn_id="22222222-2222-2222-2222-222222222222",
+            )
+        )
+
+    assert outcome.status is TurnStatus.COMPLETE
+    recorded = misses(caplog)
+    assert len(recorded) == 1
+    assert recorded[0].question == ASKED
+    assert recorded[0].turn_id == "22222222-2222-2222-2222-222222222222"
+    assert recorded[0].thread_id == "11111111-1111-1111-1111-111111111111"
+
+
+@pytest.mark.asyncio
+async def test_a_turn_that_ran_a_study_is_not_a_miss(study_tools, caplog) -> None:
+    client = FakeClient([wants(CATALOG_TOOL, RUN_TOOL), answer("Đây rồi.")])
+
+    with caplog.at_level(logging.INFO, logger="src.agent.loop"):
+        await loop(client).run(turn_request(user_text=ASKED))
+
+    assert misses(caplog) == []
+
+
+@pytest.mark.asyncio
+async def test_a_turn_that_never_opened_the_catalog_is_not_a_miss(
+    study_tools, caplog
+) -> None:
+    client = FakeClient([wants("web_search"), answer("Khoảng 6,5%.")])
+
+    with caplog.at_level(logging.INFO, logger="src.agent.loop"):
+        await loop(client).run(turn_request(user_text=ASKED))
+
+    assert misses(caplog) == []
+
+
+@pytest.mark.asyncio
+async def test_a_pasted_wall_of_text_is_cut_to_something_a_list_stays_readable_at(
+    study_tools, caplog, monkeypatch
+) -> None:
+    monkeypatch.setenv("DEBUG", "true")
+    get_settings.cache_clear()
+    try:
+        client = FakeClient([wants(CATALOG_TOOL), answer("Chưa có.")])
+
+        with caplog.at_level(logging.INFO, logger="src.agent.loop"):
+            await loop(client).run(turn_request(user_text="VCB " * 400))
+    finally:
+        get_settings.cache_clear()
+
+    recorded = misses(caplog)
+    assert len(recorded[0].question) == ASKED_LIMIT
+    assert recorded[0].question.endswith("…")
+
+
+@pytest.mark.asyncio
+async def test_outside_development_the_log_keeps_only_the_shape_of_the_question(
+    study_tools, caplog, monkeypatch
+) -> None:
+    """A reader's question is theirs: production logs keep sixty characters."""
+    monkeypatch.setenv("DEBUG", "false")
+    get_settings.cache_clear()
+    try:
+        client = FakeClient([wants(CATALOG_TOOL), answer("Chưa có.")])
+
+        with caplog.at_level(logging.INFO, logger="src.agent.loop"):
+            await loop(client).run(turn_request(user_text="VCB " * 400))
+    finally:
+        get_settings.cache_clear()
+
+    recorded = misses(caplog)
+    assert len(recorded[0].question) == ASKED_LIMIT_OUTSIDE_DEBUG
+    assert recorded[0].question.endswith("…")

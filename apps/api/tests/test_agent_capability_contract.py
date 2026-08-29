@@ -171,7 +171,7 @@ def test_shipped_schema_bytes_order_output_and_display_are_locked():
                 separators=(",", ":"),
                 ensure_ascii=False,
             ).encode("utf-8")
-        ).hexdigest() == "2ff91dfd0cf6c37d14f2c8bd09738cfaffb8ee49b2bdb42c68a8930f0d87774a"
+        ).hexdigest() == "1ffa06e443779453349a68da11b1c00d7fdc3a7227b7f4ce2519feb8c1ff4a83"
         assert {
             entry.name: (
                 entry.display_name,

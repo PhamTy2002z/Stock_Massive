@@ -43,6 +43,7 @@ from src.core.llm.errors import (
 from src.core.llm.protocol import (
     CompletionRequest,
     ContentSegment,
+    ImageContent,
     JsonSchemaFormat,
     Message,
     Role,
@@ -51,7 +52,11 @@ from src.core.llm.protocol import (
 )
 from src.core.llm import transport as transport_module
 from src.core.llm.config import MAX_TIMEOUT_SECONDS
-from src.core.llm.transport import ERROR_BODY_MAX_BYTES, OpenAICompatibleTransport
+from src.core.llm.transport import (
+    ERROR_BODY_MAX_BYTES,
+    OpenAICompatibleTransport,
+    _mark_tail_breakpoints,
+)
 
 PRICE_TOOL = ToolSchema(
     name="get_price",
@@ -751,6 +756,71 @@ class TestTheCacheBreakpoint:
         ]
         # The system prefix, and the last two of the three non-system messages.
         assert marked == [0, 2, 3]
+
+    async def test_a_breakpoint_lands_on_the_text_beside_an_image_not_on_the_image(
+        self,
+    ):
+        """The one failure a unit test of ``as_wire`` cannot see.
+
+        A message carrying an image ends in an ``image_url`` block, and it is
+        usually the last message — exactly where ``_mark_tail_breakpoints``
+        hangs the marker. ``cache_control`` is a field of a text block; on an
+        image block it is a breakpoint the route does not read, and the request
+        that carries it may simply be refused. Nothing about the ``as_wire``
+        payload says so, which is why this is measured on the wire.
+        """
+        seen: dict = {}
+
+        def handler(http_request: httpx.Request) -> httpx.Response:
+            seen.update(json.loads(http_request.content))
+            return httpx.Response(200, content=sse(text_chunk("ok")))
+
+        question = Message(
+            role=Role.USER,
+            content="Đọc giúp [ảnh: bang-gia.png]",
+            images=(
+                ImageContent(
+                    media_type="image/png",
+                    data="iVBORw0KGgo=",
+                    placeholder="[ảnh: bang-gia.png]",
+                ),
+            ),
+        )
+
+        await client(handler, llm_prompt_cache_control_enabled=True).complete(
+            request(messages=[Message(role=Role.SYSTEM, content="prompt"), question])
+        )
+
+        blocks = seen["messages"][-1]["content"]
+        assert [block["type"] for block in blocks] == ["text", "image_url"]
+        assert blocks[0]["cache_control"] == {"type": "ephemeral"}
+        assert "cache_control" not in blocks[1]
+
+    async def test_a_message_that_is_only_an_image_takes_no_breakpoint_at_all(self):
+        """Nothing in it is worth caching by prefix, so it is skipped.
+
+        Skipped rather than marked: the alternative is a marker on a block the
+        route does not read it from, which buys nothing and risks a refusal.
+        """
+        seen: dict = {}
+
+        def handler(http_request: httpx.Request) -> httpx.Response:
+            seen.update(json.loads(http_request.content))
+            return httpx.Response(200, content=sse(text_chunk("ok")))
+
+        pixels_only = {
+            "role": "user",
+            "content": [{"type": "image_url", "image_url": {"url": "data:x"}}],
+        }
+        wire = [
+            {"role": "system", "content": "prompt"},
+            {"role": "user", "content": "câu cũ"},
+            pixels_only,
+        ]
+        _mark_tail_breakpoints(wire)
+
+        assert "cache_control" not in json.dumps(wire[2])
+        assert any("cache_control" in block for block in wire[1]["content"])
 
 
 class TestToolErrors:

@@ -149,6 +149,11 @@ class LLMRoute:
     #: OpenAI-compatible route is free to refuse the request that carries it —
     #: and a breakpoint in the wrong place voids a cache rather than filling one.
     prompt_cache_control: bool = False
+    #: Whether this route reads image blocks. Answered here for the reason
+    #: ``streaming`` is: it is a fact about what is on the other end, not about
+    #: any one call — and ``loop.py`` reads no settings at all, so every edge
+    #: fact reaches it through this object or not at all.
+    vision: bool = False
 
     def __repr__(self) -> str:
         marker = "set" if self.api_key else "missing"
@@ -156,7 +161,8 @@ class LLMRoute:
             f"LLMRoute(base_url={self.base_url!r}, api_key=<{marker}>, "
             f"streaming={self.streaming}, "
             f"reasoning_history={self.reasoning_history}, "
-            f"prompt_cache_control={self.prompt_cache_control})"
+            f"prompt_cache_control={self.prompt_cache_control}, "
+            f"vision={self.vision})"
         )
 
     __str__ = __repr__
@@ -314,6 +320,7 @@ def llm_config_from_settings(settings: Any | None = None) -> LLMConfig:
             prompt_cache_control=bool(
                 getattr(settings, "llm_prompt_cache_control_enabled", False)
             ),
+            vision=bool(getattr(settings, "llm_vision_enabled", False)),
         ),
         models=MappingProxyType(
             {

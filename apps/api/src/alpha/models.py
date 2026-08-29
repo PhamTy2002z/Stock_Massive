@@ -10,6 +10,7 @@ from sqlalchemy import (
     Index,
     Identity,
     Integer,
+    LargeBinary,
     Numeric,
     String,
     Text,
@@ -494,3 +495,65 @@ class AgentArtifact(Base):
 
     def __repr__(self) -> str:
         return f"<AgentArtifact {self.id} {self.study_name} v{self.study_version}>"
+
+
+class AgentAttachment(Base):
+    """One file a reader attached, held whole.
+
+    **Why the bytes live in Postgres.** Not because a directory would not
+    survive — ``docker compose restart`` keeps the writable layer, and compose
+    already has a named volume. Three reasons that do hold:
+
+    * ownership is a column here, read by the same owner-scoped join every other
+      row in this schema is read through, rather than a second scheme invented
+      for the filesystem;
+    * ``pg_dump`` is already the backup procedure, so an attachment is backed up
+      by something that already runs;
+    * a Turn and the attachments it names commit or roll back together.
+
+    ``attached_turn_id`` is what makes the sweep possible: a row still holding
+    ``NULL`` past the grace period is an upload whose Turn was never sent, and
+    nothing will ever read it again.
+    """
+
+    __tablename__ = "agent_attachment"
+
+    id = Column(Uuid, primary_key=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # Set when the Turn that carries this attachment is created. Until then the
+    # row is an upload in flight, and the sweep is allowed to take it.
+    attached_turn_id = Column(
+        Uuid,
+        ForeignKey("agent_turn.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # What the bytes actually are, decided by reading them where that is
+    # possible — never the client's word for it.
+    media_type = Column(String(64), nullable=False)
+    # The name is for the reader; it is sanitised on the way in and is never a
+    # path, so nothing downstream may treat it as one.
+    filename = Column(String(255), nullable=False)
+    byte_size = Column(Integer, nullable=False)
+    # Pixel dimensions for images, NULL for anything else. They are read from
+    # the file header rather than measured, and they are what the token estimate
+    # is computed from — an image's cost scales with its area, so a stored size
+    # is the difference between an honest ceiling and a decorative one.
+    pixel_width = Column(Integer, nullable=True)
+    pixel_height = Column(Integer, nullable=True)
+    content = Column(LargeBinary, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        # The quota question — how many rows and how many bytes does this user
+        # already hold — is asked on every upload.
+        Index("ix_agent_attachment_user_created", "user_id", created_at.desc()),
+        # The sweep asks for orphans by age.
+        Index("ix_agent_attachment_orphans", "attached_turn_id", "created_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AgentAttachment {self.id} {self.media_type} {self.byte_size}B>"

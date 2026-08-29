@@ -37,16 +37,27 @@ everybody at once.
 
 from __future__ import annotations
 
+import base64
 import logging
 import uuid
 from collections.abc import Sequence
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Request,
+    Response,
+    status,
+)
 from fastapi.responses import StreamingResponse
+# Starlette's, not FastAPI's subclass: ``request.form()`` yields the former, and
+# an ``isinstance`` against the latter would never match.
+from starlette.datastructures import UploadFile
 
-from src.agent.messages import TranscriptTurn
+from src.agent.messages import TranscriptTurn, TurnAttachment
 from src.agent.persistence import (
     MessageRecord,
     ThreadRecord,
@@ -58,8 +69,10 @@ from src.agent.prompt import RuntimeContext
 from src.agent.schemas import (
     AllowanceResponse,
     ArtifactResponse,
+    AttachmentResponse,
     CreatedTurnResponse,
     CreateThreadRequest,
+    CapabilitiesResponse,
     CreateTurnRequest,
     MessageResponse,
     ThreadDetailResponse,
@@ -72,7 +85,17 @@ from src.agent.schemas import (
 from src.agent.service import AlphaDeskService, alpha_desk
 from src.agent.usage import Allowance, read_usage
 from src.agent.sse import frames
+from src.agent.attachments import (
+    IMAGE_TYPES,
+    MAX_ATTACHMENT_BYTES,
+    AttachmentRefused,
+    AttachmentStore,
+    StoredAttachment,
+    assert_within_turn_budget,
+    serving_headers,
+)
 from src.auth.dependencies import CurrentUser
+from src.core.ratelimit import heavy_rate_limit
 from src.auth.models import User
 from src.auth.security import TokenError, decode_access_token
 from src.auth.service import get_user_by_id
@@ -107,6 +130,19 @@ def desk() -> AlphaDeskService:
 
 
 Desk = Annotated[AlphaDeskService, Depends(desk)]
+
+
+def attachment_store() -> AttachmentStore:
+    """The store, as a dependency so a test can point it at its own session.
+
+    Beside ``Desk`` rather than beside the upload endpoint, because the Turn
+    endpoint above it needs the same store: an alias declared after its first
+    use resolves to the bare class and FastAPI reads that as a response field.
+    """
+    return AttachmentStore()
+
+
+Attachments = Annotated[AttachmentStore, Depends(attachment_store)]
 
 
 # -- reading the transcript ------------------------------------------------
@@ -165,12 +201,30 @@ def history_of(messages: Sequence[MessageRecord]) -> tuple[TranscriptTurn, ...]:
     Tool calls are deliberately absent: ``build_messages`` trims older Turns to
     their prose, and re-reading every trace of every earlier Turn to throw it
     away is a query per Turn for nothing.
+
+    **Attachments come back as metadata and never as bytes**, and that single
+    line is two ceilings at once. Dropping them entirely would lose an earlier
+    Turn's file from the model's view while the surface still draws a chip for
+    it — the interface asserting something the model does not have. Loading them
+    whole would send every image again on every later question, so a Thread
+    where ten questions each carried a picture would put ten pictures in the
+    tenth request. What survives is the placeholder: the model knows a file was
+    there and knows it can no longer see it, which is a thing it can say instead
+    of a thing it has to guess.
     """
     turns: list[TranscriptTurn] = []
     for record in messages:
         text = str(record.content.get("text") or "")
         if record.role == "user":
-            turns.append(TranscriptTurn(user_text=text))
+            turns.append(
+                TranscriptTurn(
+                    user_text=text,
+                    attachments=tuple(
+                        TurnAttachment.from_payload(entry)
+                        for entry in record.content.get("attachments") or ()
+                    ),
+                )
+            )
         elif record.role == "assistant" and turns:
             last = turns[-1]
             if last.assistant_text is None:
@@ -178,6 +232,7 @@ def history_of(messages: Sequence[MessageRecord]) -> tuple[TranscriptTurn, ...]:
                     user_text=last.user_text,
                     tool_calls=last.tool_calls,
                     assistant_text=text,
+                    attachments=last.attachments,
                 )
     return tuple(turns)
 
@@ -333,6 +388,55 @@ def _runtime(user: User) -> RuntimeContext:
     )
 
 
+async def _resolve_attachments(
+    store: AttachmentStore, user_id: int, ids: Sequence[uuid.UUID]
+) -> tuple[TurnAttachment, ...]:
+    """Read what the reader attached, in the order they attached it.
+
+    404 for an id that is not there and 404 for an id that belongs to somebody
+    else — the same answer, deliberately. Two answers would make this endpoint a
+    way to learn which ids exist.
+
+    Bytes are loaded here, at the one point where they are about to become a
+    content part. The ceiling that makes that affordable is the count already
+    applied by the schema.
+    """
+    resolved: list[TurnAttachment] = []
+    metas: list[StoredAttachment] = []
+    for attachment_id in ids:
+        stored = await store.read(user_id, attachment_id)
+        if stored is None:
+            raise HTTPException(status_code=404, detail="Attachment not found")
+        meta = stored.meta
+        metas.append(meta)
+        is_image = meta.media_type in IMAGE_TYPES
+        resolved.append(
+            TurnAttachment(
+                id=meta.id,
+                filename=meta.filename,
+                media_type=meta.media_type,
+                byte_size=meta.byte_size,
+                estimated_tokens=meta.estimated_tokens,
+                data=(
+                    base64.b64encode(stored.content).decode("ascii")
+                    if is_image
+                    else None
+                ),
+                # Decoded here rather than in the message layer: what the bytes
+                # are is a fact about the row, and a mojibake file should read as
+                # a mojibake file rather than raise inside context construction.
+                text=(
+                    None if is_image else stored.content.decode("utf-8", errors="replace")
+                ),
+            )
+        )
+    # The sum, not the count. The schema already capped the count, and the count
+    # was derived from an average image — three full-desktop captures sit inside
+    # it and past the budget.
+    assert_within_turn_budget(metas)
+    return tuple(resolved)
+
+
 @router.post(
     "/threads/{thread_id}/turns",
     response_model=CreatedTurnResponse,
@@ -343,6 +447,7 @@ async def create_turn(
     payload: CreateTurnRequest,
     current_user: CurrentUser,
     desk: Desk,
+    store: Attachments,
     response: Response,
 ) -> CreatedTurnResponse:
     """Admit, commit, then start. Never any other order.
@@ -367,6 +472,19 @@ async def create_turn(
     # stranger's id cannot be used to probe how busy the service is.
     await desk.admission.admit(user_id=current_user.id)
 
+    # Read and checked before the lifecycle is entered: a refusal here must not
+    # leave a Turn behind, and the reader is told which file to drop while they
+    # can still drop it.
+    try:
+        attachments = await _resolve_attachments(
+            store, current_user.id, payload.attachments
+        )
+    except AttachmentRefused as refused:
+        raise HTTPException(
+            status_code=refused.status_code,
+            detail={"reason": refused.reason, "message": str(refused)},
+        ) from refused
+
     try:
         handle = await desk.turns.create(
             user_id=current_user.id,
@@ -378,6 +496,7 @@ async def create_turn(
             history=history_of(view.messages),
             retry_of_turn_id=payload.retry_of_turn_id,
             mode=payload.mode,
+            attachments=attachments,
         )
     except TurnPayloadConflict as conflict:
         raise HTTPException(
@@ -466,6 +585,22 @@ async def read_turn(
 # -- the account's own allowance ------------------------------------------------
 
 
+@router.get("/capabilities", response_model=CapabilitiesResponse)
+async def read_capabilities(desk: Desk) -> CapabilitiesResponse:
+    """What the configured route can do.
+
+    Read off the same ``LLMRoute`` the loop reads, so the answer the surface
+    draws and the behaviour the context constructor takes cannot disagree — the
+    alternative is a composer that promises pixels to a route the probe never
+    measured.
+
+    Behind the session like every other route here, but the answer is a
+    deployment fact and not an account one: it is identical for every caller and
+    constant until a deploy.
+    """
+    return CapabilitiesResponse(vision=desk.config.route.vision)
+
+
 @router.get("/usage", response_model=UsageResponse)
 async def read_usage_endpoint(current_user: CurrentUser) -> UsageResponse:
     """What this account has consumed against its ceilings.
@@ -537,6 +672,113 @@ async def read_artifact(
         provenance=dict(record.provenance),
         created_at=record.created_at,
     )
+
+
+# -- attachments -----------------------------------------------------------
+
+
+@router.post(
+    "/attachments",
+    response_model=AttachmentResponse,
+    status_code=201,
+    dependencies=[Depends(heavy_rate_limit)],
+)
+async def upload_attachment(
+    request: Request,
+    current_user: CurrentUser,
+    store: Attachments,
+) -> AttachmentResponse:
+    """Take one file in, and answer with an id.
+
+    **This endpoint needs its own ceilings.** Every other ``POST`` here is
+    bounded by LLM admission, and this one calls no model, so it goes through no
+    such gate. What bounds it: the ``Content-Length`` check below, the per-file
+    and per-user ceilings in ``agent/attachments.py``, and the heavy limiter.
+
+    The limiter is keyed by IP, and behind the Next proxy every reader shares
+    one — the same fact that keeps ``subscribe`` off it. It is here anyway, as a
+    blunt stop on a runaway loop from one origin; the ceiling that actually
+    binds *per reader* is the row-and-byte quota, which is keyed by user.
+
+    **Why the file is not a declared body parameter.** FastAPI parses the body
+    before it solves any dependency, so with ``file: UploadFile = File(...)``
+    the multipart form is already spooled and validated by the time this
+    function — or any ``Depends`` guarding it — could say no, and a request past
+    the ceiling comes back 422 having been received in full. Reading the form
+    here, after the header check, is what makes the ceiling arrive first. The
+    cost is that the multipart shape is documented in this docstring rather than
+    in the schema.
+
+    ``Content-Length`` is a claim, so it is used only to refuse early and is
+    never believed afterwards: the real length is measured on the bytes.
+    """
+    declared_length = request.headers.get("content-length")
+    if declared_length and declared_length.isdigit():
+        # Multipart framing costs a little over the file itself, hence the slack.
+        if int(declared_length) > MAX_ATTACHMENT_BYTES + 8 * 1024:
+            raise HTTPException(
+                status_code=413,
+                detail={
+                    "reason": "file_too_large",
+                    "message": f"past the {MAX_ATTACHMENT_BYTES} byte ceiling",
+                },
+            )
+
+    form = await request.form()
+    upload = form.get("file")
+    if not isinstance(upload, UploadFile):
+        raise HTTPException(
+            status_code=422,
+            detail={"reason": "missing_file", "message": "expected a `file` part"},
+        )
+
+    data = await upload.read()
+    try:
+        stored = await store.store(
+            current_user.id,
+            declared_type=(upload.content_type or "").split(";")[0].strip(),
+            filename=upload.filename or "",
+            data=data,
+        )
+    except AttachmentRefused as refusal:
+        raise HTTPException(
+            status_code=refusal.status_code,
+            detail={"reason": refusal.reason, "message": str(refusal)},
+        ) from refusal
+
+    return AttachmentResponse(
+        id=stored.id,
+        media_type=stored.media_type,
+        filename=stored.filename,
+        byte_size=stored.byte_size,
+        estimated_tokens=stored.estimated_tokens,
+    )
+
+
+@router.get("/attachments/{attachment_id}")
+async def read_attachment_bytes(
+    attachment_id: uuid.UUID,
+    current_user: CurrentUser,
+    store: Attachments,
+) -> Response:
+    """The bytes, for the reader who uploaded them.
+
+    Somebody else's attachment is *not found* rather than forbidden, exactly as
+    a Turn and an artifact are: a caller who could tell the two apart has been
+    told that an id exists.
+
+    The two text types have no magic bytes, so anything at all can arrive under
+    one of them. They are handed back as an opaque download with sniffing
+    refused — see ``attachments.serving_headers`` for why that is the defence
+    rather than a stricter whitelist.
+    """
+    found = await store.read(current_user.id, attachment_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    media_type, headers = serving_headers(found.meta.media_type, found.meta.filename)
+    # Written once and never updated, so a client may hold it as long as it likes.
+    headers["Cache-Control"] = "private, max-age=31536000, immutable"
+    return Response(content=found.content, media_type=media_type, headers=headers)
 
 
 @router.post("/turns/{turn_id}/cancel", response_model=TurnResponse)

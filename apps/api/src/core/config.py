@@ -41,6 +41,20 @@ class Settings(BaseSettings):
     # bên có thể lệch nhau. Xem API_KEY_ENV_VAR ở src/core/quota.py, nơi cùng
     # biến môi trường đó quyết định giãn cách của Redis arbiter.
 
+    # Daily spine backfill — công việc định kỳ duy nhất của harness.
+    #
+    # Mặc định TẮT, và đó là chủ ý: scheduler_enabled mặc định True, nên một job
+    # đăng ký vô điều kiện sẽ tự bắt đầu gọi provider ngoài trên bất kỳ máy nào
+    # dựng stack này lên. Scope market là 1.523 request; bật nó phải là một quyết
+    # định ai đó viết ra, không phải hệ quả của việc chạy `pnpm dev`.
+    #
+    # 16:30 giờ VN là quy ước đã có trong code chứ không phải số chọn tuỳ ý:
+    # ingest đóng dấu observed_at = 16:30 và mô tả nó là "khi một run chờ hết
+    # phiên sẽ đọc" — phiên đóng 15:00, số liệu lắng sau đó.
+    backfill_daily_scheduled: bool = False
+    backfill_daily_hour: int = 16
+    backfill_daily_minute: int = 30
+
     # Universe — tập mã được thu thập và phục vụ, trần 100 mã (src/stocks/universe.py).
     # Rỗng là hợp lệ: ứng dụng chạy được và Collector không có gì để làm.
     universe_symbols: str = ""  # Comma-separated
@@ -113,6 +127,22 @@ class Settings(BaseSettings):
     # đặt cờ, chạy Capability Probe, và chỉ giữ cờ nếu check
     # `prompt_cache_control` xanh.
     llm_prompt_cache_control_enabled: bool = False
+    # Whether this route reads images. Off by default and for the same reason
+    # `prompt_cache_control` is: the only way to learn what a proxied route does
+    # with a block it was not measured on is to send it one. Turn it on after
+    # `make probe-vision` passes, never before.
+    #
+    # This is deliberately *not* a sixth Capability Probe check.
+    # `enforce_capability_probe` raises when any check fails and Alpha Desk is
+    # enabled, so a missing side capability would stop the API from booting —
+    # and the probe already spends five real model calls on every restart.
+    llm_vision_enabled: bool = False
+    # The model string `make probe-vision` last passed on. `_cached_result` in
+    # the probe is process-global and not keyed by model, so nothing else would
+    # notice `LLM_MODEL_SESSION` moving to a model the flag was never measured
+    # against. Startup compares the two and says so; it does not block, for the
+    # same reason this is not a probe check.
+    llm_vision_measured_model: str = ""
 
     # Open-web tools use their own Redis lane and Tavily credential. They are
     # off by default because each enabled Turn can spend external-provider

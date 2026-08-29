@@ -5,19 +5,27 @@ import {
   Camera,
   ChevronDown,
   ChevronRight,
-  Globe,
   Grid2x2,
   LayoutList,
   Paperclip,
   Plus,
   Square,
+  Telescope,
   Wallet,
   X,
 } from "lucide-react"
 
-import { CANCELLING_LABEL, SEND_LABEL, SIGNAL_DESK_COPY } from "@/lib/alpha-desk/copy"
+import { attachmentUrl } from "@/lib/alpha-desk/api"
+import {
+  ATTACHMENT_COPY,
+  CANCELLING_LABEL,
+  CAPTURE_COPY,
+  SEND_LABEL,
+  SIGNAL_DESK_COPY,
+} from "@/lib/alpha-desk/copy"
 import { cn } from "@/lib/utils"
 
+import { AttachmentChip } from "./attachment-chip"
 import { useDesk } from "./desk-state"
 import { IconButton, Menu, MenuItem, MenuSeparator } from "./primitives"
 import { useShell } from "./shell-state"
@@ -110,6 +118,17 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text === ""])
 
+  // One picker for the menu row and for ⌘U. The input is hidden rather than
+  // styled because a file input cannot be restyled reliably across browsers,
+  // and every real product opens a native picker from a button of its own.
+  const picker = useRef<HTMLInputElement | null>(null)
+  const attachRequests = state.attachRequests
+  useEffect(() => {
+    // Zero is the initial value, not a press.
+    if (attachRequests === 0) return
+    picker.current?.click()
+  }, [attachRequests])
+
   function submit(event: FormEvent) {
     event.preventDefault()
     const trimmed = text.trim()
@@ -142,7 +161,7 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
     <form
       onSubmit={submit}
       className={cn(
-        "composer-shell relative rounded-composer border border-border bg-surface-sunken px-4 pb-4 pt-6",
+        "composer-shell relative rounded-composer bg-surface-sunken px-4 pb-4 pt-6",
         variant === "docked" && "shadow-composer",
       )}
     >
@@ -172,6 +191,59 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
         </div>
       )}
 
+      {/* Above the field, where the analysis-context pill sits, because both
+          answer the same question: what is travelling with this question
+          besides its words. */}
+      {desk.attachments.length > 0 && (
+        <div
+          role="group"
+          aria-label={ATTACHMENT_COPY.region}
+          className="flex flex-wrap items-center gap-1.5 pb-2.5"
+        >
+          {desk.attachments.map((attachment) => (
+            <AttachmentChip
+              key={attachment.key}
+              filename={attachment.filename}
+              byteSize={attachment.byteSize}
+              image={attachment.image}
+              previewUrl={
+                attachment.previewUrl ??
+                (attachment.id !== null && attachment.image
+                  ? attachmentUrl(attachment.id)
+                  : undefined)
+              }
+              status={attachment.status}
+              error={attachment.error}
+              onRemove={() => desk.detach(attachment.key)}
+            />
+          ))}
+          {/* Said once for the row, not once per picture. The files are still
+              stored and still travel; this is about what the model will do with
+              them, and saying nothing lets a reader read a generic answer as a
+              wrong one. */}
+          {!desk.visionEnabled && desk.attachments.some((entry) => entry.image) && (
+            <span className="w-full text-micro text-ink-6">
+              {ATTACHMENT_COPY.imagesNotRead}
+            </span>
+          )}
+        </div>
+      )}
+
+      <input
+        ref={picker}
+        type="file"
+        multiple
+        accept="image/png,image/jpeg,image/webp,text/plain,text/csv,.txt,.csv"
+        className="hidden"
+        onChange={(event) => {
+          const chosen = Array.from(event.target.files ?? [])
+          desk.attach(chosen)
+          // Cleared so choosing the same file twice in a row fires `change`
+          // both times — without this the second pick is silent.
+          event.target.value = ""
+        }}
+      />
+
       <textarea
         ref={field}
         value={text}
@@ -198,7 +270,22 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
 
       <div className="flex items-center gap-1.5">
         <div className="relative flex shrink-0">
-          {attachOpen && <AttachMenu />}
+          {attachOpen && (
+            <AttachMenu
+              onPickFile={() => {
+                dispatch({ type: "overlay", overlay: null })
+                picker.current?.click()
+              }}
+              onCapture={() => {
+                // The menu closes first: the browser's own picker takes over the
+                // screen, and coming back to a menu still open reads as a press
+                // that did not land.
+                dispatch({ type: "overlay", overlay: null })
+                desk.startCapture()
+              }}
+              supported={desk.captureSupported}
+            />
+          )}
           <IconButton
             label="Đính kèm"
             aria-expanded={attachOpen}
@@ -372,21 +459,56 @@ function ModeSegment({
 /**
  * The attach menu.
  *
- * Every row here needs something the backend does not expose: there is no
- * upload endpoint, no portfolio resource, no analysis-template store, no
- * connector registry, and the news toggle is a property of the agent's tool
- * catalog rather than a per-message switch. Drawn to the reference's shape and
- * inert throughout — a control that swallowed the press would be worse than one
- * that says it is not ready.
+ * Row one works. It uploads the file when it is chosen rather than when Send is
+ * pressed, so the reader watches the progress while they are still writing and
+ * the Turn itself carries a short list of ids.
+ *
+ * The rest still need something the backend does not expose: no portfolio
+ * resource, no analysis-template store, no connector registry. Those stay
+ * inert and keep the badge — a control that swallowed the press would be worse
+ * than one that says it is not ready.
  */
-function AttachMenu() {
+export function AttachMenu({
+  onPickFile,
+  onCapture,
+  supported,
+}: {
+  onPickFile: () => void
+  onCapture: () => void
+  /** Whether this browser can capture a screen. */
+  supported: boolean
+}) {
   return (
     <Menu className="absolute bottom-[44px] left-0 min-w-[250px]">
-      <MenuItem icon={<Paperclip className="size-[17px] text-ink-4" strokeWidth={1.6} />} hint="⌘U" disabled>
-        Thêm tệp hoặc ảnh
+      <MenuItem
+        icon={<Paperclip className="size-[17px] text-ink-4" strokeWidth={1.6} />}
+        hint={ATTACHMENT_COPY.addHint}
+        onClick={onPickFile}
+      >
+        {ATTACHMENT_COPY.add}
       </MenuItem>
-      <MenuItem icon={<Camera className="size-[17px] text-ink-4" strokeWidth={1.6} />} disabled>
-        Chụp màn hình bảng giá
+      {/* Not "chụp màn hình bảng giá": it captures whatever the reader picks,
+          and a name narrower than the behaviour is a name that misleads. When
+          the browser cannot capture at all the row keeps its badge rather than
+          becoming a control that swallows the press. */}
+      <MenuItem
+        icon={<Camera className="size-[17px] text-ink-4" strokeWidth={1.6} />}
+        onClick={supported ? onCapture : undefined}
+        disabled={!supported}
+      >
+        {CAPTURE_COPY.row}
+      </MenuItem>
+      <MenuSeparator />
+      {/* A multi-step mode: several Studies, several rounds, one report. Named
+          apart from the answer-depth control, which changes what one Turn costs
+          and how long it takes. If the two ever read as the same thing, one of
+          the names is wrong — say so rather than blurring both. */}
+      <MenuItem
+        icon={<Telescope className="size-[17px] text-ink-4" strokeWidth={1.6} />}
+        trailing={<ChevronRight className="size-4 shrink-0 text-ink-6" />}
+        disabled
+      >
+        Nghiên cứu sâu
       </MenuItem>
       <MenuItem
         icon={<Wallet className="size-[17px] text-ink-4" strokeWidth={1.6} />}
@@ -395,7 +517,6 @@ function AttachMenu() {
       >
         Thêm vào danh mục
       </MenuItem>
-      <MenuSeparator />
       <MenuItem
         icon={<LayoutList className="size-[17px] text-ink-4" strokeWidth={1.6} />}
         trailing={<ChevronRight className="size-4 shrink-0 text-ink-6" />}
@@ -410,13 +531,15 @@ function AttachMenu() {
       >
         Nguồn dữ liệu kết nối
       </MenuItem>
-      <MenuSeparator />
-      {/* The row that used to sit here was a calque of a competitor's feature
-          name for work this product now does under its own: the desk is a
-          switch in the control row, not a hidden menu item. */}
-      <MenuItem icon={<Globe className="size-[17px] text-ink-4" strokeWidth={1.6} />} disabled>
-        Tra tin tức thị trường
-      </MenuItem>
+      {/* Two rows are deliberately absent from this menu.
+          One was a calque of a competitor's feature name for work this product
+          does under its own: the desk is a switch in the control row.
+          The other was "Tra tin tức thị trường", and it is gone because the
+          capability is already on. `web_search` and `fetch_url` are in the chat
+          lane's toolset on every Turn, so a badge reading "Sắp ra mắt" over them
+          was a false statement, and a switch for something already running is a
+          switch that misleads. Where the reader sees what was looked up is the
+          Sources panel, not a control here. */}
     </Menu>
   )
 }

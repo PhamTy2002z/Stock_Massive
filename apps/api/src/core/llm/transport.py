@@ -489,9 +489,12 @@ def _mark_tail_breakpoints(wire: list[dict[str, Any]]) -> None:
     has — and it changes on every call, so it is not a property to freeze into
     the transcript.
 
-    A message whose content is not a plain string is left alone. It either
-    already carries blocks of its own, in which case its last block gets the
-    marker, or it carries none, in which case there is nothing to mark.
+    A message that already carries blocks gets the marker on its last *text*
+    block rather than on its last block outright. A message carrying an image
+    ends in an image block, and ``cache_control`` is a field of a text block —
+    hanging it on the image would put the breakpoint where the route does not
+    read it, in the one shape whose unit tests still pass. A message with no
+    text block at all is skipped: nothing in it is worth caching by prefix.
     """
     marked = 0
     for index in range(len(wire) - 1, -1, -1):
@@ -504,14 +507,26 @@ def _mark_tail_breakpoints(wire: list[dict[str, Any]]) -> None:
                 {"type": "text", "text": content, "cache_control": dict(CACHE_CONTROL)}
             ]
         elif isinstance(content, list) and content:
-            block = dict(content[-1])
+            tail = _last_text_block(content)
+            if tail is None:
+                continue
+            block = dict(content[tail])
             block["cache_control"] = dict(CACHE_CONTROL)
-            payload["content"] = [*content[:-1], block]
+            payload["content"] = [*content[:tail], block, *content[tail + 1 :]]
         else:
             continue
         marked += 1
         if marked >= CACHE_TAIL_MESSAGES:
             return
+
+
+def _last_text_block(content: list[Any]) -> int | None:
+    """Index of the last text block in a content list, if there is one."""
+    for index in range(len(content) - 1, -1, -1):
+        block = content[index]
+        if isinstance(block, dict) and block.get("type") == "text":
+            return index
+    return None
 
 
 async def _read_error_body(response: httpx.Response) -> str:

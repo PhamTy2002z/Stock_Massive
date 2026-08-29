@@ -16,16 +16,17 @@ the loop to describe a row it read from a table.
 from __future__ import annotations
 
 import json
+import uuid
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from src.core.llm import ContentSegment, Message, Role, ToolCall
+from src.core.llm import ContentSegment, ImageContent, Message, Role, ToolCall
 from src.core.llm.admission import TURN_CONTEXT_PER_CALL
 
 from . import registry
-from .untrusted import wrap_result
+from .untrusted import wrap_attachment, wrap_result
 
 #: What a tool call went and read, as the surface is told it. Two values, and the
 #: distinction is the one the evidence boundary is built on: a figure out of this
@@ -458,14 +459,55 @@ def signal_desk_of(name: str, payload: Any) -> Mapping[str, Any] | None:
     artifact_id = payload.get("artifactId")
     if not artifact_id:
         return None
+    headline = payload.get("headline")
+    provenance = payload.get("provenance")
     return {
         "artifactId": str(artifact_id),
         "studyName": str(payload.get("studyName") or ""),
+        # The Vietnamese name of the recipe, which is the only one a reader may
+        # be shown. Resolved here because the registry is the one place that
+        # knows it, and a browser given only the slug would either print the
+        # slug or keep a second copy of the catalogue.
+        "studyDisplayName": _study_display_name(payload.get("studyName")),
         "title": str(payload.get("title") or ""),
         "blockCount": (
             payload["blockCount"] if isinstance(payload.get("blockCount"), int) else 0
         ),
+        # Which company the picture is about, so a reader with twenty boards can
+        # type a ticker to find one again. Read off the headline the model was
+        # handed rather than fetched: it is already in this payload, and a
+        # Study about no single company honestly has none.
+        "symbol": _headline_symbol(headline),
+        # When the numbers were frozen. Off the provenance for the same reason.
+        "asOf": (
+            str(provenance.get("asOf") or "") if isinstance(provenance, Mapping) else ""
+        ),
     }
+
+
+def _headline_symbol(headline: Any) -> str:
+    """The ticker one run is about, or ``""`` where it is about no single one."""
+    if not isinstance(headline, Mapping):
+        return ""
+    symbol = headline.get("symbol")
+    return str(symbol).strip().upper() if isinstance(symbol, str) else ""
+
+
+def _study_display_name(name: Any) -> str:
+    """The registered Vietnamese name for a Study, or ``""`` for an unknown one.
+
+    Imported where it is used rather than at module scope: ``studies`` reaches
+    the database layer, and this module is imported by the context builder,
+    which has no business dragging the store in behind it. The package import
+    is also what registers the Studies, so it is the package and not the
+    registry module that is asked.
+    """
+    if not isinstance(name, str) or not name:
+        return ""
+    from src import studies
+
+    definition = studies.REGISTRY.get(name)
+    return definition.display_name if definition is not None else ""
 
 
 def _display_item(item: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -520,6 +562,101 @@ def _source_of(call: TurnToolCall) -> str:
     return call.name
 
 
+#: How much uploaded file text one Turn may put in front of the model.
+#:
+#: Deliberately the same value as ``turns.MAX_USER_INPUT_BYTES``, and written
+#: again rather than imported because ``turns`` imports ``loop`` which imports
+#: this module — the cycle is the only reason there are two names. A test pins
+#: them equal so they cannot drift apart into two different policies.
+#:
+#: The value is the same because the question is the same one: how much prose a
+#: single Turn may set in front of the model as the reader's own words. A file
+#: the reader chose is their words as much as the message they typed, so it gets
+#: the same allowance and not a larger one derived from the image budget — that
+#: budget is measured in pixels and has nothing to say about how much text a
+#: model should read before answering.
+MAX_ATTACHMENT_TEXT_BYTES = 8 * 1024
+
+#: What a truncated file says about itself, inside its own wrapper. A file cut
+#: silently is a file the model reads as complete, and a conclusion drawn from
+#: the half it saw would be stated with the confidence of the whole.
+TRUNCATION_NOTE = "… [tệp bị cắt ở đây vì vượt trần nội dung của một lượt]"
+
+
+@dataclass(frozen=True)
+class TurnAttachment:
+    """One thing a reader attached, as the context constructor sees it.
+
+    Metadata always; payload only sometimes. That split is the whole shape of
+    this type: a Turn read back out of the store carries what is needed to
+    *name* the attachment — so the placeholder in the message still narrates the
+    prompt and the surface can draw a chip — while the bytes are loaded for the
+    newest Turn alone. Carrying every earlier Turn's pixels would send n images
+    on the n-th question of a Thread.
+    """
+
+    id: uuid.UUID
+    filename: str
+    media_type: str
+    byte_size: int
+    #: An image's own token cost, from ``attachments.image_tokens_for``. ``None``
+    #: for a text file, whose cost is the characters it contributes to
+    #: ``content`` and is therefore already counted by :func:`estimate_tokens`.
+    estimated_tokens: int | None = None
+    #: Base64 image data, when this Turn is the newest one. ``None`` otherwise.
+    data: str | None = None
+    #: Decoded file text, when this Turn is the newest one. ``None`` otherwise.
+    text: str | None = None
+
+    @classmethod
+    def from_payload(cls, entry: Mapping[str, Any]) -> TurnAttachment:
+        """Rebuild the metadata half from what the request committed.
+
+        Metadata only, by construction: there is no field here for bytes, so a
+        Turn read back out of the store cannot accidentally resend an image.
+        That is the ceiling holding, not an omission — see ``history_of``.
+        """
+        return cls(
+            id=uuid.UUID(str(entry["id"])),
+            filename=str(entry.get("filename") or ""),
+            media_type=str(entry.get("media_type") or ""),
+            byte_size=int(entry.get("byte_size") or 0),
+            estimated_tokens=(
+                int(entry["estimated_tokens"])
+                if entry.get("estimated_tokens")
+                else None
+            ),
+        )
+
+    def as_metadata(self) -> dict[str, Any]:
+        """What gets committed beside the question. Never the payload."""
+        entry: dict[str, Any] = {
+            "id": str(self.id),
+            "filename": self.filename,
+            "media_type": self.media_type,
+            "byte_size": self.byte_size,
+        }
+        if self.estimated_tokens:
+            entry["estimated_tokens"] = self.estimated_tokens
+        return entry
+
+    @property
+    def is_image(self) -> bool:
+        return self.media_type.startswith("image/")
+
+    @property
+    def placeholder(self) -> str:
+        """The text standing for this attachment inside the message.
+
+        Present for every Turn, newest or not, because it is what makes the
+        string a ledger measures describe the whole prompt the route reads — and
+        because a model that can no longer see an earlier image must at least
+        know that there was one rather than answer as though nothing was sent.
+        """
+        kind = "ảnh" if self.is_image else "tệp"
+        return f"[{kind}: {self.filename}]"
+
+
 @dataclass(frozen=True)
 class TranscriptTurn:
     """One user message and everything that answered it."""
@@ -527,6 +664,8 @@ class TranscriptTurn:
     user_text: str
     tool_calls: tuple[TurnToolCall, ...] = ()
     assistant_text: str | None = None
+    #: What the reader attached to this question. Frozen, so a tuple.
+    attachments: tuple[TurnAttachment, ...] = ()
 
     @property
     def completed_calls(self) -> tuple[TurnToolCall, ...]:
@@ -554,6 +693,16 @@ class Transcript:
     #: ``None`` means the whole prompt travels as one block.
     system_prefix: str | None = None
     turns: tuple[TranscriptTurn, ...] = ()
+    #: Whether the route this context is being built for can read images.
+    #:
+    #: A snapshot fact, arriving with the snapshot, for the same reason
+    #: ``system_prefix`` does: only the caller holds the ``LLMRoute``, and
+    #: :func:`build_messages` reading configuration would make its purity a
+    #: claim about the environment rather than about the function. ``False`` by
+    #: default, so every caller written before images existed builds exactly the
+    #: context it built before — and so a route that was never measured for
+    #: vision does not get sent pixels on the strength of a default.
+    vision: bool = False
     # The cached summary, and how many leading Turns it covers. Both come from
     # persistence together; a summary whose span is unknown could only be
     # applied by guessing.
@@ -609,13 +758,25 @@ class ConstructedContextTooLarge(ValueError):
 
 
 def estimate_tokens(message: Message) -> int:
-    """What one message is charged, deterministically."""
+    """What one message is charged, deterministically.
+
+    An image is charged what it declares, on top of the placeholder naming it in
+    ``content``. The placeholder is how the string still narrates the whole
+    prompt; it is not what the image costs. Left at the placeholder's length an
+    image reads as about eleven tokens, and then everything that decides what
+    fits — the climb-down in :func:`build_messages`, the pre-call ceilings, and
+    the recovery ladder asking whether anything was given up — decides it on a
+    number that is off by two orders of magnitude.
+
+    A message carrying no images is charged exactly what it was charged before.
+    """
     text = message.content or ""
     for call in message.tool_calls:
         text += call.name + _compact(call.arguments)
     if message.tool_call_id:
         text += message.tool_call_id
-    return MESSAGE_OVERHEAD_TOKENS + -(-len(text) // CHARS_PER_TOKEN)
+    images = sum(image.estimated_tokens for image in message.images)
+    return MESSAGE_OVERHEAD_TOKENS + -(-len(text) // CHARS_PER_TOKEN) + images
 
 
 def _system_message(transcript: Transcript) -> Message:
@@ -640,11 +801,93 @@ def _system_message(transcript: Transcript) -> Message:
     )
 
 
+def _attachment_block(
+    attachments: Sequence[TurnAttachment], *, latest: bool, vision: bool
+) -> tuple[str, tuple[ImageContent, ...]]:
+    """The text an attachment contributes, and the image parts it becomes.
+
+    Two rules, and both are properties of *this* Turn's place in the snapshot
+    rather than of anything read at call time.
+
+    A placeholder for every attachment of every Turn: that is what keeps the
+    message's own string a description of the whole prompt.
+
+    Payload for the newest Turn only. An image becomes a content part here and
+    nowhere else; a file's text is wrapped by
+    :func:`untrusted.wrap_attachment` here and nowhere else, which is what makes
+    that wrapper impossible to bypass — there is one place uploaded content
+    enters a message, and it is this function.
+    """
+    lines: list[str] = []
+    images: list[ImageContent] = []
+    remaining = MAX_ATTACHMENT_TEXT_BYTES
+    for attachment in attachments:
+        lines.append(attachment.placeholder)
+        if not latest:
+            continue
+        if attachment.is_image:
+            # The placeholder above went out regardless, and on a route that
+            # cannot read images that placeholder is the whole of what travels:
+            # the model is told a picture was attached and can say it cannot see
+            # it, which is the honest answer. Sending the bytes to a route
+            # measured not to read them would spend the tokens for nothing.
+            if vision and attachment.data is not None:
+                images.append(
+                    ImageContent(
+                        media_type=attachment.media_type,
+                        data=attachment.data,
+                        placeholder=attachment.placeholder,
+                        **(
+                            {"estimated_tokens": attachment.estimated_tokens}
+                            if attachment.estimated_tokens
+                            else {}
+                        ),
+                    )
+                )
+            continue
+        if attachment.text is None or remaining <= 0:
+            continue
+        body = attachment.text
+        encoded = body.encode("utf-8")
+        if len(encoded) > remaining:
+            # Cut on a character boundary, then say so. ``errors="ignore"``
+            # drops the partial sequence a byte slice can end in.
+            body = encoded[:remaining].decode("utf-8", errors="ignore") + TRUNCATION_NOTE
+        # What was actually spent, so the budget reads as a budget. The note
+        # itself is not charged against it: it is the harness's own sentence
+        # about the file, not any of the file's content.
+        remaining -= min(len(encoded), remaining)
+        lines.append(wrap_attachment(body, filename=attachment.filename))
+    return "\n".join(lines), tuple(images)
+
+
+def _user_message(turn: TranscriptTurn, *, latest: bool, vision: bool) -> Message:
+    """The reader's own words, and whatever they attached to them."""
+    if not turn.attachments:
+        return Message(role=Role.USER, content=turn.user_text)
+    block, images = _attachment_block(turn.attachments, latest=latest, vision=vision)
+    return Message(
+        role=Role.USER,
+        content=f"{turn.user_text}\n\n{block}" if block else turn.user_text,
+        images=images,
+    )
+
+
 def _turn_messages(
-    turn: TranscriptTurn, collapsed: frozenset[str]
+    turn: TranscriptTurn,
+    collapsed: frozenset[str],
+    *,
+    latest: bool = False,
+    vision: bool = False,
 ) -> tuple[Message, ...]:
-    """One whole Turn, with its call/result pairs kept together."""
-    messages: list[Message] = [Message(role=Role.USER, content=turn.user_text)]
+    """One whole Turn, with its call/result pairs kept together.
+
+    ``latest`` says whether this is the newest Turn of the snapshot it came
+    from. It is passed in rather than read anywhere, which is what keeps
+    :func:`build_messages` pure: the same transcript still gives the same list,
+    because "newest" is a fact about the tuple and not about the clock.
+    """
+    messages: list[Message] = [_user_message(turn, latest=latest, vision=vision)]
     calls = turn.completed_calls
     if calls:
         messages.append(
@@ -701,8 +944,14 @@ def _render_messages(
                 content=f"{SUMMARY_LABEL}\n{transcript.summary}",
             )
         )
-    for turn in turns[dropped:]:
-        messages.extend(_turn_messages(turn, collapsed))
+    shown = turns[dropped:]
+    last = len(shown) - 1
+    for index, turn in enumerate(shown):
+        messages.extend(
+            _turn_messages(
+                turn, collapsed, latest=index == last, vision=transcript.vision
+            )
+        )
     return tuple(messages)
 
 
@@ -800,6 +1049,7 @@ __all__ = [
     "ToolCallStatus",
     "Transcript",
     "TranscriptTurn",
+    "TurnAttachment",
     "TurnToolCall",
     "build_messages",
     "display_results",

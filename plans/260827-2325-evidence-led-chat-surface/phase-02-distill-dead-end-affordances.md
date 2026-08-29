@@ -16,7 +16,7 @@ Giải P1 #2 của critique: "Affordance trông dùng được nhưng dẫn tớ
 diff âm, và nó phải đi trước mọi phase thêm UI — nếu không, phase sau sẽ thêm
 control vào một surface mà user đã học là không đáng bấm.
 
-Kiểm kê thực tế (scout web §4, §5, §6, §14): 7 item Attach disabled, 4 item
+Kiểm kê thực tế (scout web §4, §5, §6, §14): 6 row Attach disabled, 4 item
 TopBar menu disabled, 3 item sidebar disabled, 1 chevron giả, 1 dialog Share
 không gọi endpoint nào, 1 nút gửi mang icon voice.
 
@@ -42,10 +42,23 @@ Non-functional:
 
 | Chỗ | Hiện tại | Làm gì | Vì sao |
 |---|---|---|---|
-| `composer.tsx:236-276` AttachMenu | 7 item, **cả 7** disabled | **Xoá cả menu + nút Attach** | Không item nào có handler ở bất kỳ đâu. Bảy lựa chọn không dùng được là ba lỗi cognitive load cùng lúc (minimal choices, progressive disclosure, error prevention). |
+| `composer.tsx:382-425` AttachMenu | 6 row, **cả 6** disabled | **Xoá các row không có handler; giữ menu và nút** | Sáu lựa chọn không dùng được là ba lỗi cognitive load cùng lúc (minimal choices, progressive disclosure, error prevention). Nhưng hai trong sáu row **có** handler đang được làm — xem khối đảo tiền đề dưới bảng. |
 | `top-bar.tsx:73,76,79,83` menu thread | 4 item disabled: Ghim · Đổi tên · **Xuất PDF** · Xoá | **Nối 3, xoá 1** | Sidebar `ThreadMenu` (`sidebar.tsx:382-394`) làm thật đúng **ba** việc — Ghim, Đổi tên, Xoá. **Export không tồn tại ở đâu cả**, và phase 11 làm **Markdown** chứ không PDF. Nên nối ba, xoá item export; phase 11 mang nó về với nhãn "Xuất Markdown". |
 | `sidebar.tsx:191,199` | "Bộ lọc cổ phiếu", "Báo cáo đã lưu", "Danh mục theo dõi" disabled | **Xoá** | Roadmap preview trong daily workspace. `plan.md` §Nguyên tắc: đưa ra khỏi workspace. |
 | `overlays.tsx:203-268` Share | Dialog mở rồi báo "API chưa có endpoint" (`:250-252`) | **Ẩn nút, giữ code dialog** | Phase 11 làm export thật và dùng lại vỏ dialog này. Xoá rồi viết lại là công thừa. Ẩn = honest ngay, và không mất việc đã làm. |
+
+> **Đảo tiền đề 2026-08-29.** Lý lẽ *"cả 7 disabled, không item nào có handler"*
+> đúng khi viết. `plans/260829-0010-composer-attachments/` cho hai row handler
+> thật — *Thêm tệp hoặc ảnh* (phase 08) và *Chụp màn hình* (phase 09) — và đặt
+> bốn row còn lại là badge có chủ ý, sau khi gỡ hẳn row *Tra tin tức thị trường*
+> (năng lực đó đã chạy trong bundle `web` mọi lượt, badge trên nó là một câu sai).
+> Menu không còn là ngõ cụt toàn phần, nên phép xoá toàn phần hết cơ sở, và
+> contract *"không có control disabled"* đổi thành *"control disabled phải được
+> mô tả"*. Phần code cho contract mới nằm ở phase 10 của plan đó
+> (`primitives.tsx` cho badge một `id`, button một `aria-describedby`).
+>
+> Citation của chính bảng trên cũng đã cũ: `composer.tsx:236-276` và *"7 item"*
+> — thật là `:382-425` với **sáu** row. Đã sửa tại chỗ.
 
 **"Đã ghim" và cấu trúc nhóm.** `sidebar.tsx:189` nhóm "Đã ghim" hiện chứa
 "Danh mục theo dõi" disabled. Phase này: ẩn nhóm khi rỗng, gỡ "Danh mục theo dõi"
@@ -79,8 +92,9 @@ bật. Vẫn giữ `dynamic(ssr:false)` để dead-code-eliminate ở production
 
 Modify:
 
-- `apps/web/src/components/shell/composer.tsx` — xoá AttachMenu (`:236-276`) +
-  nút Attach; `WaveformIcon` (`:35-54`) → `SendIcon`; bỏ chevron (`:182-185`)
+- `apps/web/src/components/shell/composer.tsx` — trong AttachMenu (`:382-425`)
+  xoá các row không có handler, **giữ menu và nút Attach**; `WaveformIcon`
+  (`:35-54`) → `SendIcon`; bỏ chevron (`:182-185`)
 - `apps/web/src/components/shell/top-bar.tsx:73-85` — nối 4 item vào handler thật
 - `apps/web/src/components/shell/sidebar.tsx:189-199` — xoá 3 item disabled, ẩn
   nhóm "Đã ghim" khi rỗng, gỡ "Danh mục theo dõi" khỏi nhóm ghim
@@ -97,10 +111,12 @@ Create:
 ## Implementation Steps
 
 1. Viết `affordance.test.tsx` **trước**: render shell ở 3 trạng thái (empty
-   state · thread đang chạy · thread đã xong), khẳng định zero control có
-   `disabled` hoặc `aria-disabled` mà không có `aria-describedby` giải thích, và
+   state · thread đang chạy · thread đã xong), khẳng định **mọi control
+   `disabled` hoặc `aria-disabled` đều được mô tả bằng chương trình** (một
+   `aria-describedby` trỏ tới phần tử giải thích vì sao nó không bấm được), và
    zero menu trigger có 0 item khả dụng. Test này đỏ ngay — đó là mục đích.
-2. Xoá AttachMenu + nút Attach. Kiểm `UnavailableNote` còn caller.
+2. Xoá các row AttachMenu không có handler; **giữ menu và nút Attach**. Kiểm
+   `UnavailableNote` còn caller.
 3. Nối TopBar menu: rút 4 handler của sidebar lên `DeskProvider`/`ShellProvider`
    (nơi đã giữ thread state) để cả hai surface gọi cùng một hàm — **không**
    nhân bản handler.
@@ -117,11 +133,11 @@ Create:
 
 - [ ] `affordance.test.tsx` xanh ở cả 3 trạng thái shell
 - [ ] Grep `disabled` trong `components/shell/` chỉ còn ở control có lý do
-      runtime thật (ví dụ nút gửi khi draft rỗng), không còn "sắp ra mắt"
+      runtime thật (nút gửi khi draft rỗng) hoặc ở row `AttachMenu` mang badge
+      *Sắp ra mắt* **có `aria-describedby`**
 - [ ] **3** hành động thread ở TopBar (Ghim · Đổi tên · Xoá) hoạt động thật và gọi
       cùng handler với sidebar (test: click TopBar → cùng mutation)
 - [ ] Item "Xuất PDF" **đã xoá** khỏi TopBar — nó không có handler ở đâu cả
-- [ ] Không nút Attach, không menu Attach trong DOM
 - [ ] Nút gửi có `aria-label` nói "gửi", icon không phải waveform
 - [ ] Nhãn tier không có chevron, không có `role="button"`
 - [ ] Ảnh chụp mặc định ở dev **không** có toolbar góc dưới-trái

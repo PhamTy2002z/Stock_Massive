@@ -113,6 +113,7 @@ from src.core.llm import (
     recovery_for,
 )
 from src.core.llm.errors import redact
+from src.core.config import get_settings
 
 from . import registry
 from .budget import TurnBudget, thresholds_for_context, trim_text
@@ -137,6 +138,7 @@ from .messages import (
     ToolCallStatus,
     Transcript,
     TranscriptTurn,
+    TurnAttachment,
     TurnToolCall,
     build_messages,
     signal_desk_absence,
@@ -610,6 +612,12 @@ class TurnRequest:
     #: test driving the loop, the transport before the switch was added — asks
     #: for exactly the Turn it always asked for.
     mode: TurnMode = CHAT_MODE
+    #: What the reader attached to *this* question, payload included.
+    #:
+    #: Only this Turn's. The earlier Turns arrive through ``history`` carrying
+    #: metadata alone, which is what stops the n-th question of a Thread from
+    #: resending n images.
+    attachments: tuple[TurnAttachment, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -754,6 +762,13 @@ class _TurnState:
     #: threading the request through all of them to answer one question is how
     #: one of them comes to be forgotten.
     mode: TurnMode = CHAT_MODE
+    #: Which Turn this is, which conversation it belongs to, and what was asked —
+    #: copied here for the same reason ``mode`` is, and read by exactly one thing:
+    #: the record a Turn leaves when it went looking for an analysis recipe and
+    #: found none it could run.
+    turn_id: str | None = None
+    thread_id: str | None = None
+    question: str = ""
     text: str | None = None
     #: The same prose minus the thoughts: what the *reader* is shown as the
     #: reply. Held separately rather than derived by subtracting one string from
@@ -859,6 +874,16 @@ class AgentLoop:
         # never inside the loop, because an in-loop cheap-router split adds a
         # decision point whose quality nothing measures.
         self._model = config.model_for(Workload.SESSION)
+        # Read once from the route, here, and carried into every constructed
+        # context. From the route rather than from ``get_settings()``: the flag
+        # belongs to the route this client was built for, and asking the
+        # environment again would be a second answer to the same question — one
+        # that could say "vision" about a route the probe never measured.
+        #
+        # ``messages`` reads no configuration at all, which is what keeps
+        # ``build_messages`` pure. This module has one unrelated settings read,
+        # for how much of a question a log line may keep.
+        self._vision = config.route.vision
         # The output budget scales with the window the harness actually sends,
         # not with whatever the model advertises: the constructed context is
         # capped at ``TURN_CONTEXT_PER_CALL`` by admission, so a share of a
@@ -874,7 +899,12 @@ class AgentLoop:
             return await self._run(request, cancelled)
 
     async def _run(self, request: TurnRequest, cancelled: Cancelled) -> TurnOutcome:
-        state = _TurnState(mode=request.mode)
+        state = _TurnState(
+            mode=request.mode,
+            turn_id=str(request.turn_id) if request.turn_id is not None else None,
+            thread_id=str(request.thread_id),
+            question=_asked(request.user_text),
+        )
         surface = resolve_tool_surface(self._toolsets)
         tools = surface.offered_schemas
         turn_budget = TurnBudget(
@@ -1092,11 +1122,13 @@ class AgentLoop:
             # Ignored by every route that does not, and by the token estimate
             # either way.
             system_prefix=prompt_prefix(),
+            vision=self._vision,
             turns=(
                 *request.history,
                 TranscriptTurn(
                     user_text=request.user_text,
                     tool_calls=self._shown_calls(state, turn_budget),
+                    attachments=request.attachments,
                 ),
             ),
             summary=request.summary,
@@ -1750,6 +1782,7 @@ class AgentLoop:
         failure, a deadline, a cancellation.
         """
         await self._save(state, boundary=True)
+        _log_catalog_without_a_run(state)
         absent = (
             signal_desk_absence(state.calls)
             if state.mode == SIGNAL_DESK_MODE and not state.signal_desks
@@ -1788,6 +1821,60 @@ class AgentLoop:
         return time.monotonic() - state.started >= self._deadline
 
 
+#: How much of a question is kept in the record below, in development. Long
+#: enough to tell two questions apart when they are read as a list, short enough
+#: that a pasted report does not become a log line nobody scrolls past.
+ASKED_LIMIT = 200
+
+#: The same, anywhere that is not development. A reader's question is theirs;
+#: outside the machine it was typed on, the log keeps enough to see the shape
+#: of what was asked and no more.
+ASKED_LIMIT_OUTSIDE_DEBUG = 60
+
+#: The two calls whose pairing this looks for.
+CATALOG_TOOL = "list_studies"
+RUN_TOOL = "run_study"
+
+
+def _asked(text: str) -> str:
+    """The question, shortened to what this environment may keep of it."""
+    limit = ASKED_LIMIT if get_settings().debug else ASKED_LIMIT_OUTSIDE_DEBUG
+    asked = " ".join(text.split())
+    if len(asked) <= limit:
+        return asked
+    return asked[: limit - 1] + "…"
+
+
+def _log_catalog_without_a_run(state: _TurnState) -> None:
+    """Record a Turn that read the analysis catalog and ran nothing from it.
+
+    This is the one signal that says *the library is missing a recipe somebody
+    wanted*. A model that has a Study for the question calls it; a model that
+    reads the whole catalog and then answers in prose has looked for one and not
+    found it, and the question it was answering is the thing worth collecting.
+
+    A log line rather than a row. The questions are wanted in aggregate, by
+    whoever is deciding which Study to write next, and a column added for that
+    would be a schema change owned by nobody. ``extra`` carries the fields so a
+    collector can group them without parsing the sentence.
+    """
+    names = {call.name for call in state.calls}
+    if CATALOG_TOOL not in names or RUN_TOOL in names:
+        return
+    question = state.question or ""
+    logger.info(
+        "Turn %s read the analysis catalog and ran no study for: %s",
+        state.turn_id or "unidentified",
+        question,
+        extra={
+            "study_catalog_miss": True,
+            "turn_id": state.turn_id,
+            "thread_id": state.thread_id,
+            "question": question,
+        },
+    )
+
+
 def _as_uuid(identifier: uuid.UUID | str | None) -> uuid.UUID | None:
     """One of the Turn's ids as a UUID, or ``None`` when it is not one.
 
@@ -1809,8 +1896,10 @@ def _as_uuid(identifier: uuid.UUID | str | None) -> uuid.UUID | None:
 __all__ = [
     "ADMISSION_STATUS",
     "ANSWER_TRUNCATED",
+    "ASKED_LIMIT",
     "AUTH_UNAVAILABLE",
     "CANCELLED_BY_USER",
+    "CATALOG_TOOL",
     "CHARS_PER_TOKEN",
     "CHAT_MODE",
     "CONTENT_POLICY_BLOCKED",
@@ -1838,6 +1927,7 @@ __all__ = [
     "ROUND_TIMEOUT_MULTIPLE",
     "ROUTE_ERROR",
     "ROUTE_RATE_LIMITED",
+    "RUN_TOOL",
     "SCHEMA_REJECTED",
     "SESSION_CONCURRENCY",
     "SIGNAL_DESK_MODE",
@@ -1860,6 +1950,7 @@ __all__ = [
     "ToolCallStatus",
     "Transcript",
     "TranscriptTurn",
+    "TurnAttachment",
     "TurnDraft",
     "TurnAdmission",
     "TurnMode",

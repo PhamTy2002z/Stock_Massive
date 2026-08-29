@@ -32,6 +32,7 @@ from src.core.llm import (
     ContextOverflow,
     DeadlineExpired,
     GatewayTimeout,
+    ImageContent,
     LLMError,
     MalformedArguments,
     Message,
@@ -46,6 +47,7 @@ from src.core.llm import (
     RouteRateLimited,
     SchemaRejected,
     SpendRequest,
+    ToolCall,
     Usage,
     Workload,
     recovery_for,
@@ -825,3 +827,77 @@ def test_a_message_without_segments_keeps_the_shape_it_always_had():
     message = Message(role=Role.USER, content="FPT?")
 
     assert message.as_wire() == message.as_wire(cache_control=True)
+
+
+# --- images on the wire ---------------------------------------------------
+
+
+def test_a_message_carrying_no_image_sends_exactly_what_it_always_sent():
+    """The regression that would be silent.
+
+    Every text message on every Turn goes through the same branch an image
+    added. If the shape moves for messages with no image, nothing fails loudly —
+    the route simply starts receiving a payload nobody chose.
+    """
+    plain = Message(role=Role.USER, content="FPT?")
+    with_calls = Message(
+        role=Role.ASSISTANT,
+        content=None,
+        tool_calls=(ToolCall(id="c1", name="get_field", arguments={"a": 1}),),
+    )
+
+    assert plain.as_wire() == {"role": "user", "content": "FPT?"}
+    assert plain.as_wire(cache_control=True) == {"role": "user", "content": "FPT?"}
+    assert "content" not in with_calls.as_wire()
+
+
+def test_an_image_reaches_the_route_as_an_image_url_block():
+    """The route is OpenAI Chat Completions, so the block is ``image_url``.
+
+    And it is blocks even with ``cache_control`` off: a plain string has nowhere
+    to put an image.
+    """
+    image = ImageContent(
+        media_type="image/png",
+        data="iVBORw0KGgo=",
+        placeholder="[ảnh: bang-gia.png]",
+        estimated_tokens=1_500,
+    )
+    message = Message(
+        role=Role.USER,
+        content="Đọc giúp [ảnh: bang-gia.png]",
+        images=(image,),
+    )
+
+    blocks = message.as_wire()["content"]
+
+    assert [block["type"] for block in blocks] == ["text", "image_url"]
+    assert blocks[0]["text"] == "Đọc giúp [ảnh: bang-gia.png]"
+    assert blocks[1]["image_url"]["url"] == "data:image/png;base64,iVBORw0KGgo="
+
+
+def test_an_image_the_content_never_names_is_refused():
+    """Same invariant the segments carry, widened rather than reinterpreted.
+
+    The string a ledger measures must still narrate the whole prompt the route
+    reads, or the two are describing different requests.
+    """
+    image = ImageContent(
+        media_type="image/png",
+        data="iVBORw0KGgo=",
+        placeholder="[ảnh: bang-gia.png]",
+    )
+
+    with pytest.raises(ValueError, match="named in its content"):
+        Message(role=Role.USER, content="Đọc giúp cái này", images=(image,))
+
+
+def test_an_image_that_declares_no_cost_is_refused():
+    """A free image is an image no ceiling can see."""
+    with pytest.raises(ValueError, match="positive token cost"):
+        ImageContent(
+            media_type="image/png",
+            data="iVBORw0KGgo=",
+            placeholder="[ảnh: x.png]",
+            estimated_tokens=0,
+        )

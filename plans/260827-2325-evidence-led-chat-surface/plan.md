@@ -11,7 +11,11 @@ created: 2026-08-27
 # Điểm tiếp xúc còn lại chỉ là đọc — xem §Không đụng plan Study.
 # 2026-08-28: phase 03 bị chặn — xem §Phase 03 đã bị đảo tiền đề.
 relatedTo: [260826-2158-study-artifact-canvas]
-blockedBy: [260828-2126-price-basis-and-signal-field-spine]
+# 2026-08-29: phase 02 bị hẹp — `260829-0010-composer-attachments` cho hai row
+# AttachMenu handler thật, nên phép xoá toàn phần hết cơ sở. Xem khối đảo
+# tiền đề trong phase-02.
+# 260828-2126-price-basis-and-signal-field-spine đóng 2026-08-29 (9/9 phase) → nhả chặn.
+blockedBy: [260829-0010-composer-attachments]
 ---
 
 # Plan: Evidence-Led Chat Surface
@@ -82,7 +86,7 @@ không còn tồn tại (eval đã rip 2026-08-22).
 |---|---|---|---|---|---|
 | 01 | [Freeze, contract & a11y baseline](phase-01-freeze-contract-and-accessibility-baseline.md) | web + docs | — | — | pending |
 | 02 | [Distill affordance ngõ cụt](phase-02-distill-dead-end-affordances.md) | web | 01 | — | pending |
-| 03 | [Market context spine](phase-03-market-context-spine.md) | api | 01, **ngoài plan: 260828-2126 phase 02** | — | **chặn — phải viết lại** |
+| 03 | [Market context spine](phase-03-market-context-spine.md) | api | 01 (phụ thuộc ngoài plan đã **thoả** 2026-08-29) | — | **phải viết lại trước khi thi công** |
 | 04 | [Research launchpad empty state](phase-04-research-launchpad-empty-state.md) | web | 02, 03 | — | pending |
 | 05 | [History information architecture](phase-05-history-information-architecture.md) | web | 02 | — | pending |
 | 06 | [Long conversation ergonomics](phase-06-long-conversation-ergonomics.md) | web | 02 | — | pending |
@@ -134,6 +138,12 @@ Sau khi phase 02 bên đó xong, phase 03 ở đây trở lại **read-only**: c
 không sửa `trading_day.py`, blast radius về gần 0. **Phải viết lại phase 03 trước
 khi thi công nó** — bản hiện tại vừa dựa trên ba claim đã bị đảo, vừa nhận một
 việc không còn là của nó.
+
+**Cập nhật 2026-08-29 — phụ thuộc đã thoả, việc viết lại thì chưa.** Plan
+`260828-2126-price-basis-and-signal-field-spine/` đã đóng 9/9 phase:
+`trading_day.py` đọc `bar_daily` (phase 02), `signals/sessions.py` cùng nhánh
+(phase 03), và dòng FiinQuant đã xoá khỏi DB (phase 08, revision `a3f7e21b8d54`).
+Nên phase 03 ở đây **không còn bị chặn** — nó chỉ còn nợ một bản viết lại.
 
 ## Không đụng plan Study — làn tách thế nào
 

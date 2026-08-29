@@ -349,8 +349,9 @@ def test_a_signal_desk_is_composed_from_the_frames_this_turn_gathered(turn):
         block = row.signal_desk_spec["blocks"][0]
         # The version and the presentation are the server's, not the model's: a
         # version is how an old artifact keeps rendering, and which column is
-        # the line is a claim about the numbers.
-        assert block["widgetVersion"] == 1
+        # the line is a claim about the numbers. The server files the newest
+        # version it draws, whatever that is today.
+        assert block["widgetVersion"] == study_tools._newest_version("line_series")
         assert block["options"] == {"x": "session", "y": "value"}
         assert row.frames[block["frame"]]["rows"][0] == ["2026-08-19", 1.0]
 

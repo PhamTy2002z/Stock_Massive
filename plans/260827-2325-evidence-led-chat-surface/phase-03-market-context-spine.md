@@ -15,14 +15,23 @@ dependencies: [1]
 >
 > 1. **Ba claim red-team nền của phase đã bị đảo.** Đo lại cho thấy
 >    `latest_trading_day()` trả `2026-08-24 Monday` (đúng — `day_in_vn` đã
->    `astimezone(VN_TZ)`), **0** dòng cuối tuần khi đếm theo `Asia/Ho_Chi_Minh`,
->    và FiinQuant khớp `bar_daily` **80/80 tuyệt đối**. Lỗi thật là
->    `provider_snapshots` không còn writer nên lịch đứng ở 2026-08-24.
+>    `astimezone(VN_TZ)`) và **0** dòng cuối tuần khi đếm theo
+>    `Asia/Ho_Chi_Minh`. Lỗi thật là `provider_snapshots` không còn writer nên
+>    lịch đứng ở 2026-08-24.
+>
+>    **Sửa 2026-08-29:** câu thứ ba ở bản trước — "FiinQuant khớp `bar_daily`
+>    80/80 tuyệt đối" — **cũng sai**, và nó là phép đo **một mã** (STB, ngoại lệ).
+>    Đo trên đủ 30 mã declared: khớp **1.367/2.256 = 60,59%**, 20/30 mã có lệch.
+>    Toàn bộ khoảng lệch là chữ ký điều chỉnh: giá đã rebase so với giá công bố.
 > 2. **Việc sửa `trading_day.py` đã đổi chủ sở hữu** sang
 >    `plans/260828-2126-price-basis-and-signal-field-spine/` phase 02, vì nó phải
 >    đi cùng nhánh với `signals/sessions.py`.
 >
-> Mọi chỗ trong file này ghi "25 Signal Field" đọc con số sai — đúng là **30**.
+> Mọi chỗ trong file này ghi "25 Signal Field" đọc con số sai — đúng là **30**,
+> và từ 2026-08-29 là **33** (thêm ba field `earnings.*`).
+>
+> **Phụ thuộc ngoài plan đã thoả 2026-08-29:** plan price-basis đóng 9/9 phase,
+> nên phase này không còn bị chặn — chỉ còn nợ bản viết lại.
 > Phase này khi viết lại chỉ còn phần **đọc** lịch cho market context, không sửa
 > `trading_day.py`, không mở freeze.
 

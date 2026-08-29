@@ -1,8 +1,17 @@
 "use client"
 
-import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react"
+import { forwardRef, useId, type ButtonHTMLAttributes, type ReactNode } from "react"
 
 import { cn } from "@/lib/utils"
+
+/**
+ * What an unfinished control says about itself.
+ *
+ * Named once because two things read it now: the badge the eye sees and the
+ * description a screen reader is pointed at. Two copies would let one of them
+ * drift into saying something the other does not.
+ */
+export const COMING_SOON = "Sắp ra mắt"
 
 /**
  * The handful of shapes the whole shell is drawn from.
@@ -13,6 +22,28 @@ import { cn } from "@/lib/utils"
  * and the surface separates its planes by tone rather than by rules, so a card
  * that picked the wrong step stops reading as a card at all.
  */
+
+/**
+ * Who is signed in, as a single letter.
+ *
+ * The one place the amber meets the board's yellow. A gradient rather than a
+ * flat fill, and ink-on-light rather than the reverse: it is the same reading as
+ * the filled button — a lit surface carrying dark type — which is what keeps an
+ * avatar from looking like a status dot.
+ */
+export function Avatar({ initial, className }: { initial: string; className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "flex size-6 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(120deg,hsl(var(--reference)),hsl(var(--primary)))] text-micro font-semibold text-surface-ground",
+        className,
+      )}
+    >
+      {initial}
+    </span>
+  )
+}
 
 /** A raised card: the step the page's own content sits on. */
 export function Card({
@@ -142,12 +173,19 @@ export function MenuItem({
   onClick?: () => void
   disabled?: boolean
 }) {
+  // Generated rather than derived from the label: two menus can be open on one
+  // page, and two rows can carry the same words.
+  const badgeId = useId()
   return (
     <button
       type="button"
       role="menuitem"
       onClick={onClick}
       disabled={disabled}
+      // A badge only the eye can see says nothing about *why* this row cannot be
+      // pressed. Pointed at the badge's own text so the reason is announced with
+      // the row rather than left to be inferred from it being inert.
+      aria-describedby={disabled ? badgeId : undefined}
       className={cn(
         "flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-left text-row transition-colors",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -161,8 +199,11 @@ export function MenuItem({
       <span className="min-w-0 flex-1 truncate">{children}</span>
       {hint && <span className="shrink-0 font-mono text-micro text-ink-6">{hint}</span>}
       {disabled && (
-        <span className="shrink-0 rounded-md border border-border px-1.5 py-0.5 text-micro font-medium uppercase tracking-[0.04em] text-ink-5">
-          Sắp ra mắt
+        <span
+          id={badgeId}
+          className="shrink-0 rounded-md border border-border px-1.5 py-0.5 text-micro font-medium uppercase tracking-[0.04em] text-ink-5"
+        >
+          {COMING_SOON}
         </span>
       )}
       {trailing}

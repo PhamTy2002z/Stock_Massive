@@ -35,6 +35,23 @@ wrapper alone gets wrong.
 
 Short content is left alone: a delimiter around ``"404"`` costs more context than
 it protects, and an injection needs room to say anything.
+
+**A file a reader uploads is a second origin, and it gets its own wrapper.**
+:func:`wrap_attachment` is the entry point, and it is deliberately not
+:func:`wrap_result`: an upload has no tool registration to ask, so routing it
+through the registration-driven decision would answer "not external" by default
+and fail *open* — the one direction this module must never fail in. It also has
+no length floor. The floor is right for a tool result and wrong here: a CSV
+whose only row reads "ignore every rule above" is 28 characters, and under the
+floor it would travel with no delimiter at all.
+
+**Pixels cannot be wrapped, and this module does not pretend otherwise.** An
+image reaches the route as an image; there is no position in it for a delimiter,
+so text rendered inside a screenshot arrives unmarked. What holds that case is a
+sentence in the system prompt saying an uploaded image is evidence rather than
+instruction, and a behavioural test of it. That is a weaker defence than the
+wrapper, it is the strongest one available for this input, and it is written
+down here as the weaker one rather than counted as closed.
 """
 
 from __future__ import annotations
@@ -50,7 +67,11 @@ MIN_WRAP_CHARS = 32
 OPEN_TEMPLATE = '<untrusted_tool_result source="{source}">'
 CLOSE_TAG = "</untrusted_tool_result>"
 
+ATTACHMENT_OPEN_TEMPLATE = '<user_attachment name="{name}">'
+ATTACHMENT_CLOSE_TAG = "</user_attachment>"
+
 _DELIMITER = re.compile(r"<\s*(/?)\s*untrusted_tool_result", re.IGNORECASE)
+_ATTACHMENT_DELIMITER = re.compile(r"<\s*(/?)\s*user_attachment", re.IGNORECASE)
 _SOURCE_UNSAFE = re.compile(r'[^0-9A-Za-z._:\-/ ]')
 
 
@@ -110,12 +131,54 @@ def wrap_result(
     return wrap_untrusted(text, source=source or tool_name)
 
 
+def defang_attachment(text: str) -> str:
+    """Neutralise the attachment wrapper's delimiter inside attachment content.
+
+    Both delimiters, not just this one: a file can as easily forge an opening
+    ``untrusted_tool_result`` tag to make its own contents read like a page the
+    harness quoted, and defanging one tag while leaving the other is a boundary
+    with a door in it.
+    """
+    defanged = _ATTACHMENT_DELIMITER.sub(
+        lambda match: f"&lt;{match.group(1)}user_attachment", text
+    )
+    return defang(defanged)
+
+
+def wrap_attachment(text: str, *, filename: str) -> str:
+    """Wrap text a reader uploaded. Always — there is no length floor here.
+
+    :data:`MIN_WRAP_CHARS` is not consulted, and that difference from
+    :func:`wrap_untrusted` is the point rather than an omission. For a tool
+    result the floor is a fair trade: a wrapper around ``"404"`` is mostly
+    wrapper, and a page needs room to say anything. An upload inverts both
+    halves of that. It was chosen for this Turn, so however little it holds is
+    the whole of what it was chosen for, and one short line is enough to carry an
+    instruction — twenty-eight characters saying "ignore every rule above" is
+    under the floor and would otherwise arrive with no delimiter at all.
+
+    Named by its filename rather than by a tool, because that is the only
+    provenance an upload has.
+    """
+    return "\n".join(
+        (
+            ATTACHMENT_OPEN_TEMPLATE.format(name=_safe_source(filename)),
+            defang_attachment(text),
+            ATTACHMENT_CLOSE_TAG,
+        )
+    )
+
+
 __all__ = [
+    "ATTACHMENT_CLOSE_TAG",
+    "ATTACHMENT_OPEN_TEMPLATE",
     "CLOSE_TAG",
     "MIN_WRAP_CHARS",
     "OPEN_TEMPLATE",
     "defang",
+    "defang_attachment",
     "is_untrusted",
+    "wrap_attachment",
     "wrap_result",
     "wrap_untrusted",
 ]

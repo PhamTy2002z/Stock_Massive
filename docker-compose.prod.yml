@@ -86,6 +86,14 @@ services:
       # thinking route may demand its own reasoning history back.
       LLM_STREAMING_ENABLED: ${LLM_STREAMING_ENABLED:-true}
       LLM_REASONING_HISTORY_REQUIRED: ${LLM_REASONING_HISTORY_REQUIRED:-false}
+      # Whether the route reads images. Forwarded for exactly the reason the
+      # block above states: a switch that only exists in the settings class is
+      # one a container never sees — and unforwarded it fails in the quietest
+      # possible way, because uploads still succeed and still store, they just
+      # never reach the model. `LLM_VISION_MEASURED_MODEL` travels with it so the
+      # startup warning can say the configured model is not the measured one.
+      LLM_VISION_ENABLED: ${LLM_VISION_ENABLED:-false}
+      LLM_VISION_MEASURED_MODEL: ${LLM_VISION_MEASURED_MODEL:-}
       # Paid route checks at boot. On by default: a route that does not honour
       # forced tool choice, parallel calls or strict schemas should fail the
       # deployment rather than the first Turn.

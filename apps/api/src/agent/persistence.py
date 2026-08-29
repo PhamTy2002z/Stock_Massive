@@ -28,6 +28,7 @@ from src.alpha.models import (
     TURN_INCOMPLETE,
     TURN_RUNNING,
     AgentArtifact,
+    AgentAttachment,
     AgentMessage,
     AgentThread,
     AgentToolCall,
@@ -906,8 +907,15 @@ class AgentPersistence:
         symbols: Sequence[str] = (),
         retry_of_turn_id: uuid.UUID | str | None = None,
         mode: str = CHAT_MODE,
+        attachments: Sequence[Mapping[str, Any]] = (),
     ) -> TurnCreation:
-        """Commit the user message and the Turn, before anything is executed."""
+        """Commit the user message and the Turn, before anything is executed.
+
+        ``attachments`` is metadata the caller has already read and proven this
+        user owns — id, filename, media type, size — never bytes. It travels
+        into the committed request for the same reason ``symbols`` does, and the
+        rows it names are bound to this Turn in the same transaction.
+        """
         normalized = tuple(dict.fromkeys(validate_symbol(symbol) for symbol in symbols))
         return await asyncio.to_thread(
             self._create_turn,
@@ -918,6 +926,7 @@ class AgentPersistence:
             normalized,
             None if retry_of_turn_id is None else _uuid(retry_of_turn_id),
             mode,
+            tuple(dict(entry) for entry in attachments),
         )
 
     def _create_turn(
@@ -929,6 +938,7 @@ class AgentPersistence:
         symbols: Sequence[str],
         retry_of_turn_id: uuid.UUID | None,
         mode: str,
+        attachments: Sequence[Mapping[str, Any]],
     ) -> TurnCreation:
         # The whole payload, compared as one value rather than field by field.
         # An idempotency key that only checks the text would return the earlier
@@ -946,6 +956,18 @@ class AgentPersistence:
             # payload, and adding one to every ordinary Turn would make the same
             # question asked before this existed compare unequal to itself.
             payload["mode"] = mode
+        if attachments:
+            # Metadata and not only ids, for two reasons that pull the same way.
+            # A reopened Thread has to draw a chip per attachment, and a joined
+            # read to fetch a filename would be a query per message on every
+            # thread open. And the newest Turn's placeholders have to name the
+            # files even after the bytes are no longer sent, which is a fact
+            # about the request rather than about the row.
+            #
+            # Safe inside the idempotency payload because every field of it is
+            # immutable once uploaded: the same ids always compare to the same
+            # metadata, so this cannot make a Turn unequal to itself.
+            payload["attachments"] = [dict(entry) for entry in attachments]
 
         def write(session: Session) -> TurnCreation:
             existing = self._owned_turn(session, user_id, turn_id)
@@ -983,6 +1005,28 @@ class AgentPersistence:
                 last_event_seq=0,
             )
             session.add(turn)
+            if attachments:
+                # Bound in the same transaction that creates the Turn. Two
+                # commits would leave one of two wrong states reachable: rows
+                # bound to a Turn that failed to exist, or — the harmful one — a
+                # committed Turn whose attachments are still unbound and
+                # therefore still swept as orphans in 24 hours. A Turn that
+                # references deleted bytes is not recoverable.
+                #
+                # Ownership is re-checked here even though the caller checked
+                # it: this is the write, and the write is the only place where
+                # checking is not advice.
+                session.execute(
+                    update(AgentAttachment)
+                    .where(
+                        AgentAttachment.id.in_(
+                            [_uuid(entry["id"]) for entry in attachments]
+                        ),
+                        AgentAttachment.user_id == user_id,
+                        AgentAttachment.attached_turn_id.is_(None),
+                    )
+                    .values(attached_turn_id=turn_id)
+                )
             session.commit()
             return TurnCreation(turn=_turn_record(turn), created=True)
 
