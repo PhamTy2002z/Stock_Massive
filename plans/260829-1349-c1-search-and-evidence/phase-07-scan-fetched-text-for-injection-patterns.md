@@ -1,7 +1,7 @@
 ---
 phase: 7
 title: "Quét pattern injection trên text đã nạp"
-status: pending
+status: done
 priority: P1
 effort: "6h"
 dependencies: []

@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Golden Set và grader deterministic"
-status: pending
+status: done
 priority: P1
 effort: "12h"
 dependencies: [1]

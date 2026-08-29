@@ -1,7 +1,7 @@
 ---
 phase: 5
 title: "Dedup domain và giữ citation qua trim"
-status: pending
+status: done
 priority: P1
 effort: "8h"
 dependencies: [3]

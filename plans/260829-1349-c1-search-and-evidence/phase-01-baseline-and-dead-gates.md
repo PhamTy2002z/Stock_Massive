@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Baseline đo được và dọn cổng chết"
-status: pending
+status: done
 priority: P1
 effort: "3h"
 dependencies: []

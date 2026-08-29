@@ -1,7 +1,7 @@
 ---
 phase: 8
 title: "Nghiệm thu so baseline"
-status: pending
+status: done
 priority: P1
 effort: "6h"
 dependencies: [2, 3, 4, 5, 6, 7]

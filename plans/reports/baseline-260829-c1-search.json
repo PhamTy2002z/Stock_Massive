@@ -1,0 +1,206 @@
+{
+  "measured_at": "2026-08-29T07:26:55.194660+00:00",
+  "git_sha": "6b203b6c194baf2d8dfaaf4df70a3f31f3d38997",
+  "database": "stockmassive (docker compose service db)",
+  "rip_out_boundary": "2026-08-25",
+  "golden_traffic_filter": "NOT EXISTS (SELECT 1 FROM users u WHERE u.id = t.user_id AND u.email LIKE 'golden-runner%')",
+  "metrics": {
+    "turn_scope_web_search_fanout": {
+      "sql": "WITH turns AS (\n  SELECT c.request_message_id,\n         count(*) AS searches\n  FROM agent_tool_call c\n  JOIN agent_thread t ON t.id = c.thread_id\n  WHERE c.tool_name = 'web_search'\n    AND c.started_at >= TIMESTAMPTZ '2026-08-25'\n    AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = t.user_id AND u.email LIKE 'golden-runner%')\n  GROUP BY c.request_message_id\n)\nSELECT count(*) AS turns_with_search,\n       count(*) FILTER (WHERE searches >= 2) AS turns_multi_search,\n       coalesce(max(searches), 0) AS max_searches_in_a_turn\nFROM turns",
+      "rows": [
+        {
+          "turns_with_search": 10,
+          "turns_multi_search": 2,
+          "max_searches_in_a_turn": 2
+        }
+      ]
+    },
+    "turn_scope_web_search_fanout_all_history": {
+      "sql": "WITH turns AS (\n  SELECT c.request_message_id,\n         count(*) AS searches\n  FROM agent_tool_call c\n  JOIN agent_thread t ON t.id = c.thread_id\n  WHERE c.tool_name = 'web_search'\n    AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = t.user_id AND u.email LIKE 'golden-runner%')\n  GROUP BY c.request_message_id\n)\nSELECT count(*) AS turns_with_search,\n       count(*) FILTER (WHERE searches >= 2) AS turns_multi_search,\n       coalesce(max(searches), 0) AS max_searches_in_a_turn\nFROM turns",
+      "rows": [
+        {
+          "turns_with_search": 43,
+          "turns_multi_search": 21,
+          "max_searches_in_a_turn": 5
+        }
+      ]
+    },
+    "round_scope_web_search_fanout_all_history": {
+      "sql": "WITH rounds AS (\n  SELECT c.request_message_id,\n         date_trunc('second', c.started_at) AS dispatch_second,\n         count(*) AS searches\n  FROM agent_tool_call c\n  JOIN agent_thread t ON t.id = c.thread_id\n  WHERE c.tool_name = 'web_search'\n    AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = t.user_id AND u.email LIKE 'golden-runner%')\n  GROUP BY c.request_message_id, date_trunc('second', c.started_at)\n)\nSELECT count(*) AS rounds_with_search,\n       count(*) FILTER (WHERE searches >= 2) AS rounds_multi_search,\n       coalesce(max(searches), 0) AS max_searches_in_a_round\nFROM rounds",
+      "rows": [
+        {
+          "rounds_with_search": 70,
+          "rounds_multi_search": 8,
+          "max_searches_in_a_round": 3
+        }
+      ]
+    },
+    "read_depth": {
+      "sql": "WITH turns AS (\n  SELECT c.request_message_id,\n         count(*) FILTER (WHERE c.tool_name = 'fetch_url') AS fetches,\n         count(*) FILTER (WHERE c.tool_name = 'web_search') AS searches\n  FROM agent_tool_call c\n  JOIN agent_thread t ON t.id = c.thread_id\n  WHERE c.tool_name IN ('fetch_url', 'web_search')\n    AND c.started_at >= TIMESTAMPTZ '2026-08-25'\n    AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = t.user_id AND u.email LIKE 'golden-runner%')\n  GROUP BY c.request_message_id\n)\nSELECT count(*) AS turns_touching_web,\n       sum(fetches) AS fetch_url_calls,\n       sum(searches) AS web_search_calls,\n       count(*) FILTER (WHERE fetches >= 2) AS turns_with_two_or_more_fetches,\n       round(avg(fetches), 3) AS mean_fetch_per_turn\nFROM turns",
+      "rows": [
+        {
+          "turns_touching_web": 10,
+          "fetch_url_calls": 3,
+          "web_search_calls": 12,
+          "turns_with_two_or_more_fetches": 0,
+          "mean_fetch_per_turn": 0.3
+        }
+      ]
+    },
+    "latency_ms": {
+      "sql": "SELECT c.tool_name,\n       count(*) AS n,\n       round(avg(c.latency_ms)) AS mean_ms,\n       percentile_disc(0.5) WITHIN GROUP (ORDER BY c.latency_ms) AS p50_ms,\n       max(c.latency_ms) AS max_ms\nFROM agent_tool_call c\nJOIN agent_thread t ON t.id = c.thread_id\nWHERE c.tool_name IN ('web_search', 'fetch_url')\n  AND c.started_at >= TIMESTAMPTZ '2026-08-25'\n  AND c.latency_ms IS NOT NULL\n  AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = t.user_id AND u.email LIKE 'golden-runner%')\nGROUP BY c.tool_name",
+      "rows": [
+        {
+          "tool_name": "fetch_url",
+          "n": 3,
+          "mean_ms": 700,
+          "p50_ms": 477,
+          "max_ms": 1198
+        },
+        {
+          "tool_name": "web_search",
+          "n": 12,
+          "mean_ms": 2600,
+          "p50_ms": 2346,
+          "max_ms": 4843
+        }
+      ]
+    },
+    "search_payload_parses": {
+      "sql": "SELECT count(*) AS web_search_rows,\n       count(*) FILTER (\n         WHERE jsonb_typeof(\n           CASE WHEN c.result ? 'text'\n                AND left(ltrim(c.result->>'text'), 1) = '{'\n                THEN (c.result->>'text')::jsonb -> 'results'\n                ELSE NULL END) = 'array') AS rows_with_results_array\nFROM agent_tool_call c\nJOIN agent_thread t ON t.id = c.thread_id\nWHERE c.tool_name = 'web_search'\n  AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = t.user_id AND u.email LIKE 'golden-runner%')",
+      "rows": [
+        {
+          "web_search_rows": 81,
+          "rows_with_results_array": 77
+        }
+      ]
+    },
+    "distinct_domains_per_search": {
+      "sql": "WITH parsed AS (\n  SELECT c.id,\n         c.request_message_id,\n         jsonb_array_elements((c.result->>'text')::jsonb -> 'results') AS r\n  FROM agent_tool_call c\n  JOIN agent_thread t ON t.id = c.thread_id\n  WHERE c.tool_name = 'web_search'\n    AND c.result ? 'text'\n    AND left(ltrim(c.result->>'text'), 1) = '{'\n    AND jsonb_typeof((c.result->>'text')::jsonb -> 'results') = 'array'\n    AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = t.user_id AND u.email LIKE 'golden-runner%')\n), per_call AS (\n  SELECT id, count(DISTINCT substring(r->>'url' from '^https?://([^/]+)')) AS domains\n  FROM parsed GROUP BY id\n)\nSELECT count(*) AS calls,\n       round(avg(domains), 3) AS mean_domains_per_search,\n       percentile_disc(0.5) WITHIN GROUP (ORDER BY domains) AS p50,\n       min(domains) AS min, max(domains) AS max\nFROM per_call",
+      "rows": [
+        {
+          "calls": 76,
+          "mean_domains_per_search": 4.5,
+          "p50": 5,
+          "min": 1,
+          "max": 5
+        }
+      ]
+    },
+    "distinct_domains_per_turn": {
+      "sql": "WITH parsed AS (\n  SELECT c.request_message_id,\n         jsonb_array_elements((c.result->>'text')::jsonb -> 'results') AS r\n  FROM agent_tool_call c\n  JOIN agent_thread t ON t.id = c.thread_id\n  WHERE c.tool_name = 'web_search'\n    AND c.started_at >= TIMESTAMPTZ '2026-08-25'\n    AND c.result ? 'text'\n    AND left(ltrim(c.result->>'text'), 1) = '{'\n    AND jsonb_typeof((c.result->>'text')::jsonb -> 'results') = 'array'\n    AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = t.user_id AND u.email LIKE 'golden-runner%')\n), per_turn AS (\n  SELECT request_message_id, count(DISTINCT substring(r->>'url' from '^https?://([^/]+)')) AS domains\n  FROM parsed GROUP BY request_message_id\n)\nSELECT count(*) AS turns,\n       round(avg(domains), 3) AS mean_domains_returned_per_turn,\n       percentile_disc(0.5) WITHIN GROUP (ORDER BY domains) AS p50,\n       min(domains) AS min, max(domains) AS max\nFROM per_turn",
+      "rows": [
+        {
+          "turns": 10,
+          "mean_domains_returned_per_turn": 5.7,
+          "p50": 5,
+          "min": 4,
+          "max": 10
+        }
+      ]
+    },
+    "cost_per_web_turn_micro_usd": {
+      "sql": "WITH web_turns AS (\n  SELECT DISTINCT c.request_message_id\n  FROM agent_tool_call c\n  JOIN agent_thread t ON t.id = c.thread_id\n  WHERE c.tool_name IN ('web_search', 'fetch_url')\n    AND c.started_at >= TIMESTAMPTZ '2026-08-25'\n    AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = t.user_id AND u.email LIKE 'golden-runner%')\n), per_turn AS (\n  SELECT lcu.owner_id,\n         sum(coalesce(lcu.actual_micro_usd, lcu.reserved_micro_usd)) AS micro_usd,\n         sum(lcu.input_tokens) AS input_tokens,\n         sum(lcu.output_tokens) AS output_tokens,\n         count(*) AS llm_calls\n  FROM llm_call_usage lcu\n  JOIN web_turns w ON w.request_message_id::text = lcu.owner_id\n  WHERE lcu.owner_type = 'turn_request_message'\n    AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = lcu.user_id AND u.email LIKE 'golden-runner%')\n  GROUP BY lcu.owner_id\n)\nSELECT count(*) AS turns,\n       round(avg(micro_usd)) AS mean_micro_usd,\n       percentile_disc(0.5) WITHIN GROUP (ORDER BY micro_usd) AS p50_micro_usd,\n       max(micro_usd) AS max_micro_usd,\n       round(avg(input_tokens)) AS mean_input_tokens,\n       round(avg(output_tokens)) AS mean_output_tokens,\n       round(avg(llm_calls), 2) AS mean_llm_calls\nFROM per_turn",
+      "rows": [
+        {
+          "turns": 10,
+          "mean_micro_usd": 42002,
+          "p50_micro_usd": 34447,
+          "max_micro_usd": 70694,
+          "mean_input_tokens": 14178,
+          "mean_output_tokens": 701,
+          "mean_llm_calls": 3.6
+        }
+      ]
+    },
+    "cost_per_turn_all_lanes_micro_usd": {
+      "sql": "WITH per_turn AS (\n  SELECT lcu.owner_id,\n         sum(coalesce(lcu.actual_micro_usd, lcu.reserved_micro_usd)) AS micro_usd\n  FROM llm_call_usage lcu\n  WHERE lcu.owner_type = 'turn_request_message'\n    AND lcu.created_at >= TIMESTAMPTZ '2026-08-25'\n    AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = lcu.user_id AND u.email LIKE 'golden-runner%')\n  GROUP BY lcu.owner_id\n)\nSELECT count(*) AS turns,\n       round(avg(micro_usd)) AS mean_micro_usd,\n       percentile_disc(0.5) WITHIN GROUP (ORDER BY micro_usd) AS p50_micro_usd,\n       max(micro_usd) AS max_micro_usd\nFROM per_turn",
+      "rows": [
+        {
+          "turns": 22,
+          "mean_micro_usd": 34362,
+          "p50_micro_usd": 33460,
+          "max_micro_usd": 70694
+        }
+      ]
+    },
+    "top_domains_returned": {
+      "sql": "WITH parsed AS (\n  SELECT jsonb_array_elements((c.result->>'text')::jsonb -> 'results') AS r\n  FROM agent_tool_call c\n  JOIN agent_thread t ON t.id = c.thread_id\n  WHERE c.tool_name = 'web_search'\n    AND c.result ? 'text'\n    AND left(ltrim(c.result->>'text'), 1) = '{'\n    AND jsonb_typeof((c.result->>'text')::jsonb -> 'results') = 'array'\n    AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = t.user_id AND u.email LIKE 'golden-runner%')\n)\nSELECT substring(r->>'url' from '^https?://([^/]+)') AS domain, count(*) AS hits\nFROM parsed\nGROUP BY 1 ORDER BY hits DESC LIMIT 15",
+      "rows": [
+        {
+          "domain": "www.youtube.com",
+          "hits": 24
+        },
+        {
+          "domain": "thoibaotaichinhvietnam.vn",
+          "hits": 21
+        },
+        {
+          "domain": "finance.vietstock.vn",
+          "hits": 20
+        },
+        {
+          "domain": "vn.investing.com",
+          "hits": 18
+        },
+        {
+          "domain": "cafef.vn",
+          "hits": 16
+        },
+        {
+          "domain": "vneconomy.vn",
+          "hits": 15
+        },
+        {
+          "domain": "baomoi.com",
+          "hits": 14
+        },
+        {
+          "domain": "simplize.vn",
+          "hits": 12
+        },
+        {
+          "domain": "www.facebook.com",
+          "hits": 10
+        },
+        {
+          "domain": "vietstock.vn",
+          "hits": 10
+        },
+        {
+          "domain": "www.sacombank.com.vn",
+          "hits": 9
+        },
+        {
+          "domain": "24hmoney.vn",
+          "hits": 9
+        },
+        {
+          "domain": "www.ssi.com.vn",
+          "hits": 8
+        },
+        {
+          "domain": "vingroup.net",
+          "hits": 8
+        },
+        {
+          "domain": "vinhomes.vn",
+          "hits": 7
+        }
+      ]
+    }
+  },
+  "scope": "Organic chat-lane traffic only. This is CONTEXT for phase 08, not the comparison sample: phase 08 compares against the phase 02 golden artifact, which is a different population (web-first corpus) and a different unit.",
+  "not_measured": {
+    "uncited_external_number": {
+      "value": null,
+      "reason": "cited-ness undefined until phase 02 fixes the observable definition; needs the answer text plus the Turn's display_results set. Not a persistence gap - the results array does survive in agent_tool_call.result->>'text' (77/81 rows parse)."
+    }
+  },
+  "notes": [
+    "Every metric carries its own n. Read no metric without it.",
+    "A round has no column of its own. turn_scope_* groups by request_message_id and so counts a whole Turn (up to MAX_TOOL_ROUNDS = 4 rounds); round_scope_* buckets by the dispatch second, which is the closest observable proxy for one asyncio.gather batch. The two disagree sharply - 21/43 turns versus 8/70 rounds - so quote the unit whenever quoting the rate.",
+    "Cost is summed over every LLM call of a Turn (mean 3.6 calls), not per call. A single call measured 20,514 micro-USD; the Turn it belonged to cost more.",
+    "actual_micro_usd is used where reconciled, reserved_micro_usd otherwise."
+  ]
+}

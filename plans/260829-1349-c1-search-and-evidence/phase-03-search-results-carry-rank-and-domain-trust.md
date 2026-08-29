@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Kết quả tìm mang rank và độ tin cậy domain"
-status: pending
+status: done
 priority: P1
 effort: "8h"
 dependencies: [2]

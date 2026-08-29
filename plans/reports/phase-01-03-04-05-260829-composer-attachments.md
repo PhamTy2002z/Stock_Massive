@@ -213,6 +213,59 @@ Một test hợp đồng đã bắt lỗi thật và **không** bị nới:
 comment mới ở `protocol.py` nêu tên model đã đo. Sửa comment (trỏ report thay vì
 nêu tên), không sửa test.
 
+## Hai lỗi tìm ra lúc nghiệm thu tay, sau khi mọi cổng đã xanh
+
+Cả hai đều ở chỗ unit test cấu trúc không với tới, và đáng ghi vì chúng cùng một
+hình dạng: **một mảnh nối giữa hai tầng, mà mỗi tầng tự nó đều đúng.**
+
+### 1. Cờ vision không tới container (vùng phase 04)
+
+`.env` khai `LLM_VISION_ENABLED=true`, `Settings` đọc được, `LLMRoute` mang được
+— nhưng `docker-compose.yml` **không forward** biến đó, nên
+`docker compose exec api env` trả chuỗi rỗng và `GET /capabilities` trả
+`{"vision": false}`. Hệ quả: ảnh nạp được, lưu được, tính token được, và **không
+bao giờ tới model** — im lặng hoàn toàn. Chính `docker-compose.yml` đã viết ra
+luật bị vi phạm, ba lần trong cùng file: *"a switch that only exists in the
+settings class is one a container never sees."*
+
+Phase 04 đặt `.env` rồi dừng ở đó; đúng ra phải kiểm tới biên container. Đã sửa
+(forward ở cả `docker-compose.yml` và `docker-compose.prod.yml`) và xác minh:
+container giờ trả `LLM_VISION_ENABLED=[true]`.
+
+### 2. Menu đính kèm hiển thị nhưng không bấm được (vùng phase 08–10)
+
+Hai row chạy thật của `AttachMenu` render đúng, đọc là enabled, có handler gắn
+đúng — và **mọi cú bấm rơi vào scrim**. `app-shell.tsx` vẽ một
+`div.fixed.inset-0.z-[25]` khi overlay mở; scrim là anh em của `main`, còn `main`
+là `position: relative; z-index: auto`. Một ancestor đã positioned mà không có
+z-index riêng vẫn **sơn như một khối**, nên không gì bên trong `main` vượt được
+một anh em z dương của nó — menu nằm dưới scrim dù z-index của nó cao đến đâu.
+
+Đo trên trình duyệt thật: `elementsFromPoint` tại tâm mỗi row trả về scrim đầu
+tiên, và nâng composer lên `z-40` **không đổi gì** — chỉ hạ/bỏ scrim mới làm click
+tới được nút.
+
+Repo đã biết bệnh này: `components/signal-desk/board-menu.tsx:48-51` ghi đúng nó
+(*"the shell's scrim sits above the desk pane… every press would land on the
+scrim"*) và vá cục bộ. Bản vá này áp cùng câu trả lời **tại chỗ quyết định
+scrim**: overlay `attach` không dựng scrim nữa, nó tự đóng bằng một listener
+`pointerdown` ở document — đúng khuôn đã dùng ba lần trong repo
+(`sidebar.tsx:330`, `board-menu.tsx:61`, `flag-action.tsx:62`). Press trên chính
+trigger được bỏ qua (`aria-expanded="true"`), nếu không click của nó sẽ mở lại
+thứ vừa đóng.
+
+**Vì sao 817 unit test không bắt được.** Mọi test của menu này render `Composer`
+một mình, nơi scrim của shell không tồn tại. Và jsdom **không có layout**, nên nó
+không có hit testing — không đời nào nó nói được pixel người đọc nhắm vào thuộc
+control nào. Lưới đúng lớp là e2e: `e2e/composer-attach.spec.ts` dùng
+`click({ trial: true })` (chạy đủ kiểm actionability, gồm *receives events*, rồi
+dừng trước khi bấm — cần thiết vì cả hai row mở hộp thoại của hệ điều hành).
+Đã kiểm ngược: gỡ bản vá thì test đỏ và Playwright nêu đích danh
+*"`<div class=\"fixed inset-0 z-[25]\"></div>` intercepts pointer events"*.
+
+Cổng sau bản vá: `pnpm type-check` `lint` pass · `pnpm test` **817 passed** ·
+`pnpm build` pass · `pnpm exec playwright test` **8 passed**.
+
 ## Câu hỏi chưa giải quyết
 
 1. **Rate limit theo IP trên endpoint nạp — user đã chốt giữ như plan

@@ -96,6 +96,83 @@ Repo vừa rẽ khỏi "nền tảng dữ liệu chứng khoán" sang "AI produc
    phải check thứ sáu của `CapabilityProbe`, vì `enforce_capability_probe` raise
    khi bất kỳ check fail và một năng lực phụ không được quyền giết cả API.
 
+   **Mở thêm 2026-08-29** cho plan `plans/260829-1349-c1-search-and-evidence/`
+   — C1 tìm rộng hơn, đọc nhiều hơn, mọi số ngoài store truy được về một trang
+   đã đọc, cộng bộ đo tối thiểu (C4-lite) để C1 tốt nghiệp bằng số. Bốn file
+   plan này sửa nằm trong bảng của `260829-0010-composer-attachments`, plan đó
+   **đã đóng 10/10**, nên chúng cần amendment này chứ không phải một dòng nới:
+
+   | Surface | Giới hạn |
+   |---|---|
+   | `apps/api/golden/*` (mới) | corpus + runner + grader; **không** importer nào từ `src/`. Không đặt ở `src/eval/` — cái tên đó chết hai lần, và nằm ngoài `src/` biến luật "runtime không phụ thuộc eval" thành sự thật vật lý |
+   | `apps/api/Makefile` | gỡ năm target `eval-*` chết, thêm `golden-run`/`golden-grade`; không đụng target nào đang chạy |
+   | `src/agent/tools/web.py` | `rank` · trích đoạn theo câu hỏi; **không** đổi SSRF, denylist, `MAX_REDIRECTS`, `MAX_PAGE_TEXT_CHARS` |
+   | `src/agent/{loop,guardrails}.py` | đúng hai con số đi cùng nhau (`MAX_EXTERNAL_TOOL_CALLS` và `same_tool_failure_halt_after`); không đổi `MAX_TOOL_ROUNDS`. **Nới 2026-08-29 lúc thi công phase 05+07** — `loop.py` thêm một trường `_TurnState.shown_sources` và hai passthrough (`seen=`, `scan=`); không đổi thêm con số nào |
+   | `src/agent/executor.py` | **Nới 2026-08-29 lúc thi công phase 07** — bản đầu ghi "chỉ comment", nhưng phase 07 khai chính file này làm điểm quét. Được: một trường `ToolResult.scan` + một chỗ gọi `scan_for_threats` sau khi tool trả về. **Không** đổi `MAX_EXTERNAL_CALLS_PER_ROUND = 8`, không đổi luật admit/segment |
+   | `src/agent/{messages,untrusted}.py` + `threat_patterns.py` (mới) | dedup hiển thị · lớp quét fail-open; **không** đổi `wrap_result` |
+   | `src/agent/events.py` | **thêm 2026-08-29 lúc thi công phase 07** — đúng một khoá `scan` vào `TOOL_CALL_FIELDS`; không thêm `EventType`, không đụng `SIGNAL_DESK_FIELDS` |
+   | `src/agent/prompt/sections.py` | một section + bump `PROMPT_VERSION` |
+   | `apps/web/src/lib/alpha-desk/types.ts` · `components/alpha/message/reasoning-timeline.tsx` · `hooks/use-live-turn.ts` | **chỉ** vẽ dữ liệu `tool.call` đã có trên dây; không đụng `SignalDeskToggle` |
+   | `apps/web/src/components/alpha/message/source-pill.tsx` | **thêm 2026-08-29 lúc thi công phase 06** — `distinctDomains` nâng lên `types.ts` để rail và pill dùng chung một phép đếm; file này **chỉ** đổi import, không đổi một dòng render nào |
+   | `.gitignore` | **thêm 2026-08-29 lúc soát lại phase 08** — phase 01 đã thêm khối ignore cho `golden/artifacts/*` (giữ `.gitkeep`) mà bảng chưa ghi; artifact nghiệm thu commit bằng `git add -f`, không cần ngoại lệ thứ hai |
+   | `apps/api/tests/*` · `apps/web/src/**/*.test.tsx` | test cho mọi surface trên |
+   | `docs/roadmap.md` · `CLAUDE.md` | §1, §3 C1/C2 — **không** đụng Track S. **Nới 2026-08-29 lúc đóng plan** cho §3 **C4** và §6: C4-lite dựng ở C1 làm hai dòng của C4 sai sự thật ("Đo chất lượng: không có"), và §6 phải nói cạnh C0→C1 đóng với nhãn `Target`. Chỉ sửa mô tả trạng thái; **không** đổi Objective, Boundary hay Gate của C4, và vẫn không đụng Track S |
+
+   Bảng này **là** ranh giới. File ngoài bảng cần amendment mới. Soát lại lúc đóng
+   plan 2026-08-29: mọi file tám phase sửa đều có dòng. `src/agent/evidence/` và
+   `src/agent/domain/` trong cùng worktree là của **C5**, không phải C1.
+
+   **Cờ quét injection lưu ở đâu — chốt 2026-08-29, đường thứ ba.** Phase 07 đưa
+   ra hai lựa chọn: cột JSONB mới trên `agent_tool_call` (A) hay live-only (B).
+   Cả hai đều thua đường thứ ba: `TurnToolCall.as_wire()` **đã** được ghi vào
+   `agent_message.content` JSONB (`turns.py:231`), nên một khoá `scan` ở đó là
+   durable, mở lại thread vẫn thấy, `golden/run.py` đọc lại được — mà **không**
+   migration, **không** cột trên bảng nóng, **không** backup DB, và không đụng
+   bất biến của cột `agent_tool_call.result` ("đúng thứ model đã thấy").
+   Cờ **không bao giờ** vào text gửi model: một cảnh báo trong text là một câu
+   model phải diễn giải, và đó chính là bề mặt injection đang tấn công.
+
+   **Mở thêm 2026-08-29** cho plan `plans/260829-1435-c5-domain-pack/` — C5 domain
+   pack + progressive instruction: domain chứng khoán thành `DomainPack("vn-equity")`
+   có version, `web`+`memory` là core, và body domain nạp theo tool path thay vì nạp
+   mọi Turn. `src/agent/*` chưa bao giờ freeze, nhưng bốn file dưới đây nằm trong bảng
+   surface của hai plan **đã đóng** (`260829-0010-composer-attachments` 10/10) hoặc
+   **đang mở** (`260829-1349-c1-search-and-evidence`) — tiền lệ price-basis nói plan
+   xong thì surface đóng, nên chúng cần amendment này chứ không phải một dòng nới:
+
+   | Surface | Giới hạn |
+   |---|---|
+   | `src/agent/domain/*` (mới) | `DomainPack` + pack `vn-equity`; pack **tham chiếu** `signals`/`studies`/`universe`/Study theo tên hoặc theo symbol đã có, **không** định nghĩa lại cái nào. `pack.py` và `__init__.py` **không** được import `stocks`/`studies`/`toolsets`; chỉ `vn_equity.py` được |
+   | `src/agent/toolsets.py` | `CORE_TOOLSETS` + một cổng import-time buộc `CHAT_TOOLSETS` khớp core + pack; `CHAT_TOOLSETS` **vẫn là literal viết ra**, không sinh động |
+   | `src/agent/prompt/sections.py` | tách core ↔ body theo ba luật của plan; **không** viết lại nội dung playbook; bump `PROMPT_VERSION` |
+   | `src/agent/prompt/contract.py` | `render`/`prefix` chỉ dựng core; `cache_key` nhận danh tính pack; **không** đổi `_assert_no_formatting_hole`, không đổi `RuntimeContext` |
+   | `src/agent/prompt/__init__.py` | **chỉ** export tên mới của hai file trên; không thêm logic |
+   | `src/agent/loop.py` | **chỉ đường nhận pack**: một cờ per-Turn trên `_TurnState`, ba trigger, một note dính trong `_call`. **Không** đổi `MAX_TOOL_ROUNDS`, `MAX_EXTERNAL_TOOL_CALLS`, `SIGNAL_DESK_NOTE`, `plan_segments` |
+   | `src/alpha/reasons.py` | **chỉ docstring** trỏ lại guard còn sống; không thêm/bớt một mã refusal nào |
+   | `apps/api/tests/*` | test cho mọi surface trên; test mới **thêm ở cuối file**, không reflow test đang có |
+   | `docs/roadmap.md` · `CLAUDE.md` | §3 C5 và §Quy ước — **không** đụng §3 C1/C2 và không đụng Track S |
+
+   Bảng này **là** ranh giới. File ngoài bảng cần amendment mới. `apps/api/golden/*`
+   **không** trong bảng: nó thuộc C1, và C5 chỉ **chạy** nó và **đọc** artifact của nó.
+   Plan này **không đụng** `src/stocks/*` và **không sửa** file nào trong `apps/web/`.
+
+   **Mở thêm 2026-08-29, lúc code review phase 05** — trigger thứ hai của C5
+   ("Turn gần nhất của Thread đã chạm domain") **chết trong production**:
+   `router.history_of` không bao giờ điền `TranscriptTurn.tool_calls`, và
+   docstring của nó nói rõ đó là cố ý. Sửa cần đúng hai file, cả hai ngoài bảng
+   trên — `messages.py` phase 05 ghi "không sửa", `router.py` thuộc bảng của plan
+   `260829-0010-composer-attachments` đã đóng 10/10:
+
+   | Surface | Giới hạn |
+   |---|---|
+   | `src/agent/messages.py` | **chỉ thêm một trường** `TranscriptTurn.tool_names`; `build_messages` **không được đọc** nó và một test giữ luật đó (cùng transcript, có tên và không tên, message byte-identical). Không đổi `tool_calls`, `completed_calls`, `_turn_messages`, `estimate_tokens` |
+   | `src/agent/router.py` | **chỉ `history_of`** đổ tên tool từ `record.content["tool_calls"]` **đã lưu sẵn** — không thêm query, không đổi shape response, không đụng auth/idempotency |
+
+   Vì sao là trường thứ hai chứ không phải làm dày `tool_calls`: `build_messages`
+   trim Turn cũ về prose, nên rehydrate một call đầy đủ sẽ đẩy **mọi** tool result
+   cũ vào **mọi** request sau. Tên thì đã nằm sẵn trên dòng đang đọc, và tên là
+   trọn vẹn thứ một Turn sau cần biết về một Turn trước.
+
 Nguồn data ngoài duy nhất được phép: **vnstock Bronze giai đoạn dev
 (180 req/phút), Diamond khi lên prod (600 req/phút, licence phân phối
 ≤500 user)**. DNSE, FiinQuant, CafeF **vi phạm điều khoản SaaS** — code đã rip
@@ -111,7 +188,11 @@ Authority: **`docs/roadmap.md`** — hai track, mỗi phase có Objective ·
 Trước→Sau · checklist · gate. Tóm tắt:
 
 - **Track C — Core harness (mọi user):** C0 nền lane chat (Current, xong
-  2026-08-25) · C1 search & tổng hợp có citation · C2 context & cache ·
+  2026-08-25) · C1 search & tổng hợp có citation (**vẫn Target sau nghiệm thu
+  2026-08-29** — 8/8 phase thi công xong, nhưng tiêu chí *"số ngoài store không
+  citation = 0"* **chưa có công cụ đo hợp lệ**: grader sai 5/5 vì không thấy được
+  số suy diễn. Xem `plans/reports/phase-08-260829-c1-verification.md`) · C2
+  context & cache ·
   C3 tool plane / nudge có trần / idempotency · C4 evaluator plane (Golden
   Question Set, dựng lại sau khi rip eval) · C5 domain pack + progressive
   instruction (Phase 1 cũ) · C6 tenant / permission / entitlement (Phase 2
@@ -218,7 +299,8 @@ Mọi đề xuất và triển khai vào `src/agent/` phải đọc `docs/hermes
   chiếu AI.
 - Agent (`src/agent/`) trên khung Hermes-style (`registry` · `toolsets` ·
   `definitions` · `executor` · `guardrails` · `budget` · `untrusted`).
-  Lane chat chọn ba bundle `web` + `memory` + `signals` = 8 tool.
+  Lane chat chọn bốn bundle `web` + `memory` + `signals` + `studies` =
+  12 tool — chính prompt cũng tự nói "mười hai công cụ".
   `toolsets.CHAT_TOOLSETS` là selection duy nhất và phải được **viết
   ra**: `AgentLoop(toolsets=None)` mặc định về đúng tuple đó. Thêm/đổi
   tool đi qua `registry`/`toolsets`/`definitions`, không hardcode trong
@@ -228,14 +310,92 @@ Mọi đề xuất và triển khai vào `src/agent/` phải đọc `docs/hermes
   chữ ký từ một registration**: `ToolContext.symbol` có (từng cho lane
   Analysis — lane đó đã bỏ) thì nó thắng; không có context (lane chat) thì
   `symbol` là argument. `trading_day` **không bao giờ** là argument.
-- Luật đã ghim trong prompt (`PROMPT_VERSION` 2.6.0): **số của store
-  thắng số của web** · tách hai khối bằng chứng · nêu mức và hệ quả,
-  **không** ra chỉ thị hành động cho vị thế cụ thể.
-- `MAX_EXTERNAL_TOOL_CALLS = 6` chỉ tính tool có `reads_external` bật,
-  không tính ba tool `signals`. `MAX_TOOL_ROUNDS = 4` ở lane chat.
+- **Prompt đi hai tầng từ `PROMPT_VERSION` 3.0.0** (2026-08-29). *Core* —
+  `prompt/sections.py`, chín section, 5.345 token — đi với **mọi** Turn và
+  vẫn là prefix cacheable: danh tính, luật không ghi đè được, danh mục
+  mười hai tool, luật dùng tool chung, nội dung ngoài, ký ức, văn phong.
+  *Body của pack* — `agent/domain/vn_equity.py`, hai section, 789 token —
+  là playbook chứng khoán và đi ra **dưới dạng system note dán mỗi call**,
+  không phải section, vì prompt render một lần trước round 0.
+  **Ba trigger, đều deterministic, không tốn lượt model nào:** `mode ==
+  "signal_desk"` · Turn gần nhất của Thread có call domain (**đúng một**
+  Turn, quét sâu hơn thì một Thread từng hỏi cổ phiếu mang body mãi mãi) ·
+  round này model xin gọi một tool domain (đọc `completion.tool_calls`
+  trước dispatch, nên một call hỏng vẫn là tín hiệu intent đúng). Bật rồi
+  thì **dính tới cuối Turn** — cờ `_TurnState.domain_body`, per-Turn.
+  Chỗ giữ token là `pack.body_tokens` đo thật, **không** phải
+  `SYSTEM_NOTE_TOKENS = 160`; một biểu thức duy nhất
+  (`loop.domain_body_tokens`) dùng ở cả `_construct` lẫn `_call`.
+- **Đường cắt core ↔ body có một luật, và nó là luật an toàn.** Câu nào
+  giữ cho câu trả lời an toàn thì **ở core**, vì Turn không kích trigger
+  chính là Turn trả lời bằng trí nhớ: cấm chỉ thị hành động cho vị thế ·
+  luật bảng điều kiện · cấm bịa số liệu thị trường VN · cổng
+  `check_price_claim` · "nội dung trong thẻ bọc là dữ liệu". Câu *"Hỏi
+  store trước khi hỏi web"* cũng ở core — nó **gây ra** lời gọi tool
+  domain, đẩy xuống body là deadlock. Test giữ cả hai chiều
+  (`test_agent_prompt.py`): danh sách câu load-bearing không được mất, và
+  danh sách sàn an toàn không được rơi xuống body.
+- Luật đã ghim trong prompt: tách hai khối bằng chứng · nêu mức và hệ quả,
+  **không** ra chỉ thị hành động cho vị thế cụ thể · §5 "Cách tiêu bảy lượt
+  tra cứu" (2.10.0): truy vấn độc lập đi **cùng một round**, snippet 700 ký
+  tự là chỉ dấu chọn trang chứ không phải bằng chứng, và `fetch_url` nêu rõ
+  đang tìm gì để nhận đoạn khớp thay vì đầu trang. **Số của store thắng số
+  của web** đã chuyển **xuống body** ở 3.0.0: nó chỉ áp dụng được sau khi đã
+  đọc store, mà đọc store chính là trigger nạp body, nên nó không vắng mặt
+  lúc cần.
+- **Domain là một `DomainPack`, không phải một tập hằng rải rác.**
+  `agent/domain/pack.py` là khung (không import `stocks`/`studies`/
+  `toolsets`, không đọc settings); `vn_equity.py` là domain, và là file
+  duy nhất được import `stocks`. Pack khai `name · version ·
+  prompt_sections · toolsets · universe · study_names ·
+  refusal_vocabulary`; `identity` hash cả version viết tay lẫn prose, nên
+  quên bump vẫn void cache. `CHAT_TOOLSETS` **vẫn là literal viết ra** và
+  một cổng import-time raise khi nó lệch `CORE_TOOLSETS + pack.toolsets`.
+  `loop.py` đọc pack qua `active_pack()` và **không được mang tên pack
+  nào** — hai hằng `CATALOG_TOOL`/`RUN_TOOL` là nợ có trước C5, một test
+  giữ nó ở đúng hai dòng.
+- `MAX_EXTERNAL_TOOL_CALLS = 7` (từ 6, 2026-08-29) chỉ tính tool có
+  `reads_external` bật, không tính ba tool `signals`. `MAX_TOOL_ROUNDS = 4`
+  ở lane chat. **Bảy đi cùng `guardrails.same_tool_failure_halt_after = 7`
+  — hai số là một sự thật, đổi cái này phải đổi cái kia, và một test giữ
+  đẳng thức** (`tests/test_agent_guardrails.py`). Bảy là phép đo, không
+  phải số tròn: mục tiêu 2–3 tìm + 3–4 đọc = 5–7 call, một Turn web-first
+  đo được 42.181 µUSD (n=20, golden) so trần `TURN_COST_MICRO_USD =
+  500.000`. Giữ **dưới 8** có chủ đích — `MAX_EXTERNAL_CALLS_PER_ROUND = 8`
+  chưa từng binding trong production, nới tới 8 là bật một code path chưa
+  ai chạy.
 - Kết quả tool có bọc `<untrusted_tool_result>` do
   `registry.ToolEntry.reads_external` quyết, mặc định `True`. Tool đọc
   store khai `reads_external=False`.
+- **Lớp bảo mật thứ năm là lớp mềm, và mềm là thiết kế.** `wrap_result` là lớp
+  cứng, luôn chạy, không đổi. `untrusted.scan_for_threats` (2026-08-29) chỉ **gắn
+  cờ**: mọi đường ra khỏi nó là một verdict, kể cả khi pattern nổ hay chạm trần
+  0,25 s (→ `risk: "unknown"`, khác `"low"` — "đã nhìn, không thấy gì" và "không
+  nhìn" là hai sự thật khác nhau). Quét ở **executor, đúng một lần mỗi kết quả**,
+  **không** trên đường render: `shown_result` dựng lại mỗi lượt gọi LLM nên quét ở
+  đó sẽ đọc lại một trang 20k ký tự tới năm lần cho một câu trả lời. Hai scope
+  (`all` + `context`); scope `strict` của Hermes **loại có lý do** — nó bảo vệ agent
+  ghi được filesystem, lane này không có tool nào như vậy. Cờ lưu trong
+  `TurnToolCall.as_wire()` → `agent_message.content` JSONB, **không** cột mới,
+  **không** migration. **Không bao giờ vào text gửi model** — một cảnh báo trong
+  text là một câu model phải diễn giải, và đó chính là bề mặt injection đang tấn
+  công. Đo trên corpus golden: **0 `risk: high` / 97 kết quả** trang thị trường
+  lành; hiển thị trên rail **chưa bật** vì 0/97 không phân biệt "không kêu bậy"
+  với "không kêu".
+- **Nguồn hiển thị dedup theo phạm vi Turn, không theo call.** `_TurnState.
+  shown_sources` + `messages.dedup_key` (bỏ fragment · `www.` · trailing slash ·
+  tracking param · scheme). **Chuẩn hoá chỉ để so trùng — link lưu và click vẫn là
+  link gốc**, vì bỏ một tham số site nào đó định tuyến theo sẽ biến link sống thành
+  404. Phạm vi Turn là phép đo chứ không phải thẩm mỹ: **0/53** call search trả URL
+  trùng trong cùng payload, còn **21/223** URL trùng giữa các call — dedup per-call
+  là code không bao giờ chạy. Đo trên lượt golden cuối: nguồn/lượt tìm **5,13 →
+  3,96** (−22,8%) ở `MAX_RESULTS = 5` không đổi, mà `distinct_domains` giữ nguyên
+  19/20. Grader lấy **set** domain nên dedup **không thể** hạ số domain khác nhau.
+- **Rung 2 của thang trim giữ danh sách URL của kết quả** (trần
+  `COLLAPSED_RESULT_URLS = 5`), bỏ title và snippet. `url` của `fetch_url` và
+  `query` của `web_search` **vốn đã sống** trong `arguments` — dựng lại chúng là
+  trả tiền hai lần cho một sự thật. Thứ thật sự mất là URL của **kết quả**, và đó
+  là thứ một khẳng định trỏ vào.
 - **Signal Desk đi hai đường, cùng một luật.** `run_study` chạy công thức có tên;
   `get_series` + `render_signal_desk` cho câu hỏi chưa có công thức. Cả hai trả
   model **id + tóm tắt**, không bao giờ trả `frames`; loop phát `signal_desk.ready`
@@ -413,6 +573,11 @@ Mọi đề xuất và triển khai vào `src/agent/` phải đọc `docs/hermes
 
 **2026-08-22 (đã ghi trước đó):**
 - Eval Battery / Eval Gate / Eval Report: `src/eval/*` (đã rip lại lần
-  này), `make eval*`, biến `EVAL_*`, bảng `eval_run`, lane ngân sách
-  eval. Chữ `eval` còn trong code là lệnh Redis (`core/redis.py::eval_
-  script`).
+  này), biến `EVAL_*`, bảng `eval_run`, lane ngân sách eval. Chữ `eval`
+  còn trong code là lệnh Redis (`core/redis.py::eval_script`).
+  **Đính chính 2026-08-29:** câu "`make eval*` đã gỡ" **sai suốt một tuần**
+  — năm target `eval-validate/smoke/run/compare/gate` vẫn sống trong
+  `apps/api/Makefile` và cả năm gọi `python -m src.eval`, một module chỉ
+  còn `__pycache__`. Gỡ thật ở C1 phase 01, cùng lúc xoá `src/eval/` khỏi
+  disk. Bộ đo mới **không** dùng lại tên đó: nó ở `apps/api/golden/`,
+  ngoài `src/`, nên production không import được nó.

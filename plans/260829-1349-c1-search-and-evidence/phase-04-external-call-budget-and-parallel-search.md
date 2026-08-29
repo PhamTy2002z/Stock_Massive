@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Ngân sách external call và tìm song song"
-status: pending
+status: done
 priority: P1
 effort: "8h"
 dependencies: [2, 3]

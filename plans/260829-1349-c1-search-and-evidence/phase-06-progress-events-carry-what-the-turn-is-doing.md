@@ -1,7 +1,7 @@
 ---
 phase: 6
 title: "Rail hiện số nguồn và domain đã có trên dây"
-status: pending
+status: done
 priority: P2
 effort: "3h"
 dependencies: [3]
