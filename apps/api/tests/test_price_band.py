@@ -547,13 +547,16 @@ class TestWhatTheDetectorRefusesToDecide:
         assert reading.lock is LimitLock.INDETERMINATE
         assert reading.degraded_reason is SignalIssue.MISSING_TARGET_SESSION
 
-    def test_an_adjusted_session_cannot_be_judged_against_a_band(self):
-        """Rescaled closes are not the prices a band is a percentage of.
+    def test_an_adjusted_session_still_on_the_grid_is_judged(self):
+        """The label stopped deciding this; the prices decide it.
 
-        This is not an edge case any more — it is the whole spine. Every row
-        ``bar_daily`` holds today is ``adjusted_at_source``, so this refusal is
-        what the band machine answers for every session until Phase 06 of the
-        price-basis plan teaches it to decide one from the tick grid instead.
+        Every row ``bar_daily`` holds is ``adjusted_at_source``, so refusing that
+        label refused every session of every symbol — and silently, because the
+        withheld verdict reads as *no lock* rather than as an error. What is asked
+        instead is whether these prices are still the ones the board printed, and
+        a symbol with no entitlement behind it carries published prices under the
+        adjusted label. 25,800 anchors a ceiling of 27,600 after rounding to the
+        grid, and the session traded its whole range there.
         """
         with open_session() as session:
             list_on(session, "MBB", Exchange.HOSE)
@@ -576,8 +579,71 @@ class TestWhatTheDetectorRefusesToDecide:
 
             reading = detect_limit_lock(session, "MBB", date(2019, 3, 4))
 
+        assert reading.degraded_reason is None
+        assert reading.lock is LimitLock.CEILING
+
+    def test_a_price_off_the_quoting_grid_is_refused_by_name(self):
+        """A rebased price cannot be compared with a limit that sits on a tick.
+
+        The anchor is multiplied by a factor that takes it off the grid, which is
+        what a provider's rescaling does. The verdict is withheld under its own
+        code rather than becoming a false *no lock*, which is the whole difference
+        between this and the label test it replaced.
+        """
+        with open_session() as session:
+            list_on(session, "MBB", Exchange.HOSE)
+            write_session(
+                session,
+                "MBB",
+                date(2019, 3, 1),
+                close=25_837,
+                basis=PriceBasis.ADJUSTED_AT_SOURCE,
+            )
+            write_session(
+                session,
+                "MBB",
+                date(2019, 3, 4),
+                high=26_000,
+                low=25_900,
+                close=25_950,
+                basis=PriceBasis.ADJUSTED_AT_SOURCE,
+            )
+
+            reading = detect_limit_lock(session, "MBB", date(2019, 3, 4))
+
         assert reading.lock is LimitLock.INDETERMINATE
-        assert reading.degraded_reason is SignalIssue.UNADJUSTABLE_PRICE_BASIS
+        assert reading.degraded_reason is SignalIssue.PRICE_OFF_TICK_GRID
+        assert reading.limits is None
+
+    def test_a_session_and_an_anchor_on_two_bases_is_still_a_seam(self):
+        """One of each is a symbol's own seam falling between two days.
+
+        Untouched by the narrowing above: the ratio between a raw close and an
+        adjusted one is not a price move, whatever grid either sits on.
+        """
+        with open_session() as session:
+            list_on(session, "MBB", Exchange.HOSE)
+            write_session(
+                session,
+                "MBB",
+                date(2019, 3, 1),
+                close=25_800,
+                basis=PriceBasis.RAW,
+            )
+            write_session(
+                session,
+                "MBB",
+                date(2019, 3, 4),
+                high=27_600,
+                low=27_600,
+                close=27_600,
+                basis=PriceBasis.ADJUSTED_AT_SOURCE,
+            )
+
+            reading = detect_limit_lock(session, "MBB", date(2019, 3, 4))
+
+        assert reading.lock is LimitLock.INDETERMINATE
+        assert reading.degraded_reason is SignalIssue.MIXED_PRICE_BASIS
 
     def test_an_adjusted_anchor_cannot_supply_a_reference_either(self):
         """The seam runs between two sessions, so a raw bar can have an adjusted

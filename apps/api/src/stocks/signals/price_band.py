@@ -12,10 +12,19 @@ read off a stored field, because neither stored field can serve:
   ``_fetch_history`` passes ``band=None`` deliberately rather than stamp today's
   band onto a 2019 session (``docs/adr/0006``).
 
-Everything here reads ``raw`` prices only. An ``adjusted_at_source`` close is an
-unrounded float that has been rescaled for every action since it was observed;
-it does not sit on the tick grid a band is defined on, so a comparison against a
-limit price is not merely imprecise but meaningless.
+**What this module reads is prices on the tick grid, whatever their basis says.**
+It used to read ``raw`` only, and that rule outlived its own reason: the store now
+holds nothing but ``adjusted_at_source``, so refusing that label refused every
+session of every symbol — silently, because a withheld band verdict reads as
+*not locked* rather than as an error.
+
+The reasoning underneath was always about the prices and not the label. A
+rescaled close is an unrounded float that has been multiplied for every action
+since it was observed, so it does not sit on the tick grid a band is defined on,
+and comparing it against a limit price is not imprecise but meaningless. The
+converse is what the old rule missed: a symbol with no entitlement behind it
+carries the published prices under the adjusted label, and those can be judged.
+``off_tick_grid`` asks that directly.
 
 Downstream this is a primitive, not a signal. ``prepare_bars()`` counts limit
 locks per window and reports them in Window Health, and Corporate Action
@@ -328,6 +337,17 @@ class BandRegimeResolver:
             session_date=day,
             exchange=exchange,
             limit_ratio=BAND_LIMIT_BY_EXCHANGE[exchange],
+            # UPCOM measures its band from the prior session's round-lot
+            # continuous VWAP, and the daily spine holds an open, a high, a low,
+            # a close and a volume — no VWAP, and none derivable from those. So
+            # every UPCOM session is undecided, **permanently**, and under
+            # ``anchor_not_stored`` rather than under a code about this window:
+            # nothing about a longer window or a fresher backfill changes it.
+            # That is 819 of the 1,751 symbols on the listing register — though
+            # none of the declared Universe, every one of which is on HOSE, so
+            # the chat lane does not meet this today. Stated here so a later
+            # reader looking for something to fix knows there is nothing to fix
+            # short of a source that reports the VWAP.
             anchor_basis=(
                 BandAnchorBasis.PRIOR_DAY_VWAP
                 if exchange is Exchange.UPCOM
@@ -435,9 +455,18 @@ def measure_band(
         return _undecided(symbol, day, regime, SignalIssue.SESSION_PRICES_INCOMPLETE)
 
     anchor_price = _price(anchor.last_price)
-    limits = band_limits(regime.exchange, anchor_price)
     high = _price(target.high_price)
     low = _price(target.low_price)
+
+    # The three prices the verdict is arithmetic on: the anchor the band is a
+    # percentage of, and the two extremes compared against it. Checked together
+    # rather than one at a time because a verdict needs all three to be the
+    # published ones — an anchor off the grid moves both limits, and a high off
+    # the grid can never equal a limit that is on it.
+    if off_tick_grid(regime.exchange, anchor_price, high, low):
+        return _undecided(symbol, day, regime, SignalIssue.PRICE_OFF_TICK_GRID)
+
+    limits = band_limits(regime.exchange, anchor_price)
 
     if high > limits.ceiling or low < limits.floor:
         return BandReading(
@@ -503,18 +532,63 @@ def _basis_of_the_pair(
 ) -> SignalIssue | None:
     """What the two sessions' bases say about reading them together, if anything.
 
-    Both raw is the only pair that can be measured. Everything else is named the
-    way ADR-0006 names it for a window, because that is what a session and its
-    anchor are: two adjusted rows are ``unadjustable_price_basis`` — that basis
-    was fixed at ``observed_at`` and cannot be recomputed from what is stored —
-    while one of each is ``mixed_price_basis``, which is a symbol's own seam
-    falling between two consecutive days.
+    A pair on one basis can be measured; one of each cannot. Two rows of
+    different bases are ``mixed_price_basis`` — a symbol's own seam falling
+    between two consecutive days, where the ratio between them is not a price
+    move at all.
+
+    **A pair adjusted throughout is now measured, where it used to be refused.**
+    This is the same narrowing the window gateway's rule went through when the
+    daily spine became the source of sessions, applied to the two-day window a
+    session and its anchor are. Every stored row is ``adjusted_at_source``, so
+    refusing that pair refused every session of every symbol — and it did it
+    without raising anything: the verdict became ``INDETERMINATE``, which reads
+    as *no lock*, so ``Bar.limit_locked`` was ``False`` everywhere,
+    ``BarFrame.without_limit_locks()`` dropped nothing, and a baseline volatility
+    that documents itself as excluding limit-locked sessions was quietly computed
+    over windows still holding them. Nothing was refused and no test went red.
+
+    What replaces it is a check on the prices rather than on the label, in
+    ``off_tick_grid`` below: the question a band asks is an equality against a
+    grid-rounded limit, so what matters is whether these particular prices are
+    still the ones the board printed, not what the column says about the series.
+    A symbol with no entitlement in the window carries published prices under the
+    adjusted label and can be judged; a rebased one cannot, and says so under its
+    own code.
     """
-    if target.price_basis is PriceBasis.RAW and anchor.price_basis is PriceBasis.RAW:
-        return None
-    if target.price_basis is anchor.price_basis:
-        return SignalIssue.UNADJUSTABLE_PRICE_BASIS
-    return SignalIssue.MIXED_PRICE_BASIS
+    if target.price_basis is not anchor.price_basis:
+        return SignalIssue.MIXED_PRICE_BASIS
+    return None
+
+
+def off_tick_grid(exchange: Exchange, *prices: Decimal) -> bool:
+    """Whether any of these prices is off the board's quoting grid.
+
+    Public because two callers need the same question answered and must not
+    answer it twice: this module decides whether a session can be judged against
+    its band, and ``agent.tools.price_check`` decides whether a price a web page
+    claimed can be. Two copies of a rule about what a published price looks like
+    would be two chances to disagree about it.
+
+    The test that replaced the basis label for band verdicts. A limit price is a
+    price the exchange would accept an order at, so it sits on a tick by
+    construction; ``band_limits`` rounds both limits onto the grid for exactly
+    that reason. A stored price that is *not* on the grid has therefore been
+    multiplied by something since it was published, and an equality between it
+    and a grid-rounded limit can only come out false — which is a wrong verdict,
+    not a missing one.
+
+    **Necessary, not sufficient.** A rebased price can land back on the grid by
+    coincidence — a factor of exactly 2 on a price already at a multiple of the
+    step will — so passing this check is not proof the price is published. It was
+    measured to decide 93% of HOSE sessions and to catch the rest; treat it as
+    what it is and do not build a proof on top of it.
+
+    The step is taken per price rather than once, because the HOSE ladder changes
+    at 10,000 and 50,000 and two prices in one pair can sit on either side of a
+    boundary.
+    """
+    return any(price % tick_size(exchange, price) != 0 for price in prices)
 
 
 def _undecided(

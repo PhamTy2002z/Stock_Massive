@@ -37,6 +37,8 @@ export const SIGNAL_ISSUE_SENTENCES = {
   missing_target_session: "Chưa có dữ liệu phiên này",
   insufficient_history: "Chưa đủ số phiên tối thiểu để tính chỉ số này",
   insufficient_sessions: "Chưa đủ số phiên trong ngày để dựng bức tranh này",
+  session_not_ingested:
+    "Chưa có dữ liệu giao dịch của phiên được hỏi — phiên chưa mở, dữ liệu chưa về, hoặc ngày đó không giao dịch",
   recently_inactive: "Có phiên không phát sinh giao dịch trong cửa sổ tính",
   cohort_warming: "Nhóm được so sánh vẫn đang nạp dữ liệu",
   lagging_market_data: "Đã có phiên mới hơn nhưng chưa đủ dữ liệu để tính",
@@ -54,6 +56,8 @@ export const SIGNAL_ISSUE_SENTENCES = {
   anchor_not_stored:
     "Sàn này đo biên độ từ một mức tham chiếu hệ thống không lưu và không dựng lại được",
   anchor_missing: "Không có phiên liền trước để làm mốc tham chiếu cho biên độ",
+  price_off_tick_grid:
+    "Giá của một phiên trong cửa sổ không nằm trên bước giá của sàn nên không phải giá sàn công bố, không đo được biên độ",
 
   // Corporate Actions (ADR-0006)
   unconfirmed_corporate_action:

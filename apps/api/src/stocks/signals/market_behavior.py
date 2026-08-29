@@ -180,6 +180,13 @@ def adtv_money_reading(window: FieldWindow) -> FieldReading:
     money: an average over twelve of them is an average over a different stretch
     of market, and printing it beside another symbol's twenty would present the
     two as comparable.
+
+    The per-session money is an estimate — close times volume, because the
+    source reports no traded value — so this average inherits that estimate's
+    error. ``sessions.py::_traded_value`` is where it is derived and what it is
+    worth. A session that did not trade arrives as missing rather than as zero,
+    which is what makes the refusal above fire instead of the average silently
+    sagging.
     """
     bars = _recent(window.frame, LIQUIDITY_SESSIONS)
     values = [bar.total_value_vnd for bar in bars]
@@ -247,6 +254,15 @@ def amihud_illiquidity_reading(window: FieldWindow) -> FieldReading:
     move divided by no traded money is not an unbounded illiquidity, it is a
     session with nothing to measure, and the count beside the number is what
     that session actually said.
+
+    **The denominator is an estimate, and this is the field it hurts most.**
+    Traded money is derived as close times volume
+    (``sessions.py::_traded_value``); its error is close-versus-session-average
+    and is therefore largest on the sessions that moved furthest. Those are
+    exactly the sessions this ratio weights heaviest, because ``|R_t|`` is its
+    numerator. The ratio is still the right shape — a big move on thin money
+    still reads as illiquid — but a single session's term should not be quoted
+    as a measurement.
     """
     bars = _recent(window.frame, LIQUIDITY_SESSIONS + 1)
     terms: list[float] = []

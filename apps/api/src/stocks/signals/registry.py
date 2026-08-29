@@ -79,6 +79,16 @@ from .foreign_flow import (
     persistence_run_days,
     persistence_run_days_reading,
 )
+from .earnings import (
+    EARNINGS_LOOKBACK_SESSIONS,
+    EARNINGS_MIN_SESSIONS,
+    TREND_KEYS,
+    TREND_QUARTERS,
+    YEAR_ON_YEAR_KEYS,
+    eps_basic_yoy_reading,
+    gross_profit_trend_reading,
+    net_profit_yoy_reading,
+)
 from .indicators import (
     BOLLINGER_MIN_SESSIONS,
     INDICATOR_WARMUP_SESSIONS,
@@ -506,7 +516,11 @@ ADTV_MONEY = SignalField(
         "which is the figure that survives a corporate action: a share count "
         "changes at an ex-date and the dong traded do not. It says how much of "
         "this symbol can be bought or sold on an ordinary day and nothing about "
-        "what its price will do."
+        "what its price will do. **Each session's money is an estimate**: the "
+        "source reports no traded value, so it is the session's closing price "
+        "times its volume. That is close for an ordinary session and furthest "
+        "out on a session that moved a long way, since one price stands in for "
+        "the whole day's trading."
     ),
     kind=FieldKind.ESTIMATOR,
     claim=Claim.DESCRIPTIVE,
@@ -567,7 +581,12 @@ AMIHUD_ILLIQUIDITY = SignalField(
         f"{LIQUIDITY_SESSIONS} sessions. **Higher means more illiquid** — the "
         "same money moves the price further. Sessions in which nothing traded "
         "are counted beside it rather than averaged in, because a price move "
-        "divided by no traded money is not a measurement."
+        "divided by no traded money is not a measurement. **The money in the "
+        "denominator is an estimate** — closing price times volume, because the "
+        "source reports no traded value — and this ratio is the field that "
+        "estimate costs most, because it weights hardest exactly the "
+        "large-move sessions where a single closing price represents the day "
+        "worst. Read it as a ranking of illiquidity rather than as a level."
     ),
     kind=FieldKind.ESTIMATOR,
     claim=Claim.DESCRIPTIVE,
@@ -599,7 +618,10 @@ ADTV_PERCENTILE = SignalField(
         "100. Higher means more of the Universe trades less than this symbol "
         "does. It is a position within a named sample on a named date, both of "
         "which travel with it, and it is not comparable with a percentile taken "
-        "over a different sample."
+        "over a different sample. Every symbol's traded money is estimated the "
+        "same way — closing price times volume — so the estimate applies "
+        "equally across the sample being ranked and moves a position far less "
+        "than it moves a level."
     ),
     kind=FieldKind.PERCENTILE,
     claim=Claim.DESCRIPTIVE,
@@ -1216,6 +1238,112 @@ BOLLINGER_PERCENT_B = SignalField(
 )
 
 
+# --- Quarterly results ----------------------------------------------------
+#
+# The first fields in this registry whose input is a filing rather than a
+# session. They are served on the **volume** projection for the reason
+# ``roe_percentile`` is: no arithmetic here touches a price, and the price
+# projection would hand them the price-basis and band refusals that go with
+# reading one — a results figure refused because a window crossed an adjustment
+# seam would be a refusal manufactured by the declaration.
+#
+# The window is not an input. It dates the read: the quarters these fields may
+# see are the ones whose end its newest session has passed.
+
+_RESULTS_STAMP = (
+    "The quarter it was read from is stamped beside it, and a quarter past "
+    "every filing deadline is reported as old rather than as current."
+)
+
+EPS_BASIC_YOY = SignalField(
+    name="earnings.eps_basic_yoy_pct",
+    projection=BarProjection.VOLUME,
+    unit=Unit.PERCENT,
+    sign=Sign.SIGNED,
+    interpretation=(
+        "How far this symbol's basic earnings per share for its newest filed "
+        "quarter sits above or below the same quarter one year earlier, in "
+        "percent. The same quarter rather than the one before it, because a "
+        "Vietnamese issuer's quarters are not comparable with each other — a "
+        "developer hands over in Q4 and a retailer sells in Q1. The figure is "
+        "the per-share number each quarter was filed with, so a share count "
+        "that changed between the two quarters is inside it rather than "
+        f"adjusted for. {_RESULTS_STAMP}"
+    ),
+    kind=FieldKind.VOCABULARY,
+    claim=Claim.DESCRIPTIVE,
+    source=FieldSource.STORED,
+    min_sessions=EARNINGS_MIN_SESSIONS,
+    lookback_sessions=EARNINGS_LOOKBACK_SESSIONS,
+    threshold=None,
+    null_fpr=None,
+    requires_quarterly_statements=True,
+    output_keys=YEAR_ON_YEAR_KEYS,
+    reading=eps_basic_yoy_reading,
+)
+
+NET_PROFIT_YOY = SignalField(
+    name="earnings.net_profit_yoy_pct",
+    projection=BarProjection.VOLUME,
+    unit=Unit.PERCENT,
+    sign=Sign.SIGNED,
+    interpretation=(
+        "How far this symbol's net profit after tax for its newest filed "
+        "quarter sits above or below the same quarter one year earlier, in "
+        "percent. The consolidated line, which includes minority interests: a "
+        "quarter in which those moved moves this number too. A year-ago quarter "
+        "that was a loss is refused rather than divided by, because a "
+        f"percentage change against a negative base reads backwards. "
+        f"{_RESULTS_STAMP}"
+    ),
+    kind=FieldKind.VOCABULARY,
+    claim=Claim.DESCRIPTIVE,
+    source=FieldSource.STORED,
+    min_sessions=EARNINGS_MIN_SESSIONS,
+    lookback_sessions=EARNINGS_LOOKBACK_SESSIONS,
+    threshold=None,
+    null_fpr=None,
+    requires_quarterly_statements=True,
+    output_keys=YEAR_ON_YEAR_KEYS,
+    reading=net_profit_yoy_reading,
+)
+
+GROSS_PROFIT_TREND = SignalField(
+    name="earnings.gross_profit_trend",
+    projection=BarProjection.VOLUME,
+    unit=Unit.PERCENT,
+    sign=Sign.SIGNED,
+    interpretation=(
+        f"Which way this symbol's gross profit has moved across its {TREND_QUARTERS} "
+        "newest filed quarters: the least-squares slope per quarter, as a "
+        "percentage of those quarters' own average level, so a company earning "
+        "trillions and one earning billions are comparable. Positive means a "
+        "widening gross profit and negative a narrowing one. Seasonality is not "
+        f"removed — {TREND_QUARTERS} consecutive quarters hold one of each "
+        "season, but their ordering is not neutral, so a business whose "
+        "strongest season falls last reads as widening. A bank files no "
+        "gross-profit line at all and is refused by name rather than answered "
+        f"from a line that resembles one. {_RESULTS_STAMP}"
+    ),
+    kind=FieldKind.VOCABULARY,
+    claim=Claim.DESCRIPTIVE,
+    source=FieldSource.STORED,
+    min_sessions=EARNINGS_MIN_SESSIONS,
+    lookback_sessions=EARNINGS_LOOKBACK_SESSIONS,
+    threshold=None,
+    null_fpr=None,
+    requires_quarterly_statements=True,
+    output_keys=TREND_KEYS,
+    reading=gross_profit_trend_reading,
+)
+
+EARNINGS_FIELDS: tuple[SignalField, ...] = (
+    EPS_BASIC_YOY,
+    NET_PROFIT_YOY,
+    GROSS_PROFIT_TREND,
+)
+
+
 def _index(*fields: SignalField) -> Mapping[str, SignalField]:
     """Key the declarations by name, refusing two fields with one name.
 
@@ -1262,6 +1390,9 @@ REGISTRY: Mapping[str, SignalField] = _index(
     RSI,
     MACD,
     BOLLINGER_PERCENT_B,
+    EPS_BASIC_YOY,
+    NET_PROFIT_YOY,
+    GROSS_PROFIT_TREND,
 )
 
 

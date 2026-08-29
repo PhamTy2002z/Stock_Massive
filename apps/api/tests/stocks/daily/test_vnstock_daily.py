@@ -14,6 +14,8 @@ import pytest
 from sqlalchemy import delete, func, select
 
 from src.core.database import Base, get_sync_db, sync_engine
+from src.core.quota import QuotaLane, QuotaRefused, active_lane
+from src.stocks import backfill_daily
 from src.stocks.models import BarDaily
 from src.stocks.providers import vnstock_daily
 
@@ -464,6 +466,20 @@ class TestPaging:
 
 
 class TestRequestWindow:
+    @pytest.fixture(autouse=True)
+    def _slot_is_granted(self, monkeypatch):
+        """These tests are about the window, so the allowance is granted.
+
+        ``fetch_daily`` takes an account slot before it asks the provider, and
+        the arbiter is fail-closed with no Redis behind it (``docs/adr/0014``) —
+        deliberately, because a Provider Source call nothing is counting is a
+        call with no allowance. That is the right production answer and noise
+        here: nothing below is asking whether the quota is enforced.
+        """
+        monkeypatch.setattr(
+            vnstock_daily, "quota_arbiter", lambda: _FakeArbiter([])
+        )
+
     def test_the_window_asked_for_is_wider_than_the_sessions_wanted(self, monkeypatch):
         """A session is not a calendar day, and asking short returns short.
 
@@ -534,3 +550,123 @@ class TestRequestWindow:
 
         with pytest.raises(vnstock_daily.DailyIngestError, match="would not open"):
             vnstock_daily.fetch_daily("STB", end=TODAY, sessions=10)
+
+
+class TestTheAccountAllowanceIsTakenFromTheOneArbiter:
+    """The provider call spends an account allowance it does not own alone.
+
+    ``docs/adr/0014`` put that allowance behind a single Redis arbiter after
+    three uncoordinated pacers over one account were measured to add up to more
+    than the account had — and vnstock answers an exhausted quota by calling
+    ``sys.exit()``, so the cost of getting it wrong is the process dying an hour
+    into an unwatched run. This module therefore takes a slot rather than
+    keeping a pace of its own.
+
+    ``fetch_daily`` is the only place in this module that reaches the network,
+    and it is injectable, so every other test in this file replaces it and never
+    comes near Redis.
+    """
+
+    def test_the_network_call_takes_a_slot_first(self, monkeypatch):
+        taken: list[object] = []
+        monkeypatch.setattr(
+            vnstock_daily,
+            "quota_arbiter",
+            lambda: _FakeArbiter(taken),
+        )
+        monkeypatch.setattr(
+            vnstock_daily, "Quote", lambda **_: _StubQuote(pd.DataFrame())
+        )
+
+        frame = vnstock_daily.fetch_daily(
+            "AAA", end=date(2026, 8, 21), sessions=10
+        )
+
+        assert frame.empty
+        assert taken == ["acquired"]
+
+    def test_a_refused_slot_is_not_reported_as_an_empty_window(self, monkeypatch):
+        """The failure this ordering exists to prevent.
+
+        ``safe_vnstock_call`` answers every ordinary exception with ``None``, and
+        ``fetch_daily`` reports ``None`` as "the provider answered nothing" —
+        which the paging loop reads as *this window predates the symbol's first
+        session*. A quota refusal collapsed into that sentence would mark the
+        symbol not-deep-enough and move on silently, every run, forever. So the
+        refusal has to travel as itself.
+        """
+        asked: list[str] = []
+
+        def refusing_arbiter():
+            return _RefusingArbiter()
+
+        monkeypatch.setattr(vnstock_daily, "quota_arbiter", refusing_arbiter)
+        monkeypatch.setattr(
+            vnstock_daily,
+            "Quote",
+            lambda **_: _StubQuote(pd.DataFrame(), asked=asked),
+        )
+
+        with pytest.raises(QuotaRefused):
+            vnstock_daily.fetch_daily("AAA", end=date(2026, 8, 21), sessions=10)
+
+        # And the provider was never reached, which is the point of refusing.
+        assert asked == []
+
+    def test_the_backfill_entry_point_declares_the_backfill_lane(self):
+        """The lane is declared where the answer is known, not at the call site.
+
+        ``BACKFILL`` rather than ``LEGACY``: it stands aside for a caller with a
+        person waiting behind it, and it accepts an unbounded wait — which is
+        right for 1,523 symbols and wrong for a request serving somebody.
+        """
+        seen: list[QuotaLane] = []
+
+        def fetch(symbol, *, end, sessions):
+            seen.append(active_lane())
+            raise vnstock_daily.DailyIngestError("no network in this test")
+
+        with get_sync_db() as session:
+            session.execute(delete(BarDaily))
+            session.commit()
+
+        report = backfill_daily.run(
+            scope=backfill_daily.SCOPE_INDEX,
+            sessions=5,
+            fetch=fetch,
+            today=date(2026, 8, 21),
+        )
+
+        assert seen == [QuotaLane.BACKFILL]
+        assert report.failures == (backfill_daily.INDEX_SYMBOL,)
+        # Outside the block the lane is back to what it was, so a later caller in
+        # the same process does not inherit a batch job's patience.
+        assert active_lane() is QuotaLane.LEGACY
+
+
+class _FakeArbiter:
+    """An arbiter that records the slot instead of keeping an allowance."""
+
+    def __init__(self, taken: list[object]) -> None:
+        self._taken = taken
+
+    def acquire(self, lane=None, max_wait=None) -> float:
+        self._taken.append("acquired")
+        return 0.0
+
+
+class _RefusingArbiter:
+    def acquire(self, lane=None, max_wait=None) -> float:
+        raise QuotaRefused("no allowance for this test")
+
+
+class _StubQuote:
+    """Stands in for the provider client without opening a socket."""
+
+    def __init__(self, frame: pd.DataFrame, asked: list[str] | None = None) -> None:
+        self._frame = frame
+        self._asked = asked if asked is not None else []
+
+    def history(self, **kwargs) -> pd.DataFrame:
+        self._asked.append(kwargs.get("end", ""))
+        return self._frame

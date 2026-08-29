@@ -1,7 +1,7 @@
 ---
 phase: 8
 title: "Xoá FiinQuant và nghiệm thu"
-status: pending
+status: done
 priority: P1
 effort: "6h"
 dependencies: [4, 5, 6]

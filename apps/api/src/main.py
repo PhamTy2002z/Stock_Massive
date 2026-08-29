@@ -1,4 +1,5 @@
 """FastAPI application entry point — post-rip-out, chat-lane baseline."""
+import asyncio
 import logging
 import sys
 from contextlib import asynccontextmanager
@@ -17,7 +18,7 @@ from src.alpha.refusals import AlphaRefusal
 from src.auth.router import router as auth_router
 from src.core.cache import CacheRefreshUnavailable
 from src.core.config import get_settings
-from src.core.database import engine
+from src.core.database import engine, get_sync_db
 from src.core.llm import (
     CapabilityProbe,
     Workload,
@@ -29,6 +30,7 @@ from src.core.llm import (
 from src.core.quota import QuotaRefused
 from src.core.scheduler import setup_scheduler
 from src.stocks.shared import StockServiceError
+from src.stocks.trading_day import spine_freshness
 from src.stocks.universe import Universe
 
 
@@ -60,6 +62,68 @@ async def run_capability_probe_at_startup(config) -> None:
     enforce_capability_probe(result, alpha_desk_enabled=config.enabled)
 
 
+def warn_if_vision_was_measured_on_another_model(config) -> None:
+    """Say out loud when the vision flag is on for a model nobody measured.
+
+    ``scripts/probe_vision.py`` answers the question for one model string, and
+    the answer is then carried by a flag that knows nothing about which. Moving
+    ``LLM_MODEL_SESSION`` therefore silently re-uses a measurement that was
+    never made. A warning rather than a gate: reading images is a side
+    capability, and the same argument that keeps this out of the Capability
+    Probe keeps it from stopping a boot.
+    """
+    settings = get_settings()
+    if not config.route.vision:
+        return
+    measured = (settings.llm_vision_measured_model or "").strip()
+    configured = config.model_for(Workload.SESSION)
+    if measured != configured:
+        logger.warning(
+            "LLM_VISION_ENABLED is on for model %r, but the route was last "
+            "measured for images on %r — run `make probe-vision` and update "
+            "LLM_VISION_MEASURED_MODEL",
+            configured,
+            measured or "<nothing>",
+        )
+
+
+async def report_spine_freshness_at_startup() -> None:
+    """Say out loud whether anything is still feeding the daily spine.
+
+    The Trading Day calendar is derived from ``bar_daily``, so a spine nobody is
+    filling does not read as broken: every answer keeps citing a date, and the
+    date is simply old. That is the failure this line exists to make visible —
+    the expensive version is not the job failing, it is the job failing while
+    nobody notices.
+
+    Read in a thread because the store read is synchronous, and never allowed to
+    stop startup: an operational observation must not be able to keep the API
+    down.
+    """
+
+    def read() -> str | None:
+        with get_sync_db() as session:
+            freshness = spine_freshness(session)
+        if freshness.is_empty or freshness.is_stale:
+            return freshness.describe()
+        logger.info("Daily spine: %s", freshness.describe())
+        return None
+
+    try:
+        problem = await asyncio.to_thread(read)
+    except Exception:
+        logger.exception("Could not read the daily spine's freshness")
+        return
+
+    if problem is not None:
+        logger.warning(
+            "Daily spine is not current: %s. Every Signal Field is dated by this "
+            "table, so answers will carry an old session rather than fail. Fill "
+            "it with `make backfill-daily SCOPE=index` (then declared, market).",
+            problem,
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan.
@@ -75,8 +139,11 @@ async def lifespan(app: FastAPI):
     enforce_budget_validation(llm_config)
 
     await run_capability_probe_at_startup(llm_config)
+    warn_if_vision_was_measured_on_another_model(llm_config)
 
     await sweep_interrupted_turns()
+
+    await report_spine_freshness_at_startup()
 
     try:
         if settings.scheduler_enabled:

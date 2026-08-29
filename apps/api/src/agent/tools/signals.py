@@ -143,6 +143,7 @@ CATALOG_AXES: Mapping[str, Axis] = MappingProxyType(
         "band_pressure": Axis.TECHNICAL,
         "company_profile": Axis.MONEY_FLOW,
         "drawdown_stats": Axis.TECHNICAL,
+        "earnings": Axis.FUNDAMENTAL,
         "factor_percentiles": Axis.FUNDAMENTAL,
         "foreign_flow_pressure": Axis.MONEY_FLOW,
         "indicator_pack": Axis.TECHNICAL,
@@ -185,6 +186,9 @@ DISPLAY_NAMES: Mapping[str, str] = MappingProxyType(
         "drawdown_stats.days_underwater": "Số phiên dưới đỉnh",
         "drawdown_stats.max_drawdown_pct": "Sụt giá sâu nhất",
         "drawdown_stats.mdd_over_expected": "Sụt giá so mức kỳ vọng",
+        "earnings.eps_basic_yoy_pct": "EPS cơ bản so cùng kỳ",
+        "earnings.gross_profit_trend": "Xu hướng lãi gộp bốn quý",
+        "earnings.net_profit_yoy_pct": "Lợi nhuận sau thuế so cùng kỳ",
         "factor_percentiles.book_yield_percentile": "Phân vị lợi suất sổ sách",
         "factor_percentiles.earnings_yield_percentile": "Phân vị lợi suất lợi nhuận",
         "factor_percentiles.roe_percentile": "Phân vị ROE",
@@ -296,6 +300,52 @@ def summarise_get_series(arguments: Mapping[str, Any]) -> str:
     sessions = arguments.get("sessions")
     span = f" · {sessions} phiên" if isinstance(sessions, int) else ""
     return f"Đọc chuỗi: {label} — {symbol}{span}" if symbol else f"Đọc chuỗi: {label}{span}"
+
+
+#: What a refusal code means to a reader, grouped by what was missing rather
+#: than by code. The codes themselves are the system talking about itself, and
+#: the contract refuses them in a note; a reader weighing a chart needs only to
+#: know which kind of gap thinned it. The code→count map still reaches the
+#: model untouched, so nothing is lost for the lane that acts on codes.
+_ISSUE_GROUPS: tuple[tuple[frozenset[str], str], ...] = (
+    (
+        frozenset({"insufficient_history", "insufficient_sessions", "cohort_warming",
+                   "insufficient_cross_section", "insufficient_downside_observations",
+                   "half_life_exceeds_window"}),
+        "lịch sử chưa đủ dài cho chỉ số này",
+    ),
+    (
+        frozenset({"missing_target_session", "recently_inactive", "lagging_market_data",
+                   "stale_market_data", "session_prices_incomplete", "no_traded_sessions",
+                   "traded_figure_not_stored", "zero_range_session", "limit_locked_window"}),
+        "thiếu dữ liệu giao dịch của phiên",
+    ),
+    (
+        frozenset({"mixed_price_basis", "unadjustable_price_basis", "anchor_not_stored",
+                   "anchor_missing", "unconfirmed_corporate_action",
+                   "corporate_action_terms_incomplete", "price_move_exceeds_band",
+                   "unexplained_price_gap", "volume_basis_break", "exchange_unknown", "price_off_tick_grid",
+                   "band_not_measured", "band_not_applicable"}),
+        "giá chưa quy về cùng một cơ sở sau sự kiện doanh nghiệp",
+    ),
+    (
+        frozenset({"fundamental_not_stored", "statement_line_missing", "market_cap_absent",
+                   "stale_market_cap", "stale_fundamental_period", "stale_reference_reading"}),
+        "chưa có báo cáo tài chính hoặc vốn hoá tương ứng",
+    ),
+    (
+        frozenset({"foreign_flow_not_stored", "foreign_room_not_stored", "foreign_room_exhausted"}),
+        "chưa có số liệu khối ngoại",
+    ),
+)
+
+
+def _issue_note(code: str, count: int) -> str:
+    """One method note per refusal code, said as the kind of gap it is."""
+    for codes, meaning in _ISSUE_GROUPS:
+        if code in codes:
+            return f"{count} phiên: {meaning}"
+    return f"{count} phiên: chỉ số không tính được"
 
 
 def points_affordable(window_sessions: int, asked: int) -> int:
@@ -507,12 +557,16 @@ class SignalTools:
                 as_of=_as_of(context, days[-1]),
                 sessions_used=answered,
                 health="normal" if not reasons else "degraded",
+                # The strip beside the chart gets one sentence a reader can weigh;
+                # which issue refused which session is a method note. The raw
+                # code→count map still goes to the model in the payload below.
                 reason=(
                     None
                     if not reasons
-                    else ", ".join(
-                        f"{code}: {count}" for code, count in sorted(reasons.items())
-                    )
+                    else f"{sum(reasons.values())}/{len(days)} phiên không đọc được số"
+                ),
+                method_notes=tuple(
+                    _issue_note(code, count) for code, count in sorted(reasons.items())
                 ),
             )
             frame_id = frames_buffer.store_series(

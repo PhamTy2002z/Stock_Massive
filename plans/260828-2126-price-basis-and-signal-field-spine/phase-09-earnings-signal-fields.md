@@ -1,7 +1,7 @@
 ---
 phase: 9
 title: "Signal Field earnings.*"
-status: pending
+status: done
 priority: P2
 effort: "1d"
 dependencies: [1]

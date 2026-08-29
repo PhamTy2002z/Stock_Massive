@@ -46,6 +46,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.core.database import get_sync_db
+from src.core.quota import QuotaLane, quota_lane
 from src.stocks.models import BarDaily
 from src.stocks.providers import vnstock_daily
 from src.stocks.providers.vnstock_daily import SERIES_EQUITY, SERIES_INDEX
@@ -212,17 +213,25 @@ def run(
         len(targets),
         depth,
     )
-    for symbol, series in targets:
-        report.symbols.append(
-            _one_symbol(
-                symbol,
-                series,
-                depth=depth,
-                session_factory=session_factory,
-                fetch=fetch,
-                today=today,
+    # Declared once, here, because this is the entry point that knows the answer
+    # — which is how the arbiter is meant to be used (``docs/adr/0014``): the
+    # lane rides a ``ContextVar`` so the provider call underneath neither knows
+    # nor needs to. ``BACKFILL`` is the right lane and not ``LEGACY``: it stands
+    # aside whenever a caller with a user waiting is queued, and it accepts an
+    # unbounded wait, which is what a batch job of 1,523 symbols should do and
+    # what a request serving a person must not.
+    with quota_lane(QuotaLane.BACKFILL):
+        for symbol, series in targets:
+            report.symbols.append(
+                _one_symbol(
+                    symbol,
+                    series,
+                    depth=depth,
+                    session_factory=session_factory,
+                    fetch=fetch,
+                    today=today,
+                )
             )
-        )
 
     logger.info(
         "Daily spine backfill done: scope=%s attempted=%d skipped=%d rows=%d "

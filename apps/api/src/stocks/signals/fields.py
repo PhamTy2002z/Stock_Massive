@@ -75,6 +75,7 @@ class BarProjection(str, Enum):
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to a checker
     from .bars import BarFrame, WindowHealth
+    from .earnings import QuarterlyStatements
     from .fundamentals import FundamentalStanding
     from .reference import ForeignRoomStanding
 
@@ -406,6 +407,12 @@ class FieldWindow:
     ceiling on foreign ownership, which is not a session and is not derivable
     from one. It is here because a foreign-flow number cannot be read without it
     — a flow that flattened because the room filled is not a change of view.
+
+    ``quarterly`` is the filings themselves — several quarters of one symbol's
+    income statement — and it is present only where a field declared that it
+    needs them, because loading them costs one read per quarter. A results field
+    finds either the quarters whose end is at or before the window's cutoff, or
+    ``None`` where the store holds no statement for this symbol at all.
     """
 
     frame: "BarFrame"
@@ -413,6 +420,7 @@ class FieldWindow:
     fundamental: "FundamentalStanding | None" = None
     foreign_room: "ForeignRoomStanding | None" = None
     foreign_net_volume_by_session: Mapping[date, int] | None = None
+    quarterly: "QuarterlyStatements | None" = None
 
 
 @dataclass(frozen=True)
@@ -478,6 +486,11 @@ class SignalField:
     # it.
     lookback_sessions: int | None = None
     requires_foreign_share_flow: bool = False
+    # Whether the serving path loads this field's quarterly statements onto the
+    # window. Declared rather than loaded for everyone, because the read is one
+    # query per quarter of one symbol: paid for every field, it would put five
+    # statement reads behind a question about a moving average.
+    requires_quarterly_statements: bool = False
     output_keys: tuple[str, ...] = ()
     reading: Callable[[FieldWindow], FieldReading] | None = None
     # The cross-sectional half of the same mechanism: the per-symbol quantity a
@@ -518,6 +531,13 @@ class SignalField:
                 "the declaration rather than beside it, and whether it is "
                 "answered for one symbol or within a sample is not a caller's "
                 "choice to make"
+            )
+        if self.requires_quarterly_statements and self.ranked is not None:
+            raise ValueError(
+                f"{self.name} is ranked across a cross-section, which loads one "
+                "quarter for a whole sample rather than several quarters for one "
+                "symbol: declared here, it would refuse for every member of "
+                "every ranking and the refusal would name the store"
             )
         if self.ranked is not None and self.kind is not FieldKind.PERCENTILE:
             raise ValueError(

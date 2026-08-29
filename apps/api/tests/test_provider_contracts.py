@@ -37,7 +37,7 @@ def metadata(source: ProviderSource = ProviderSource.VNSTOCK) -> SnapshotMetadat
     )
 
 
-def market_metadata(source: ProviderSource = ProviderSource.FIINQUANT) -> SnapshotMetadata:
+def market_metadata(source: ProviderSource = ProviderSource.VNSTOCK) -> SnapshotMetadata:
     """Metadata for a market session, which exists only from version 2 onward.
 
     The other capabilities are still at 1: the Price Basis is a market field,
@@ -54,7 +54,7 @@ def market_metadata(source: ProviderSource = ProviderSource.FIINQUANT) -> Snapsh
 def test_market_snapshot_normalizes_symbol_and_locks_vnd_unit():
     snapshot = MarketSnapshot(
         symbol="vcb",
-        metadata=market_metadata(ProviderSource.FIINQUANT),
+        metadata=market_metadata(ProviderSource.VNSTOCK),
         price_basis=PriceBasis.RAW,
         last_price=59_700,
         volume=1_000,
@@ -62,12 +62,12 @@ def test_market_snapshot_normalizes_symbol_and_locks_vnd_unit():
 
     assert snapshot.symbol == "VCB"
     assert snapshot.price_unit is PriceUnit.VND
-    assert snapshot.metadata.source is ProviderSource.FIINQUANT
+    assert snapshot.metadata.source is ProviderSource.VNSTOCK
 
     with pytest.raises(ValidationError):
         MarketSnapshot(
             symbol="VCB",
-            metadata=market_metadata(ProviderSource.FIINQUANT),
+            metadata=market_metadata(ProviderSource.VNSTOCK),
             price_basis=PriceBasis.RAW,
             price_unit="thousand_vnd",
         )
@@ -75,7 +75,7 @@ def test_market_snapshot_normalizes_symbol_and_locks_vnd_unit():
     with pytest.raises(ValidationError, match="Invalid symbol format"):
         MarketSnapshot(
             symbol="VCB;DROP",
-            metadata=market_metadata(ProviderSource.FIINQUANT),
+            metadata=market_metadata(ProviderSource.VNSTOCK),
             price_basis=PriceBasis.RAW,
         )
 
@@ -92,7 +92,7 @@ def test_a_market_snapshot_states_what_its_prices_mean():
     with pytest.raises(ValidationError, match="price_basis"):
         MarketSnapshot(
             symbol="VCB",
-            metadata=metadata(ProviderSource.FIINQUANT),
+            metadata=metadata(ProviderSource.VNSTOCK),
             last_price=59_700,
         )
 
@@ -110,7 +110,7 @@ def test_a_market_snapshot_states_what_its_prices_mean():
     with pytest.raises(ValidationError):
         MarketSnapshot(
             symbol="VCB",
-            metadata=market_metadata(ProviderSource.FIINQUANT),
+            metadata=market_metadata(ProviderSource.VNSTOCK),
             price_basis="adjusted",
             last_price=59_700,
         )
@@ -128,7 +128,7 @@ def test_a_stamped_session_cannot_call_itself_version_one():
     with pytest.raises(ValidationError, match="schema version 1"):
         MarketSnapshot(
             symbol="VCB",
-            metadata=metadata(ProviderSource.FIINQUANT),
+            metadata=metadata(ProviderSource.VNSTOCK),
             price_basis=PriceBasis.RAW,
             last_price=59_700,
         )
@@ -139,7 +139,7 @@ def test_a_stamped_session_cannot_call_itself_version_one():
     ahead = MarketSnapshot(
         symbol="VCB",
         metadata=SnapshotMetadata(
-            source=ProviderSource.FIINQUANT,
+            source=ProviderSource.VNSTOCK,
             effective_at=NOW,
             observed_at=NOW,
             schema_version=MARKET_SCHEMA_VERSION + 1,
@@ -152,7 +152,7 @@ def test_a_stamped_session_cannot_call_itself_version_one():
     # The other capabilities never gained a basis, so they stay where they were.
     at_version_one = ValuationSnapshot(
         symbol="VCB",
-        metadata=metadata(ProviderSource.FIINQUANT),
+        metadata=metadata(ProviderSource.VNSTOCK),
         provider_pe=12.5,
     )
     assert at_version_one.metadata.schema_version == 1
@@ -161,7 +161,7 @@ def test_a_stamped_session_cannot_call_itself_version_one():
 def test_market_snapshot_separates_volume_fields_from_value_fields():
     snapshot = MarketSnapshot(
         symbol="HPG",
-        metadata=market_metadata(ProviderSource.FIINQUANT),
+        metadata=market_metadata(ProviderSource.VNSTOCK),
         price_basis=PriceBasis.RAW,
         last_price=22_000,
         volume=12_000_000,
@@ -202,7 +202,7 @@ def test_market_snapshot_separates_volume_fields_from_value_fields():
 def test_market_snapshot_allows_negative_foreign_net_value_only():
     outflow = MarketSnapshot(
         symbol="HPG",
-        metadata=market_metadata(ProviderSource.FIINQUANT),
+        metadata=market_metadata(ProviderSource.VNSTOCK),
         price_basis=PriceBasis.RAW,
         foreign_net_value_vnd=-11_000_000_000,
     )
@@ -212,7 +212,7 @@ def test_market_snapshot_allows_negative_foreign_net_value_only():
         with pytest.raises(ValidationError):
             MarketSnapshot(
                 symbol="HPG",
-                metadata=market_metadata(ProviderSource.FIINQUANT),
+                metadata=market_metadata(ProviderSource.VNSTOCK),
                 price_basis=PriceBasis.RAW,
                 **{field: -1},
             )
@@ -221,7 +221,7 @@ def test_market_snapshot_allows_negative_foreign_net_value_only():
         with pytest.raises(ValidationError):
             MarketSnapshot(
                 symbol="HPG",
-                metadata=market_metadata(ProviderSource.FIINQUANT),
+                metadata=market_metadata(ProviderSource.VNSTOCK),
                 price_basis=PriceBasis.RAW,
                 **{field: 0},
             )
@@ -230,7 +230,7 @@ def test_market_snapshot_allows_negative_foreign_net_value_only():
 def test_valuation_snapshot_carries_ratios_without_statement_inputs():
     snapshot = ValuationSnapshot(
         symbol="hpg",
-        metadata=metadata(ProviderSource.FIINQUANT),
+        metadata=metadata(ProviderSource.VNSTOCK),
         provider_pe=12.5,
         provider_pb=1.8,
     )
@@ -242,7 +242,7 @@ def test_valuation_snapshot_carries_ratios_without_statement_inputs():
     with pytest.raises(ValidationError):
         ValuationSnapshot(
             symbol="HPG",
-            metadata=metadata(ProviderSource.FIINQUANT),
+            metadata=metadata(ProviderSource.VNSTOCK),
             trailing_12_month_net_income_vnd=1_000,
         )
 
@@ -263,7 +263,7 @@ def test_fundamental_snapshot_no_longer_carries_valuation_ratios():
 def test_market_snapshot_keeps_foreign_net_flow_within_gross_flow():
     balanced = MarketSnapshot(
         symbol="HPG",
-        metadata=market_metadata(ProviderSource.FIINQUANT),
+        metadata=market_metadata(ProviderSource.VNSTOCK),
         price_basis=PriceBasis.RAW,
         foreign_buy_value_vnd=19_800_000_000,
         foreign_sell_value_vnd=8_800_000_000,
@@ -275,7 +275,7 @@ def test_market_snapshot_keeps_foreign_net_flow_within_gross_flow():
     # reported net away from buy minus sell without breaking the bound.
     MarketSnapshot(
         symbol="HPG",
-        metadata=market_metadata(ProviderSource.FIINQUANT),
+        metadata=market_metadata(ProviderSource.VNSTOCK),
         price_basis=PriceBasis.RAW,
         foreign_buy_value_vnd=19_800_000_000,
         foreign_sell_value_vnd=8_800_000_000,
@@ -285,7 +285,7 @@ def test_market_snapshot_keeps_foreign_net_flow_within_gross_flow():
     with pytest.raises(ValidationError, match="cannot exceed"):
         MarketSnapshot(
             symbol="HPG",
-            metadata=market_metadata(ProviderSource.FIINQUANT),
+            metadata=market_metadata(ProviderSource.VNSTOCK),
             price_basis=PriceBasis.RAW,
             foreign_buy_value_vnd=19_800_000,
             foreign_sell_value_vnd=8_800_000,
@@ -295,37 +295,36 @@ def test_market_snapshot_keeps_foreign_net_flow_within_gross_flow():
 
 def test_source_ownership_matches_the_measured_main_cover_table():
     assert SOURCE_OWNERSHIP_BY_CAPABILITY == {
-        Capability.MARKET: SourceOwnership(
-            main=ProviderSource.FIINQUANT,
-            cover=ProviderSource.VNSTOCK,
-        ),
-        Capability.VALUATION: SourceOwnership(
-            main=ProviderSource.FIINQUANT,
-            cover=ProviderSource.VNSTOCK,
-        ),
+        Capability.MARKET: SourceOwnership(main=ProviderSource.VNSTOCK),
+        Capability.VALUATION: SourceOwnership(main=ProviderSource.VNSTOCK),
         Capability.REFERENCE: SourceOwnership(main=ProviderSource.VNSTOCK),
         Capability.FUNDAMENTAL: SourceOwnership(main=ProviderSource.VNSTOCK),
-        Capability.MARKET_INDEX: SourceOwnership(main=ProviderSource.FIINQUANT),
+        Capability.MARKET_INDEX: SourceOwnership(main=ProviderSource.VNSTOCK),
     }
 
-    assert main_source(Capability.VALUATION) is ProviderSource.FIINQUANT
-    assert cover_source(Capability.VALUATION) is ProviderSource.VNSTOCK
+    # Every capability now names one source and no cover. A cover served only
+    # what its main could not reach and was never a fallback, because the two
+    # disagreed on units; one source cannot disagree with itself.
+    assert main_source(Capability.VALUATION) is ProviderSource.VNSTOCK
+    assert cover_source(Capability.VALUATION) is None
+    assert cover_source(Capability.MARKET) is None
     assert cover_source(Capability.FUNDAMENTAL) is None
 
-    # The index has one owner and no cover on purpose (docs/adr/0017): the Cover
-    # Source's quote history is adjusted_at_source, and an index is adjusted for
-    # nothing — so admitting it would put a basis on the row asserting a
-    # rescaling nobody performed.
-    assert main_source(Capability.MARKET_INDEX) is ProviderSource.FIINQUANT
+    # The index still has one owner and no cover, and that is still the point —
+    # what changed is which source it is. Admitting a second one would put two
+    # bases on one series, and on an instrument that is adjusted for nothing the
+    # basis is only safe to read as "no adjustment to make" while it is
+    # unanimous.
+    assert main_source(Capability.MARKET_INDEX) is ProviderSource.VNSTOCK
     assert cover_source(Capability.MARKET_INDEX) is None
-    assert not owns_capability(Capability.MARKET_INDEX, ProviderSource.VNSTOCK)
 
 
 def test_source_ownership_answers_which_sources_may_own_a_capability():
-    assert owns_capability(Capability.MARKET, ProviderSource.FIINQUANT)
-    assert owns_capability(Capability.MARKET, ProviderSource.VNSTOCK)
-    assert owns_capability(Capability.FUNDAMENTAL, ProviderSource.VNSTOCK)
-    assert not owns_capability(Capability.FUNDAMENTAL, ProviderSource.FIINQUANT)
+    # Every capability, against the one source there is. Written as a loop over
+    # the enum so that a capability added later without an owner fails here
+    # rather than at the first call that asks who serves it.
+    for capability in Capability:
+        assert owns_capability(capability, ProviderSource.VNSTOCK)
 
 
 def test_source_ownership_rejects_a_capability_owning_the_same_source_twice():

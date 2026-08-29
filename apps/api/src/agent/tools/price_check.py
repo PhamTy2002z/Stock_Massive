@@ -54,7 +54,12 @@ from src.core.database import get_sync_db
 from src.stocks.providers.contracts import PriceBasis, SessionSnapshot
 from src.stocks.shared.validators import validate_symbol
 from src.stocks.signals.corporate_actions import CorporateActionStore
-from src.stocks.signals.price_band import band_limits, resolve_band_regime, tick_size
+from src.stocks.signals.price_band import (
+    band_limits,
+    off_tick_grid,
+    resolve_band_regime,
+    tick_size,
+)
 from src.stocks.signals.sessions import sessions_on_days
 from src.stocks.trading_day import latest_trading_day, trading_days_before
 
@@ -257,7 +262,13 @@ def _judge(
     no_session = "no session was named and the store holds none to fall back on"
     checks = [
         _tick_check(exchange, price),
-        _band_check(exchange, price, bars.get(anchor_day), anchor_day)
+        _band_check(
+            exchange,
+            price,
+            bars.get(anchor_day),
+            anchor_day,
+            _rescaled_since(session, symbol, anchor_day) if anchor_day else (),
+        )
         if day is not None
         else _unverified(BAND, no_session),
         _store_check(price, bars.get(day), day, _rescaled_since(session, symbol, day))
@@ -351,6 +362,7 @@ def _band_check(
     price: Decimal,
     anchor_bar: SessionSnapshot | None,
     anchor_day: date | None,
+    rescaled_since: Sequence[date] = (),
 ) -> dict[str, Any]:
     """Whether the claim is inside the move the session was permitted.
 
@@ -359,6 +371,27 @@ def _band_check(
     volume-weighted average instead and the store does not hold one, so a UPCOM
     claim answers ``unverified`` rather than being judged against the wrong
     anchor.
+
+    **The anchor has to be a price the exchange printed, and that is asked of the
+    price rather than of its basis.** This check used to require
+    ``price_basis == raw``, which was right about the reason and wrong about the
+    test: once sessions moved to the daily spine no stored row carried that
+    basis, so this branch answered ``unverified`` for every claim ever made — a
+    security control switched off as a side effect, and silently, because
+    ``unverified`` is an ordinary answer here.
+
+    Two gates replace it, and both fail to ``unverified``:
+
+    * **On the tick grid** (``price_band.off_tick_grid``). Every limit price sits
+      on a tick because the exchange would not accept an order anywhere else, so
+      an anchor off the grid has been multiplied since it was published and the
+      band computed from it would be wrong rather than missing. Necessary and not
+      sufficient — a rebased price can land back on the grid by coincidence.
+    * **No entitlement in between.** The ex-dates between the anchor session and
+      the one being checked, which the store check beside this one already loads.
+      Not used alone: the action series covers a fraction of the market, so "no
+      row" reads as "no ex-date" and would wave through the very cases the first
+      gate is guessing at. Used together, each covers what the other misses.
     """
     if exchange is None:
         return _unverified(BAND, "no board is known for this symbol on this session")
@@ -366,11 +399,13 @@ def _band_check(
         return _unverified(
             BAND, "the store holds no session before this one to anchor the band on"
         )
-    if anchor_bar.price_basis is not PriceBasis.RAW:
+    if rescaled_since:
+        named = ", ".join(item.isoformat() for item in rescaled_since)
         return _unverified(
             BAND,
-            "the previous session is stored adjusted at source, so its close is "
-            "not the reference price the exchange set the band from",
+            "a corporate action fell between the anchor session and this one "
+            f"({named}), so the stored close is not the reference price the "
+            "exchange set the band from",
         )
     close = anchor_bar.last_price
     if close is None:
@@ -379,6 +414,14 @@ def _band_check(
     anchor = Decimal(str(close))
     if not MIN_PLAUSIBLE_PRICE <= anchor <= MAX_PLAUSIBLE_PRICE:
         return _unverified(BAND, "the previous session's close is not a usable anchor")
+
+    if off_tick_grid(exchange, anchor):
+        return _unverified(
+            BAND,
+            "the previous session's stored close is not on this board's quoting "
+            "steps, so it has been rescaled since it was published and is not "
+            "the reference price the band was set from",
+        )
 
     limits = band_limits(exchange, anchor)
     inside = limits.floor <= price <= limits.ceiling

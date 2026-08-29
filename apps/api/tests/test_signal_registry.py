@@ -42,10 +42,17 @@ from src.stocks.models import (
     ProviderSnapshot,
 )
 from src.stocks.providers import Exchange, PriceBasis
-from src.stocks.signals.bars import prepare_bars
+from src.stocks.providers.contracts import (
+    Capability,
+    ProviderSource,
+    cover_source,
+    main_source,
+)
+from src.stocks.signals.bars import BarSeries, prepare_bars
 from src.stocks.signals.fields import BarProjection
 from src.stocks.signals.fields import (
     CATALOG_NULL_FPR_CEILING,
+    PERCENTILE_ABSOLUTE_FLOOR,
     Claim,
     FieldKind,
     FieldReading,
@@ -61,7 +68,7 @@ from src.stocks.signals.fields import (
 )
 from src.stocks.signals.bars import Bar
 from src.stocks.signals.issues import SignalIssue
-from src.stocks.signals.price_band import LimitLock, band_limits
+from src.stocks.signals.price_band import LimitLock, band_limits, tick_size
 from src.stocks.signals.registry import (
     REGISTRY,
     VOLATILITY_REGIME_Z,
@@ -176,14 +183,33 @@ def store_quiet_history(
             session,
             symbol,
             day,
-            open_price=round(open_price, 1) * scale,
-            high=round(high, 1) * scale,
-            low=round(low, 1) * scale,
-            close=round(next_close, 1) * scale,
+            open_price=_on_tick(open_price) * scale,
+            high=_on_tick(high) * scale,
+            low=_on_tick(low) * scale,
+            close=_on_tick(next_close) * scale,
             basis=basis,
         )
-        close = round(next_close, 1)
+        close = _on_tick(next_close)
     return tuple(days)
+
+
+def _on_tick(price: float) -> float:
+    """The nearest price HOSE would accept an order at.
+
+    The fixture used to round to a tenth of a dong, which is not a price this
+    market quotes at any level — the step is 10, 50 or 100 depending on the band
+    the price sits in. That was invisible while a band verdict was decided by the
+    price basis column, and became visible the moment it was decided by whether
+    the prices are the ones the board printed: a window of prices off the grid is
+    a window the band machine correctly declines to judge, so the locked sessions
+    a test planted stopped being counted.
+
+    Snapping here rather than loosening the check, because the check is right and
+    the fixture was wrong. Every session written by this helper is now a session
+    that could have traded.
+    """
+    step = float(tick_size(Exchange.HOSE, _decimal(price)))
+    return round(price / step) * step
 
 
 def _decimal(value: float) -> Decimal:
@@ -820,3 +846,445 @@ class TestWhichProjectionEachFieldIsServedUnder:
         monkeypatch.setattr(registry_module, "REGISTRY", moved)
 
         assert registry_version() != before
+
+
+class TestTradedMoneyIsDerivedRatherThanRefused:
+    """The three liquidity fields, over a source that reports no traded value.
+
+    ``bar_daily`` holds OHLCV and nothing else, and the daily Adapter's own
+    docstring tells its caller to multiply close by volume. So the alternative to
+    deriving that product is refusing three fields over one multiplication. It is
+    derived once, at the ``SessionSnapshot`` seam, and the assertions here are
+    about the two consequences of choosing that seam:
+
+    **It has to reach two tiers, not one.** ``adtv_vnd`` and ``amihud_illiq``
+    read ``Bar.total_value_vnd``; the gateway's own peer standing reads the
+    snapshot directly, and ``adtv_percentile`` reads that standing. Deriving in
+    the first place only would leave the third permanently
+    ``ranking_unavailable`` — a refusal manufactured by where the arithmetic sat.
+
+    **A session that did not trade is missing, not zero.** Close times a zero
+    volume is a well-formed ``0.0``, and ``average_over_sessions`` refuses a
+    window with a gap in it while averaging a zero straight in. Returning zero
+    would have turned the refusal that guards this field into one that can no
+    longer fire.
+    """
+
+    #: Enough peers for a percentile to be served over them: the floor is
+    #: ``max(ceil(0.6 × asked), 15)``, so twenty-five answer it with room over.
+    PEER_COUNT = 25
+
+    def _with_peers(self, session: Session) -> tuple[tuple[date, ...], list[str]]:
+        """``AAA`` plus enough peers for the standing to have a sample."""
+        days = store_quiet_history(session, basis=PriceBasis.ADJUSTED_AT_SOURCE)
+        peers = [f"P{index:02d}" for index in range(self.PEER_COUNT)]
+        for index, peer in enumerate(peers):
+            store_quiet_history(
+                session,
+                peer,
+                basis=PriceBasis.ADJUSTED_AT_SOURCE,
+                seed=100 + index,
+            )
+        return days, ["AAA", *peers]
+
+    def test_the_money_is_the_close_times_the_shares(self):
+        """The arithmetic, off the gateway's own bars.
+
+        ``write_session`` defaults the volume, so this pins the product against
+        the two numbers that produced it rather than against a recorded figure.
+        """
+        with open_session() as session:
+            days = store_quiet_history(session, basis=PriceBasis.ADJUSTED_AT_SOURCE)
+            frame, _ = prepare_bars(session, "AAA", 20, end=days[-1])
+
+        assert frame is not None
+        for bar in frame.bars:
+            assert bar.close is not None
+            assert bar.volume is not None
+            assert bar.total_value_vnd == pytest.approx(bar.close * bar.volume)
+
+    def test_the_two_fields_that_read_a_bar_answer_with_a_number(self):
+        with open_session() as session:
+            days = store_quiet_history(session, basis=PriceBasis.ADJUSTED_AT_SOURCE)
+            money = serve_field(
+                session,
+                "AAA",
+                registered_field("liquidity_profile.adtv_vnd"),
+                end=days[-1],
+            )
+            amihud = serve_field(
+                session,
+                "AAA",
+                registered_field("liquidity_profile.amihud_illiq"),
+                end=days[-1],
+            )
+
+        assert money.refusal is None
+        assert money.value is not None and money.value > 0
+        assert amihud.refusal is None
+        assert amihud.value is not None and amihud.value >= 0
+
+    def test_the_derived_money_reaches_the_gateways_own_standing(self):
+        """The claim that decided where the derivation goes.
+
+        ``WindowHealth.adtv`` is measured off the snapshots, one tier below the
+        bars. If it is ``None`` here the derivation never reached it, and
+        ``adtv_percentile`` is refused for a reason that is not about the store.
+        """
+        with open_session() as session:
+            days, names = self._with_peers(session)
+            _, health = prepare_bars(
+                session, "AAA", 20, end=days[-1], peers=names
+            )
+
+        assert health.adtv is not None
+        assert health.adtv.average_value_vnd > 0
+        assert health.adtv.n >= PERCENTILE_ABSOLUTE_FLOOR
+
+    def test_the_percentile_answers_off_that_standing(self):
+        with open_session() as session:
+            days, names = self._with_peers(session)
+            value = serve_field(
+                session,
+                "AAA",
+                registered_field("liquidity_profile.adtv_percentile"),
+                end=days[-1],
+                peers=names,
+            )
+
+        assert value.refusal is None
+        assert value.value is not None
+        assert 0.0 <= value.value <= 100.0
+
+    def test_a_session_that_did_not_trade_is_missing_rather_than_zero(self):
+        """The refusal has to still fire, and the average must not sag.
+
+        Written as one session at zero volume inside the averaged stretch. Were
+        the product ``0.0``, the window would be complete, the field would answer,
+        and the answer would be a twentieth lighter than the market it describes.
+        """
+        with open_session() as session:
+            days = store_quiet_history(session, basis=PriceBasis.ADJUSTED_AT_SOURCE)
+            write_session(
+                session,
+                "AAA",
+                days[-3],
+                close=20_000,
+                volume=0,
+                basis=PriceBasis.ADJUSTED_AT_SOURCE,
+            )
+            frame, _ = prepare_bars(session, "AAA", 20, end=days[-1])
+            money = serve_field(
+                session,
+                "AAA",
+                registered_field("liquidity_profile.adtv_vnd"),
+                end=days[-1],
+            )
+
+        assert frame is not None
+        untraded = [bar for bar in frame.bars if bar.volume == 0]
+        assert untraded, "the fixture has to plant a session that did not trade"
+        assert all(bar.total_value_vnd is None for bar in untraded)
+        assert money.value is None
+        assert money.refusal is SignalIssue.TRADED_FIGURE_NOT_STORED
+
+    def test_amihud_steps_over_that_session_instead_of_refusing(self):
+        """It guards its own denominator, so it degrades where ADTV refuses.
+
+        Asserted beside the test above rather than assumed: the two fields read
+        the same derived figure and answer differently, and the count of skipped
+        sessions is what says so out loud.
+        """
+        with open_session() as session:
+            days = store_quiet_history(session, basis=PriceBasis.ADJUSTED_AT_SOURCE)
+            write_session(
+                session,
+                "AAA",
+                days[-3],
+                close=20_000,
+                volume=0,
+                basis=PriceBasis.ADJUSTED_AT_SOURCE,
+            )
+            amihud = serve_field(
+                session,
+                "AAA",
+                registered_field("liquidity_profile.amihud_illiq"),
+                end=days[-1],
+            )
+
+        assert amihud.refusal is None
+        assert amihud.value is not None
+        assert amihud.extras["zero_volume_days"] >= 1
+
+
+class TestTheIndexSeriesIsServedThroughTheSameGateway:
+    """VNINDEX, read from the daily spine by the reader that serves equities.
+
+    The index is not a second reading path. ``BarSeries`` decides everything the
+    gateway does differently for one — the band, the read-time adjustment, the
+    peer cross-section are each switched off by a predicate on that value — so
+    what is asserted here is that the shared path serves the series correctly,
+    not that a parallel one exists.
+
+    The ownership of this capability moved to the daily spine's source on
+    2026-08-28. The objection that had kept it out was that a second index series
+    would put two price bases on one instrument that is adjusted for nothing; the
+    reason that is now safe is that there is exactly one, which is the property
+    the last test here pins.
+    """
+
+    INDEX_SESSIONS = 24
+
+    def _store_index_history(self, session: Session) -> tuple[date, ...]:
+        """A rising VNINDEX in points, on the days the calendar calls sessions.
+
+        Written over the flat level ``write_session`` puts on the calendar, so
+        the series has a range of its own and a test can tell a level apart from
+        a scaled one.
+        """
+        days: list[date] = []
+        cursor = date(2025, 1, 6)
+        while len(days) < self.INDEX_SESSIONS:
+            if cursor.weekday() < 5:
+                days.append(cursor)
+            cursor += timedelta(days=1)
+
+        level = 1_200.0
+        for day in days:
+            level *= 1.004
+            write_session(
+                session,
+                "VNINDEX",
+                day,
+                close=round(level, 2),
+                high=round(level * 1.003, 2),
+                low=round(level * 0.997, 2),
+                open_price=round(level * 0.999, 2),
+                basis=PriceBasis.ADJUSTED_AT_SOURCE,
+                series="index",
+            )
+            # The calendar is the index series itself, so the equity row is what
+            # makes these days Trading Days without overwriting the levels above.
+            write_session(
+                session,
+                "AAA",
+                day,
+                close=20_000,
+                basis=PriceBasis.ADJUSTED_AT_SOURCE,
+            )
+        return tuple(days)
+
+    def test_the_series_is_served_and_the_window_is_not_refused(self):
+        with open_session() as session:
+            days = self._store_index_history(session)
+            frame, health = prepare_bars(
+                session,
+                "VNINDEX",
+                20,
+                end=days[-1],
+                series=BarSeries.MARKET_INDEX,
+            )
+
+        assert health.refusal is None
+        assert frame is not None
+        assert len(frame.bars) == 20
+
+    def test_the_level_is_in_points_and_nothing_rescaled_it(self):
+        """The unit trap: an index scaled like a share price reads as 1.8 million.
+
+        The store decides the scale once, at ingest, from the series. A second
+        scaling anywhere on the read path would show up here and nowhere else,
+        because no equity assertion can tell 20.000 dong from 20.000 of anything.
+        """
+        with open_session() as session:
+            days = self._store_index_history(session)
+            frame, _ = prepare_bars(
+                session,
+                "VNINDEX",
+                20,
+                end=days[-1],
+                series=BarSeries.MARKET_INDEX,
+            )
+
+        assert frame is not None
+        closes = [bar.close for bar in frame.bars]
+        assert all(close is not None for close in closes)
+        assert all(1_000.0 < close < 3_000.0 for close in closes)
+        # Rising, which is what the fixture built: a flat series would pass the
+        # bound above while saying nothing about whether the levels arrived.
+        assert closes == sorted(closes)
+
+    def test_the_gateway_asks_the_index_none_of_the_three_equity_questions(self):
+        """Each one is a category error on a composite, not a missing input."""
+        assert BarSeries.MARKET_INDEX.has_price_band is False
+        assert BarSeries.MARKET_INDEX.has_corporate_actions is False
+        assert BarSeries.MARKET_INDEX.has_peer_cross_section is False
+
+        with open_session() as session:
+            days = self._store_index_history(session)
+            frame, health = prepare_bars(
+                session,
+                "VNINDEX",
+                20,
+                end=days[-1],
+                series=BarSeries.MARKET_INDEX,
+            )
+
+        assert frame is not None
+        assert all(bar.band is None for bar in frame.bars)
+        assert health.band_regime is None
+        assert health.adjustment.applied is False
+        # No peers to rank a composite among; ranking its turnover would rank it
+        # against its own members.
+        assert health.adtv is None
+
+    def test_the_index_capability_has_one_owner_and_one_basis(self):
+        """Why reading the basis as "no adjustment to make" is safe here.
+
+        It is safe because it is unanimous. Asserted as two halves of one fact:
+        the capability admits a single source, and the window that source serves
+        carries a single basis — so no index window can hold a seam, and the
+        refusal that would have caught one has nothing to catch.
+        """
+        assert cover_source(Capability.MARKET_INDEX) is None
+        assert main_source(Capability.MARKET_INDEX) is ProviderSource.VNSTOCK
+
+        with open_session() as session:
+            days = self._store_index_history(session)
+            _, health = prepare_bars(
+                session,
+                "VNINDEX",
+                20,
+                end=days[-1],
+                series=BarSeries.MARKET_INDEX,
+            )
+
+        assert health.refusal is not SignalIssue.MIXED_PRICE_BASIS
+        assert health.refusal is None
+
+
+class TestTheBandVerdictOnAnAdjustedWindow:
+    """The second price-basis gate, and what it was silently switching off.
+
+    ``measure_band`` asks the basis question of a session and its anchor, and it
+    used to refuse a pair adjusted throughout. Every row in the daily spine is
+    adjusted, so that refused every session of every symbol — and it did so
+    without raising anything a test could see: a withheld verdict is
+    ``INDETERMINATE``, ``Bar.limit_locked`` reads that as *not locked*,
+    ``without_limit_locks()`` then drops nothing, and a baseline volatility whose
+    own docstring says limit-locked sessions may not be in it was computed over
+    windows that still held them.
+
+    So the assertions here are deliberately about the consequence rather than
+    about the gate: that a lock is counted, and that the frame really removes it.
+    A test that only checked the refusal code would have passed throughout the
+    period the behaviour was wrong.
+    """
+
+    def test_a_ceiling_lock_is_counted_on_an_adjusted_window(self):
+        with open_session() as session:
+            days = store_quiet_history(
+                session,
+                basis=PriceBasis.ADJUSTED_AT_SOURCE,
+                locked_from_end=(2, 3, 4),
+            )
+            _, health = prepare_bars(session, "AAA", 20, end=days[-1])
+
+        assert health.refusal is None
+        assert health.limit_lock_days > 0
+        assert len(health.limit_lock_dates) == health.limit_lock_days
+
+    def test_the_frame_actually_drops_the_locked_sessions(self):
+        """The half that matters to a number: counted *and* excluded.
+
+        ``limit_lock_days`` moving off zero only proves the verdict arrived.
+        This proves the verdict is acted on, which is the part a range estimator
+        depends on — a run of ``H=L=O=C`` deflates a robust baseline and
+        manufactures a z-score on the sessions either side of it.
+        """
+        with open_session() as session:
+            days = store_quiet_history(
+                session,
+                basis=PriceBasis.ADJUSTED_AT_SOURCE,
+                locked_from_end=(2, 3, 4),
+            )
+            frame, health = prepare_bars(session, "AAA", 20, end=days[-1])
+
+        assert frame is not None
+        kept = frame.without_limit_locks()
+        assert len(kept.bars) == len(frame.bars) - health.limit_lock_days
+        assert all(not bar.limit_locked for bar in kept.bars)
+        assert any(bar.limit_locked for bar in frame.bars)
+
+    def test_an_upcom_session_is_undecided_and_stays_that_way(self):
+        """Not a thin window and not a missing backfill: no VWAP is stored.
+
+        The board anchors its band on the prior session's round-lot continuous
+        VWAP, and the daily spine holds OHLCV. The code names the absent input so
+        that a reader is not sent looking for a fix in the window length.
+        """
+        with open_session() as session:
+            days = store_quiet_history(
+                session, basis=PriceBasis.ADJUSTED_AT_SOURCE
+            )
+            # Moved to the board rather than listed twice: the fixture already
+            # put this symbol on HOSE, and the register holds one row per symbol.
+            session.execute(
+                ListingRoster.__table__.update()
+                .where(ListingRoster.symbol == "AAA")
+                .values(exchange=Exchange.UPCOM.value)
+            )
+            session.flush()
+            frame, health = prepare_bars(session, "AAA", 20, end=days[-1])
+
+        assert frame is not None
+        assert health.limit_lock_days == 0
+        assert all(bar.band is None for bar in frame.bars)
+        assert all(
+            bar.band_undecided_reason is SignalIssue.ANCHOR_NOT_STORED
+            for bar in frame.bars
+        )
+
+    def test_a_rebased_window_says_so_rather_than_reporting_no_locks(self):
+        """The failure this phase exists to make loud.
+
+        ``scale`` is what a provider does when it restates a series: one constant
+        over every price. It takes them off the quoting grid, so no session can
+        be judged — and the point is that the window says which input it is short
+        of instead of answering that this symbol never reached its band.
+        """
+        with open_session() as session:
+            days = store_quiet_history(
+                session,
+                basis=PriceBasis.ADJUSTED_AT_SOURCE,
+                locked_from_end=(2, 3, 4),
+                scale=1.037,
+            )
+            frame, health = prepare_bars(session, "AAA", 20, end=days[-1])
+
+        assert frame is not None
+        assert health.limit_lock_days == 0
+        assert SignalIssue.PRICE_OFF_TICK_GRID in health.band_undecided_reasons
+        assert all(
+            bar.band_undecided_reason is SignalIssue.PRICE_OFF_TICK_GRID
+            for bar in frame.bars
+        )
+
+    def test_band_pressure_answers_on_an_adjusted_window(self):
+        """The field the phase is named for, end to end through the gateway."""
+        with open_session() as session:
+            days = store_quiet_history(
+                session,
+                basis=PriceBasis.ADJUSTED_AT_SOURCE,
+                locked_from_end=(2, 3, 4),
+            )
+            value = serve_field(
+                session,
+                "AAA",
+                registered_field("band_pressure.limit_days_in_window"),
+                end=days[-1],
+            )
+
+        assert value.refusal is None
+        assert value.value is not None
+        assert value.value > 0

@@ -61,7 +61,11 @@ GET_SERIES_DESCRIPTION = (
     "frameId. The series itself is kept where the Signal Desk can draw it and is "
     "never put in this conversation: pass the frameId to render_signal_desk to show "
     "it to the reader. Use it when the question is about a shape over time — a "
-    "trend, a range, a comparison across sessions — and there is no study for it."
+    "trend, a range, a comparison across sessions — and there is no study for it. "
+    "It reads one figure per closed session and nothing inside a session, so a "
+    "question about where within a session something happened — which price "
+    "level traded most, which part of the day carried the volume — is not "
+    "answerable from it. Check run_study for that before answering in prose."
 )
 GET_SERIES_SCHEMA = object_schema(
     {

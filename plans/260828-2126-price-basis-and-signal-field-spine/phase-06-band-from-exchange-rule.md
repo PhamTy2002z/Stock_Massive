@@ -1,7 +1,7 @@
 ---
 phase: 6
 title: "band_pressure trên lưới bước giá"
-status: pending
+status: done
 priority: P2
 effort: "1d"
 dependencies: [5]

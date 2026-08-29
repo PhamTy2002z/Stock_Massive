@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from ..trading_day import latest_trading_day
 from .bars import WindowHealth, prepare_bars, prepare_bars_context
 from .cross_sectional import percentile_of
+from .earnings import quarterly_statements_for
 from .fields import (
     FieldReading,
     FieldValue,
@@ -92,12 +93,21 @@ def serve_field(
         if field.requires_foreign_share_flow
         else None
     )
+    # Against the same cutoff, and for the same reason: the quarters read are
+    # the ones whose end the window's newest session has passed, so a window
+    # answered for a date in the past does not acquire a filing nobody had then.
+    quarterly = (
+        quarterly_statements_for(session, symbol, cutoff)
+        if field.requires_quarterly_statements
+        else None
+    )
     reading = field.reading(
         FieldWindow(
             frame=frame,
             health=health,
             foreign_room=foreign_room_on_or_before(session, symbol, cutoff),
             foreign_net_volume_by_session=foreign_share_flows,
+            quarterly=quarterly,
         )
     )
     if reading.value is None:

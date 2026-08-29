@@ -217,11 +217,14 @@ class TestTheBand:
         assert verdict(result, TICK) == ON_TICK
         session.close()
 
-    def test_an_adjusted_anchor_is_refused_rather_than_used(self):
-        """An adjusted close is not the reference price the exchange set.
+    def test_an_adjusted_anchor_on_the_grid_is_used(self):
+        """The label stopped deciding this; the price decides it.
 
-        Using it would produce a band of the right shape around the wrong
-        number, which is the failure mode this whole module exists to name.
+        Every stored row is ``adjusted_at_source``, so refusing that label
+        refused every claim ever checked — and silently, because ``unverified``
+        is an ordinary answer here rather than an error. A symbol with no
+        entitlement behind it carries the published close under that label, and
+        21,500 is a price HOSE would accept an order at.
         """
         session = open_session()
         list_on(session, SYMBOL, Exchange.HOSE)
@@ -235,7 +238,68 @@ class TestTheBand:
         write_session(session, SYMBOL, SESSION, close=float(REAL_CLOSE))
         session.flush()
 
-        assert verdict(check(session, 25_000), BAND) == UNVERIFIED
+        # ±7% of 21,500 is 20,000–23,000 after rounding to the grid.
+        assert verdict(check(session, 22_000), BAND) == WITHIN_BAND
+        assert verdict(check(session, 25_000), BAND) != UNVERIFIED
+        session.close()
+
+    def test_an_anchor_off_the_quoting_grid_is_refused(self):
+        """A rescaled close cannot anchor a band made of grid-rounded limits.
+
+        21,537 is not a price this board quotes at any level, so it has been
+        multiplied since it was published. The band around it would be the right
+        shape around the wrong number — the failure this module exists to name.
+        """
+        session = open_session()
+        list_on(session, SYMBOL, Exchange.HOSE)
+        write_session(
+            session,
+            SYMBOL,
+            BEFORE,
+            close=21_537.0,
+            basis=PriceBasis.ADJUSTED_AT_SOURCE,
+        )
+        write_session(session, SYMBOL, SESSION, close=float(REAL_CLOSE))
+        session.flush()
+
+        assert verdict(check(session, 22_000), BAND) == UNVERIFIED
+        session.close()
+
+    def test_an_entitlement_between_the_two_sessions_is_refused(self):
+        """The second gate, for the rebasing the grid test cannot see.
+
+        A price rescaled by a whole factor can land back on the grid, so being on
+        it is necessary and not sufficient. The stored action series answers the
+        rest where it has rows — it is not trusted alone, because it covers a
+        fraction of the market and "no row" would otherwise read as "no ex-date".
+        """
+        session = open_session()
+        list_on(session, SYMBOL, Exchange.HOSE)
+        write_session(
+            session,
+            SYMBOL,
+            BEFORE,
+            close=21_500.0,
+            basis=PriceBasis.ADJUSTED_AT_SOURCE,
+        )
+        write_session(session, SYMBOL, SESSION, close=float(REAL_CLOSE))
+        session.add(
+            CorporateAction(
+                symbol=SYMBOL,
+                source="vnstock",
+                event_code="ISS",
+                title="Stock dividend",
+                kind="stock_dividend",
+                ex_date=SESSION,
+                exercise_ratio=Decimal("0.1"),
+                changes_share_count=True,
+                confirmation="confirmed",
+                observed_at=datetime(2026, 8, 13, 11, 0, tzinfo=timezone.utc),
+            )
+        )
+        session.flush()
+
+        assert verdict(check(session, 22_000), BAND) == UNVERIFIED
         session.close()
 
 

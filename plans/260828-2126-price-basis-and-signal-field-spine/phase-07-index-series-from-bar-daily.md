@@ -1,7 +1,7 @@
 ---
 phase: 7
 title: "MARKET_INDEX từ bar_daily series=index"
-status: pending
+status: done
 priority: P3
 effort: "4h"
 dependencies: [3]

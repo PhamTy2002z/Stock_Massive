@@ -1,7 +1,7 @@
 ---
 phase: 5
 title: "traded_value suy diễn — ba field liquidity"
-status: pending
+status: done
 priority: P2
 effort: "6h"
 dependencies: [4]

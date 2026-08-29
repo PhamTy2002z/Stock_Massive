@@ -1,7 +1,7 @@
 ---
 title: "Price Basis And Signal Field Spine"
 description: "Chuyển 30 Signal Field khỏi giá FiinQuant sang bar_daily của vnstock, đổi luật price basis cho đúng, rồi xoá nguồn vi phạm điều khoản."
-status: pending
+status: done
 priority: P1
 effort: "9 phase"
 tags: [signals, price-basis, compliance, vnstock, api]
@@ -155,11 +155,11 @@ declaration** (kiểu `requires_foreign_share_flow`), không phải mã refusal 
 | 02 | [Lịch giao dịch chuyển sang bar_daily](./phase-02-trading-day-on-bar-daily.md) | api | 01 | **done** |
 | 03 | [Cầu bar_daily → bars.py + luật basis mới](./phase-03-bar-daily-into-bars.md) | api | 02 | **done** |
 | 04 | [Projection cho 30 field + refusal đúng input](./phase-04-basis-law-and-retired-source.md) | api + web | 03 | **done** |
-| 05 | [traded_value suy diễn — ba field liquidity](./phase-05-derived-traded-value.md) | api | 04 | pending |
-| 06 | [band_pressure trên lưới bước giá](./phase-06-band-from-exchange-rule.md) | api | 05 | pending |
-| 07 | [MARKET_INDEX từ bar_daily series=index](./phase-07-index-series-from-bar-daily.md) | api | 03 | pending |
-| 08 | [Xoá FiinQuant và nghiệm thu](./phase-08-retire-fiinquant.md) | api + db | 04, 05, 06 | pending |
-| 09 | [Signal Field earnings.*](./phase-09-earnings-signal-fields.md) | api | 01 | pending |
+| 05 | [traded_value suy diễn — ba field liquidity](./phase-05-derived-traded-value.md) | api | 04 | **done** |
+| 06 | [band_pressure trên lưới bước giá](./phase-06-band-from-exchange-rule.md) | api | 05 | **done** |
+| 07 | [MARKET_INDEX từ bar_daily series=index](./phase-07-index-series-from-bar-daily.md) | api | 03 | **done** |
+| 08 | [Xoá FiinQuant và nghiệm thu](./phase-08-retire-fiinquant.md) | api + db | 04, 05, 06 | **done** |
+| 09 | [Signal Field earnings.*](./phase-09-earnings-signal-fields.md) | api | 01 | **done** |
 
 **Đường tới hạn: `01 → 02 → 03 → 04 → 05 → 06 → 08`.**
 
@@ -235,31 +235,57 @@ ghi "không đụng"; sai:
 
 ## Success Criteria
 
-- [ ] 22 Signal Field trả số thật từ `bar_daily`, 8 field trả refusal đúng input
-- [ ] Cả **20** field PRICE trả số — không chỉ nhóm VOLUME
-- [ ] Luật basis mới viết thành câu trong `bars.py` và `price_band.py`, có test
-- [ ] `limit_lock_days > 0` trên fixture có phiên trần — chứng minh cổng thứ hai
-      không bị tắt câm
-- [ ] 0 dòng `source = 'fiinquant'` trong `provider_snapshots` **của DB container**
-- [ ] Backup đã restore thử và **đếm khớp số dòng cụ thể** trước khi xoá
-- [ ] Golden test: 17 field OHLCV không đổi quá dung sai đã khai, trên mã có
-      corporate action
-- [ ] `make test` + bốn cổng web xanh, gồm `tests/studies/`
+Đo 2026-08-29 trên store thật, sau phép xoá.
 
-## Câu hỏi chưa giải quyết
+- [x] 22 Signal Field trả số thật từ `bar_daily`, 8 field trả refusal đúng input —
+      **vượt**: 23/30 field gốc trả số (`foreign_room_pct` sống nhờ 220 dòng
+      reference vnstock, plan dự là chết), cộng ba field `earnings.*` mới ⇒ VCB
+      **25/33**, VNM và MWG **26/33**
+- [x] Cả **20** field PRICE trả số — không chỉ nhóm VOLUME
+- [x] Luật basis mới viết thành câu trong `bars.py` và `price_band.py`, có test
+- [x] `limit_lock_days > 0` trên fixture có phiên trần — cổng thứ hai không bị tắt câm
+- [x] 0 dòng `source = 'fiinquant'` trong `provider_snapshots` **của DB container**
+- [x] Backup đã restore thử và đếm khớp 106.007 / 71.773 trước khi xoá
+- [x] Golden test: 17 field OHLCV không đổi quá dung sai đã khai
+- [x] `make test` (**1423 passed**) + bốn cổng web xanh, gồm `tests/studies/`
 
-1. Ai chạy `backfill_daily`? (R2 — quyết định vận hành)
-2. `market_cap_vnd` có dựng lại từ `charter_capital` không, hay ba field
-   `factor_percentiles` để `market_cap_absent` vĩnh viễn? **Lưu ý mới:** FiinQuant
-   đã null `market_cap_vnd` ở **99,48%** dòng (36.338/36.528), nên ba field này
-   gần như đã chết từ trước — xoá FiinQuant không đổi gì cho chúng.
-3. Dung sai golden test cho 17 field OHLCV — bằng 0, hay chấp nhận lệch do
-   provider làm tròn hệ số khác `_factors`?
-4. R7: chấp nhận mất nhánh BAND/STORE của `check_price_claim`, hay dựng lại phép
-   so trên giá đã điều chỉnh với dung sai khai rõ?
-5. Lịch định nghĩa trên tập nào — `series='index'` (VNINDEX một mã, sạch nhất) hay
-   Universe declared 30 mã? Không dùng hợp của 1.522 mã: chỉ 846 mã có dòng ở
-   phiên mới nhất, nên phép hợp tuyên phiên sớm hơn phần lớn mã có dữ liệu.
+## Câu hỏi chưa giải quyết — trạng thái 2026-08-29
+
+1. **Ai chạy `backfill_daily`?** — **đã trả 2026-08-29.** Đăng ký vào seam
+   scheduler có sẵn (`core/scheduler.py`, vốn tự ghi "add it here"), ba scope nối
+   tiếp 16:30 giờ VN, `index` đi đầu vì VNINDEX định nghĩa Trading Day calendar.
+   **Mặc định tắt** (`BACKFILL_DAILY_SCHEDULED`) vì `scheduler_enabled` mặc định
+   `True` — một job vô điều kiện sẽ tự gọi provider ngoài trên mọi máy dựng stack.
+   Kèm hai việc phát hiện khi làm: job **bỏ qua arbiter hạn mức hoàn toàn**, nay
+   lấy slot qua `QuotaLane.BACKFILL` đã có sẵn; và `spine_freshness` không có
+   caller nào ngoài `main()` của chính job, nay API startup cảnh báo khi stale.
+   Chi tiết: `plans/reports/proposal-260829-0034-backfill-schedule-and-band-check.md`.
+2. **`market_cap_vnd` có dựng lại không?** — **đã trả lời bằng phép đo, không cần
+   quyết.** Nguồn cũ null `market_cap_vnd` ở 99,48% dòng, nên ba field
+   `factor_percentiles` gần như đã chết từ trước; xoá nguồn không đổi gì cho chúng.
+   Ba field đó trả `market_cap_absent` trên store thật, đúng như khai. Dựng lại từ
+   `charter_capital` là **feature mới**, không phải nợ của plan này.
+3. **Dung sai golden test cho 17 field OHLCV** — **đã trả lời.** Bằng **0**, và
+   không cần dung sai: `test_every_ratio_a_field_reads_survives_the_window_being_rescaled`
+   phục vụ cùng cửa sổ nhân 2,5 và đòi **cùng một số** ra
+   (`pytest.approx` mặc định). Số học của cả 17 field là tỷ số nên hằng số chia
+   hết. Không có chỗ nào cần chấp nhận lệch do provider làm tròn.
+4. **R7 — `check_price_claim`** — **đã trả 2026-08-29**, và phép đo cũ sai một
+   nửa: **chỉ nhánh BAND chết**, không phải hai. Nhánh STORE vẫn chạy (`:461` đòi
+   cả `rescaled_since` nên chỉ suy giảm quanh phiên có rescaling); TICK không dính.
+   Sửa bằng **hai cổng giá** thay cổng nhãn `RAW`:
+   `price_band.off_tick_grid(exchange, anchor)` — giá sàn công bố luôn nằm trên
+   lưới bước giá — **và** ex-date giữa phiên neo và phiên đích. Không dùng cổng thứ
+   hai một mình: bảng corporate action phủ một phần nhỏ thị trường nên "không có
+   dòng" đọc thành "không có ex-date". Nghiệm thu trên store thật: 30/30 mã
+   declared `within_band` cho giá đúng (trước 0/30 `unverified`) và `exceeds_band`
+   cho giá bịa ±9% / −12% / ×10.
+5. **Lịch định nghĩa trên tập nào?** — **đã trả lời, Phase 02 chốt.**
+   `series='index'` (VNINDEX). Đo xác nhận: 3.991 phiên liên tục 2010-08-31 →
+   2026-08-27, một mã, một source, một basis. Không dùng hợp của 1.522 mã.
+
+**Còn mở: không câu nào.** Năm câu đều đã trả — ba bằng phép đo trong plan, hai
+bằng phần thi công 2026-08-29 ở trên. Plan đóng.
 
 ---
 

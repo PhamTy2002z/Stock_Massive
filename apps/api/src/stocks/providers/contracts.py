@@ -29,9 +29,22 @@ class BatchTooLarge(Exception):
 
 
 class ProviderSource(str, Enum):
-    """Upstream sources approved for the internal VN30 pilot."""
+    """Upstream sources this system is permitted to serve numbers from.
 
-    FIINQUANT = "fiinquant"
+    One member, where there were two. The other was removed on 2026-08-29 along
+    with the 71,773 rows it had written: its licence does not permit
+    redistributing what it served, and by then nothing read them — sessions come
+    off the daily spine and the valuation rows never had a reader.
+
+    Removing the member is the part that makes the retirement structural rather
+    than a convention. While it existed, a row could be written under that name
+    and be read back; now such a row fails at the boundary, because
+    `ProviderSource("fiinquant")` raises. That is the intended behaviour and the
+    reason the member is gone rather than merely unused — the deletion had to be
+    ordered behind it, since dropping the name first would have made every
+    surviving row unreadable instead of merely unwritable.
+    """
+
     VNSTOCK = "vnstock"
 
 
@@ -159,24 +172,57 @@ class SourceOwnership(InternalSnapshot):
 
 SOURCE_OWNERSHIP_BY_CAPABILITY: Mapping[Capability, SourceOwnership] = MappingProxyType(
     {
-        Capability.MARKET: SourceOwnership(
-            main=ProviderSource.FIINQUANT,
-            cover=ProviderSource.VNSTOCK,
-        ),
-        Capability.VALUATION: SourceOwnership(
-            main=ProviderSource.FIINQUANT,
-            cover=ProviderSource.VNSTOCK,
-        ),
+        # One source each, where both used to name a Main and a Cover. The Main
+        # Source of both was retired on 2026-08-29: its licence does not permit
+        # redistributing what it served, and nothing reads it any more — sessions
+        # come off the daily spine, and the valuation rows never had a reader at
+        # all.
+        #
+        # The Cover is **dropped rather than promoted in place**, and that is
+        # load-bearing: ``validate_distinct_sources`` refuses a row whose cover
+        # is its main, so moving the Main to vnstock while leaving the Cover
+        # there raises at import — every test failing at collection rather than
+        # one failing with a message.
+        #
+        # What a Cover meant is also gone with it. It served only what the Main
+        # could not reach and was never a runtime fallback, because the two
+        # disagreed on units. One source cannot disagree with itself.
+        Capability.MARKET: SourceOwnership(main=ProviderSource.VNSTOCK),
+        Capability.VALUATION: SourceOwnership(main=ProviderSource.VNSTOCK),
         Capability.REFERENCE: SourceOwnership(main=ProviderSource.VNSTOCK),
         Capability.FUNDAMENTAL: SourceOwnership(main=ProviderSource.VNSTOCK),
-        # No cover source, and that is the decision rather than an omission. The
-        # Cover Source's quote history is ``adjusted_at_source`` and there is no
-        # raw option (``docs/adr/0006``), but an index is never adjusted for
-        # anything — so a vnstock index series would carry a basis that asserts a
-        # rescaling nobody performed, and a window mixing it with the Main
-        # Source's would be refused as ``mixed_price_basis`` for a seam that does
-        # not exist in the market. One source, one basis, one meaning.
-        Capability.MARKET_INDEX: SourceOwnership(main=ProviderSource.FIINQUANT),
+        # Reversed 2026-08-28, and the reasoning it reverses is kept below
+        # rather than deleted, because half of it is still true.
+        #
+        # The decision was: no cover source, and vnstock must not serve this
+        # capability at all. *"The Cover Source's quote history is
+        # ``adjusted_at_source`` and there is no raw option (``docs/adr/0006``),
+        # but an index is never adjusted for anything — so a vnstock index series
+        # would carry a basis that asserts a rescaling nobody performed, and a
+        # window mixing it with the Main Source's would be refused as
+        # ``mixed_price_basis`` for a seam that does not exist in the market. One
+        # source, one basis, one meaning."*
+        #
+        # The second objection is now moot: the source it protected against
+        # mixing with is gone. It never held a single index row — the store has
+        # no ``market_index`` snapshot from any source, ever — and its quote rows
+        # are being removed under a licence that does not permit redistributing
+        # them. There is no second series left for a window to mix, so there is
+        # no seam to refuse.
+        #
+        # The first objection stands as a fact and is answered by naming what the
+        # label means here rather than by adding a third basis value. On an
+        # instrument that cannot be adjusted, ``adjusted_at_source`` is read as
+        # *there is no adjustment to make* — not as a rescaling someone
+        # performed. That reading is safe precisely because it is unanimous:
+        # every index row in the daily spine carries this basis and one source,
+        # so no index window can hold two bases and no comparison between them
+        # can be silently wrong. A third enum value would have to be understood
+        # by both price-basis gates and every refusal that reads one, to express
+        # a distinction no window can currently observe.
+        #
+        # What did not change: still one source, one basis, one meaning.
+        Capability.MARKET_INDEX: SourceOwnership(main=ProviderSource.VNSTOCK),
     }
 )
 

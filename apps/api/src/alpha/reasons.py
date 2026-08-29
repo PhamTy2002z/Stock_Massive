@@ -35,6 +35,12 @@ SIGNAL_ISSUE_SENTENCES: Mapping[SignalIssue, str] = MappingProxyType(
             "The store holds fewer whole intraday sessions than this study needs, "
             "so no profile was computed over a shortened window."
         ),
+        SignalIssue.SESSION_NOT_INGESTED: (
+            "The session being asked about is not in the store: it may not have "
+            "opened yet, its bars may not have arrived, or the market may not be "
+            "trading that day. Nothing was answered from an earlier session "
+            "under its name."
+        ),
         SignalIssue.INSUFFICIENT_HISTORY: (
             "The store holds fewer sessions than this figure needs, so it was "
             "not computed over a shortened window."
@@ -82,6 +88,11 @@ SIGNAL_ISSUE_SENTENCES: Mapping[SignalIssue, str] = MappingProxyType(
         SignalIssue.ANCHOR_MISSING: (
             "The session before the window's oldest one is not stored, so there "
             "is no previous close to anchor the band to."
+        ),
+        SignalIssue.PRICE_OFF_TICK_GRID: (
+            "A session in this window is held at prices that are not on the "
+            "board's quoting steps, so they are not the prices the exchange "
+            "printed and its band cannot be measured against them."
         ),
         SignalIssue.UNCONFIRMED_CORPORATE_ACTION: (
             "A corporate action falling in this window has no ex-date the stored "

@@ -60,6 +60,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 from vnstock.api.quote import Quote
 
+from src.core.quota import quota_arbiter
 from src.core.vnstock_wrapper import safe_vnstock_call
 from src.stocks.models import BarDaily
 from src.stocks.providers.normalize import VN_TZ
@@ -136,6 +137,27 @@ def fetch_daily(symbol: str, *, end: date, sessions: int) -> pd.DataFrame:
     quote = safe_vnstock_call(Quote, source=PROVIDER_SOURCE, symbol=symbol)
     if quote is None:
         raise DailyIngestError(f"vnstock would not open a client for {symbol}")
+
+    # The account's allowance, taken from the one arbiter that owns it
+    # (``docs/adr/0014``). Not a pacer of this module's own: three uncoordinated
+    # pacers over one allowance was the measured failure that arbiter exists to
+    # end, and a fourth here would spend the same slots the news lane and the
+    # legacy routes are counting. The lane is whatever the entry point declared —
+    # ``backfill_daily.run`` says ``BACKFILL``, which stands aside for a caller
+    # with a user waiting behind it and then waits as long as it takes.
+    #
+    # Placed before ``history`` and not before the constructor above, because the
+    # constructor reaches no provider — the guarded client makes the same
+    # distinction for the same reason.
+    #
+    # Refusals propagate. ``QuotaRefused`` is not a thin window or a provider
+    # hiccup, and it must not become one: ``safe_vnstock_call`` answers every
+    # ordinary exception with ``None``, which this function then reports as "the
+    # provider answered nothing" — the sentence the paging loop reads as *this
+    # window predates the symbol's first session*. A quota refusal dressed as
+    # that would mark a symbol not-deep-enough and move on, quietly, forever.
+    quota_arbiter().acquire()
+
     frame = safe_vnstock_call(
         quote.history,
         start=start.isoformat(),

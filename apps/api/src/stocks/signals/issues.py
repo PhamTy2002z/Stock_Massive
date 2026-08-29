@@ -41,6 +41,14 @@ class SignalIssue(str, Enum):
     # daily bars; this one counts intraday sessions actually stored.
     INSUFFICIENT_SESSIONS = "insufficient_sessions"
 
+    # The session being asked about has not reached the store yet. Distinct
+    # from MISSING_TARGET_SESSION, which says the day held no session at all:
+    # this one says the session is expected to exist and its bars have not
+    # arrived. It is raised rather than quietly answering from the session
+    # before, because a picture of yesterday captioned "today" is the one
+    # wrong answer that looks exactly like a right one.
+    SESSION_NOT_INGESTED = "session_not_ingested"
+
     # --- Price Basis, from ADR-0006 -------------------------------------
     # The sessions being read together do not share a basis: the window crosses
     # the seam between a symbol's Cover Source history and its collected era.
@@ -77,6 +85,27 @@ class SignalIssue(str, Enum):
     # The symbol has no stored session on the trading day before this one, so
     # there is no previous close to anchor to.
     ANCHOR_MISSING = "anchor_missing"
+
+    # The prices this session is held at are not on the board's quoting grid, so
+    # they are not the prices the exchange printed and a band cannot be measured
+    # against them.
+    #
+    # Every limit price sits on a tick by construction — the exchange would not
+    # accept an order anywhere else — so a stored price off the grid has been
+    # multiplied by a factor since it was published. That makes it a fine input
+    # for a ratio and an impossible one for the question "did this session trade
+    # *at* its limit", which is an equality against a grid-rounded number.
+    #
+    # This is the price basis rule made per-session rather than per-window. A
+    # window adjusted throughout is served, and most of its sessions still carry
+    # the published prices because most symbols have no entitlement in the
+    # window; the ones that were rebased say so here instead of quietly reporting
+    # that no session ever reached its band.
+    #
+    # It is necessary and not sufficient, and the docstring on the check says so:
+    # a rebased price can land back on the grid by coincidence. It removes the
+    # bulk of the bad verdicts, and it does not pretend to be a proof.
+    PRICE_OFF_TICK_GRID = "price_off_tick_grid"
 
     # --- Corporate Actions, from ADR-0006 --------------------------------
     # An action falling in the window has no ex-date, or has one the raw prices
