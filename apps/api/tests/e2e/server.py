@@ -170,9 +170,12 @@ class Control:
         signal_desk = {
             "artifactId": artifact_id,
             "studyName": "intraday_liquidity_profile",
+            "studyDisplayName": "Thanh khoản trong phiên",
             "title": "Thanh khoản trong phiên — STB",
             "blockCount": 1,
             "round": 0,
+            "symbol": "STB",
+            "asOf": "2026-08-21T09:00:00+07:00",
         }
         self.signal_desks.append(signal_desk)
         self.publisher.signal_desk_ready(signal_desk)

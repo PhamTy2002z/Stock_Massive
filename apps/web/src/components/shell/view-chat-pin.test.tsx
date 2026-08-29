@@ -26,6 +26,15 @@ const desk = {
   isSubmitting: false,
   refusal: null as string | null,
   flagFailedFor: null as number | null,
+  attachments: [] as unknown[],
+  attach: vi.fn(),
+  detach: vi.fn(),
+  visionEnabled: true,
+  capture: null as { previewUrl: string } | null,
+  startCapture: vi.fn(),
+  acceptCapture: vi.fn(),
+  discardCapture: vi.fn(),
+  captureSupported: true,
   submit: vi.fn(),
   cancel: vi.fn(),
   retry: vi.fn(),
@@ -77,12 +86,13 @@ const answer = {
 }
 
 const answered = [
-  { kind: "user", key: "u1", text: "Về mã STB thì sao?", pending: false },
+  { kind: "user", key: "u1", text: "Về mã STB thì sao?", pending: false, attachments: [] },
   { kind: "assistant", key: "a1", view: answer, messageId: 1, flaggedReason: null },
 ]
 
 const followUp = {
   kind: "user",
+  attachments: [],
   key: "u2",
   text: "Thời điểm nào biến động nhiều nhất?",
   pending: true,

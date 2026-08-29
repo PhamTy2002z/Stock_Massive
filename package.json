@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "docker compose up --build -d && pnpm dev:web",
+    "dev": "docker compose up --build -d --wait && pnpm dev:web",
     "dev:api": "docker compose up --build",
     "dev:api:detach": "docker compose up --build -d",
     "dev:web": "pnpm --dir apps/web dev",

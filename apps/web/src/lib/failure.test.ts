@@ -122,7 +122,10 @@ describe("describeFailure", () => {
       if (failure.recovery === "none") expect(failure.action).toBeNull()
       else expect(failure.action).toBeTruthy()
       expect(failure.title).not.toBe("")
-      expect(failure.detail).not.toBe("")
+      // A missing resource is the one kind that says nothing past its title:
+      // there is no recovery to explain, and guessing at the cause misleads.
+      if (failure.kind === "not_found") expect(failure.detail).toBe("")
+      else expect(failure.detail).not.toBe("")
     }
   })
 })

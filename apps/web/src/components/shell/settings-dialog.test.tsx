@@ -2,9 +2,7 @@
 /**
  * What Settings offers, and what it refuses to pretend.
  *
- * The dialog used to hold one working control and four read-only values, two of
- * which were compile-time constants dressed as fields. Two properties are worth
- * a test:
+ * Three properties are worth a test:
  *
  * *An allowance is drawn in the state it is actually in.* Loading, unlimited and
  * metered are three different facts. Drawing an unlimited ceiling as a full
@@ -12,14 +10,20 @@
  * something they cannot run out of — and every ceiling is unlimited on that
  * route, so it is the default case there rather than an edge.
  *
- * *A default is a default, not a switch.* The Hội thoại pane answers what a new
- * conversation opens with. It must write the preference and nothing else; the
- * per-conversation mode stays on the composer.
+ * *A default is a default, not a per-conversation switch.* The Hội thoại pane
+ * answers what a new conversation opens with. It must write the preference and
+ * nothing else; the per-conversation mode stays on the composer.
+ *
+ * *A row with nothing behind it says so.* Most of the dialog is drawn ahead of
+ * the writes that would make it work, and the whole point of drawing it that way
+ * is the badge and the inert control. A row that lost its badge would be a live
+ * control that silently discards what the reader chose — which is the failure
+ * this surface exists to avoid, so it is asserted rather than eyeballed.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 
 import type { Usage } from "@/lib/alpha-desk/types"
 
@@ -76,10 +80,18 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe("the rail", () => {
-  it("offers the four panes that have something to do", () => {
+  it("offers every pane in both groups", () => {
     open()
 
-    for (const label of ["Giao diện", "Hội thoại", "Hồ sơ", "Hạn mức"]) {
+    for (const label of [
+      "Giao diện",
+      "Hội thoại",
+      "Thông báo",
+      "Hồ sơ",
+      "Hạn mức",
+      "Bảo mật",
+      "Dữ liệu",
+    ]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument()
     }
   })
@@ -88,8 +100,14 @@ describe("the rail", () => {
     open()
 
     // The display timezone and the exchange list moved to where the numbers
-    // are, which is the provenance strip under each Signal Desk.
-    expect(screen.queryByRole("button", { name: "Hệ thống" })).toBeNull()
+    // are, which is the provenance strip under each Signal Desk. There is no
+    // pane for them, and the rail is the only place a pane can be reached from.
+    const rail = screen.getByRole("navigation", { name: "Mục cài đặt" })
+    const labels = Array.from(rail.querySelectorAll("button")).map(
+      (button) => button.textContent,
+    )
+
+    expect(labels).not.toContain("Hệ thống")
   })
 
   it("filters to nothing rather than showing a stale pane", () => {
@@ -161,24 +179,26 @@ describe("the allowance", () => {
   })
 })
 
+const DEFAULT_DESK = "Signal Desk là chế độ mặc định"
+
 describe("how a new conversation opens", () => {
   it("starts from what the browser last chose", () => {
     writePreferences({ signalDeskByDefault: true })
     open()
     goTo("Hội thoại")
 
-    expect(screen.getByRole("radio", { name: "Signal Desk" })).toHaveAttribute(
+    expect(screen.getByRole("switch", { name: DEFAULT_DESK })).toHaveAttribute(
       "aria-checked",
       "true",
     )
   })
 
   it("writes the default without touching anything else", async () => {
-    writePreferences({ chatWidth: 640 })
+    writePreferences({ signalDeskByDefault: false, chatWidth: 640 })
     open()
     goTo("Hội thoại")
 
-    fireEvent.click(screen.getByRole("radio", { name: "Signal Desk" }))
+    fireEvent.click(screen.getByRole("switch", { name: DEFAULT_DESK }))
 
     await waitFor(() => {
       expect(readPreferences().signalDeskByDefault).toBe(true)
@@ -187,18 +207,46 @@ describe("how a new conversation opens", () => {
     expect(readPreferences().chatWidth).toBe(640)
   })
 
-  it("claims nothing during the first paint, before storage has been read", () => {
-    writePreferences({ signalDeskByDefault: true })
+  it("is the one live control on its pane", () => {
+    writePreferences({ signalDeskByDefault: false })
     open()
     goTo("Hội thoại")
 
-    // Both segments unselected would be the pre-mount state. By the time the
-    // rail has been clicked the effect has run, so exactly one is checked —
-    // what must never happen is *both* reading as unchecked after mount.
-    const checked = screen
-      .getAllByRole("radio")
-      .filter((radio) => radio.getAttribute("aria-checked") === "true")
+    // Follow-up suggestions, auto-naming and the completion sound are drawn but
+    // have no reader in the agent. A switch there that accepted a click would
+    // persist an opinion nothing consults.
+    const live = screen
+      .getAllByRole("switch")
+      .filter((toggle) => !(toggle as HTMLButtonElement).disabled)
 
-    expect(checked).toHaveLength(1)
+    expect(live).toHaveLength(1)
+    expect(live[0]).toHaveAccessibleName(DEFAULT_DESK)
+  })
+})
+
+describe("rows drawn ahead of their write path", () => {
+  it("marks an unbuilt control rather than letting it look live", () => {
+    open()
+    goTo("Bảo mật")
+
+    const twoFactor = screen.getByRole("switch", { name: "Xác thực hai bước" })
+
+    expect(twoFactor).toBeDisabled()
+    // The badge is the row's own promise, so it has to be beside this label
+    // rather than merely somewhere on the pane.
+    expect(
+      twoFactor.closest("div")?.parentElement?.textContent,
+    ).toContain("Sắp ra mắt")
+  })
+
+  it("keeps the account's real email readable on the pane that holds it", () => {
+    open()
+    goTo("Bảo mật")
+
+    // Scoped to the pane: the same address is also on the rail's account card,
+    // which is a different claim about a different surface.
+    const pane = screen.getByRole("region", { name: "Bảo mật" })
+
+    expect(within(pane).getByText("nha.dautu@example.com")).toBeInTheDocument()
   })
 })

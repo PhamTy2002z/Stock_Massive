@@ -14,7 +14,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 
 import type { Failure } from "@/lib/failure"
 
@@ -71,6 +71,14 @@ const queryMock = vi.hoisted(() => ({
 }))
 
 vi.mock("@tanstack/react-query", () => ({
+  // The desk's panel sits behind an error boundary that resets the query cache.
+  // There is no cache here, so the reset is a no-op and the boundary is just
+  // the render prop it wraps.
+  QueryErrorResetBoundary: ({
+    children,
+  }: {
+    children: (api: { reset: () => void }) => React.ReactNode
+  }) => children({ reset: () => {} }),
   useInfiniteQuery: () => ({
     data: undefined,
     isError: false,
@@ -170,6 +178,15 @@ const desk = {
   signalDesk: false,
   setSignalDesk: vi.fn(),
   building: null as string | null,
+  attachments: [] as PendingAttachment[],
+  attach: vi.fn(),
+  detach: vi.fn(),
+  visionEnabled: true,
+  capture: null as { previewUrl: string } | null,
+  startCapture: vi.fn(),
+  acceptCapture: vi.fn(),
+  discardCapture: vi.fn(),
+  captureSupported: true,
   submit: vi.fn(),
   cancel: vi.fn(),
   retry: vi.fn(),
@@ -188,11 +205,12 @@ vi.mock("./desk-state", () => ({
 }))
 
 import { Composer } from "./composer"
+import type { PendingAttachment } from "./desk-state"
 import { Inspector } from "./inspector"
 import { focusableElements, Overlays } from "./overlays"
-import { MenuItem, SampleDataNote, UnavailableNote } from "./primitives"
+import { COMING_SOON, MenuItem, SampleDataNote, UnavailableNote } from "./primitives"
 import { Conversations } from "./sidebar"
-import { SIGNAL_DESK_STARTERS } from "@/lib/alpha-desk/copy"
+import { ATTACHMENT_COPY, CAPTURE_COPY, SIGNAL_DESK_STARTERS } from "@/lib/alpha-desk/copy"
 
 import { ChatView } from "./view-chat"
 import {
@@ -216,6 +234,15 @@ beforeEach(() => {
   desk.refusal = null
   desk.signalDesk = false
   desk.building = null
+  desk.attachments = []
+  desk.visionEnabled = true
+  desk.capture = null
+  desk.captureSupported = true
+  desk.attach.mockClear()
+  desk.detach.mockClear()
+  desk.startCapture.mockClear()
+  desk.acceptCapture.mockClear()
+  desk.discardCapture.mockClear()
   desk.setSignalDesk.mockClear()
   desk.submit.mockClear()
   desk.cancel.mockClear()
@@ -314,7 +341,7 @@ describe("the Signal Desk against the sidebar", () => {
 
     act(() => shell.dispatch({ type: "open-inspector", tab: "deskView" }))
 
-    expect(chatColumnWidth(shell.state)).toBe(427)
+    expect(chatColumnWidth(shell.state)).toBe(556)
     expect(inspectorWidth(shell.state)).toBeGreaterThan(chatColumnWidth(shell.state))
   })
 
@@ -369,7 +396,7 @@ describe("the Signal Desk against the sidebar", () => {
     act(() => shell.dispatch({ type: "close-inspector" }))
     act(() => shell.dispatch({ type: "open-inspector", tab: "deskView" }))
 
-    expect(chatColumnWidth(shell.state)).toBe(427)
+    expect(chatColumnWidth(shell.state)).toBe(556)
   })
 
   it("is worth nothing at all while it is closed", () => {
@@ -435,7 +462,7 @@ describe("the Signal Desk as a mode", () => {
     expect(shell.state.signalDesk).toBe(false)
     expect(shell.state.inspector).toBeNull()
     // The pictures belonged to the conversation being left.
-    expect(shell.state.deskViews).toEqual([])
+    expect(shell.state.deskBoards).toEqual([])
     expect(shell.state.deskViewArtifactId).toBeNull()
   })
 
@@ -526,7 +553,7 @@ describe("reopening a conversation that already made pictures", () => {
     { artifactId: "artifact-2", title: "Điều kiện hiện tại — STB" },
   ]
 
-  it("puts the strip back, so the pictures are one click away rather than a scroll", () => {
+  it("puts the boards back, so the pictures are one click away rather than a scroll", () => {
     // The report this was built from: the reader opens an old conversation, the
     // desk view is right there in the transcript, and the header offers only
     // "Nguồn" — the picture is reachable only by scrolling back to its card.
@@ -536,10 +563,13 @@ describe("reopening a conversation that already made pictures", () => {
 
     act(() => shell.dispatch({ type: "desk-views-restored", tabs: TABS }))
 
-    expect(shell.state.deskViews).toEqual(TABS)
+    // The record keeps the lot, in the order they were drawn, and the desk
+    // lands on the newest of them.
+    expect(shell.state.deskBoards).toEqual(TABS)
+    expect(shell.state.deskRecent).toEqual([TABS[1].artifactId, TABS[0].artifactId])
   })
 
-  it("opens the newest one if the reader presses the tab, not the desk's empty state", () => {
+  it("opens the newest one if the reader reaches for the desk, not its empty state", () => {
     setViewport(1600)
     mount()
 
@@ -586,16 +616,16 @@ describe("reopening a conversation that already made pictures", () => {
     expect(shell.state).toBe(settled)
   })
 
-  it("drops the strip again on the way out to another conversation", () => {
-    // The other half of the rule, and the one that already worked: these tabs
-    // belong to the conversation being left.
+  it("drops the boards again on the way out to another conversation", () => {
+    // The other half of the rule, and the one that already worked: these
+    // pictures belong to the conversation being left.
     setViewport(1600)
     mount()
     act(() => shell.dispatch({ type: "desk-views-restored", tabs: TABS }))
 
     act(() => shell.dispatch({ type: "thread", signalDesk: false, opened: true }))
 
-    expect(shell.state.deskViews).toEqual([])
+    expect(shell.state.deskBoards).toEqual([])
     expect(shell.state.deskViewArtifactId).toBeNull()
   })
 })
@@ -612,10 +642,10 @@ describe("a desk view arriving mid-answer", () => {
 
     expect(shell.state.inspector).toBe("deskView")
     expect(shell.state.deskViewArtifactId).toBe("artifact-1")
-    expect(shell.state.deskViews).toEqual([{ artifactId: "artifact-1", title: "STB" }])
+    expect(shell.state.deskBoards).toEqual([{ artifactId: "artifact-1", title: "STB" }])
   })
 
-  it("files a tab but changes nothing while the desk is off", () => {
+  it("files the board but changes nothing while the desk is off", () => {
     // The mode is the trigger now. An answer must not rearrange the screen
     // under a reader who did not ask it to.
     setViewport(1600)
@@ -624,11 +654,11 @@ describe("a desk view arriving mid-answer", () => {
     act(() => shell.dispatch({ type: "signal-desk-ready", artifactId: "artifact-1" }))
 
     expect(shell.state.inspector).toBeNull()
-    expect(shell.state.deskViews).toHaveLength(1)
+    expect(shell.state.deskBoards).toHaveLength(1)
   })
 
   it("keeps every desk view of the conversation reachable", () => {
-    // The bug this strip exists for: one artifact id meant a Thread that ran
+    // The bug this record exists for: one artifact id meant a Thread that ran
     // three Studies could show only the newest.
     setViewport(1600)
     mount()
@@ -638,7 +668,7 @@ describe("a desk view arriving mid-answer", () => {
     act(() => shell.dispatch({ type: "signal-desk-ready", artifactId: "a2", title: "two" }))
     act(() => shell.dispatch({ type: "signal-desk-ready", artifactId: "a3", title: "three" }))
 
-    expect(shell.state.deskViews.map((tab) => tab.artifactId)).toEqual(["a1", "a2", "a3"])
+    expect(shell.state.deskRecent).toEqual(["a3", "a2", "a1"])
     expect(shell.state.deskViewArtifactId).toBe("a3")
 
     act(() => shell.dispatch({ type: "open-desk-view", artifactId: "a1" }))
@@ -654,7 +684,7 @@ describe("a desk view arriving mid-answer", () => {
     act(() => shell.dispatch({ type: "signal-desk-ready", artifactId: "a1", title: "one" }))
     act(() => shell.dispatch({ type: "signal-desk-ready", artifactId: "a1", title: "one" }))
 
-    expect(shell.state.deskViews).toHaveLength(1)
+    expect(shell.state.deskBoards).toHaveLength(1)
   })
 
   it("leaves a tab the reader chose alone, and still files the picture", () => {
@@ -669,7 +699,7 @@ describe("a desk view arriving mid-answer", () => {
     act(() => shell.dispatch({ type: "signal-desk-ready", artifactId: "artifact-1" }))
 
     expect(shell.state.inspector).toBe("sources")
-    expect(shell.state.deskViews).toHaveLength(1)
+    expect(shell.state.deskBoards).toHaveLength(1)
   })
 
   it("stays out of the way once the reader has put the pane away", () => {
@@ -694,7 +724,7 @@ describe("a desk view arriving mid-answer", () => {
 
     expect(shell.state.inspector).toBeNull()
     // Still reachable: the card in the transcript is what opens it there.
-    expect(shell.state.deskViews).toHaveLength(1)
+    expect(shell.state.deskBoards).toHaveLength(1)
   })
 
   it("opens on the picture the reader picked out of the transcript", () => {
@@ -707,10 +737,10 @@ describe("a desk view arriving mid-answer", () => {
     expect(shell.state.sidebarOpen).toBe(false)
     expect(shell.state.inspector).toBe("deskView")
     expect(shell.state.deskViewArtifactId).toBe("artifact-3")
-    expect(shell.state.deskViews).toHaveLength(1)
+    expect(shell.state.deskBoards).toHaveLength(1)
   })
 
-  it("learns a tab's real name from the row it fetches", () => {
+  it("learns a board's real name from the row it fetches", () => {
     setViewport(1600)
     mount()
     act(() => shell.dispatch({ type: "open-desk-view", artifactId: "artifact-3" }))
@@ -723,20 +753,7 @@ describe("a desk view arriving mid-answer", () => {
       }),
     )
 
-    expect(shell.state.deskViews[0].title).toBe("STB — thanh khoản trong phiên")
-  })
-
-  it("lands on the neighbour when the open tab is closed", () => {
-    setViewport(1600)
-    mount()
-    act(() => shell.dispatch({ type: "signal-desk", on: true }))
-    act(() => shell.dispatch({ type: "signal-desk-ready", artifactId: "a1", title: "one" }))
-    act(() => shell.dispatch({ type: "signal-desk-ready", artifactId: "a2", title: "two" }))
-
-    act(() => shell.dispatch({ type: "close-desk-view", artifactId: "a2" }))
-
-    expect(shell.state.deskViews.map((tab) => tab.artifactId)).toEqual(["a1"])
-    expect(shell.state.deskViewArtifactId).toBe("a1")
+    expect(shell.state.deskBoards[0].title).toBe("STB — thanh khoản trong phiên")
   })
 })
 
@@ -746,6 +763,9 @@ describe("the workspace on screen", () => {
     mount(<Inspector />)
 
     act(() => shell.dispatch({ type: "signal-desk", on: true }))
+    // The header's actions act on a board, so they are live only once the
+    // conversation has drawn one.
+    act(() => shell.dispatch({ type: "signal-desk-ready", artifactId: "a1", title: "STB" }))
     fireEvent.click(screen.getByRole("button", { name: "Chia sẻ" }))
 
     expect(shell.state.overlay).toBe("share")
@@ -756,6 +776,41 @@ describe("the workspace on screen", () => {
     mount(<Inspector />)
 
     expect(screen.queryByRole("complementary")).toBeNull()
+  })
+
+  it("slides shut rather than vanishing, then leaves", () => {
+    // The chat column takes 420ms to widen back; a pane gone on the first frame
+    // leaves a blank strip beside it for the rest of the slide. The pane stays,
+    // inert and drawn from the shell as it was, until its exit animation ends.
+    setViewport(1600)
+    mount(<Inspector />)
+    act(() => shell.dispatch({ type: "signal-desk", on: true }))
+    const pane = screen.getByRole("complementary", { name: "Signal Desk" })
+
+    act(() => shell.dispatch({ type: "close-inspector" }))
+
+    expect(shell.state.inspector).toBeNull()
+    expect(pane).toBeInTheDocument()
+    expect(pane).toHaveAttribute("aria-hidden", "true")
+    expect(pane.className).toContain("pointer-events-none")
+    expect(screen.getByText(/Signal Desk đang bật/)).toBeInTheDocument()
+
+    fireEvent.animationEnd(pane)
+
+    expect(screen.queryByRole("complementary")).toBeNull()
+  })
+
+  it("comes straight back if reopened mid-slide", () => {
+    setViewport(1600)
+    mount(<Inspector />)
+    act(() => shell.dispatch({ type: "signal-desk", on: true }))
+    act(() => shell.dispatch({ type: "close-inspector" }))
+
+    act(() => shell.dispatch({ type: "signal-desk", on: true }))
+
+    const pane = screen.getByRole("complementary", { name: "Signal Desk" })
+    expect(pane).not.toHaveAttribute("aria-hidden")
+    expect(pane.className).not.toContain("pointer-events-none")
   })
 
   it("says what will fill it rather than opening blank", () => {
@@ -773,7 +828,8 @@ describe("the workspace on screen", () => {
     mount(<Inspector />)
 
     act(() => shell.dispatch({ type: "signal-desk", on: true }))
-    fireEvent.click(screen.getByRole("tab", { name: "Nguồn" }))
+    act(() => shell.dispatch({ type: "signal-desk-ready", artifactId: "a1", title: "STB" }))
+    fireEvent.click(screen.getByRole("button", { name: "Nguồn" }))
 
     expect(shell.state.inspector).toBe("sources")
   })
@@ -784,11 +840,11 @@ describe("the workspace on screen", () => {
     act(() => shell.dispatch({ type: "signal-desk", on: true }))
 
     const seam = screen.getByRole("separator", { name: "Resize chat column" })
-    expect(seam).toHaveAttribute("aria-valuenow", "427")
+    expect(seam).toHaveAttribute("aria-valuenow", "556")
 
     fireEvent.keyDown(seam, { key: "ArrowRight", shiftKey: true })
 
-    expect(chatColumnWidth(shell.state)).toBe(467)
+    expect(chatColumnWidth(shell.state)).toBe(596)
   })
 
   it("shows the build state while a Study is in flight", () => {
@@ -821,6 +877,24 @@ describe("what floats above the surface", () => {
     })
 
     expect(shell.state.overlay).toBeNull()
+  })
+
+  it("takes one layer per Escape: the dropdown first, the pane only after", () => {
+    setViewport(1600)
+    mount()
+    act(() => shell.dispatch({ type: "open-inspector", tab: "deskView" }))
+    act(() => shell.dispatch({ type: "overlay", overlay: "board-menu" }))
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))
+    })
+    expect(shell.state.overlay).toBeNull()
+    expect(shell.state.inspector).toBe("deskView")
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))
+    })
+    expect(shell.state.inspector).toBeNull()
   })
 
   it("opens the palette on the platform shortcut", () => {
@@ -874,6 +948,275 @@ describe("a question offered by a panel", () => {
     )
 
     expect(shell.state.draft).toBe("nửa câu")
+  })
+})
+
+function pendingAttachment(
+  overrides: Partial<PendingAttachment> = {},
+): PendingAttachment {
+  return {
+    key: "k1",
+    filename: "bang-gia.png",
+    byteSize: 2_048,
+    mediaType: "image/png",
+    image: true,
+    previewUrl: "blob:preview",
+    id: "a-1",
+    status: "ready",
+    ...overrides,
+  }
+}
+
+describe("attaching a file from the composer", () => {
+  it("draws a chip for each pending attachment", () => {
+    desk.attachments = [
+      pendingAttachment(),
+      pendingAttachment({ key: "k2", filename: "ghi-chu.csv", image: false, id: "a-2" }),
+    ]
+    mount(<Composer />)
+
+    const region = screen.getByRole("group", { name: ATTACHMENT_COPY.region })
+    expect(region).toBeInTheDocument()
+    expect(screen.getByText("bang-gia.png")).toBeInTheDocument()
+    expect(screen.getByText("ghi-chu.csv")).toBeInTheDocument()
+  })
+
+  it("draws nothing at all when the question carries nothing", () => {
+    desk.attachments = []
+    mount(<Composer />)
+
+    expect(
+      screen.queryByRole("group", { name: ATTACHMENT_COPY.region }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("takes one chip back off the question through the desk", () => {
+    desk.attachments = [pendingAttachment()]
+    mount(<Composer />)
+
+    fireEvent.click(
+      screen.getByRole("button", { name: ATTACHMENT_COPY.remove("bang-gia.png") }),
+    )
+
+    expect(desk.detach).toHaveBeenCalledWith("k1")
+  })
+
+  it("says once that this route will not read pictures", () => {
+    // Once for the row rather than once per picture, and only when there is a
+    // picture: the file is still stored and still travels, so this is about what
+    // the model will do with it.
+    desk.attachments = [pendingAttachment()]
+    desk.visionEnabled = false
+    mount(<Composer />)
+
+    expect(screen.getAllByText(ATTACHMENT_COPY.imagesNotRead)).toHaveLength(1)
+  })
+
+  it("stays quiet about pictures when the route reads them", () => {
+    desk.attachments = [pendingAttachment()]
+    desk.visionEnabled = true
+    mount(<Composer />)
+
+    expect(screen.queryByText(ATTACHMENT_COPY.imagesNotRead)).not.toBeInTheDocument()
+  })
+
+  it("says nothing about pictures for a question carrying only a text file", () => {
+    desk.attachments = [pendingAttachment({ image: false, filename: "a.csv" })]
+    desk.visionEnabled = false
+    mount(<Composer />)
+
+    expect(screen.queryByText(ATTACHMENT_COPY.imagesNotRead)).not.toBeInTheDocument()
+  })
+
+  it("offers the row that adds a file, and it is no longer inert", () => {
+    // The badge is drawn from `disabled`, so a row that works cannot carry one.
+    mount(<Composer />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Đính kèm" }))
+
+    const row = screen.getByRole("menuitem", { name: /Thêm tệp hoặc ảnh/ })
+    expect(row).not.toBeDisabled()
+    expect(row).not.toHaveTextContent("Sắp ra mắt")
+  })
+
+  it("opens the picker from ⌘U, with the focus anywhere", () => {
+    // The hint is printed on the row, and a printed shortcut that does nothing
+    // is the same broken promise this change is clearing up. The listener is the
+    // shell's global one, so this fires the event on the window rather than on
+    // the field.
+    mount(<Composer />)
+    const picker = document.querySelector<HTMLInputElement>('input[type="file"]')!
+    const opened = vi.spyOn(picker, "click").mockImplementation(() => {})
+
+    fireEvent.keyDown(window, { key: "u", metaKey: true })
+
+    expect(opened).toHaveBeenCalledTimes(1)
+    opened.mockRestore()
+  })
+
+  it("hands the chosen files to the desk", () => {
+    mount(<Composer />)
+    const picker = document.querySelector<HTMLInputElement>('input[type="file"]')!
+
+    fireEvent.change(picker, {
+      target: { files: [new File(["x"], "a.png", { type: "image/png" })] },
+    })
+
+    expect(desk.attach).toHaveBeenCalledTimes(1)
+    expect(desk.attach.mock.calls[0][0][0].name).toBe("a.png")
+  })
+})
+
+describe("asking a question again from the transcript", () => {
+  const withAttachment = {
+    kind: "user",
+    key: "u1",
+    text: "ảnh này là gì?",
+    pending: false,
+    attachments: [
+      { id: "a-1", filename: "bang-gia.png", media_type: "image/png", byte_size: 9 },
+    ],
+  }
+
+  it("sends the files the question carried, not just its words", () => {
+    desk.entries = [withAttachment]
+    mount(<ChatView />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Gửi lại" }))
+
+    expect(desk.resend).toHaveBeenCalledWith("ảnh này là gì?", ["a-1"])
+  })
+
+  it("regenerating an answer re-asks the question above it, with its files", () => {
+    desk.entries = [
+      withAttachment,
+      {
+        kind: "assistant",
+        key: "m1",
+        messageId: 1,
+        view: { text: "một bảng giá", toolCalls: [], thoughts: [], deskViews: [], followUps: [] },
+        flaggedReason: null,
+        helpful: false,
+      },
+    ]
+    mount(<ChatView />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Tải lại" }))
+
+    expect(desk.resend).toHaveBeenCalledWith("ảnh này là gì?", ["a-1"])
+  })
+
+  it("draws the files above the question it was asked with", () => {
+    desk.entries = [withAttachment]
+    mount(<ChatView />)
+
+    expect(screen.getByText("bang-gia.png")).toBeInTheDocument()
+    // No way to take a file out of a question already asked.
+    expect(
+      screen.queryByRole("button", { name: ATTACHMENT_COPY.remove("bang-gia.png") }),
+    ).not.toBeInTheDocument()
+  })
+})
+
+describe("capturing a screen", () => {
+  it("offers the row, and it no longer promises a feature it does not have", () => {
+    mount(<Composer />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Đính kèm" }))
+
+    // "Chụp màn hình" and not "Chụp màn hình bảng giá": it captures whatever
+    // the reader picks, and a name narrower than the behaviour misleads.
+    const row = screen.getByRole("menuitem", { name: /Chụp màn hình/ })
+    expect(row).not.toBeDisabled()
+    expect(row).not.toHaveTextContent("bảng giá")
+    expect(row).not.toHaveTextContent("Sắp ra mắt")
+  })
+
+  it("asks the desk for a frame, and closes the menu first", () => {
+    // The browser's own picker takes over the screen; coming back to a menu
+    // still open reads as a press that did not land.
+    mount(<Composer />)
+    fireEvent.click(screen.getByRole("button", { name: "Đính kèm" }))
+
+    fireEvent.click(screen.getByRole("menuitem", { name: /Chụp màn hình/ }))
+
+    expect(desk.startCapture).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole("menuitem", { name: /Chụp màn hình/ })).not.toBeInTheDocument()
+  })
+
+  it("keeps the row inert, with its badge, where the browser cannot capture", () => {
+    // A dead control that swallows the press is worse than one that says it
+    // cannot.
+    desk.captureSupported = false
+    mount(<Composer />)
+    fireEvent.click(screen.getByRole("button", { name: "Đính kèm" }))
+
+    const row = screen.getByRole("menuitem", { name: /Chụp màn hình/ })
+    expect(row).toBeDisabled()
+    fireEvent.click(row)
+    expect(desk.startCapture).not.toHaveBeenCalled()
+  })
+})
+
+describe("looking at a capture before it is sent", () => {
+  it("draws nothing until there is a frame", () => {
+    mount(<Overlays />)
+
+    expect(screen.queryByRole("dialog", { name: CAPTURE_COPY.title })).not.toBeInTheDocument()
+  })
+
+  it("shows the frame with both choices, neither preselected by being alone", () => {
+    // The gate on the real privacy risk of this phase: `getDisplayMedia` hands
+    // back whatever the reader agreed to share, and once it is sent it is sent.
+    desk.capture = { previewUrl: "blob:frame" }
+    const view = mount(<Overlays />)
+    act(() => {
+      shell.dispatch({ type: "overlay", overlay: "capture" })
+    })
+
+    expect(screen.getByRole("dialog", { name: CAPTURE_COPY.title })).toBeInTheDocument()
+    expect(view.container.querySelector("img")).toHaveAttribute("src", "blob:frame")
+    expect(screen.getByRole("button", { name: CAPTURE_COPY.accept })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: CAPTURE_COPY.discard })).toBeInTheDocument()
+  })
+
+  it("attaches the frame when it is accepted", () => {
+    desk.capture = { previewUrl: "blob:frame" }
+    mount(<Overlays />)
+    act(() => {
+      shell.dispatch({ type: "overlay", overlay: "capture" })
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: CAPTURE_COPY.accept }))
+
+    expect(desk.acceptCapture).toHaveBeenCalledTimes(1)
+  })
+
+  it("leaves nothing behind when it is discarded", () => {
+    desk.capture = { previewUrl: "blob:frame" }
+    mount(<Overlays />)
+    act(() => {
+      shell.dispatch({ type: "overlay", overlay: "capture" })
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: CAPTURE_COPY.discard }))
+
+    expect(desk.discardCapture).toHaveBeenCalledTimes(1)
+    expect(desk.attach).not.toHaveBeenCalled()
+  })
+
+  it("closes on Escape through the shell's own listener", () => {
+    desk.capture = { previewUrl: "blob:frame" }
+    mount(<Overlays />)
+    act(() => {
+      shell.dispatch({ type: "overlay", overlay: "capture" })
+    })
+
+    act(() => {
+      fireEvent.keyDown(window, { key: "Escape" })
+    })
+
+    expect(shell.state.overlay).toBeNull()
   })
 })
 
@@ -945,14 +1288,29 @@ describe("the composer", () => {
     expect(shell.state.contextSymbol).toBeNull()
   })
 
-  it("offers no dead research row in the attach menu", () => {
-    // A calque of a competitor's feature name for work this product now does
-    // under its own, behind a switch the reader can see.
+  it("keeps the research row apart from the mode switch beside it", () => {
+    // This assertion is the reverse of the one it replaces, and the reversal is
+    // the point rather than a slip.
+    //
+    // The row was removed once, correctly: it was then a calque of a
+    // competitor's feature name for work the Signal Desk switch already does,
+    // and a menu item duplicating a visible switch is a second control for one
+    // behaviour. It comes back naming something the switch does not do — a
+    // multi-step mode, several Studies over several rounds ending in one report.
+    // The switch changes what a single Turn produces; this would change how many
+    // Turns there are.
+    //
+    // So what is guarded is no longer its absence but the distinction: it stays
+    // inert and badged, and it is not the switch.
     mount(<Composer />)
 
     act(() => shell.dispatch({ type: "overlay", overlay: "attach" }))
 
-    expect(screen.queryByRole("menuitem", { name: /Nghiên cứu sâu/ })).toBeNull()
+    const row = screen.getByRole("menuitem", { name: /Nghiên cứu sâu/ })
+    expect(row).toBeDisabled()
+    expect(within(row).getByText(COMING_SOON)).toBeInTheDocument()
+    // The switch is a radio in the control row, and it is not in this menu.
+    expect(within(row).queryByRole("radio")).not.toBeInTheDocument()
   })
 })
 
@@ -1121,7 +1479,7 @@ describe("dialog focus", () => {
 })
 
 describe("what a question can be done with again", () => {
-  const asked = { kind: "user", key: "u1", text: "VCB thế nào?", pending: false }
+  const asked = { kind: "user", key: "u1", text: "VCB thế nào?", pending: false, attachments: []  }
 
   it("offers the sentence back to the composer instead of editing the message", () => {
     // A message is immutable in the store. Sửa puts the question in the field
@@ -1143,7 +1501,9 @@ describe("what a question can be done with again", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Gửi lại" }))
 
-    expect(desk.resend).toHaveBeenCalledWith("VCB thế nào?")
+    // The empty list is the question saying it carried nothing, which is a
+    // different statement from saying nothing about attachments at all.
+    expect(desk.resend).toHaveBeenCalledWith("VCB thế nào?", [])
   })
 
   it("goes inert while a Turn is running, as the composer does", () => {
@@ -1193,7 +1553,7 @@ describe("the opening the desk gives an empty conversation", () => {
 
   it("stops offering starters once the conversation has begun", () => {
     desk.signalDesk = true
-    desk.entries = [{ kind: "user", key: "u1", text: "hỏi", pending: false }]
+    desk.entries = [{ kind: "user", key: "u1", text: "hỏi", pending: false, attachments: []  }]
     mount(<ChatView />)
 
     expect(
@@ -1206,7 +1566,7 @@ describe("an admission refusal", () => {
   it("is shown as its own sentence beside the transcript, never over it", () => {
     // A 429 or a 503 is an HTTP outcome carrying a stable reason, never an
     // event, and never a reason to clear what is on screen.
-    desk.entries = [{ kind: "user", key: "u1", text: "hỏi gì đó", pending: false }]
+    desk.entries = [{ kind: "user", key: "u1", text: "hỏi gì đó", pending: false, attachments: []  }]
     desk.refusal = "Bạn đang có một lượt đang chạy."
     mount(<ChatView />)
 
@@ -1217,7 +1577,7 @@ describe("an admission refusal", () => {
 
 describe("the conversation's own scroll", () => {
   it("gives the transcript the overflow, so the composer stays on the floor", () => {
-    desk.entries = [{ kind: "user", key: "u1", text: "hỏi", pending: false }]
+    desk.entries = [{ kind: "user", key: "u1", text: "hỏi", pending: false, attachments: []  }]
     const { container } = mount(<ChatView />)
 
     const scroller = container.querySelector(".overflow-y-auto")
@@ -1226,7 +1586,7 @@ describe("the conversation's own scroll", () => {
   })
 
   it("never lets the page body scroll sideways", () => {
-    desk.entries = [{ kind: "user", key: "u1", text: "hỏi", pending: false }]
+    desk.entries = [{ kind: "user", key: "u1", text: "hỏi", pending: false, attachments: []  }]
     const { container } = mount(<ChatView />)
 
     for (const element of container.querySelectorAll("div")) {
@@ -1309,7 +1669,7 @@ describe("what the workspace remembers", () => {
     mount(<Inspector />)
     act(() => shell.dispatch({ type: "signal-desk", on: true }))
 
-    expect(chatColumnWidth(shell.state)).toBe(427)
+    expect(chatColumnWidth(shell.state)).toBe(556)
   })
 
   it("opens with the sidebar out when this browser has said nothing", () => {

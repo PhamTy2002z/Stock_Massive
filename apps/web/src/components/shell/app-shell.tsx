@@ -1,5 +1,7 @@
 "use client"
 
+import { useEffect } from "react"
+
 import { cn } from "@/lib/utils"
 
 import { DeskProvider } from "./desk-state"
@@ -32,11 +34,50 @@ export function AppShell() {
 function Frame() {
   const { state, dispatch, panelWidth } = useShell()
 
+  // The composer's menu dismisses itself rather than through the scrim below,
+  // because the scrim would be *over* it.
+  //
+  // The scrim is a sibling of `main` carrying `z-[25]`, and `main` is
+  // positioned with `z-index: auto`. A positioned ancestor with no z-index of
+  // its own still paints as one unit, so nothing inside `main` can out-paint a
+  // positive-z sibling of it — a menu drawn in the composer sits under the
+  // scrim however high its own z-index goes, and every press on it lands on the
+  // scrim instead. Measured: `elementsFromPoint` over a menu row returned the
+  // scrim first, and raising the composer to `z-40` changed nothing.
+  //
+  // `board-menu.tsx` hit the same trap and worked around it locally. This is
+  // the same answer, applied where the scrim is decided: for the composer's
+  // menu there is no scrim at all, so there is nothing to be under.
+  //
+  // A press on the trigger is left alone — it is `aria-expanded` while the menu
+  // is open, and closing here would let its own click reopen what it meant to
+  // shut.
+  useEffect(() => {
+    if (state.overlay !== "attach") return
+    function onPointerDown(event: PointerEvent) {
+      const target = event.target
+      const element =
+        target instanceof Element
+          ? target
+          : target instanceof Node
+            ? target.parentElement
+            : null
+      if (
+        element?.closest(
+          '[role="menu"], [aria-haspopup="menu"][aria-expanded="true"]',
+        )
+      ) {
+        return
+      }
+      dispatch({ type: "overlay", overlay: null })
+    }
+    document.addEventListener("pointerdown", onPointerDown)
+    return () => document.removeEventListener("pointerdown", onPointerDown)
+  }, [state.overlay, dispatch])
+
   return (
     <div className="relative flex h-dvh overflow-hidden bg-background text-foreground">
-      {(state.overlay === "account" ||
-        state.overlay === "attach" ||
-        state.overlay === "thread") && (
+      {(state.overlay === "account" || state.overlay === "thread") && (
         <div
           className="fixed inset-0 z-[25]"
           onClick={() => dispatch({ type: "overlay", overlay: null })}

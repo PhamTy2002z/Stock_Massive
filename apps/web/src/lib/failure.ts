@@ -108,7 +108,9 @@ function fromStatus(status: number, message: string | null): Failure {
       return failure(
         "not_found",
         "Không tìm thấy nội dung này",
-        "Nội dung có thể đã bị xoá, hoặc thuộc về một hội thoại khác. Địa chỉ này không còn trỏ tới đâu cả.",
+        // The title says everything a reader can act on; guessing at why the
+        // address is stale only adds a sentence to disbelieve.
+        "",
         "none",
         status,
       )

@@ -20,4 +20,8 @@ export const queryKeys = {
   // This account's allowance. Unlike `artifact`, it moves: every Turn spends
   // against it and the daily half expires at Vietnamese midnight.
   usage: ["usage"] as const,
+
+  // What the route can do. The opposite of `usage`: constant until a deploy, so
+  // it is fetched once and never refetched.
+  capabilities: ["capabilities"] as const,
 }

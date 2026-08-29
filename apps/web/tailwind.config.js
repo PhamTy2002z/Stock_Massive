@@ -68,7 +68,7 @@ module.exports = {
         'panel': 'cubic-bezier(0.22, 1, 0.28, 1)',
       },
       transitionDuration: {
-        'panel': '340ms',
+        'panel': '420ms',
       },
       borderRadius: {
         lg: 'var(--radius)',

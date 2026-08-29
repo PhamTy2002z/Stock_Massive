@@ -11,7 +11,7 @@ import {
 
 import { useAuth } from "@/hooks/use-auth"
 
-import { Menu, MenuItem, MenuSeparator } from "./primitives"
+import { Avatar, Menu, MenuItem, MenuSeparator } from "./primitives"
 import { useShell } from "./shell-state"
 
 /**
@@ -97,23 +97,5 @@ export function AccountMenu() {
         <ChevronDown className="size-4 shrink-0 text-ink-6" strokeWidth={1.7} />
       </button>
     </div>
-  )
-}
-
-/**
- * The one place the amber meets the board's yellow.
- *
- * A gradient rather than a flat fill, and ink-on-light rather than the reverse:
- * it is the same reading as the filled button — a lit surface carrying dark
- * type — which is what keeps an avatar from looking like a status dot.
- */
-function Avatar({ initial, className }: { initial: string; className?: string }) {
-  return (
-    <span
-      aria-hidden="true"
-      className={`flex size-6 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(120deg,hsl(var(--reference)),hsl(var(--primary)))] text-micro font-semibold text-surface-ground ${className ?? ""}`}
-    >
-      {initial}
-    </span>
   )
 }

@@ -10,6 +10,7 @@ env/
 # Build outputs
 .next/
 .next-e2e/
+.next-verify/
 out/
 dist/
 build/

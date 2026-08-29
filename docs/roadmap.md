@@ -283,7 +283,7 @@ nhiên là của con).
 
 ## 4. Track S — Signal Desk (paid)
 
-### S0 — Runtime qua Study — **Current / đang đóng**
+### S0 — Runtime qua Study — **Done** (còn đóng nhánh)
 
 **Objective.** Hỏi một câu, nhận một desk có số thật, `as_of` đóng băng, mở
 lại không tính lại.
@@ -299,10 +299,52 @@ lại không tính lại.
 `frames_buffer` · widget catalog versioned · `TurnMode=signal_desk` · spine
 daily/intraday vnstock · từ vựng `signal_desk` (revision `f8c2d4a96e17`).
 
-- [ ] Đóng nhánh `feat/study-canvas-runtime`: `make test` + bốn cổng web; plan `plans/260826-2158-study-artifact-canvas/` ghi xong
+**Price basis spine xong 2026-08-29** — plan
+`plans/260828-2126-price-basis-and-signal-field-spine/`, 9/9 phase. Signal Field
+đã rời giá FiinQuant sang `bar_daily`, và nguồn vi phạm licence đã bị xoá khỏi cả
+code lẫn DB (71.773 dòng, revision `a3f7e21b8d54`). Registry 30 → **33 field**
+(thêm ba `earnings.*`). Đo thật trên store: VCB 25 phục vụ / 8 từ chối · VNM và
+MWG 26/7 — mọi refusal trỏ đúng input thiếu. Chi tiết ở
+`plans/reports/phase-0{5,6,7,8,9}-*.md`.
+
+**Hai nợ vận hành đã trả 2026-08-29** (đề xuất ở
+`plans/reports/proposal-260829-0034-backfill-schedule-and-band-check.md`):
+
+- **Spine có người nạp.** `backfill_daily` giờ (a) lấy slot từ arbiter hạn mức
+  vnstock có sẵn thay vì gọi không giới hạn — nó vốn bỏ qua `core/quota.py` hoàn
+  toàn, lane `BACKFILL` đã tồn tại và nhường caller có người chờ; (b) đăng ký vào
+  seam scheduler có sẵn, ba scope nối tiếp 16:30 giờ VN, **mặc định tắt**;
+  (c) API startup cảnh báo khi spine stale, vì trước đó `spine_freshness` không có
+  caller nào ngoài `main()` của chính job.
+- **Nhánh BAND của `check_price_claim` sống lại.** Cổng cũ kiểm nhãn `RAW`; thay
+  bằng hai cổng giá — lưới bước giá (`price_band.off_tick_grid`) cộng ex-date giữa
+  phiên neo và phiên đích. Đo trên store thật: 30/30 mã declared `within_band`
+  cho giá đúng và `exceeds_band` cho giá bịa, từ 0/30 `unverified` trước đó.
+
+- [x] Năm cổng xanh — `make test` **1449 passed**, `make lint`, và bốn cổng web (`type-check`, `lint`, `test` **750 passed**, `build`). Đo 2026-08-29; hai con số này còn nhích lên vì việc song song trong cây, cổng là *xanh* chứ không phải con số
+- [x] Plan `plans/260826-2158-study-artifact-canvas/` ghi xong — 10/10 phase done; hai mục hoãn 08b/09b giao qua `plans/260828-2126-price-basis-and-signal-field-spine/` (đóng 2026-08-29, 9/9 phase)
+- [x] Plan `plans/260828-2126-price-basis-and-signal-field-spine/` ghi xong — Signal Field rời giá FiinQuant sang `bar_daily`; nguồn vi phạm licence xoá khỏi code **và** DB
+- [x] Ba Study end-to-end trên store thật + `test_agent_signal_desk` xanh — xem bảng Gate dưới
+- [x] `alembic heads` một head duy nhất — `a3f7e21b8d54`
+
+**Việc còn lại không phải tiêu chí của S0.** Đóng nhánh
+`feat/study-canvas-runtime` là bước VCS, không phải điều kiện để "runtime qua
+Study" chạy được — nó là mục duy nhất trong toàn file roadmap từng gộp một bước
+git vào checklist kỹ thuật, nên nó ra khỏi checklist và nằm đây. Trạng thái
+2026-08-29: chưa commit, và cây làm việc đang giữ việc chưa xong của hai session
+khác, nên commit lúc này sẽ gộp cả phần của họ. Merge là quyết định của người,
+sau khi cây sạch.
 - [x] Contract test cố định "frames không vào message" ở tầng transcript — `tests/test_agent_study_tools.py::test_the_frames_are_absent_from_the_messages_a_turn_would_send` + `::test_the_frames_stay_out_of_a_signal_desk_turn_too`
 
-**Gate.** 3 Study end-to-end với vnstock thật; `test_agent_signal_desk` xanh.
+**Gate — đạt, đo 2026-08-29 trên store thật (không phải fixture).**
+
+| Study | Kết quả |
+|---|---|
+| `intraday_liquidity_profile` (VCB) | 4 block · frames `tiles` 4 · `profile` 16 · `heatmap` 30 · `ranking` 16 |
+| `entry_condition_review` (VCB) | 5 block · frames `price_context` 250 · `earnings_quarters` 8 · `conditions` 6 |
+| `earnings_dislocation_screener` (declared) | 4 block · frames `scatter` 30 · `ranking` 10 · `filters` 12 |
+
+`as_of` phiên 2026-08-27, Universe 30 mã. `test_agent_signal_desk` **11 passed**.
 
 ### S1 — Thư viện Study + desk theo mã — **Conditional** (cần C1, C4)
 
@@ -333,6 +375,16 @@ từng Study con; khuyến nghị có giá chỉ hiện sau khi người dùng x
 |---|---|---|
 | Kết luận | văn xuôi trong chat | artifact thesis, render lại được |
 | Khuyến nghị có giá | policy trong prompt | node approval, event SSE riêng |
+
+**Checklist**
+- [ ] Row *"Nghiên cứu sâu"* trong `AttachMenu` (`components/shell/composer.tsx`)
+      bỏ badge *Sắp ra mắt* và nối vào lane này — plan
+      `plans/260829-0010-composer-attachments/` dựng năm row còn lại và để đúng
+      row này chờ ở đây. Nó thuộc S2 chứ không phải S1 vì "nghiên cứu sâu" là
+      **nhiều bước tổng hợp thành một thesis có `Provenance`**, tức chính
+      Objective của phase này; S1 chỉ fan-out Study song song trong một Turn.
+      Khác `260827-2325/phase-09` — phase đó là control **độ sâu của một câu trả
+      lời** trong một lượt, không phải một chế độ nhiều bước.
 
 **Gate.** 0 Turn phát khuyến nghị có giá thiếu bằng chứng; thesis render lại
 sau 30 ngày không tính lại.

@@ -131,9 +131,12 @@ describe("a Signal Desk result", () => {
             {
               artifactId: "artifact-stb5",
               studyName: "entry_condition_review",
+              studyDisplayName: "Rà soát điều kiện vào lệnh",
               title: "Điều kiện hiện tại — STB5",
               blockCount: 4,
               round: 1,
+              symbol: "STB5",
+              asOf: "2026-08-28T09:00:00+07:00",
             },
           ],
         })}

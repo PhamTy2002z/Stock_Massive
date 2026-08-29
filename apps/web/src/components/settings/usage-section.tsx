@@ -8,8 +8,8 @@ import { queryKeys } from "@/lib/query-keys"
 
 import {
   AllowanceMeter,
+  PillAction,
   ReadOnlyField,
-  SettingsPanel,
   SettingsRow,
   SettingsSection,
   type MeterTone,
@@ -45,67 +45,54 @@ export function UsageSection() {
     <SettingsSection
       title="Hạn mức"
       description="Mức sử dụng của tài khoản này so với hạn mức đang áp dụng. Đây là giới hạn vận hành cho việc tạo câu trả lời, không phải khoản phải trả."
+      footer="Hạn mức ngày đặt lại vào 0h giờ Việt Nam. Cửa sổ 30 ngày nhả dần theo từng câu hỏi cũ."
     >
-      <SettingsPanel
-        footer={
-          <p className="text-micro text-ink-6">
-            Hạn mức ngày đặt lại vào 0h giờ Việt Nam. Cửa sổ 30 ngày nhả dần
-            theo từng câu hỏi cũ.
-          </p>
-        }
-      >
-        {isError ? (
+      {isError ? (
+        <SettingsRow
+          label="Không đọc được hạn mức"
+          description="Số liệu nằm ở máy chủ; lần thử tiếp theo có thể đọc được."
+        >
+          <PillAction onClick={() => refetch()} disabled={isFetching}>
+            {isFetching ? "Đang thử lại…" : "Thử lại"}
+          </PillAction>
+        </SettingsRow>
+      ) : (
+        <>
           <SettingsRow
-            label="Không đọc được hạn mức"
-            description="Số liệu nằm ở máy chủ; lần thử tiếp theo có thể đọc được."
+            label="Câu hỏi hôm nay"
+            description="Số câu hỏi đã gửi tới trợ lý trong ngày giao dịch hiện tại."
           >
-            <button
-              type="button"
-              onClick={() => refetch()}
-              disabled={isFetching}
-              className="rounded-lg border border-border px-3 py-2 text-meta transition-colors hover:bg-accent disabled:opacity-60"
-            >
-              {isFetching ? "Đang thử lại…" : "Thử lại"}
-            </button>
-          </SettingsRow>
-        ) : (
-          <>
-            <SettingsRow
+            <AllowanceCell
               label="Câu hỏi hôm nay"
-              description="Số câu hỏi đã gửi tới trợ lý trong ngày giao dịch hiện tại."
-            >
-              <AllowanceCell
-                label="Câu hỏi hôm nay"
-                allowance={data?.turns_today}
-                pending={isPending}
-                format={(value) => `${value}`}
-              />
-            </SettingsRow>
-            <SettingsRow
+              allowance={data?.turns_today}
+              pending={isPending}
+              format={(value) => `${value}`}
+            />
+          </SettingsRow>
+          <SettingsRow
+            label="Chi phí xử lý hôm nay"
+            description="Chi phí tính toán đã dùng trong ngày, quy về đô-la Mỹ."
+          >
+            <AllowanceCell
               label="Chi phí xử lý hôm nay"
-              description="Chi phí tính toán đã dùng trong ngày, quy về đô-la Mỹ."
-            >
-              <AllowanceCell
-                label="Chi phí xử lý hôm nay"
-                allowance={data?.spend_today_micro_usd}
-                pending={isPending}
-                format={usd}
-              />
-            </SettingsRow>
-            <SettingsRow
+              allowance={data?.spend_today_micro_usd}
+              pending={isPending}
+              format={usd}
+            />
+          </SettingsRow>
+          <SettingsRow
+            label="Chi phí xử lý 30 ngày"
+            description="Cửa sổ lăn 30 ngày, tính từ thời điểm hiện tại."
+          >
+            <AllowanceCell
               label="Chi phí xử lý 30 ngày"
-              description="Cửa sổ lăn 30 ngày, tính từ thời điểm hiện tại."
-            >
-              <AllowanceCell
-                label="Chi phí xử lý 30 ngày"
-                allowance={data?.spend_rolling_30d_micro_usd}
-                pending={isPending}
-                format={usd}
-              />
-            </SettingsRow>
-          </>
-        )}
-      </SettingsPanel>
+              allowance={data?.spend_rolling_30d_micro_usd}
+              pending={isPending}
+              format={usd}
+            />
+          </SettingsRow>
+        </>
+      )}
     </SettingsSection>
   )
 }

@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { logoutAction } from "@/app/(auth)/actions"
+import { ApiUnavailableError, connectionStatus, isRetryableStatus } from "@/lib/connection-status"
 import { queryKeys } from "@/lib/query-keys"
 
 export interface AuthUser {
@@ -13,8 +14,34 @@ export interface AuthUser {
   created_at: string | null
 }
 
+const ME_URL = "/api/auth/me"
+
+/**
+ * Ask the route handler who is signed in, in the vocabulary the rest of the app
+ * already speaks.
+ *
+ * The handler answers 503 when the API is unreachable — which it is for the
+ * first half-minute after `pnpm dev`, while the container migrates and boots.
+ * A plain `Error` for that made the shell's very first read fatal: nothing
+ * retried it, the boundary swallowed the page, and the reader got an error
+ * screen for a backend that was merely still starting. Silence belongs to
+ * `ApiUnavailableError`, so ConnectionGate veils and lifts on its own.
+ */
 async function fetchCurrentUser(): Promise<AuthUser | null> {
-  const response = await fetch("/api/auth/me", { credentials: "same-origin" })
+  let response: Response
+  try {
+    response = await fetch(ME_URL, { credentials: "same-origin" })
+  } catch (cause) {
+    connectionStatus.reportWaiting(ME_URL)
+    throw new ApiUnavailableError(undefined, undefined, { cause })
+  }
+
+  if (isRetryableStatus(response.status)) {
+    connectionStatus.reportWaiting(ME_URL)
+    throw new ApiUnavailableError(undefined, response.status)
+  }
+
+  connectionStatus.reportReady(ME_URL)
 
   if (!response.ok) {
     throw new Error("Unable to resolve session")
@@ -36,7 +63,8 @@ export function useAuth() {
     queryKey: queryKeys.currentUser,
     queryFn: fetchCurrentUser,
     staleTime: 5 * 60 * 1000,
-    retry: false,
+    // Retry is left to QUERY_DEFAULTS, which waits out an unreachable API and
+    // gives up quickly on anything the server actually answered.
     refetchOnWindowFocus: true,
   })
 

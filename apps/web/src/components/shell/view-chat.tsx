@@ -4,13 +4,16 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { AlertCircle, Check, Copy, Pencil, RotateCcw, X } from "lucide-react"
 
 import { AssistantMessage } from "@/components/alpha/message/assistant-message"
+import { AttachmentChip } from "@/components/shell/attachment-chip"
 import { DraftMessage } from "@/components/alpha/message/draft-message"
 import { FollowUps } from "@/components/alpha/message/follow-ups"
 import { VisgniteMark } from "@/components/shared/visgnite-logo"
 import { useAuth } from "@/hooks/use-auth"
 import { SIGNAL_DESK_COPY, SIGNAL_DESK_STARTERS } from "@/lib/alpha-desk/copy"
+import { attachmentUrl } from "@/lib/alpha-desk/api"
 import { pinStep } from "@/lib/alpha-desk/pin-question"
-import type { TranscriptEntry } from "@/lib/alpha-desk/transcript"
+import { questionBefore } from "@/lib/alpha-desk/transcript"
+import { isImageAttachment, type Attachment } from "@/lib/alpha-desk/types"
 import { greetingFor, plainGreeting } from "@/lib/greeting"
 import { vietnamPartOfDay } from "@/lib/market-session"
 import Link from "next/link"
@@ -40,15 +43,6 @@ function copyText(text: string): void {
  * question produced it. Nothing happens when there is no question above — an
  * answer with nothing before it is not something to re-ask.
  */
-function questionBefore(entries: TranscriptEntry[], key: string): string | null {
-  const index = entries.findIndex((entry) => entry.key === key)
-  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
-    const entry = entries[cursor]
-    if (entry.kind === "user") return entry.text
-  }
-  return null
-}
-
 /** How close to the bottom still counts as "following" the newest content. */
 const FOLLOW_THRESHOLD_PX = 120
 
@@ -129,12 +123,20 @@ function Greeting() {
  * Held at the column's centre with the composer under it rather than sharing a
  * centred stack with it: the composer is where it will be for the rest of the
  * conversation, so nothing jumps when the first question lands.
+ *
+ * **Display size, not heading size.** It was set a third smaller than the
+ * design on the theory that a ~427px column could not carry the full measure.
+ * It can: the line is four short words and it is the only thing in the region.
+ * Undersized, it read as a section label over an empty pane rather than as the
+ * product naming itself, which is the whole job of this line. The mark grows
+ * with it — the two are one lockup, and a mark that stayed put would sit as a
+ * bullet beside the type instead of as its counterweight.
  */
 function DeskHeadline() {
   return (
-    <div className="flex animate-vg-fade-in items-center justify-center gap-3">
-      <VisgniteMark className="h-[23px] w-[15px]" />
-      <h2 className="min-w-0 font-serif text-[1.6rem] font-light leading-[1.2] tracking-[-0.015em] text-ink-display [text-wrap:pretty]">
+    <div className="flex animate-vg-fade-in items-center justify-center gap-[0.8rem]">
+      <VisgniteMark className="h-[26px] w-[17px]" />
+      <h2 className="min-w-0 font-serif text-[2.2rem] font-light leading-[1.15] tracking-[-0.01em] text-ink-display [text-wrap:pretty]">
         {SIGNAL_DESK_COPY.deskEmptyHeadline}
       </h2>
     </div>
@@ -335,19 +337,31 @@ export function ChatView() {
     // already at its width, with the composer already docked where it will
     // stay. The ordinary opening centres a greeting and a field together
     // because there is no second region to be beside.
+    //
+    // The two openings are different trees, and throwing the desk switch swaps
+    // one for the other in a single frame: a greeting and a centred field one
+    // moment, a headline over a docked field the next. Each side fades in as it
+    // arrives, so the swap reads as a scene change rather than a glitch; the
+    // `key` is what restarts the fade on the way back.
     if (desk.signalDesk) {
       return (
-        <>
+        <div
+          key="desk-opening"
+          className="flex min-h-0 flex-1 flex-col motion-safe:animate-vg-fade-in"
+        >
           <div className="flex min-h-0 flex-1 items-center justify-center px-5 pb-6 pt-2">
             <DeskHeadline />
           </div>
           <DockedFooter starters anchored={false} />
-        </>
+        </div>
       )
     }
 
     return (
-      <div className="scrollbar-thin flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-5 pb-16 pt-5">
+      <div
+        key="chat-opening"
+        className="scrollbar-thin flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-5 pb-16 pt-5 motion-safe:animate-vg-fade-in"
+      >
         {/* Narrower than the docked composer's 760 on purpose. The opening is
             one field under one line of type, and a field that runs the full
             width of the transcript reads as a page rather than as a prompt.
@@ -385,6 +399,7 @@ export function ChatView() {
                   key={entry.key}
                   text={entry.text}
                   pending={entry.pending}
+                  attachments={entry.attachments}
                   innerRef={
                     isAnchor
                       ? (element) => {
@@ -416,7 +431,7 @@ export function ChatView() {
                   // Turn that ended badly or a fresh ask.
                   onRegenerate={() => {
                     const asked = questionBefore(desk.entries, entry.key)
-                    if (asked !== null) desk.resend(asked)
+                    if (asked !== null) desk.resend(asked.text, asked.attachments)
                   }}
                   onFollowUp={desk.submit}
                   onOpenSources={(messageId) =>
@@ -541,12 +556,15 @@ function DockedFooter({
           </div>
         )}
 
+        {/* Pills rather than cards: the desk's opening column is the narrow one,
+            and three bordered rows in it read as a list to complete rather than
+            as three ways to start. */}
         {starters && (
           <FollowUps
             items={[...SIGNAL_DESK_STARTERS]}
             onPick={(text) => dispatch({ type: "ask", text })}
-            boxed
-            className="pb-2.5"
+            pill
+            className="pb-3"
           />
         )}
 
@@ -558,11 +576,23 @@ function DockedFooter({
             is drawn from the store, frozen at its `as_of`, with its provenance
             named on the panel itself. The caveat is about the prose answer, so
             it stays on the surface that shows prose across the full column. */}
-        {!desk.signalDesk && (
-          <p className="mt-2.5 text-center text-micro text-ink-6">
+        {/* Collapsed rather than removed: the line's height is the composer's
+            resting position, and taking it out in one frame lifts the field by
+            a line while the pane beside it is still sliding. A grid row eased
+            between 0fr and 1fr lets the height leave on the same clock. */}
+        <div
+          aria-hidden={desk.signalDesk || undefined}
+          className={cn(
+            "grid transition-[grid-template-rows,opacity] duration-panel ease-panel motion-reduce:transition-none",
+            desk.signalDesk
+              ? "[grid-template-rows:0fr] opacity-0"
+              : "[grid-template-rows:1fr] opacity-100",
+          )}
+        >
+          <p className="min-h-0 overflow-hidden pt-2.5 text-center text-micro text-ink-6">
             VisgniteAI có thể sai sót. Hãy đối chiếu nguồn dữ liệu trước khi ra quyết định đầu tư.
           </p>
-        )}
+        </div>
       </div>
     </div>
   )
@@ -605,10 +635,13 @@ function scrollTo(element: HTMLElement, top: number): void {
 function UserMessage({
   text,
   pending,
+  attachments,
   innerRef,
 }: {
   text: string
   pending: boolean
+  /** What this question carried. Drawn above the bubble, aligned with it. */
+  attachments: Attachment[]
   /** Set on the newest question, which the transcript pins to the top. */
   innerRef?: (element: HTMLDivElement | null) => void
 }) {
@@ -635,6 +668,28 @@ function UserMessage({
 
   return (
     <div ref={innerRef} className="group/msg flex flex-col items-end gap-1">
+      {/* Above the question and right-aligned with it, so the files read as
+          part of what was asked rather than as a separate event. No remove
+          button: a question already sent cannot have a file taken out of it,
+          and a control that would only ever refuse is worse than none. */}
+      {attachments.length > 0 && (
+        <div className="flex max-w-[82%] flex-wrap justify-end gap-1.5 pb-0.5">
+          {attachments.map((attachment) => (
+            <AttachmentChip
+              key={attachment.id}
+              filename={attachment.filename}
+              byteSize={attachment.byte_size}
+              image={isImageAttachment(attachment)}
+              // The row is immutable, so the browser may cache these for the
+              // life of the tab. That is why this is a URL and not a fetch.
+              previewUrl={
+                isImageAttachment(attachment) ? attachmentUrl(attachment.id) : undefined
+              }
+            />
+          ))}
+        </div>
+      )}
+
       {/* The question is the one thing in a bubble, and it is the bubble
           surface rather than the muted one: on this ground `bg-muted` sits a
           percent off the page and stops reading as a bubble at all. */}
@@ -667,7 +722,14 @@ function UserMessage({
             // A Turn is running: the composer offers Stop rather than Send for
             // this stretch, and this control says the same thing by going inert.
             disabled={desk.canCancel}
-            onClick={() => desk.resend(text)}
+            // Its own attachments, because this control re-asks *this*
+            // question: the ids are on the message the button sits under.
+            onClick={() =>
+              desk.resend(
+                text,
+                attachments.map((attachment) => attachment.id),
+              )
+            }
           >
             <RotateCcw className="size-3.5" />
           </IconButton>

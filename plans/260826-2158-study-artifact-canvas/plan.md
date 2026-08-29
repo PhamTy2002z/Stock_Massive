@@ -36,9 +36,9 @@ Nguồn quyết định: `plans/reports/proposal-260826-2107-ai-core-dynamic-can
 | 06 | [get_series + composition render_canvas](phase-06-series-evidence-and-composition.md) | B | 05 | **done** |
 | 07 | [Study entry_condition_review](phase-07-condition-review-study.md) | C | 06, 08a | **done** |
 | 08a | [Spine daily market-wide `bar_daily`](phase-08-market-wide-daily-spine.md) | D | 02 | **done** |
-| 08b | Luật price basis + xoá dòng fiinquant | D | 08a | **chuyển → `260828-2126-price-basis-and-signal-field-spine/` phase 02-08** |
+| 08b | Luật price basis + xoá dòng fiinquant | D | 08a | **done** — giao ở `260828-2126-price-basis-and-signal-field-spine/` phase 02-08 (đóng 2026-08-29; 71.773 dòng đã xoá qua revision `a3f7e21b8d54`) |
 | 09a | [Store BCTC quý + ratio + job quét](phase-09-financial-statement-store.md) | E | 08a | **done** |
-| 09b | Signal Field `earnings.*` | E | 09a | **chuyển → `260828-2126-price-basis-and-signal-field-spine/` phase 09** |
+| 09b | Signal Field `earnings.*` | E | 09a | **done** — giao ở `260828-2126-price-basis-and-signal-field-spine/` phase 09 (ba field `earnings.*`, registry 30 → 33) |
 | 10 | [Study earnings_dislocation_screener](phase-10-earnings-screener.md) | E | 06, 08a, 09a | **done** |
 
 Song song, không chặn code: **email `support@vnstocks.com` xin điều khoản

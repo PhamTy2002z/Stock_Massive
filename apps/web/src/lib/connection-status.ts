@@ -15,6 +15,17 @@
 
 export type ConnectionState = "ready" | "waiting"
 
+/**
+ * The Alpha Desk proxy's name for an API that never answered it.
+ *
+ * Lives here rather than in either side of that exchange because both sides
+ * must agree on it: the route handler writes it into the refusal body, the
+ * browser client reads it back, and a copy on each side is a copy that drifts.
+ * It is the discriminator that keeps an admission `503` — a decision with its
+ * own reason — apart from a `503` that is only silence.
+ */
+export const UPSTREAM_UNREACHABLE = "upstream_unreachable"
+
 /** Statuses that mean "ask again shortly", not "this request was wrong". */
 const RETRYABLE_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504])
 
