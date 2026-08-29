@@ -40,7 +40,7 @@ from __future__ import annotations
 import base64
 import logging
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Annotated
 
@@ -202,6 +202,16 @@ def history_of(messages: Sequence[MessageRecord]) -> tuple[TranscriptTurn, ...]:
     their prose, and re-reading every trace of every earlier Turn to throw it
     away is a query per Turn for nothing.
 
+    Their **names** do come back, in ``tool_names``, and neither half of that
+    sentence contradicts the one above it. No extra query: the names are already
+    on the assistant row this loop is reading, written there by
+    ``turns.assistant_message``. And nothing is sent to the model that was not
+    sent before — ``build_messages`` reads ``tool_calls`` and never
+    ``tool_names``. What the names buy is one question a later Turn asks of an
+    earlier one and could not answer: has this thread already reached for the
+    domain, so that a follow-up which calls nothing still gets the domain's half
+    of the prompt.
+
     **Attachments come back as metadata and never as bytes**, and that single
     line is two ceilings at once. Dropping them entirely would lose an earlier
     Turn's file from the model's view while the surface still draws a chip for
@@ -233,6 +243,16 @@ def history_of(messages: Sequence[MessageRecord]) -> tuple[TranscriptTurn, ...]:
                     tool_calls=last.tool_calls,
                     assistant_text=text,
                     attachments=last.attachments,
+                    # Skipping anything without a name rather than trusting the
+                    # shape: these rows were written by every version of this
+                    # message builder there has ever been, and a Turn from
+                    # before the field existed must read as a Turn that called
+                    # nothing, not raise.
+                    tool_names=tuple(
+                        str(call["name"])
+                        for call in record.content.get("tool_calls") or ()
+                        if isinstance(call, Mapping) and call.get("name")
+                    ),
                 )
     return tuple(turns)
 

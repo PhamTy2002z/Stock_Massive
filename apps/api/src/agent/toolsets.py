@@ -36,6 +36,13 @@ class Toolset(TypedDict, total=False):
 #: bypassed selection would be a tool that bypassed its own gate too.
 CORE_TOOLS: tuple[str, ...] = ()
 
+#: The bundles that belong to no domain: they answer questions about anything,
+#: so every pack gets them and no pack declares them. The split is the whole
+#: point of a pack — what is left over after these is what makes this deployment
+#: about one subject rather than another, and that remainder is
+#: ``active_pack().toolsets``.
+CORE_TOOLSETS: tuple[str, ...] = ("web", "memory")
+
 TOOLSETS: dict[str, Toolset] = {
     "web": {
         "description": "Search the open web and read one public page.",
@@ -95,6 +102,12 @@ TOOLSETS: dict[str, Toolset] = {
 #: ``studies`` since a conversation gained a Signal Desk to draw on. Both are written
 #: down rather than defaulted: a fifth bundle added tomorrow does not reach a
 #: conversation until this tuple says so.
+#:
+#: It is also :data:`CORE_TOOLSETS` followed by what the active pack declares,
+#: and ``_check_the_selection_matches_the_pack`` refuses the import when it
+#: stops being. Written down *and* held to the pack: the tuple a reader sees is
+#: the real one, and swapping the pack cannot leave it behind saying the last
+#: domain's name.
 CHAT_TOOLSETS: tuple[str, ...] = ("web", "memory", "signals", "studies")
 
 
@@ -244,12 +257,70 @@ def _check_the_chat_selection_holds() -> None:
         raise UnknownToolsetError(unknown[0], tuple(TOOLSETS))
 
 
+class ChatSelectionDisagreesWithPackError(ValueError):
+    """The written-down selection and the active pack no longer say the same thing.
+
+    Both properties above are kept, and this is what keeps them from being in
+    tension. The selection stays *written down* — a reader of this file sees the
+    real tuple, and a bundle registered for another lane still does not reach a
+    conversation until this tuple names it. What it can no longer do is drift
+    from the domain it is supposed to be the selection *for*.
+
+    Raised at import rather than logged, on the same reasoning as
+    ``_check_the_chat_selection_holds``: a deployment whose selection has drifted
+    from its pack is a deployment handing the model a tool surface nobody
+    approved, and one loud failure on the way up is cheaper than that served
+    quietly. The message names both sides because the fix is always to change
+    one of them and the reader has to know which.
+    """
+
+    def __init__(self, selection: Sequence[str], expected: Sequence[str]) -> None:
+        super().__init__(
+            f"CHAT_TOOLSETS is {tuple(selection)!r} but the active pack makes it "
+            f"{tuple(expected)!r}; edit CHAT_TOOLSETS in agent/toolsets.py or the "
+            "toolsets the pack declares in agent/domain/, so the two agree"
+        )
+        self.selection = tuple(selection)
+        self.expected = tuple(expected)
+
+
+def _check_the_selection_matches_the_pack() -> None:
+    """Refuse to import a chat selection that has drifted from the active pack.
+
+    Imported inside the function, not at module scope, and it is worth being
+    exact about what that buys and what it does not. It buys one thing: by the
+    time this runs, on the last executable line of the module, ``toolsets`` is
+    fully defined — so a future ``domain`` that reached back for ``TOOLSETS`` or
+    ``resolve_toolset`` would find them, where a module-scope import would have
+    handed it a half-built module. It does **not** make this module independent
+    of the domain: importing ``toolsets`` now transitively imports
+    ``agent.domain`` and, through the pack, ``stocks.universe`` and
+    ``stocks.signals.issues``. A cycle running the other way — something under
+    ``stocks`` importing ``toolsets`` — would still break, and the reason it
+    cannot today is that nothing under ``stocks`` or ``core`` imports
+    ``src.agent`` at all. That is the edge to not add.
+
+    Raising here rather than logging is the same trade ``_check_the_chat_
+    selection_holds`` already makes: a deployment whose selection has drifted
+    from its pack hands the model a tool surface nobody approved, and one loud
+    failure on the way up is cheaper than that served quietly.
+    """
+    from .domain import active_pack
+
+    expected = (*CORE_TOOLSETS, *active_pack().toolsets)
+    if CHAT_TOOLSETS != expected:
+        raise ChatSelectionDisagreesWithPackError(CHAT_TOOLSETS, expected)
+
+
 _check_the_chat_selection_holds()
+_check_the_selection_matches_the_pack()
 
 
 __all__ = [
     "CHAT_TOOLSETS",
     "CORE_TOOLS",
+    "CORE_TOOLSETS",
+    "ChatSelectionDisagreesWithPackError",
     "TOOLSETS",
     "Toolset",
     "ToolsetCycleError",

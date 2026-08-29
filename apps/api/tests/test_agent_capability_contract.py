@@ -165,13 +165,18 @@ def test_shipped_schema_bytes_order_output_and_display_are_locked():
         # studies.py``): a Study added later changes the tool signature the
         # resolved-surface cache keys on and changes nothing in the prompt. So
         # this is updated in the same commit as the Study, deliberately.
+        #
+        # Moved on 2026-08-29 as well, for ``fetch_url``'s new optional
+        # ``looking_for``: a page is now returned as the passages matching what
+        # the caller said it was after, so the argument is part of the wire
+        # schema and the model has to be told the field means something.
         assert hashlib.sha256(
             json.dumps(
                 schemas,
                 separators=(",", ":"),
                 ensure_ascii=False,
             ).encode("utf-8")
-        ).hexdigest() == "1ffa06e443779453349a68da11b1c00d7fdc3a7227b7f4ce2519feb8c1ff4a83"
+        ).hexdigest() == "85e91984d09bf1c34a0b70d91353c29e2e5b63c398d84d9e48a4a0b931b380f8"
         assert {
             entry.name: (
                 entry.display_name,
@@ -219,6 +224,22 @@ def test_lane_selection_and_order_are_explicit_and_do_not_share_authority():
         "list_studies",
         "run_study",
         "render_signal_desk",
+    )
+
+    # Added 2026-08-29: the selection above is still written down and still the
+    # only one the chat lane makes, and it now also has an author. The two
+    # halves are ``CORE_TOOLSETS`` — the bundles that belong to no subject — and
+    # whatever the active domain pack declares. Neither half may be inferred:
+    # this asserts the *sum*, and ``toolsets`` refuses to import when the sum
+    # stops holding, so the tuple above cannot be left behind naming the last
+    # domain after a pack swap.
+    from src.agent.domain import active_pack
+
+    assert toolsets.CORE_TOOLSETS == ("web", "memory")
+    assert active_pack().toolsets == ("signals", "studies")
+    assert toolsets.CHAT_TOOLSETS == (
+        *toolsets.CORE_TOOLSETS,
+        *active_pack().toolsets,
     )
 
 

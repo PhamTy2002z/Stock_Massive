@@ -150,7 +150,8 @@ from .messages import (
     summarise_call,
 )
 from .prompt import RuntimeContext, prefix as prompt_prefix, render
-from .toolsets import CHAT_TOOLSETS
+from .domain import active_pack
+from .toolsets import CHAT_TOOLSETS, CORE_TOOLS, resolve_toolset
 
 logger = logging.getLogger(__name__)
 
@@ -290,7 +291,35 @@ TURN_DEADLINE_SECONDS = 600.0
 # query inside the deployment — charging them against a ceiling that exists
 # because a search costs money and a page belongs to somebody else would spend
 # the web allowance on evidence that has neither property.
-MAX_EXTERNAL_TOOL_CALLS = 6
+# Seven since 2026-08-29, and the number is a measurement rather than a
+# preference. The goal it has to fund is two or three searches plus three or
+# four page reads — five to seven calls — and six cut straight through the
+# middle of that.
+#
+# What it cost, measured on ``llm_call_usage`` the day it moved: a web-first
+# Turn ran 42,002 micro-USD on average over ten Turns (p50 34,447, max 70,694),
+# across a mean of 3.6 model calls. One extra page read adds its own result to
+# the transcript, and the transcript is resent on every later round, so the
+# pessimistic marginal cost is the page cap (22,000 chars, roughly 7,300 tokens)
+# times the rounds that follow it, times the input price of 2 micro-USD a token:
+# about 58,000 micro-USD if the read lands in the first of four rounds. That puts
+# a worst-case Turn near 100,000 against ``TURN_COST_MICRO_USD`` of 500,000 — a
+# fivefold margin — and near 71,000 in the ordinary case.
+#
+# The envelope agrees. The Turn lane holds $30 of the $45 month, which buys
+# roughly 420 web-first Turns at the new figure against 714 at the old one; this
+# deployment has run 611 Turns in total, ever. The ceiling was never what money
+# was short of.
+#
+# Below eight on purpose. ``executor.MAX_EXTERNAL_CALLS_PER_ROUND`` is 8, and
+# while the Turn ceiling is under it the per-round gate has never fired in
+# production; raising this to 8 or beyond would light up a path nothing has
+# exercised, which is a different change with a different risk.
+#
+# It expires. The prices above are the route's prices on the day of the
+# measurement, so a route change is a reason to run the arithmetic again rather
+# than to trust this comment.
+MAX_EXTERNAL_TOOL_CALLS = 7
 EXTERNAL_TOOL_EXHAUSTED_MESSAGE = (
     "This turn has reached its limit on external tool calls. Answer from what has "
     "already been gathered, and say what you could not look up."
@@ -325,6 +354,63 @@ SIGNAL_DESK_NOTE = (
     "for a Signal Desk-producing tool wherever the question admits one, and when "
     "none does, answer in prose and say plainly what could not be drawn."
 )
+
+def domain_body_note() -> str:
+    """The active pack's own half of the prompt, for a Turn that reached for it.
+
+    A system note rather than a section of the rendered prompt, for the reason
+    ``SIGNAL_DESK_NOTE`` is one: the prompt is rendered once per Turn and is
+    identical across Turns, which is what makes it a cacheable prefix, and
+    whether *this* Turn touched the domain is not known when it is rendered.
+    Sent with every remaining call once it is on, like the mode note and unlike
+    ``state.note``, because a playbook that lasted one round is a playbook the
+    model has forgotten by the time the tool results come back.
+
+    Read through ``active_pack`` rather than bound at import: the pack is what
+    swapping a domain swaps, and a value copied into a module-level constant
+    here is the copy a second domain would have to come back and edit.
+
+    Written down for whoever turns prompt caching on: once
+    ``LLMRoute.prompt_cache_control`` is live, a note at the tail is paid for in
+    full on every call, and the right home for this text becomes a second block
+    immediately after the core — still inside the cacheable head, cached from
+    the second call onward. That is a decision for the phase that owns the cache
+    boundary, and nothing here is built ahead of it.
+    """
+    return active_pack().body_text
+
+
+def domain_body_tokens(state: "_TurnState") -> int:
+    """What this call has to set aside for the body, if it carries one.
+
+    One function called from both places rather than two constants that happen
+    to agree. ``_construct`` trims the transcript against a ceiling minus this,
+    and ``_call`` appends the message this stands for; the comment on that
+    reservation already says the two must not disagree, and two hand-copied
+    expressions are the cheapest way to make them.
+
+    It is the body's own measured cost rather than ``SYSTEM_NOTE_TOKENS``. The
+    notes that constant was written for are one sentence; a pack body is
+    hundreds of tokens, and reserving a sentence's worth of room for it is a
+    context built believing it has room it does not.
+    """
+    return active_pack().body_tokens if state.domain_body else 0
+
+
+def domain_tool_names() -> frozenset[str]:
+    """Every tool that means "this Turn is asking about the domain".
+
+    Derived from the pack rather than listed here. That derivation is the whole
+    acceptance test of the pack idea: the moment this function spells a tool
+    name, swapping the domain means editing the loop that runs every domain.
+
+    ``CORE_TOOLS`` is empty, so what comes back is the pack's tools and nothing
+    else — but the subtraction is written anyway, because a core tool added
+    later would otherwise turn ``web_search`` into a domain trigger and load the
+    body into every Turn that reads a page.
+    """
+    return frozenset(resolve_toolset(active_pack().toolsets)) - frozenset(CORE_TOOLS)
+
 
 ROUNDS_EXHAUSTED_NOTE = (
     f"All {MAX_TOOL_ROUNDS} tool rounds for this turn have been used. Answer from "
@@ -785,6 +871,15 @@ class _TurnState:
     tool_rounds: int = 0
     usage: Usage = field(default_factory=Usage)
     calls: list[TurnToolCall] = field(default_factory=list)
+    #: Every page this Turn has already put in front of the reader, by the key
+    #: that decides whether two links are one page (``messages.dedup_key``).
+    #:
+    #: Per-Turn because that is the scope the duplication actually has. Two
+    #: searches issued in the same breath land on the same article often enough
+    #: to matter — 21 of 223 links over a recorded run — while no single search
+    #: returned one link twice, so a set scoped any narrower than this would be
+    #: a set that never rejected anything.
+    shown_sources: set[str] = field(default_factory=set)
     model_refused: bool = False
     summary_needed: bool = False
     request_id: str | None = None
@@ -803,6 +898,20 @@ class _TurnState:
     # that sent it: a Turn told twice about one observation has been charged
     # twice for it.
     note: str | None = None
+    # Whether this Turn has been handed the active pack's half of the prompt.
+    #
+    # Per-Turn, like ``mode`` above and for the same reason: whether the reader
+    # asked something about the domain is a fact about this Turn, and a flag one
+    # level up would leak the answer into the next reader's Turn. ``_TurnState``
+    # is built once per ``_run``, ``AgentLoop`` once per Turn, so this cannot
+    # outlive the question that set it.
+    #
+    # Sticky once true. A model told the playbook in round two still needs it in
+    # round three, when the tool results it has to read come back — and a rule
+    # that arrives and leaves again is worse than one that never came, because
+    # the answer is written under the version of the instructions the last call
+    # happened to carry.
+    domain_body: bool = False
     # Set when the guardrail ladder halted the tool loop. The Turn does not end:
     # it makes its answering call one round early, which is what the halt
     # guidance asks for — ending here would throw away evidence the reader was
@@ -927,6 +1036,26 @@ class AgentLoop:
             surface=surface,
         )
         system_prompt = render(request.runtime)
+        # Two of the three ways a Turn earns the domain body, both readable
+        # before a single model call and neither costing one.
+        #
+        # The mode, because it is a promise the Turn will produce a Signal Desk
+        # and a Signal Desk comes from a domain tool: the body is certain to be
+        # needed, so waiting for the call that proves it would just spend the
+        # first round without it.
+        #
+        # The thread, because "and what about VNM?" is where a follow-up loses
+        # the playbook the previous answer was written under, and that is the
+        # cheapest regression to cause and the hardest to see. One Turn back and
+        # no further, deliberately: scanning the whole history would mean a
+        # thread that once mentioned a ticker carries the body forever.
+        if request.mode == SIGNAL_DESK_MODE:
+            state.domain_body = True
+        elif request.history:
+            domain_tools = domain_tool_names()
+            state.domain_body = any(
+                name in domain_tools for name in request.history[-1].tool_names
+            )
 
         for round_index in range(MAX_TOOL_ROUNDS + 1):
             if cancelled():
@@ -1055,6 +1184,17 @@ class AgentLoop:
                     state, TurnStatus.COMPLETE, None, rounds_exhausted=exhausted
                 )
 
+            # The third trigger: what the model asked to call, read before it is
+            # dispatched rather than after it returns. The *request* is the
+            # intent — a call that fails is still a Turn that went looking at
+            # the domain — and reading it here means the body is in place for
+            # the call that has to make sense of the result.
+            if not state.domain_body:
+                domain_tools = domain_tool_names()
+                state.domain_body = any(
+                    call.name in domain_tools for call in completion.tool_calls
+                )
+
             assert_distinct_ids(completion.tool_calls)
             failed = await self._round(
                 completion.tool_calls, state, turn_budget, executor
@@ -1112,6 +1252,9 @@ class AgentLoop:
             # Every call of a ``signal_desk`` Turn carries the mode note, so the
             # room for it is reserved every time as well.
             + (SYSTEM_NOTE_TOKENS if request.mode == SIGNAL_DESK_MODE else 0)
+            # And the domain body, once this Turn has earned it, at its own
+            # measured size rather than a note's.
+            + domain_body_tokens(state)
         )
         if reserved:
             budget = replace(budget, max_tokens=budget.max_tokens - reserved)
@@ -1251,6 +1394,16 @@ class AgentLoop:
             state.summary_needed = state.summary_needed or context.summary_needed
             messages = list(context.messages)
             reserved = 0
+            # First among the appended messages, so the notes that are about
+            # this Turn rather than about the domain keep the last word: the
+            # body is prompt material that happens to arrive late, not the most
+            # recent thing the Turn was told.
+            body_tokens = domain_body_tokens(state)
+            if body_tokens:
+                messages.append(
+                    Message(role=Role.SYSTEM, content=domain_body_note())
+                )
+                reserved += body_tokens
             if request.mode == SIGNAL_DESK_MODE:
                 messages.append(
                     Message(role=Role.SYSTEM, content=SIGNAL_DESK_NOTE)
@@ -1554,12 +1707,21 @@ class AgentLoop:
                         # re-parsing ``result.text``: the executor already holds
                         # the object, and a second parse is a second chance to
                         # read a provider's JSON differently from the first.
-                        results=display_results(result.tool_name, result.payload),
+                        results=display_results(
+                            result.tool_name,
+                            result.payload,
+                            seen=state.shown_sources,
+                        ),
                         # Read off the same payload, for the same reason, and
                         # answering the question ``status`` cannot: whether this
                         # call came back with a number or with the reason there
                         # is none.
                         outcome=outcome_of(result.tool_name, result.payload),
+                        # The advisory scan's verdict, carried from where the
+                        # result first existed. Never merged into ``guidance``:
+                        # guidance is the harness talking to the model, and this
+                        # is the harness talking to the reader.
+                        scan=result.scan,
                     )
                     state.calls[position] = finished
                     turn_budget.add(
@@ -1962,6 +2124,9 @@ __all__ = [
     "TurnStatus",
     "TurnToolCall",
     "assert_distinct_ids",
+    "domain_body_note",
+    "domain_body_tokens",
+    "domain_tool_names",
     "build_messages",
     "signal_desk_absence",
     "estimate_tokens",

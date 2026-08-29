@@ -10,8 +10,20 @@ The sentences are here and not in ``src/stocks/signals/issues.py`` because the
 audiences are different and so is the language. That module owns the closed set
 of **Signal Issue** codes; the web app holds one Vietnamese sentence per code
 for the surfaces a person reads in Vietnamese; this holds one English sentence
-per code for the artifact the model is handed. A code with no sentence here
-fails ``tests/test_envelope.py``, so the set cannot grow past the prose.
+per code for the artifact the model is handed.
+
+A code with no sentence here fails ``tests/test_agent_domain_pack.py``, which
+holds the closed enum against this mapping through the vocabulary the
+``vn-equity`` pack declares, so the set cannot grow past the prose. The
+Vietnamese half is held the same way from the other side:
+``apps/web/src/lib/signal-issues.test.ts`` reads the enum out of the Python
+source and refuses a code with no sentence and a sentence with no code. Both
+guards are two-source on purpose — a check comparing a list to itself is a check
+that cannot go red.
+
+This paragraph named ``tests/test_envelope.py`` until 2026-08-29. That file went
+in the 2026-08-25 rip-out, so for a week the docstring asserted a guard that was
+not running.
 
 Every sentence says what is missing or what changed, never what to do about it.
 A reason that advised a reader would be the recommendation the whole citation

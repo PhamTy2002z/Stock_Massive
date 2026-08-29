@@ -13,9 +13,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from dataclasses import replace
 from datetime import date, datetime, timezone
 from types import MappingProxyType
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -60,7 +62,9 @@ from src.agent.loop import (
     ROUTE_RATE_LIMITED,
     RUN_TOOL,
     SCHEMA_REJECTED,
+    SIGNAL_DESK_MODE,
     SIGNAL_DESK_NOTE,
+    SYSTEM_NOTE_TOKENS,
     THOUGHT,
     TOOL_TIMEOUT,
     TURN_DEADLINE,
@@ -77,11 +81,20 @@ from src.agent.loop import (
     TurnToolCall,
     assert_distinct_ids,
     build_messages,
+    domain_body_note,
+    domain_body_tokens,
     estimate_tokens,
     shown_result,
     summarise_call,
     terminal_reason_for,
     trace_status,
+)
+from src.agent.messages import (
+    COLLAPSED_RESULT_URLS,
+    MAX_DISPLAY_RESULTS,
+    _collapsed_result,
+    dedup_key,
+    display_results,
 )
 from src.agent.prompt import RuntimeContext, prefix as prompt_prefix, render
 from src.core.llm import (
@@ -953,15 +966,16 @@ async def test_a_local_tool_is_not_charged_to_the_external_budget() -> None:
 
 @pytest.mark.asyncio
 async def test_a_halt_makes_the_next_call_the_answering_one() -> None:
-    # Six failures of one tool is the ladder's halt rung, and one round can reach
-    # it: a round that fans out is exactly where the model loses the plot. It is
-    # also reachable across rounds now — ``test_agent_guardrails`` holds that
-    # arithmetic — so this batch is a shape the ladder handles, not the only one.
+    # The halt rung is the whole external allowance, and one round can reach it:
+    # a round that fans out is exactly where the model loses the plot. It is also
+    # reachable across rounds — ``test_agent_guardrails`` holds that arithmetic —
+    # so this batch is a shape the ladder handles rather than the only one. The
+    # count follows ``MAX_EXTERNAL_TOOL_CALLS`` because the rung is that number.
     halting_round = Completion(
         model=SESSION_MODEL,
         tool_calls=tuple(
             ToolCall(id=f"c{index}", name="broken", arguments={"query": f"q{index}"})
-            for index in range(6)
+            for index in range(MAX_EXTERNAL_TOOL_CALLS)
         ),
     )
     client = FakeClient([halting_round, answer(), answer()])
@@ -1444,6 +1458,9 @@ def test_the_wire_payload_is_exactly_the_fields_of_the_contract() -> None:
         # Whether the call answered, which ``status`` cannot say. ``None`` for a
         # web search: it has no figure that could be missing.
         "outcome": None,
+        # The advisory threat scan's verdict. ``None`` for a call that has not
+        # come back: there is no result to have looked at yet.
+        "scan": None,
     }
     # The two the allowlist exists to keep off a rendered channel. ``results``
     # and ``error`` widened it; these did not come with them.
@@ -1463,7 +1480,7 @@ async def test_a_call_the_turn_refused_tells_the_surface_which_ceiling_refused_i
     rounds = [
         wants(*(["web_search"] * 3), prefix="a"),
         wants(*(["web_search"] * 3), prefix="b"),
-        wants("web_search", prefix="c"),
+        wants(*(["web_search"] * 2), prefix="c"),
         answer(),
     ]
     published: list[dict[str, Any]] = []
@@ -1477,7 +1494,9 @@ async def test_a_call_the_turn_refused_tells_the_surface_which_ceiling_refused_i
 
     outcome = await loop(FakeClient(rounds), publisher=Surface()).run(turn_request())
 
-    # Six external calls ran; the seventh had nothing left to spend.
+    # Eight calls asked for, and the allowance is seven: the last one had
+    # nothing left to spend. Three a round is inside the per-round fan-out gate
+    # of eight, so this is the Turn ceiling firing and not that one.
     refused = [call for call in outcome.tool_calls if not call.dispatched]
     assert [call.error for call in refused] == ["external_budget_exhausted"]
     assert outcome.status is TurnStatus.COMPLETE
@@ -1797,3 +1816,580 @@ async def test_outside_development_the_log_keeps_only_the_shape_of_the_question(
     recorded = misses(caplog)
     assert len(recorded[0].question) == ASKED_LIMIT_OUTSIDE_DEBUG
     assert recorded[0].question.endswith("…")
+
+
+# -- the pack's half of the prompt, and which Turns pay for it ----------------
+#
+# The prompt is rendered once per Turn, before any call, so "load the domain
+# playbook only when the domain is asked about" cannot be a section of it. It is
+# a system note, sent with every call from the moment the Turn earns it — the
+# same shape ``SIGNAL_DESK_NOTE`` already has, and for the same reason.
+#
+# Four situations, one test each, because the failure they guard against is not
+# a crash: it is a Turn quietly running with the wrong half of the instructions.
+
+
+def _bodies(client: FakeClient) -> list[int]:
+    """How many messages of each call carried the pack body."""
+    body = domain_body_note()
+    return [
+        sum(1 for message in request.messages if message.content == body)
+        for request in client.requests
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_turn_that_never_reaches_the_domain_never_sees_its_body() -> None:
+    """The saving, stated as an absence.
+
+    A question about deposit rates is answered out of the web, and the store
+    playbook has nothing to say about it. If the body shows up here anyway, the
+    whole change has bought a longer prompt and nothing else.
+    """
+    client = FakeClient(
+        [
+            Completion(
+                model=SESSION_MODEL,
+                text="Để tôi tra đã.",
+                tool_calls=(
+                    ToolCall(id="c1", name="web_search", arguments={"query": "x"}),
+                ),
+            ),
+            answer("Khoảng 6,5%."),
+        ]
+    )
+
+    await loop(client).run(turn_request())
+
+    assert _bodies(client) == [0, 0]
+
+
+@pytest.mark.asyncio
+async def test_reaching_for_a_domain_tool_brings_the_body_to_the_next_call() -> None:
+    """The ordinary path, and the one round of latency it deliberately accepts.
+
+    The trigger is what the model *asked* to call, read before dispatch: the
+    call it wants is the intent, and a failing call is still a Turn that went
+    looking at the domain. The body cannot reach the call that asked — that
+    request was built and sent before the ask existed — so it lands on the call
+    that has to read the result, which is where the playbook is actually needed.
+    """
+    client = FakeClient(
+        [
+            Completion(
+                model=SESSION_MODEL,
+                text="Để tôi đọc store.",
+                tool_calls=(
+                    ToolCall(id="c1", name="get_field", arguments={"query": "VCB"}),
+                ),
+            ),
+            answer("Thanh khoản phiên gần nhất ở mức trung bình."),
+        ]
+    )
+
+    await loop(client).run(turn_request(user_text="VCB thanh khoản thế nào?"))
+
+    assert _bodies(client) == [0, 1]
+
+
+@pytest.mark.asyncio
+async def test_the_body_is_sticky_for_the_rest_of_the_turn() -> None:
+    """Once carried, carried to the end.
+
+    A playbook that lasted one round would be gone by the round that writes the
+    answer, and the answer would be written under whichever instructions the
+    last call happened to hold.
+    """
+    client = FakeClient(
+        [
+            Completion(
+                model=SESSION_MODEL,
+                text="Đọc store trước.",
+                tool_calls=(
+                    ToolCall(id="c1", name="get_field", arguments={"query": "VCB"}),
+                ),
+            ),
+            Completion(
+                model=SESSION_MODEL,
+                text="Giờ tra thêm tin.",
+                tool_calls=(
+                    ToolCall(id="c2", name="web_search", arguments={"query": "VCB"}),
+                ),
+            ),
+            answer("Số của phiên gần nhất, kèm phần tin tức."),
+        ]
+    )
+
+    await loop(client).run(turn_request(user_text="VCB thế nào?"))
+
+    assert _bodies(client) == [0, 1, 1]
+
+
+@pytest.mark.asyncio
+async def test_a_signal_desk_turn_carries_the_body_from_its_first_call() -> None:
+    """The mode is a promise, so the body does not wait to be earned.
+
+    A ``signal_desk`` Turn either produces a desk or says why it could not, and
+    a desk comes from a domain tool — so the round spent discovering that would
+    be a round spent without the playbook for no gain.
+    """
+    client = FakeClient([answer("Đây là bức tranh.")])
+
+    await loop(client).run(turn_request(mode=SIGNAL_DESK_MODE))
+
+    assert _bodies(client) == [1]
+    # And the mode note is still its own message: one says which Turn this is,
+    # the other says what the domain's rules are, and merging them would make a
+    # sentence true of one Turn into a rule true of every Turn.
+    first = client.requests[0].messages
+    assert any(message.content == SIGNAL_DESK_NOTE for message in first)
+    assert any(message.content == domain_body_note() for message in first)
+
+
+def _thread_history(*, domain_call: bool, then_a_plain_turn: bool = False):
+    """A Thread as the router actually hands one to the loop.
+
+    Built through ``history_of`` on ``MessageRecord``s written by
+    ``assistant_message``, rather than by constructing ``TranscriptTurn``s
+    directly. That is not ceremony: hand-built history is how the first version
+    of this test passed while the trigger it covered was dead in production —
+    ``history_of`` populated no tool calls at all, and only a test that goes
+    through it could have said so.
+    """
+    from datetime import datetime, timezone
+
+    from src.agent.persistence import MessageRecord
+    from src.agent.router import history_of
+    from src.agent.turns import assistant_message
+
+    moment = datetime(2026, 8, 22, tzinfo=timezone.utc)
+    thread = uuid.UUID("11111111-1111-1111-1111-111111111111")
+    calls = (
+        [{"id": "h1", "name": "get_field", "arguments": {"symbol": "VCB"}}]
+        if domain_call
+        else [{"id": "h1", "name": "web_search", "arguments": {"query": "x"}}]
+    )
+    rows = [
+        MessageRecord(1, thread, 1, "user", {"text": "VCB thanh khoản thế nào?"}, moment),
+        MessageRecord(
+            2,
+            thread,
+            2,
+            "assistant",
+            assistant_message(text="Trung bình.", tool_calls=calls, status="complete"),
+            moment,
+        ),
+    ]
+    if then_a_plain_turn:
+        rows += [
+            MessageRecord(3, thread, 3, "user", {"text": "Viết lại cho gọn hơn."}, moment),
+            MessageRecord(
+                4,
+                thread,
+                4,
+                "assistant",
+                assistant_message(text="Xong.", status="complete"),
+                moment,
+            ),
+        ]
+    return history_of(rows)
+
+
+def test_the_transcript_a_thread_hands_back_carries_the_names_and_not_the_calls() -> None:
+    """Why the trigger reads ``tool_names`` and not ``tool_calls``.
+
+    ``history_of`` leaves ``tool_calls`` empty on purpose — the constructor
+    trims older Turns to their prose, and rehydrating a call would put every
+    earlier tool result back into every later request. The names ride along
+    because they are already on the row being read, and because a name is the
+    whole of what a later Turn needs to know.
+    """
+    history = _thread_history(domain_call=True)
+
+    assert history[-1].tool_names == ("get_field",)
+    assert history[-1].tool_calls == ()
+
+
+def test_no_context_is_built_from_the_names() -> None:
+    """The guarantee that makes the new field free.
+
+    A field the constructor read would be a field that changed what the model
+    sees, which is what leaving ``tool_calls`` empty was protecting in the first
+    place. Same transcript, names and no names, byte-identical messages.
+    """
+    with_names = _thread_history(domain_call=True)
+    without = tuple(
+        TranscriptTurn(
+            user_text=turn.user_text,
+            assistant_text=turn.assistant_text,
+        )
+        for turn in with_names
+    )
+
+    def built(history):
+        return build_messages(
+            Transcript(
+                system_prompt="S",
+                turns=(*history, TranscriptTurn(user_text="Còn VNM?")),
+            ),
+            ContextBudget(max_tokens=32_000),
+        ).messages
+
+    assert built(with_names) == built(without)
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_in_a_thread_that_touched_the_domain_starts_with_it() -> None:
+    """Where a regression is easiest to cause and hardest to see.
+
+    "And what about VNM?" reads as a fresh question to a loop that only watches
+    this Turn's calls, and it would be answered without the playbook the
+    previous answer was written under. The dangerous shape is the follow-up the
+    model answers with *no* tool call at all — trigger three never fires, so
+    this is the only thing standing between that answer and a prompt missing
+    half its rules.
+    """
+    client = FakeClient([answer("VNM thì thấp hơn.")])
+
+    await loop(client).run(
+        turn_request(
+            user_text="Còn VNM thì sao?",
+            history=_thread_history(domain_call=True),
+        )
+    )
+
+    assert _bodies(client) == [1]
+
+
+@pytest.mark.asyncio
+async def test_a_thread_whose_last_turn_stayed_outside_the_domain_does_not() -> None:
+    """The other half of that trigger, and the reason it looks one Turn back.
+
+    Scanning the whole history would mean a thread that once mentioned a ticker
+    carries the body for every question afterwards, including the ones about the
+    weather. This thread reached the store two Turns ago and then did something
+    else; the trigger has to let it go.
+    """
+    client = FakeClient([answer("Được.")])
+
+    await loop(client).run(
+        turn_request(
+            user_text="Cảm ơn.",
+            history=_thread_history(domain_call=True, then_a_plain_turn=True),
+        )
+    )
+
+    assert _bodies(client) == [0]
+
+
+@pytest.mark.asyncio
+async def test_a_thread_that_only_read_the_web_does_not_bring_the_body() -> None:
+    """And the trigger discriminates by tool, not by "there was a call"."""
+    client = FakeClient([answer("Được.")])
+
+    await loop(client).run(
+        turn_request(user_text="Còn gì nữa không?", history=_thread_history(domain_call=False))
+    )
+
+    assert _bodies(client) == [0]
+
+
+@pytest.mark.asyncio
+async def test_the_call_that_carries_the_body_is_charged_for_it() -> None:
+    """The reservation and the message have to be the same size.
+
+    ``_construct`` trims the transcript against a ceiling minus what is about to
+    be appended; if that reservation is a note's worth and the message is a
+    playbook's worth, the context is built believing it has room it does not and
+    the request goes out over the ceiling it was trimmed against.
+    """
+    client = FakeClient(
+        [
+            Completion(
+                model=SESSION_MODEL,
+                text="Đọc store.",
+                tool_calls=(
+                    ToolCall(id="c1", name="get_field", arguments={"query": "VCB"}),
+                ),
+            ),
+            answer("Xong."),
+        ]
+    )
+
+    await loop(client).run(turn_request(user_text="VCB thế nào?"))
+
+    from src.agent.domain import active_pack
+
+    without, with_body = client.spends
+    # The body's own measured cost, not ``SYSTEM_NOTE_TOKENS``: hundreds of
+    # tokens rather than a hundred and sixty.
+    assert active_pack().body_tokens > SYSTEM_NOTE_TOKENS
+    assert with_body.input_tokens - without.input_tokens >= active_pack().body_tokens
+
+
+def test_the_reservation_and_the_message_come_from_one_expression() -> None:
+    """Two call sites, one function, so they cannot drift apart.
+
+    Asserted on the helper rather than by reading both call sites, because what
+    matters is that there is only one number to be wrong.
+    """
+    from src.agent.domain import active_pack
+    from src.agent.loop import _TurnState
+
+    quiet = _TurnState()
+    reached = _TurnState(domain_body=True)
+
+    assert domain_body_tokens(quiet) == 0
+    assert domain_body_tokens(reached) == active_pack().body_tokens
+
+
+# -- one page drawn once, and still nameable after the collapse ---------------
+
+
+def _search_payload(*items: dict[str, Any]) -> dict[str, Any]:
+    """One ``web_search`` result payload, in the shape ``tools/web.py`` builds."""
+    return {
+        "query": "lãi suất",
+        "results": [
+            {
+                "rank": index,
+                "title": item.get("title", f"trang {index}"),
+                "url": item["url"],
+                "snippet": item.get("snippet", "…"),
+                "published_at": item.get("published_at"),
+                "source": item.get(
+                    "source", urlsplit(item["url"]).hostname or "web"
+                ),
+                **{
+                    key: value
+                    for key, value in item.items()
+                    if key not in {"url", "title", "snippet", "published_at", "source"}
+                },
+            }
+            for index, item in enumerate(items, start=1)
+        ],
+    }
+
+
+def test_two_links_that_name_one_page_share_one_key() -> None:
+    """The four reductions, each a case where two strings are one document."""
+    canonical = dedup_key("https://cafef.vn/bai-viet")
+
+    assert dedup_key("http://www.cafef.vn/bai-viet/") == canonical
+    assert dedup_key("https://cafef.vn/bai-viet#phan-2") == canonical
+    assert dedup_key("https://cafef.vn/bai-viet?utm_source=google") == canonical
+    assert dedup_key("https://CAFEF.VN/bai-viet") == canonical
+
+
+def test_a_parameter_nobody_listed_still_selects_a_page() -> None:
+    """Dropping an unrecognised parameter would merge two real pages into one."""
+    assert dedup_key("https://vnexpress.net/tin?page=2") != dedup_key(
+        "https://vnexpress.net/tin?page=3"
+    )
+
+
+def test_the_hostname_comes_from_the_backend_rather_than_a_second_parse() -> None:
+    """One derivation of a hostname in this system, not two that can disagree."""
+    assert dedup_key("https://cafef.vn/x", host="WWW.Cafef.VN") == dedup_key(
+        "https://cafef.vn/x"
+    )
+
+
+def test_a_result_with_no_usable_link_keeps_its_place() -> None:
+    """"No key" is not a key: merging on it would collapse every such result."""
+    shown = display_results(
+        "web_search",
+        {"results": [{"url": "", "title": "một"}, {"url": "", "title": "hai"}]},
+        seen=set(),
+    )
+
+    assert [item["title"] for item in shown] == ["một", "hai"]
+
+
+def test_two_searches_that_land_on_one_page_draw_it_once() -> None:
+    """The duplication is between calls, which is why the set is the Turn's.
+
+    Measured on a recorded run: no single search returned one link twice, and 21
+    of 223 links came back to more than one query. A set scoped to one payload
+    would therefore never reject anything.
+    """
+    seen: set[str] = set()
+    first = display_results(
+        "web_search",
+        _search_payload({"url": "https://cafef.vn/a"}, {"url": "https://vnexpress.net/b"}),
+        seen=seen,
+    )
+    second = display_results(
+        "web_search",
+        _search_payload(
+            {"url": "https://www.cafef.vn/a?utm_source=x"}, {"url": "https://tuoitre.vn/c"}
+        ),
+        seen=seen,
+    )
+
+    assert [item["url"] for item in first] == [
+        "https://cafef.vn/a",
+        "https://vnexpress.net/b",
+    ]
+    assert [item["url"] for item in second] == ["https://tuoitre.vn/c"]
+
+
+def test_two_pages_on_one_domain_are_two_results() -> None:
+    """Deduplication is by page. Counting domains is a question asked later."""
+    shown = display_results(
+        "web_search",
+        _search_payload({"url": "https://cafef.vn/a"}, {"url": "https://cafef.vn/b"}),
+        seen=set(),
+    )
+
+    assert len(shown) == 2
+    assert len({item["source"] for item in shown}) == 1
+
+
+def test_the_better_copy_of_one_page_wins_inside_a_payload() -> None:
+    """The provider's own placement first; the publication date breaks a tie."""
+    shown = display_results(
+        "web_search",
+        {
+            "results": [
+                {
+                    "rank": 4,
+                    "url": "https://cafef.vn/a#cuoi",
+                    "title": "bản sau",
+                    "source": "cafef.vn",
+                },
+                {
+                    "rank": 2,
+                    "url": "https://cafef.vn/a",
+                    "title": "bản trước",
+                    "source": "cafef.vn",
+                },
+            ]
+        },
+        seen=set(),
+    )
+
+    assert [item["title"] for item in shown] == ["bản trước"]
+
+
+def test_a_call_asked_on_its_own_still_answers_about_its_own_payload() -> None:
+    """``seen=None`` asks the old question, which is what a one-off render wants."""
+    payload = _search_payload({"url": "https://cafef.vn/a"})
+
+    assert display_results("web_search", payload) == display_results(
+        "web_search", payload
+    )
+
+
+def test_the_ceiling_never_marks_a_link_it_did_not_draw() -> None:
+    """Marking a link drawn and then dropping it would hide it for good."""
+    seen: set[str] = set()
+    payload = _search_payload(
+        *({"url": f"https://site{index}.vn/a"} for index in range(MAX_DISPLAY_RESULTS + 3))
+    )
+    shown = display_results("web_search", payload, seen=seen)
+
+    assert len(shown) == MAX_DISPLAY_RESULTS
+    assert len(seen) == MAX_DISPLAY_RESULTS
+    later = display_results("web_search", payload, seen=seen)
+    assert [item["url"] for item in later] == [
+        f"https://site{index}.vn/a"
+        for index in range(MAX_DISPLAY_RESULTS, MAX_DISPLAY_RESULTS + 3)
+    ]
+
+
+def test_a_collapsed_search_still_says_what_it_found() -> None:
+    """Rung two sheds the prose and keeps what a claim can be anchored to."""
+    call = TurnToolCall(
+        id="c1",
+        name="web_search",
+        arguments={"query": "lãi suất"},
+        status=ToolCallStatus.OK,
+        result_text="…",
+        results=tuple(
+            {"title": "t", "url": f"https://site{index}.vn/a", "source": "s", "snippet": "x"}
+            for index in range(COLLAPSED_RESULT_URLS + 2)
+        ),
+    )
+
+    collapsed = _collapsed_result(call)
+
+    assert collapsed.startswith("called web_search with arguments")
+    assert "https://site0.vn/a" in collapsed
+    # The ceiling holds where the ladder fires because the context is already
+    # over budget, and an unbounded number of links there is not a fix.
+    assert collapsed.count("https://") == COLLAPSED_RESULT_URLS
+    assert "snippet" not in collapsed and '"title"' not in collapsed
+
+
+def test_a_collapsed_call_with_no_results_reads_as_it_always_did() -> None:
+    call = TurnToolCall(
+        id="c1",
+        name="get_field",
+        arguments={"field": "price.close", "symbol": "VCB"},
+        status=ToolCallStatus.OK,
+        result_text="…",
+    )
+
+    assert _collapsed_result(call) == (
+        'called get_field with arguments {"field":"price.close","symbol":"VCB"}'
+    )
+
+
+def test_the_links_a_turn_cited_survive_the_ladder_reaching_rung_two() -> None:
+    """A Turn whose early rounds collapsed can still say where a figure came from."""
+    turns = long_history(6)
+    cited = "https://cafef.vn/bai-viet-duy-nhat"
+    first = turns[0]
+    turns = (
+        TranscriptTurn(
+            user_text=first.user_text,
+            tool_calls=tuple(
+                replace(
+                    call,
+                    results=({"title": "t", "url": cited, "source": "cafef.vn", "snippet": "x"},),
+                )
+                for call in first.tool_calls
+            ),
+            assistant_text=first.assistant_text,
+        ),
+        *turns[1:],
+    )
+    intact = build_messages(
+        Transcript(system_prompt="p", turns=turns), ContextBudget(max_tokens=100_000)
+    )
+    squeezed = build_messages(
+        Transcript(system_prompt="p", turns=turns),
+        ContextBudget(max_tokens=intact.estimated_tokens - 200),
+    )
+
+    assert squeezed.results_collapsed >= 1
+    assert any(
+        cited in (message.content or "") for message in squeezed.messages
+    )
+
+
+def test_the_collapse_still_sheds_far_more_than_the_links_cost() -> None:
+    """Rung two fires because the context is already over budget.
+
+    So the invariant is not "the links are cheap" but "the collapse is still a
+    collapse". A whole page of prose leaves; at most five links stay.
+    """
+    call = TurnToolCall(
+        id="c1",
+        name="web_search",
+        arguments={"query": "lãi suất"},
+        status=ToolCallStatus.OK,
+        result_text="y" * 8_000,
+        results=tuple(
+            {
+                "title": "t" * 200,
+                "url": f"https://site{index}.vn/{'a' * 60}",
+                "source": f"site{index}.vn",
+                "snippet": "x" * 280,
+            }
+            for index in range(COLLAPSED_RESULT_URLS + 2)
+        ),
+    )
+
+    assert len(_collapsed_result(call)) < len(shown_result(call)) // 4

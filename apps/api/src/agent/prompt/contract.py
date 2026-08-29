@@ -94,12 +94,19 @@ class RuntimeContext:
             object.__setattr__(self, "user_name", sanitise_name(self.user_name))
 
 
-def _assert_no_formatting_hole(sections: Sequence[PromptSection]) -> None:
+def assert_no_formatting_hole(sections: Sequence[PromptSection]) -> None:
     """Refuse a section body that could be filled in later.
 
     Auditing the call sites proves for today's code that nothing interpolates
     into the prompt; a body with no brace in it proves the same for tomorrow's,
     because there is nothing for a stray ``format`` call to fill.
+
+    Public because it has two callers rather than one: the core below, and a
+    domain pack validating the body it appends to a call
+    (``agent/domain/pack.py``). A pack's prose reaches the model in the same
+    conversation as the core, so it goes through the same gate — and a gate two
+    modules call while wearing an underscore is a name that lies about its
+    reach.
     """
     for section in sections:
         if "{" in section.body or "}" in section.body:
@@ -109,7 +116,7 @@ def _assert_no_formatting_hole(sections: Sequence[PromptSection]) -> None:
             )
 
 
-_assert_no_formatting_hole(SECTIONS)
+assert_no_formatting_hole(SECTIONS)
 
 
 def _static_text(sections: Sequence[PromptSection] = SECTIONS) -> str:
@@ -159,7 +166,7 @@ def render(context: RuntimeContext) -> str:
     return _STATIC_TEXT + "\n\n" + "\n".join(lines) + "\n"
 
 
-def cache_key(model: str, tool_signature: str) -> str:
+def cache_key(model: str, tool_signature: str, pack_identity: str) -> str:
     """The identity of a cacheable prefix.
 
     Model, version and the prompt hash — the hash so that a prose edit which
@@ -168,8 +175,18 @@ def cache_key(model: str, tool_signature: str) -> str:
     cacheable head of the request as the prompt. Caching never changes
     correctness or control flow; this key only decides whether a prefix may be
     reused.
+
+    ``pack_identity`` is required rather than defaulted, and the requirement is
+    the point. Since the prompt came apart into a core and a domain body, two
+    Turns on the same model with the same tools are *not* the same prompt when
+    they run under different packs, and a default here would be a place for the
+    next caller to skip the pack without noticing. Nothing calls this at
+    runtime yet — prompt caching is off — so the strict signature costs one
+    argument today and prevents a silently wrong cache hit later.
     """
-    return "|".join((model, PROMPT_VERSION, PROMPT_HASH, tool_signature))
+    return "|".join(
+        (model, PROMPT_VERSION, PROMPT_HASH, tool_signature, pack_identity)
+    )
 
 
 __all__ = [
@@ -177,6 +194,7 @@ __all__ = [
     "PROMPT_HASH",
     "PROMPT_VERSION",
     "RuntimeContext",
+    "assert_no_formatting_hole",
     "cache_key",
     "contract_hash",
     "prefix",
