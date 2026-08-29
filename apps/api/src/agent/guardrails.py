@@ -92,13 +92,17 @@ class GuardrailThresholds:
     five it needed five byte-identical calls fanned out inside a single round,
     which is the one shape the ladder should not have to depend on.
 
-    ``same_tool_failure_halt_after=6``: the external-call ceiling itself. Six
+    ``same_tool_failure_halt_after=7``: the external-call ceiling itself. Seven
     failures of one tool is that whole allowance spent on nothing, so the two
     numbers are one fact and are written as one — change either and change
-    both. Reached by an ordinary two-calls-a-round fan-out over three rounds.
-    At eight it was unreachable by construction for ``web_search`` and
-    ``fetch_url``: the Turn ran out of calls before the tool ran out of
-    failures.
+    both. It moved from six with the ceiling on 2026-08-29, and following it was
+    the decision rather than the default: the rung means "one tool has failed as
+    much as the whole allowance", and pinning it at six while the allowance grew
+    would quietly turn it into "halt before the budget is spent", a different
+    rule nobody chose. Reached by a two-calls-a-round fan-out over four rounds,
+    or by three then two then two. Above the ceiling it would be unreachable by
+    construction for ``web_search`` and ``fetch_url``: the Turn would run out of
+    calls before the tool ran out of failures.
 
     No import backs those two sentences: this module stays free of the runtime
     it judges, and the equality is held by a test instead.
@@ -108,7 +112,7 @@ class GuardrailThresholds:
     same_tool_failure_warn_after: int = 3
     no_progress_warn_after: int = 2
     exact_failure_block_after: int = 3
-    same_tool_failure_halt_after: int = 6
+    same_tool_failure_halt_after: int = 7
 
 
 DEFAULT_THRESHOLDS = GuardrailThresholds()

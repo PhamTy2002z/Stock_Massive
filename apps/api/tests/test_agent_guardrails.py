@@ -97,8 +97,11 @@ def test_the_block_rung_is_reached_at_one_call_a_round():
 
 def test_the_halt_rung_is_reached_inside_the_external_call_budget():
     # Two searches a round is an ordinary fan-out, not a pathological one, and
-    # six failures is the whole external allowance. Under the old threshold of
-    # eight this could not happen at all: the Turn ran out of calls first.
+    # seven failures is the whole external allowance. Above the ceiling this
+    # could not happen at all: the Turn would run out of calls first. The inner
+    # loop stops on the halt because the executor does — a halted Turn
+    # dispatches nothing more, so a test that kept going would be counting calls
+    # the runtime never makes.
     guardrails = TurnGuardrails()
 
     verdicts = []
@@ -106,6 +109,8 @@ def test_the_halt_rung_is_reached_inside_the_external_call_budget():
         if guardrails.halted:
             break
         for slot in range(2):
+            if guardrails.halted:
+                break
             verdicts.append(
                 guardrails.after_call(
                     "web_search", {"query": f"r{round_index}-{slot}"}, ok=False
@@ -122,11 +127,16 @@ def test_the_halt_rung_is_the_external_call_ceiling():
     assert DEFAULT_THRESHOLDS.same_tool_failure_halt_after == MAX_EXTERNAL_TOOL_CALLS
 
 
-def test_the_sixth_failure_of_one_tool_halts_the_turn():
+def test_the_seventh_failure_of_one_tool_halts_the_turn():
+    """Seven, because the rung is the external-call ceiling and that moved.
+
+    The two numbers are one fact (``guardrails.GuardrailThresholds``), so this
+    count follows ``MAX_EXTERNAL_TOOL_CALLS`` and is not a constant of its own.
+    """
     guardrails = TurnGuardrails()
     verdicts = [
         guardrails.after_call("fetch_url", {"url": f"https://{index}.example"}, ok=False)
-        for index in range(6)
+        for index in range(MAX_EXTERNAL_TOOL_CALLS)
     ]
 
     assert verdicts[-1].verdict is Verdict.HALT
@@ -182,7 +192,7 @@ def test_a_new_answer_clears_the_no_progress_streak():
 
 def test_a_turn_that_resets_starts_from_the_first_rung_again():
     guardrails = TurnGuardrails()
-    for _ in range(6):
+    for _ in range(MAX_EXTERNAL_TOOL_CALLS):
         guardrails.after_call("fetch_url", {"url": "https://a.example"}, ok=False)
     assert guardrails.halted is True
 

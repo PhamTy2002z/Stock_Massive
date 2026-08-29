@@ -21,6 +21,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 
 from src.core.llm import ContentSegment, ImageContent, Message, Role, ToolCall
 from src.core.llm.admission import TURN_CONTEXT_PER_CALL
@@ -169,6 +170,20 @@ class TurnToolCall:
     #: that demands it back demands it for the rounds of the Turn it is
     #: answering, and a closed Turn in the history is accepted without it.
     signature: str | None = None
+    #: What the advisory threat scan made of this call's result.
+    #:
+    #: ``{"risk": ..., "findings": [...]}`` for a call that read outside content,
+    #: ``None`` for everything else. Three risks, and the third one matters: a
+    #: scan that could not finish says ``unknown`` rather than ``low``, because
+    #: "we looked and found nothing" and "we did not look" are different facts.
+    #:
+    #: **It travels to the screen and never to the model.** A warning inside the
+    #: text is a sentence the model has to interpret, and interpreting sentences
+    #: from a page is the surface the attack is aimed at — so :func:`shown_result`
+    #: does not read this and there is no path from here into a message. It is
+    #: for the person, on the channel the person's browser reads, and it is
+    #: carried in ``as_wire`` so a Thread reopened tomorrow still shows it.
+    scan: Mapping[str, Any] | None = None
     #: Task-local declaration snapshot. It is deliberately absent from
     #: :meth:`as_wire`; reconnects have only the persisted public call and use
     #: the conservative registry fallback until typed lifecycle identity lands.
@@ -219,6 +234,15 @@ class TurnToolCall:
             # as it does for the wrapper.
             "kind": EXTERNAL_KIND if self.reads_external else STORE_KIND,
             "outcome": self.outcome,
+            # The advisory scan's verdict, on the payload that is persisted with
+            # the Turn rather than in a column of its own. That choice is the
+            # whole storage decision: this dictionary is already written to
+            # ``agent_message.content`` when the answer commits, so the verdict
+            # survives a reopened Thread and can be counted over a corpus
+            # without a migration, without a second column on the hot trace
+            # table, and without putting an advisory signal inside the trace's
+            # own invariant — that ``result`` holds exactly what the model saw.
+            "scan": dict(self.scan) if self.scan else None,
         }
 
 
@@ -284,7 +308,106 @@ DISPLAY_SNIPPET_CHARS = 280
 MAX_DISPLAY_RESULTS = 10
 
 
-def display_results(name: str, payload: Any) -> tuple[Mapping[str, Any], ...]:
+#: Query parameters that name a campaign rather than a page.
+#:
+#: Measured rather than guessed at: these are the keys a search provider hands
+#: back attached to links whose page is identical without them. The list is
+#: deliberately short and closed — a parameter this does not recognise is left
+#: alone, because dropping one that *does* select content would merge two real
+#: pages into one and silently hide evidence.
+_TRACKING_PARAMS = frozenset(
+    {
+        "fbclid",
+        "gclid",
+        "igshid",
+        "mc_cid",
+        "mc_eid",
+        "msclkid",
+        "ref",
+        "ref_src",
+        "utm_campaign",
+        "utm_content",
+        "utm_id",
+        "utm_medium",
+        "utm_source",
+        "utm_term",
+        "yclid",
+    }
+)
+
+
+def dedup_key(url: str, *, host: str = "") -> str:
+    """What makes two links the same page, for comparison and nothing else.
+
+    **The normalised form is never what gets fetched or shown.** It exists to
+    answer one question — are these two results the same page — and a link is
+    stored and clicked exactly as the provider gave it. That is a design
+    constraint rather than a thing to discover later: stripping a parameter some
+    site happens to route on would turn a working link into a 404 for the
+    reader, and this function has no way to know which sites those are.
+
+    Four reductions, each one a case where two strings name one page: the
+    fragment is a position inside a document rather than a document; ``www.`` is
+    a host prefix that resolves to the same server; a trailing slash on a path is
+    the same path; and the parameters in :data:`_TRACKING_PARAMS` say where a
+    visitor came from rather than what they are looking at. The scheme is
+    dropped for the same reason — ``http`` and ``https`` are one page served two
+    ways, and a provider returning both would otherwise read as two sources.
+
+    A string that is not a link at all comes back empty, and the caller treats
+    an empty key as no key: two results with no link are two results, because
+    the alternative is one unusable key merging everything that lacks one.
+
+    ``host`` is the hostname the backend already built — ``results[].source``,
+    which ``tools/web.py`` derives once when it assembles the item. It is passed
+    in rather than parsed again here so there is one derivation of a hostname in
+    this system and not two that can come to disagree. Parsing is the fallback
+    for a payload that carries no such field.
+    """
+    try:
+        parts = urlsplit(url.strip())
+    except ValueError:
+        return ""
+    host = (host.strip() or parts.hostname or "").lower().removeprefix("www.")
+    if not host:
+        return ""
+    query = "&".join(
+        sorted(
+            f"{key}={value}"
+            for key, value in parse_qsl(parts.query, keep_blank_values=True)
+            if key.lower() not in _TRACKING_PARAMS
+        )
+    )
+    port = f":{parts.port}" if parts.port not in (None, 80, 443) else ""
+    path = parts.path.rstrip("/")
+    return f"{host}{port}{path}?{query}" if query else f"{host}{port}{path}"
+
+
+def _better(candidate: Mapping[str, Any], incumbent: Mapping[str, Any]) -> bool:
+    """Whether ``candidate`` is the copy of a page worth keeping.
+
+    The provider's own position first, because that is the one ordering it
+    committed to; the publication date only breaks a tie. Both fields come off
+    the search item the web tool builds, and a result carrying neither loses to
+    one that arrived earlier — first seen is the stable answer when there is
+    nothing to prefer.
+    """
+    ranks = (_rank_of(candidate), _rank_of(incumbent))
+    if ranks[0] != ranks[1]:
+        return ranks[0] < ranks[1]
+    return str(candidate.get("published_at") or "") > str(
+        incumbent.get("published_at") or ""
+    )
+
+
+def _rank_of(item: Mapping[str, Any]) -> int:
+    value = item.get("rank")
+    return int(value) if isinstance(value, int) and value > 0 else 1_000
+
+
+def display_results(
+    name: str, payload: Any, *, seen: set[str] | None = None
+) -> tuple[Mapping[str, Any], ...]:
     """The part of one tool's result that may be put on a screen.
 
     Separate from ``result_text`` on purpose. ``result_text`` is the whole
@@ -310,6 +433,22 @@ def display_results(name: str, payload: Any) -> tuple[Mapping[str, Any], ...]:
     A tool with nothing worth showing returns nothing, which is the default: a
     tool added later shows a row and no results until somebody decides what of
     it is fit for a screen.
+
+    **``seen`` makes the projection Turn-wide rather than call-wide**, and the
+    scope is the whole reason it is a parameter. Two searches issued in one
+    round routinely land on the same page — measured over a recorded run, 21 of
+    223 links came back to more than one query — and without a set carried
+    across the calls each of them draws that page again. Within a single
+    provider response there is nothing to merge: the same run had **no** call
+    return one link twice, so a deduplication scoped to one payload would be
+    code that never runs, which is the one thing this plan refuses to ship.
+
+    The caller owns the set because the Turn is what the set is about. Passing
+    ``None`` asks the old question — what is in *this* payload — and is what a
+    test or a one-off render wants.
+
+    What is compared is :func:`dedup_key` and never the link itself. The link
+    stored and clicked is the provider's, untouched.
     """
     if not isinstance(payload, Mapping):
         return ()
@@ -317,10 +456,8 @@ def display_results(name: str, payload: Any) -> tuple[Mapping[str, Any], ...]:
         raw = payload.get("results")
         if not isinstance(raw, Sequence) or isinstance(raw, str):
             return ()
-        return tuple(
-            _display_item(item)
-            for item in raw[:MAX_DISPLAY_RESULTS]
-            if isinstance(item, Mapping)
+        return _distinct(
+            [item for item in raw if isinstance(item, Mapping)], seen=seen
         )
     if name == "fetch_url":
         # A page read is one result, and it is only worth a row once it has a
@@ -328,8 +465,59 @@ def display_results(name: str, payload: Any) -> tuple[Mapping[str, Any], ...]:
         # empty heading tells the reader less than no card at all.
         if not payload.get("title") and not payload.get("url"):
             return ()
-        return (_display_item(payload),)
+        return _distinct([payload], seen=seen)
     return ()
+
+
+def _distinct(
+    items: Sequence[Mapping[str, Any]], *, seen: set[str] | None
+) -> tuple[Mapping[str, Any], ...]:
+    """The results worth drawing, in the order they arrived, each page once.
+
+    Two passes, and they are not the same question. The first collapses copies
+    *inside* this payload, where the better copy wins — a page returned at rank
+    two and again at rank five is one page, and the reader should be shown the
+    provider's better placement of it. The second drops what the Turn has drawn
+    already, where the *earlier* copy wins by having been drawn: retracting a
+    source from a row that is already on screen would be a row rewriting itself.
+
+    A result with no usable link keeps its place. It cannot be compared, and
+    treating "no key" as a key would merge every such result into one.
+    """
+    best: dict[str, Mapping[str, Any]] = {}
+    order: list[str | int] = []
+    loose: dict[int, Mapping[str, Any]] = {}
+    for position, item in enumerate(items):
+        key = dedup_key(
+            str(item.get("url") or ""), host=str(item.get("source") or "")
+        )
+        if not key:
+            loose[position] = item
+            order.append(position)
+            continue
+        if key not in best:
+            best[key] = item
+            order.append(key)
+        elif _better(item, best[key]):
+            best[key] = item
+
+    kept: list[Mapping[str, Any]] = []
+    for slot in order:
+        # The ceiling is checked before the set is written, not after. Marking a
+        # link as drawn and then dropping it for want of room would hide it from
+        # every later call of the Turn as well, which is the one way this can
+        # lose a source outright.
+        if len(kept) >= MAX_DISPLAY_RESULTS:
+            break
+        if isinstance(slot, int):
+            kept.append(_display_item(loose[slot]))
+            continue
+        if seen is not None:
+            if slot in seen:
+                continue
+            seen.add(slot)
+        kept.append(_display_item(best[slot]))
+    return tuple(kept)
 
 
 #: What a call yielded, where that is a different question from whether it ran.
@@ -532,6 +720,44 @@ def _display_text(value: Any, limit: int) -> str:
     return " ".join(value.split())[:limit]
 
 
+#: How many of a collapsed call's links survive the collapse.
+#:
+#: A ceiling because rung two of the ladder fires precisely when the context is
+#: already over its budget, and a fix that hands back an unbounded number of
+#: tokens at that moment is not a fix. Five is the width of one search
+#: (``tools/web.py``'s ``MAX_RESULTS``), so an ordinary search keeps all of its
+#: links and only a page that returned more than a search does gives any up.
+COLLAPSED_RESULT_URLS = 5
+
+
+def _collapsed_result(call: TurnToolCall) -> str:
+    """One collapsed call, as the model reads it after rung two of the ladder.
+
+    What the collapse throws away is a whole page of prose, which is the point.
+    What it must not throw away is the *identity* of what the call found, and
+    that identity was in two places, only one of which survived.
+
+    The arguments survived and always did: ``fetch_url``'s ``url`` and
+    ``web_search``'s ``query`` are in the encoded argument object, so a model
+    reading a collapsed line still knows what was asked. Rebuilding those here
+    would be paying twice for one fact.
+
+    The links the search *found* did not survive, and they are what an answer
+    points at. A Turn whose early rounds have collapsed could still name a
+    figure it read and no longer had any way to say where it came from — which
+    is the one property this plan is about. So the links come back, and the
+    titles and snippets do not: a link is what a claim is anchored to, and the
+    prose is what the collapse was called to shed.
+    """
+    line = f"called {call.name} with arguments {_compact(call.arguments)}"
+    links = [
+        str(item.get("url") or "")
+        for item in call.results[:COLLAPSED_RESULT_URLS]
+        if str(item.get("url") or "")
+    ]
+    return f"{line}; results: {' '.join(links)}" if links else line
+
+
 def shown_result(call: TurnToolCall) -> str:
     """What the model reads for one finished call, in the one place it is built.
 
@@ -666,6 +892,23 @@ class TranscriptTurn:
     assistant_text: str | None = None
     #: What the reader attached to this question. Frozen, so a tuple.
     attachments: tuple[TurnAttachment, ...] = ()
+    #: The names of the tools this Turn called, and nothing else about them.
+    #:
+    #: A second field rather than a thinner ``tool_calls``, because the two are
+    #: read by different things for different reasons. ``tool_calls`` is the
+    #: exchange the model is shown again, and a Turn reconstructed from the
+    #: store never has it: the constructor trims older Turns to their prose, so
+    #: rehydrating a full call — arguments, result, status — would put every
+    #: earlier tool result back into every later request. What survives in the
+    #: transcript row is the list of names, and a *name* is enough to answer the
+    #: one question a later Turn asks of an earlier one: did this thread already
+    #: reach for the domain.
+    #:
+    #: Nothing in :func:`build_messages` reads this. That is the point, and a
+    #: test holds it: a field the constructor consulted would be a field that
+    #: changed what the model sees, which is exactly what leaving ``tool_calls``
+    #: empty was protecting.
+    tool_names: tuple[str, ...] = ()
 
     @property
     def completed_calls(self) -> tuple[TurnToolCall, ...]:
@@ -907,7 +1150,7 @@ def _turn_messages(
         )
         for call in calls:
             if call.id in collapsed:
-                body = f"called {call.name} with arguments {_compact(call.arguments)}"
+                body = _collapsed_result(call)
             else:
                 body = shown_result(call)
             messages.append(
@@ -1031,6 +1274,7 @@ def build_messages(
 __all__ = [
     "ANSWER",
     "CHARS_PER_TOKEN",
+    "COLLAPSED_RESULT_URLS",
     "DISPLAY_SNIPPET_CHARS",
     "MAX_DISPLAY_RESULTS",
     "MAX_SUMMARY_CHARS",
@@ -1052,6 +1296,7 @@ __all__ = [
     "TurnAttachment",
     "TurnToolCall",
     "build_messages",
+    "dedup_key",
     "display_results",
     "estimate_tokens",
     "outcome_of",
