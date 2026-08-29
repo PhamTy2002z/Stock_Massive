@@ -1,7 +1,7 @@
 ---
 title: "Composer Attachments"
 description: "Menu + của composer thôi là sáu row inert: tệp và ảnh đi thật tới model qua một đường có kế toán token đúng, chụp màn hình đi cùng đường, row nghiên cứu sâu nhận đúng một badge trung thực."
-status: in-progress
+status: done
 priority: P2
 effort: "10 phase"
 tags: [web, api, llm, upload, security, freeze-amendment]
@@ -150,12 +150,12 @@ injected, and nothing else"*) và `ToolContext.symbol` (phải `None` ở lane c
 ## Success Criteria
 
 - [x] Một message có ảnh cho `estimate_tokens` **lớn hơn** placeholder của nó, và trong một hệ số đã nêu so với `usage.input_tokens` route trả về
-- [ ] `vision_input` pass **qua `Message`/`as_wire` thật**, với `prompt_cache_control` cả tắt và bật; hoặc fork chỉ-tệp-text đã chọn có ghi lý do
+- [x] `vision_input` pass **qua `Message`/`as_wire` thật**, với `prompt_cache_control` cả tắt và bật — 3/3 lượt PASS, `plans/reports/probe-260829-vision-route.md`; fork không kích hoạt
 - [x] Nạp một ảnh qua UI → model mô tả được nội dung ảnh
-- [ ] `GET /attachments/{id}` trả bytes **không hỏng** qua proxy Next (so byte-for-byte)
+- [x] `GET /attachments/{id}` trả bytes **không hỏng** qua proxy Next — SHA-256 khớp cả hai chiều trên bản production thật, `e2e/composer-attach.spec.ts::an attachment survives the Next proxy byte for byte`
 - [x] Một ảnh chứa dòng chữ chỉ thị không đổi được hành vi model; một giá chỉ xuất hiện trong ảnh không được nêu mà không qua `check_price_claim`
 - [x] Một tệp `text/plain` 28 ký tự vẫn được bọc (không lọt `MIN_WRAP_CHARS`)
-- [ ] Quota per-user (số hàng + tổng bytes) từ chối được vòng lặp nạp; hàng không gắn Turn có TTL
+- [x] Quota per-user (số hàng + tổng bytes) từ chối được vòng lặp nạp; hàng không gắn Turn có TTL — `tests/test_agent_attachments.py::TestQuota` (429 `attachment_quota_rows` / `attachment_quota_bytes`) và `::TestSweep`
 - [x] Retry và resend một Turn có ảnh gửi lại đúng danh sách đính kèm
 - [x] Thread nhiều lượt: ảnh của lượt trước **không** được gửi lại ở lượt sau
 - [x] Mở lại thread cũ vẽ lại đính kèm, không gọi model
@@ -163,7 +163,7 @@ injected, and nothing else"*) và `ToolContext.symbol` (phải `None` ở lane c
 - [x] `AttachMenu` có test đầu tiên: đúng bốn row mang badge, hai row không, mọi row disabled có `aria-describedby`
 - [x] `alembic heads` một head sau migration; parent đọc lúc thi công
 - [x] `docs/roadmap.md` có ghi chú UI ở đúng phase Track S
-- [ ] `260827-2325/phase-02` đã hẹp cả bảng hành động **và** Success Criteria **và** contract test
+- [x] `260827-2325/phase-02` đã hẹp cả bảng hành động **và** Success Criteria **và** contract test a11y, kèm khối đảo tiền đề giữ nguyên văn lý lẽ cũ
 - [x] `make test` · `pnpm type-check` `lint` `test` `build` pass
 
 ## Red Team Review

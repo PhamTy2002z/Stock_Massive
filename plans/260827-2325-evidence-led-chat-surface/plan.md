@@ -15,7 +15,13 @@ relatedTo: [260826-2158-study-artifact-canvas]
 # AttachMenu handler thật, nên phép xoá toàn phần hết cơ sở. Xem khối đảo
 # tiền đề trong phase-02.
 # 260828-2126-price-basis-and-signal-field-spine đóng 2026-08-29 (9/9 phase) → nhả chặn.
-blockedBy: [260829-0010-composer-attachments]
+# 2026-08-29: composer-attachments đóng 10/10 → nhả chặn.
+# 2026-08-29: chặn mới hẹp hơn — chỉ phase 09 và 10. Phase 09 phơi
+# MAX_TOOL_ROUNDS/MAX_EXTERNAL_TOOL_CALLS ra UI làm tier, và
+# 260829-1349-c1-search-and-evidence phase 04 đang đổi đúng hai số đó;
+# phase 10 là mặt UI của citation mà C1 phase 05 sinh ra ở backend.
+# Phase 01-08 web thuần, KHÔNG bị chặn — chạy song song được.
+blockedBy: [260829-1349-c1-search-and-evidence]
 ---
 
 # Plan: Evidence-Led Chat Surface
