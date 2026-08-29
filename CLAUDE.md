@@ -116,7 +116,7 @@ Repo vừa rẽ khỏi "nền tảng dữ liệu chứng khoán" sang "AI produc
    | `apps/web/src/components/alpha/message/source-pill.tsx` | **thêm 2026-08-29 lúc thi công phase 06** — `distinctDomains` nâng lên `types.ts` để rail và pill dùng chung một phép đếm; file này **chỉ** đổi import, không đổi một dòng render nào |
    | `.gitignore` | **thêm 2026-08-29 lúc soát lại phase 08** — phase 01 đã thêm khối ignore cho `golden/artifacts/*` (giữ `.gitkeep`) mà bảng chưa ghi; artifact nghiệm thu commit bằng `git add -f`, không cần ngoại lệ thứ hai |
    | `apps/api/tests/*` · `apps/web/src/**/*.test.tsx` | test cho mọi surface trên |
-   | `docs/roadmap.md` · `CLAUDE.md` | §1, §3 C1/C2 — **không** đụng Track S. **Nới 2026-08-29 lúc đóng plan** cho §3 **C4** và §6: C4-lite dựng ở C1 làm hai dòng của C4 sai sự thật ("Đo chất lượng: không có"), và §6 phải nói cạnh C0→C1 đóng với nhãn `Target`. Chỉ sửa mô tả trạng thái; **không** đổi Objective, Boundary hay Gate của C4, và vẫn không đụng Track S |
+   | `docs/roadmap.md` · `CLAUDE.md` | §1, §3 C1/C2 — **không** đụng Track S. **Nới 2026-08-29 lúc đóng plan** cho §3 **C4** và §6: C4-lite dựng ở C1 làm hai dòng của C4 sai sự thật ("Đo chất lượng: không có"), và §6 phải nói cạnh C0→C1 đóng với nhãn `Target` — **thay bởi amendment 19:45 cùng ngày**, cạnh đó giờ đóng với nhãn `Current`. Chỉ sửa mô tả trạng thái; **không** đổi Objective, Boundary hay Gate của C4, và vẫn không đụng Track S |
 
    Bảng này **là** ranh giới. File ngoài bảng cần amendment mới. Soát lại lúc đóng
    plan 2026-08-29: mọi file tám phase sửa đều có dòng. `src/agent/evidence/` và
@@ -173,6 +173,50 @@ Repo vừa rẽ khỏi "nền tảng dữ liệu chứng khoán" sang "AI produc
    cũ vào **mọi** request sau. Tên thì đã nằm sẵn trên dòng đang đọc, và tên là
    trọn vẹn thứ một Turn sau cần biết về một Turn trước.
 
+   **Mở thêm 2026-08-29, đóng cùng ngày** cho plan
+   `plans/260829-1945-c1-evidence-graduation/` — C1 tốt nghiệp `Target` →
+   `Current`. Plan bốn phase; **phase 02 dừng có chủ đích** (xem dưới), nên bề
+   mặt thật sự sửa hẹp hơn bảng dự kiến:
+
+   | Surface | Giới hạn |
+   |---|---|
+   | `apps/api/tests/{test_agent_tool_executor,test_agent_untrusted_results,test_agent_persistence_paths}.py` | test tích hợp cho scan persistence; **thêm ở cuối file**, không reflow test đang có |
+   | `apps/api/tests/golden/test_run.py` (mới) | `read_case` chiếu `scan` từ message đã persist |
+   | `apps/api/tests/agent_tool_world.py` | **nới lúc đóng plan** — `ADVERSARIAL_PAGE` về đúng một chỗ thay vì bốn bản chép tay; bốn test khẳng định trên verdict của **chính** văn bản đó, nên một bản trôi đi sẽ để một file pass trên trang không ai quét. Chỉ thêm một hằng, không đụng `isolated_registry`/`stub_entry`/`echo` |
+   | `docs/roadmap.md` · `CLAUDE.md` | §3 C1 → `Current`, §3 C4 nhận tiêu chí citation, §6 cạnh C0→C1. **Không** đụng Track S |
+   | `plans/260829-1349-c1-search-and-evidence/plan.md` | **chỉ** một con trỏ kế nhiệm; không viết lại kết luận cũ |
+   | `plans/260829-1945-c1-evidence-graduation/*` | plan + bốn phase file (status/evidence) + hai report mới trong `reports/` |
+
+   **0 file production sửa.** Chuỗi `executor → as_wire → agent_message.content
+   JSONB → read_case` đã đúng từ phase 07; thứ thiếu là **bằng chứng**, không
+   phải code. **`executor._dispatch` cố ý không bọc `try` quanh
+   `scan_for_threats`** — hàm đó có `except Exception` bao trùm trả
+   `risk: "unknown"`, tức nó total theo hợp đồng viết trong docstring của chính
+   nó; một guard ở executor sẽ là nhánh không bao giờ chạy, và nó sẽ dời luật
+   "fail-open tuyệt đối" ra khỏi chỗ luật đó thuộc về. Không migration, không đổi schema, `golden/web_first.json` và
+   `golden/artifacts/*` nguyên vẹn.
+
+   **`golden/numeric_evidence.py` KHÔNG tồn tại, và đừng viết nó.** Phase 02
+   định thay phép so bag-of-numbers bằng witness suy diễn. Đo trước khi viết
+   (`reports/phase-01-260829-derivation-depth.md`) cho kết quả dừng: tập premise
+   một case là **109–310 số**, và **sau khi đã siết ba chiều** (chỉ hệ số độ lớn ·
+   toán hạng ≥3 chữ số nghĩa · bỏ ×100) tập toán hạng vẫn còn **38–221 số**. Một
+   phép `+ − × ÷` trên đó chạm **92,7–100%** toàn bộ không gian giá trị ba chữ số
+   ở **bốn trên năm** case (`wf-012` 55,2%, vì tập của nó nhỏ nhất) — nên mọi số
+   **bịa** cũng tìm được witness: false-accept **39/40**. Bỏ phép nhị phân thì
+   recall sập **3/9**. Ngưỡng an toàn đòi tập toán hạng **≤8 số** — bất khả. Một thiết kế
+   thứ ba (toán hạng chỉ lấy từ số câu trả lời đã tự có nguồn) hạ phủ xuống
+   1,4–25,7% nhưng recall còn 6/9 và vẫn nhận sai 28%, kèm witness vòng tròn
+   (`wf-012`: `100` được đỡ bằng `25 + 75`, mà `75` sinh ra *từ* `100`).
+   Kết luận là **số học, không phải thiếu công sức**: n toán hạng với 4 phép
+   sinh ~4n² ứng viên, và 4n² vượt xa 900 thì phủ kín. Đo citation cần đổi
+   **thứ runtime phát ra** — claim-provenance contract — và việc đó **thuộc C4**.
+
+   **Đính chính report cũ:** `phase-08-260829-c1-verification.md` ghi grader sai
+   "5/5". Đúng là **4/5**. `wf-012` là finding **thật** — câu trả lời nói room
+   ngoại HPG tối đa `100%` và không trang nào trong bằng chứng của case nói trần
+   room của HPG. Report gốc **giữ nguyên**, không viết lại lịch sử.
+
 Nguồn data ngoài duy nhất được phép: **vnstock Bronze giai đoạn dev
 (180 req/phút), Diamond khi lên prod (600 req/phút, licence phân phối
 ≤500 user)**. DNSE, FiinQuant, CafeF **vi phạm điều khoản SaaS** — code đã rip
@@ -188,11 +232,11 @@ Authority: **`docs/roadmap.md`** — hai track, mỗi phase có Objective ·
 Trước→Sau · checklist · gate. Tóm tắt:
 
 - **Track C — Core harness (mọi user):** C0 nền lane chat (Current, xong
-  2026-08-25) · C1 search & tổng hợp có citation (**vẫn Target sau nghiệm thu
-  2026-08-29** — 8/8 phase thi công xong, nhưng tiêu chí *"số ngoài store không
-  citation = 0"* **chưa có công cụ đo hợp lệ**: grader sai 5/5 vì không thấy được
-  số suy diễn. Xem `plans/reports/phase-08-260829-c1-verification.md`) · C2
-  context & cache ·
+  2026-08-25) · C1 search & tổng hợp có citation (**Current, tốt nghiệp
+  2026-08-29** — ba gate đo được đều đạt; tiêu chí *"số ngoài store không citation
+  = 0"* **chuyển sang C4** vì đo được là nó bất khả với một grader đọc văn bản trả
+  lời. Xem `plans/260829-1945-c1-evidence-graduation/reports/graduation-report.md`)
+  · C2 context & cache ·
   C3 tool plane / nudge có trần / idempotency · C4 evaluator plane (Golden
   Question Set, dựng lại sau khi rip eval) · C5 domain pack + progressive
   instruction (Phase 1 cũ) · C6 tenant / permission / entitlement (Phase 2

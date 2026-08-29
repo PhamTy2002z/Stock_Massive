@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Adversarial scan persistence"
-status: pending
+status: done
 priority: P1
 effort: "5h"
 dependencies: [1]

@@ -61,11 +61,11 @@ metric nào chứng minh · lấy invariant nhỏ hơn được không*.
 | Blog | **Coordination cost thật — 1 loop trước, split khi có boundary** | Đúng: 1 loop, không subagent | C7 chỉ mở khi đo được |
 | Blog | **Checkpoint · idempotency · retry không duplicate** | Freeze-never-resume có; `ToolIdempotency` khai nhưng nhiều tool `UNKNOWN`, executor chưa dùng | C3 |
 | Blog | **Human là một node** | Policy trong prompt; chưa có approval node | S2 |
-| Blog | **Evals quyết định graph** | **Một phần, 2026-08-29.** C4-lite ở `apps/api/golden/` — 20 câu web-first, 4 grader deterministic, `make golden-run`/`golden-grade`, ba artifact. Đã quyết một việc thật: C1 giữ nhãn `Target` vì số, không vì cảm giác. Chưa có LLM judge, chưa fail-closed CI | C4 |
+| Blog | **Evals quyết định graph** | **Một phần, 2026-08-29.** C4-lite ở `apps/api/golden/` — 20 câu web-first, 4 grader deterministic, `make golden-run`/`golden-grade`, ba artifact. Đã quyết hai việc thật bằng số, **không lượt chạy mới nào**: C1 giữ `Target` ở lần chấm đầu, rồi tốt nghiệp `Current` khi authority của `read_depth` chốt về bar từng case — cùng ba artifact, chấm lại miễn phí. Và tiêu chí citation chuyển sang C4 vì đo được là nó bất khả với một grader đọc văn bản. Chưa có LLM judge, chưa fail-closed CI | C4 |
 | Hermes | **Guard fail-open**: chậm/rẻ/ồn được, trắng màn hình không | `signal_desk` mode có mã lỗi có tên; lane chat còn cửa `incomplete` | C3 |
 | Hermes | **Nudge tổng hợp có trần** thay vì kết thúc Turn | `MAX_EMPTY_NUDGES = 1`, trần theo lần | C3: trần theo tiền + câu backend-authored |
 | Hermes | **Progress event mang nội dung thật** (query, số nguồn, domain) | **Đóng 2026-08-29 mà không dựng event nào.** `progress.py` vẫn không tồn tại và `EventType` vẫn đúng 8 member — dữ liệu đã ở trên dây từ trước: query qua `tool.call.summary`, số nguồn + domain trong payload. Việc thật là **vẽ** chúng, và chỗ trống là **branch row** của một round (nơi truy vấn song song rơi vào); `SingleCallRow` đã vẽ sẵn. Đếm **publisher khác nhau**, không đếm kết quả | C1 ✔ |
-| Hermes | Quét pattern injection trên nội dung web (lớp duy nhất còn thiếu trong 5 lớp) | **Đóng 2026-08-29.** `untrusted.scan_for_threats` + `threat_patterns.py`: 2 scope (`strict` loại có lý do — nó bảo vệ agent ghi được filesystem), NFKC + 17 ký tự ẩn/bidi, fail-open tuyệt đối, trần 0,25 s, quét ở executor **đúng một lần mỗi kết quả**. Đo trên corpus: **0 `risk: high` / 97 kết quả** trang lành — chứng minh không kêu bậy, **không** chứng minh bắt được injection thật (nửa đó bằng test) | C1 ✔ |
+| Hermes | Quét pattern injection trên nội dung web (lớp duy nhất còn thiếu trong 5 lớp) | **Đóng 2026-08-29.** `untrusted.scan_for_threats` + `threat_patterns.py`: 2 scope (`strict` loại có lý do — nó bảo vệ agent ghi được filesystem), NFKC + 17 ký tự ẩn/bidi, fail-open tuyệt đối, trần 0,25 s, quét ở executor **đúng một lần mỗi kết quả**. Đo trên corpus: **0 `risk: high` / 97 kết quả** trang lành — chứng minh không kêu bậy. Nửa "bắt được injection thật" chứng minh **2026-08-29** bằng 11 test tích hợp đi đúng đường production tới persist/reopen, non-vacuity bằng mutation | C1 ✔ |
 | Hermes | **Ký ức đi qua tool**, không chèn free-text vào prompt | Đúng: `remember_fact/recall_facts` | C5 giữ |
 | Hermes | **Không copy**: sandbox, TUI, 7 tầng fallback, SQLite, MoA | — | Rejected |
 | OpenCode | **Capability resolution plane** một declaration | `ToolEntry` đã gom schema/trust/idempotency/concurrency | C3 hoàn thiện |
@@ -84,7 +84,7 @@ metric nào chứng minh · lấy invariant nhỏ hơn được không*.
 user ──▶ TurnService._execute (turns.py) — TurnMode chat|signal_desk, budget admission
            ▼
         AgentLoop (loop.py) ◀──────────────────────┐ cycle ≤ MAX_TOOL_ROUNDS=4
-           │ core/llm: typed errors, compact on     │ MAX_EXTERNAL_TOOL_CALLS=6
+           │ core/llm: typed errors, compact on     │ MAX_EXTERNAL_TOOL_CALLS=7
            │ ContextOverflow, reduce on OutputCap   │ MAX_EMPTY_NUDGES=1
            ▼                                       │
         executor.run_calls — fan-out song song ────┘ one-call-one-result
@@ -97,9 +97,9 @@ user ──▶ TurnService._execute (turns.py) — TurnMode chat|signal_desk, bu
         events.py SSE ─▶ apps/web    ·    _finish / _finish_bare — hai cửa ra duy nhất
 ```
 
-Edge **chưa có**: nhiều truy vấn web song song có tổng hợp · prune trước
-summary · checkpoint giữa round · evaluator ngoài luồng · fan-in Study → thesis
-· human-approval node.
+Edge **chưa có**: prune trước summary · checkpoint giữa round · evaluator ngoài
+luồng · fan-in Study → thesis · human-approval node. (*Nhiều truy vấn web song
+song có tổng hợp* đã rời danh sách này 2026-08-29: `parallel_rate` 63% ≥ 50%.)
 
 ---
 
@@ -114,7 +114,7 @@ Một loop, 4 bundle, 11 tool, budget arithmetic, typed recovery, repetition
 ladder `allow→warn→block→halt`, SSE replay, freeze-never-resume. Đây là
 baseline mọi "Trước" bên dưới đo từ đó.
 
-### C1 — Search & tổng hợp có bằng chứng — **Target**
+### C1 — Search & tổng hợp có bằng chứng — **Current**
 
 **Objective.** AI tìm rộng hơn, đọc nhiều hơn, tổng hợp thành một câu trả lời
 có trích dẫn — và nói thẳng chỗ không tìm được.
@@ -124,7 +124,7 @@ có trích dẫn — và nói thẳng chỗ không tìm được.
 | Truy vấn web / Turn | Song song **đã chạy** — `executor.py:268-278` `asyncio.gather`, `web_search` khai `PARALLEL_SAFE`. Đo 2026-08-29: **8/70 round** (11,4%) có ≥2 truy vấn, max 3; theo đơn vị Turn là 21/43. Trần ≤ 6 external call cắt ngang mục tiêu | 2–3 truy vấn **song song** một round, còn ≥ 2 call để đọc trang. **Làm 2026-08-29:** trần Turn 6 → **7** (`loop.py`), `same_tool_failure_halt_after` đi theo, `PROMPT_VERSION` 2.10.0 thêm section §5 về cách tiêu bảy lượt đó |
 | Trang đọc / Turn | Đo hậu rip: **0,3 `fetch_url`/Turn chạm web** (3 call / 10 Turn), 0/10 Turn đọc ≥2 trang; cắt 20k **đầu** trang | 3–4 trang, dedup domain, và một tín hiệu tin cậy domain — repo chỉ có denylist, nên hình dạng tín hiệu chốt ở C1 phase 03 (điểm từ nguồn tìm · bảng tĩnh nhỏ · hoặc chỉ `rank` + `published_at`) |
 | Kết quả cho model | snippet 700 ký tự; `published_at` **đã có** (`tools/web.py:503`), thiếu đúng `rank` và tín hiệu tin cậy | **Làm 2026-08-29:** `rank` (1-based, thứ tự nguồn trả) + `relevance` (điểm khớp truy vấn của nhà cung cấp, đặt tên đúng thứ nó đo). **`domain_trust` chốt là không làm** — repo không có whitelist, điểm của Tavily là độ khớp truy vấn chứ không phải độ tin cậy publisher, và một bảng tĩnh tự viết là nợ bảo trì kèm thiên vị. `fetch_url` nhận `looking_for` và trả đoạn khớp, giữ nguyên văn, theo thứ tự trang |
-| Câu trả lời | có thể "hiểu 10" nhưng chỉ dẫn được 1 nguồn | mâu thuẫn giữa nguồn **đã được nêu** (đo: wf-011 nêu tên hai nguồn và lượng hoá chênh lệch). Còn *"mỗi con số ngoài store có citation"* **chưa đo được** — grader `uncited_external_number` sai 5/5 vì không thấy được số suy diễn; xem Gate |
+| Câu trả lời | có thể "hiểu 10" nhưng chỉ dẫn được 1 nguồn | mâu thuẫn giữa nguồn **đã được nêu** (đo: wf-011 nêu tên hai nguồn và lượng hoá chênh lệch). Tiêu chí *"mỗi con số ngoài store có citation"* **chuyển sang C4** — nó cần một claim-provenance contract, không đo được bằng grader đọc văn bản trả lời; xem Gate |
 | Người dùng thấy | "đang tìm…" | **Làm 2026-08-29:** query nguyên văn đã hiện từ trước qua `tool.call.summary`; phần thiếu là **số publisher khác nhau + domain** trên branch row của một round — chỗ các truy vấn song song rơi vào. Đếm publisher khác nhau chứ không đếm kết quả: năm trang từ hai tờ báo là hai nguồn, vẽ năm dấu là nói câu trả lời được đối chứng gấp hai lần rưỡi thực tế |
 | Bảo mật | 4 lớp | **Làm 2026-08-29:** 5 lớp — thêm `scan_for_threats` (NFKC + gỡ 17 ký tự ẩn/bidi, hai scope, fail-open tuyệt đối, trần thời gian 0,25s). Cờ lưu trong `TurnToolCall.as_wire()` → `agent_message.content` JSONB: durable, không migration, không cột trên bảng nóng. **Không bao giờ vào text gửi model** |
 
@@ -139,7 +139,7 @@ Không cần subagent.
 - [x] Quét pattern injection trên visible text (mẫu Hermes `threat_patterns`), fail-open: gắn cờ, không chặn. Hai scope (`all` + `context`); **`strict` loại có lý do** — nó bảo vệ agent ghi được filesystem, lane này không có tool nào như vậy. Quét ở `executor` **đúng một lần mỗi kết quả**, không trên đường render — `agent/threat_patterns.py`, `agent/untrusted.py::scan_for_threats`, `agent/executor.py`
 - [x] Citation retention: rung 2 của thang trim giữ **danh sách URL của kết quả** (trần 5), bỏ title và snippet; `url`/`query` vốn đã sống trong `arguments` nên không dựng lại — `agent/messages.py::_collapsed_result`, test transcript
 
-**Gate — chạy 2026-08-29, C1 KHÔNG tốt nghiệp, nhãn giữ `Target`.**
+**Gate — chạy 2026-08-29, C1 tốt nghiệp, nhãn `Current`.**
 Ba lượt Golden Set web-first (n = 20 mỗi lượt), chấm bằng cùng một grader.
 Ngưỡng chốt ở `apps/api/golden/README.md`; lý lẽ đầy đủ ở
 `plans/reports/phase-08-260829-c1-verification.md`.
@@ -154,13 +154,31 @@ Ngưỡng chốt ở `apps/api/golden/README.md`; lý lẽ đầy đủ ở
 | chi phí/Turn P50 | 45.484 | 60.107 | **58.222** µUSD | < 500.000 | đạt |
 | `uncited_external_number` | 11/16 | 12/16 | **11/16** | **không gate** | **công cụ hỏng** |
 
-**Hai lý do không tốt nghiệp.** (1) Tiêu chí *"câu có số ngoài store mà không
-citation = 0"* **chưa có công cụ đo hợp lệ**: grader sai **5/5** — mọi case nó
-đánh trượt đều là câu trả lời trung thực, và số bị gắn cờ đều là số **suy ra**
-(hiệu hai nguồn, phần trăm, đổi đơn vị `tỷ`→`nghìn tỷ`) từ số đã có nguồn. Hai
-câu trả lời **tốt nhất** lượt chạy bị đánh trượt vì đã tính một phép trừ.
-(2) `read_depth` phát biểu phẳng cho 14/20, dưới khởi điểm và giảm 2 case so
-lượt trước — dao động thật ở n = 20, nhưng **chưa chứng minh được** cải thiện.
+**Ba gate đạt, tiêu chí thứ tư chuyển chủ.** `distinct_domains` 19/20 (≥18),
+`read_depth` 18/20 theo bar của từng case (≥16), `parallel_rate` 63% (≥50%).
+
+`read_depth` có **đúng một** authority: **bar của từng case** (`expect.min_pages_read`).
+Phát biểu phẳng `fetch_url ≥ 2` cho 14/20 là **diagnostic**, không phải gate — nó
+không đọc bar của case, nên một case khai `min_pages_read: 1` bị nó tính là trượt
+dù đúng hợp đồng. Ngưỡng sống một chỗ: `apps/api/golden/README.md`.
+
+**Tiêu chí *"số ngoài store không citation = 0"* chuyển sang C4, không bị bỏ.**
+Đo 2026-08-29 (`plans/260829-1945-c1-evidence-graduation/reports/phase-01-260829-derivation-depth.md`):
+nó **không đo được bằng một grader đọc văn bản trả lời**, và đó là kết luận số
+học chứ không phải thiếu công sức. Tập premise của một case là 109–310 số, và
+**sau khi siết ba chiều** (chỉ hệ số độ lớn · toán hạng ≥3 chữ số nghĩa · bỏ ×100)
+tập toán hạng vẫn còn **38–221 số**. Một phép `+ − × ÷` trên tập đó chạm
+**92,7–100%** toàn bộ không gian giá trị ba chữ số ở **bốn trên năm** case
+(`wf-012` 55,2%, tập nhỏ nhất), nên mọi số bịa cũng tìm được "witness":
+false-accept **39/40**. Bỏ phép nhị phân thì recall sập còn **3/9**. Muốn
+false-accept dưới 5% thì tập toán hạng phải **≤8 số** — bất khả. Đo được nó cần runtime **ghi lại provenance của từng khẳng định**, tức
+một hợp đồng mới, và đó là C4.
+
+**Đính chính report cũ:** không phải "5/5 false positive" mà là **4/5**. `wf-012`
+là finding **thật** — câu trả lời nói room ngoại HPG tối đa `100%`, và không trang
+nào trong bằng chứng của case nói trần room của HPG (kết quả gần nhất là một doanh
+nghiệp khác "nới room lên 50%"). Đó là hằng số model tự cấp. 8/9 số bị gắn cờ là
+suy diễn hợp lệ, 1/9 là finding thật. Report gốc giữ nguyên, không viết lại.
 
 **Một confound phải đọc kèm mọi delta:** lượt cuối chạy ở `PROMPT_VERSION` 3.0.0
 còn lượt trước ở 2.10.0 — chênh lệch đó là của **C5**, không phải của phase
@@ -171,15 +189,23 @@ mỗi 5 kết quả** một truy vấn trả về đã được một call trư�
 Nguồn được vẽ giảm 18,4% mà `distinct_domains` giữ nguyên 19/20 — bỏ bản trùng,
 không bỏ phạm vi phủ.
 
-**Lớp quét injection:** 97 kết quả được quét, **0 `risk: high`, 0 `unknown`**.
-Chứng minh nó không kêu bậy trên trang thị trường lành; **không** chứng minh nó
-bắt được injection thật — trang thật model đọc không mang injection, và corpus
-không dựng được nội dung trang. Nửa đó chứng minh bằng test. Hiển thị cảnh báo
-trên rail **chưa bật**: 0/97 không phân biệt "không kêu bậy" với "không kêu".
+**Lớp quét injection — cả hai nửa, 2026-08-29.** Nửa *"không kêu bậy"*: corpus
+cho **0 `risk: high`, 0 `unknown` / 97 kết quả** trang thị trường lành. Nửa *"có
+bắt được injection thật không"* **không** chứng minh được bằng corpus — trang thật
+model đọc không mang injection, và corpus không dựng được nội dung trang — nên nó
+chứng minh bằng **11 test tích hợp** đi đúng đường production: văn bản
+tấn công từ handler ngoài → `executor` quét **đúng một lần** dù transcript dựng lại
+ba lần → `as_wire` → `agent_message.content` JSONB → mở lại thread và
+`golden.run.read_case` đọc ra **cùng một verdict**. Ba trạng thái đều phủ
+(`high`/`low`/`unknown` khi scanner hỏng, fail-open, câu trả lời vẫn chạy), và
+**không** ký tự nào của kẻ tấn công hay `risk` nào lọt vào transcript gửi model.
+Non-vacuity chứng minh bằng mutation: bỏ `scan` khỏi `as_wire` → test đỏ. **0 file
+production phải sửa** — chuỗi đã đúng từ trước, thứ thiếu là bằng chứng.
 
-**Việc còn lại của C1:** grader thấy được số suy diễn (điều kiện để tiêu chí
-citation đo được) · `read_depth` phẳng chứng minh ở n lớn hơn · đo lớp quét trên
-nội dung có injection thật.
+**Việc còn lại, đã chuyển chủ:** claim-provenance contract → **C4** ·
+`read_depth` phẳng ở n lớn hơn → diagnostic, không chặn ·
+hiển thị cảnh báo quét trên rail → vẫn tắt (0/97 không phân biệt "không kêu bậy"
+với "không kêu").
 
 ### C2 — Context & cache — **Target**
 
@@ -247,12 +273,17 @@ câu web-first, grader deterministic bốn chỉ số, `make golden-run`/`golden
 ba artifact đã chạy. Nó **không phải** C4: không LLM judge, không CI fail-closed,
 không replay từ Turn thật. C4 tiếp tục từ đó chứ không dựng lại từ đầu.
 
+**C1 để lại cho C4 một câu hỏi đã đóng và một việc mở.** Đóng: *"grader thấy được
+số suy diễn"* là **ngõ cụt đã đo**, đừng thử lại — chi tiết ở
+`plans/260829-1945-c1-evidence-graduation/reports/phase-01-260829-derivation-depth.md`.
+Mở: đo citation cần đổi **thứ runtime phát ra**, không phải đổi grader.
+
 | | Trước | Sau |
 |---|---|---|
 | Đo chất lượng | **Có một phần** — C4-lite: 20 câu + 4 grader deterministic, chạy được bằng `make`, chấm lại cho kết quả giống hệt | + LLM judge offline; + corpus ngoài họ web-first |
 | Chặn hồi quy | review tay | gate fail-closed trên PR đổi prompt/prune/tool |
 | Baseline | **Có cho họ web-first** — `distinct_domains` · `read_depth` · `parallel_rate` · latency P50 · chi phí/Turn, ngưỡng chốt ở `golden/README.md` | + grounding · empty-after-tools · invalid args · warn/block/halt · token |
-| Citation | **Chưa đo được.** Grader `uncited_external_number` sai 5/5 vì không thấy số suy diễn (hiệu hai nguồn, phần trăm, đổi đơn vị) — nó ở lại như phép đếm, không gate | grader thấy được số suy diễn |
+| Citation | **C4 sở hữu tiêu chí này từ 2026-08-29** (chuyển từ C1). Đo được rồi: một grader đọc văn bản trả lời **không thể** phân biệt số suy diễn thật với số bịa — tập toán hạng sau khi siết vẫn 38–221 số, một phép nhị phân chạm 92,7–100% không gian giá trị ở bốn trên năm case. `uncited_external_number` ở lại như phép đếm, không gate | **claim-provenance contract**: runtime ghi premise + phép biến đổi cho từng khẳng định, grader **verify** thay vì **tìm kiếm** |
 
 **Boundary.** Evaluator là node **ngoài luồng** — không tăng latency người
 dùng (blog G3/G8).
@@ -270,7 +301,7 @@ dùng (blog G3/G8).
       `runtime_constants` (đủ để nhận ra lượt nào chạy dưới prompt hai tầng),
       nhưng **không ghi `DomainPack.identity`** — hai lượt dưới hai pack body
       khác nhau sinh metadata không phân biệt được. Một dòng, cùng chỗ
-- [~] Grader deterministic — **bốn cái chạy**; `citation còn?` **chưa đo được** (xem bảng trên). Chưa có: có desk? đúng Study? `outcome` khớp? frames không lọt?
+- [~] Grader deterministic — **bốn cái chạy**; `citation còn?` **cần claim-provenance contract**, không phải grader tốt hơn (xem bảng trên). Chưa có: có desk? đúng Study? `outcome` khớp? frames không lọt?
 - [ ] LLM judge chỉ grounding/completeness, có CI
 - [ ] Replay từ `agent_turn` thật ẩn danh, không gọi provider — C4-lite tape **web** ở `WebLane.read`, model vẫn live; replay Turn là việc khác
 - [~] `make golden-run`/`golden-grade` có, JSON là authority. Còn: **gate policy fail-closed**
@@ -460,7 +491,7 @@ sau khi cây sạch.
 
 `as_of` phiên 2026-08-27, Universe 30 mã. `test_agent_signal_desk` **11 passed**.
 
-### S1 — Thư viện Study + desk theo mã — **Conditional** (cần C1, C4)
+### S1 — Thư viện Study + desk theo mã — **Conditional** (cần C4 — C1 ✔ 2026-08-29)
 
 **Objective.** Một mã → nhiều góc nhìn trong một Turn; Study đủ nhiều để câu
 hỏi thường gặp có công thức.
@@ -558,12 +589,15 @@ C5 ─▶ C6 ──────────────┘    │
                      (C1,C4)  (C3,C6)  (C6)
 ```
 
-**Trạng thái cạnh C0→C1, 2026-08-29.** Tám phase của C1 thi công xong, nhưng C1
-**giữ nhãn `Target`**: hai gate trượt (xem §C1). Cạnh này **không chặn** C2 —
-C2 sở hữu `messages`/`core/llm` và không phụ thuộc kết quả đo của C1. Nó **có**
-chặn phần citation của C4: tiêu chí *"số ngoài store không citation = 0"* chưa có
-công cụ đo hợp lệ, nên grader số suy diễn là việc phải làm trước khi C4 phát biểu
-được gate đó.
+**Trạng thái cạnh C0→C1, 2026-08-29 — đóng.** C1 mang nhãn **`Current`**: ba gate
+đo được đều đạt (`distinct_domains` 19/20 · `read_depth` 18/20 · `parallel_rate`
+63%), và lớp quét injection đã chứng minh đầu-cuối qua persist/reopen. **C2 mở.**
+
+Tiêu chí citation **chuyển sang C4** thay vì giữ C1 ở `Target`, và lý do là cạnh
+trong chính sơ đồ này: **C4 phụ thuộc C1**. Để C1 chờ công cụ mà chỉ C4 dựng được
+là khoá chết vòng tròn. Nó không bị bỏ — C4 khai nó thành claim-provenance
+contract, và ngõ cụt "grader số suy diễn" đã đo xong nên C4 không phải trả lại
+tiền học phí đó.
 
 C1–C3 (owner `tools/web`, `messages`, `executor`) và C5–C6 (owner `prompt`,
 `toolsets`, `auth`, `budget`) không giao nhau về file → chạy song song hai

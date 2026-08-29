@@ -1,13 +1,24 @@
 ---
 phase: 2
 title: "Evidence witness grader"
-status: pending
+status: blocked
 priority: P1
 effort: "7h"
 dependencies: [1]
 ---
 
 # Phase 2: Evidence witness grader
+
+> **DỪNG — 2026-08-29. Không thi công, và đó là kết quả đúng.**
+> Đo trước khi viết (`reports/phase-01-260829-derivation-depth.md`): tập premise
+> một case là 109–310 số, và **sau khi siết ba chiều** tập toán hạng vẫn còn
+> **38–221 số**. Một phép `+ − × ÷` trên đó chạm **92,7–100%** toàn bộ không gian
+> giá trị ba chữ số ở bốn trên năm case (`wf-012` 55,2%) — mọi số **bịa** cũng tìm
+> được witness: false-accept **39/40**; bỏ phép nhị phân thì recall còn **3/9**.
+> An toàn đòi tập toán hạng **≤8 số**: bất khả. Đây là điều khoản dừng của chính
+> phase này ("*if still non-zero, stop and replan toward an explicit
+> claim-provenance contract in C4*"). `golden/numeric_evidence.py` **không được
+> viết**; grader **không** bị nới. Tiêu chí chuyển sang **C4**.
 
 ## Context Links
 

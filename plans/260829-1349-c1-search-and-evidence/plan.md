@@ -233,6 +233,15 @@ Red-team đầy đủ: `plans/reports/red-team-260829-1411-c1-search-and-evidenc
 
 ## Kết quả nghiệm thu — 2026-08-29
 
+> **Kế nhiệm, 2026-08-29 muộn hơn cùng ngày:** C1 **đã tốt nghiệp `Current`** qua
+> `plans/260829-1945-c1-evidence-graduation/`. Kết luận bên dưới **đúng tại thời
+> điểm chạy** và giữ nguyên, không viết lại. Hai điều plan kế nhiệm đo lại được:
+> (1) *"grader thấy được số suy diễn"* — việc plan này giao lại — là **ngõ cụt đã
+> chứng minh**, tiêu chí citation chuyển sang **C4** dưới dạng claim-provenance
+> contract; (2) con số *"grader sai 5/5"* đúng ra là **4/5** — `wf-012` là finding
+> thật. Chi tiết:
+> `plans/260829-1945-c1-evidence-graduation/reports/graduation-report.md`.
+
 **Tám phase thi công xong. C1 KHÔNG tốt nghiệp; nhãn roadmap giữ `Target`.**
 Báo cáo đầy đủ: `plans/reports/phase-08-260829-c1-verification.md`.
 Ngưỡng chốt: `apps/api/golden/README.md`.

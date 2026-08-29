@@ -1,10 +1,10 @@
 ---
 title: "C1 Evidence Graduation"
-description: "Đóng C1 bằng grader số có witness, kiểm thử injection đầu-cuối và một graduation contract không còn mâu thuẫn."
-status: pending
+description: "Đóng C1 bằng một graduation contract không còn mâu thuẫn và kiểm thử injection đầu-cuối; grader số suy diễn đo ra là bất khả nên tiêu chí citation chuyển sang C4."
+status: done
 priority: P1
 effort: "19h"
-branch: "feat/study-canvas-runtime"
+branch: "develop"
 tags: [harness, measurement, security, backend, critical]
 blockedBy: []
 blocks: []
@@ -50,10 +50,10 @@ và Price Basis đã đóng; plan này không chạm surface riêng của chúng
 
 | # | Phase | Status | Dependency |
 |---|---|---|---|
-| 01 | [Freeze contract and plan boundaries](./phase-01-freeze-contract-and-plan-boundaries.md) | Pending | — |
-| 02 | [Evidence witness grader](./phase-02-evidence-witness-grader.md) | Pending | 01 |
-| 03 | [Adversarial scan persistence](./phase-03-adversarial-scan-persistence.md) | Pending | 01 |
-| 04 | [Regrade and graduate C1](./phase-04-regrade-and-graduate-c1.md) | Pending | 02, 03 |
+| 01 | [Freeze contract and plan boundaries](./phase-01-freeze-contract-and-plan-boundaries.md) | **Done** | — |
+| 02 | [Evidence witness grader](./phase-02-evidence-witness-grader.md) | **Blocked — dừng có chủ đích** | 01 |
+| 03 | [Adversarial scan persistence](./phase-03-adversarial-scan-persistence.md) | **Done** | 01 |
+| 04 | [Regrade and graduate C1](./phase-04-regrade-and-graduate-c1.md) | **Done** | 03 (02 dừng) |
 
 ## Execution Strategy
 
@@ -63,18 +63,41 @@ worktree cho tới khi prerequisite C1/C5 được commit hoặc cô lập an to
 
 ## Success Criteria
 
-- [ ] `read_depth` dùng đúng một gate: ≥16/20 case đạt `min_pages_read`; metric
-      phẳng `fetch_url >= 2` chỉ diagnostic.
-- [ ] Grader giải thích mỗi số được phủ bằng raw evidence hoặc witness tree hữu hạn.
-- [ ] Calibration giữ số thật/suy diễn hợp lệ và vẫn bắt claim không có evidence.
-- [ ] Threat scan `high|low|unknown` đi executor → wire → persisted assistant
-      message → reopened thread; scan text không vào model transcript.
-- [ ] Ba artifact cũ regrade deterministic bằng cùng code; không cần network/DB/model.
-- [ ] C1 chỉ thành `Current` khi gate đạt; C5 vẫn giữ trạng thái riêng.
-- [ ] Focused tests + full API test/lint xanh; web gates chỉ bắt buộc nếu wire shape đổi.
+- [x] `read_depth` dùng đúng một gate: ≥16/20 case đạt `min_pages_read` (**18/20**);
+      metric phẳng `fetch_url >= 2` (14/20) chỉ diagnostic.
+- [~] **Grader witness — không đạt và không được đạt.** Đo cho thấy witness tree
+      hữu hạn nhận 92,7–100% mọi giá trị ở bốn trên năm case; tiêu chí chuyển sang
+      C4. Xem phase 02.
+- [~] **Calibration — cùng lý do.** 39/40 mutation bịa qua được ở mọi mức siết.
+- [x] Threat scan `high|low|unknown` đi executor → wire → persisted assistant
+      message → reopened thread; scan text **không** vào model transcript. 11 test,
+      non-vacuity chứng minh bằng mutation.
+- [x] Ba artifact regrade deterministic bằng cùng code, byte-identical; 0 USD.
+- [x] C1 → `Current` khi ba gate đo được đạt; **C5 giữ nguyên trạng thái**.
+- [x] Focused (107) + full API test (**1690 passed**) + lint xanh; web gates
+      **không áp dụng** — 0 file dưới `src/` hay `apps/web/` bị sửa.
+
+## Kết quả — 2026-08-29 · **ĐÓNG**
+
+**C1 tốt nghiệp `Target` → `Current`.** Ba gate đạt (`distinct_domains` 19/20 ·
+`read_depth` 18/20 · `parallel_rate` 63%); lớp quét injection chứng minh đầu-cuối;
+tiêu chí citation **chuyển sang C4** dưới dạng claim-provenance contract, kèm
+bằng chứng nó bất khả với một grader đọc văn bản. **0 file production sửa.**
+
+Hai concern của phase 03 đã đóng: `ADVERSARIAL_PAGE` gom về
+`tests/agent_tool_world.py`; `executor._dispatch` **giữ nguyên** không bọc `try`
+— `scan_for_threats` total theo hợp đồng, guard sẽ là nhánh chết. Không còn gap.
+
+Báo cáo: [`reports/graduation-report.md`](./reports/graduation-report.md) ·
+đo derivation depth: [`reports/phase-01-260829-derivation-depth.md`](./reports/phase-01-260829-derivation-depth.md).
 
 ## Unresolved Questions
 
-None. Phase 01 đo derivation depth thật rồi đóng cap; không đoán trước.
+1. **Claim-provenance contract có hình dạng gì** — runtime suy provenance, hay
+   prompt buộc model trưng phép tính rồi grader verify. Thuộc plan của C4.
+2. **`read_depth` phẳng chưa chứng minh ở n = 20** — không chặn (diagnostic), nhưng
+   cache `WebLane` khiến chạy thêm lượt trong ngày không tăng n hiệu dụng.
+3. **Chưa đo lớp quét trên trang thật mang injection** — test dùng payload dựng sẵn.
+4. **Ai sở hữu và chấm Golden Set** — nợ cũ, corpus vẫn do C4-lite tự viết.
 
 <!-- slug: c1-evidence-graduation -->

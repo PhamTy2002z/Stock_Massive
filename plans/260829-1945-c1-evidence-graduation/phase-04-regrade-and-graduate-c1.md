@@ -1,10 +1,10 @@
 ---
 phase: 4
 title: "Regrade and graduate C1"
-status: pending
+status: done
 priority: P1
 effort: "3h"
-dependencies: [2, 3]
+dependencies: [3]  # 02 dừng có chủ đích — xem phase-02
 ---
 
 # Phase 4: Regrade and graduate C1

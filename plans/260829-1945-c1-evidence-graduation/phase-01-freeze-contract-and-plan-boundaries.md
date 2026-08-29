@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Freeze contract and plan boundaries"
-status: pending
+status: done
 priority: P1
 effort: "4h"
 dependencies: []

@@ -141,14 +141,23 @@ before the corpus existed got it wrong:
   unreachable.
 - **`distinct_domains` is per-case, not a flat three.** The corpus declares a bar
   of 2 for ten cases and 3 for ten. The grader scores each case against its own.
+- **`read_depth` is per-case too, and that is its only authority.** The flat
+  statement `fetch_url >= 2` is a **diagnostic** and never a gate. It cannot read
+  a case's own bar, so it fails a case declaring `min_pages_read: 1` that met its
+  contract exactly. Both numbers are reported; only the per-case one decides.
 
 ### Why `uncited_external_number` does not gate
 
-It was read against every case it failed on the final run. **Five out of five were
-honest, well-sourced answers.** Every flagged figure was either a unit conversion
-(a page writes `tỷ`, the answer writes `nghìn tỷ`) or arithmetic over numbers that
-*are* covered — the difference between two sources, a percentage of a position, a
-figure the question itself supplied.
+It was read against every case it failed on the final run. **Four out of five were
+honest, well-sourced answers**, and eight of the nine flagged figures were either a
+unit conversion (a page writes `tỷ`, the answer writes `nghìn tỷ`) or arithmetic
+over numbers that *are* covered — the difference between two sources, a percentage
+of a position, a figure the question itself supplied.
+
+The fifth, `wf-012`'s `100`, is a **real finding**: the answer states a foreign
+ownership ceiling of `100%` for HPG and no page in that case's evidence says what
+HPG's ceiling is — the nearest result is a headline about a *different* company
+raising its own to 50%. It is a constant the model supplied, not one it read.
 
 The grader asks *does this number appear verbatim in the evidence*. The criterion
 asks *is this number supported by the evidence*. Those coincide for an answer that
@@ -156,9 +165,27 @@ only copies, and separate the moment an answer does arithmetic — which is exac
 what the `conflicting_or_missing` family asks for. The two best answers of the run
 were failed for computing a subtraction.
 
-So it stays in the file as a **count worth reading** and is never a verdict. The
-real fix is a grader that can see a derived figure; that is a phase, not a
-threshold.
+So it stays in the file as a **count worth reading** and is never a verdict.
+
+**And the "real fix" named here was tried, measured, and abandoned — do not
+rebuild it.** A grader that searches for a derivation cannot work at this corpus's
+scale, and the reason is arithmetic rather than effort. One case's premise set runs
+to **109–310 numbers**, and tightening three ways at once — magnitude-word scales
+only, operands of three significant digits or more, no ×100 — still leaves **38–221
+operands**. A single `+ − × ÷` over that reaches **92.7–100% of the entire
+three-significant-digit value space** on four of the five cases (`wf-012`, the
+smallest pool, reaches 55.2%), so a fabricated number finds a "witness" just as
+easily as an honest one: **39 of 40** fabricated mutations were accepted. Dropping the binary operation cut
+false accepts but took recall down to **3 of 9**. Keeping false accepts under 5%
+requires an operand pool of **eight numbers or fewer**; the real pools are an
+order of magnitude past that. A third design, restricting operands to figures the
+answer itself already grounded, cut the reachable space to 1.4–25.7% but recalled
+only 6 of 9 and still accepted 28% — and it justified `wf-012`'s `100` with
+`25 + 75`, where `75` is the figure the answer derived *from* `100`.
+
+Measuring this criterion needs the runtime to **record what each claim was derived
+from**. That is a claim-provenance contract, and it belongs to C4. Full numbers:
+`plans/260829-1945-c1-evidence-graduation/reports/phase-01-260829-derivation-depth.md`.
 
 ## What the artifact carries beyond the four graders
 
