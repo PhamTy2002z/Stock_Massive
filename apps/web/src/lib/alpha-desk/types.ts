@@ -143,6 +143,36 @@ export function toolCallKind(call: ToolCall): ToolCallKind {
 }
 
 /**
+ * Every distinct publisher behind these calls, in the order they were first seen.
+ *
+ * Distinct, because that is the question a reader is asking. Three searches that
+ * all came back with the same newspaper rested on one source, and a count of
+ * results would say three — overstating how much of the answer was corroborated
+ * rather than repeated.
+ *
+ * Order is first-seen rather than sorted: only the first few marks are drawn,
+ * and the source the answer leaned on first is a better thing to show than
+ * whichever hostname happens to sort earliest.
+ *
+ * The hostname is read off `source`, which the backend derived once when it
+ * built the result. Parsing the link again here would be a second derivation of
+ * one fact, free to disagree with the first.
+ */
+export function distinctDomains(calls: ToolCall[]): string[] {
+  const seen = new Set<string>()
+  const domains: string[] = []
+  for (const call of calls) {
+    for (const result of call.results) {
+      const domain = result.source.trim()
+      if (domain === "" || seen.has(domain)) continue
+      seen.add(domain)
+      domains.push(domain)
+    }
+  }
+  return domains
+}
+
+/**
  * One source a tool call turned up, as the reader is shown it.
  *
  * **Every string here was written by somebody else.** It is the visible text of

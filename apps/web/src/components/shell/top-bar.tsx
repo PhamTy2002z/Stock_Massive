@@ -1,14 +1,15 @@
 "use client"
 
-import { ChevronDown, Download, Pencil, Pin, Trash2 } from "lucide-react"
+import * as React from "react"
+import { ChevronDown, EyeOff, Pencil, Pin, PinOff, Trash2 } from "lucide-react"
 
 import { VisgniteMark } from "@/components/shared/visgnite-logo"
-import { useThreads } from "@/hooks/use-threads"
+import { useDeleteThread, useThreads, useUpdateThread } from "@/hooks/use-threads"
 import { cn } from "@/lib/utils"
 
 import { useDesk } from "./desk-state"
 import { IconButton, Menu, MenuItem, MenuSeparator } from "./primitives"
-import { threadTitle } from "./sidebar"
+import { RenameField, threadTitle } from "./sidebar"
 import { useShell } from "./shell-state"
 
 /**
@@ -18,14 +19,24 @@ import { useShell } from "./shell-state"
  * with the last of the market surfaces (2026-08-26). What stays is the title
  * of the current conversation — everything else in the row belonged to lenses
  * the harness lane no longer offers. Workspace actions live in its own header.
+ *
+ * The menu behind the chevron writes for real. It was drawn inert against an
+ * API that "creates, lists and reads Threads and nothing more" — a sentence
+ * that stopped being true once the sidebar's own menu started pinning,
+ * renaming and deleting through `PATCH` and `DELETE`. Both menus now act on
+ * the same three endpoints, so the same gesture means the same thing whichever
+ * corner the reader reaches for.
  */
 export function TopBar() {
   const { state, dispatch } = useShell()
   const desk = useDesk()
   const threads = useThreads(true)
+  const update = useUpdateThread()
+  const remove = useDeleteThread()
+  const [renaming, setRenaming] = React.useState(false)
 
   const current = threads.data?.threads.find((row) => row.id === desk.threadId)
-  const title =
+  const fullTitle =
     state.view === "news"
       ? "Tin tức thị trường"
       : state.view === "board"
@@ -35,8 +46,55 @@ export function TopBar() {
           : current
             ? threadTitle(current.title, current.updated_at)
             : "Hội thoại"
+  const title = shorten(fullTitle)
 
   const menuOpen = state.overlay === "thread"
+  const pinned = current?.pinned_at != null
+
+  const closeMenu = React.useCallback(
+    () => dispatch({ type: "overlay", overlay: null }),
+    [dispatch],
+  )
+
+  // Opening another conversation abandons a rename left in flight. The field
+  // stands in for the name of a Thread, and the Thread it was naming is gone.
+  React.useEffect(() => setRenaming(false), [desk.threadId])
+
+  const pin = React.useCallback(() => {
+    if (current === undefined) return
+    closeMenu()
+    update.mutate({ threadId: current.id, pinned: !pinned })
+  }, [closeMenu, current, pinned, update])
+
+  const rename = React.useCallback(() => {
+    if (current === undefined) return
+    closeMenu()
+    setRenaming(true)
+  }, [closeMenu, current])
+
+  const drop = React.useCallback(() => {
+    if (current === undefined) return
+    closeMenu()
+    // The conversation on screen cannot survive its own Thread. This menu only
+    // ever names the open one, so the empty composer is always where it lands.
+    remove.mutate(current.id, { onSuccess: () => desk.newThread() })
+  }, [closeMenu, current, desk, remove])
+
+  // The letters printed down the right edge of the menu, made true. Bound only
+  // while the menu is open, because a bare `d` that deletes a conversation from
+  // anywhere would fire on the first word typed into the composer.
+  React.useEffect(() => {
+    if (!menuOpen) return
+    function onKey(event: KeyboardEvent) {
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      const act = { p: pin, r: rename, d: drop }[event.key.toLowerCase()]
+      if (act === undefined) return
+      event.preventDefault()
+      act()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [menuOpen, pin, rename, drop])
 
   return (
     <header className="flex flex-none items-center gap-2 px-5 py-3">
@@ -47,49 +105,100 @@ export function TopBar() {
           one thing on it that is neither a control nor part of what the reader
           came to look at — the list already says which conversation is open,
           one corner away. The chevron goes with it rather than being left
-          naming nothing: every row in the menu it opens is inert in this
-          release, so nothing reachable is lost, and switching the desk off
-          brings the title and the menu back together. */}
-      {!state.signalDesk && (
-        <div className="relative flex min-w-0 items-center gap-1">
-          <h1 className="min-w-0 truncate text-[0.95rem] font-normal text-ink-2">{title}</h1>
-          <IconButton
-            label="Tuỳ chọn hội thoại"
-            size="sm"
-            aria-expanded={menuOpen}
-            aria-haspopup="menu"
-            onClick={(event) => {
-              event.stopPropagation()
-              dispatch({ type: "overlay", overlay: menuOpen ? null : "thread" })
-            }}
-            className="rounded-[7px]"
-          >
-            <ChevronDown className="size-[15px]" strokeWidth={1.7} />
-          </IconButton>
+          naming nothing: switching the desk off brings the title and the menu
+          back together. */}
+      {!state.signalDesk &&
+        (renaming && current !== undefined ? (
+          // The name, as a text field, in the place the name was. A dialog to
+          // change one word would take the reader off the conversation they are
+          // reading; the field commits and abandons by the same three keys the
+          // sidebar's rename does, because it is the same field.
+          <div className="min-w-0 max-w-[26rem] flex-1">
+            <RenameField
+              row={current}
+              onDone={(next) => {
+                setRenaming(false)
+                if (next !== null && next !== (current.title ?? "")) {
+                  update.mutate({ threadId: current.id, title: next })
+                }
+              }}
+            />
+          </div>
+        ) : (
+          <div className="relative flex min-w-0 items-center gap-1">
+            <h1
+              title={title === fullTitle ? undefined : fullTitle}
+              className="min-w-0 truncate text-[0.95rem] font-normal text-ink-2"
+            >
+              {title}
+            </h1>
+            <IconButton
+              label="Tuỳ chọn hội thoại"
+              size="sm"
+              aria-expanded={menuOpen}
+              aria-haspopup="menu"
+              onClick={(event) => {
+                event.stopPropagation()
+                dispatch({ type: "overlay", overlay: menuOpen ? null : "thread" })
+              }}
+              className="rounded-[7px]"
+            >
+              <ChevronDown className="size-[15px]" strokeWidth={1.7} />
+            </IconButton>
 
-          {menuOpen && (
-            <Menu className="absolute left-0 top-[34px] min-w-[236px] rounded-xl">
-              {/* Pinning, renaming, exporting and deleting a Thread each need an
-                  endpoint the API does not expose yet — the transport creates,
-                  lists and reads Threads and nothing more. Drawn and inert rather
-                  than hidden, so the shape of the menu matches the reference. */}
-              <MenuItem icon={<Pin className="size-4 text-ink-4" strokeWidth={1.6} />} hint="P" disabled>
-                Ghim
-              </MenuItem>
-              <MenuItem icon={<Pencil className="size-4 text-ink-4" strokeWidth={1.6} />} hint="R" disabled>
-                Đổi tên
-              </MenuItem>
-              <MenuItem icon={<Download className="size-4 text-ink-4" strokeWidth={1.6} />} hint="E" disabled>
-                Xuất PDF
-              </MenuItem>
-              <MenuSeparator />
-              <MenuItem icon={<Trash2 className="size-4" strokeWidth={1.6} />} hint="D" destructive disabled>
-                Xoá
-              </MenuItem>
-            </Menu>
-          )}
-        </div>
-      )}
+            {/* The same 212px the sidebar's per-Thread menu is: it is the same
+                menu over the same four writes, and two widths for one object
+                read as two different menus. Fixed rather than grown to fit, so
+                the box does not change shape when Ghim becomes Bỏ ghim. */}
+            {menuOpen && (
+              <Menu className="absolute left-0 top-[34px] w-[212px] rounded-xl">
+                {/* Every row is dead while the bar names a conversation that
+                    does not exist yet — there is nothing on the server to pin,
+                    rename or delete until the first question opens one. */}
+                <MenuItem
+                  icon={
+                    pinned ? (
+                      <PinOff className="size-4 text-ink-4" strokeWidth={1.6} />
+                    ) : (
+                      <Pin className="size-4 text-ink-4" strokeWidth={1.6} />
+                    )
+                  }
+                  hint="P"
+                  disabled={current === undefined}
+                  onClick={pin}
+                >
+                  {pinned ? "Bỏ ghim" : "Ghim"}
+                </MenuItem>
+                {/* Read state is not a thing a Thread has: the API carries no
+                    such field, so there is nothing to write and nothing for the
+                    list to draw differently. Left as the shape of the row it
+                    will be, badged as unavailable rather than wired to a value
+                    this browser would be the only holder of. */}
+                <MenuItem icon={<EyeOff className="size-4 text-ink-4" strokeWidth={1.6} />} hint="U" disabled quiet>
+                  Đánh dấu chưa đọc
+                </MenuItem>
+                <MenuItem
+                  icon={<Pencil className="size-4 text-ink-4" strokeWidth={1.6} />}
+                  hint="R"
+                  disabled={current === undefined}
+                  onClick={rename}
+                >
+                  Đổi tên
+                </MenuItem>
+                <MenuSeparator />
+                <MenuItem
+                  icon={<Trash2 className="size-4" strokeWidth={1.6} />}
+                  hint="D"
+                  destructive
+                  disabled={current === undefined}
+                  onClick={drop}
+                >
+                  Xoá
+                </MenuItem>
+              </Menu>
+            )}
+          </div>
+        ))}
 
       {/* Sharing a conversation is a property of the conversation, so the
           control belongs to the bar above it — not to a panel that may not be
@@ -108,6 +217,25 @@ export function TopBar() {
       )}
     </header>
   )
+}
+
+/** Words kept from a conversation's name in the bar above it. */
+const TITLE_WORDS = 6
+
+/**
+ * The name of a conversation, cut to the first few words.
+ *
+ * A Thread is named after the sentence that opened it, so the name is a whole
+ * question and the bar is wide enough to print most of one. `truncate` alone
+ * cuts wherever the column happens to end, which makes the same conversation
+ * read differently at two window widths. Cutting by words instead gives the
+ * row a length of its own; the CSS clip stays as the second gate for a name
+ * with no spaces in it. The full name rides along as the tooltip.
+ */
+function shorten(name: string): string {
+  const words = name.split(/\s+/).filter(Boolean)
+  if (words.length <= TITLE_WORDS) return name
+  return `${words.slice(0, TITLE_WORDS).join(" ")}…`
 }
 
 /**

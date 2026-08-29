@@ -1,6 +1,6 @@
 "use client"
 
-import type { ToolCall } from "@/lib/alpha-desk/types"
+import { distinctDomains, type ToolCall } from "@/lib/alpha-desk/types"
 import { cn } from "@/lib/utils"
 import { SourceChips } from "./source-chips"
 
@@ -45,25 +45,4 @@ export function SourcePill({
       </button>
     </div>
   )
-}
-
-/**
- * Every distinct page behind these calls, in the order they were first seen.
- *
- * Order matters because the chips show only the first few: the earliest source
- * is the one the answer leaned on first, which is a better thing to show than
- * whichever happened to sort first.
- */
-function distinctDomains(toolCalls: ToolCall[]): string[] {
-  const seen = new Set<string>()
-  const domains: string[] = []
-  for (const call of toolCalls) {
-    for (const result of call.results) {
-      const domain = result.source.trim()
-      if (domain === "" || seen.has(domain)) continue
-      seen.add(domain)
-      domains.push(domain)
-    }
-  }
-  return domains
 }

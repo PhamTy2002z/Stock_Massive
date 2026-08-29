@@ -484,7 +484,7 @@ function ThreadMenu({
  * list has. Committing on blur rather than discarding, because the user typed
  * the name they wanted and clicking away is not a retraction.
  */
-function RenameField({
+export function RenameField({
   row,
   onDone,
 }: {

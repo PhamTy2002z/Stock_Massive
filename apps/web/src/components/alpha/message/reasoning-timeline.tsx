@@ -7,6 +7,7 @@ import { toolCallEmptyLabel, toolCallErrorLabel } from "@/lib/alpha-desk/copy"
 import { signalIssueSentence } from "@/lib/signal-issues"
 import {
   answeredNothing,
+  distinctDomains,
   outcomeIssue,
   toolCallKind,
   type Thought,
@@ -264,6 +265,49 @@ function RailRow({
   )
 }
 
+/**
+ * How many publishers one finished lookup came back with, and which ones.
+ *
+ * **Distinct publishers, not results.** A search returning five pages from two
+ * newspapers rested on two sources, and drawing five marks would tell a reader
+ * the answer was corroborated two and a half times more than it was. The count
+ * beside them is the same number for the same reason.
+ *
+ * The hostnames are the backend's own (`results[].source`), so nothing here
+ * parses a link a second time. They reach the screen as text and as marks and
+ * never as markup: every one of these strings was written by somebody else, and
+ * the rule that holds for the source list holds for a line beside a spinner.
+ *
+ * The full list rides in `title` because the marks are a glance and a glance is
+ * not readable. Three discs say *it went and looked, at these sorts of places*;
+ * the names say which, without the row having to grow to hold them.
+ */
+function SourceTally({ call }: { call: ToolCall }) {
+  const domains = distinctDomains([call])
+  // A call that reports a count but carries no projection of what it found —
+  // a Turn stored before the sources travelled — keeps the sentence it always
+  // had. Saying nothing there would be a row that ran and found nothing, which
+  // is the opposite of what happened.
+  if (domains.length === 0) {
+    return call.result_count > 0 ? (
+      <span className="ml-auto flex-none text-meta leading-[22px] text-muted-foreground">
+        {call.result_count} kết quả
+      </span>
+    ) : null
+  }
+
+  return (
+    <span
+      className="ml-auto flex flex-none items-center gap-[0.55rem] text-meta leading-[22px] text-muted-foreground"
+      title={domains.join(", ")}
+    >
+      {domains.length} nguồn
+      <SourceChips sources={domains} />
+    </span>
+  )
+}
+
+
 /** A round with exactly one tool call: its own row, its own result count. */
 function SingleCallRow({ call, isLast }: { call: ToolCall; isLast: boolean }) {
   const [expanded, setExpanded] = useState(false)
@@ -304,10 +348,7 @@ function SingleCallRow({ call, isLast }: { call: ToolCall; isLast: boolean }) {
           answers with one figure and no sources, so "0 kết quả" beside a call
           that succeeded said the opposite of what happened. */}
       {call.status === "ok" && !answeredNothing(call) && toolCallKind(call) === "external" && (
-        <span className="ml-auto flex flex-none items-center gap-[0.55rem] text-meta leading-[22px] text-muted-foreground">
-          {call.result_count} kết quả
-          <SourceChips sources={call.results.map((result) => result.source)} />
-        </span>
+        <SourceTally call={call} />
       )}
     </div>
   )
@@ -443,6 +484,13 @@ function GroupRow({ calls, isLast }: { calls: ToolCall[]; isLast: boolean }) {
                 {toolCallEmptyLabel(call.outcome)}
               </span>
             )}
+            {/* The branch rows are where the parallel searches land, and they
+                were the one place the count and the marks were missing: a round
+                of three searches said what each one asked and nothing about what
+                any of them found. */}
+            {call.status === "ok" &&
+              !answeredNothing(call) &&
+              toolCallKind(call) === "external" && <SourceTally call={call} />}
           </div>
         ))}
       </div>

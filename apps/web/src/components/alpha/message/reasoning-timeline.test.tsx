@@ -535,3 +535,137 @@ describe("a round of store reads", () => {
     expect(screen.getByText("Đã chạy 2 truy vấn")).toBeInTheDocument()
   })
 })
+
+/**
+ * A rail that says what each lookup asked and nothing about what it found tells
+ * a reader the Turn was busy, not whether the answer rests on anything. The
+ * facts were already on the wire — `results[].source` and `result_count` — and
+ * had simply never been drawn on the rows where the parallel searches land.
+ */
+describe("how many publishers a lookup came back with", () => {
+  const twoDomains = [
+    result({ url: "https://cafef.vn/a", source: "cafef.vn" }),
+    result({ url: "https://cafef.vn/b", source: "cafef.vn" }),
+    result({ url: "https://vnexpress.net/c", source: "vnexpress.net" }),
+  ]
+
+  it("counts distinct publishers rather than results", () => {
+    render(
+      <ReasoningTimeline
+        thoughts={[]}
+        toolCalls={[call({ result_count: 3, results: twoDomains })]}
+        elapsedMs={5000}
+        running={false}
+      />,
+    )
+
+    expect(screen.getByText("2 nguồn")).toBeInTheDocument()
+    expect(screen.queryByText("3 nguồn")).not.toBeInTheDocument()
+  })
+
+  it("draws it on the branch rows of a round, where parallel searches land", () => {
+    render(
+      <ReasoningTimeline
+        thoughts={[]}
+        toolCalls={[
+          call({ id: "a", result_count: 3, results: twoDomains }),
+          call({
+            id: "b",
+            result_count: 1,
+            results: [result({ url: "https://tuoitre.vn/d", source: "tuoitre.vn" })],
+          }),
+        ]}
+        elapsedMs={5000}
+        running={false}
+      />,
+    )
+
+    expect(screen.getByText("Đã chạy 2 truy vấn")).toBeInTheDocument()
+    expect(screen.getByText("2 nguồn")).toBeInTheDocument()
+    expect(screen.getByText("1 nguồn")).toBeInTheDocument()
+  })
+
+  it("names the publishers in text, because three marks are a glance", () => {
+    render(
+      <ReasoningTimeline
+        thoughts={[]}
+        toolCalls={[call({ result_count: 3, results: twoDomains })]}
+        elapsedMs={5000}
+        running={false}
+      />,
+    )
+
+    expect(screen.getByTitle("cafef.vn, vnexpress.net")).toBeInTheDocument()
+  })
+
+  it("still draws one row per call", () => {
+    const { container } = render(
+      <ReasoningTimeline
+        thoughts={[]}
+        toolCalls={[
+          call({ id: "a", result_count: 3, results: twoDomains }),
+          call({ id: "b", result_count: 3, results: twoDomains }),
+        ]}
+        elapsedMs={5000}
+        running={false}
+      />,
+    )
+
+    expect(container.querySelectorAll("[title='cafef.vn, vnexpress.net']")).toHaveLength(2)
+  })
+
+  it("says nothing at all for a store read, which has no publisher", () => {
+    render(
+      <ReasoningTimeline
+        thoughts={[]}
+        toolCalls={[
+          call({
+            name: "get_field",
+            kind: "store",
+            summary: "Đọc chỉ báo",
+            result_count: 1,
+            results: [],
+          }),
+        ]}
+        elapsedMs={5000}
+        running={false}
+      />,
+    )
+
+    expect(screen.queryByText(/nguồn/)).not.toBeInTheDocument()
+  })
+
+  it("prints a publisher's name as text and never as markup", () => {
+    render(
+      <ReasoningTimeline
+        thoughts={[]}
+        toolCalls={[
+          call({
+            result_count: 1,
+            results: [
+              result({ source: "<img src=x onerror=alert(1)>", url: "https://x.vn/a" }),
+            ],
+          }),
+        ]}
+        elapsedMs={5000}
+        running={false}
+      />,
+    )
+
+    expect(screen.getByTitle("<img src=x onerror=alert(1)>")).toBeInTheDocument()
+    expect(document.querySelector("img[onerror]")).toBeNull()
+  })
+})
+
+it("keeps the old sentence for a call that counted results but carried none", () => {
+  render(
+    <ReasoningTimeline
+      thoughts={[]}
+      toolCalls={[call({ result_count: 6, results: [] })]}
+      elapsedMs={5000}
+      running={false}
+    />,
+  )
+
+  expect(screen.getByText("6 kết quả")).toBeInTheDocument()
+})

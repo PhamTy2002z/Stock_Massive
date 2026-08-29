@@ -163,6 +163,7 @@ export function MenuItem({
   destructive = false,
   onClick,
   disabled = false,
+  quiet = false,
 }: {
   icon?: ReactNode
   children: ReactNode
@@ -172,6 +173,16 @@ export function MenuItem({
   destructive?: boolean
   onClick?: () => void
   disabled?: boolean
+  /**
+   * Say the row is unavailable without drawing the chip that says it.
+   *
+   * The chip is ~84px of uppercase micro type — wider than the label on a
+   * contextual menu, so one inert row would set the width of the whole menu.
+   * The reason is still written and still pointed at by `aria-describedby`;
+   * only the eye loses it, and the eye already has a row at 40% opacity that
+   * does not answer the pointer.
+   */
+  quiet?: boolean
 }) {
   // Generated rather than derived from the label: two menus can be open on one
   // page, and two rows can carry the same words.
@@ -201,7 +212,11 @@ export function MenuItem({
       {disabled && (
         <span
           id={badgeId}
-          className="shrink-0 rounded-md border border-border px-1.5 py-0.5 text-micro font-medium uppercase tracking-[0.04em] text-ink-5"
+          className={
+            quiet
+              ? "sr-only"
+              : "shrink-0 rounded-md border border-border px-1.5 py-0.5 text-micro font-medium uppercase tracking-[0.04em] text-ink-5"
+          }
         >
           {COMING_SOON}
         </span>
