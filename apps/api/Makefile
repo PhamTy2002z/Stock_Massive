@@ -1,6 +1,6 @@
 # API Development Commands
 
-.PHONY: dev run test lint clean contracts smoke-signal-desk backfill-daily
+.PHONY: dev run test lint clean contracts smoke-signal-desk backfill-daily golden-run golden-grade
 
 # Use venv python if exists
 PYTHON := $(shell if [ -d ".venv" ]; then echo ".venv/bin/python"; else echo "python"; fi)
@@ -76,24 +76,17 @@ clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
 
-eval-validate:
-	$(PYTHON) -m src.eval validate
+# The golden harness (apps/api/golden). Running and grading are two targets on
+# purpose: a run spends real money, and a score has to be repeatable for free.
+#
+# CEILING_USD has no default and the runner refuses to start without it. The
+# whole model envelope is $45 a month, so an unbounded run is not a thing this
+# repository knows how to do.
+golden-run:
+	@test -n "$(CEILING_USD)" || (echo "CEILING_USD is required: a run spends real money" >&2; exit 2)
+	$(PYTHON) -m golden.run --ceiling-usd "$(CEILING_USD)" $(GOLDEN_ARGS)
 
-eval-smoke:
-	$(PYTHON) -m src.eval smoke
-
-eval-run:
-	@test -n "$(EVAL_ROUTE)" || (echo "EVAL_ROUTE is required" >&2; exit 2)
-	@test -n "$(EVAL_CEILING)" || (echo "EVAL_CEILING is required" >&2; exit 2)
-	$(PYTHON) -m src.eval run --route "$(EVAL_ROUTE)" --ceiling "$(EVAL_CEILING)"
-
-eval-compare:
-	@test -n "$(EVAL_BASELINE)" || (echo "EVAL_BASELINE is required" >&2; exit 2)
-	@test -n "$(EVAL_CANDIDATE)" || (echo "EVAL_CANDIDATE is required" >&2; exit 2)
-	$(PYTHON) -m src.eval compare "$(EVAL_BASELINE)" "$(EVAL_CANDIDATE)"
-
-eval-gate:
-	@test -n "$(EVAL_ROUTE)" || (echo "EVAL_ROUTE is required" >&2; exit 2)
-	@test -n "$(EVAL_CEILING)" || (echo "EVAL_CEILING is required" >&2; exit 2)
-	@test -n "$(EVAL_BASELINE)" || (echo "EVAL_BASELINE is required" >&2; exit 2)
-	$(PYTHON) -m src.eval gate --route "$(EVAL_ROUTE)" --ceiling "$(EVAL_CEILING)" --baseline-artifact "$(EVAL_BASELINE)"
+# Reads one artifact file. No network, no database, no model.
+golden-grade:
+	@test -n "$(ARTIFACT)" || (echo "ARTIFACT=path/to/artifact.json is required" >&2; exit 2)
+	$(PYTHON) -m golden.grade "$(ARTIFACT)" $(GRADE_ARGS)

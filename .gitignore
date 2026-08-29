@@ -89,3 +89,8 @@ backups/
 
 # Subagent scratch memory: machine-local, not a project artifact.
 .claude/agent-memory/
+
+# Golden harness runs. The artifacts are local measurements; only the baseline
+# a phase pins is committed, and it is added with -f.
+apps/api/golden/artifacts/*
+!apps/api/golden/artifacts/.gitkeep
