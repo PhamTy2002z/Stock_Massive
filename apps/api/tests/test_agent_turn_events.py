@@ -109,6 +109,11 @@ def test_a_tool_call_carries_the_contract_fields_and_never_its_arguments():
         # surface can draw a store read differently from a stranger's page,
         # which is the distinction the whole evidence boundary rests on.
         "kind",
+        # What the advisory threat scan made of the result: whether the page
+        # tried to give the model orders. Pattern names only — a matched span
+        # would be the page's own text travelling on the rendered channel under
+        # a second name.
+        "scan",
     }
     assert event.data["summary"] == "Tìm trên web: lãi suất"
     # Widening the allowlist for the sources a reader is shown did not let the

@@ -65,6 +65,7 @@ from . import registry
 from .definitions import ResolvedToolSurface
 from .guardrails import HALT_GUIDANCE, TurnGuardrails, Verdict, result_signature
 from .messages import outcome_of
+from .untrusted import scan_for_threats
 
 logger = logging.getLogger(__name__)
 
@@ -84,11 +85,14 @@ DISPATCH_FAILED = "dispatch_failed"
 ROUND_FANOUT_EXCEEDED = "round_fanout_exceeded"
 
 #: How many calls that leave this deployment one round dispatches. Arithmetic
-#: rather than taste: a Turn gets six of them in total
-#: (``loop.MAX_EXTERNAL_TOOL_CALLS``), so a round asking for more than eight has
-#: already asked for more than the whole Turn can fund. Eight rather than six
-#: keeps the refusal here about the *shape* of the batch and leaves the budget
-#: itself to be spent, and refused, where it is counted.
+#: rather than taste: a Turn gets seven of them in total
+#: (``loop.MAX_EXTERNAL_TOOL_CALLS``, raised from six on 2026-08-29), so a round
+#: asking for more than eight has already asked for more than the whole Turn can
+#: fund. Eight rather than seven keeps the refusal here about the *shape* of the
+#: batch and leaves the budget itself to be spent, and refused, where it is
+#: counted. The margin is now one call rather than two, and that is the reason
+#: the Turn ceiling was held below eight: at eight the two gates would coincide
+#: and this one would start firing on batches the budget was going to fund.
 MAX_EXTERNAL_CALLS_PER_ROUND = 8
 
 #: How many calls that stay inside this deployment one round dispatches. Also
@@ -137,6 +141,14 @@ class ToolResult:
     guidance: str | None = None
     dispatched: bool = True
     duration_ms: int = 0
+    #: What the advisory threat scan made of this result, or ``None`` where
+    #: there was nothing to scan.
+    #:
+    #: ``None`` for every call whose text this deployment wrote itself — a
+    #: refusal, a ceiling, a tool that raised. Scanning our own sentences would
+    #: put a risk verdict on the harness talking to itself, which is noise in the
+    #: one place the signal has to stay readable.
+    scan: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -373,6 +385,17 @@ class ToolExecutor:
             text = f"{call.name} failed: {exc}"
         elapsed = int((time.perf_counter() - started) * 1000)
 
+        # Scanned here, once, and deliberately not on the render path. What the
+        # model reads is rebuilt on every LLM call of the Turn (``shown_result``),
+        # so a scan living there would re-read a twenty-thousand-character page up
+        # to five times for one answer and produce the same verdict each time.
+        # This is where the result exists for the first time.
+        scan = (
+            scan_for_threats(text)
+            if ok and self._reads_external(call.name)
+            else None
+        )
+
         after = self.guardrails.after_call(
             call.name, arguments, ok=ok, result_hash=result_signature(text)
         )
@@ -390,6 +413,7 @@ class ToolExecutor:
                 # model that lost the thread still needs the data to find it.
                 guidance=after.guidance,
                 duration_ms=elapsed,
+                scan=scan,
             ),
         )
 

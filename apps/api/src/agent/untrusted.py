@@ -56,9 +56,13 @@ down here as the weaker one rather than counted as closed.
 
 from __future__ import annotations
 
+import logging
 import re
+import time
 
-from . import registry
+from . import registry, threat_patterns
+
+logger = logging.getLogger(__name__)
 
 #: Below this, a result is too short to carry an instruction and the wrapper
 #: would be most of what the model reads.
@@ -131,6 +135,61 @@ def wrap_result(
     return wrap_untrusted(text, source=source or tool_name)
 
 
+#: How long the scan may spend on one result before it gives up on it.
+#:
+#: A ceiling rather than a hope. The patterns avoid nested quantifiers, but a
+#: twenty-thousand-character page is a large enough input that "we were careful"
+#: is not the same as "it is bounded", and this layer must never be the reason
+#: an answer is late. Checked between patterns, which is where the cost is.
+SCAN_BUDGET_SECONDS = 0.25
+
+#: What the scan says when it could not finish or could not run.
+#:
+#: A third value rather than folding into ``low``. "We looked and found nothing"
+#: and "we did not look" are different facts, and a reader deciding how much to
+#: trust a page needs to be able to tell them apart. Silently reporting a failed
+#: scan as clean is how a warning light becomes a lie.
+RISK_UNKNOWN = "unknown"
+RISK_HIGH = "high"
+RISK_LOW = "low"
+
+
+def scan_for_threats(text: str, *, scope: str = threat_patterns.SCOPE_CONTEXT) -> dict:
+    """Look for a page trying to give orders, and never stop an answer over it.
+
+    **Fail-open is not a promise here, it is the shape of the function.** Every
+    path out of it returns a verdict: a pattern that blows up, a budget that runs
+    out, a text that is not a string. There is no exception that escapes and no
+    branch that raises, because this is the advisory layer — the hard layer is
+    the wrapper, which has already run by the time anybody asks this — and a
+    warning light that can kill the answer is worse than no warning light.
+
+    The finding names travel; the matched text does not. A span is a piece of
+    what the attacker wrote, and copying it into a trace and then onto a screen
+    would give the page a second channel to write on.
+    """
+    try:
+        if not isinstance(text, str) or not text.strip():
+            return {"risk": RISK_LOW, "findings": []}
+        folded = threat_patterns.normalise(text)
+        deadline = time.monotonic() + SCAN_BUDGET_SECONDS
+        found: list[str] = []
+        for name, pattern in threat_patterns.PATTERNS.get(scope, ()):
+            if time.monotonic() > deadline:
+                logger.warning(
+                    "The threat scan gave up on %d character(s) after %.2fs",
+                    len(text),
+                    SCAN_BUDGET_SECONDS,
+                )
+                return {"risk": RISK_UNKNOWN, "findings": found}
+            if pattern.search(folded):
+                found.append(name)
+        return {"risk": RISK_HIGH if found else RISK_LOW, "findings": found}
+    except Exception as exc:  # noqa: BLE001 - an advisory layer may not raise
+        logger.warning("The threat scan could not run: %r", exc)
+        return {"risk": RISK_UNKNOWN, "findings": []}
+
+
 def defang_attachment(text: str) -> str:
     """Neutralise the attachment wrapper's delimiter inside attachment content.
 
@@ -175,9 +234,14 @@ __all__ = [
     "CLOSE_TAG",
     "MIN_WRAP_CHARS",
     "OPEN_TEMPLATE",
+    "RISK_HIGH",
+    "RISK_LOW",
+    "RISK_UNKNOWN",
+    "SCAN_BUDGET_SECONDS",
     "defang",
     "defang_attachment",
     "is_untrusted",
+    "scan_for_threats",
     "wrap_attachment",
     "wrap_result",
     "wrap_untrusted",

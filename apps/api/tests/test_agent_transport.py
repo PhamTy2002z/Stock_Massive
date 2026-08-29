@@ -960,6 +960,10 @@ class TestThreads:
             # comes back with no figure is a successful call, and the surface
             # cannot say so without this.
             "outcome",
+            # What the advisory threat scan made of the result. Persisted with
+            # the message rather than in a column of its own, which is what lets
+            # a Thread reopened tomorrow still say a page tried to give orders.
+            "scan",
         }
 
     async def test_a_tool_call_reaches_the_wire_and_rides_the_snapshot(
@@ -989,6 +993,7 @@ class TestThreads:
                 "result_count": 0,
                 "kind": "external",
                 "outcome": None,
+                "scan": None,
             }
         ]
 

@@ -123,6 +123,13 @@ TOOL_CALL_FIELDS = (
     "results",
     "result_count",
     "kind",
+    # The advisory threat scan's verdict on this result: whether a page tried to
+    # give the model orders. On the allowlist because it is written *for the
+    # reader* — a finding is a fact about a source, the same kind of fact as its
+    # hostname, and the one place it must never appear is inside the text the
+    # model reads. It carries pattern names and never a matched span, so nothing
+    # a page wrote travels under it.
+    "scan",
 )
 
 #: The keys a ``signal_desk.ready`` payload is allowed to carry.
