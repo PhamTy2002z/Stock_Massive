@@ -4,13 +4,22 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import json
 from collections.abc import Mapping
 from typing import Any
 
 import pytest
 
-from src.agent import definitions, executor, registry
+from src.agent import (
+    definitions,
+    executor,
+    messages,
+    registry,
+    threat_patterns,
+    untrusted,
+)
 from src.agent.guardrails import GuardrailThresholds, TurnGuardrails
+from .agent_tool_world import ADVERSARIAL_PAGE
 
 CONTEXT = registry.ToolContext(user_id=7)
 
@@ -693,3 +702,177 @@ async def test_a_page_that_gives_orders_is_flagged_and_still_answered() -> None:
     assert outcome.results[0].ok is True
     assert outcome.results[0].scan["risk"] == "high"
     assert "instruction_override" in outcome.results[0].scan["findings"]
+
+
+# -- one adversarial page, from the handler to the verdict --------------------
+
+
+#: A page written to give orders, and the whole input of the tests below.
+#:
+#: Deterministic rather than representative: the verdict is asserted name by
+#: name, so the payload cannot be "something hostile" — it has to be the exact
+#: four sentences whose names a reader of a trace would see. Nothing here is
+#: preset on a fixture; the executor meets this string the way it meets a page.
+
+#: In the order the pattern table declares them, which is the order a finding
+#: list is built in and therefore the order that has to stay stable: a name is
+#: what somebody reads, and a list that reshuffles between runs cannot be
+#: compared with the run before it.
+ADVERSARIAL_FINDINGS = [
+    "instruction_override",
+    "conceal_from_user",
+    "role_reassignment",
+    "prompt_disclosure",
+]
+
+ORDINARY_PAGE = (
+    "Thanh khoản toàn thị trường đạt 14.200 tỷ đồng, giảm nhẹ so với phiên "
+    "trước, theo số liệu của sở giao dịch."
+)
+
+BULLETIN = "https://example.com/bulletin"
+
+
+def page(surface: Surface, name: str, body: str) -> None:
+    """Register ``name`` as an external tool whose whole result is ``body``."""
+
+    async def handler(_context: registry.ToolContext, _arguments: Mapping[str, Any]) -> Any:
+        return body
+
+    surface.add(name)
+    surface.entries[name] = dataclasses.replace(
+        surface.entries[name], handler=handler
+    )
+
+
+async def fetched(body: str) -> executor.ToolResult:
+    """One external call over ``body``, through the real registry-backed path."""
+    surface = Surface()
+    page(surface, "fetch_url", body)
+    outcome = await surface.executor().run(
+        [call("fetch_url", arguments={"url": BULLETIN})]
+    )
+    return outcome.results[0]
+
+
+@pytest.mark.asyncio
+async def test_a_page_that_gives_orders_is_named_by_what_it_tried() -> None:
+    """The finding names are the contract, so they are asserted as a list."""
+    result = await fetched(ADVERSARIAL_PAGE)
+
+    assert result.ok is True
+    assert result.text == ADVERSARIAL_PAGE
+    assert result.scan == {"risk": "high", "findings": ADVERSARIAL_FINDINGS}
+
+
+@pytest.mark.asyncio
+async def test_the_verdict_carries_no_word_the_attacker_wrote() -> None:
+    """A span is the page's own text, and a trace is a second channel to write on.
+
+    So the verdict is two keys and nothing else: what the scan concluded, and
+    what it recognised. Asserted over the encoded dictionary rather than over
+    its keys, because the leak this guards against would arrive as a value.
+    """
+    result = await fetched(ADVERSARIAL_PAGE)
+    encoded = json.dumps(result.scan, ensure_ascii=False)
+
+    assert set(result.scan) == {"risk", "findings"}
+    for phrase in ("Ignore all", "You are now", "system prompt", "VN-Index"):
+        assert phrase not in encoded
+
+
+@pytest.mark.asyncio
+async def test_an_ordinary_market_page_comes_back_low() -> None:
+    """The other half of a warning light: it has to be quiet on a normal page."""
+    result = await fetched(ORDINARY_PAGE)
+
+    assert result.ok is True
+    assert result.scan == {"risk": "low", "findings": []}
+
+
+@pytest.mark.asyncio
+async def test_one_result_is_scanned_once_however_often_the_transcript_is_rebuilt(
+    monkeypatch,
+) -> None:
+    """The count is the reason the scan sits here, so the count is the assertion.
+
+    A Turn rebuilds every earlier result into a message on every LLM call it
+    makes. Counted at the fold every scan runs through rather than at this
+    module's own name for the scanner: a scan that crept onto the render path
+    would import it somewhere else, and a counter bound to ``executor`` would
+    not see it.
+    """
+    passes: list[int] = []
+    fold = threat_patterns.normalise
+
+    def counting(text: str) -> str:
+        passes.append(len(text))
+        return fold(text)
+
+    monkeypatch.setattr(threat_patterns, "normalise", counting)
+    result = await fetched(ADVERSARIAL_PAGE)
+
+    turn_call = messages.TurnToolCall(
+        id=result.call_id,
+        name=result.tool_name,
+        arguments={"url": BULLETIN},
+        status=messages.ToolCallStatus.OK,
+        result_text=result.text,
+        scan=result.scan,
+    )
+    transcript = messages.Transcript(
+        system_prompt="Trả lời bằng tiếng Việt.",
+        turns=(
+            messages.TranscriptTurn(
+                user_text="Phiên hôm nay ra sao?", tool_calls=(turn_call,)
+            ),
+        ),
+    )
+    for _ in range(3):
+        messages.build_messages(transcript)
+
+    assert result.scan == {"risk": "high", "findings": ADVERSARIAL_FINDINGS}
+    assert len(passes) == 1
+
+
+class ExplodingPattern:
+    """A pattern that raises where the scan expects an answer."""
+
+    def search(self, _text: str) -> None:
+        raise RuntimeError("the pattern table is mid-reload")
+
+
+@pytest.mark.asyncio
+async def test_a_scan_that_cannot_run_says_unknown_and_the_answer_still_arrives(
+    monkeypatch,
+) -> None:
+    """Fail-open, and fail-honest: the page comes back, and ``low`` is not claimed.
+
+    Forced at the pattern rather than at the scanner's own name, because that is
+    where a failure can actually originate — the scanner's contract is that
+    every path out of it is a verdict, and a test that replaced the whole
+    function with one that raises would be measuring the mock.
+    """
+    monkeypatch.setitem(
+        threat_patterns.PATTERNS,
+        threat_patterns.SCOPE_CONTEXT,
+        (("instruction_override", ExplodingPattern()),),
+    )
+    result = await fetched(ADVERSARIAL_PAGE)
+
+    assert result.ok is True
+    assert result.text == ADVERSARIAL_PAGE
+    assert result.scan == {"risk": untrusted.RISK_UNKNOWN, "findings": []}
+
+
+@pytest.mark.asyncio
+async def test_a_scan_that_runs_out_of_budget_says_unknown_rather_than_low(
+    monkeypatch,
+) -> None:
+    """"We looked and found nothing" and "we did not look" are different facts."""
+    monkeypatch.setattr(untrusted, "SCAN_BUDGET_SECONDS", -1.0)
+    result = await fetched(ADVERSARIAL_PAGE)
+
+    assert result.ok is True
+    assert result.text == ADVERSARIAL_PAGE
+    assert result.scan["risk"] == untrusted.RISK_UNKNOWN

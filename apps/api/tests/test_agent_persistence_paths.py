@@ -11,14 +11,18 @@ from sqlalchemy import delete
 
 from src.agent.persistence import (
     THREAD_TITLE_LENGTH,
+    TURN_COMPLETE,
     AgentPersistence,
     thread_title_from,
 )
 from src.agent.executor import ToolCall, ToolExecutor
-from src.agent.registry import ToolContext
+from src.agent.messages import ToolCallStatus, TurnToolCall
+from src.agent.registry import ToolAccess, ToolContext
+from src.agent.turns import assistant_message
 from src.alpha.models import AgentThread
 from src.auth.models import User
 from src.core.database import Base, get_sync_db, sync_engine, sync_session_factory
+from .agent_tool_world import ADVERSARIAL_PAGE, stub_entry
 
 SYMBOL = "PATHS"
 
@@ -343,3 +347,123 @@ def test_a_long_question_is_cut_at_a_word_with_an_ellipsis():
 
 def test_a_blank_question_names_nothing():
     assert thread_title_from("   \n  ") is None
+
+
+# -- the advisory verdict, written down and read back -------------------------
+
+
+#: The same page the executor and wrapper tests use. Exact rather than merely
+#: hostile, because the verdict below is compared name by name.
+
+BULLETIN = "https://example.com/bulletin"
+
+
+async def dispatched(user_id: int, name: str, body: str, *, external: bool = True):
+    """One tool call, run for real, so the verdict is computed and not written.
+
+    The declaration is handed to the executor rather than registered globally:
+    the process-wide registry belongs to whichever module imported a tool
+    surface first, and a test that depended on that would pass or fail by
+    collection order.
+    """
+
+    async def handler(_context, _arguments):
+        return body
+
+    entry = stub_entry(
+        name,
+        handler=handler,
+        access=ToolAccess.NETWORK if external else ToolAccess.STORE,
+        reads_external=external,
+    )
+    outcome = await ToolExecutor(
+        context=ToolContext(user_id=user_id),
+        lookup={name: entry}.get,
+        availability=lambda _name: True,
+    ).run([ToolCall(id="call_0", name=name, arguments={"url": BULLETIN})])
+    return outcome.results[0]
+
+
+def committed(result) -> dict:
+    """The assistant message a finished Turn writes, carrying this one call."""
+    call = TurnToolCall(
+        id=result.call_id,
+        name=result.tool_name,
+        arguments={"url": BULLETIN},
+        status=ToolCallStatus.OK,
+        result_text=result.text,
+        scan=result.scan,
+    )
+    return assistant_message(
+        text="Trang này cố ra lệnh, nên tôi chỉ đọc nó như dữ liệu.",
+        tool_calls=[call.as_wire()],
+        status=TURN_COMPLETE,
+    )
+
+
+async def reopened(store: AgentPersistence, owner: int, thread_id) -> dict:
+    """The persisted assistant message, read back the way a reopened Thread is."""
+    view = await store.read_thread(owner, thread_id)
+    assert view is not None
+    message = next(
+        item for item in reversed(view.messages) if item.role == "assistant"
+    )
+    return dict(message.content or {})
+
+
+@pytest.mark.asyncio
+async def test_a_flagged_page_is_still_flagged_when_the_thread_is_reopened(owner):
+    """The verdict is durable without a column of its own, and that is the design.
+
+    ``TurnToolCall.as_wire`` is already written to ``agent_message.content``
+    when the answer commits, so the flag survives a reopen with no migration, no
+    second column on the hot trace table, and without touching the trace's own
+    invariant that ``result`` holds exactly what the model saw.
+    """
+    store = persistence()
+    thread = await store.create_thread(owner)
+    await store.append_message(
+        thread.id, role="user", content={"text": "Phiên hôm nay ra sao?"}
+    )
+    result = await dispatched(owner, "market_bulletin", ADVERSARIAL_PAGE)
+
+    await store.append_message(
+        thread.id, role="assistant", content=committed(result)
+    )
+    content = await reopened(store, owner, thread.id)
+    (payload,) = content["tool_calls"]
+
+    assert result.scan == {
+        "risk": "high",
+        "findings": [
+            "instruction_override",
+            "conceal_from_user",
+            "role_reassignment",
+            "prompt_disclosure",
+        ],
+    }
+    assert payload["scan"] == result.scan
+    assert payload["kind"] == "external"
+
+
+@pytest.mark.asyncio
+async def test_a_store_read_is_persisted_with_no_verdict_at_all(owner):
+    """``None`` and ``low`` are different claims, and the round trip keeps both.
+
+    A read of this deployment's own store is never scanned, so what is written
+    down is the absence of a verdict rather than a clean one — otherwise the
+    corpus that counts how often the scan fires would be counting reads it never
+    looked at.
+    """
+    store = persistence()
+    thread = await store.create_thread(owner)
+    result = await dispatched(owner, "get_field", "{}", external=False)
+
+    await store.append_message(
+        thread.id, role="assistant", content=committed(result)
+    )
+    content = await reopened(store, owner, thread.id)
+    (payload,) = content["tool_calls"]
+
+    assert result.scan is None
+    assert payload["scan"] is None
