@@ -46,7 +46,7 @@
     "blocks": [
       {
         "widget": "stat_tiles",
-        "widgetVersion": 1,
+        "widgetVersion": 2,
         "frame": "tiles",
         "options": {
           "label": "label",
@@ -56,7 +56,7 @@
       },
       {
         "widget": "bar_series",
-        "widgetVersion": 1,
+        "widgetVersion": 2,
         "frame": "profile",
         "options": {
           "x": "bucket",
@@ -76,7 +76,7 @@
       },
       {
         "widget": "ranked_bars",
-        "widgetVersion": 1,
+        "widgetVersion": 2,
         "frame": "ranking",
         "options": {
           "label": "bucket",
@@ -121,7 +121,14 @@
         "label": "Chỉ số",
         "value": "Giá trị",
         "unit": "Đơn vị"
-      }
+      },
+      "columnRoles": {},
+      "pointRoles": [
+        "focus",
+        null,
+        null,
+        null
+      ]
     },
     "profile": {
       "kind": "series",
@@ -253,7 +260,26 @@
         "median_amount": "Khối lượng trung vị",
         "share": "Tỷ trọng trong phiên",
         "spike_frequency": "Số phiên nằm trong top 2"
-      }
+      },
+      "columnRoles": {},
+      "pointRoles": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        "focus",
+        null
+      ]
     },
     "heatmap": {
       "kind": "matrix",
@@ -899,7 +925,9 @@
         "14:00": "14:00",
         "14:15": "14:15",
         "14:45": "14:45"
-      }
+      },
+      "columnRoles": {},
+      "pointRoles": []
     },
     "ranking": {
       "kind": "table",
@@ -1031,7 +1059,26 @@
         "share": "Tỷ trọng trong phiên",
         "avg_amount": "Khối lượng trung bình",
         "spike_frequency": "Số phiên nằm trong top 2"
-      }
+      },
+      "columnRoles": {},
+      "pointRoles": [
+        "focus",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
     }
   },
   "provenance": {
@@ -1039,6 +1086,10 @@
     "asOf": "2026-08-21T16:00:00+07:00",
     "sessionsUsed": 30,
     "health": "normal",
-    "reason": null
+    "reason": null,
+    "methodNotes": [
+      "Một khung giờ được tính là đỉnh của phiên khi nằm trong 2 khung giao dịch lớn nhất phiên đó.",
+      "Tỷ trọng của mỗi khung giờ tính trên tổng của chính phiên đó, nên phiên sôi động và phiên trầm so được với nhau."
+    ]
   }
 }

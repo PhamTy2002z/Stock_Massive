@@ -19,7 +19,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AlphaRefusalError } from "@/lib/alpha"
 
-import { createTurn, newTurnId, turnStreamUrl } from "./api"
+import {
+  attachmentUrl,
+  createTurn,
+  newTurnId,
+  turnStreamUrl,
+  uploadAttachment,
+} from "./api"
 
 let fetchMock: ReturnType<typeof vi.fn>
 
@@ -70,6 +76,41 @@ describe("the Turn id", () => {
       (call) => JSON.parse(call[1].body as string).turn_id,
     )
     expect(keys).toEqual([turnId, turnId])
+  })
+
+  it("carries the mode the reader switched to, so the desk is asked for", async () => {
+    fetchMock.mockResolvedValue(json({ id: "t-1", created: true }))
+
+    await createTurn({
+      threadId: "thread-1",
+      turnId: newTurnId(),
+      text: "VCB thế nào?",
+      signalDesk: true,
+    })
+
+    expect(sentBody().mode).toBe("signal_desk")
+  })
+
+  it("says chat rather than saying nothing, because the mode is part of the key", async () => {
+    // Omitted, the server would default it — and two Turns asked in two
+    // different modes under one id would resolve to each other. The value is
+    // stated so the idempotency payload can tell them apart.
+    fetchMock.mockResolvedValue(json({ id: "t-1", created: true }))
+
+    await createTurn({ threadId: "thread-1", turnId: newTurnId(), text: "VCB?" })
+
+    expect(sentBody().mode).toBe("chat")
+  })
+
+  it("sends no analysis lens, because nothing behind the request reads one", async () => {
+    // `active_symbol` used to travel here and was dropped in silence by a schema
+    // that never declared it. A key nobody reads is worse than no key: it reads
+    // from the browser as a lens the backend honours.
+    fetchMock.mockResolvedValue(json({ id: "t-1", created: true }))
+
+    await createTurn({ threadId: "thread-1", turnId: newTurnId(), text: "VCB?" })
+
+    expect(sentBody()).not.toHaveProperty("active_symbol")
   })
 
   it("is a fresh id each time it is asked for", () => {
@@ -134,5 +175,62 @@ describe("an admission refusal", () => {
 
     expect(refusal.status).toBe(502)
     expect(refusal.reason).toBeNull()
+  })
+})
+
+
+describe("what a question carries besides its words", () => {
+  it("sends an empty list when nothing was attached", async () => {
+    fetchMock.mockResolvedValue(json({ id: "turn-1" }))
+
+    await createTurn({ threadId: "t1", turnId: "turn-1", text: "VCB thế nào?" })
+
+    expect(sentBody().attachments).toEqual([])
+  })
+
+  it("sends the ids, in the order they were added", async () => {
+    fetchMock.mockResolvedValue(json({ id: "turn-1" }))
+
+    await createTurn({
+      threadId: "t1",
+      turnId: "turn-1",
+      text: "đọc hai ảnh này",
+      attachments: ["a-1", "a-2"],
+    })
+
+    expect(sentBody().attachments).toEqual(["a-1", "a-2"])
+  })
+})
+
+describe("putting one file up", () => {
+  it("sends multipart and sets no Content-Type of its own", async () => {
+    // The browser computes the multipart boundary from the body at send time.
+    // Anything set here would either lose the boundary or shadow it.
+    fetchMock.mockResolvedValue(
+      json({ id: "a-1", filename: "a.png", media_type: "image/png", byte_size: 3 }),
+    )
+
+    const stored = await uploadAttachment(new File(["abc"], "a.png", { type: "image/png" }))
+
+    const [, init] = fetchMock.mock.calls[0]
+    expect(init.body).toBeInstanceOf(FormData)
+    expect((init.headers as Record<string, string>)["Content-Type"]).toBeUndefined()
+    expect(stored.id).toBe("a-1")
+  })
+
+  it("throws the refusal with its reason, so the chip can say which one", async () => {
+    fetchMock.mockResolvedValue(
+      json({ detail: { reason: "file_too_large", message: "quá lớn" } }, 413),
+    )
+
+    await expect(
+      uploadAttachment(new File(["abc"], "a.png", { type: "image/png" })),
+    ).rejects.toMatchObject({ reason: "file_too_large" })
+  })
+})
+
+describe("where an attachment's bytes are read from", () => {
+  it("is the proxy path, escaped", () => {
+    expect(attachmentUrl("a b")).toBe("/api/alpha-desk/attachments/a%20b")
   })
 })

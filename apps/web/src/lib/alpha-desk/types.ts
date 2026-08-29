@@ -173,11 +173,28 @@ export interface ToolResult {
  */
 export interface SignalDeskAnnouncement {
   artifactId: string
+  /**
+   * The recipe's stable name.
+   *
+   * **Never shown to a reader.** It is a slug the server keys registrations by,
+   * and printing it would put a function name in front of somebody who came for
+   * an analysis. What a person is shown is `studyDisplayName`, and what they
+   * search on is both.
+   */
   studyName: string
+  /** The recipe's Vietnamese name, which is the one a reader may see. */
+  studyDisplayName: string
   title: string
   blockCount: number
   /** Which round of the tool loop produced it. Files it beside that round. */
   round: number
+  /**
+   * The ticker the board is about, or `""` for a board that is about no one
+   * company. Carried so a reader can type a symbol to find the board again.
+   */
+  symbol: string
+  /** When the numbers were frozen, ISO-8601, or `""` where the run said nothing. */
+  asOf: string
 }
 
 /**
@@ -196,6 +213,18 @@ export interface Frame {
   rows: unknown[][]
   unit: string | null
   labels: Record<string, string>
+  /**
+   * What a whole series is, keyed by column, as the engine declared it.
+   *
+   * A meaning rather than a colour — "this one fell", "this is the one the
+   * answer is about" — because only the layer that computed the number knows
+   * which, and a colour chosen there would be legible in one of the two themes.
+   * Optional: every artifact written before this says nothing, and a picture
+   * that says nothing is drawn the way it always was.
+   */
+  columnRoles?: Record<string, string>
+  /** The same, positional against `rows`, for one bar, point or tile. */
+  pointRoles?: (string | null)[]
 }
 
 /** One widget on the desk view, the frame it draws, and the options the server chose. */
@@ -219,11 +248,37 @@ export interface SignalDeskSpec {
  * a health without the session count, is a fact a reader cannot weigh.
  */
 export interface Provenance {
+  /**
+   * Which store the numbers were read out of.
+   *
+   * **Not shown to a reader.** It names a provider and a layer of this system,
+   * which is a fact about the plumbing rather than about the analysis. Kept on
+   * the type because the payload carries it and an export may want it.
+   */
   source: string
   asOf: string
   sessionsUsed: number
   health: "normal" | "degraded" | "unavailable"
+  /**
+   * Why the health is what it is, when the run said.
+   *
+   * One Vietnamese sentence for a reader, at most 120 characters, checked by
+   * the Study contract for the system's own words before the row is frozen.
+   * Rows frozen before that check may carry refusal codes or internal English
+   * prose; `ProvenanceStrip.readableReason` maps the codes and drops the rest.
+   */
   reason: string | null
+  /**
+   * How the numbers were arrived at, in a reader's language.
+   *
+   * Behind a disclosure rather than on the strip: it is what somebody checks
+   * *after* deciding the picture matters, and putting a method paragraph on the
+   * line above every chart buries the three facts that belong there.
+   *
+   * Optional because an artifact frozen before the field existed carries none,
+   * and a run that explains nothing is not a run that explains badly.
+   */
+  methodNotes?: string[]
 }
 
 /** One Study run, as the desk view endpoint serves it. Immutable by design. */
@@ -295,9 +350,33 @@ export interface AssistantContent {
 }
 
 /** The user message, as the create transaction wrote it. */
+/**
+ * One thing the reader attached, as every layer that is not the bytes sees it.
+ *
+ * Metadata only, and that is the contract rather than an economy: the row is
+ * immutable, so its bytes are a separate cacheable request against
+ * `GET /attachments/{id}`. Carrying them here would make one thread open bring
+ * back every picture the conversation ever held.
+ */
+export interface Attachment {
+  id: string
+  filename: string
+  media_type: string
+  byte_size: number
+  /** What an image is charged. Absent for a text file, whose cost is its characters. */
+  estimated_tokens?: number
+}
+
+/** Whether this is something to draw a thumbnail for. */
+export function isImageAttachment(attachment: { media_type: string }): boolean {
+  return attachment.media_type.startsWith("image/")
+}
+
 export interface UserContent {
   text: string
   symbols?: string[]
+  /** What was attached to this question. Absent on every Turn that had none. */
+  attachments?: Attachment[]
 }
 
 /**
@@ -413,6 +492,24 @@ export interface Allowance {
  * once and here. It is an operating limit on generation rather than an amount
  * owed, and the panel is responsible for not implying a bill.
  */
+/**
+ * What this deployment's route can do.
+ *
+ * A property of the route the API was configured and measured against, so it is
+ * the same for every account and constant until a deploy. Deliberately not a
+ * field on {@link Usage}: that is one account's consumption, and folding a
+ * constant into it would have the surface poll for a value that cannot move.
+ */
+export interface Capabilities {
+  /**
+   * Whether the model reads images.
+   *
+   * When false the composer still accepts and stores them and says so plainly —
+   * a picture silently ignored reads to the reader as a wrong answer.
+   */
+  vision: boolean
+}
+
 export interface Usage {
   as_of: string
   turns_today: Allowance

@@ -12,6 +12,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 
+import { SIGNAL_DESK_COPY } from "@/lib/alpha-desk/copy"
 import type { SignalDeskBlock, Frame, Provenance } from "@/lib/alpha-desk/types"
 
 import { SignalDeskBlockView } from "./signal-desk-block"
@@ -119,7 +120,38 @@ describe("a block with no frame behind it", () => {
   it("says so rather than leaving a gap nobody can see", () => {
     drawWithoutFrame()
 
-    expect(screen.getByText(/Không có dữ liệu cho khối/)).toBeInTheDocument()
+    expect(screen.getByText(SIGNAL_DESK_COPY.blockNoData)).toBeInTheDocument()
     expect(screen.queryByText("Xem dạng bảng")).toBeNull()
+  })
+})
+
+describe("what a block is allowed to say", () => {
+  /** Everything the machinery calls things, none of which is a reader's word. */
+  const MACHINERY = ["stat_tiles", "data_table", "tiles", "v1", "frame", "widget"]
+
+  it("names no widget, no version and no frame key when it cannot draw", () => {
+    // The report this was built from: a reader met "chưa vẽ được bar_series v2"
+    // on a product that had promised them an analysis.
+    const { container } = render(
+      <SignalDeskBlockView
+        block={{ ...BLOCK, widget: "stat_tiles", widgetVersion: 99 }}
+        frame={FRAME}
+        provenance={PROVENANCE}
+      />,
+    )
+
+    const note = screen.getByText(SIGNAL_DESK_COPY.blockAsTable)
+    expect(note).toBeInTheDocument()
+    for (const word of MACHINERY) {
+      expect(container.textContent).not.toContain(word)
+    }
+  })
+
+  it("names none of it when there is no frame behind the block either", () => {
+    const { container } = drawWithoutFrame()
+
+    for (const word of MACHINERY) {
+      expect(container.textContent).not.toContain(word)
+    }
   })
 })

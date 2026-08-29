@@ -54,11 +54,19 @@ const EVENT_TYPES: TurnEventType[] = [
 // seconds) gets to try first, so an ordinary blip costs no request at all.
 const ERROR_PROBE_MS = 4000
 
-/** What the composer hands over: the question, and the lens it was asked under. */
+/** What the composer hands over: the question, and the mode it was asked in. */
 export interface TurnInput {
   text: string
   symbols?: string[]
-  activeSymbol?: string | null
+  /** The Signal Desk switch as it stood when the question was sent. */
+  signalDesk?: boolean
+  /**
+   * The attachments this question carries, by id.
+   *
+   * Ids and not files: they were uploaded when the reader chose them, so this
+   * stays a small JSON request and stays idempotent.
+   */
+  attachments?: string[]
 }
 
 export interface LiveTurnController {
@@ -179,8 +187,9 @@ export function useLiveTurn(threadId: string | null): LiveTurnController {
           threadId,
           turnId: id,
           text: input.text,
+          attachments: input.attachments ?? [],
           symbols: input.symbols,
-          activeSymbol: input.activeSymbol,
+          signalDesk: input.signalDesk,
           retryOfTurnId,
         })
       } catch (error) {

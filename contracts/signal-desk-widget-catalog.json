@@ -13,6 +13,14 @@
       "purpose": "Cột theo trục thời gian hoặc theo nhóm rời rạc"
     },
     {
+      "name": "bar_series",
+      "version": 2,
+      "frameKinds": [
+        "series"
+      ],
+      "purpose": "Như v1, thêm màu cột theo vai trò từng dòng khai trong frame"
+    },
+    {
       "name": "condition_checklist",
       "version": 1,
       "frameKinds": [
@@ -39,6 +47,14 @@
       "purpose": "Đường theo trục thời gian, tối đa hai trục giá trị"
     },
     {
+      "name": "line_series",
+      "version": 2,
+      "frameKinds": [
+        "series"
+      ],
+      "purpose": "Như v1, thêm màu đường theo vai trò từng cột khai trong frame"
+    },
+    {
       "name": "range_strip",
       "version": 1,
       "frameKinds": [
@@ -55,12 +71,28 @@
       "purpose": "Xếp hạng có nhãn, dài nhất trên cùng"
     },
     {
+      "name": "ranked_bars",
+      "version": 2,
+      "frameKinds": [
+        "table"
+      ],
+      "purpose": "Như v1, thêm màu thanh theo vai trò từng dòng khai trong frame"
+    },
+    {
       "name": "scatter_quadrant",
       "version": 1,
       "frameKinds": [
         "table"
       ],
       "purpose": "Điểm trên hai trục, chia bốn vùng bằng đường tham chiếu"
+    },
+    {
+      "name": "scatter_quadrant",
+      "version": 2,
+      "frameKinds": [
+        "table"
+      ],
+      "purpose": "Như v1, thêm màu điểm theo vai trò từng dòng khai trong frame"
     },
     {
       "name": "session_heatmap",
@@ -77,6 +109,14 @@
         "table"
       ],
       "purpose": "Vài con số dẫn dắt, mỗi ô một dòng của frame"
+    },
+    {
+      "name": "stat_tiles",
+      "version": 2,
+      "frameKinds": [
+        "table"
+      ],
+      "purpose": "Như v1, thêm màu ô theo vai trò từng dòng khai trong frame"
     }
   ]
 }

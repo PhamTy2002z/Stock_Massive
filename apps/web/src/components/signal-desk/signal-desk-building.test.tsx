@@ -35,9 +35,12 @@ function deskView(overrides: Partial<SignalDeskAnnouncement> = {}): SignalDeskAn
   return {
     artifactId: "a1",
     studyName: "intraday_liquidity_profile",
+    studyDisplayName: "Thanh khoản trong phiên",
     title: "STB",
     blockCount: 3,
     round: 0,
+    symbol: "STB",
+    asOf: "2026-08-28T09:00:00+07:00",
     ...overrides,
   }
 }

@@ -17,14 +17,23 @@ did not, and a count is not a recommendation however it is read.
 
 **Momentum is computed here rather than read from a Signal Field.** The three
 figures a review of this kind wants — twelve-month return, drawdown from the
-52-week high, RSI — all exist as registered Signal Fields, and every one of them
-derives from ``provider_snapshots`` rows whose only source is FiinQuant, a
-provider this deployment is not licensed to redistribute from. Drawing them
-would put those numbers on a Signal Desk, which is precisely the provenance hole this
-phase was written to close. All three are pure functions of a close series, and
-``bar_daily`` holds an adjusted vnstock series — the correct input for all three,
-since adjustment is exactly what one wants when measuring what holding the share
-returned.
+52-week high, RSI — all exist as registered Signal Fields.
+
+The original reason for computing them here was provenance: those fields read
+``provider_snapshots``, whose only quote source was one this deployment is not
+licensed to redistribute from, so drawing them would have put unredistributable
+numbers on a Signal Desk. **That reason expired on 2026-08-28**, when the fields
+moved to the daily spine; the rows behind the old objection were deleted the day
+after, and the source is no longer a member of ``ProviderSource``.
+
+What keeps the local computation is narrower and worth stating plainly: all
+three are pure functions of a close series, this Study already holds the close
+series it needs for its other conditions, and reading three Signal Fields would
+be three window preparations for numbers already in hand. ``bar_daily`` holds an
+adjusted series, which is the right input for all three, since adjustment is
+exactly what one wants when measuring what holding the share returned. Should a
+reviewer prefer the registry's own numbers for consistency with the chat lane,
+nothing in the provenance rules stands in the way any more.
 
 ## The windows, and why each is fixed
 
@@ -147,6 +156,19 @@ CHECKLIST_NOTE = (
     "của người đọc."
 )
 
+#: Which picture on the panel a checklist row can be checked against, keyed by
+#: the frame that holds the number and valued at the way a reader would point at
+#: it. Two names for one thing on purpose: the key is what ties a row to a frame
+#: this Study actually produced, and the value is what reaches a person. The rows
+#: used to carry the key itself, and the browser printed "Số liệu trong khối
+#: price_context" into a tooltip — a name that told a reader nothing, in English.
+_EVIDENCE_NAMES: Mapping[str, str] = {
+    "tiles": "Các số dẫn dắt",
+    "range_band": "Dải giá 52 tuần",
+    "price_context": "Đường giá",
+    "earnings_quarters": "Lợi nhuận theo quý",
+}
+
 _STATUS_LABELS: Mapping[Status, str] = {
     "met": "Đạt",
     "not_met": "Chưa đạt",
@@ -217,9 +239,10 @@ class _Condition:
 
     ``value`` and ``unit`` are the measurement behind the status, kept as a
     number rather than a formatted string so the browser formats it the way it
-    formats every other number on the panel. ``evidence_ref`` names the frame
-    that holds it, which is what makes a row checkable rather than merely
-    stated.
+    formats every other number on the panel. ``evidence_ref`` names the picture
+    on this panel that holds it, which is what makes a row checkable rather than
+    merely stated. It is the frame's own key; what a reader is shown is the
+    Vietnamese for it, out of :data:`_EVIDENCE_NAMES`.
     """
 
     label: str
@@ -344,6 +367,20 @@ def compute(context: StudyContext) -> StudyResult:
             sessions_used=len(bars),
             health="normal" if not degraded else "degraded",
             reason="; ".join(degraded) or None,
+            # What the four axes were measured over. Beside the reason rather
+            # than inside it: a reader checking whether the picture is thin is
+            # not the same reader as one checking how a window was chosen.
+            method_notes=(
+                f"Dải cao – thấp lấy trên {RANGE_SESSIONS} phiên đã đóng gần "
+                "nhất, xấp xỉ 52 tuần giao dịch.",
+                f"Vùng giá tập trung là hai bậc giá dày phiên nhất trong "
+                f"{ZONE_SESSIONS} phiên gần nhất.",
+                f"Chỉ báo sức mạnh giá tính trên {RSI_PERIOD} phiên, đo trên "
+                f"{RSI_WINDOW_SESSIONS} phiên gần nhất nên không đổi theo độ dài "
+                "biểu đồ.",
+                "Giá đã điều chỉnh cho sự kiện quyền, nên so được giữa các mốc "
+                "thời gian.",
+            ),
         ),
     )
 
@@ -569,14 +606,17 @@ def _degradations(
     The earnings axis counts: a review missing one of its four axes is not a
     healthy review, and a strip that said ``normal`` would leave the reader to
     notice the empty block for themselves.
+
+    Both clauses are Vietnamese and both are short, because they are joined into
+    the one sentence a reader gets above the picture. What *method* was used is a
+    separate field for a separate question.
     """
     reasons = []
     if sessions_used < asked_for:
-        reasons.append(f"store holds {sessions_used} of {asked_for} sessions")
+        reasons.append(f"Chỉ đọc được {sessions_used}/{asked_for} phiên")
     if trend == "unknown":
         reasons.append(
-            "the earnings axis is unknown: fewer than "
-            f"{reads_fundamental.QUARTERS} comparable quarters stored"
+            f"Chưa đủ {reads_fundamental.QUARTERS} quý lợi nhuận so sánh được"
         )
     return reasons
 
@@ -603,7 +643,24 @@ def _tiles_frame(
         ),
         unit=None,
         labels={"label": "Chỉ số", "value": "Giá trị", "unit": "Đơn vị"},
+        # Only the twelve-month return is a direction. The position in the band
+        # and the distance from the high are places, not movements, and the last
+        # close and the RSI are levels — colouring a level as a rise would be
+        # reading a verdict into a number this Study deliberately does not give.
+        point_roles=(None, None, _direction(return_12m_pct), None, None),
     )
+
+
+def _direction(change: float | None) -> str | None:
+    """Whether a change rose or fell, or nothing where it did neither.
+
+    Nothing at zero as well as at ``None``: a return of exactly nought did not
+    rise, and painting it in the up colour because it is not negative would put
+    a claim on the one number that makes none.
+    """
+    if change is None or change == 0:
+        return None
+    return "up" if change > 0 else "down"
 
 
 def _range_frame(
@@ -653,6 +710,13 @@ def _earnings_frame(quarters: Sequence[_QuarterReading]) -> Frame:
     Empty when nothing is stored, rather than absent: the block still draws, and
     a reader sees an earnings axis with no bars in it — which is the honest
     picture of a company this store has not collected.
+
+    **A bar's colour is its year-on-year direction, never its height.** The bar
+    is the quarter's profit and the colour is whether that profit beat the same
+    quarter a year earlier, which is the comparison the column beside it makes
+    and the only one a season of earnings supports: four quarters read left to
+    right are four different seasons, and the tallest of them is usually just
+    the busiest one. A quarter with no comparable predecessor is left unpainted.
     """
     return Frame(
         kind="series",
@@ -662,6 +726,7 @@ def _earnings_frame(quarters: Sequence[_QuarterReading]) -> Frame:
             for quarter in quarters
         ),
         unit="VND",
+        point_roles=tuple(_direction(quarter.yoy_pct) for quarter in quarters),
         labels={
             "quarter": "Quý",
             "net_profit_vnd": "Lợi nhuận sau thuế",
@@ -671,28 +736,38 @@ def _earnings_frame(quarters: Sequence[_QuarterReading]) -> Frame:
 
 
 def _conditions_frame(conditions: Sequence[_Condition]) -> Frame:
+    """The checklist, in the words a reader reads and no others.
+
+    The status used to travel twice — once as the token the checklist widget
+    marks a row with, once as the Vietnamese beside it — and the frame is also
+    what the "xem dạng bảng" disclosure prints. So a reader who opened the table
+    met a column of ``met`` and ``not_met``, which is this system's spelling of a
+    word it had already translated one column to the left.
+
+    Only the Vietnamese is sent now. The widget reads the same three words, and
+    a panel written before this change still carries the tokens and still draws,
+    because the drawing knows both spellings of the three statuses it has.
+    """
     return Frame(
         kind="table",
-        columns=("label", "status", "status_text", "value", "unit", "evidence"),
+        columns=("label", "status", "value", "unit", "evidence"),
         rows=tuple(
             (
                 item.label,
-                item.status,
                 _STATUS_LABELS[item.status],
                 item.value,
                 item.unit,
-                item.evidence_ref,
+                _EVIDENCE_NAMES[item.evidence_ref],
             )
             for item in conditions
         ),
         unit=None,
         labels={
             "label": "Điều kiện",
-            "status": "Mã trạng thái",
-            "status_text": "Trạng thái",
+            "status": "Trạng thái",
             "value": "Mức đo được",
             "unit": "Đơn vị",
-            "evidence": "Khối dữ liệu",
+            "evidence": "Đối chiếu ở",
         },
     )
 
@@ -710,7 +785,7 @@ def view(result: StudyResult) -> SignalDeskSpec:
         blocks=(
             SignalDeskBlock(
                 widget="stat_tiles",
-                widget_version=1,
+                widget_version=2,
                 frame="tiles",
                 options={"label": "label", "value": "value", "unit": "unit"},
             ),
@@ -736,7 +811,7 @@ def view(result: StudyResult) -> SignalDeskSpec:
             ),
             SignalDeskBlock(
                 widget="bar_series",
-                widget_version=1,
+                widget_version=2,
                 frame="earnings_quarters",
                 options={"x": "quarter", "y": "net_profit_vnd"},
             ),
@@ -801,10 +876,10 @@ DEFINITION = register(
             "conditions",
         ),
         widgets=(
-            ("stat_tiles", 1),
+            ("stat_tiles", 2),
             ("range_strip", 1),
             ("line_series", 1),
-            ("bar_series", 1),
+            ("bar_series", 2),
             ("condition_checklist", 1),
         ),
         compute=compute,

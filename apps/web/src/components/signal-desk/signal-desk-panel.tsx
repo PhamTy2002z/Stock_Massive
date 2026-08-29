@@ -130,7 +130,12 @@ export function SignalDeskPanel({
         <ProvenanceStrip provenance={artifact.data.provenance} />
       )}
 
-      <div className="mt-3.5 space-y-3.5">
+      {/* Keyed on whether the numbers have arrived, so the blocks fade in over
+          where the skeleton stood instead of replacing it between two frames. */}
+      <div
+        key={artifact.data === undefined ? "skeleton" : "blocks"}
+        className="mt-3.5 space-y-3.5 motion-safe:animate-vg-fade-in"
+      >
         {artifact.data === undefined ? (
           Array.from({ length: Math.max(1, blockCount ?? 1) }).map((_, index) => (
             <Skeleton key={index} />

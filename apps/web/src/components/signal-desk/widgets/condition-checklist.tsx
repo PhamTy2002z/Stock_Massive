@@ -31,8 +31,19 @@ import type { Frame } from "@/lib/alpha-desk/types"
 import { columnIndex, formatMeasure, numberAt } from "../frame"
 import type { WidgetProps } from "../widget-registry"
 
-/** The three statuses a Study may send, and how each one reads. */
+/**
+ * The three statuses a Study may send, and how each one reads.
+ *
+ * Each is listed under both spellings it arrives in. A Study sends the
+ * Vietnamese, because the frame it sends is also what the "xem dạng bảng"
+ * disclosure prints and a reader opening that met `met` and `not_met`. Panels
+ * written before that change carry the tokens, and a persisted panel has to
+ * keep rendering — so the tokens stay here rather than being replaced.
+ */
 const STATUSES = {
+  "Đạt": { word: "Đạt", icon: Check, tone: "text-positive" },
+  "Chưa đạt": { word: "Chưa đạt", icon: X, tone: "text-negative" },
+  "Chưa rõ": { word: "Chưa rõ", icon: Minus, tone: "text-caution" },
   met: { word: "Đạt", icon: Check, tone: "text-positive" },
   not_met: { word: "Chưa đạt", icon: X, tone: "text-negative" },
   unknown: { word: "Chưa rõ", icon: Minus, tone: "text-caution" },

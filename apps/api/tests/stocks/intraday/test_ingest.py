@@ -17,6 +17,7 @@ from sqlalchemy import delete, func, select
 from src.core.database import Base, get_sync_db, sync_engine
 from src.stocks.intraday import ingest, session_window
 from src.stocks.models import BarIntraday15m
+from src.stocks.providers.normalize import VN_TZ
 
 SYMBOL = "INGST"
 
@@ -321,6 +322,101 @@ def test_a_session_bucket_with_no_trade_is_left_out_rather_than_zeroed():
         )
 
     assert len(labels) == len(session_window.SESSION_BUCKETS) - 1
+
+
+def test_the_quarter_hour_the_market_is_still_inside_is_not_written():
+    """A bucket seven minutes old is seven minutes of trade under a full label.
+
+    The provider answers about the day in progress and reports the current
+    quarter hour as though it were finished. Written, it becomes a fifteen-minute
+    row carrying a fraction of a quarter hour — and an artifact freezes it there,
+    because an artifact is rendered again rather than recomputed.
+    """
+    day = date(2026, 8, 21)
+    # Inside the 10:30 bucket, seven minutes into it.
+    now = datetime(2026, 8, 21, 10, 37, tzinfo=VN_TZ)
+
+    with get_sync_db() as session:
+        outcome = ingest.ensure_bars(
+            session,
+            SYMBOL,
+            sessions=1,
+            fetch=lambda *_: provider_frame([day]),
+            today=day,
+            now=now,
+        )
+        session.commit()
+        written = _bucket_times(session)
+
+    # 10:15 ended at 10:30 and its minute of slack is up; 10:30 is the one the
+    # clock is inside, and everything after it has not started.
+    assert time(10, 15) in written
+    assert time(10, 30) not in written
+    assert max(written) == time(10, 15)
+    assert outcome.buckets_underway == len(session_window.SESSION_BUCKETS) - len(
+        written
+    )
+    assert outcome.rows_written == len(written)
+
+
+def test_a_bucket_is_written_once_its_grace_has_elapsed_and_not_a_second_before():
+    """The cut-off is the bucket's own end plus the slack, to the second."""
+    day = date(2026, 8, 21)
+    settled = (
+        datetime(2026, 8, 21, 10, 30, tzinfo=VN_TZ)
+        + timedelta(minutes=session_window.BUCKET_MINUTES)
+        + ingest.SETTLE_GRACE
+    )
+    fetch = lambda *_: provider_frame([day])
+
+    with get_sync_db() as session:
+        ingest.ensure_bars(
+            session,
+            SYMBOL,
+            sessions=1,
+            fetch=fetch,
+            today=day,
+            now=settled - timedelta(seconds=1),
+        )
+        session.commit()
+        assert time(10, 30) not in _bucket_times(session)
+
+        # The same fetch a second later: the warm path re-reads the session it
+        # belongs to, so the bucket arrives on its own without a backfill.
+        ingest.ensure_bars(
+            session, SYMBOL, sessions=1, fetch=fetch, today=day, now=settled
+        )
+        session.commit()
+        assert time(10, 30) in _bucket_times(session)
+
+
+def test_a_session_the_clock_has_left_behind_is_written_whole():
+    """Yesterday is never held back: every one of its buckets is finished."""
+    day = date(2026, 8, 20)
+
+    with get_sync_db() as session:
+        outcome = ingest.ensure_bars(
+            session,
+            SYMBOL,
+            sessions=1,
+            fetch=lambda *_: provider_frame([day]),
+            today=date(2026, 8, 21),
+            now=datetime(2026, 8, 21, 9, 5, tzinfo=VN_TZ),
+        )
+        session.commit()
+
+    assert outcome.buckets_underway == 0
+    assert outcome.rows_written == len(session_window.SESSION_BUCKETS)
+
+
+def _bucket_times(session) -> set[time]:
+    """The clock times of every stored bucket for this symbol."""
+    return {
+        stamp.astimezone(VN_TZ).time()
+        for stamp in session.execute(
+            select(BarIntraday15m.bucket_start).where(BarIntraday15m.symbol == SYMBOL)
+        ).scalars()
+    }
 
 
 def _totals(session) -> tuple[int, int]:

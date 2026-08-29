@@ -135,9 +135,17 @@ TOOL_CALL_FIELDS = (
 SIGNAL_DESK_FIELDS = (
     "artifactId",
     "studyName",
+    # The recipe's Vietnamese name. It travels with the slug rather than
+    # instead of it: the slug is what an export and a trace are keyed by, and
+    # the display name is the only one a reader may be shown.
+    "studyDisplayName",
     "title",
     "blockCount",
     "round",
+    # Which company, and when the numbers were frozen. Both are how a reader
+    # with twenty boards finds one again — neither is a number off a frame.
+    "symbol",
+    "asOf",
 )
 
 

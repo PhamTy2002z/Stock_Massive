@@ -21,6 +21,7 @@
 import { memo, useState } from "react"
 import { ErrorBoundary } from "react-error-boundary"
 
+import { SIGNAL_DESK_COPY } from "@/lib/alpha-desk/copy"
 import type { SignalDeskBlock, Frame, Provenance } from "@/lib/alpha-desk/types"
 
 import { FALLBACK, resolveWidget } from "./widget-registry"
@@ -46,11 +47,7 @@ function Block({
     // The server checks that every block names a frame the run produced, so
     // this means the two builds disagree. Said out loud rather than rendered as
     // a gap: a missing block is a hole nobody can see.
-    return (
-      <p className="text-meta text-muted-foreground">
-        Không có dữ liệu cho khối &ldquo;{block.frame}&rdquo;.
-      </p>
-    )
+    return <p className="text-meta text-muted-foreground">{SIGNAL_DESK_COPY.blockNoData}</p>
   }
 
   const { component: Widget, degraded } = resolveWidget(
@@ -66,8 +63,7 @@ function Block({
     return (
       <section>
         <Degraded frame={frame} options={block.options} provenance={provenance}>
-          Hiển thị dạng bảng — bản xem này chưa vẽ được {block.widget} v
-          {block.widgetVersion}.
+          {SIGNAL_DESK_COPY.blockAsTable}
         </Degraded>
       </section>
     )
@@ -94,8 +90,7 @@ function Block({
         resetKeys={[frame]}
         fallbackRender={() => (
           <Degraded frame={frame} options={block.options} provenance={provenance}>
-            Hiển thị dạng bảng — không vẽ được {block.widget} với dữ liệu của
-            bảng này.
+            {SIGNAL_DESK_COPY.blockAsTable}
           </Degraded>
         )}
       >

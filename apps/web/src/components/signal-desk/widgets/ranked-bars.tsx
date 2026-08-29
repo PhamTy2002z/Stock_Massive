@@ -14,7 +14,8 @@
  * the end of its own bar instead, which is where the eye already is.
  *
  * **The leader carries the focus, and nothing else does.** It is the row the
- * ranking exists to name.
+ * ranking exists to name — unless the frame itself says which rows are what, in
+ * which case the engine that measured them decides and this only draws.
  */
 
 import {
@@ -28,9 +29,16 @@ import {
   YAxis,
 } from "recharts"
 
-import { columnIndex, formatValue, labelOf, numberAt, textAt } from "../frame"
+import {
+  columnIndex,
+  formatValue,
+  labelOf,
+  numberAt,
+  pointRole,
+  textAt,
+} from "../frame"
 import type { WidgetProps } from "../widget-registry"
-import { AXIS, FOCUS, SERIES, TOOLTIP_STYLE } from "./chart-theme"
+import { AXIS, colorFor, FOCUS, resolveRoles, SERIES, TOOLTIP_STYLE } from "./chart-theme"
 
 /** How many rows a ranking shows. Beyond this it is a table, not a ranking. */
 const MAX_ROWS = 8
@@ -47,8 +55,15 @@ export function RankedBarsWidget({ frame, options }: WidgetProps) {
   const value = columnIndex(frame, valueColumn)
 
   const ranked = frame.rows
-    .map((row) => ({ label: textAt(row, label), value: numberAt(row, value) }))
-    .filter((point): point is { label: string; value: number } => point.value !== null)
+    .map((row, index) => ({
+      label: textAt(row, label),
+      value: numberAt(row, value),
+      role: pointRole(frame, index),
+    }))
+    .filter(
+      (point): point is { label: string; value: number; role: string | null } =>
+        point.value !== null,
+    )
 
   const data = ranked.slice(0, MAX_ROWS)
   const hidden = ranked.length - data.length
@@ -56,6 +71,12 @@ export function RankedBarsWidget({ frame, options }: WidgetProps) {
   if (data.length === 0) {
     return <p className="text-meta text-muted-foreground">Không có hạng nào để xếp.</p>
   }
+
+  // Resolved over the rows actually drawn, since those are the ones a reader
+  // compares. A frame that says nothing about any of them keeps the rule below:
+  // the top row carries the mark because the ranking exists to name it.
+  const declared = data.some((point) => point.role !== null)
+  const { roles } = resolveRoles(data.map((point) => point.role))
 
   return (
     <figure className="m-0">
@@ -89,7 +110,16 @@ export function RankedBarsWidget({ frame, options }: WidgetProps) {
                   value is largest: the Study ranked these, and a tie at the top
                   is still one leader — two accented bars spend the mark. */}
               {data.map((point, index) => (
-                <Cell key={point.label} fill={index === 0 ? FOCUS : SERIES} />
+                <Cell
+                  key={point.label}
+                  fill={
+                    declared
+                      ? colorFor(roles[index])
+                      : index === 0
+                        ? FOCUS
+                        : SERIES
+                  }
+                />
               ))}
               <LabelList
                 dataKey="value"

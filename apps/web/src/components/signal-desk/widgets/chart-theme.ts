@@ -17,9 +17,16 @@
  * **`FOCUS` is a single element, never a series.** The peak bucket, the ranked
  * leader, the current price marker: the one row a reader came for. A second
  * amber thing on the same chart spends the only mark that means "this one".
+ * {@link resolveRoles} is where that is enforced rather than trusted.
+ *
+ * **What a colour means is the engine's to say, and the theme's to draw.** A
+ * frame may declare what its series and its points *are* — the one the answer is
+ * about, a quarter that fell, the third of four groups — and {@link colorFor}
+ * turns that into the token this theme paints it with. The engine never names a
+ * colour; a name it chose would be legible in one of the two themes.
  */
 
-/** The one categorical series colour: neither the amber nor the market pair. */
+/** The default series colour: neither the amber nor the market pair. */
 export const SERIES = "hsl(var(--widget-series))"
 
 /** A companion series, told apart by weight rather than by a second hue. */
@@ -27,6 +34,74 @@ export const SERIES_MUTED = "hsl(var(--widget-neutral))"
 
 /** The one element the answer is actually about. Never a whole series. */
 export const FOCUS = "hsl(var(--widget-focus))"
+
+/**
+ * Every meaning a frame may declare, and the token this theme draws it with.
+ *
+ * Closed on purpose, and matched to the server's own list
+ * (`studies/contracts.py`): a word that is not here is a claim this build cannot
+ * draw, and drawing it as the default series colour is the honest answer —
+ * silently inventing a hue for it would be the browser deciding what a number
+ * means.
+ */
+const ROLE_TOKENS: Record<string, string> = {
+  series: "--widget-series",
+  muted: "--widget-series-muted",
+  focus: "--widget-focus",
+  up: "--widget-up",
+  down: "--widget-down",
+  neutral: "--widget-neutral",
+  "category:1": "--widget-cat-1",
+  "category:2": "--widget-cat-2",
+  "category:3": "--widget-cat-3",
+  "category:4": "--widget-cat-4",
+  "category:5": "--widget-cat-5",
+  "category:6": "--widget-cat-6",
+}
+
+/** The colour for one declared meaning, or the default series colour. */
+export function colorFor(role: unknown): string {
+  const token = typeof role === "string" ? ROLE_TOKENS[role] : undefined
+  return token === undefined ? SERIES : `hsl(var(${token}))`
+}
+
+export interface ResolvedRoles {
+  /** One entry per element handed in, in the same order. */
+  roles: (string | null)[]
+  /** True when more than one element claimed the focus and none now has it. */
+  focusSpent: boolean
+}
+
+/**
+ * The declared meanings, with the focus mark spent at most once.
+ *
+ * The focus is the only role that is a claim about the *picture* rather than
+ * about one number: it says "this is the one". Two of them say nothing, and a
+ * chart with half its bars in amber reads as a chart about amber. So a frame
+ * that marks two has both marks withdrawn — nothing is highlighted rather than
+ * everything, because the numbers are still right and only the emphasis was
+ * wrong. Every other role in the same frame is left exactly as it was.
+ *
+ * Withdrawn to `null` rather than to a colour, so each widget falls back to
+ * whatever *it* draws an unclaimed element in: the series colour on a chart, the
+ * page's own ink on a tile.
+ *
+ * Silent to the reader by design. The chart still says what it measured, the
+ * table under it carries the same numbers, and "two peaks were marked" is a
+ * sentence about how this system is built, not about the company.
+ */
+export function resolveRoles(
+  declared: readonly (string | null | undefined)[],
+): ResolvedRoles {
+  const roles = declared.map((role) => (typeof role === "string" ? role : null))
+  const focused = roles.filter((role) => role === "focus").length
+  if (focused <= 1) return { roles, focusSpent: false }
+
+  return {
+    roles: roles.map((role) => (role === "focus" ? null : role)),
+    focusSpent: true,
+  }
+}
 
 /** The ground a bar or a rule is drawn against. */
 export const TRACK = "hsl(var(--widget-track))"

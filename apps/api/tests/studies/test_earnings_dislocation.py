@@ -52,12 +52,14 @@ from src.studies.earnings_dislocation import (
     GATES,
     GATE_ABOVE_PRICE_CHANGE,
     GATE_BELOW_GROWTH_THRESHOLD,
+    GATE_LABELS,
     GATE_PRICE_WINDOW_UNUSABLE,
     LIQUIDITY_FLOOR_VND,
     NAME,
     QUADRANT_HIGH_GROWTH_LOW_PRICE,
     QUADRANT_LOW_GROWTH_HIGH_PRICE,
     REACTION_SESSIONS,
+    START_ROW_LABEL,
     TOP_N_CEILING,
     TOP_N_FLOOR,
     WINDOW_CLOSES,
@@ -126,8 +128,18 @@ def screen(params: dict | None = None):
 
 
 def ladder(result) -> dict[str, tuple[int, int]]:
-    """The ``filters`` frame as ``{gate code: (excluded, remaining)}``."""
-    return {row[0]: (row[3], row[4]) for row in result.frames["filters"].rows}
+    """The ``filters`` frame as ``{gate code: (excluded, remaining)}``.
+
+    Keyed back to the codes here rather than carried in the frame. That table is
+    printed to a reader by the disclosure under the block, so every cell of it
+    is the gate's Vietnamese sentence; a test that wants the gate's identity
+    looks the sentence up.
+    """
+    codes = {label: code for code, label in GATE_LABELS.items()}
+    return {
+        codes.get(row[0], row[0]): (row[2], row[3])
+        for row in result.frames["filters"].rows
+    }
 
 
 def ranking(result) -> dict[str, tuple]:
@@ -238,9 +250,11 @@ def test_each_gate_removes_exactly_the_symbols_planted_for_it(market):
 def test_every_gate_appears_in_the_ladder_even_when_it_removed_nothing(market):
     result = screen()
 
-    assert set(ladder(result)) == {"universe", *GATES}
+    assert set(ladder(result)) == {START_ROW_LABEL, *GATES}
     # A reader asking "why is my symbol not here" has to see the gate ran.
-    assert [row[0] for row in result.frames["filters"].rows][1:] == list(GATES)
+    assert [row[0] for row in result.frames["filters"].rows][1:] == [
+        GATE_LABELS[gate] for gate in GATES
+    ]
 
 
 def test_a_window_that_mixes_price_bases_is_excluded_rather_than_compared(market):
@@ -428,13 +442,41 @@ def test_the_provenance_carries_the_limits_the_screen_cannot_design_away(market)
     provenance = screen().provenance
 
     assert provenance.sessions_used == WINDOW_CLOSES
-    reason = provenance.reason or ""
+    notes = " ".join(provenance.method_notes)
     # The three limits the data forced: an approximated traded value, a window
-    # that is not anchored to a publication date, and a roster of today.
-    assert "xấp xỉ" in reason
-    assert f"{REACTION_SESSIONS} phiên" in reason
-    assert "roster" in reason
-    assert "dislocation_rank" in reason
+    # that is not anchored to a publication date, and a listing as it stands now.
+    assert "ước bằng trung vị" in notes
+    assert f"{REACTION_SESSIONS} phiên" in notes
+    assert "niêm yết hiện hành" in notes
+    assert "Thứ hạng lệch pha" in notes
+
+
+def test_the_method_belongs_beside_the_reason_and_never_inside_it(market):
+    """A healthy screen says nothing about health, and still states its limits.
+
+    The method used to be joined onto the reason, so a screen with nothing wrong
+    printed five clauses of methodology as its health line — and the reader who
+    only wanted to know whether the numbers were thin read all of them.
+    """
+    provenance = screen().provenance
+
+    assert provenance.health == "normal"
+    assert provenance.reason is None
+    assert len(provenance.method_notes) == 5
+
+
+def test_no_note_a_reader_meets_is_written_in_this_systems_own_words(market):
+    """Every sentence on the strip is about the companies, not about the code.
+
+    The case that named this: the strip printed the ranking formula's own
+    identifier in the middle of a Vietnamese sentence.
+    """
+    provenance = screen().provenance
+    forbidden = ("dislocation_rank", "adjusted_at_source", "store", "roster")
+
+    for sentence in (*provenance.method_notes, provenance.reason or ""):
+        for word in forbidden:
+            assert word not in sentence
 
 
 def test_a_thinly_filed_universe_is_reported_as_degraded(market):
@@ -463,7 +505,9 @@ def test_a_thinly_filed_universe_is_reported_as_degraded(market):
         session.rollback()
 
     assert result.provenance.health == "degraded"
-    assert fixture.PERIOD in (result.provenance.reason or "")
+    # The quarter as a reader writes it, not the code the filings are keyed by.
+    assert "quý II/2026" in (result.provenance.reason or "")
+    assert fixture.PERIOD not in (result.provenance.reason or "")
     assert result.headline["measured"] == fixture.CANDIDATE_COUNT - 5
 
 
@@ -480,7 +524,7 @@ def test_the_signal_desk_draws_four_blocks_over_frames_the_study_produced(market
     ]
     assert all(block.frame in result.frames for block in spec.blocks)
     assert set(result.frames) == set(definition.frames)
-    assert fixture.PERIOD in spec.title
+    assert "quý II/2026" in spec.title
     assert IMPERATIVE.search(spec.title) is None
 
 

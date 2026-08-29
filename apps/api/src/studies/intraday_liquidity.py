@@ -172,7 +172,7 @@ def compute(context: StudyContext) -> StudyResult:
         headline=headline,
         frames={
             "tiles": _tiles_frame(peak, sessions_used, params.metric),
-            "profile": _profile_frame(buckets, params.metric),
+            "profile": _profile_frame(buckets, params.metric, peak),
             "heatmap": _heatmap_frame(by_session),
             "ranking": _ranking_frame(ranked, params.metric),
         },
@@ -184,7 +184,16 @@ def compute(context: StudyContext) -> StudyResult:
             reason=(
                 None
                 if sessions_used >= params.sessions
-                else f"store holds {sessions_used} of {params.sessions} sessions"
+                else (
+                    f"Chỉ đọc được {sessions_used}/{params.sessions} phiên "
+                    "gần nhất"
+                )
+            ),
+            method_notes=(
+                f"Một khung giờ được tính là đỉnh của phiên khi nằm trong "
+                f"{SPIKE_TOP_N} khung giao dịch lớn nhất phiên đó.",
+                "Tỷ trọng của mỗi khung giờ tính trên tổng của chính phiên đó, "
+                "nên phiên sôi động và phiên trầm so được với nhau.",
             ),
         ),
     )
@@ -318,10 +327,14 @@ def _tiles_frame(peak: _Bucket, sessions_used: int, metric: Metric) -> Frame:
         ),
         unit=None,
         labels={"label": "Chỉ số", "value": "Giá trị", "unit": "Đơn vị"},
+        # The window itself is what the question asked for; the three tiles after
+        # it are how large, how concentrated and how often, which are what make
+        # the first one worth anything.
+        point_roles=("focus", None, None, None),
     )
 
 
-def _profile_frame(buckets: Sequence[_Bucket], metric: Metric) -> Frame:
+def _profile_frame(buckets: Sequence[_Bucket], metric: Metric, peak: _Bucket) -> Frame:
     return Frame(
         kind="series",
         columns=("bucket", "avg_amount", "median_amount", "share", "spike_frequency"),
@@ -336,6 +349,13 @@ def _profile_frame(buckets: Sequence[_Bucket], metric: Metric) -> Frame:
             for bucket in buckets
         ),
         unit=_UNITS[metric],
+        # Marked by the bucket that won on share, which is what the profile is
+        # sorted by nowhere and ranked by everywhere else. Leaving it to the
+        # drawing layer would mark the tallest *bar* instead, and the bar drawn
+        # is whichever column the block chose to plot.
+        point_roles=tuple(
+            "focus" if bucket.label == peak.label else None for bucket in buckets
+        ),
         labels={
             "bucket": "Khung giờ",
             "avg_amount": f"{_AMOUNT_LABELS[metric]} trung bình",
@@ -392,6 +412,12 @@ def _ranking_frame(ranked: Sequence[_Bucket], metric: Metric) -> Frame:
             for position, bucket in enumerate(ranked, start=1)
         ),
         unit=_UNITS[metric],
+        # The leader, which is the same bucket the headline names. A tie at the
+        # top is still one leader: two marks spend the one that means "this one".
+        point_roles=tuple(
+            "focus" if position == 1 else None
+            for position, _ in enumerate(ranked, start=1)
+        ),
         labels={
             "rank": "Hạng",
             "bucket": "Khung giờ",
@@ -415,13 +441,13 @@ def view(result: StudyResult) -> SignalDeskSpec:
         blocks=(
             SignalDeskBlock(
                 widget="stat_tiles",
-                widget_version=1,
+                widget_version=2,
                 frame="tiles",
                 options={"label": "label", "value": "value", "unit": "unit"},
             ),
             SignalDeskBlock(
                 widget="bar_series",
-                widget_version=1,
+                widget_version=2,
                 frame="profile",
                 options={
                     "x": "bucket",
@@ -438,7 +464,7 @@ def view(result: StudyResult) -> SignalDeskSpec:
             ),
             SignalDeskBlock(
                 widget="ranked_bars",
-                widget_version=1,
+                widget_version=2,
                 frame="ranking",
                 options={"label": "bucket", "value": "share", "valueFormat": "percent"},
             ),
@@ -464,10 +490,10 @@ DEFINITION = register(
         requires=("intraday_bar_15m",),
         frames=("tiles", "profile", "heatmap", "ranking"),
         widgets=(
-            ("stat_tiles", 1),
-            ("bar_series", 1),
+            ("stat_tiles", 2),
+            ("bar_series", 2),
             ("session_heatmap", 1),
-            ("ranked_bars", 1),
+            ("ranked_bars", 2),
         ),
         compute=compute,
         view=view,

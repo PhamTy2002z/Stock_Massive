@@ -166,18 +166,34 @@ def study_parameters() -> dict[str, dict[str, Any]]:
     adds a parameter is callable the moment it is registered. Descriptions are
     prefixed with the Studies that accept the key, because on one flat object
     the model cannot otherwise tell which parameter belongs to what it asked for.
+
+    **Where two Studies describe one key differently, both descriptions travel.**
+    They may legitimately share a name with different ranges, and keeping only
+    the first would tell the model the second Study's range is the first's —
+    which it would then respect, and be silently clamped for.
     """
     merged: dict[str, dict[str, Any]] = {}
     owners: dict[str, list[str]] = {}
+    described: dict[str, dict[str, list[str]]] = {}
     for definition in _registered():
         schema = definition.params_schema
         for name, property_schema in (schema.get("properties") or {}).items():
             owners.setdefault(name, []).append(definition.name)
             merged.setdefault(name, dict(property_schema))
+            text = str(property_schema.get("description") or "").strip()
+            described.setdefault(name, {}).setdefault(text, []).append(
+                definition.name
+            )
     for name, schema in merged.items():
-        described = str(schema.get("description") or "").strip()
-        prefix = f"[{', '.join(owners[name])}]"
-        schema["description"] = f"{prefix} {described}".strip()
+        readings = described[name]
+        if len(readings) == 1:
+            text = next(iter(readings))
+            schema["description"] = f"[{', '.join(owners[name])}] {text}".strip()
+        else:
+            schema["description"] = " · ".join(
+                f"[{', '.join(studies_named)}] {text}".strip()
+                for text, studies_named in readings.items()
+            )
         # Nothing is required on this object except the Study's name: a
         # parameter that is mandatory for one Study is meaningless for the next,
         # and a schema that said otherwise would refuse every other call.
@@ -219,7 +235,10 @@ def run_study_description() -> str:
         "over time or across buckets rather than a single number: a session "
         "profile, a distribution, a ranking, anything a reader would want drawn. "
         "The reader is shown the whole picture; you are shown the headline, "
-        "which is everything a sentence can honestly say about it.",
+        "which is everything a sentence can honestly say about it. Read the "
+        "list below against what was actually asked rather than against the "
+        "words used to ask it: a study's question is written to cover the "
+        "several ways a reader phrases the same one.",
         "",
         "Available studies:",
     ]
@@ -488,7 +507,7 @@ class StudyTools:
                 "title": artifact.signal_desk_spec.title,
                 "blockCount": len(artifact.signal_desk_spec.blocks),
                 "headline": dict(artifact.headline),
-                "provenance": artifact.provenance.to_payload(),
+                "provenance": _provenance_for_model(artifact.provenance.to_payload()),
             }
 
     def render_signal_desk(
@@ -608,7 +627,7 @@ class StudyTools:
             "title": title,
             "blockCount": len(blocks),
             "dropped": dropped,
-            "provenance": provenance,
+            "provenance": _provenance_for_model(provenance),
         }
 
     @contextmanager
@@ -658,6 +677,18 @@ def _presentation(widget: str, frame: Mapping[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def _provenance_for_model(provenance: Mapping[str, Any]) -> dict[str, Any]:
+    """The provenance as the model reads it: without the method notes.
+
+    The notes are for the reader who opens "Cách tính" under a picture. The
+    model is owed the headline and the strip — as-of, sessions, health, one
+    reason — inside a budget of roughly three hundred tokens, and five sentences
+    of method per Study would spend most of it on something the model cannot
+    act on. The artifact keeps them; the browser draws them.
+    """
+    return {key: value for key, value in provenance.items() if key != "methodNotes"}
+
+
 def _merged_provenance(sources: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """One claim over several frames: the oldest as-of, the worst health.
 
@@ -670,6 +701,7 @@ def _merged_provenance(sources: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     as_of = ""
     sessions = 0
     reasons: list[str] = []
+    notes: list[str] = []
     for source in sources:
         candidate = str(source.get("health") or "normal")
         if order.get(candidate, 0) > order.get(health, 0):
@@ -683,12 +715,21 @@ def _merged_provenance(sources: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         reason = source.get("reason")
         if isinstance(reason, str) and reason:
             reasons.append(reason)
+        for note in source.get("methodNotes") or ():
+            if isinstance(note, str) and note:
+                notes.append(note)
+    # The strip under a panel holds one sentence, and every frame's reason is
+    # already one. The first distinct reason takes the strip; the others are
+    # limitations of the same picture, so they travel as method notes rather
+    # than being glued into a paragraph the strip would have to cut.
+    distinct = list(dict.fromkeys(reasons))
     return {
         "source": "store",
         "asOf": as_of,
         "sessionsUsed": sessions,
         "health": health,
-        "reason": "; ".join(dict.fromkeys(reasons)) or None,
+        "reason": distinct[0] if distinct else None,
+        "methodNotes": list(dict.fromkeys(distinct[1:] + notes)),
     }
 
 

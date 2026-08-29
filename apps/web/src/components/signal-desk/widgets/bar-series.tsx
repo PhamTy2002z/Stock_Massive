@@ -9,6 +9,11 @@
  * carries the focus. A whole series in the focus colour spends the only mark
  * that means "this one is the answer".
  *
+ * **Where the frame says what its buckets are, that wins.** The engine knows
+ * whether a quarter fell or a bucket is the one the question was about; the peak
+ * this file finds is a guess from the shape of the numbers, and it is what a
+ * frame that says nothing still gets.
+ *
  * **The ceiling is derived, because the true maximum says nothing.** A
  * liquidity profile is one dominant bucket and thirty small ones; scaled to the
  * dominant bucket the thirty are a rule along the baseline, and the chart
@@ -31,10 +36,25 @@ import {
   YAxis,
 } from "recharts"
 
-import { axisPresentation, columnIndex, labelOf, numberAt, textAt } from "../frame"
+import {
+  axisPresentation,
+  columnIndex,
+  labelOf,
+  numberAt,
+  pointRole,
+  textAt,
+} from "../frame"
 import type { WidgetProps } from "../widget-registry"
 import { ChartHeading } from "./chart-heading"
-import { AXIS, FOCUS, GRID, SERIES, TOOLTIP_STYLE } from "./chart-theme"
+import {
+  AXIS,
+  colorFor,
+  FOCUS,
+  GRID,
+  resolveRoles,
+  SERIES,
+  TOOLTIP_STYLE,
+} from "./chart-theme"
 
 /** Which bar is the tallest *ordinary* one, and the room left above it. */
 const PERCENTILE = 0.9
@@ -77,11 +97,18 @@ export function BarSeriesWidget({ frame, options }: WidgetProps) {
   const y = columnIndex(frame, yColumn)
 
   const points = frame.rows
-    .map((row) => ({ label: textAt(row, x), value: numberAt(row, y) }))
+    .map((row, index) => ({
+      label: textAt(row, x),
+      value: numberAt(row, y),
+      role: pointRole(frame, index),
+    }))
     // A bucket with no value is dropped rather than plotted at zero: a bar of
     // height nothing says "nobody traded", and an absent bucket says the
     // exchange has no such quarter hour. Only one of those is about the company.
-    .filter((point): point is { label: string; value: number } => point.value !== null)
+    .filter(
+      (point): point is { label: string; value: number; role: string | null } =>
+        point.value !== null,
+    )
 
   if (points.length === 0) {
     return (
@@ -100,13 +127,21 @@ export function BarSeriesWidget({ frame, options }: WidgetProps) {
   // focus colour would be the whole series wearing the mark that means "this
   // one is the answer".
   const peak = values.indexOf(Math.max(...values))
+  // A frame that says what its buckets are outranks the peak found here: the
+  // engine measured them and this only sorted them.
+  const declared = points.some((point) => point.role !== null)
+  const { roles } = resolveRoles(points.map((point) => point.role))
   // Drawn at the ceiling rather than through it: recharts would happily paint a
   // bar past the top of its own plot, and a bar overlapping the block above is
   // a chart that has escaped its box.
   const data = points.map((point, index) => ({
     ...point,
     plotted: ceiling === null ? point.value : Math.min(point.value, ceiling),
-    focused: index === peak || (ceiling !== null && point.value > ceiling),
+    paint: declared
+      ? colorFor(roles[index])
+      : index === peak || (ceiling !== null && point.value > ceiling)
+        ? FOCUS
+        : SERIES,
   }))
 
   return (
@@ -141,7 +176,7 @@ export function BarSeriesWidget({ frame, options }: WidgetProps) {
             />
             <Bar dataKey="plotted" radius={[2, 2, 0, 0]}>
               {data.map((point) => (
-                <Cell key={point.label} fill={point.focused ? FOCUS : SERIES} />
+                <Cell key={point.label} fill={point.paint} />
               ))}
             </Bar>
           </BarChart>
@@ -150,9 +185,9 @@ export function BarSeriesWidget({ frame, options }: WidgetProps) {
 
       {over.length > 0 && ceiling !== null && (
         <figcaption className="mt-1.5 text-pretty text-meta text-muted-foreground">
-          Trục dừng ở {yAxis.measure(ceiling)} để các cột nhỏ so được với nhau. {over.length}{" "}
-          cột cao hơn mức này được tô màu nhấn và cắt tại đó — số thật nằm trong
-          bảng.
+          Trục dừng ở {yAxis.measure(ceiling)} để các cột nhỏ so được với nhau.{" "}
+          {over.length} cột cao hơn mức này bị cắt tại đó
+          {declared ? "" : " và được tô màu nhấn"} — số thật nằm trong bảng.
         </figcaption>
       )}
     </figure>

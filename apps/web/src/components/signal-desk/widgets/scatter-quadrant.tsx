@@ -17,6 +17,7 @@
 
 import {
   CartesianGrid,
+  Cell,
   ReferenceLine,
   ResponsiveContainer,
   Scatter,
@@ -27,9 +28,16 @@ import {
   ZAxis,
 } from "recharts"
 
-import { columnIndex, formatNumber, labelOf, numberAt, textAt } from "../frame"
+import {
+  columnIndex,
+  formatNumber,
+  labelOf,
+  numberAt,
+  pointRole,
+  textAt,
+} from "../frame"
 import type { WidgetProps } from "../widget-registry"
-import { AXIS, GRID, SERIES, TOOLTIP_STYLE } from "./chart-theme"
+import { AXIS, colorFor, GRID, resolveRoles, SERIES, TOOLTIP_STYLE } from "./chart-theme"
 
 /** The two dividers: present enough to read a quadrant by, quiet enough not to
     compete with the points that sit on them. */
@@ -46,15 +54,21 @@ export function ScatterQuadrantWidget({ frame, options }: WidgetProps) {
   const y = columnIndex(frame, yColumn)
 
   const points = frame.rows
-    .map((row) => ({
+    .map((row, index) => ({
       label: textAt(row, label),
       x: numberAt(row, x),
       y: numberAt(row, y),
+      role: pointRole(frame, index),
     }))
     // Both coordinates or neither: a point with one is not somewhere on the
     // plane, and plotting it at zero would put it in a quadrant it is not in.
-    .filter((point): point is { label: string; x: number; y: number } =>
-      point.x !== null && point.y !== null,
+    .filter(
+      (point): point is {
+        label: string
+        x: number
+        y: number
+        role: string | null
+      } => point.x !== null && point.y !== null,
     )
 
   if (points.length === 0) {
@@ -67,6 +81,7 @@ export function ScatterQuadrantWidget({ frame, options }: WidgetProps) {
 
   const midX = median(points.map((point) => point.x))
   const midY = median(points.map((point) => point.y))
+  const { roles } = resolveRoles(points.map((point) => point.role))
 
   return (
     <div
@@ -107,10 +122,15 @@ export function ScatterQuadrantWidget({ frame, options }: WidgetProps) {
             }
             labelFormatter={() => ""}
           />
-          {/* Every point the same colour. Nothing here is "the answer" — the
-              reading is which quadrant a point is in, and a highlighted point
-              would be this layer naming one. */}
-          <Scatter data={points} fill={SERIES} />
+          {/* Every point the same colour unless the frame said otherwise.
+              Nothing here is "the answer" — the reading is which quadrant a
+              point is in, and a point this layer picked out would be it naming
+              one. The engine that measured them may name one; this may not. */}
+          <Scatter data={points} fill={SERIES}>
+            {points.map((point, index) => (
+              <Cell key={point.label} fill={colorFor(roles[index])} />
+            ))}
+          </Scatter>
         </ScatterChart>
       </ResponsiveContainer>
     </div>

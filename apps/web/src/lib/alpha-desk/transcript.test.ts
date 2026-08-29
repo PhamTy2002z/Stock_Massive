@@ -11,7 +11,7 @@
 import { describe, expect, it } from "vitest"
 
 import { IDLE, type LiveTurn } from "./live-turn"
-import { buildTranscript, storedDeskViews, type TranscriptInput } from "./transcript"
+import { buildTranscript, questionBefore, storedDeskViews, type TranscriptInput } from "./transcript"
 import type { FlagReason, ThreadMessage, ToolCall } from "./types"
 
 const THREAD = "11111111-1111-4111-8111-111111111111"
@@ -30,12 +30,16 @@ function call(id: string, status: ToolCall["status"] = "ok"): ToolCall {
   }
 }
 
-function userMessage(id: number, text: string): ThreadMessage {
+function userMessage(
+  id: number,
+  text: string,
+  content: Record<string, unknown> = {},
+): ThreadMessage {
   return {
     id,
     seq: id,
     role: "user",
-    content: { text },
+    content: { text, ...content } as ThreadMessage["content"],
     created_at: "2026-08-22T09:00:00Z",
     flagged_reason: null,
     flagged_at: null,
@@ -330,7 +334,13 @@ describe("the question the user just asked", () => {
     const entries = transcript({ pendingUserText: "FPT thế nào?" })
 
     expect(entries).toEqual([
-      { kind: "user", key: "pending-user", text: "FPT thế nào?", pending: true },
+      {
+        kind: "user",
+        key: "pending-user",
+        text: "FPT thế nào?",
+        pending: true,
+        attachments: [],
+      },
     ])
   })
 
@@ -460,9 +470,12 @@ describe("a stored answer", () => {
     const announcement = {
       artifactId: "artifact-stb5",
       studyName: "entry_condition_review",
+      studyDisplayName: "Rà soát điều kiện",
       title: "Điều kiện hiện tại — STB5",
       blockCount: 4,
       round: 1,
+      symbol: "STB5",
+      asOf: "2026-08-28T09:00:00+07:00",
     }
     const [entry] = buildTranscript({
       threadId: THREAD,
@@ -490,6 +503,14 @@ describe("a stored answer", () => {
       blockCount: 3,
       round: 0,
     }
+    // Written before the display name, the ticker and the freeze reached the
+    // announcement. Absence reads as empty rather than as a card that vanishes.
+    const asRead = {
+      ...announcement,
+      studyDisplayName: "",
+      symbol: "",
+      asOf: "",
+    }
     const [entry] = buildTranscript({
       threadId: THREAD,
       messages: [
@@ -503,9 +524,7 @@ describe("a stored answer", () => {
       pendingUserText: null,
     })
 
-    expect(entry.kind === "assistant" && entry.view.deskViews).toEqual([
-      announcement,
-    ])
+    expect(entry.kind === "assistant" && entry.view.deskViews).toEqual([asRead])
   })
 })
 
@@ -546,5 +565,118 @@ describe("the desk views a stored Thread already made", () => {
     expect(storedDeskViews([question])).toEqual([])
     expect(storedDeskViews([answerWith(1, undefined)])).toEqual([])
     expect(storedDeskViews([])).toEqual([])
+  })
+})
+
+describe("what a question's attachments look like on the record", () => {
+  it("reads them off the stored message", () => {
+    const entries = transcript({
+      messages: [
+        userMessage(1, "ảnh này là gì?", {
+          attachments: [
+            { id: "a-1", filename: "bang-gia.png", media_type: "image/png", byte_size: 2048 },
+          ],
+        }),
+      ],
+    })
+
+    expect(entries[0]).toMatchObject({
+      kind: "user",
+      attachments: [{ id: "a-1", filename: "bang-gia.png", byte_size: 2048 }],
+    })
+  })
+
+  it("gives an ordinary question an empty list rather than undefined", () => {
+    // Every consumer maps over it — the bubble, the retry, the resend — and a
+    // missing array would be three optional chains instead of one invariant.
+    const entries = transcript({ messages: [userMessage(1, "VCB thế nào?")] })
+
+    expect(entries[0]).toMatchObject({ kind: "user", attachments: [] })
+  })
+
+  it("drops a half-written entry rather than the whole conversation", () => {
+    // Stored JSONB, so a value written by an older build or edited by hand
+    // should cost one missing chip and nothing else.
+    const entries = transcript({
+      messages: [
+        userMessage(1, "hỏi", {
+          attachments: [{ filename: "khong-co-id.png" }, { id: "a-2" }, "rác"],
+        }),
+      ],
+    })
+
+    expect(entries[0]).toMatchObject({
+      kind: "user",
+      // Named by its id when the filename is unreadable: a chip with no label
+      // is a chip that says nothing.
+      attachments: [{ id: "a-2", filename: "a-2" }],
+    })
+  })
+
+  it("shows the chips on a question the create has not committed yet", () => {
+    const entries = transcript({
+      pendingUserText: "đọc ảnh này",
+      pendingAttachments: [
+        { id: "a-9", filename: "moi.png", media_type: "image/png", byte_size: 12 },
+      ],
+    })
+
+    expect(entries.at(-1)).toMatchObject({
+      kind: "user",
+      pending: true,
+      attachments: [{ id: "a-9" }],
+    })
+  })
+})
+
+
+describe("asking a question again", () => {
+  const asked = (text: string, ids: string[] = []) => ({
+    kind: "user" as const,
+    key: `k-${text}`,
+    text,
+    pending: false,
+    attachments: ids.map((id) => ({
+      id,
+      filename: `${id}.png`,
+      media_type: "image/png",
+      byte_size: 1,
+    })),
+  })
+  const answered = (key: string) => ({ kind: "assistant" as const, key }) as never
+
+  it("hands back the words and the files together", () => {
+    // Together, because apart is the failure: a retry that sends the words alone
+    // gets a confident answer about a picture the model never saw, and a retry
+    // is a new Turn so no idempotency conflict catches it.
+    expect(questionBefore([asked("một", ["a-1", "a-2"])])).toEqual({
+      text: "một",
+      attachments: ["a-1", "a-2"],
+    })
+  })
+
+  it("takes the last question when no entry is named", () => {
+    expect(questionBefore([asked("cũ", ["a-1"]), asked("mới", ["a-2"])])).toEqual({
+      text: "mới",
+      attachments: ["a-2"],
+    })
+  })
+
+  it("takes the question before a named entry, with that question's own files", () => {
+    const entries = [asked("cũ", ["a-1"]), answered("m-1"), asked("mới", ["a-2"])]
+
+    expect(questionBefore(entries, "m-1")).toEqual({
+      text: "cũ",
+      attachments: ["a-1"],
+    })
+  })
+
+  it("is null when nothing has been asked", () => {
+    expect(questionBefore([])).toBeNull()
+    expect(questionBefore([answered("m-1")], "m-1")).toBeNull()
+  })
+
+  it("gives an empty list for a question that carried nothing", () => {
+    expect(questionBefore([asked("trơn")])).toEqual({ text: "trơn", attachments: [] })
   })
 })

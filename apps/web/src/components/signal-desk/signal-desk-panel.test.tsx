@@ -114,27 +114,29 @@ describe("once the artifact is fetched", () => {
   it("shows the day the numbers were frozen, and how old that is", async () => {
     fetchArtifact.mockResolvedValue(payload())
 
-    draw(<SignalDeskPanel artifactId={ARTIFACT_ID} />)
+    const { container } = draw(<SignalDeskPanel artifactId={ARTIFACT_ID} />)
 
-    const strip = await screen.findByText(/^vnstock$/)
-    const line = strip.parentElement as HTMLElement
-    expect(line.textContent).toContain(`${fixture.provenance.sessionsUsed} phiên`)
+    const sessions = await screen.findByText(
+      `${fixture.provenance.sessionsUsed} phiên`,
+    )
+    const line = sessions.parentElement as HTMLElement
     // The fixture's as-of is pinned in the past, so the age has to be said.
     expect(line.textContent).toMatch(/ngày trước/)
+    // And the provider is not named: the strip is a caption for a reader.
+    expect(container.textContent).not.toContain("vnstock")
   })
 
   it("re-opens on the stored as-of rather than asking for a fresher slice", async () => {
     fetchArtifact.mockResolvedValue(payload())
 
+    const sessions = `${fixture.provenance.sessionsUsed} phiên`
     const { unmount } = draw(<SignalDeskPanel artifactId={ARTIFACT_ID} />)
-    await screen.findByText(/^vnstock$/)
+    await screen.findByText(sessions)
     unmount()
     draw(<SignalDeskPanel artifactId={ARTIFACT_ID} />)
-    const reopened = await screen.findByText(/^vnstock$/)
+    const reopened = await screen.findByText(sessions)
 
-    expect(reopened.parentElement?.textContent).toContain(
-      `${fixture.provenance.sessionsUsed} phiên`,
-    )
+    expect(reopened.parentElement?.textContent).toMatch(/dữ liệu \d{2}\/\d{2}\/\d{4}/)
     // A second mount is a second query client here, so the fetch happening
     // twice is expected; what must not happen is the *content* moving.
     expect(fetchArtifact).toHaveBeenCalledWith(ARTIFACT_ID)

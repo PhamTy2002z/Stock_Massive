@@ -359,8 +359,57 @@ def test_a_run_that_produced_a_signal_desk_is_classified_as_a_value():
     assert projected == {
         "artifactId": answered["artifactId"],
         "studyName": STUDY,
+        # The Vietnamese name, resolved from the registration. The slug travels
+        # beside it because a trace and an export are keyed by the slug; only
+        # this one may be drawn.
+        "studyDisplayName": "Thanh khoản trong phiên",
         "title": answered["title"],
         "blockCount": 1,
+        # Which company, so twenty boards later a reader can type a ticker and
+        # find this one. Read off the headline already in the payload.
+        "symbol": "STB",
+        "asOf": answered["provenance"]["asOf"],
+    }
+
+
+def test_the_announcement_carries_no_display_name_for_an_unregistered_recipe():
+    """A composed Signal Desk has no registration, and must not fall back to a slug.
+
+    ``render_signal_desk`` files its runs under a kind rather than a Study, so
+    there is no Vietnamese name to resolve. Empty is the honest answer: the
+    surface then labels the board by its title, which is a sentence the model
+    wrote for a reader — where a slug is a key nobody outside this process has
+    any business reading.
+    """
+    projected = signal_desk_of(
+        "render_signal_desk",
+        {
+            "artifactId": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+            "studyName": "composed_signal_desk",
+            "title": "Thanh khoản STB và HPG",
+            "blockCount": 2,
+            "provenance": {"asOf": "2026-08-28T09:00:00+07:00"},
+        },
+    )
+
+    assert projected is not None
+    assert projected["studyDisplayName"] == ""
+    # No headline, so no company. Not every board is about one.
+    assert projected["symbol"] == ""
+    assert projected["asOf"] == "2026-08-28T09:00:00+07:00"
+
+
+def test_the_announcement_survives_a_payload_that_says_none_of_it():
+    projected = signal_desk_of("run_study", {"artifactId": "abc"})
+
+    assert projected == {
+        "artifactId": "abc",
+        "studyName": "",
+        "studyDisplayName": "",
+        "title": "",
+        "blockCount": 0,
+        "symbol": "",
+        "asOf": "",
     }
 
 
@@ -515,3 +564,46 @@ def test_a_store_failure_does_not_carry_the_frames_into_the_message(monkeypatch)
     assert "4242424" not in text
     assert "frames" not in text
     assert "INSERT" not in text
+
+
+def test_a_composed_desk_keeps_one_sentence_on_the_strip_and_the_rest_as_notes():
+    """Several frames each carry a reason; the panel's strip holds one.
+
+    The first distinct reason takes the strip. The others are limitations of
+    the same picture and travel as method notes — together with every frame's
+    own notes — rather than being joined into a paragraph the strip would cut.
+    """
+    merged = study_tools._merged_provenance(
+        [
+            {
+                "asOf": "2026-08-28",
+                "health": "degraded",
+                "sessionsUsed": 20,
+                "reason": "3/20 phiên không đọc được số",
+                "methodNotes": ["3 phiên: lịch sử chưa đủ dài cho chỉ số này"],
+            },
+            {
+                "asOf": "2026-08-27",
+                "health": "normal",
+                "sessionsUsed": 30,
+                "reason": "3/20 phiên không đọc được số",
+                "methodNotes": ["Giá đã điều chỉnh theo sự kiện doanh nghiệp"],
+            },
+            {
+                "asOf": "2026-08-28",
+                "health": "normal",
+                "sessionsUsed": 10,
+                "reason": "Có báo cáo quý II/2026 cho 1.124/1.523 mã",
+            },
+        ]
+    )
+
+    assert merged["reason"] == "3/20 phiên không đọc được số"
+    assert merged["methodNotes"] == [
+        "Có báo cáo quý II/2026 cho 1.124/1.523 mã",
+        "3 phiên: lịch sử chưa đủ dài cho chỉ số này",
+        "Giá đã điều chỉnh theo sự kiện doanh nghiệp",
+    ]
+    assert merged["health"] == "degraded"
+    assert merged["asOf"] == "2026-08-27"
+    assert merged["sessionsUsed"] == 30

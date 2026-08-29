@@ -18,6 +18,7 @@
 import { cleanup, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import { SIGNAL_DESK_COPY } from "@/lib/alpha-desk/copy"
 import type { SignalDeskBlock, Frame, Provenance } from "@/lib/alpha-desk/types"
 
 import { DataTableWidget } from "./widgets/data-table"
@@ -78,7 +79,10 @@ describe("a widget that throws", () => {
 
     expect(screen.getByRole("table")).toBeInTheDocument()
     expect(screen.getByText("Khối lượng trung bình")).toBeInTheDocument()
-    expect(screen.getByText(/không vẽ được bar_series/)).toBeInTheDocument()
+    // The note says a table stands in, and names nothing from the machinery
+    // while saying it.
+    expect(screen.getByText(SIGNAL_DESK_COPY.blockAsTable)).toBeInTheDocument()
+    expect(document.body.textContent).not.toContain("bar_series")
 
     quiet.mockRestore()
   })

@@ -24,6 +24,8 @@ import { alphaFetch, alphaSend } from "@/lib/alpha"
 
 import type {
   ArtifactPayload,
+  Attachment,
+  Capabilities,
   CreatedTurn,
   FlagReason,
   MessageFlag,
@@ -87,7 +89,24 @@ export interface CreateTurnInput {
   turnId: string
   text: string
   symbols?: string[]
-  activeSymbol?: string | null
+  /**
+   * Whether the reader threw the Signal Desk switch for this question.
+   *
+   * The boolean is the surface's word and `mode` is the wire's. Translated here
+   * rather than upstream so the two vocabularies meet at exactly one line: the
+   * composer switches a mode it can name, and the request carries the value the
+   * schema owns.
+   */
+  signalDesk?: boolean
+  /**
+   * The attachments this question carries, by id, in the order they were added.
+   *
+   * Ids and not files: the bytes went up before the reader finished typing, so
+   * this request stays small and stays idempotent. It is part of the payload the
+   * backend compares, so the same id with two different pictures is a conflict
+   * rather than a silent reuse.
+   */
+  attachments?: string[]
   retryOfTurnId?: string | null
 }
 
@@ -98,6 +117,11 @@ export interface CreateTurnInput {
  * server and returned. That is what makes a retried admission safe on a flaky
  * network: the same id with the same payload resolves to the Turn that already
  * exists instead of starting a second one.
+ *
+ * `mode` is part of that payload, which is why it is always sent rather than
+ * sent only when it is on: the same sentence asked from the desk is a different
+ * request from the same sentence asked in chat, because only one of them is owed
+ * a picture.
  */
 export function createTurn(input: CreateTurnInput): Promise<CreatedTurn> {
   return alphaFetch<CreatedTurn>(`/threads/${encodeURIComponent(input.threadId)}/turns`, {
@@ -106,10 +130,40 @@ export function createTurn(input: CreateTurnInput): Promise<CreatedTurn> {
       turn_id: input.turnId,
       text: input.text,
       symbols: input.symbols ?? [],
-      active_symbol: input.activeSymbol ?? null,
+      mode: input.signalDesk ? "signal_desk" : "chat",
+      attachments: input.attachments ?? [],
       retry_of_turn_id: input.retryOfTurnId ?? null,
     }),
   })
+}
+
+/**
+ * Put one file up and get its id back.
+ *
+ * Sent when the file is chosen, not when Send is pressed. The reader watches the
+ * progress while they are still writing, and the Turn itself then carries a
+ * short list of ids — which is what keeps `createTurn` fast and keeps its
+ * idempotency key comparable.
+ *
+ * `FormData` on purpose, and with no `Content-Type` of its own: the browser
+ * computes the multipart boundary from the body at send time, and `sendAlpha`
+ * knows to leave the header alone for exactly this case.
+ */
+export function uploadAttachment(file: File): Promise<Attachment> {
+  const body = new FormData()
+  body.append("file", file)
+  return alphaFetch<Attachment>("/attachments", { method: "POST", body })
+}
+
+/**
+ * Where the bytes of one attachment live.
+ *
+ * A URL rather than a fetch, because the consumers are an `<img src>` and a
+ * link: handing them a string lets the browser do its own caching, and the row
+ * is immutable so that cache is correct for as long as the tab lives.
+ */
+export function attachmentUrl(attachmentId: string): string {
+  return `/api/alpha-desk/attachments/${encodeURIComponent(attachmentId)}`
 }
 
 /**
@@ -215,4 +269,16 @@ export function newTurnId(): string {
  */
 export function fetchUsage(): Promise<Usage> {
   return alphaFetch<Usage>("/usage")
+}
+
+/**
+ * What the configured route can do.
+ *
+ * Separate from {@link fetchUsage} because the two change on different clocks:
+ * usage moves with every Turn, and this moves only when the deployment is
+ * reconfigured. One endpoint for both would make the constant half be polled at
+ * the moving half's rate.
+ */
+export function fetchCapabilities(): Promise<Capabilities> {
+  return alphaFetch<Capabilities>("/capabilities")
 }

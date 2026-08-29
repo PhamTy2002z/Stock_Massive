@@ -143,6 +143,37 @@ describe("the note", () => {
   })
 })
 
+describe("the two spellings of one status", () => {
+  /**
+   * The Study sends Vietnamese now, because the frame it sends is also what the
+   * disclosure under the block prints, and a reader who opened that table met
+   * `met` and `not_met`. Panels persisted before that change still carry the
+   * tokens and still have to draw, which is what the second half of this checks.
+   */
+  const ROWS: [string, string][] = [
+    ["Đạt", "Đạt"],
+    ["Chưa đạt", "Chưa đạt"],
+    ["Chưa rõ", "Chưa rõ"],
+    ["met", "Đạt"],
+    ["not_met", "Chưa đạt"],
+    ["unknown", "Chưa rõ"],
+  ]
+
+  it.each(ROWS)("reads %s as %s", (sent, read) => {
+    const { container } = draw(
+      {
+        ...FRAME,
+        columns: ["label", "status"],
+        rows: [["Một điều kiện", sent]],
+        labels: { label: "Điều kiện", status: "Trạng thái" },
+      },
+      { label: "label", status: "status" },
+    )
+
+    expect(container.querySelector(".sr-only")?.textContent).toBe(read)
+  })
+})
+
 describe("what arrives from somewhere else", () => {
   it("draws a status it has never met as unknown rather than as a failure", () => {
     const { container } = draw({

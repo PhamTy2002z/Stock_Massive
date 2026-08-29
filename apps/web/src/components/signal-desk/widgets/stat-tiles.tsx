@@ -17,6 +17,13 @@
  * magnitude as a word — "380 nghìn cp" — rather than as the axis shorthand
  * that ran straight into the unit beside it and read as two units.
  *
+ * **Colour is the engine's claim, not decoration.** A tile is inked in the
+ * foreground colour like the rest of the page unless the frame said what that
+ * number is — a figure that rose, the one the answer is about — and then it
+ * carries the colour for that. So a coloured tile on this grid always means
+ * something was claimed, and the tile's own label and the table under the block
+ * say the same thing in words.
+ *
  * **The columns are counted from the panel, not from the viewport.** The
  * inspector is a column a reader drags, so a breakpoint would be measuring the
  * wrong thing: at 420 pixels of panel on a wide screen every breakpoint says
@@ -24,8 +31,9 @@
  * itself, which is the box the tiles are actually in.
  */
 
-import { columnIndex, formatMeasureParts, formatUnit, textAt } from "../frame"
+import { columnIndex, formatMeasureParts, formatUnit, pointRole, textAt } from "../frame"
 import type { WidgetProps } from "../widget-registry"
+import { colorFor, resolveRoles } from "./chart-theme"
 
 export function StatTilesWidget({ frame, options }: WidgetProps) {
   const label = columnIndex(frame, options.label ?? "label")
@@ -36,6 +44,11 @@ export function StatTilesWidget({ frame, options }: WidgetProps) {
     return <p className="text-meta text-muted-foreground">Chưa có số dẫn dắt nào.</p>
   }
 
+  // A tile that says nothing keeps the ink it has always had. Only a tile the
+  // engine said something about is coloured, so colour on this grid always
+  // means the same thing: a claim was made about that number.
+  const { roles } = resolveRoles(frame.rows.map((_, index) => pointRole(frame, index)))
+
   return (
     <dl className="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-2">
       {frame.rows.map((row, index) => (
@@ -43,7 +56,11 @@ export function StatTilesWidget({ frame, options }: WidgetProps) {
           <dt className="truncate text-meta text-muted-foreground">
             {textAt(row, label)}
           </dt>
-          <Reading value={row[value]} unit={unit >= 0 ? row[unit] : null} />
+          <Reading
+            value={row[value]}
+            unit={unit >= 0 ? row[unit] : null}
+            role={roles[index]}
+          />
         </div>
       ))}
     </dl>
@@ -51,12 +68,25 @@ export function StatTilesWidget({ frame, options }: WidgetProps) {
 }
 
 /** One no-wrap measurement with a strong figure and a quiet measurement unit. */
-function Reading({ value, unit }: { value: unknown; unit: unknown }) {
+function Reading({
+  value,
+  unit,
+  role,
+}: {
+  value: unknown
+  unit: unknown
+  role: string | null
+}) {
   const parts = reading(value, unit)
   return (
     <dd className="mt-0.5 min-w-0">
       <span className="inline-flex max-w-full items-baseline whitespace-nowrap font-mono tabular-nums">
-        <span className="truncate text-[1.05rem] font-semibold tracking-[-0.01em] text-foreground">
+        <span
+          className={`truncate text-[1.05rem] font-semibold tracking-[-0.01em] ${
+            role === null ? "text-foreground" : ""
+          }`}
+          style={role === null ? undefined : { color: colorFor(role) }}
+        >
           {parts.value}
         </span>
         {parts.unit !== "" && (

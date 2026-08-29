@@ -1,4 +1,4 @@
-"""Fetching fifteen-minute bars, and the four things that go wrong.
+"""Fetching fifteen-minute bars, and the five things that go wrong.
 
 **The grid is padding.** Ninety-six buckets come back for a day that has at most
 seventeen. ``session_window`` decides which survive, and they are filtered before
@@ -13,6 +13,14 @@ statistic is built from.
 either, so the first fetch takes the full year the provider will give and every
 later one starts from the last stored session — re-fetching that session
 deliberately, because it is the one the provider may have revised.
+
+**The last bucket of a live session is still filling.** The provider answers
+about the day in progress, and the quarter hour the clock is currently inside
+comes back as a whole bucket carrying the few minutes that have elapsed. Written,
+it freezes a fraction of a bucket into a store whose consumers treat every row as
+complete. So a bucket is held back until its fifteen minutes plus a minute of
+slack have passed; the next warm fetch re-reads the session it belongs to and
+writes it whole.
 
 **vnstock has no SLA and calls ``sys.exit()``.** Every call goes through
 ``safe_vnstock_call``, and a response whose columns are not the ones documented
@@ -66,6 +74,14 @@ COLD_START_DAYS = 365
 #: bucket the provider revised is corrected instead of frozen.
 REQUIRED_COLUMNS = ("time", "open", "high", "low", "close", "volume")
 
+#: How long past its own end a bucket must be before it is written. The provider
+#: publishes the quarter hour the clock is inside as though it were finished, and
+#: it has also been seen to post the final trades of a bucket a beat after it
+#: closed. A minute of slack costs nothing — the session is re-fetched from its
+#: own edge on the next warm call — and it is what keeps a seven-minute bucket
+#: out of a store whose readers count every row as fifteen minutes.
+SETTLE_GRACE = timedelta(seconds=60)
+
 
 class IntradayIngestError(RuntimeError):
     """The provider answered with something this code will not write.
@@ -86,6 +102,10 @@ class IngestOutcome:
     padding_dropped: int
     sessions_stored: int
     last_session: date | None
+    #: Buckets the provider sent that had not finished yet. Counted apart from
+    #: padding: padding is a quarter hour that will never be a session, and this
+    #: is one that will be, on the next fetch.
+    buckets_underway: int = 0
 
 
 def _fetch_from_vnstock(symbol: str, start: date, end: date) -> pd.DataFrame:
@@ -113,22 +133,26 @@ def ensure_bars(
     sessions: int,
     fetch: Fetch | None = None,
     today: date | None = None,
+    now: datetime | None = None,
 ) -> IngestOutcome:
     """Make sure the store holds at least ``sessions`` sessions for ``symbol``.
 
-    ``fetch`` and ``today`` are injectable so the suite can prove the delta
-    logic and the padding filter without reaching the network; production passes
-    neither.
+    ``fetch``, ``today`` and ``now`` are injectable so the suite can prove the
+    delta logic, the padding filter and the unfinished-bucket filter without
+    reaching the network or waiting for a clock; production passes none of them.
+    ``now`` is the one clock this call reads: the day it asks about, the cut-off
+    for an unfinished bucket and the ``observed_at`` it stamps all come from it.
     """
     symbol = symbol.upper()
     fetch = fetch or _fetch_from_vnstock
-    today = today or datetime.now(VN_TZ).date()
+    now = now or datetime.now(VN_TZ)
+    today = today or now.date()
 
     stored_days, last_session = _what_is_stored(session, symbol)
     start = _start_from(stored_days, last_session, sessions, today)
 
     frame = fetch(symbol, start, today)
-    rows, padding = _rows_from(symbol, frame)
+    rows, padding, underway = _rows_from(symbol, frame, now)
     written = _upsert(session, rows)
 
     stored_days, last_session = _what_is_stored(session, symbol)
@@ -139,6 +163,7 @@ def ensure_bars(
         padding_dropped=padding,
         sessions_stored=stored_days,
         last_session=last_session,
+        buckets_underway=underway,
     )
 
 
@@ -167,8 +192,10 @@ def _start_from(
     return last_session
 
 
-def _rows_from(symbol: str, frame: pd.DataFrame) -> tuple[list[dict], int]:
-    """Session buckets as rows, and how many padding buckets were dropped."""
+def _rows_from(
+    symbol: str, frame: pd.DataFrame, now: datetime
+) -> tuple[list[dict], int, int]:
+    """Session buckets as rows, plus the padding and the unfinished dropped."""
     missing = [name for name in REQUIRED_COLUMNS if name not in frame.columns]
     if missing:
         raise IntradayIngestError(
@@ -176,9 +203,9 @@ def _rows_from(symbol: str, frame: pd.DataFrame) -> tuple[list[dict], int]:
             f"{list(frame.columns)}"
         )
 
-    observed_at = datetime.now(VN_TZ)
     rows: list[dict] = []
     padding = 0
+    underway = 0
 
     for record in frame.itertuples(index=False):
         moment: pd.Timestamp = record.time
@@ -186,10 +213,14 @@ def _rows_from(symbol: str, frame: pd.DataFrame) -> tuple[list[dict], int]:
         if phase is None or _is_blank(record):
             padding += 1
             continue
+        bucket_start = moment.to_pydatetime().replace(tzinfo=VN_TZ)
+        if _still_filling(bucket_start, now):
+            underway += 1
+            continue
         rows.append(
             {
                 "symbol": symbol,
-                "bucket_start": moment.to_pydatetime().replace(tzinfo=VN_TZ),
+                "bucket_start": bucket_start,
                 "trading_day": moment.date(),
                 "phase": phase,
                 "open": _vnd(record.open),
@@ -198,10 +229,25 @@ def _rows_from(symbol: str, frame: pd.DataFrame) -> tuple[list[dict], int]:
                 "close": _vnd(record.close),
                 "volume": int(record.volume),
                 "source": SOURCE,
-                "observed_at": observed_at,
+                "observed_at": now,
             }
         )
-    return rows, padding
+    return rows, padding, underway
+
+
+def _still_filling(bucket_start: datetime, now: datetime) -> bool:
+    """Is this quarter hour one the clock has not finished leaving behind?
+
+    The provider stamps a bucket at its start and reports it as soon as its
+    first trade prints, so the bucket the market is currently inside arrives
+    looking exactly like a whole one. Its volume is whatever has traded so far,
+    and written it would be read as a full fifteen minutes by every statistic
+    downstream — and frozen there by an artifact, which is never recomputed.
+    """
+    return (
+        bucket_start + timedelta(minutes=session_window.BUCKET_MINUTES) + SETTLE_GRACE
+        > now
+    )
 
 
 def _is_blank(record) -> bool:
@@ -271,6 +317,7 @@ __all__ = [
     "IngestOutcome",
     "IntradayIngestError",
     "PRICE_SCALE",
+    "SETTLE_GRACE",
     "SOURCE",
     "ensure_bars",
 ]

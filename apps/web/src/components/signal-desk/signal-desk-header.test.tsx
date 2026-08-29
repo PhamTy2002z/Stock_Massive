@@ -2,35 +2,40 @@
 /**
  * The chrome above the workspace.
  *
- * Asserted through roles rather than class names: what the strip promises is
- * that every desk view of a conversation stays reachable and that "Nguồn" is one
- * of the tabs rather than a panel somewhere else — both of which a reader
- * experiences as tabs they can reach, not as markup.
+ * Asserted through roles rather than class names: what the header promises is
+ * that it names the board on screen, that every other board of the conversation
+ * is one dropdown away, and that "Nguồn" is a toggle beside it rather than a
+ * panel somewhere else.
  */
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { SignalDeskTab } from "@/components/shell/shell-state"
+import type { SignalDeskBoard } from "@/components/shell/shell-state"
+import { BOARD_SWITCHER_COPY, SIGNAL_DESK_COPY } from "@/lib/alpha-desk/copy"
 
 import { SignalDeskHeader } from "./signal-desk-header"
 
 afterEach(cleanup)
 
-const DESK_VIEWS: SignalDeskTab[] = [
-  { artifactId: "a1", title: "STB — thanh khoản trong phiên" },
-  { artifactId: "a2", title: "HPG — rà soát điều kiện" },
+const BOARDS: SignalDeskBoard[] = [
+  { artifactId: "a1", title: "STB — thanh khoản trong phiên", symbol: "STB" },
+  { artifactId: "a2", title: "HPG — rà soát điều kiện", symbol: "HPG" },
   { artifactId: "a3", title: "Lệch giá sau báo cáo" },
 ]
 
 function mount(overrides: Partial<Parameters<typeof SignalDeskHeader>[0]> = {}) {
   const props = {
-    deskViews: DESK_VIEWS,
+    boards: BOARDS,
+    pinned: [] as string[],
     activeDeskViewId: "a3",
     showingSources: false,
     canExport: true,
+    menuOpen: false,
     onOpenDeskView: vi.fn(),
-    onCloseDeskView: vi.fn(),
     onOpenSources: vi.fn(),
+    onToggleMenu: vi.fn(),
+    onTogglePin: vi.fn(),
+    onOpenSwitcher: vi.fn(),
     onShare: vi.fn(),
     onExport: vi.fn(),
     ...overrides,
@@ -39,70 +44,108 @@ function mount(overrides: Partial<Parameters<typeof SignalDeskHeader>[0]> = {}) 
   return props
 }
 
-describe("the tab strip", () => {
-  it("keeps a tab for every desk view the conversation drew", () => {
-    // The bug it exists for: one artifact id meant the third Study made the
-    // first two unreachable.
+describe("the board on screen", () => {
+  it("names the open board on the one control, and how many there are", () => {
     mount()
 
-    const tabs = screen.getAllByRole("tab")
-    expect(tabs.map((tab) => tab.textContent)).toEqual([
-      ...DESK_VIEWS.map((deskView) => deskView.title),
-      "Nguồn",
-    ])
+    const control = screen.getByRole("button", { name: BOARD_SWITCHER_COPY.open })
+    expect(control.textContent).toContain(BOARDS[2].title)
+    expect(control.textContent).toContain(BOARD_SWITCHER_COPY.count(3))
+    expect(control).toHaveAttribute("aria-haspopup", "menu")
+    expect(screen.queryAllByRole("tab")).toHaveLength(0)
   })
 
-  it("marks exactly one tab as the open one", () => {
-    mount()
+  it("asks the reader to choose when nothing is open yet", () => {
+    mount({ boards: [], activeDeskViewId: null })
 
-    const selected = screen.getAllByRole("tab").filter(
-      (tab) => tab.getAttribute("aria-selected") === "true",
+    expect(screen.getByRole("button", { name: BOARD_SWITCHER_COPY.open }).textContent).toBe(
+      BOARD_SWITCHER_COPY.choose,
     )
-    expect(selected).toHaveLength(1)
-    expect(selected[0]).toHaveTextContent("Lệch giá sau báo cáo")
   })
 
-  it("opens an earlier deskView the reader clicks back to", () => {
+  it("opens the dropdown from the control, not the switcher", () => {
     const props = mount()
 
-    fireEvent.click(screen.getByRole("tab", { name: /thanh khoản/ }))
+    fireEvent.click(screen.getByRole("button", { name: BOARD_SWITCHER_COPY.open }))
 
-    expect(props.onOpenDeskView).toHaveBeenCalledWith("a1")
+    expect(props.onToggleMenu).toHaveBeenCalledWith(true)
+    expect(props.onOpenSwitcher).not.toHaveBeenCalled()
   })
 
-  it("keeps the sources of an answer reachable from the same strip", () => {
-    // Nothing that existed before the redesign may become unreachable by it.
+  it("lists every board in the dropdown, pinned first, and opens the one pressed", () => {
+    const props = mount({ menuOpen: true, pinned: ["a1"] })
+
+    const items = screen.getAllByRole("menuitem").map((item) => item.textContent)
+    expect(items[0]).toContain(BOARDS[0].title)
+    expect(items.slice(1, BOARDS.length)).toEqual(
+      BOARDS.slice(1)
+        .reverse()
+        .map((board) => board.title + (board.symbol ?? "")),
+    )
+    expect(screen.getByRole("menu").textContent).toContain(BOARD_SWITCHER_COPY.search)
+
+    fireEvent.click(screen.getByRole("menuitem", { name: new RegExp(BOARDS[1].title) }))
+    expect(props.onOpenDeskView).toHaveBeenCalledWith("a2")
+    expect(props.onToggleMenu).toHaveBeenCalledWith(false)
+  })
+
+  it("pins from the dropdown without opening the board", () => {
+    const props = mount({ menuOpen: true })
+
+    fireEvent.click(screen.getAllByRole("button", { name: BOARD_SWITCHER_COPY.pin })[0])
+    expect(props.onTogglePin).toHaveBeenCalledWith("a3", true)
+    expect(props.onOpenDeskView).not.toHaveBeenCalled()
+  })
+
+  it("reaches the searchable switcher from the dropdown's last row", () => {
+    const props = mount({ menuOpen: true })
+
+    fireEvent.click(screen.getByRole("menuitem", { name: new RegExp(BOARD_SWITCHER_COPY.search) }))
+    expect(props.onOpenSwitcher).toHaveBeenCalled()
+    expect(props.onToggleMenu).toHaveBeenCalledWith(false)
+  })
+
+  it("closes on a press outside, and stays for a press inside", () => {
+    const props = mount({ menuOpen: true })
+
+    fireEvent.pointerDown(screen.getByRole("menu"))
+    expect(props.onToggleMenu).not.toHaveBeenCalled()
+
+    fireEvent.pointerDown(document.body)
+    expect(props.onToggleMenu).toHaveBeenCalledWith(false)
+  })
+
+  it("never shows a reader an id or a recipe slug", () => {
+    mount({
+      menuOpen: true,
+      boards: [{ ...BOARDS[0], studyName: "intraday_liquidity", studyDisplayName: "Thanh khoản trong phiên" }],
+    })
+
+    const text = document.body.textContent ?? ""
+    expect(text).not.toContain("a1")
+    expect(text).not.toContain("intraday_liquidity")
+    expect(text).toContain("Thanh khoản trong phiên")
+  })
+})
+
+describe("the sources beside the board", () => {
+  it("is a toggle, not a tab, and opens the sources", () => {
     const props = mount()
 
-    fireEvent.click(screen.getByRole("tab", { name: "Nguồn" }))
+    const sources = screen.getByRole("button", { name: SIGNAL_DESK_COPY.sources })
+    expect(sources).toHaveAttribute("aria-pressed", "false")
+    fireEvent.click(sources)
 
     expect(props.onOpenSources).toHaveBeenCalled()
   })
 
-  it("marks the sources tab open when that is what the pane is showing", () => {
-    mount({ showingSources: true, activeDeskViewId: null })
+  it("is pressed when that is what the pane is showing", () => {
+    mount({ showingSources: true })
 
-    expect(screen.getByRole("tab", { name: "Nguồn" })).toHaveAttribute(
-      "aria-selected",
+    expect(screen.getByRole("button", { name: SIGNAL_DESK_COPY.sources })).toHaveAttribute(
+      "aria-pressed",
       "true",
     )
-  })
-
-  it("offers to close a desk view but never the sources", () => {
-    // Sources is not a desk view; there is nothing there to close.
-    mount()
-
-    expect(screen.getAllByRole("button", { name: /^Close / })).toHaveLength(
-      DESK_VIEWS.length,
-    )
-  })
-
-  it("closes the desk view whose control was pressed", () => {
-    const props = mount()
-
-    fireEvent.click(screen.getByRole("button", { name: "Close HPG — rà soát điều kiện" }))
-
-    expect(props.onCloseDeskView).toHaveBeenCalledWith("a2")
   })
 })
 
@@ -130,8 +173,6 @@ describe("the way out to a file", () => {
   })
 
   it("offers no save, because nothing would keep it", () => {
-    // There is no endpoint behind a saved report, and a control that swallowed
-    // the press would tell a reader their work was kept.
     mount()
 
     expect(screen.queryByRole("button", { name: /Lưu/ })).toBeNull()

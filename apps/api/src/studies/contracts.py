@@ -34,8 +34,9 @@ declaration, so a Study that forgets to say what question it answers is a
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
@@ -65,6 +66,50 @@ KNOWN_REQUIREMENTS: frozenset[str] = frozenset({"intraday_bar_15m"})
 #: figure with a picture should not have to learn two vocabularies for "this is
 #: thinner than usual".
 Health = Literal["normal", "degraded", "unavailable"]
+
+#: How many interchangeable categorical slots the palette offers. Six because a
+#: picture that needs a seventh hue has stopped being readable as categories —
+#: past that a reader is matching swatches to a legend rather than seeing groups.
+CATEGORY_SLOTS = 6
+
+#: What a series or a row *is*, said by the layer that knows what it measured.
+#:
+#: A role is a claim about meaning, not a colour: the engine says "this quarter
+#: fell", the browser decides what "fell" looks like in the theme the reader has
+#: on. That is why the vocabulary is closed and lives here — a Study inventing
+#: ``"orange"`` would be the engine reaching across the wire to paint, and a
+#: Study inventing ``"bearish"`` would be a meaning nothing renders.
+#:
+#: ``focus`` is spent once per picture. It marks the one element the answer is
+#: about; a second one spends the only mark that means "this one". The browser
+#: enforces that rather than trusting it — see ``chart-theme.ts``.
+#:
+#: ``up`` and ``down`` are the market pair and belong only where the number
+#: genuinely rose or fell. ``category:1``–``category:6`` are interchangeable
+#: group hues carrying no direction at all, which is why the two families should
+#: not appear in one picture: a chart doing both is describing two things at once.
+PLAIN_ROLES: frozenset[str] = frozenset(
+    {"series", "muted", "focus", "up", "down", "neutral"}
+)
+
+CATEGORY_ROLES: frozenset[str] = frozenset(
+    f"category:{slot}" for slot in range(1, CATEGORY_SLOTS + 1)
+)
+
+ROLES: frozenset[str] = PLAIN_ROLES | CATEGORY_ROLES
+
+
+def role_error(role: object) -> str | None:
+    """Why this is not a role, or ``None`` when it is one."""
+    if not isinstance(role, str):
+        return f"a role is a string, got {type(role).__name__}"
+    if role in ROLES:
+        return None
+    return (
+        f"{role!r} is not a role; use one of "
+        + ", ".join(sorted(PLAIN_ROLES))
+        + f", or category:1..{CATEGORY_SLOTS}"
+    )
 
 
 class StudyRefused(Exception):
@@ -97,6 +142,17 @@ class Frame:
     rather than in the browser because the column names are chosen by whoever
     wrote the Study, and a label invented at the far end of the wire is an
     interpretation of a number by the layer least equipped to make one.
+
+    ``column_roles`` and ``point_roles`` carry meaning, not colour, for the same
+    reason ``labels`` carries Vietnamese: only the layer that computed a number
+    knows whether it rose, whether it is the one the answer is about, or whether
+    it is simply the third of four groups. Both are optional and both default to
+    nothing, so a picture that says nothing about meaning is drawn exactly as it
+    was before any of this existed.
+
+    ``column_roles`` is keyed by column and describes a whole series — the second
+    line on a two-line chart. ``point_roles`` is positional against ``rows`` and
+    describes one bar, point or tile, with ``None`` for a row making no claim.
     """
 
     kind: FrameKind
@@ -104,6 +160,8 @@ class Frame:
     rows: tuple[tuple[Any, ...], ...]
     unit: str | None
     labels: Mapping[str, str]
+    column_roles: Mapping[str, str] = field(default_factory=dict)
+    point_roles: tuple[str | None, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.columns:
@@ -121,6 +179,37 @@ class Frame:
                 "every column needs a Vietnamese label; missing: "
                 + ", ".join(unlabelled)
             )
+        self._check_roles()
+
+    def _check_roles(self) -> None:
+        """A role naming nothing, or nothing nameable, fails where it is written.
+
+        Both halves matter. An unknown role word would reach the browser and be
+        silently ignored — a Study would have said something about its numbers
+        and nobody would ever see it. A role attached to a column that is not
+        there is the same failure with a rename behind it.
+        """
+        for column, role in self.column_roles.items():
+            if column not in self.columns:
+                raise ValueError(
+                    f"role {role!r} names column {column!r}, which this Frame "
+                    "does not have"
+                )
+            problem = role_error(role)
+            if problem is not None:
+                raise ValueError(f"column {column!r}: {problem}")
+
+        if self.point_roles and len(self.point_roles) != len(self.rows):
+            raise ValueError(
+                f"{len(self.point_roles)} point roles against "
+                f"{len(self.rows)} rows"
+            )
+        for index, role in enumerate(self.point_roles):
+            if role is None:
+                continue
+            problem = role_error(role)
+            if problem is not None:
+                raise ValueError(f"row {index}: {problem}")
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -129,7 +218,77 @@ class Frame:
             "rows": [list(row) for row in self.rows],
             "unit": self.unit,
             "labels": dict(self.labels),
+            "columnRoles": dict(self.column_roles),
+            "pointRoles": list(self.point_roles),
         }
+
+
+#: How long the one sentence under a picture may be. A limit rather than a
+#: guideline because the surface it lands on is a strip beside a chart: past
+#: roughly this it wraps to a paragraph, and a reader checking whether the
+#: numbers are thin stops reading a paragraph.
+REASON_LIMIT = 120
+
+#: How long one note about method may be. Longer than a reason because a
+#: limitation genuinely takes a clause to state, and short enough that stating
+#: two of them in one note is not an option.
+METHOD_NOTE_LIMIT = 160
+
+#: Words that are this system talking about itself. A reader asked about a
+#: company and every one of these answers with plumbing.
+_SHOP_WORDS = frozenset(
+    {
+        "artifact",
+        "column",
+        "dataframe",
+        "endpoint",
+        "frame",
+        "payload",
+        "provider",
+        "roster",
+        "schema",
+        "store",
+        "universe",
+        "widget",
+    }
+)
+
+#: Anything shaped like an identifier. This is what catches the names nobody
+#: thought to ban — a column, a function, a ranking formula — without a list
+#: that has to be kept current with the code.
+_CODE_NAME = re.compile(r"[A-Za-z]+_[A-Za-z0-9_]+")
+
+_WORD = re.compile(r"[A-Za-z][A-Za-z0-9]*")
+
+
+def _check_reader_sentence(field_name: str, text: str, limit: int) -> None:
+    """One sentence a reader can use, or a ``ValueError`` naming what is wrong.
+
+    Everything on the provenance strip is read by somebody who asked about a
+    company, so it is Vietnamese about the data and never about this system. The
+    real case: a strip that printed the whole ranking formula, the price
+    adjustment policy and where the symbol list came from, in one line, as the
+    answer to "how fresh is this".
+    """
+    if not text.strip():
+        raise ValueError(f"{field_name} is empty; leave it out instead")
+    if len(text) > limit:
+        raise ValueError(
+            f"{field_name} is {len(text)} characters against a limit of {limit}: "
+            "say why the data is thin, and put the method beside it"
+        )
+    identifier = _CODE_NAME.search(text)
+    if identifier is not None:
+        raise ValueError(
+            f"{field_name} carries the code name {identifier.group()!r}; a reader "
+            "asked about a company, so say it in Vietnamese"
+        )
+    for word in _WORD.findall(text):
+        if word.lower() in _SHOP_WORDS:
+            raise ValueError(
+                f"{field_name} carries {word!r}, which is this system describing "
+                "itself rather than the data"
+            )
 
 
 @dataclass(frozen=True)
@@ -140,6 +299,14 @@ class Provenance:
     same picture the answer was written about, so the artifact carries the
     instant it was built rather than being recomputed against a store that has
     moved on.
+
+    **``reason`` and ``method_notes`` answer two different questions.** One
+    reader wants to know whether this picture is thinner than usual and stops
+    there; another wants to know how the numbers were arrived at before they
+    trust a ranking. Both used to arrive as a single joined line, so the first
+    reader met five clauses of methodology and the second had to find the one
+    that mattered inside it. ``reason`` is now the first question only, in a
+    sentence; ``method_notes`` is the second, one limitation per entry.
     """
 
     source: str
@@ -147,6 +314,15 @@ class Provenance:
     sessions_used: int
     health: Health
     reason: str | None
+    method_notes: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.reason is not None:
+            _check_reader_sentence("reason", self.reason, REASON_LIMIT)
+        for index, note in enumerate(self.method_notes):
+            _check_reader_sentence(
+                f"method_notes[{index}]", note, METHOD_NOTE_LIMIT
+            )
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -155,6 +331,7 @@ class Provenance:
             "sessionsUsed": self.sessions_used,
             "health": self.health,
             "reason": self.reason,
+            "methodNotes": list(self.method_notes),
         }
 
 
@@ -282,7 +459,13 @@ class StoredArtifact:
 
 
 __all__ = [
+    "CATEGORY_ROLES",
+    "CATEGORY_SLOTS",
     "KNOWN_REQUIREMENTS",
+    "METHOD_NOTE_LIMIT",
+    "PLAIN_ROLES",
+    "REASON_LIMIT",
+    "ROLES",
     "SignalDeskBlock",
     "SignalDeskSpec",
     "Frame",
@@ -294,4 +477,5 @@ __all__ = [
     "StudyDefinition",
     "StudyRefused",
     "StudyResult",
+    "role_error",
 ]

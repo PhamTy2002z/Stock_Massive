@@ -190,8 +190,12 @@ GATES = MEASUREMENT_GATES + THRESHOLD_GATES
 #: What each gate removed, in the words a reader sees under the table. Every one
 #: of them describes a state of the data or of the measurement — none of them
 #: describes what the symbol is worth.
+#: What the ladder's first row is called: everything the screen started from,
+#: before any gate ran.
+START_ROW_LABEL = "Tổng số mã xét"
+
 GATE_LABELS: Mapping[str, str] = {
-    GATE_NO_FILING: "Chưa có báo cáo kỳ này trong store",
+    GATE_NO_FILING: "Chưa có báo cáo kỳ này",
     GATE_CONCEPT_UNKNOWN: "Báo cáo không có dòng lợi nhuận sau thuế",
     GATE_NO_PRIOR_FILING: "Chưa có báo cáo cùng kỳ năm trước",
     GATE_PRIOR_CONCEPT_UNKNOWN: "Báo cáo cùng kỳ không có dòng lợi nhuận",
@@ -212,21 +216,38 @@ QUADRANT_HIGH_GROWTH_HIGH_PRICE = "Tăng trưởng cao, giá đã theo"
 QUADRANT_LOW_GROWTH_LOW_PRICE = "Tăng trưởng thấp, giá giảm so với thị trường"
 QUADRANT_LOW_GROWTH_HIGH_PRICE = "Tăng trưởng thấp, giá tăng so với thị trường"
 
-#: What the numbers are and are not, in the field a reader and the model both
-#: see. This is the only carrier a Signal Desk has for a methodological limit, and
-#: every clause here is a limit this Study cannot design away.
+#: Which group hue each region is drawn in. Four interchangeable colours rather
+#: than a scale, because the four regions are not ordered: "tăng trưởng cao, giá
+#: chưa theo" is not *more* of anything than the region beside it, and a ramp
+#: from pale to dark would rank them on the reader's behalf. Assigned here so the
+#: same region is the same colour in every run of this Study.
+QUADRANT_ROLES: Mapping[str, str] = {
+    QUADRANT_HIGH_GROWTH_LOW_PRICE: "category:1",
+    QUADRANT_HIGH_GROWTH_HIGH_PRICE: "category:2",
+    QUADRANT_LOW_GROWTH_LOW_PRICE: "category:3",
+    QUADRANT_LOW_GROWTH_HIGH_PRICE: "category:4",
+}
+
+#: What the numbers are and are not, one limitation per sentence, in the words a
+#: reader uses. Every clause here is a limit this Study cannot design away.
+#:
+#: They used to be joined onto the health reason and printed as a single line
+#: above the picture, so somebody who wanted to know whether the scan covered the
+#: market got five clauses of methodology instead, with the code name of the
+#: ranking formula in the middle of it. Method is a second question and now has a
+#: second field.
 METHOD_NOTES = (
-    "thanh khoản là trung vị giá đóng cửa × khối lượng trên cửa sổ, xấp xỉ cho "
-    "giá trị giao dịch vì nguồn không trả cột này",
-    f"cửa sổ phản ứng giá là {REACTION_SESSIONS} phiên gần nhất chứ không tính "
-    "từ ngày công bố — nguồn không trả ngày công bố của từng báo cáo",
-    "dislocation_rank = phân vị tăng trưởng × phân vị lợi suất tương đối đảo "
-    "dấu, tính trên các mã đo được sau sàn thanh khoản "
-    f"{LIQUIDITY_FLOOR_VND / 1e9:.0f} tỷ đồng một phiên",
-    "giá là adjusted_at_source; lợi suất là tỷ số nên không đổi theo điều chỉnh, "
-    "trừ đúng phiên giao dịch không hưởng quyền",
-    "universe lấy từ roster niêm yết hiện hành, không dựng lại danh sách của "
-    "quá khứ",
+    "Thanh khoản ước bằng trung vị của giá đóng cửa nhân khối lượng mỗi phiên, "
+    "vì nguồn dữ liệu không cung cấp giá trị giao dịch.",
+    f"Phản ứng giá đo trên {REACTION_SESSIONS} phiên gần nhất, không tính từ "
+    "ngày công bố báo cáo — nguồn dữ liệu không cho biết ngày công bố.",
+    "Thứ hạng lệch pha ghép phân vị tăng trưởng lợi nhuận với phân vị lợi suất "
+    "so với thị trường, đảo dấu, chỉ trên các mã qua sàn thanh khoản "
+    f"{LIQUIDITY_FLOOR_VND / 1e9:.0f} tỷ đồng một phiên.",
+    "Giá đã điều chỉnh cho sự kiện quyền; lợi suất là tỷ số nên không đổi, trừ "
+    "đúng phiên giao dịch không hưởng quyền.",
+    "Danh sách mã lấy theo niêm yết hiện hành, không dựng lại danh sách của quá "
+    "khứ.",
 )
 
 
@@ -483,19 +504,18 @@ def compute(context: StudyContext) -> StudyResult:
             # month of sessions, and the measurement is these closes.
             sessions_used=WINDOW_CLOSES,
             health="normal" if coverage >= HEALTHY_FILING_COVERAGE else "degraded",
-            reason="; ".join(
-                (
-                    *(
-                        ()
-                        if coverage >= HEALTHY_FILING_COVERAGE
-                        else (
-                            f"store chỉ có báo cáo {period} cho {filed}/"
-                            f"{len(symbols)} mã",
-                        )
-                    ),
-                    *METHOD_NOTES,
+            # One sentence, and only when there is something to say. A screen run
+            # over a quarter half the market has not reported is a fact about the
+            # coverage, and the count is what lets a reader weigh it.
+            reason=(
+                None
+                if coverage >= HEALTHY_FILING_COVERAGE
+                else (
+                    f"Mới có báo cáo {_period_words(period)} cho "
+                    f"{_count(filed)}/{_count(len(symbols))} mã"
                 )
             ),
+            method_notes=METHOD_NOTES,
         ),
     )
 
@@ -814,13 +834,16 @@ def _tiles_frame(screened: int, measured: int, matched: int, period: str) -> Fra
         kind="table",
         columns=("label", "value", "unit"),
         rows=(
-            ("Kỳ báo cáo", period, None),
+            ("Kỳ báo cáo", _period_words(period), None),
             ("Số mã quét", screened, "mã"),
             ("Đo được cả hai trục", measured, "mã"),
             ("Qua cả hai ngưỡng", matched, "mã"),
         ),
         unit=None,
         labels={"label": "Chỉ số", "value": "Giá trị", "unit": "Đơn vị"},
+        # The names that passed both thresholds are what the screen was run for;
+        # the three tiles before it are how far the field narrowed to get there.
+        point_roles=(None, None, None, "focus"),
     )
 
 
@@ -835,6 +858,15 @@ def _scatter_frame(ranked: Sequence[_Ranked]) -> Frame:
     relatives = [item.candidate.rel_return_pct for item in ranked]
     mid_growth = float(median(growths))
     mid_rel = float(median(relatives))
+    quadrants = tuple(
+        quadrant_of(
+            item.candidate.growth_pct,
+            item.candidate.rel_return_pct,
+            mid_growth=mid_growth,
+            mid_rel=mid_rel,
+        )
+        for item in ranked
+    )
     return Frame(
         kind="table",
         columns=("symbol", "growth_pct", "rel_return_pct", "quadrant"),
@@ -843,16 +875,15 @@ def _scatter_frame(ranked: Sequence[_Ranked]) -> Frame:
                 item.candidate.symbol,
                 _pct(item.candidate.growth_pct),
                 _pct(item.candidate.rel_return_pct),
-                quadrant_of(
-                    item.candidate.growth_pct,
-                    item.candidate.rel_return_pct,
-                    mid_growth=mid_growth,
-                    mid_rel=mid_rel,
-                ),
+                quadrant,
             )
-            for item in ranked
+            for item, quadrant in zip(ranked, quadrants)
         ),
         unit="%",
+        # The region is what the point *is*, so it is what the point is coloured
+        # by — and the region's own name travels in the row beside it, so a
+        # reader who cannot separate four hues reads the same four groups.
+        point_roles=tuple(QUADRANT_ROLES[quadrant] for quadrant in quadrants),
         labels={
             "symbol": "Mã",
             "growth_pct": "Tăng trưởng lợi nhuận so cùng kỳ (%)",
@@ -902,10 +933,17 @@ def _ranking_frame(top: Sequence[_Ranked]) -> Frame:
             for position, item in enumerate(top, start=1)
         ),
         unit=None,
+        # The leading name, which is what a ranking is for. Nothing below it is
+        # marked: a top ten with three accents is a shortlist this Study does not
+        # draw.
+        point_roles=tuple(
+            "focus" if position == 1 else None
+            for position, _ in enumerate(top, start=1)
+        ),
         labels={
             "rank": "Hạng",
             "symbol": "Mã",
-            "dislocation_rank": "dislocation_rank",
+            "dislocation_rank": "Thứ hạng lệch pha",
             "growth_pct": "Tăng trưởng lợi nhuận so cùng kỳ (%)",
             "net_profit_vnd": "Lợi nhuận sau thuế kỳ này (VND)",
             "prior_net_profit_vnd": "Lợi nhuận sau thuế cùng kỳ (VND)",
@@ -946,7 +984,7 @@ def _filters_frame(
             f"≥ {WINDOW_CLOSES} phiên đã đóng trong {CALENDAR_LOOKBACK_DAYS} ngày"
         ),
         GATE_PRICE_WINDOW_UNUSABLE: (
-            "cửa sổ giá cùng một Price Basis và so được với VN-Index"
+            "cửa sổ giá cùng một cơ sở giá và so được với VN-Index"
         ),
         GATE_THIN_LIQUIDITY: (
             f"trung vị giá × khối lượng ≥ {LIQUIDITY_FLOOR_VND / 1e9:.0f} tỷ "
@@ -958,24 +996,27 @@ def _filters_frame(
         ),
     }
     described = (
-        "market = mã đang niêm yết"
+        "toàn bộ mã đang niêm yết"
         if universe == "market"
-        else "declared = Universe khai báo"
+        else "danh sách mã đã khai báo sẵn"
     )
-    rows = [("universe", "Universe", described, 0, screened)]
+    # No gate token in the table. Every row already carries the gate's own
+    # Vietnamese sentence, and the code beside it was this system's spelling of
+    # the same thing — read by nobody, and printed to a person the moment they
+    # opened "xem dạng bảng".
+    rows = [(START_ROW_LABEL, described, 0, screened)]
     remaining = screened
     for gate in GATES:
         remaining -= counts[gate]
         rows.append(
-            (gate, GATE_LABELS[gate], requirements[gate], counts[gate], remaining)
+            (GATE_LABELS[gate], requirements[gate], counts[gate], remaining)
         )
     return Frame(
         kind="table",
-        columns=("code", "gate", "requirement", "excluded", "remaining"),
+        columns=("gate", "requirement", "excluded", "remaining"),
         rows=tuple(rows),
         unit="mã",
         labels={
-            "code": "Mã cửa",
             "gate": "Cửa lọc",
             "requirement": "Điều kiện",
             "excluded": "Số mã bị loại",
@@ -997,17 +1038,17 @@ def view(result: StudyResult) -> SignalDeskSpec:
     """
     period = result.headline["period"]
     return SignalDeskSpec(
-        title=f"Lợi nhuận tăng, giá chưa theo — {period}",
+        title=f"Lợi nhuận tăng, giá chưa theo — {_period_words(period)}",
         blocks=(
             SignalDeskBlock(
                 widget="stat_tiles",
-                widget_version=1,
+                widget_version=2,
                 frame="tiles",
                 options={"label": "label", "value": "value", "unit": "unit"},
             ),
             SignalDeskBlock(
                 widget="scatter_quadrant",
-                widget_version=1,
+                widget_version=2,
                 frame="scatter",
                 options={
                     "label": "symbol",
@@ -1017,7 +1058,7 @@ def view(result: StudyResult) -> SignalDeskSpec:
             ),
             SignalDeskBlock(
                 widget="ranked_bars",
-                widget_version=1,
+                widget_version=2,
                 frame="ranking",
                 options={"label": "symbol", "value": "dislocation_rank"},
             ),
@@ -1049,6 +1090,28 @@ def _money(value: float) -> float:
     return float(Decimal(str(value)).quantize(Decimal("1")))
 
 
+#: Quarters the way a Vietnamese reader writes them, keyed by the code the
+#: provider files them under.
+_QUARTER_WORDS: Mapping[str, str] = {"1": "I", "2": "II", "3": "III", "4": "IV"}
+
+
+def _period_words(period: str) -> str:
+    """``2026-Q2`` as *quý II/2026*, or unchanged where it is not that shape.
+
+    The code is what the filings are keyed by and what the model asks for; it is
+    not what a person calls a quarter. Left alone rather than guessed at when it
+    does not parse, since a mangled date is worse than an unfamiliar one.
+    """
+    year, _, quarter = period.partition("-Q")
+    word = _QUARTER_WORDS.get(quarter)
+    return f"quý {word}/{year}" if word and year.isdigit() else period
+
+
+def _count(value: int) -> str:
+    """A count grouped the way Vietnamese groups one: 1.523, not 1,523."""
+    return f"{value:,}".replace(",", ".")
+
+
 DEFINITION = register(
     StudyDefinition(
         name=NAME,
@@ -1067,9 +1130,9 @@ DEFINITION = register(
         requires=(),
         frames=("tiles", "scatter", "ranking", "filters"),
         widgets=(
-            ("stat_tiles", 1),
-            ("scatter_quadrant", 1),
-            ("ranked_bars", 1),
+            ("stat_tiles", 2),
+            ("scatter_quadrant", 2),
+            ("ranked_bars", 2),
             ("data_table", 1),
         ),
         compute=compute,

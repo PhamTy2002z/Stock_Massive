@@ -15,6 +15,7 @@
 import type { LivePhase, LiveTurn } from "./live-turn"
 import { readDeskViews, readStrings, readThoughts, readToolCalls } from "./read-content"
 import type {
+  Attachment,
   SignalDeskAnnouncement,
   FlagReason,
   Thought,
@@ -28,6 +29,15 @@ export interface UserEntry {
   text: string
   /** Sent, and the create has not come back yet. Never a second copy of a committed one. */
   pending: boolean
+  /**
+   * What was attached to this question, as the message stored it.
+   *
+   * On the entry rather than fetched where it is drawn, because this is also
+   * what a retry and a resend read: the pending list is cleared the moment a
+   * question is sent, so the transcript is the only place the answer still
+   * lives by the time either of those is pressed.
+   */
+  attachments: Attachment[]
 }
 
 /** One canonical assistant message, read defensively because it is stored JSONB. */
@@ -168,6 +178,11 @@ export interface TranscriptInput {
   live: LiveTurn
   /** What the user just sent, while the create is still in flight. */
   pendingUserText: string | null
+  /**
+   * What the unsent question carries, so the chips show before the create
+   * returns. Empty for every question with nothing attached.
+   */
+  pendingAttachments?: Attachment[]
   /** Analyses opened into this Thread, in the order they were opened. */
   openedAnalyses?: OpenedAnalysis[]
   /**
@@ -262,6 +277,7 @@ export function buildTranscript(input: TranscriptInput): TranscriptEntry[] {
         key: `message-${message.id}`,
         text: textOf(message),
         pending: false,
+        attachments: attachmentsOf(message),
       })
     } else if (message.role === "assistant" && message.id !== heldBack) {
       // `summary` is context compaction. It is a fact about what the model was
@@ -288,6 +304,7 @@ export function buildTranscript(input: TranscriptInput): TranscriptEntry[] {
       key: "pending-user",
       text: input.pendingUserText,
       pending: true,
+      attachments: input.pendingAttachments ?? [],
     })
   }
 
@@ -351,6 +368,31 @@ function textOf(message: ThreadMessage): string {
   return typeof message.content.text === "string" ? message.content.text : ""
 }
 
+/**
+ * The attachments one stored message names, read defensively.
+ *
+ * Stored JSONB, so every field is checked rather than trusted: a message
+ * written by an older build carries no list at all, and a half-written entry
+ * should cost one missing chip rather than a blank conversation.
+ */
+function attachmentsOf(message: ThreadMessage): Attachment[] {
+  const raw = message.content.attachments
+  if (!Array.isArray(raw)) return []
+  const read: Attachment[] = []
+  for (const entry of raw) {
+    if (typeof entry !== "object" || entry === null) continue
+    const { id, filename, media_type, byte_size } = entry as Partial<Attachment>
+    if (typeof id !== "string") continue
+    read.push({
+      id,
+      filename: typeof filename === "string" ? filename : id,
+      media_type: typeof media_type === "string" ? media_type : "application/octet-stream",
+      byte_size: typeof byte_size === "number" ? byte_size : 0,
+    })
+  }
+  return read
+}
+
 function assistantView(message: ThreadMessage): AssistantView {
   const content = message.content
   // `answer` is the reply; `text` is the reply plus everything narrated on the
@@ -373,4 +415,42 @@ function assistantView(message: ThreadMessage): AssistantView {
         : 0,
     completed: content.status !== "incomplete",
   }
+}
+
+
+/** A question as the two places that re-ask it need it: words and files. */
+export interface AskedQuestion {
+  text: string
+  /** The attachment ids, in the order the question carried them. */
+  attachments: string[]
+}
+
+/**
+ * The last question asked, or the last one before a given entry.
+ *
+ * One function for both, because both callers want the same thing and getting
+ * it wrong looks identical: a retry that sends the words without the files, and
+ * a model that then answers confidently about a picture it never saw. No `409`
+ * catches that — a retry is a *new* Turn — so the only defence is that there is
+ * one place this is decided.
+ *
+ * Read off the transcript rather than off any pending state. The pending list is
+ * cleared the moment a question is sent, so by the time either control is
+ * pressed the message is the only place the answer still lives.
+ */
+export function questionBefore(
+  entries: TranscriptEntry[],
+  key?: string,
+): AskedQuestion | null {
+  const from = key === undefined ? entries.length : entries.findIndex((entry) => entry.key === key)
+  for (let cursor = from - 1; cursor >= 0; cursor -= 1) {
+    const entry = entries[cursor]
+    if (entry.kind === "user") {
+      return {
+        text: entry.text,
+        attachments: entry.attachments.map((attachment) => attachment.id),
+      }
+    }
+  }
+  return null
 }

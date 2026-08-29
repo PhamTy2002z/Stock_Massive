@@ -28,10 +28,25 @@ import {
   YAxis,
 } from "recharts"
 
-import { axisPresentation, columnIndex, labelOf, numberAt, textAt } from "../frame"
+import {
+  axisPresentation,
+  columnIndex,
+  columnRole,
+  labelOf,
+  numberAt,
+  textAt,
+} from "../frame"
 import type { WidgetProps } from "../widget-registry"
 import { ChartHeading } from "./chart-heading"
-import { AXIS, GRID, SERIES, SERIES_MUTED, TOOLTIP_STYLE } from "./chart-theme"
+import {
+  AXIS,
+  colorFor,
+  GRID,
+  resolveRoles,
+  SERIES,
+  SERIES_MUTED,
+  TOOLTIP_STYLE,
+} from "./chart-theme"
 
 export function LineSeriesWidget({ frame, options }: WidgetProps) {
   const xColumn = typeof options.x === "string" ? options.x : frame.columns[0]
@@ -67,6 +82,16 @@ export function LineSeriesWidget({ frame, options }: WidgetProps) {
     frame.unit,
     options.yFormat,
   )
+
+  // The two lines are two whole series, so the meaning is declared per column.
+  // Where nothing is declared they keep the pairing they have always had: the
+  // reading in the series colour, its companion stepped back and dashed.
+  const { roles } = resolveRoles([
+    columnRole(frame, yColumn),
+    columnRole(frame, secondColumn),
+  ])
+  const primaryStroke = roles[0] === null ? SERIES : colorFor(roles[0])
+  const secondaryStroke = roles[1] === null ? SERIES_MUTED : colorFor(roles[1])
 
   return (
     <figure className="m-0">
@@ -121,7 +146,7 @@ export function LineSeriesWidget({ frame, options }: WidgetProps) {
               yAxisId="left"
               type="monotone"
               dataKey="value"
-              stroke={SERIES}
+              stroke={primaryStroke}
               strokeWidth={1.5}
               dot={false}
               // The break is the point: a session the store refused is a hole in
@@ -133,7 +158,7 @@ export function LineSeriesWidget({ frame, options }: WidgetProps) {
                 yAxisId="right"
                 type="monotone"
                 dataKey="second"
-                stroke={SERIES_MUTED}
+                stroke={secondaryStroke}
                 strokeWidth={1.5}
                 // Dashed as well as paler. The second series is on its own axis
                 // and a reader who cannot separate two hues would otherwise have

@@ -59,25 +59,44 @@ export const FALLBACK: { widget: string; version: number } = {
 /** Which frame kinds each widget can draw, mirroring the server's catalog. */
 const ACCEPTS: Record<string, Frame["kind"][]> = {
   "stat_tiles@1": ["table"],
+  "stat_tiles@2": ["table"],
   "bar_series@1": ["series"],
+  "bar_series@2": ["series"],
   "session_heatmap@1": ["matrix"],
   "ranked_bars@1": ["table"],
+  "ranked_bars@2": ["table"],
   "line_series@1": ["series"],
+  "line_series@2": ["series"],
   "range_strip@1": ["table"],
   "condition_checklist@1": ["table"],
   "scatter_quadrant@1": ["table"],
+  "scatter_quadrant@2": ["table"],
   "data_table@1": ["series", "matrix", "table"],
 }
 
+/**
+ * Five widgets appear twice, and both entries are the same component.
+ *
+ * Version 2 of each reads what a frame declares about its own series and points;
+ * version 1 is kept because artifacts written before that exist and have to keep
+ * rendering, and dropping the entry would send every one of them to the table.
+ * One component serves both honestly: an older frame declares nothing, and a
+ * component handed nothing draws exactly what it drew before.
+ */
 const REGISTRY: Record<string, Widget> = {
   "stat_tiles@1": StatTilesWidget,
+  "stat_tiles@2": StatTilesWidget,
   "bar_series@1": BarSeriesWidget,
+  "bar_series@2": BarSeriesWidget,
   "session_heatmap@1": SessionHeatmapWidget,
   "ranked_bars@1": RankedBarsWidget,
+  "ranked_bars@2": RankedBarsWidget,
   "line_series@1": LineSeriesWidget,
+  "line_series@2": LineSeriesWidget,
   "range_strip@1": RangeStripWidget,
   "condition_checklist@1": ConditionChecklistWidget,
   "scatter_quadrant@1": ScatterQuadrantWidget,
+  "scatter_quadrant@2": ScatterQuadrantWidget,
   "data_table@1": DataTableWidget,
 }
 

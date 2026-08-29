@@ -130,9 +130,15 @@ export function readDeskViews(value: unknown): SignalDeskAnnouncement[] {
     if (artifactId === "") continue
     const title = asString(record.title)
     const studyName = asString(record.studyName)
+    const studyDisplayName = asString(record.studyDisplayName)
     deskViews.push({
       artifactId,
       studyName,
+      // The Vietnamese name, and never the slug as a stand-in for it: a board
+      // announced by a build that predates the display name has no readable
+      // recipe name, and the surfaces fall back to the title rather than
+      // printing `intraday_liquidity` at somebody.
+      studyDisplayName,
       // A desk view with no title still gets a name a person can read: the panel
       // and the card in the transcript are both labelled by it.
       title: title === "" ? SIGNAL_DESK_COPY.name : title,
@@ -140,6 +146,8 @@ export function readDeskViews(value: unknown): SignalDeskAnnouncement[] {
       // block tall and grows when the fetch lands, rather than guessing high.
       blockCount: asNumber(record.blockCount, 0),
       round: asNumber(record.round, 0),
+      symbol: asString(record.symbol).toUpperCase(),
+      asOf: asString(record.asOf),
     })
   }
   return deskViews

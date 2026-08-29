@@ -57,6 +57,7 @@ from src.studies.entry_condition_review import (
     MIN_SESSIONS,
     NAME,
     ConditionReviewParams,
+    _EVIDENCE_NAMES,
     _concentration_zone,
     _rsi,
     compute,
@@ -76,12 +77,12 @@ FIXTURE_RSI = 51.19
 #: What the fixture makes of the six conditions: five hold, the twelve-month
 #: return does not, and nothing is unknown because the quarters are stored.
 EXPECTED_STATUSES = {
-    LABEL_OFF_HIGH: "met",
-    LABEL_IN_ZONE: "met",
-    LABEL_RETURN_12M: "not_met",
-    LABEL_RSI: "met",
-    LABEL_PROFIT_POSITIVE: "met",
-    LABEL_PROFIT_IMPROVED: "met",
+    LABEL_OFF_HIGH: "Đạt",
+    LABEL_IN_ZONE: "Đạt",
+    LABEL_RETURN_12M: "Chưa đạt",
+    LABEL_RSI: "Đạt",
+    LABEL_PROFIT_POSITIVE: "Đạt",
+    LABEL_PROFIT_IMPROVED: "Đạt",
 }
 
 #: The vocabulary a condition review may never speak, in the field the model
@@ -128,6 +129,11 @@ def review(params: dict | None = None):
 
 
 def statuses(result) -> dict[str, str]:
+    """The checklist as ``{condition: status}``, in the words it is sent in.
+
+    Vietnamese rather than tokens: the frame is also what the disclosure under
+    the block prints, so the status travels as the word a reader reads.
+    """
     return {row[0]: row[1] for row in result.frames["conditions"].rows}
 
 
@@ -208,8 +214,24 @@ def test_the_checklist_statuses_are_the_ones_the_fixture_determines(window):
 def test_every_condition_names_the_frame_its_number_is_in(window):
     result = review()
 
+    for key, name in _EVIDENCE_NAMES.items():
+        assert key in result.frames, key
+        assert name != key
+
+    named = {row[4] for row in result.frames["conditions"].rows}
+    assert named <= set(_EVIDENCE_NAMES.values())
+
+
+def test_a_row_points_at_a_picture_in_words_a_reader_can_follow(window):
+    """The pointer is printed into a tooltip, so it is Vietnamese and not a key.
+
+    The case: the browser rendered "Số liệu trong khối price_context" over a row
+    about the twelve-month return.
+    """
+    result = review()
+
     for row in result.frames["conditions"].rows:
-        assert row[5] in result.frames, row
+        assert "_" not in row[4], row
 
 
 def test_a_symbol_with_no_quarters_still_answers_with_an_unknown_earnings_axis(
@@ -224,8 +246,8 @@ def test_a_symbol_with_no_quarters_still_answers_with_an_unknown_earnings_axis(
     assert result.headline["latestQuarter"] is None
     # The two earnings conditions are unknown rather than failed: a company that
     # has not filed is not a company whose profit fell.
-    assert statuses(result)[LABEL_PROFIT_POSITIVE] == "unknown"
-    assert statuses(result)[LABEL_PROFIT_IMPROVED] == "unknown"
+    assert statuses(result)[LABEL_PROFIT_POSITIVE] == "Chưa rõ"
+    assert statuses(result)[LABEL_PROFIT_IMPROVED] == "Chưa rõ"
     assert result.headline["conditions"]["unknown"] == 2
     # And the price axes still answer, which is the whole point of not refusing.
     assert result.headline["pricePosition"]["last"] == fixture.LAST_CLOSE
@@ -233,7 +255,7 @@ def test_a_symbol_with_no_quarters_still_answers_with_an_unknown_earnings_axis(
     # The strip says the panel is thinner than a whole review, in the terms the
     # reader is shown.
     assert result.provenance.health == "degraded"
-    assert "quarters stored" in (result.provenance.reason or "")
+    assert "quý lợi nhuận so sánh được" in (result.provenance.reason or "")
 
 
 def test_fewer_than_eight_quarters_is_still_an_unknown_trend(window):
@@ -245,8 +267,8 @@ def test_fewer_than_eight_quarters_is_still_an_unknown_trend(window):
     # Three quarters is no year-on-year pair at all, and a partial trend read as
     # a trend would be a different claim from the one the data supports.
     assert result.headline["earningsTrend"] == "unknown"
-    assert statuses(result)[LABEL_PROFIT_POSITIVE] == "met"
-    assert statuses(result)[LABEL_PROFIT_IMPROVED] == "unknown"
+    assert statuses(result)[LABEL_PROFIT_POSITIVE] == "Đạt"
+    assert statuses(result)[LABEL_PROFIT_IMPROVED] == "Chưa rõ"
 
 
 def test_a_loss_making_base_quarter_gets_no_percentage(window):

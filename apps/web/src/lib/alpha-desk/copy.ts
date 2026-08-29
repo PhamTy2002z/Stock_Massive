@@ -143,13 +143,35 @@ export const SIGNAL_DESK_COPY = {
   /**
    * What the pane says while the desk is on and nothing has been drawn yet.
    *
-   * A sentence rather than an illustration or a button: the composer is the
-   * call to action, three hundred pixels to the left, and a second one here
-   * would send the reader looking for a control that is already under their
-   * hands.
+   * Four parts rather than one sentence, and still no button: the composer is
+   * the call to action three hundred pixels to the left, and a second one here
+   * would send the reader looking for a control already under their hands. What
+   * the empty pane owes them instead is *what will appear* — which is why the
+   * shape of a board is drawn above the words, unlabelled and inert.
+   *
+   * `emptyStatus` is the one line that reports rather than explains: the desk
+   * being on is a state the reader switched into, and it is the fact they will
+   * check first if nothing arrives.
    */
-  empty:
-    "Signal Desk đang bật. Hỏi về một mã, một ngành hay cả thị trường để dựng bảng đầu tiên.",
+  emptyStatus: "Signal Desk đang bật",
+  emptyTitle: "Bảng phân tích sẽ hiện ở đây",
+  emptyBody:
+    "Hỏi về một mã, một ngành hay cả thị trường — mỗi câu trả lời dựng một bảng có số liệu, nguồn và có thể xuất.",
+  /**
+   * The Universe, said where a reader is about to name a symbol.
+   *
+   * The count is written out rather than fetched. It is a deployment's own
+   * declared Universe — thirty symbols, stated in the backend — and a figure
+   * that arrived over the network would show a blank or a wrong number for the
+   * first few hundred milliseconds of exactly the screen that exists to set an
+   * expectation.
+   *
+   * No link under it. The design draws one to a list of the thirty, and there is
+   * no page, popover or endpoint on this side that holds them — a link to
+   * nothing teaches the reader that the product's links do not work, which
+   * costs more than the list would have given them.
+   */
+  emptyUniverseHint: "Hiện hỗ trợ 30 mã VN30 — sẽ mở rộng dần.",
   /** What the pane says with the desk off and no picture in the conversation. */
   noDeskView: "Chưa có Signal Desk nào trong hội thoại này.",
   /** An artifact this reader may not open, which is almost always another Thread's. */
@@ -204,6 +226,54 @@ export const SIGNAL_DESK_COPY = {
    * being greeted a second time is not it.
    */
   deskEmptyHeadline: "Signal on your Desk",
+  /**
+   * What a block says when it cannot be drawn.
+   *
+   * **Neither sentence names anything from the machinery.** They used to: one
+   * quoted the frame's key and the other the widget and its version, so a
+   * reader met `bar_series v2` in a product that had promised them an analysis.
+   * A name only the server uses tells the reader nothing they can act on and
+   * everything about how the sausage is made, so what is left is the fact —
+   * this part has no numbers, or this part is a table today.
+   */
+  blockNoData: "Phần này chưa có số liệu.",
+  blockAsTable: "Hiển thị dạng bảng — bản này chưa vẽ được biểu đồ.",
+} as const
+
+/**
+ * Everything the board switcher says.
+ *
+ * Its own record rather than more keys on `SIGNAL_DESK_COPY`, because these are
+ * about *finding* a board rather than about a board — and because the switcher
+ * is where the vocabulary rule is easiest to break. A row here shows a title, a
+ * ticker, and the Vietnamese name of the analysis. It never shows the id it
+ * opens by, and never the slug the server keys the recipe under.
+ */
+export const BOARD_SWITCHER_COPY = {
+  /** The control that opens it, and the chord that does the same thing. */
+  open: "Tất cả bảng",
+  shortcut: "⌘K",
+  title: "Chuyển bảng",
+  placeholder: "Tìm theo tên bảng, mã hoặc phân tích…",
+  pinnedGroup: "Đã ghim",
+  recentGroup: "Gần đây",
+  allGroup: "Tất cả bảng",
+  /** The row that widens the list from "recent" to the whole conversation. */
+  showAll: "Xem tất cả bảng",
+  pin: "Ghim lên đầu danh sách",
+  unpin: "Bỏ ghim",
+  empty: "Hội thoại này chưa dựng bảng nào.",
+  noMatch: "Không có bảng nào khớp.",
+  /** How "Tất cả" groups: by the round of the answer that drew them. */
+  round: (round: number) => (round > 0 ? `Lượt hỏi ${round}` : "Trước đó"),
+  /** The dropdown's last row: the way to the searchable list. */
+  search: "Tìm bảng…",
+  /** The header's control before any board is open. */
+  choose: "Chọn bảng",
+  /** How many boards the conversation holds, beside the open one's name. */
+  count: (count: number) => `${count} bảng`,
+  /** The dropdown's group for every board that is not pinned, newest first. */
+  othersGroup: "Bảng khác",
 } as const
 
 /**
@@ -252,6 +322,74 @@ export const SEND_LABEL = "Gửi"
  * the product's Vietnamese-first operational language.
  */
 export const CANCELLING_LABEL = "Đang dừng…"
+
+/**
+ * Everything the attachment path says, including every way it says no.
+ *
+ * The refusals are named by the reason the backend sends rather than by status
+ * code, and each one names the action left to take. A reader who sees "413" has
+ * been told what happened to the request; a reader who sees "tệp này lớn hơn
+ * 4 MB" has been told what to do next.
+ *
+ * `unknown` exists because a refusal this build has never heard of is still a
+ * refusal, and a blank space beside a file that did not upload is the one
+ * outcome with no reading at all.
+ */
+export const ATTACHMENT_COPY = {
+  add: "Thêm tệp hoặc ảnh",
+  addHint: "⌘U",
+  /** On the button that takes one chip back off the question. */
+  remove: (filename: string) => `Bỏ ${filename}`,
+  uploading: "Đang nạp…",
+  failed: "Không nạp được",
+  /** Read by a screen reader for the row of chips above the field. */
+  region: "Tệp đính kèm của câu hỏi này",
+  /**
+   * Said once, beside the chips, when the route cannot read pictures.
+   *
+   * The file still uploads and still travels — this is a fact about what the
+   * model will be able to do with it, not a refusal. Saying nothing would let a
+   * reader attach a chart and read a generic answer as a wrong answer.
+   */
+  imagesNotRead: "Model của phiên này chưa đọc được ảnh — ảnh vẫn được lưu kèm câu hỏi.",
+  refusals: {
+    file_too_large: "Tệp này lớn hơn mức cho phép. Hãy chọn tệp nhỏ hơn.",
+    media_type_not_allowed: "Chỉ nhận ảnh PNG, JPEG, WebP và tệp văn bản .txt, .csv.",
+    empty_file: "Tệp này rỗng.",
+    quota_rows: "Bạn đã lưu quá nhiều tệp. Hãy bỏ vài tệp cũ rồi thử lại.",
+    quota_bytes: "Dung lượng tệp đã lưu đã đầy. Hãy bỏ vài tệp cũ rồi thử lại.",
+    turn_image_budget: "Những ảnh này quá lớn để đi cùng một câu hỏi. Hãy bỏ một ảnh.",
+    unknown: "Không nạp được tệp này. Hãy thử lại.",
+  },
+} as const
+
+/**
+ * What the screen capture says.
+ *
+ * The preview step has its own words because it is the one gate on a real
+ * privacy risk: `getDisplayMedia` hands back everything the reader agreed to
+ * share, which can include a tab, a message, an inbox. Once it is sent it is
+ * sent, so the copy has to make "look before you attach" the obvious reading.
+ */
+export const CAPTURE_COPY = {
+  /** The menu row. Not "chụp màn hình bảng giá" — it captures anything. */
+  row: "Chụp màn hình",
+  /** The preview dialog's accessible name. */
+  title: "Xem lại ảnh chụp",
+  explain: "Xem lại trước khi đính kèm. Ảnh này sẽ được gửi tới model.",
+  accept: "Đính kèm",
+  discard: "Bỏ",
+  /** Said on the row when the browser cannot capture at all. */
+  unsupported: "Trình duyệt này không cho chụp màn hình.",
+  /** The capture came back empty — a stream with no frame in it. */
+  failed: "Không chụp được. Hãy thử lại.",
+} as const
+
+/** The message for one refusal reason, falling back to the honest generic one. */
+export function attachmentRefusal(reason: string | null | undefined): string {
+  const table: Record<string, string> = ATTACHMENT_COPY.refusals
+  return table[reason ?? ""] ?? ATTACHMENT_COPY.refusals.unknown
+}
 
 /**
  * What flagging a message says, and — the load-bearing half — what it does not.

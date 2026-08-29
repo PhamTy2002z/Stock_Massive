@@ -241,9 +241,12 @@ describe("a desk view", () => {
   const SIGNAL_DESK = {
     artifactId: "artifact-1",
     studyName: "intraday_liquidity_profile",
+    studyDisplayName: "Thanh khoản trong phiên",
     title: "Thanh khoản trong phiên — STB",
     blockCount: 4,
     round: 0,
+    symbol: "STB",
+    asOf: "2026-08-28T09:00:00+07:00",
   }
 
   it("is remembered by the id the panel will fetch it with", () => {

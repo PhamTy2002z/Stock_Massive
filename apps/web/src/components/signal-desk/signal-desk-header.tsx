@@ -1,106 +1,129 @@
 "use client"
 
 /**
- * The Signal Desk's own chrome: one tab per picture, and the way out to a file.
+ * The Signal Desk's own chrome: which board is open, and the way out to a file.
  *
- * **Every desk view in the conversation keeps a tab.** The surface used to hold one
- * artifact id, so a Thread that ran three Studies could show only the newest and
- * the first two became unreachable the moment the third arrived — the reader had
- * watched them being drawn and then had nowhere to click. A strip is the whole
- * point of the redesign.
+ * **One control names the board; a dropdown under it holds the rest.** The
+ * surface used to draw a tab per board, and a conversation twenty boards long
+ * became a strip of clipped titles the reader scrolled sideways through. Now the
+ * header says what is on screen and the dropdown offers everything else — pinned
+ * first, then newest — with the searchable switcher as its last row.
  *
- * **"Nguồn" is the last tab, not a second panel.** What an answer rested on and
- * what it was drawn from are the same question asked from two sides, and a
+ * **"Nguồn" is a sibling toggle, not a second panel.** What an answer rested on
+ * and what it was drawn from are the same question asked from two sides, and a
  * reader comparing a figure with its source should not have to give up half the
- * screen to see the other. It carries a different glyph and no close control:
- * it is not a desk view, and there is nothing to close.
+ * screen to see the other.
  *
  * **There is no "Lưu".** The design draws one beside the export and there is no
  * endpoint behind it — the sidebar's "Báo cáo đã lưu" is still "Sắp ra mắt". A
  * control that swallowed the press would tell a reader their work was kept.
+ *
+ * **Only the export waits for a board.** "Nguồn" and "Chia sẻ" do not: sources
+ * are what an *answer* rested on and sharing is of the *conversation*, so a
+ * reader who asked a question in Chat and got a cited answer has something for
+ * both of them with no board anywhere in sight. Dimming the pair on an empty
+ * desk read as tidy and was simply wrong about what they act on.
  */
 
-import { Download, Link2, PanelTop, X } from "lucide-react"
+import { ChevronDown, Download, Link2, PanelTop } from "lucide-react"
 
-import { SIGNAL_DESK_COPY } from "@/lib/alpha-desk/copy"
-import type { SignalDeskTab } from "@/components/shell/shell-state"
+import type { SignalDeskBoard } from "@/components/shell/shell-state"
+import { BOARD_SWITCHER_COPY, SIGNAL_DESK_COPY } from "@/lib/alpha-desk/copy"
 import { cn } from "@/lib/utils"
 
+import { BoardMenu } from "./board-menu"
+
 export function SignalDeskHeader({
-  deskViews,
+  boards,
+  pinned,
   activeDeskViewId,
   showingSources,
   canExport,
+  menuOpen,
   onOpenDeskView,
-  onCloseDeskView,
   onOpenSources,
+  onToggleMenu,
+  onTogglePin,
+  onOpenSwitcher,
   onShare,
   onExport,
 }: {
-  deskViews: SignalDeskTab[]
+  /** Every board of the conversation, oldest first. */
+  boards: SignalDeskBoard[]
+  /** The pinned ids, in pin order. */
+  pinned: string[]
   activeDeskViewId: string | null
   showingSources: boolean
   /** False until the numbers are in the browser: there is nothing to write yet. */
   canExport: boolean
+  /** Whether the dropdown is open; the shell owns it like every other overlay. */
+  menuOpen: boolean
   onOpenDeskView: (artifactId: string) => void
-  onCloseDeskView: (artifactId: string) => void
   onOpenSources: () => void
+  onToggleMenu: (open: boolean) => void
+  onTogglePin: (artifactId: string, pinned: boolean) => void
+  /** The searchable switcher, reached from the dropdown's last row and ⌘K. */
+  onOpenSwitcher: () => void
   onShare: () => void
   onExport: () => void
 }) {
+  const active = boards.find((board) => board.artifactId === activeDeskViewId)
+  const label = active?.title ?? BOARD_SWITCHER_COPY.choose
+
   return (
     <header className="flex flex-none items-center gap-2 px-3.5 pt-2.5">
-      <div
-        role="tablist"
-        aria-label="Signal Desk"
-        className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto scrollbar-thin"
-      >
-        {deskViews.map((deskView) => {
-          const active = !showingSources && deskView.artifactId === activeDeskViewId
-          return (
-            <div key={deskView.artifactId} role="presentation" className="relative flex-none">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => onOpenDeskView(deskView.artifactId)}
-                className={cn(TAB, "max-w-[220px] pr-7", active ? TAB_ON : TAB_OFF)}
-              >
-                <PanelTop className="size-[13px] flex-none" strokeWidth={1.7} aria-hidden />
-                <span className="min-w-0 truncate">{deskView.title}</span>
-              </button>
-              {/* A sibling rather than a child: a button inside a button is not
-                  something a browser will lay out, and the close affordance has
-                  to be reachable without selecting the tab it sits on. */}
-              <button
-                type="button"
-                aria-label={`Close ${deskView.title}`}
-                onClick={() => onCloseDeskView(deskView.artifactId)}
-                className="absolute right-1.5 top-1/2 flex size-[18px] -translate-y-1/2 items-center justify-center rounded text-ink-6 transition-colors hover:bg-foreground/10 hover:text-ink-2"
-              >
-                <X className="size-3" strokeWidth={2} aria-hidden />
-              </button>
-            </div>
-          )
-        })}
-
+      <div className="relative min-w-0 flex-1">
         <button
           type="button"
-          role="tab"
-          aria-selected={showingSources}
-          onClick={onOpenSources}
-          className={cn(TAB, "flex-none", showingSources ? TAB_ON : TAB_OFF)}
+          aria-label={BOARD_SWITCHER_COPY.open}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={() => onToggleMenu(!menuOpen)}
+          className={cn(
+            "flex max-w-full items-center gap-1.5 rounded-[9px] px-2 py-1.5 text-control transition-colors hover:bg-foreground/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            showingSources ? "text-ink-5" : "text-ink-1",
+            menuOpen && "bg-foreground/[0.06]",
+          )}
         >
-          <Link2 className="size-[13px] flex-none" strokeWidth={1.7} aria-hidden />
-          <span>{SIGNAL_DESK_COPY.sources}</span>
+          <PanelTop className="size-[13px] flex-none text-ink-5" strokeWidth={1.7} aria-hidden />
+          <span className="min-w-0 truncate">{label}</span>
+          {boards.length > 1 && (
+            <span className="flex-none text-micro text-ink-6">
+              {BOARD_SWITCHER_COPY.count(boards.length)}
+            </span>
+          )}
+          <ChevronDown className="size-3 flex-none text-ink-5" strokeWidth={2} aria-hidden />
         </button>
+        {menuOpen && (
+          <BoardMenu
+            boards={boards}
+            pinned={pinned}
+            activeBoardId={showingSources ? null : activeDeskViewId}
+            onOpenBoard={onOpenDeskView}
+            onTogglePin={onTogglePin}
+            onSearch={onOpenSwitcher}
+            onClose={() => onToggleMenu(false)}
+          />
+        )}
       </div>
 
       <div className="flex flex-none items-center gap-2">
         <button
           type="button"
+          aria-pressed={showingSources}
+          onClick={onOpenSources}
+          className={cn(
+            "flex items-center gap-1.5 rounded-[9px] px-2.5 py-1.5 text-control transition-colors hover:bg-foreground/[0.06]",
+            showingSources ? "bg-foreground/[0.06] text-ink-1" : "text-ink-5 hover:text-ink-2",
+          )}
+        >
+          <Link2 className="size-[13px] flex-none" strokeWidth={1.7} aria-hidden />
+          <span>{SIGNAL_DESK_COPY.sources}</span>
+        </button>
+        <button
+          type="button"
           onClick={onShare}
-          className="shrink-0 whitespace-nowrap rounded-[9px] border border-border bg-foreground/[0.04] px-3.5 py-1.5 text-control text-ink-2 transition-colors hover:bg-foreground/[0.08]"
+          className="shrink-0 whitespace-nowrap rounded-[9px] px-3 py-1.5 text-control text-ink-3 transition-colors hover:bg-foreground/[0.06] hover:text-ink-1"
         >
           Chia sẻ
         </button>
@@ -120,9 +143,3 @@ export function SignalDeskHeader({
     </header>
   )
 }
-
-/** The folder-tab shape: square-cut at the bottom, where the content meets it. */
-const TAB =
-  "flex items-center gap-1.5 rounded-t-lg px-3 py-[0.42rem] text-[0.83rem] transition-colors"
-const TAB_ON = "bg-surface-raised text-ink-1"
-const TAB_OFF = "text-ink-6 hover:text-ink-3"

@@ -30,6 +30,7 @@ from . import (  # noqa: F401  (imported for their side effect)
     earnings_dislocation,
     entry_condition_review,
     intraday_liquidity,
+    volume_at_price,
 )
 
 __all__ = [

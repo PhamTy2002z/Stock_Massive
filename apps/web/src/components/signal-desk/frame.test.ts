@@ -16,6 +16,7 @@ import type { Frame } from "@/lib/alpha-desk/types"
 import {
   axisPresentation,
   columnIndex,
+  columnRole,
   formatMeasure,
   formatMeasureParts,
   formatNumber,
@@ -25,6 +26,7 @@ import {
   formatValue,
   labelOf,
   numberAt,
+  pointRole,
   textAt,
 } from "./frame"
 
@@ -140,5 +142,35 @@ describe("one chart scale", () => {
 
     expect(axis.unit).toBe("tỷ đồng")
     expect(axis.format(-150_000_000_000)).toBe("−150")
+  })
+})
+
+describe("what a frame says about its own numbers", () => {
+  it("answers nothing for a frame written before frames could say anything", () => {
+    // The default has to be silence rather than a colour: every artifact frozen
+    // before this existed is one of these, and each has to draw as it drew.
+    expect(columnRole(FRAME, "value")).toBeNull()
+    expect(pointRole(FRAME, 0)).toBeNull()
+  })
+
+  it("answers what the engine declared, per series and per row", () => {
+    const declared: Frame = {
+      ...FRAME,
+      rows: [["Q1", 1, "%"], ["Q2", -1, "%"]],
+      columnRoles: { value: "up" },
+      pointRoles: ["up", "down"],
+    }
+
+    expect(columnRole(declared, "value")).toBe("up")
+    expect(columnRole(declared, "label")).toBeNull()
+    expect(pointRole(declared, 1)).toBe("down")
+  })
+
+  it("answers nothing for a row or a column that is not there", () => {
+    const declared: Frame = { ...FRAME, columnRoles: { value: "up" }, pointRoles: ["focus"] }
+
+    expect(columnRole(declared, undefined)).toBeNull()
+    expect(columnRole(declared, "missing")).toBeNull()
+    expect(pointRole(declared, 4)).toBeNull()
   })
 })

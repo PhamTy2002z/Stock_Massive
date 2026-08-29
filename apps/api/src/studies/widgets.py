@@ -13,6 +13,14 @@ it ships as version 2 and the old artifacts keep asking for version 1. A viewer
 that meets a version it does not know falls back to ``data_table`` — the numbers
 without the picture, which is a degradation a reader can see through, unlike a
 blank panel.
+
+**A retired version stays in the catalog.** Five widgets ship a version 2 that
+reads the meaning a frame declares about its own series and points, and their
+version 1 is listed beside it rather than replaced. Dropping it would make every
+artifact written before the change fall back to a table — the version scheme
+exists to prevent exactly that. The browser maps both versions onto the same
+component, which is sound because the older version's frames declare no meaning
+and are drawn the way they always were.
 """
 
 from __future__ import annotations
@@ -47,11 +55,23 @@ CATALOG: Mapping[tuple[str, int], Widget] = MappingProxyType(
             frame_kinds=("table",),
             purpose="Vài con số dẫn dắt, mỗi ô một dòng của frame",
         ),
+        ("stat_tiles", 2): Widget(
+            name="stat_tiles",
+            version=2,
+            frame_kinds=("table",),
+            purpose="Như v1, thêm màu ô theo vai trò từng dòng khai trong frame",
+        ),
         ("bar_series", 1): Widget(
             name="bar_series",
             version=1,
             frame_kinds=("series",),
             purpose="Cột theo trục thời gian hoặc theo nhóm rời rạc",
+        ),
+        ("bar_series", 2): Widget(
+            name="bar_series",
+            version=2,
+            frame_kinds=("series",),
+            purpose="Như v1, thêm màu cột theo vai trò từng dòng khai trong frame",
         ),
         ("session_heatmap", 1): Widget(
             name="session_heatmap",
@@ -65,11 +85,23 @@ CATALOG: Mapping[tuple[str, int], Widget] = MappingProxyType(
             frame_kinds=("table",),
             purpose="Xếp hạng có nhãn, dài nhất trên cùng",
         ),
+        ("ranked_bars", 2): Widget(
+            name="ranked_bars",
+            version=2,
+            frame_kinds=("table",),
+            purpose="Như v1, thêm màu thanh theo vai trò từng dòng khai trong frame",
+        ),
         ("line_series", 1): Widget(
             name="line_series",
             version=1,
             frame_kinds=("series",),
             purpose="Đường theo trục thời gian, tối đa hai trục giá trị",
+        ),
+        ("line_series", 2): Widget(
+            name="line_series",
+            version=2,
+            frame_kinds=("series",),
+            purpose="Như v1, thêm màu đường theo vai trò từng cột khai trong frame",
         ),
         ("range_strip", 1): Widget(
             name="range_strip",
@@ -88,6 +120,12 @@ CATALOG: Mapping[tuple[str, int], Widget] = MappingProxyType(
             version=1,
             frame_kinds=("table",),
             purpose="Điểm trên hai trục, chia bốn vùng bằng đường tham chiếu",
+        ),
+        ("scatter_quadrant", 2): Widget(
+            name="scatter_quadrant",
+            version=2,
+            frame_kinds=("table",),
+            purpose="Như v1, thêm màu điểm theo vai trò từng dòng khai trong frame",
         ),
         ("data_table", 1): Widget(
             name="data_table",

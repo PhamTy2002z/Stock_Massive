@@ -27,6 +27,23 @@ export function labelOf(frame: Frame, column: string): string {
   return frame.labels[column] ?? column
 }
 
+/**
+ * What one whole series is, as the frame declared it, or `null`.
+ *
+ * Absent on every frame written before frames could say this, which is why the
+ * answer is `null` rather than a default: the widget decides what "said nothing"
+ * looks like, and for every one of them that is the colour it already used.
+ */
+export function columnRole(frame: Frame, column: unknown): string | null {
+  if (typeof column !== "string") return null
+  return frame.columnRoles?.[column] ?? null
+}
+
+/** What one bar, point or tile is, as the frame declared it, or `null`. */
+export function pointRole(frame: Frame, index: number): string | null {
+  return frame.pointRoles?.[index] ?? null
+}
+
 /** One cell as a number, or `null` when it is absent or not one. */
 export function numberAt(row: unknown[], index: number): number | null {
   if (index < 0 || index >= row.length) return null
