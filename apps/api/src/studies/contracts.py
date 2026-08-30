@@ -1,31 +1,35 @@
 """What an analysis recipe has to declare before a model may ask for it.
 
-A **Study** is one named, versioned, deterministic recipe: given parameters a
-model chose, it computes numbers and says how to draw them. It exists because
-the lane already had a way to hand a model *one figure* — a Signal Field — and
-no way to hand a person *a picture*. A picture is a matrix of thirty sessions by
-seventeen buckets; put that in a message and the context is gone, and the model
-will read the wrong cell anyway.
+A **Study** is one named, versioned, deterministic *template*: a ``plan`` of
+steps and a ``board`` written against their names. It exists because the lane
+already had a way to hand a model *one figure* — a Signal Field — and no way to
+hand a person *a picture*. A picture is a matrix of thirty sessions by seventeen
+buckets; put that in a message and the context is gone, and the model will read
+the wrong cell anyway.
 
 So the split is structural rather than stylistic:
 
-**The engine computes.** ``compute`` is pure of the model: it reads the store,
-does arithmetic, and returns numbers nobody has narrated yet.
+**The engine computes, and a template has no private engine.** A ``QueryStep``
+goes through the reader a model's own ``query`` call goes through, a
+``ComputeStep`` through the sandbox and the validator a model's ``compute`` goes
+through, and a ``ReadStep`` is the one narrow privilege — on the *read* axis, for
+the three answers the query layer has no source for, and never for arithmetic.
 
-**The artifact holds the numbers.** ``StudyResult.frames`` is persisted and
-served to the browser directly. It never enters a model message — not truncated,
+**The artifact holds the numbers.** Every step's frame is persisted and served
+to the browser directly. None of them enters a model message — not truncated,
 not summarised, not "just this once". The test that proves it reads the
 transcript.
 
-**The registry draws.** ``view`` picks widgets by name and version out of a
-catalog the browser reads from the same file (``contracts/
-signal-desk-widget-catalog.json``), so a widget the browser cannot draw is a failure
-at import here rather than a blank panel there.
+**The composer draws.** ``board`` is a literal written against step names, so
+the registry can check at import that every frame it draws is one the plan
+produces and every widget it suggests is one the browser has — a failure where
+it was written rather than a blank panel in front of a reader.
 
-**The model reads only the headline.** ``StudyResult.headline`` is the entire
-model-facing surface, budgeted at roughly three hundred tokens. Everything a
-sentence could honestly say about the picture has to be in it, because the
-picture itself is not on offer.
+**The model reads only the headline.** ``StudyDefinition.headline`` is the entire
+model-facing surface, budgeted at roughly three hundred tokens. It is handed the
+frames and nothing else, so every figure in it came out of a cell by
+construction. Everything a sentence could honestly say about the picture has to
+be in it, because the picture itself is not on offer.
 
 Modelled on ``src/stocks/signals/fields.py`` deliberately: no defaults on the
 declaration, so a Study that forgets to say what question it answers is a
@@ -35,10 +39,10 @@ declaration, so a Study that forgets to say what question it answers is a
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -88,8 +92,32 @@ CATEGORY_SLOTS = 6
 #: genuinely rose or fell. ``category:1``–``category:6`` are interchangeable
 #: group hues carrying no direction at all, which is why the two families should
 #: not appear in one picture: a chart doing both is describing two things at once.
+#: ``winner`` and ``loser`` are the comparison pair, and they are not ``up`` and
+#: ``down`` wearing another name. A number that *rose* and a number that is
+#: *better than the one beside it* are different claims: VIC's drawdown falling
+#: is ``down`` and also ``winner``, and a chart that had to choose between them
+#: would have to drop one of the two things the picture is about.
+#:
+#: ``benchmark`` marks the line something is being compared *against* — an index,
+#: a sector median — so a reader can tell the reference from the subject without
+#: a legend. ``warning`` marks a cell a reader should not read past without the
+#: caveat beside it. ``stale`` marks a number that is real but older than the
+#: rest of the picture, which is the one condition a frame can carry that no
+#: refusal covers: it has a value, and the value is from another day.
 PLAIN_ROLES: frozenset[str] = frozenset(
-    {"series", "muted", "focus", "up", "down", "neutral"}
+    {
+        "series",
+        "muted",
+        "focus",
+        "up",
+        "down",
+        "neutral",
+        "winner",
+        "loser",
+        "benchmark",
+        "warning",
+        "stale",
+    }
 )
 
 CATEGORY_ROLES: frozenset[str] = frozenset(
@@ -153,6 +181,15 @@ class Frame:
     ``column_roles`` is keyed by column and describes a whole series — the second
     line on a two-line chart. ``point_roles`` is positional against ``rows`` and
     describes one bar, point or tile, with ``None`` for a row making no claim.
+    ``cell_roles`` is keyed ``(row index, column)`` and describes one cell.
+
+    **Three granularities rather than two, because a comparison needs the third.**
+    A table of symbols against fields has a winner per *column* and a symbol per
+    *row*, and the claim being made is about neither: it is that this symbol wins
+    on this field. Expressed with ``point_roles`` it would say the whole row
+    wins, which is exactly the sentence a comparison exists to avoid. The three
+    do not overlap and none of them defaults to anything, so a frame saying
+    nothing about meaning is drawn as it was before any of this existed.
     """
 
     kind: FrameKind
@@ -162,6 +199,7 @@ class Frame:
     labels: Mapping[str, str]
     column_roles: Mapping[str, str] = field(default_factory=dict)
     point_roles: tuple[str | None, ...] = ()
+    cell_roles: Mapping[tuple[int, str], str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.columns:
@@ -211,6 +249,21 @@ class Frame:
             if problem is not None:
                 raise ValueError(f"row {index}: {problem}")
 
+        for (index, column), role in self.cell_roles.items():
+            if not 0 <= index < len(self.rows):
+                raise ValueError(
+                    f"cell role {role!r} names row {index}, and this Frame has "
+                    f"{len(self.rows)}"
+                )
+            if column not in self.columns:
+                raise ValueError(
+                    f"cell role {role!r} names column {column!r}, which this "
+                    "Frame does not have"
+                )
+            problem = role_error(role)
+            if problem is not None:
+                raise ValueError(f"cell ({index}, {column!r}): {problem}")
+
     def to_payload(self) -> dict[str, Any]:
         return {
             "kind": self.kind,
@@ -220,6 +273,14 @@ class Frame:
             "labels": dict(self.labels),
             "columnRoles": dict(self.column_roles),
             "pointRoles": list(self.point_roles),
+            # A list of triples rather than a nested object: a JSON key can only
+            # be a string, so a ``(row, column)`` key would have to be spelled
+            # ``"3|roe"`` and parsed back at the far end — a second encoding for
+            # the browser to agree with, and one more thing to get wrong.
+            "cellRoles": [
+                {"row": index, "column": column, "role": role}
+                for (index, column), role in sorted(self.cell_roles.items())
+            ],
         }
 
 
@@ -291,6 +352,26 @@ def _check_reader_sentence(field_name: str, text: str, limit: int) -> None:
             )
 
 
+#: Where a frame's numbers came from, as a closed vocabulary.
+#:
+#: Three words and not a free string, because the reader-facing consequence
+#: differs per word: ``store`` is this deployment's own measurement and carries
+#: its health and its ``as_of``; ``web`` is a number read off a page somebody
+#: else published, and the badge beside it has to say so; ``derived`` is
+#: arithmetic this Turn did on frames it already had, which is neither of the
+#: first two and must not be able to pass as ``store``.
+#:
+#: It was a free ``str`` and every caller wrote ``"store"``. Closing it is what
+#: makes a badge on the browser a decision the engine took rather than a string
+#: comparison the far end guesses at.
+FrameSource = Literal["store", "web", "derived"]
+
+#: The same three words as a set, for the check. Written out rather than derived
+#: from the ``Literal`` with ``get_args`` so the failure is a name a reader can
+#: grep for rather than a typing introspection.
+FRAME_SOURCES: frozenset[str] = frozenset({"store", "web", "derived"})
+
+
 @dataclass(frozen=True)
 class Provenance:
     """Where the numbers came from, frozen at the moment they were computed.
@@ -309,14 +390,27 @@ class Provenance:
     sentence; ``method_notes`` is the second, one limitation per entry.
     """
 
-    source: str
+    source: FrameSource
     as_of: datetime
     sessions_used: int
     health: Health
     reason: str | None
     method_notes: tuple[str, ...] = ()
+    # What was asked for, in the terms the asking layer used: the source name, the
+    # symbols, the window, the refusal counts. Kept for the operator reading the
+    # row and for the replay that has to rebuild the same frame after a code
+    # change — not for the reader, and not for the model, neither of which ever
+    # sees it. Free-shaped on purpose: the six sources answer to six different
+    # sets of arguments, and a typed union of them here would be the query
+    # schema written a second time.
+    query: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        if self.source not in FRAME_SOURCES:
+            raise ValueError(
+                f"{self.source!r} is not where numbers come from; use one of "
+                + ", ".join(sorted(FRAME_SOURCES))
+            )
         if self.reason is not None:
             _check_reader_sentence("reason", self.reason, REASON_LIMIT)
         for index, note in enumerate(self.method_notes):
@@ -332,7 +426,21 @@ class Provenance:
             "health": self.health,
             "reason": self.reason,
             "methodNotes": list(self.method_notes),
+            "query": dict(self.query),
         }
+
+
+#: Which spelling of a Signal Desk spec a row holds.
+#:
+#: Version 1 is a title and a flat list of blocks — every artifact written before
+#: the board grammar existed, and every Study still writing one. Version 2 is the
+#: board: a KPI strip, sections, resolved captions, an appendix and a lint score.
+#:
+#: The number is on the payload rather than inferred from which keys are present,
+#: because inference is how a v1 row with an empty section list comes to be read
+#: as a v2 board with nothing in it.
+SPEC_VERSION_V1 = 1
+SPEC_VERSION_V2 = 2
 
 
 @dataclass(frozen=True)
@@ -373,24 +481,199 @@ class SignalDeskSpec:
 
     def to_payload(self) -> dict[str, Any]:
         return {
+            # Stated rather than left absent. A browser branching on the version
+            # would otherwise have to read "no version" as "version one", which
+            # is true today and is exactly the sort of true-today the next
+            # spelling breaks.
+            "specVersion": SPEC_VERSION_V1,
             "title": self.title,
             "blocks": [block.to_payload() for block in self.blocks],
         }
 
 
 @dataclass(frozen=True)
-class StudyResult:
-    """What ``compute`` hands back: a headline for the model, frames for the eye."""
+class ResolvedValue:
+    """One cell, looked up and formatted at the moment the board was frozen.
 
-    headline: Mapping[str, Any]
-    frames: Mapping[str, Frame]
-    provenance: Provenance
+    Stored resolved rather than as a reference for the same reason ``as_of`` is
+    stored: re-opening a thread renders the board that was written, and a board
+    that re-read its own frames on every open would be a board whose figures
+    could move under a reader who was told they were frozen. It also means the
+    browser never looks a number up — it draws the string it is handed, and the
+    one place that decides how a number reads is ``studies/format.py``.
+
+    ``frame``, ``row`` and ``column`` travel anyway, because a reader who wants
+    to know where a figure came from is owed the cell, and an export that carried
+    only the rendering would be an export of the picture rather than the evidence.
+    """
+
+    text: str
+    raw: Any
+    unit: str | None
+    frame: str
+    row: int
+    column: str
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "text": self.text,
+            "raw": self.raw,
+            "unit": self.unit,
+            "frame": self.frame,
+            "row": self.row,
+            "column": self.column,
+        }
+
+
+@dataclass(frozen=True)
+class KpiCell:
+    """One figure on the strip: what it is called, what it is, and what it means."""
+
+    label: str
+    value: ResolvedValue
+    delta: ResolvedValue | None
+    role: str | None
+    span: int
 
     def __post_init__(self) -> None:
-        if not self.headline:
-            raise ValueError("a Study with no headline tells the model nothing")
-        if not self.frames:
-            raise ValueError("a Study with no frames has nothing to draw")
+        if not self.label.strip():
+            raise ValueError("a KPI with no label is a number nobody can read")
+        if self.role is not None:
+            problem = role_error(self.role)
+            if problem is not None:
+                raise ValueError(f"kpi {self.label!r}: {problem}")
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "label": self.label,
+            "value": self.value.to_payload(),
+            "delta": None if self.delta is None else self.delta.to_payload(),
+            "role": self.role,
+            "span": self.span,
+        }
+
+
+@dataclass(frozen=True)
+class VisualBlock:
+    """One picture on the board, and the record of how it came to be that one.
+
+    ``upgraded_from`` and ``downgraded`` are kept rather than dropped once the
+    decision is made. The first says the server overruled the model's suggestion,
+    which is a thing an operator reading a board later needs to be able to see;
+    the second says no rule matched and the numbers are shown plainly, which is
+    a thing the *reader* is told.
+    """
+
+    widget: str
+    widget_version: int
+    frame: str
+    options: Mapping[str, Any]
+    span: int
+    source: FrameSource
+    upgraded_from: str | None = None
+    downgraded: str | None = None
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "kind": "visual",
+            "widget": self.widget,
+            "widgetVersion": self.widget_version,
+            "frame": self.frame,
+            "options": dict(self.options),
+            "span": self.span,
+            "source": self.source,
+            "upgradedFrom": self.upgraded_from,
+            "downgraded": self.downgraded,
+        }
+
+
+@dataclass(frozen=True)
+class CaptionBlock:
+    """One sentence, its holes, and what went into each hole.
+
+    Both the template and the resolved text travel. The template with its
+    ``{a}`` markers is what lets the browser draw each figure as a mark a reader
+    can hover to see which cell it came from; the resolved text is what an export
+    and a screen reader get, and neither should have to re-run the substitution.
+    """
+
+    template: str
+    text: str
+    refs: Mapping[str, ResolvedValue]
+    span: int
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "kind": "caption",
+            "template": self.template,
+            "text": self.text,
+            "refs": {
+                key: value.to_payload() for key, value in sorted(self.refs.items())
+            },
+            "span": self.span,
+        }
+
+
+BoardBlock = VisualBlock | CaptionBlock
+
+
+@dataclass(frozen=True)
+class BoardSection:
+    """One idea of the board: an optional heading and the blocks under it."""
+
+    heading: str | None
+    blocks: tuple[BoardBlock, ...]
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "heading": self.heading,
+            "blocks": [block.to_payload() for block in self.blocks],
+        }
+
+
+@dataclass(frozen=True)
+class BoardSpec:
+    """A Signal Desk as the compiler produces it: version 2 of the spec.
+
+    Held separately from :class:`SignalDeskSpec` rather than by widening it,
+    because the two are read by different code on both sides of the wire and a
+    single class with half its fields empty is how a v1 row comes to be drawn as
+    a broken v2 board. The version on the payload is what the browser branches
+    on, and every field below is already resolved: nothing here needs a frame
+    lookup to render.
+    """
+
+    title: str
+    archetype: str
+    kpis: tuple[KpiCell, ...]
+    sections: tuple[BoardSection, ...]
+    appendix: VisualBlock | None
+    lint: Mapping[str, Any]
+    auto_composed: bool
+
+    def __post_init__(self) -> None:
+        if not self.title.strip():
+            raise ValueError("a board with no title is a panel nobody can name")
+        if not self.sections:
+            raise ValueError("a board with no sections draws nothing")
+
+    @property
+    def block_count(self) -> int:
+        """How many boxes a skeleton should hold while the numbers are fetched."""
+        total = sum(len(section.blocks) for section in self.sections)
+        return total + (1 if self.appendix is not None else 0)
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "specVersion": SPEC_VERSION_V2,
+            "title": self.title,
+            "archetype": self.archetype,
+            "kpis": [kpi.to_payload() for kpi in self.kpis],
+            "sections": [section.to_payload() for section in self.sections],
+            "appendix": None if self.appendix is None else self.appendix.to_payload(),
+            "lint": dict(self.lint),
+            "autoComposed": self.auto_composed,
+        }
 
 
 @dataclass(frozen=True)
@@ -406,17 +689,151 @@ class StudyContext:
     session: "Session"
     as_of: datetime
     universe: tuple[str, ...]
+    #: Somewhere a plan's steps can put a thing they all need, resolved once.
+    #:
+    #: Two reads of one plan asking the store the same question twice is not only
+    #: wasteful, it can *disagree with itself*: each statement is its own
+    #: snapshot under read-committed, so a quarterly scan or an intraday ingest
+    #: committing between two steps makes one frame describe a store the next
+    #: frame no longer sees. A run is meant to be a single instant — that is what
+    #: ``as_of`` claims — so a fact resolved once belongs here rather than being
+    #: fetched again.
+    #:
+    #: Mutable inside a frozen context on purpose: what is frozen is *which* run
+    #: this is, and a per-run memo does not change that. It lives exactly as long
+    #: as the run, so nothing here can answer a later question.
+    scratch: dict[str, Any] = field(default_factory=dict)
+
+
+#: How a step's frame is filed, in the vocabulary ``frames_buffer`` already
+#: knows. A read is a read whichever road it came down, and a calculation is a
+#: calculation; inventing a third word for "a step of a template" would give the
+#: browser a kind with no meaning and the operator a row that reads as special.
+STEP_KINDS: frozenset[str] = frozenset({"query", "read", "compute"})
+
+
+@dataclass(frozen=True)
+class QueryStep:
+    """One of the store's tables, read through the same reader chat reads it by.
+
+    ``symbols`` and ``arguments`` are callables of the context rather than a
+    literal mapping because a template's window is its parameters — thirty
+    sessions or two hundred and fifty — and a template that spelled them once at
+    import would answer every question with the first one asked.
+    """
+
+    name: str
+    title: str
+    source: str
+    symbols: Callable[["StudyContext"], Sequence[str]]
+    arguments: Callable[["StudyContext"], Mapping[str, Any]]
+    #: What a reader is owed about how this step's numbers were arrived at.
+    #: Declared on the step because neither layer that builds a step's
+    #: provenance can know it: ``read_source`` describes a table and
+    #: ``derived_provenance`` describes a calculation, and "the concentration
+    #: zone is two adjacent bins of twenty" is a fact about *this question*.
+    #: They lead the merged strip, so a cap falls on the engine's own lines
+    #: rather than on these.
+    method_notes: tuple[str, ...] = ()
+    check: Callable[[Frame, "StudyContext"], None] | None = None
+
+    kind: ClassVar[str] = "query"
+
+
+@dataclass(frozen=True)
+class ReadStep:
+    """A read the query layer does not offer, named and owned by one template.
+
+    **The narrow privilege, and why it is on the read axis rather than the
+    calculation one.** Three of the store's answers have no ``query`` source:
+    the exchange's tick grid under a price ladder, the statement concept a
+    filer's own template decides, and a screen across more symbols than a model
+    is ever handed. All three are *facts about the store's shape* — reads — and
+    none of them is arithmetic. So a template may name a reader; it may not name
+    a calculator. Every number a template derives still goes through
+    ``studies/compute`` and its validator, on exactly the terms a model gets.
+
+    Nothing reaches this from a model: the only route to a template is
+    ``run_study(name)``, and the name is a registered one.
+    """
+
+    name: str
+    title: str
+    read: Callable[["StudyContext"], tuple[Frame, Provenance]]
+    #: What a reader is owed about how this step's numbers were arrived at.
+    #: Declared on the step because neither layer that builds a step's
+    #: provenance can know it: ``read_source`` describes a table and
+    #: ``derived_provenance`` describes a calculation, and "the concentration
+    #: zone is two adjacent bins of twenty" is a fact about *this question*.
+    #: They lead the merged strip, so a cap falls on the engine's own lines
+    #: rather than on these.
+    method_notes: tuple[str, ...] = ()
+    check: Callable[[Frame, "StudyContext"], None] | None = None
+
+    kind: ClassVar[str] = "read"
+
+
+@dataclass(frozen=True)
+class ComputeStep:
+    """Arithmetic over earlier steps, in the sandbox, under the same validator.
+
+    ``inputs`` names steps rather than frames, and the runner binds them to
+    ``f0``…``f5`` in the order written — the same names a model writes against.
+    A template has no privilege here on purpose: a literal it types is refused
+    at import by the same validator, exactly as a model's would be at call time.
+
+    ``constants`` is a callable of the context because a template's assumptions
+    *are* its parameters — the growth floor a screen was asked for, whether the
+    question meant shares or money. A literal mapping would bake the first
+    question ever asked into every answer after it.
+    """
+
+    name: str
+    title: str
+    code: str
+    inputs: tuple[str, ...] = ()
+    constants: Callable[["StudyContext"], Mapping[str, Any]] = lambda _context: {}
+    output_kind: FrameKind | None = None
+    #: How wide and how tall this step's answer may be, where the ceilings a
+    #: model's calculation answers to are too narrow for an honest picture.
+    #: ``None`` takes the sandbox's own default.
+    max_rows: int | None = None
+    max_columns: int | None = None
+    #: What a reader is owed about how this step's numbers were arrived at.
+    #: Declared on the step because neither layer that builds a step's
+    #: provenance can know it: ``read_source`` describes a table and
+    #: ``derived_provenance`` describes a calculation, and "the concentration
+    #: zone is two adjacent bins of twenty" is a fact about *this question*.
+    #: They lead the merged strip, so a cap falls on the engine's own lines
+    #: rather than on these.
+    method_notes: tuple[str, ...] = ()
+    check: Callable[[Frame, "StudyContext"], None] | None = None
+
+    kind: ClassVar[str] = "compute"
+
+
+Step = QueryStep | ReadStep | ComputeStep
 
 
 @dataclass(frozen=True)
 class StudyDefinition:
-    """The declaration. No defaults, so an omission fails at import.
+    """The declaration. No defaults where an omission should fail at import.
 
-    ``frames`` and ``widgets`` are declared rather than discovered because the
-    alternative is discovering them at the only moment that matters — a real
-    question, with a person waiting. Declared, the runner can check that what
-    ``compute`` produced is what was promised, and the import-time check can
-    refuse a widget the browser has no drawing for.
+    A Study is a *template*: a plan of steps and a board written against their
+    names. It computes nothing of its own and draws nothing of its own — the
+    plan runs through the same reader and the same sandbox a model's question
+    does, and the board compiles through the same composer. What is left that is
+    genuinely the Study's is the two things a model cannot supply: the sequence
+    that answers this question, and the shape that shows it.
+
+    ``board`` is a literal mapping rather than a callable, and that is what makes
+    the registry able to check at import that every frame the board names is a
+    step the plan produces. Its ``title`` may carry ``{param}`` placeholders,
+    which is the one thing about a board that genuinely varies per run.
+
+    ``headline`` is a callable and is handed the frames and nothing else, so
+    every figure in the three hundred tokens the model reads came out of a frame
+    by construction rather than by discipline.
     """
 
     name: str
@@ -425,10 +842,15 @@ class StudyDefinition:
     display_name: str
     params_model: type[BaseModel]
     requires: tuple[str, ...]
-    frames: tuple[str, ...]
-    widgets: tuple[tuple[str, int], ...]
-    compute: Callable[[StudyContext], StudyResult]
-    view: Callable[[StudyResult], SignalDeskSpec]
+    archetype: str
+    plan: tuple[Step, ...]
+    board: Mapping[str, Any]
+    headline: Callable[[BaseModel, Mapping[str, Mapping[str, Any]]], Mapping[str, Any]]
+    #: Raised before a step runs, for the refusals that are about the question
+    #: rather than about the data — a symbol outside the Universe, above all.
+    #: Reading the store to say "this is not a symbol I cover" would be a read
+    #: whose only outcome is a refusal.
+    precheck: Callable[["StudyContext"], None] | None = None
 
     @property
     def params_schema(self) -> Mapping[str, Any]:
@@ -438,6 +860,10 @@ class StudyDefinition:
         contracts that agree until someone widens one of them.
         """
         return self.params_model.model_json_schema()
+
+    @property
+    def step_names(self) -> tuple[str, ...]:
+        return tuple(step.name for step in self.plan)
 
 
 @dataclass(frozen=True)
@@ -455,11 +881,27 @@ class StoredArtifact:
     study_version: int
     headline: Mapping[str, Any]
     provenance: Provenance
-    signal_desk_spec: SignalDeskSpec
+    signal_desk_spec: BoardSpec
+    #: Each step's frame, addressable as ``"<artifact id>#<step>"``. Handed to
+    #: the model so a template's own numbers can be re-mixed into a board it
+    #: composes itself, which is the whole reason a step is an artifact rather
+    #: than an intermediate. Not stored on the composition row: the ids are
+    #: fresh every run, and a row carrying them could never be regenerated
+    #: byte-for-byte.
+    steps: Mapping[str, str] = field(default_factory=dict)
 
 
 __all__ = [
+    "BoardBlock",
+    "BoardSection",
+    "BoardSpec",
     "CATEGORY_ROLES",
+    "CaptionBlock",
+    "KpiCell",
+    "ResolvedValue",
+    "SPEC_VERSION_V1",
+    "SPEC_VERSION_V2",
+    "VisualBlock",
     "CATEGORY_SLOTS",
     "KNOWN_REQUIREMENTS",
     "METHOD_NOTE_LIMIT",
@@ -468,14 +910,20 @@ __all__ = [
     "ROLES",
     "SignalDeskBlock",
     "SignalDeskSpec",
+    "FRAME_SOURCES",
     "Frame",
     "FrameKind",
+    "FrameSource",
     "Health",
     "Provenance",
+    "ComputeStep",
+    "QueryStep",
+    "ReadStep",
+    "STEP_KINDS",
+    "Step",
     "StoredArtifact",
     "StudyContext",
     "StudyDefinition",
     "StudyRefused",
-    "StudyResult",
     "role_error",
 ]

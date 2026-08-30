@@ -113,32 +113,55 @@ def load_window(session) -> None:
 
 
 def payload(session) -> dict:
-    """The artifact as the browser fetches it: spec, frames, provenance."""
-    from src.studies.contracts import StudyContext
-    from src.studies.intraday_liquidity import (
-        NAME,
-        VERSION,
-        LiquidityParams,
-        compute,
-        view,
-    )
+    """The artifact as the browser fetches it: the board, its frames, provenance.
+
+    The whole template runs — reader, sandbox, composer — so what the browser
+    develops against is what a live question produces rather than a hand-built
+    approximation of it. ``as_of`` is passed rather than taken from the clock,
+    which is what keeps regenerating this file a no-op when nothing changed.
+    """
+    from sqlalchemy import select
+
+    from src.agent.tools.query import read_source
+    from src.alpha.models import AgentArtifact
+    from src.studies import runner
+    from src.studies.templates.intraday_liquidity import NAME, VERSION
+    from src.studies.templates.params import LiquidityParams
 
     params = LiquidityParams.model_validate({"symbol": SYMBOL, "sessions": 30})
-    result = compute(
-        StudyContext(
-            params=params, session=session, as_of=AS_OF, universe=(SYMBOL,)
+    universe = _AUniverseOf((SYMBOL,))
+    original = runner.build_universe
+    runner.build_universe = lambda _session: universe
+    try:
+        artifact = runner.run(
+            NAME,
+            params.model_dump(mode="json"),
+            session=session,
+            read=read_source,
+            as_of=AS_OF,
         )
-    )
-    spec = view(result)
+    finally:
+        runner.build_universe = original
+
+    row = session.execute(
+        select(AgentArtifact).where(AgentArtifact.id == artifact.id)
+    ).scalar_one()
     return {
         "studyName": NAME,
         "studyVersion": VERSION,
         "params": params.model_dump(mode="json"),
-        "headline": dict(result.headline),
-        "signal_deskSpec": spec.to_payload(),
-        "frames": {key: frame.to_payload() for key, frame in result.frames.items()},
-        "provenance": result.provenance.to_payload(),
+        "headline": dict(artifact.headline),
+        "signal_deskSpec": dict(row.signal_desk_spec),
+        "frames": {key: dict(value) for key, value in (row.frames or {}).items()},
+        "provenance": dict(row.provenance or {}),
     }
+
+
+class _AUniverseOf:
+    """The declared Universe, stated here rather than read from the environment."""
+
+    def __init__(self, symbols: tuple[str, ...]) -> None:
+        self.symbols = symbols
 
 
 def main() -> None:

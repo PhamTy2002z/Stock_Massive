@@ -12,11 +12,13 @@ silent at runtime:
   person, in Vietnamese;
 * an input nothing fetches — a refusal on a live question that reads as a
   statement about the company rather than about the store;
-* a ``view`` that names a frame ``compute`` never produces — an exception on a
-  live question rather than at the moment the mismatch was written.
+* a board that names a frame the plan never produces, or a calculation whose
+  inputs name a step that runs after it — an exception on a live question rather
+  than at the moment the mismatch was written.
 
-The first three are refused here. The last cannot be known without data, so the
-runner checks it on every run (``runner.py``) and a test pins it per Study.
+All four are refused here. The last became checkable when the board stopped
+being a function of the numbers and became a literal written against step names:
+what a template draws is now knowable without running it.
 """
 
 from __future__ import annotations
@@ -25,8 +27,25 @@ from collections.abc import Mapping
 
 from pydantic import BaseModel
 
-from . import widgets
-from .contracts import KNOWN_REQUIREMENTS, StudyDefinition
+from . import grammar, widgets
+from .compute import validator
+from .contracts import (
+    KNOWN_REQUIREMENTS,
+    ComputeStep,
+    QueryStep,
+    StudyDefinition,
+)
+
+#: How many frames the sandbox binds for one calculation, held equal to the
+#: ceiling the model-facing tool declares. A template writing a seventh input
+#: would be a template whose step never ran.
+MAX_COMPUTE_INPUTS = 6
+
+#: The sources ``query`` offers, named here rather than imported: the readers
+#: live in the tool layer, and this package does not import that one.
+QUERY_SOURCES: frozenset[str] = frozenset(
+    {"bar_daily", "intraday_15m", "statement", "ratio", "reference", "corporate_actions"}
+)
 
 REGISTRY: dict[str, StudyDefinition] = {}
 
@@ -71,23 +90,95 @@ def _check(definition: StudyDefinition) -> None:
             f"study {definition.name!r} requires inputs nothing knows how to "
             "fetch: " + ", ".join(unfetchable)
         )
-    if not definition.frames:
+    if definition.archetype not in grammar.ARCHETYPES:
         raise ImportError(
-            f"study {definition.name!r} declares no frames, so there is nothing "
+            f"study {definition.name!r} declares archetype "
+            f"{definition.archetype!r}; the five are "
+            + ", ".join(sorted(grammar.ARCHETYPES))
+        )
+    _check_plan(definition)
+    _check_board(definition)
+
+
+def _check_plan(definition: StudyDefinition) -> None:
+    """Every step named once, and every calculation fed by a step before it."""
+    if not definition.plan:
+        raise ImportError(
+            f"study {definition.name!r} declares no steps, so there is nothing "
             "for a Signal Desk to draw"
         )
-    if not definition.widgets:
-        raise ImportError(f"study {definition.name!r} declares no widgets")
-    unknown = [
-        f"{name} v{version}"
-        for name, version in definition.widgets
-        if not widgets.known(name, version)
-    ]
+    seen: set[str] = set()
+    for step in definition.plan:
+        if not step.name:
+            raise ImportError(f"study {definition.name!r} has a step with no name")
+        if step.name in seen:
+            raise ImportError(
+                f"study {definition.name!r} names the step {step.name!r} twice; "
+                "the second frame would hide the first from the board"
+            )
+        if isinstance(step, ComputeStep):
+            ahead = [name for name in step.inputs if name not in seen]
+            if ahead:
+                raise ImportError(
+                    f"study {definition.name!r} feeds step {step.name!r} from "
+                    + ", ".join(ahead)
+                    + ", which it has not produced yet"
+                )
+            if len(step.inputs) > MAX_COMPUTE_INPUTS:
+                raise ImportError(
+                    f"study {definition.name!r} feeds step {step.name!r} from "
+                    f"{len(step.inputs)} frames, and the sandbox binds "
+                    f"{MAX_COMPUTE_INPUTS}"
+                )
+        if isinstance(step, ComputeStep):
+            broken = validator.validate(step.code)
+            if broken:
+                # The point of the whole plane, checked where a template is
+                # written rather than where one runs. A template has no
+                # privilege over a model here: a figure it types is refused at
+                # import, so "no market number is typed" is a property of the
+                # build rather than of anyone's care.
+                raise ImportError(
+                    f"study {definition.name!r} writes a calculation the "
+                    f"validator refuses in step {step.name!r}: "
+                    + "; ".join(
+                        f"{item.code} line {item.line}: {item.detail}"
+                        for item in broken
+                    )
+                )
+        if isinstance(step, QueryStep) and step.source not in QUERY_SOURCES:
+            raise ImportError(
+                f"study {definition.name!r} reads {step.source!r}, which is not "
+                "one of the store's sources: " + ", ".join(sorted(QUERY_SOURCES))
+            )
+        seen.add(step.name)
+
+
+def _check_board(definition: StudyDefinition) -> None:
+    """The board parses, draws only steps this plan runs, and names real widgets."""
+    try:
+        board = grammar.parse(definition.board)
+    except grammar.BoardMalformed as malformed:
+        raise ImportError(
+            f"study {definition.name!r} declares a board that is not one: "
+            f"{malformed}"
+        ) from malformed
+
+    steps = set(definition.step_names)
+    unknown = sorted(set(grammar.frame_references(board)) - steps)
     if unknown:
         raise ImportError(
-            f"study {definition.name!r} draws with widgets no viewer has: "
+            f"study {definition.name!r} draws frames its plan never produces: "
             + ", ".join(unknown)
         )
+    for section in board.sections:
+        for block in section.blocks:
+            hint = getattr(block, "widget", None)
+            if hint is not None and not any(name == hint for name, _version in widgets.CATALOG):
+                raise ImportError(
+                    f"study {definition.name!r} suggests widget {hint!r}, which "
+                    "no viewer has"
+                )
 
 
 def study(name: str) -> StudyDefinition:
@@ -115,6 +206,11 @@ def catalog() -> tuple[Mapping[str, object], ...]:
             "question": definition.question,
             "displayName": definition.display_name,
             "params": definition.params_schema,
+            # The shape of the answer, not of the data. A model choosing
+            # between a template and composing its own board is choosing
+            # between two answers to one question, and the archetype is the
+            # only word that says what the template's answer looks like.
+            "archetype": definition.archetype,
             # What this Study reads before it computes. In the catalog because
             # the answer to "can I ask this now" is a fact about the inputs, and
             # a model that cannot see them would have to discover the answer by

@@ -10,6 +10,10 @@ absent from the catalog no matter how correctly it is written.
 """
 
 from .contracts import (
+    BoardSpec,
+    ComputeStep,
+    QueryStep,
+    ReadStep,
     SignalDeskBlock,
     SignalDeskSpec,
     Frame,
@@ -18,7 +22,6 @@ from .contracts import (
     StudyContext,
     StudyDefinition,
     StudyRefused,
-    StudyResult,
 )
 from .registry import REGISTRY, catalog, register, study
 from .runner import StudyParamsInvalid, run
@@ -26,14 +29,13 @@ from .runner import StudyParamsInvalid, run
 # Registration is an import. Keep this last: the modules below reach back into
 # the registry above, and a Study nobody imports is absent from the catalog
 # however correctly it is written.
-from . import (  # noqa: F401  (imported for their side effect)
-    earnings_dislocation,
-    entry_condition_review,
-    intraday_liquidity,
-    volume_at_price,
-)
+from . import templates  # noqa: F401  (imported for its side effect)
 
 __all__ = [
+    "BoardSpec",
+    "ComputeStep",
+    "QueryStep",
+    "ReadStep",
     "SignalDeskBlock",
     "SignalDeskSpec",
     "Frame",
@@ -44,7 +46,6 @@ __all__ = [
     "StudyDefinition",
     "StudyParamsInvalid",
     "StudyRefused",
-    "StudyResult",
     "catalog",
     "register",
     "run",

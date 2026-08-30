@@ -1,6 +1,6 @@
 {
   "studyName": "intraday_liquidity_profile",
-  "studyVersion": 1,
+  "studyVersion": 2,
   "params": {
     "symbol": "STB",
     "sessions": 30,
@@ -23,219 +23,282 @@
       },
       {
         "window": "09:15",
-        "share": 0.0537,
+        "share": 0.0538,
         "avgAmount": 100000.0,
         "occurrence": "0/30"
       },
       {
         "window": "09:30",
-        "share": 0.0537,
+        "share": 0.0538,
         "avgAmount": 100000.0,
         "occurrence": "0/30"
       }
     ],
     "phaseSummary": {
       "ato": 0.0,
-      "am": 0.4838,
-      "pm": 0.4625,
-      "atc": 0.0537
+      "am": 0.4842,
+      "pm": 0.4628,
+      "atc": 0.0538
     }
   },
   "signal_deskSpec": {
-    "title": "Thanh khoản trong phiên — STB",
-    "blocks": [
+    "kpis": [
       {
-        "widget": "stat_tiles",
-        "widgetVersion": 2,
-        "frame": "tiles",
-        "options": {
-          "label": "label",
-          "value": "value",
-          "unit": "unit"
+        "role": "focus",
+        "span": 3,
+        "delta": null,
+        "label": "Khung giờ đỉnh",
+        "value": {
+          "raw": "14:15",
+          "row": 0,
+          "text": "14:15",
+          "unit": "shares",
+          "frame": "f1",
+          "column": "bucket"
         }
       },
       {
-        "widget": "bar_series",
-        "widgetVersion": 2,
-        "frame": "profile",
-        "options": {
-          "x": "bucket",
-          "y": "share",
-          "secondary": "avg_amount",
-          "yFormat": "percent"
+        "role": null,
+        "span": 3,
+        "delta": null,
+        "label": "Tỷ trọng thanh khoản",
+        "value": {
+          "raw": 19.38,
+          "row": 0,
+          "text": "19,4%",
+          "unit": "%",
+          "frame": "f2",
+          "column": "share_pct"
         }
       },
       {
-        "widget": "session_heatmap",
-        "widgetVersion": 1,
-        "frame": "heatmap",
-        "options": {
-          "rowKey": "session",
-          "valueFormat": "percent"
+        "role": null,
+        "span": 3,
+        "delta": null,
+        "label": "Trung bình khung giờ đỉnh",
+        "value": {
+          "raw": 380000.0,
+          "row": 0,
+          "text": "380.000",
+          "unit": "shares",
+          "frame": "f1",
+          "column": "avg_amount"
         }
       },
       {
-        "widget": "ranked_bars",
-        "widgetVersion": 2,
-        "frame": "ranking",
-        "options": {
-          "label": "bucket",
-          "value": "share",
-          "valueFormat": "percent"
+        "role": null,
+        "span": 3,
+        "delta": null,
+        "label": "Số phiên lặp lại",
+        "value": {
+          "raw": 21,
+          "row": 0,
+          "text": "21",
+          "unit": "shares",
+          "frame": "f1",
+          "column": "spike_frequency"
         }
       }
-    ]
+    ],
+    "lint": {
+      "score": 1.0,
+      "kpiCount": 4,
+      "violations": [],
+      "visualRatio": 0.75,
+      "widgetKinds": 3,
+      "narrativeChars": 98
+    },
+    "title": "Thanh khoản trong phiên — STB",
+    "appendix": null,
+    "sections": [
+      {
+        "blocks": [
+          {
+            "kind": "visual",
+            "span": 12,
+            "frame": "f0",
+            "source": "derived",
+            "widget": "bar_series",
+            "options": {
+              "x": "bucket",
+              "y": "share"
+            },
+            "downgraded": null,
+            "upgradedFrom": null,
+            "widgetVersion": 2
+          },
+          {
+            "kind": "caption",
+            "refs": {
+              "a": {
+                "raw": "14:15",
+                "row": 0,
+                "text": "14:15",
+                "unit": "shares",
+                "frame": "f1",
+                "column": "bucket"
+              },
+              "b": {
+                "raw": 19.38,
+                "row": 0,
+                "text": "19,4%",
+                "unit": "%",
+                "frame": "f2",
+                "column": "share_pct"
+              },
+              "c": {
+                "raw": 21,
+                "row": 0,
+                "text": "21",
+                "unit": "shares",
+                "frame": "f1",
+                "column": "spike_frequency"
+              }
+            },
+            "span": 12,
+            "text": "Khung giờ 14:15 chiếm 19,4% thanh khoản trung bình một phiên và nằm trong nhóm lớn nhất phiên 21 lần.",
+            "template": "Khung giờ {a} chiếm {b} thanh khoản trung bình một phiên và nằm trong nhóm lớn nhất phiên {c} lần."
+          }
+        ],
+        "heading": "Tổng quan"
+      },
+      {
+        "blocks": [
+          {
+            "kind": "visual",
+            "span": 12,
+            "frame": "f3",
+            "source": "derived",
+            "widget": "session_heatmap",
+            "options": {
+              "rowKey": "session"
+            },
+            "downgraded": null,
+            "upgradedFrom": null,
+            "widgetVersion": 1
+          },
+          {
+            "kind": "visual",
+            "span": 12,
+            "frame": "f1",
+            "source": "derived",
+            "widget": "ranked_bars",
+            "options": {
+              "label": "bucket",
+              "value": "share"
+            },
+            "downgraded": null,
+            "upgradedFrom": null,
+            "widgetVersion": 2
+          }
+        ],
+        "heading": "Diễn biến từng phiên"
+      }
+    ],
+    "archetype": "profile",
+    "specVersion": 2,
+    "autoComposed": false
   },
   "frames": {
-    "tiles": {
-      "kind": "table",
-      "columns": [
-        "label",
-        "value",
-        "unit"
-      ],
-      "rows": [
-        [
-          "Khung giờ đỉnh",
-          "14:15",
-          null
-        ],
-        [
-          "Tỷ trọng thanh khoản",
-          19.38,
-          "%"
-        ],
-        [
-          "Khối lượng trung bình",
-          380000.0,
-          "shares"
-        ],
-        [
-          "Số phiên lặp lại",
-          "21/30",
-          "phiên"
-        ]
-      ],
-      "unit": null,
-      "labels": {
-        "label": "Chỉ số",
-        "value": "Giá trị",
-        "unit": "Đơn vị"
-      },
-      "columnRoles": {},
-      "pointRoles": [
-        "focus",
-        null,
-        null,
-        null
-      ]
-    },
-    "profile": {
+    "f0": {
       "kind": "series",
-      "columns": [
-        "bucket",
-        "avg_amount",
-        "median_amount",
-        "share",
-        "spike_frequency"
-      ],
       "rows": [
         [
           "09:15",
           100000.0,
           100000.0,
-          0.0537,
+          0.0538,
           0
         ],
         [
           "09:30",
           100000.0,
           100000.0,
-          0.0537,
+          0.0538,
           0
         ],
         [
           "09:45",
           100000.0,
           100000.0,
-          0.0537,
+          0.0538,
           0
         ],
         [
           "10:00",
           100000.0,
           100000.0,
-          0.0537,
+          0.0538,
           0
         ],
         [
           "10:15",
           100000.0,
           100000.0,
-          0.0537,
+          0.0538,
           0
         ],
         [
           "10:30",
           100000.0,
           100000.0,
-          0.0537,
+          0.0538,
           0
         ],
         [
           "10:45",
           100000.0,
           100000.0,
-          0.0537,
+          0.0538,
           0
         ],
         [
           "11:00",
           100000.0,
           100000.0,
-          0.0537,
+          0.0538,
           0
         ],
         [
           "11:15",
           100000.0,
           100000.0,
-          0.0537,
+          0.0538,
           0
         ],
         [
           "13:00",
           100000.0,
           100000.0,
-          0.0537,
+          0.0538,
           0
         ],
         [
           "13:15",
           100000.0,
           100000.0,
-          0.0537,
+          0.0538,
           0
         ],
         [
           "13:30",
           100000.0,
           100000.0,
-          0.0537,
+          0.0538,
           0
         ],
         [
           "13:45",
           100000.0,
           100000.0,
-          0.0537,
+          0.0538,
           0
         ],
         [
           "14:00",
           100000.0,
           100000.0,
-          0.0537,
+          0.0538,
           0
         ],
         [
@@ -249,19 +312,26 @@
           "14:45",
           100000.0,
           100000.0,
-          0.0537,
+          0.0538,
           0
         ]
       ],
       "unit": "shares",
       "labels": {
+        "share": "Tỷ trọng trong phiên",
         "bucket": "Khung giờ",
         "avg_amount": "Khối lượng trung bình",
         "median_amount": "Khối lượng trung vị",
-        "share": "Tỷ trọng trong phiên",
         "spike_frequency": "Số phiên nằm trong top 2"
       },
-      "columnRoles": {},
+      "columns": [
+        "bucket",
+        "avg_amount",
+        "median_amount",
+        "share",
+        "spike_frequency"
+      ],
+      "cellRoles": [],
       "pointRoles": [
         null,
         null,
@@ -279,30 +349,244 @@
         null,
         "focus",
         null
-      ]
-    },
-    "heatmap": {
-      "kind": "matrix",
-      "columns": [
-        "session",
-        "09:00",
-        "09:15",
-        "09:30",
-        "09:45",
-        "10:00",
-        "10:15",
-        "10:30",
-        "10:45",
-        "11:00",
-        "11:15",
-        "13:00",
-        "13:15",
-        "13:30",
-        "13:45",
-        "14:00",
-        "14:15",
-        "14:45"
       ],
+      "columnRoles": {}
+    },
+    "f1": {
+      "kind": "table",
+      "rows": [
+        [
+          1,
+          "14:15",
+          0.1938,
+          380000.0,
+          21
+        ],
+        [
+          2,
+          "09:15",
+          0.0538,
+          100000.0,
+          0
+        ],
+        [
+          3,
+          "09:30",
+          0.0538,
+          100000.0,
+          0
+        ],
+        [
+          4,
+          "09:45",
+          0.0538,
+          100000.0,
+          0
+        ],
+        [
+          5,
+          "10:00",
+          0.0538,
+          100000.0,
+          0
+        ],
+        [
+          6,
+          "10:15",
+          0.0538,
+          100000.0,
+          0
+        ],
+        [
+          7,
+          "10:30",
+          0.0538,
+          100000.0,
+          0
+        ],
+        [
+          8,
+          "10:45",
+          0.0538,
+          100000.0,
+          0
+        ],
+        [
+          9,
+          "11:00",
+          0.0538,
+          100000.0,
+          0
+        ],
+        [
+          10,
+          "11:15",
+          0.0538,
+          100000.0,
+          0
+        ],
+        [
+          11,
+          "13:00",
+          0.0538,
+          100000.0,
+          0
+        ],
+        [
+          12,
+          "13:15",
+          0.0538,
+          100000.0,
+          0
+        ],
+        [
+          13,
+          "13:30",
+          0.0538,
+          100000.0,
+          0
+        ],
+        [
+          14,
+          "13:45",
+          0.0538,
+          100000.0,
+          0
+        ],
+        [
+          15,
+          "14:00",
+          0.0538,
+          100000.0,
+          0
+        ],
+        [
+          16,
+          "14:45",
+          0.0538,
+          100000.0,
+          0
+        ]
+      ],
+      "unit": "shares",
+      "labels": {
+        "rank": "Hạng",
+        "share": "Tỷ trọng trong phiên",
+        "bucket": "Khung giờ",
+        "avg_amount": "Khối lượng trung bình",
+        "spike_frequency": "Số phiên nằm trong top 2"
+      },
+      "columns": [
+        "rank",
+        "bucket",
+        "share",
+        "avg_amount",
+        "spike_frequency"
+      ],
+      "cellRoles": [],
+      "pointRoles": [
+        "focus",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "columnRoles": {}
+    },
+    "f2": {
+      "kind": "table",
+      "rows": [
+        [
+          "14:15",
+          19.38
+        ],
+        [
+          "09:15",
+          5.38
+        ],
+        [
+          "09:30",
+          5.38
+        ],
+        [
+          "09:45",
+          5.38
+        ],
+        [
+          "10:00",
+          5.38
+        ],
+        [
+          "10:15",
+          5.38
+        ],
+        [
+          "10:30",
+          5.38
+        ],
+        [
+          "10:45",
+          5.38
+        ],
+        [
+          "11:00",
+          5.38
+        ],
+        [
+          "11:15",
+          5.38
+        ],
+        [
+          "13:00",
+          5.38
+        ],
+        [
+          "13:15",
+          5.38
+        ],
+        [
+          "13:30",
+          5.38
+        ],
+        [
+          "13:45",
+          5.38
+        ],
+        [
+          "14:00",
+          5.38
+        ],
+        [
+          "14:45",
+          5.38
+        ]
+      ],
+      "unit": "%",
+      "labels": {
+        "bucket": "Khung giờ",
+        "share_pct": "Tỷ trọng trong phiên"
+      },
+      "columns": [
+        "bucket",
+        "share_pct"
+      ],
+      "cellRoles": [],
+      "pointRoles": [],
+      "columnRoles": {}
+    },
+    "f3": {
+      "kind": "matrix",
       "rows": [
         [
           "2026-07-23",
@@ -907,7 +1191,6 @@
       ],
       "unit": "share",
       "labels": {
-        "session": "Phiên",
         "09:00": "09:00",
         "09:15": "09:15",
         "09:30": "09:30",
@@ -924,172 +1207,47 @@
         "13:45": "13:45",
         "14:00": "14:00",
         "14:15": "14:15",
-        "14:45": "14:45"
+        "14:45": "14:45",
+        "session": "Phiên"
       },
-      "columnRoles": {},
-      "pointRoles": []
-    },
-    "ranking": {
-      "kind": "table",
       "columns": [
-        "rank",
-        "bucket",
-        "share",
-        "avg_amount",
-        "spike_frequency"
+        "session",
+        "09:00",
+        "09:15",
+        "09:30",
+        "09:45",
+        "10:00",
+        "10:15",
+        "10:30",
+        "10:45",
+        "11:00",
+        "11:15",
+        "13:00",
+        "13:15",
+        "13:30",
+        "13:45",
+        "14:00",
+        "14:15",
+        "14:45"
       ],
-      "rows": [
-        [
-          1,
-          "14:15",
-          0.1938,
-          380000.0,
-          21
-        ],
-        [
-          2,
-          "09:15",
-          0.0537,
-          100000.0,
-          0
-        ],
-        [
-          3,
-          "09:30",
-          0.0537,
-          100000.0,
-          0
-        ],
-        [
-          4,
-          "09:45",
-          0.0537,
-          100000.0,
-          0
-        ],
-        [
-          5,
-          "10:00",
-          0.0537,
-          100000.0,
-          0
-        ],
-        [
-          6,
-          "10:15",
-          0.0537,
-          100000.0,
-          0
-        ],
-        [
-          7,
-          "10:30",
-          0.0537,
-          100000.0,
-          0
-        ],
-        [
-          8,
-          "10:45",
-          0.0537,
-          100000.0,
-          0
-        ],
-        [
-          9,
-          "11:00",
-          0.0537,
-          100000.0,
-          0
-        ],
-        [
-          10,
-          "11:15",
-          0.0537,
-          100000.0,
-          0
-        ],
-        [
-          11,
-          "13:00",
-          0.0537,
-          100000.0,
-          0
-        ],
-        [
-          12,
-          "13:15",
-          0.0537,
-          100000.0,
-          0
-        ],
-        [
-          13,
-          "13:30",
-          0.0537,
-          100000.0,
-          0
-        ],
-        [
-          14,
-          "13:45",
-          0.0537,
-          100000.0,
-          0
-        ],
-        [
-          15,
-          "14:00",
-          0.0537,
-          100000.0,
-          0
-        ],
-        [
-          16,
-          "14:45",
-          0.0537,
-          100000.0,
-          0
-        ]
-      ],
-      "unit": "shares",
-      "labels": {
-        "rank": "Hạng",
-        "bucket": "Khung giờ",
-        "share": "Tỷ trọng trong phiên",
-        "avg_amount": "Khối lượng trung bình",
-        "spike_frequency": "Số phiên nằm trong top 2"
-      },
-      "columnRoles": {},
-      "pointRoles": [
-        "focus",
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null
-      ]
+      "cellRoles": [],
+      "pointRoles": [],
+      "columnRoles": {}
     }
   },
   "provenance": {
-    "source": "vnstock",
     "asOf": "2026-08-21T16:00:00+07:00",
-    "sessionsUsed": 30,
     "health": "normal",
     "reason": null,
+    "source": "store",
     "methodNotes": [
       "Một khung giờ được tính là đỉnh của phiên khi nằm trong 2 khung giao dịch lớn nhất phiên đó.",
-      "Tỷ trọng của mỗi khung giờ tính trên tổng của chính phiên đó, nên phiên sôi động và phiên trầm so được với nhau."
-    ]
+      "Tỷ trọng của mỗi khung giờ tính trên tổng của chính phiên đó, nên phiên sôi động và phiên trầm so được với nhau.",
+      "Phép tính dùng 2 giả định đã khai báo",
+      "Số liệu tính lại, phép tính mã edb7eb1db5a2",
+      "Số liệu tính lại, phép tính mã 81710b7738c5",
+      "Số liệu tính lại, phép tính mã a82012c7b0db"
+    ],
+    "sessionsUsed": 30
   }
 }

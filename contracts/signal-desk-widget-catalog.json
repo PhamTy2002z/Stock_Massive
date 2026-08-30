@@ -21,6 +21,32 @@
       "purpose": "Như v1, thêm màu cột theo vai trò từng dòng khai trong frame"
     },
     {
+      "name": "bullet",
+      "version": 1,
+      "frameKinds": [
+        "table"
+      ],
+      "purpose": "Giá trị so với một mốc tham chiếu, mỗi dòng một thanh"
+    },
+    {
+      "name": "caption",
+      "version": 1,
+      "frameKinds": [
+        "series",
+        "matrix",
+        "table"
+      ],
+      "purpose": "Một câu có chỗ trống, mỗi chỗ là một ô đã tra sẵn"
+    },
+    {
+      "name": "comparison_table",
+      "version": 1,
+      "frameKinds": [
+        "table"
+      ],
+      "purpose": "Bảng đối chiếu: hàng là mã, cột là chỉ tiêu, ô thắng thua tô màu"
+    },
+    {
       "name": "condition_checklist",
       "version": 1,
       "frameKinds": [
@@ -37,6 +63,31 @@
         "table"
       ],
       "purpose": "Bảng số thuần — cũng là fallback khi viewer không biết widget"
+    },
+    {
+      "name": "donut",
+      "version": 1,
+      "frameKinds": [
+        "table"
+      ],
+      "purpose": "Phần của một tổng, tối đa năm phần"
+    },
+    {
+      "name": "grouped_bar",
+      "version": 1,
+      "frameKinds": [
+        "series",
+        "table"
+      ],
+      "purpose": "Cột theo nhóm: mỗi thực thể một chùm, mỗi chỉ tiêu một cột"
+    },
+    {
+      "name": "kpi_strip",
+      "version": 1,
+      "frameKinds": [
+        "table"
+      ],
+      "purpose": "Dải ô dẫn dắt trên đầu bảng, mỗi ô một con số đã tra sẵn"
     },
     {
       "name": "line_series",
@@ -117,6 +168,23 @@
         "table"
       ],
       "purpose": "Như v1, thêm màu ô theo vai trò từng dòng khai trong frame"
+    },
+    {
+      "name": "text_card",
+      "version": 1,
+      "frameKinds": [
+        "table"
+      ],
+      "purpose": "Vài dòng chữ lấy thẳng từ frame, không có số nào tự viết"
+    },
+    {
+      "name": "waterfall",
+      "version": 1,
+      "frameKinds": [
+        "table",
+        "series"
+      ],
+      "purpose": "Cộng dồn từng bước từ đầu kỳ tới cuối kỳ"
     }
   ]
 }

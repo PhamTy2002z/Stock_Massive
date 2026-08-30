@@ -1,9 +1,17 @@
-"""The study, against a window whose answer is known before it runs.
+"""The template, against a window whose answer is known before it runs.
 
 The fixture builds thirty synthetic sessions with a spike planted at ``14:15`` in
 exactly twenty-one of them. Everything asserted below is a fact about that
 construction, so a change in the arithmetic shows up as a wrong answer to a
 question with a right one — not as a number that merely looks plausible.
+
+**Asserted through the engine rather than against a function.** The Study is a
+plan now: its arithmetic lives in the sandbox, and there is no ``compute`` to
+call. So every test here runs the plan and reads the frames back off the rows it
+wrote, which is also the honest subject — what a reader sees comes out of those
+rows and out of nothing else. The three invariants that used to be checked
+against ``_bucket_statistics`` directly are checked against planted windows built
+to expose them.
 """
 
 from __future__ import annotations
@@ -14,15 +22,17 @@ import pytest
 from sqlalchemy import delete
 
 from src.core.database import Base, get_sync_db, sync_engine
-from src.stocks.intraday import session_window
+from src.stocks.intraday import ingest, session_window
 from src.stocks.models import BarIntraday15m
 from src.stocks.providers.normalize import VN_TZ
 from src.stocks.signals.issues import SignalIssue
-from src.studies import registry, runner
+from src.studies import registry
 from src.studies.contracts import StudyRefused
-from src.studies.intraday_liquidity import MIN_SESSIONS, NAME
+from src.studies.templates.intraday_liquidity import MIN_SESSIONS, NAME
+from src.studies.templates.params import LiquidityParams
 
 from . import artifact_fixture as fixture
+from .template_run import run_template
 
 SYMBOL = fixture.SYMBOL  # declared Universe, so the membership check passes
 OUTSIDE = "NOTINUNIV"
@@ -33,6 +43,9 @@ TOTAL_SESSIONS = fixture.TOTAL_SESSIONS
 BASE_VOLUME = fixture.BASE_VOLUME
 SPIKE_VOLUME = fixture.SPIKE_VOLUME
 HOSE_BUCKETS = fixture.HOSE_BUCKETS
+
+#: The one price the fixture trades at, so shares and money rank alike.
+FIXTURE_CLOSE = 75_000
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -58,46 +71,14 @@ def at(day: date, hour: int = 16) -> datetime:
     return datetime(day.year, day.month, day.day, hour, tzinfo=VN_TZ)
 
 
-def run(params: dict, monkeypatch):
-    """The whole run path, with the Universe declared here.
-
-    ``UNIVERSE_SYMBOLS`` is empty in the suite's settings — a declared Universe
-    is operator configuration, not a test fixture — so the membership the study
-    checks is stated locally rather than inherited from whatever the developer
-    has in their environment.
-    """
-    monkeypatch.setattr(
-        runner, "build_universe", lambda session: _AUniverseOf((SYMBOL,))
-    )
-    with get_sync_db() as session:
-        stored = runner.run(NAME, params, session=session)
-        session.rollback()
-        return stored
+def run(params: dict, monkeypatch, *, universe: tuple[str, ...] = (SYMBOL,)):
+    return run_template(NAME, params, universe=universe, monkeypatch=monkeypatch)
 
 
-class _AUniverseOf:
-    def __init__(self, symbols: tuple[str, ...]) -> None:
-        self.symbols = symbols
-
-
-def compute(params: dict, when: datetime):
-    """The study's own compute, with as-of pinned so the window is deterministic."""
-    from src.studies.contracts import StudyContext
-    from src.studies.intraday_liquidity import LiquidityParams, compute as _compute
-
-    with get_sync_db() as session:
-        return _compute(
-            StudyContext(
-                params=LiquidityParams.model_validate(params),
-                session=session,
-                as_of=when,
-                universe=(SYMBOL,),
-            )
-        )
-
-
-def test_the_planted_spike_is_the_peak_window_at_the_frequency_planted(window):
-    result = compute({"symbol": SYMBOL}, at(LAST_SESSION))
+def test_the_planted_spike_is_the_peak_window_at_the_frequency_planted(
+    window, monkeypatch
+):
+    result = run({"symbol": SYMBOL}, monkeypatch)
 
     assert result.headline["peakWindow"] == SPIKE_BUCKET
     assert result.headline["peakOccurrence"] == f"{SPIKE_SESSIONS}/{TOTAL_SESSIONS}"
@@ -109,9 +90,10 @@ def test_the_planted_spike_is_the_peak_window_at_the_frequency_planted(window):
     )
 
 
-def test_every_sessions_shares_sum_to_one_over_the_buckets_it_has(window):
-    result = compute({"symbol": SYMBOL}, at(LAST_SESSION))
-    heatmap = result.frames["heatmap"]
+def test_every_sessions_shares_sum_to_one_over_the_buckets_it_has(
+    window, monkeypatch
+):
+    heatmap = run({"symbol": SYMBOL}, monkeypatch).frames["heatmap"]
 
     for row in heatmap.rows:
         cells = [cell for cell in row[1:] if cell is not None]
@@ -119,104 +101,169 @@ def test_every_sessions_shares_sum_to_one_over_the_buckets_it_has(window):
         assert sum(cells) == pytest.approx(1.0, abs=5e-4)
 
 
-def test_a_bucket_this_symbol_never_trades_in_is_a_hole_not_a_zero(window):
-    result = compute({"symbol": SYMBOL}, at(LAST_SESSION))
+def test_a_bucket_this_symbol_never_trades_in_is_a_hole_not_a_zero(
+    window, monkeypatch
+):
+    result = run({"symbol": SYMBOL}, monkeypatch)
     heatmap = result.frames["heatmap"]
     ato_column = heatmap.columns.index("09:00")
 
     assert all(row[ato_column] is None for row in heatmap.rows)
-    assert "09:00" not in {row[0] for row in result.frames["profile"].rows}
+    assert "09:00" not in set(result.frames["profile"].column("bucket"))
 
 
-def test_the_phase_summary_accounts_for_the_whole_session(window):
-    result = compute({"symbol": SYMBOL}, at(LAST_SESSION))
-    summary = result.headline["phaseSummary"]
+def test_the_phase_summary_accounts_for_the_whole_session(window, monkeypatch):
+    summary = run({"symbol": SYMBOL}, monkeypatch).headline["phaseSummary"]
 
     assert summary["ato"] == 0.0  # a HOSE symbol has no 09:00 bucket
-    assert sum(summary.values()) == pytest.approx(1.0, abs=5e-4)
+    # A thousandth rather than half of one, because the summary is now built
+    # from the *published* cells: each bucket's share is the four-decimal figure
+    # the picture draws, so sixteen of them carry sixteen roundings. The headline
+    # agreeing with the panel to the last digit is worth more than a total that
+    # lands on one and disagrees with every cell under it.
+    assert sum(summary.values()) == pytest.approx(1.0, abs=2e-3)
     # Per bucket rather than per phase: the morning has nine buckets against the
     # afternoon's six, so the raw phase totals favour the morning even though the
     # planted spike is an afternoon bucket.
     assert summary["pm"] / 6 > summary["am"] / 9
 
 
-def test_the_value_metric_reads_money_rather_than_shares(window):
-    volume = compute({"symbol": SYMBOL, "metric": "volume"}, at(LAST_SESSION))
-    value = compute({"symbol": SYMBOL, "metric": "value"}, at(LAST_SESSION))
+def test_the_value_metric_reads_money_rather_than_shares(window, monkeypatch):
+    volume = run({"symbol": SYMBOL, "metric": "volume"}, monkeypatch)
+    value = run({"symbol": SYMBOL, "metric": "value"}, monkeypatch)
 
     assert value.frames["profile"].unit == "VND"
     assert volume.frames["profile"].unit == "shares"
     # One price across the fixture, so shares and money rank the buckets alike.
     assert value.headline["peakWindow"] == volume.headline["peakWindow"]
     assert value.headline["peakAvgAmount"] == pytest.approx(
-        volume.headline["peakAvgAmount"] * 75_000, rel=1e-6
+        volume.headline["peakAvgAmount"] * FIXTURE_CLOSE, rel=1e-6
     )
 
 
-def test_a_bucket_missing_from_most_sessions_is_averaged_over_the_whole_window():
+def _plant(session, per_session: dict[date, dict[str, int]]) -> None:
+    """Write exactly the buckets named, and nothing else, for one symbol."""
+    session.execute(delete(BarIntraday15m).where(BarIntraday15m.symbol == SYMBOL))
+    for day, buckets in per_session.items():
+        for label, volume in buckets.items():
+            hour, minute = (int(part) for part in label.split(":"))
+            session.add(
+                BarIntraday15m(
+                    symbol=SYMBOL,
+                    trading_day=day,
+                    bucket_start=datetime(
+                        day.year, day.month, day.day, hour, minute, tzinfo=VN_TZ
+                    ),
+                    phase=session_window.phase_of(
+                        datetime(2026, 1, 1, hour, minute).time()
+                    ),
+                    open=1,
+                    high=1,
+                    low=1,
+                    close=1,
+                    volume=volume,
+                    source=ingest.SOURCE,
+                    observed_at=datetime(
+                        day.year, day.month, day.day, hour, minute, tzinfo=VN_TZ
+                    ),
+                )
+            )
+
+
+@pytest.fixture
+def planted():
+    """A window written bucket by bucket, so a shape can be posed exactly."""
+    def _write(per_session: dict[date, dict[str, int]]) -> None:
+        with get_sync_db() as session:
+            _plant(session, per_session)
+            session.commit()
+
+    yield _write
+
+    with get_sync_db() as session:
+        session.execute(delete(BarIntraday15m).where(BarIntraday15m.symbol == SYMBOL))
+        session.commit()
+
+
+def _days(count: int) -> list[date]:
+    return [date(2026, 8, day) for day in range(3, 3 + count)]
+
+
+def test_a_bucket_missing_from_most_sessions_is_averaged_over_the_whole_window(
+    planted, monkeypatch
+):
     """A quiet quarter hour is quiet, not absent.
 
     Dividing by the sessions a bucket *appeared* in makes a bucket that traded
-    once in thirty look like the busiest of the day, and makes the four phases
-    sum to more than one. The sessions it is missing from are sessions it was
-    worth nothing in.
+    once in the window look like the busiest of the day, and makes the four
+    phases sum to more than one. The sessions it is missing from are sessions it
+    was worth nothing in.
     """
-    from src.studies.intraday_liquidity import _bucket_statistics, _phase_summary
+    days = _days(MIN_SESSIONS)
+    planted(
+        {
+            days[0]: {"09:15": 50, "14:45": 50},
+            **{day: {"14:45": 100} for day in days[1:]},
+        }
+    )
 
-    by_session = {
-        "d1": {"09:15": 50.0, "14:45": 50.0},
-        "d2": {"14:45": 100.0},
-        "d3": {"14:45": 100.0},
-        "d4": {"14:45": 100.0},
-    }
+    result = run({"symbol": SYMBOL, "sessions": MIN_SESSIONS}, monkeypatch)
+    profile = result.frames["profile"]
+    shares = dict(zip(profile.column("bucket"), profile.column("share")))
+    amounts = dict(zip(profile.column("bucket"), profile.column("avg_amount")))
 
-    buckets = {bucket.label: bucket for bucket in _bucket_statistics(by_session)}
-
-    # Present in one session of four, at half of it: a share of an eighth.
-    assert buckets["09:15"].avg_share == pytest.approx(0.125)
-    assert buckets["09:15"].avg_amount == pytest.approx(50.0 / 4)
+    # Present in one session of ten, at half of it: a share of a twentieth.
+    assert shares["09:15"] == pytest.approx(1 / (2 * MIN_SESSIONS), abs=5e-5)
+    assert amounts["09:15"] == pytest.approx(50 / MIN_SESSIONS, abs=0.5)
     # And the whole picture still adds to one session's worth.
-    assert sum(_phase_summary(list(buckets.values())).values()) == pytest.approx(1.0)
+    assert sum(result.headline["phaseSummary"].values()) == pytest.approx(
+        1.0, abs=2e-3
+    )
 
 
-def test_a_spike_is_measured_rather_than_broken_by_the_clock():
+def test_a_spike_is_measured_rather_than_broken_by_the_clock(planted, monkeypatch):
     """Being in the top two has to mean something to be worth counting.
 
     Taking the first two of a sorted list breaks ties by the order the buckets
     arrived in, which is the clock — so on a session where everything traded the
-    same amount, the two earliest quarter hours collected a spike apiece and the
-    frequency became a fact about sorting.
+    same amount, the two earliest quarter hours would collect a spike apiece and
+    the frequency would be a fact about sorting.
     """
-    from src.studies.intraday_liquidity import _bucket_statistics
+    days = _days(MIN_SESSIONS)
+    flat = {label: 100 for label in ("09:15", "09:30", "09:45", "10:00")}
+    spiked = {"09:15": 100, "09:30": 100, "09:45": 100, "14:45": 900}
+    planted({day: (spiked if index else flat) for index, day in enumerate(days)})
 
-    flat = {label: 100.0 for label in ("09:15", "09:30", "09:45", "10:00")}
-    spiked = {"09:15": 100.0, "09:30": 100.0, "09:45": 100.0, "14:45": 900.0}
-
-    buckets = {
-        bucket.label: bucket
-        for bucket in _bucket_statistics({"d1": flat, "d2": spiked})
-    }
+    profile = run({"symbol": SYMBOL, "sessions": MIN_SESSIONS}, monkeypatch).frames[
+        "profile"
+    ]
+    spikes = dict(zip(profile.column("bucket"), profile.column("spike_frequency")))
 
     # Nobody is distinguished on the flat session, and only the real spike is on
-    # the other — the second slot is a three-way tie that spans the cut.
-    assert buckets["14:45"].spike_sessions == 1
-    assert buckets["09:15"].spike_sessions == 0
-    assert buckets["09:30"].spike_sessions == 0
+    # the others — the second slot is a three-way tie that spans the cut.
+    assert spikes["14:45"] == MIN_SESSIONS - 1
+    assert spikes["09:15"] == 0
+    assert spikes["09:30"] == 0
 
 
-def test_a_session_with_no_more_buckets_than_the_cut_distinguishes_nothing():
-    from src.studies.intraday_liquidity import _bucket_statistics
+def test_a_session_with_no_more_buckets_than_the_cut_distinguishes_nothing(
+    planted, monkeypatch
+):
+    days = _days(MIN_SESSIONS)
+    planted({day: {"09:15": 10, "09:30": 90} for day in days})
 
-    buckets = {
-        bucket.label: bucket
-        for bucket in _bucket_statistics({"d1": {"09:15": 10.0, "09:30": 90.0}})
-    }
+    profile = run({"symbol": SYMBOL, "sessions": MIN_SESSIONS}, monkeypatch).frames[
+        "profile"
+    ]
+    spikes = dict(zip(profile.column("bucket"), profile.column("spike_frequency")))
 
-    assert buckets["09:15"].spike_sessions == 0
-    assert buckets["09:30"].spike_sessions == 0
+    assert spikes["09:15"] == 0
+    assert spikes["09:30"] == 0
 
 
-def test_a_window_shorter_than_the_minimum_refuses_with_the_matching_code(window):
+def test_a_window_shorter_than_the_minimum_refuses_with_the_matching_code(
+    window, monkeypatch
+):
     with get_sync_db() as session:
         session.execute(
             delete(BarIntraday15m).where(
@@ -227,70 +274,74 @@ def test_a_window_shorter_than_the_minimum_refuses_with_the_matching_code(window
         session.commit()
 
     with pytest.raises(StudyRefused) as refusal:
-        compute({"symbol": SYMBOL}, at(LAST_SESSION))
+        run({"symbol": SYMBOL}, monkeypatch)
 
     assert refusal.value.issue is SignalIssue.INSUFFICIENT_SESSIONS
 
 
-def test_a_symbol_outside_the_universe_is_refused_before_any_read():
-    from src.studies.contracts import StudyContext
-    from src.studies.intraday_liquidity import LiquidityParams, compute as _compute
-
-    with get_sync_db() as session:
-        with pytest.raises(StudyRefused) as refusal:
-            _compute(
-                StudyContext(
-                    params=LiquidityParams.model_validate({"symbol": OUTSIDE}),
-                    session=session,
-                    as_of=at(LAST_SESSION),
-                    universe=(SYMBOL,),
-                )
-            )
+def test_a_symbol_outside_the_universe_is_refused_before_any_read(monkeypatch):
+    with pytest.raises(StudyRefused) as refusal:
+        run({"symbol": OUTSIDE}, monkeypatch)
 
     assert refusal.value.issue is SignalIssue.MISSING_TARGET_SESSION
 
 
 def test_a_session_count_out_of_range_is_clamped_rather_than_refused():
-    from src.studies.intraday_liquidity import LiquidityParams
-
     assert LiquidityParams.model_validate({"symbol": "stb", "sessions": 900}).sessions == 60
     assert LiquidityParams.model_validate({"symbol": "stb", "sessions": 1}).sessions == 10
     assert LiquidityParams.model_validate({"symbol": "stb"}).symbol == "STB"
 
 
-def test_the_headline_stays_inside_the_budget_the_model_pays_for(window):
+def test_the_headline_stays_inside_the_budget_the_model_pays_for(
+    window, monkeypatch
+):
     import json
 
-    result = compute({"symbol": SYMBOL}, at(LAST_SESSION))
+    result = run({"symbol": SYMBOL}, monkeypatch)
     serialized = json.dumps(result.headline, ensure_ascii=False)
 
     assert len(serialized) < 1_500, serialized
 
 
-def test_the_signal_desk_draws_four_blocks_over_frames_the_study_produced(window):
+def test_the_board_draws_the_frames_the_plan_produced(window, monkeypatch):
+    """Every picture on the board comes out of a step, and the strip out of cells.
+
+    The frames the board carries are filed under ``f0``, ``f1``… by the composer,
+    so what is checked here is that each one is a frame this run produced rather
+    than that it is called what the plan called it — the step names are the
+    plan's vocabulary and the keys are the board's.
+    """
+    result = run({"symbol": SYMBOL}, monkeypatch)
+    board = result.board
     definition = registry.study(NAME)
-    result = compute({"symbol": SYMBOL}, at(LAST_SESSION))
-    spec = definition.view(result)
 
-    assert [block.widget for block in spec.blocks] == [
-        "stat_tiles",
-        "bar_series",
-        "session_heatmap",
-        "ranked_bars",
+    drawn = [
+        block.widget
+        for section in board.sections
+        for block in section.blocks
+        if hasattr(block, "widget")
     ]
-    assert all(block.frame in result.frames for block in spec.blocks)
-    assert set(result.frames) == set(definition.frames)
-    assert SYMBOL in spec.title
+    assert len(drawn) >= 3
+    assert len(set(drawn)) >= 2
+    assert board.archetype == definition.archetype
+    assert SYMBOL in board.title
+    # The strip answers the question, and every figure on it is a resolved cell.
+    assert result.kpi("Khung giờ đỉnh").value.raw == SPIKE_BUCKET
+    assert result.kpi("Số phiên lặp lại").value.raw == SPIKE_SESSIONS
+    assert result.kpi("Tỷ trọng thanh khoản").value.text.endswith("%")
+    assert all(cell.value.frame.startswith("f") for cell in board.kpis)
 
 
-def test_a_run_through_the_runner_persists_the_frames_and_not_the_headline(
+def test_a_run_persists_a_frame_per_step_and_never_the_headline(
     window, monkeypatch
 ):
-    stored = run({"symbol": SYMBOL, "sessions": 30}, monkeypatch)
+    result = run({"symbol": SYMBOL, "sessions": 30}, monkeypatch)
 
-    assert stored.study_name == NAME
-    assert stored.headline["peakWindow"] == SPIKE_BUCKET
-    assert stored.signal_desk_spec.blocks[2].widget == "session_heatmap"
+    assert result.artifact.study_name == NAME
+    assert set(result.frames) == set(registry.study(NAME).step_names)
+    # Every step is addressable, which is what lets a model re-mix one.
+    assert set(result.artifact.steps) == set(result.frames)
+    assert all("#" in reference for reference in result.artifact.steps.values())
 
 
 def test_the_published_artifact_fixture_is_what_this_study_produces(window):

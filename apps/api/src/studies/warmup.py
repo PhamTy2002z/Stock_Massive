@@ -34,6 +34,7 @@ from collections.abc import Callable, Mapping
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from src.core.quota import QuotaRefused
 from src.stocks.intraday import ingest
 from src.stocks.signals.issues import SignalIssue
 
@@ -66,7 +67,25 @@ def _intraday_bars(session: Session, params: BaseModel) -> None:
             "this study reads intraday bars and its parameters name no symbol",
         )
     sessions = getattr(params, "sessions", DEFAULT_SESSIONS)
-    ingest.ensure_bars(session, str(symbol), sessions=int(sessions))
+    try:
+        ingest.ensure_bars(session, str(symbol), sessions=int(sessions))
+    except QuotaRefused as refused:
+        # The fetch now spends the account's allowance through the one arbiter
+        # that owns it, and the arbiter *raises* rather than returning: the
+        # Collector holds an exclusive lease, or Redis is unreachable and the
+        # policy is fail-closed, or the wait exceeded the lane's ceiling.
+        #
+        # Translated here rather than left to escape, because ``run_study``
+        # catches ``StudyRefused`` and nothing else: a bare ``RuntimeError``
+        # leaves the loop as a raw tool failure, counts against
+        # ``same_tool_failure_halt_after``, and tells the reader nothing. It is
+        # the same shape as any other "the data is on its way" — which is what
+        # ``COHORT_WARMING`` is the vocabulary for.
+        raise StudyRefused(
+            SignalIssue.COHORT_WARMING,
+            "intraday bars for this symbol are not stored yet and the provider "
+            f"allowance would not admit the fetch right now ({refused})",
+        ) from refused
 
 
 #: Every input a Study may declare, and what makes it present.

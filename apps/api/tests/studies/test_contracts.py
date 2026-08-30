@@ -16,7 +16,6 @@ from src.studies.contracts import (
     Frame,
     Provenance,
     StudyRefused,
-    StudyResult,
 )
 
 
@@ -105,7 +104,7 @@ def test_point_roles_that_do_not_line_up_with_the_rows_are_refused():
 
 def a_provenance(**overrides) -> Provenance:
     fields = {
-        "source": "vnstock",
+        "source": "store",
         "as_of": datetime(2026, 8, 26, 7, 30, tzinfo=timezone.utc),
         "sessions_used": 30,
         "health": "normal",
@@ -156,7 +155,7 @@ def test_the_method_travels_beside_the_reason_rather_than_inside_it():
 def test_provenance_names_its_freeze_in_the_payload():
     moment = datetime(2026, 8, 26, 7, 30, tzinfo=timezone.utc)
     payload = Provenance(
-        source="vnstock",
+        source="store",
         as_of=moment,
         sessions_used=30,
         health="normal",
@@ -177,21 +176,6 @@ def test_a_signal_desk_needs_a_title_and_a_block():
         SignalDeskSpec(title="   ", blocks=(block,))
     with pytest.raises(ValueError, match="no blocks"):
         SignalDeskSpec(title="Thanh khoản", blocks=())
-
-
-def test_a_result_with_no_frames_has_nothing_to_draw():
-    provenance = Provenance(
-        source="vnstock",
-        as_of=datetime.now(timezone.utc),
-        sessions_used=1,
-        health="normal",
-        reason=None,
-    )
-
-    with pytest.raises(ValueError, match="nothing to draw"):
-        StudyResult(headline={"symbol": "STB"}, frames={}, provenance=provenance)
-    with pytest.raises(ValueError, match="no headline"):
-        StudyResult(headline={}, frames={"profile": a_frame()}, provenance=provenance)
 
 
 def test_a_refusal_carries_the_code_the_tool_layer_records():
