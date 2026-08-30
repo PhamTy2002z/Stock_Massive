@@ -62,6 +62,13 @@ services:
       # the same reason DATABASE_URL is, and only the deployment knows it.
       UNIVERSE_SYMBOLS: ${UNIVERSE_SYMBOLS:-}
       SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
+      # Whether the daily spine fills itself. Forwarded for the reason the block
+      # above states: a switch that only exists in the settings class is one a
+      # container never sees. Default off is deliberate — the market scope is
+      # 1,523 provider calls, and a job registered unconditionally would spend
+      # them on every machine that brings the stack up. On, it runs index,
+      # declared and market in turn at 16:30 Vietnam time.
+      BACKFILL_DAILY_SCHEDULED: ${BACKFILL_DAILY_SCHEDULED:-false}
       # A self-hosted Redis is not part of this file; a deployment either points
       # this at one it runs or uses the Upstash pair below. Empty is handled:
       # the cache degrades and the LLM route breaker fails open.
