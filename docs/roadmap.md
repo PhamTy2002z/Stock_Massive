@@ -55,7 +55,7 @@ metric nào chứng minh · lấy invariant nhỏ hơn được không*.
 | Nguồn | Bài học | Ta đang ở đâu | Vào phase |
 |---|---|---|---|
 | Blog | **Node · Edge · State** rõ; loop = graph có cycle | Có: Turn/tool/Study · cycle 4 round · `agent_turn/tool_call/artifact` | C0 |
-| Blog | **Contract > free text**; approve vì evidence | Có: `StudyResult.headline/frames`, `outcome_of` | C0 |
+| Blog | **Contract > free text**; approve vì evidence | Có: `StudyDefinition.headline` vs frame, `outcome_of` | C0 |
 | Blog | **Deterministic gate > LLM** | Có cho Study (`runner`), giá (`check_price_claim`). **Thiếu** cho câu trả lời thường: chưa có grader | C4 |
 | Blog | **Mỗi node chỉ nhận state nó cần** | Có: frames không vào model, prompt typed | C2 mở rộng |
 | Blog | **Coordination cost thật — 1 loop trước, split khi có boundary** | Đúng: 1 loop, không subagent | C7 chỉ mở khi đo được |
@@ -301,7 +301,7 @@ dùng (blog G3/G8).
       `runtime_constants` (đủ để nhận ra lượt nào chạy dưới prompt hai tầng),
       nhưng **không ghi `DomainPack.identity`** — hai lượt dưới hai pack body
       khác nhau sinh metadata không phân biệt được. Một dòng, cùng chỗ
-- [~] Grader deterministic — **bốn cái chạy**; `citation còn?` **cần claim-provenance contract**, không phải grader tốt hơn (xem bảng trên). Chưa có: có desk? đúng Study? `outcome` khớp? frames không lọt?
+- [~] Grader deterministic — **bốn cái chạy**; `citation còn?` **cần claim-provenance contract**, không phải grader tốt hơn (xem bảng trên). Hai mục **có desk?** và **frames không lọt?** do phase 09 của `plans/260829-2304-signal-desk-analysis-compiler/` dựng — S1 và C4 tốt nghiệp cùng một bằng chứng, không phải S1 vượt gate. Còn lại chưa có: đúng Study? `outcome` khớp?
 - [ ] LLM judge chỉ grounding/completeness, có CI
 - [ ] Replay từ `agent_turn` thật ẩn danh, không gọi provider — C4-lite tape **web** ở `WebLane.read`, model vẫn live; replay Turn là việc khác
 - [~] `make golden-run`/`golden-grade` có, JSON là authority. Còn: **gate policy fail-closed**
@@ -491,24 +491,48 @@ sau khi cây sạch.
 
 `as_of` phiên 2026-08-27, Universe 30 mã. `test_agent_signal_desk` **11 passed**.
 
-### S1 — Thư viện Study + desk theo mã — **Conditional** (cần C4 — C1 ✔ 2026-08-29)
+### S1 — Analysis compiler — **Conditional** (cần C4 — C1 ✔ 2026-08-29)
 
-**Objective.** Một mã → nhiều góc nhìn trong một Turn; Study đủ nhiều để câu
-hỏi thường gặp có công thức.
+**Objective.** Một câu hỏi phân tích chưa đoán trước → board có bằng chứng;
+Study là template, không phải điều kiện.
+
+Phase này từng viết là *"thư viện Study ≥ 10"*. Đếm Study là đếm sai thứ:
+câu thứ mười một vẫn rơi về văn xuôi, và mỗi Study mới là một lần đoán trước
+câu hỏi. Định nghĩa lại 2026-08-29 — năng lực, không phải số lượng — theo
+`plans/260829-2304-signal-desk-analysis-compiler/`.
 
 | | Trước | Sau |
 |---|---|---|
-| Study | 3 | ≥ 10, mỗi cái có Golden question |
-| Study / Turn | 1 | fan-out 2–4 Study song song, budget theo Study |
-| Desk | một Study một desk | một desk gom nhiều Study cho một mã |
+| Đơn vị sáng tác | 4 Study viết sẵn | `query` + `compute` + Board DSL; 4 Study thành template chạy trên cùng đường ống |
+| Board / Turn | 1 board cứng, ≤ 6 block | ≤ 2 board, ≤ 14 block, layout 12 cột do server tính |
+| Số trên board | trong prose, không kiểm được | 100% là tham chiếu `(frame, row, col)` server resolve — model không gõ số nào |
+| Kho BCTC | 302.528 dòng, một Study đọc | `query(statement)` mở cho mọi câu, nhiều mã × nhiều kỳ |
+| Số ngoài store | prose không chứng minh được | `frame_from_evidence` — chỉ vào frame khi có mặt trong trang đã fetch cùng Turn |
 
 **Checklist**
-- [ ] `run_study` nhận nhiều params một round — `agent/tools/studies.py`
-- [ ] Widget fan-in versioned; `MAX_SIGNAL_DESKS_PER_TURN` reweight — `studies/widgets.py`, `frames_buffer.py`
-- [ ] Mỗi Study mới kèm Golden question (C4) và refusal vocabulary
+- [x] Bảng surface + roadmap S1 viết lại — `CLAUDE.md`, `docs/roadmap.md` *(phase 01)*
+- [x] `query` sáu nguồn + `compare_fields` có role winner/loser — `agent/tools/query.py` *(phase 02)*
+- [x] `compute(code, frames)` sandbox, validator chặn literal số — `studies/compute/*` *(phase 03)*
+- [x] `frame_from_evidence` — số web phải có trên trang đã đọc — `agent/tools/evidence.py` *(phase 04)*
+- [x] Board DSL v2 + grammar + layout + lint + auto-compose — `studies/{composer,grammar,layout,lint,archetypes,auto_compose}.py` *(phase 05)*
+- [x] Grid, KPI strip, caption, 6 widget mới — `apps/web/src/components/signal-desk/**` *(phase 06)*
+- [x] Bốn Study cũ chạy qua template, frames khớp fixture chụp trước khi port *(phase 07,
+      2026-08-30)* — `studies/templates/*`; mọi frame còn sống khớp store thật ở 1e-9.
+      Frame `tiles` của cả bốn **bỏ**: dải KPI của board v2 là thứ thay nó, và mỗi ô
+      giờ là một `Ref` server tra. Bước thứ ba `ReadStep` thêm vào trục **đọc** cho ba
+      câu trả lời `query` không có source (lưới bước giá · chỉ tiêu theo template báo
+      cáo · quét rộng hơn `MAX_SYMBOLS`); số học **không** có ngoại lệ nào —
+      `registry` chạy validator literal lúc import
+- [x] Section TOOLS core + body PLAYBOOK soạn board; bump `PROMPT_VERSION` *(phase 08,
+      2026-08-30)* — 3.4.0, pack 3.0.0; core +228 token (136 mục lục + 92 luật),
+      body 1.064. Blocker C2 phase 05 đã đóng trước khi phase này chạy. Còn nợ:
+      `make golden-run` web-first để chắc ba gate C1 không giảm — cần deployment
+- [ ] Golden `signal_desk` ≥ 50 câu người ngoài team viết + grader deterministic *(phase 09)*
 
-**Gate.** ≥ 10 Study; Golden Set nhóm `signal_desk` pass ≥ 90% grader
-deterministic.
+**Gate.** Golden `signal_desk` pass ≥ 90% grader deterministic; hai bất biến
+đo 100% và **không** chờ phân bố — refs resolve 100%, frames không vào
+transcript 100%. Chi phí/Turn ≤ 2 × Turn web-first đo được (≤ 84.362 µUSD),
+`MAX_TOOL_ROUNDS`/`MAX_EXTERNAL_TOOL_CALLS` không đổi.
 
 ### S2 — Thesis + human approval — **Conditional** (cần S1, C3, C6)
 
