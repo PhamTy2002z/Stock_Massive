@@ -20,7 +20,13 @@ import { describe, expect, it } from "vitest"
 import catalog from "../../../../../contracts/signal-desk-widget-catalog.json"
 
 import { DataTableWidget } from "./widgets/data-table"
-import { acceptedKinds, knownWidgets, resolveWidget, widgetKey } from "./widget-registry"
+import {
+  acceptedKinds,
+  knownWidgets,
+  NOT_FRAME_WIDGETS,
+  resolveWidget,
+  widgetKey,
+} from "./widget-registry"
 
 const CATALOG = catalog as {
   fallback: { widget: string; version: number }
@@ -31,13 +37,29 @@ describe("the registry against the server's catalog", () => {
   it("implements every widget the server may send, and nothing it may not", () => {
     const promised = CATALOG.widgets
       .map((widget) => widgetKey(widget.name, widget.version))
+      .filter((key) => !NOT_FRAME_WIDGETS.includes(key))
       .sort()
 
     expect(knownWidgets()).toEqual(promised)
   })
 
+  it("names the catalog entries that are board parts rather than drawings", () => {
+    // `kpi_strip` and `caption` are laid out by the board from figures the
+    // server already resolved; neither takes a frame, so neither can be a
+    // component here. Listed rather than silently skipped, so a *third* name
+    // going missing is a red test rather than a quiet exemption.
+    const catalogued = CATALOG.widgets.map((widget) =>
+      widgetKey(widget.name, widget.version),
+    )
+    for (const key of NOT_FRAME_WIDGETS) {
+      expect(catalogued).toContain(key)
+      expect(knownWidgets()).not.toContain(key)
+    }
+  })
+
   it("accepts the same frame kinds the server checks a Study's blocks against", () => {
     for (const widget of CATALOG.widgets) {
+      if (NOT_FRAME_WIDGETS.includes(widgetKey(widget.name, widget.version))) continue
       expect(acceptedKinds(widget.name, widget.version)).toEqual(widget.frameKinds)
     }
   })

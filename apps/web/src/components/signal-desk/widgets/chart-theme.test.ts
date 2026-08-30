@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from "vitest"
 
-import { colorFor, resolveRoles, SERIES } from "./chart-theme"
+import { cellColorFor, colorFor, resolveRoles, SERIES } from "./chart-theme"
 
 /** The server's own vocabulary, from `studies/contracts.py`. */
 const PLAIN = ["series", "muted", "focus", "up", "down", "neutral"]
@@ -75,5 +75,39 @@ describe("spending the focus", () => {
 
     expect(roles).toEqual([null, null])
     expect(focusSpent).toBe(false)
+  })
+})
+
+describe("the roles a board added", () => {
+  it("draws the comparison pair with the market pair's tokens", () => {
+    // `winner`/`loser` and `up`/`down` share a token and not a meaning. A
+    // number that rose and a number better than the one beside it are different
+    // claims — a drawdown that fell is `down` and also `winner` — and the frame
+    // says which it is making.
+    expect(colorFor("winner")).toBe("hsl(var(--widget-up))")
+    expect(colorFor("loser")).toBe("hsl(var(--widget-down))")
+  })
+
+  it("gives the reference line its own quiet token", () => {
+    expect(colorFor("benchmark")).toBe("hsl(var(--widget-benchmark))")
+  })
+
+  it("gives a caveat its own token, apart from the focus mark", () => {
+    expect(colorFor("warning")).toBe("hsl(var(--widget-warning))")
+    expect(colorFor("warning")).not.toBe(colorFor("focus"))
+  })
+
+  it("draws a number that is real and old in the neutral", () => {
+    expect(colorFor("stale")).toBe("hsl(var(--widget-neutral))")
+  })
+})
+
+describe("a cell that claims nothing", () => {
+  it("keeps the page's own ink rather than the chart's neutral", () => {
+    // The difference from `colorFor`: a table where every unmarked cell was
+    // painted the series colour would be a table where every cell looks claimed.
+    expect(cellColorFor(null)).toBe(null)
+    expect(cellColorFor("bullish")).toBe(null)
+    expect(cellColorFor("winner")).toBe("hsl(var(--widget-up))")
   })
 })

@@ -96,17 +96,34 @@ describe("before the numbers arrive", () => {
 })
 
 describe("once the artifact is fetched", () => {
-  it("renders every block of the spec the server sent", async () => {
+  it("renders every block of the board the server sent", async () => {
     fetchArtifact.mockResolvedValue(payload())
 
-    const { container } = draw(<SignalDeskPanel artifactId={ARTIFACT_ID} blockCount={4} />)
+    const spec = fixture.signal_deskSpec
+    const visuals = spec.sections.reduce(
+      (total, section) =>
+        total + section.blocks.filter((block) => block.kind === "visual").length,
+      spec.appendix ? 1 : 0,
+    )
+    const drawn = spec.sections.reduce(
+      (total, section) => total + section.blocks.length,
+      spec.appendix ? 1 : 0,
+    )
+    const { container } = draw(
+      <SignalDeskPanel artifactId={ARTIFACT_ID} blockCount={drawn} />,
+    )
 
     await waitFor(() =>
-      expect(screen.getByText(fixture.signal_deskSpec.title)).toBeInTheDocument(),
+      expect(screen.getByText(spec.title)).toBeInTheDocument(),
     )
+    // A `section` per board section and a `section` per picture inside it, so a
+    // board that quietly dropped a figure lands short here.
     expect(container.querySelectorAll("section")).toHaveLength(
-      fixture.signal_deskSpec.blocks.length,
+      spec.sections.length + visuals,
     )
+    // The strip answers the question and the pictures are the reason to believe
+    // it, so a board that drew one and not the other would still pass above.
+    expect(screen.getAllByText(spec.kpis[0].label)).not.toHaveLength(0)
     // The heatmap is the hero picture, and it is SVG this build draws itself.
     expect(container.querySelector("svg")).not.toBeNull()
   })
@@ -145,13 +162,16 @@ describe("once the artifact is fetched", () => {
   it("draws a block it cannot render as a table and says which", async () => {
     fetchArtifact.mockResolvedValue(
       payload({
+        // A version-one spec on purpose: rows written before the board grammar
+        // existed are still on disk and still have to open.
         signal_desk_spec: {
+          specVersion: 1,
           title: "Một khối lạ",
           blocks: [
             {
               widget: "session_heatmap",
               widgetVersion: 99,
-              frame: "heatmap",
+              frame: Object.keys(fixture.frames)[0],
               options: {},
             },
           ],

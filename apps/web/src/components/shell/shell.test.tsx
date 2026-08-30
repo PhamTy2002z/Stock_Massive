@@ -333,6 +333,34 @@ describe("the Signal Desk against the sidebar", () => {
     expect(shell.state.sidebarOpen).toBe(true)
   })
 
+  it("opens answer sources as a narrow Chat drawer without entering Signal Desk", () => {
+    setViewport(1664)
+    mount(<Inspector />)
+
+    act(() => shell.dispatch({ type: "open-sources", messageId: 7 }))
+
+    expect(shell.state.signalDesk).toBe(false)
+    expect(shell.state.inspector).toBe("sources")
+    expect(shell.state.sidebarOpen).toBe(true)
+    expect(sidebarFloats(shell.state)).toBe(false)
+    expect(inspectorWidth(shell.state)).toBe(408)
+    expect(screen.getByRole("complementary", { name: "Nguồn" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Đóng nguồn" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Close Signal Desk" })).toBeNull()
+  })
+
+  it("floats a reopened sidebar before it can crush the Chat source drawer", () => {
+    setViewport(900)
+    mount()
+    act(() => shell.dispatch({ type: "toggle-sidebar" }))
+    act(() => shell.dispatch({ type: "open-sources", messageId: 7 }))
+    act(() => shell.dispatch({ type: "toggle-sidebar" }))
+
+    expect(shell.state.sidebarOpen).toBe(true)
+    expect(sidebarFloats(shell.state)).toBe(true)
+    expect(inspectorWidth(shell.state)).toBe(408)
+  })
+
   it("gives the desk the majority of the width and pins the conversation", () => {
     // The inversion this redesign is: the chat is the fixed column now, and
     // the workspace is whatever is left rather than the other way round.
@@ -832,6 +860,8 @@ describe("the workspace on screen", () => {
     fireEvent.click(screen.getByRole("button", { name: "Nguồn" }))
 
     expect(shell.state.inspector).toBe("sources")
+    expect(screen.getByRole("complementary", { name: "Signal Desk" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Close Signal Desk" })).toBeInTheDocument()
   })
 
   it("resizes the conversation rather than the workspace", () => {
@@ -1639,7 +1669,9 @@ describe("what the workspace remembers", () => {
     // every later session on a wide monitor.
     setViewport(1600)
     mount()
-    act(() => shell.dispatch({ type: "open-inspector", tab: "sources" }))
+    act(() => shell.dispatch({ type: "signal-desk", on: true }))
+    act(() => shell.dispatch({ type: "toggle-sidebar" }))
+    expect(sidebarFloats(shell.state)).toBe(true)
     act(() => shell.dispatch({ type: "toggle-sidebar" }))
 
     cleanup()

@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * The Signal Desk: the workspace beside the conversation.
+ * The right-hand pane: a source drawer in Chat, or the Signal Desk workspace.
  *
  * The proportions are inverted from what this panel used to be. It began as a
  * 408px inspector squeezed against the right edge, which is the right shape for
@@ -18,10 +18,10 @@
  *
  * The market lenses that used to live here (indices, VN30, sector performance,
  * stock detail, price history, news sources) went with the market surfaces on
- * 2026-08-25. What a chat lane needs is what is left: the pictures, and the
- * citations behind the answer in view — a sibling toggle in the same header,
- * because a reader comparing a figure with its source should not have to choose
- * which half of the screen to give up.
+ * 2026-08-25. Chat keeps citations in a narrow supporting drawer. Once Signal
+ * Desk is on, the same citations become a sibling toggle in its header, because
+ * a reader comparing a figure with its source should not have to leave the
+ * workspace.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -153,6 +153,7 @@ function Pane({ leaving, onGone }: { leaving: boolean; onGone: () => void }) {
   const compact = isCompact(state.viewport);
   const showingSources =
     state.inspector !== null && state.inspector !== "deskView";
+  const chatSources = showingSources && !state.signalDesk;
   const activeDeskViewId = showingSources ? null : state.deskViewArtifactId;
 
   // The same row the panel under this draws, under the same freeze — one query
@@ -172,7 +173,7 @@ function Pane({ leaving, onGone }: { leaving: boolean; onGone: () => void }) {
   return (
     <aside
       role="complementary"
-      aria-label={SIGNAL_DESK_COPY.name}
+      aria-label={chatSources ? SIGNAL_DESK_COPY.sources : SIGNAL_DESK_COPY.name}
       aria-hidden={leaving || undefined}
       style={{ width: compact ? "100%" : panelWidth }}
       onAnimationEnd={(event) => {
@@ -180,7 +181,11 @@ function Pane({ leaving, onGone }: { leaving: boolean; onGone: () => void }) {
       }}
       className={cn(
         "fixed right-0 top-0 z-20 flex h-dvh min-w-0 flex-col bg-background will-change-transform",
-        compact ? "shadow-2xl" : "py-2.5 pr-2.5",
+        compact
+          ? "shadow-2xl"
+          : chatSources
+            ? "border-l border-border"
+            : "py-2.5 pr-2.5",
         // The width moves with the room — folding the list, resizing the
         // window — on the same clock the chat column's padding does, so the
         // seam between the two never opens for a frame. A drag is the one
@@ -193,7 +198,7 @@ function Pane({ leaving, onGone }: { leaving: boolean; onGone: () => void }) {
           : "motion-safe:animate-vg-panel-in",
       )}
     >
-      {!compact && (
+      {!compact && !chatSources && (
         <div
           role="separator"
           tabIndex={0}
@@ -226,60 +231,73 @@ function Pane({ leaving, onGone }: { leaving: boolean; onGone: () => void }) {
           the card's own shape says where the picture begins. */}
       <div
         className={cn(
-          "flex min-h-0 flex-1 flex-col overflow-hidden bg-surface-raised",
-          compact ? "" : "rounded-[18px]",
+          "flex min-h-0 flex-1 flex-col overflow-hidden",
+          chatSources ? "bg-background" : "bg-surface-raised",
+          compact || chatSources ? "" : "rounded-[18px]",
         )}
       >
-        <div className="flex items-start gap-1">
-          <div className="min-w-0 flex-1">
-            <SignalDeskHeader
-              boards={state.deskBoards}
-              pinned={state.deskPinned}
-              activeDeskViewId={activeDeskViewId}
-              showingSources={showingSources}
-              canExport={artifact.data !== undefined}
-              menuOpen={state.overlay === "board-menu"}
-              onOpenDeskView={(artifactId) =>
-                dispatch({ type: "open-desk-view", artifactId })
-              }
-              onOpenSources={() =>
-                dispatch({ type: "open-inspector", tab: "sources" })
-              }
-              onToggleMenu={(open) =>
-                dispatch({
-                  type: "overlay",
-                  overlay: open ? "board-menu" : null,
-                })
-              }
-              onTogglePin={(artifactId, pinned) =>
-                dispatch({ type: "pin-desk-view", artifactId, pinned })
-              }
-              onOpenSwitcher={() =>
-                dispatch({ type: "overlay", overlay: "boards" })
-              }
-              onShare={() => dispatch({ type: "overlay", overlay: "share" })}
-              onExport={() => {
-                if (artifact.data !== undefined) exportArtifact(artifact.data);
-              }}
-            />
-          </div>
-          {/* A hairline between the header's own controls and the way out.
-              Closing the desk is not one of the things the reader does *to* the
-              board, and without a rule the X reads as the fourth item in that
-              row. */}
-          <div className="flex flex-none items-center gap-1.5 pr-2 pt-3">
-            <span
-              aria-hidden
-              className="block h-4 w-px flex-none bg-foreground/[0.1]"
-            />
+        {chatSources ? (
+          <header className="flex flex-none items-center justify-between border-b border-border px-4 py-2.5">
+            <h2 className="text-sm font-medium text-ink-1">{SIGNAL_DESK_COPY.sources}</h2>
             <IconButton
-              label="Close Signal Desk"
+              label="Đóng nguồn"
               onClick={() => dispatch({ type: "close-inspector" })}
             >
               <X className="size-4" />
             </IconButton>
+          </header>
+        ) : (
+          <div className="flex items-start gap-1">
+            <div className="min-w-0 flex-1">
+              <SignalDeskHeader
+                boards={state.deskBoards}
+                pinned={state.deskPinned}
+                activeDeskViewId={activeDeskViewId}
+                showingSources={showingSources}
+                canExport={artifact.data !== undefined}
+                menuOpen={state.overlay === "board-menu"}
+                onOpenDeskView={(artifactId) =>
+                  dispatch({ type: "open-desk-view", artifactId })
+                }
+                onOpenSources={() =>
+                  dispatch({ type: "open-inspector", tab: "sources" })
+                }
+                onToggleMenu={(open) =>
+                  dispatch({
+                    type: "overlay",
+                    overlay: open ? "board-menu" : null,
+                  })
+                }
+                onTogglePin={(artifactId, pinned) =>
+                  dispatch({ type: "pin-desk-view", artifactId, pinned })
+                }
+                onOpenSwitcher={() =>
+                  dispatch({ type: "overlay", overlay: "boards" })
+                }
+                onShare={() => dispatch({ type: "overlay", overlay: "share" })}
+                onExport={() => {
+                  if (artifact.data !== undefined) exportArtifact(artifact.data);
+                }}
+              />
+            </div>
+            {/* A hairline between the header's own controls and the way out.
+                Closing the desk is not one of the things the reader does *to* the
+                board, and without a rule the X reads as the fourth item in that
+                row. */}
+            <div className="flex flex-none items-center gap-1.5 pr-2 pt-3">
+              <span
+                aria-hidden
+                className="block h-4 w-px flex-none bg-foreground/[0.1]"
+              />
+              <IconButton
+                label="Close Signal Desk"
+                onClick={() => dispatch({ type: "close-inspector" })}
+              >
+                <X className="size-4" />
+              </IconButton>
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
           {/* `min-h-full` and a column, so the empty state's own `m-auto` has a

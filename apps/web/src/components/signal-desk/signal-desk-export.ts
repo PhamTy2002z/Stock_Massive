@@ -18,6 +18,7 @@
  * it would be three kilobytes to avoid ten lines.
  */
 
+import { isBoardSpec } from "@/lib/alpha-desk/types"
 import type { ArtifactPayload, Frame } from "@/lib/alpha-desk/types"
 
 import { labelOf } from "./frame"
@@ -31,12 +32,34 @@ import { labelOf } from "./frame"
  * fault, and refusing the export over it helps nobody.
  */
 export function primaryFrame(artifact: ArtifactPayload): Frame | null {
-  const named = artifact.signal_desk_spec?.blocks?.[0]?.frame
-  if (typeof named === "string" && artifact.frames[named] !== undefined) {
+  const named = firstDrawnFrame(artifact)
+  if (named !== null && artifact.frames[named] !== undefined) {
     return artifact.frames[named]
   }
   const first = Object.values(artifact.frames ?? {})[0]
   return first ?? null
+}
+
+/**
+ * Which frame the first picture on the board draws, in either spelling.
+ *
+ * A v2 board's first block may be a caption — a sentence assembled from cells of
+ * several frames — and exporting "the data behind this" as the frame a sentence
+ * happened to quote would be the wrong file. So the search is for the first
+ * *visual*, and a board of nothing but captions falls through to the fallback.
+ */
+function firstDrawnFrame(artifact: ArtifactPayload): string | null {
+  const spec = artifact.signal_desk_spec
+  if (isBoardSpec(spec)) {
+    for (const section of spec.sections ?? []) {
+      for (const block of section.blocks ?? []) {
+        if (block.kind === "visual") return block.frame
+      }
+    }
+    return spec.appendix?.frame ?? null
+  }
+  const named = spec?.blocks?.[0]?.frame
+  return typeof named === "string" ? named : null
 }
 
 /**

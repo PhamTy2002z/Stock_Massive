@@ -265,6 +265,8 @@ type Action =
 
 /** The reference's own numbers. */
 export const SIDEBAR_WIDTH = 274
+/** A source list is a supporting drawer, not the Signal Desk workspace. */
+const SOURCE_DRAWER_WIDTH = 408
 /**
  * The chat column once the desk is open.
  *
@@ -312,12 +314,18 @@ export function sidebarFloats(state: ShellState): boolean {
  * Separate from `sidebarFloats` because the two questions differ for a closed
  * sidebar: nothing is floating when nothing is shown, but whether it *would*
  * float still decides whether opening and closing it is a lasting choice or a
- * dismissal. On a phone, and beside an open inspector, the list is a surface
- * laid over the workspace — putting it away there is the same gesture as
- * closing any other overlay, and no more a preference than one.
+ * dismissal. On a phone, and beside the Signal Desk, the list is a surface laid
+ * over the workspace — putting it away there is the same gesture as closing any
+ * other overlay, and no more a preference than one. A Chat source drawer is the
+ * narrow third column it always was, so the list remains a column beside it.
  */
 export function sidebarWouldFloat(state: ShellState): boolean {
-  return state.inspector !== null || isCompact(state.viewport)
+  const chatSources = state.inspector === "sources" && !state.signalDesk
+  if (isCompact(state.viewport)) return true
+  if (chatSources) {
+    return (state.viewport || 1440) < SIDEBAR_WIDTH + CHAT_MIN + SOURCE_DRAWER_WIDTH
+  }
+  return state.inspector !== null
 }
 
 /** What the two columns have to share, the sidebar already taken out. */
@@ -364,6 +372,9 @@ export { CHAT_MIN as MIN_CHAT_WIDTH }
  */
 export function inspectorWidth(state: ShellState): number {
   if (state.inspector === null || isCompact(state.viewport)) return 0
+  if (!state.signalDesk && state.inspector === "sources") {
+    return Math.min(SOURCE_DRAWER_WIDTH, Math.max(0, roomForColumns(state) - CHAT_MIN))
+  }
   return Math.max(0, roomForColumns(state) - chatColumnWidth(state))
 }
 
@@ -399,6 +410,10 @@ const INITIAL: ShellState = {
  */
 function foldSidebarIfCramped(state: ShellState): ShellState {
   if (!state.sidebarOpen || state.inspector === null) return state
+  // Chat sources stay a drawer. Where three columns do not fit, the sidebar
+  // already floats and costs the layout no width, so closing it would be an
+  // unrelated mode-like transition caused by opening supporting evidence.
+  if (state.inspector === "sources" && !state.signalDesk) return state
   // Before the first measurement there is nothing to decide against, and
   // guessing would fold the sidebar on every server render. A phone has already
   // folded it, and the pane there is an overlay in any case.

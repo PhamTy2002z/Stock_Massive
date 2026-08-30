@@ -24,14 +24,20 @@ import type { ComponentType } from "react"
 import type { Frame, Provenance } from "@/lib/alpha-desk/types"
 
 import { BarSeriesWidget } from "./widgets/bar-series"
+import { BulletWidget } from "./widgets/bullet"
+import { ComparisonTableWidget } from "./widgets/comparison-table"
 import { ConditionChecklistWidget } from "./widgets/condition-checklist"
 import { DataTableWidget } from "./widgets/data-table"
+import { DonutWidget } from "./widgets/donut"
+import { GroupedBarWidget } from "./widgets/grouped-bar"
 import { LineSeriesWidget } from "./widgets/line-series"
 import { RangeStripWidget } from "./widgets/range-strip"
 import { RankedBarsWidget } from "./widgets/ranked-bars"
 import { ScatterQuadrantWidget } from "./widgets/scatter-quadrant"
 import { SessionHeatmapWidget } from "./widgets/session-heatmap"
 import { StatTilesWidget } from "./widgets/stat-tiles"
+import { TextCardWidget } from "./widgets/text-card"
+import { WaterfallWidget } from "./widgets/waterfall"
 
 /** What every widget is handed, and the whole of it. */
 export interface WidgetProps {
@@ -71,6 +77,12 @@ const ACCEPTS: Record<string, Frame["kind"][]> = {
   "condition_checklist@1": ["table"],
   "scatter_quadrant@1": ["table"],
   "scatter_quadrant@2": ["table"],
+  "grouped_bar@1": ["series", "table"],
+  "comparison_table@1": ["table"],
+  "donut@1": ["table"],
+  "waterfall@1": ["table", "series"],
+  "bullet@1": ["table"],
+  "text_card@1": ["table"],
   "data_table@1": ["series", "matrix", "table"],
 }
 
@@ -97,8 +109,28 @@ const REGISTRY: Record<string, Widget> = {
   "condition_checklist@1": ConditionChecklistWidget,
   "scatter_quadrant@1": ScatterQuadrantWidget,
   "scatter_quadrant@2": ScatterQuadrantWidget,
+  "grouped_bar@1": GroupedBarWidget,
+  "comparison_table@1": ComparisonTableWidget,
+  "donut@1": DonutWidget,
+  "waterfall@1": WaterfallWidget,
+  "bullet@1": BulletWidget,
+  "text_card@1": TextCardWidget,
   "data_table@1": DataTableWidget,
 }
+
+/**
+ * Widgets the catalog lists that no component here draws, and why not.
+ *
+ * `kpi_strip` and `caption` are *block kinds of a board*, not drawings of a
+ * frame: the strip is laid out by `kpi-strip.tsx` from figures the server
+ * already resolved, and a caption is a sentence assembled from cells of several
+ * frames. Neither takes a `frame` and neither could satisfy `WidgetProps`.
+ *
+ * They are in the server's catalog because the catalog is what a board's blocks
+ * are checked against, and the contract test reads this list rather than
+ * failing: a name missing from the registry by accident is still a red test.
+ */
+export const NOT_FRAME_WIDGETS: string[] = ["caption@1", "kpi_strip@1"]
 
 export function widgetKey(name: string, version: number): string {
   return `${name}@${version}`

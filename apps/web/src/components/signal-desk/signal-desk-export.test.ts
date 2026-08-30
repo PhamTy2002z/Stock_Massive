@@ -112,3 +112,100 @@ describe("a desk view leaving as a file", () => {
     expect(primaryFrame(artifact)).toBeNull()
   })
 })
+
+describe("a board", () => {
+  it("exports the frame the first picture draws, not the one a sentence quoted", () => {
+    // A v2 board may lead with a caption, and the frame a sentence happened to
+    // reference is not "the data behind this".
+    const artifact = {
+      id: "x",
+      study_name: "composed_signal_desk",
+      study_version: 1,
+      params: {},
+      signal_desk_spec: {
+        specVersion: 2,
+        title: "Bảng",
+        archetype: "compare",
+        kpis: [],
+        sections: [
+          {
+            heading: null,
+            blocks: [
+              {
+                kind: "caption",
+                template: "{a}",
+                text: "1",
+                refs: {},
+                span: 12,
+              },
+              {
+                kind: "visual",
+                widget: "comparison_table",
+                widgetVersion: 1,
+                frame: "f1",
+                options: {},
+                span: 12,
+                source: "store",
+                upgradedFrom: null,
+                downgraded: null,
+              },
+            ],
+          },
+        ],
+        appendix: null,
+        lint: {
+          score: 1,
+          visualRatio: 1,
+          narrativeChars: 0,
+          kpiCount: 0,
+          widgetKinds: 1,
+          violations: [],
+        },
+        autoComposed: false,
+      },
+      frames: {
+        f0: {
+          kind: "table" as const,
+          columns: ["a"],
+          rows: [[1]],
+          unit: null,
+          labels: { a: "A" },
+        },
+        f1: {
+          kind: "table" as const,
+          columns: ["b"],
+          rows: [[2]],
+          unit: null,
+          labels: { b: "B" },
+        },
+      },
+      provenance: {
+        source: "store",
+        asOf: "2026-08-20T00:00:00+00:00",
+        sessionsUsed: 1,
+        health: "normal" as const,
+        reason: null,
+      },
+      created_at: "2026-08-20T00:00:00+00:00",
+    }
+
+    expect(primaryFrame(artifact as never)?.columns).toEqual(["b"])
+  })
+
+  it("still exports a v1 desk from its first block", () => {
+    const artifact = {
+      signal_desk_spec: { title: "Cũ", blocks: [{ frame: "f0" }] },
+      frames: {
+        f0: {
+          kind: "table" as const,
+          columns: ["a"],
+          rows: [[1]],
+          unit: null,
+          labels: { a: "A" },
+        },
+      },
+    }
+
+    expect(primaryFrame(artifact as never)?.columns).toEqual(["a"])
+  })
+})

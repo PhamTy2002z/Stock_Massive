@@ -57,6 +57,24 @@ const ROLE_TOKENS: Record<string, string> = {
   "category:4": "--widget-cat-4",
   "category:5": "--widget-cat-5",
   "category:6": "--widget-cat-6",
+  // The comparison pair, and it is not the market pair wearing another name. A
+  // number that *rose* and a number that is *better than the one beside it* are
+  // different claims — VIC's drawdown falling is `down` and also `winner` — so a
+  // chart that had to choose between them would drop one of the two things the
+  // picture is about.
+  winner: "--widget-up",
+  loser: "--widget-down",
+  // What something is being compared *against*: an index, a sector median. Told
+  // apart from the subject by weight rather than by a hue of its own, because a
+  // reference line competing for attention with the line it references is a
+  // chart with two subjects.
+  benchmark: "--widget-benchmark",
+  // A cell a reader should not read past without the caveat beside it.
+  warning: "--widget-warning",
+  // Real, and older than the rest of the picture. The one condition a frame can
+  // carry that no refusal covers: it has a value, and the value is from another
+  // day.
+  stale: "--widget-neutral",
 }
 
 /** The colour for one declared meaning, or the default series colour. */
@@ -101,6 +119,18 @@ export function resolveRoles(
     roles: roles.map((role) => (role === "focus" ? null : role)),
     focusSpent: true,
   }
+}
+
+/**
+ * The colour for one cell's declared meaning, or nothing.
+ *
+ * `null` rather than the series colour, unlike {@link colorFor}: a table cell
+ * that claims nothing keeps the page's own ink, and painting it the chart's
+ * neutral would make every cell of every comparison look claimed.
+ */
+export function cellColorFor(role: unknown): string | null {
+  const token = typeof role === "string" ? ROLE_TOKENS[role] : undefined
+  return token === undefined ? null : `hsl(var(${token}))`
 }
 
 /** The ground a bar or a rule is drawn against. */

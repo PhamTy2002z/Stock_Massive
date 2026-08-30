@@ -255,6 +255,19 @@ export interface Frame {
   columnRoles?: Record<string, string>
   /** The same, positional against `rows`, for one bar, point or tile. */
   pointRoles?: (string | null)[]
+  /**
+   * The same again, for one cell — the third granularity a comparison needs.
+   *
+   * A table of symbols against metrics has a winner per *column* and a symbol
+   * per *row*, and the claim is about neither: it is that this symbol wins on
+   * this metric. Said with `pointRoles` it would colour the whole row, which is
+   * the sentence a comparison exists to avoid.
+   *
+   * A list of triples rather than a nested object because a JSON key can only be
+   * a string, so a `(row, column)` key would have to be spelled `"3|roe"` and
+   * parsed back here — a second encoding for both ends to agree about.
+   */
+  cellRoles?: { row: number; column: string; role: string }[]
 }
 
 /** One widget on the desk view, the frame it draws, and the options the server chose. */
@@ -266,8 +279,129 @@ export interface SignalDeskBlock {
 }
 
 export interface SignalDeskSpec {
+  /**
+   * Which spelling this is. Absent on every row frozen before the number
+   * existed, which is exactly what `1` means — read it through
+   * {@link specVersionOf} rather than comparing it here.
+   */
+  specVersion?: number
   title: string
   blocks: SignalDeskBlock[]
+}
+
+/**
+ * One cell, already looked up and already formatted, on its way to a box.
+ *
+ * The browser never formats a figure on a board. `text` was produced by
+ * `studies/format.py` at the moment the board was frozen, so a board re-opened
+ * next year renders the string it was written with rather than one this build
+ * derives from a rule it has since changed. `raw`, `frame`, `row` and `column`
+ * travel so a reader can be shown which cell a figure came from.
+ */
+export interface ResolvedValue {
+  text: string
+  raw: unknown
+  unit: string | null
+  frame: string
+  row: number
+  column: string
+}
+
+/** One figure on the strip that leads a board. */
+export interface Kpi {
+  label: string
+  value: ResolvedValue
+  delta: ResolvedValue | null
+  /** What the figure means, in the engine's vocabulary. Never a colour. */
+  role: string | null
+  /** Columns of twelve. Decided by the server, honoured here. */
+  span: number
+}
+
+/** One picture on a board, and the record of how it came to be that one. */
+export interface VisualBlock {
+  kind: "visual"
+  widget: string
+  widgetVersion: number
+  frame: string
+  options: Record<string, unknown>
+  span: number
+  /** Where these numbers came from: this store, a page, or arithmetic on both. */
+  source: "store" | "web" | "derived"
+  /** What the model asked for, when the server drew something else. */
+  upgradedFrom: string | null
+  /** Why this is numbers rather than a picture, when no rule matched. */
+  downgraded: string | null
+}
+
+/**
+ * One sentence, its holes, and what went into each hole.
+ *
+ * Both spellings travel: `template` keeps its `{a}` markers so each figure can
+ * be drawn as a mark the reader hovers to see the cell behind it, and `text` is
+ * the same sentence resolved, for an export and for a screen reader.
+ */
+export interface CaptionBlock {
+  kind: "caption"
+  template: string
+  text: string
+  refs: Record<string, ResolvedValue>
+  span: number
+}
+
+export type BoardBlock = VisualBlock | CaptionBlock
+
+export interface BoardSection {
+  heading: string | null
+  blocks: BoardBlock[]
+}
+
+/** What the compiler measured about the board it admitted. */
+export interface BoardLint {
+  score: number
+  visualRatio: number
+  narrativeChars: number
+  kpiCount: number
+  widgetKinds: number
+  violations: { code: string; where: string; detail: string }[]
+}
+
+/** A board: version 2 of the spec, and the shape this panel was rebuilt for. */
+export interface SignalDeskSpecV2 {
+  specVersion: 2
+  title: string
+  archetype: string
+  kpis: Kpi[]
+  sections: BoardSection[]
+  appendix: VisualBlock | null
+  lint: BoardLint
+  /**
+   * Whether the server drew this because the model drew none.
+   *
+   * Shown to the reader, in one line under the header. A board nobody claims
+   * authorship of is read as an argument somebody made.
+   */
+  autoComposed: boolean
+}
+
+export type AnySignalDeskSpec = SignalDeskSpec | SignalDeskSpecV2
+
+/**
+ * Which spelling a spec is, defaulting to the one that predates the number.
+ *
+ * A function rather than a field read, because "no version" and "version one"
+ * are the same fact and inferring it at each call site is how one of them comes
+ * to be read as a v2 board with nothing in it.
+ */
+export function specVersionOf(spec: AnySignalDeskSpec | undefined): number {
+  const declared = (spec as { specVersion?: unknown } | undefined)?.specVersion
+  return typeof declared === "number" ? declared : 1
+}
+
+export function isBoardSpec(
+  spec: AnySignalDeskSpec | undefined,
+): spec is SignalDeskSpecV2 {
+  return specVersionOf(spec) === 2
 }
 
 /**
@@ -317,7 +451,7 @@ export interface ArtifactPayload {
   study_name: string
   study_version: number
   params: Record<string, unknown>
-  signal_desk_spec: SignalDeskSpec
+  signal_desk_spec: AnySignalDeskSpec
   frames: Record<string, Frame>
   provenance: Provenance
   created_at: string

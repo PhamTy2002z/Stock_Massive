@@ -34,10 +34,12 @@ import { useEffect, useMemo } from "react"
 import { FailureState } from "@/components/ui/failure-state"
 import { SIGNAL_DESK_COPY } from "@/lib/alpha-desk/copy"
 import { describeFailure } from "@/lib/failure"
-import type { SignalDeskBlock, Frame } from "@/lib/alpha-desk/types"
+import { isBoardSpec } from "@/lib/alpha-desk/types"
+import type { SignalDeskBlock, Frame, SignalDeskSpec } from "@/lib/alpha-desk/types"
 import { cn } from "@/lib/utils"
 
 import { SignalDeskBlockView } from "./signal-desk-block"
+import { SignalDeskBoardView } from "./signal-desk-board"
 import { ProvenanceStrip } from "./provenance-strip"
 import { useArtifact } from "./use-artifact"
 
@@ -118,7 +120,23 @@ export function SignalDeskPanel({
   }
 
   const spec = artifact.data?.signal_desk_spec
-  const blocks: SignalDeskBlock[] = spec?.blocks ?? []
+
+  // Two spellings, and the branch is on the version rather than on which keys
+  // happen to be present. A v1 row with an empty block list is not a v2 board
+  // with nothing in it, and inference is how it comes to be drawn as one.
+  if (artifact.data !== undefined && isBoardSpec(spec)) {
+    return (
+      <div className={cn(frozen && "pointer-events-none")}>
+        <SignalDeskBoardView
+          spec={spec}
+          frames={frames}
+          provenance={artifact.data.provenance}
+        />
+      </div>
+    )
+  }
+
+  const blocks: SignalDeskBlock[] = (spec as SignalDeskSpec | undefined)?.blocks ?? []
 
   return (
     <div className={cn(frozen && "pointer-events-none")}>

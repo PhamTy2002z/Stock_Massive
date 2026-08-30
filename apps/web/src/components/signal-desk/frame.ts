@@ -44,6 +44,29 @@ export function pointRole(frame: Frame, index: number): string | null {
   return frame.pointRoles?.[index] ?? null
 }
 
+/**
+ * What one *cell* is, as the frame declared it, or `null`.
+ *
+ * The third granularity, and a comparison needs it: a table of symbols against
+ * metrics has a winner per column and a symbol per row, and the claim is about
+ * neither — it is that this symbol wins on this metric. Read out of a list of
+ * triples rather than a nested object, because a JSON key can only be a string.
+ *
+ * Linear rather than indexed, deliberately. The lists this reads are one entry
+ * per marked cell of a table a reader can see at once — a handful — and a map
+ * built per render would cost more than the scans it saves.
+ */
+export function cellRole(
+  frame: Frame,
+  row: number,
+  column: string,
+): string | null {
+  const found = frame.cellRoles?.find(
+    (entry) => entry.row === row && entry.column === column,
+  )
+  return found?.role ?? null
+}
+
 /** One cell as a number, or `null` when it is absent or not one. */
 export function numberAt(row: unknown[], index: number): number | null {
   if (index < 0 || index >= row.length) return null

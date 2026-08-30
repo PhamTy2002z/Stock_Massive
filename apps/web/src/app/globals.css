@@ -582,6 +582,17 @@
     --widget-axis: 214 5% 71%;
     /* The row or point the answer is actually about. */
     --widget-focus: 30 91% 58%;
+    /* What something is being compared *against*: an index, a sector median.
+       Deliberately the quietest mark on a chart — a reference that competed
+       with the line referencing it would be a chart with two subjects. Slate
+       at 5.13:1 against --widget-surface, past the 3:1 a chart stroke needs
+       and well clear of the six category hues. */
+    --widget-benchmark: 220 12% 55%;
+    /* A cell a reader should not read past without the caveat beside it. Amber
+       rather than the fall red: the number is not bad, it is unsafe to read
+       alone. Stepped away from --widget-focus (30 91% 58%) by hue so the two
+       are not mistaken for each other on one picture. 8.44:1. */
+    --widget-warning: 45 88% 60%;
 
     /* Six interchangeable group hues, for a picture whose parts are categories
        rather than directions.
@@ -619,6 +630,10 @@
     --widget-grid: 220 8% 88%;
     --widget-axis: 216 6% 40%;
     --widget-focus: 30 76% 36%;
+    /* The same two, darkened for white paper: 4.61:1 and 4.53:1 against
+       --widget-surface (0 0% 100%). */
+    --widget-benchmark: 220 12% 42%;
+    --widget-warning: 38 92% 32%;
 
     /* The same six hues, darkened for white paper. Against --widget-surface
        (0 0% 100%): 5.88, 9.45, 6.29, 6.25, 5.42 and 5.73 to one. */
