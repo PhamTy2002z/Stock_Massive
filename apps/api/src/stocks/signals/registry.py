@@ -40,6 +40,7 @@ from types import MappingProxyType
 from .fields import (
     BarProjection,
     Claim,
+    Direction,
     FieldKind,
     FieldSource,
     NullCalibration,
@@ -154,6 +155,7 @@ VOLATILITY_REGIME_Z = SignalField(
     # field the nightly pipeline cannot find by name is a field it emits as
     # refused.
     name="volatility_regime.gk_variance_robust_z",
+    better=Direction.LOWER,
     # The estimator itself is intra-bar and so basis-invariant, but the
     # reading carries ``limit_lock_days``, which comes off the band
     # machine and only the price projection measures one.
@@ -218,6 +220,7 @@ VOLATILITY_REGIME_Z = SignalField(
 
 REALIZED_VOLATILITY = SignalField(
     name="realized_volatility.yang_zhang_annualized_pct",
+    better=Direction.LOWER,
     projection=BarProjection.PRICE,
     unit=Unit.PERCENT_ANNUALIZED,
     sign=Sign.NON_NEGATIVE,
@@ -296,6 +299,7 @@ _DRAWDOWN_KEYS = (
 
 MAX_DRAWDOWN = SignalField(
     name="drawdown_stats.max_drawdown_pct",
+    better=Direction.HIGHER,
     projection=BarProjection.PRICE,
     unit=Unit.PERCENT,
     sign=Sign.NON_POSITIVE,
@@ -320,6 +324,7 @@ MAX_DRAWDOWN = SignalField(
 
 CURRENT_DRAWDOWN = SignalField(
     name="drawdown_stats.current_drawdown_pct",
+    better=Direction.HIGHER,
     projection=BarProjection.PRICE,
     unit=Unit.PERCENT,
     sign=Sign.NON_POSITIVE,
@@ -342,6 +347,7 @@ CURRENT_DRAWDOWN = SignalField(
 
 DAYS_UNDERWATER = SignalField(
     name="drawdown_stats.days_underwater",
+    better=Direction.LOWER,
     projection=BarProjection.PRICE,
     unit=Unit.SESSIONS,
     sign=Sign.NON_NEGATIVE,
@@ -364,6 +370,7 @@ DAYS_UNDERWATER = SignalField(
 
 DRAWDOWN_VERSUS_BENCHMARK = SignalField(
     name="drawdown_stats.mdd_over_expected",
+    better=Direction.LOWER,
     projection=BarProjection.PRICE,
     unit=Unit.RATIO,
     sign=Sign.NON_NEGATIVE,
@@ -421,6 +428,7 @@ DRAWDOWN_VERSUS_BENCHMARK = SignalField(
 
 SHARPE = SignalField(
     name="risk_adjusted.sharpe_annualized",
+    better=Direction.HIGHER,
     projection=BarProjection.PRICE,
     unit=Unit.RATIO,
     sign=Sign.SIGNED,
@@ -457,6 +465,7 @@ SHARPE = SignalField(
 
 SORTINO = SignalField(
     name="risk_adjusted.sortino_annualized",
+    better=Direction.HIGHER,
     projection=BarProjection.PRICE,
     unit=Unit.RATIO,
     sign=Sign.SIGNED,
@@ -504,6 +513,7 @@ SORTINO = SignalField(
 
 ADTV_MONEY = SignalField(
     name="liquidity_profile.adtv_vnd",
+    better=Direction.HIGHER,
     # Price, not volume: after the traded value is derived it is
     # arithmetic on ``close``. ``WindowHealth.adtv`` is measured only on
     # this projection too.
@@ -539,6 +549,7 @@ ADTV_MONEY = SignalField(
 
 ADTV_SHARES = SignalField(
     name="liquidity_profile.adtv_shares",
+    better=Direction.HIGHER,
     # Only ``volume`` is read, and a share count is a share count on
     # either price basis. The unit break a stock dividend causes still
     # travels, as ``volume_basis_break``.
@@ -570,6 +581,7 @@ ADTV_SHARES = SignalField(
 
 AMIHUD_ILLIQUIDITY = SignalField(
     name="liquidity_profile.amihud_illiq",
+    better=Direction.LOWER,
     # Price: a move in percent divided by money traded, both read off the
     # bars.
     projection=BarProjection.PRICE,
@@ -606,6 +618,7 @@ AMIHUD_ILLIQUIDITY = SignalField(
 
 ADTV_PERCENTILE = SignalField(
     name="liquidity_profile.adtv_percentile",
+    better=Direction.HIGHER,
     # Price, and it has to be: the peer standing this ranks is measured
     # only when the projection is price, so anything else locks the field
     # into ``ranking_unavailable`` for good.
@@ -759,6 +772,7 @@ MOMENTUM_RANK = SignalField(
     # months back — which is the same window ``252 + 21`` describes by the length
     # of its skip. Both spellings, one window (see ``cross_sectional``).
     name="momentum_rank.percentile_12_2",
+    better=Direction.HIGHER,
     projection=BarProjection.PRICE,
     unit=Unit.PERCENTILE,
     sign=Sign.NON_NEGATIVE,
@@ -796,6 +810,7 @@ MOMENTUM_RANK = SignalField(
 
 TREND_SIGNAL = SignalField(
     name="trend_signal.total_return_12m_pct",
+    better=Direction.HIGHER,
     projection=BarProjection.PRICE,
     unit=Unit.PERCENT,
     sign=Sign.SIGNED,
@@ -873,6 +888,7 @@ _FACTOR_KEYS = (
 
 EARNINGS_YIELD_PERCENTILE = SignalField(
     name="factor_percentiles.earnings_yield_percentile",
+    better=Direction.HIGHER,
     projection=BarProjection.PRICE,
     unit=Unit.PERCENTILE,
     sign=Sign.NON_NEGATIVE,
@@ -898,6 +914,7 @@ EARNINGS_YIELD_PERCENTILE = SignalField(
 
 BOOK_YIELD_PERCENTILE = SignalField(
     name="factor_percentiles.book_yield_percentile",
+    better=Direction.HIGHER,
     projection=BarProjection.PRICE,
     unit=Unit.PERCENTILE,
     sign=Sign.NON_NEGATIVE,
@@ -920,6 +937,7 @@ BOOK_YIELD_PERCENTILE = SignalField(
 
 ROE_PERCENTILE = SignalField(
     name="factor_percentiles.roe_percentile",
+    better=Direction.HIGHER,
     # A ratio out of the quarterly statements; no price is read at any
     # point. It needs the window only to be dated against the same cutoff
     # every other member of the sample is.
@@ -1257,6 +1275,7 @@ _RESULTS_STAMP = (
 
 EPS_BASIC_YOY = SignalField(
     name="earnings.eps_basic_yoy_pct",
+    better=Direction.HIGHER,
     projection=BarProjection.VOLUME,
     unit=Unit.PERCENT,
     sign=Sign.SIGNED,
@@ -1284,6 +1303,7 @@ EPS_BASIC_YOY = SignalField(
 
 NET_PROFIT_YOY = SignalField(
     name="earnings.net_profit_yoy_pct",
+    better=Direction.HIGHER,
     projection=BarProjection.VOLUME,
     unit=Unit.PERCENT,
     sign=Sign.SIGNED,
@@ -1310,6 +1330,7 @@ NET_PROFIT_YOY = SignalField(
 
 GROSS_PROFIT_TREND = SignalField(
     name="earnings.gross_profit_trend",
+    better=Direction.HIGHER,
     projection=BarProjection.VOLUME,
     unit=Unit.PERCENT,
     sign=Sign.SIGNED,

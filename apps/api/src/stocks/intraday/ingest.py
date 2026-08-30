@@ -34,8 +34,10 @@ the first question rather than on the container starting up.
 
 from __future__ import annotations
 
+import argparse
 import logging
 import math
+import sys
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -47,9 +49,12 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 from vnstock.api.quote import Quote
 
+from src.core.database import get_sync_db
+from src.core.quota import QuotaLane, quota_arbiter, quota_lane
 from src.core.vnstock_wrapper import safe_vnstock_call
 from src.stocks.models import BarIntraday15m
 from src.stocks.providers.normalize import VN_TZ
+from src.stocks.universe import build_universe
 
 from . import session_window
 
@@ -110,6 +115,13 @@ class IngestOutcome:
 
 def _fetch_from_vnstock(symbol: str, start: date, end: date) -> pd.DataFrame:
     quote = Quote(source=PROVIDER_SOURCE, symbol=symbol)
+    # The account's allowance, taken from the one arbiter that owns it, on the
+    # same reasoning ``providers/vnstock_daily.py`` gives: a pacer of this
+    # module's own would spend the same slots the daily spine is counting, and
+    # three uncoordinated pacers over one allowance is the measured failure the
+    # arbiter exists to end. Placed after the constructor, which reaches no
+    # provider.
+    quota_arbiter().acquire()
     frame = safe_vnstock_call(
         quote.history,
         start=start.isoformat(),
@@ -312,7 +324,93 @@ def _deduplicated(rows: list[dict]) -> list[dict]:
     return list(by_bucket.values())
 
 
+#: How many closed sessions a declared-scope backfill asks for. A year of them,
+#: which is what one request buys at this provider's 15-minute depth: nothing
+#: here pages, so asking for less would cost the same request and store less.
+BACKFILL_SESSIONS = 240
+
+#: The scopes the backfill accepts. ``declared`` is the promised Universe — the
+#: symbols a Study may be run for — and it is the only one offered. A market
+#: scope would be 1.523 requests for buckets no reader can reach: intraday
+#: history is read by Study, and a Study only runs for a symbol the Universe
+#: contains.
+BACKFILL_SCOPES = ("declared",)
+
+
+def run_backfill(
+    *, scope: str = "declared", sessions: int = BACKFILL_SESSIONS
+) -> tuple[int, list[str]]:
+    """Fill 15-minute history for every symbol in scope, one request each.
+
+    Returns how many symbols were written and which failed. One symbol's failure
+    does not end the run, on the daily spine's reasoning: re-running the same
+    command retries only what failed, and a run that stopped at the first
+    provider hiccup would leave the rest of the market un-backfilled for the
+    sake of one.
+    """
+    if scope not in BACKFILL_SCOPES:
+        raise ValueError(
+            f"{scope!r} is not a scope; expected one of {BACKFILL_SCOPES}"
+        )
+
+    with get_sync_db() as session:
+        symbols = build_universe(session).symbols
+
+    written = 0
+    failures: list[str] = []
+    # ``BACKFILL`` stands aside for a caller with a user waiting behind it and
+    # then waits as long as it takes, which is what an operator's job should do
+    # to an allowance a conversation is also drawing on.
+    with quota_lane(QuotaLane.BACKFILL):
+        for symbol in symbols:
+            try:
+                with get_sync_db() as session:
+                    outcome = ensure_bars(session, symbol, sessions=sessions)
+                written += 1
+                logger.info(
+                    "%s: %d rows, %d sessions stored, last %s",
+                    outcome.symbol,
+                    outcome.rows_written,
+                    outcome.sessions_stored,
+                    outcome.last_session,
+                )
+            except Exception as error:  # noqa: BLE001 - one symbol is not the run
+                logger.warning("%s failed: %s", symbol, error)
+                failures.append(symbol)
+    return written, failures
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="python -m src.stocks.intraday.ingest",
+        description="Fill 15-minute intraday history for the declared Universe.",
+    )
+    parser.add_argument("--scope", default="declared", choices=list(BACKFILL_SCOPES))
+    parser.add_argument(
+        "--sessions",
+        type=int,
+        default=BACKFILL_SESSIONS,
+        help="How many closed sessions deep to ask for.",
+    )
+    args = parser.parse_args(argv)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        stream=sys.stdout,
+    )
+    written, failures = run_backfill(scope=args.scope, sessions=args.sessions)
+    logger.info("Intraday backfill: %d symbols written", written)
+    if failures:
+        # Non-zero after every other symbol has been written, so an operator
+        # sees it and a re-run retries only what failed.
+        logger.warning("Symbols that failed: %s", ", ".join(failures))
+        return 1
+    return 0
+
+
 __all__ = [
+    "BACKFILL_SCOPES",
+    "BACKFILL_SESSIONS",
     "COLD_START_DAYS",
     "IngestOutcome",
     "IntradayIngestError",
@@ -320,4 +418,9 @@ __all__ = [
     "SETTLE_GRACE",
     "SOURCE",
     "ensure_bars",
+    "run_backfill",
 ]
+
+
+if __name__ == "__main__":
+    sys.exit(main())

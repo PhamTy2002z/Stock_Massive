@@ -75,6 +75,178 @@ def lines_for(
     return {(statement, item_id): value for statement, item_id, value in rows}
 
 
+def lines_for_many(
+    session: Session,
+    symbols: Sequence[str],
+    periods: Sequence[str],
+    items: Sequence[tuple[str, str]] | None = None,
+) -> dict[tuple[str, str, str, str], Decimal]:
+    """Many symbols' lines for many quarters, keyed ``(symbol, period, statement, item_id)``.
+
+    One query rather than a loop over :func:`lines_for`, because the question
+    this answers is a *table* — ten symbols against eight quarters against a
+    chosen set of lines — and a loop would be eighty round trips to build one.
+
+    ``items`` narrows to the lines actually wanted. Passing ``None`` reads every
+    line the symbols report, which for ten symbols across eight quarters of an
+    insurer's balance sheet is thousands of rows; the caller that means "the
+    whole statement" says so by leaving it out, and the ceiling that stops that
+    being a mistake lives in the tool layer where the model's request arrives.
+
+    ``item_seq = 0`` here as everywhere: the first occurrence is the one a named
+    concept resolves against, and the repeats are a different line filed under
+    the wrong id.
+
+    A pair the store does not hold is simply absent from the mapping. Absent and
+    zero are different answers, and a caller building a frame writes ``null`` for
+    the first — a line a company does not report is not a line it reported as
+    nothing.
+    """
+    wanted_symbols = [symbol.upper() for symbol in symbols]
+    wanted_periods = list(periods)
+    if not wanted_symbols or not wanted_periods:
+        return {}
+
+    query = select(
+        FinancialStatementLine.symbol,
+        FinancialStatementLine.period,
+        FinancialStatementLine.statement,
+        FinancialStatementLine.item_id,
+        FinancialStatementLine.value,
+    ).where(
+        FinancialStatementLine.symbol.in_(wanted_symbols),
+        FinancialStatementLine.period.in_(wanted_periods),
+        FinancialStatementLine.item_seq == PRIMARY_SEQ,
+    )
+    if items is not None:
+        wanted_items = list(items)
+        if not wanted_items:
+            return {}
+        query = query.where(_wanted_items(wanted_items))
+
+    return {
+        (symbol, period, statement, item_id): value
+        for symbol, period, statement, item_id, value in session.execute(query).all()
+    }
+
+
+def ratios_for_many(
+    session: Session,
+    symbols: Sequence[str],
+    periods: Sequence[str],
+    items: Sequence[str] | None = None,
+) -> dict[tuple[str, str, str], Decimal]:
+    """Many symbols' reported ratios for many quarters, keyed ``(symbol, period, item_id)``.
+
+    The same read as :func:`ratios_for` widened the same way, and with the same
+    warning it carries: the units follow the source that reported them, so a
+    caller comparing two sources reads the ``source`` column instead of this.
+    """
+    wanted_symbols = [symbol.upper() for symbol in symbols]
+    wanted_periods = list(periods)
+    if not wanted_symbols or not wanted_periods:
+        return {}
+
+    query = select(
+        FinancialRatioSnapshot.symbol,
+        FinancialRatioSnapshot.period,
+        FinancialRatioSnapshot.item_id,
+        FinancialRatioSnapshot.value,
+    ).where(
+        FinancialRatioSnapshot.symbol.in_(wanted_symbols),
+        FinancialRatioSnapshot.period.in_(wanted_periods),
+        FinancialRatioSnapshot.item_seq == PRIMARY_SEQ,
+    )
+    if items is not None:
+        wanted_items = list(items)
+        if not wanted_items:
+            return {}
+        query = query.where(FinancialRatioSnapshot.item_id.in_(wanted_items))
+
+    return {
+        (symbol, period, item_id): value
+        for symbol, period, item_id, value in session.execute(query).all()
+    }
+
+
+def periods_for_many(
+    session: Session,
+    symbols: Sequence[str],
+    *,
+    statement: str | None = None,
+) -> tuple[str, ...]:
+    """Every quarter any of these symbols filed a statement line for, newest first.
+
+    The union rather than the intersection. A frame of two symbols where one
+    reports a quarter the other does not still has that quarter as a row; the
+    cell that is missing becomes ``null``, which is the honest answer and the one
+    the intersection would silently delete along with the whole row.
+    """
+    wanted = [symbol.upper() for symbol in symbols]
+    if not wanted:
+        return ()
+    query = (
+        select(FinancialStatementLine.period)
+        .where(FinancialStatementLine.symbol.in_(wanted))
+        .distinct()
+        .order_by(FinancialStatementLine.period.desc())
+    )
+    if statement is not None:
+        query = query.where(FinancialStatementLine.statement == statement)
+    return tuple(session.execute(query).scalars())
+
+
+def ratio_periods_for_many(
+    session: Session, symbols: Sequence[str]
+) -> tuple[str, ...]:
+    """Every quarter any of these symbols holds a *ratio* for, newest first.
+
+    Its own read and not :func:`periods_for_many` with a different filter,
+    because the two tables are filled from two independent provider responses
+    and a scan writes them one part at a time (``store.ingest_symbol``): a symbol
+    whose statement fetch failed and whose ratio fetch succeeded holds a quarter
+    in one table and not the other. Asking the statement table which quarters
+    exist would silently drop exactly those, with no refusal saying why — and the
+    provider only ever answers about three distinct quarters of ratios anyway
+    (``fetch.py``), so the set really is smaller and really is different.
+    """
+    wanted = [symbol.upper() for symbol in symbols]
+    if not wanted:
+        return ()
+    return tuple(
+        session.execute(
+            select(FinancialRatioSnapshot.period)
+            .where(FinancialRatioSnapshot.symbol.in_(wanted))
+            .distinct()
+            .order_by(FinancialRatioSnapshot.period.desc())
+        ).scalars()
+    )
+
+
+def periods_held_by(
+    session: Session, symbols: Sequence[str]
+) -> dict[str, frozenset[str]]:
+    """Which quarters each symbol actually filed, so a gap can name itself.
+
+    A frame's rows are the *union* of the quarters any symbol holds, so a symbol
+    that filed four of eight has four rows of nulls. Without this, every one of
+    those cells is counted as a line the company did not report — which is the
+    wrong input to blame. ``CLAUDE.md``: a refusal code has to point at the input
+    that is actually missing.
+    """
+    wanted = [symbol.upper() for symbol in symbols]
+    if not wanted:
+        return {}
+    held: dict[str, set[str]] = {}
+    for symbol, period in session.execute(
+        select(FinancialStatementLine.symbol, FinancialStatementLine.period)
+        .where(FinancialStatementLine.symbol.in_(wanted))
+        .distinct()
+    ).all():
+        held.setdefault(symbol, set()).add(period)
+    return {symbol: frozenset(periods) for symbol, periods in held.items()}
+
+
 def concepts_for(
     session: Session, symbol: str, period: str
 ) -> dict[Concept, ConceptValue]:
@@ -153,6 +325,11 @@ __all__ = [
     "concepts_for_period",
     "latest_period",
     "lines_for",
+    "lines_for_many",
     "periods_for",
+    "periods_for_many",
+    "periods_held_by",
+    "ratio_periods_for_many",
     "ratios_for",
+    "ratios_for_many",
 ]

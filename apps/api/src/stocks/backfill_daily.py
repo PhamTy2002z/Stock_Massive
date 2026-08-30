@@ -7,14 +7,16 @@ resumes for free — and there is no second record of progress that can disagree
 with the rows sitting next to it. A checkpoint table would have to be kept true
 against the very thing it describes.
 
-**"The newest session" is the series' own, and it has to stay that way.**
-``trading_day.latest_trading_day`` now reads this very table, so using it as the
-skip reference would make the job's progress depend on its own output: it
-returns only *closed* sessions, so a run during trading hours would compare
-every symbol against yesterday and skip the whole market rather than write
-today's partial bar the next run replaces. The reference is ``max(trading_day)``
-within the same series instead. On a first run there is none, and nothing is
-skipped.
+**The skip reference comes from the calendar, never from this table.**
+Both obvious in-store references are this job's own output, and both make the
+spine a fixed point. ``trading_day.latest_trading_day`` reads this very table.
+So does ``max(trading_day)`` within the series, which was the reference here
+until it was measured: every symbol that reached the newest stored session is
+"current" *with that session*, so a spine that missed a day could never be told
+to go and get it. VNINDEX showed it sharpest — the only symbol in its series,
+compared against itself, skipped on every run once it reached its depth, with
+the store frozen three days behind the market. The reference is
+:func:`latest_expected_session` instead: the newest weekday, by the clock.
 
 **One symbol failing does not end the run.** Market scope is 1,523 network
 calls against a provider with no SLA; a run that stopped on the first timeout
@@ -39,8 +41,9 @@ import logging
 import sys
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Callable
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -135,11 +138,29 @@ def scope_symbols(
     raise ValueError(f"{scope!r} is not a scope; expected one of {SCOPES}")
 
 
-def newest_stored_session(session: Session, series: str) -> date | None:
-    """The newest session the spine holds for a series, or None while it is empty."""
-    return session.execute(
-        select(func.max(BarDaily.trading_day)).where(BarDaily.series == series)
-    ).scalar_one_or_none()
+#: The market's clock. A session is dated by the day it traded in Vietnam, so
+#: the calendar this job compares against has to be read there too.
+ICT = ZoneInfo("Asia/Ho_Chi_Minh")
+
+
+def latest_expected_session(today: date | None = None) -> date:
+    """The day a session would carry if the market ran on the newest weekday.
+
+    Weekday rather than trading day, and that is the whole point: a trading-day
+    calendar is derived from the spine, so asking one would put this job back on
+    data it is itself responsible for producing. A public holiday costs one call
+    per symbol that comes back with nothing new, and the ``observed_at`` guard in
+    :func:`is_deep_enough` holds it to one for the day.
+
+    During trading hours this is today, so the run writes today's partial bar and
+    then stands down until tomorrow — the old reference skipped the market
+    outright in that window, which is the behaviour its own docstring set out to
+    avoid.
+    """
+    day = today or datetime.now(ICT).date()
+    while day.weekday() >= 5:  # Saturday, Sunday: no session carries these dates
+        day -= timedelta(days=1)
+    return day
 
 
 def is_deep_enough(
@@ -261,7 +282,7 @@ def _one_symbol(
     """
     try:
         with session_factory() as session:
-            reference = newest_stored_session(session, series)
+            reference = latest_expected_session(today)
             if is_deep_enough(session, symbol, sessions=depth, reference=reference):
                 logger.info(
                     "%s skipped: already %d sessions deep and current",

@@ -557,3 +557,60 @@ class AgentAttachment(Base):
 
     def __repr__(self) -> str:
         return f"<AgentAttachment {self.id} {self.media_type} {self.byte_size}B>"
+
+
+class FinancialStatementItem(Base):
+    """The Vietnamese a reader sees where a statement line has a provider's id.
+
+    ``financial_statement_line`` stores ``item_id`` raw and never a label — the
+    decision recorded there is that a mapping which turns out to be wrong should
+    be a patch to one resolver rather than a market-wide re-fetch. That holds for
+    *meaning*: what a line is worth as a concept is ``financial/templates.py``'s
+    to decide. It does not hold for *display*. A frame handed to the browser
+    labels every column in Vietnamese (``studies/contracts.py::Frame``), and a
+    column named ``business_income_tax_deferred`` is a column nobody asked about
+    a company can read.
+
+    So the label is a table rather than a column on the line: the same
+    ``(statement, item_id)`` repeats across 1.235 symbols and 34 quarters, and a
+    label carried on every one of the 302.528 rows would be the same sentence
+    stored three hundred thousand times — and would have to be re-fetched to fix
+    a typo.
+
+    Keyed ``(statement, item_id)`` without ``item_seq``. The occurrence index is
+    in the line's key because the provider genuinely answers two different
+    numbers under one id, but both occurrences arrive under the *same* id, and an
+    id is what this table names. Where the second occurrence is a different line
+    arriving under the wrong id — SSI's minority interest under
+    ``business_income_tax_deferred`` — a per-occurrence label would give the
+    reader the provider's own mistake in two languages rather than one.
+
+    Labels are the provider's, stored as it wrote them. Nothing here translates:
+    an invented Vietnamese line name is an interpretation of a number by the
+    layer least equipped to make one, which is the rule ``Frame.labels``
+    already states.
+    """
+
+    __tablename__ = "financial_statement_item"
+
+    # income | balance | cashflow | ratio — src/stocks/financial/fetch.py owns
+    # the set. ``ratio`` is here too: a ratio response carries the same three
+    # meta columns, and a reader drawing a ratio frame needs a label as much as
+    # one drawing a balance sheet.
+    statement = Column(String(8), primary_key=True)
+    item_id = Column(String(128), primary_key=True)
+    label_vi = Column(String(512), nullable=False)
+    # The provider answers an English column too, and it is stored rather than
+    # dropped: it is free, it arrives in the same response, and it is the only
+    # check available on a Vietnamese label that looks wrong.
+    label_en = Column(String(512), nullable=True)
+    # Which symbol's response this label was read from. Kept because the three
+    # reporting templates disagree about what a line means, and a label seeded
+    # from a bank's response sitting on a securities house's id is the failure
+    # this column makes visible instead of invisible.
+    seeded_from = Column(String(20), nullable=False)
+    source = Column(String(32), nullable=False)
+    observed_at = Column(DateTime(timezone=True), nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<FinancialStatementItem {self.statement}.{self.item_id}>"

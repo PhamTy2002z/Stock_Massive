@@ -115,12 +115,58 @@ async def report_spine_freshness_at_startup() -> None:
         logger.exception("Could not read the daily spine's freshness")
         return
 
-    if problem is not None:
+    if problem is None:
+        return
+
+    settings = get_settings()
+    if not settings.backfill_daily_scheduled:
         logger.warning(
             "Daily spine is not current: %s. Every Signal Field is dated by this "
             "table, so answers will carry an old session rather than fail. Fill "
-            "it with `make backfill-daily SCOPE=index` (then declared, market).",
+            "it with `make backfill-daily SCOPE=index` (then declared, market), "
+            "or set BACKFILL_DAILY_SCHEDULED so this fills itself.",
             problem,
+        )
+        return
+
+    logger.warning(
+        "Daily spine is not current: %s. Filling index and declared now.", problem
+    )
+    asyncio.create_task(_catch_the_daily_spine_up())
+
+
+#: What a catch-up fills, and what it deliberately does not. ``market`` is 1,523
+#: provider calls; a boot is not the moment to spend them, and no answer this
+#: lane gives is dated by a symbol outside the declared Universe.
+CATCH_UP_SCOPES = ("index", "declared")
+
+
+async def _catch_the_daily_spine_up() -> None:
+    """Fill the spine behind the request path, once, at boot.
+
+    A log line was the whole response to a stale spine until 2026-08-30, and the
+    failure it was written for happened anyway: the store sat three days behind,
+    every answer cited its newest session, and the date was simply old. A machine
+    that is off at 16:30 never meets the scheduled run, so boot is the only other
+    moment the gap can close.
+
+    Off the request path and never raising. Answers served in the first minute
+    are still dated by the old session — they say so — and the run replaces it.
+    """
+    from src.stocks import backfill_daily
+
+    for scope in CATCH_UP_SCOPES:
+        try:
+            report = await asyncio.to_thread(backfill_daily.run, scope=scope)
+        except Exception:
+            logger.exception("Daily spine catch-up failed for scope %s", scope)
+            continue
+        logger.info(
+            "Daily spine catch-up scope=%s attempted=%d rows=%d failed=%d",
+            scope,
+            report.attempted,
+            report.rows_written,
+            len(report.failures),
         )
 
 

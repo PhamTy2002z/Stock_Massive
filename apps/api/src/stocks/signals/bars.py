@@ -130,28 +130,32 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
-from datetime import date
+from dataclasses import dataclass, field
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from enum import Enum
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.stocks.models import CorporateAction, ListingRoster
+from src.stocks.models import CorporateAction, ListingRoster, ProviderSnapshot
 
 from ..providers.contracts import (
     Capability,
     Exchange,
     MarketSnapshot,
     PriceBasis,
+    ReferenceSnapshot,
     SessionSnapshot,
+    main_source,
 )
+from ..providers.normalize import VN_TZ
 from ..trading_day import latest_trading_day, trading_days_before
 from ..universe import build_universe
 from .corporate_actions import CorporateActionStore, adjustment_factor
 from .fields import DEGRADED_LIMIT_LOCK_SHARE, BarProjection, min_sample_for
 from .issues import SignalIssue
+from .reference import REFERENCE_STALE_DAYS
 from .price_band import (
     EXCHANGE_MIGRATIONS,
     BandAnchorBasis,
@@ -366,6 +370,11 @@ class BarPreparationContext:
     _sessions: dict[str, dict[date, SessionSnapshot]]
     _actions: dict[str, tuple[CorporateAction, ...]]
     _listed_exchanges: dict[str, Exchange | None]
+    # Loaded with the window rather than per symbol. A cross-sectional field
+    # prepares one context and then calls ``prepare_bars`` a hundred times; a
+    # share count read inside that loop would be a hundred queries for one
+    # answer that does not change between them.
+    _shares: dict[str, "SharesOnRecord"] = field(default_factory=dict)
     _projection: BarProjection = BarProjection.PRICE
     _series: BarSeries = BarSeries.EQUITY
 
@@ -528,6 +537,7 @@ def prepare_bars_context(
             _sessions={},
             _actions={},
             _listed_exchanges={},
+            _shares={},
             _projection=projection,
             _series=series,
         )
@@ -573,6 +583,14 @@ def prepare_bars_context(
         _sessions=held,
         _actions=actions,
         _listed_exchanges=listed_exchanges,
+        # Only for the equity series. An index has no share count, and asking
+        # for one would be a query answering nothing on every cross-sectional
+        # read of the benchmark.
+        _shares=(
+            share_counts(session, wanted, on_or_before=resolved_end)
+            if series is BarSeries.EQUITY
+            else {}
+        ),
         _projection=projection,
         _series=series,
     )
@@ -747,7 +765,15 @@ def prepare_bars(
         if _adjusts_from_actions(usable.values()):
             factors, adjustment_issues = _factors(window, usable, by_ex_date)
 
-    frame = _frame(symbol, window, usable, bands, factors, projection, series)
+    if series is not BarSeries.EQUITY:
+        shares = None
+    elif context is not None:
+        shares = context._shares.get(symbol.upper())
+    else:
+        # Cut off at the window's own end, so a window asked about a past
+        # session is not valued with a share count issued after it.
+        shares = share_counts(session, [symbol], on_or_before=end).get(symbol.upper())
+    frame = _frame(symbol, window, usable, bands, factors, projection, series, shares)
 
     degradations: list[SignalIssue] = []
     if any(action.changes_share_count for action in actions):
@@ -1000,6 +1026,140 @@ def _close_before(
     return None
 
 
+@dataclass(frozen=True)
+class SharesOnRecord:
+    """How many shares a symbol has, and when that was last observed.
+
+    Named for the record rather than for the count, because
+    ``providers/contracts.ShareCount`` already exists in this same tree and means
+    something narrower — one typed count off a provider payload, with no date on
+    it. Two dataclasses under one name in one package is a shadow waiting for the
+    first person who adds an import; this one carries the observation day, which
+    is the whole reason it exists.
+
+    Two fields rather than one because a share count is only ever *last known*:
+    the reference capability is written by a scan, not by a session, so a count
+    read today may have been observed a fortnight ago. A caller multiplying a
+    close by it is entitled to know which, and ``observed_on`` is what lets a
+    frame say ``stale_shares`` instead of publishing a valuation as though it
+    were measured on the session it is drawn against.
+    """
+
+    symbol: str
+    shares: int
+    share_type: str
+    observed_on: date
+
+
+def reference_snapshots(
+    session: Session,
+    symbols: Sequence[str],
+    *,
+    on_or_before: date | None = None,
+) -> dict[str, tuple[ReferenceSnapshot, date]]:
+    """The newest stored reference row for each symbol at or before a date.
+
+    Reads ``provider_snapshots`` under the reference capability, which is where
+    the scan writes a listing's share types and its foreign room.
+
+    **``on_or_before`` is what makes a past window answerable.** The room and the
+    share count carry no period of their own — they are dated by the session the
+    board was read in — so a read with no cutoff answers *today* whatever day it
+    was asked about. A cross-section computed for a session in March would then
+    be multiplied by a share count issued in August, and the same historical
+    cutoff would give a different answer every day it was recomputed. The cutoff
+    is spelled exactly as ``reference.foreign_room_on_or_before`` spells it, for
+    the same reason: two readers of one table that disagree about which day a row
+    belongs to are two answers to one question.
+
+    Newest observation per symbol wins and the rest are skipped. The table is
+    append-only, so a symbol whose count changed at a share issue holds both
+    rows, and the older one describes a company that no longer exists.
+
+    Here rather than in a reader of its own, and not in ``providers/store.py``:
+    two callers need exactly this — the market-capitalisation branch below, and
+    the ``reference`` source of the query tool. ``src/stocks`` may not import
+    ``src/agent``, so the shared read has to live on this side of that edge, and
+    ``store.py``'s own docstring says not to grow it. It is not a rewrite of
+    ``foreign_room_on_or_before`` either: that one answers one symbol's room,
+    this one answers many symbols' whole reference row, and collapsing them would
+    make the room read pay for a share count nobody asked it for.
+
+    A row that does not validate is skipped with a warning rather than raising.
+    One malformed payload is one symbol's problem, and a cross-sectional read of
+    the whole Universe should not stop because a scan wrote a bad row for a
+    company nobody asked about.
+    """
+    wanted = [symbol.strip().upper() for symbol in symbols if symbol and symbol.strip()]
+    if not wanted:
+        return {}
+
+    query = select(ProviderSnapshot).where(
+        ProviderSnapshot.capability == Capability.REFERENCE.value,
+        ProviderSnapshot.symbol.in_(wanted),
+        ProviderSnapshot.source == main_source(Capability.REFERENCE).value,
+    )
+    if on_or_before is not None:
+        cutoff = datetime.combine(
+            on_or_before + timedelta(days=1), time.min, tzinfo=VN_TZ
+        )
+        query = query.where(ProviderSnapshot.effective_at < cutoff)
+
+    rows = session.execute(
+        query.order_by(
+            ProviderSnapshot.symbol,
+            ProviderSnapshot.effective_at.desc(),
+            ProviderSnapshot.observed_at.desc(),
+        )
+    ).scalars()
+
+    newest: dict[str, tuple[ReferenceSnapshot, date]] = {}
+    for row in rows:
+        if row.symbol in newest:
+            continue
+        try:
+            snapshot = ReferenceSnapshot.model_validate(row.payload)
+        except Exception:  # noqa: BLE001 - a malformed row is one symbol, not the read
+            logger.warning(
+                "reference snapshot for %s did not validate; skipping", row.symbol
+            )
+            continue
+        # ``astimezone(VN_TZ)`` and not ``.date()``: a row written at one in the
+        # morning Vietnam time is a different calendar day in UTC, and the other
+        # reader of this table already resolves it this way.
+        newest[row.symbol] = (snapshot, row.effective_at.astimezone(VN_TZ).date())
+    return newest
+
+
+def share_counts(
+    session: Session,
+    symbols: Sequence[str],
+    *,
+    on_or_before: date | None = None,
+) -> dict[str, SharesOnRecord]:
+    """The newest stored share count for each symbol, in one query.
+
+    A projection of :func:`reference_snapshots` rather than a second read. The
+    choice between ``outstanding``, ``listed`` and ``issued`` is not made here —
+    ``ReferenceSnapshot.canonical_shares()`` already owns it, and a second
+    ordering written beside it is a second answer that can disagree.
+    """
+    counts: dict[str, SharesOnRecord] = {}
+    for symbol, (snapshot, observed_on) in reference_snapshots(
+        session, symbols, on_or_before=on_or_before
+    ).items():
+        count = snapshot.canonical_shares()
+        if count is None or count.value <= 0:
+            continue
+        counts[symbol] = SharesOnRecord(
+            symbol=symbol,
+            shares=int(count.value),
+            share_type=count.share_type.value,
+            observed_on=observed_on,
+        )
+    return counts
+
+
 def _frame(
     symbol: str,
     window: Sequence[date],
@@ -1008,6 +1168,7 @@ def _frame(
     factors: dict[date, Decimal],
     projection: BarProjection,
     series: BarSeries,
+    shares: SharesOnRecord | None = None,
 ) -> BarFrame:
     """Build the window's bars, rebased onto its last session's share terms.
 
@@ -1029,6 +1190,35 @@ def _frame(
         # session knows whether there is a company behind it, and a second test
         # in this loop could disagree with the first.
         market_cap_vnd, foreign_net_value_vnd = row.company_figures
+        if market_cap_vnd is None and shares is not None:
+            # Derived, and only where the session did not carry one. ``bar_daily``
+            # holds no market capitalisation — the column belonged to the source
+            # retired on 2026-08-29 — so every equity session now arrives without
+            # one, and three of VCB's Signal Fields refused for want of a number
+            # the store has the two halves of.
+            #
+            # The close *as published on that session*, not the rebased one: a
+            # share count is a count on the day it was observed, and multiplying
+            # it by a price rescaled into the window's newest share terms would
+            # apply the split twice. The raw close is ``row.last_price``; the
+            # rebased one is what goes into ``Bar.close`` a few lines below.
+            #
+            # **Two dates have to agree before this is a number at all**, and
+            # this is where the old honest refusal is kept rather than traded
+            # away. A share count read *after* the session describes a company
+            # the session did not have — a share issue between the two makes the
+            # valuation wrong by exactly the issue. And a count older than the
+            # reference Capability's own freshness contract describes a company
+            # that has since moved: ``REFERENCE_STALE_DAYS`` is that contract,
+            # read off it rather than restated here. Outside either bound the
+            # bar keeps ``None``, and the field refuses with
+            # ``market_cap_absent`` exactly as it did before this branch existed.
+            # Serving a wrong number with every freshness signal reading "fine"
+            # is strictly worse than refusing.
+            age = (day - shares.observed_on).days
+            close_as_published = row.last_price
+            if close_as_published is not None and 0 <= age <= REFERENCE_STALE_DAYS:
+                market_cap_vnd = float(close_as_published) * shares.shares
         bars.append(
             Bar(
                 session_date=day,

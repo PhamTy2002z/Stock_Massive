@@ -25,6 +25,7 @@ from typing import Iterable, Sequence
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from src.alpha.models import FinancialStatementItem
 from src.stocks.models import FinancialRatioSnapshot, FinancialStatementLine
 
 from . import fetch
@@ -34,6 +35,20 @@ logger = logging.getLogger(__name__)
 
 STATEMENT_KEY = ("symbol", "period", "statement", "item_id", "item_seq")
 RATIO_KEY = ("symbol", "period", "item_id", "item_seq")
+#: A label is keyed by the id it names and not by the quarter or the symbol it
+#: was read from — the same line carries the same heading across every symbol
+#: reporting under that template.
+ITEM_KEY = ("statement", "item_id")
+
+#: What a re-run of a line write overwrites. A restated quarter replaces the
+#: number and says when it was seen; nothing else about the row can move.
+_LINE_UPDATE = ("value", "source", "observed_at")
+
+#: What a re-seed of a label overwrites. ``seeded_from`` is in the set on
+#: purpose: re-seeding from a different reporting template is how a label filed
+#: under the wrong one gets corrected, and a column that recorded only the first
+#: symbol ever seen would make that correction invisible.
+_ITEM_UPDATE = ("label_vi", "label_en", "seeded_from", "source", "observed_at")
 
 
 @dataclass(frozen=True)
@@ -49,12 +64,17 @@ class IngestOutcome:
 
 def write_statement_lines(session: Session, rows: Sequence[dict]) -> int:
     """Upsert statement lines and report how many rows the write covered."""
-    return _upsert(session, FinancialStatementLine, rows, STATEMENT_KEY)
+    return _upsert(session, FinancialStatementLine, rows, STATEMENT_KEY, _LINE_UPDATE)
 
 
 def write_ratio_lines(session: Session, rows: Sequence[dict]) -> int:
     """Upsert ratio rows and report how many rows the write covered."""
-    return _upsert(session, FinancialRatioSnapshot, rows, RATIO_KEY)
+    return _upsert(session, FinancialRatioSnapshot, rows, RATIO_KEY, _LINE_UPDATE)
+
+
+def write_statement_items(session: Session, rows: Sequence[dict]) -> int:
+    """Upsert statement-line labels and report how many rows the write covered."""
+    return _upsert(session, FinancialStatementItem, rows, ITEM_KEY, _ITEM_UPDATE)
 
 
 def ingest_symbol(
@@ -121,18 +141,22 @@ def _upsert(
     model: type,
     rows: Sequence[dict],
     key: tuple[str, ...],
+    update: tuple[str, ...],
 ) -> int:
+    """One idempotent write, told which columns a re-run is allowed to move.
+
+    ``update`` is an argument rather than a constant because the two things
+    written through here restate different columns: a line restates its number,
+    a label restates its wording. Left as one hardcoded set, the label write
+    would have named a ``value`` column its table does not have.
+    """
     rows = _deduplicated(rows, key)
     if not rows:
         return 0
     statement = insert(model).values(rows)
     statement = statement.on_conflict_do_update(
         index_elements=list(key),
-        set_={
-            "value": statement.excluded.value,
-            "source": statement.excluded.source,
-            "observed_at": statement.excluded.observed_at,
-        },
+        set_={name: getattr(statement.excluded, name) for name in update},
     )
     session.execute(statement)
     return len(rows)
@@ -151,10 +175,12 @@ def _deduplicated(rows: Sequence[dict], key: tuple[str, ...]) -> list[dict]:
 
 
 __all__ = [
+    "ITEM_KEY",
     "RATIO_KEY",
     "STATEMENT_KEY",
     "IngestOutcome",
     "ingest_symbol",
     "write_ratio_lines",
+    "write_statement_items",
     "write_statement_lines",
 ]

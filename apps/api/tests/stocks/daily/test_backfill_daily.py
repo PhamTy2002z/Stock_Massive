@@ -389,3 +389,42 @@ def _freshness(monkeypatch, *, age_days: int | None) -> None:
             age_days=age_days,
         ),
     )
+
+
+class TestTheSkipReferenceComesFromTheCalendar:
+    """The spine has to be able to move past its own newest session.
+
+    Both in-store references are this job's own output, so either one makes the
+    spine a fixed point: every symbol that reached the newest stored session is
+    "current" with that session, and a spine that missed a day can never be told
+    to go and get it. Measured in production on 2026-08-30 — every one of 1,523
+    symbols was frozen at 2026-08-27 and every run skipped every symbol.
+    """
+
+    def test_a_weekend_asks_for_the_friday_before_it(self):
+        friday = date(2026, 8, 28)
+
+        assert backfill_daily.latest_expected_session(date(2026, 8, 29)) == friday
+        assert backfill_daily.latest_expected_session(date(2026, 8, 30)) == friday
+        assert backfill_daily.latest_expected_session(friday) == friday
+
+    def test_a_spine_behind_the_calendar_is_fetched_again(self, two_symbols):
+        """The regression: judged against itself, this run skipped everything."""
+        stale_end = TODAY - timedelta(days=3)
+        backfill_daily.run(
+            scope="market",
+            sessions=20,
+            fetch=lambda symbol, *, end, sessions: synthetic(
+                days_back(20, end=stale_end)
+            ),
+            today=stale_end,
+        )
+        asked_before_the_newest_session(FIRST, stale_end)
+        asked_before_the_newest_session(SECOND, stale_end)
+
+        report = backfill_daily.run(
+            scope="market", sessions=20, fetch=a_page, today=TODAY
+        )
+
+        assert report.skipped == 0
+        assert report.attempted == 2

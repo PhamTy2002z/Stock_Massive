@@ -225,6 +225,26 @@ class Sign(str, Enum):
     NON_POSITIVE = "non_positive"
 
 
+class Direction(str, Enum):
+    """Which way is better, when two symbols' figures are put side by side.
+
+    **Not :class:`Sign`.** A sign convention says whether a number may be
+    negative — a drawdown is, a volatility never is — and says nothing about
+    which of two drawdowns a reader should prefer. A comparison needs the second
+    thing and has no way to derive it from the first: ``roe_percentile`` and
+    ``amihud_illiquidity_percentile`` are both non-negative percentiles, and high
+    is good on one and bad on the other.
+
+    Optional, and the default is no answer at all. Most figures in this catalog
+    genuinely have no better direction — a beta of 1.2 is not worse than 0.8, it
+    is a different exposure — and a field forced to choose would be publishing a
+    judgement nobody made. A frame simply marks no winner in that column.
+    """
+
+    HIGHER = "higher"
+    LOWER = "lower"
+
+
 class Unit(str, Enum):
     """What the number is measured in.
 
@@ -485,6 +505,12 @@ class SignalField:
     # the refusal would name the history rather than the declaration that caused
     # it.
     lookback_sessions: int | None = None
+    # Which way is better when this figure is compared across symbols. Optional
+    # with a default of "no answer", unlike the nine declarations above, and the
+    # asymmetry is the point: those nine are true of every number this system
+    # publishes, and this one is a judgement that only some figures admit. Left
+    # unset, a comparison marks no winner in the column rather than guessing.
+    better: Direction | None = None
     requires_foreign_share_flow: bool = False
     # Whether the serving path loads this field's quarterly statements onto the
     # window. Declared rather than loaded for everyone, because the read is one

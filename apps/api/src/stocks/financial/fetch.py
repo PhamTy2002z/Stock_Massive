@@ -213,6 +213,90 @@ def ratio_rows(
     ]
 
 
+def label_rows(
+    symbol: str,
+    part: str,
+    frame: pd.DataFrame,
+    *,
+    observed_at: datetime | None = None,
+) -> list[dict]:
+    """The three meta columns of one response as rows of ``financial_statement_item``.
+
+    A label, unlike a number, does not belong to a quarter — it belongs to the
+    ``item_id``, and it repeats identically down every period column of the
+    response. So this reads the meta columns only and never a value, which is
+    why one symbol per reporting template is enough to name the market's lines.
+
+    **The occurrence index is deliberately not carried.** Where the provider
+    answers one ``item_id`` twice, both occurrences arrive under the same id and
+    the labels differ — SSI's second ``business_income_tax_deferred`` is
+    labelled as its minority interest. The first occurrence wins, matching
+    ``reads.PRIMARY_SEQ``: a per-occurrence label would hand a reader the
+    provider's own mis-filing in two languages instead of one, and the caller
+    that wants the repeats asks the table directly.
+
+    A row whose Vietnamese label is empty is skipped rather than written blank.
+    ``label_vi`` is what a column heading is drawn from, and a heading that is
+    the empty string is worse than a heading that is the raw id.
+    """
+    if part not in PARTS:
+        raise FinancialFetchError(
+            f"{part!r} is not a part; expected one of {PARTS}"
+        )
+    # ``item`` and ``item_id`` are required; ``item_en`` is not, and that is
+    # measured rather than tolerant. The KBS ratio response answers
+    # ``['item', 'item_id', '2026-Q2', ...]`` and no English column at all —
+    # ``fetch_ratio``'s own docstring records that KBS ignores ``lang="en"``.
+    # Demanding all three META_COLUMNS therefore refused every ratio label, and
+    # a ratio frame headed by raw ids is exactly what this table exists to stop.
+    missing = [name for name in ("item", "item_id") if name not in frame.columns]
+    if missing:
+        raise FinancialFetchError(
+            f"vnstock answered for {symbol} {part} without {missing}; got "
+            f"{list(frame.columns)}"
+        )
+    english = (
+        frame["item_en"]
+        if "item_en" in frame.columns
+        else [None] * len(frame.index)
+    )
+    observed_at = observed_at or datetime.now(VN_TZ)
+    source = SOURCE_RATIO if part == PART_RATIO else SOURCE_STATEMENT
+
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for item_id, label_vi, label_en in zip(
+        frame["item_id"], frame["item"], english
+    ):
+        item_id = str(item_id)
+        if item_id in seen:
+            continue
+        seen.add(item_id)
+        label_vi = _label(label_vi)
+        if label_vi is None:
+            continue
+        rows.append(
+            {
+                "statement": part,
+                "item_id": item_id,
+                "label_vi": label_vi,
+                "label_en": _label(label_en),
+                "seeded_from": symbol.upper(),
+                "source": source,
+                "observed_at": observed_at,
+            }
+        )
+    return rows
+
+
+def _label(value: Any) -> str | None:
+    """One label as it will be stored, or ``None`` where there is none."""
+    if value is None or (not isinstance(value, str) and bool(pd.isna(value))):
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def _cells(
     symbol: str, part: str, frame: pd.DataFrame
 ) -> Iterator[tuple[str, str, int, Decimal]]:
@@ -315,6 +399,7 @@ __all__ = [
     "RatioFetch",
     "fetch_ratio",
     "fetch_statement",
+    "label_rows",
     "ratio_rows",
     "statement_rows",
 ]
