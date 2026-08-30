@@ -1,8 +1,8 @@
 # Research: khoảng trống của sản phẩm theo dõi luận điểm trên thị trường
 
-Ngày kiểm tra nguồn: **2026-08-30**  
+Ngày kiểm tra nguồn: **2026-08-30**
 Persona: nhà đầu tư tự quyết định tại Việt Nam, theo dõi 5–30 mã, horizon vài
-tuần đến vài tháng.  
+tuần đến vài tháng.
 Phạm vi đề xuất dùng để đối chiếu: một **Delta Inbox** sau phiên hoặc theo sự
 kiện, chỉ chứa *Material Changes* liên quan tới luận điểm do người dùng viết;
 deterministic detection, AI diễn giải; không buy/sell, broker sync, realtime,
