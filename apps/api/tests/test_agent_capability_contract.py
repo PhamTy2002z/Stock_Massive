@@ -31,6 +31,17 @@ EXPECTED_CATALOG = {
         registry.ContentTrust.UNTRUSTED,
         registry.ToolConcurrency.PARALLEL_SAFE,
     ),
+    "frame_from_evidence": (
+        "web",
+        registry.ToolEffect.READ,
+        registry.ToolIdempotency.IDEMPOTENT,
+        # The store, not the network. Nothing is fetched: the page it checks
+        # against is read out of the Tool Call Trace, which is the only copy the
+        # answer was written from.
+        registry.ToolAccess.STORE,
+        registry.ContentTrust.TRUSTED_STRUCTURED,
+        registry.ToolConcurrency.PARALLEL_SAFE,
+    ),
     "session_search": (
         "memory",
         registry.ToolEffect.READ,
@@ -87,6 +98,22 @@ EXPECTED_CATALOG = {
         registry.ContentTrust.TRUSTED_STRUCTURED,
         registry.ToolConcurrency.SERIALIZED,
     ),
+    "query": (
+        "signals",
+        registry.ToolEffect.READ,
+        registry.ToolIdempotency.IDEMPOTENT,
+        registry.ToolAccess.STORE,
+        registry.ContentTrust.TRUSTED_STRUCTURED,
+        registry.ToolConcurrency.PARALLEL_SAFE,
+    ),
+    "compare_fields": (
+        "signals",
+        registry.ToolEffect.READ,
+        registry.ToolIdempotency.IDEMPOTENT,
+        registry.ToolAccess.STORE,
+        registry.ContentTrust.TRUSTED_STRUCTURED,
+        registry.ToolConcurrency.PARALLEL_SAFE,
+    ),
     "list_studies": (
         "studies",
         registry.ToolEffect.READ,
@@ -108,6 +135,18 @@ EXPECTED_CATALOG = {
         registry.ToolConcurrency.SERIALIZED,
     ),
     "render_signal_desk": (
+        "studies",
+        registry.ToolEffect.READ,
+        registry.ToolIdempotency.IDEMPOTENT,
+        registry.ToolAccess.STORE,
+        registry.ContentTrust.TRUSTED_STRUCTURED,
+        registry.ToolConcurrency.SERIALIZED,
+    ),
+    # Serialized rather than parallel-safe, and it is the only tool here whose
+    # reason is a resource rather than an ordering: every call spawns a process
+    # allowed half a gigabyte, and a round issuing six at once is six of those
+    # at once.
+    "compute": (
         "studies",
         registry.ToolEffect.READ,
         registry.ToolIdempotency.IDEMPOTENT,
@@ -143,6 +182,7 @@ def test_shipped_schema_bytes_order_output_and_display_are_locked():
     expected_runtime = {
         "web_search": ("Tìm trên web", True, 8_000, "query", False),
         "fetch_url": ("Đọc trang", True, 22_000, "url", False),
+        "frame_from_evidence": ("Lấy số từ trang đã đọc", False, 8_000, None, True),
         "session_search": ("Tìm trong hội thoại trước", True, None, "query", False),
         "remember_fact": ("Ghi nhớ", True, None, "title", False),
         "recall_facts": ("Đọc lại ghi chú", True, None, "query", False),
@@ -150,9 +190,12 @@ def test_shipped_schema_bytes_order_output_and_display_are_locked():
         "get_field": ("Đọc chỉ báo", False, 32_000, None, True),
         "get_series": ("Đọc chuỗi chỉ báo", False, 32_000, None, True),
         "check_price_claim": ("Kiểm mức giá", False, 4_000, None, True),
+        "query": ("Đọc bảng dữ liệu", False, 32_000, None, True),
+        "compare_fields": ("So sánh chỉ báo", False, 32_000, None, True),
         "list_studies": ("Xem danh mục phân tích", True, 32_000, None, True),
         "run_study": ("Chạy phân tích", False, 32_000, None, True),
         "render_signal_desk": ("Vẽ signal_desk", False, 32_000, None, True),
+        "compute": ("Tính trên số đã đọc", False, 8_000, None, True),
     }
     with isolated_registry():
         tools.register_all()
@@ -170,13 +213,33 @@ def test_shipped_schema_bytes_order_output_and_display_are_locked():
         # ``looking_for``: a page is now returned as the passages matching what
         # the caller said it was after, so the argument is part of the wire
         # schema and the model has to be told the field means something.
+        #
+        # Moved again on 2026-08-30 for ``query`` and ``compare_fields``: the
+        # store's own tables became readable as a table, which is two new wire
+        # schemas rather than a change to an existing one. Moved a second time
+        # the same day, in code review: ``window`` gained a maximum and ``items``
+        # a maxItems, because a ceiling checked only on the built frame is a
+        # ceiling that protects the model's context and not the process. Moved a second time
+        # the same day, on review: ``window`` gained a maximum and ``items`` a
+        # maxItems, so a request too large to answer is refused at the boundary
+        # instead of after the read.
+        #
+        # Moved a third time on 2026-08-30 for ``compute`` and
+        # ``frame_from_evidence``: the calculation axis and the evidence axis
+        # registered, which is two more new wire schemas rather than a change to
+        # an existing one.
+        #
+        # Moved a fourth time on 2026-08-30 for the board grammar:
+        # ``render_signal_desk`` went from a title and a flat list of blocks to
+        # a board — a KPI strip, sections, captions with cell references, an
+        # appendix. One schema replaced, none added.
         assert hashlib.sha256(
             json.dumps(
                 schemas,
                 separators=(",", ":"),
                 ensure_ascii=False,
             ).encode("utf-8")
-        ).hexdigest() == "85e91984d09bf1c34a0b70d91353c29e2e5b63c398d84d9e48a4a0b931b380f8"
+        ).hexdigest() == "be5b995fec13fb685542f24b8fb2b90ef7861a48ea1ba7836cd31cbdaa97b71b"
         assert {
             entry.name: (
                 entry.display_name,
@@ -219,11 +282,14 @@ def test_lane_selection_and_order_are_explicit_and_do_not_share_authority():
         "get_field",
         "get_series",
         "check_price_claim",
+        "query",
+        "compare_fields",
     )
     assert toolsets.resolve_toolset("studies") == (
         "list_studies",
         "run_study",
         "render_signal_desk",
+        "compute",
     )
 
     # Added 2026-08-29: the selection above is still written down and still the

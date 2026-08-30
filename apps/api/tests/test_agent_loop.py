@@ -11,6 +11,7 @@ a reason an operator can act on.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from dataclasses import replace
@@ -62,6 +63,7 @@ from src.agent.loop import (
     ROUTE_RATE_LIMITED,
     RUN_TOOL,
     SCHEMA_REJECTED,
+    NO_SIGNAL_DESK_TOOL_CALLED,
     SIGNAL_DESK_MODE,
     SIGNAL_DESK_NOTE,
     SYSTEM_NOTE_TOKENS,
@@ -91,12 +93,26 @@ from src.agent.loop import (
 )
 from src.agent.messages import (
     COLLAPSED_RESULT_URLS,
+    CONTEXT_LAYERS,
     MAX_DISPLAY_RESULTS,
+    SUMMARY_LABEL,
+    TRACE_HANDLE_PREFIX,
+    ContextComposition,
+    TurnAttachment,
     _collapsed_result,
+    aged_results,
+    context_projection,
     dedup_key,
     display_results,
+    shown_result,
 )
-from src.agent.prompt import RuntimeContext, prefix as prompt_prefix, render
+from src.agent.domain import active_pack
+from src.agent.prompt import (
+    PROMPT_HASH,
+    RuntimeContext,
+    prefix as prompt_prefix,
+    render,
+)
 from src.core.llm import (
     AuthUnavailable,
     BudgetRefusal,
@@ -1337,7 +1353,7 @@ def test_an_older_result_collapses_to_one_line_before_a_turn_is_dropped() -> Non
     assert squeezed.results_collapsed >= 1
     assert squeezed.turns_dropped == 0
     assert any(
-        (message.content or "").startswith("called web_search with arguments")
+        (message.content or "").startswith(TRACE_HANDLE_PREFIX)
         for message in squeezed.messages
     )
 
@@ -1830,10 +1846,17 @@ async def test_outside_development_the_log_keeps_only_the_shape_of_the_question(
 
 
 def _bodies(client: FakeClient) -> list[int]:
-    """How many messages of each call carried the pack body."""
+    """How many messages of each call carried the pack body.
+
+    Counted by containment rather than equality: since the body moved into the
+    cacheable head it is a block *inside* the system message, between the core
+    and the values rendered for this Turn, rather than a message of its own.
+    What these tests are about — whether this call carries it at all, and
+    exactly once — is unchanged by that move.
+    """
     body = domain_body_note()
     return [
-        sum(1 for message in request.messages if message.content == body)
+        sum(1 for message in request.messages if body in (message.content or ""))
         for request in client.requests
     ]
 
@@ -1938,12 +1961,15 @@ async def test_a_signal_desk_turn_carries_the_body_from_its_first_call() -> None
     await loop(client).run(turn_request(mode=SIGNAL_DESK_MODE))
 
     assert _bodies(client) == [1]
-    # And the mode note is still its own message: one says which Turn this is,
-    # the other says what the domain's rules are, and merging them would make a
-    # sentence true of one Turn into a rule true of every Turn.
+    # And the mode note is still its own message while the body is not: one says
+    # which Turn this is and changes call by call, the other says what the
+    # domain's rules are and is identical under one pack. Merging them would
+    # make a sentence true of one Turn into a rule true of every Turn — and it
+    # would put a per-Turn string inside the block a cache is keyed on.
     first = client.requests[0].messages
     assert any(message.content == SIGNAL_DESK_NOTE for message in first)
-    assert any(message.content == domain_body_note() for message in first)
+    assert domain_body_note() in (first[0].content or "")
+    assert first[0].role is Role.SYSTEM
 
 
 def _thread_history(*, domain_call: bool, then_a_plain_turn: bool = False):
@@ -2127,11 +2153,12 @@ async def test_the_call_that_carries_the_body_is_charged_for_it() -> None:
     assert with_body.input_tokens - without.input_tokens >= active_pack().body_tokens
 
 
-def test_the_reservation_and_the_message_come_from_one_expression() -> None:
-    """Two call sites, one function, so they cannot drift apart.
+def test_what_the_body_costs_is_written_down_in_one_place() -> None:
+    """One function answers it, so a diagnostic and a replay cannot disagree.
 
-    Asserted on the helper rather than by reading both call sites, because what
-    matters is that there is only one number to be wrong.
+    Nothing reserves this any more — the body is inside the system message and
+    is measured from the string that goes out — but "what is this Turn paying
+    for its playbook" is still a question with one answer.
     """
     from src.agent.domain import active_pack
     from src.agent.loop import _TurnState
@@ -2314,7 +2341,7 @@ def test_a_collapsed_search_still_says_what_it_found() -> None:
 
     collapsed = _collapsed_result(call)
 
-    assert collapsed.startswith("called web_search with arguments")
+    assert collapsed.startswith(f"{TRACE_HANDLE_PREFIX} web_search with arguments")
     assert "https://site0.vn/a" in collapsed
     # The ceiling holds where the ladder fires because the context is already
     # over budget, and an unbounded number of links there is not a fix.
@@ -2322,7 +2349,13 @@ def test_a_collapsed_search_still_says_what_it_found() -> None:
     assert "snippet" not in collapsed and '"title"' not in collapsed
 
 
-def test_a_collapsed_call_with_no_results_reads_as_it_always_did() -> None:
+def test_a_collapsed_call_with_no_results_names_itself_and_says_it_was_recorded() -> None:
+    """A line that only named the call left the model three guesses.
+
+    Whether it failed, whether it answered nothing, or whether it answered
+    something not being shown — and one of those turns a collapse into an answer
+    that reports the lookup did not work. The handle says which it is.
+    """
     call = TurnToolCall(
         id="c1",
         name="get_field",
@@ -2332,8 +2365,14 @@ def test_a_collapsed_call_with_no_results_reads_as_it_always_did() -> None:
     )
 
     assert _collapsed_result(call) == (
-        'called get_field with arguments {"field":"price.close","symbol":"VCB"}'
+        f"{TRACE_HANDLE_PREFIX} get_field with arguments "
+        '{"field":"price.close","symbol":"VCB"}'
     )
+    # And it does not offer something the model could ask for: there is no
+    # retrieval tool in this deployment, and a sentence implying one would spend
+    # a round teaching the model that.
+    assert "fetch" not in _collapsed_result(call)
+    assert "again" not in _collapsed_result(call)
 
 
 def test_the_links_a_turn_cited_survive_the_ladder_reaching_rung_two() -> None:
@@ -2393,3 +2432,823 @@ def test_the_collapse_still_sheds_far_more_than_the_links_cost() -> None:
     )
 
     assert len(_collapsed_result(call)) < len(shown_result(call)) // 4
+
+
+# -- where the tokens went ---------------------------------------------------
+
+
+def _composed(**overrides: Any) -> ConstructedContext:
+    """One constructed context with every layer non-empty by default."""
+    transcript = Transcript(
+        system_prompt=render(RuntimeContext(today=date(2026, 8, 29), user_name="Ty")),
+        system_prefix=prompt_prefix(),
+        turns=(
+            TranscriptTurn(
+                user_text="Câu hỏi cũ " + "x" * 200,
+                tool_calls=(
+                    TurnToolCall(
+                        id="old",
+                        name="web_search",
+                        arguments={"query": "cũ"},
+                        status=ToolCallStatus.OK,
+                        result_text="y" * 400,
+                    ),
+                ),
+                assistant_text="Trả lời cũ " + "z" * 200,
+            ),
+            TranscriptTurn(
+                user_text="HPG hôm nay thế nào?",
+                tool_calls=(
+                    TurnToolCall(
+                        id="new",
+                        name="web_search",
+                        arguments={"query": "HPG"},
+                        status=ToolCallStatus.OK,
+                        result_text="p" * 600,
+                    ),
+                    TurnToolCall(
+                        id="study",
+                        name="run_study",
+                        arguments={"study": "intraday_liquidity_profile"},
+                        status=ToolCallStatus.OK,
+                        result_text="Thanh khoản dồn về phiên chiều.",
+                    ),
+                ),
+            ),
+        ),
+        **overrides,
+    )
+    return build_messages(transcript)
+
+
+def test_the_layers_of_a_context_sum_to_what_the_request_is_charged() -> None:
+    """The breakdown is the estimate, split. Not a second measurement of it."""
+    context = _composed()
+
+    assert context.composition.total == context.estimated_tokens
+    assert context.estimated_tokens == sum(
+        estimate_tokens(message) for message in context.messages
+    )
+
+
+def test_every_rung_of_the_ladder_keeps_the_layers_summing_to_the_total() -> None:
+    """A collapse and a drop move tokens between layers; they never lose one."""
+    request = turn_request(history=long_history())
+    transcript = Transcript(
+        system_prompt=render(request.runtime),
+        system_prefix=prompt_prefix(),
+        turns=(*request.history, TranscriptTurn(user_text=request.user_text)),
+    )
+
+    seen_dropped = False
+    seen_collapsed = False
+    for ceiling in (200_000, 20_000, 12_000, 9_000, 7_000):
+        context = build_messages(transcript, ContextBudget(max_tokens=ceiling))
+        assert context.composition.total == context.estimated_tokens
+        seen_dropped = seen_dropped or context.turns_dropped > 0
+        seen_collapsed = seen_collapsed or context.results_collapsed > 0
+
+    assert seen_dropped and seen_collapsed
+
+
+def test_each_layer_is_charged_the_thing_it_is_named_after() -> None:
+    """The eight names are not decoration: each one holds its own content."""
+    layers = _composed().composition
+
+    # The cacheable prefix is the whole prompt but the two rendered lines.
+    assert layers.system_core == estimate_tokens(
+        Message(role=Role.SYSTEM, content=prompt_prefix())
+    )
+    assert 0 < layers.system_dynamic < 20
+    # The older Turn — question, exchange and answer — is history; the newest
+    # question is intent and its results are evidence.
+    assert layers.history > layers.user_intent > 0
+    assert layers.tool_results > layers.study_headlines > 0
+    assert layers.attachments == 0
+    assert layers.domain_body == 0
+
+
+def test_a_study_headline_is_not_charged_to_the_page_layer() -> None:
+    """A capped sentence about a picture is not the layer prune is aimed at."""
+    def one(name: str) -> ConstructedContext:
+        return build_messages(
+            Transcript(
+                system_prompt="s",
+                turns=(
+                    TranscriptTurn(
+                        user_text="q",
+                        tool_calls=(
+                            TurnToolCall(
+                                id="c",
+                                name=name,
+                                arguments={},
+                                status=ToolCallStatus.OK,
+                                result_text="w" * 300,
+                            ),
+                        ),
+                    ),
+                ),
+            )
+        )
+
+    assert one("run_study").composition.study_headlines > 0
+    assert one("run_study").composition.tool_results == 0
+    assert one("web_search").composition.tool_results > 0
+    assert one("web_search").composition.study_headlines == 0
+
+
+def test_an_attachment_is_charged_apart_from_the_words_it_came_with() -> None:
+    context = build_messages(
+        Transcript(
+            system_prompt="s",
+            turns=(
+                TranscriptTurn(
+                    user_text="Đọc giúp tôi",
+                    attachments=(
+                        TurnAttachment(
+                            id="a1",
+                            filename="ghi-chu.txt",
+                            media_type="text/plain",
+                            byte_size=40,
+                            text="một đoạn văn bản " * 20,
+                        ),
+                    ),
+                ),
+            ),
+        )
+    )
+
+    layers = context.composition
+    assert layers.user_intent == estimate_tokens(
+        Message(role=Role.USER, content="Đọc giúp tôi")
+    )
+    assert layers.attachments > layers.user_intent
+    assert layers.total == context.estimated_tokens
+
+
+def test_a_summary_is_charged_to_history_and_not_to_the_prompt() -> None:
+    context = _composed(summary="Người dùng đã hỏi về HPG.", summarised_turns=1)
+
+    assert context.composition.system_core == estimate_tokens(
+        Message(role=Role.SYSTEM, content=prompt_prefix())
+    )
+    assert context.composition.history > 0
+    assert context.composition.total == context.estimated_tokens
+
+
+def test_a_composition_refuses_a_layer_nobody_declared() -> None:
+    with pytest.raises(ValueError, match="no such context layer"):
+        ContextComposition().plus(cache_hits=10)
+
+
+def test_a_composition_serialises_every_layer_in_a_fixed_order() -> None:
+    payload = ContextComposition(system_core=3).as_dict()
+
+    assert list(payload) == list(CONTEXT_LAYERS)
+    assert payload["system_core"] == 3
+
+
+@pytest.mark.asyncio
+async def test_what_funds_a_call_is_exactly_what_explains_it() -> None:
+    """The reservation is the composition's own arithmetic, not a second one.
+
+    Exercised on the call that carries all four appended messages at once —
+    domain body, mode note, rounds-exhausted note and a nudge — because that is
+    where two hand-copied expressions would first disagree.
+    """
+    install()
+    client = FakeClient(
+        [
+            *(
+                wants("get_field", prefix=f"r{index}", query=f"q{index}")
+                for index in range(MAX_TOOL_ROUNDS)
+            ),
+            Completion(model=SESSION_MODEL, text=""),
+            answer(),
+        ]
+    )
+
+    await loop(client).run(turn_request(mode=SIGNAL_DESK_MODE))
+
+    request = client.requests[-1]
+    appended = request.messages[-3:]
+    assert [message.content for message in appended] == [
+        SIGNAL_DESK_NOTE,
+        ROUNDS_EXHAUSTED_NOTE,
+        EMPTY_AFTER_TOOLS_NOTE,
+    ]
+    # The pack body is carried by the system message, not appended, so it is
+    # measured rather than reserved — and it must not be both.
+    assert active_pack().body_text in (request.messages[0].content or "")
+
+    # What the call was reserved for is the constructed context plus exactly
+    # the price of what was appended to it, and nothing rounded twice.
+    reserved = 3 * SYSTEM_NOTE_TOKENS
+    constructed = sum(
+        estimate_tokens(message) for message in request.messages[:-3]
+    )
+    assert client.spends[-1].input_tokens == constructed + reserved
+
+
+# -- the projection the model reads, and the trace it does not shrink --------
+
+
+def _recorded_search(*urls: str, query: str = "lãi suất") -> dict[str, Any]:
+    return {
+        "query": query,
+        "results": [
+            {
+                "title": f"Tiêu đề {index}",
+                "url": url,
+                "source": urlsplit(url).netloc,
+                "snippet": "x" * 300,
+                "rank": index + 1,
+            }
+            for index, url in enumerate(urls)
+        ],
+    }
+
+
+def searching(*payloads: Mapping[str, Any]):
+    """A ``web_search`` handler that serves one recorded payload per call."""
+    queue = list(payloads)
+
+    async def handler(_context, _arguments) -> Any:
+        return queue.pop(0) if queue else {"query": "", "results": []}
+
+    return handler
+
+
+@pytest.mark.asyncio
+async def test_a_page_two_searches_both_found_is_given_to_the_model_once() -> None:
+    """Measured on a real run: 21 of 223 links came back to more than one query."""
+    shared = "https://cafef.vn/hpg-quy-3"
+    registry.register(
+        entry(
+            "web_search",
+            searching(
+                _recorded_search(shared, "https://vnexpress.net/a", query="q0"),
+                _recorded_search(shared, "https://tuoitre.vn/b", query="q1"),
+            ),
+        ),
+        override=True,
+    )
+    client = FakeClient(
+        [
+            wants("web_search", "web_search", prefix="r0", query="q"),
+            answer(),
+        ]
+    )
+
+    await loop(client).run(turn_request())
+
+    tool_messages = [
+        message.content or ""
+        for message in client.requests[-1].messages
+        if message.role is Role.TOOL
+    ]
+    assert sum(text.count(shared) for text in tool_messages) == 1
+    # And both calls are still there — the second one kept the page only it found.
+    assert len(tool_messages) == 2
+    assert any("vnexpress.net/a" in text for text in tool_messages)
+    assert any("tuoitre.vn/b" in text for text in tool_messages)
+
+
+@pytest.mark.asyncio
+async def test_the_trace_keeps_every_result_the_projection_dropped() -> None:
+    """The audit record is what an answer rested on. It never shrinks."""
+    shared = "https://cafef.vn/hpg-quy-3"
+    written: list[Mapping[str, Any]] = []
+
+    async def record(entry_payload: Mapping[str, Any]) -> None:
+        written.append(entry_payload)
+
+    registry.register(
+        entry(
+            "web_search",
+            searching(
+                _recorded_search(shared, query="q0"),
+                _recorded_search(shared, query="q1"),
+            ),
+        ),
+        override=True,
+    )
+    client = FakeClient(
+        [wants("web_search", "web_search", prefix="r0", query="q"), answer()]
+    )
+
+    await loop(client, trace=record).run(turn_request())
+
+    assert len(written) == 2
+    assert all(shared in row["result"]["text"] for row in written)
+
+
+@pytest.mark.asyncio
+async def test_two_reads_of_one_page_asking_two_things_both_survive() -> None:
+    """``fetch_url`` is not deduplicated, and the reason is the whole exception.
+
+    The tool selects the passages that answer the question it was given, so the
+    second read is the evidence the second call was made to get.
+    """
+    async def page(_context, arguments) -> Any:
+        return {
+            "url": "https://cafef.vn/hpg",
+            "title": "HPG",
+            "text": f"đoạn trả lời cho {arguments.get('query')}",
+        }
+
+    registry.register(entry("fetch_url", page), override=True)
+    client = FakeClient(
+        [
+            wants("fetch_url", "fetch_url", prefix="r0", query="doanh thu"),
+            answer(),
+        ]
+    )
+    # Two different questions of the same page, in one round.
+    client.script[0] = Completion(
+        model=SESSION_MODEL,
+        tool_calls=(
+            ToolCall(
+                id="f0",
+                name="fetch_url",
+                arguments={"url": "https://cafef.vn/hpg", "query": "doanh thu"},
+                output_index=0,
+            ),
+            ToolCall(
+                id="f1",
+                name="fetch_url",
+                arguments={"url": "https://cafef.vn/hpg", "query": "biên lợi nhuận"},
+                output_index=1,
+            ),
+        ),
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+
+    await loop(client).run(turn_request())
+
+    tool_messages = [
+        message.content or ""
+        for message in client.requests[-1].messages
+        if message.role is Role.TOOL
+    ]
+    assert any("doanh thu" in text for text in tool_messages)
+    assert any("biên lợi nhuận" in text for text in tool_messages)
+
+
+@pytest.mark.asyncio
+async def test_the_projection_never_travels_on_the_wire() -> None:
+    """It is what the next model call is given, not a second public shape."""
+    registry.register(
+        entry("web_search", searching(_recorded_search("https://cafef.vn/a"))),
+        override=True,
+    )
+    publisher = RecordingPublisher()
+    client = FakeClient([wants("web_search"), answer()])
+
+    await loop(client, publisher=publisher).run(turn_request())
+
+    for payload in publisher.calls:
+        assert "context_text" not in payload
+        assert "result_text" not in payload
+
+
+def test_a_call_with_no_projection_reads_exactly_as_it_always_did() -> None:
+    """Every caller written before the field gets the string it always got."""
+    call = TurnToolCall(
+        id="c1",
+        name="get_field",
+        arguments={"symbol": "VCB"},
+        status=ToolCallStatus.OK,
+        result_text="6,5%",
+    )
+
+    assert call.model_text == "6,5%"
+    assert "6,5%" in shown_result(call)
+
+
+def test_a_projection_that_drops_nothing_returns_the_very_same_bytes() -> None:
+    payload = _recorded_search("https://cafef.vn/a", "https://vnexpress.net/b")
+    text = json.dumps(payload, ensure_ascii=False)
+
+    assert context_projection("web_search", payload, text, seen=set()) is text
+
+
+def test_a_result_with_no_usable_link_keeps_its_place() -> None:
+    """No key is no comparison; merging them would hide all but the first."""
+    payload = {"results": [{"title": "a", "url": ""}, {"title": "b", "url": ""}]}
+    text = json.dumps(payload, ensure_ascii=False)
+
+    projected = context_projection("web_search", payload, text, seen={"x"})
+
+    assert projected is text
+
+
+def test_the_deterministic_ladder_runs_before_a_summary_is_asked_for() -> None:
+    """Rung order is the plan's whole shape: prune first, then the lossy step.
+
+    ``summary_needed`` is a *report*, not a rung. A context that fits after the
+    ladder still reports it when the thread is long, but the constructor never
+    waits for a summary before trimming — asking a model to rewrite a
+    conversation is the expensive, lossy answer to a question the deterministic
+    ladder has usually already answered.
+    """
+    transcript = Transcript(
+        system_prompt="s",
+        turns=long_history(12),
+    )
+
+    context = build_messages(transcript, ContextBudget(max_tokens=6_000))
+
+    assert context.summary_used is False
+    assert context.results_collapsed > 0 or context.turns_dropped > 0
+    assert context.estimated_tokens <= 6_000
+    # And the ladder is what fitted it: the summary is merely flagged for the
+    # Turn after this one.
+    assert context.summary_needed is True
+
+
+@pytest.mark.asyncio
+async def test_an_overflow_retry_gives_ground_through_the_ladder_not_a_summary() -> None:
+    """The route's ceiling lowers ours, and the *deterministic* rungs answer it.
+
+    That the retry is smaller is the neighbouring test's business. This one is
+    about *how*: the second attempt carries collapsed handles and dropped Turns,
+    and it carries no summary — nothing asked a model to rewrite the
+    conversation, because the ladder had not run out.
+    """
+    client = FakeClient([ContextOverflow("the input did not fit"), answer()])
+    request = turn_request(history=long_history())
+
+    await loop(
+        client, budget=ContextBudget(max_tokens=snug_ceiling(request))
+    ).run(request)
+
+    second = client.requests[1]
+    contents = [message.content or "" for message in second.messages]
+    assert any(text.startswith(TRACE_HANDLE_PREFIX) for text in contents)
+    assert not any(text.startswith(SUMMARY_LABEL) for text in contents)
+
+
+# -- the ageing rung: a result stops being prose once it has been read -------
+
+
+def _turn_at(call_index: int, *names: str) -> TranscriptTurn:
+    """One Turn as it looks when the model is about to make call ``call_index``.
+
+    The constructor is shown the calls of every round before this one, so the
+    rounds run ``0 … call_index - 1`` and ``names`` gives one call per round.
+    """
+    return TranscriptTurn(
+        user_text="Lãi suất huy động đang bao nhiêu?",
+        tool_calls=tuple(
+            TurnToolCall(
+                id=f"c{index}",
+                name=name,
+                arguments={"query": f"q{index}"},
+                status=ToolCallStatus.OK,
+                # Shaped like a real result: the link is inside the payload, the
+                # way ``web_search`` and ``fetch_url`` both return it. A fixture
+                # whose body did not name its own URL would let the retention
+                # test below pass on a context that had lost the link.
+                result_text=json.dumps(
+                    {
+                        "url": f"https://site{index}.vn/a",
+                        "text": f"nội dung {index} " * 100,
+                    },
+                    ensure_ascii=False,
+                ),
+                round=index,
+                results=({"url": f"https://site{index}.vn/a", "source": f"site{index}.vn"},),
+            )
+            for index, name in enumerate(names[:call_index])
+        ),
+    )
+
+
+def test_a_result_is_never_a_handle_on_the_call_that_first_reads_it() -> None:
+    """The load-bearing property of the whole rung.
+
+    A search result collapsed on the call that was supposed to read it is not
+    pruning — it is the Turn never having searched. The first draft of this rung
+    did exactly that, and the test that caught it is this one.
+    """
+    for tool in ("web_search", "fetch_url", "get_field"):
+        turn = _turn_at(1, tool)
+
+        assert aged_results(turn) == frozenset()
+
+
+def test_a_search_result_becomes_a_handle_once_its_pages_have_been_chosen() -> None:
+    """Read once, then the query and its links are what is left of it."""
+    assert aged_results(_turn_at(2, "web_search", "fetch_url")) == {"c0"}
+    assert aged_results(_turn_at(3, "web_search", "web_search", "fetch_url")) == {
+        "c0",
+        "c1",
+    }
+
+
+def test_a_fetched_page_stays_whole_a_call_longer_than_a_search() -> None:
+    """A snippet is how a page was chosen; a passage is the evidence itself.
+
+    Both calls of round zero and one are shown for the first time on calls one
+    and two. On call two the search has had its one reading and goes; the page
+    has one left.
+    """
+    assert aged_results(_turn_at(2, "fetch_url", "web_search")) == frozenset()
+    assert aged_results(_turn_at(3, "fetch_url", "web_search", "fetch_url")) == {
+        "c0",
+        "c1",
+    }
+    # Order does not matter — the tool does. A search in round zero and a page
+    # in round one, read on call two: only the search is stale.
+    assert aged_results(_turn_at(3, "web_search", "fetch_url", "fetch_url")) == {"c0"}
+
+
+def test_ageing_is_the_state_the_ladder_starts_from_not_a_rung_of_it() -> None:
+    """A context that fits comfortably is still built without stale prose."""
+    turn = _turn_at(4, "web_search", "web_search", "fetch_url", "fetch_url")
+    transcript = Transcript(system_prompt="s", turns=(turn,))
+
+    roomy = build_messages(transcript, ContextBudget(max_tokens=1_000_000))
+
+    assert roomy.results_collapsed == 2
+    handles = [
+        message.content or ""
+        for message in roomy.messages
+        if (message.content or "").startswith(TRACE_HANDLE_PREFIX)
+    ]
+    assert len(handles) == 2
+
+
+def test_no_source_a_turn_found_stops_being_reachable_when_a_result_ages() -> None:
+    """The links are what a claim is anchored to, and the handle keeps them."""
+    turn = _turn_at(4, "web_search", "web_search", "fetch_url", "fetch_url")
+    context = build_messages(
+        Transcript(system_prompt="s", turns=(turn,)),
+        ContextBudget(max_tokens=1_000_000),
+    )
+    body = "\n".join(message.content or "" for message in context.messages)
+
+    for call in turn.completed_calls:
+        for item in call.results:
+            assert str(item["url"]) in body
+
+
+def test_ageing_only_counts_the_rounds_of_the_turn_that_owns_them() -> None:
+    """Round numbers from two Turns are two clocks, not one timeline."""
+    older = _turn_at(3, "web_search", "web_search", "fetch_url")
+
+    assert aged_results(older) == {"c0", "c1"}
+    # The same Turn read as the newest one it is: nothing about the Turn after
+    # it changes which of its own calls are stale.
+    assert aged_results(replace(older, assistant_text="Xong.")) == {"c0", "c1"}
+
+
+def test_a_turn_with_no_finished_calls_has_nothing_to_age() -> None:
+    assert aged_results(TranscriptTurn(user_text="q")) == frozenset()
+    running = TranscriptTurn(
+        user_text="q",
+        tool_calls=(TurnToolCall(id="c0", name="web_search", round=0),),
+    )
+    assert aged_results(running) == frozenset()
+
+
+# -- the cacheable head, and what identifies it ------------------------------
+
+
+def test_the_body_sits_between_the_core_and_the_values_of_this_turn() -> None:
+    """Ordered by how often each block changes, which is what a prefix cache is.
+
+    The core is identical for every Turn of every reader; the body is identical
+    for every Turn under one pack; the date changes daily. A route reads a
+    cached prefix up to the first byte that differs, so a body placed after the
+    date would cache nothing but the core, and a body appended at the tail —
+    where it used to be — would cache nothing of itself at all.
+    """
+    prompt = render(RuntimeContext(today=date(2026, 8, 29), user_name="Ty"))
+    context = build_messages(
+        Transcript(
+            system_prompt=prompt,
+            system_prefix=prompt_prefix(),
+            system_body="PLAYBOOK",
+            turns=(TranscriptTurn(user_text="VCB thế nào?"),),
+        )
+    )
+    content = context.messages[0].content or ""
+
+    assert content.index(prompt_prefix()) < content.index("PLAYBOOK")
+    assert content.index("PLAYBOOK") < content.index("2026-08-29")
+    # And it is still one message describing one prompt.
+    assert context.messages[0].role is Role.SYSTEM
+    assert sum(1 for m in context.messages if m.role is Role.SYSTEM) == 1
+
+
+def test_each_stable_block_gets_its_own_breakpoint_and_the_runtime_gets_none() -> None:
+    """Two blocks go stale on two clocks: a prompt edit, and a pack swap.
+
+    One breakpoint over their concatenation would void the core every time a
+    pack moved, which is the larger of the two by a factor of seven.
+    """
+    context = build_messages(
+        Transcript(
+            system_prompt=render(RuntimeContext(today=date(2026, 8, 29))),
+            system_prefix=prompt_prefix(),
+            system_body="PLAYBOOK",
+            turns=(TranscriptTurn(user_text="q"),),
+        )
+    )
+    segments = context.messages[0].segments
+
+    assert [segment.cache_breakpoint for segment in segments] == [True, True, False]
+    # ``Message`` refuses any other arrangement, and this says so out loud.
+    assert "".join(s.text for s in segments) == context.messages[0].content
+
+
+def test_a_turn_with_no_body_builds_the_message_it_always_built() -> None:
+    """Most Turns never touch the domain, and they pay nothing for packs."""
+    prompt = render(RuntimeContext(today=date(2026, 8, 29), user_name="Ty"))
+    plain = Transcript(
+        system_prompt=prompt,
+        system_prefix=prompt_prefix(),
+        turns=(TranscriptTurn(user_text="q"),),
+    )
+
+    message = build_messages(plain).messages[0]
+
+    assert message.content == prompt
+    assert [s.cache_breakpoint for s in message.segments] == [True, False]
+
+
+def test_the_body_is_charged_to_its_own_layer_and_only_once() -> None:
+    with_body = build_messages(
+        Transcript(
+            system_prompt=render(RuntimeContext(today=date(2026, 8, 29))),
+            system_prefix=prompt_prefix(),
+            system_body=active_pack().body_text,
+            turns=(TranscriptTurn(user_text="q"),),
+        )
+    )
+    without = build_messages(
+        Transcript(
+            system_prompt=render(RuntimeContext(today=date(2026, 8, 29))),
+            system_prefix=prompt_prefix(),
+            turns=(TranscriptTurn(user_text="q"),),
+        )
+    )
+
+    assert without.composition.domain_body == 0
+    assert with_body.composition.domain_body > 0
+    assert with_body.composition.system_core == without.composition.system_core
+    assert with_body.composition.total == with_body.estimated_tokens
+    # And the whole difference between the two contexts is the body — to within
+    # the estimator's single rounding step. A charge is ``ceil(len / 4)`` taken
+    # over running prefixes, so inserting a block moves where the remainders
+    # fall and the two numbers can land one apart. What this rules out is the
+    # failure it was written for: a body charged twice, or charged to the core,
+    # is out by about a thousand rather than by one.
+    assert (
+        abs(
+            (with_body.estimated_tokens - without.estimated_tokens)
+            - with_body.composition.domain_body
+        )
+        <= 1
+    )
+
+
+@pytest.mark.asyncio
+async def test_every_call_of_a_turn_names_the_head_it_sent() -> None:
+    client = FakeClient([wants("web_search"), answer()])
+
+    await loop(client).run(turn_request())
+
+    identities = {
+        request.metadata.get("cache_identity") for request in client.requests
+    }
+    assert len(identities) == 1
+    (identity,) = identities
+    assert PROMPT_HASH in identity
+    assert active_pack().identity in identity
+    assert SESSION_MODEL in identity
+
+
+@pytest.mark.asyncio
+async def test_nothing_about_one_turn_reaches_the_identity_of_its_head() -> None:
+    """A key carrying a date or a question is a key that never matches."""
+    client = FakeClient([answer()])
+    other = FakeClient([answer()])
+
+    await loop(client).run(
+        turn_request(user_text="VCB thế nào?", user_id=7, request_message_id=1)
+    )
+    await loop(other).run(
+        turn_request(
+            user_text="Lãi suất bao nhiêu?",
+            user_id=9,
+            request_message_id=2,
+            runtime=RuntimeContext(today=date(2027, 1, 1), user_name="Khác"),
+            mode=SIGNAL_DESK_MODE,
+        )
+    )
+
+    # Two Turns sharing nothing — different reader, question, day and mode —
+    # and one identity. That equality is the assertion; the substring checks
+    # below only name what would have broken it.
+    identity = client.requests[0].metadata["cache_identity"]
+    assert identity == other.requests[0].metadata["cache_identity"]
+    for leak in ("VCB", "2027-01-01", "Khác", "signal_desk"):
+        assert leak not in identity
+
+
+@pytest.mark.asyncio
+async def test_the_identity_stays_in_this_process_and_off_the_wire() -> None:
+    """The route has not been shown to read a cache field, so none is sent."""
+    from src.core.llm.transport import OpenAICompatibleTransport
+
+    client = FakeClient([answer()])
+    await loop(client).run(turn_request())
+    body = OpenAICompatibleTransport(config())._body(client.requests[0])
+
+    assert "cache_identity" not in json.dumps(body, default=str)
+    assert "metadata" not in body
+
+
+# -- the board a signal_desk Turn ends with ---------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_signal_desk_turn_that_drew_nothing_draws_what_it_gathered() -> None:
+    """The one hook, and the failure it closes.
+
+    A ``signal_desk`` Turn ending in prose is what the mode exists to prevent,
+    and it has two shapes that look identical from the loop: the model never
+    reached for a board, or it reached and broke the grammar twice. Either way
+    the frames are on disk, so the server draws them and stamps it.
+    """
+    client = FakeClient([answer("Đây là câu trả lời bằng chữ.")])
+    drawn: list[tuple[Any, Any]] = []
+
+    def compose(turn_id: Any, thread_id: Any):
+        drawn.append((turn_id, thread_id))
+        return {
+            "artifactId": "9f8e7d6c-5b4a-3928-1706-0f1e2d3c4b5a",
+            "studyName": "composed_signal_desk",
+            "title": "Số liệu đã tính",
+            "blockCount": 2,
+            "autoComposed": True,
+            "provenance": {"asOf": "2026-08-30T00:00:00+00:00"},
+        }
+
+    outcome = await loop(client, auto_compose=compose).run(
+        turn_request(mode=SIGNAL_DESK_MODE)
+    )
+
+    assert len(drawn) == 1
+    assert len(outcome.signal_desks) == 1
+    assert outcome.signal_desks[0]["autoComposed"] is True
+    # A Turn that ended with a board owes no account of why it did not.
+    assert outcome.signal_desk_absence is None
+
+
+@pytest.mark.asyncio
+async def test_a_turn_with_nothing_gathered_still_says_why_it_drew_nothing() -> None:
+    client = FakeClient([answer("Không có số nào.")])
+
+    outcome = await loop(client, auto_compose=lambda *_args: None).run(
+        turn_request(mode=SIGNAL_DESK_MODE)
+    )
+
+    assert outcome.signal_desks == ()
+    assert outcome.signal_desk_absence == NO_SIGNAL_DESK_TOOL_CALLED
+
+
+@pytest.mark.asyncio
+async def test_a_chat_turn_is_never_drawn_for() -> None:
+    """The hook is the mode's, not the loop's. A question answered in prose was
+    answered."""
+    client = FakeClient([answer("Trả lời thường.")])
+    called: list[int] = []
+
+    outcome = await loop(
+        client, auto_compose=lambda *_args: called.append(1)
+    ).run(turn_request())
+
+    assert called == []
+    assert outcome.signal_desk_absence is None
+
+
+@pytest.mark.asyncio
+async def test_a_compose_that_breaks_does_not_break_the_answer() -> None:
+    """A board is worth having and it is not worth failing a finished Turn for."""
+
+    def explode(*_args: Any):
+        raise RuntimeError("the store is down")
+
+    client = FakeClient([answer("Câu trả lời vẫn còn đây.")])
+
+    outcome = await loop(client, auto_compose=explode).run(
+        turn_request(mode=SIGNAL_DESK_MODE)
+    )
+
+    assert outcome.answer == "Câu trả lời vẫn còn đây."
+    assert outcome.signal_desks == ()
+    assert outcome.signal_desk_absence == NO_SIGNAL_DESK_TOOL_CALLED

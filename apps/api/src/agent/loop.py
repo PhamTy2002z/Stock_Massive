@@ -127,12 +127,15 @@ from .guardrails import TurnGuardrails
 from .messages import (
     ANSWER,
     CHARS_PER_TOKEN,
+    DOMAIN_BODY,
     MAX_SUMMARY_CHARS,
     MESSAGE_OVERHEAD_TOKENS,
     NO_SIGNAL_DESK_TOOL_CALLED,
     SUMMARY_LABEL,
+    SYSTEM_DYNAMIC,
     THOUGHT,
     ConstructedContext,
+    ContextComposition,
     ConstructedContextTooLarge,
     ContextBudget,
     ToolCallStatus,
@@ -141,6 +144,7 @@ from .messages import (
     TurnAttachment,
     TurnToolCall,
     build_messages,
+    context_projection,
     signal_desk_absence,
     signal_desk_of,
     display_results,
@@ -149,7 +153,7 @@ from .messages import (
     shown_result,
     summarise_call,
 )
-from .prompt import RuntimeContext, prefix as prompt_prefix, render
+from .prompt import RuntimeContext, cache_key, prefix as prompt_prefix, render
 from .domain import active_pack
 from .toolsets import CHAT_TOOLSETS, CORE_TOOLS, resolve_toolset
 
@@ -339,6 +343,15 @@ TurnMode = Literal["chat", "signal_desk"]
 CHAT_MODE: TurnMode = "chat"
 SIGNAL_DESK_MODE: TurnMode = "signal_desk"
 
+#: How a ``signal_desk`` Turn draws what it gathered when the model drew nothing.
+#:
+#: Two ids in, the same announcement payload ``render_signal_desk`` returns out,
+#: or ``None`` when the Turn gathered no frame at all. A callable rather than an
+#: import because it reads rows: the default is
+#: ``agent/tools/studies.py::auto_compose_for_turn``, resolved at the one call
+#: site below so this module's imports stay free of the store.
+AutoComposer = Callable[[Any, Any], Mapping[str, Any] | None]
+
 # What a ``signal_desk`` Turn is told, on every call rather than once.
 #
 # A system note rather than a section of the prompt, because the prompt is
@@ -350,9 +363,11 @@ SIGNAL_DESK_MODE: TurnMode = "signal_desk"
 # ``state.note``: a mode holds for the whole Turn, and a model told once in
 # round one has to remember it through three more rounds of tool results.
 SIGNAL_DESK_NOTE = (
-    "This turn was asked from the Signal Desk, the surface that draws. Reach "
-    "for a Signal Desk-producing tool wherever the question admits one, and when "
-    "none does, answer in prose and say plainly what could not be drawn."
+    "This turn was asked from the Signal Desk, the surface that draws. Every "
+    "question that gets numbers becomes a board: gather frames with query, "
+    "compute or run_study, then render_signal_desk. When nothing can be drawn, "
+    "say plainly what could not be — the server will compose a board from the "
+    "frames you already have, and a poor board beats a paragraph."
 )
 
 def domain_body_note() -> str:
@@ -381,18 +396,19 @@ def domain_body_note() -> str:
 
 
 def domain_body_tokens(state: "_TurnState") -> int:
-    """What this call has to set aside for the body, if it carries one.
+    """What the pack body costs this call, or zero where it carries none.
 
-    One function called from both places rather than two constants that happen
-    to agree. ``_construct`` trims the transcript against a ceiling minus this,
-    and ``_call`` appends the message this stands for; the comment on that
-    reservation already says the two must not disagree, and two hand-copied
-    expressions are the cheapest way to make them.
+    Nothing reserves this any more, and that is the improvement. The body used
+    to be a message appended after the context was constructed, so the ceiling
+    the transcript was trimmed against had to be lowered by a number computed
+    here — and a reservation is only ever an estimate of a message somebody else
+    builds. Since the body moved inside the system message it is measured like
+    every other block of the prompt, by :func:`estimate_tokens`, from the string
+    that actually goes out.
 
-    It is the body's own measured cost rather than ``SYSTEM_NOTE_TOKENS``. The
-    notes that constant was written for are one sentence; a pack body is
-    hundreds of tokens, and reserving a sentence's worth of room for it is a
-    context built believing it has room it does not.
+    Kept because the question is still worth asking — a diagnostic and the
+    replay harness both want to know what a Turn is paying for its playbook —
+    and because it is the one place that answer is written down.
     """
     return active_pack().body_tokens if state.domain_body else 0
 
@@ -880,6 +896,18 @@ class _TurnState:
     #: returned one link twice, so a set scoped any narrower than this would be
     #: a set that never rejected anything.
     shown_sources: set[str] = field(default_factory=set)
+    #: Every page the *model* has already been given, this Turn, by key.
+    #:
+    #: A second set rather than a reuse of ``shown_sources``, and the two are
+    #: not the same question. That one is about a screen: a rail row is drawn
+    #: once and never retracted, so a link enters it the moment it is rendered.
+    #: This one is about a prompt: a search result is dropped from a later call
+    #: only because an earlier call is *still carrying it*, and the two
+    #: populations diverge the moment a result is capped for display
+    #: (``MAX_DISPLAY_RESULTS``) or the moment a call is shown but not sent.
+    #: Sharing one set would let a link the rail drew suppress a result the
+    #: model never saw.
+    context_sources: set[str] = field(default_factory=set)
     model_refused: bool = False
     summary_needed: bool = False
     request_id: str | None = None
@@ -912,6 +940,26 @@ class _TurnState:
     # the answer is written under the version of the instructions the last call
     # happened to carry.
     domain_body: bool = False
+    #: Where the last call's input tokens went, by layer.
+    #:
+    #: Held on the Turn rather than returned, because the two readers of it are
+    #: not the caller of ``_call``: a measurement harness replaying this Turn
+    #: wants the breakdown of the call that was actually sent, and a diagnostic
+    #: wants the last one when a Turn ends badly. Overwritten each round, which
+    #: is the honest shape — a round is what a composition describes.
+    composition: ContextComposition = field(default_factory=ContextComposition)
+    #: What identifies the cacheable head every call of this Turn sends.
+    #:
+    #: Carried so it can be attached to each request and read back off a trace
+    #: — an answer that came out wrong is asked "which prompt produced it", and
+    #: a version number alone cannot answer that once a domain pack can change
+    #: the prompt without the version moving.
+    #:
+    #: It does **not** steer the provider. The route's cache is keyed on the
+    #: first bytes of the request and always was; this is the harness's own name
+    #: for those bytes, and calling it a cache key without saying so would
+    #: invite somebody to "fix" caching by editing it.
+    cache_identity: str = ""
     # Set when the guardrail ladder halted the tool loop. The Turn does not end:
     # it makes its answering call one round early, which is what the halt
     # guidance asks for — ending here would throw away evidence the reader was
@@ -962,6 +1010,7 @@ class AgentLoop:
         tool_timeout_seconds: float = TOOL_TIMEOUT_SECONDS,
         deadline_seconds: float | None = TURN_DEADLINE_SECONDS,
         clock: Callable[[], datetime] | None = None,
+        auto_compose: AutoComposer | None = None,
     ) -> None:
         self._client = client
         # A conversation's selection, never "every bundle this build registered".
@@ -979,6 +1028,10 @@ class AgentLoop:
         self._tool_timeout = tool_timeout_seconds
         self._deadline = deadline_seconds
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+        # How a ``signal_desk`` Turn gets a board when the model composed none.
+        # Injected rather than imported at the top for one reason: this module
+        # opens no sessions and knows no tables, and the default reaches both.
+        self._auto_compose = auto_compose
         # Resolved once, here. ``docs/adr/0008``: models split by workload and
         # never inside the loop, because an in-loop cheap-router split adds a
         # decision point whose quality nothing measures.
@@ -1016,6 +1069,18 @@ class AgentLoop:
         )
         surface = resolve_tool_surface(self._toolsets)
         tools = surface.offered_schemas
+        # The identity of this Turn's cacheable head, computed once where every
+        # part of it is already in hand. Model, prompt version and hash, the
+        # resolved tool surface — the schemas travel in the same head as the
+        # prompt — and the pack, because two Turns on the same model with the
+        # same tools are not the same prompt under two domains.
+        #
+        # Nothing about *this* Turn is in it: no user, no thread, no date, no
+        # mode, no question. A key carrying any of those would be a key that
+        # never matches, which is a cache that costs and never pays.
+        state.cache_identity = cache_key(
+            self._model, surface.identity_digest, active_pack().identity
+        )
         turn_budget = TurnBudget(
             thresholds_for_context(self._context_tokens),
             registry_limits={
@@ -1219,6 +1284,49 @@ class AgentLoop:
 
     # -- the model call ---------------------------------------------------
 
+    def _appended(
+        self, request: TurnRequest, state: _TurnState, exhausted: bool
+    ) -> tuple[tuple[Message, str, int], ...]:
+        """The system messages added after the context was constructed.
+
+        Each one comes with the layer it is charged to and what it is charged,
+        so the caller has one list to send and one list to account for. The
+        reservation in ``_construct`` reads the same values from the same
+        helpers, which is what keeps the ceiling the transcript was trimmed
+        against and the request that actually goes out from disagreeing.
+
+        The pack body is **not** here, and used to be. It is prompt material,
+        and since it moved into the system message it is carried and measured by
+        the constructed context like the rest of the prompt — a Turn that
+        reserved room for it here as well would be paying for it twice.
+        """
+        appended: list[tuple[Message, str, int]] = []
+        if request.mode == SIGNAL_DESK_MODE:
+            appended.append(
+                (
+                    Message(role=Role.SYSTEM, content=SIGNAL_DESK_NOTE),
+                    SYSTEM_DYNAMIC,
+                    SYSTEM_NOTE_TOKENS,
+                )
+            )
+        if exhausted:
+            appended.append(
+                (
+                    Message(role=Role.SYSTEM, content=ROUNDS_EXHAUSTED_NOTE),
+                    SYSTEM_DYNAMIC,
+                    SYSTEM_NOTE_TOKENS,
+                )
+            )
+        if state.note:
+            appended.append(
+                (
+                    Message(role=Role.SYSTEM, content=state.note),
+                    SYSTEM_DYNAMIC,
+                    SYSTEM_NOTE_TOKENS,
+                )
+            )
+        return tuple(appended)
+
     def _construct(
         self,
         system_prompt: str,
@@ -1243,18 +1351,15 @@ class AgentLoop:
                     * CONTEXT_COMPRESSION_FACTOR ** state.compressions
                 ),
             )
-        # Room for whatever is appended after the context is built, so the
-        # ceiling the transcript is trimmed against and the request that
-        # actually goes out cannot disagree.
-        reserved = (
-            (SYSTEM_NOTE_TOKENS if exhausted else 0)
-            + (SYSTEM_NOTE_TOKENS if state.note else 0)
-            # Every call of a ``signal_desk`` Turn carries the mode note, so the
-            # room for it is reserved every time as well.
-            + (SYSTEM_NOTE_TOKENS if request.mode == SIGNAL_DESK_MODE else 0)
-            # And the domain body, once this Turn has earned it, at its own
-            # measured size rather than a note's.
-            + domain_body_tokens(state)
+        # Room for whatever is appended after the context is built, read off
+        # the same list ``_call`` appends, so the ceiling the transcript is
+        # trimmed against and the request that actually goes out cannot
+        # disagree. Every call of a ``signal_desk`` Turn carries the mode note,
+        # and a Turn that has earned the domain body carries it at its own
+        # measured size rather than a note's; both facts live in ``_appended``
+        # and neither is restated here.
+        reserved = sum(
+            tokens for _, _, tokens in self._appended(request, state, exhausted)
         )
         if reserved:
             budget = replace(budget, max_tokens=budget.max_tokens - reserved)
@@ -1265,6 +1370,12 @@ class AgentLoop:
             # Ignored by every route that does not, and by the token estimate
             # either way.
             system_prefix=prompt_prefix(),
+            # The pack's playbook, between the core and this Turn's values. A
+            # Turn that has not touched the domain sends ``None`` and gets the
+            # message it always got. Read every construction rather than once,
+            # because the third trigger fires mid-Turn: the body appears on the
+            # call after the model asks for a domain tool and stays to the end.
+            system_body=domain_body_note() if state.domain_body else None,
             vision=self._vision,
             turns=(
                 *request.history,
@@ -1292,8 +1403,12 @@ class AgentLoop:
         trimmed = {result.call_id: result.text for result in turn_budget.rebalance()}
         if not trimmed:
             return tuple(state.calls)
+        # ``context_text`` and never ``result_text``: rung three is the model's
+        # copy giving ground, and writing the shorter string over the trace's
+        # copy would make the audit record say the tool returned less than it
+        # did.
         return tuple(
-            replace(call, result_text=trimmed[call.id])
+            replace(call, context_text=trimmed[call.id])
             if call.id in trimmed
             else call
             for call in state.calls
@@ -1345,6 +1460,13 @@ class AgentLoop:
             self._client.complete(
                 CompletionRequest(
                     model=self._model,
+                    # Local to this process: ``metadata`` is read by this
+                    # harness and by tests, and the transport does not put it on
+                    # the wire. That is deliberate — the route has not been
+                    # shown to read any cache field, and sending one it ignores
+                    # would be a claim in the request body that nothing behind
+                    # it honours.
+                    metadata={"cache_identity": state.cache_identity},
                     messages=tuple(messages),
                     tools=tuple(tools),
                     # On the ceiling the model answers from what it has: another
@@ -1392,31 +1514,16 @@ class AgentLoop:
         while True:
             context = rebuild()
             state.summary_needed = state.summary_needed or context.summary_needed
-            messages = list(context.messages)
-            reserved = 0
-            # First among the appended messages, so the notes that are about
-            # this Turn rather than about the domain keep the last word: the
-            # body is prompt material that happens to arrive late, not the most
-            # recent thing the Turn was told.
-            body_tokens = domain_body_tokens(state)
-            if body_tokens:
-                messages.append(
-                    Message(role=Role.SYSTEM, content=domain_body_note())
-                )
-                reserved += body_tokens
-            if request.mode == SIGNAL_DESK_MODE:
-                messages.append(
-                    Message(role=Role.SYSTEM, content=SIGNAL_DESK_NOTE)
-                )
-                reserved += SYSTEM_NOTE_TOKENS
-            if exhausted:
-                messages.append(
-                    Message(role=Role.SYSTEM, content=ROUNDS_EXHAUSTED_NOTE)
-                )
-                reserved += SYSTEM_NOTE_TOKENS
-            if state.note:
-                messages.append(Message(role=Role.SYSTEM, content=state.note))
-                reserved += SYSTEM_NOTE_TOKENS
+            appended = self._appended(request, state, exhausted)
+            messages = [*context.messages, *(message for message, _, _ in appended)]
+            # One arithmetic, not two. What funds the call is the sum of what
+            # explains it, so the reservation cannot drift from the breakdown
+            # the way two hand-copied expressions eventually would.
+            composition = context.composition
+            for _, layer, tokens in appended:
+                composition = composition.plus(**{layer: tokens})
+            state.composition = composition
+            reserved = composition.total - context.estimated_tokens
 
             try:
                 completion = await self._complete(
@@ -1699,6 +1806,17 @@ class AgentLoop:
                             ToolCallStatus.OK if result.ok else ToolCallStatus.ERROR
                         ),
                         result_text=result.text,
+                        # What the model reads, which is the result minus the
+                        # pages this Turn has already put in front of it. Built
+                        # from the same structured payload the display
+                        # projection is built from, and beside it, so there is
+                        # one place a result becomes two audiences' copies.
+                        context_text=context_projection(
+                            result.tool_name,
+                            result.payload,
+                            result.text,
+                            seen=state.context_sources,
+                        ),
                         error=result.error,
                         guidance=result.guidance,
                         duration_ms=result.duration_ms,
@@ -1724,16 +1842,21 @@ class AgentLoop:
                         scan=result.scan,
                     )
                     state.calls[position] = finished
+                    # The budget measures what the model is given, not what
+                    # the tool returned. Rungs two and three decide how much of
+                    # a Turn's results have to give ground, and deciding that
+                    # against a longer string than the one being sent would trim
+                    # a context that already fitted.
                     turn_budget.add(
-                        finished.id, finished.name, finished.result_text or ""
+                        finished.id, finished.name, finished.model_text
                     )
 
         # The results the budget never saw, because they never ran. Added anyway,
         # so the trimming ladder measures the same set of results the model
         # reads.
         for record in planned:
-            if not record.dispatched and record.result_text:
-                turn_budget.add(record.id, record.name, record.result_text)
+            if not record.dispatched and record.model_text:
+                turn_budget.add(record.id, record.name, record.model_text)
 
         if timed_out:
             # Settled rather than left running, so a reader who reconnects to the
@@ -1890,6 +2013,39 @@ class AgentLoop:
         if announce is not None:
             announce(payload)
 
+    async def _compose_what_is_left(self, state: _TurnState) -> None:
+        """Draw the Turn's own frames, once, when it is about to end with none.
+
+        A ``signal_desk`` Turn that ends in prose is the one failure the mode
+        exists to prevent, and it has two shapes that look identical from here:
+        the model never reached for a board, or it reached twice and broke the
+        grammar both times. Either way the frames are on disk and a reader asked
+        for a picture, so the server draws one and stamps it ``autoComposed``.
+
+        **It never raises into a terminal path.** This runs from
+        :meth:`_ended`, which every way a Turn can finish passes through —
+        including the ones that finished badly. A board is worth having and it is
+        not worth turning a completed answer into a failed one, so a broken
+        compose is logged and the Turn ends the way it was going to.
+        """
+        composer = self._auto_compose
+        if composer is None:
+            from .tools.studies import auto_compose_for_turn
+
+            composer = auto_compose_for_turn
+        try:
+            payload = await asyncio.to_thread(
+                composer, _as_uuid(state.turn_id), _as_uuid(state.thread_id)
+            )
+        except Exception:  # pragma: no cover - defended, not expected
+            logger.exception(
+                "Turn %s could not compose a board from its own frames",
+                state.turn_id or "unidentified",
+            )
+            return
+        if payload:
+            self._publish_signal_desk(state, payload)
+
     async def _save(self, state: _TurnState, *, boundary: bool = False) -> None:
         if self._checkpoint is None:
             return
@@ -1945,6 +2101,8 @@ class AgentLoop:
         """
         await self._save(state, boundary=True)
         _log_catalog_without_a_run(state)
+        if state.mode == SIGNAL_DESK_MODE and not state.signal_desks:
+            await self._compose_what_is_left(state)
         absent = (
             signal_desk_absence(state.calls)
             if state.mode == SIGNAL_DESK_MODE and not state.signal_desks
@@ -2128,6 +2286,7 @@ __all__ = [
     "domain_body_tokens",
     "domain_tool_names",
     "build_messages",
+    "AutoComposer",
     "signal_desk_absence",
     "estimate_tokens",
     "shown_result",

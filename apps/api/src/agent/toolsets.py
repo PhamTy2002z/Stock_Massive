@@ -45,8 +45,18 @@ CORE_TOOLSETS: tuple[str, ...] = ("web", "memory")
 
 TOOLSETS: dict[str, Toolset] = {
     "web": {
-        "description": "Search the open web and read one public page.",
-        "tools": ("web_search", "fetch_url"),
+        "description": (
+            "Search the open web, read one public page, and put figures read "
+            "off a page onto the Signal Desk."
+        ),
+        "tools": (
+            "web_search",
+            "fetch_url",
+            # In this bundle and not one of its own because it is about the web:
+            # it reads a page this Turn already fetched and nothing else, and a
+            # deployment without the web has nothing for it to check against.
+            "frame_from_evidence",
+        ),
     },
     "memory": {
         "description": (
@@ -62,8 +72,9 @@ TOOLSETS: dict[str, Toolset] = {
     # registration — see ``tools/signals.py``.
     "signals": {
         "description": (
-            "Read one registered Signal Field out of this system's own store — "
-            "as one figure or as a series across sessions — and check a price "
+            "Read this system's own store: one registered Signal Field as a "
+            "figure or a series, a table of many symbols across many periods, a "
+            "comparison of symbols on several fields — and check a price "
             "published elsewhere against the exchange that would have had to "
             "produce it."
         ),
@@ -72,6 +83,14 @@ TOOLSETS: dict[str, Toolset] = {
             "get_field",
             "get_series",
             "check_price_claim",
+            # The table half of the same plane, added with the analysis
+            # compiler. In this bundle and not one of their own because they
+            # read exactly what the four above read — this system's store, under
+            # the same Universe and closed-session rules — and a bundle is a
+            # statement about *what a tool reads*, not about what shape it
+            # returns.
+            "query",
+            "compare_fields",
         ),
     },
     # A Study answers what a figure cannot: a shape rather than a number. The
@@ -84,7 +103,16 @@ TOOLSETS: dict[str, Toolset] = {
             "store, or compose a Signal Desk out of numbers already gathered, and "
             "draw either as a panel the reader can open."
         ),
-        "tools": ("list_studies", "run_study", "render_signal_desk"),
+        "tools": (
+            "list_studies",
+            "run_study",
+            "render_signal_desk",
+            # The calculation axis of the same plane. Here rather than in
+            # ``signals`` because it reads no store table: its inputs are frames
+            # this Turn already made, which is what a Study's own ``compute``
+            # does, one step later.
+            "compute",
+        ),
     },
 }
 

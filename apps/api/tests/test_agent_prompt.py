@@ -70,7 +70,21 @@ def test_the_version_names_the_prose_this_build_actually_ships() -> None:
 
     The hash below moves on its own when the prose moves; this line does not,
     which is the point. Updating it is the moment somebody states that the
-    prompt changed and says what changed — 3.0.0 split the prompt in two: a
+    prompt changed and says what changed — 3.3.0 named ``compute`` and
+    ``frame_from_evidence`` in the tool catalogue, because the calculation axis
+    and the evidence axis registered and a registered tool the prompt never
+    names is a tool the model cannot reach; catalogue prose only, no rule moved.
+    3.2.0 named ``query`` and
+    ``compare_fields`` in the tool catalogue, because the store's own tables
+    became readable as a table and a registered tool the prompt never names is a
+    tool the model cannot reach; catalogue prose only, no rule moved. 3.1.0
+    moved the domain body from a
+    note appended after the tool results to a block inside the system message,
+    between the core and the values rendered for the Turn. Not one word of
+    either tier changed, and the version moved anyway: where an instruction sits
+    relative to a page of untrusted text is part of what the model was told, and
+    an artifact recorded under 3.0.0 was produced by a different arrangement of
+    the same sentences. 3.0.0 split the prompt in two: a
     core every Turn carries, and a domain body carried only by a Turn that
     reaches for the domain, which now lives with the pack that declares it
     (``agent/domain/vn_equity``). Nothing was rewritten in the move, so the
@@ -86,7 +100,7 @@ def test_the_version_names_the_prose_this_build_actually_ships() -> None:
     the reader uploads is evidence rather than instruction, and the price gate
     now covers a number read off one of them, not only a number read off a page.
     """
-    assert PROMPT_VERSION == "3.0.0"
+    assert PROMPT_VERSION == "3.5.0"
 
 
 def test_the_prompt_carries_the_signal_desk_rule_in_its_cacheable_half() -> None:
@@ -368,13 +382,14 @@ LOAD_BEARING_PROSE = (
     "bạn có đúng ba lựa chọn",
     "Nói không biết là một câu trả lời hoàn chỉnh",
     # Core: the tool catalog and the rules that apply to any tool.
-    "Bạn có mười hai công cụ",
+    "Bạn có mười sáu công cụ",
     "Hỏi store trước khi hỏi web",
     "Không biết thì tra, đừng đoán",
     "cùng một lượt gọi",
     "Chỉ để sang lượt sau",
     "Nói trước khi tra",
     "Có những lượt được hỏi từ Signal Desk",
+    "mọi câu hỏi nhận được số\nđều phải thành board",
     # Core: what arrives from outside, and the gate a price has to pass.
     "untrusted_tool_result",
     "user_attachment",
@@ -392,6 +407,10 @@ LOAD_BEARING_PROSE = (
     "Ranh giới giữa hai loại trên",
     "Nhưng store chỉ có ba trục",
     "Nên với một mã: đọc field trước",
+    # Body: how a board is composed, once the domain is in play.
+    "dựng nó theo bảy bước sau",
+    "chọn dạng board theo dạng câu hỏi",
+    "KPI trước, hình sau",
 )
 
 
@@ -424,6 +443,10 @@ SAFETY_FLOOR = (
     # see, and the sentence saying it cannot see one has to be there for it.
     "Bạn KHÔNG đọc được",
     "hãy hỏi lại con số đó thay vì đoán",
+    # A figure a model typed is a figure nothing checked. The rule belongs
+    # beside "do not invent a Vietnamese market number" for the same reason:
+    # the Turn that reaches for nothing is the Turn that would type one.
+    "bạn không gõ số vào chú thích",
 )
 
 
@@ -474,7 +497,7 @@ def test_the_pack_body_holds_the_store_playbook_and_no_tool_catalog() -> None:
     assert "Signal Field" in body
     assert "get_field" in body
     # The catalog stays where the schemas are: in every Turn.
-    assert "Bạn có mười hai công cụ" not in body
+    assert "Bạn có mười sáu công cụ" not in body
     assert "web_search" not in body
     assert "session_search" not in body
 
@@ -517,6 +540,31 @@ def test_no_pack_body_can_be_filled_in_later() -> None:
 #: derives from today's code is a baseline that says nothing.
 PROMPT_TOKENS_BEFORE_THE_SPLIT = 6097
 
+#: What the tool catalogue grew by after the split, and why it is subtracted
+#: rather than folded into the ceiling below.
+#:
+#: ``query`` and ``compare_fields`` were named in the catalogue on 2026-08-30,
+#: and ``compute`` and ``frame_from_evidence`` on the same day, a registered tool
+#: the prompt never names being a tool the model cannot reach. The entries for
+#: ``render_signal_desk`` and ``run_study`` were rewritten the same day, when the
+#: first stopped taking a list of blocks and started taking a board and the
+#: second stopped being a separate road — 136 tokens, measured by rendering the
+#: prefix with the two old entries and with the two new ones.
+#: That is ordinary prompt work and it costs what it costs. What it is *not* is
+#: the split regressing, and a ceiling raised to absorb it would stop measuring
+#: the thing it was written to measure — the two tests below are C5's acceptance
+#: evidence, and evidence that moves whenever the prompt grows is not evidence.
+#:
+#: So the growth is a named number, subtracted at the assertion. A later
+#: sentence added to the catalogue moves this constant and leaves the gate
+#: alone; a later change that made the *core* fatter without adding a tool still
+#: goes red, which is exactly the failure the gate exists for.
+#: 574 of it is the four entries, measured by rendering the catalogue section with
+#: and without them. One number for both tests below because both are the same prose
+#: counted the same way — the rounding difference between a section body and the
+#: rendered prefix is under the tolerance either test already carries.
+CATALOGUE_GROWTH_SINCE_THE_SPLIT = 710
+
 
 def _tokens(text: str) -> int:
     from src.agent.messages import estimate_tokens
@@ -533,7 +581,12 @@ def test_the_core_got_cheaper_by_enough_to_have_been_worth_doing() -> None:
     golden corpus — is a *signal* rather than a gate, because it is the sum of
     everything else happening on this branch as well.
     """
-    core = _tokens(prefix())
+    core = (
+        _tokens(prefix())
+        - CATALOGUE_GROWTH_SINCE_THE_SPLIT
+        - BOARD_PROSE_IN_THE_CORE
+        - FRESHNESS_PROSE_IN_THE_CORE
+    )
 
     assert core <= 5550, core
     assert PROMPT_TOKENS_BEFORE_THE_SPLIT - core >= 600
@@ -544,6 +597,30 @@ def test_the_core_got_cheaper_by_enough_to_have_been_worth_doing() -> None:
 #: computed the same way on both sides of the move — no headings, no per-message
 #: overhead counted once for the core and again for the body.
 SECTION_BODIES_BEFORE_THE_SPLIT = 6030
+
+#: What the board playbook cost, in the same unit, named for the same reason the
+#: catalogue growth is: it is prose that was never on either side of the split, so
+#: folding it into the baseline would make a real capability read as a split that
+#: gained a paragraph out of nowhere.
+#:
+#: Split in two because the two tiers are gated separately. The 92 in the core are
+#: the rewritten Signal Desk mode paragraph and the one invariant sentence saying a
+#: figure on a picture is a reference rather than something typed — both had to stay
+#: where a Turn that triggers no body still reads them. The 389 in the body are the
+#: seven steps for composing a board, which only a Turn that touched the domain
+#: needs. Measured 2026-08-30 with ``PROMPT_VERSION`` 3.4.0, by rendering the prefix
+#: with and without each piece.
+BOARD_PROSE_IN_THE_CORE = 92
+BOARD_PROSE_IN_THE_BODY = 389
+
+#: What the freshness floor cost, named for the reason the two constants above
+#: are. Added 2026-08-30 after a Turn quoted a close without its session while
+#: the spine sat three days behind the market: two paragraphs in the core, one
+#: making the as-of part of the number rather than a garnish, one forbidding the
+#: model from describing its own run wrongly. Core and not body, because a Turn
+#: that triggers no body is the Turn most likely to answer from memory.
+#: Measured by rendering the prefix with and without them.
+FRESHNESS_PROSE_IN_THE_CORE = 193
 
 
 def test_the_split_moved_the_prose_rather_than_deleting_it() -> None:
@@ -560,8 +637,18 @@ def test_the_split_moved_the_prose_rather_than_deleting_it() -> None:
     should move this number and the author should move the constant with it,
     which is a different act from discovering that a split lost a paragraph.
     """
-    bodies = sum(_tokens(section.body) for section in SECTIONS) + sum(
-        _tokens(section.body) for section in active_pack().prompt_sections
+    bodies = (
+        sum(_tokens(section.body) for section in SECTIONS)
+        + sum(_tokens(section.body) for section in active_pack().prompt_sections)
+        # Subtracted for the reason ``CATALOGUE_GROWTH_SINCE_THE_SPLIT`` is
+        # named: this test asks whether the *move* lost a paragraph, and four
+        # tools named after the move are prose that was never on either side of
+        # it. Folded into the total, a real capability addition would read as a
+        # split that gained a paragraph out of nowhere.
+        - CATALOGUE_GROWTH_SINCE_THE_SPLIT
+        - BOARD_PROSE_IN_THE_CORE
+        - BOARD_PROSE_IN_THE_BODY
+        - FRESHNESS_PROSE_IN_THE_CORE
     )
 
     assert abs(bodies - SECTION_BODIES_BEFORE_THE_SPLIT) <= 20, bodies

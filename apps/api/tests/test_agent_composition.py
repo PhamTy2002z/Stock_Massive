@@ -30,7 +30,7 @@ from src.alpha.envelope import EvidenceFigure
 from src.alpha.models import AgentArtifact, AgentMessage, AgentThread, AgentTurn
 from src.auth.models import User
 from src.core.database import Base, get_sync_db, sync_engine
-from src.studies import frames_buffer
+from src.studies import frames_buffer, grammar
 from src.studies.contracts import Frame, Provenance
 
 FIELD = "risk_adjusted.sharpe_annualized"
@@ -326,107 +326,253 @@ def a_frame_for(turn_id) -> str:
     return str(frame_id)
 
 
-def test_a_signal_desk_is_composed_from_the_frames_this_turn_gathered(turn):
+def a_table_for(turn_id) -> str:
+    """A one-row table: what a KPI strip is read out of."""
+    with get_sync_db() as session:
+        frame_id = frames_buffer.store_frame(
+            session,
+            kind=frames_buffer.QUERY_KIND,
+            frame=Frame(
+                kind="table",
+                columns=("symbol", "roe", "roa", "margin"),
+                rows=(("STB", 18.5, 1.4, 22.0),),
+                unit="%",
+                labels={
+                    "symbol": "Mã",
+                    "roe": "ROE",
+                    "roa": "ROA",
+                    "margin": "Biên lợi nhuận",
+                },
+            ),
+            provenance=Provenance(
+                source="store",
+                as_of=datetime(2026, 8, 20, tzinfo=timezone.utc),
+                sessions_used=1,
+                health="normal",
+                reason=None,
+            ),
+            params={"source": "ratio"},
+            title="Chỉ số STB",
+            turn_id=turn_id,
+            thread_id=None,
+        )
+        session.commit()
+    return str(frame_id)
+
+
+def a_board(series_id: str, table_id: str) -> dict:
+    """The smallest board that satisfies every rule, for the tests about one rule."""
+    return {
+        "title": "Sharpe của STB",
+        "archetype": "profile",
+        "kpis": [
+            {"label": "ROE", "value": {"frame_id": table_id, "column": "roe"}},
+            {"label": "ROA", "value": {"frame_id": table_id, "column": "roa"}},
+            {"label": "Biên", "value": {"frame_id": table_id, "column": "margin"}},
+        ],
+        "sections": [
+            {
+                "heading": "Diễn biến",
+                "blocks": [
+                    {"kind": "visual", "frame_id": series_id},
+                    {"kind": "visual", "frame_id": table_id},
+                ],
+            }
+        ],
+    }
+
+
+def test_a_board_is_compiled_from_the_frames_this_turn_gathered(turn):
     turn_id = turn[0]
-    frame_id = a_frame_for(turn_id)
+    series_id = a_frame_for(turn_id)
+    table_id = a_table_for(turn_id)
 
-    answered = render(
-        {
-            "title": "Sharpe của STB",
-            "blocks": [{"widget": "line_series", "frame_id": frame_id}],
-        },
-        turn_id=turn_id,
-    )
+    answered = render(a_board(series_id, table_id), turn_id=turn_id)
 
-    assert answered["blockCount"] == 1
-    assert answered["dropped"] == []
+    assert answered["autoComposed"] is False
+    assert answered["kpiCount"] == 3
+
     with get_sync_db() as session:
         row = session.execute(
             select(AgentArtifact).where(
                 AgentArtifact.id == uuid.UUID(answered["artifactId"])
             )
         ).scalar_one()
-        block = row.signal_desk_spec["blocks"][0]
-        # The version and the presentation are the server's, not the model's: a
-        # version is how an old artifact keeps rendering, and which column is
-        # the line is a claim about the numbers. The server files the newest
-        # version it draws, whatever that is today.
-        assert block["widgetVersion"] == study_tools._newest_version("line_series")
-        assert block["options"] == {"x": "session", "y": "value"}
-        assert row.frames[block["frame"]]["rows"][0] == ["2026-08-19", 1.0]
+        spec = row.signal_desk_spec
+
+    assert spec["specVersion"] == 2
+    assert spec["archetype"] == "profile"
+    # The figure is stored resolved and formatted: re-opening the board a month
+    # later draws the string that was written, not one derived again.
+    first = spec["kpis"][0]
+    assert first["value"]["text"] == "18,5%"
+    assert first["value"]["raw"] == 18.5
+    assert first["value"]["row"] == 0
+    # The widget is the shape's, not the model's — it named none.
+    blocks = spec["sections"][0]["blocks"]
+    assert [block["widget"] for block in blocks] == ["line_series", "stat_tiles"]
+    assert blocks[0]["options"] == {"x": "session", "y": "value"}
+    # Every row of the grid adds to twelve.
+    assert sum(block["span"] for block in blocks) == 12
+    assert row.frames[blocks[0]["frame"]]["rows"][0] == ["2026-08-19", 1.0]
 
 
-def test_a_frame_from_another_turn_draws_nothing(turn, other_turn):
-    frame_id = a_frame_for(other_turn)
-
-    answered = render(
-        {"title": "Của người khác", "blocks": [{"widget": "line_series", "frame_id": frame_id}]},
-        turn_id=turn[0],
-    )
-
-    assert answered["error"] == "cannot_read"
-    assert "not a frame id this turn produced" in answered["dropped"][0]["reason"]
-
-
-def test_a_block_that_cannot_be_drawn_costs_one_block_and_not_the_signal_desk(
-    turn, other_turn
-):
+def test_a_caption_is_stored_resolved_and_a_typed_digit_is_refused(turn):
     turn_id = turn[0]
-    good = a_frame_for(turn_id)
-    stranger = a_frame_for(other_turn)
+    series_id = a_frame_for(turn_id)
+    table_id = a_table_for(turn_id)
 
-    answered = render(
+    # Three pictures and one sentence, because the lint floor is seven tenths
+    # of the blocks: a board of two charts cannot carry a caption at all, which
+    # is a consequence of the threshold rather than of this test.
+    second_series = a_frame_for(turn_id)
+    board = a_board(series_id, table_id)
+    board["sections"] = [
         {
-            "title": "Một khối hỏng",
+            "heading": "Diễn biến",
             "blocks": [
-                {"widget": "line_series", "frame_id": good},
-                {"widget": "session_heatmap", "frame_id": good},
-                {"widget": "line_series", "frame_id": stranger},
+                {"kind": "visual", "frame_id": series_id},
+                {"kind": "visual", "frame_id": second_series},
             ],
         },
-        turn_id=turn_id,
-    )
+        {
+            "heading": "Chỉ số",
+            "blocks": [
+                {"kind": "visual", "frame_id": table_id},
+                {
+                    "kind": "caption",
+                    "template": "ROE đang ở {a}.",
+                    "refs": {"a": {"frame_id": table_id, "column": "roe"}},
+                },
+            ],
+        },
+    ]
+    answered = render(board, turn_id=turn_id)
 
-    assert answered["blockCount"] == 1
-    reasons = " ".join(entry["reason"] for entry in answered["dropped"])
-    # Both refusals name what was wrong, so the model can fix them next round.
-    assert "cannot draw a series frame" in reasons
-    assert "not a frame id this turn produced" in reasons
+    with get_sync_db() as session:
+        spec = session.execute(
+            select(AgentArtifact).where(
+                AgentArtifact.id == uuid.UUID(answered["artifactId"])
+            )
+        ).scalar_one().signal_desk_spec
+    caption = spec["sections"][1]["blocks"][1]
+    assert caption["kind"] == "caption"
+    assert caption["text"] == "ROE đang ở 18,5%."
+    assert caption["refs"]["a"]["column"] == "roe"
+
+    # The same caption with a year typed into it is the one thing this whole
+    # arrangement exists to refuse.
+    board["title"] = "Có chữ số"
+    board["sections"][1]["blocks"][1]["template"] = "Quý 3 năm 2026: ROE {a}."
+    refused = render(board, turn_id=turn_id)
+
+    assert refused["error"] == "board_rejected"
+    assert "caption_has_digit" in {
+        violation["code"] for violation in refused["violations"]
+    }
+
+
+def test_a_frame_from_another_turn_is_a_named_violation(turn, other_turn):
+    turn_id = turn[0]
+    table_id = a_table_for(turn_id)
+    stranger = a_frame_for(other_turn)
+
+    board = a_board(stranger, table_id)
+    answered = render(board, turn_id=turn_id)
+
+    assert answered["error"] == "board_rejected"
+    assert "frame_not_available" in {
+        violation["code"] for violation in answered["violations"]
+    }
+    assert answered["unavailableFrames"][0]["frame_id"] == stranger
+
+
+def test_a_board_that_breaks_a_rule_twice_is_drawn_by_the_server(turn):
+    """One round to fix it, and then a board rather than a paragraph.
+
+    One ``StudyTools`` for both calls, because the memory of "this Turn has had
+    its round" is on the instance. In the process this runs in there is exactly
+    one, built by ``register_study_tools``; a test that built two would be
+    testing a deployment that does not exist.
+    """
+    turn_id = turn[0]
+    a_frame_for(turn_id)
+    a_table_for(turn_id)
+    tools = study_tools.StudyTools()
+    context = ToolContext(user_id=1, turn_id=turn_id, thread_id=None)
+    # A board with no sections is malformed; one with one KPI is merely wrong,
+    # which is the case that gets a round to fix itself.
+    wrong = {
+        "title": "Thiếu KPI",
+        "kpis": [],
+        "sections": [{"blocks": [{"kind": "caption", "template": "Không có gì."}]}],
+    }
+
+    first = dict(tools.render_signal_desk(context, wrong))
+    assert first["error"] == "board_rejected"
+    assert "board_missing_kpi_strip" in {
+        violation["code"] for violation in first["violations"]
+    }
+
+    second = dict(tools.render_signal_desk(context, wrong))
+    assert second["autoComposed"] is True
+    assert "error" not in second
+
+    with get_sync_db() as session:
+        spec = session.execute(
+            select(AgentArtifact).where(
+                AgentArtifact.id == uuid.UUID(second["artifactId"])
+            )
+        ).scalar_one().signal_desk_spec
+    assert spec["autoComposed"] is True
+    # The server draws; it never writes a sentence.
+    assert all(
+        block["kind"] == "visual"
+        for section in spec["sections"]
+        for block in section["blocks"]
+    )
 
 
 def test_a_turn_may_not_keep_drawing(turn):
     turn_id = turn[0]
-    frame_id = a_frame_for(turn_id)
-    block = {"widget": "line_series", "frame_id": frame_id}
+    series_id = a_frame_for(turn_id)
+    table_id = a_table_for(turn_id)
 
     for index in range(frames_buffer.MAX_SIGNAL_DESKS_PER_TURN):
-        assert render({"title": f"Lần {index}", "blocks": [block]}, turn_id=turn_id)[
-            "blockCount"
-        ] == 1
+        board = a_board(series_id, table_id)
+        board["title"] = f"Lần {index}"
+        assert render(board, turn_id=turn_id)["kpiCount"] == 3
 
-    refused = render({"title": "Lần thừa", "blocks": [block]}, turn_id=turn_id)
+    board = a_board(series_id, table_id)
+    board["title"] = "Lần thừa"
+    refused = render(board, turn_id=turn_id)
 
     assert refused["error"] == "cannot_read"
     assert "already drawn" in refused["detail"]
 
 
-def test_a_signal_desk_may_not_be_longer_than_a_reader_will_read(turn):
+def test_a_board_may_not_be_longer_than_a_reader_will_read(turn):
     turn_id = turn[0]
-    frame_id = a_frame_for(turn_id)
-    block = {"widget": "line_series", "frame_id": frame_id}
+    series_id = a_frame_for(turn_id)
+    table_id = a_table_for(turn_id)
 
-    with pytest.raises(ValueError, match="at most"):
-        render(
-            {
-                "title": "Quá dài",
-                "blocks": [block] * (frames_buffer.MAX_BLOCKS + 1),
-            },
-            turn_id=turn_id,
-        )
+    board = a_board(series_id, table_id)
+    board["sections"] = [
+        {"blocks": [{"kind": "visual", "frame_id": series_id}]}
+    ] * (grammar.MAX_SECTIONS + 1)
+    answered = render(board, turn_id=turn_id)
+
+    assert answered["error"] == "board_rejected"
+    codes = {violation["code"] for violation in answered["violations"]}
+    assert "sections_over_limit" in codes
+    # And the same frame drawn five times is its own violation, so the model is
+    # told both things rather than fixing one and meeting the other.
+    assert "visual_frame_reused" in codes
 
 
 def test_a_study_frame_is_addressed_by_name_because_a_study_has_several(turn):
     turn_id = turn[0]
+    table_id = a_table_for(turn_id)
     with get_sync_db() as session:
         row = AgentArtifact(
             id=uuid.uuid4(),
@@ -452,30 +598,246 @@ def test_a_study_frame_is_addressed_by_name_because_a_study_has_several(turn):
                 },
             },
             signal_desk_spec={"title": "x", "blocks": []},
-            provenance={"source": "vnstock", "asOf": "", "sessionsUsed": 30,
+            provenance={"source": "store", "asOf": "", "sessionsUsed": 30,
                         "health": "normal", "reason": None},
         )
         session.add(row)
         session.commit()
         artifact_id = str(row.id)
 
-    unnamed = render(
-        {"title": "Không nêu tên", "blocks": [{"widget": "line_series", "frame_id": artifact_id}]},
-        turn_id=turn_id,
-    )
-    named = render(
-        {
-            "title": "Có nêu tên",
-            "blocks": [{"widget": "line_series", "frame_id": f"{artifact_id}#profile"}],
-        },
-        turn_id=turn_id,
-    )
+    unnamed = render(a_board(artifact_id, table_id), turn_id=turn_id)
+    named = render(a_board(f"{artifact_id}#profile", table_id), turn_id=turn_id)
 
-    assert unnamed["error"] == "cannot_read"
-    assert "has to be named" in unnamed["dropped"][0]["reason"]
-    assert named["blockCount"] == 1
+    assert unnamed["error"] == "board_rejected"
+    assert "has to be named" in unnamed["unavailableFrames"][0]["reason"]
+    assert named["kpiCount"] == 3
 
     with get_sync_db() as session:
         session.execute(
             delete(AgentArtifact).where(AgentArtifact.id == uuid.UUID(artifact_id))
         )
+
+
+# -- the question the whole track exists for -------------------------------
+
+
+def a_comparison_for(turn_id) -> str:
+    """VIC against VCB on four ratios, shaped exactly as ``compare_fields`` files one."""
+    with get_sync_db() as session:
+        frame_id = frames_buffer.store_frame(
+            session,
+            kind=frames_buffer.COMPARE_KIND,
+            frame=Frame(
+                kind="table",
+                columns=("symbol", "roe", "roa", "gross_margin", "debt_to_equity"),
+                rows=(
+                    ("VIC", 4.2, 0.6, 18.4, 2.9),
+                    ("VCB", 18.9, 1.8, 42.1, 0.4),
+                ),
+                unit="%",
+                labels={
+                    "symbol": "Mã",
+                    "roe": "ROE",
+                    "roa": "ROA",
+                    "gross_margin": "Biên gộp",
+                    "debt_to_equity": "Nợ trên vốn",
+                },
+                cell_roles={
+                    (0, "roe"): "loser",
+                    (1, "roe"): "winner",
+                    (0, "roa"): "loser",
+                    (1, "roa"): "winner",
+                },
+            ),
+            provenance=Provenance(
+                source="store",
+                as_of=datetime(2026, 8, 20, tzinfo=timezone.utc),
+                sessions_used=2,
+                health="normal",
+                reason=None,
+            ),
+            params={"field_ids": ["roe", "roa"], "symbols": ["VIC", "VCB"]},
+            title="VIC và VCB",
+            turn_id=turn_id,
+            thread_id=None,
+        )
+        session.commit()
+    return str(frame_id)
+
+
+def a_quarter_series_for(turn_id) -> str:
+    with get_sync_db() as session:
+        frame_id = frames_buffer.store_frame(
+            session,
+            kind=frames_buffer.QUERY_KIND,
+            frame=Frame(
+                kind="series",
+                columns=("quarter", "vic_profit", "vcb_profit"),
+                rows=tuple(
+                    (f"2025Q{quarter}", 1.0e12 * quarter, 8.0e12 + 1.0e11 * quarter)
+                    for quarter in range(1, 5)
+                ),
+                unit="VND",
+                labels={
+                    "quarter": "Quý",
+                    "vic_profit": "LNST VIC",
+                    "vcb_profit": "LNST VCB",
+                },
+            ),
+            provenance=Provenance(
+                source="store",
+                as_of=datetime(2026, 8, 20, tzinfo=timezone.utc),
+                sessions_used=4,
+                health="normal",
+                reason=None,
+            ),
+            params={"source": "statement", "symbols": ["VIC", "VCB"]},
+            title="LNST theo quý",
+            turn_id=turn_id,
+            thread_id=None,
+        )
+        session.commit()
+    return str(frame_id)
+
+
+def test_vic_against_vcb_compiles_into_the_board_the_plan_describes(turn):
+    """The example the whole plan was written around, end to end.
+
+    A comparison table with winner and loser cells, the bars beside it, a KPI
+    strip of four, one caption — and not one market number typed by the model:
+    every figure on this board is a cell reference the server looked up.
+    """
+    turn_id = turn[0]
+    ratios = a_comparison_for(turn_id)
+    quarters = a_quarter_series_for(turn_id)
+
+    answered = render(
+        {
+            "title": "VIC và VCB: nền tảng nào chắc hơn",
+            "archetype": "compare",
+            "kpis": [
+                {
+                    "label": "ROE VCB",
+                    "value": {"frame_id": ratios, "column": "roe", "row_where": "symbol=VCB"},
+                    "role": "winner",
+                },
+                {
+                    "label": "ROE VIC",
+                    "value": {"frame_id": ratios, "column": "roe", "row_where": "symbol=VIC"},
+                    "role": "loser",
+                },
+                {
+                    "label": "Nợ trên vốn VCB",
+                    "value": {
+                        "frame_id": ratios,
+                        "column": "debt_to_equity",
+                        "row_where": "symbol=VCB",
+                    },
+                },
+                {
+                    "label": "LNST VCB quý gần nhất",
+                    "value": {"frame_id": quarters, "column": "vcb_profit", "row": 3},
+                },
+            ],
+            "sections": [
+                {
+                    "heading": "Đối chiếu chỉ số",
+                    "blocks": [{"kind": "visual", "frame_id": ratios}],
+                },
+                {
+                    "heading": "Lợi nhuận theo quý",
+                    "blocks": [
+                        {"kind": "visual", "frame_id": quarters},
+                        {
+                            "kind": "caption",
+                            "template": "ROE của VCB là {a} so với {b} của VIC.",
+                            "refs": {
+                                "a": {
+                                    "frame_id": ratios,
+                                    "column": "roe",
+                                    "row_where": "symbol=VCB",
+                                },
+                                "b": {
+                                    "frame_id": ratios,
+                                    "column": "roe",
+                                    "row_where": "symbol=VIC",
+                                },
+                            },
+                        },
+                    ],
+                },
+            ],
+            "appendix_frame_id": ratios,
+        },
+        turn_id=turn_id,
+    )
+
+    assert "error" not in answered
+    assert answered["kpiCount"] == 4
+    assert answered["autoComposed"] is False
+    assert answered["lint"]["violations"] == []
+
+    with get_sync_db() as session:
+        spec = session.execute(
+            select(AgentArtifact).where(
+                AgentArtifact.id == uuid.UUID(answered["artifactId"])
+            )
+        ).scalar_one().signal_desk_spec
+
+    assert spec["specVersion"] == 2
+    assert spec["archetype"] == "compare"
+
+    # A comparison, drawn as one, at the full width of the grid — and the bars
+    # beside it, which the model did not ask for. The server adds them because a
+    # table is where a reader checks a number and bars are where they see the
+    # gap, and neither one does the other's job.
+    comparison, companion = spec["sections"][0]["blocks"]
+    assert comparison["widget"] == "comparison_table"
+    assert comparison["span"] == 12
+    assert comparison["options"] == {
+        "entity": "symbol",
+        "metrics": ["roe", "roa", "gross_margin", "debt_to_equity"],
+    }
+    assert companion["widget"] == "grouped_bar"
+    assert companion["frame"] == comparison["frame"]
+
+    # Four quarters against two measures is two lines: the plan's rule sends a
+    # time axis of one or two measures to a line, and a third measure to bars.
+    quarterly = spec["sections"][1]["blocks"][0]
+    assert quarterly["widget"] == "line_series"
+
+    # Every figure is resolved, formatted, and traceable back to its cell.
+    strip = spec["kpis"]
+    assert [kpi["value"]["text"] for kpi in strip] == [
+        "18,9%",
+        "4,2%",
+        "0,4%",
+        "8,40 nghìn tỷ",
+    ]
+    assert [kpi["role"] for kpi in strip[:2]] == ["winner", "loser"]
+    # Every figure names a frame the row actually carries, so a replay resolves
+    # without reaching for anything that is not in front of it.
+    assert sum(kpi["span"] for kpi in strip) == 12
+
+    caption = spec["sections"][1]["blocks"][1]
+    assert caption["text"] == "ROE của VCB là 18,9% so với 4,2% của VIC."
+    # The template keeps its holes, so the panel can mark each figure and say
+    # which cell it came from.
+    assert "{a}" in caption["template"]
+    assert caption["refs"]["a"]["column"] == "roe"
+
+    # The one table on the board is the appendix, at full width.
+    assert spec["appendix"]["widget"] == "data_table"
+    assert spec["appendix"]["span"] == 12
+
+    # And the cell roles the comparison declared survive into the row the panel
+    # draws from: the winner mark is the engine's claim, not the browser's.
+    with get_sync_db() as session:
+        frames = session.execute(
+            select(AgentArtifact).where(
+                AgentArtifact.id == uuid.UUID(answered["artifactId"])
+            )
+        ).scalar_one().frames
+    drawn = frames[comparison["frame"]]
+    assert {"row": 1, "column": "roe", "role": "winner"} in drawn["cellRoles"]
+    assert {kpi["value"]["frame"] for kpi in strip} <= set(frames)

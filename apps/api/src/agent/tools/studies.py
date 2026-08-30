@@ -22,7 +22,7 @@ nothing at all. So every Study's parameters live side by side on one object,
 about what a name means, and the handler passes each Study only the keys it
 declared.
 
-**What comes back is a headline and an id.** ``StudyResult.frames`` — the matrix
+**What comes back is a headline and an id.** A template's frames — the matrix
 the picture is drawn from — is persisted and served to the browser, and never
 enters a message. That is not a size decision: a model handed thirty rows of
 seventeen numbers reads the wrong cell and says so confidently, where a model
@@ -42,6 +42,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -49,7 +50,17 @@ from sqlalchemy.orm import Session
 
 from src import studies
 from src.core.database import get_sync_db
-from src.studies import frames_buffer, warmup, widgets
+from src.studies import (
+    archetypes,
+    auto_compose,
+    composer,
+    contracts,
+    frames_buffer,
+    grammar,
+    lint,
+    warmup,
+    widgets,
+)
 from src.studies.contracts import StudyDefinition, StudyRefused
 from src.studies.runner import StudyParamsInvalid
 
@@ -63,6 +74,7 @@ from ..registry import (
     ToolIdempotency,
     register,
 )
+from . import query
 
 TOOLSET = "studies"
 
@@ -77,13 +89,25 @@ MAX_RESULT_CHARS = 32_000
 #: for one key.
 STUDY_ARGUMENT = "name"
 
+#: How many Turns a process remembers having already refused a board for. A
+#: bound rather than a lifetime: the question ("has this Turn had its one round
+#: to fix a board?") is meaningless once the Turn ends, and a process that served
+#: a hundred thousand Turns should not still be holding the first one's id.
+REJECTED_TURNS_REMEMBERED = 512
+
 RENDER_SIGNAL_DESK_DESCRIPTION = (
-    "Draw a Signal Desk out of frames you gathered earlier in this same turn with "
-    "get_series or run_study. Each block names a widget and one frameId; the "
-    "server picks the widget's version and its presentation. A block it cannot "
-    "draw is dropped with the reason and the rest of the Signal Desk is still shown, "
-    "so a mistake in one block costs one block. Use it when there is no study "
-    "for the question and you have gathered the numbers yourself."
+    "Compose the board for this answer out of frames you gathered earlier in the "
+    "same turn with query, compare_fields, compute, get_series, run_study or "
+    "frame_from_evidence. You write the structure — a strip of 3 to 6 leading "
+    "figures, one to four sections of visuals, at most one caption per section, "
+    "an optional appendix table. You never write a market number: every figure is "
+    "a reference to one cell, {frame_id, column, and either row or "
+    "row_where:\"column=value\"}, and the server looks it up and formats it. A "
+    "caption is a sentence with {a}..{f} where its numbers go; a digit typed into "
+    "a caption — a year included — is refused. Leave widget out and the shape of "
+    "the frame decides the picture; name one only when the question calls for a "
+    "different reading of the same numbers. A board that breaks a rule comes back "
+    "with the rules it broke, named, so you can send it again."
 )
 
 #: The widgets a model may name, and what each is for.
@@ -91,67 +115,197 @@ RENDER_SIGNAL_DESK_DESCRIPTION = (
 #: Built from the same catalog the Studies are checked against, so a widget
 #: added for a Study is composable the moment it exists and a widget retired
 #: stops being offered without a second list to remember.
+def _ref_schema(what: str) -> dict[str, Any]:
+    """One cell, as a model can name it without ever seeing the numbers.
+
+    Written out at each use rather than referenced through ``$defs``: the strict
+    restatement (``core/llm/protocol.py``) walks ``properties`` and ``items``
+    only, so a definition behind a ``$ref`` would reach the route without
+    ``additionalProperties`` on it and be refused before a token is generated.
+
+    **The fields carry no descriptions of their own, and that is a measurement.**
+    Eight of these travel on one schema — two per KPI, six per caption — so a
+    sentence per field is eight copies of it. Described once, they cost 2,580
+    tokens against the 763 of the block list they replace; bare, with the meaning
+    stated once in the tool's own description where it is read once, they cost a
+    third of that. The rules are all still here: what is trimmed is the prose,
+    never a constraint.
+    """
+    return {
+        "type": "object",
+        "description": what + " Give row or row_where, not both.",
+        "properties": {
+            "frame_id": {"type": "string"},
+            "column": {"type": "string"},
+            "row": {"type": "integer"},
+            "row_where": {"type": "string"},
+        },
+        "required": ["frame_id", "column"],
+        "additionalProperties": False,
+    }
+
+
+#: Widgets that are not a picture a model may ask for.
+#:
+#: ``kpi_strip`` and ``caption`` are block kinds of the board rather than
+#: drawings of a frame — the model reaches them by writing a KPI or a caption,
+#: and naming one as a visual's widget is a category error the grammar would
+#: have to refuse anyway. ``data_table`` is refused by name
+#: (``table_not_in_appendix``). Offering the three would be offering three
+#: choices whose only outcome is a violation.
+_NOT_A_VISUAL: frozenset[str] = frozenset({"kpi_strip", "caption", "data_table"})
+
+
 def render_signal_desk_schema() -> dict[str, Any]:
-    """The argument object: a title, and the blocks in the order they read."""
-    names = sorted({name for name, _ in widgets.CATALOG})
+    """The board: a strip of figures, sections of blocks, and an appendix."""
+    names = sorted(
+        {name for name, _ in widgets.CATALOG if name not in _NOT_A_VISUAL}
+    )
     return {
         "type": "object",
         "properties": {
             "title": {
                 "type": "string",
                 "minLength": 1,
-                "description": "What the panel is called, in the reader's language.",
+                "description": "What the board is called, in the reader's language.",
             },
-            "blocks": {
-                "type": "array",
-                "minItems": 1,
-                "maxItems": frames_buffer.MAX_BLOCKS,
+            "archetype": {
+                "type": "string",
+                "enum": sorted(grammar.ARCHETYPES),
                 "description": (
-                    f"Up to {frames_buffer.MAX_BLOCKS} blocks, in the order a "
-                    "reader meets them."
+                    "The kind of question: compare, profile, screen, timeline, "
+                    "decompose. Omit for profile."
+                ),
+            },
+            "kpis": {
+                "type": "array",
+                "minItems": grammar.MIN_KPIS,
+                "maxItems": grammar.MAX_KPIS,
+                "description": (
+                    f"The {grammar.MIN_KPIS}-{grammar.MAX_KPIS} figures leading "
+                    "the board."
                 ),
                 "items": {
                     "type": "object",
                     "properties": {
-                        "widget": {
+                        "label": {
                             "type": "string",
-                            "enum": names,
-                            "description": _widget_guide(),
+                            "maxLength": grammar.KPI_LABEL_LIMIT,
+                            "description": "What it is, in the reader's language.",
                         },
-                        "frame_id": {
+                        "value": _ref_schema("The cell this figure is."),
+                        "delta": _ref_schema("A change shown beside it. Optional."),
+                        "role": {
                             "type": "string",
-                            "minLength": 1,
-                            "description": (
-                                "A frameId from get_series, or an artifactId "
-                                "from run_study with #frameName appended."
-                            ),
+                            "enum": sorted(contracts.PLAIN_ROLES),
+                            "description": "What it means, for colour. Optional.",
                         },
                     },
-                    "required": ["widget", "frame_id"],
+                    "required": ["label", "value"],
                     "additionalProperties": False,
                 },
             },
+            "sections": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": grammar.MAX_SECTIONS,
+                "description": (
+                    f"Up to {grammar.MAX_SECTIONS} sections, in reading order."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "heading": {"type": "string"},
+                        "blocks": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": grammar.MAX_BLOCKS_PER_SECTION,
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "kind": {
+                                        "type": "string",
+                                        "enum": ["visual", "caption"],
+                                        "description": "A picture, or a sentence.",
+                                    },
+                                    "frame_id": {"type": "string"},
+                                    "widget": {
+                                        "type": "string",
+                                        "enum": names,
+                                        "description": _widget_guide(),
+                                    },
+                                    "columns": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "description": "visual: only these columns.",
+                                    },
+                                    "template": {
+                                        "type": "string",
+                                        "maxLength": grammar.CAPTION_LIMIT,
+                                        "description": (
+                                            "caption: one sentence with {a}..{f} "
+                                            "where its figures go. No digits."
+                                        ),
+                                    },
+                                    "refs": {
+                                        "type": "object",
+                                        "description": "caption: a cell per {key} used.",
+                                        "properties": {
+                                            key: _ref_schema(f"Cell {{{key}}}.")
+                                            for key in grammar.REF_KEYS
+                                        },
+                                        "required": [],
+                                        "additionalProperties": False,
+                                    },
+                                },
+                                "required": ["kind"],
+                                "additionalProperties": False,
+                            },
+                        },
+                    },
+                    "required": ["blocks"],
+                    "additionalProperties": False,
+                },
+            },
+            "appendix_frame_id": {
+                "type": "string",
+                "description": (
+                    "One frame as a plain table at the end — the only place a "
+                    "table belongs. Optional."
+                ),
+            },
         },
-        "required": ["title", "blocks"],
+        "required": ["title", "kpis", "sections"],
         "additionalProperties": False,
     }
 
 
 def _widget_guide() -> str:
-    """One line per widget: its name and what it is for."""
+    """One line per drawable widget: its name and what it is for.
+
+    The three that are not drawings of a frame are left out for the reason the
+    enum leaves them out — a line describing a choice that is always a violation
+    is a line spent teaching a mistake.
+    """
     seen: dict[str, str] = {}
     for (name, _version), entry in widgets.CATALOG.items():
+        if name in _NOT_A_VISUAL:
+            continue
         seen.setdefault(name, entry.purpose)
-    return "Which drawing to use. " + "; ".join(
+    return "Optional. Leave out and the frame's shape decides. " + "; ".join(
         f"{name} — {purpose}" for name, purpose in sorted(seen.items())
     )
 
 
 def summarise_render_signal_desk(arguments: Mapping[str, Any]) -> str:
-    """The rail row for a composed signal_desk: its title and how many blocks."""
+    """The rail row for a composed board: its title and how many blocks."""
     title = str(arguments.get("title") or "").strip()
-    blocks = arguments.get("blocks")
-    count = len(blocks) if isinstance(blocks, list) else 0
+    sections = arguments.get("sections")
+    count = 0
+    if isinstance(sections, list):
+        for section in sections:
+            if isinstance(section, Mapping) and isinstance(section.get("blocks"), list):
+                count += len(section["blocks"])
     span = f" · {count} khối" if count else ""
     return f"Vẽ signal_desk: {title}{span}" if title else f"Vẽ signal_desk{span}"
 
@@ -363,6 +517,10 @@ class StudyTools:
         # more here than there, because this one writes: the artifact and the
         # bars fetched for it commit together or not at all.
         self._session_opener = session_opener
+        # Which Turns have already spent their one round to fix a board. A dict
+        # rather than a set because insertion order is what makes the bound
+        # cheap to enforce: the oldest key is the first one.
+        self._rejected: dict[str, None] = {}
 
     def entries(self) -> tuple[ToolEntry, ...]:
         return (
@@ -473,12 +631,35 @@ class StudyTools:
             )
 
         with self._open() as session:
+            # The same ceiling ``render_signal_desk`` answers to, and it is new
+            # here only because a template's board is now a composition like any
+            # other. Before the port a Study wrote a row under its own name and
+            # this count never saw it, so a Turn could draw two composed boards
+            # *and* four Studies. Two boards a Turn is a claim about what a
+            # reader can take in, and it does not depend on who drew them.
+            already = frames_buffer.signal_desks_composed(session, context.turn_id)
+            if already >= frames_buffer.MAX_SIGNAL_DESKS_PER_TURN:
+                return {
+                    "error": "cannot_read",
+                    "detail": (
+                        f"this turn has already drawn {already} boards, which is "
+                        "the most it may draw"
+                    ),
+                }
+
             try:
                 with _artifact_write(name):
                     artifact = studies.run(
                         name,
                         _params_for(definition, arguments),
                         session=session,
+                        # The reader a model's own ``query`` call uses. Passed in
+                        # rather than imported by the runner, because
+                        # ``src/studies`` is imported by this package and imports
+                        # nothing from it — and a template reading the store by a
+                        # second road is a template whose numbers could differ
+                        # from the same question asked in chat.
+                        read=query.read_source,
                         turn_id=context.turn_id,
                         thread_id=context.thread_id,
                         warm=warmup.warm,
@@ -488,6 +669,15 @@ class StudyTools:
                     f"{name} cannot run with those parameters — {invalid}"
                 ) from invalid
             except StudyRefused as refused:
+                # Every step that ran before the refusal wrote a frame row, and a
+                # plan that stops halfway leaves them behind: this method returns
+                # rather than raises, so the session would commit on the way out.
+                # They are not merely litter — ``auto_compose_for_turn`` draws
+                # *every* frame a Turn gathered, so a Study that declined to
+                # answer would end the Turn as a board built out of its offcuts.
+                # Rolling back loses the warm fetch too, which is the trade the
+                # runner already documents: half a run is not a thing to keep.
+                session.rollback()
                 # The Study ran and has no numbers, which is an answer rather
                 # than a failure. It comes back as a result so the model relays
                 # the reason instead of reading a raise as the tool being broken.
@@ -505,7 +695,16 @@ class StudyTools:
                 # so it can say a Signal Desk exists, and it has no way to read one.
                 "artifactId": str(artifact.id),
                 "title": artifact.signal_desk_spec.title,
-                "blockCount": len(artifact.signal_desk_spec.blocks),
+                "blockCount": artifact.signal_desk_spec.block_count,
+                "kpiCount": len(artifact.signal_desk_spec.kpis),
+                # Never, for a template: a board written by hand and checked at
+                # import is the opposite of the case ``autoComposed`` marks.
+                # Stated anyway so the browser reads one shape from both roads.
+                "autoComposed": False,
+                # Each step's frame, addressable. A model that ran a template
+                # and wants one of its numbers beside something it fetched can
+                # draw the step rather than re-derive it.
+                "frames": dict(artifact.steps),
                 "headline": dict(artifact.headline),
                 "provenance": _provenance_for_model(artifact.provenance.to_payload()),
             }
@@ -513,29 +712,31 @@ class StudyTools:
     def render_signal_desk(
         self, context: ToolContext, arguments: Mapping[str, Any]
     ) -> Mapping[str, Any]:
-        """Draw the frames this Turn gathered, dropping only what cannot be drawn.
+        """Compile the board the model composed, or say exactly what is wrong.
 
-        **Degrading is per block.** A model that named the wrong widget for one
-        frame has still gathered four good ones, and refusing the Signal Desk would
-        throw those away over a mistake it could fix in the next round. So a bad
-        block is dropped with its reason returned, and the reasons are what the
-        model reads.
+        **The whole board passes or none of it does, which is the opposite of
+        what this used to do.** The old tool dropped a block it could not draw
+        and kept the rest, because a block was an independent picture and losing
+        one cost one. A board is not independent blocks: the strip is a claim
+        about the sections under it, and a section silently missing turns a
+        comparison into a profile of whichever side survived. So a violation is
+        the whole answer, named, and the model gets a round to fix it.
+
+        **The second failure is answered by drawing rather than by refusing.**
+        A ``signal_desk`` Turn that ends in prose is the failure the mode exists
+        to prevent, and two rounds spent on grammar is a model that will not get
+        there. So the server composes a board from the same frames and stamps it
+        ``autoComposed`` — worse than the model's, and infinitely better than a
+        paragraph.
 
         **Ownership is the Turn.** Every frame is checked against the Turn that
         made it (``studies/frames_buffer.py``), so an id from another
         conversation draws nothing here.
         """
-        title = str(arguments.get("title") or "").strip()
-        if not title:
-            raise ValueError("title must say what the panel is called")
-        raw = arguments.get("blocks")
-        if not isinstance(raw, list) or not raw:
-            raise ValueError("blocks must name at least one widget and frame")
-        if len(raw) > frames_buffer.MAX_BLOCKS:
-            raise ValueError(
-                f"a Signal Desk holds at most {frames_buffer.MAX_BLOCKS} blocks; "
-                f"{len(raw)} were asked for"
-            )
+        try:
+            board = grammar.parse(arguments)
+        except grammar.BoardMalformed as malformed:
+            raise ValueError(str(malformed)) from malformed
 
         with self._open() as session:
             already = frames_buffer.signal_desks_composed(session, context.turn_id)
@@ -543,78 +744,82 @@ class StudyTools:
                 return {
                     "error": "cannot_read",
                     "detail": (
-                        f"this turn has already drawn {already} signal_desks, which "
-                        "is the most it may draw"
+                        f"this turn has already drawn {already} boards, which is "
+                        "the most it may draw"
                     ),
                 }
 
-            frames: dict[str, Mapping[str, Any]] = {}
-            blocks: list[Mapping[str, Any]] = []
-            dropped: list[Mapping[str, str]] = []
-            sources: list[Mapping[str, Any]] = []
-
-            for index, item in enumerate(raw):
-                if not isinstance(item, Mapping):
-                    dropped.append({"block": str(index), "reason": "not a block"})
-                    continue
-                widget = str(item.get("widget") or "").strip()
-                reference = str(item.get("frame_id") or "").strip()
+            # Every frame the board names, fetched once. A reference the Turn
+            # does not own comes back missing rather than raising, so the rule it
+            # breaks is a named violation like every other one.
+            payloads: dict[str, Mapping[str, Any]] = {}
+            sources: dict[str, Mapping[str, Any]] = {}
+            unavailable: list[Mapping[str, str]] = []
+            for reference in grammar.frame_references(board):
                 try:
-                    frame, provenance = frames_buffer.read_frame(
+                    payload, provenance = frames_buffer.read_frame(
                         session, reference, turn_id=context.turn_id
                     )
                 except frames_buffer.FrameNotAvailable as missing:
-                    dropped.append({"block": reference or str(index), "reason": str(missing)})
-                    continue
-
-                version = _newest_version(widget)
-                kind = str(frame.get("kind") or "")
-                if version is None:
-                    dropped.append(
-                        {"block": reference, "reason": f"no widget named {widget!r}"}
+                    unavailable.append(
+                        {"frame_id": reference, "reason": str(missing)}
                     )
                     continue
-                if not widgets.accepts(widget, version, kind):  # type: ignore[arg-type]
-                    dropped.append(
-                        {
-                            "block": reference,
-                            "reason": (
-                                f"{widget} cannot draw a {kind} frame; "
-                                f"it draws {', '.join(widgets.CATALOG[(widget, version)].frame_kinds)}"
-                            ),
-                        }
-                    )
-                    continue
+                payloads[reference] = payload
+                sources[reference] = provenance
 
-                key = f"f{len(frames)}"
-                frames[key] = frame
-                blocks.append(
-                    {
-                        "widget": widget,
-                        "widgetVersion": version,
-                        "frame": key,
-                        # Presentation is the server's, as it is for a Study: the
-                        # choices that change what a chart claims belong with the
-                        # layer that knows what the numbers mean.
-                        "options": _presentation(widget, frame),
+            violations = grammar.validate(board, payloads)
+            compiled = composer.compile_board(board, payloads, sources)
+            violations.extend(archetypes.check(board.archetype, compiled.shapes))
+            report = lint.score(compiled.sections, len(compiled.kpis))
+            violations.extend(report.violations)
+
+            if violations:
+                if not self._spend_the_retry(context.turn_id):
+                    return {
+                        "error": "board_rejected",
+                        "detail": (
+                            "the board breaks the rules below; send it again with "
+                            "them fixed"
+                        ),
+                        "violations": [
+                            violation.to_payload() for violation in violations
+                        ],
+                        "unavailableFrames": unavailable,
                     }
-                )
-                sources.append(provenance)
+                composed = self._auto_compose(session, context, title=board.title)
+                if composed is None:
+                    return {
+                        "error": "board_rejected",
+                        "detail": (
+                            "the board breaks the rules below and this turn has "
+                            "gathered no frame the server could draw instead"
+                        ),
+                        "violations": [
+                            violation.to_payload() for violation in violations
+                        ],
+                        "unavailableFrames": unavailable,
+                    }
+                return composed
 
-            if not blocks:
-                return {
-                    "error": "cannot_read",
-                    "detail": "no block could be drawn",
-                    "dropped": dropped,
-                }
-
-            provenance = _merged_provenance(sources)
+            spec = contracts.BoardSpec(
+                title=board.title,
+                archetype=board.archetype or archetypes.DEFAULT,
+                kpis=compiled.kpis,
+                sections=compiled.sections,
+                appendix=compiled.appendix,
+                lint=report.to_payload(),
+                auto_composed=False,
+            )
+            provenance = composer.merged_provenance(
+                [sources[reference] for reference in payloads]
+            )
             with _artifact_write(frames_buffer.COMPOSITION_KIND):
                 artifact_id = frames_buffer.store_composition(
                     session,
-                    title=title,
-                    frames=frames,
-                    blocks=tuple(blocks),
+                    title=board.title,
+                    frames=compiled.frames,
+                    spec=spec.to_payload(),
                     provenance=provenance,
                     turn_id=context.turn_id,
                     thread_id=context.thread_id,
@@ -624,9 +829,65 @@ class StudyTools:
             "studyName": frames_buffer.COMPOSITION_KIND,
             "studyVersion": 1,
             "artifactId": str(artifact_id),
-            "title": title,
-            "blockCount": len(blocks),
-            "dropped": dropped,
+            "title": board.title,
+            "blockCount": spec.block_count,
+            "kpiCount": len(spec.kpis),
+            "autoComposed": False,
+            "lint": report.to_payload(),
+            "provenance": _provenance_for_model(provenance),
+        }
+
+    def _spend_the_retry(self, turn_id: Any) -> bool:
+        """Whether this Turn has already had its one round to fix a board.
+
+        Held in memory rather than in a row, and bounded, because the question
+        is about the *conversation in flight* — a Turn that ended never asks it
+        again, and a row written to answer it would outlive the only moment it
+        means anything. The bound is what keeps a long-lived process from
+        remembering every Turn it ever served.
+        """
+        if turn_id is None:
+            return False
+        key = str(turn_id)
+        if key in self._rejected:
+            return True
+        self._rejected[key] = None
+        while len(self._rejected) > REJECTED_TURNS_REMEMBERED:
+            self._rejected.pop(next(iter(self._rejected)))
+        return False
+
+    def _auto_compose(
+        self, session: Session, context: ToolContext, *, title: str | None = None
+    ) -> Mapping[str, Any] | None:
+        """Draw every frame this Turn gathered, and say the server drew it."""
+        gathered = frames_buffer.frames_in_turn(session, context.turn_id)
+        composed = auto_compose.compose(
+            gathered, title=title or auto_compose.DEFAULT_TITLE
+        )
+        if composed is None:
+            return None
+        spec, frames = composed
+        provenance = composer.merged_provenance(
+            [provenance for _reference, _payload, provenance in gathered]
+        )
+        with _artifact_write(frames_buffer.COMPOSITION_KIND):
+            artifact_id = frames_buffer.store_composition(
+                session,
+                title=spec.title,
+                frames=frames,
+                spec=spec.to_payload(),
+                provenance=provenance,
+                turn_id=context.turn_id,
+                thread_id=context.thread_id,
+            )
+        return {
+            "studyName": frames_buffer.COMPOSITION_KIND,
+            "studyVersion": 1,
+            "artifactId": str(artifact_id),
+            "title": spec.title,
+            "blockCount": spec.block_count,
+            "kpiCount": len(spec.kpis),
+            "autoComposed": True,
             "provenance": _provenance_for_model(provenance),
         }
 
@@ -634,47 +895,6 @@ class StudyTools:
     def _open(self) -> Iterator[Session]:
         with self._session_opener() as session:
             yield session
-
-
-def _newest_version(widget: str) -> int | None:
-    """The highest version of one widget the catalog holds, or ``None``.
-
-    The server picks, not the model: a version is how an artifact written last
-    month keeps rendering, and it is a fact about the drawing rather than about
-    the question. A model naming one would be a model pinning a viewer.
-    """
-    versions = [version for name, version in widgets.CATALOG if name == widget]
-    return max(versions) if versions else None
-
-
-#: Which column a widget draws from, given a frame it accepts.
-#:
-#: Positional rather than by name: a gathered series is ``(session, value)`` and
-#: a Study's frame names its own columns, so the honest general rule is "the
-#: first column labels and the second measures". A widget that needs more than
-#: that says so here rather than guessing in the browser.
-def _presentation(widget: str, frame: Mapping[str, Any]) -> dict[str, Any]:
-    columns = [str(name) for name in (frame.get("columns") or [])]
-    first = columns[0] if columns else ""
-    second = columns[1] if len(columns) > 1 else ""
-    if widget in {"line_series", "bar_series"}:
-        options: dict[str, Any] = {"x": first, "y": second}
-        if len(columns) > 2:
-            options["secondary"] = columns[2]
-        return options
-    if widget == "ranked_bars":
-        return {"label": first, "value": second}
-    if widget == "scatter_quadrant":
-        return {
-            "label": first,
-            "x": second,
-            "y": columns[2] if len(columns) > 2 else second,
-        }
-    if widget == "stat_tiles":
-        return {"label": first, "value": second}
-    if widget == "session_heatmap":
-        return {"rowKey": first}
-    return {}
 
 
 def _provenance_for_model(provenance: Mapping[str, Any]) -> dict[str, Any]:
@@ -689,48 +909,31 @@ def _provenance_for_model(provenance: Mapping[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in provenance.items() if key != "methodNotes"}
 
 
-def _merged_provenance(sources: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """One claim over several frames: the oldest as-of, the worst health.
+def auto_compose_for_turn(
+    turn_id: Any,
+    thread_id: Any,
+    *,
+    session_opener: SessionOpener = get_sync_db,
+) -> Mapping[str, Any] | None:
+    """Draw what a ``signal_desk`` Turn gathered, when it composed nothing itself.
 
-    Both in the pessimistic direction, because a strip is read as a statement
-    about the whole panel: a Signal Desk holding one week-old frame is a week-old
-    signal_desk, and one holding a degraded frame is not a healthy one.
+    The loop's one hook, and it lives here rather than there for the reason
+    every store read does: ``agent/loop.py`` opens no sessions and knows no
+    tables, and a Turn's frames are rows. What the loop passes in is two ids and
+    what it gets back is the same announcement payload ``render_signal_desk``
+    returns, so :func:`messages.signal_desk_of` reads one shape either way.
+
+    Synchronous, because the session is. The caller puts it on a thread.
     """
-    order = {"normal": 0, "degraded": 1, "unavailable": 2}
-    health = "normal"
-    as_of = ""
-    sessions = 0
-    reasons: list[str] = []
-    notes: list[str] = []
-    for source in sources:
-        candidate = str(source.get("health") or "normal")
-        if order.get(candidate, 0) > order.get(health, 0):
-            health = candidate
-        stamp = str(source.get("asOf") or "")
-        if stamp and (not as_of or stamp < as_of):
-            as_of = stamp
-        used = source.get("sessionsUsed")
-        if isinstance(used, int):
-            sessions = max(sessions, used)
-        reason = source.get("reason")
-        if isinstance(reason, str) and reason:
-            reasons.append(reason)
-        for note in source.get("methodNotes") or ():
-            if isinstance(note, str) and note:
-                notes.append(note)
-    # The strip under a panel holds one sentence, and every frame's reason is
-    # already one. The first distinct reason takes the strip; the others are
-    # limitations of the same picture, so they travel as method notes rather
-    # than being glued into a paragraph the strip would have to cut.
-    distinct = list(dict.fromkeys(reasons))
-    return {
-        "source": "store",
-        "asOf": as_of,
-        "sessionsUsed": sessions,
-        "health": health,
-        "reason": distinct[0] if distinct else None,
-        "methodNotes": list(dict.fromkeys(distinct[1:] + notes)),
-    }
+    tools = StudyTools(session_opener=session_opener)
+    context = ToolContext(turn_id=turn_id, thread_id=thread_id)
+    with tools._open() as session:
+        if (
+            frames_buffer.signal_desks_composed(session, turn_id)
+            >= frames_buffer.MAX_SIGNAL_DESKS_PER_TURN
+        ):
+            return None
+        return tools._auto_compose(session, context)
 
 
 def _check_the_parameters_agree() -> None:
@@ -778,6 +981,8 @@ def register_study_tools(**kwargs: Any) -> tuple[ToolEntry, ...]:
 
 __all__ = [
     "LIST_STUDIES_DESCRIPTION",
+    "auto_compose_for_turn",
+    "REJECTED_TURNS_REMEMBERED",
     "RENDER_SIGNAL_DESK_DESCRIPTION",
     "LIST_STUDIES_SCHEMA",
     "MAX_RESULT_CHARS",

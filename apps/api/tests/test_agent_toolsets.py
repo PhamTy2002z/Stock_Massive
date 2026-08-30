@@ -14,12 +14,13 @@ def _memo():
     toolsets.clear_memo()
 
 
-def test_the_shipped_toolsets_hold_the_five_tools_and_nothing_else():
+def test_the_shipped_toolsets_hold_the_six_tools_and_nothing_else():
     resolved = toolsets.resolve_toolset(["web", "memory"])
 
     assert resolved == (
         "web_search",
         "fetch_url",
+        "frame_from_evidence",
         "session_search",
         "remember_fact",
         "recall_facts",
@@ -27,7 +28,11 @@ def test_the_shipped_toolsets_hold_the_five_tools_and_nothing_else():
 
 
 def test_one_name_may_be_passed_without_a_sequence():
-    assert toolsets.resolve_toolset("web") == ("web_search", "fetch_url")
+    assert toolsets.resolve_toolset("web") == (
+        "web_search",
+        "fetch_url",
+        "frame_from_evidence",
+    )
 
 
 def test_an_include_is_expanded_recursively_and_deduplicated():
@@ -64,7 +69,11 @@ def test_an_expansion_is_remembered_across_calls():
     assert first == second
     # The memo is what makes the second call free; asking for it directly is how
     # a regression that drops it becomes visible.
-    assert toolsets._MEMO["web"] == ("web_search", "fetch_url")
+    assert toolsets._MEMO["web"] == (
+        "web_search",
+        "fetch_url",
+        "frame_from_evidence",
+    )
 
 
 def test_an_unknown_toolset_is_refused_rather_than_resolving_to_nothing():

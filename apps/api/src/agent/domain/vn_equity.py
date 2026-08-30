@@ -20,10 +20,12 @@ from src.stocks.universe import build_universe
 from ..prompt.sections import PromptSection
 from .pack import DomainPack
 
-#: Bumped by hand with the prose it names. ``2.x`` is this domain carrying its
-#: own half of the prompt; ``1.x`` was the declaration alone, back when the
-#: playbook below still shipped inside the core every Turn paid for.
-VERSION = "2.0.0"
+#: Bumped by hand with the prose it names. ``3.x`` is the playbook that composes
+#: a board — the seven steps a question with numbers in it goes through, which
+#: only a Turn that touched this domain ever needs. ``2.x`` is this domain
+#: carrying its own half of the prompt; ``1.x`` was the declaration alone, back
+#: when the playbook below still shipped inside the core every Turn paid for.
+VERSION = "3.0.0"
 
 #: Written out rather than read from ``studies.REGISTRY``, and the reason is
 #: import order as much as review: ``REGISTRY`` is filled by importing
@@ -97,6 +99,32 @@ không phải trả lời gọn.
 Nên với một mã: đọc field trước, rồi tra web cho phần chuyển động gần đây mà
 không con số nào giải thích được — vì sao nó chạy, có tin gì, sắp có sự kiện gì.
 Hai việc đó không thay thế nhau.
+
+Khi câu trả lời là một board, dựng nó theo bảy bước sau.
+
+Một, trước hết xem câu hỏi có trùng một Study có sẵn không. run_study liệt kê
+sẵn từng Study cùng dạng board của nó; một công thức đã được kiểm luôn hơn một
+dàn bài dựng tại chỗ.
+
+Hai, chọn dạng board theo dạng câu hỏi: một mã một lúc là profile, nhiều mã đặt
+cạnh nhau là compare, lọc cả thị trường là screen, diễn biến qua thời gian là
+timeline, tách một tổng thành các phần là decompose.
+
+Ba, phát các truy vấn độc lập trong cùng một round. Các mã, các kỳ và các bảng
+không phụ thuộc kết quả của nhau thì đi cùng nhau.
+
+Bốn, tính một lần cho mọi tỉ số. Một compute nhận tới sáu frame, nên tăng
+trưởng, tỉ trọng và xếp hạng của cùng một câu hỏi thuộc về cùng một phép tính.
+
+Năm, KPI trước, hình sau, mỗi mục nhiều nhất một chú thích. Dải KPI là câu trả
+lời; các hình là lý do tin nó.
+
+Sáu, so sánh từ hai mã trở lên thì đi qua compare_fields rồi để board vẽ bảng
+đối chiếu — nó tự đánh dấu mã thắng theo từng ô, theo hướng tốt mà chính field
+khai.
+
+Bảy, con số store không có thì fetch_url rồi frame_from_evidence; chỉ những dòng
+thật sự có mặt trên trang mới lên được board.
 """.strip(),
 )
 

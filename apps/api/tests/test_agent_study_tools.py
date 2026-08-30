@@ -33,18 +33,19 @@ from src.agent.messages import (
 )
 from src.agent.registry import ToolContext
 from src.agent.tools import studies as study_tools
-from src.alpha.models import AgentArtifact
+from src.alpha.models import AgentArtifact, AgentMessage, AgentThread, AgentTurn
+from src.auth.models import User
 from src.core.database import Base, get_sync_db, sync_engine
 from src.stocks.signals.issues import SignalIssue
-from src.studies import registry as study_registry, warmup
+from src.studies import composer, registry as study_registry, warmup
+from src.studies import frames_buffer
 from src.studies.contracts import (
-    SignalDeskBlock,
-    SignalDeskSpec,
+    ComputeStep,
     Frame,
     Provenance,
+    ReadStep,
     StudyDefinition,
     StudyRefused,
-    StudyResult,
 )
 
 STUDY = "tools_liquidity"
@@ -69,7 +70,7 @@ def only_this_files_catalog():
     """
     saved = dict(study_registry.REGISTRY)
     study_registry.REGISTRY.clear()
-    yield
+    yield saved
     study_registry.REGISTRY.clear()
     study_registry.REGISTRY.update(saved)
 
@@ -79,46 +80,142 @@ def no_leftover_rows():
     yield
     with get_sync_db() as session:
         session.execute(
-            delete(AgentArtifact).where(AgentArtifact.study_name.like("tools_%"))
-        )
-
-
-def a_result(context) -> StudyResult:
-    return StudyResult(
-        headline={
-            "symbol": context.params.symbol,
-            "sessionsUsed": context.params.sessions,
-            "peakWindow": "14:45",
-        },
-        frames={
-            "profile": Frame(
-                kind="series",
-                columns=("bucket", "avg_volume"),
-                rows=(("09:15", 1_000), ("14:45", 4_242_424)),
-                unit="shares",
-                labels={"bucket": "Khung giờ", "avg_volume": "KL trung bình"},
+            delete(AgentArtifact).where(
+                AgentArtifact.study_name.in_(
+                    (
+                        frames_buffer.QUERY_KIND,
+                        frames_buffer.COMPUTE_KIND,
+                        frames_buffer.COMPOSITION_KIND,
+                    )
+                )
             )
-        },
-        provenance=Provenance(
-            source="vnstock",
-            as_of=context.as_of,
-            sessions_used=context.params.sessions,
-            health="normal",
-            reason=None,
-        ),
+        )
+        session.commit()
+
+
+#: The frame the fake template's one read hands back. A ``ReadStep`` rather than
+#: a query, so this file's Studies never touch a table and every assertion below
+#: is about the tool rather than about the store.
+
+@pytest.fixture
+def turns():
+    """Two real Turns, because the board ceiling is joined on one.
+
+    A Turn id the ``agent_turn`` table has never seen fails the artifact's
+    foreign key, and ``_artifact_write`` swallows that as a warning — so a test
+    that invented an id would watch every write quietly do nothing and still
+    read a count of zero.
+    """
+    email = f"studies-{uuid.uuid4().hex[:12]}@example.com"
+    with get_sync_db() as session:
+        user = User(email=email, hashed_password="x", is_active=True)
+        session.add(user)
+        session.flush()
+        thread = AgentThread(id=uuid.uuid4(), user_id=user.id, title=None, symbols=[])
+        session.add(thread)
+        session.flush()
+        message = AgentMessage(
+            thread_id=thread.id, seq=1, role="user", content={"text": "?"}
+        )
+        session.add(message)
+        session.flush()
+        made = []
+        for _ in range(2):
+            row = AgentTurn(
+                id=uuid.uuid4(),
+                thread_id=thread.id,
+                request_message_id=message.id,
+                status="running",
+            )
+            session.add(row)
+            made.append(row.id)
+        session.commit()
+        thread_id, user_id = thread.id, user.id
+
+    yield tuple(made)
+
+    with get_sync_db() as session:
+        session.execute(delete(AgentArtifact).where(AgentArtifact.thread_id == thread_id))
+        session.execute(delete(AgentTurn).where(AgentTurn.thread_id == thread_id))
+        session.execute(delete(AgentMessage).where(AgentMessage.thread_id == thread_id))
+        session.execute(delete(AgentThread).where(AgentThread.id == thread_id))
+        session.execute(delete(User).where(User.id == user_id))
+        session.commit()
+
+
+def a_frame() -> Frame:
+    return Frame(
+        kind="series",
+        columns=("bucket", "avg_volume"),
+        rows=(("09:15", 1_000), ("14:45", 4_242_424)),
+        unit="shares",
+        labels={"bucket": "Khung giờ", "avg_volume": "KL trung bình"},
     )
 
 
-def a_signal_desk(_result: StudyResult) -> SignalDeskSpec:
-    return SignalDeskSpec(
-        title="Thanh khoản trong phiên — STB",
-        blocks=(
-            SignalDeskBlock(
-                widget="bar_series",
-                widget_version=1,
-                frame="profile",
-                options={"x": "bucket", "y": "avg_volume"},
-            ),
+def a_read(context):
+    return a_frame(), Provenance(
+        source="store",
+        as_of=context.as_of,
+        sessions_used=context.params.sessions,
+        health="normal",
+        reason=None,
+    )
+
+
+#: One row, so the board carries two shapes and therefore two kinds of picture —
+#: which is what ``lint.MIN_WIDGET_KINDS`` asks of any board drawing more than one.
+_PEAK = """
+result = pd.DataFrame({"peak": [f0["avg_volume"].max()]})
+result.attrs["labels"] = {"peak": "Khung giờ lớn nhất"}
+result.attrs["unit"] = "shares"
+"""
+
+
+def a_board() -> dict:
+    return {
+        "title": "Thanh khoản trong phiên — {symbol}",
+        "archetype": "profile",
+        "kpis": [
+            {
+                "label": f"Số {index}",
+                "value": {
+                    "frame_id": "profile",
+                    "column": "avg_volume",
+                    "row": index % 2,
+                },
+            }
+            for index in range(3)
+        ],
+        "sections": [
+            {
+                "heading": "Tổng quan",
+                "blocks": [
+                    {"kind": "visual", "frame_id": "profile"},
+                    {"kind": "visual", "frame_id": "peak"},
+                ],
+            }
+        ],
+    }
+
+
+def a_headline(params, frames):
+    return {
+        "symbol": params.symbol,
+        "sessionsUsed": params.sessions,
+        "peakWindow": frames["profile"]["rows"][-1][0],
+    }
+
+
+def a_plan(read=a_read) -> tuple:
+    return (
+        ReadStep(name="profile", title="Khung giờ", read=read),
+        ComputeStep(
+            name="peak",
+            title="Đỉnh",
+            code=_PEAK,
+            inputs=("profile",),
+            output_kind="table",
         ),
     )
 
@@ -131,10 +228,10 @@ def register(name: str = STUDY, **overrides) -> StudyDefinition:
         "display_name": "Thanh khoản trong phiên",
         "params_model": Params,
         "requires": (),
-        "frames": ("profile",),
-        "widgets": (("bar_series", 1),),
-        "compute": a_result,
-        "view": a_signal_desk,
+        "archetype": "profile",
+        "plan": a_plan(),
+        "board": a_board(),
+        "headline": a_headline,
     }
     fields.update(overrides)
     return study_registry.register(StudyDefinition(**fields))
@@ -164,16 +261,23 @@ def test_the_model_is_handed_a_headline_and_an_id_and_never_the_frames():
         "artifactId",
         "title",
         "blockCount",
+        "kpiCount",
+        "autoComposed",
+        "frames",
         "headline",
         "provenance",
     }
     assert answered["headline"]["peakWindow"] == "14:45"
-    assert answered["blockCount"] == 1
+    assert answered["blockCount"] == 2
+    assert answered["kpiCount"] == 3
+    assert answered["autoComposed"] is False
+    # ``frames`` is a map of step name to an addressable id, not to any cell.
+    assert set(answered["frames"]) == {"profile", "peak"}
     # Not "frames is absent" but "no cell of any frame is reachable": a payload
     # that carried them under another name would pass the first check.
     wire = json.dumps(answered, ensure_ascii=False)
     assert "4242424" not in wire.replace(".0", "")
-    assert "profile" not in wire
+    assert "09:15" not in wire
 
 
 def test_the_frames_are_absent_from_the_messages_a_turn_would_send():
@@ -288,8 +392,16 @@ def test_the_row_holds_the_numbers_the_message_does_not():
                 AgentArtifact.id == uuid.UUID(answered["artifactId"])
             )
         ).scalar_one()
-        assert row.frames["profile"]["rows"] == [["09:15", 1000], ["14:45", 4242424]]
+        # The composition files its frames under the keys the board's blocks
+        # name, so the read frame is whichever of them holds the buckets.
+        drawn = [
+            frame
+            for frame in row.frames.values()
+            if frame["columns"] == ["bucket", "avg_volume"]
+        ]
+        assert drawn and drawn[0]["rows"] == [["09:15", 1000], ["14:45", 4242424]]
         assert row.signal_desk_spec["title"] == answered["title"]
+        assert row.signal_desk_spec["specVersion"] == 2
 
 
 def test_the_run_is_owned_by_the_context_and_never_by_an_argument(monkeypatch):
@@ -309,7 +421,9 @@ def test_the_run_is_owned_by_the_context_and_never_by_an_argument(monkeypatch):
     def recording_run(name, params, **kwargs):
         seen.update(kwargs, name=name, params=dict(params))
         with get_sync_db() as session:
-            stored = real_run(name, params, session=session)
+            stored = real_run(
+                name, params, session=session, read=kwargs["read"]
+            )
             session.rollback()
             return stored
 
@@ -322,6 +436,9 @@ def test_the_run_is_owned_by_the_context_and_never_by_an_argument(monkeypatch):
 
     assert seen["turn_id"] == turn_id
     assert seen["thread_id"] == thread_id
+    # And the reader a template's query steps go through is the one a model's
+    # own ``query`` call goes through, injected rather than imported.
+    assert seen["read"] is study_tools.query.read_source
     # The argument the model tried to smuggle in is not a parameter of this
     # Study, so it never reaches the run at all.
     assert seen["params"] == {"symbol": "STB"}
@@ -331,12 +448,12 @@ def test_the_run_is_owned_by_the_context_and_never_by_an_argument(monkeypatch):
 
 
 def test_a_refused_study_answers_with_the_input_that_was_short():
-    def refuse(_context) -> StudyResult:
+    def refuse(_context):
         raise StudyRefused(
             SignalIssue.INSUFFICIENT_SESSIONS, "4 closed sessions stored, 10 needed"
         )
 
-    register("tools_thin", compute=refuse)
+    register("tools_thin", plan=a_plan(read=refuse))
 
     answered = run({"name": "tools_thin", "symbol": "STB"})
 
@@ -364,11 +481,13 @@ def test_a_run_that_produced_a_signal_desk_is_classified_as_a_value():
         # this one may be drawn.
         "studyDisplayName": "Thanh khoản trong phiên",
         "title": answered["title"],
-        "blockCount": 1,
+        "blockCount": 2,
         # Which company, so twenty boards later a reader can type a ticker and
         # find this one. Read off the headline already in the payload.
         "symbol": "STB",
         "asOf": answered["provenance"]["asOf"],
+        # A Study's board is a Study's, so nothing here was drawn by the server.
+        "autoComposed": False,
     }
 
 
@@ -410,6 +529,7 @@ def test_the_announcement_survives_a_payload_that_says_none_of_it():
         "blockCount": 0,
         "symbol": "",
         "asOf": "",
+        "autoComposed": False,
     }
 
 
@@ -467,7 +587,7 @@ def test_two_studies_disagreeing_about_one_parameter_fail_the_build():
         symbol: int
 
     register()
-    register("tools_conflicting", params_model=OtherParams, frames=("profile",))
+    register("tools_conflicting", params_model=OtherParams)
 
     with pytest.raises(ValueError, match="symbol"):
         study_tools._check_the_parameters_agree()
@@ -573,7 +693,7 @@ def test_a_composed_desk_keeps_one_sentence_on_the_strip_and_the_rest_as_notes()
     the same picture and travel as method notes — together with every frame's
     own notes — rather than being joined into a paragraph the strip would cut.
     """
-    merged = study_tools._merged_provenance(
+    merged = composer.merged_provenance(
         [
             {
                 "asOf": "2026-08-28",
@@ -607,3 +727,40 @@ def test_a_composed_desk_keeps_one_sentence_on_the_strip_and_the_rest_as_notes()
     assert merged["health"] == "degraded"
     assert merged["asOf"] == "2026-08-27"
     assert merged["sessionsUsed"] == 30
+
+
+def test_a_turn_may_not_draw_more_boards_by_running_studies(turns):
+    """The board ceiling counts a template's board like any other.
+
+    New with the port, and new because a template's board became a composition
+    row. Before it, a Study filed under its own name and this count never saw
+    one — so a Turn could draw two boards it composed *and* one per Study it
+    ran. Two boards a Turn is a claim about what a reader can take in, and it
+    does not depend on who drew them.
+    """
+    register()
+    turn_id = turns[0]
+
+    drawn = [
+        run({"name": STUDY, "symbol": "STB"}, turn_id=turn_id)
+        for _ in range(frames_buffer.MAX_SIGNAL_DESKS_PER_TURN)
+    ]
+    refused = run({"name": STUDY, "symbol": "STB"}, turn_id=turn_id)
+
+    assert all("artifactId" in answer for answer in drawn)
+    assert refused["error"] == "cannot_read"
+    assert str(frames_buffer.MAX_SIGNAL_DESKS_PER_TURN) in refused["detail"]
+    # A refusal, not a failure: the Turn still has an answer to give.
+    assert outcome_of("run_study", refused) == "cannot_read"
+
+
+def test_another_turn_is_not_charged_for_this_ones_boards(turns):
+    """The ceiling is per Turn, and the count is joined on the Turn."""
+    register()
+    first, second = turns
+
+    for _ in range(frames_buffer.MAX_SIGNAL_DESKS_PER_TURN):
+        run({"name": STUDY, "symbol": "STB"}, turn_id=first)
+    answered = run({"name": STUDY, "symbol": "STB"}, turn_id=second)
+
+    assert "artifactId" in answered

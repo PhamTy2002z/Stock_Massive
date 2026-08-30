@@ -467,3 +467,73 @@ async def test_a_store_read_is_persisted_with_no_verdict_at_all(owner):
 
     assert result.scan is None
     assert payload["scan"] is None
+
+
+@pytest.mark.asyncio
+async def test_the_projection_the_model_read_never_reaches_the_persisted_call(owner):
+    """``context_text`` is the model's copy, and it stops at the model.
+
+    The persisted payload is what a reopened Thread draws and what the golden
+    runner counts. A shorter copy of a result leaking into it would make both of
+    them describe a Turn that never happened — a search that found fewer pages
+    than it found.
+    """
+    store = persistence()
+    thread = await store.create_thread(owner)
+    result = await dispatched(owner, "web_search", '{"results":[{"url":"https://a.vn"}]}')
+
+    call = TurnToolCall(
+        id=result.call_id,
+        name=result.tool_name,
+        arguments={"query": "lãi suất"},
+        status=ToolCallStatus.OK,
+        result_text=result.text,
+        context_text="{}",
+        scan=result.scan,
+    )
+    await store.append_message(
+        thread.id,
+        role="assistant",
+        content=assistant_message(
+            text="Xong.", tool_calls=[call.as_wire()], status=TURN_COMPLETE
+        ),
+    )
+    content = await reopened(store, owner, thread.id)
+    (payload,) = content["tool_calls"]
+
+    assert "context_text" not in payload
+    assert "result_text" not in payload
+    assert call.model_text == "{}"
+
+
+@pytest.mark.asyncio
+async def test_the_trace_row_holds_the_whole_result_not_the_projection(owner):
+    """The audit invariant: ``result`` is what the tool returned.
+
+    Written through the same ``record_tool_call`` the loop's trace writer calls,
+    and read back through the same ``tool_result`` a spilled preview is resolved
+    through, so what this asserts is the round trip rather than a dictionary.
+    """
+    store = persistence()
+    thread = await store.create_thread(owner)
+    whole = '{"results":[{"url":"https://a.vn"},{"url":"https://b.vn"}]}'
+    result = await dispatched(owner, "web_search", whole)
+    asked = await store.append_message(
+        thread.id, role="user", content={"text": "lãi suất"}
+    )
+
+    await store.record_tool_call(
+        {
+            "thread_id": str(thread.id),
+            "request_message_id": asked.id,
+            "tool_name": result.tool_name,
+            "tool_call_id": result.call_id,
+            "arguments": {"query": "lãi suất"},
+            "result": {"text": result.text, "chars": len(result.text)},
+            "status": "ok",
+        }
+    )
+    stored = await store.tool_result(asked.id, result.call_id)
+
+    assert stored is not None
+    assert stored["text"] == whole

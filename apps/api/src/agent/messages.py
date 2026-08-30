@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
@@ -87,6 +87,44 @@ MESSAGE_OVERHEAD_TOKENS = 4
 
 SUMMARY_LABEL = "Summary of the earlier turns in this conversation:"
 
+#: The eight things a constructed context is made of.
+#:
+#: Named rather than derived from the message list, because the question C2 asks
+#: is *where did the tokens go*, and a role is not an answer to it: four of these
+#: layers travel as ``system`` and three as ``user``. Each name is a thing
+#: somebody can decide to spend less on.
+#:
+#: ``system_core`` is the prompt every Turn carries — the cacheable prefix.
+#: ``domain_body`` is the active pack's playbook, whether it travels inside the
+#: constructed context or is reserved for a message appended after it.
+#: ``system_dynamic`` is everything else the harness says: the rendered date and
+#: name, and the per-call notes the loop appends.
+#: ``history`` is older Turns, and the summary standing in for the ones dropped.
+#: ``user_intent`` is the newest question, in the reader's own words.
+#: ``attachments`` is what they attached to it, text and pixels.
+#: ``tool_results`` is this Turn's tool exchange.
+#: ``study_headlines`` is the part of that exchange a Study answered, kept apart
+#: because a headline is capped prose about a picture and a page is not.
+SYSTEM_CORE = "system_core"
+DOMAIN_BODY = "domain_body"
+SYSTEM_DYNAMIC = "system_dynamic"
+HISTORY = "history"
+USER_INTENT = "user_intent"
+ATTACHMENTS = "attachments"
+TOOL_RESULTS = "tool_results"
+STUDY_HEADLINES = "study_headlines"
+
+CONTEXT_LAYERS = (
+    SYSTEM_CORE,
+    DOMAIN_BODY,
+    SYSTEM_DYNAMIC,
+    HISTORY,
+    USER_INTENT,
+    ATTACHMENTS,
+    TOOL_RESULTS,
+    STUDY_HEADLINES,
+)
+
 
 def _compact(payload: Mapping[str, Any]) -> str:
     """One deterministic encoding, so the same inputs give the same bytes."""
@@ -97,6 +135,133 @@ def _compact(payload: Mapping[str, Any]) -> str:
         sort_keys=True,
         default=str,
     )
+
+
+def charged_text(message: Message) -> str:
+    """Exactly the string :func:`estimate_tokens` charges this message for.
+
+    Its own function because two readers need the same answer and only one of
+    them is the estimate. The composition below attributes a message's tokens to
+    the layers its text came from, and it can only do that if it is slicing the
+    identical string — a second, nearly-identical concatenation here would make
+    the layer breakdown add up to a number no request was ever charged.
+    """
+    text = message.content or ""
+    for call in message.tool_calls:
+        text += call.name + _compact(call.arguments)
+    if message.tool_call_id:
+        text += message.tool_call_id
+    return text
+
+
+def estimate_tokens(message: Message) -> int:
+    """What one message is charged, deterministically.
+
+    An image is charged what it declares, on top of the placeholder naming it in
+    ``content``. The placeholder is how the string still narrates the whole
+    prompt; it is not what the image costs. Left at the placeholder's length an
+    image reads as about eleven tokens, and then everything that decides what
+    fits — the climb-down in :func:`build_messages`, the pre-call ceilings, and
+    the recovery ladder asking whether anything was given up — decides it on a
+    number that is off by two orders of magnitude.
+
+    A message carrying no images is charged exactly what it was charged before.
+    """
+    images = sum(image.estimated_tokens for image in message.images)
+    return MESSAGE_OVERHEAD_TOKENS + _text_tokens(charged_text(message)) + images
+
+
+def _text_tokens(text: str) -> int:
+    """Characters to tokens, the one rounding rule this module has."""
+    return -(-len(text) // CHARS_PER_TOKEN)
+
+
+@dataclass(frozen=True)
+class ContextComposition:
+    """Where a request's input tokens went, by layer.
+
+    Eight counters and a total, and the property that makes them worth having is
+    that the total is not a ninth number: it is the sum, and it equals the
+    estimate the request was reserved against. A breakdown that could disagree
+    with the bill would be a diagnosis of a system nobody is running.
+
+    Built by attribution rather than by re-measurement. Each message of the
+    constructed context is charged once, and its charge is split between the
+    layers its own text came from — see :func:`_attribute`. The split is exact
+    by construction: the parts of a message's charged text are contiguous and
+    cover all of it, and the rounding is applied to running prefixes so the
+    pieces sum to the whole rather than to the whole plus two.
+    """
+
+    system_core: int = 0
+    domain_body: int = 0
+    system_dynamic: int = 0
+    history: int = 0
+    user_intent: int = 0
+    attachments: int = 0
+    tool_results: int = 0
+    study_headlines: int = 0
+
+    @property
+    def total(self) -> int:
+        return sum(getattr(self, layer) for layer in CONTEXT_LAYERS)
+
+    def plus(self, **layers: int) -> ContextComposition:
+        """The same composition with more tokens on the named layers.
+
+        The loop appends messages after the context is constructed and reserves
+        room for them; both halves land here, so the arithmetic that funds the
+        call and the arithmetic that explains it are the same arithmetic.
+        """
+        unknown = set(layers) - set(CONTEXT_LAYERS)
+        if unknown:
+            raise ValueError(f"no such context layer: {sorted(unknown)}")
+        return replace(
+            self, **{name: getattr(self, name) + value for name, value in layers.items()}
+        )
+
+    def as_dict(self) -> dict[str, int]:
+        """The breakdown as an ordered mapping, for an artifact or a report."""
+        return {layer: getattr(self, layer) for layer in CONTEXT_LAYERS}
+
+
+#: One message, and which layers its charge belongs to.
+#:
+#: ``parts`` are ``(layer, characters)`` in the order they appear in
+#: :func:`charged_text`, and their lengths sum to that string's length. The
+#: per-message overhead is charged to the first part, and any image tokens to
+#: ``image_layer``.
+@dataclass(frozen=True)
+class _Tagged:
+    message: Message
+    parts: tuple[tuple[str, int], ...]
+    image_layer: str = ATTACHMENTS
+
+
+def _attribute(tagged: Sequence[_Tagged]) -> ContextComposition:
+    """Split every message's charge across the layers its text came from."""
+    totals: dict[str, int] = {layer: 0 for layer in CONTEXT_LAYERS}
+    for piece in tagged:
+        text = charged_text(piece.message)
+        covered = sum(length for _, length in piece.parts)
+        if covered != len(text):
+            raise ValueError(
+                "a tagged message's parts must cover its charged text exactly; "
+                f"{covered} characters were tagged and {len(text)} were charged"
+            )
+        consumed = 0
+        running = 0
+        for layer, length in piece.parts:
+            running += length
+            upto = -(-running // CHARS_PER_TOKEN)
+            totals[layer] += upto - consumed
+            consumed = upto
+        totals[piece.parts[0][0]] += MESSAGE_OVERHEAD_TOKENS
+        images = sum(image.estimated_tokens for image in piece.message.images)
+        if images:
+            totals[piece.image_layer] += images
+    return ContextComposition(**totals)
+
 
 
 @dataclass(frozen=True)
@@ -120,6 +285,25 @@ class TurnToolCall:
     arguments: Mapping[str, Any] = field(default_factory=dict)
     status: ToolCallStatus = ToolCallStatus.RUNNING
     result_text: str | None = None
+    #: The same result, projected for the model, or ``None`` where the two are
+    #: the same string.
+    #:
+    #: A second field rather than a narrower ``result_text``, because the two
+    #: answer to different readers and only one of them may ever shrink. The
+    #: Tool Call Trace is the audit record of what an answer rested on, and the
+    #: invariant on it is that it holds exactly what the tool returned; the
+    #: model's copy is what a Turn can afford to show, and by the end of a
+    #: web-first Turn the same page has often already been shown by an earlier
+    #: call. Trimming ``result_text`` to fit would edit the audit record to make
+    #: the context cheaper, which is the trade this field exists to refuse.
+    #:
+    #: **It never goes on the wire.** :meth:`as_wire` does not carry it, and it
+    #: is not a second public shape of a result: a surface reads ``results``,
+    #: a reader reads the answer, and this is only what the next model call is
+    #: given. ``None`` means "no projection was made", and every reader falls
+    #: back to ``result_text`` — which is what every caller written before this
+    #: field gets, unchanged.
+    context_text: str | None = None
     #: A short user-facing line: the tool and the one argument worth naming.
     #: Never the result body, and never the reason it failed — that is ``error``,
     #: which travels beside it so a surface can say *why* without the summary
@@ -194,6 +378,18 @@ class TurnToolCall:
     @property
     def finished(self) -> bool:
         return self.status is not ToolCallStatus.RUNNING
+
+    @property
+    def model_text(self) -> str:
+        """What the model reads for this call: the projection, or the result.
+
+        One accessor rather than the same ``or`` at four call sites, because a
+        site that forgot it would quietly send the model the untrimmed result
+        and the budget would be measuring a string nobody was given.
+        """
+        if self.context_text is not None:
+            return self.context_text
+        return self.result_text or ""
 
     @property
     def reads_external(self) -> bool:
@@ -670,6 +866,14 @@ def signal_desk_of(name: str, payload: Any) -> Mapping[str, Any] | None:
         "asOf": (
             str(provenance.get("asOf") or "") if isinstance(provenance, Mapping) else ""
         ),
+        # Whether the server drew this board because the model drew none.
+        #
+        # It travels because the panel prints a line saying so, and it prints a
+        # line because a board nobody claims authorship of is read as an argument
+        # somebody made. Defaulted rather than required: every board written
+        # before the compiler existed was the model's, and an absent flag is that
+        # fact rather than a gap.
+        "autoComposed": bool(payload.get("autoComposed")),
     }
 
 
@@ -730,6 +934,82 @@ def _display_text(value: Any, limit: int) -> str:
 COLLAPSED_RESULT_URLS = 5
 
 
+def context_projection(
+    name: str, payload: Any, text: str, *, seen: set[str] | None = None
+) -> str:
+    """The result as the *model* reads it, with what it has already read removed.
+
+    Built from the structured payload the executor is still holding rather than
+    by parsing ``text`` back into objects. A second parse would be a second
+    chance to read a provider's JSON differently from the first, and the two
+    readings would diverge on exactly the payload nobody tested.
+
+    One tool is projected and the rest pass through unchanged, and the asymmetry
+    is measured rather than tidy:
+
+    ``web_search`` returns a list of pages, and over a recorded run **21 of 223**
+    links came back to more than one query while **no single call** returned a
+    link twice. So the duplication is *between* calls, which is why ``seen`` is
+    a Turn-wide set the caller owns — a deduplication scoped to one payload
+    would be code that never runs.
+
+    ``fetch_url`` is **not** deduplicated by URL, and that is the load-bearing
+    exception. The same page fetched twice with two different ``looking_for``
+    values returns two different passages, because the tool selects the passages
+    that answer the question it was given. Dropping the second as a duplicate
+    would throw away the evidence the second call was made to get, and the
+    Turn's answer would be missing the half it went back for.
+
+    What survives is the *identity* of what was dropped: the link is still in
+    the earlier call's own result, and in the ``results`` projection the rail
+    draws. Nothing that was ever cited stops being reachable.
+    """
+    if seen is None or name != "web_search" or not isinstance(payload, Mapping):
+        return text
+    raw = payload.get("results")
+    if not isinstance(raw, Sequence) or isinstance(raw, str):
+        return text
+
+    kept: list[Any] = []
+    dropped = 0
+    for item in raw:
+        if not isinstance(item, Mapping):
+            kept.append(item)
+            continue
+        key = dedup_key(
+            str(item.get("url") or ""), host=str(item.get("source") or "")
+        )
+        # No key is no comparison. A result with no usable link keeps its place,
+        # because treating "no key" as a key would merge every such result into
+        # one and hide all but the first.
+        if not key:
+            kept.append(item)
+            continue
+        if key in seen:
+            dropped += 1
+            continue
+        seen.add(key)
+        kept.append(item)
+
+    if not dropped:
+        # Nothing to say, and nothing to re-encode. Returning ``text`` keeps the
+        # exact bytes the executor produced for the common case, so a projection
+        # that changes nothing cannot change anything.
+        return text
+    return _compact({**payload, "results": kept})
+
+
+#: What a collapsed call is called in the message the model reads.
+#:
+#: The words are chosen to say two true things and no third. The result *was*
+#: recorded — the Tool Call Trace holds it in full, and an auditor reading the
+#: Turn tomorrow can see what this call returned. And it is **not** something
+#: the model can ask for back: there is no retrieval tool in this deployment,
+#: and a sentence implying one would send the model looking for a call it cannot
+#: make, spending a round to learn that.
+TRACE_HANDLE_PREFIX = "earlier call, recorded in full and not repeated here:"
+
+
 def _collapsed_result(call: TurnToolCall) -> str:
     """One collapsed call, as the model reads it after rung two of the ladder.
 
@@ -748,8 +1028,18 @@ def _collapsed_result(call: TurnToolCall) -> str:
     is the one property this plan is about. So the links come back, and the
     titles and snippets do not: a link is what a claim is anchored to, and the
     prose is what the collapse was called to shed.
+
+    What the line says about itself is :data:`TRACE_HANDLE_PREFIX`: the result
+    was recorded and is not repeated. Said explicitly rather than left as a bare
+    ``called ...``, because a model reading a line that only names a call has to
+    guess whether the call failed, returned nothing, or returned something it is
+    not being shown — and one of those three guesses turns a collapse into an
+    answer that says the lookup did not work.
     """
-    line = f"called {call.name} with arguments {_compact(call.arguments)}"
+    line = (
+        f"{TRACE_HANDLE_PREFIX} {call.name} with arguments "
+        f"{_compact(call.arguments)}"
+    )
     links = [
         str(item.get("url") or "")
         for item in call.results[:COLLAPSED_RESULT_URLS]
@@ -770,7 +1060,7 @@ def shown_result(call: TurnToolCall) -> str:
     """
     body = wrap_result(
         call.name,
-        call.result_text or "",
+        call.model_text,
         source=_source_of(call),
         resolved=call.resolved_tool,
     )
@@ -935,6 +1225,23 @@ class Transcript:
     #: the boundary arrives here rather than being guessed at by string surgery.
     #: ``None`` means the whole prompt travels as one block.
     system_prefix: str | None = None
+    #: The active domain pack's playbook, when this Turn has earned it.
+    #:
+    #: It travels *inside* the system message, between the core and the values
+    #: rendered for this Turn, and that position is the whole point. A pack body
+    #: appended at the tail is read after every tool result and is paid for in
+    #: full on every call; the same prose here sits in the cacheable head, so a
+    #: route with an automatic prefix cache reads it back from the second call
+    #: of the Turn onward instead of re-sending it.
+    #:
+    #: Two blocks and not one string, because they go stale on different clocks:
+    #: the core changes when the prompt is edited, and the body changes when the
+    #: domain is swapped. A cache keyed on their concatenation would void the
+    #: core every time a pack moved.
+    #:
+    #: ``None`` is the ordinary case — most Turns never touch the domain — and
+    #: it produces byte-for-byte the message this built before packs existed.
+    system_body: str | None = None
     turns: tuple[TranscriptTurn, ...] = ()
     #: Whether the route this context is being built for can read images.
     #:
@@ -980,6 +1287,12 @@ class ConstructedContext:
     summary_needed: bool = False
     turns_dropped: int = 0
     results_collapsed: int = 0
+    #: Where those tokens went. ``composition.total`` is ``estimated_tokens``,
+    #: and the equality is not a coincidence to be checked but the definition:
+    #: the estimate is the sum of the layers. A test pins it for every rung of
+    #: the ladder, because a breakdown that drifts from the bill is a diagnosis
+    #: of a system nobody is running.
+    composition: ContextComposition = field(default_factory=ContextComposition)
 
 
 class ConstructedContextTooLarge(ValueError):
@@ -1000,47 +1313,69 @@ class ConstructedContextTooLarge(ValueError):
         self.budget = budget
 
 
-def estimate_tokens(message: Message) -> int:
-    """What one message is charged, deterministically.
-
-    An image is charged what it declares, on top of the placeholder naming it in
-    ``content``. The placeholder is how the string still narrates the whole
-    prompt; it is not what the image costs. Left at the placeholder's length an
-    image reads as about eleven tokens, and then everything that decides what
-    fits — the climb-down in :func:`build_messages`, the pre-call ceilings, and
-    the recovery ladder asking whether anything was given up — decides it on a
-    number that is off by two orders of magnitude.
-
-    A message carrying no images is charged exactly what it was charged before.
-    """
-    text = message.content or ""
-    for call in message.tool_calls:
-        text += call.name + _compact(call.arguments)
-    if message.tool_call_id:
-        text += message.tool_call_id
-    images = sum(image.estimated_tokens for image in message.images)
-    return MESSAGE_OVERHEAD_TOKENS + -(-len(text) // CHARS_PER_TOKEN) + images
+#: What separates two blocks of the system message. The same blank line the
+#: prompt already puts between its own sections, so a reader — and a model —
+#: sees one document rather than three concatenated ones.
+_BLOCK_SEPARATOR = "\n\n"
 
 
-def _system_message(transcript: Transcript) -> Message:
-    """The system prompt, carrying its cache boundary when one is known.
+def _system_message(transcript: Transcript) -> _Tagged:
+    """The system message: core, then the pack's body, then this Turn's values.
+
+    Three blocks in one message, in the order of how often each changes. The
+    core is identical for every Turn of every reader. The body is identical for
+    every Turn under one pack. The rendered values change daily. A route with a
+    prefix cache reads back everything up to the first byte that differs, so
+    that order is the difference between caching five thousand tokens and
+    caching none.
 
     The segments describe the same string the message already holds —
     ``Message`` refuses any other arrangement — so a route that does not speak
-    ``cache_control`` sees exactly the prompt it saw before, and the token
-    estimate is unchanged either way.
+    ``cache_control`` sees exactly one prompt, and the token estimate is the
+    same either way.
+
+    The boundary between blocks is the caller's, never this function's.
+    ``system_prefix`` is where the core ends because only a caller holding
+    ``prompt.prefix()`` can say so; a boundary found here by string surgery
+    would move the moment somebody edited the prompt's last section.
+
+    With no declared boundary the whole prompt is the core and a body follows
+    it, which is what every caller written before packs existed already gets.
     """
     prompt = transcript.system_prompt
     stable = transcript.system_prefix
-    if not stable or not prompt.startswith(stable) or len(stable) == len(prompt):
-        return Message(role=Role.SYSTEM, content=prompt)
-    return Message(
-        role=Role.SYSTEM,
-        content=prompt,
-        segments=(
-            ContentSegment(stable, cache_breakpoint=True),
-            ContentSegment(prompt[len(stable) :]),
+    body = transcript.system_body
+    declared = bool(stable) and prompt.startswith(stable or "") and len(
+        stable or ""
+    ) < len(prompt)
+
+    core = stable if declared else prompt
+    runtime = prompt[len(core) :] if declared else ""
+
+    blocks: list[tuple[str, str, bool]] = [(SYSTEM_CORE, core, True)]
+    if body:
+        blocks.append((DOMAIN_BODY, _BLOCK_SEPARATOR + body, True))
+    if runtime:
+        blocks.append((SYSTEM_DYNAMIC, runtime, False))
+
+    content = "".join(text for _, text, _ in blocks)
+    if len(blocks) == 1:
+        # One block is not a boundary. Left without segments, so a message with
+        # nothing to say about caching is byte-identical to what it always was.
+        return _Tagged(
+            Message(role=Role.SYSTEM, content=content),
+            ((SYSTEM_CORE, len(content)),),
+        )
+    return _Tagged(
+        Message(
+            role=Role.SYSTEM,
+            content=content,
+            segments=tuple(
+                ContentSegment(text, cache_breakpoint=breakpoint)
+                for _, text, breakpoint in blocks
+            ),
         ),
+        tuple((layer, len(text)) for layer, text, _ in blocks),
     )
 
 
@@ -1104,16 +1439,44 @@ def _attachment_block(
     return "\n".join(lines), tuple(images)
 
 
-def _user_message(turn: TranscriptTurn, *, latest: bool, vision: bool) -> Message:
-    """The reader's own words, and whatever they attached to them."""
+def _user_message(
+    turn: TranscriptTurn, *, latest: bool, vision: bool, intent_layer: str
+) -> _Tagged:
+    """The reader's own words, and whatever they attached to them.
+
+    ``intent_layer`` is where the words themselves are charged — the newest
+    question is :data:`USER_INTENT` and an older one is :data:`HISTORY` — while
+    the attachment block is always :data:`ATTACHMENTS`, in either Turn. Passed
+    in for the reason ``latest`` is: a message cannot see its own place in the
+    tuple it came from, and reading it here would make this function's answer
+    depend on something other than its arguments.
+    """
     if not turn.attachments:
-        return Message(role=Role.USER, content=turn.user_text)
+        return _Tagged(
+            Message(role=Role.USER, content=turn.user_text),
+            ((intent_layer, len(turn.user_text)),),
+        )
     block, images = _attachment_block(turn.attachments, latest=latest, vision=vision)
-    return Message(
-        role=Role.USER,
-        content=f"{turn.user_text}\n\n{block}" if block else turn.user_text,
-        images=images,
+    content = f"{turn.user_text}\n\n{block}" if block else turn.user_text
+    return _Tagged(
+        Message(role=Role.USER, content=content, images=images),
+        (
+            (intent_layer, len(turn.user_text)),
+            (ATTACHMENTS, len(content) - len(turn.user_text)),
+        ),
     )
+
+
+def _result_layer(call: TurnToolCall) -> str:
+    """Which layer one tool result is charged to.
+
+    A Study's answer is kept apart from a page's because the two are different
+    spending decisions. A headline is a capped sentence about a picture whose
+    numbers never travel (``studies/``), so it is already as small as it can be;
+    a page is the layer prune is aimed at. Folding them together would report a
+    Turn that drew three charts as having read three pages.
+    """
+    return STUDY_HEADLINES if call.name in _STUDY_TOOLS else TOOL_RESULTS
 
 
 def _turn_messages(
@@ -1122,29 +1485,54 @@ def _turn_messages(
     *,
     latest: bool = False,
     vision: bool = False,
-) -> tuple[Message, ...]:
+) -> tuple[_Tagged, ...]:
     """One whole Turn, with its call/result pairs kept together.
 
     ``latest`` says whether this is the newest Turn of the snapshot it came
     from. It is passed in rather than read anywhere, which is what keeps
     :func:`build_messages` pure: the same transcript still gives the same list,
     because "newest" is a fact about the tuple and not about the clock.
+
+    It also decides which layer this Turn's prose is charged to. The newest
+    Turn is the question being answered; every older one is history, and so is
+    the answer this Turn eventually gives — an assistant message is only ever
+    read again by a later Turn.
     """
-    messages: list[Message] = [_user_message(turn, latest=latest, vision=vision)]
+    intent_layer = USER_INTENT if latest else HISTORY
+    messages: list[_Tagged] = [
+        _user_message(turn, latest=latest, vision=vision, intent_layer=intent_layer)
+    ]
     calls = turn.completed_calls
     if calls:
+        ask = Message(
+            role=Role.ASSISTANT,
+            tool_calls=tuple(
+                ToolCall(
+                    id=call.id,
+                    name=call.name,
+                    arguments=dict(call.arguments),
+                    output_index=index,
+                    signature=call.signature,
+                )
+                for index, call in enumerate(calls)
+            ),
+        )
+        # The request for the calls is charged call by call, where each call's
+        # own result is charged. An older Turn's exchange is history whatever
+        # tool made it: the layer answers "can this be pruned", and a finished
+        # Turn's results can be, while this Turn's are the evidence the answer
+        # is standing on. Per call rather than per message because a round that
+        # mixed a search with a Study would otherwise put the Study's ask on
+        # the page layer, and the layer names would stop meaning what they say.
         messages.append(
-            Message(
-                role=Role.ASSISTANT,
-                tool_calls=tuple(
-                    ToolCall(
-                        id=call.id,
-                        name=call.name,
-                        arguments=dict(call.arguments),
-                        output_index=index,
-                        signature=call.signature,
+            _Tagged(
+                ask,
+                tuple(
+                    (
+                        _result_layer(call) if latest else HISTORY,
+                        len(inner.name) + len(_compact(inner.arguments)),
                     )
-                    for index, call in enumerate(calls)
+                    for call, inner in zip(calls, ask.tool_calls, strict=True)
                 ),
             )
         )
@@ -1153,16 +1541,19 @@ def _turn_messages(
                 body = _collapsed_result(call)
             else:
                 body = shown_result(call)
+            result = Message(
+                role=Role.TOOL,
+                content=body,
+                tool_call_id=call.id,
+                name=call.name,
+            )
+            layer = _result_layer(call) if latest else HISTORY
             messages.append(
-                Message(
-                    role=Role.TOOL,
-                    content=body,
-                    tool_call_id=call.id,
-                    name=call.name,
-                )
+                _Tagged(result, ((layer, len(charged_text(result))),))
             )
     if turn.assistant_text:
-        messages.append(Message(role=Role.ASSISTANT, content=turn.assistant_text))
+        answered = Message(role=Role.ASSISTANT, content=turn.assistant_text)
+        messages.append(_Tagged(answered, ((HISTORY, len(turn.assistant_text)),)))
     return tuple(messages)
 
 
@@ -1171,21 +1562,26 @@ def _render_messages(
     turns: Sequence[TranscriptTurn],
     dropped: int,
     collapsed: frozenset[str],
-) -> tuple[Message, ...]:
+) -> tuple[_Tagged, ...]:
     """Assemble one candidate context.
 
     The system prompt is one message and the summary is another. Folding the
     summary into the prompt would put conversation content inside the artifact
     whose whole property is that conversation content cannot enter it — and it
     would move the cacheable prefix once per Turn.
+
+    The summary travels as a ``system`` message and is charged to
+    :data:`HISTORY`, because a role is not a layer: it is the Turns it replaced,
+    rewritten, and it is spent on for exactly the reason they were.
     """
-    messages: list[Message] = [_system_message(transcript)]
+    messages: list[_Tagged] = [_system_message(transcript)]
     if transcript.summary:
+        summarised = Message(
+            role=Role.SYSTEM,
+            content=f"{SUMMARY_LABEL}\n{transcript.summary}",
+        )
         messages.append(
-            Message(
-                role=Role.SYSTEM,
-                content=f"{SUMMARY_LABEL}\n{transcript.summary}",
-            )
+            _Tagged(summarised, ((HISTORY, len(charged_text(summarised))),))
         )
     shown = turns[dropped:]
     last = len(shown) - 1
@@ -1196,6 +1592,83 @@ def _render_messages(
             )
         )
     return tuple(messages)
+
+
+#: Tools whose result is a way of *choosing* what to read, not the reading.
+#:
+#: One name, and the prompt already says why it is this one. §5 of the system
+#: prompt tells the model in as many words that a search snippet is an indicator
+#: of which page is worth opening and **not** evidence — so once the Turn has
+#: moved on, the snippets have done the only job they had, and what is worth
+#: keeping is which pages the search found. That is exactly what the handle
+#: keeps: the query, and up to :data:`COLLAPSED_RESULT_URLS` links.
+#:
+#: ``fetch_url`` is deliberately absent. A fetched passage *is* the evidence,
+#: and it stays in full for :data:`RESULT_CALLS`.
+_SELECTION_TOOLS = frozenset({"web_search"})
+
+#: For how many model calls a selection result stays in the context in full.
+#:
+#: Counted from the call that *reads* it, which is the only counting that makes
+#: sense here: a result returned in round *r* is first read by the call that
+#: closes round *r*, and that call is age one. So one means "read once" and
+#: never means "collapsed before anybody looked" — the distinction is the whole
+#: correctness of this rung, and a test holds it.
+#:
+#: One, because the call that reads a page of search results is the call that
+#: decides what to fetch. By the next call that decision has been made, acted
+#: on, and the pages are in the context in full.
+SELECTION_CALLS = 1
+
+#: For how many model calls any other result stays in the context in full.
+#:
+#: Two, on the same clock. A page fetched in round one is read by the call that
+#: closes round one and by the call after it; a Turn still quoting it three
+#: calls later is answering from something it has not looked at in a while, and
+#: the handle still names the page it came from.
+#:
+#: Both numbers were read off a measured distribution rather than picked, and
+#: the distribution says something the plan they came from did not know. Over
+#: the twenty-case golden corpus this pair takes constructed tokens down
+#: **13.8%** with **no source URL lost**. The most aggressive honest policy —
+#: every result a handle after the single call that read it — reaches **17.8%**,
+#: and that is the ceiling: the system prompt is **53.3%** of a context and no
+#: amount of pruning touches it, so a 20% total cut would need 46% of every tool
+#: result to go, which is more than there is. Deduplication alone, which loses
+#: nothing whatsoever, is **1.1%**.
+RESULT_CALLS = 2
+
+
+def aged_results(turn: TranscriptTurn) -> frozenset[str]:
+    """The calls of one Turn whose full text has outlived its usefulness.
+
+    Deterministic, and computed before anything is measured — this is not a rung
+    of the recovery ladder but the state the ladder starts from. A context that
+    fits is still built without prose the answer stopped reading two calls ago,
+    because the alternative is paying for it on every remaining call of the Turn
+    and only noticing at the ceiling.
+
+    Which call the Turn is on is read off the Turn rather than passed in: the
+    constructor is shown exactly the calls of rounds before the current one, so
+    the highest round present plus one *is* the call being built. That keeps
+    :func:`build_messages` a pure function of its transcript, and it means a
+    caller cannot get the ageing wrong by miscounting.
+
+    Only this Turn's calls. An older Turn's results are older than any of these,
+    but their round numbers count from that Turn's own zero — comparing them
+    would be comparing two clocks — and the ladder already drops whole older
+    Turns before it reaches anything here.
+    """
+    calls = turn.completed_calls
+    if not calls:
+        return frozenset()
+    now = max(call.round for call in calls) + 1
+    return frozenset(
+        call.id
+        for call in calls
+        if (now - call.round)
+        > (SELECTION_CALLS if call.name in _SELECTION_TOOLS else RESULT_CALLS)
+    )
 
 
 def _reductions(
@@ -1251,9 +1724,17 @@ def build_messages(
     covered = transcript.summarised_turns if transcript.summary else 0
     live = tuple(transcript.turns[covered:])
 
+    # What the newest Turn has stopped reading. Applied to every rung rather
+    # than being one of them: it is not a concession made under pressure, it is
+    # the shape of a context that has not been paying for the same page four
+    # times.
+    aged = aged_results(live[-1]) if live else frozenset()
+
     smallest = 0
     for dropped, collapsed in _reductions(live, budget):
-        messages = _render_messages(transcript, live, dropped, collapsed)
+        collapsed = collapsed | aged
+        tagged = _render_messages(transcript, live, dropped, collapsed)
+        messages = tuple(piece.message for piece in tagged)
         tokens = sum(estimate_tokens(message) for message in messages)
         smallest = tokens
         if tokens <= budget.max_tokens:
@@ -1266,6 +1747,7 @@ def build_messages(
                 ),
                 turns_dropped=dropped,
                 results_collapsed=len(collapsed),
+                composition=_attribute(tagged),
             )
 
     raise ConstructedContextTooLarge(smallest, budget.max_tokens)
@@ -1273,8 +1755,19 @@ def build_messages(
 
 __all__ = [
     "ANSWER",
+    "ATTACHMENTS",
     "CHARS_PER_TOKEN",
     "COLLAPSED_RESULT_URLS",
+    "CONTEXT_LAYERS",
+    "DOMAIN_BODY",
+    "HISTORY",
+    "STUDY_HEADLINES",
+    "SYSTEM_CORE",
+    "SYSTEM_DYNAMIC",
+    "TOOL_RESULTS",
+    "USER_INTENT",
+    "ContextComposition",
+    "charged_text",
     "DISPLAY_SNIPPET_CHARS",
     "MAX_DISPLAY_RESULTS",
     "MAX_SUMMARY_CHARS",
@@ -1295,7 +1788,12 @@ __all__ = [
     "TranscriptTurn",
     "TurnAttachment",
     "TurnToolCall",
+    "RESULT_CALLS",
+    "SELECTION_CALLS",
+    "TRACE_HANDLE_PREFIX",
+    "aged_results",
     "build_messages",
+    "context_projection",
     "dedup_key",
     "display_results",
     "estimate_tokens",

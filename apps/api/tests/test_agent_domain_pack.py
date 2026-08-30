@@ -49,10 +49,13 @@ def test_every_toolset_the_pack_names_is_a_toolset_somebody_registered():
 def test_the_written_down_selection_is_core_plus_the_pack_and_nothing_else():
     assert toolsets.CORE_TOOLSETS == ("web", "memory")
     assert toolsets.CHAT_TOOLSETS == (*toolsets.CORE_TOOLSETS, *PACK.toolsets)
-    # And it still expands to the twelve tools a conversation has always had:
-    # splitting the selection into core and pack is a change of *authorship*,
-    # not of surface.
-    assert len(toolsets.resolve_toolset(toolsets.CHAT_TOOLSETS)) == 12
+    # Sixteen tools as of the analysis compiler, and the number is asserted
+    # rather than the membership because what this test is about is that the
+    # selection has one author. It was twelve when the selection was split into
+    # core and pack — that split was a change of *authorship*, not of surface —
+    # then ``query`` and ``compare_fields`` joined the ``signals`` bundle,
+    # ``compute`` joined ``studies`` and ``frame_from_evidence`` joined ``web``.
+    assert len(toolsets.resolve_toolset(toolsets.CHAT_TOOLSETS)) == 16
 
 
 def test_a_selection_that_drifts_from_the_pack_cannot_be_imported(monkeypatch):
@@ -220,6 +223,13 @@ def test_the_loop_names_no_particular_domain():
     ``web_domain_denylist``, deduplicating results by domain — and a bare
     substring check would turn a structural gate into a spelling gate the first
     time a comment mentions any of them.
+
+    The tool half is scoped the same way and for the same reason, and it took a
+    tool called ``query`` to make that necessary. A tool name is hardcoded into
+    the loop as a *string literal* — that is the whole shape of the mistake, and
+    it is what the two known exceptions below look like. Searched as a bare
+    substring, ``query`` matches the loop's own prose about a database query and
+    the gate goes red over an English word.
     """
     source = (Path(domain.__file__).parents[1] / "loop.py").read_text()
 
@@ -250,7 +260,8 @@ def test_the_loop_names_no_particular_domain():
         scrubbed = scrubbed.replace(line, "")
 
     for tool in resolve_toolset(domain.active_pack().toolsets):
-        assert tool not in scrubbed, f"loop.py names the domain tool {tool}"
+        for literal in (f'"{tool}"', f"'{tool}'"):
+            assert literal not in scrubbed, f"loop.py names the domain tool {tool}"
 
 
 def test_swapping_the_pack_moves_the_tool_surface_without_touching_the_loop(
@@ -312,6 +323,7 @@ def test_swapping_the_pack_moves_the_tool_surface_without_touching_the_loop(
         assert toolsets.resolve_toolset(instance._toolsets) == (
             "web_search",
             "fetch_url",
+            "frame_from_evidence",
             "session_search",
             "remember_fact",
             "recall_facts",
@@ -513,6 +525,10 @@ def test_swapping_the_pack_swaps_the_prompt_body_with_no_edit_to_the_loop(
         assert "Signal Field" not in domain_body_note()
         # And what counts as "this Turn asked about the domain" follows too:
         # the second pack's trigger is its own bundle, not the first pack's.
-        assert domain_tool_names() == {"web_search", "fetch_url"}
+        assert domain_tool_names() == {
+            "web_search",
+            "fetch_url",
+            "frame_from_evidence",
+        }
     finally:
         toolsets.clear_memo()
