@@ -42,6 +42,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+# The sibling is stdlib-only, so unlike the src imports deferred inside the
+# functions below it belongs up here; the artifact stamps the same digest the
+# corpus file records for itself.
+from .signal_desk_corpus import digest as corpus_digest
+
 logger = logging.getLogger("golden.run")
 
 #: The runner's own account. A separate identity for two reasons that pull the
@@ -52,6 +57,9 @@ GOLDEN_EMAIL = "golden-runner@stockmassive.local"
 GOLDEN_NAME = "Golden Runner"
 
 SCHEMA = "golden.artifact@1"
+WEB_FIRST_MODE = "web_first"
+SIGNAL_DESK_MODE = "signal_desk"
+MODES = (WEB_FIRST_MODE, SIGNAL_DESK_MODE)
 
 
 # -- the frozen web --------------------------------------------------------
@@ -223,6 +231,7 @@ def runtime_constants(config: Any) -> dict[str, Any]:
     Phase 04 changes one of these numbers; without this block, the artifact from
     before and the artifact from after would look comparable when they are not.
     """
+    from src.agent.domain import active_pack
     from src.agent.executor import MAX_EXTERNAL_CALLS_PER_ROUND
     from src.agent.loop import MAX_EXTERNAL_TOOL_CALLS, MAX_TOOL_ROUNDS
     from src.agent.prompt.sections import PROMPT_VERSION
@@ -233,6 +242,7 @@ def runtime_constants(config: Any) -> dict[str, Any]:
     )
     from src.core.llm.admission import TURN_COST_MICRO_USD
 
+    pack = active_pack()
     return {
         "MAX_EXTERNAL_TOOL_CALLS": MAX_EXTERNAL_TOOL_CALLS,
         "MAX_TOOL_ROUNDS": MAX_TOOL_ROUNDS,
@@ -242,6 +252,11 @@ def runtime_constants(config: Any) -> dict[str, Any]:
         "MAX_PAGE_TEXT_CHARS": MAX_PAGE_TEXT_CHARS,
         "TURN_COST_MICRO_USD": TURN_COST_MICRO_USD,
         "PROMPT_VERSION": PROMPT_VERSION,
+        "domain_pack": {
+            "name": pack.name,
+            "version": pack.version,
+            "identity": pack.identity,
+        },
         "model": config.model_for(_session_workload()),
     }
 
@@ -250,6 +265,17 @@ def _session_workload() -> Any:
     from src.core.llm import Workload
 
     return Workload.SESSION
+
+
+def _turn_mode(mode: str) -> str:
+    """Map a harness lane to the persisted production Turn mode."""
+    from src.agent.loop import CHAT_MODE, SIGNAL_DESK_MODE as TURN_SIGNAL_DESK_MODE
+
+    if mode == WEB_FIRST_MODE:
+        return CHAT_MODE
+    if mode == SIGNAL_DESK_MODE:
+        return TURN_SIGNAL_DESK_MODE
+    raise ValueError(f"unknown golden mode: {mode!r}")
 
 
 # -- reading one finished Turn back out of the store -----------------------
@@ -265,12 +291,26 @@ def spend_for(request_message_id: int) -> dict[str, Any]:
 
     Summed, not sampled. A web-first Turn averages several calls, so reading one
     row and calling it the price of a Turn understates it by that factor.
+
+    Four token counters rather than two, because ``input_tokens`` is not the
+    input. The transport splits what the provider reports (``transport._usage``)
+    so the cheap cached part is not billed at the full input price — which means
+    the column holds the *fresh* prompt only, and an artifact calling it the
+    prompt would report a Turn as having sent less than it sent. The cached read
+    and the cache write are the rest of it, and a run cannot say whether the
+    automatic prefix cache is working without them.
     """
     from sqlalchemy import func, select
 
     from src.alpha.models import LlmCallUsage
     from src.core.database import sync_session_factory
 
+    columns = {
+        "fresh_input_tokens": LlmCallUsage.input_tokens,
+        "cached_read_tokens": LlmCallUsage.cached_read_tokens,
+        "cache_write_tokens": LlmCallUsage.cache_write_tokens,
+        "output_tokens": LlmCallUsage.output_tokens,
+    }
     with sync_session_factory() as session:
         row = session.execute(
             select(
@@ -283,19 +323,28 @@ def spend_for(request_message_id: int) -> dict[str, Any]:
                     ),
                     0,
                 ),
-                func.coalesce(func.sum(LlmCallUsage.input_tokens), 0),
-                func.coalesce(func.sum(LlmCallUsage.output_tokens), 0),
+                *(func.coalesce(func.sum(column), 0) for column in columns.values()),
                 func.count(),
             ).where(
                 LlmCallUsage.owner_type == "turn_request_message",
                 LlmCallUsage.owner_id == str(request_message_id),
             )
         ).one()
+    totals = {name: int(value) for name, value in zip(columns, row[1:-1], strict=True)}
     return {
         "micro_usd": int(row[0]),
-        "input_tokens": int(row[1]),
-        "output_tokens": int(row[2]),
-        "llm_calls": int(row[3]),
+        # Kept under its old name and holding the same column it always held, so
+        # every artifact written before this line stays comparable with every
+        # one written after it. What changed is that the three counters beside
+        # it say what the name never did.
+        "input_tokens": totals["fresh_input_tokens"],
+        **totals,
+        "prompt_tokens": (
+            totals["fresh_input_tokens"]
+            + totals["cached_read_tokens"]
+            + totals["cache_write_tokens"]
+        ),
+        "llm_calls": int(row[-1]),
     }
 
 
@@ -355,6 +404,7 @@ async def read_case(
     request_message_id: int,
     wall_ms: int,
     terminal_reason: str | None = None,
+    mode: str = WEB_FIRST_MODE,
 ) -> dict[str, Any]:
     """Assemble one case's slice of the artifact from what the runtime wrote.
 
@@ -369,6 +419,7 @@ async def read_case(
 
     answer_text = ""
     payloads: tuple[Mapping[str, Any], ...] = ()
+    signal_desks: tuple[Mapping[str, Any], ...] = ()
     turn_status = "unknown"
     for message in reversed(view.messages if view else ()):
         if message.role != "assistant":
@@ -378,13 +429,19 @@ async def read_case(
         payloads = tuple(
             item for item in (content.get("tool_calls") or ()) if isinstance(item, Mapping)
         )
+        signal_desks = tuple(
+            item for item in (content.get("signal_desks") or ()) if isinstance(item, Mapping)
+        )
         turn_status = str(content.get("status") or "unknown")
         break
 
     full_text_by_call: dict[str, str] = {}
+    trace_by_call: dict[str, Any] = {}
     for trace in traces:
         result = trace.result or {}
-        full_text_by_call[str(trace.tool_call_id or "")] = str(result.get("text") or "")
+        call_id = str(trace.tool_call_id or "")
+        full_text_by_call[call_id] = str(result.get("text") or "")
+        trace_by_call[call_id] = trace
 
     calls: list[dict[str, Any]] = []
     sources: list[dict[str, Any]] = []
@@ -396,6 +453,7 @@ async def read_case(
         call_id = str(payload.get("id") or "")
         kind = str(payload.get("kind") or "external")
         body = full_text_by_call.get(call_id, "")
+        trace = trace_by_call.get(call_id)
         calls.append(
             {
                 "id": call_id,
@@ -407,6 +465,8 @@ async def read_case(
                 "summary": payload.get("summary"),
                 "result_count": payload.get("result_count"),
                 "result_chars": len(body),
+                "arguments": dict(trace.arguments) if trace is not None else {},
+                "result_text": body,
                 # What the advisory threat scan made of this result. Read off
                 # the persisted call payload rather than a column of its own,
                 # which is the whole reason the verdict is stored there: a
@@ -437,11 +497,87 @@ async def read_case(
                 }
             )
 
+    compositions: list[dict[str, Any]] = []
+    if mode == SIGNAL_DESK_MODE:
+        from .graders_signal_desk import (
+            build_ref_proof,
+            build_replay_proof,
+            replay_arguments,
+        )
+
+        for descriptor in signal_desks:
+            artifact_id = descriptor.get("artifact_id") or descriptor.get("artifactId")
+            if not artifact_id:
+                continue
+            artifact = await store.read_artifact(user_id, str(artifact_id))
+            if artifact is None:
+                continue
+            spec = dict(artifact.signal_desk_spec or {})
+            frames = dict(artifact.frames or {})
+            frame_sources: dict[str, str] = {}
+            for section in spec.get("sections") or ():
+                for block in section.get("blocks") or ():
+                    if isinstance(block, Mapping) and block.get("kind") == "visual":
+                        frame_sources[str(block.get("frame") or "")] = str(
+                            block.get("source") or "store"
+                        )
+            appendix = spec.get("appendix")
+            if isinstance(appendix, Mapping):
+                frame_sources[str(appendix.get("frame") or "")] = str(
+                    appendix.get("source") or "store"
+                )
+            frame_metadata = [
+                {
+                    "key": str(key),
+                    "kind": frame.get("kind"),
+                    "columns": list(frame.get("columns") or ()),
+                    "row_count": len(frame.get("rows") or ()),
+                    "unit": frame.get("unit"),
+                    "source": frame_sources.get(str(key), "store"),
+                }
+                for key, frame in frames.items()
+                if isinstance(frame, Mapping)
+            ]
+            render_arguments = None
+            for call in calls:
+                if call.get("name") != "render_signal_desk":
+                    continue
+                try:
+                    result = json.loads(str(call.get("result_text") or ""))
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(result, Mapping) and str(
+                    result.get("artifactId") or ""
+                ) == str(artifact_id):
+                    render_arguments = call.get("arguments")
+                    break
+            composition: dict[str, Any] = {
+                "artifact_id": str(artifact.id),
+                "study_name": artifact.study_name,
+                "study_version": artifact.study_version,
+                "spec": spec,
+                # The one and only copy of raw frame arrays in a golden case.
+                "frames": frames,
+                "provenance": dict(artifact.provenance or {}),
+                "frame_metadata": frame_metadata,
+            }
+            if isinstance(render_arguments, Mapping) and not spec.get("autoComposed"):
+                composition["replay_arguments"] = replay_arguments(render_arguments)
+            composition["ref_proof"] = build_ref_proof(composition)
+            composition["replay_proof"] = build_replay_proof(composition)
+            compositions.append(composition)
+
+    model_visible_parts = [str(case.get("question") or "")]
+    for call in calls:
+        model_visible_parts.append(json.dumps(call.get("arguments") or {}, ensure_ascii=False))
+        model_visible_parts.append(str(call.get("result_text") or ""))
+
     return {
         "id": case.get("id"),
         "question": case.get("question"),
         "family": case.get("family"),
         "expect": dict(case.get("expect") or {}),
+        "mode": mode,
         "why_a_fluent_answer_fails": case.get("why_a_fluent_answer_fails"),
         "turn": {
             "id": str(turn_id),
@@ -453,6 +589,10 @@ async def read_case(
         },
         "answer_text": answer_text,
         "tool_calls": calls,
+        "signal_desks": [dict(item) for item in signal_desks],
+        "composition": compositions[0] if compositions else None,
+        "model_visible_text": "\n".join(model_visible_parts),
+        "external_calls": sum(1 for call in calls if call.get("kind") == "external"),
         "sources": sources,
         "external_evidence_text": "\n".join(external_chunks),
         "store_evidence_text": "\n".join(store_chunks),
@@ -471,6 +611,7 @@ async def run_corpus(
     replay: bool,
     limit: int | None,
     git_sha: str | None = None,
+    mode: str = WEB_FIRST_MODE,
 ) -> dict[str, Any]:
     from src.agent import tools
     from src.agent.prompt import RuntimeContext
@@ -521,6 +662,7 @@ async def run_corpus(
                 turn_id=turn_id,
                 user_text=str(case.get("question") or ""),
                 runtime=RuntimeContext(today=datetime.now().date(), user_name=GOLDEN_NAME),
+                mode=_turn_mode(mode),
             )
             running = desk.turns.running(turn_id)
             if running is not None and running.task is not None:
@@ -537,6 +679,7 @@ async def run_corpus(
                 request_message_id=handle.turn.request_message_id,
                 wall_ms=wall_ms,
                 terminal_reason=terminal_reason,
+                mode=mode,
             )
             results.append(entry)
             spent += int(entry["cost"]["micro_usd"])
@@ -588,7 +731,14 @@ async def run_corpus(
             "started_at": started.isoformat(),
             "finished_at": datetime.now(timezone.utc).isoformat(),
             "git_sha": git_sha or _git_sha(),
+            "mode": mode,
             "corpus_id": corpus.get("corpus_id"),
+            # Which questions, not just how many. A corpus is edited between
+            # rounds — a failing case reworded, a family topped up — and two
+            # artifacts naming the same corpus_id are otherwise indistinguishable
+            # from two runs of the same questions.
+            "corpus_sha256": corpus_digest(corpus),
+            "corpus_selection": dict(corpus.get("selection") or {}) or None,
             "corpus_cases": len(cases),
             # What the corpus file holds, beside what this run was asked for. A
             # ``--limit`` run is a smoke test rather than a shorter measurement,
@@ -635,7 +785,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         required=True,
         help="hard spend ceiling for this run, in USD; required",
     )
-    parser.add_argument("--corpus", default="golden/web_first.json")
+    parser.add_argument("--mode", choices=MODES, default=WEB_FIRST_MODE)
+    parser.add_argument("--corpus", default=None)
     parser.add_argument("--out", default=None, help="artifact path; defaults to a stamped file")
     parser.add_argument("--tape", default="golden/artifacts/web-tape.json")
     parser.add_argument(
@@ -654,7 +805,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.ceiling_usd <= 0:
         parser.error("--ceiling-usd must be positive")
 
-    corpus = json.loads(Path(args.corpus).read_text(encoding="utf-8"))
+    corpus_path = args.corpus or (
+        "golden/signal_desk.json"
+        if args.mode == SIGNAL_DESK_MODE
+        else "golden/web_first.json"
+    )
+    corpus = json.loads(Path(corpus_path).read_text(encoding="utf-8"))
     stamp = datetime.now(timezone.utc).strftime("%y%m%d-%H%M%S")
     out = Path(args.out or f"golden/artifacts/{corpus.get('corpus_id', 'run')}-{stamp}.json")
 
@@ -666,6 +822,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             replay=bool(args.replay),
             limit=args.limit,
             git_sha=args.git_sha,
+            mode=args.mode,
         )
     )
     out.parent.mkdir(parents=True, exist_ok=True)

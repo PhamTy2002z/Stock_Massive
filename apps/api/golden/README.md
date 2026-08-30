@@ -79,6 +79,117 @@ make golden-run   CEILING_USD=1.50 GOLDEN_ARGS="--replay"
 make golden-grade ARTIFACT=golden/artifacts/<file>.json
 ```
 
+### Signal Desk mode
+
+The Phase 09 harness is available without changing the spend rule:
+
+```
+make golden-run MODE=signal_desk CEILING_USD=1.50 \
+  GOLDEN_ARGS="--corpus /path/to/signal_desk.json"
+make golden-grade ARTIFACT=golden/artifacts/<file>.json
+```
+
+`MODE` defaults to `web_first`, so existing runs keep their original lane. A
+Signal Desk artifact adds the persisted composition (spec v2 plus its one copy
+of frame rows), lint and frame metadata, model-visible trace text, tool
+arguments, prompt/domain-pack identity, and hash proofs for reference resolution
+and deterministic composer replay. The six fixed invariants gate at 100%; each
+case's `board`, `min_kpi`, optional `archetype`, and optional `refusal`
+expectations decide the case result. Visual ratio, narrative length, KPI count,
+widget variety, auto-compose rate, cost, latency, and external-call count are
+first-round measurements and do not gate yet. The cost gate remains P50 ≤
+84,362 micro-USD and the overall case bar remains 90%.
+
+No external 50-case Signal Desk corpus is committed yet, and no paid Signal
+Desk golden run has been performed. Until the outside-team collection closes,
+pass `--corpus` explicitly; the absent default `golden/signal_desk.json` is
+intentional and must not be replaced with developer-written or provider-faked
+cases. After the first real run, inspect the non-gating visual/narrative/KPI
+distributions before changing any threshold; threshold changes are a separate
+reviewed step, not part of generating the artifact.
+
+#### Where the fifty questions come from
+
+The corpus measures whether the desk answers a question nobody here anticipated,
+so a question written in this repository cannot be in it. The collection is a
+form sent to at least three people outside the repository, asking for any
+analytical question about the Vietnamese market they would actually want
+answered — no format, no hint that a chart is involved, no example that would
+seed the shape of the answer:
+
+> Bạn muốn hỏi gì về thị trường chứng khoán Việt Nam? Viết câu hỏi bằng lời của
+> bạn, như khi hỏi một người phân tích. Không cần đúng cú pháp, không cần biết
+> dữ liệu có sẵn hay không. Mỗi người 20 câu.
+
+Collect **at least sixty**, then label each one — its family, and what the case
+expects — and draw fifty by seed:
+
+```
+make golden-corpus-select SUBMISSIONS=/path/to/submissions.json SEED=20260830
+make golden-corpus-validate CORPUS=golden/signal_desk.json
+```
+
+Labelling is a grading contract and stays here; the question never is. Keep only
+`id`, `question`, `family` and `expect` on a submission — a contributor's name or
+address would otherwise be committed with the corpus and hashed into every
+artifact. The draw fills each family's floor first and takes the remainder in the
+seed's order, so no submission is preferred for reading well. `single`, `screen`,
+`timeline`, `decompose` and `off_store` each hold at least six cases and
+`compare` at least twelve — a run that is forty comparisons measures the
+comparison path and reports it as if it had measured the desk.
+
+Three refusals, each guarding a way the draw stops being a draw:
+
+- **fewer than sixty submissions.** Fifty drawn from fifty is the whole pool
+  under every seed, and the corpus would record a provenance for a choice nobody
+  made. The floor is twenty per cent above the target, so a smaller `--target`
+  smoke run scales with it.
+- **a family under its floor** — every short family named at once, because
+  collection is a form sent to people and each hidden shortfall costs another
+  round of it.
+- **an existing corpus file**, unless `FORCE=1`. A redraw replaces the questions
+  every artifact already written was scored against, and nothing left in the tree
+  would reproduce those digests.
+
+`golden-corpus-validate` refuses a corpus with no `selection` block: it cannot
+prove the questions came from outside, but it can refuse to bless fifty that
+never went through the draw — which is the step where somebody here would
+otherwise pick them.
+
+The corpus file records the seed, how many it was drawn from, and the digest of
+the submissions, and every artifact records `corpus_sha256` — the corpus it ran,
+questions included, not just the `corpus_id` naming it. A case reworded between
+rounds changes that digest, which is the point: two artifacts naming the same
+corpus are otherwise indistinguishable from two runs of the same questions.
+
+There is a fourth file, and it answers a question the other three cannot.
+
+```
+make golden-context-export ARTIFACT=golden/artifacts/<file>.json
+make golden-context-replay OUT=/tmp/replay.json
+```
+
+`context_replay.py` rebuilds **every context a finished run constructed**, from
+that run's own trace, through the same public context builder the loop uses. It
+exists because a token measurement made by running the corpus again is three
+measurements added together — the code changed, the Internet changed, and the
+model sampled differently — and only the first of those belongs to a change in
+how context is built. The tape removes the second; this removes the third.
+
+`export` is the only half that touches a database. `replay` is pure: no network,
+no model, no clock — the date in the prompt is pinned at `REPLAY_DATE` — so the
+same corpus gives byte-identical output on any machine, today or in a month.
+It decides nothing and enforces nothing; it prints where the tokens went.
+
+What it cannot recover is one thing, named rather than hidden: the guardrail's
+sentence about a call the harness **refused before dispatch** travels in the
+message and is persisted nowhere. It is a fixed constant per reason, identical
+in every replay, so it cancels in a delta — and the report carries
+`refused_calls` so the size of the gap is readable. Measured against the ledger
+on the corpus it was built from: 78 model calls in the replay against 78 rows in
+`llm_call_usage`, and 797,722 tokens against 800,628 reserved — **0.36% apart**,
+all of it those sentences.
+
 - **`CEILING_USD` has no default.** A runner that can start without a ceiling
   eventually will, and the whole model envelope is $45 a month.
 - **Grading never touches the network, the database or a model.** It is a pure
@@ -189,12 +300,22 @@ from**. That is a claim-provenance contract, and it belongs to C4. Full numbers:
 
 ## What the artifact carries beyond the four graders
 
-Two things are recorded and **not** scored, on purpose.
+Three things are recorded and **not** scored, on purpose.
 
 - **`cost` and `turn.wall_ms`** are continuous distributions. A binomial gate on
   twenty cases is a valid gate; a threshold on a median of twenty latencies is a
   number that moves with the Internet. They are reported with a range and read
   as signals.
+- **`cost` names four token counters, and `input_tokens` is not the prompt.**
+  The transport splits what the provider reports so the cheap cached part is not
+  billed at the full input price, which means that column holds the **fresh**
+  prompt only. Beside it are `cached_read_tokens`, `cache_write_tokens` and
+  their sum as `prompt_tokens`. The old name keeps the old column so an artifact
+  written before this line stays comparable with one written after it — what
+  changed is that the three counters beside it say what the name never did.
+  Measured on `web-first-v1-final`: 489,106 fresh against **492,032 cached
+  read**, so the route's automatic prefix cache was already serving **50.1%** of
+  the prompt with `llm_prompt_cache_control_enabled` off.
 - **`tool_calls[].scan`** is the advisory threat scan's verdict on each result,
   read straight off the persisted call payload. It is here so the rate at which
   the scan fires on *ordinary* market pages can be measured before anybody
