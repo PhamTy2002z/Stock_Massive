@@ -10,7 +10,11 @@ from src.core.llm import (
     CapabilityProbe,
     CapabilityProbeError,
     Completion,
+    GatewayTimeout,
     OwnerType,
+    ProbeCheck,
+    ProbeResult,
+    RouteRateLimited,
     ToolCall,
     clear_capability_probe_cache,
     enforce_capability_probe,
@@ -218,3 +222,96 @@ async def test_probe_skip_is_only_the_explicit_flag(monkeypatch, caplog):
         await main.run_capability_probe_at_startup(object())
 
     assert "skipped by explicit configuration" in caplog.text
+
+
+class RateLimitedRoute:
+    """Out of allowance, which is the route working and refusing this call."""
+
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def complete(self, request, spend):
+        self.calls.append(request)
+        raise RouteRateLimited("the route is out of allowance (429)")
+
+
+class TimingOutRoute:
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def complete(self, request, spend):
+        self.calls.append(request)
+        raise GatewayTimeout("the route did not answer in time")
+
+
+@pytest.mark.asyncio
+class TestAnUnmeasuredCheckIsNotAFailure:
+    """A route that refused the call said nothing about the contract."""
+
+    async def test_a_rate_limited_route_leaves_every_paid_check_unmeasured(self):
+        route = RateLimitedRoute()
+
+        result = await CapabilityProbe(route, model="session-model").run()
+
+        assert result.ok is False
+        assert result.failures == {}
+        assert set(result.unmeasured) == {
+            "forced_tool_choice",
+            "parallel_tool_calls",
+            "strict_json_schema",
+            "closed_tool_loop",
+        }
+
+    async def test_a_timing_out_route_is_unmeasured_for_the_same_reason(self):
+        route = TimingOutRoute()
+
+        result = await CapabilityProbe(route, model="session-model").run()
+
+        assert result.failures == {}
+        assert len(result.unmeasured) == 4
+
+    async def test_an_unmeasured_run_is_not_cached_so_the_next_one_retries(self):
+        route = RateLimitedRoute()
+        probe = CapabilityProbe(route, model="session-model")
+
+        first = await probe.run()
+        second = await probe.run()
+
+        assert second is not first
+        assert len(route.calls) == 8
+
+    async def test_a_wrong_answer_is_still_a_failure_beside_an_unmeasured_one(self):
+        """The two outcomes do not collapse into each other."""
+        result = ProbeResult(
+            checks={
+                "forced_tool_choice": ProbeCheck(False, "parameters ignored"),
+                "closed_tool_loop": ProbeCheck(
+                    False, "RouteRateLimited: out of allowance", measured=False
+                ),
+            }
+        )
+
+        assert set(result.failures) == {"forced_tool_choice"}
+        assert set(result.unmeasured) == {"closed_tool_loop"}
+
+
+@pytest.mark.asyncio
+async def test_startup_survives_a_route_that_could_not_be_measured(caplog):
+    """The outage the probe reports must not become an outage the probe causes."""
+    route = RateLimitedRoute()
+    result = await CapabilityProbe(route, model="session-model").run()
+
+    with caplog.at_level(logging.WARNING):
+        enforce_capability_probe(result, alpha_desk_enabled=True)
+
+    assert "unmeasured" in caplog.text
+    assert "RouteRateLimited" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_conclusive_failure_still_refuses_startup():
+    route = DroppingRoute()
+    result = await CapabilityProbe(route, model="session-model").run()
+
+    with pytest.raises(CapabilityProbeError):
+        enforce_capability_probe(result, alpha_desk_enabled=True)
