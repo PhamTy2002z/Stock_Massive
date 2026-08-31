@@ -56,7 +56,6 @@ def call(
         "name": name,
         "round": round_index,
         "status": "error" if refused else "ok",
-        "outcome": None,
         "kind": "external",
         "arguments": {} if refused else {"query": "lãi suất"},
         "result_text": "" if refused else body,
@@ -137,22 +136,20 @@ def test_the_replay_reads_no_clock() -> None:
     assert replay_case(one_case(), RUNTIME) == pinned
 
 
-def test_a_domain_call_loads_the_pack_body_from_the_next_call_onward() -> None:
-    """The loop reads what the model asked for before dispatching it."""
+def test_every_replayed_call_carries_the_pack_body() -> None:
     played = replay_case(
-        one_case(calls=[call("c0", "get_field"), call("c1", round_index=1)]),
+        one_case(calls=[call("c0", "session_search"), call("c1", round_index=1)]),
         RUNTIME,
     )
     body = [item["composition"]["domain_body"] for item in played["constructed"]]
 
-    assert body[0] == 0
-    assert body[1] > 0 and body[1] == body[2]
+    assert body[0] > 0 and len(set(body)) == 1
 
 
-def test_a_turn_that_never_touches_the_domain_never_pays_for_the_body() -> None:
+def test_a_turn_without_tools_still_carries_the_domain_body() -> None:
     played = replay_case(one_case(), RUNTIME)
 
-    assert all(item["composition"]["domain_body"] == 0 for item in played["constructed"])
+    assert all(item["composition"]["domain_body"] > 0 for item in played["constructed"])
 
 
 def test_the_last_call_of_a_turn_that_spent_every_round_carries_the_note() -> None:

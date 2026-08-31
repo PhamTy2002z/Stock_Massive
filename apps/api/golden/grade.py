@@ -90,12 +90,7 @@ class Report:
         nobody had sat yet.
         """
         out: dict[str, Any] = {}
-        graders = GRADERS
-        if self.run.get("mode") == "signal_desk":
-            from .graders_signal_desk import GRADERS as SIGNAL_DESK_GRADERS
-
-            graders = SIGNAL_DESK_GRADERS
-        for grader in graders:
+        for grader in GRADERS:
             values = [
                 f.value for f in self.findings if f.grader == grader and f.value is not None
             ]
@@ -363,49 +358,9 @@ def grade(artifact: Mapping[str, Any]) -> Report:
             f"the corpus declares {expected_cases} case(s) and the artifact holds {len(cases)}"
         )
 
-    if run.get("mode") == "signal_desk":
-        from .graders_signal_desk import (
-            COST_P50_CEILING_MICRO_USD,
-            EXPECTATION_GRADERS,
-            FIXED_GRADERS,
-            grade_case,
-        )
-
-        for case in cases:
-            report.findings.extend(grade_case(case))
-        fixed_pass = all(
-            finding.passed is True
-            for finding in report.findings
-            if finding.grader in FIXED_GRADERS
-        )
-        per_case: list[bool] = []
-        for case in cases:
-            case_id = str(case.get("id"))
-            decided = [
-                finding.passed
-                for finding in report.findings
-                if finding.case_id == case_id
-                and finding.grader in FIXED_GRADERS + EXPECTATION_GRADERS
-                and finding.passed is not None
-            ]
-            per_case.append(bool(decided) and all(decided))
-        case_rate = sum(per_case) / len(per_case)
-        costs = [int((case.get("cost") or {}).get("micro_usd") or 0) for case in cases]
-        cost_p50 = _median(costs)
-        report.run["signal_desk_gate"] = {
-            "fixed_invariants_pass": fixed_pass,
-            "case_pass_rate": round(case_rate, 4),
-            "case_pass_threshold": 0.9,
-            "cost_p50_micro_usd": cost_p50,
-            "cost_ceiling_micro_usd": COST_P50_CEILING_MICRO_USD,
-            "passed": fixed_pass
-            and case_rate >= 0.9
-            and cost_p50 <= COST_P50_CEILING_MICRO_USD,
-        }
-    else:
-        for case in cases:
-            for name in GRADERS:
-                report.findings.append(_GRADERS[name](case))
+    for case in cases:
+        for name in GRADERS:
+            report.findings.append(_GRADERS[name](case))
     return report
 
 

@@ -1,10 +1,11 @@
-"""FastAPI application entry point — post-rip-out, chat-lane baseline."""
-import asyncio
+"""FastAPI entry point for the web-first AI agent harness."""
+
+from __future__ import annotations
+
 import logging
 import sys
 from contextlib import asynccontextmanager
 
-from apscheduler import AsyncScheduler
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -18,7 +19,7 @@ from src.alpha.refusals import AlphaRefusal
 from src.auth.router import router as auth_router
 from src.core.cache import CacheRefreshUnavailable
 from src.core.config import get_settings
-from src.core.database import engine, get_sync_db
+from src.core.database import engine
 from src.core.llm import (
     CapabilityProbe,
     Workload,
@@ -27,12 +28,6 @@ from src.core.llm import (
     enforce_capability_probe,
     llm_config_from_settings,
 )
-from src.core.quota import QuotaRefused
-from src.core.scheduler import setup_scheduler
-from src.stocks.shared import StockServiceError
-from src.stocks.trading_day import spine_freshness
-from src.stocks.universe import Universe
-
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,7 +44,6 @@ async def run_capability_probe_at_startup(config) -> None:
     if not get_settings().llm_capability_probe_enabled:
         logger.info("Capability Probe skipped by explicit configuration")
         return
-
     client = build_client(config)
     try:
         result = await CapabilityProbe(
@@ -63,146 +57,31 @@ async def run_capability_probe_at_startup(config) -> None:
 
 
 def warn_if_vision_was_measured_on_another_model(config) -> None:
-    """Say out loud when the vision flag is on for a model nobody measured.
-
-    ``scripts/probe_vision.py`` answers the question for one model string, and
-    the answer is then carried by a flag that knows nothing about which. Moving
-    ``LLM_MODEL_SESSION`` therefore silently re-uses a measurement that was
-    never made. A warning rather than a gate: reading images is a side
-    capability, and the same argument that keeps this out of the Capability
-    Probe keeps it from stopping a boot.
-    """
-    settings = get_settings()
+    """Warn when the vision flag is reused for an unmeasured model."""
+    current = get_settings()
     if not config.route.vision:
         return
-    measured = (settings.llm_vision_measured_model or "").strip()
+    measured = (current.llm_vision_measured_model or "").strip()
     configured = config.model_for(Workload.SESSION)
     if measured != configured:
         logger.warning(
-            "LLM_VISION_ENABLED is on for model %r, but the route was last "
-            "measured for images on %r — run `make probe-vision` and update "
-            "LLM_VISION_MEASURED_MODEL",
+            "LLM_VISION_ENABLED is on for model %r, but image support was last "
+            "measured on %r",
             configured,
             measured or "<nothing>",
         )
 
 
-async def report_spine_freshness_at_startup() -> None:
-    """Say out loud whether anything is still feeding the daily spine.
-
-    The Trading Day calendar is derived from ``bar_daily``, so a spine nobody is
-    filling does not read as broken: every answer keeps citing a date, and the
-    date is simply old. That is the failure this line exists to make visible —
-    the expensive version is not the job failing, it is the job failing while
-    nobody notices.
-
-    Read in a thread because the store read is synchronous, and never allowed to
-    stop startup: an operational observation must not be able to keep the API
-    down.
-    """
-
-    def read() -> str | None:
-        with get_sync_db() as session:
-            freshness = spine_freshness(session)
-        if freshness.is_empty or freshness.is_stale:
-            return freshness.describe()
-        logger.info("Daily spine: %s", freshness.describe())
-        return None
-
-    try:
-        problem = await asyncio.to_thread(read)
-    except Exception:
-        logger.exception("Could not read the daily spine's freshness")
-        return
-
-    if problem is None:
-        return
-
-    settings = get_settings()
-    if not settings.backfill_daily_scheduled:
-        logger.warning(
-            "Daily spine is not current: %s. Every Signal Field is dated by this "
-            "table, so answers will carry an old session rather than fail. Fill "
-            "it with `make backfill-daily SCOPE=index` (then declared, market), "
-            "or set BACKFILL_DAILY_SCHEDULED so this fills itself.",
-            problem,
-        )
-        return
-
-    logger.warning(
-        "Daily spine is not current: %s. Filling index and declared now.", problem
-    )
-    asyncio.create_task(_catch_the_daily_spine_up())
-
-
-#: What a catch-up fills, and what it deliberately does not. ``market`` is 1,523
-#: provider calls; a boot is not the moment to spend them, and no answer this
-#: lane gives is dated by a symbol outside the declared Universe.
-CATCH_UP_SCOPES = ("index", "declared")
-
-
-async def _catch_the_daily_spine_up() -> None:
-    """Fill the spine behind the request path, once, at boot.
-
-    A log line was the whole response to a stale spine until 2026-08-30, and the
-    failure it was written for happened anyway: the store sat three days behind,
-    every answer cited its newest session, and the date was simply old. A machine
-    that is off at 16:30 never meets the scheduled run, so boot is the only other
-    moment the gap can close.
-
-    Off the request path and never raising. Answers served in the first minute
-    are still dated by the old session — they say so — and the run replaces it.
-    """
-    from src.stocks import backfill_daily
-
-    for scope in CATCH_UP_SCOPES:
-        try:
-            report = await asyncio.to_thread(backfill_daily.run, scope=scope)
-        except Exception:
-            logger.exception("Daily spine catch-up failed for scope %s", scope)
-            continue
-        logger.info(
-            "Daily spine catch-up scope=%s attempted=%d rows=%d failed=%d",
-            scope,
-            report.attempted,
-            report.rows_written,
-            len(report.failures),
-        )
-
-
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Manage application lifespan.
-
-    The market surfaces were ripped out on 2026-08-25; the lifespan block now
-    only seats what the chat lane needs — Universe check, Budget Validation,
-    Capability Probe, sweep of interrupted Turns, an empty scheduler seam.
-    """
-    universe = Universe.from_settings(get_settings())
-    logger.info(f"Universe declares {len(universe)} symbols")
-
+async def lifespan(_app: FastAPI):
+    """Validate the harness, recover interrupted turns, and close resources."""
     llm_config = llm_config_from_settings(get_settings())
     enforce_budget_validation(llm_config)
-
     await run_capability_probe_at_startup(llm_config)
     warn_if_vision_was_measured_on_another_model(llm_config)
-
     await sweep_interrupted_turns()
-
-    await report_spine_freshness_at_startup()
-
     try:
-        if settings.scheduler_enabled:
-            async with AsyncScheduler() as scheduler:
-                await setup_scheduler(scheduler)
-                await scheduler.start_in_background()
-                schedules = await scheduler.get_schedules()
-                logger.info(f"Scheduler started with {len(schedules)} schedules")
-                app.state.scheduler = scheduler
-                yield
-        else:
-            logger.info("Scheduler disabled by config")
-            yield
+        yield
     finally:
         try:
             await close_alpha_desk()
@@ -212,8 +91,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Stock Massive API",
-    description="AI chat lane over Vietnamese equity signal store",
-    version="0.2.0",
+    description="Web-first AI agent harness for Vietnamese equity research",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
@@ -233,7 +112,7 @@ app.include_router(favicons_router, prefix="/api/v1")
 
 
 @app.exception_handler(AlphaRefusal)
-async def alpha_refusal_handler(request: Request, exc: AlphaRefusal):
+async def alpha_refusal_handler(_request: Request, exc: AlphaRefusal):
     detail = {"reason": exc.reason, "message": exc.message}
     reset_at = getattr(exc, "reset_at", None)
     if reset_at is not None:
@@ -241,23 +120,10 @@ async def alpha_refusal_handler(request: Request, exc: AlphaRefusal):
     return JSONResponse(status_code=exc.status_code, content={"detail": detail})
 
 
-@app.exception_handler(StockServiceError)
-async def stock_service_error_handler(request: Request, exc: StockServiceError):
-    return JSONResponse(status_code=502, content={"detail": str(exc)})
-
-
-@app.exception_handler(QuotaRefused)
-async def quota_refused_handler(request: Request, exc: QuotaRefused):
-    logger.warning("account allowance refused %s: %s", request.url.path, exc)
-    return JSONResponse(
-        status_code=503,
-        content={"detail": str(exc)},
-        headers={"Retry-After": "60"},
-    )
-
-
 @app.exception_handler(CacheRefreshUnavailable)
-async def cache_refresh_unavailable_handler(request: Request, exc: CacheRefreshUnavailable):
+async def cache_refresh_unavailable_handler(
+    request: Request, exc: CacheRefreshUnavailable
+):
     logger.warning("cache refresh suppressed on %s", request.url.path)
     return JSONResponse(
         status_code=503,
@@ -267,8 +133,8 @@ async def cache_refresh_unavailable_handler(request: Request, exc: CacheRefreshU
 
 
 @app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+async def global_exception_handler(_request: Request, exc: Exception):
+    logger.error("Unhandled exception: %s", exc, exc_info=True)
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
@@ -280,24 +146,3 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
-
-
-@app.get("/scheduler/status")
-async def scheduler_status():
-    if not hasattr(app.state, "scheduler"):
-        return {"enabled": False, "message": "Scheduler not initialized"}
-
-    scheduler = app.state.scheduler
-    schedules = await scheduler.get_schedules()
-    return {
-        "enabled": True,
-        "state": scheduler.state.name,
-        "schedule_count": len(schedules),
-        "schedules": [
-            {
-                "id": s.id,
-                "next_fire_time": s.next_fire_time.isoformat() if s.next_fire_time else None,
-            }
-            for s in schedules
-        ],
-    }

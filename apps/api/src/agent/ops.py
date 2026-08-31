@@ -50,7 +50,6 @@ database the API serves from, and it looks with ``SELECT`` only.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -63,17 +62,11 @@ from src.alpha.models import (
     TOOL_CALL_OK,
     TOOL_CALL_UNKNOWN_TOOL,
     TURN_INCOMPLETE,
-    AgentMessage,
     AgentToolCall,
     AgentTurn,
 )
 
-from . import registry
 from .persistence import flag_counts_between
-
-#: The tool the contract asks for before a price read elsewhere is stated. Named
-#: here because this module counts calls to it and nothing else about it.
-PRICE_CHECK_TOOL = "check_price_claim"
 
 #: The window the numbers are stated over. Configurable per call, because a
 #: wider window is a useful reading — there is no rule attached to any
@@ -198,173 +191,6 @@ class OpsSnapshot:
         )
 
 
-def _external_tool_names() -> frozenset[str]:
-    """Tools whose results are somebody else's writing.
-
-    Asked of the registry rather than named here, so a web-reading tool added
-    later counts without this module being edited — the same reason
-    ``untrusted.py`` stopped keeping a list.
-    """
-    return frozenset(
-        entry.name
-        for entry in registry.entries()
-        if entry.access is registry.ToolAccess.NETWORK
-    )
-
-
-#: A number written the way a Vietnamese price is written: groups of three
-#: digits separated by dots. Deliberately loose, because the alternative is
-#: parsing prose.
-_GROUPED_NUMBER = re.compile(r"\d{1,3}(?:\.\d{3})+")
-
-#: What immediately after a number means it was not a price. A revenue in
-#: billions and a percentage both arrive in the same shape as a price and are
-#: not one, and the real Turn this reading exists for quoted all three.
-_NOT_A_PRICE_AFTER = re.compile(r"^\s*(?:%|tỷ|ty|triệu|trieu|nghìn|nghin|tr\b|bn\b)")
-
-#: The range a share price in VND falls in. Outside it the grouped number was a
-#: volume, a market capitalisation or an index level.
-_MIN_PRICE = 1_000
-_MAX_PRICE = 5_000_000
-
-
-def names_a_price(text: str) -> bool:
-    """Whether this answer states something shaped like a share price in VND.
-
-    A heuristic, and it is used for exactly one thing: counting how often the
-    model checked a price it quoted. It is **not** wired into the message layer
-    and nothing is flagged, blocked or rewritten on the strength of it — a free
-    text scan that gated answers would flag revenues and percentages too, and
-    the noise would cost the reader's trust in the mechanism. Measure first; the
-    plan behind this says build the backstop only if the measurement says the
-    contract is being ignored.
-    """
-    for match in _GROUPED_NUMBER.finditer(text or ""):
-        if _NOT_A_PRICE_AFTER.match(text[match.end() : match.end() + 12]):
-            continue
-        try:
-            value = int(match.group(0).replace(".", ""))
-        except ValueError:  # pragma: no cover - the pattern is all digits and dots
-            continue
-        if _MIN_PRICE <= value <= _MAX_PRICE:
-            return True
-    return False
-
-
-@dataclass(frozen=True)
-class PriceCheckCompliance:
-    """How often a quoted price was checked before it was stated.
-
-    The contract asks the model to call ``check_price_claim`` before it states a
-    price it read somewhere else. A contract is not an enforcement, so this
-    counts rather than assuming — the whole reason the tool landed without a
-    text-scanning backstop in the message layer.
-
-    ``eligible`` is the denominator and it is narrow on purpose: a Turn counts
-    only when it both read outside content and stated something shaped like a
-    price. A Turn that answered from the store, or that quoted no number, is not
-    a Turn that owed a check.
-    """
-
-    since: datetime
-    until: datetime
-    window_days: int
-    #: Every Turn that finished with an answer in the window.
-    turns_with_answers: int
-    #: Turns that read outside content *and* stated a price-shaped number.
-    eligible: int
-    #: Of those, the ones that called ``check_price_claim`` at least once.
-    checked: int
-
-    @property
-    def rate(self) -> float | None:
-        """The share of eligible Turns that checked, or None with none to judge.
-
-        ``None`` rather than zero, because zero out of zero is a compliance
-        failure that never had the chance to happen, and reading it as one is
-        how a quiet week becomes an alarm.
-        """
-        return None if self.eligible == 0 else self.checked / self.eligible
-
-    def as_wire(self) -> dict[str, Any]:
-        return {
-            "since": self.since.isoformat(),
-            "until": self.until.isoformat(),
-            "window_days": self.window_days,
-            "turns_with_answers": self.turns_with_answers,
-            "eligible": self.eligible,
-            "checked": self.checked,
-            "rate": self.rate,
-        }
-
-
-def read_price_check_compliance(
-    session: Session,
-    *,
-    now: datetime,
-    window_days: int = OPS_WINDOW_DAYS,
-) -> PriceCheckCompliance:
-    """How often a Turn that quoted a price had checked it. Reads only.
-
-    Two queries and a scan in Python rather than one clever query: deciding
-    whether prose names a price is not something to express in SQL, and the
-    window holds one developer's users' Turns.
-    """
-    window = _Window(now=now, window_days=window_days)
-    external = _external_tool_names()
-
-    answered = session.execute(
-        window.bound(
-            select(
-                AgentTurn.request_message_id,
-                AgentMessage.content,
-            ).join(AgentMessage, AgentMessage.id == AgentTurn.response_message_id),
-            AgentTurn.started_at,
-        )
-    ).all()
-    if not answered:
-        return PriceCheckCompliance(
-            since=window.since,
-            until=window.until,
-            window_days=window.window_days,
-            turns_with_answers=0,
-            eligible=0,
-            checked=0,
-        )
-
-    request_ids = {row[0] for row in answered if row[0] is not None}
-    tools_by_request: dict[int, set[str]] = {}
-    if request_ids:
-        for request_id, tool_name in session.execute(
-            select(AgentToolCall.request_message_id, AgentToolCall.tool_name)
-            .where(AgentToolCall.request_message_id.in_(request_ids))
-            .distinct()
-        ).all():
-            tools_by_request.setdefault(request_id, set()).add(tool_name)
-
-    eligible = 0
-    checked = 0
-    for request_id, content in answered:
-        used = tools_by_request.get(request_id, set())
-        if not used & external:
-            continue
-        text = str((content or {}).get("text") or "")
-        if not names_a_price(text):
-            continue
-        eligible += 1
-        if PRICE_CHECK_TOOL in used:
-            checked += 1
-
-    return PriceCheckCompliance(
-        since=window.since,
-        until=window.until,
-        window_days=window.window_days,
-        turns_with_answers=len(answered),
-        eligible=eligible,
-        checked=checked,
-    )
-
-
 def read_ops_snapshot(
     session: Session,
     *,
@@ -479,10 +305,6 @@ def _busiest_first(rows: Iterable[tuple[Any, Any]]) -> dict[str, int]:
 
 __all__ = [
     "OPS_WINDOW_DAYS",
-    "PRICE_CHECK_TOOL",
     "OpsSnapshot",
-    "PriceCheckCompliance",
-    "names_a_price",
     "read_ops_snapshot",
-    "read_price_check_compliance",
 ]

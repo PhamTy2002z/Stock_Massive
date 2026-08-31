@@ -5,12 +5,9 @@ import {
   Camera,
   ChevronDown,
   ChevronRight,
-  Grid2x2,
-  LayoutList,
   Paperclip,
   Plus,
   Square,
-  Telescope,
   Wallet,
   X,
 } from "lucide-react"
@@ -21,7 +18,6 @@ import {
   CANCELLING_LABEL,
   CAPTURE_COPY,
   SEND_LABEL,
-  SIGNAL_DESK_COPY,
 } from "@/lib/alpha-desk/copy"
 import { cn } from "@/lib/utils"
 
@@ -186,14 +182,12 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
             </IconButton>
           </span>
           <span className="min-w-0 truncate text-meta text-ink-6">
-            đang là ngữ cảnh phân tích
+            đang là ngữ cảnh câu hỏi
           </span>
         </div>
       )}
 
-      {/* Above the field, where the analysis-context pill sits, because both
-          answer the same question: what is travelling with this question
-          besides its words. */}
+      {/* Above the field because attachments travel with the next question. */}
       {desk.attachments.length > 0 && (
         <div
           role="group"
@@ -300,8 +294,6 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
           </IconButton>
         </div>
 
-        <SignalDeskToggle />
-
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
           {/* `composer-model` is a container query, not a breakpoint: the row
               has to lay out for the width of this card and the desk makes that
@@ -327,9 +319,7 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
               disabled={!text.trim() || desk.isSubmitting}
               // Inverted rather than coloured: the design makes this the one
               // solid light shape on the whole surface, which is what picks it
-              // out without the accent colour — that is spoken for by the
-              // analysis-context chip a few pixels away, and two oranges in one
-              // card compete. `bg-foreground` inverts with the theme, so the
+              // out without the accent colour. `bg-foreground` inverts with the theme, so the
               // button stays the opposite of its ground in light mode too.
               //
               // Three states, and the pressed one is the point: this is the
@@ -350,111 +340,6 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
   )
 }
 
-/**
- * The mode the composer is in, as two named segments.
- *
- * A mode the reader enters, which is why it sits in the control row and not in
- * a menu: turning it on inverts the layout there and then — the conversation
- * narrows to its column, the workspace opens beside it — with or without a
- * picture in hand. Nothing about asking changes. The chat in the narrow column
- * is the same chat, and a question that draws nothing is answered exactly as it
- * was.
- *
- * **It was a switch and it is a segmented control now.** One pill that was
- * either lit or unlit put the whole burden of the mode on a colour: a reader
- * meeting it for the first time could see that something was on, and had no way
- * to learn what was off. Two segments name both halves, so the choice is
- * legible before it is made — and the design system already had the pattern
- * written down for exactly this, down to what the selected one looks like.
- *
- * **The selected segment is a raised neutral surface, not a filled accent.**
- * That is the system's own rule for segmented controls, and it is the right one
- * here: the lift says "this is the segment you are in" without spending the
- * page's one filled colour on a control that is not an action. The amber comes
- * back as *text* on the selected Signal Desk segment only — the accent marks
- * the consequential mode, and marks nothing at all while the reader is simply
- * chatting.
- *
- * **Three states, and the third is a status light.** While a Study is in flight
- * the segment says so, from the same `building` the pane's skeleton is drawn
- * from — one fact, two places. There is deliberately no fourth: the feature is
- * free for everyone in this release, so there is no locked state, no upgrade
- * path and no popover explaining a limit that does not exist.
- *
- * The decision is read from `useDesk` and written back through one function, so
- * an entitlement check later has exactly one edge to attach to.
- */
-function SignalDeskToggle() {
-  const desk = useDesk()
-  const running = desk.signalDesk && desk.building !== null
-
-  return (
-    <div
-      role="radiogroup"
-      aria-label="Chế độ trả lời"
-      className="inline-flex h-9 shrink-0 items-center gap-0.5 rounded-[11px] bg-foreground/[0.05] p-0.5"
-    >
-      <ModeSegment
-        selected={!desk.signalDesk}
-        onSelect={() => desk.setSignalDesk(false)}
-        label={SIGNAL_DESK_COPY.chatMode}
-      />
-      <ModeSegment
-        selected={desk.signalDesk}
-        onSelect={() => desk.setSignalDesk(true)}
-        busy={running}
-        accent
-        label={running ? SIGNAL_DESK_COPY.running : SIGNAL_DESK_COPY.toggle}
-      />
-    </div>
-  )
-}
-
-/**
- * One segment of the mode control.
- *
- * `radio` rather than a pressed button: these are two values of one setting, and
- * the difference matters to anything not looking at the screen — a radio group
- * announces "one of two" and reads the unselected label out, which is precisely
- * the information the old single switch could not carry.
- */
-function ModeSegment({
-  selected,
-  onSelect,
-  label,
-  accent = false,
-  busy = false,
-}: {
-  selected: boolean
-  onSelect: () => void
-  label: string
-  /** Whether this segment carries the accent while it is the selected one. */
-  accent?: boolean
-  busy?: boolean
-}) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={selected}
-      aria-busy={busy || undefined}
-      // Only the selected segment is in the tab order, which is how a radio
-      // group behaves everywhere else: one stop, then the arrow keys.
-      tabIndex={selected ? 0 : -1}
-      onClick={onSelect}
-      className={cn(
-        "composer-mode-segment inline-flex h-8 items-center whitespace-nowrap rounded-[9px] px-3 text-control transition-colors",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-surface-sunken",
-        selected
-          ? cn("bg-surface-bubble", accent ? "text-primary" : "text-foreground")
-          : "text-ink-5 hover:text-ink-2",
-        busy && "animate-pulse motion-reduce:animate-none",
-      )}
-    >
-      {label}
-    </button>
-  )
-}
 
 /**
  * The attach menu.
@@ -464,7 +349,7 @@ function ModeSegment({
  * the Turn itself carries a short list of ids.
  *
  * The rest still need something the backend does not expose: no portfolio
- * resource, no analysis-template store, no connector registry. Those stay
+ * resource and no connector registry. Those stay
  * inert and keep the badge — a control that swallowed the press would be worse
  * than one that says it is not ready.
  */
@@ -499,37 +384,12 @@ export function AttachMenu({
         {CAPTURE_COPY.row}
       </MenuItem>
       <MenuSeparator />
-      {/* A multi-step mode: several Studies, several rounds, one report. Named
-          apart from the answer-depth control, which changes what one Turn costs
-          and how long it takes. If the two ever read as the same thing, one of
-          the names is wrong — say so rather than blurring both. */}
-      <MenuItem
-        icon={<Telescope className="size-[17px] text-ink-4" strokeWidth={1.6} />}
-        trailing={<ChevronRight className="size-4 shrink-0 text-ink-6" />}
-        disabled
-      >
-        Nghiên cứu sâu
-      </MenuItem>
       <MenuItem
         icon={<Wallet className="size-[17px] text-ink-4" strokeWidth={1.6} />}
         trailing={<ChevronRight className="size-4 shrink-0 text-ink-6" />}
         disabled
       >
         Thêm vào danh mục
-      </MenuItem>
-      <MenuItem
-        icon={<LayoutList className="size-[17px] text-ink-4" strokeWidth={1.6} />}
-        trailing={<ChevronRight className="size-4 shrink-0 text-ink-6" />}
-        disabled
-      >
-        Mẫu phân tích
-      </MenuItem>
-      <MenuItem
-        icon={<Grid2x2 className="size-[17px] text-ink-4" strokeWidth={1.6} />}
-        trailing={<ChevronRight className="size-4 shrink-0 text-ink-6" />}
-        disabled
-      >
-        Nguồn dữ liệu kết nối
       </MenuItem>
       {/* Two rows are deliberately absent from this menu.
           One was a calque of a competitor's feature name for work this product

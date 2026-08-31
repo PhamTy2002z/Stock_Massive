@@ -843,7 +843,7 @@ def test_a_message_carrying_no_image_sends_exactly_what_it_always_sent():
     with_calls = Message(
         role=Role.ASSISTANT,
         content=None,
-        tool_calls=(ToolCall(id="c1", name="get_field", arguments={"a": 1}),),
+        tool_calls=(ToolCall(id="c1", name="session_search", arguments={"query": "x"}),),
     )
 
     assert plain.as_wire() == {"role": "user", "content": "FPT?"}

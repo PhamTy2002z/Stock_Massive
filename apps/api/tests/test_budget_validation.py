@@ -24,10 +24,9 @@ from src.core.llm.budget import (
 )
 from src.core.llm.config import llm_config_from_settings
 
-# Prices that fund both workloads with room to spare: one Analysis costs
+# Prices that fund both workloads with room to spare: one batch reservation costs
 # 24,000 x $0.5/Mtok + 3,000 x $1/Mtok = $0.015, exactly the ceiling. The
-# token figures are the whole of one Analysis and not of one call: the lane
-# is a bounded loop now (``src/alpha/analysis_loop.py``).
+# historical Analysis label remains stable ledger vocabulary.
 AFFORDABLE = dict(
     llm_price_batch_input_usd_per_mtok=0.5,
     llm_price_batch_cached_input_usd_per_mtok=0.05,
@@ -50,6 +49,10 @@ def _config(**overrides):
         llm_api_key="dev-token",
         llm_pricing_version="2026-08",
         llm_pricing_effective_date=date(2026, 8, 1),
+        llm_budget_monthly_usd=45.0,
+        llm_budget_analysis_usd=10.0,
+        llm_budget_turn_usd=30.0,
+        llm_budget_emergency_usd=5.0,
         **AFFORDABLE,
     )
     base.update(overrides)
@@ -253,14 +256,10 @@ class TestStartup:
 
         from src import main
 
-        started = []
         monkeypatch.setattr(
             main, "llm_config_from_settings", lambda _s=None: _config(
                 llm_price_batch_input_usd_per_mtok=5.0
             )
-        )
-        monkeypatch.setattr(
-            main, "setup_scheduler", lambda scheduler: started.append(scheduler)
         )
 
         with pytest.raises(BudgetValidationError) as exc_info:
@@ -268,9 +267,6 @@ class TestStartup:
                 pass  # pragma: no cover - startup is what raises
 
         assert "analysis_cost" in str(exc_info.value)
-        # Before the scheduler, so no job can dispatch against a route whose
-        # prices were never going to hold.
-        assert started == []
 
     def test_a_fundable_configuration_lets_the_app_start(self, monkeypatch):
         from fastapi.testclient import TestClient

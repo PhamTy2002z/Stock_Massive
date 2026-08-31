@@ -42,11 +42,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-# The sibling is stdlib-only, so unlike the src imports deferred inside the
-# functions below it belongs up here; the artifact stamps the same digest the
-# corpus file records for itself.
-from .signal_desk_corpus import digest as corpus_digest
-
 logger = logging.getLogger("golden.run")
 
 #: The runner's own account. A separate identity for two reasons that pull the
@@ -58,8 +53,18 @@ GOLDEN_NAME = "Golden Runner"
 
 SCHEMA = "golden.artifact@1"
 WEB_FIRST_MODE = "web_first"
-SIGNAL_DESK_MODE = "signal_desk"
-MODES = (WEB_FIRST_MODE, SIGNAL_DESK_MODE)
+MODES = (WEB_FIRST_MODE,)
+
+
+def corpus_digest(corpus: Mapping[str, Any]) -> str:
+    """Stable identity of the exact corpus a run measured."""
+    payload = json.dumps(
+        corpus,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 # -- the frozen web --------------------------------------------------------
@@ -269,12 +274,10 @@ def _session_workload() -> Any:
 
 def _turn_mode(mode: str) -> str:
     """Map a harness lane to the persisted production Turn mode."""
-    from src.agent.loop import CHAT_MODE, SIGNAL_DESK_MODE as TURN_SIGNAL_DESK_MODE
+    from src.agent.loop import CHAT_MODE
 
     if mode == WEB_FIRST_MODE:
         return CHAT_MODE
-    if mode == SIGNAL_DESK_MODE:
-        return TURN_SIGNAL_DESK_MODE
     raise ValueError(f"unknown golden mode: {mode!r}")
 
 
@@ -419,7 +422,6 @@ async def read_case(
 
     answer_text = ""
     payloads: tuple[Mapping[str, Any], ...] = ()
-    signal_desks: tuple[Mapping[str, Any], ...] = ()
     turn_status = "unknown"
     for message in reversed(view.messages if view else ()):
         if message.role != "assistant":
@@ -428,9 +430,6 @@ async def read_case(
         answer_text = str(content.get("answer") or content.get("text") or "")
         payloads = tuple(
             item for item in (content.get("tool_calls") or ()) if isinstance(item, Mapping)
-        )
-        signal_desks = tuple(
-            item for item in (content.get("signal_desks") or ()) if isinstance(item, Mapping)
         )
         turn_status = str(content.get("status") or "unknown")
         break
@@ -460,7 +459,6 @@ async def read_case(
                 "name": payload.get("name"),
                 "round": payload.get("round"),
                 "status": payload.get("status"),
-                "outcome": payload.get("outcome"),
                 "kind": kind,
                 "summary": payload.get("summary"),
                 "result_count": payload.get("result_count"),
@@ -497,76 +495,6 @@ async def read_case(
                 }
             )
 
-    compositions: list[dict[str, Any]] = []
-    if mode == SIGNAL_DESK_MODE:
-        from .graders_signal_desk import (
-            build_ref_proof,
-            build_replay_proof,
-            replay_arguments,
-        )
-
-        for descriptor in signal_desks:
-            artifact_id = descriptor.get("artifact_id") or descriptor.get("artifactId")
-            if not artifact_id:
-                continue
-            artifact = await store.read_artifact(user_id, str(artifact_id))
-            if artifact is None:
-                continue
-            spec = dict(artifact.signal_desk_spec or {})
-            frames = dict(artifact.frames or {})
-            frame_sources: dict[str, str] = {}
-            for section in spec.get("sections") or ():
-                for block in section.get("blocks") or ():
-                    if isinstance(block, Mapping) and block.get("kind") == "visual":
-                        frame_sources[str(block.get("frame") or "")] = str(
-                            block.get("source") or "store"
-                        )
-            appendix = spec.get("appendix")
-            if isinstance(appendix, Mapping):
-                frame_sources[str(appendix.get("frame") or "")] = str(
-                    appendix.get("source") or "store"
-                )
-            frame_metadata = [
-                {
-                    "key": str(key),
-                    "kind": frame.get("kind"),
-                    "columns": list(frame.get("columns") or ()),
-                    "row_count": len(frame.get("rows") or ()),
-                    "unit": frame.get("unit"),
-                    "source": frame_sources.get(str(key), "store"),
-                }
-                for key, frame in frames.items()
-                if isinstance(frame, Mapping)
-            ]
-            render_arguments = None
-            for call in calls:
-                if call.get("name") != "render_signal_desk":
-                    continue
-                try:
-                    result = json.loads(str(call.get("result_text") or ""))
-                except (TypeError, ValueError):
-                    continue
-                if isinstance(result, Mapping) and str(
-                    result.get("artifactId") or ""
-                ) == str(artifact_id):
-                    render_arguments = call.get("arguments")
-                    break
-            composition: dict[str, Any] = {
-                "artifact_id": str(artifact.id),
-                "study_name": artifact.study_name,
-                "study_version": artifact.study_version,
-                "spec": spec,
-                # The one and only copy of raw frame arrays in a golden case.
-                "frames": frames,
-                "provenance": dict(artifact.provenance or {}),
-                "frame_metadata": frame_metadata,
-            }
-            if isinstance(render_arguments, Mapping) and not spec.get("autoComposed"):
-                composition["replay_arguments"] = replay_arguments(render_arguments)
-            composition["ref_proof"] = build_ref_proof(composition)
-            composition["replay_proof"] = build_replay_proof(composition)
-            compositions.append(composition)
-
     model_visible_parts = [str(case.get("question") or "")]
     for call in calls:
         model_visible_parts.append(json.dumps(call.get("arguments") or {}, ensure_ascii=False))
@@ -589,8 +517,6 @@ async def read_case(
         },
         "answer_text": answer_text,
         "tool_calls": calls,
-        "signal_desks": [dict(item) for item in signal_desks],
-        "composition": compositions[0] if compositions else None,
         "model_visible_text": "\n".join(model_visible_parts),
         "external_calls": sum(1 for call in calls if call.get("kind") == "external"),
         "sources": sources,
@@ -805,11 +731,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.ceiling_usd <= 0:
         parser.error("--ceiling-usd must be positive")
 
-    corpus_path = args.corpus or (
-        "golden/signal_desk.json"
-        if args.mode == SIGNAL_DESK_MODE
-        else "golden/web_first.json"
-    )
+    corpus_path = args.corpus or "golden/web_first.json"
     corpus = json.loads(Path(corpus_path).read_text(encoding="utf-8"))
     stamp = datetime.now(timezone.utc).strftime("%y%m%d-%H%M%S")
     out = Path(args.out or f"golden/artifacts/{corpus.get('corpus_id', 'run')}-{stamp}.json")

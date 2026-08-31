@@ -10,20 +10,10 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from src.core.config import get_settings
 from src.core.database import Base, asyncpg_connect_args, to_asyncpg_url
 
-# Import models to register with Base.metadata (bypass stocks __init__.py to avoid vnstock import)
-import importlib.util
-import sys
-from pathlib import Path
-
-models_path = Path(__file__).parent.parent / "src" / "stocks" / "models.py"
-spec = importlib.util.spec_from_file_location("models", models_path)
-models = importlib.util.module_from_spec(spec)
-sys.modules["stocks_models"] = models
-spec.loader.exec_module(models)
-
-# src.auth and src.alpha have no heavy imports, so plain imports are enough here
+# Import current ORM owners so Alembic can compare against Base.metadata.
 from src.auth.models import RefreshToken, User  # noqa: E402,F401
 from src.alpha.models import (  # noqa: E402,F401
+    AgentAttachment,
     AgentMessage,
     AgentKnowledge,
     AgentThread,

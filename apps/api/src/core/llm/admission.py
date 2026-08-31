@@ -26,13 +26,9 @@ from .protocol import Usage
 
 logger = logging.getLogger(__name__)
 
-# What one call inside an Analysis may reserve, and what the whole Analysis may
-# cost. The two per-call bounds are deliberately as large as the whole
-# Analysis's token allowance: the Analysis lane is a *loop* now
-# (``src/alpha/analysis_loop.py``), and the thing that actually bounds it across
-# calls is ``ANALYSIS_COST_MICRO_USD`` below, checked against everything this
-# owner has already been charged. Two token ceilings per call as well would be a
-# second, weaker answer to a question the cost ceiling already answers exactly.
+# The historical ``analysis`` owner and lane names are reserved for offline
+# batch/evaluation work. They remain stable ledger vocabulary until a dedicated
+# compatibility change renames them; current chat execution uses the Turn lane.
 #
 # They are not unbounded, and that matters: an envelope that grew past what one
 # generation can carry still arrives here reserved at its real size and is

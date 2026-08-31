@@ -39,7 +39,6 @@ function view(overrides: Partial<AssistantView> = {}): AssistantView {
     text: "một câu trả lời",
     toolCalls: [],
     thoughts: [],
-    deskViews: [],
     followUps: [],
     elapsedMs: 0,
     completed: true,
@@ -62,7 +61,6 @@ function draft(overrides: Partial<DraftEntry> = {}): DraftEntry {
     working: inFlight && text === "",
     toolCalls: [],
     thoughts: [],
-    deskViews: [],
     elapsedMs: 0,
     terminalReason: null,
     ...overrides,
@@ -118,38 +116,6 @@ describe("the answer's prose", () => {
 
     expect(container.querySelector("img")).toBeNull()
     expect(screen.getByText(/onerror/)).toBeInTheDocument()
-  })
-})
-
-describe("a Signal Desk result", () => {
-  it("stays visible under the canonical answer and opens its artifact", () => {
-    const onOpenDeskView = vi.fn()
-    render(
-      <AssistantMessage
-        view={view({
-          deskViews: [
-            {
-              artifactId: "artifact-stb5",
-              studyName: "entry_condition_review",
-              studyDisplayName: "Rà soát điều kiện vào lệnh",
-              title: "Điều kiện hiện tại — STB5",
-              blockCount: 4,
-              round: 1,
-              symbol: "STB5",
-              asOf: "2026-08-28T09:00:00+07:00",
-            },
-          ],
-        })}
-        onOpenDeskView={onOpenDeskView}
-      />,
-    )
-
-    const card = screen.getByRole("button", {
-      name: /Điều kiện hiện tại — STB5/,
-    })
-    fireEvent.click(card)
-
-    expect(onOpenDeskView).toHaveBeenCalledWith("artifact-stb5")
   })
 })
 

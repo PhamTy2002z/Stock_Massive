@@ -32,7 +32,7 @@ import { SIDEBAR_WIDTH, sidebarFloats, useShell } from "./shell-state"
  * The left column: identity, the two main modes, and everything the user keeps.
  *
  * Collapsing is a width transition on a wrapper rather than an unmount, so the
- * Watchlist and the Thread list keep their scroll position and their queries
+ * Navigation and the Thread list keep their scroll position and their queries
  * across a fold. The `aside` inside it holds a fixed 274px so its own contents
  * never reflow while the wrapper animates — a sidebar whose rows re-wrap on the
  * way out reads as breaking rather than as sliding.
@@ -145,7 +145,7 @@ function Nav() {
         icon={<Plus className="size-[17px] text-ink-4" strokeWidth={1.6} />}
         onClick={() => {
           desk.newThread()
-          dispatch({ type: "view", view: "new" })
+          dispatch({ type: "view", view: "chat" })
         }}
       >
         Trò chuyện mới

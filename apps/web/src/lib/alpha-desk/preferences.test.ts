@@ -25,23 +25,20 @@ describe("what this browser remembers", () => {
   })
 
   it("hands back what was written", () => {
-    writePreferences({ signalDeskByDefault: true, chatWidth: 640 })
+    writePreferences({ sidebarOpen: false, chatWidth: 640 })
 
     const saved = readPreferences()
 
-    expect(saved.signalDeskByDefault).toBe(true)
+    expect(saved.sidebarOpen).toBe(false)
     expect(saved.chatWidth).toBe(640)
   })
 
   it("merges rather than replaces, so two callers cannot erase each other", () => {
-    // The settings dialog and the shell write different fields and neither
-    // knows about the other's.
-    writePreferences({ signalDeskByDefault: true })
+    writePreferences({ sidebarOpen: false })
     writePreferences({ chatWidth: 512 })
 
     expect(readPreferences()).toEqual({
-      signalDeskByDefault: true,
-      sidebarOpen: null,
+      sidebarOpen: false,
       chatWidth: 512,
     })
   })
@@ -73,21 +70,18 @@ describe("a record this build did not write", () => {
   it("keeps the fields it recognises and defaults the rest", () => {
     // A record written before `chatWidth` existed. The browser has no opinion
     // about the width, which is exactly what null means.
-    window.localStorage.setItem(KEY, JSON.stringify({ signalDeskByDefault: true }))
+    window.localStorage.setItem(KEY, JSON.stringify({ sidebarOpen: false }))
 
     expect(readPreferences()).toEqual({
-      signalDeskByDefault: true,
-      sidebarOpen: null,
+      sidebarOpen: false,
       chatWidth: null,
     })
   })
 
-  it("refuses a mode that is not a boolean rather than coercing it", () => {
-    window.localStorage.setItem(KEY, JSON.stringify({ signalDeskByDefault: "yes" }))
+  it("refuses a sidebar value that is not a boolean rather than coercing it", () => {
+    window.localStorage.setItem(KEY, JSON.stringify({ sidebarOpen: "yes" }))
 
-    // "yes" is truthy, and coercing it would switch a mode the reader never
-    // chose. Not-a-boolean is not-an-opinion.
-    expect(readPreferences().signalDeskByDefault).toBe(false)
+    expect(readPreferences().sidebarOpen).toBeNull()
   })
 
   it("refuses a width that could never be one", () => {
@@ -120,7 +114,7 @@ describe("a browser that refuses storage", () => {
       expect(readPreferences()).toEqual(DEFAULT_PREFERENCES)
       // And a write is swallowed: the product keeps working at its default,
       // which is the whole reason nothing load-bearing lives here.
-      expect(() => writePreferences({ signalDeskByDefault: true })).not.toThrow()
+      expect(() => writePreferences({ sidebarOpen: false })).not.toThrow()
     } finally {
       Object.defineProperty(window, "localStorage", {
         configurable: true,

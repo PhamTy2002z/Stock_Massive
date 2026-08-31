@@ -37,18 +37,18 @@ describe("the login redirect", () => {
     expect(matches("/api/alpha-desk/threads")).toBe(false)
     expect(matches("/api/alpha-desk/threads/t-1/turns")).toBe(false)
     expect(matches("/api/alpha-desk/turns/abc/cancel")).toBe(false)
-    expect(matches("/api/alpha-desk/watchlist/rail")).toBe(false)
+    expect(matches("/api/alpha-desk/attachments/a-1")).toBe(false)
   })
 
   it("still runs on the pages it is for", () => {
     // The exclusion is narrow on purpose: without this, the test above would
     // pass for a matcher that had stopped matching anything at all.
-    expect(matches("/alpha-desk")).toBe(true)
-    expect(matches("/watchlist")).toBe(true)
+    expect(matches("/")).toBe(true)
+    expect(matches("/settings")).toBe(true)
   })
 
   it("is a redirect to HTML wherever it does run, which is the whole problem", () => {
-    const response = middleware(signedOut("http://localhost:3000/alpha-desk"))
+    const response = middleware(signedOut("http://localhost:3000/"))
 
     expect(response.status).toBe(307)
     expect(response.headers.get("location")).toContain("/login")

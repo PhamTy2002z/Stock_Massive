@@ -317,101 +317,6 @@ describe("a source result's text", () => {
 })
 
 
-describe("a call that ran and answered nothing", () => {
-  /**
-   * Measured on the trace: of 151 `get_field` calls, 42 came back with no figure
-   * and 15 declined the question, and all 157 rows drew identically to the 94
-   * that returned a number. A reader watching four rows of `Đọc chỉ báo` go by
-   * had no way to see that three of them were empty.
-   */
-  const empty = call({
-    id: "a",
-    kind: "store",
-    status: "ok",
-    summary: "Đọc chỉ báo: Phân vị lợi suất sổ sách — VHM",
-    outcome: "no_value:market_cap_absent",
-  })
-
-  it("says so, in words that are neither a failure nor a success", () => {
-    render(
-      <ReasoningTimeline
-        thoughts={[]}
-        toolCalls={[empty]}
-        elapsedMs={5000}
-        running
-      />,
-    )
-
-    expect(screen.getByText("Không có số")).toBeInTheDocument()
-    expect(screen.queryByText("Lỗi")).not.toBeInTheDocument()
-  })
-
-  it("carries the reason it was empty, from the one table that owns them", () => {
-    render(
-      <ReasoningTimeline
-        thoughts={[]}
-        toolCalls={[empty]}
-        elapsedMs={5000}
-        running
-      />,
-    )
-
-    expect(screen.getByText("Không có số")).toHaveAttribute(
-      "title",
-      "Không phiên nào trong cửa sổ có vốn hoá nên chưa lập được tỷ số này",
-    )
-  })
-
-  it("draws a declined question differently from an empty answer", () => {
-    render(
-      <ReasoningTimeline
-        thoughts={[]}
-        toolCalls={[call({ id: "b", kind: "store", outcome: "cannot_read" })]}
-        elapsedMs={5000}
-        running
-      />,
-    )
-
-    expect(screen.getByText("Ngoài phạm vi")).toBeInTheDocument()
-  })
-
-  it("leaves a call that answered alone", () => {
-    render(
-      <ReasoningTimeline
-        thoughts={[]}
-        toolCalls={[call({ id: "c", kind: "store", outcome: "value" })]}
-        elapsedMs={5000}
-        running
-      />,
-    )
-
-    expect(screen.queryByText("Không có số")).not.toBeInTheDocument()
-    expect(screen.queryByText("Ngoài phạm vi")).not.toBeInTheDocument()
-  })
-
-  it("says it inside a grouped round too", () => {
-    render(
-      <ReasoningTimeline
-        thoughts={[]}
-        toolCalls={[
-          empty,
-          call({
-            id: "d",
-            kind: "store",
-            summary: "Đọc chỉ báo: RSI (14) — VHM",
-            outcome: "value",
-          }),
-        ]}
-        elapsedMs={5000}
-        running
-      />,
-    )
-
-    expect(screen.getByText("Không có số")).toBeInTheDocument()
-  })
-})
-
-
 describe("a round of store reads", () => {
   /**
    * A Turn analysing HPG read twelve figures in one breath. The rail called them
@@ -420,9 +325,9 @@ describe("a round of store reads", () => {
    * peers of the line naming them.
    */
   const reads = [
-    call({ id: "a", kind: "store", summary: "Đọc chỉ báo: RSI (14) — HPG" }),
-    call({ id: "b", kind: "store", summary: "Đọc chỉ báo: Phân vị ROE — HPG" }),
-    call({ id: "c", kind: "store", summary: "Đọc chỉ báo: Biến động thực tế — HPG" }),
+    call({ id: "a", kind: "store", summary: "Tìm trong hội thoại trước: HPG" }),
+    call({ id: "b", kind: "store", summary: "Đọc lại ghi chú: HPG" }),
+    call({ id: "c", kind: "store", summary: "Ghi nhớ: HPG" }),
   ]
 
   it("is counted in the words for the work it actually did", () => {
@@ -430,7 +335,7 @@ describe("a round of store reads", () => {
       <ReasoningTimeline thoughts={[]} toolCalls={reads} elapsedMs={5000} running />,
     )
 
-    expect(screen.getByText("Đọc 3 chỉ báo")).toBeInTheDocument()
+    expect(screen.getByText("Đã chạy 3 công cụ nội bộ")).toBeInTheDocument()
     expect(screen.queryByText(/truy vấn/)).not.toBeInTheDocument()
   })
 
@@ -471,7 +376,7 @@ describe("a round of store reads", () => {
             id: `${symbol}-${field}`,
             kind: "store",
             status,
-            summary: `Đọc chỉ báo: ${field} — ${symbol}`,
+            summary: `Tìm trong hội thoại trước: ${field} — ${symbol}`,
           }),
         ),
       )
@@ -482,7 +387,7 @@ describe("a round of store reads", () => {
         <ReasoningTimeline thoughts={[]} toolCalls={calls} elapsedMs={5000} running />,
       )
 
-      expect(screen.getByText("Đọc 14 chỉ báo")).toBeInTheDocument()
+      expect(screen.getByText("Đã chạy 14 công cụ nội bộ")).toBeInTheDocument()
       expect(screen.queryByText(calls[0].summary)).not.toBeInTheDocument()
     })
 
@@ -492,7 +397,7 @@ describe("a round of store reads", () => {
         <ReasoningTimeline thoughts={[]} toolCalls={calls} elapsedMs={5000} running />,
       )
 
-      fireEvent.click(screen.getByRole("button", { name: /Đọc 14 chỉ báo/ }))
+      fireEvent.click(screen.getByRole("button", { name: /Đã chạy 14 công cụ nội bộ/ }))
 
       for (const read of calls) {
         expect(screen.getByText(read.summary)).toBeInTheDocument()
@@ -620,9 +525,9 @@ describe("how many publishers a lookup came back with", () => {
         thoughts={[]}
         toolCalls={[
           call({
-            name: "get_field",
+            name: "session_search",
             kind: "store",
-            summary: "Đọc chỉ báo",
+            summary: "Tìm trong hội thoại trước",
             result_count: 1,
             results: [],
           }),

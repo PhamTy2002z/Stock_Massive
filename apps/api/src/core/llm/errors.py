@@ -197,9 +197,8 @@ class RouteRateLimited(LLMError):
 class AuthUnavailable(LLMError):
     """The channel's credential died. Never retried.
 
-    Interactive Turns surface *re-auth needed*; the nightly lane marks the
-    symbol failed-retryable and pauses the dispatcher rather than walking the
-    rest of the cohort to record the same failure against every symbol.
+    Interactive Turns surface *re-auth needed*. Offline callers may map the same
+    typed failure to their own bounded recovery policy.
     """
 
 
@@ -591,8 +590,7 @@ def classify_status(
 ) -> LLMError:
     """Turn one real upstream condition into its declared class.
 
-    Single-sourced here so the nightly lane and the interactive lane cannot
-    disagree about what a 401 means.
+    Single-sourced here so every caller agrees about what a 401 means.
     """
     if status_code in (401, 403):
         return AuthUnavailable(

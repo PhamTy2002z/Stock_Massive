@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-quer
 import { act, cleanup, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { searchStocks } from "@/lib/api"
+import { alphaFetch } from "@/lib/alpha"
 import { connectionStatus } from "@/lib/connection-status"
 
 import { ConnectionGate } from "./connection-gate"
@@ -51,13 +51,13 @@ describe("ConnectionGate recovery", () => {
 
   it("stays waiting while any active request is still unavailable", async () => {
     connectionStatus.reportWaiting(
-      "http://localhost:8000/api/v1/stocks/symbols/search?q=UNAVAILABLE&limit=20",
+      "/api/alpha-desk/threads/UNAVAILABLE",
     )
     const transitions: string[] = []
     const unsubscribe = connectionStatus.subscribe(() => {
       transitions.push(connectionStatus.get())
     })
-    const unavailable = deferred<Response>()
+    const unavailable = deferred<void>()
     vi.stubGlobal(
       "fetch",
       vi.fn((input: string | URL | Request) => {
@@ -68,7 +68,11 @@ describe("ConnectionGate recovery", () => {
         if (url.includes("q=AVAILABLE")) {
           return Promise.resolve(jsonResponse(200, []))
         }
-        return unavailable.promise
+        return unavailable.promise.then(() =>
+          jsonResponse(503, {
+            detail: { reason: "upstream_unreachable", message: "Still unavailable" },
+          }),
+        )
       }),
     )
     const queryClient = new QueryClient({
@@ -88,7 +92,7 @@ describe("ConnectionGate recovery", () => {
     })
 
     await act(async () => {
-      unavailable.resolve(jsonResponse(503, { detail: "Still unavailable" }))
+      unavailable.resolve()
     })
     unsubscribe()
 
@@ -100,13 +104,13 @@ describe("ConnectionGate recovery", () => {
 function ActiveQueries() {
   useQuery({
     queryKey: ["available"],
-    queryFn: () => searchStocks("AVAILABLE"),
+    queryFn: () => alphaFetch("/threads/AVAILABLE"),
     initialData: [],
     staleTime: Infinity,
   })
   useQuery({
     queryKey: ["unavailable"],
-    queryFn: () => searchStocks("UNAVAILABLE"),
+    queryFn: () => alphaFetch("/threads/UNAVAILABLE"),
     initialData: [],
     staleTime: Infinity,
   })

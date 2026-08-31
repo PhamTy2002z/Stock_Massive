@@ -54,21 +54,8 @@ services:
       UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
       UPSTASH_REDIS_REST_TOKEN: ${UPSTASH_REDIS_REST_TOKEN:-}
       CACHE_REDIS_URL: ${CACHE_REDIS_URL:-redis://redis:6379/0}
-      # Read by vnstock; without it the quota is 20 req/min instead of 60
-      VNSTOCK_API_KEY: ${VNSTOCK_API_KEY:-}
-      # The symbols the system commits to collecting and serving. Empty is a
-      # legitimate Universe — the app runs and the Collector has nothing to do.
-      UNIVERSE_SYMBOLS: ${UNIVERSE_SYMBOLS:-}
-      SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
-      # Whether the daily spine fills itself. Forwarded for the reason the block
-      # above states: a switch that only exists in the settings class is one a
-      # container never sees. Default off is deliberate — the market scope is
-      # 1,523 provider calls, and a job registered unconditionally would spend
-      # them on every machine that brings the stack up. On, it runs index,
-      # declared and market in turn at 16:30 Vietnam time.
-      BACKFILL_DAILY_SCHEDULED: ${BACKFILL_DAILY_SCHEDULED:-false}
       # Alpha Desk's LLM route (docs/adr/0014). Forwarded for the same reason as
-      # the job switches above: a switch that only exists in the settings class
+      # other runtime settings: a switch that only exists in the settings class
       # is one a container never sees. With ALPHA_DESK_ENABLED true, Budget
       # Validation runs at startup and an unfundable price table refuses to
       # boot — so these are exactly the keys an operator turning the desk on

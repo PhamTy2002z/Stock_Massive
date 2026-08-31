@@ -57,26 +57,12 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
-      # The covered Universe. Empty means *every* symbol is refused by the tool
-      # layer, which is a working API serving nothing — so it is passed here for
-      # the same reason DATABASE_URL is, and only the deployment knows it.
-      UNIVERSE_SYMBOLS: ${UNIVERSE_SYMBOLS:-}
-      SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
-      # Whether the daily spine fills itself. Forwarded for the reason the block
-      # above states: a switch that only exists in the settings class is one a
-      # container never sees. Default off is deliberate — the market scope is
-      # 1,523 provider calls, and a job registered unconditionally would spend
-      # them on every machine that brings the stack up. On, it runs index,
-      # declared and market in turn at 16:30 Vietnam time.
-      BACKFILL_DAILY_SCHEDULED: ${BACKFILL_DAILY_SCHEDULED:-false}
       # A self-hosted Redis is not part of this file; a deployment either points
       # this at one it runs or uses the Upstash pair below. Empty is handled:
       # the cache degrades and the LLM route breaker fails open.
       CACHE_REDIS_URL: ${CACHE_REDIS_URL:-}
       UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
       UPSTASH_REDIS_REST_TOKEN: ${UPSTASH_REDIS_REST_TOKEN:-}
-      # Read by vnstock; without it the quota is 20 req/min instead of 60
-      VNSTOCK_API_KEY: ${VNSTOCK_API_KEY:-}
       AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required}
       # Alpha Desk's LLM route (docs/adr/0014). Off unless the environment says
       # otherwise; with it on, Budget Validation refuses to boot on a price

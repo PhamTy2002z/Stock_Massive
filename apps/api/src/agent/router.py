@@ -42,6 +42,7 @@ import logging
 import uuid
 from collections.abc import Mapping, Sequence
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Annotated
 
 from fastapi import (
@@ -68,7 +69,6 @@ from src.agent.persistence import (
 from src.agent.prompt import RuntimeContext
 from src.agent.schemas import (
     AllowanceResponse,
-    ArtifactResponse,
     AttachmentResponse,
     CreatedTurnResponse,
     CreateThreadRequest,
@@ -100,7 +100,8 @@ from src.auth.models import User
 from src.auth.security import TokenError, decode_access_token
 from src.auth.service import get_user_by_id
 from src.core.database import async_session_factory
-from src.stocks.providers.normalize import VN_TZ
+
+VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
 logger = logging.getLogger(__name__)
 
@@ -479,9 +480,6 @@ async def create_turn(
     the commit and the task start is recoverable as an incomplete Turn rather
     than as an invisible or duplicated request.
 
-    ``mode`` is carried through untouched. It is the switch the reader threw,
-    and this layer neither interprets it nor defaults it a second time: the
-    schema owns the two values and the loop owns what they promise.
     """
     desk.assert_enabled()
     view: ThreadView | None = await desk.store.read_thread(current_user.id, thread_id)
@@ -515,7 +513,6 @@ async def create_turn(
             symbols=payload.symbols,
             history=history_of(view.messages),
             retry_of_turn_id=payload.retry_of_turn_id,
-            mode=payload.mode,
             attachments=attachments,
         )
     except TurnPayloadConflict as conflict:
@@ -655,45 +652,6 @@ def _allowance(value: Allowance) -> AllowanceResponse:
 # -- cancel ----------------------------------------------------------------
 
 
-# -- one Signal Desk ------------------------------------------------------------
-
-
-@router.get("/artifacts/{artifact_id}", response_model=ArtifactResponse)
-async def read_artifact(
-    artifact_id: uuid.UUID,
-    current_user: CurrentUser,
-    desk: Desk,
-) -> ArtifactResponse:
-    """The numbers behind one Signal Desk, for the reader whose answer produced it.
-
-    The one route ``frames`` travels. It is a separate request from the
-    transcript on purpose: a heatmap is thousands of cells and a conversation
-    scrolls, so the text loads at text weight and the picture is fetched by
-    whoever opens the panel.
-
-    **Immutable, so the client may cache it forever.** The row is written once
-    and never updated; re-opening a Thread renders what was frozen rather than
-    recomputing against a store that has moved on.
-
-    An artifact under another user's Thread is *not found* rather than
-    forbidden, exactly as a Turn is: a caller who could tell the two apart has
-    been told an id exists.
-    """
-    record = await desk.store.read_artifact(current_user.id, artifact_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="Artifact not found")
-    return ArtifactResponse(
-        id=record.id,
-        study_name=record.study_name,
-        study_version=record.study_version,
-        params=dict(record.params),
-        signal_desk_spec=dict(record.signal_desk_spec),
-        frames=dict(record.frames),
-        provenance=dict(record.provenance),
-        created_at=record.created_at,
-    )
-
-
 # -- attachments -----------------------------------------------------------
 
 
@@ -783,9 +741,8 @@ async def read_attachment_bytes(
 ) -> Response:
     """The bytes, for the reader who uploaded them.
 
-    Somebody else's attachment is *not found* rather than forbidden, exactly as
-    a Turn and an artifact are: a caller who could tell the two apart has been
-    told that an id exists.
+    Somebody else's attachment is *not found* rather than forbidden: a caller
+    who could tell the two apart has been told that an id exists.
 
     The two text types have no magic bytes, so anything at all can arrive under
     one of them. They are handed back as an opaque download with sniffing

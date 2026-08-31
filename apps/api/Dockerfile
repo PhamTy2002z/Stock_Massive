@@ -1,8 +1,3 @@
-# 3.12 is a floor, not a preference: FiinQuantX 0.1.67 ships an f-string that
-# nests the same quote character, which only parses from 3.12 on (PEP 701).
-# Under 3.11 `import FiinQuantX` dies with a SyntaxError, the Collector reports
-# "FiinQuant login failed" for every symbol, and market and valuation silently
-# come back empty while vnstock keeps working.
 FROM python:3.12-slim
 
 WORKDIR /code

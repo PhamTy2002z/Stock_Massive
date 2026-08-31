@@ -139,7 +139,7 @@ async def test_the_runner_projects_the_verdict_that_was_persisted(owner):
     flagged = await wire_payload(
         owner, "call_0", "market_bulletin", ADVERSARIAL_PAGE, external=True
     )
-    read = await wire_payload(owner, "call_1", "get_field", "{}", external=False)
+    read = await wire_payload(owner, "call_1", "session_search", "{}", external=False)
     thread, request = await one_turn(store, owner, [flagged, read])
 
     projected = await read_case(

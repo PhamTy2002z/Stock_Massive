@@ -173,7 +173,6 @@ def export(artifact_path: Path, out_path: Path) -> dict[str, Any]:
                     "name": str(payload.get("name") or ""),
                     "round": int(payload.get("round") or 0),
                     "status": str(payload.get("status") or ""),
-                    "outcome": payload.get("outcome"),
                     "kind": str(payload.get("kind") or "external"),
                     "arguments": {} if refused else trace["arguments"],
                     "result_text": "" if refused else trace["result_text"],
@@ -289,7 +288,6 @@ def _call_of(entry: Mapping[str, Any], *, seen: set[str]) -> Any:
         results=tuple(
             dict(item) for item in (entry.get("results") or ()) if isinstance(item, Mapping)
         ),
-        outcome=entry.get("outcome"),
     )
 
 
@@ -314,7 +312,7 @@ def replay_case(case: Mapping[str, Any], runtime: Mapping[str, Any]) -> dict[str
     """
     from src.agent.budget import TurnBudget, thresholds_for_context
     from src.agent.domain import active_pack
-    from src.agent.loop import MAX_TOOL_ROUNDS, SYSTEM_NOTE_TOKENS, domain_tool_names
+    from src.agent.loop import MAX_TOOL_ROUNDS, SYSTEM_NOTE_TOKENS
     from src.agent.messages import (
         SYSTEM_DYNAMIC,
         ContextBudget,
@@ -332,7 +330,6 @@ def replay_case(case: Mapping[str, Any], runtime: Mapping[str, Any]) -> dict[str
         _call_of(entry, seen=context_sources) for entry in case.get("calls") or ()
     ]
     rounds = max((call.round for call in calls), default=-1) + 1
-    domain_tools = domain_tool_names()
     pack = active_pack()
 
     prompt = render(
@@ -346,7 +343,6 @@ def replay_case(case: Mapping[str, Any], runtime: Mapping[str, Any]) -> dict[str
 
     turn_budget = TurnBudget(thresholds)
     constructed: list[dict[str, Any]] = []
-    body_on = False
     for index in range(rounds + 1):
         earlier = [call for call in calls if call.round < index]
         # The output budget is a fact about the Turn, not about a round: a
@@ -376,7 +372,7 @@ def replay_case(case: Mapping[str, Any], runtime: Mapping[str, Any]) -> dict[str
             Transcript(
                 system_prompt=prompt,
                 system_prefix=prompt_prefix(),
-                system_body=pack.body_text if body_on else None,
+                system_body=pack.body_text,
                 turns=(
                     TranscriptTurn(
                         user_text=str(case.get("question") or ""),
@@ -414,11 +410,6 @@ def replay_case(case: Mapping[str, Any], runtime: Mapping[str, Any]) -> dict[str
             }
         )
 
-        # What this round asked for decides whether the *next* call carries the
-        # pack body — the loop reads the request before dispatching it, so the
-        # playbook is in place for the call that has to read the results.
-        if any(call.name in domain_tools for call in calls if call.round == index):
-            body_on = True
         for call in calls:
             if call.round == index:
                 turn_budget.add(call.id, call.name, call.model_text)

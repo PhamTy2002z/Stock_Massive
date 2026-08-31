@@ -85,9 +85,8 @@ FLAG_REASONS = (
 class AgentMessage(Base):
     """One canonical, immutable message in a Thread.
 
-    ``content`` is JSONB because an assistant message carries more than prose:
-    the validated **Widget** spec rides here, per the decision that a message
-    stores the spec and never the chart data.
+    ``content`` is JSONB because a message carries structured attachments and
+    settled tool-call projections beside prose.
 
     ``flagged_reason`` and ``flagged_at`` are the whole of v1's dispute surface.
     They are a nullable pair on this row rather than a ``message_flag`` table
@@ -183,21 +182,8 @@ class AgentToolCall(Base):
     spilled_bytes = Column(Integer, nullable=True)
     status = Column(String(16), nullable=False)  # one of TOOL_CALL_STATUSES below
     error = Column(String(500), nullable=True)
-    # What the call *yielded*, where that is a different question from whether it
-    # ran. ``status`` answers which kind of outcome the call had and ``error``
-    # names the failure; neither can say that a successful store read came back
-    # with no figure, which is what a third of ``get_field`` calls did while
-    # every one of them was stored as ``ok``.
-    #
-    # Nullable because it is additive and because most tools have nothing to
-    # classify: a web search either failed or returned results, and a row from
-    # before this column existed cannot be told what it was.
-    #
-    # Holds the refusal's own **Signal Issue** rather than a flat "nothing" —
-    # ``no_value:market_cap_absent`` and ``no_value:insufficient_cross_section``
-    # are different operational facts, and one word for both would rebuild the
-    # blind spot this column exists to close. The vocabulary is
-    # ``agent/messages.py``.
+    # Legacy local-analysis classification. Runtime no longer writes or exposes
+    # it; the column remains until schema retention is decided separately.
     outcome = Column(String(64), nullable=True)
     latency_ms = Column(Integer, nullable=True)
     prompt_tokens = Column(Integer, nullable=True)
@@ -445,58 +431,6 @@ class LlmCallUsage(Base):
 
 
 
-class AgentArtifact(Base):
-    """One Study run, kept so the picture can be re-opened rather than re-run.
-
-    Its own table rather than a column on ``agent_message``: the payload is
-    numbers by the thousand and the message is text the browser needs
-    immediately, so a join on the message would drag a heatmap into every
-    transcript scroll. Split, the transcript loads at text weight and the Signal Desk
-    is fetched by whoever opens it.
-
-    ``frames`` is the whole point of the row and the one part no model ever
-    reads. It is served straight to the browser (``docs`` — the Signal Desk panel),
-    and the test that proves the separation reads the transcript for these keys.
-
-    ``turn_id`` and ``thread_id`` are nullable because a Study also runs outside
-    a Turn — the smoke script, and any later precompute. An artifact with
-    neither is reachable by id alone, which is what such a run wants; one with
-    both is what a reader re-opens.
-    """
-
-    __tablename__ = "agent_artifact"
-
-    id = Column(Uuid, primary_key=True)
-    turn_id = Column(
-        Uuid,
-        ForeignKey("agent_turn.id", ondelete="CASCADE"),
-        nullable=True,
-    )
-    thread_id = Column(
-        Uuid,
-        ForeignKey("agent_thread.id", ondelete="CASCADE"),
-        nullable=True,
-    )
-    study_name = Column(String(64), nullable=False)
-    study_version = Column(Integer, nullable=False)
-    # What the model asked for, after validation — not what it typed. A rejected
-    # call never reaches this table, so these are always parameters that ran.
-    params = Column(JSONB, nullable=False)
-    frames = Column(JSONB, nullable=False)
-    signal_desk_spec = Column(JSONB, nullable=False)
-    provenance = Column(JSONB, nullable=False)
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-
-    __table_args__ = (
-        # Re-opening a thread asks for its artifacts newest first.
-        Index("ix_agent_artifact_thread_created", "thread_id", created_at.desc()),
-        Index("ix_agent_artifact_turn", "turn_id"),
-    )
-
-    def __repr__(self) -> str:
-        return f"<AgentArtifact {self.id} {self.study_name} v{self.study_version}>"
-
-
 class AgentAttachment(Base):
     """One file a reader attached, held whole.
 
@@ -557,60 +491,3 @@ class AgentAttachment(Base):
 
     def __repr__(self) -> str:
         return f"<AgentAttachment {self.id} {self.media_type} {self.byte_size}B>"
-
-
-class FinancialStatementItem(Base):
-    """The Vietnamese a reader sees where a statement line has a provider's id.
-
-    ``financial_statement_line`` stores ``item_id`` raw and never a label — the
-    decision recorded there is that a mapping which turns out to be wrong should
-    be a patch to one resolver rather than a market-wide re-fetch. That holds for
-    *meaning*: what a line is worth as a concept is ``financial/templates.py``'s
-    to decide. It does not hold for *display*. A frame handed to the browser
-    labels every column in Vietnamese (``studies/contracts.py::Frame``), and a
-    column named ``business_income_tax_deferred`` is a column nobody asked about
-    a company can read.
-
-    So the label is a table rather than a column on the line: the same
-    ``(statement, item_id)`` repeats across 1.235 symbols and 34 quarters, and a
-    label carried on every one of the 302.528 rows would be the same sentence
-    stored three hundred thousand times — and would have to be re-fetched to fix
-    a typo.
-
-    Keyed ``(statement, item_id)`` without ``item_seq``. The occurrence index is
-    in the line's key because the provider genuinely answers two different
-    numbers under one id, but both occurrences arrive under the *same* id, and an
-    id is what this table names. Where the second occurrence is a different line
-    arriving under the wrong id — SSI's minority interest under
-    ``business_income_tax_deferred`` — a per-occurrence label would give the
-    reader the provider's own mistake in two languages rather than one.
-
-    Labels are the provider's, stored as it wrote them. Nothing here translates:
-    an invented Vietnamese line name is an interpretation of a number by the
-    layer least equipped to make one, which is the rule ``Frame.labels``
-    already states.
-    """
-
-    __tablename__ = "financial_statement_item"
-
-    # income | balance | cashflow | ratio — src/stocks/financial/fetch.py owns
-    # the set. ``ratio`` is here too: a ratio response carries the same three
-    # meta columns, and a reader drawing a ratio frame needs a label as much as
-    # one drawing a balance sheet.
-    statement = Column(String(8), primary_key=True)
-    item_id = Column(String(128), primary_key=True)
-    label_vi = Column(String(512), nullable=False)
-    # The provider answers an English column too, and it is stored rather than
-    # dropped: it is free, it arrives in the same response, and it is the only
-    # check available on a Vietnamese label that looks wrong.
-    label_en = Column(String(512), nullable=True)
-    # Which symbol's response this label was read from. Kept because the three
-    # reporting templates disagree about what a line means, and a label seeded
-    # from a bank's response sitting on a securities house's id is the failure
-    # this column makes visible instead of invisible.
-    seeded_from = Column(String(20), nullable=False)
-    source = Column(String(32), nullable=False)
-    observed_at = Column(DateTime(timezone=True), nullable=False)
-
-    def __repr__(self) -> str:
-        return f"<FinancialStatementItem {self.statement}.{self.item_id}>"

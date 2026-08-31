@@ -173,22 +173,13 @@ async def test_disabled_alpha_desk_logs_the_failure_and_continues(caplog):
     assert "parameters ignored" in caplog.text
 
 
-def test_lifespan_runs_probe_after_universe_and_budget_before_scheduler(monkeypatch):
+def test_lifespan_runs_budget_before_probe(monkeypatch):
     from fastapi.testclient import TestClient
 
     from src import main
 
     events = []
 
-    class UniverseResult:
-        def __len__(self):
-            return 0
-
-    monkeypatch.setattr(
-        main.Universe,
-        "from_settings",
-        classmethod(lambda cls, settings: events.append("universe") or UniverseResult()),
-    )
     monkeypatch.setattr(
         main,
         "enforce_budget_validation",
@@ -199,17 +190,13 @@ def test_lifespan_runs_probe_after_universe_and_budget_before_scheduler(monkeypa
         events.append("probe")
         raise RuntimeError("route contract failed")
 
-    async def scheduler_started(scheduler):
-        events.append("scheduler")
-
     monkeypatch.setattr(main, "run_capability_probe_at_startup", fail_probe)
-    monkeypatch.setattr(main, "setup_scheduler", scheduler_started)
 
     with pytest.raises(RuntimeError, match="route contract failed"):
         with TestClient(main.app):
             pass
 
-    assert events == ["universe", "budget", "probe"]
+    assert events == ["budget", "probe"]
 
 
 @pytest.mark.asyncio

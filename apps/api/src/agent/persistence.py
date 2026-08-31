@@ -27,7 +27,6 @@ from src.alpha.models import (
     TURN_COMPLETE,
     TURN_INCOMPLETE,
     TURN_RUNNING,
-    AgentArtifact,
     AgentAttachment,
     AgentMessage,
     AgentThread,
@@ -35,9 +34,8 @@ from src.alpha.models import (
     AgentTurn,
 )
 from src.core.database import sync_session_factory
-from src.stocks.shared import validate_symbol
-
 from .loop import CHAT_MODE
+from .symbols import normalize_symbol
 
 T = TypeVar("T")
 SessionFactory = Callable[[], Session]
@@ -113,33 +111,6 @@ class MessageRecord:
 
 
 @dataclass(frozen=True)
-class ArtifactRecord:
-    """One persisted Study run, as the Signal Desk endpoint serves it.
-
-    ``frames`` is here and nowhere near a message: this record is built for the
-    browser, which draws the numbers, and the model's whole view of the same run
-    was the headline it was handed when the tool answered.
-
-    ``as_of`` rides inside ``provenance`` rather than as a column of its own,
-    because it is one of four facts a reader needs together — where the numbers
-    came from, when they were frozen, how many sessions they cover, and under
-    what condition — and splitting one out invites a surface that shows it
-    without the other three.
-    """
-
-    id: uuid.UUID
-    thread_id: uuid.UUID | None
-    turn_id: uuid.UUID | None
-    study_name: str
-    study_version: int
-    params: Mapping[str, Any]
-    frames: Mapping[str, Any]
-    signal_desk_spec: Mapping[str, Any]
-    provenance: Mapping[str, Any]
-    created_at: datetime
-
-
-@dataclass(frozen=True)
 class ThreadRecord:
     id: uuid.UUID
     user_id: int
@@ -176,10 +147,6 @@ class ToolCallRecord:
     #: two places. The size the model was shown a preview of now rides
     #: ``result`` beside the preview itself, so nothing writes this column.
     spilled_bytes: int | None = None
-    #: What the call yielded, where "it ran" and "it answered" are different
-    #: facts (``agent/messages.py::outcome_of``). ``None`` for tools with nothing
-    #: to classify and for rows written before the column existed.
-    outcome: str | None = None
 
 
 @dataclass(frozen=True)
@@ -305,21 +272,6 @@ def _message_record(row: AgentMessage) -> MessageRecord:
     )
 
 
-def _artifact_record(row: AgentArtifact) -> ArtifactRecord:
-    return ArtifactRecord(
-        id=row.id,
-        thread_id=row.thread_id,
-        turn_id=row.turn_id,
-        study_name=row.study_name,
-        study_version=row.study_version,
-        params=dict(row.params),
-        frames=dict(row.frames),
-        signal_desk_spec=dict(row.signal_desk_spec),
-        provenance=dict(row.provenance),
-        created_at=row.created_at,
-    )
-
-
 def _trace_record(row: AgentToolCall) -> ToolCallRecord:
     return ToolCallRecord(
         id=row.id,
@@ -336,7 +288,6 @@ def _trace_record(row: AgentToolCall) -> ToolCallRecord:
         started_at=row.started_at,
         tool_call_id=row.tool_call_id,
         spilled_bytes=row.spilled_bytes,
-        outcome=row.outcome,
     )
 
 
@@ -489,40 +440,6 @@ class AgentPersistence:
                 .where(AgentMessage.id == message_id, AgentThread.user_id == user_id)
             ).scalar_one_or_none()
             return None if row is None else _message_record(row)
-
-    # -- one Signal Desk ------------------------------------------------------
-
-    async def read_artifact(
-        self, user_id: int, artifact_id: uuid.UUID | str
-    ) -> ArtifactRecord | None:
-        """One Study run, but only if this user owns the Thread it was run in.
-
-        Ownership is a join for the reason :meth:`read_message` joins:
-        ``agent_artifact`` has no ``user_id`` and should not grow one.
-
-        A row with no Thread — a smoke run, a precompute — is therefore
-        unreadable through this route, by anybody. That is the intended answer
-        rather than a gap: such a run belongs to no conversation, so there is no
-        reader it could be *theirs*, and the alternative is an endpoint whose
-        authorisation depends on a nullable column being non-null.
-        """
-        return await asyncio.to_thread(
-            self._read_artifact, user_id, _uuid(artifact_id)
-        )
-
-    def _read_artifact(
-        self, user_id: int, artifact_id: uuid.UUID
-    ) -> ArtifactRecord | None:
-        with self._session_factory() as session:
-            row = session.execute(
-                select(AgentArtifact)
-                .join(AgentThread, AgentThread.id == AgentArtifact.thread_id)
-                .where(
-                    AgentArtifact.id == artifact_id,
-                    AgentThread.user_id == user_id,
-                )
-            ).scalar_one_or_none()
-            return None if row is None else _artifact_record(row)
 
     # -- flagging a message (#99) -----------------------------------------
 
@@ -745,7 +662,7 @@ class AgentPersistence:
     ) -> MessageRecord:
         if role not in {"user", "assistant", "summary"}:
             raise ValueError(f"unsupported transcript role: {role}")
-        normalized = tuple(dict.fromkeys(validate_symbol(symbol) for symbol in symbols))
+        normalized = tuple(dict.fromkeys(normalize_symbol(symbol) for symbol in symbols))
         return await asyncio.to_thread(
             self._append_message,
             _uuid(thread_id),
@@ -789,7 +706,7 @@ class AgentPersistence:
     async def threads_discussing(
         self, user_id: int, symbol: str
     ) -> tuple[ThreadRecord, ...]:
-        normalized = validate_symbol(symbol)
+        normalized = normalize_symbol(symbol)
         return await asyncio.to_thread(self._threads_discussing, user_id, normalized)
 
     def _threads_discussing(
@@ -841,9 +758,6 @@ class AgentPersistence:
                 ),
                 status=str(trace["status"]),
                 error=str(trace["error"])[:500] if trace.get("error") else None,
-                outcome=(
-                    str(trace["outcome"])[:64] if trace.get("outcome") else None
-                ),
                 latency_ms=trace.get("latency_ms"),
                 prompt_tokens=trace.get("prompt_tokens"),
                 completion_tokens=trace.get("completion_tokens"),
@@ -916,7 +830,7 @@ class AgentPersistence:
         into the committed request for the same reason ``symbols`` does, and the
         rows it names are bound to this Turn in the same transaction.
         """
-        normalized = tuple(dict.fromkeys(validate_symbol(symbol) for symbol in symbols))
+        normalized = tuple(dict.fromkeys(normalize_symbol(symbol) for symbol in symbols))
         return await asyncio.to_thread(
             self._create_turn,
             user_id,
@@ -1134,14 +1048,13 @@ class AgentPersistence:
 
         The canonical assistant message, ``status``, ``terminal_reason``,
         ``response_message_id`` and ``finished_at`` are written together. Before
-        it commits the transcript holds no half-written answer at all — the same
-        invariant that makes a row in ``analysis`` mean *complete*.
+        it commits the transcript holds no half-written answer at all.
         """
         if status in ACTIVE_TURN_STATUSES:
             raise ValueError(f"{status} is not a terminal Turn status")
         if status != TURN_COMPLETE and not terminal_reason:
             raise ValueError("a non-complete Turn must carry a terminal reason")
-        normalized = tuple(dict.fromkeys(validate_symbol(symbol) for symbol in symbols))
+        normalized = tuple(dict.fromkeys(normalize_symbol(symbol) for symbol in symbols))
         return await asyncio.to_thread(
             self._finish_turn,
             _uuid(turn_id),
@@ -1257,7 +1170,6 @@ __all__ = [
     "TURN_INCOMPLETE",
     "TURN_RUNNING",
     "AgentPersistence",
-    "ArtifactRecord",
     "MessageRecord",
     "ThreadRecord",
     "ThreadView",

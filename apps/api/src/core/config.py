@@ -33,32 +33,6 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: str = "http://localhost:3000"  # Comma-separated origins
 
-    # Vnstock
-    vnstock_source: str = "VCI"  # Default data source (VCI is most reliable)
-    # VNSTOCK_API_KEY cố ý không khai ở đây: vnstock đọc thẳng từ os.environ để
-    # quyết định tier (20 request/phút khi không thấy, 60 khi thấy). Khai lại
-    # thành setting sẽ đọc được cả từ .env — nơi vnstock không nhìn tới — nên hai
-    # bên có thể lệch nhau. Xem API_KEY_ENV_VAR ở src/core/quota.py, nơi cùng
-    # biến môi trường đó quyết định giãn cách của Redis arbiter.
-
-    # Daily spine backfill — công việc định kỳ duy nhất của harness.
-    #
-    # Mặc định TẮT, và đó là chủ ý: scheduler_enabled mặc định True, nên một job
-    # đăng ký vô điều kiện sẽ tự bắt đầu gọi provider ngoài trên bất kỳ máy nào
-    # dựng stack này lên. Scope market là 1.523 request; bật nó phải là một quyết
-    # định ai đó viết ra, không phải hệ quả của việc chạy `pnpm dev`.
-    #
-    # 16:30 giờ VN là quy ước đã có trong code chứ không phải số chọn tuỳ ý:
-    # ingest đóng dấu observed_at = 16:30 và mô tả nó là "khi một run chờ hết
-    # phiên sẽ đọc" — phiên đóng 15:00, số liệu lắng sau đó.
-    backfill_daily_scheduled: bool = False
-    backfill_daily_hour: int = 16
-    backfill_daily_minute: int = 30
-
-    # Universe — tập mã được thu thập và phục vụ, trần 100 mã (src/stocks/universe.py).
-    # Rỗng là hợp lệ: ứng dụng chạy được và Collector không có gì để làm.
-    universe_symbols: str = ""  # Comma-separated
-
     # Upstash Redis (supports both naming conventions)
     upstash_redis_url: str = ""
     upstash_redis_token: str = ""
@@ -75,9 +49,6 @@ class Settings(BaseSettings):
     def redis_token(self) -> str:
         """Get Redis token (supports both naming conventions)."""
         return self.upstash_redis_rest_token or self.upstash_redis_token
-
-    # Scheduler
-    scheduler_enabled: bool = True
 
     # Alpha Desk — tuyến LLM, hai model theo workload, và giá của chúng
     # (src/core/llm/, docs/adr/0014). Tắt mặc định: đây là kênh trả tiền, nên
@@ -146,7 +117,7 @@ class Settings(BaseSettings):
 
     # Open-web tools use their own Redis lane and Tavily credential. They are
     # off by default because each enabled Turn can spend external-provider
-    # allowance independently of the vnstock account arbiter.
+    # allowance independently of the model budget ledger.
     tavily_api_key: str = ""
     web_tools_enabled: bool = False
     web_fetch_max_bytes: int = 512 * 1024

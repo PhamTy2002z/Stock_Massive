@@ -202,9 +202,9 @@ def test_the_untrusted_tools_are_the_ones_that_read_the_open_web():
     # The two store reads and the price check are this system answering about
     # its own data. Wrapping them would tell the model to weigh its own
     # harness's answer as a stranger's claim.
-    assert untrusted.is_untrusted("get_field") is False
-    assert untrusted.is_untrusted("list_fields") is False
-    assert untrusted.is_untrusted("check_price_claim") is False
+    assert untrusted.is_untrusted("session_search") is False
+    assert untrusted.is_untrusted("recall_facts") is False
+    assert untrusted.is_untrusted("remember_fact") is False
 
 
 def test_a_tool_nobody_registered_is_treated_as_outside():

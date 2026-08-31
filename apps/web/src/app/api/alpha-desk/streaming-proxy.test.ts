@@ -301,8 +301,8 @@ describe("the buffered path", () => {
     fetchMock.mockResolvedValue(json({ cap: 10, count: 0, entries: [] }))
 
     const response = await GET(
-      request(`${ORIGIN}/api/alpha-desk/watchlist/rail`),
-      context(["watchlist", "rail"]),
+      request(`${ORIGIN}/api/alpha-desk/threads`),
+      context(["threads"]),
     )
 
     expect(response.headers.get("Content-Type")).toContain("application/json")

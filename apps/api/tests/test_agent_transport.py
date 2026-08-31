@@ -1,7 +1,7 @@
 """The three endpoints, against a live database and the real app (#85).
 
-Integration rather than unit, for the reason the Watchlist tests give: owner
-scoping, the idempotency key and "another user's Turn is never reachable" are
+Integration rather than unit because owner scoping, the idempotency key and
+"another user's Turn is never reachable" are
 statements about rows and about the join that reads them, and a fake store would
 let all three pass while the real one refused.
 
@@ -48,7 +48,6 @@ from src.agent.router import (
 from src.agent.service import AlphaDeskService
 from src.agent.turns import TurnService
 from src.alpha.models import (
-    AgentArtifact,
     AgentMessage,
     AgentThread,
     AgentToolCall,
@@ -115,8 +114,6 @@ class ScriptedLoop:
         self._control.started.set()
         for call in self._control.calls:
             self._publisher.tool_call(call.as_wire())
-        for signal_desk in self._control.signal_desks:
-            self._publisher.signal_desk_ready(signal_desk)
         for index, piece in enumerate(self._control.pieces):
             # The separator travels inside the delta, exactly as the real loop
             # sends it, so the answer is the concatenation of what was streamed.
@@ -134,7 +131,6 @@ class ScriptedLoop:
             rounds_used=0,
             rounds_exhausted=False,
             tool_calls=tuple(self._control.calls),
-            signal_desks=tuple(self._control.signal_desks),
             usage=Usage(),
         )
 
@@ -147,7 +143,6 @@ class Control:
         self.release = asyncio.Event()
         self.pieces: list[str] = []
         self.calls: list[TurnToolCall] = []
-        self.signal_desks: list[dict] = []
         self.status = TurnStatus.COMPLETE
         self.terminal_reason: str | None = None
 
@@ -160,18 +155,6 @@ class Control:
 
     def says(self, *texts: str) -> None:
         self.pieces = list(texts)
-
-    def draws_a_signal_desk(self, artifact_id: str) -> None:
-        """Announce one Signal Desk, exactly as a ``run_study`` round would."""
-        self.signal_desks = [
-            {
-                "artifactId": artifact_id,
-                "studyName": "intraday_liquidity_profile",
-                "title": "Thanh khoản trong phiên — STB",
-                "blockCount": 4,
-                "round": 0,
-            }
-        ]
 
     def calls_a_tool(self, name: str = "web_search") -> None:
         self.calls = [
@@ -232,7 +215,6 @@ def alpha_schema():
             AgentMessage.__table__,
             AgentToolCall.__table__,
             AgentTurn.__table__,
-            AgentArtifact.__table__,
             LlmCallUsage.__table__,
         ],
         checkfirst=True,
@@ -328,11 +310,6 @@ def _purge(email: str) -> None:
             .all()
         )
         if threads:
-            # Before the Turns: an artifact points at both, and the cascade is
-            # the database's rather than this fixture's to rely on.
-            session.execute(
-                delete(AgentArtifact).where(AgentArtifact.thread_id.in_(threads))
-            )
             session.execute(delete(AgentTurn).where(AgentTurn.thread_id.in_(threads)))
             session.execute(
                 delete(AgentToolCall).where(AgentToolCall.thread_id.in_(threads))
@@ -536,26 +513,6 @@ class TestIdempotency:
         assert clash.status_code == 409
         desk.control.finish()
 
-
-    async def test_the_surface_a_turn_was_asked_from_is_part_of_that_payload(
-        self, client, auth, desk
-    ):
-        """A mode is part of the question, not a rendering choice.
-
-        The same words asked from the Signal Desk are a different request: only
-        one of the two is owed a picture, so the idempotency key must not answer
-        one with the other.
-        """
-        thread_id = await open_thread(client, auth)
-        turn_id = str(uuid.uuid4())
-
-        await start_turn(client, auth, thread_id, turn_id=turn_id)
-        clash = await start_turn(
-            client, auth, thread_id, turn_id=turn_id, mode="signal_desk"
-        )
-
-        assert clash.status_code == 409
-        desk.control.finish()
 
     async def test_a_client_that_names_no_mode_sends_what_it_always_sent(
         self, client, auth, desk
@@ -956,10 +913,6 @@ class TestThreads:
             "results",
             "result_count",
             "kind",
-            # Whether the call answered, beside whether it ran: a store read that
-            # comes back with no figure is a successful call, and the surface
-            # cannot say so without this.
-            "outcome",
             # What the advisory threat scan made of the result. Persisted with
             # the message rather than in a column of its own, which is what lets
             # a Thread reopened tomorrow still say a page tried to give orders.
@@ -992,7 +945,6 @@ class TestThreads:
                 "results": [],
                 "result_count": 0,
                 "kind": "external",
-                "outcome": None,
                 "scan": None,
             }
         ]
@@ -1200,136 +1152,6 @@ def _dependency_calls(endpoint) -> set:
             found.add(dependant.call)
         pending.extend(dependant.dependencies)
     return found
-
-
-class TestTheSignalDesk:
-    """Announcing a picture, and serving the numbers behind it."""
-
-    pytestmark = pytest.mark.asyncio
-
-    @staticmethod
-    def _write_artifact(thread_id, turn_id) -> uuid.UUID:
-        """One Study run, put in the store the way a ``run_study`` call would.
-
-        Written directly rather than by running a Study: what this class is
-        about is who may read the row and what the wire carries, and a real
-        computation would make those assertions depend on a window of bars.
-        """
-        artifact_id = uuid.uuid4()
-        with get_sync_db() as session:
-            session.add(
-                AgentArtifact(
-                    id=artifact_id,
-                    thread_id=None if thread_id is None else uuid.UUID(str(thread_id)),
-                    turn_id=None if turn_id is None else uuid.UUID(str(turn_id)),
-                    study_name="intraday_liquidity_profile",
-                    study_version=1,
-                    params={"symbol": "STB", "sessions": 30},
-                    frames={
-                        "profile": {
-                            "kind": "series",
-                            "columns": ["bucket", "avg_volume"],
-                            "rows": [["09:15", 1000], ["14:45", 4242424]],
-                            "unit": "shares",
-                            "labels": {
-                                "bucket": "Khung giờ",
-                                "avg_volume": "KL trung bình",
-                            },
-                        }
-                    },
-                    signal_desk_spec={
-                        "title": "Thanh khoản trong phiên — STB",
-                        "blocks": [
-                            {
-                                "widget": "bar_series",
-                                "widgetVersion": 1,
-                                "frame": "profile",
-                                "options": {},
-                            }
-                        ],
-                    },
-                    provenance={
-                        "source": "vnstock",
-                        "asOf": "2026-08-21T09:00:00+00:00",
-                        "sessionsUsed": 30,
-                        "health": "normal",
-                        "reason": None,
-                    },
-                )
-            )
-        return artifact_id
-
-    async def test_the_owner_gets_the_frames_and_the_frozen_as_of(
-        self, client, auth, desk
-    ):
-        thread_id = await open_thread(client, auth)
-        artifact_id = self._write_artifact(thread_id, None)
-
-        response = await client.get(f"{API}/artifacts/{artifact_id}", headers=auth)
-
-        assert response.status_code == 200, response.text
-        body = response.json()
-        assert body["study_name"] == "intraday_liquidity_profile"
-        assert body["frames"]["profile"]["rows"][1] == ["14:45", 4242424]
-        # The freeze. Re-opening a Thread renders this rather than recomputing,
-        # so the date on screen is the date the answer was written about.
-        assert body["provenance"]["asOf"] == "2026-08-21T09:00:00+00:00"
-
-    async def test_another_users_signal_desk_is_not_found_rather_than_forbidden(
-        self, client, auth, desk, other_account
-    ):
-        thread_id = await open_thread(client, auth)
-        artifact_id = self._write_artifact(thread_id, None)
-        stranger = await authenticate(client, other_account)
-
-        theirs = await client.get(f"{API}/artifacts/{artifact_id}", headers=stranger)
-        missing = await client.get(f"{API}/artifacts/{uuid.uuid4()}", headers=auth)
-
-        assert theirs.status_code == 404
-        assert missing.status_code == 404
-
-    async def test_a_run_belonging_to_no_conversation_is_readable_by_nobody(
-        self, client, auth, desk
-    ):
-        """A smoke run has no Thread, so there is no reader it could be theirs.
-
-        The alternative — serving it to whoever asks — is an endpoint whose
-        authorisation depends on a nullable column happening to be non-null.
-        """
-        artifact_id = self._write_artifact(None, None)
-        try:
-            response = await client.get(f"{API}/artifacts/{artifact_id}", headers=auth)
-        finally:
-            # It hangs off no Thread, so no cascade reaches it when the account
-            # is purged; this test owns it and puts it away itself.
-            with get_sync_db() as session:
-                session.execute(
-                    delete(AgentArtifact).where(AgentArtifact.id == artifact_id)
-                )
-
-        assert response.status_code == 404
-
-    async def test_the_stream_announces_the_signal_desk_and_the_message_keeps_it(
-        self, client, auth, desk
-    ):
-        thread_id = await open_thread(client, auth)
-        turn_id = str(uuid.uuid4())
-        artifact_id = str(uuid.uuid4())
-        desk.control.says("Thanh khoản STB dồn về phiên đóng cửa.")
-        desk.control.draws_a_signal_desk(artifact_id)
-        await start_turn(client, auth, thread_id, turn_id=turn_id, text="Thanh khoản STB?")
-        await asyncio.wait_for(desk.control.started.wait(), 2)
-        desk.control.finish()
-        await _settle(desk, turn_id)
-
-        thread = await client.get(f"{API}/threads/{thread_id}", headers=auth)
-        answer = thread.json()["messages"][-1]
-
-        assert answer["content"]["signal_desks"][0]["artifactId"] == artifact_id
-        assert answer["content"]["signal_desks"][0]["blockCount"] == 4
-        # The transcript names the picture and holds none of it: the numbers are
-        # a row of their own, fetched by whoever opens the panel.
-        assert "frames" not in answer["content"]["signal_desks"][0]
 
 
 async def _settle(desk: Desk, turn_id: str):

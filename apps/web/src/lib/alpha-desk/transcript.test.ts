@@ -11,7 +11,7 @@
 import { describe, expect, it } from "vitest"
 
 import { IDLE, type LiveTurn } from "./live-turn"
-import { buildTranscript, questionBefore, storedDeskViews, type TranscriptInput } from "./transcript"
+import { buildTranscript, questionBefore, type TranscriptInput } from "./transcript"
 import type { FlagReason, ThreadMessage, ToolCall } from "./types"
 
 const THREAD = "11111111-1111-4111-8111-111111111111"
@@ -366,56 +366,6 @@ describe("the question the user just asked", () => {
   })
 })
 
-describe("an Analysis opened into the transcript", () => {
-  it("sits where it was opened rather than at the end", () => {
-    const entries = transcript({
-      messages: [userMessage(1, "FPT thế nào?"), assistantMessage(2, "đáp")],
-      openedAnalyses: [{ symbol: "FPT", tradingDay: "2026-08-12", afterSeq: 1 }],
-    })
-
-    expect(entries.map((entry) => entry.kind)).toEqual(["user", "analysis", "assistant"])
-  })
-
-  it("appears on its own in a Thread that has no messages yet", () => {
-    const entries = transcript({
-      openedAnalyses: [{ symbol: "HPG", tradingDay: "2026-08-12", afterSeq: 0 }],
-    })
-
-    expect(entries).toEqual([
-      {
-        kind: "analysis",
-        key: "analysis-HPG-2026-08-12",
-        symbol: "HPG",
-        tradingDay: "2026-08-12",
-      },
-    ])
-  })
-
-  it("keeps the order they were opened in when two share an anchor", () => {
-    const entries = transcript({
-      messages: [userMessage(1, "hai mã")],
-      openedAnalyses: [
-        { symbol: "FPT", tradingDay: "2026-08-12", afterSeq: 1 },
-        { symbol: "HPG", tradingDay: "2026-08-12", afterSeq: 1 },
-      ],
-    })
-
-    expect(
-      entries.filter((entry) => entry.kind === "analysis").map((entry) => entry.key),
-    ).toEqual(["analysis-FPT-2026-08-12", "analysis-HPG-2026-08-12"])
-  })
-
-  it("stays above a draft that is still streaming", () => {
-    const entries = transcript({
-      messages: [userMessage(1, "FPT thế nào?")],
-      live: live({ text: "một câu" }),
-      openedAnalyses: [{ symbol: "FPT", tradingDay: "2026-08-12", afterSeq: 1 }],
-    })
-
-    expect(entries.map((entry) => entry.kind)).toEqual(["user", "analysis", "draft"])
-  })
-})
-
 describe("a stored answer", () => {
   const stored = (content: Record<string, unknown>): ThreadMessage => ({
     id: 1,
@@ -466,106 +416,6 @@ describe("a stored answer", () => {
     expect(entry.kind === "assistant" && entry.view.elapsedMs).toBe(0)
   })
 
-  it("restores the Signal Desk card from the canonical message contract", () => {
-    const announcement = {
-      artifactId: "artifact-stb5",
-      studyName: "entry_condition_review",
-      studyDisplayName: "Rà soát điều kiện",
-      title: "Điều kiện hiện tại — STB5",
-      blockCount: 4,
-      round: 1,
-      symbol: "STB5",
-      asOf: "2026-08-28T09:00:00+07:00",
-    }
-    const [entry] = buildTranscript({
-      threadId: THREAD,
-      messages: [
-        stored({
-          text: "Đã rà soát điều kiện hiện tại.",
-          tool_calls: [],
-          signal_desks: [announcement],
-        }),
-      ],
-      live: IDLE,
-      pendingUserText: null,
-    })
-
-    expect(entry.kind === "assistant" && entry.view.deskViews).toEqual([
-      announcement,
-    ])
-  })
-
-  it("keeps cards stored before the Signal Desk rename readable", () => {
-    const announcement = {
-      artifactId: "artifact-legacy",
-      studyName: "intraday_liquidity_profile",
-      title: "Thanh khoản trong phiên — STB",
-      blockCount: 3,
-      round: 0,
-    }
-    // Written before the display name, the ticker and the freeze reached the
-    // announcement. Absence reads as empty rather than as a card that vanishes.
-    const asRead = {
-      ...announcement,
-      studyDisplayName: "",
-      symbol: "",
-      asOf: "",
-    }
-    const [entry] = buildTranscript({
-      threadId: THREAD,
-      messages: [
-        stored({
-          text: "Câu trả lời cũ.",
-          tool_calls: [],
-          canvases: [announcement],
-        }),
-      ],
-      live: IDLE,
-      pendingUserText: null,
-    })
-
-    expect(entry.kind === "assistant" && entry.view.deskViews).toEqual([asRead])
-  })
-})
-
-describe("the desk views a stored Thread already made", () => {
-  function answerWith(id: number, deskViews: unknown, key = "signal_desks"): ThreadMessage {
-    const message = assistantMessage(id, "đáp")
-    return { ...message, content: { ...message.content, [key]: deskViews } }
-  }
-
-  const FIRST = { artifactId: "a-1", studyName: "s", title: "Thanh khoản STB", blockCount: 2 }
-  const SECOND = { artifactId: "a-2", studyName: "s", title: "Điều kiện hiện tại", blockCount: 5 }
-
-  it("collects them oldest first, across the whole conversation", () => {
-    // The order is the strip's order, and the strip reads left to right as the
-    // conversation ran.
-    const found = storedDeskViews([answerWith(3, [SECOND]), answerWith(1, [FIRST])])
-
-    expect(found.map((view) => view.artifactId)).toEqual(["a-1", "a-2"])
-    expect(found[1].title).toBe("Điều kiện hiện tại")
-  })
-
-  it("files one run under one tab however often it was announced", () => {
-    // A retried Turn republishes the announcement it already made. Two tabs for
-    // one picture would be the reader choosing between identical things.
-    const found = storedDeskViews([answerWith(1, [FIRST]), answerWith(2, [FIRST])])
-
-    expect(found).toHaveLength(1)
-  })
-
-  it("still reads Threads written before the Signal Desk rename", () => {
-    // The JSONB already on disk says `canvases`. A reader that only knew the
-    // new key would quietly lose every picture made before the rename.
-    expect(storedDeskViews([answerWith(1, [FIRST], "canvases")])).toHaveLength(1)
-  })
-
-  it("ignores what the user said and what the column did not hold", () => {
-    const question = { ...assistantMessage(1, "hỏi"), role: "user" as const }
-    expect(storedDeskViews([question])).toEqual([])
-    expect(storedDeskViews([answerWith(1, undefined)])).toEqual([])
-    expect(storedDeskViews([])).toEqual([])
-  })
 })
 
 describe("what a question's attachments look like on the record", () => {

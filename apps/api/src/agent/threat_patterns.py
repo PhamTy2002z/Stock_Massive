@@ -153,7 +153,7 @@ _CONTEXT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         "tool_invocation_request",
         re.compile(
             r"\b(call|invoke|use|run)\s+(the\s+)?"
-            r"(tool|function|fetch_url|web_search|get_field)\b[^\n]{0,30}"
+            r"(tool|function|fetch_url|web_search|session_search)\b[^\n]{0,30}"
             r"\b(with|on|to)\b",
             re.IGNORECASE,
         ),
