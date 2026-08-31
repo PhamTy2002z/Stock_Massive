@@ -21,7 +21,7 @@
      #26282a  bubble        — what the user said
      #f59331  amber         — the filled action, and nothing else
      #fafafa → #8c8f93      — the ink ladder, six slate steps, never pure white
-                              on a chart and never pure black anywhere
+                              and never pure black anywhere
 
    Two rules hold across the whole file.
 
@@ -118,14 +118,6 @@
        and for the one accent stroke a selected row is allowed. */
     --interactive: var(--ink-1);
     --interactive-strong: 30 91% 58%;
-
-    /* -- charts ------------------------------------------------------------ */
-    /* Amber, red, violet, yellow, cyan — the reference's own five. */
-    --chart-1: 30 91% 58%;
-    --chart-2: 3 72% 60%;
-    --chart-3: 262 77% 75%;
-    --chart-4: 45 76% 62%;
-    --chart-5: 187 59% 61%;
   }
 
   /* Day. The same system re-grounded on paper: the ladders invert, the amber
@@ -169,9 +161,6 @@
 
     --ring: 30 76% 36%;
     --interactive-strong: 30 76% 36%;
-    --chart-1: 30 76% 36%;
-    --chart-2: 3 72% 44%;
-
     --positive: 140 60% 28%;
     --negative: 3 72% 42%;
     --ceiling: 262 55% 46%;
