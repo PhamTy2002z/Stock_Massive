@@ -429,7 +429,7 @@ function DockedFooter({ anchored = true }: { anchored?: boolean }) {
     <div
       style={anchored ? { right: panelWidth } : undefined}
       className={cn(
-        "px-5 pb-3",
+        "px-5 pb-2",
         anchored
           ? cn(
               "absolute bottom-0 left-0 bg-gradient-to-t from-background from-[62%] to-transparent",

@@ -18,7 +18,26 @@ import { CHUNK_CLASS } from "@/lib/alpha-desk/word-cadence"
 import { AssistantMessage } from "./assistant-message"
 import { DraftMessage } from "./draft-message"
 
-afterEach(cleanup)
+const originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard")
+
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+  if (originalClipboard) {
+    Object.defineProperty(navigator, "clipboard", originalClipboard)
+  } else {
+    Reflect.deleteProperty(navigator, "clipboard")
+  }
+})
+
+function mockClipboard() {
+  const writeText = vi.fn().mockResolvedValue(undefined)
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  })
+  return writeText
+}
 
 function call(overrides: Partial<ToolCall> = {}): ToolCall {
   return {
@@ -94,7 +113,48 @@ describe("the answer's prose", () => {
     )
 
     expect(screen.getByRole("table")).toBeInTheDocument()
-    expect(screen.getByRole("columnheader", { name: "Mã" })).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "Bảng trong câu trả lời" })).toHaveAttribute(
+      "tabindex",
+      "0",
+    )
+    expect(screen.getByRole("columnheader", { name: "Mã" })).toHaveClass("border-b")
+    expect(screen.getByRole("columnheader", { name: "Giá" })).toHaveClass("text-left")
+    expect(screen.getByRole("button", { name: "Sao chép bảng" })).toBeInTheDocument()
+  })
+
+  it("renders fenced content as a copyable code surface", () => {
+    render(
+      <AssistantMessage
+        view={view({ text: "```text\nFinancial Data\n  ↓\nAI Intent\n```" })}
+      />,
+    )
+
+    const codeBlock = screen.getByLabelText("Khối mã")
+    expect(codeBlock.parentElement).toHaveClass("rounded-card", "bg-surface-raised")
+    expect(screen.getByRole("button", { name: "Sao chép khối mã" })).toBeInTheDocument()
+  })
+
+  it("copies a table as tab-separated data and a code block as plain text", async () => {
+    const writeText = mockClipboard()
+    render(
+      <AssistantMessage
+        view={view({
+          text: "| Mã | Giá |\n| --- | ---: |\n| FPT | 100 |\n\n```text\nFinancial Data\n  ↓\nAI Intent\n```",
+        })}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Sao chép bảng" }))
+    expect(await screen.findByRole("button", { name: "Đã sao chép bảng" })).toBeInTheDocument()
+    expect(writeText).toHaveBeenLastCalledWith("Mã\tGiá\nFPT\t100")
+    expect(screen.getByRole("columnheader", { name: "Giá" })).toHaveClass("text-right")
+    expect(screen.getByRole("cell", { name: "100" })).toHaveClass("text-right")
+
+    fireEvent.click(screen.getByRole("button", { name: "Sao chép khối mã" }))
+    expect(
+      await screen.findByRole("button", { name: "Đã sao chép khối mã" }),
+    ).toBeInTheDocument()
+    expect(writeText).toHaveBeenLastCalledWith("Financial Data\n  ↓\nAI Intent")
   })
 
   it("opens a link in a new tab and sends no referrer with it", () => {
@@ -339,6 +399,27 @@ describe("the answer arriving", () => {
     render(<DraftMessage entry={draft({ text: "một hai ba" })} onRetry={vi.fn()} />)
 
     expect(words()).toEqual(["một", "hai", "ba"])
+  })
+
+  it("keeps an already revealed table mounted while later prose arrives", () => {
+    const table = "| Vùng giá | Vai trò |\n| --- | --- |\n| 76.000–76.600 | Kháng cự gần |"
+    const rendered = render(
+      <DraftMessage entry={draft({ text: table })} onRetry={vi.fn()} />,
+    )
+    const firstHeader = screen.getByRole("columnheader", { name: "Vùng giá" })
+    const firstCell = screen.getByRole("cell", { name: "76.000–76.600" })
+
+    rendered.rerender(
+      <DraftMessage
+        entry={draft({ text: `${table}\n\nCách đọc cho tháng tới:` })}
+        onRetry={vi.fn()}
+      />,
+    )
+
+    // Replacing a cell mounts every animated word in it again, restarting the
+    // fade and making the whole table visibly flash on each reveal commit.
+    expect(screen.getByRole("columnheader", { name: "Vùng giá" })).toBe(firstHeader)
+    expect(screen.getByRole("cell", { name: "76.000–76.600" })).toBe(firstCell)
   })
 
   it("leaves a message from history whole, because it was always there", () => {
