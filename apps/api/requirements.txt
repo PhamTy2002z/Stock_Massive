@@ -18,18 +18,15 @@ email-validator>=2.0.0
 
 # Utils
 httpx>=0.25.0
-websockets>=14.0,<17.0
-mcp>=2.0.0,<3.0.0
 python-multipart>=0.0.6
-tenacity>=8.2.0
 # Document evidence extraction. Both are imported directly by the agent layer.
 pypdf>=6.0.0,<7.0.0
 openpyxl>=3.1.0,<4.0.0
 
-# Cache & Rate Limiting
+# Cache & Rate Limiting. Rate limiting is served by the plain Redis client in
+# src/core/ratelimit.py, so no separate limiter package belongs here.
 redis>=5.0.0,<9.0.0
 upstash-redis>=1.0.0
-upstash-ratelimit>=1.0.0
 
 # Dev
 pytest>=7.4.0
