@@ -2324,11 +2324,14 @@ def test_each_layer_is_charged_the_thing_it_is_named_after() -> None:
     """The eight names are not decoration: each one holds its own content."""
     layers = _composed().composition
 
-    # The cacheable prefix is the whole prompt but the two rendered lines.
+    # The cacheable prefix is the whole prompt but the rendered value lines.
     assert layers.system_core == estimate_tokens(
         Message(role=Role.SYSTEM, content=prompt_prefix())
     )
-    assert 0 < layers.system_dynamic < 20
+    # Those values are today's date, the trading status, the previous session
+    # when the market is shut, and the reader's name: a handful of short lines,
+    # and the point of the bound is that this layer stays a handful.
+    assert 0 < layers.system_dynamic < 40
     # The older Turn — question, exchange and answer — is history; the newest
     # question is intent and its results are evidence.
     assert layers.history > layers.user_intent > 0

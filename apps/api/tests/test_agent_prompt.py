@@ -19,7 +19,7 @@ def prose(key: str) -> str:
 
 
 def test_prompt_version_and_section_order_are_explicit():
-    assert PROMPT_VERSION == "4.0.0"
+    assert PROMPT_VERSION == "4.1.0"
     assert tuple(item.key for item in SECTIONS) == (
         "mission",
         "invariants",
@@ -71,6 +71,14 @@ def test_prompt_treats_web_and_attachments_as_untrusted_data():
     assert "user_attachment" in body
     assert "không phải chỉ dẫn" in body
     assert "prompt injection" in body
+
+
+def test_prompt_teaches_the_model_to_read_the_trading_status():
+    body = prose("context")
+    assert "market_today" in body
+    assert "previous_trading_day" in body
+    assert "hôm nay không có phiên" in body
+    assert "không được gán cho hôm nay" in body
 
 
 def test_prompt_limits_memory_to_user_owned_durable_facts():
