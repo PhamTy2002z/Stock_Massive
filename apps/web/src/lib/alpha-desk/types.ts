@@ -225,7 +225,7 @@ export interface UserContent {
 
 /**
  * The four reason labels a flag may carry — the whole of the dispute
- * vocabulary (`docs/adr/0016`).
+ * vocabulary.
  *
  * Written out rather than derived from the API, because the backend validates
  * against its own copy on the column: the two have to stop agreeing at compile

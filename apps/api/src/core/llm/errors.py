@@ -1,8 +1,7 @@
 """The five error classes, single-sourced for both lanes.
 
-``docs/adr/0008`` and ``docs/specs/0003`` §3 fix the taxonomy and, more
-importantly, fix what each class *does*. The classes only earn their keep
-because their behaviours differ:
+The taxonomy is fixed here and, more importantly, so is what each class
+*does*. The classes only earn their keep because their behaviours differ:
 
 | Class | Behaviour |
 | --- | --- |
@@ -40,8 +39,7 @@ from .protocol import Usage
 
 logger = logging.getLogger(__name__)
 
-# ``docs/specs/0003`` §3: the model may try another approach, but not the same
-# tool forever. Two attempts is enough for a transient failure and short enough
+# The model may try another approach, but not the same tool forever. Two attempts is enough for a transient failure and short enough
 # that a broken tool cannot spend a Turn's budget rediscovering it.
 MAX_TOOL_ATTEMPTS = 2
 
@@ -276,7 +274,7 @@ class LLMMetrics:
     """What the operator watches, and what nothing here acts on automatically.
 
     ``malformed_arguments`` is counted and logged loudly, and that is all: the
-    operator flips ``alpha_desk_enabled`` by hand (``docs/adr/0008``). A cutoff
+    operator flips ``alpha_desk_enabled`` by hand. A cutoff
     that fires on two errors is a mechanism that can cause its own outage, and
     with a handful of internal users whoever notices is also whoever can fix it.
     """

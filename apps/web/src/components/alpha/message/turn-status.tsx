@@ -9,9 +9,8 @@ import { cn } from "@/lib/utils"
 /**
  * How a Turn ended, as a line under whatever it produced.
  *
- * **Never a full-screen error** (`docs/specs/0002` §6). A Turn that ran out of
- * budget, hit its deadline or lost its route still produced prose that passed
- * the Gate, and replacing that with an error page would throw away the only
+ * **Never a full-screen error.** A Turn that ran out of budget, hit its
+ * deadline or lost its route still produced prose, and replacing that with an error page would throw away the only
  * part the user wanted. So this is an inline note beside the content, and the
  * content is rendered by the caller either way.
  *

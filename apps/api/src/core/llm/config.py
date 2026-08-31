@@ -1,8 +1,8 @@
 """What route the application talks to, and what that route charges.
 
 Every value here is environment configuration, and that is the whole point of
-the boundary: a route change is an env-var flip (``docs/adr/0014``,
-``docs/specs/0003`` §3). A model id compiled into a module would survive the
+the boundary: a route change is an env-var flip. A model id compiled into a
+module would survive the
 flip and quietly keep the old route alive, so the only place a model id may
 have a default is ``Settings`` — the configuration layer itself.
 
@@ -48,8 +48,8 @@ def clamp_timeout(seconds: float) -> float:
 class Workload(str, Enum):
     """The two lanes a model is chosen for, never inside a loop.
 
-    ``docs/adr/0008``: an in-loop split adds a decision point whose quality
-    nothing here can measure.
+    The split is made once, before the loop runs: an in-loop split adds a
+    decision point whose quality nothing here can measure.
     """
 
     BATCH = "batch"
@@ -97,8 +97,7 @@ class TokenPrices:
     def worst_case_input(self) -> float:
         """What an input token costs when every one of them is charged dearest.
 
-        Admission reserves the worst case before dispatch (``docs/adr/0014``),
-        and writing the cacheable prefix is usually dearer than reading it
+        Admission reserves the worst case before dispatch, and writing the cacheable prefix is usually dearer than reading it
         fresh. Validating against the cheaper of the two would approve a
         configuration whose first cache-writing call already breaks the ceiling.
         """
@@ -110,7 +109,7 @@ class PricingTable:
     """One dated, versioned set of prices per workload.
 
     The version and the effective date are carried rather than derived: a cost
-    row records which prices produced it (``docs/adr/0014``), and a table that
+    row records which prices produced it, and a table that
     cannot say which prices it holds cannot be reconciled against later.
     """
 
@@ -201,7 +200,7 @@ class BudgetLanes:
 
 @dataclass(frozen=True)
 class UserCeilings:
-    """The five per-user ceilings of ``docs/adr/0014``; ``None`` is unlimited.
+    """The five per-user spend ceilings; ``None`` is unlimited.
 
     Configuration for the same reason the lanes are: what one account may spend
     in a day is a spend decision rather than a promise the product makes, and a

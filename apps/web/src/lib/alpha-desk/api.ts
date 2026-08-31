@@ -160,7 +160,7 @@ export function fetchTurn(turnId: string): Promise<Turn> {
  *
  * Idempotent per message: a second call replaces the reason rather than adding
  * a second flag, because the backend writes a pair of columns and not a row in
- * a table it does not have (`docs/adr/0016`).
+ * a table it does not have.
  *
  * **It opens nothing.** There is no ticket id in the answer to render, and the
  * surface must not invent one — the response carries the flag and nothing else.

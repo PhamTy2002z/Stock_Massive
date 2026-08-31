@@ -25,7 +25,7 @@ function context(path: string[]) {
 
 describe("the resource allowlist", () => {
   it("carries the flag action, which is a write on a message the user owns", async () => {
-    // Not a 404: `messages` is on the allowlist for the flag of ADR-0016.
+    // Not a 404: `messages` is on the allowlist for the flag action.
     // Upstream still resolves the Thread's owner, so widening the proxy here
     // widens nothing anybody can reach.
     const response = await POST(

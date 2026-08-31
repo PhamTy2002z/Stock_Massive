@@ -1,6 +1,6 @@
 """Budget Validation: arithmetic that has to hold before the first request.
 
-``docs/adr/0014`` reserves a worst case *before* every call, so the ceilings it
+Admission reserves a worst case *before* every call, so the ceilings it
 enforces are only enforceable if the configured prices can fund them at all. A
 route priced above the per-Analysis or per-Turn ceiling does not fail at
 startup on its own — it fails on the first real Turn, halfway through an answer
@@ -13,8 +13,8 @@ which is why it can run inside ``lifespan`` before anything else starts.
 
 **The dev lane still declares prices.** CLIProxyAPI on a personal subscription
 publishes none, and dev traffic produces no cost figures at all — a ~300-token
-CLI system prompt rides on every request and there is no cache control
-(``docs/specs/0003`` §3). What is configured there is therefore the *production*
+CLI system prompt rides on every request and there is no cache control.
+What is configured there is therefore the *production*
 price table the dev route stands in for, which is the same table the budget is
 computed from analytically. Accepting a zero price instead would let a route
 boot whose every call costs nothing on paper, and the ceilings this file exists
@@ -30,7 +30,7 @@ from .config import LLMConfig, TokenPrices, Workload
 
 logger = logging.getLogger(__name__)
 
-# The ceilings of ``docs/adr/0014``. These are the contract, not the route, so
+# The spend ceilings. These are the contract, not the route, so
 # they are constants: a deployment that wants different ceilings is changing
 # what the product promises, not which model it talks to.
 #
@@ -46,7 +46,7 @@ TURN_OUTPUT_TOKENS = 20_000
 TURN_COST_CEILING_USD = 0.50
 
 # Money compared in floating point needs a tolerance, and the unit the ledger
-# is denominated in is the honest one: a micro-USD (``docs/adr/0014``).
+# is denominated in is the honest one: a micro-USD.
 MICRO_USD = 1e-6
 HARD_MONTHLY_ENVELOPE_USD = 45.0
 HARD_LANE_ALLOCATIONS_USD = {

@@ -92,7 +92,7 @@ CheckpointPayload = Callable[[TurnDraft], dict[str, Any]]
 # therefore buy nothing an attachment needs.
 MAX_USER_INPUT_BYTES = 8 * 1024
 
-# ``docs/adr/0013``'s wall-clock ceiling for one Turn, including the time it
+# The wall-clock ceiling for one Turn, including the time it
 # spends waiting for an execution slot.
 TURN_DEADLINE_SECONDS = 600.0
 
@@ -641,8 +641,8 @@ def _terminal_state(running: RunningTurn, outcome: TurnOutcome) -> tuple[str, st
     pressing stop from a container being asked to stop, so it reports both as
     ``cancelled_by_user``. The difference matters to the reader: a cancellation
     is something they did, and a shutdown is something that happened to them.
-    ``docs/adr/0013`` lists shutdown under ``incomplete`` for exactly that
-    reason, and this is the one place that knows which it was.
+    Shutdown settles as ``incomplete`` for exactly that reason, and this is
+    the one place that knows which it was.
     """
     if (
         outcome.status is TurnStatus.CANCELLED

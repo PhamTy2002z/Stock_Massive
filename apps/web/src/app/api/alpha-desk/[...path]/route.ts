@@ -51,8 +51,8 @@ import { UPSTREAM_UNREACHABLE } from "@/lib/connection-status"
  */
 
 // The resources this proxy will carry, matched on the first segment.
-// `threads` and `turns` are the chat transport (ADR-0013). `messages` is the flag
-// action of ADR-0016 and nothing else: upstream mounts `POST` and `DELETE` on
+// `threads` and `turns` are the chat transport. `messages` is the flag action
+// and nothing else: upstream mounts `POST` and `DELETE` on
 // `/messages/{id}/flag` alone, and both resolve ownership through the Thread, so
 // the same argument covers it. `assets` is the favicon fetch-and-cache: the
 // browser must never reach a search result's domain directly to load its
@@ -133,7 +133,8 @@ const configuredOrigins = (): string[] =>
  * behind a reverse proxy reports `http://localhost:3000` for a request the
  * browser made to `https://app.example.com`, so an `Origin` check against it
  * refuses every write the moment a proxy is put in front — which is precisely
- * the deployment ADR-0013 asks for. That failure is invisible to a unit test on
+ * the deployment this product asks for. That failure is invisible to a unit
+ * test on
  * either side of the proxy and is why the end-to-end acceptance exists.
  *
  * `X-Forwarded-Host` and `Host` are safe to compare an `Origin` against because
@@ -214,7 +215,7 @@ async function forward(request: NextRequest, path: string[]): Promise<NextRespon
 
   // Awaited *before* anything is returned. A streaming response that went out
   // and only then discovered it had no token would have to report the failure
-  // inside the stream, which is the shape ADR-0013 exists to avoid.
+  // inside the stream, which is the shape the two-request transport avoids.
   let token = await currentAccessToken()
   let response = await send(request, target, token, body, requestContentType)
 

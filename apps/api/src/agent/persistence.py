@@ -425,10 +425,10 @@ class AgentPersistence:
         """One transcript row, but only if this user owns the Thread it is in.
 
         Ownership is a join for the same reason :meth:`_owned_turn` joins:
-        ``agent_message`` has no ``user_id`` and should not grow one. The Widget
-        replay route is the caller, and it resolves the descriptor *stored on
-        the message* rather than one the client sent — so a reader can only ever
-        get back the slice their own answer was written against.
+        ``agent_message`` has no ``user_id`` and should not grow one. No HTTP
+        route reads a single message today — the replay route that did went with
+        the retired board surfaces — so this is the store's own read-back, and
+        the ownership join is what keeps it safe to mount behind one later.
         """
         return await asyncio.to_thread(self._read_message, user_id, message_id)
 
@@ -450,7 +450,8 @@ class AgentPersistence:
 
         Writing the pair *replaces* whatever was there: a second flag on the
         same message is the reader correcting themselves, and accumulating both
-        would need the table ``docs/adr/0016`` refuses. Pressing the *same*
+        would need a table this product deliberately does not have. Pressing
+        the *same*
         reason again writes nothing at all, stamp included. ``None`` means the
         message is not this user's to flag — the same answer as a message that
         does not exist, because a caller who can tell those apart has been told
@@ -689,8 +690,7 @@ class AgentPersistence:
         """Run one transaction, retrying the ``UNIQUE(thread_id, seq)`` race.
 
         The retry lives here rather than in each caller because ``seq`` is
-        allocated inside the writing transaction by design (``docs/specs/0003``
-        §10.2), so every writer of a transcript row races the same way and none
+        allocated inside the writing transaction by design, so every writer of a transcript row races the same way and none
         of them should have to remember it.
         """
         for attempt in range(MAX_SEQUENCE_RETRIES):

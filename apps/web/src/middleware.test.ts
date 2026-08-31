@@ -6,8 +6,8 @@
  * does. A `fetch` cannot follow a redirect to HTML and would report the login
  * page as the answer; an `EventSource` handed HTML reconnects against it every
  * few seconds for as long as the tab is open. So `/api/alpha-desk/*`
- * authenticates inside the handler and answers an API-shaped status instead
- * (ADR-0013), and this pins the exclusion that makes that possible.
+ * authenticates inside the handler and answers an API-shaped status instead,
+ * and this pins the exclusion that makes that possible.
  *
  * The matcher is asserted rather than the handler, because the matcher is what
  * decides whether the handler runs at all — and it is one regex away from

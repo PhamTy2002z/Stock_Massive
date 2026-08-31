@@ -2,7 +2,7 @@
 /**
  * What flagging a message does, and — the part that matters — what it does not.
  *
- * V1 has no dispute workflow (`docs/adr/0016`). Every claim below is one a
+ * V1 has no dispute workflow. Every claim below is one a
  * conventional feedback widget gets wrong by being reassuring: it thanks the
  * user, hands them a reference number, tells them somebody will look into it,
  * and offers a comment box nobody reads. Each of those is a promise this system

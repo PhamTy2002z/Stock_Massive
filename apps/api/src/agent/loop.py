@@ -1,4 +1,4 @@
-"""The hand-rolled agent loop over ``LLMClient`` (``docs/adr/0008``).
+"""The hand-rolled agent loop over ``LLMClient``.
 
 No framework: not LangGraph, not pydantic-ai, not the Agents SDK, not
 ``tool_runner``. There is no graph to orchestrate — five tools are plain
@@ -11,7 +11,7 @@ What the loop does, and nothing more: render the prompt, ask the model, run the
 tools it asked for, show it what came back, and stop. It does not decide what an
 answer is allowed to say. The harness this replaced did, and the machinery for
 it — an evidence manifest, a recommendation validator, labelled blocks, a widget
-protocol — is gone with the tools that fed it (``docs/adr/0026``).
+protocol — is gone with the tools that fed it.
 
 Five properties are worth reading the code for.
 
@@ -164,7 +164,7 @@ logger = logging.getLogger(__name__)
 # lowering the other spends a budget nothing has validated.
 MAX_TOOL_ROUNDS = 4
 
-# ``docs/adr/0008``: in-process is correct because uvicorn runs a single worker.
+# In-process is correct because uvicorn runs a single worker.
 #
 # The default only. ``service.py`` wires the semaphore from the same configured
 # ceiling the ledger checks, because the two enforce one number from opposite
@@ -527,8 +527,8 @@ UNMAPPED_ADMISSION_STATUS = 503
 class TurnRefused(AlphaRefusal):
     """A Turn refused at admission, before a row or a stream existed.
 
-    ``docs/adr/0013``'s two-request transport rests on one property: an
-    admission failure never opens a stream. Folding admission into the stream
+    The two-request transport rests on one property: an admission failure
+    never opens a stream. Folding admission into the stream
     would turn a refusal into an in-band event the client has to parse, and it
     would make the idempotency key arrive at the same moment as the work.
     """
@@ -568,7 +568,7 @@ class TurnPreflight(Protocol):
 class TurnAdmission:
     """The one question the ``POST`` asks before it creates anything.
 
-    The ceilings are not this class's. They belong to ``docs/adr/0014`` and to
+    The ceilings are not this class's. They belong to
     ``core/llm/admission.py``, which is also the authority that enforces them at
     dispatch. What is here is the part the ledger cannot own: the in-process
     semaphore, and the mapping from a stable reason onto a status code.
@@ -658,8 +658,8 @@ class TurnRequest:
 class TurnDraft:
     """What has been produced so far, for checkpointing.
 
-    ``boundary`` says this checkpoint is one of the moments ``docs/adr/0013``
-    names — a tool call, a cancellation, a terminal state — rather than ordinary
+    ``boundary`` says this checkpoint is one of the named moments — a tool
+    call, a cancellation, a terminal state — rather than ordinary
     progress. The rate limiter that keeps checkpoints to at most one a second
     reads it, and nothing else does.
     """
@@ -927,8 +927,8 @@ class AgentLoop:
         self._tool_timeout = tool_timeout_seconds
         self._deadline = deadline_seconds
         self._clock = clock or (lambda: datetime.now(timezone.utc))
-        # Resolved once, here. ``docs/adr/0008``: models split by workload and
-        # never inside the loop, because an in-loop cheap-router split adds a
+        # Resolved once, here. Models split by workload and never inside the
+        # loop, because an in-loop cheap-router split adds a
         # decision point whose quality nothing measures.
         self._model = config.model_for(Workload.SESSION)
         # Read once from the route, here, and carried into every constructed
@@ -1296,8 +1296,7 @@ class AgentLoop:
         """
         output_tokens = self._output_tokens(state)
         spend = SpendRequest(
-            # ``docs/adr/0014``: every provider call names a durable owner with
-            # a non-null id, and for this loop that owner is always the user's
+            # Every provider call names a durable owner with a non-null id, and for this loop that owner is always the user's
             # request message.
             owner=CallOwner(
                 type=OwnerType.TURN_REQUEST_MESSAGE,
@@ -1881,8 +1880,8 @@ class AgentLoop:
         Every terminal path runs through here, including the ones that end
         badly. A Turn that ran out of budget, lost its credential or was
         cancelled still produced prose, and prose is what makes an ``incomplete``
-        useful rather than empty — the difference ``docs/adr/0013`` draws between
-        ``incomplete`` and ``failed``.
+        useful rather than empty — the difference between ``incomplete`` and
+        ``failed``.
 
         """
         await self._save(state, boundary=True)

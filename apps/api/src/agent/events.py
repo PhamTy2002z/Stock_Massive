@@ -1,6 +1,6 @@
 """The in-process publisher a Turn emits through, and the subscription seam.
 
-``docs/adr/0026`` fixed the event types and replay contract. This module builds
+The event types and the replay contract are fixed here. This module builds
 them, and :mod:`src.agent.sse` puts them on the wire. The split is
 deliberate: the publisher is what the loop emits through, so it has to exist
 before there is anywhere to stream from.

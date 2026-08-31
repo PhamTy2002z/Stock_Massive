@@ -376,14 +376,14 @@ class SpendAdmission:
         Read-only, writes nothing, and takes no advisory lock. That is not an
         oversight — it is the difference between this and :meth:`reserve`. A
         reservation row is written immediately before the network call and its
-        existence *is* the fact that a Turn dispatched (ADR-0015), so answering
+        existence *is* the fact that a Turn dispatched, so answering
         a ``POST`` from one would charge a start to the very Turn it is about to
         refuse.
 
         :meth:`reserve` stays the authority. This is the same set of ceilings
-        asked early enough to be an ordinary HTTP status, which is what
-        ``docs/adr/0013`` requires of admission: a refusal must be decided
-        before any stream opens, never delivered as an in-band event.
+        asked early enough to be an ordinary HTTP status, which is what the
+        transport requires of admission: a refusal must be decided before any
+        stream opens, never delivered as an in-band event.
 
         The headroom checked is one call at the Turn's own per-call ceiling —
         exactly what the loop's first :meth:`reserve` will ask for at worst.
@@ -544,7 +544,7 @@ def _assert_user_ceilings(
     day_reset: datetime,
     pending: int,
 ) -> None:
-    """The five per-user ceilings of ``docs/adr/0014``, in one place.
+    """The five per-user spend ceilings, in one place.
 
     Asked twice with one difference. At admission no ``agent_turn`` row exists
     yet, so the prospective Turn has to be added to the two active counts;
@@ -874,7 +874,7 @@ def _read_turn_state(
 ) -> TurnState:
     """Read current Turn counts inside the same locked admission transaction.
 
-    **The start allowance is consumed at dispatch, not at admission** (ADR-0015):
+    **The start allowance is consumed at dispatch, not at admission:**
     refusals, provider model refusals and incomplete Turns count because they
     consumed resources, while authentication, schema, origin, body-size and
     admission failures rejected *before* dispatch do not.

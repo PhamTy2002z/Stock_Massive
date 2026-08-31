@@ -1,8 +1,8 @@
 /**
  * What the create call sends, and what a refusal comes back as.
  *
- * Two properties of ADR-0013 live in this one small module, and neither is
- * visible from a component test.
+ * Two properties of the chat transport live in this one small module, and
+ * neither is visible from a component test.
  *
  * **The browser owns the Turn id.** It is generated before the `POST` and sent
  * *in* it, which is what makes a retried admission safe on a flaky network: a

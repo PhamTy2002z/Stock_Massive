@@ -60,7 +60,7 @@ import { useShell } from "./shell-state"
  *   two), and this reads it — switching it starts no Thread and ends none;
  * - **reattaching**, from what this tab remembered. A reload, a view change and
  *   a dropped network each end a subscriber; the Turn keeps running on the
- *   backend and is picked up wherever it got to (ADR-0013).
+ *   backend and is picked up wherever it got to.
  */
 /**
  * One attachment on a question that has not been sent yet.

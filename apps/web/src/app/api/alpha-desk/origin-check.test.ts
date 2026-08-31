@@ -6,7 +6,7 @@
  * behind a reverse proxy reports `http://localhost:3000` for a browser that
  * asked for `https://app.example.com`. An origin check against it therefore
  * refuses every Alpha Desk write the day a proxy is put in front — which is the
- * deployment ADR-0013 asks for, and a failure invisible to a unit test on
+ * deployment this product asks for, and a failure invisible to a unit test on
  * either side of the proxy. It was found by the end-to-end acceptance (#92) and
  * is pinned here so it stays found.
  *

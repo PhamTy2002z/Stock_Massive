@@ -11,8 +11,7 @@ The route enforces its own limit server-side — the breaker only saves the paid
 request that would have been refused anyway — and the cost of getting it wrong is
 not an overspend but a blank answer on a screen somebody is watching. A Redis
 outage must not be able to stop every Turn, so every failure in here admits the
-call and says so in the log. That is the same direction ``ADR-0021`` chose for the
-Recommendation Validator, for the same reason.
+call and says so in the log.
 
 Two consequences of failing open, stated so neither is a surprise:
 

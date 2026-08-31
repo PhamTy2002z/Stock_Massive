@@ -21,12 +21,10 @@ So the queries here are read-only, they return values, and nothing pages. They
 are read when somebody asks what the field is doing, which is the only occasion
 on which any of these numbers means anything.
 
-There are two readings and they answer different questions. The first is the
-field snapshot above. The second counts how often a Turn that quoted a price had
-checked it (:func:`read_price_check_compliance`), which exists because the rule
-it measures lives in the system prompt and a prompt is not an enforcement — the
-number is there so the decision about building a backstop is made on a measured
-rate rather than on a guess about one.
+There is one reading, :func:`read_ops_snapshot`, and it answers the question
+above. A second reading counted how often a Turn that quoted a price had
+checked it; it went with the price-check tool and is not coming back under this
+module.
 
 There is no threshold on any of these numbers, and that is a change of substance
 rather than of wording. The rule this query used to carry — a sustained

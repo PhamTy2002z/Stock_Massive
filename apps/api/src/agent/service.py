@@ -41,8 +41,8 @@ logger = logging.getLogger(__name__)
 class AlphaDeskDisabled(AlphaRefusal):
     """The operator switched the interactive surface off.
 
-    ``docs/adr/0008``: nothing disables itself automatically, so this is only
-    ever a deliberate act — and it must read as a temporary service condition
+    Nothing disables itself automatically, so this is only ever a deliberate
+    act — and it must read as a temporary service condition
     rather than as a fault or as a rule about this user.
     """
 
@@ -125,8 +125,7 @@ def build_alpha_desk(
             checkpoint=checkpoint,
             publisher=publisher,
             # Wired the same way the checkpoint is: one short transaction per
-            # write, and a Turn never holds a session
-            # (``docs/specs/0003`` §10.5).
+            # write, and a Turn never holds a session.
             trace=persistence.record_tool_call,
         )
 

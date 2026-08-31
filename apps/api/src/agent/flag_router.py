@@ -21,16 +21,16 @@ suspended, and no background job is dispatched. v1 has no dispute workflow; the
 value of the action is downstream and manual — a flagged message confirmed as a
 genuine failure is a defect somebody reads the transcript for.
 
-**Replay means re-reading the Evidence Manifest, not reproducing the answer.**
-The Manifest is on the message and is kept indefinitely; the full Tool Call
-Traces expire at 90 days. That is what makes a flag still answerable months
-later, and it is stated rather than hidden: a trace can be re-read, not re-run.
+**Replay means re-reading what was written down, not reproducing the answer.**
+The transcript message is kept indefinitely; the Tool Call Traces behind it
+expire at 90 days, so a flag raised later is answerable from the prose alone.
+That limit is stated rather than hidden: a trace can be re-read, not re-run.
 
 **It hangs off the store, not off the desk service.** Flagging is not a Turn: it
-admits nothing, spends nothing and reaches no model, so it takes the same
-``AgentPersistence`` dependency the Widget replay route takes rather than the
-service that owns the loop. A flag must remain possible on a transcript the
-model route is too broke or too broken to add to.
+admits nothing, spends nothing and reaches no model, so it takes the
+``AgentPersistence`` dependency directly rather than the service that owns the
+loop. A flag must remain possible on a transcript the model route is too broke
+or too broken to add to.
 
 **Ownership is verified here, and not only in the UI.** The store resolves the
 message through an owner-scoped join, so another user's message is *not found*
