@@ -25,17 +25,20 @@ traceable to their data, timing, assumptions, and uncertainty.
 
 VisgniteAI is an evidence-backed, point-in-time investment research desk rather
 than a stock-prediction or trading-tip product. Its distinguishing mechanism is
-the connection of sourced observations and deterministic calculations to
-explicit claims, confidence, counterarguments, invalidation triggers, and
-decision implications.
+the connection of sourced observations to explicit claims, confidence,
+counterarguments, invalidation triggers, and decision implications — each one
+traceable back to the source and the moment it was read.
 
 ## Operating Context
 
 The product is a Vietnamese-language, authenticated web application focused on
-HOSE, HNX, and UPCOM. Its current single-surface workspace combines AI research
-conversations, market-board data, news, watchlists, saved threads, analysis
-artifacts, and source inspection without discarding in-progress work when the
-user changes views.
+HOSE, HNX, and UPCOM. Its current surface is a single chat workspace: research
+conversations, saved threads, attachments, and inspection of the sources an
+answer was built from, without discarding in-progress work.
+
+Market boards, watchlists, news feeds and analysis artifacts were part of an
+earlier product and are retired. Evidence reaches an answer through the agent's
+web tools and the user's own attachments, not through a local market store.
 
 ## Capabilities and Constraints
 
@@ -43,9 +46,11 @@ user changes views.
   trades.
 - Personalized action proposals remain unavailable unless a future
   product/legal decision and an explicit human-approval flow authorize them.
-- Financial calculations, market rules, time selection, units, rounding, data
-  scope, authorization, and side-effect policy are deterministic system
-  responsibilities rather than model claims.
+- Authorization, data scope, tool availability, spend limits and side-effect
+  policy are deterministic system responsibilities rather than model claims.
+- The product runs no local financial engine. Figures come from sources the
+  answer cites, so units, rounding, as-of time and market rules are properties
+  of the cited source that the answer must carry, not results it computes.
 - Material figures and conclusions preserve their source, as-of time,
   freshness, units, transformation method, and quality or refusal state.
 - The system distinguishes observations, derived metrics, claims, hypotheses,
@@ -69,16 +74,15 @@ user changes views.
 
 - The binding investment-intelligence contract is documented at
   `docs/Harness/investment-intelligence-contract.md`.
-- The capability direction and autonomy boundaries are documented at
-  `docs/harness-roadmap.md`; data-platform and product-system delivery are
-  tracked separately in `docs/system-roadmap.md`.
+- The capability direction, autonomy boundaries and delivery order are
+  documented at `docs/roadmap.md`, which is the authority for product scope.
 - The implemented product surface and Vietnamese copy live under
   `apps/web/src/`.
 - Existing identity assets live under `apps/web/public/images/`, with the
   reusable VisgniteAI mark implemented in
   `apps/web/src/components/shared/visgnite-logo.tsx`.
-- Current product data and analysis must remain grounded in real providers,
-  persisted evidence, and deterministic calculations. Future work must not
+- Current product answers must remain grounded in retrievable sources and the
+  persisted evidence of the Turn that produced them. Future work must not
   fabricate testimonials, customers, performance claims, benchmarks, or market
   evidence.
 

@@ -1,101 +1,221 @@
-# Roadmap AI Harness — Stock_Massive
+# Roadmap — AI Agent for Investment (Stock_Massive)
 
-Tài liệu này là authority cho thứ tự phát triển sau pivot **harness-first**.
-Mục tiêu sản phẩm hiện tại không còn là Signal Desk hay một engine phân tích
-deterministic. Mục tiêu là một AI agent chứng khoán dùng web và tool, có vòng
-lặp bền, context tốt, guardrail rõ và trả lời có bằng chứng ở chất lượng tương
-đương hình dạng trong [`text.md`](../text.md).
-
-`text.md` là **mẫu trải nghiệm**, không phải nguồn sự thật hay golden answer:
-nó minh họa cách mở đầu bằng kết luận, giải thích chuyện gì đang xảy ra, nguyên
-nhân, ý nghĩa, tác động và điều nhà đầu tư cần theo dõi. Mọi số, mốc giá và nguồn
-trong output thật vẫn phải được agent kiểm chứng tại thời điểm trả lời.
-
-Code và test sở hữu hành vi đang chạy. Roadmap sở hữu quyết định, dependency,
-gate tốt nghiệp và thứ tự thực hiện. Các tài liệu trong `docs/Harness/` là
+Tài liệu này là authority cho scope sản phẩm và thứ tự phát triển. Code và test
+sở hữu hành vi đang chạy; roadmap sở hữu quyết định, dependency, gate tốt
+nghiệp và thứ tự thực hiện. Các tài liệu trong `docs/Harness/` là
 research/contract trước pivot; khi xung đột, roadmap này thắng.
 
-## 1. Outcome contract
+**Mục tiêu sản phẩm:** Stock_Massive trở thành một **AI Agent for Investment**
+cho nhà đầu tư Việt Nam, với hình dạng sản phẩm là **Evidence Desk** (§1): một
+bàn kiểm chứng nơi câu trả lời là cấu trúc *kết luận ← claim ← bằng chứng ←
+thời điểm* mà người dùng bóc được từng lớp. Ưu tiên đã chốt: **chất lượng
+trước tốc độ và trước chi phí** — memo được phép chậm nhiều phút và tiêu nhiều
+lượt model, miễn là quá trình hiển thị trung thực theo thời gian thực và kết
+quả đạt hợp đồng sự thật (§2).
 
-Stock_Massive phải trở thành một **web-first financial research agent** có thể:
+**Nguồn học kiến trúc:**
 
-1. hiểu câu hỏi và horizon người dùng thực sự hỏi;
-2. lập kế hoạch tìm kiếm, tìm nhiều hướng song song và đọc các nguồn cần thiết;
-3. phân biệt discovery (`web_search`) với retrieval (`fetch_url`);
-4. tổng hợp bằng chứng thành câu trả lời rõ ràng, nêu mâu thuẫn và khoảng trống;
-5. gắn claim trọng yếu với nguồn, thời điểm và mức chắc chắn;
-6. tự phục hồi có giới hạn khi model, provider hoặc tool sai hợp đồng;
-7. luôn settle Turn thành trạng thái typed, không để màn hình trắng;
-8. giữ context hữu ích qua hội thoại dài mà không làm rơi intent, citation hay
-   cặp tool-call/tool-result;
-9. không tăng quyền vì prompt, nội dung web, memory, MCP hay child session;
-10. đo chất lượng, cost và latency trên outcome thật trước khi mở capability mới.
+- **Hermes Agent là nguồn học chính** cho runtime core: vòng lặp model↔tool có
+  retry/fallback/cancel, error taxonomy map sang typed recovery, bounded nudge
+  thay vì màn hình trắng, guard fail-open, context layering, kỷ luật budget và
+  observability content-light.
+- **OpenCode là nguồn học cho tầng advanced**: durable typed session/state (đã
+  áp dụng làm spine), unified capability plane, permission `allow/ask/deny`,
+  progressive rules/skills, hidden specialist cho tác vụ phụ có contract nhỏ,
+  và — khi roadmap mở gate — **code execution trong sandbox**.
+- Học invariant và boundary đã chứng minh, không copy sản phẩm coding-agent.
+  Tầng finance evidence là phần tự xây, không có nguồn để port.
 
-Với câu hỏi phân tích chứng khoán, output tốt thường trả lời được năm ý trong
-`text.md`: **đang xảy ra gì, vì sao, tại sao quan trọng, tác động ngắn/dài hạn,
-và cần theo dõi gì**. Đây là rubric theo intent, không phải template bắt buộc cho
-mọi câu hỏi.
+**Về `text.md`:** file mẫu này đã bị xoá khỏi repo và **không phải nguồn sự
+thật**. Không transcript mẫu nào là golden answer. Chất lượng được sở hữu bởi
+§2/§3 và corpus eval Phase 1.
 
-## 2. Phạm vi mới
+## 1. Sản phẩm đích: Evidence Desk
+
+### Bốn job
+
+1. **Stress-test luận điểm (hero):** "Tôi định mua X vì A, B, C — kiểm chứng
+   giúp tôi." Agent tách tiền đề, kiểm từng cái, chủ động săn phản chứng.
+2. **Memo sự kiện:** "X giảm ba phiên, chuyện gì vậy?" — memo theo rubric §3.
+3. **Kiểm chứng dữ kiện:** đối chiếu một con số/claim với nguồn gốc.
+4. **Phân xử mâu thuẫn nguồn:** hai nguồn lệch nhau — hiển thị cả hai và giải
+   thích vì sao lệch.
+
+Bốn job dùng chung một engine (Phase 6); khác nhau ở intent frame và render.
+
+### Năm object cốt lõi
+
+- **Memo:** verdict tổng → rubric §3 → phản chứng → cần theo dõi; luôn có
+  `as_of` banner.
+- **Claim:** khẳng định trọng yếu có loại `fact | inference | scenario`, nối
+  evidence IDs, có trạng thái kiểm chứng.
+- **Evidence card:** chip citation mở panel: quoted span highlight, publisher,
+  publication time, retrieval time, link gốc, conflict note.
+- **Verdict tiền đề:** đúng ba trạng thái **Đứng vững / Lung lay / Không kiểm
+  chứng được**. "Đúng một phần" biểu đạt bằng Lung lay kèm giải thích; không
+  thêm trạng thái thứ tư để giữ eval đơn giản.
+- **Watch item / dossier:** "cần theo dõi gì" thành mục có mốc thời gian,
+  bấm để chạy lại và đối chiếu memo cũ. Watch item **chỉ sống trong memo và
+  thread (dossier theo `symbols[]`)** — không có surface watchlist toàn cục;
+  đường Signal Desk/watchlist đã retire giữ nguyên.
+
+### Elicitation — hỏi lại người dùng có kỷ luật
+
+Khi thiếu dữ kiện **không thể khám phá** (horizon, giá vốn, mua mới hay trung
+bình giá, mục đích), agent được hỏi lại bằng **question card render từ typed
+part**, theo bốn kỷ luật:
+
+1. Chỉ hỏi điều web không trả lời được; hỏi thứ discoverable là defect.
+2. Scout-then-ask: research sơ bộ trước, câu hỏi mang evidence chip trong mình.
+3. Budget cứng enforce ở backend: tối đa 1 vòng trước memo, tối đa 3 câu, mỗi
+   câu 2–4 lựa chọn single-select; vòng hai chỉ khi câu trả lời mở nhánh mới.
+4. Luôn có "Bỏ qua — dùng giả định mặc định"; skip thì memo vẫn chạy và giả
+   định in rõ đầu memo. Không tồn tại card chặn đường.
+
+Kiến trúc: **câu hỏi là typed part kết thúc Turn** (Turn settle terminal như
+mọi Turn; loop hỏi–đáp là loop hội thoại, không phải state treo trong Turn).
+Ba trạng thái persist: `answered | skipped | superseded` (user gõ composer
+thay vì bấm → card mờ). Schema part có cờ `multi_select` từ v1; UI multi-select
+làm sau. Câu hỏi phải rẽ nhánh kết luận — chấm được ở Phase 1.
+
+## 2. Hợp đồng sự thật
+
+"Luôn đúng" không phải cam kết khả thi. Cam kết của sản phẩm tách theo bốn lớp
+với mức đảm bảo khác nhau:
+
+| Lớp | Đảm bảo | Cơ chế |
+|---|---|---|
+| 1. Trung thực với nguồn (claim khớp quoted span) | **Cơ học, hard gate 100%** | Render-only-from-ledger + verifier pass |
+| 2. Nguồn nói thật | Bound, không tuyệt đối | Source policy + luật đa nguồn |
+| 3. Suy luận hợp lý | Không đảm bảo — dán nhãn + phản biện | Claim typing + counterevidence pass |
+| 4. Dự báo | Không ai đảm bảo được | Nhãn scenario, cấm certainty |
+
+**Cơ chế bắt buộc:**
+
+- **Render-only-from-ledger:** số/URL không có evidence ID thì không render
+  được về mặt kỹ thuật. Chặn bịa ở tầng code, không ở tầng prompt.
+- **Verifier pass context sạch:** một lượt model độc lập (hidden specialist,
+  không nhiễm context research) đối chiếu từng claim trọng yếu với quoted
+  span. Rớt → hạ xuống "không kiểm chứng được" hoặc loại. **Verifier lỗi
+  provider = fail-closed cho nhãn đã-kiểm-chứng, fail-open cho việc trả lời:**
+  memo vẫn ra, chip rơi về trạng thái chưa kiểm chứng — không bao giờ render
+  claim chưa kiểm như đã kiểm, cũng không bao giờ vì verifier chết mà trắng
+  màn hình.
+- **Luật đa nguồn:** số trọng yếu cần ≥2 nguồn độc lập *hoặc* 1 nguồn primary
+  (filing/CBTT/IR); chỉ có 1 nguồn aggregator → render kèm nhãn "một nguồn".
+- **Temporal validity:** không dùng nguồn sau `as_of`; publication lag và
+  phiên giao dịch xử lý theo finance temporal rules.
+- **Quyền từ chối là đòn bẩy precision:** "không đủ bằng chứng" là outcome
+  hạng nhất, được thiết kế UI riêng, không phải lời xin lỗi.
+
+**Metric công bố được (đo ở Phase 1, giám sát ở Phase 9):** fabrication rate
+lớp 1 = 0% (hard gate); disclosure conflict/thiếu dữ liệu/nhãn suy luận =
+100%; material-claim accuracy trên corpus có ground truth = con số đo nhiều
+trial, chỉ công bố sau khi đo; production có sampling audit người review và
+nút "báo sai" trên từng claim — lỗi xác nhận thành case corpus mới.
+
+## 3. Rubric chất lượng câu trả lời
+
+Câu hỏi phân tích chứng khoán: output tốt trả lời năm ý — **đang xảy ra gì,
+vì sao, tại sao quan trọng, tác động ngắn/dài hạn, cần theo dõi gì** — cấu
+trúc theo intent, không phải template bắt buộc. Kèm theo: mở đầu bằng kết
+luận; phân biệt fact/inference/scenario; không biến headline, analyst target
+hay technical level một nguồn thành certainty; nêu thẳng conflict và khoảng
+trống; thiếu horizon/risk context vẫn phân tích nhưng in rõ giả định, không
+giả personalization. Rubric tự chứa, không tham chiếu transcript mẫu nào.
+
+## 4. Outcome contract
+
+Agent phải: (1) hiểu câu hỏi, horizon và mức rủi ro thật sự được hỏi; (2) lập
+kế hoạch và research nhiều hướng song song; (3) phân biệt discovery
+(`web_search`) với retrieval (`fetch_url`); (4) tổng hợp thành phân tích nêu
+mâu thuẫn và khoảng trống; (5) gắn claim với nguồn, thời điểm, mức chắc chắn;
+(6) tự phục hồi có giới hạn khi model/provider/tool sai hợp đồng; (7) luôn
+settle Turn typed, không màn hình trắng; (8) giữ context dài không rơi intent,
+citation, cặp call/result; (9) không tăng quyền vì prompt, web, memory, MCP
+hay child session; (10) đo chất lượng/cost/latency trên outcome thật trước khi
+mở capability mới; (11) hỏi lại user đúng kỷ luật §1 khi thiếu dữ kiện
+non-discoverable; (12) sau gate Phase 11: chạy tính toán trong sandbox và phân
+biệt số agent tính với số trích nguồn.
+
+Bậc thang năng lực: **Evidence Desk (Phase 1–9)** → scale-out (Phase 10, theo
+usage) → compute sandbox (Phase 11) → delegation/MCP (Phase 12). Ranh giới
+theo `PRODUCT.md`: research và decision support; không đặt lệnh; không
+personalized advice khi chưa có quyết định product/legal và human-approval
+flow riêng.
+
+**Chính sách chi phí và tốc độ (đã chốt):** chất lượng trước; envelope
+model/deadline hào phóng theo lane; bound tồn tại để *chấm dứt có lý do*
+(chống loop lú, repetition), không phải để tiết kiệm. Phase 9 đo cost per
+successful outcome làm **đồng hồ định giá**, không phải phanh.
+
+## 5. Phạm vi
 
 ### Giữ và nâng cấp
 
-- FastAPI là server lõi; Next.js là client của contract HTTP/SSE.
-- Thread, Turn, message, tool call, usage, cancel và SSE replay.
-- Web search/fetch, memory qua tool và attachment đọc-only khi còn đúng contract.
+- FastAPI server lõi; Next.js là client của contract HTTP/SSE.
+- Thread, Turn, message, tool call, usage, cancel, SSE replay.
+- Web search/fetch, memory qua tool, attachment đọc-only.
 - One-call-one-result, bounded concurrency, budget arithmetic, typed recovery,
-  repetition ladder và hai cửa terminal tập trung.
-- SSRF protection, redirect/DNS validation, untrusted-content boundary và
-  injection scan hiện có.
-- Golden/eval web-first và operational telemetry có thể tái tạo.
+  repetition ladder, hai cửa terminal tập trung.
+- SSRF/redirect/DNS protections, untrusted-content boundary, injection scan.
+- Nền golden web-first hiện có tại `apps/api/golden` (runner đóng băng web
+  tại seam `WebLane.read`; run nửa xanh chấm `incomplete`, không phải pass
+  thấp) và telemetry tái tạo được. Harness eval cũ tại `apps/api/eval` đã
+  xoá — Phase 1 mở rộng golden, không dựng lại đường cũ.
 
-### Xóa khỏi product path
+### Đã xóa (Phase 0, hoàn tất)
 
-- Mọi UI, state, event, API mode và persistence projection dành riêng cho
-  Signal Desk/analysis board.
-- Study registry/runner/template, Board DSL, widget catalog, frame buffer,
-  compute sandbox và artifact render.
-- Tool để đọc/tính Signal Field, indicator, series, statement hoặc local market
-  store cho agent: `list_fields`, `get_field`, `query`, `compare_fields`,
-  `get_series`, `compute`, `check_price_claim`, `list_studies`, `run_study`,
-  `frame_from_evidence`, `render_signal_desk`.
-- Prompt/playbook ép câu hỏi có số thành board hoặc ưu tiên dữ liệu local.
-- Scheduler/backfill và code indicator/calculation chỉ phục vụ đường sản phẩm đã
-  bỏ, sau khi reverse-dependency audit chứng minh không còn public owner khác.
+Signal Desk/analysis board UI-state-event-API; Study/Board DSL, widget
+catalog, frame buffer, compute sandbox cũ, artifact render; tool đọc/tính
+indicator/series/statement/local store; prompt ép board; scheduler/backfill
+của đường đã bỏ.
 
 ### Không xây trong roadmap lõi
 
-- Một chart/board/Study engine mới dưới tên khác.
-- Shell, file-write, code execution, LSP, browser-computer-use hoặc plugin npm.
-- Generic MCP marketplace và `trust: full` mặc định.
-- Provider matrix rộng chỉ để đạt feature parity.
-- Memory free-text tự chèn vào system prompt hoặc skill tự sửa policy.
-- Broker/order execution, position sizing cá nhân hóa hoặc auto-trading.
+- Chart/board/Study engine mới dưới tên khác; catalog chỉ báo built-in; local
+  market store cho agent; watchlist surface toàn cục.
+- Shell trên host, file-write ngoài sandbox, LSP, browser-computer-use,
+  plugin npm.
+- Generic MCP marketplace, `trust: full` mặc định, provider matrix rộng.
+- Memory free-text tự chèn system prompt; skill tự sửa policy; hồ sơ rủi ro
+  do model suy ra (vừa vướng PDPL vừa vượt ranh advice).
+- Broker/order execution, position sizing cá nhân hóa, auto-trading.
 - Multi-agent cho answer chính trước khi single-agent đạt gate.
 
-## 3. Kiến trúc đích
+Code execution không bị cấm tuyệt đối: tồn tại duy nhất dạng Conditional
+Phase 11 trong sandbox, qua đúng capability/permission plane.
+
+## 6. Kiến trúc đích
 
 ```text
-Next.js client
-    │ HTTP + SSE projection
+Next.js client  (memo · verdict card · citation chip/Inspector · timeline
+    │            · question card · dossier — projection của typed contract)
+    │ HTTP + SSE
     ▼
 FastAPI transport
     ▼
-Durable Session / Turn / typed Part state          ← OpenCode spine
+Durable Session / Turn / typed Part state            ← OpenCode spine
+  (answer · thought · progress · question · claim/citation parts)
     ▼
-Agent Loop + provider recovery + bounded budgets   ← Hermes runtime discipline
+Intent Router → Lane profile (light | deep)          ← trần round/deadline/pass
+    ▼
+Agent Loop + provider recovery + bounded budgets     ← Hermes discipline
     ├── Context Engine
     ├── Resolved Capability Plane
     ├── Permission + Guardrail Plane
     ├── Tool Executor
-    │     ├── web_search
-    │     ├── fetch_url
-    │     ├── session_search
-    │     ├── remember_fact
-    │     └── recall_facts
-    └── Evidence / Claim Ledger                    ← finance upgrade
+    │     ├── web_search · fetch_url
+    │     ├── session_search · remember_fact · recall_facts
+    │     └── execute_code (sandbox)                 ← Conditional, Phase 11
+    ├── Deep-lane pipeline: research → counterevidence → verification
+    │     (verifier = hidden specialist, context sạch)
+    └── Evidence store hai tầng + Claim Ledger       ← finance core
+          ├── tầng cache sản phẩm: nội dung web công khai, share toàn hệ
+          │   thống theo canonical URL + cửa sổ as_of, retention riêng
+          └── tầng trajectory artifact: riêng tư, TTL eval/debug
            ▼
-       cited final answer
+       cited final answer (chỉ render từ ledger)
 
 Cross-cutting: observability · eval · privacy · cost · cancellation
 ```
@@ -105,343 +225,498 @@ Cross-cutting: observability · eval · privacy · cost · cancellation
 1. Client chỉ đọc product contract; không suy diễn durable state từ animation.
 2. Session/Turn không hiểu provider wire shape.
 3. Agent loop chỉ nhận resolved capabilities, không biết registry cụ thể.
-4. Mọi tool đi qua cùng schema, permission, budget, timeout, lifecycle và output
-   policy; không có đường gọi tắt.
-5. Tool result và nội dung web luôn là data không tin cậy, không phải instruction.
-6. Evidence identity, publication time và retrieval time không bị mất khi trim,
-   summary, persist hoặc render citation.
-7. Guard heuristic có thể fail-open; authorization, tenant scope, SSRF, schema
-   integrity và external side effect phải fail-closed.
-8. Operational telemetry không mặc định lưu prompt, page body, memory hay hidden
-   reasoning; trajectory giàu nội dung là artifact eval/debug có TTL riêng.
+4. Mọi tool — kể cả `execute_code` tương lai — đi qua cùng schema, permission,
+   budget, timeout, lifecycle, output policy; không có đường gọi tắt.
+5. Tool result, nội dung web, output sandbox là data không tin cậy.
+6. Evidence identity, publication time, retrieval time không bị mất khi trim,
+   summary, persist hay render.
+7. Guard heuristic được fail-open; authorization, tenant scope, SSRF, schema
+   integrity, sandbox isolation, external side effect fail-closed. Nhãn
+   "đã kiểm chứng" fail-closed; việc trả lời fail-open.
+8. Evidence store hai tầng: tầng cache sản phẩm chứa **duy nhất nội dung web
+   công khai** (share được, không dính user data); thread, giả định elicitation,
+   memo, trajectory giàu nội dung là dữ liệu riêng tư — telemetry mặc định
+   content-light, trajectory artifact có TTL/access-control riêng.
+9. Progress event map 1-1 với sự kiện thật của loop; cấm stage giả bấm giờ.
 
-## 4. Conformance Hermes + OpenCode
+## 7. Nguồn học: adopt và điều chỉnh
 
-“Dựa trên Hermes + OpenCode” nghĩa là bám đúng invariant và boundary đã chứng
-minh, không chép toàn bộ sản phẩm coding-agent vào domain chứng khoán.
+### Hermes — runtime core (nguồn học chính)
 
-| Nguồn | Adopt | Điều chỉnh cho Stock_Massive |
-|---|---|---|
-| OpenCode | Server là core, client là projection | Giữ FastAPI/SSE hiện có; không dựng server thứ hai |
-| OpenCode | Session/message/tool là typed durable state | Dùng Turn/part lifecycle của repo; chỉ thêm state thiếu cho replay/reconcile |
-| OpenCode | Một capability path cho built-in/custom/MCP | Một resolved declaration duy nhất; hiện chỉ expose tool cần cho research |
-| OpenCode | Permission `allow/ask/deny`, rule theo capability/resource | Default-deny capability lạ; không lấy default `* = allow` |
-| OpenCode | Progressive rules/skills và deterministic prune trước summary | Domain pack nhỏ, nạp theo intent; không remote instruction mặc định |
-| OpenCode | Subagent là child session có permission riêng | Conditional; deny của cha truyền xuống, global budget cho toàn cây |
-| Hermes | Imperative model↔tool loop có retry/fallback/cancel | Giữ loop nhỏ, typed và phù hợp một web research lane |
-| Hermes | Tool registry, synthetic error, stable result order | Bắt buộc one-call-one-result trên mọi failure path |
-| Hermes | Parallel-read, barrier cho call không an toàn | Web read có thể song song; side effect tương lai serialize/idempotent |
-| Hermes | Result preview/spill + budget toàn round | Prompt nhận preview có provenance; full body ở evidence store có TTL |
-| Hermes | Error taxonomy theo recovery action | Phân biệt auth, rate, overload, timeout, context, output, policy, schema |
-| Hermes | Bounded nudge và guard fail-open | Không để guard không chắc chắn làm mất câu trả lời |
-| Hermes | Context theo stable/context/volatile, usage feedback, cache | Đo token thật; không tối ưu cache bằng cách làm mất evidence |
-| Hermes | Content-light observer tách khỏi trajectory | Giữ privacy mặc định; trace giàu nội dung chỉ khi opt-in |
-| Finance | — | Claim–evidence, `as_of`, publication lag, source conflict, uncertainty và suitability boundary |
+| Adopt | Điều chỉnh |
+|---|---|
+| Imperative loop retry/fallback/cancel | Loop nhỏ, typed, theo lane profile |
+| Tool registry, synthetic error, stable order | One-call-one-result mọi failure path |
+| Parallel-read + barrier | Web read song song; side effect serialize |
+| Result preview/spill + budget round | Preview có provenance; full body ở evidence store |
+| Error taxonomy theo recovery action | auth/rate/overload/timeout/context/output/policy/schema |
+| Bounded nudge, guard fail-open | Hết budget → partial answer trung thực |
+| Context stable/scoped/volatile + usage feedback | Đo token thật; không mất evidence vì cache |
+| Content-light observer | Trace giàu nội dung chỉ opt-in |
 
-Nguồn nghiên cứu nội bộ: [`docs/hermes/README.md`](hermes/README.md),
-[`docs/opencode/README.md`](opencode/README.md) và
+Không bê: terminal coding agent, TUI, gateway đa nền tảng, 40+ shell tool,
+fallback 7 tầng. Hermes không có grader chất lượng — Phase 1 tự dựng.
+
+### OpenCode — spine và tầng advanced
+
+| Adopt | Điều chỉnh |
+|---|---|
+| Server là core, client là projection | Giữ FastAPI/SSE; không server thứ hai |
+| Typed durable session/part | Turn/part lifecycle của repo |
+| Một capability path | Một resolved declaration duy nhất |
+| Permission allow/ask/deny | Default-deny capability lạ |
+| Progressive rules/skills, prune trước summary | Domain pack nạp theo intent |
+| Hidden specialist cho tác vụ phụ nhỏ | Verifier, title, compaction — contract nhỏ đo được |
+| Sandbox code execution | Phase 11; ephemeral, không egress mặc định |
+| Subagent là child session | Phase 12; deny truyền xuống, budget toàn cây |
+
+### Finance layer — tự xây
+
+Claim–evidence ledger, `as_of`/phiên/timezone, publication lag, corporate
+action, đơn vị/tiền tệ, source conflict, uncertainty, suitability boundary.
+
+Nguồn nội bộ: [`docs/hermes/README.md`](hermes/README.md),
+[`docs/opencode/README.md`](opencode/README.md),
 [`plans/reports/research-260827-2318-hermes-vs-opencode-harness.md`](../plans/reports/research-260827-2318-hermes-vs-opencode-harness.md).
-Nguồn upstream chính: [Hermes architecture](https://hermes-agent.nousresearch.com/docs/developer-guide/architecture),
+Upstream: [Hermes architecture](https://hermes-agent.nousresearch.com/docs/developer-guide/architecture),
 [Hermes agent loop](https://hermes-agent.nousresearch.com/docs/developer-guide/agent-loop),
 [Hermes tools runtime](https://hermes-agent.nousresearch.com/docs/developer-guide/tools-runtime),
 [OpenCode tools](https://opencode.ai/docs/tools/),
-[OpenCode permissions](https://opencode.ai/docs/permissions/) và
-[OpenCode rules](https://opencode.ai/docs/rules/).
+[OpenCode permissions](https://opencode.ai/docs/permissions/),
+[OpenCode rules](https://opencode.ai/docs/rules/),
+[MCP elicitation](https://modelcontextprotocol.io/specification/draft/client/elicitation)
+(mô hình accept/decline/cancel cho question card).
 
-## 5. Baseline đang có
+## 8. Baseline đang có
 
-Các invariant sau là **Current** và phải sống qua đợt teardown:
+Invariant **Current**, mọi phase phải giữ: Turn có deadline + tool-round/
+external-call cap + spend admission; executor một result mỗi call trên mọi
+failure path; fan-out theo call order; typed recovery tách overflow/output
+cap/provider error; repetition `allow → warn → block → halt`; cancel
+idempotent, exit qua terminal owner tập trung; SSE snapshot/replay; SSRF/
+rebinding/redirect protections; untrusted result bị cap + quét injection.
+Tool catalog đúng năm capability web + memory/session. Attachment là input
+của Turn, không phải tool.
 
-- một Turn có deadline, tool-round/external-call cap và spend admission;
-- executor trả đúng một result cho mỗi call, kể cả unknown, blocked, timeout,
-  overflow và handler error;
-- read-safe calls có thể fan-out song song và result quay về theo call order;
-- provider error, context overflow và output cap có typed recovery khác nhau;
-- repetition đi theo `allow → warn → block → halt`;
-- cancel idempotent, mọi exit path settle qua terminal owner tập trung;
-- SSE snapshot/replay và subscriber isolation;
-- web fetch chặn SSRF/rebinding/redirect nguy hiểm;
-- untrusted result bị giới hạn, quét injection và không được nâng thành policy;
-- web-first golden corpus và grader cơ bản đã tồn tại.
+**Đã verify trực tiếp trong code (2026-09-01):** năm tool khai báo tại
+`toolsets.py`; `MAX_TOOL_ROUNDS = 4` và turn deadline trong `loop.py` (trở
+thành giá trị của lane light — deep lane nâng qua lane config Phase 3); ladder
+trong `guardrails.py`; snapshot/replay atomic trong `events.py`; hai cửa
+terminal `_finish`/`_finish_bare` trong `turns.py`; SSRF `is_global` + DNS
+pinning + redirect re-validation trong `tools/web.py`. Nền có sẵn cho phase
+sau: module `evidence/` (contracts, documents, numbers, validation — nền Phase
+6), endpoint flag/helpful theo message trong `flag_router.py` (nền nút "báo
+sai" Phase 7/9), golden runner `apps/api/golden/run.py` (nền Phase 1).
 
-Tool catalog hiện tại có đúng năm capability nêu trong sơ đồ trên. Attachment
-đọc-only tiếp tục là input của Turn, không phải tool và không mở lại local
-analysis runtime.
+## 9. Nguyên tắc thi công
 
-## 6. Lộ trình thực hiện
+Roadmap sở hữu quyết định và gate; nó cố tình không nói file nào, hàm nào.
+Tầng giữa roadmap và code là **phase plan**, và các luật dưới đây tồn tại để
+khi thực tế va vào roadmap thì có protocol xử lý, thay vì lật kèo ngầm.
 
-Nhãn: **Current** = có owner + test; **Target** = đã chốt, chưa đạt gate;
-**Conditional** = chỉ mở khi dependency và số đo cho phép; **Rejected** = ngoài
-scope, chỉ đảo khi có product decision mới.
+### Gate phải chạy được
 
-### R0 — Teardown Signal Desk và local analysis engine — **Current**
+Mọi gate quy được về một lệnh chạy được hoặc một metric có ngưỡng số. Gate
+không quy được là **bug của roadmap**: sửa roadmap trước khi viết code. Báo
+"không đạt" chỉ hợp lệ ở dạng *gate X, số đo Y, blocker Z* — không nhận
+"cách này không tốt" như một lý do dừng.
 
-**Outcome.** Sản phẩm chỉ còn chat/research surface. Không còn đường UI, prompt,
-tool, event hoặc background job nào có thể tạo analysis board hay đọc/tính chỉ
-báo cho agent.
+### Preflight trước khi mở phase
 
-**Work surfaces.**
+Mỗi phase mở bằng một phase plan trong `plans/` (theo naming convention của
+repo) và phải qua bốn câu:
 
-- Frontend: xóa `apps/web/src/components/signal-desk/`; tháo board card,
-  board view/menu/switcher, shell board state, `signal_desk.ready`, artifact
-  loader/export và test/fixture/e2e sở hữu chúng.
-- Agent API: bỏ `TurnMode="signal_desk"`, event/payload/absence handling và mọi
-  branch auto-compose/publish/reopen dành cho board trong `apps/api/src/agent/`.
-- Capability: xóa các tool analysis liệt kê ở §2 khỏi registry, toolsets, prompt,
-  domain pack, display metadata, budget và contract tests.
-- Analysis runtime: xóa `apps/api/src/studies/` và test/fixture chỉ sở hữu Study,
-  frame, compute, Board DSL hay artifact.
-- Data/calculation: audit consumer rồi xóa `apps/api/src/stocks/signals/`, daily
-  backfill/scheduler/config và schema/model chỉ còn phục vụ indicator/Study.
-- Persistence: dừng mọi write artifact trước; backup database rồi dùng migration
-  riêng để retire schema/data khi đã chốt retention. Không drop dữ liệu trong
-  cùng thay đổi với code-path teardown.
-- Docs/eval: bỏ Signal Desk khỏi contract/golden navigation; giữ research cũ
-  ngoài authority path nếu còn giá trị lịch sử.
+1. Mỗi gate của phase đã có lệnh/test/metric chạy được chưa?
+2. Mọi thứ phase này giả định phase trước để lại đã **verify trong code
+   thật** chưa — không tin nhãn Done suông?
+3. Unknown discoverable → scout ngay trong lúc plan; unknown không
+   discoverable → ghi thành named assumption kèm fallback ("nếu sai thì làm
+   gì").
+4. Đường lùi nếu giữa phase phải dừng là gì?
 
-**Kết quả.** Production path, contract và test hiện chỉ còn chat/research với
-năm tool web + memory/session. Signal Desk, Study, board artifact, local
-indicator/calculation và scheduler/backfill đã rời executable surface. Các bảng
-hoặc cột lịch sử chưa bị drop trong thay đổi này: retirement dữ liệu cần một
-quyết định retention, backup và migration riêng.
+Trượt câu nào → phase chưa ready: sửa plan, không lao vào code.
 
-**Gate đã đạt.**
+### Luật phản biện quyết định
 
-- `rg` trên production code không còn `signal_desk`, Study/Board DSL và tên tool
-  analysis đã retire, ngoài migration/history được ghi chú rõ;
-- tool catalog runtime chỉ expose web + memory/session capabilities đã duyệt;
-- app chat, restore thread, stream answer, source list, cancel và reconnect xanh;
-- API/web lint, typecheck, focused tests và build xanh;
-- không còn scheduler gọi pipeline đã xóa; schema retirement được theo dõi như
-  quyết định migration độc lập, không phải điều kiện mở R1.
+Quyết định đã ghi trong roadmap kèm căn cứ **chỉ được thách thức bằng bằng
+chứng mới** — thực tế code, số đo, hành vi provider — không bằng lo ngại trừu
+tượng hay khẩu vị. Thách thức = dừng, viết deviation report (quyết định gốc →
+bằng chứng mới → trade-off → các phương án) vào `plans/reports/`, chờ product
+owner quyết. Không bao giờ tự đảo rồi báo sau. Roadmap giữ thẩm quyền bằng
+cách được **amend tường minh**, không phải bằng cách bất biến hay bị bypass.
 
-### R1 — Evaluation contract cho câu trả lời đích — **Target**
+### Cửa một chiều và hai chiều
 
-**Outcome.** Chất lượng kiểu `text.md` trở thành corpus và rubric chạy được,
-không còn là cảm giác khi đọc demo.
+- **Hai chiều** (đổi rẻ — agent được đề xuất và điều chỉnh trong phạm vi
+  phase): hình dạng field của part, giá trị lane config, ngưỡng budget, cấu
+  trúc module nội bộ, copy UI.
+- **Một chiều** (dừng và chờ người quyết, bất kể phase): public HTTP/SSE
+  contract, drop/migrate dữ liệu, ranh giới pháp lý research/advice, default
+  permission, thêm capability ngoài catalog, thay đổi hợp đồng sự thật §2.
+
+## 10. Lộ trình theo phase — triển khai tuần tự
+
+Nhãn: **Done** / **Target** / **Conditional**. Phase sau chỉ mở khi gate
+phase trước xanh. Mỗi phase giữ chat UI hiện có xanh (client là projection —
+contract đổi tới đâu, projection theo tới đó, không gộp UI lớn vào phase
+backend).
+
+### Khả năng mở khóa theo phase
+
+Bảng quản trị tính năng: gate phase nào xanh thì AI/hệ thống có thêm đúng
+những gì — không có khả năng nào xuất hiện ngoài bảng này.
+
+| Phase xanh | AI/hệ thống có thêm |
+|---|---|
+| P0 (done) | Agent chat web-research 5 tool, trả lời có nguồn cơ bản trên surface sạch |
+| P1 | Chưa thêm tính năng user-facing — thêm khả năng **biết mình sai ở đâu**: bảng điểm chất lượng chạy một lệnh; mọi thay đổi sau đều có số đo trước/sau |
+| P2 | Quản trị catalog tính năng bằng declaration: thêm/gỡ/bật/tắt một capability qua đúng một khai báo + permission, không sửa code rải rác |
+| P3 | Turn bền và trung thực: phục hồi lỗi provider theo loại, tiến trình thật hiển thị realtime, contract question card sẵn sàng, khung lane light/deep |
+| P4 | Hội thoại dài không xuống cấp: dossier nhiều memo vẫn giữ intent, citation, evidence — điều kiện cho user dùng lâu dài |
+| P5 | Được phép tăng tự chủ an toàn: fan-out research rộng hơn mà injection/SSRF/permission đã có adversarial suite chặn lưng |
+| P6 | **Khả năng lõi của sản phẩm:** deep memo 3-pass — stress-test luận điểm, memo sự kiện, kiểm số, phân xử nguồn; claim đã verify, citation thật, biết từ chối |
+| P7 | User nhìn thấy và thao tác được mọi thứ: verdict card, evidence card, timeline ba hồi, question card, dossier/watch item, nút báo sai |
+| P8 | Agent nhớ có consent: hồ sơ giả định opt-in (không hỏi lại điều đã khai), domain knowledge nạp theo intent |
+| P9 | Quản trị release: dashboard chất lượng/chi phí per outcome, sampling audit, kill switch + rollback cho từng capability và prompt |
+| P10 | Chịu tải đông user: evidence cache dùng chung, coalescing câu hỏi nóng, queue giờ cao điểm, tenant envelope cho B2B |
+| P11 | Agent tự viết + chạy tính toán định lượng trong sandbox; số agent tính có provenance, phân biệt với số trích nguồn |
+| P12 | Ủy quyền có kiểm soát: subagent/MCP/side-effect trong boundary cha, budget toàn cây |
+
+### Phase 0 — Teardown Signal Desk và local analysis — **Done**
+
+Production path chỉ còn chat/research với năm tool web + memory/session.
+Schema/data lịch sử chưa drop: retirement là quyết định migration riêng,
+không chặn Phase 1.
+
+### Phase 1 — Evaluation contract — **Target, next**
+
+**Outcome.** §2 và §3 thành corpus + grader chạy được, nhiều trial là mặc
+định (chính sách chi phí §4 đã mở khóa). Mở rộng nền `apps/api/golden` hiện
+có (`run.py` + `grade.py` + `web_first.json`), không dựng framework mới.
 
 **Checklist.**
 
-- Viết case family cho fact lookup, diễn biến tuần, outlook/horizon, event impact,
-  support/resistance từ nguồn công khai, source conflict, thiếu dữ liệu và câu
-  hỏi có tính khuyến nghị.
-- Mỗi case đóng băng query, page snapshot, publication/retrieval time, accepted
-  outcome properties và known traps; không đóng băng một tool trajectory duy nhất.
-- Deterministic graders chấm settlement, citation URL, evidence identity,
-  material numeric claim, temporal validity, refusal/policy và budget.
-- Rubric judge chấm synthesis, cấu trúc theo intent, counterargument, uncertainty
-  và decision utility; judge không chấm con số backend kiểm được.
-- Artifact ghi code SHA, prompt/tool/model/config/data versions và trial count.
+- Case family theo bốn job §1: thesis-check (tách tiền đề, verdict ba trạng
+  thái, phản chứng), event memo, fact verification, source conflict; cộng
+  fact lookup, diễn biến tuần, outlook, thiếu dữ liệu, câu khuyến nghị.
+- Family **elicitation quality**: chấm cả over-ask (hỏi thứ discoverable, hỏi
+  không rẽ nhánh kết luận) lẫn under-ask (âm thầm giả định sai điều trọng yếu).
+- Family **material-claim accuracy** có ground truth đóng băng — nơi con số
+  "% đúng" được sinh ra một cách trung thực.
+- Mỗi case đóng băng query, page snapshot, publication/retrieval time,
+  accepted outcome properties, known traps; không đóng băng một trajectory;
+  không transcript mẫu nào là golden answer.
+- Deterministic graders: settlement, citation URL, evidence identity, material
+  numeric claim, temporal validity, refusal/policy, budget, nhãn đa nguồn.
+- Rubric judge: synthesis, cấu trúc theo intent, chất lượng phản biện,
+  uncertainty, decision utility; judge không chấm số backend kiểm được.
+- Artifact ghi code SHA, prompt/tool/model/config/data versions, trial count.
 
-**Gate.** Hard dimensions phải đạt 100% trên corpus release: terminal settlement,
-không citation giả, không claim số trọng yếu thiếu evidence, không dùng nguồn sau
-`as_of`, không vượt permission/suitability. Threshold trade-off cho quality,
-latency và cost chỉ khóa sau khi có baseline nhiều trial.
+**Gate.** Toàn corpus chạy bằng **một lệnh**, artifact in pass/fail theo từng
+dimension; run nửa xanh là `incomplete`. Hard dimensions 100% trên corpus
+release: terminal settlement, 0 citation giả, 0 claim số trọng yếu thiếu
+evidence, 0 nguồn sau `as_of`, 0 vượt permission/suitability. Baseline nhiều
+trial có confidence interval trước khi khóa threshold quality/latency/cost.
 
-### R2 — Unified Capability Plane — **Target**
+### Phase 2 — Unified Capability Plane — **Target**
 
-**Outcome.** Một declaration duy nhất quyết định model thấy tool nào và tool đó
-được parse, authorize, budget, execute, trace, trim và hiển thị ra sao.
+**Outcome.** Một declaration duy nhất quyết định model thấy tool nào và tool
+được parse, authorize, budget, execute, trace, trim, hiển thị ra sao.
 
-Resolved capability phải sở hữu: name/version, schema, description, availability,
+Resolved capability sở hữu: name/version, schema, description, availability,
 handler, read/write effect, trust/data class, permission rule, idempotency,
-concurrency/barrier, timeout/cost, output policy và display metadata.
+concurrency/barrier, timeout/cost, output policy, display metadata. Đây là
+điều kiện để Phase 11/12 thêm capability không tạo dispatch path thứ hai.
 
-**Gate.** Thêm hoặc bỏ một tool không cần sửa bảng tên song song; schema model
-nhận đúng schema executor validate; unknown/invalid/denied/timeout/handler error
-đều settle một typed result; read-safe parallelism giữ stable emission order.
+**Gate.** Chứng minh bằng contract test: thêm một tool thử nghiệm trong test
+suite chỉ cần đúng một declaration — executor, prompt schema, trace, budget,
+display đọc cùng nguồn; schema model = schema executor; unknown/invalid/
+denied/timeout/handler error settle một typed result; parallelism giữ stable
+order.
 
-### R3 — Durable Agent Loop và provider recovery — **Target**
+### Phase 3 — Durable loop, lane và progress thật — **Target**
 
-**Outcome.** Loop bám semantics Hermes nhưng state bám session/typed-part của
-OpenCode: model có thể sai, provider có thể lỗi, client có thể disconnect, nhưng
-Turn luôn phục hồi có giới hạn hoặc kết thúc có lý do cụ thể.
-
-**Checklist.**
-
-- Chuẩn hóa lifecycle `pending → running → completed|error|denied|cancelled` cho
-  model attempt và tool call; persist intent trước execute khi cần reconcile.
-- Không tin `finish_reason` một mình: còn tool call chưa settle thì loop xử lý
-  protocol trước khi stop.
-- Error taxonomy map một-một sang bounded action: retry+jitter, wait, alternate
-  route, context reduction, output-reserve reduction, nudge hoặc fail-closed.
-- Bounded nudge cho malformed/empty/no-synthesis; hết budget trả partial answer
-  trung thực kèm concrete blocker thay vì trắng màn hình.
-- Cancellation truyền xuống model/tool; terminal write idempotent; orphan read
-  call được reconcile, không tuyên bố exactly-once nếu chưa có idempotency.
-- Mọi retry/child tương lai tiêu cùng deadline và cost envelope, không được cấp
-  allowance mới.
-
-**Gate.** Fault-injection cho timeout, rate limit, malformed call, empty output,
-context overflow, output cap, cancel và disconnect đều settle đúng; 0 orphan
-tool state; 0 duplicate external effect; semantic recovery pass golden cases.
-
-### R4 — Context Engine — **Target**
-
-**Outcome.** Model nhận đúng context cần cho step hiện tại, không phải toàn bộ
-lịch sử và toàn bộ knowledge trên mọi request.
+**Outcome.** Loop semantics Hermes trên state OpenCode; Turn phục hồi có giới
+hạn hoặc kết thúc có lý do; tiến trình hiển thị là sự thật.
 
 **Checklist.**
 
-- Tách `stable` (identity/policy/tool protocol), `scoped` (intent/domain rules),
-  `transcript/evidence` và `volatile` (time/user/Turn state).
-- Ghi usage token thật từ provider để hiệu chỉnh estimate và quyết định overflow.
-- Prune deterministic trước lossy summary: dedup source/snippet, collapse old
-  result thành evidence handle, giữ recent intent và call/result pair.
-- Summary có provenance, protected tail, cooldown/anti-thrash và recovery search;
-  lỗi summary fail-open về context hợp lệ gần nhất.
-- Đặt cache boundary theo prefix ổn định nếu route probe chứng minh hỗ trợ; đo
-  cache read/write thay vì suy từ config.
-- Nạp finance playbook/skill body theo intent hoặc tool path, không nhét toàn bộ
-  domain vào mọi Turn.
+- Lifecycle `pending → running → completed|error|denied|cancelled` cho model
+  attempt và tool call; persist intent trước execute khi cần reconcile.
+- **Lane profile:** intent router chọn `light` (hội thoại, trần thấp, không
+  pass phụ) hay `deep` (memo, trần round/deadline hào phóng, bật pipeline
+  3-pass ở Phase 6). Trần là config theo lane, không hard-code một cỡ —
+  `MAX_TOOL_ROUNDS = 4` hiện tại trong `loop.py` trở thành giá trị lane light.
+- Không tin `finish_reason` một mình; error taxonomy map bounded action;
+  bounded nudge; hết budget trả partial answer kèm concrete blocker.
+- **Progress part typed:** mỗi event mang nội dung thật (query nguyên văn,
+  domain, số nguồn, bước pipeline); map 1-1 sự kiện loop; persist trong
+  transcript làm audit trail; SSE replay vẽ lại đúng timeline sau reconnect.
+- **Question part typed** (§1): options như dữ liệu; ba trạng thái
+  `answered|skipped|superseded` persist; cờ `multi_select` trong schema.
+- Cancellation truyền xuống model/tool; terminal write idempotent; retry/
+  specialist tiêu cùng deadline và cost envelope của Turn.
 
-**Gate.** Replay corpus giữ nguyên task success, cited evidence và user intent;
-input token/cost giảm có confidence interval; context overflow hội tụ trong
-bounded attempts; không tách tool call khỏi result.
+**Gate.** Fault-injection (timeout, rate limit, malformed, empty, context
+overflow, output cap, cancel, disconnect) settle đúng; 0 orphan tool state;
+0 duplicate external effect; replay timeline nhất quán sau disconnect; question
+card ba trạng thái sống qua replay.
 
-### R5 — Permission, guardrails và web security — **Target**
+### Phase 4 — Context Engine — **Target**
 
-**Outcome.** Capability được phép vì policy typed, không vì model tự khai hoặc
-tool/server tự gắn nhãn an toàn.
+**Outcome.** Model nhận đúng context cho step hiện tại. Mục tiêu là **chất
+lượng suy luận** (context dài làm model xuống cấp), tiết kiệm token là phụ
+phẩm.
 
-**Checklist.**
+**Checklist.** Tách stable/scoped/transcript-evidence/volatile; usage token
+thật từ provider; prune deterministic trước lossy summary (dedup snippet,
+collapse old result thành evidence handle, giữ recent intent + call/result
+pair); summary có provenance, protected tail, cooldown, recovery search, lỗi
+summary fail-open về context hợp lệ gần nhất; cache boundary theo prefix ổn
+định nếu route probe chứng minh; finance playbook nạp theo intent.
 
-- Permission rule `allow|ask|deny` theo capability/resource; no-match và unknown
-  mặc định deny. `ask` chỉ tồn tại khi thật sự có side effect cần consent.
-- Permission, approval, kill switch, sandbox và authorization là bốn cơ chế
-  khác nhau; không dùng cái này thay cái kia.
-- Giữ SSRF/DNS/redirect protections; thêm egress/domain policy và page-size/time
-  budget trên mọi fetch path.
-- Scan injection là risk signal không lọt vào model text; web/tool content không
-  thể sửa policy, tool args, memory hoặc system instructions.
-- Guard loop theo exact failure/same-tool/no-progress; warn sớm, halt theo budget;
-  scanner/metrics lỗi không được làm mất answer.
-- Auth, tenant/data scope, schema validator và side effect fail-closed; mất kênh
-  approval không bao giờ auto-approve.
+**Gate.** Replay corpus giữ task success, cited evidence, user intent; overflow
+hội tụ bounded; không tách call khỏi result; evidence từ Turn trước (scout của
+elicitation) dùng lại được ở Turn sau không refetch.
 
-**Gate.** Adversarial suite phủ indirect injection, encoded/bidi payload, SSRF,
-redirect, oversized result, permission bypass, repeated calls và secret leakage;
-0 privilege escalation, 0 raw secret trong trace, benign corpus không bị block
-quá threshold đã khóa từ baseline.
+### Phase 5 — Permission, guardrails, web security — **Target**
 
-### R6 — Web Research + Finance Evidence — **Target**
-
-**Outcome.** Agent đạt chất lượng trả lời đích chỉ bằng web research, tool loop
-và reasoning của model; không cần indicator/store/Study engine.
+**Outcome.** Capability được phép vì policy typed.
 
 **Checklist.**
 
-- Planner tạo các query độc lập theo giá/diễn biến, sự kiện, doanh nghiệp/ngành
-  và phản biện; executor fan-out search rồi fetch các trang đủ để kết luận.
-- Source policy phân biệt primary filing/company/exchange, báo chí, aggregator
-  và snippet; ranking/relevance không bị gọi nhầm là publisher trust.
-- Evidence ledger giữ URL canonical, publisher, title, publication/retrieval
-  time, quoted span/hash, entity/symbol, period, unit và source conflict.
-- Claim ledger nối từng claim trọng yếu với evidence IDs; citation renderer chỉ
-  render từ ledger, không nhận URL model tự gõ.
-- Finance temporal rules xử lý `as_of`, phiên giao dịch, timezone, kỳ báo cáo,
-  corporate action, đơn vị/tiền tệ và publication lag.
-- Prompt dạy model phân biệt fact, inference và scenario; không biến headline,
-  analyst target hay technical level của một nguồn thành certainty.
-- Khi người dùng hỏi “có nên mua”, thiếu horizon/risk context thì vẫn được phân
-  tích nhưng phải nói rõ giả định và không giả personalization.
+- Rule `allow|ask|deny` theo capability/resource; no-match/unknown = deny;
+  `ask` chỉ khi có side effect thật.
+- Permission, approval, kill switch, sandbox, authorization là các cơ chế
+  khác nhau.
+- Giữ SSRF/DNS/redirect; page-size/time budget mọi fetch path; **egress
+  budget hai tầng: per-Turn và fleet-wide per-domain** (toàn hệ thống chỉ đọc
+  một trang một lần mỗi cửa sổ — điều kiện sống còn khi đông user, thiết kế
+  từ bây giờ, enforce đủ ở Phase 10).
+- Injection scan là risk signal ngoài model text; web/tool content không sửa
+  được policy, args, memory, system instructions.
+- Guard loop exact-failure/same-tool/no-progress; scanner lỗi không làm mất
+  answer. Auth, tenant scope, schema, side effect fail-closed.
 
-**Gate.** Golden web-first đạt hard gates R1; source conflict và missing evidence
-được nói thẳng; citation mở đúng trang hỗ trợ claim; answer usefulness đạt bar
-đã baseline; không có import/runtime dependency vào local signal/calculation
-engine.
+**Gate.** Adversarial suite: indirect injection, encoded/bidi, SSRF, redirect,
+oversized, permission bypass, repeated calls, secret leakage — 0 escalation,
+0 raw secret trong trace; benign corpus không bị block quá threshold baseline.
 
-### R7 — Memory và progressive domain knowledge — **Target**
+### Phase 6 — Evidence engine: research 3-pass + finance evidence — **Target**
 
-**Outcome.** Agent nhớ điều hữu ích mà không biến memory thành instruction có
-đặc quyền hoặc nguồn dữ kiện thị trường.
+**Outcome.** Deep lane đạt hợp đồng sự thật §2 chỉ bằng web research, tool
+loop và reasoning; không indicator/store/Study engine.
+
+**Checklist.**
+
+- Planner tạo query độc lập theo giá/diễn biến, sự kiện, doanh nghiệp/ngành
+  và **phản biện**; executor fan-out search rồi fetch đủ để kết luận.
+- **Pipeline 3-pass của deep lane:** research (draft claim) → counterevidence
+  (một lượt chuyên tấn công draft, sinh mục "điều gì vô hiệu hóa luận điểm")
+  → verification (verifier context sạch đối chiếu từng claim với quoted span;
+  chính sách fail của §2). Mỗi pass phát progress part thật.
+- Source policy VN: primary (CBTT HOSE/HNX, SSC, VSDC, IR) > báo chí >
+  aggregator > snippet; risk class ToS per nguồn; **luật đa nguồn** §2;
+  ranking không phải publisher trust.
+- Evidence store hai tầng (§6): cache sản phẩm theo canonical URL + cửa sổ
+  `as_of` (retention khóa khi phase bắt đầu); trajectory artifact TTL riêng.
+- Claim ledger nối claim ↔ evidence IDs + trạng thái verify; citation renderer
+  chỉ render từ ledger.
+- Finance temporal rules: `as_of`, phiên, timezone, kỳ báo cáo, corporate
+  action, đơn vị/tiền tệ, publication lag.
+- Elicitation policy §1 chạy trong planner: quyết định hỏi trước khi kết luận,
+  scout-then-ask, budget cứng backend.
+- Prompt theo §3; câu "có nên mua" thiếu context → phân tích với giả định in
+  rõ, không giả personalization.
+
+**Gate.** Golden Phase 1 đạt hard gates; elicitation family đạt (0 câu hỏi
+discoverable, 0 câu không rẽ nhánh trên corpus); conflict/missing nói thẳng;
+citation mở đúng trang; material-claim accuracy có baseline nhiều trial;
+điểm rubric judge ≥ ngưỡng đã khóa từ baseline Phase 1; 0 import local
+signal engine.
+
+### Phase 7 — Evidence Desk UX — **Target**
+
+**Outcome.** Client render đầy đủ hình dạng sản phẩm §1 từ typed contract —
+không suy diễn từ text.
+
+**Checklist.**
+
+- Memo layout: verdict tổng + `as_of` banner → verdict card ba trạng thái
+  từng tiền đề → rubric §3 → phản chứng/vô hiệu hóa → watch items → footer
+  "N nguồn · M claim · K không kiểm chứng được".
+- Citation chip inline → Inspector nâng cấp thành evidence card (quoted span
+  highlight, publisher, hai mốc thời gian, link, conflict note, nhãn
+  inference/single-source).
+- **Timeline ba hồi** live khi chạy (research → phản biện → kiểm chứng), gập
+  được, persist thành audit trail sau khi memo ra; reconnect vẽ lại đúng điểm.
+- v1: memo render sau verification; nâng cấp chip-flip ("đang kiểm ⏳" → ▸①)
+  là option sau, có gate riêng, không nợ ngầm.
+- Question card: single-select + skip; `superseded` khi user gõ composer;
+  card đã trả lời render đúng trạng thái khi replay.
+- Trạng thái "không đủ bằng chứng" có thiết kế riêng: nói đã tìm gì, thiếu gì,
+  gợi ý bước tiếp — không phải error state.
+- Nút **"báo sai"** trên từng claim — backend flag/helpful theo message đã
+  tồn tại (`flag_router.py`); phase này nối UI xuống mức claim, pipeline
+  triage ở Phase 9.
+- Dossier: thread theo `symbols[]`, watch item bấm chạy lại và memo mới đối
+  chiếu memo cũ.
+
+**Gate.** E2E: hỏi → (question card → chọn/skip/supersede) → timeline live →
+memo đầy đủ object §1 → bóc evidence card → F5 giữa chừng không mất gì →
+cancel sạch. Web lint/type-check/test/build xanh; mọi phần tử memo đều truy
+được từ typed part, không parse markdown.
+
+### Phase 8 — Memory, hồ sơ giả định và domain knowledge — **Target**
+
+**Outcome.** Agent nhớ điều hữu ích; memory không thành instruction đặc quyền
+hay nguồn dữ kiện thị trường; tuân thủ PDPL 2025 (hiệu lực 01/01/2026 — dữ
+liệu tài chính cá nhân là nhạy cảm, consent theo mục đích, rút dễ như cho).
+
+**Checklist.**
 
 - Session search và cross-session memory chỉ qua tool có schema.
-- Tách user preference/profile khỏi market evidence và system policy.
-- Memory có provenance, owner, scope, created/updated time, expiry và delete path.
-- Recall xung đột với evidence mới phải bị hạ ưu tiên và nêu mâu thuẫn.
-- Domain catalog nhỏ được cache; body chi tiết nạp theo intent.
-- Auto-write, self-editing skill và memory-to-system-prompt vẫn Rejected.
+- **Hồ sơ giả định hai giai đoạn:** trước phase này, câu trả lời elicitation
+  chỉ sống trong thread. Phase này mở **opt-in per-purpose**: chỉ lưu giả
+  định user tự khai (horizon, vùng giá vốn theo mã, mục đích); panel xem–sửa–
+  xóa từng mục; expiry ~90 ngày rồi hỏi xác nhận lại; mỗi recall hiển thị
+  banner trên memo kèm nút cập nhật. Cấm vĩnh viễn hồ sơ model tự suy.
+- Memory có provenance, owner, scope, created/updated, expiry, delete path;
+  recall xung đột evidence mới bị hạ ưu tiên và nêu mâu thuẫn.
+- Domain catalog nhỏ cache; body nạp theo intent. Auto-write, self-editing
+  skill, memory-to-system-prompt: Rejected.
 
-**Gate.** Memory isolation, delete, stale-conflict và injection tests xanh;
-recall tăng task success trên replay mà không tăng unsupported-claim rate.
+**Gate.** Isolation/delete/stale-conflict/injection tests xanh; recall tăng
+task success trên replay không tăng unsupported-claim rate; consent flow
+chứng minh được (audit trail đồng ý/rút).
 
-### R8 — Observability, cost và release gate — **Target**
+### Phase 9 — Observability, cost và release gate — **Target**
 
-**Outcome.** Có thể trả lời “agent đã làm gì, tại sao answer này tồn tại, lỗi ở
-đâu và tốn bao nhiêu” mà không lưu chain-of-thought.
+**Outcome.** Trả lời được "agent làm gì, answer này vì sao tồn tại, lỗi đâu,
+tốn bao nhiêu" không cần lưu chain-of-thought; số §2 thành số giám sát liên
+tục.
 
-- Trace hierarchy: Turn → model attempt → context composition → tool lifecycle →
-  evidence/claim → terminal outcome.
+**Checklist.**
+
+- Trace hierarchy: Turn → attempt → context composition → tool lifecycle →
+  pass pipeline → evidence/claim → terminal outcome.
 - Metric có denominator: success/incomplete/refused/cancelled, tool selection,
-  invalid args, useful result, recovery, evidence coverage, latency/token/data
-  cost per successful outcome và reconnect consistency.
-- Content-light telemetry mặc định; trajectory sample được redact, access-control,
-  TTL và delete.
-- Prompt/tool/context/model/provider changes chạy affected golden/adversarial
-  replay; loop/permission changes thêm fault-injection.
-- Rollback/kill switch tồn tại cho capability và prompt release.
+  invalid args, recovery, evidence coverage, verify pass/fail rate,
+  elicitation ask/skip/supersede rate, latency/token/data cost per successful
+  outcome, reconnect consistency.
+- **Vòng lỗi production:** nút "báo sai" (mở rộng endpoint flag hiện có) →
+  hàng đợi triage → sampling audit người review định kỳ → lỗi xác nhận thành
+  case corpus Phase 1.
+- Content-light mặc định; trajectory sample redact + access-control + TTL.
+- Mọi thay đổi prompt/tool/context/model/provider chạy affected golden +
+  adversarial replay; loop/permission thêm fault-injection; rollback/kill
+  switch cho capability và prompt release.
 
-**Gate.** Mỗi release artifact tái tạo được; hard-dimension regression fail
-closed; dashboard/trace không cần prompt body vẫn xác định được typed cause và
-owner; cost được báo trên successful outcome, không trên raw Turn count.
+**Gate.** Release artifact tái tạo được; hard-dimension regression fail
+closed; trace không cần prompt body vẫn ra typed cause + owner; cost báo trên
+successful outcome — sẵn sàng làm đầu vào định giá B2C/B2B.
 
-### R9 — Delegation, MCP và side-effect tools — **Conditional**
+### Phase 10 — Scale-out — **Conditional (theo usage, không theo eval)**
 
-Chỉ mở sau R1–R8 khi một workload độc lập chứng minh single-agent không đủ.
+Mở khi usage thật chạm ngưỡng (đề xuất: >1k MAU hoặc fetch per-domain chạm
+trần lễ độ). Không mở sớm.
 
-- Child là durable child session, fresh context, output schema fail-closed.
-- Deny/data boundary của parent truyền xuống; child không tự nhận memory, secret,
-  write tool hoặc quyền delegate tiếp.
-- Depth, concurrency, total token/cost/deadline và cancellation bound toàn cây.
-- MCP mặc định untrusted, allowlist capability, validate server/tool contract;
-  server annotation không phải authorization.
-- Side effect cần idempotency/reconcile và approval riêng.
+- **Shared evidence cache** thành hạ tầng chính thức: request coalescing câu
+  hỏi nóng (user đầu trả giá đầy đủ, người sau hit cache tầng evidence — memo
+  và giả định cá nhân không bao giờ share); nhất quán as_of giữa user cùng
+  cửa sổ.
+- Fleet-wide per-domain budget (thiết kế từ Phase 5) enforce đầy đủ.
+- Queue admission giờ cao điểm (phiên sáng, ngày sập, mùa KQKD) với progress
+  trung thực; SSE fan-out qua Redis pub/sub; tenant envelope cho B2B.
+- Nhân bản thị trường mới = thay ba module đã cô lập: source policy, temporal
+  rules, eval corpus. Harness không đổi.
 
-**Gate.** Delegation uplift vượt overhead trên cùng corpus nhiều trial; 0 permission
-escalation, orphan child và budget escape. Không đạt thì giữ single-agent và ghi
-Rejected cho workload đó.
+**Gate.** Load test burst 10x không rơi Turn; cache hit không bao giờ trả
+evidence quá cửa sổ as_of; 0 rò rỉ dữ liệu riêng tư qua tầng cache; per-domain
+politeness giữ được ở concurrency mục tiêu.
 
-## 7. Dependency và thứ tự
+### Phase 11 — Agent compute: code execution sandbox — **Conditional**
+
+Mở sau Phase 1–9 khi eval chứng minh một họ câu hỏi định lượng fail vì model
+arithmetic (tăng trưởng nhiều kỳ, so sánh ngành, scenario math, thống kê chuỗi
+từ nguồn đã trích).
+
+- Sandbox ephemeral khuôn OpenCode: process cô lập, filesystem tạm, không
+  network egress mặc định; runtime (container/microVM/WASM) chọn khi mở.
+- `execute_code` qua đúng plane Phase 2: schema, permission, timeout, output
+  cap, budget, lifecycle như mọi tool.
+- Input duy nhất: evidence/attachment có provenance trong Turn; không store
+  nội bộ, không catalog chỉ báo, không scheduler — không phải restore Signal
+  Desk/Study.
+- Kết quả là **derived computation** trong claim ledger: nối evidence input +
+  code/version; renderer phân biệt số agent tính với số trích nguồn.
+- Code và stdout/stderr là untrusted; kill switch riêng; sandbox fail →
+  fail-closed về đường web-first, không mất answer.
+
+**Gate.** Golden định lượng tăng accuracy vs baseline model-arithmetic có ý
+nghĩa thống kê nhiều trial; 0 sandbox escape/egress ngoài policy/escalation;
+cost/latency per successful outcome trong envelope; rollback diễn tập. Không
+đạt → Rejected cho workload đó.
+
+### Phase 12 — Delegation, MCP, side-effect tools — **Conditional**
+
+Mở khi một workload độc lập chứng minh single-agent không đủ.
+
+- Child = durable child session, fresh context, output schema fail-closed;
+  deny/data boundary cha truyền xuống; không tự nhận memory/secret/write
+  tool/quyền delegate tiếp.
+- Depth, concurrency, token/cost/deadline, cancellation bound toàn cây.
+- MCP mặc định untrusted, allowlist capability, validate contract; annotation
+  không phải authorization. Side effect cần idempotency/reconcile + approval.
+
+**Gate.** Uplift vượt overhead cùng corpus nhiều trial; 0 escalation, 0 orphan
+child, 0 budget escape. Không đạt → single-agent + Rejected.
+
+## 11. Dependency
 
 ```text
-R0 teardown
-   ▼
-R1 eval contract  ◀ next
-   ▼
-R2 capability plane ─▶ R3 durable loop
-                         ├─▶ R4 context
-                         ├─▶ R5 guardrails
-                         └─▶ R6 web + finance evidence
-                               ▼
-                         R7 memory/domain
-                               ▼
-                         R8 release gate
-                               ▼
-                         R9 conditional expansion
+P0 done → P1 eval ◀ next → P2 capability → P3 loop/lane/progress
+        → P4 context → P5 security → P6 evidence engine → P7 desk UX
+        → P8 memory/consent → P9 observability/release
+                                   │
+              ┌────────────────────┼──────────────────────┐
+              ▼ (theo usage)       ▼ (theo eval)          ▼ (theo workload)
+        P10 scale-out        P11 compute sandbox    P12 delegation/MCP
 ```
 
-Observability và eval instrumentation được thêm trong từng phase; R8 hợp nhất
-chúng thành release authority, không đợi đến cuối mới bắt đầu đo.
+Tuần tự P1→P9 là bắt buộc; P10/P11/P12 độc lập nhau, mỗi cái có trigger
+riêng, đều đứng trên plane P2 và permission P5. Eval/observability
+instrumentation thêm trong từng phase; P9 hợp nhất thành release authority.
 
-## 8. Definition of Done toàn roadmap
+## 12. Definition of Done
 
-Pivot hoàn tất khi:
+**Evidence Desk hoàn tất (P0–P9) khi:**
 
-1. Không còn Signal Desk/Study/indicator/calculation path trong product runtime.
-2. Chat UI là một client mỏng của durable Turn/SSE contract.
-3. Mọi tool đi qua unified capability, permission, budget và lifecycle plane.
-4. Loop phục hồi typed, bounded và không trả màn hình trắng.
-5. Context dài giữ intent, evidence và protocol với cost đo được.
-6. Web content không thể nâng quyền; mọi hard security boundary fail-closed.
-7. Câu trả lời tài chính đạt hard evidence/temporal gates và rubric trải nghiệm
-   lấy từ `text.md`.
-8. Mọi thay đổi prompt/tool/model/context có replay artifact, cost và rollback.
+1. Không còn Signal Desk/Study/indicator path trong product runtime.
+2. Chat UI là projection mỏng của durable Turn/typed-part contract; mọi
+   object §1 render từ part, không parse text.
+3. Mọi tool qua unified capability/permission/budget/lifecycle plane.
+4. Loop phục hồi typed, bounded, không màn hình trắng; progress là sự thật.
+5. Context dài giữ intent, evidence, protocol; suy luận không xuống cấp đo
+   được trên replay.
+6. Web content không nâng được quyền; hard boundary fail-closed.
+7. Hợp đồng sự thật §2 đạt: fabrication 0% cơ học, disclosure 100%,
+   material-claim accuracy có số đo nhiều trial, refusal là outcome hạng nhất.
+8. Elicitation đúng kỷ luật §1 trên corpus; consent hồ sơ giả định đúng PDPL.
+9. Mọi thay đổi prompt/tool/model/context có replay artifact, cost, rollback.
 
-## 9. Câu hỏi cần khóa khi phase tương ứng bắt đầu
+**AI Agent for Investment đầy đủ thêm:** P10/P11/P12 hoặc mở với gate xanh,
+hoặc ghi Rejected kèm số đo — không có capability "mở một nửa" ngoài plane.
 
-1. Dữ liệu artifact/signal lịch sử giữ bao lâu trước migration retire schema?
-2. Memory cross-session mặc định opt-in hay opt-out?
-3. “Investment research” hay “personalized advice” là legal/product boundary
-   chính thức của output?
-4. Ai sở hữu human review cho finance correctness và suitability cases?
+## 13. Câu hỏi cần khóa khi phase tương ứng bắt đầu
+
+1. (P0-di sản) Dữ liệu artifact/signal lịch sử giữ bao lâu trước migration
+   retire schema?
+2. (P6) Retention và cửa sổ as_of của tầng evidence cache sản phẩm: con số
+   cụ thể theo loại nguồn (giá EOD, bài báo, filing)?
+3. (P7) "Investment research" vs "personalized advice": ranh giới legal chính
+   thức của copy và disclaimer trên memo?
+4. (P9) Ai sở hữu sampling audit finance correctness — founder, cộng tác viên
+   chuyên môn, hay thuê ngoài định kỳ?
+5. (P11) Sandbox runtime nào (container/microVM/WASM) và ai vận hành isolation
+   boundary?

@@ -20,7 +20,6 @@ colors:
   ceiling-violet: "hsl(262 77% 75%)"
   reference-gold: "hsl(45 76% 62%)"
   floor-cyan: "hsl(187 59% 61%)"
-  widget-blue: "hsl(213 84% 72%)"
 typography:
   display:
     fontFamily: "Newsreader, Georgia, Times New Roman, serif"
@@ -178,12 +177,6 @@ conventional vocabulary for Vietnamese market data.
 
 ### Secondary
 
-- **Widget Blue** (`hsl(213 84% 72%)`): the categorical series color for neutral
-  charts and widgets. It prevents neutral data from borrowing brand or market
-  semantics.
-
-### Tertiary
-
 - **Market Green** (`hsl(140 50% 50%)`) and **Market Red**
   (`hsl(3 72% 60%)`): directional data only—never brand or general controls.
 - **Ceiling Violet** (`hsl(262 77% 75%)`), **Reference Gold**
@@ -209,8 +202,8 @@ conventional vocabulary for Vietnamese market data.
 **The Rationed Amber Rule.** Allow roughly one filled amber control per view.
 Amber is a scarce action signal, not decoration or body text.
 
-**The Data Is Not Brand Rule.** Green, red, violet, gold, cyan, and widget blue
-carry market or chart meaning. Never reuse them merely to make a control vivid,
+**The Data Is Not Brand Rule.** Green, red, violet, gold, and cyan carry market
+meaning. Never reuse them merely to make a control vivid,
 and never rely on color alone to communicate the state.
 
 ## Typography
