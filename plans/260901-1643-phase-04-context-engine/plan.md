@@ -1,7 +1,7 @@
 ---
 plan: 260901-1643-phase-04-context-engine
 title: "Phase 4 — Context Engine"
-status: ready — preflight §9 đạt, chờ ngân sách golden cho gate chất lượng
+status: done — gate xanh 2026-09-01; task success chờ ngân sách golden (BLIND)
 roadmap: "docs/roadmap.md §10 Phase 4"
 branch: feat/phase-04-context-engine
 ---
@@ -254,3 +254,48 @@ tự) → 3 → 5. Việc 5 viết xen kẽ theo từng việc, gom gate cuối.
 6. Composition token trước/sau ghi thành số trong report; task success chờ
    ngân sách golden, ghi BLIND cho tới khi có.
 7. `git diff --check` sạch; không tham chiếu Signal Desk/Study mới.
+
+## Kết quả (2026-09-01)
+
+Gate **đạt** ở mọi dòng đo được bằng lệnh miễn phí. Suite gate
+`pytest tests/test_agent_context_engine.py -q` = 29 test; toàn backend
+`pytest -q` **1375 passed** (baseline đầu phase 1283), web lint/type-check/
+test (458)/build xanh, `compileall` + `git diff --check` sạch. Năm việc, mười
+commit, report từng việc trong
+`plans/reports/fullstack-260901-1643-phase-04-task{1..5}-*.md`.
+
+Bốn gap đóng đúng như plan: số token thật của route quyết định context qua một
+projection không nhánh (ước lượng giữ vai backstop preflight); một trang Turn
+trước đọc được phục vụ lại từ bản ghi của chính thread với **0 HTTP request** và
+`retrieved_at` gốc; summary có producer là specialist ẩn chạy **sau** khi Turn
+settle, provenance đủ span/nguồn/model, fail-open tuyệt đối; playbook chỉ nạp
+khi câu hỏi với tới nó, quyết một lần đầu Turn, prefix core byte-identical giữa
+hai trường hợp.
+
+**Hai lỗi thật mà gate bắt được**, cả hai đã sửa hướng-nguyên-nhân:
+
+1. `ConstructedContextTooLarge` thoát khỏi `_call` và settle `turn_failed`, mất
+   phần trả lời dở — vi phạm outcome contract §4(7). Nay settle
+   `incomplete/context_overflow`, giữ narration (`b0e5925`).
+2. **Ladder có thể leo lên.** Handle của một call dài hơn chính kết quả khi kết
+   quả ngắn, nên nấc "nhường đất" làm context *to hơn* và mất luôn nội dung —
+   đo được 129 → 182 → 235 token. Nay `worth_collapsing` quyết định trên đúng
+   text hai bên render ra; cùng fixture: 129/129/129/98/67 (`0e166a4`).
+
+Composition trên cùng corpus, cùng lệnh, replay thuần: 377.434 (trước) →
+377.534 (sau bốn việc) → **377.495** (sau việc 5). +100 là câu nói với model
+rằng đọc lại trang cũ không tốn request — đổi một tool round lấy 100 token trên
+78 call; −39 là token từng bị tiêu để *mất* nội dung. Playbook-theo-intent tiết
+kiệm **0 trên corpus này**, và đó là số đo chứ không phải suy đoán:
+`cases_carrying_the_pack_body = 20/20` — mọi case release đều là câu hỏi thị
+trường. Phép đo được chứng minh là *nhạy* với quyết định bằng một test riêng.
+
+**Chưa đo được, ghi BLIND chứ không ghi xanh:** "replay corpus giữ task
+success". Replay thuần đo token và cấu tạo, không đo chất lượng; task success
+cần `make golden-release` tiêu tiền thật và chưa có ngân sách cấp.
+
+Câu hỏi mở, đúng chủ sở hữu: corpus release không có case ngoài domain nên
+playbook-theo-intent chưa có số thật (golden owner/P9); `agent_tool_call` thiếu
+index `thread_id` — cố ý để lại, cần đo trên bảng thật trước (P6); giá batch
+thật vs trần $0.015/owner chưa chạm bao giờ (P9); `estimate_bias` chưa có ai
+đọc (P9); `REPORT_SCHEMA@2` chưa có consumer (P5).
