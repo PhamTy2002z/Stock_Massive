@@ -163,7 +163,18 @@ CHARS_PER_TOKEN = 3
 # the ids on a tool block.
 MESSAGE_OVERHEAD_TOKENS = 4
 
-SUMMARY_LABEL = "Summary of the earlier turns in this conversation:"
+#: What the summary message says about itself, before the summary.
+#:
+#: The second sentence is the recovery path, and it is a sentence rather than a
+#: tool. Nothing was deleted to make the summary: the Turns it rewrote are still
+#: in the transcript word for word, and ``session_search`` reaches them by their
+#: own words. A model told only that the earlier turns were summarised has no
+#: way to know that, so it either answers from the compression or says the
+#: detail is gone — and the second is a false statement about this system.
+SUMMARY_LABEL = (
+    "Summary of the earlier turns in this conversation. Those turns are still on "
+    "record and session_search can find them again by their own words:"
+)
 
 #: The eight things a constructed context is made of.
 #:

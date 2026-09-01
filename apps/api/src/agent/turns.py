@@ -45,7 +45,7 @@ import asyncio
 import logging
 import time
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import Any
@@ -84,6 +84,12 @@ logger = logging.getLogger(__name__)
 # Called with ``checkpoint``, ``publisher`` and ``lane`` by keyword.
 LoopFactory = Callable[..., Any]
 CheckpointPayload = Callable[[TurnDraft], dict[str, Any]]
+# The out-of-band summariser, called with ``thread_id`` and ``user_id`` by
+# keyword once a Turn has settled. A callable rather than the class itself for
+# the same reason the loop is a factory: this module has no business holding an
+# LLM client, and what it needs from a compactor is that it can be started and
+# forgotten.
+Compactor = Callable[..., Awaitable[Any]]
 
 # The cap on what a reader typed. It is on encoded bytes rather than characters,
 # because that is what the request actually carries and what a Vietnamese
@@ -397,10 +403,16 @@ class TurnService:
         config: LLMConfig,
         deadline_seconds: float | None = None,
         shutdown_seconds: float = GRACEFUL_SHUTDOWN_SECONDS,
+        compactor: Compactor | None = None,
     ) -> None:
         self._store = store
         self._loop_factory = loop_factory
         self._config = config
+        # ``None`` means no Thread is ever compacted, which is the behaviour
+        # every caller had before one existed: a deployment, a test or a replay
+        # that wires no compactor still settles Turns exactly as it did.
+        self._compactor = compactor
+        self._compactions: set[asyncio.Task[Any]] = set()
         # ``None`` means every Turn is held to its own lane's wall clock, which
         # is the production wiring. A number here is a hard ceiling over all of
         # them: one deadline for the deployment, whatever a question was routed
@@ -545,9 +557,50 @@ class TurnService:
             except Exception:
                 logger.exception("Turn %s failed", turn_id)
                 return await self._finish_bare(running, "incomplete", "turn_failed")
-            return await self._finish(running, outcome)
+            record = await self._finish(running, outcome)
+            # After the terminal transaction and the terminal event, never
+            # before: the reader has their answer by this line, and what follows
+            # is housekeeping for the Turn after this one.
+            self._compact_later(request, outcome)
+            return record
         finally:
             self._running.pop(turn_id, None)
+
+    def _compact_later(self, request: TurnRequest, outcome: TurnOutcome) -> None:
+        """Hand the settled Thread to the compaction specialist, and wait for nothing.
+
+        A task rather than an await, and that is the whole design. The extra
+        model call is worth making because the *next* question in a long Thread
+        would otherwise be answered off a transcript trimmed by the ladder — and
+        it is worth making only if nobody pays for it in latency. Awaited here,
+        it would sit between a Turn's terminal event and the release of its
+        registry entry, which is time the reader is still watching.
+
+        Its result is discarded on purpose: a summary that was not written
+        changes nothing about the Thread, and there is no state here to repair.
+        """
+        if self._compactor is None or not outcome.summary_needed:
+            return
+        task = asyncio.create_task(
+            self._compactor(thread_id=request.thread_id, user_id=request.user_id),
+            name=f"compaction-{request.thread_id}",
+        )
+        self._compactions.add(task)
+        task.add_done_callback(self._compaction_done)
+
+    def _compaction_done(self, task: asyncio.Task[Any]) -> None:
+        self._compactions.discard(task)
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            # The compactor swallows its own failures, so reaching this line
+            # means one escaped it. Logged rather than raised: the Turn it came
+            # from settled correctly, and an unretrieved exception on a task
+            # nobody awaits is a warning printed at interpreter shutdown.
+            logger.warning(
+                "Compaction task failed: %s: %s", type(error).__name__, error
+            )
 
 
     async def _finish(self, running: RunningTurn, outcome: TurnOutcome) -> TurnRecord:
@@ -782,6 +835,11 @@ class TurnService:
     async def shutdown(self, timeout: float | None = None) -> None:
         """Give every active Turn its window to reach a safe checkpoint."""
         deadline = self._shutdown_seconds if timeout is None else timeout
+        # Compaction gets no window at all, and needs none: it holds nothing a
+        # reader is waiting for, and a summary this process does not finish is a
+        # summary the next settled Turn writes instead.
+        for pass_over in tuple(self._compactions):
+            pass_over.cancel()
         running = list(self._running.values())
         if not running:
             return

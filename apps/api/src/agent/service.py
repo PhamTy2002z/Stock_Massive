@@ -27,6 +27,7 @@ import logging
 from typing import Any
 
 from src.agent import tools
+from src.agent.compaction import ThreadCompactor
 from src.agent.limits import SubscriptionLimiter
 from src.agent.loop import AgentLoop, SessionSlots, TurnAdmission
 from src.agent.persistence import AgentPersistence
@@ -137,6 +138,13 @@ def build_alpha_desk(
             store=persistence,
             loop_factory=loop_factory,
             config=resolved,
+            # The one client and the one store again, for the same reason the
+            # loop gets them: the summary a settled Thread earns is written
+            # through the same admission ledger every other call goes through,
+            # and read back by the next Turn from the same rows.
+            compactor=ThreadCompactor(
+                client=client, config=resolved, store=persistence
+            ).compact,
         ),
         admission=TurnAdmission(client.admission, slots=slots),
         subscriptions=SubscriptionLimiter(),

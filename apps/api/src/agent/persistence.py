@@ -122,6 +122,62 @@ class MessageRecord:
 
 
 @dataclass(frozen=True)
+class SummaryRecord:
+    """A stored summary, and the span it is allowed to stand in for.
+
+    The span is the whole value of the row. A summary is applied by *replacing*
+    the leading Turns it covers, so a reader that could not say how many Turns
+    that is would have to guess which part of the conversation is already
+    accounted for — and a wrong guess either sends the same Turns twice or drops
+    Turns nothing rewrote.
+    """
+
+    message_id: int
+    seq: int
+    text: str
+    covers_from_seq: int
+    covers_to_seq: int
+    summarised_turns: int
+
+
+def latest_summary(messages: Sequence[MessageRecord]) -> SummaryRecord | None:
+    """The newest usable summary in a transcript already read, or ``None``.
+
+    Read off the rows the transcript read already returned rather than by a
+    query of its own: the caller that needs this is the one opening a Thread to
+    start a Turn, and it is holding every message in that Thread.
+
+    A row whose span cannot be read as a span is skipped rather than repaired.
+    The only thing that could be done with a summary of unknown extent is guess
+    at it, and the constructor refuses such a summary for exactly that reason —
+    so an unreadable row means the next Turn runs on the full transcript, which
+    is the context it would have had if nothing had ever been summarised.
+    """
+    for record in reversed(tuple(messages)):
+        if record.role != "summary":
+            continue
+        content = record.content or {}
+        text = str(content.get("summary") or "").strip()
+        try:
+            covers_from = int(content["covers_from_seq"])
+            covers_to = int(content["covers_to_seq"])
+            turns = int(content["summarised_turns"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not text or turns < 1 or covers_from < 1 or covers_to < covers_from:
+            continue
+        return SummaryRecord(
+            message_id=record.id,
+            seq=record.seq,
+            text=text,
+            covers_from_seq=covers_from,
+            covers_to_seq=covers_to,
+            summarised_turns=turns,
+        )
+    return None
+
+
+@dataclass(frozen=True)
 class ThreadRecord:
     id: uuid.UUID
     user_id: int
@@ -1606,6 +1662,7 @@ __all__ = [
     "QuestionAlreadyResolved",
     "QuestionOptionInvalid",
     "QuestionRecord",
+    "SummaryRecord",
     "ThreadRecord",
     "ThreadView",
     "ToolCallRecord",
@@ -1614,4 +1671,5 @@ __all__ = [
     "TurnRecord",
     "UnflaggableMessage",
     "flag_counts_between",
+    "latest_summary",
 ]
