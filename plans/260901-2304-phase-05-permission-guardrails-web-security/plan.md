@@ -1,6 +1,6 @@
 # Phase 5 — Permission, guardrails, web security
 
-Status: **Ready**  
+Status: **Done**
 Branch: `feat/phase-05-permission-guardrails-web-security`  
 Opened: 2026-09-01  
 Authority: [`docs/roadmap.md`](../../docs/roadmap.md), Phase 5 and §9
@@ -170,7 +170,7 @@ cd apps/api && pytest tests/test_agent_capability_contract.py \
   tests/test_agent_untrusted_results.py tests/test_threat_patterns.py \
   tests/test_agent_memory_tools.py tests/test_auth_security.py -q
 cd apps/api && pytest -q
-python -m compileall -q apps/api/src apps/api/golden apps/api/tests
+python3 -m compileall -q apps/api/src apps/api/golden apps/api/tests
 pnpm --dir apps/web lint && pnpm --dir apps/web type-check \
   && pnpm --dir apps/web test && pnpm --dir apps/web build
 git diff --check
@@ -230,3 +230,33 @@ old resolver without data conversion.
 Plan reviewed against roadmap Phase 5, §6 dependency rules and §9 preflight on
 2026-09-01. All four preflight questions have executable/evidenced answers, no
 one-way door is crossed, and implementation may start.
+
+## Kết quả (2026-09-01)
+
+Phase 5 hoàn tất trên `feat/phase-05-permission-guardrails-web-security`. Năm
+tool đã có rule set typed theo capability/resource, last-match-wins và
+deny-by-default; schema frozen được validate trước dispatch; `ask`, permission,
+authorization, availability và content escalation có kết quả typed riêng.
+Untrusted external read làm taint Turn và chặn durable write về sau; outbound
+web chặn credential trước I/O; trace được redact đệ quy cả ở executor lẫn cửa
+persistence.
+
+Web lane giữ cache/single-flight và thêm Redis window toàn fleet theo domain;
+scan nhận diện percent/HTML/base64, zero-width và bidi nhưng vẫn fail-open khi
+scanner lỗi. Catalog vẫn đúng năm tool, default permission không đổi, không có
+endpoint/SSE event/migration mới.
+
+Gate cuối:
+
+- adversarial: **25 passed**; escalation `0`, raw secret trong trace `0`, benign
+  false-positive `0/20`;
+- security-focused: **257 passed**;
+- toàn API: **1401 passed, 3 deselected**;
+- web: lint, type-check, **458 tests**, production build đều xanh;
+- `python3 -m compileall` và `git diff --check` sạch.
+
+Self-review từ mốc Phase 4 `cae8732` bắt và sửa hai regression trước khi đóng:
+global deny cuối rule set phải ẩn schema dù có allow hẹp ở trước; taint chỉ được
+tạo bởi successful untrusted **read**, không bởi metadata untrusted trên một
+write stub. Không còn finding blocker/high sau vòng review cuối. Báo cáo chi
+tiết: [`plans/reports/fullstack-260901-2304-phase-05-permission-guardrails-web-security.md`](../reports/fullstack-260901-2304-phase-05-permission-guardrails-web-security.md).

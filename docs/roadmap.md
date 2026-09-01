@@ -620,7 +620,7 @@ thật vs trần $0.015/owner của lane analysis chưa bao giờ bị chạm (P
 consumer (P5). Plan và số đo:
 [`plans/260901-1643-phase-04-context-engine/plan.md`](../plans/260901-1643-phase-04-context-engine/plan.md).
 
-### Phase 5 — Permission, guardrails, web security — **Target**
+### Phase 5 — Permission, guardrails, web security — **Done (2026-09-01)**
 
 **Outcome.** Capability được phép vì policy typed.
 
@@ -642,6 +642,20 @@ consumer (P5). Plan và số đo:
 **Gate.** Adversarial suite: indirect injection, encoded/bidi, SSRF, redirect,
 oversized, permission bypass, repeated calls, secret leakage — 0 escalation,
 0 raw secret trong trace; benign corpus không bị block quá threshold baseline.
+
+**Kết quả.** Rule set capability/resource typed đã chạy last-match-wins,
+no-match/unknown deny; schema frozen được validate trước dispatch và các cửa
+permission/approval/availability/authorization/content escalation tách thành
+kết quả typed. Untrusted external read chặn durable write về sau trong cùng
+Turn; web secret egress bị chặn trước I/O; trace redact đệ quy; scanner nhận
+diện encoded/zero-width/bidi và vẫn fail-open. Web lane có Redis allowance toàn
+fleet và theo domain trên cache miss, giữ cache/single-flight cùng per-Turn
+logical ceiling; Phase 10 vẫn sở hữu full scale enforcement. Gate adversarial
+25 test đạt escalation `0`, raw secret `0`, benign false-positive `0/20`; toàn
+API **1401 passed**, web **458 tests** + lint/type/build xanh. Không đổi catalog
+năm tool, default permission, HTTP/SSE hay schema DB. Plan và bằng chứng:
+[`plans/260901-2304-phase-05-permission-guardrails-web-security/plan.md`](../plans/260901-2304-phase-05-permission-guardrails-web-security/plan.md),
+[`plans/reports/fullstack-260901-2304-phase-05-permission-guardrails-web-security.md`](../plans/reports/fullstack-260901-2304-phase-05-permission-guardrails-web-security.md).
 
 ### Phase 6 — Evidence engine: research 3-pass + finance evidence — **Target**
 
@@ -821,7 +835,7 @@ child, 0 budget escape. Không đạt → single-agent + Rejected.
 
 ```text
 P0 done → P1 eval done → P2 capability done → P3 loop/lane done
-        → P4 context done → P5 security ◀ next → P6 evidence engine → P7 desk UX
+        → P4 context done → P5 security done → P6 evidence engine ◀ next → P7 desk UX
         → P8 memory/consent → P9 observability/release
                                    │
               ┌────────────────────┼──────────────────────┐
