@@ -1373,6 +1373,26 @@ class AgentLoop:
                 # route declined is the question, and the reason says so.
                 self._attempt(state, ATTEMPT_COMPLETED, terminal_reason=MODEL_REFUSAL)
                 return await self._ended(state, TurnStatus.COMPLETE, MODEL_REFUSAL)
+            except ConstructedContextTooLarge as too_large:
+                # The ladder ran out: even the protected Turn, fully collapsed,
+                # is over the ceiling. Nobody asked the route, so there is no
+                # provider condition to name — but the condition is the same one
+                # the route reports as ``context_overflow``, and settling under a
+                # second reason would split one fact across two rows of the ops
+                # tally. Settled here rather than allowed out of the loop because
+                # a Turn that leaves through an exception nobody catches is a
+                # Turn whose partial answer is thrown away with it.
+                logger.warning(
+                    "Turn %s could not be constructed inside its ceiling: %s",
+                    request.request_message_id,
+                    too_large,
+                )
+                self._attempt(
+                    state, ATTEMPT_ERROR, terminal_reason=CONTEXT_OVERFLOW
+                )
+                return await self._ended(
+                    state, TurnStatus.INCOMPLETE, CONTEXT_OVERFLOW
+                )
             except LLMError as error:
                 reason = self._route_failure(request, error)
                 self._attempt(state, ATTEMPT_ERROR, terminal_reason=reason)
