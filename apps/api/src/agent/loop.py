@@ -1221,18 +1221,6 @@ class AgentLoop:
         )
         surface = resolve_tool_surface(self._toolsets)
         tools = surface.offered_schemas
-        # The identity of this Turn's cacheable head, computed once where every
-        # part of it is already in hand. Model, prompt version and hash, the
-        # resolved tool surface — the schemas travel in the same head as the
-        # prompt — and the pack, because two Turns on the same model with the
-        # same tools are not the same prompt under two domains.
-        #
-        # Nothing about *this* Turn is in it: no user, no thread, no date, no
-        # mode, no question. A key carrying any of those would be a key that
-        # never matches, which is a cache that costs and never pays.
-        state.cache_identity = cache_key(
-            self._model, surface.identity_digest, active_pack().identity
-        )
         turn_budget = TurnBudget(
             thresholds_for_context(self._context_tokens),
             registry_limits={
@@ -1271,6 +1259,25 @@ class AgentLoop:
                 active_pack().name,
                 body_reason,
             )
+        # The identity of this Turn's cacheable head, computed once where every
+        # part of it is already in hand. Model, prompt version and hash, the
+        # resolved tool surface — the schemas travel in the same head as the
+        # prompt — the pack, because two Turns on the same model with the same
+        # tools are not the same prompt under two domains, and whether the
+        # pack's body is being carried, because that is the other way one pack
+        # produces two prompts.
+        #
+        # After the body decision and not before it: the key names the prompt
+        # that goes out, and the decision is what says which prompt that is.
+        # Nothing else about *this* Turn is in it — no user, no thread, no date,
+        # no mode, no question. A key carrying any of those would be a key that
+        # never matches, which is a cache that costs and never pays.
+        state.cache_identity = cache_key(
+            self._model,
+            surface.identity_digest,
+            active_pack().identity,
+            domain_body=state.domain_body,
+        )
         # The first thing the trail says, and the only part that is about a
         # decision taken before this Turn ran: which ceilings it got, and the
         # machine reason the router gave for them.
