@@ -962,11 +962,34 @@ def context_projection(
 #:
 #: The words are chosen to say two true things and no third. The result *was*
 #: recorded — the Tool Call Trace holds it in full, and an auditor reading the
-#: Turn tomorrow can see what this call returned. And it is **not** something
-#: the model can ask for back: there is no retrieval tool in this deployment,
-#: and a sentence implying one would send the model looking for a call it cannot
-#: make, spending a round to learn that.
+#: Turn tomorrow can see what this call returned. And it is not repeated in this
+#: message, which is the whole of what the collapse did.
+#:
+#: What it deliberately does **not** say is anything about getting the body
+#: back, because that answer is not the same for every tool and the shared
+#: prefix is paid for by every collapsed line at the moment the context is
+#: already over budget. There is no retrieval tool in this deployment, so for
+#: most calls there is nothing to offer and a sentence implying otherwise would
+#: spend a round teaching the model that. The one tool where asking again is
+#: genuinely cheap says so itself, in :data:`REREAD_COSTS_NOTHING`.
 TRACE_HANDLE_PREFIX = "earlier call, recorded in full and not repeated here:"
+
+#: What a collapsed page read adds, and the only tool it is true of.
+#:
+#: A page this Thread has already read is served back out of its own trace with
+#: no request made (``tools/web.py``), so the honest cost of asking for it again
+#: is a round of the tool loop and nothing else. The model is told because the
+#: alternative is worse in both directions: a model that believes the body is
+#: gone forever either answers without evidence it could have had, or refuses on
+#: the grounds that the lookup failed.
+#:
+#: Scoped to the one tool on purpose. Re-running a search *does* reach the
+#: provider, and a line promising a free re-read beside a collapsed
+#: ``web_search`` would be false where it mattered most.
+REREAD_COSTS_NOTHING = "reading it again in this conversation costs no new request"
+
+#: The tool the note above is true of, named where the note is.
+_REREADABLE_TOOL = "fetch_url"
 
 
 def _collapsed_result(call: TurnToolCall) -> str:
@@ -994,11 +1017,19 @@ def _collapsed_result(call: TurnToolCall) -> str:
     guess whether the call failed, returned nothing, or returned something it is
     not being shown — and one of those three guesses turns a collapse into an
     answer that says the lookup did not work.
+
+    A collapsed page read says one thing more, :data:`REREAD_COSTS_NOTHING`, and
+    only when the read succeeded. A failed call left no record to serve, so the
+    page would in fact be fetched over the network, and telling the model a
+    retry is free is the kind of small lie that shows up later as a Turn that
+    spent its rounds on the one URL that never answered.
     """
     line = (
         f"{TRACE_HANDLE_PREFIX} {call.name} with arguments "
         f"{_compact(call.arguments)}"
     )
+    if call.name == _REREADABLE_TOOL and call.status is ToolCallStatus.OK:
+        line = f"{line}; {REREAD_COSTS_NOTHING}"
     links = [
         str(item.get("url") or "")
         for item in call.results[:COLLAPSED_RESULT_URLS]
@@ -1762,6 +1793,7 @@ __all__ = [
     "TurnAttachment",
     "TurnToolCall",
     "UsageFeedback",
+    "REREAD_COSTS_NOTHING",
     "RESULT_CALLS",
     "SELECTION_CALLS",
     "TRACE_HANDLE_PREFIX",

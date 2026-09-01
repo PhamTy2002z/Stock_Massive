@@ -8,6 +8,7 @@ one short transaction; a Turn never owns a database session.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -23,6 +24,7 @@ from sqlalchemy.orm import Session
 from src.alpha.models import (
     ACTIVE_TURN_STATUSES,
     FLAG_REASONS,
+    TOOL_CALL_OK,
     TURN_ADMITTED,
     TURN_COMPLETE,
     TURN_INCOMPLETE,
@@ -993,6 +995,70 @@ class AgentPersistence:
                 )
             ).scalar_one_or_none()
             return dict(row) if isinstance(row, Mapping) else None
+
+    async def recorded_result(
+        self,
+        thread_id: uuid.UUID | str,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+    ) -> Mapping[str, Any] | None:
+        """The newest successful result of this call anywhere in one Thread.
+
+        Scoped to the Thread rather than to the request message, and the width
+        is the point. :meth:`tool_result` answers "what did *this* Turn's call
+        id return", and stays narrow because a call id minted in another Turn
+        reading through it would be a route to citing evidence the citing Turn
+        never gathered. This answers a different question — "has this
+        conversation already read this" — and a Thread is the honest boundary
+        for it: one user, one line of questions, one permission scope, and every
+        row in it was written by a call this same reader asked for. It never
+        crosses a Thread, so it never crosses a user.
+
+        The match is JSONB containment on the recorded arguments, so a caller
+        names the arguments that identify the read and ignores the ones that
+        only shape it. Newest wins, and only the newest is looked at: an older
+        row is an older reading of the same thing, and serving it while a newer
+        one exists would answer with evidence the conversation has already
+        superseded.
+
+        What comes back is the tool's own payload, not the row. The stored
+        ``result`` is the trace envelope the loop writes, whose ``text`` is the
+        compact JSON of that payload trimmed to the tool's declared result
+        budget — and a trim leaves the JSON unparseable. Unparseable is reported
+        as *no record*, never as a partial one: a caller that acted on half an
+        object would be acting on evidence nobody can reconstruct.
+        """
+        return await asyncio.to_thread(
+            self._recorded_result, _uuid(thread_id), tool_name, dict(arguments)
+        )
+
+    def _recorded_result(
+        self,
+        thread_id: uuid.UUID,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+    ) -> Mapping[str, Any] | None:
+        with self._session_factory() as session:
+            stored = session.execute(
+                select(AgentToolCall.result)
+                .where(
+                    AgentToolCall.thread_id == thread_id,
+                    AgentToolCall.tool_name == tool_name,
+                    AgentToolCall.status == TOOL_CALL_OK,
+                    AgentToolCall.arguments.contains(arguments),
+                )
+                .order_by(
+                    AgentToolCall.started_at.desc(), AgentToolCall.id.desc()
+                )
+                .limit(1)
+            ).scalar_one_or_none()
+        if not isinstance(stored, Mapping):
+            return None
+        try:
+            payload = json.loads(str(stored.get("text") or ""))
+        except ValueError:
+            return None
+        return payload if isinstance(payload, Mapping) else None
 
     async def traces_for_request(
         self, request_message_id: int

@@ -96,6 +96,7 @@ from src.agent.messages import (
     COLLAPSED_RESULT_URLS,
     CONTEXT_LAYERS,
     MAX_DISPLAY_RESULTS,
+    REREAD_COSTS_NOTHING,
     SUMMARY_LABEL,
     TRACE_HANDLE_PREFIX,
     ContextComposition,
@@ -3052,11 +3053,38 @@ def test_a_collapsed_call_with_no_results_names_itself_and_says_it_was_recorded(
         f"{TRACE_HANDLE_PREFIX} session_search with arguments "
         '{"query":"VCB"}'
     )
-    # And it does not offer something the model could ask for: there is no
-    # retrieval tool in this deployment, and a sentence implying one would spend
-    # a round teaching the model that.
+    # And the shared prefix offers nothing the model could ask for. This
+    # result is a search of the transcript: there is no retrieval tool in this
+    # deployment, re-running it reaches the store again, and a sentence
+    # implying otherwise would spend a round teaching the model that.
     assert "fetch" not in _collapsed_result(call)
     assert "again" not in _collapsed_result(call)
+
+
+def test_a_collapsed_page_read_says_what_asking_for_it_again_would_cost() -> None:
+    """The one tool where a re-read is genuinely free says so, and only it.
+
+    A page this Thread has already read comes back out of its own trace with no
+    request made, so a model that believes the body is gone forever either
+    answers without evidence it could have had or reports a lookup that in fact
+    worked. A search is not in that position — re-running it reaches the
+    provider — and a note beside one would be false where it mattered most.
+    """
+    page = TurnToolCall(
+        id="c1",
+        name="fetch_url",
+        arguments={"url": "https://cafef.vn/bai-viet"},
+        status=ToolCallStatus.OK,
+        result_text="…",
+    )
+    search = replace(page, name="web_search", arguments={"query": "lãi suất"})
+    failed = replace(page, status=ToolCallStatus.ERROR, error="tool_failed")
+
+    assert REREAD_COSTS_NOTHING in _collapsed_result(page)
+    assert REREAD_COSTS_NOTHING not in _collapsed_result(search)
+    # A call that failed left no record to serve, so the page really would be
+    # fetched over the network and the free re-read is not on offer.
+    assert REREAD_COSTS_NOTHING not in _collapsed_result(failed)
 
 
 def test_the_links_a_turn_cited_survive_the_ladder_reaching_rung_two() -> None:

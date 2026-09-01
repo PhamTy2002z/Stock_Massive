@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from datetime import datetime, timezone
 
@@ -37,6 +38,11 @@ from src.core.database import Base, get_sync_db, sync_engine, sync_session_facto
 from .agent_tool_world import ADVERSARIAL_PAGE, stub_entry
 
 SYMBOL = "PATHS"
+
+
+def _at(day: int) -> datetime:
+    """One August instant, so a row's age is decided by the test and not the clock."""
+    return datetime(2026, 8, day, 9, 30, tzinfo=timezone.utc)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -927,3 +933,93 @@ async def test_the_first_terminal_wins_the_question_along_with_everything_else(o
     assert question_row(second.question_id) is None
     assert question_row(part.question_id).state == QUESTION_ANSWERED
     assert [row.role for row in view.messages] == ["user", "assistant"]
+
+
+@pytest.mark.asyncio
+async def test_a_page_read_is_found_again_anywhere_in_its_own_thread(owner):
+    """The read that lets evidence outlive the Turn that gathered it.
+
+    Scoped to the Thread and matched by containment, so the URL identifies the
+    read and the question that shaped it does not. The newest one answers: an
+    older row is a reading this conversation has already superseded.
+    """
+    store = persistence()
+    thread = await store.create_thread(owner)
+    elsewhere = await store.create_thread(owner)
+    url = "https://news.example/rates"
+
+    async def read(thread_id, message_id, *, content, when, status="ok", tool="fetch_url"):
+        await store.record_tool_call(
+            {
+                "thread_id": thread_id,
+                "request_message_id": message_id,
+                "tool_name": tool,
+                "tool_call_id": f"call_{when.day}",
+                "arguments": {"url": url, "looking_for": "lãi suất"},
+                "result": {
+                    "text": json.dumps({"url": url, "content": content}),
+                    "chars": len(content),
+                    "dispatched": True,
+                },
+                "status": status,
+                "error": None,
+                "started_at": when,
+            }
+        )
+
+    first = await store.append_message(thread.id, role="user", content={"text": "one"})
+    second = await store.append_message(thread.id, role="user", content={"text": "two"})
+    other = await store.append_message(elsewhere.id, role="user", content={"text": "far"})
+    await read(thread.id, first.id, content="giữ nguyên", when=_at(20))
+    await read(thread.id, second.id, content="tăng 0,25 điểm", when=_at(21))
+    await read(thread.id, second.id, content="không đọc được", when=_at(22), status="timeout")
+    await read(elsewhere.id, other.id, content="thread khác", when=_at(23))
+
+    served = await store.recorded_result(thread.id, "fetch_url", {"url": url})
+
+    assert served == {"url": url, "content": "tăng 0,25 điểm"}
+    # A Thread reads its own rows and no others. Another conversation of the
+    # same user gathered its evidence for a question this one never asked.
+    assert await store.recorded_result(
+        elsewhere.id, "fetch_url", {"url": url}
+    ) == {"url": url, "content": "thread khác"}
+    assert (
+        await store.recorded_result(
+            thread.id, "fetch_url", {"url": "https://news.example/never"}
+        )
+        is None
+    )
+    assert await store.recorded_result(thread.id, "web_search", {"url": url}) is None
+
+
+@pytest.mark.asyncio
+async def test_a_result_too_big_to_have_been_stored_whole_is_no_record_at_all(owner):
+    """A trimmed body leaves JSON that does not close, and half an object is
+    worse than none: the caller reads the page again rather than acting on
+    evidence nobody can reconstruct.
+    """
+    store = persistence()
+    thread = await store.create_thread(owner)
+    request = await store.append_message(
+        thread.id, role="user", content={"text": "a very long page"}
+    )
+    whole = json.dumps({"url": "https://news.example/long", "content": "x" * 400})
+    await store.record_tool_call(
+        {
+            "thread_id": thread.id,
+            "request_message_id": request.id,
+            "tool_name": "fetch_url",
+            "tool_call_id": "call_0",
+            "arguments": {"url": "https://news.example/long"},
+            "result": {"text": whole[:120], "chars": len(whole), "dispatched": True},
+            "status": "ok",
+            "error": None,
+        }
+    )
+
+    assert (
+        await store.recorded_result(
+            thread.id, "fetch_url", {"url": "https://news.example/long"}
+        )
+        is None
+    )
