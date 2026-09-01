@@ -279,6 +279,9 @@ def entry(name: str, handler=_ok, **overrides: Any) -> registry.ToolEntry:
         # stranger's writing, and these tests would be asserting against a
         # surface the process does not have.
         "reads_external": name in WEB_TOOLS,
+        # The shipped catalog these stand in for is allowed, and a registration
+        # that says nothing is refused, so the stubs say what the real ones say.
+        "permission": registry.ToolPermission.ALLOW,
         "effect": (
             registry.ToolEffect.WRITE
             if name == "remember_fact"

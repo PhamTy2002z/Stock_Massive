@@ -277,6 +277,7 @@ def test_access_and_content_trust_stay_orthogonal_for_live_and_legacy_calls(
             access=access,
             content_trust=trust,
             concurrency=registry.ToolConcurrency.SERIALIZED,
+            permission=registry.ToolPermission.ALLOW,
         )
     )
     resolved = registry.resolve(name, now=1_000.0)

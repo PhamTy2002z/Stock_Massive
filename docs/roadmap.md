@@ -488,7 +488,7 @@ không tồn tại ở bất kỳ đâu trong pipeline hôm nay, nên luật tem
 của §2 chưa đo được. Gate coi hard dimension không quyết định được là `BLIND`
 chứ không phải xanh, nên không phase nào đi qua nó bằng cách im lặng.
 
-### Phase 2 — Unified Capability Plane — **Target**
+### Phase 2 — Unified Capability Plane — **Done (2026-09-01)**
 
 **Outcome.** Một declaration duy nhất quyết định model thấy tool nào và tool
 được parse, authorize, budget, execute, trace, trim, hiển thị ra sao.
@@ -503,6 +503,18 @@ suite chỉ cần đúng một declaration — executor, prompt schema, trace, b
 display đọc cùng nguồn; schema model = schema executor; unknown/invalid/
 denied/timeout/handler error settle một typed result; parallelism giữ stable
 order.
+
+**Kết quả (2026-09-01).** Gate đạt bằng
+`pytest tests/test_agent_capability_contract.py …` (84 test, toàn suite 1144
+passed). Declaration nay mang permission rule bắt buộc (`allow|ask|deny`,
+không default — default permission để nguyên cho P5) và per-call
+`timeout_seconds`; executor enforce cả hai tại một điểm, thêm hai typed
+result `permission_denied` (ask fail-closed tới khi P5 có approval flow) và
+`tool_call_timeout` (chỉ dành cho bound khai trên declaration —
+`TimeoutError` của chính handler vẫn là `tool_failed`). Hành vi 5 tool ship
+không đổi. Hai câu hỏi chuyển P5: có rút tool non-allow khỏi schema model
+thấy không, và số đo tần suất chạm timeout trên mạng thật. Plan và số đo:
+[`plans/260901-1130-phase-02-capability-plane/plan.md`](../plans/260901-1130-phase-02-capability-plane/plan.md).
 
 ### Phase 3 — Durable loop, lane và progress thật — **Target**
 
@@ -749,7 +761,7 @@ child, 0 budget escape. Không đạt → single-agent + Rejected.
 ## 11. Dependency
 
 ```text
-P0 done → P1 eval done → P2 capability ◀ next → P3 loop/lane/progress
+P0 done → P1 eval done → P2 capability done → P3 loop/lane ◀ next
         → P4 context → P5 security → P6 evidence engine → P7 desk UX
         → P8 memory/consent → P9 observability/release
                                    │

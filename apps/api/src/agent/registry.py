@@ -40,11 +40,19 @@ this attribute existed, also had.
 Which *bundle* a caller selects is still what decides what a lane may call
 (``toolsets.py``). This attribute answers a different question: given that it
 was called, is what came back somebody else's writing.
+
+**Permission and time are declared here too, and only here.** A registration
+says whether it may run at all (:attr:`ToolEntry.permission`) and how long one
+call of it may take (:attr:`ToolEntry.timeout_seconds`). The executor enforces
+both from this declaration rather than from a table of its own, for the reason
+every other axis lives here: a second place that knows which tools are
+permitted is a second place that can disagree with the one the model was shown.
 """
 
 from __future__ import annotations
 
 import logging
+import math
 import os
 import time
 import uuid
@@ -64,6 +72,12 @@ logger = logging.getLogger(__name__)
 #: that a multi-round Turn probes each tool once rather than once per round.
 CHECK_TTL_SECONDS = 30.0
 MAX_RESOLUTION_RETRIES = 3
+
+#: How long one call of a tool that declared nothing else may take. A default
+#: exists here, and deliberately does not exist for permission: a tool whose
+#: author did not think about time still has to end, while a tool whose author
+#: did not think about permission must not be granted one by omission.
+DEFAULT_TOOL_TIMEOUT_SECONDS = 20.0
 
 #: A handler takes the Turn's trusted context and the model's arguments, and may
 #: be a coroutine function or a blocking one — the executor decides how to run
@@ -106,6 +120,20 @@ class ToolConcurrency(str, Enum):
 
     PARALLEL_SAFE = "parallel_safe"
     SERIALIZED = "serialized"
+
+
+class ToolPermission(str, Enum):
+    """Whether a declaration may be dispatched, and on whose say-so.
+
+    ``ALLOW`` runs. ``DENY`` never runs here. ``ASK`` means a person has to
+    agree first, and there is no way to ask one yet, so the executor refuses it
+    and says so — a capability that needs consent must not run because the
+    consent machinery is missing.
+    """
+
+    ALLOW = "allow"
+    ASK = "ask"
+    DENY = "deny"
 
 
 class AvailabilityReason(str, Enum):
@@ -240,6 +268,26 @@ class ToolEntry:
     access: ToolAccess = ToolAccess.NETWORK
     content_trust: ContentTrust | None = None
     concurrency: ToolConcurrency = ToolConcurrency.SERIALIZED
+    #: Whether this tool may be dispatched at all. Required — :func:`register`
+    #: refuses a registration that leaves it unset, and ``None`` is that unset
+    #: state rather than a value with a meaning.
+    #:
+    #: **There is no default, and that is the point.** Any default is a rule
+    #: about tools nobody thought about: ``ALLOW`` grants the newest, least
+    #: reviewed capability the same standing as a tool that was argued over,
+    #: and ``DENY`` makes forgetting the field look like a deployment decision.
+    #: Both are answers this layer is not entitled to give, so it declines to
+    #: give one and refuses the registration instead.
+    permission: ToolPermission | None = None
+    #: How long one call of this tool may take before the executor gives up on
+    #: it and tells the model so. Declared per tool because the honest bound is
+    #: a property of the work: reading a page that redirects twice is not the
+    #: same wait as one store query.
+    #:
+    #: This is not the round's backstop. That one ends the Turn; this one ends
+    #: one call and leaves the round to finish, which is the difference between
+    #: an answer built from the evidence that did arrive and no answer at all.
+    timeout_seconds: float = DEFAULT_TOOL_TIMEOUT_SECONDS
     contract_version: str = "1"
 
     def __post_init__(self) -> None:
@@ -250,6 +298,17 @@ class ToolEntry:
             ("concurrency", ToolConcurrency),
         ):
             object.__setattr__(self, field_name, enum_type(getattr(self, field_name)))
+        if self.permission is not None:
+            object.__setattr__(self, "permission", ToolPermission(self.permission))
+        timeout = float(self.timeout_seconds)
+        if not math.isfinite(timeout) or timeout <= 0:
+            # A tool that may take forever has no bound at all, and a bound of
+            # zero or less can only refuse. Both read as a declaration, and
+            # neither is one, so neither is accepted.
+            raise ValueError(
+                f"tool {self.name!r} needs a finite, positive timeout_seconds"
+            )
+        object.__setattr__(self, "timeout_seconds", timeout)
         trust = (
             None
             if self.content_trust is None
@@ -288,7 +347,14 @@ class ToolEntry:
 
 @dataclass(frozen=True)
 class ResolvedTool:
-    """One immutable declaration and its availability verdict for a task."""
+    """One immutable declaration and its availability verdict for a task.
+
+    Every axis the executor, the message layer and the budget need is carried
+    here, so a task decides once what a tool is and no consumer re-derives it
+    from the live registry half a round later. :attr:`permission` is one of
+    those axes and is never absent on a snapshot of a *registered* declaration,
+    because :func:`register` refuses one that leaves it unset.
+    """
 
     name: str
     toolset: str
@@ -307,6 +373,8 @@ class ResolvedTool:
     access: ToolAccess
     content_trust: ContentTrust
     concurrency: ToolConcurrency
+    permission: ToolPermission
+    timeout_seconds: float
     contract_version: str
     is_async: bool
     max_result_size_chars: int | None
@@ -351,6 +419,8 @@ class ResolvedTool:
             access=entry.access,
             content_trust=entry.content_trust,
             concurrency=entry.concurrency,
+            permission=entry.permission,
+            timeout_seconds=entry.timeout_seconds,
             contract_version=entry.contract_version,
             is_async=entry.is_async,
             max_result_size_chars=entry.max_result_size_chars,
@@ -398,6 +468,16 @@ def register(entry: ToolEntry, *, override: bool = False) -> ToolEntry:
         raise ValueError(
             f"tool {entry.name!r} needs a display_name a person can read; the "
             "model's name for it is not one"
+        )
+    if entry.permission is None:
+        # Refused rather than defaulted, for the reason a display name is:
+        # a default here would be a rule about every tool nobody thought about,
+        # decided by whoever picked the default rather than by whoever ships the
+        # capability. The refusal makes the omission loud at import time instead
+        # of quiet at dispatch time.
+        raise ValueError(
+            f"tool {entry.name!r} needs a permission; whether it may run is a "
+            "decision its registration has to state"
         )
     if not isinstance(entry.schema, Mapping):
         raise TypeError(f"tool {entry.name!r} needs a JSON Schema mapping")
@@ -609,6 +689,7 @@ __all__ = [
     "AvailabilityReason",
     "CHECK_TTL_SECONDS",
     "ContentTrust",
+    "DEFAULT_TOOL_TIMEOUT_SECONDS",
     "Handler",
     "MAX_RESOLUTION_RETRIES",
     "ResolvedTool",
@@ -618,6 +699,7 @@ __all__ = [
     "ToolEffect",
     "ToolEntry",
     "ToolIdempotency",
+    "ToolPermission",
     "ToolShadowError",
     "availability",
     "accesses_network",
