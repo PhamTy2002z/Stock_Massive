@@ -52,11 +52,48 @@ THOUGHT = "thought"
 
 
 class ToolCallStatus(str, Enum):
-    """The three states the interactive surface renders a tool call in."""
+    """The five states the interactive surface renders a tool call in.
 
+    ``pending`` is a call that has been *written down* before its effect runs:
+    the harness checkpoints the intent of a batch that changes durable state, so
+    a crash between dispatch and result leaves a record saying the effect may
+    have happened. ``running`` is stronger — it means the call is on its way to
+    the tool — and the difference is the whole reason both exist.
+
+    ``denied`` is a call the declaration's permission rule refused. It never
+    reached a tool and never will, which is a different fact from ``error``: a
+    tool that broke is worth asking again and a closed route is not. The
+    ``error`` code travels beside it in the transcript, but not on the rendered
+    channel (``events.TOOL_CALL_FIELDS`` carries no ``error``), so the status is
+    where a surface learns this.
+
+    The Tool Call Trace keeps its own four-value vocabulary
+    (``alpha/models.py``): these are the states of a call as a *screen* and a
+    checkpoint see it, and a projection is not a trace.
+    """
+
+    PENDING = "pending"
     RUNNING = "running"
     OK = "ok"
     ERROR = "error"
+    DENIED = "denied"
+
+
+#: The states a call is in while it is still somebody's responsibility.
+#:
+#: Named once, because three readers ask the same question: the context
+#: constructor leaves an unsettled call out of the transcript entirely, the loop
+#: settles what is left of them when a Turn ends, and the lifecycle settles the
+#: same thing in a checkpoint it is about to freeze.
+UNSETTLED_STATUSES = frozenset({ToolCallStatus.PENDING, ToolCallStatus.RUNNING})
+
+#: What a call that never got to settle is recorded as.
+#:
+#: The honest reading of an interrupted call rather than a claim about the tool:
+#: something ended the Turn — a restart, a deadline, a shutdown — while this call
+#: was outstanding, and whether its effect landed is unknown. ``dispatched`` is
+#: kept as it was, because that is the only fact anybody has about it.
+CALL_INTERRUPTED = "interrupted"
 
 
 #: How each tool is described on screen, and which one of its arguments may
@@ -355,7 +392,14 @@ class TurnToolCall:
 
     @property
     def finished(self) -> bool:
-        return self.status is not ToolCallStatus.RUNNING
+        """Whether this call has a state nobody is waiting on any more.
+
+        Read against :data:`UNSETTLED_STATUSES` rather than against ``running``
+        alone: a ``pending`` call is an intent that has been written down and not
+        yet answered, so a transcript built from it would hand the model half a
+        tool exchange — the very thing ``completed_calls`` exists to prevent.
+        """
+        return self.status not in UNSETTLED_STATUSES
 
     @property
     def model_text(self) -> str:
@@ -1540,6 +1584,7 @@ def build_messages(
 __all__ = [
     "ANSWER",
     "ATTACHMENTS",
+    "CALL_INTERRUPTED",
     "CHARS_PER_TOKEN",
     "COLLAPSED_RESULT_URLS",
     "CONTEXT_LAYERS",
@@ -1557,6 +1602,7 @@ __all__ = [
     "MESSAGE_OVERHEAD_TOKENS",
     "SUMMARY_LABEL",
     "THOUGHT",
+    "UNSETTLED_STATUSES",
     "ConstructedContext",
     "ConstructedContextTooLarge",
     "ContextBudget",

@@ -31,10 +31,12 @@ from src.alpha.models import (
     TOOL_CALL_TOOL_ERROR,
     TOOL_CALL_UNKNOWN_TOOL,
 )
+from src.agent.executor import ToolExecutor
 from src.agent.loop import (
     ANSWER,
     ANSWER_TRUNCATED,
     AUTH_UNAVAILABLE,
+    CALL_INTERRUPTED,
     CANCELLED_BY_USER,
     CONTENT_POLICY_BLOCKED,
     CONTEXT_OVERFLOW,
@@ -70,6 +72,7 @@ from src.agent.loop import (
     ToolCallStatus,
     Transcript,
     TranscriptTurn,
+    TurnDraft,
     TurnRequest,
     TurnStatus,
     TurnToolCall,
@@ -886,6 +889,159 @@ async def test_a_tool_that_failed_settles_as_an_error_and_the_turn_goes_on() -> 
     assert [event["status"] for event in publisher.calls] == ["running", "error"]
     assert outcome.status is TurnStatus.COMPLETE
     assert outcome.tool_calls[0].status is ToolCallStatus.ERROR
+
+
+@pytest.mark.asyncio
+async def test_a_call_a_permission_rule_refused_is_denied_and_not_an_error() -> None:
+    """A closed route and a broken tool are opposite things to be told.
+
+    Only one of them is worth asking again, and the reason code does not reach
+    the rendered channel at all (``events.TOOL_CALL_FIELDS`` carries no
+    ``error``), so the status is where the surface has to learn which it was.
+    """
+    publisher = RecordingPublisher()
+    registry.register(
+        entry("web_search", permission=registry.ToolPermission.DENY), override=True
+    )
+    client = FakeClient([wants("web_search"), answer()])
+
+    outcome = await loop(client, publisher=publisher).run(turn_request())
+
+    assert [event["status"] for event in publisher.calls] == ["running", "denied"]
+    call = outcome.tool_calls[0]
+    assert call.status is ToolCallStatus.DENIED
+    # The code is still on the record for the transcript and the trace, and the
+    # call is still honest about never having been dispatched.
+    assert call.error == "permission_denied"
+    assert call.dispatched is False
+    assert call.as_wire()["status"] == "denied"
+    # And the Turn goes on: the model was told, and answered from the rest.
+    assert outcome.status is TurnStatus.COMPLETE
+
+
+@pytest.mark.asyncio
+async def test_a_batch_that_changes_state_is_written_down_before_it_runs() -> None:
+    """The intent is durable before the effect runs, or the effect can be lost.
+
+    A crash between dispatching a write and reading its result must leave a
+    record saying the write may have landed. What makes that possible is a
+    checkpoint taken *before* the call goes out, holding the call in the state it
+    is in at that moment: written down, not yet on its way.
+    """
+    drafts: list[TurnDraft] = []
+    client = FakeClient([wants("remember_fact"), answer()])
+
+    outcome = await loop(client, checkpoint=drafts.append).run(turn_request())
+
+    written = [
+        draft
+        for draft in drafts
+        if any(call.status is ToolCallStatus.PENDING for call in draft.tool_calls)
+    ]
+    assert len(written) == 1
+    intent = written[0]
+    # A boundary, so the rate limiter cannot be the reason the intent is missing.
+    assert intent.boundary
+    # The intent is the whole of it: which call, under which id, with no result.
+    assert [(call.id, call.name) for call in intent.tool_calls] == [
+        ("call_0", "remember_fact")
+    ]
+    assert [call.result_text for call in intent.tool_calls] == [None]
+    # And it was written before any draft carried a result at all.
+    answered = [
+        index
+        for index, draft in enumerate(drafts)
+        if any(call.result_text for call in draft.tool_calls)
+    ]
+    assert drafts.index(intent) < min(answered)
+    assert outcome.tool_calls[0].status is ToolCallStatus.OK
+
+
+@pytest.mark.asyncio
+async def test_a_batch_that_only_reads_pays_for_no_extra_checkpoint() -> None:
+    """Nothing to reconcile after a read, so nothing is written down before it."""
+    reads: list[TurnDraft] = []
+    writes: list[TurnDraft] = []
+
+    await loop(
+        FakeClient([wants("web_search"), answer()]), checkpoint=reads.append
+    ).run(turn_request())
+    await loop(
+        FakeClient([wants("remember_fact"), answer()]), checkpoint=writes.append
+    ).run(turn_request())
+
+    assert not any(
+        call.status is ToolCallStatus.PENDING
+        for draft in reads
+        for call in draft.tool_calls
+    )
+    # The same Turn shape either way, and the write batch pays exactly one more
+    # checkpoint than the read batch: its intent.
+    assert len(writes) == len(reads) + 1
+
+
+def _answers_one_call_short(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A round that comes back one result short of the calls it was given.
+
+    One-call-one-result forbids it, which is why the terminal gate that settles
+    leftovers cannot be reached through the ordinary surface — every round
+    settles its own calls before it returns. The fault is injected so the gate
+    is tested rather than assumed.
+    """
+    dispatched = ToolExecutor.run
+
+    async def short(self: ToolExecutor, calls: Any) -> Any:
+        outcome = await dispatched(self, calls)
+        return replace(outcome, results=outcome.results[:1])
+
+    monkeypatch.setattr(ToolExecutor, "run", short)
+
+
+@pytest.mark.asyncio
+async def test_a_turn_that_ends_leaves_no_call_waiting(monkeypatch) -> None:
+    publisher = RecordingPublisher()
+    _answers_one_call_short(monkeypatch)
+    client = FakeClient([wants("web_search", "session_search"), answer()])
+
+    outcome = await loop(client, publisher=publisher).run(turn_request())
+
+    assert outcome.status is TurnStatus.COMPLETE
+    assert [
+        call for call in outcome.tool_calls if not call.finished
+    ] == []
+    orphan = outcome.tool_calls[1]
+    assert orphan.status is ToolCallStatus.ERROR
+    assert orphan.error == CALL_INTERRUPTED
+    # Truthful about the one fact anybody has: the call was sent.
+    assert orphan.dispatched is True
+    # And the surface was told, so the stream and the checkpoint agree.
+    assert publisher.calls[-1]["id"] == orphan.id
+    assert publisher.calls[-1]["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_turn_settles_what_it_was_waiting_on_as_the_cancel(
+    monkeypatch,
+) -> None:
+    """The reader stopped it, and the leftover call says so rather than 'interrupted'."""
+    _answers_one_call_short(monkeypatch)
+    stopped = {"value": False}
+
+    def cancelled() -> bool:
+        return stopped["value"]
+
+    async def _stop(_context, arguments) -> Any:
+        stopped["value"] = True
+        return {"found": arguments.get("query")}
+
+    registry.register(entry("web_search", _stop), override=True)
+    client = FakeClient([wants("web_search", "session_search"), answer()])
+
+    outcome = await loop(client).run(turn_request(), cancelled)
+
+    assert outcome.status is TurnStatus.CANCELLED
+    assert [call for call in outcome.tool_calls if not call.finished] == []
+    assert outcome.tool_calls[1].error == CANCELLED_BY_USER
 
 
 @pytest.mark.asyncio
@@ -1782,6 +1938,29 @@ def test_a_running_call_is_left_out_of_the_context_entirely() -> None:
     turn = TranscriptTurn(
         user_text="Chào",
         tool_calls=(TurnToolCall(id="c1", name="web_search"),),
+    )
+    constructed = build_messages(Transcript(system_prompt="p", turns=(turn,)))
+
+    assert [message.role for message in constructed.messages] == [
+        Role.SYSTEM,
+        Role.USER,
+    ]
+
+
+def test_a_call_written_down_before_it_ran_is_left_out_as_well() -> None:
+    """An intent is not half a tool exchange the model gets to read.
+
+    A ``pending`` call has been recorded and not answered, so putting it in the
+    transcript would send the request most routes refuse outright — the same
+    reason a ``running`` one is left out.
+    """
+    turn = TranscriptTurn(
+        user_text="Chào",
+        tool_calls=(
+            TurnToolCall(
+                id="c1", name="remember_fact", status=ToolCallStatus.PENDING
+            ),
+        ),
     )
     constructed = build_messages(Transcript(system_prompt="p", turns=(turn,)))
 

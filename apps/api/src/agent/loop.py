@@ -130,8 +130,15 @@ from src.core.config import get_settings
 from . import registry
 from .budget import TurnBudget, thresholds_for_context, trim_text
 from .definitions import resolve_tool_surface
-from .executor import HALTED_TURN, UNKNOWN_TOOL, ExecutionOutcome, ToolExecutor
+from .executor import (
+    HALTED_TURN,
+    PERMISSION_DENIED,
+    UNKNOWN_TOOL,
+    ExecutionOutcome,
+    ToolExecutor,
+)
 from .executor import ToolCall as ExecutorToolCall
+from .executor import ToolResult as ExecutorToolResult
 from .guardrails import TurnGuardrails
 from .lanes import DEFAULT_REASON, LIGHT, LaneProfile
 from .parts import (
@@ -152,6 +159,7 @@ from .parts import (
 # Thread out of the store (``messages.py``).
 from .messages import (
     ANSWER,
+    CALL_INTERRUPTED,
     CHARS_PER_TOKEN,
     DOMAIN_BODY,
     MAX_SUMMARY_CHARS,
@@ -159,6 +167,7 @@ from .messages import (
     SUMMARY_LABEL,
     SYSTEM_DYNAMIC,
     THOUGHT,
+    UNSETTLED_STATUSES,
     ConstructedContext,
     ContextComposition,
     ConstructedContextTooLarge,
@@ -828,6 +837,45 @@ def assert_distinct_ids(calls: Sequence[ToolCall]) -> None:
                 "is the failure that concatenates two calls' arguments"
             )
         seen.add(call.id)
+
+
+def _settled_status(result: ExecutorToolResult) -> ToolCallStatus:
+    """Which state one answered call is rendered in.
+
+    Three answers rather than two, because a refusal by the declaration's
+    permission rule is not a tool that broke. Nothing ran and nothing will:
+    asking again for the same call is the one move that cannot work, and drawn as
+    ``error`` beside a search engine that went down that is exactly the move a
+    reader would make. The code stays on the record for the transcript and the
+    trace; the *status* is what the rendered channel carries, because
+    ``events.TOOL_CALL_FIELDS`` deliberately does not carry ``error``.
+    """
+    if result.ok:
+        return ToolCallStatus.OK
+    if result.error == PERMISSION_DENIED:
+        return ToolCallStatus.DENIED
+    return ToolCallStatus.ERROR
+
+
+def _changes_durable_state(calls: Sequence[TurnToolCall]) -> bool:
+    """Whether this batch is about to change something outside the Turn.
+
+    Read off the declaration snapshot resolved for each call — the same
+    declaration the executor enforces — rather than off the process-wide
+    registry, which could answer for a tool this Turn cannot even dispatch.
+
+    A call whose declaration never resolved is not a write. The executor answers
+    an unknown name with ``unknown_tool`` before any effect exists, so there is
+    nothing an intent checkpoint could reconcile; and a call the budget already
+    refused is settled, which is why only what is still going to run is asked
+    about.
+    """
+    return any(
+        call.status is ToolCallStatus.RUNNING
+        and call.resolved_tool is not None
+        and call.resolved_tool.effect is registry.ToolEffect.WRITE
+        for call in calls
+    )
 
 
 @dataclass
@@ -1778,6 +1826,7 @@ class AgentLoop:
         index = {record.id: position for position, record in enumerate(planned)}
         state.calls.extend(planned)
         offset = len(state.calls) - len(planned)
+        positions = range(offset, len(state.calls))
         # The round by its shape, and never by its content: what each call asked
         # and what it returned lives on the ``tool.call`` channel and in the Tool
         # Call Trace, and copying a query onto this one would put a second copy of
@@ -1790,11 +1839,49 @@ class AgentLoop:
             external_used=state.external_calls,
             call_ids=[record.id for record in planned],
         )
-        for record in planned:
+        if _changes_durable_state(planned):
+            # Write the intent down before the effect runs. A crash between
+            # dispatching a call that changes durable state and reading its
+            # result has to leave a record saying the effect *may* have
+            # happened: with nothing written down the intent is simply lost, and
+            # the sweep then settles a Turn that quietly changed the reader's
+            # stored memory as though it had never asked for anything.
+            #
+            # The calls enter that checkpoint as ``pending`` — written down, not
+            # yet on their way — and are announced ``running`` immediately below,
+            # at the moment they are actually about to be dispatched. Two states
+            # rather than one because they answer different questions of a
+            # recovered draft: a ``pending`` call is an intent, and a ``running``
+            # call is an intent somebody acted on.
+            #
+            # A batch that only reads keeps the path it always had. There is
+            # nothing to reconcile afterwards, so the extra write would buy a row
+            # version and no fact.
+            for position in positions:
+                call = state.calls[position]
+                if call.status is ToolCallStatus.RUNNING:
+                    state.calls[position] = replace(
+                        call, status=ToolCallStatus.PENDING
+                    )
+            await self._save(state, boundary=True)
+            for position in positions:
+                call = state.calls[position]
+                if call.status is ToolCallStatus.PENDING:
+                    state.calls[position] = replace(
+                        call, status=ToolCallStatus.RUNNING
+                    )
+
+        for position in positions:
             # Only what is about to run is announced as running. A call the
             # budget already refused has one state, not two, and publishing a
             # ``running`` it never entered would put a spinner on screen for
             # work nobody started.
+            #
+            # Read back out of the state rather than off ``planned``: after an
+            # intent checkpoint the record in the state is the current one, and a
+            # second list of the same calls is how a surface comes to be told
+            # about a state the Turn has already left.
+            record = state.calls[position]
             if record.status is ToolCallStatus.RUNNING:
                 self._publish_call(record)
 
@@ -1821,9 +1908,7 @@ class AgentLoop:
                     position = offset + index[result.call_id]
                     finished = replace(
                         state.calls[position],
-                        status=(
-                            ToolCallStatus.OK if result.ok else ToolCallStatus.ERROR
-                        ),
+                        status=_settled_status(result),
                         result_text=result.text,
                         # What the model reads, which is the result minus the
                         # pages this Turn has already put in front of it. Built
@@ -1876,9 +1961,9 @@ class AgentLoop:
             # Settled rather than left running, so a reader who reconnects to the
             # finished Turn is not shown a spinner on a call nothing is waiting
             # for any more.
-            for position in range(offset, len(state.calls)):
+            for position in positions:
                 call = state.calls[position]
-                if call.status is ToolCallStatus.RUNNING:
+                if call.status in UNSETTLED_STATUSES:
                     state.calls[position] = replace(
                         call,
                         status=ToolCallStatus.ERROR,
@@ -1886,7 +1971,7 @@ class AgentLoop:
                         dispatched=False,
                     )
 
-        for position in range(offset, len(state.calls)):
+        for position in positions:
             self._publish_call(state.calls[position])
 
         if timed_out:
@@ -2072,6 +2157,44 @@ class AgentLoop:
         """
         self._attempt(state, ATTEMPT_CANCELLED, terminal_reason=CANCELLED_BY_USER)
 
+    def _settle_orphans(self, state: _TurnState, status: TurnStatus) -> None:
+        """Give every still-outstanding call the state the Turn ended in.
+
+        A Turn cannot end owing somebody a spinner. Whatever is left ``pending``
+        or ``running`` when a terminal path is taken has no result and will never
+        get one, so it settles as an error naming why the Turn stopped:
+        ``cancelled_by_user`` where the reader stopped it, ``interrupted``
+        wherever a deadline, a route failure or a shutdown did.
+
+        ``dispatched`` is left exactly as it was, and so is an error code the call
+        already carries. Whether the call's effect landed is the one fact a
+        recovered Turn is asked about, and this function has no way to establish
+        it — rewriting the field to make the record tidy is what would make the
+        record a lie.
+
+        The settled state goes out on the ``tool.call`` channel as well, because a
+        reader still attached when the Turn ends draws the timeline from the
+        stream and a reader who reconnects draws it from the checkpoint. They must
+        not be able to disagree.
+
+        In an ordinary Turn there is nothing here to do: every round settles its
+        own calls before it returns. This is the guarantee for the paths that do
+        not get that far.
+        """
+        error = (
+            CANCELLED_BY_USER
+            if status is TurnStatus.CANCELLED
+            else CALL_INTERRUPTED
+        )
+        for position, call in enumerate(state.calls):
+            if call.status not in UNSETTLED_STATUSES:
+                continue
+            settled = replace(
+                call, status=ToolCallStatus.ERROR, error=call.error or error
+            )
+            state.calls[position] = settled
+            self._publish_call(settled)
+
     async def _save(self, state: _TurnState, *, boundary: bool = False) -> None:
         if self._checkpoint is None:
             return
@@ -2119,7 +2242,12 @@ class AgentLoop:
         useful rather than empty — the difference between ``incomplete`` and
         ``failed``.
 
+        Every call is settled before any of that is written down, so nothing the
+        Turn was waiting on outlives it: the checkpoint taken here and the
+        outcome returned from here are the two views the rest of the system reads
+        a finished Turn from.
         """
+        self._settle_orphans(state, status)
         await self._save(state, boundary=True)
         return TurnOutcome(
             status=status,
@@ -2200,6 +2328,7 @@ __all__ = [
     "ANSWER_TRUNCATED",
     "ASKED_LIMIT",
     "AUTH_UNAVAILABLE",
+    "CALL_INTERRUPTED",
     "CANCELLED_BY_USER",
     "CHARS_PER_TOKEN",
     "CHAT_MODE",

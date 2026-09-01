@@ -67,6 +67,7 @@ from .loop import (
     TurnRequest,
     TurnStatus,
 )
+from .messages import CALL_INTERRUPTED, UNSETTLED_STATUSES, ToolCallStatus
 from .persistence import TURN_INCOMPLETE, AgentPersistence, TurnRecord
 from .prompt import RuntimeContext
 
@@ -246,6 +247,45 @@ def draft_content(draft: TurnDraft) -> dict[str, Any]:
     }
 
 
+#: The wire spellings of the states a call has not settled into.
+#:
+#: Derived from the enum rather than written out here, so a state added to the
+#: projection cannot be a state this reader silently keeps freezing.
+_UNSETTLED_WIRE_STATUSES = frozenset(status.value for status in UNSETTLED_STATUSES)
+
+
+def settle_orphan_calls(
+    calls: Sequence[Mapping[str, Any]], error: str
+) -> tuple[dict[str, Any], ...]:
+    """The same calls, with nothing left in a state somebody is waiting on.
+
+    A checkpoint is a photograph of a Turn in flight, so the calls in it are
+    routinely ``pending`` or ``running``. Copied into a canonical message or a
+    frozen snapshot unchanged, those states become permanent: a Thread reopened
+    tomorrow draws a spinner on a call that stopped being anybody's business
+    before the process running it was replaced, and a transcript that does that
+    is a transcript nobody can read the history off.
+
+    Only ``status`` changes, and ``error`` only where the record carries none — a
+    call that already said why it failed knows more than this function does.
+    Every other key is copied through, ``dispatched`` among them where a payload
+    carries one: whether the call's effect landed is a fact this function cannot
+    establish and must not invent.
+
+    Pure, and shared by the two places a checkpoint becomes permanent, because
+    two implementations of "settle the leftovers" is how one of them comes to
+    miss a state the other one learned about.
+    """
+    settled: list[dict[str, Any]] = []
+    for call in calls:
+        entry = dict(call)
+        if entry.get("status") in _UNSETTLED_WIRE_STATUSES:
+            entry["status"] = ToolCallStatus.ERROR.value
+            entry["error"] = entry.get("error") or error
+        settled.append(entry)
+    return tuple(settled)
+
+
 def assistant_message(
     *,
     text: str,
@@ -317,7 +357,13 @@ def frozen_message(record: TurnRecord) -> Mapping[str, Any] | None:
         # empty one.
         answer=draft.get("answer") or None,
         thoughts=tuple(draft.get("thoughts") or ()),
-        tool_calls=tuple(draft.get("tool_calls") or ()),
+        # Whatever this checkpoint was still waiting on is settled before it is
+        # frozen into the transcript. The build that wrote it is gone, so nothing
+        # is coming back for those calls, and ``interrupted`` is the honest
+        # reading: something ended the Turn while the call was outstanding.
+        tool_calls=settle_orphan_calls(
+            tuple(draft.get("tool_calls") or ()), CALL_INTERRUPTED
+        ),
         # Carried through unchanged: the build that was answering wrote this
         # trail, and this process knows nothing about the events in it beyond
         # that they stopped.
@@ -572,7 +618,18 @@ class TurnService:
         """
         draft = running.draft
         text = "" if draft is None else (draft.text or "")
-        calls = [] if draft is None else [call.as_wire() for call in draft.tool_calls]
+        # The loop never handed back an outcome, so it never settled anything: the
+        # last checkpoint is all there is, and its calls are settled here before
+        # they become permanent. This path is never a cancellation — a cancelled
+        # Turn ends through the loop and ``_finish`` — so ``interrupted`` is the
+        # whole of what happened to them.
+        calls = (
+            ()
+            if draft is None
+            else settle_orphan_calls(
+                [call.as_wire() for call in draft.tool_calls], CALL_INTERRUPTED
+            )
+        )
         message = (
             assistant_message(
                 text=text,
@@ -593,6 +650,19 @@ class TurnService:
             status=status,
             terminal_reason=terminal_reason,
             message=message,
+            # The persisted draft, settled too. Once this process stops holding
+            # the Turn, a reconnecting subscriber is answered from that column
+            # rather than from the message — so leaving the last checkpoint there
+            # untouched would keep a snapshot drawing what the transcript no
+            # longer says.
+            draft=(
+                None
+                if draft is None
+                else {
+                    **draft_content(draft),
+                    "tool_calls": [dict(call) for call in calls],
+                }
+            ),
             last_event_seq=running.publisher.next_seq,
         )
         running.publisher.terminal(
@@ -732,5 +802,6 @@ __all__ = [
     "assistant_message",
     "draft_content",
     "frozen_message",
+    "settle_orphan_calls",
     "sweep_interrupted_turns",
 ]

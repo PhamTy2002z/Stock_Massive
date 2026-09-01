@@ -9,7 +9,7 @@ from datetime import date, datetime, timezone
 import pytest
 from sqlalchemy import delete, select
 
-from src.agent import toolsets
+from src.agent import registry, toolsets
 from src.agent.events import EventType
 from src.agent.lanes import DEEP, DEFAULT_REASON, LIGHT, LaneProfile
 from src.agent.loop import AgentLoop, ContextBudget, TurnDraft
@@ -27,6 +27,7 @@ from src.agent.turns import (
     TurnService,
     UserInputTooLarge,
     assert_input_within_cap,
+    settle_orphan_calls,
 )
 from src.alpha.models import (
     AgentMessage,
@@ -691,6 +692,146 @@ async def test_the_canonical_message_says_which_lane_answered_and_why(owner):
     assert [part["payload"]["status"] for part in trail[1:]] == [
         "running",
         "completed",
+    ]
+
+
+# --- nothing is left waiting when a Turn ends ------------------------------
+
+
+def test_settling_a_leftover_call_says_nothing_about_its_effect():
+    """Only the state changes. Whether the effect landed is not ours to invent."""
+    calls = [
+        {"id": "c1", "name": "remember_fact", "status": "pending", "dispatched": True},
+        {"id": "c2", "name": "web_search", "status": "running", "dispatched": False},
+        {"id": "c3", "name": "web_search", "status": "ok", "dispatched": True},
+        # A call that already said why it stopped keeps its own reason.
+        {
+            "id": "c4",
+            "name": "web_search",
+            "status": "running",
+            "error": "tool_call_timeout",
+        },
+    ]
+
+    settled = settle_orphan_calls(calls, "interrupted")
+
+    assert [call["status"] for call in settled] == ["error", "error", "ok", "error"]
+    assert [call.get("error") for call in settled] == [
+        "interrupted",
+        "interrupted",
+        None,
+        "tool_call_timeout",
+    ]
+    assert [call.get("dispatched") for call in settled] == [True, False, True, None]
+    # Pure: the caller's own list is untouched.
+    assert calls[0]["status"] == "pending"
+
+
+def narrating(name: str, text: str = "Đang ghi lại.") -> Completion:
+    """A round that says something and then asks for one tool call."""
+    return Completion(
+        model="gpt-5.6-terra",
+        text=text,
+        tool_calls=(
+            ToolCall(id="c1", name=name, arguments={"query": "FPT"}, output_index=0),
+        ),
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_deadline_settles_the_write_its_checkpoint_had_written_down(owner):
+    """The intent survives the deadline, and it does not survive as a spinner.
+
+    A call that changes durable state is checkpointed before it is dispatched, so
+    a Turn the wall clock kills mid-write leaves a record of it. What that record
+    must not do is stay ``pending`` for ever: the transcript and the snapshot a
+    reconnecting reader is answered from both say the call was interrupted.
+    """
+    thread_id = await thread_for(owner)
+
+    async def sleepy(_context, _arguments):
+        await asyncio.sleep(5)
+        return {"ok": True}
+
+    registry.register(entry("remember_fact", sleepy), override=True)
+    turns = service(
+        FakeClient([narrating("remember_fact"), answer("Không tới đây.")]),
+        deadline_seconds=0.05,
+    )
+    turn_id = uuid.uuid4()
+    await turns.create(
+        user_id=owner,
+        thread_id=thread_id,
+        turn_id=turn_id,
+        user_text="Ghi nhớ giúp tôi.",
+        runtime=runtime(owner),
+    )
+    await turns.running(turn_id).task
+
+    record = await store().read_turn(owner, turn_id)
+    assert record.status == TURN_INCOMPLETE
+    assert record.terminal_reason == "turn_deadline"
+    # The persisted draft, which is what a later subscriber is answered from.
+    persisted = record.draft_content["tool_calls"]
+    assert [call["id"] for call in persisted] == ["c1"]
+    assert [call["status"] for call in persisted] == ["error"]
+    assert [call["error"] for call in persisted] == ["interrupted"]
+    # And the canonical message, which is what a reopened Thread renders.
+    assistant = [row for row in messages_of(thread_id) if row.role == "assistant"][0]
+    assert [call["status"] for call in assistant.content["tool_calls"]] == ["error"]
+    subscriber = await turns.subscribe(owner, turn_id)
+    assert [
+        call["status"] for call in subscriber.snapshot.data["tool_calls"]
+    ] == ["error"]
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_freezes_no_call_anybody_is_still_waiting_on(owner):
+    """A restart leaves calls mid-flight, and the freeze is where they settle.
+
+    The build that was answering is gone, so nothing is coming back for them:
+    frozen as they were, the transcript would draw a spinner on every one of
+    them for as long as the Thread exists.
+    """
+    thread_id = await thread_for(owner)
+    message = await store().append_message(
+        thread_id, role="user", content={"text": "FPT thế nào?"}
+    )
+    turn_id = uuid.uuid4()
+    with get_sync_db() as session:
+        session.add(
+            AgentTurn(
+                id=turn_id,
+                thread_id=thread_id,
+                request_message_id=message.id,
+                status=TURN_RUNNING,
+                last_event_seq=4,
+                started_at=datetime.now(timezone.utc),
+                draft_content={
+                    "text": "Một phần đã kịp nói.",
+                    "tool_calls": [
+                        {"id": "c1", "name": "web_search", "status": "ok"},
+                        {"id": "c2", "name": "web_search", "status": "running"},
+                        {"id": "c3", "name": "remember_fact", "status": "pending"},
+                    ],
+                    "rounds_used": 1,
+                },
+            )
+        )
+
+    await service(FakeClient([])).sweep()
+
+    assistant = [row for row in messages_of(thread_id) if row.role == "assistant"][0]
+    frozen = assistant.content["tool_calls"]
+    # The call that had answered keeps its state; the two the restart caught are
+    # settled, and neither is left in a state the surface draws as in flight.
+    assert [call["status"] for call in frozen] == ["ok", "error", "error"]
+    # The one that had answered gains no reason of its own.
+    assert [call.get("error") for call in frozen] == [
+        None,
+        "interrupted",
+        "interrupted",
     ]
 
 
