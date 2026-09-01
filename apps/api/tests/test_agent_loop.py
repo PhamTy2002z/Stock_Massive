@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import uuid
 from dataclasses import replace
 from datetime import date, datetime, timezone
@@ -857,6 +858,98 @@ async def test_cancellation_keeps_the_round_that_had_already_run() -> None:
     assert outcome.rounds_used == 1
     assert [call.status for call in outcome.tool_calls] == [ToolCallStatus.OK]
     assert len(client.requests) == 1
+
+
+class StallingClient:
+    """A route that answers the first ask and then holds the second open.
+
+    What a reasoning route looks like from here, and the wait a reader pressing
+    stop is trying to get out of. ``asked`` fires when the second call is in
+    flight, so a test can press stop at the one moment that is hard to reach by
+    timing.
+    """
+
+    def __init__(self, first: Completion, *, asked: asyncio.Event, stall: float) -> None:
+        self.first = first
+        self.asked = asked
+        self.stall = stall
+        self.requests: list[Any] = []
+        self.spends: list[Any] = []
+        self.answered = 0
+
+    async def complete(self, request, spend=None):
+        self.requests.append(request)
+        self.spends.append(spend)
+        if len(self.requests) == 1:
+            return self.first
+        self.asked.set()
+        await asyncio.sleep(self.stall)
+        self.answered += 1
+        return answer("Nobody reads this.")
+
+
+@pytest.mark.asyncio
+async def test_a_stop_during_the_model_call_does_not_wait_the_route_out() -> None:
+    """The stop reaches the call in flight, not the round boundary behind it.
+
+    The reason to assert the elapsed time rather than only the status: polling a
+    flag between rounds produces exactly the same terminal state, two minutes
+    later, while the reader watches a spinner they already dismissed.
+    """
+    publisher = RecordingPublisher()
+    drafts: list[TurnDraft] = []
+    asked = asyncio.Event()
+    stop = asyncio.Event()
+    # Long enough that waiting it out could not pass for promptness, short
+    # enough that a broken teardown fails this test instead of hanging the suite.
+    client = StallingClient(
+        Completion(
+            model=SESSION_MODEL,
+            text="Đang tra.",
+            tool_calls=(
+                ToolCall(id="c1", name="web_search", arguments={"query": "lãi suất"}),
+            ),
+            usage=Usage(input_tokens=10, output_tokens=5),
+        ),
+        asked=asked,
+        stall=5.0,
+    )
+
+    async def press_stop() -> None:
+        await asked.wait()
+        stop.set()
+
+    pressing = asyncio.create_task(press_stop())
+    started = time.monotonic()
+    outcome = await loop(
+        client, publisher=publisher, checkpoint=drafts.append
+    ).run(turn_request(), stop.is_set, cancel_event=stop)
+    elapsed = time.monotonic() - started
+    await pressing
+
+    assert outcome.status is TurnStatus.CANCELLED
+    assert outcome.terminal_reason == CANCELLED_BY_USER
+    assert elapsed < client.stall / 2
+    # The ask was torn down rather than left running behind the Turn.
+    assert client.answered == 0
+    # What the first round produced is still the reader's, and so is its round.
+    assert outcome.text == "Đang tra."
+    assert outcome.rounds_used == 1
+    assert [call.status for call in outcome.tool_calls] == [ToolCallStatus.OK]
+    # The trail says the asking was stopped, not that it failed.
+    assert statuses(publisher) == ["running", "completed", "running", "cancelled"]
+    assert only(publisher, ProgressKind.MODEL_ATTEMPT)[-1] == {
+        "status": "cancelled",
+        "terminal_reason": CANCELLED_BY_USER,
+    }
+    # And nothing anybody can reconnect to is left owing a result.
+    assert [call for call in outcome.tool_calls if not call.finished] == []
+    assert [
+        call
+        for draft in drafts[-1:]
+        for call in draft.tool_calls
+        if call.status in {ToolCallStatus.PENDING, ToolCallStatus.RUNNING}
+    ] == []
 
 
 # -- tool calls --------------------------------------------------------------
@@ -2344,6 +2437,30 @@ async def test_a_round_whose_tools_never_answer_ends_the_turn_and_settles_them()
     # No call is left spinning on a Turn that has stopped.
     assert [call.status for call in outcome.tool_calls] == [ToolCallStatus.ERROR]
     assert [event["status"] for event in publisher.calls] == ["running", "error"]
+
+
+@pytest.mark.asyncio
+async def test_a_call_the_round_gave_up_on_is_still_recorded_as_sent() -> None:
+    """A result that never came does not make the request unsent.
+
+    The round's bound expiring says nothing about whether the call reached the
+    other side — it is still out there when the round stops waiting — and a
+    record claiming it never left is the record that hides whatever it did.
+    """
+    async def hangs(_context, _arguments):
+        await asyncio.sleep(10)
+
+    registry.register(entry("web_search", hangs), override=True)
+    registry.register(entry("session_search", hangs), override=True)
+    client = FakeClient(
+        [wants("web_search", "session_search"), answer("Không tới đây.")]
+    )
+
+    outcome = await loop(client, tool_timeout_seconds=0.02).run(turn_request())
+
+    assert outcome.terminal_reason == TOOL_TIMEOUT
+    assert [call.error for call in outcome.tool_calls] == [TOOL_TIMEOUT, TOOL_TIMEOUT]
+    assert [call.dispatched for call in outcome.tool_calls] == [True, True]
 
 
 # -- the stock-domain half of the prompt --------------------------------------

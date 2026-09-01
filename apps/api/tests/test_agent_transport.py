@@ -110,7 +110,10 @@ class ScriptedLoop:
         self._checkpoint = checkpoint
         self._publisher = publisher
 
-    async def run(self, request, cancelled) -> TurnOutcome:
+    async def run(self, request, cancelled, *, cancel_event=None) -> TurnOutcome:
+        # ``cancel_event`` is accepted because the service hands one to every
+        # Turn it starts. This double waits on its own release rather than on the
+        # event: what the real loop does with it is asserted where the loop is.
         self._control.started.set()
         for call in self._control.calls:
             self._publisher.tool_call(call.as_wire())

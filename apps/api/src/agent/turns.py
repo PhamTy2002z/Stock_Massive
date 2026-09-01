@@ -47,7 +47,7 @@ import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from src.alpha.refusals import AlphaRefusal
@@ -142,6 +142,13 @@ class RunningTurn:
     task: asyncio.Task[Any] | None = None
     cancel_requested: bool = False
     shutting_down: bool = False
+    # The same stop as the two flags above, in the form a wait inside the Turn
+    # can be woken by. The flags are what :meth:`cancelled` answers from — a
+    # round boundary asks a question and wants an answer now — and the event is
+    # what reaches the model call and the tool round already in flight. Both are
+    # set together, and by the same two callers, so a Turn cannot be stopped
+    # according to one and running according to the other.
+    cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
     # What this Turn was routed to, and why. Decided once when the Turn was
     # created and carried rather than re-derived: the loop is built from it, the
     # wall clock comes from it, and the reason is what lets an operator ask why a
@@ -541,7 +548,11 @@ class TurnService:
         try:
             try:
                 outcome = await asyncio.wait_for(
-                    agent.run(request, running.cancelled),
+                    agent.run(
+                        request,
+                        running.cancelled,
+                        cancel_event=running.cancel_event,
+                    ),
                     deadline,
                 )
             except TimeoutError:
@@ -704,11 +715,14 @@ class TurnService:
         return subscriber
 
     async def cancel(self, user_id: int, turn_id: uuid.UUID | str) -> TurnRecord | None:
-        """Authenticated and idempotent; dispatches no new call.
+        """Authenticated and idempotent; ends the work in flight and starts none.
 
-        A read-only call already in flight is allowed to finish, as the loop
-        requires. Its trace is kept and its result is simply not fed into
-        another round.
+        The event reaches what is already running: the model call is given up on
+        rather than waited out, and so is a segment of read-only tools. A call
+        that *writes* is the exception and finishes — its effect must happen once
+        or not at all, and cancelling it halfway is how it comes to happen twice.
+        Whatever a finished call returned is kept in the trace; what changes is
+        that no result is fed into another round.
         """
         record = await self._store.request_turn_cancel(user_id, turn_id)
         if record is None:
@@ -716,6 +730,7 @@ class TurnService:
         running = self._running.get(record.id)
         if running is not None:
             running.cancel_requested = True
+            running.cancel_event.set()
         return record
 
     # -- startup and shutdown ---------------------------------------------
@@ -732,6 +747,10 @@ class TurnService:
             return
         for entry in running:
             entry.shutting_down = True
+            # Asked to stop the same way a reader asks, so the window this
+            # method buys is spent reaching a checkpoint rather than waiting out
+            # a model call whose answer this process will not be here to use.
+            entry.cancel_event.set()
         tasks = [entry.task for entry in running if entry.task is not None]
         _done, pending = await asyncio.wait(tasks, timeout=deadline)
         for task in pending:

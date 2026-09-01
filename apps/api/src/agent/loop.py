@@ -66,6 +66,14 @@ in the reply. It is *not* withheld from the model: ``state.text`` keeps every
 piece, and that is the string the next Turn's transcript is built from. How a
 surface chooses to draw a sentence must not change what the model saw.
 
+**A stop is acted on where it lands.** A reader who cancels is not asked to wait
+for whatever this Turn happens to be inside. The model call in flight is torn
+down, and so is a segment of read-only tools; the one tool that *writes* is
+allowed to finish, because an effect made half way is worse than an effect
+nobody wanted. Money already committed stays committed — the ledger's
+``usage_unknown`` path says the true thing about a request the route was given —
+and every call the Turn was waiting on settles before the Turn is written down.
+
 **Nothing is disabled automatically.** ``malformed_arguments`` is counted and
 logged loudly; an operator flips the switch by hand. A cutoff that fires on two
 errors is a mechanism that can cause its own outage.
@@ -79,7 +87,7 @@ import logging
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import Enum
@@ -675,6 +683,18 @@ class TurnAdmission:
             raise TurnRefused.of(refusal) from refusal
 
 
+class TurnCancelled(Exception):
+    """The reader stopped the Turn while the model was still being asked.
+
+    Raised rather than returned, and deliberately not an :class:`LLMError`: the
+    route did nothing wrong, so none of the recoveries in :meth:`AgentLoop._call`
+    may look at this and none of the terminal reasons may classify it. It travels
+    up to the one branch that settles a cancelled Turn, which keeps the
+    ``cancelled_by_user`` decision in the same place the round-boundary check
+    already makes it.
+    """
+
+
 class ToolCallIdMismatch(MalformedArguments):
     """A tool call whose id cannot be trusted to identify it.
 
@@ -988,6 +1008,15 @@ class _TurnState:
     #: for those bytes, and calling it a cache key without saying so would
     #: invite somebody to "fix" caching by editing it.
     cache_identity: str = ""
+    #: Set the moment the reader stops this Turn, where the caller has one.
+    #:
+    #: On the state rather than on the loop because it belongs to *this* running
+    #: Turn, and on the state rather than threaded through six signatures because
+    #: the two places that race against it — the model call and the tool round —
+    #: are already handed it. ``None`` is a Turn nobody can stop mid-flight,
+    #: which is every caller that passes no event: the round-boundary predicate
+    #: is still the authority on whether the Turn continues.
+    cancel_event: asyncio.Event | None = None
     # Set when the guardrail ladder halted the tool loop. The Turn does not end:
     # it makes its answering call one round early, which is what the halt
     # guidance asks for — ending here would throw away evidence the reader was
@@ -1090,16 +1119,35 @@ class AgentLoop:
     # -- entry point ------------------------------------------------------
 
     async def run(
-        self, request: TurnRequest, cancelled: Cancelled = lambda: False
+        self,
+        request: TurnRequest,
+        cancelled: Cancelled = lambda: False,
+        *,
+        cancel_event: asyncio.Event | None = None,
     ) -> TurnOutcome:
-        async with self._slots.occupy():
-            return await self._run(request, cancelled)
+        """One Turn. ``cancel_event`` is what lets a stop land mid-flight.
 
-    async def _run(self, request: TurnRequest, cancelled: Cancelled) -> TurnOutcome:
+        The predicate stays the authority at every round boundary, and a caller
+        that supplies only the predicate gets exactly the loop it always had: the
+        Turn ends between rounds. The event is the same stop said in a form the
+        two waits inside a round can be woken by — the model call and a segment
+        of read-only tools — so a reader who presses stop does not go on paying
+        for work whose answer nobody will see.
+        """
+        async with self._slots.occupy():
+            return await self._run(request, cancelled, cancel_event)
+
+    async def _run(
+        self,
+        request: TurnRequest,
+        cancelled: Cancelled,
+        cancel_event: asyncio.Event | None,
+    ) -> TurnOutcome:
         state = _TurnState(
             turn_id=str(request.turn_id) if request.turn_id is not None else None,
             thread_id=str(request.thread_id),
             question=_asked(request.user_text),
+            cancel_event=cancel_event,
         )
         surface = resolve_tool_surface(self._toolsets)
         tools = surface.offered_schemas
@@ -1133,6 +1181,10 @@ class AgentLoop:
             guardrails=TurnGuardrails(),
             trace=self._trace_writer(request, turn_budget),
             surface=surface,
+            # The same stop the model call races. What the executor does with it
+            # is its own rule: reads in flight are given up on, and a write that
+            # has started is allowed to finish.
+            cancel_event=cancel_event,
         )
         system_prompt = render(request.runtime)
         state.domain_body = True
@@ -1193,6 +1245,19 @@ class AgentLoop:
                 # route violated its contract, and an answer built on top of
                 # that is an answer nobody can trust. Nothing is disabled here.
                 raise
+            except TurnCancelled:
+                # The reader stopped the Turn while this call was in flight, and
+                # the call has already been torn down. Whatever earlier rounds
+                # produced is still theirs; what they do not get is the answer
+                # this call was going to bring, and the trail says so.
+                logger.info(
+                    "Turn %s was stopped while the model was being asked",
+                    request.request_message_id,
+                )
+                self._cancelled_attempt(state)
+                return await self._ended(
+                    state, TurnStatus.CANCELLED, CANCELLED_BY_USER
+                )
             except TimeoutError:
                 # Our ceiling on one ``complete`` including every retry the
                 # client made inside it, distinct from the transport's per-request
@@ -1302,10 +1367,12 @@ class AgentLoop:
             if failed is not None:
                 return await self._ended(state, TurnStatus.INCOMPLETE, failed)
 
-            # Cancellation stops *after* the in-flight calls complete. The one
-            # tool that writes writes a single row of the user's own memory, so
-            # there is nothing to roll back, and a half-cancel path costs more
-            # than the call it would save.
+            # The round is behind us either way: a stop that arrived during it
+            # has already settled its own calls — reads given up on, a write in
+            # flight allowed to finish so nothing outside this process happens
+            # twice — and a stop that arrived after it finds every call answered.
+            # What this check owns is the Turn: no further round, and no further
+            # call.
             if cancelled():
                 self._cancelled_attempt(state)
                 return await self._ended(
@@ -1466,6 +1533,17 @@ class AgentLoop:
 
         Both halves happen inside the client, which holds no transaction across
         the network call; the loop's job is to name the worst case honestly.
+
+        Given up on when the reader stops the Turn, which is a second bound
+        beside :data:`LLM_CALL_TIMEOUT_SECONDS` and not a replacement for it: the
+        call ceiling still holds over the whole race, so a route that goes silent
+        with nobody pressing stop ends the Turn exactly where it did before.
+
+        The reservation of an abandoned call is left to the ledger's
+        ``usage_unknown`` path, which is where this system already says the thing
+        that is true of it: the money is spent whether or not the answer arrived.
+        Nothing is refunded here, and nothing may be — a request that reached the
+        route was served by it.
         """
         output_tokens = self._output_tokens(state)
         spend = SpendRequest(
@@ -1487,30 +1565,65 @@ class AgentLoop:
             owner_output_total=self._lane.owner_output_total,
             owner_input_total=self._lane.owner_input_total,
         )
-        return await asyncio.wait_for(
-            self._client.complete(
-                CompletionRequest(
-                    model=self._model,
-                    # Local to this process: ``metadata`` is read by this
-                    # harness and by tests, and the transport does not put it on
-                    # the wire. That is deliberate — the route has not been
-                    # shown to read any cache field, and sending one it ignores
-                    # would be a claim in the request body that nothing behind
-                    # it honours.
-                    metadata={"cache_identity": state.cache_identity},
-                    messages=tuple(messages),
-                    tools=tuple(tools),
-                    # On the ceiling the model answers from what it has: another
-                    # round of tools it cannot spend would come back as a call
-                    # nobody runs.
-                    tool_choice="none" if final else "auto",
-                    parallel_tool_calls=True,
-                    max_output_tokens=output_tokens,
-                ),
-                spend,
+        asking = self._client.complete(
+            CompletionRequest(
+                model=self._model,
+                # Local to this process: ``metadata`` is read by this harness and
+                # by tests, and the transport does not put it on the wire. That
+                # is deliberate — the route has not been shown to read any cache
+                # field, and sending one it ignores would be a claim in the
+                # request body that nothing behind it honours.
+                metadata={"cache_identity": state.cache_identity},
+                messages=tuple(messages),
+                tools=tuple(tools),
+                # On the ceiling the model answers from what it has: another
+                # round of tools it cannot spend would come back as a call
+                # nobody runs.
+                tool_choice="none" if final else "auto",
+                parallel_tool_calls=True,
+                max_output_tokens=output_tokens,
             ),
-            self._call_timeout,
+            spend,
         )
+        stop = state.cancel_event
+        if stop is None:
+            return await asyncio.wait_for(asking, self._call_timeout)
+        return await asyncio.wait_for(self._asked(asking, stop), self._call_timeout)
+
+    async def _asked(
+        self, asking: Awaitable[Completion], stop: asyncio.Event
+    ) -> Completion:
+        """The route's answer, or :class:`TurnCancelled` if the reader stops first.
+
+        A race rather than a poll: the wait this has to interrupt is a single
+        ``await`` on a network call that a reasoning route can hold for a minute,
+        and there is no point inside it to look at a flag.
+
+        The call is cancelled before this returns on either exit — the reader's
+        stop, or the ceiling the caller wraps this in — because a request nobody
+        is waiting for still holds a connection, and an abandoned task's
+        exception would surface later attached to a Turn that has ended.
+        """
+        call = asyncio.ensure_future(asking)
+        stopped = asyncio.ensure_future(stop.wait())
+        try:
+            await asyncio.wait({call, stopped}, return_when=asyncio.FIRST_COMPLETED)
+        except asyncio.CancelledError:
+            # The call ceiling, or the process going down. Either way this call
+            # is not going to be read, so it does not go on running.
+            call.cancel()
+            raise
+        finally:
+            stopped.cancel()
+        if call.done():
+            # It arrived, so it is the answer — including when the stop landed in
+            # the same tick. The Turn was paid for and the words exist; the round
+            # boundary in :meth:`_run` is where the stop is then honoured.
+            return call.result()
+        call.cancel()
+        with suppress(asyncio.CancelledError):
+            await call
+        raise TurnCancelled()
 
     async def _call(
         self,
@@ -1961,6 +2074,14 @@ class AgentLoop:
             # Settled rather than left running, so a reader who reconnects to the
             # finished Turn is not shown a spinner on a call nothing is waiting
             # for any more.
+            #
+            # ``dispatched`` keeps the truth about each call rather than being
+            # written down as ``False`` to match the absent result: a call in the
+            # batch this round handed the executor was *sent*, and it is still
+            # out there when the round gives up on it. Saying it never left would
+            # tell a recovered Turn — and anybody reading the trace after a
+            # duplicate — the one thing that is not so.
+            sent = {call.id for call in runnable}
             for position in positions:
                 call = state.calls[position]
                 if call.status in UNSETTLED_STATUSES:
@@ -1968,7 +2089,7 @@ class AgentLoop:
                         call,
                         status=ToolCallStatus.ERROR,
                         error=TOOL_TIMEOUT,
-                        dispatched=False,
+                        dispatched=call.id in sent,
                     )
 
         for position in positions:
@@ -2147,13 +2268,17 @@ class AgentLoop:
         )
 
     def _cancelled_attempt(self, state: _TurnState) -> None:
-        """Say that the Turn will not ask the model again, because it was stopped.
+        """Say that the asking of the model stopped, because the reader did.
 
-        Emitted where a cancellation ends the Turn, which is a round boundary:
-        the loop's next act would have been a model call, and the reader's stop
-        is why it is not made. Nothing about a call already answered changes —
-        its own ``completed`` part is already in the trail, and the prose it
-        produced is still the reader's.
+        Emitted from the two places a cancellation ends a Turn. At a round
+        boundary it means the next call is not made. In the middle of a call it
+        means that call was torn down: the request is cancelled, the connection
+        closed, and whatever the route would have said is not coming. Both are
+        the same fact for a reader — nothing further will be asked — which is why
+        they share one status.
+
+        Nothing about a call already answered changes: its own ``completed`` part
+        is already in the trail, and the prose it produced is still the reader's.
         """
         self._attempt(state, ATTEMPT_CANCELLED, terminal_reason=CANCELLED_BY_USER)
 
@@ -2379,6 +2504,7 @@ __all__ = [
     "Transcript",
     "TranscriptTurn",
     "TurnAttachment",
+    "TurnCancelled",
     "TurnDraft",
     "TurnAdmission",
     "TurnOutcome",

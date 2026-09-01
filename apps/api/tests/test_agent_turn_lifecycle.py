@@ -534,11 +534,55 @@ async def test_a_cancel_is_idempotent_and_dispatches_no_further_call(owner):
     await turns.running(turn_id).task
 
     assert first.cancel_requested_at == second.cancel_requested_at
-    assert finished == ["done"]  # the read-only call in flight was allowed to end
+    assert finished == ["done"]  # the barrier in flight was allowed to end
     assert len(client.requests) == 1
     record = await store().read_turn(owner, turn_id)
     assert record.status == "cancelled"
     assert record.terminal_reason == "cancelled_by_user"
+
+
+@pytest.mark.asyncio
+async def test_a_cancel_reaches_the_work_in_flight_and_not_only_the_next_boundary(
+    owner,
+):
+    """One stop, said twice: a flag a boundary can read and an event a wait can.
+
+    The flag alone means a Turn holding a ninety-second model call keeps holding
+    it after the reader has gone. The event is what the model call and a segment
+    of read-only tools are woken by, and both are set by this one call.
+    """
+    thread_id = await thread_for(owner)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow(_context, _arguments):
+        started.set()
+        await release.wait()
+        return {"symbol": "FPT", "ok": True}
+
+    install(entry("slow", slow))
+    turns = service(FakeClient([wants("slow"), answer("Không tới đây.")]))
+    turn_id = uuid.uuid4()
+    await turns.create(
+        user_id=owner,
+        thread_id=thread_id,
+        turn_id=turn_id,
+        user_text="FPT thế nào?",
+        runtime=runtime(owner),
+    )
+    await started.wait()
+    running = turns.running(turn_id)
+    assert running.cancel_event.is_set() is False
+
+    await turns.cancel(owner, turn_id)
+
+    assert running.cancel_requested is True
+    assert running.cancel_event.is_set() is True
+    release.set()
+    await running.task
+
+    record = await store().read_turn(owner, turn_id)
+    assert record.status == "cancelled"
 
 
 # --- checkpointing ---------------------------------------------------------
@@ -1000,6 +1044,44 @@ async def test_shutdown_gives_an_active_turn_its_window_to_checkpoint(owner):
     assert record.terminal_reason == "shutdown"
     assert record.finished_at is not None
     assert turns.running_ids == ()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_stops_every_running_turn_the_way_a_reader_would(owner):
+    """The window is for reaching a checkpoint, not for waiting out a route.
+
+    A Turn that spends the grace period inside a model call this process will not
+    be alive to read from is a Turn that reaches no checkpoint at all, so a
+    shutdown says the same stop a reader says — to every Turn it finds running.
+    """
+    thread_id = await thread_for(owner)
+    started = asyncio.Event()
+
+    async def slow(_context, _arguments):
+        started.set()
+        await asyncio.sleep(0.05)
+        return {"symbol": "FPT", "ok": True}
+
+    install(entry("slow", slow))
+    turns = service(FakeClient([wants("slow"), answer("Kết luận cuối cùng.")]))
+    turn_id = uuid.uuid4()
+    await turns.create(
+        user_id=owner,
+        thread_id=thread_id,
+        turn_id=turn_id,
+        user_text="FPT thế nào?",
+        runtime=runtime(owner),
+    )
+    await started.wait()
+    running = turns.running(turn_id)
+
+    await turns.shutdown(timeout=5.0)
+
+    assert running.shutting_down is True
+    assert running.cancel_event.is_set() is True
+    record = await store().read_turn(owner, turn_id)
+    assert record.status == TURN_INCOMPLETE
+    assert record.terminal_reason == "shutdown"
 
 
 def _reservation(user_id: int, owner_id: str, when: datetime) -> LlmCallUsage:

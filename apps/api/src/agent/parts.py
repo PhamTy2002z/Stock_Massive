@@ -73,11 +73,13 @@ class ProgressKind(str, Enum):
 
 #: The lifecycle of one Turn's asking of the model.
 #:
-#: ``cancelled`` is the reader stopping the Turn: no further attempt will be
-#: made, and whatever the model had already said is what they keep. It is a
-#: status of the attempt rather than a kind of its own because the question a
-#: reader asks of the timeline is the same one — *what happened when this Turn
-#: asked the model* — and four answers to it belong on one line.
+#: ``cancelled`` is the reader stopping the Turn: whatever the model had already
+#: said is what they keep, no further attempt will be made, and where the stop
+#: arrived mid-call the asking that was in flight was itself torn down rather
+#: than waited out. It is a status of the attempt rather than a kind of its own
+#: because the question a reader asks of the timeline is the same one — *what
+#: happened when this Turn asked the model* — and four answers to it belong on
+#: one line.
 ATTEMPT_RUNNING = "running"
 ATTEMPT_COMPLETED = "completed"
 ATTEMPT_ERROR = "error"
