@@ -152,6 +152,37 @@ def test_a_turn_without_tools_still_carries_the_domain_body() -> None:
     assert all(item["composition"]["domain_body"] > 0 for item in played["constructed"])
 
 
+def test_a_question_off_the_domain_is_replayed_without_the_playbook() -> None:
+    """The measurement follows the decision, or it is a measurement of nothing.
+
+    The runtime carries the pack's body on intent, so a replay that carried it
+    on every case would report the cost of a context no Turn ever sends — and
+    would report the saving as zero whatever the decision does.
+    """
+    off_domain = replay_case(one_case(question="Bạn là ai?"), RUNTIME)
+    on_domain = replay_case(one_case(), RUNTIME)
+
+    assert off_domain["domain_body"] is False
+    assert off_domain["domain_body_reason"].startswith("off_topic:")
+    assert all(
+        item["composition"]["domain_body"] == 0 for item in off_domain["constructed"]
+    )
+    assert on_domain["domain_body"] is True
+    assert (
+        off_domain["constructed"][0]["estimated_tokens"]
+        < on_domain["constructed"][0]["estimated_tokens"]
+    )
+
+
+def test_the_report_counts_how_many_cases_reached_for_the_domain() -> None:
+    """A corpus of market questions saves nothing by loading on intent, and the
+    number that says so belongs beside the tokens rather than in a belief.
+    """
+    report = replay(corpus(one_case(), one_case(id="wf-002", question="Bạn là ai?")))
+
+    assert report["totals"]["cases_carrying_the_pack_body"] == 1
+
+
 def test_the_last_call_of_a_turn_that_spent_every_round_carries_the_note() -> None:
     played = replay_case(
         one_case(
