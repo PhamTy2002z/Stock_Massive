@@ -1,8 +1,8 @@
 # Phase 5 — Permission, guardrails, web security
 
 Status: **Done**
-Branch: `feat/phase-05-permission-guardrails-web-security`  
-Opened: 2026-09-01  
+Branch: `feat/phase-05-permission-guardrails-web-security`
+Opened: 2026-09-01
 Authority: [`docs/roadmap.md`](../../docs/roadmap.md), Phase 5 and §9
 
 ## Brainstorm contract
