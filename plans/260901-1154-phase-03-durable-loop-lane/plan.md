@@ -83,11 +83,14 @@ Không tin nhãn Done: đọc trực tiếp `loop.py`, `turns.py`, `events.py`,
   trở thành giá trị của `LIGHT` (roadmap nói đúng câu này).
 - `turns.py`: `TurnService.create` gọi router một lần, truyền deadline lane
   vào `wait_for` và loop; lane name đi vào progress part đầu tiên.
-- Admission: `SpendRequest` thêm field optional `owner_output_total`
-  (default `None` → giữ `TURN_OUTPUT_TOTAL` 20_000); ledger clamp bằng trần
-  cứng config (`TURN_OUTPUT_TOTAL_MAX = 60_000`) — caller là code tin cậy
-  nhưng ledger vẫn giữ bound. `TURN_COST_MICRO_USD` 500_000 giữ nguyên
-  (margin đo được của light ~100k worst-case × deep 2.5× vẫn lọt; đo lại ở P6).
+- Admission: `SpendRequest` (admission.py:101) thêm hai field optional
+  `owner_output_total` / `owner_input_total` (default `None` → giữ
+  `TURN_OUTPUT_TOTAL` 20_000 / `TURN_INPUT_TOTAL` 100_000, admission.py:49-50);
+  ledger clamp bằng trần cứng config (`TURN_OUTPUT_TOTAL_MAX = 60_000`,
+  `TURN_INPUT_TOTAL_MAX = 300_000`) — caller là code tin cậy nhưng ledger vẫn
+  giữ bound. `LaneProfile` mang cả `owner_input_total` (light 100_000, deep
+  280_000). `TURN_COST_MICRO_USD` 500_000 giữ nguyên (margin đo được của light
+  ~100k worst-case × deep 2.5× vẫn lọt; đo lại ở P6).
 
 ### 2. Progress part typed (`agent/parts.py` — file mới)
 
