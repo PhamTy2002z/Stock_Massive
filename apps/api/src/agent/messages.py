@@ -1675,6 +1675,31 @@ def aged_results(turn: TranscriptTurn) -> frozenset[str]:
     )
 
 
+def worth_collapsing(turns: Sequence[TranscriptTurn]) -> frozenset[str]:
+    """The calls whose handle is genuinely smaller than the result it replaces.
+
+    A collapse is a trade: a page of prose for a line naming where it came from.
+    For a real page the trade is overwhelming, which is why the ladder makes it.
+    But a result can be *shorter* than the handle that would replace it — a rate,
+    a one-line refusal, a search that found nothing — and collapsing one of those
+    spends tokens to lose content. A ladder that did it would climb upward while
+    trying to come down, and a Turn over its ceiling would be handed a rung that
+    made its problem worse.
+
+    Decided once, on the text both sides are actually rendered from, and applied
+    to every rung. A rung whose only remaining call is not worth collapsing then
+    repeats the rung before it, which costs one comparison and keeps the ladder
+    monotone — and it keeps ``results_collapsed`` counting collapses that
+    happened rather than collapses that were asked for.
+    """
+    return frozenset(
+        call.id
+        for turn in turns
+        for call in turn.completed_calls
+        if len(_collapsed_result(call)) < len(shown_result(call))
+    )
+
+
 def _reductions(
     turns: Sequence[TranscriptTurn], budget: ContextBudget
 ) -> Iterator[tuple[int, frozenset[str]]]:
@@ -1743,10 +1768,14 @@ def build_messages(
     # the shape of a context that has not been paying for the same page four
     # times.
     aged = aged_results(live[-1]) if live else frozenset()
+    # And what collapsing would actually buy. Both the ageing above and every
+    # rung below are filtered through it, so no concession this constructor
+    # makes can leave the context larger than it was.
+    worth = worth_collapsing(live)
 
     smallest = 0
     for rung, (dropped, collapsed) in enumerate(_reductions(live, budget)):
-        collapsed = collapsed | aged
+        collapsed = (collapsed | aged) & worth
         tagged = _render_messages(transcript, live, dropped, collapsed)
         messages = tuple(piece.message for piece in tagged)
         tokens = sum(estimate_tokens(message) for message in messages)
@@ -1809,6 +1838,7 @@ __all__ = [
     "SELECTION_CALLS",
     "TRACE_HANDLE_PREFIX",
     "aged_results",
+    "worth_collapsing",
     "build_messages",
     "context_projection",
     "dedup_key",
