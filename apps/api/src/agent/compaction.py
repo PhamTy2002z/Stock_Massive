@@ -52,6 +52,7 @@ from src.core.llm import (
     SpendRequest,
     Workload,
 )
+from src.core.llm.admission import ANALYSIS_INPUT_PER_CALL
 
 from .messages import CHARS_PER_TOKEN, ContextBudget
 from .persistence import AgentPersistence, MessageRecord, SummaryRecord, latest_summary
@@ -64,18 +65,36 @@ SUMMARY_ROLE = "summary"
 
 #: What one summary may be worth in output tokens — a couple of paragraphs.
 #:
-#: It and :data:`MAX_SOURCE_CHARS` together keep one pass inside the ceilings the
-#: analysis owner carries in ``core/llm/admission.py``: 24k input and 3k output
-#: per call, and about $0.015 of generation for one owner. A call priced past
-#: that ceiling is refused, and a refused compaction writes nothing — so the
-#: input is bounded here rather than left to grow with the conversation.
+#: Well inside the 3k an analysis call may generate, and small enough that one
+#: pass costs about a fifth of a cent at batch prices. The *input* side of the
+#: same ceilings is :data:`COMPACTION_INPUT_TOKENS`, which is derived rather
+#: than chosen because that is the side a long conversation grows.
 COMPACTION_OUTPUT_TOKENS = 700
 
-#: How much transcript prose one pass may read. At the estimator's three
-#: characters per token this is about five thousand tokens: several long Turns,
-#: and far enough under the per-call ceiling that a Vietnamese transcript, which
-#: tokenizes worse than the estimate assumes, still fits.
+#: How much transcript prose one pass would *like* to read. At the estimator's
+#: three characters per token this is about five thousand tokens: several long
+#: Turns, and cheap enough that compacting a thread is not an event anybody
+#: budgets for. It is a preference, not a guarantee — the guarantee is
+#: :data:`COMPACTION_INPUT_TOKENS` below.
 MAX_SOURCE_CHARS = 15_000
+
+#: What the envelope of two messages costs on top of their prose, in the same
+#: pessimistic estimate the reservation is made with.
+_ENVELOPE_TOKENS = 64
+
+#: What one pass may reserve, derived rather than chosen.
+#:
+#: Admission refuses an analysis call reserved above ``ANALYSIS_INPUT_PER_CALL``,
+#: and a refused compaction is the quietest failure this module has: it writes
+#: nothing, raises nothing, and leaves a log line saying a ceiling was met. So
+#: the pass is cut to fit *before* the money is asked for, and the number it is
+#: cut to comes from the ceiling itself — a constant picked by hand here would
+#: be a constant that drifts from the one that does the refusing.
+#:
+#: Four fifths of it. The remaining fifth is the margin between the estimate the
+#: reservation is made on and a Vietnamese transcript, which tokenizes worse
+#: than three characters to the token.
+COMPACTION_INPUT_TOKENS = ANALYSIS_INPUT_PER_CALL * 4 // 5
 
 #: The ceiling on one message's prose inside that budget, so a single enormous
 #: answer cannot crowd out every other Turn in the span.
@@ -213,6 +232,14 @@ def plan_compaction(
     Turns than an earlier one would silently uncover Turns whose prose the next
     context no longer carries, and the reader would watch the conversation lose
     its own beginning.
+
+    **The pass fits the call before the call is made.** A body that would be
+    reserved above :data:`COMPACTION_INPUT_TOKENS` is cut here, and what is cut
+    is chosen so the span stays true: first the *span* narrows — covering fewer
+    Turns is a smaller claim, not a false one — and only when a single Turn is
+    left does the summary being carried forward get abridged. A span that
+    claimed Turns nobody read would be worse than no summary, and no summary is
+    what this returns when even that is not enough.
     """
     turns = thread_turns(messages)
     covered_before = previous.summarised_turns if previous else 0
@@ -231,6 +258,24 @@ def plan_compaction(
     if not fresh:
         return None
 
+    body = _body(head, fresh)
+    if len(body) > _SOURCE_CEILING_CHARS:
+        # One Turn left, and the pass is still above what admission will fund.
+        # What is oversized here is the one piece of prose this module did not
+        # write — a summary row read back from the store — so that is what
+        # gives way. An abridged head still summarises the span it says it
+        # summarises; the alternative is a call the ledger refuses, and a thread
+        # that is never compacted again because the same refusal happens every
+        # time.
+        room = _head_room(fresh)
+        if room <= 0:
+            # The Turns alone are past the ceiling. Nothing here may claim a
+            # span it did not read, so this pass writes nothing at all and the
+            # next Turn builds its context off the ladder, as it does today.
+            return None
+        head = f"{head[:room].rstrip()}{_ELLIPSIS}"
+        body = _body(head, fresh)
+
     covers_to_seq = fresh[-1].last_seq
     if previous is not None and covers_to_seq <= previous.covers_to_seq:
         return None
@@ -246,24 +291,64 @@ def plan_compaction(
             message_id for turn in fresh for message_id in turn.message_ids
         ),
         previous_summary_message_id=previous.message_id if previous else None,
-        body=_body(head, fresh),
+        body=body,
     )
 
 
+#: The three fixed strings the pass's prose is assembled from. Named rather
+#: than written inline because :func:`_head_room` has to subtract them: the
+#: room left for a summary being carried forward is the ceiling minus the Turns
+#: minus exactly these.
+_HEAD_LABEL = "Tóm tắt đã có của phần trước hội thoại:\n"
+_HEAD_JOIN = "\n\nCác lượt tiếp theo cần gộp vào bản tóm tắt đó:\n"
+_OPENING_LABEL = "Các lượt đầu của hội thoại:\n"
+
+#: What an abridged head ends on, so the model reads a summary that was cut
+#: rather than one that stopped making sense.
+_ELLIPSIS = "…"
+
+
 def _body(head: str, turns: Sequence[_Turn]) -> str:
-    blocks = [turn.prose for turn in turns]
+    blocks = "\n\n".join(turn.prose for turn in turns)
     if head:
-        return (
-            "Tóm tắt đã có của phần trước hội thoại:\n"
-            f"{head}\n\n"
-            "Các lượt tiếp theo cần gộp vào bản tóm tắt đó:\n"
-            + "\n\n".join(blocks)
-        )
-    return "Các lượt đầu của hội thoại:\n" + "\n\n".join(blocks)
+        return f"{_HEAD_LABEL}{head}{_HEAD_JOIN}{blocks}"
+    return f"{_OPENING_LABEL}{blocks}"
 
 
 def _body_length(head: str, turns: Sequence[_Turn]) -> int:
     return len(_body(head, turns))
+
+
+def _estimated_input_tokens(body: str) -> int:
+    """The worst case this call asks admission to fund.
+
+    Estimated from the text rather than fixed at the per-call ceiling, because
+    the reservation is what the lane is charged until the route reconciles it,
+    and reserving four times the real cost of every compaction would spend the
+    analysis lane on calls that never happened. The estimator is the same
+    pessimistic one the context ceiling is met with, plus the overhead of two
+    message envelopes.
+    """
+    return (len(SYSTEM) + len(body)) // CHARS_PER_TOKEN + _ENVELOPE_TOKENS
+
+
+#: The longest body whose reservation still lands under
+#: :data:`COMPACTION_INPUT_TOKENS`. The arithmetic of
+#: :func:`_estimated_input_tokens`, run backwards.
+_SOURCE_CEILING_CHARS = (
+    COMPACTION_INPUT_TOKENS - _ENVELOPE_TOKENS
+) * CHARS_PER_TOKEN - len(SYSTEM)
+
+
+def _head_room(turns: Sequence[_Turn]) -> int:
+    """How much of an existing summary this pass can still carry with it."""
+    return (
+        _SOURCE_CEILING_CHARS
+        - len(_HEAD_LABEL)
+        - len(_HEAD_JOIN)
+        - len("\n\n".join(turn.prose for turn in turns))
+        - len(_ELLIPSIS)
+    )
 
 
 class ThreadCompactor:
@@ -429,20 +514,8 @@ class ThreadCompactor:
         }
 
 
-def _estimated_input_tokens(body: str) -> int:
-    """The worst case this call asks admission to fund.
-
-    Estimated from the text rather than fixed at the per-call ceiling, because
-    the reservation is what the lane is charged until the route reconciles it,
-    and reserving four times the real cost of every compaction would spend the
-    analysis lane on calls that never happened. The estimator is the same
-    pessimistic one the context ceiling is met with, plus the overhead of two
-    message envelopes.
-    """
-    return (len(SYSTEM) + len(body)) // CHARS_PER_TOKEN + 64
-
-
 __all__ = [
+    "COMPACTION_INPUT_TOKENS",
     "COOLDOWN_SECONDS",
     "MAX_SOURCE_CHARS",
     "MAX_SUMMARY_TEXT_CHARS",
