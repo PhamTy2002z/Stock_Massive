@@ -30,6 +30,7 @@ from src.agent.parts import (
     MAX_QUESTION_OPTIONS,
     MAX_QUESTION_PROMPT_CHARS,
     MIN_QUESTION_OPTIONS,
+    NUMERIC_MAP_FIELDS,
     PROGRESS_FIELDS,
     PROGRESS_WIRE_FIELDS,
     QUESTION_ANSWERED,
@@ -131,6 +132,66 @@ def test_a_structured_payload_is_never_admitted():
     )
 
     assert payload == {"lane": "deep"}
+
+
+def test_a_pruned_context_reports_itself_in_numbers():
+    """What a construction gave up, and the two measures it was weighed against."""
+    payload = progress_payload(
+        ProgressKind.CONTEXT_PRUNED,
+        rung=3,
+        turns_dropped=2,
+        results_collapsed=5,
+        estimated=9_100,
+        projected=10_400,
+        layers={"system_core": 4_800, "history": 2_100, "tool_results": 2_200},
+    )
+
+    assert payload == {
+        "rung": 3,
+        "turns_dropped": 2,
+        "results_collapsed": 5,
+        "estimated": 9_100,
+        "projected": 10_400,
+        "layers": {"system_core": 4_800, "history": 2_100, "tool_results": 2_200},
+    }
+
+
+def test_a_breakdown_carries_counters_or_it_does_not_travel():
+    """The one mapping a part may hold is names against numbers, and only that.
+
+    A page's text arriving under a layer name is the whole reason the barrier is
+    by value and not merely by key: the part still publishes, and what the
+    tokens were is simply missing.
+    """
+    payload = progress_payload(
+        ProgressKind.CONTEXT_PRUNED,
+        rung=1,
+        layers={"tool_results": "<html>lãi suất 6,5%</html>"},
+    )
+
+    assert payload == {"rung": 1}
+
+
+def test_only_a_key_that_declared_itself_a_breakdown_may_carry_a_mapping():
+    """Otherwise "a mapping of numbers" is a door every payload can walk through."""
+    assert NUMERIC_MAP_FIELDS == {"layers"}
+
+    payload = progress_payload(
+        ProgressKind.CONTEXT_PRUNED,
+        rung={"system_core": 1},
+        layers={"system_core": 1},
+    )
+
+    assert payload == {"layers": {"system_core": 1}}
+
+
+def test_a_breakdown_is_copied_rather_than_shared_with_its_caller():
+    """A part is what happened; it cannot change after the event it describes."""
+    layers = {"history": 10}
+    payload = progress_payload(ProgressKind.CONTEXT_PRUNED, layers=layers)
+    layers["history"] = 999
+
+    assert payload == {"layers": {"history": 10}}
 
 
 def test_the_wire_shape_is_the_five_fields_the_transport_restates():

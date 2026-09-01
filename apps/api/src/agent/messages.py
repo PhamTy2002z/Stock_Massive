@@ -251,6 +251,65 @@ def _text_tokens(text: str) -> int:
 
 
 @dataclass(frozen=True)
+class UsageFeedback:
+    """What the route charged for the last call, and what this module guessed it would.
+
+    Two measurements of the same thing, with two different jobs. The estimate
+    above is a *preflight backstop*: it is all there is before a Turn's first
+    call, it is what admission reserves against, and it is a rule about
+    characters rather than a fact about a tokenizer. The route's own count is
+    the *deciding* number, and until now it was parsed, billed and persisted
+    without ever reaching the decision it should have been making.
+
+    So the ceiling is met against a projection rather than against either one:
+    the last real count, moved by however much the transcript has changed since
+    it was taken. That keeps the correction anchored to a measurement while
+    still tracking a context that grew a tool result ago.
+
+    Both fields default to zero, and that is the whole of the "no measurement
+    yet" case: the projection of an unmeasured context is ``0 + estimate - 0``,
+    which is the estimate. One arithmetic and one code path, rather than a
+    branch that only the second call of a Turn ever takes and that nothing
+    exercises until it is wrong.
+    """
+
+    #: ``input_tokens + cached_input_tokens`` of the last successful call.
+    #: Cached input is included because a cached prefix is still prompt the
+    #: model read: it is discounted, not absent, and the number this feeds is
+    #: about the context window rather than about the bill.
+    real_input_tokens: int = 0
+    #: What this module estimated for exactly the messages that call sent.
+    estimate_at_real: int = 0
+
+    @property
+    def measured(self) -> bool:
+        """Whether the route has answered at all under this Turn's context."""
+        return self.estimate_at_real > 0
+
+    @property
+    def bias(self) -> float | None:
+        """How wrong the estimate was, as a ratio, or ``None`` before it is known.
+
+        Carried rather than logged because the honest way to change
+        :data:`CHARS_PER_TOKEN` is to read this off real traffic. A constant
+        picked from a distribution nobody measured is how the estimate came to
+        be a rule about characters in the first place.
+        """
+        if not self.measured:
+            return None
+        return self.real_input_tokens / self.estimate_at_real
+
+    def project(self, estimated_tokens: int) -> int:
+        """The real cost of a context this large, as far as anything can tell.
+
+        Never negative: a transcript that shrank by more than the last call was
+        charged would otherwise project a context of below nothing, and the
+        smallest true answer is zero.
+        """
+        return max(0, self.real_input_tokens + estimated_tokens - self.estimate_at_real)
+
+
+@dataclass(frozen=True)
 class ContextComposition:
     """Where a request's input tokens went, by layer.
 
@@ -265,6 +324,13 @@ class ContextComposition:
     by construction: the parts of a message's charged text are contiguous and
     cover all of it, and the rounding is applied to running prefixes so the
     pieces sum to the whole rather than to the whole plus two.
+
+    The last two fields are not layers and :attr:`total` does not count them.
+    They say what the estimate is worth: what the route is expected to charge
+    for this context, and how far its last real count stood from the guess. They
+    ride here rather than on a log line because the reader that has to act on
+    them — the ceiling, and anything later measuring how good the estimate is —
+    is already holding the composition.
     """
 
     system_core: int = 0
@@ -274,6 +340,15 @@ class ContextComposition:
     user_intent: int = 0
     attachments: int = 0
     tool_results: int = 0
+    #: What the route is expected to charge for these layers, given what it
+    #: charged last time (:class:`UsageFeedback`). Equal to :attr:`total` until
+    #: a call of this Turn has come back with a count of its own, which is why
+    #: nothing downstream needs to ask which of the two it is looking at.
+    projected_tokens: int = 0
+    #: The last measured call's real count over its estimate, or ``None`` before
+    #: there is one. Carried so the estimate's error is a number somebody can
+    #: read off traffic rather than a thing to be argued about.
+    estimate_bias: float | None = None
 
     @property
     def total(self) -> int:
@@ -285,12 +360,20 @@ class ContextComposition:
         The loop appends messages after the context is constructed and reserves
         room for them; both halves land here, so the arithmetic that funds the
         call and the arithmetic that explains it are the same arithmetic.
+
+        The projection moves with them, by the same tokens. What separates the
+        two numbers is a property of the *last measured call* and not of what
+        was appended to this one, so leaving the projection behind would make it
+        describe a context nobody is sending.
         """
         unknown = set(layers) - set(CONTEXT_LAYERS)
         if unknown:
             raise ValueError(f"no such context layer: {sorted(unknown)}")
+        added = {name: getattr(self, name) + value for name, value in layers.items()}
         return replace(
-            self, **{name: getattr(self, name) + value for name, value in layers.items()}
+            self,
+            **added,
+            projected_tokens=self.projected_tokens + sum(layers.values()),
         )
 
     def as_dict(self) -> dict[str, int]:
@@ -1163,6 +1246,12 @@ class ConstructedContext:
     summary_needed: bool = False
     turns_dropped: int = 0
     results_collapsed: int = 0
+    #: Which rung of :func:`_reductions` this context came off, counting the
+    #: untouched one as zero. The two counters above say what was given up; this
+    #: says how far down the ladder the constructor had to walk to give it up,
+    #: which is the difference between a Turn that trimmed one old result and a
+    #: Turn that is one rung from having nothing left to trim.
+    rung: int = 0
     #: Where those tokens went. ``composition.total`` is ``estimated_tokens``,
     #: and the equality is not a coincidence to be checked but the definition:
     #: the estimate is the sum of the layers. A test pins it for every rung of
@@ -1178,6 +1267,10 @@ class ConstructedContextTooLarge(ValueError):
     over-budget context would hand admission a call it must refuse mid-Turn, and
     returning a silently mangled one is the failure this constructor exists to
     prevent.
+
+    The number it carries is the one the refusal was decided on: the projection
+    of the smallest context the ladder could build, which is that context's
+    estimate until the route has been heard from.
     """
 
     def __init__(self, estimated_tokens: int, budget: int) -> None:
@@ -1579,15 +1672,25 @@ def _reductions(
 
 
 def build_messages(
-    transcript: Transcript, budget: ContextBudget | None = None
+    transcript: Transcript,
+    budget: ContextBudget | None = None,
+    feedback: UsageFeedback | None = None,
 ) -> ConstructedContext:
     """Construct one call's messages under the constructed-context ceiling.
 
-    Pure: the same transcript and the same budget give the same list, every
+    Pure: the same transcript, budget and feedback give the same list, every
     time. The ceiling is met here and nowhere else, which is why the ladder is
     exhaustive rather than best-effort.
+
+    *feedback* is what the route charged for this Turn's last call, and it is
+    what the ceiling is met against — the estimate is what a caller who has
+    never been told anything better falls back to, which is exactly what an
+    absent feedback describes. A caller with no route behind it (a replay, a
+    test of the ladder itself) passes nothing and gets the construction it
+    always got.
     """
     budget = budget or ContextBudget()
+    feedback = feedback or UsageFeedback()
     # A summary without a span could only be applied by guessing which Turns it
     # replaced, so an unaccompanied span is ignored rather than trusted.
     covered = transcript.summarised_turns if transcript.summary else 0
@@ -1600,13 +1703,14 @@ def build_messages(
     aged = aged_results(live[-1]) if live else frozenset()
 
     smallest = 0
-    for dropped, collapsed in _reductions(live, budget):
+    for rung, (dropped, collapsed) in enumerate(_reductions(live, budget)):
         collapsed = collapsed | aged
         tagged = _render_messages(transcript, live, dropped, collapsed)
         messages = tuple(piece.message for piece in tagged)
         tokens = sum(estimate_tokens(message) for message in messages)
-        smallest = tokens
-        if tokens <= budget.max_tokens:
+        projected = feedback.project(tokens)
+        smallest = projected
+        if projected <= budget.max_tokens:
             return ConstructedContext(
                 messages=messages,
                 estimated_tokens=tokens,
@@ -1616,7 +1720,12 @@ def build_messages(
                 ),
                 turns_dropped=dropped,
                 results_collapsed=len(collapsed),
-                composition=_attribute(tagged),
+                rung=rung,
+                composition=replace(
+                    _attribute(tagged),
+                    projected_tokens=projected,
+                    estimate_bias=feedback.bias,
+                ),
             )
 
     raise ConstructedContextTooLarge(smallest, budget.max_tokens)
@@ -1652,6 +1761,7 @@ __all__ = [
     "TranscriptTurn",
     "TurnAttachment",
     "TurnToolCall",
+    "UsageFeedback",
     "RESULT_CALLS",
     "SELECTION_CALLS",
     "TRACE_HANDLE_PREFIX",

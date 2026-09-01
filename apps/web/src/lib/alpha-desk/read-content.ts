@@ -50,6 +50,7 @@ const PROGRESS_KINDS: readonly ProgressKind[] = [
   "model_attempt",
   "tool_round",
   "recovery",
+  "context_pruned",
   "tools_halted",
   "rounds_exhausted",
   "deadline",

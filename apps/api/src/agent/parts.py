@@ -66,7 +66,7 @@ logger = logging.getLogger(__name__)
 
 
 class ProgressKind(str, Enum):
-    """The seven loop events a Turn reports progress for.
+    """The eight loop events a Turn reports progress for.
 
     A closed set, and closed for the same reason the payload keys are an
     allowlist: a kind nobody named is a kind nobody decided was fit for a
@@ -81,6 +81,11 @@ class ProgressKind(str, Enum):
     TOOL_ROUND = "tool_round"
     #: A bounded recovery the loop actually performed.
     RECOVERY = "recovery"
+    #: A context built with less in it than the transcript holds: older Turns
+    #: left out, tool results turned into handles, or both. One part per
+    #: construction that actually gave ground, from the construction that gave
+    #: it — a Turn that fits reports nothing, because fitting is not an event.
+    CONTEXT_PRUNED = "context_pruned"
     #: The guardrail ladder stopped the tool loop; the Turn still answers.
     TOOLS_HALTED = "tools_halted"
     #: The last round the lane allows; the model is told so and answers.
@@ -128,6 +133,19 @@ PROGRESS_FIELDS: Mapping[ProgressKind, tuple[str, ...]] = {
     ProgressKind.MODEL_ATTEMPT: ("status", "terminal_reason"),
     ProgressKind.TOOL_ROUND: ("calls", "external_used", "call_ids"),
     ProgressKind.RECOVERY: ("action", "attempt", "bound"),
+    #: Numbers only, and every one of them this harness's own arithmetic: which
+    #: rung of the ladder built the context, what that rung cost the transcript,
+    #: the two token measures the ceiling was met against, and where those
+    #: tokens sat. Nothing here is read off a page or a tool result, which is
+    #: what lets a part about pruning say what was pruned without carrying it.
+    ProgressKind.CONTEXT_PRUNED: (
+        "rung",
+        "turns_dropped",
+        "results_collapsed",
+        "estimated",
+        "projected",
+        "layers",
+    ),
     ProgressKind.TOOLS_HALTED: ("reason",),
     ProgressKind.ROUNDS_EXHAUSTED: ("rounds",),
     #: The Turn's own wall clock ran out. Nothing to say beyond that it did:
@@ -148,14 +166,35 @@ PROGRESS_WIRE_FIELDS = ("seq", "kind", "round", "payload", "at")
 #: front of the reader and additionally makes them look like a code.
 MAX_CODE_CHARS = 120
 
+#: The keys that may carry a mapping, and the shape one has to have to travel.
+#:
+#: A counter per name, and nothing else — the values are checked to be numbers,
+#: so the thing this rule exists to stop cannot ride in on one however it is
+#: nested. Named by key rather than allowed generally, because "a mapping whose
+#: values happen to be numbers today" is exactly the door a payload walks
+#: through later carrying a page's text under a second key nobody reviewed.
+NUMERIC_MAP_FIELDS: frozenset[str] = frozenset({"layers"})
+
+
+def _counters(value: Mapping[str, Any]) -> bool:
+    """Whether a mapping is names against numbers, and only that."""
+    return all(
+        isinstance(name, str)
+        and len(name) <= MAX_CODE_CHARS
+        and isinstance(count, (int, float))
+        and not isinstance(count, bool)
+        for name, count in value.items()
+    )
+
 
 def _admissible(kind: ProgressKind, key: str, value: Any) -> bool:
     """Whether one value is the kind of thing a part may carry.
 
-    Codes, numbers and flags, plus the one list of codes ``call_ids`` is. A
-    mapping or a nested object is refused outright: the way a page's text would
-    arrive here is inside somebody's structured payload, and there is no reason
-    for a part to carry one.
+    Codes, numbers and flags, plus the one list of codes ``call_ids`` is, plus
+    the counters a :data:`NUMERIC_MAP_FIELDS` key may hold. Any other mapping or
+    nested object is refused outright: the way a page's text would arrive here
+    is inside somebody's structured payload, and there is no reason for a part
+    to carry one.
     """
     if isinstance(value, str):
         if len(value) > MAX_CODE_CHARS:
@@ -173,6 +212,17 @@ def _admissible(kind: ProgressKind, key: str, value: Any) -> bool:
         return all(
             isinstance(entry, str) and len(entry) <= MAX_CODE_CHARS for entry in value
         )
+    if isinstance(value, Mapping):
+        if key in NUMERIC_MAP_FIELDS and _counters(value):
+            return True
+        logger.warning(
+            "Dropped %r from a %s progress part: only %s may carry a mapping, "
+            "and only of numbers",
+            key,
+            kind.value,
+            sorted(NUMERIC_MAP_FIELDS),
+        )
+        return False
     logger.warning(
         "Dropped %r from a %s progress part: %s is not a code or a number",
         key,
@@ -212,7 +262,15 @@ def progress_payload(kind: ProgressKind, **fields: Any) -> dict[str, Any]:
             continue
         if not _admissible(kind, key, value):
             continue
-        payload[key] = list(value) if isinstance(value, (list, tuple)) else value
+        # Copied rather than referenced, for the reason the list is: a payload
+        # that shared a caller's container would be a part that changes after
+        # the event it describes has happened.
+        if isinstance(value, Mapping):
+            payload[key] = dict(value)
+        elif isinstance(value, (list, tuple)):
+            payload[key] = list(value)
+        else:
+            payload[key] = value
     return payload
 
 
@@ -443,6 +501,7 @@ __all__ = [
     "MAX_QUESTION_OPTION_ID_CHARS",
     "MAX_QUESTION_PROMPT_CHARS",
     "MIN_QUESTION_OPTIONS",
+    "NUMERIC_MAP_FIELDS",
     "PROGRESS_FIELDS",
     "PROGRESS_WIRE_FIELDS",
     "QUESTION_ANSWERED",

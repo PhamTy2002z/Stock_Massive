@@ -98,6 +98,7 @@ from src.agent.messages import (
     TRACE_HANDLE_PREFIX,
     ContextComposition,
     TurnAttachment,
+    UsageFeedback,
     _collapsed_result,
     aged_results,
     context_projection,
@@ -1599,11 +1600,15 @@ async def test_a_compression_that_ran_is_reported_once_with_its_bound() -> None:
     ]
     # Inside the one asking, not beside it: giving ground to the route and asking
     # again is the same attempt, and a second ``running`` would count a call the
-    # Turn never made.
+    # Turn never made. The two pruning parts are the two constructions that
+    # happened — the transcript did not fit this ceiling before the route was
+    # asked either, and the one after the recovery fits a smaller one.
     assert publisher.kinds() == [
         "lane_selected",
         "model_attempt",
+        "context_pruned",
         "recovery",
+        "context_pruned",
         "model_attempt",
     ]
     assert statuses(publisher) == ["running", "completed"]
@@ -3195,6 +3200,215 @@ async def test_what_funds_a_call_is_exactly_what_explains_it() -> None:
         estimate_tokens(message) for message in request.messages[:-2]
     )
     assert client.spends[-1].input_tokens == constructed + reserved
+
+
+# -- what the route charged, and what that decides ---------------------------
+
+
+def _long_transcript(request: TurnRequest) -> Transcript:
+    """The transcript of a Turn with plenty of older Turns to give up."""
+    return Transcript(
+        system_prompt=render(request.runtime),
+        system_prefix=prompt_prefix(),
+        turns=(*request.history, TranscriptTurn(user_text=request.user_text)),
+    )
+
+
+def test_a_context_the_route_has_not_priced_yet_projects_its_own_estimate() -> None:
+    """The first call of a Turn has nothing better than the characters.
+
+    And that is the whole of the unmeasured case: no branch, no second policy —
+    a correction of zero over an estimate of zero leaves the estimate standing.
+    """
+    context = _composed()
+
+    assert context.composition.projected_tokens == context.estimated_tokens
+    assert context.composition.estimate_bias is None
+
+
+def test_the_projection_is_the_last_real_count_moved_by_what_changed() -> None:
+    """What the next construction knows is the delta, not the next real count."""
+    request = turn_request(history=long_history(turns=3))
+    before = _long_transcript(request)
+    after = replace(
+        before,
+        turns=(*before.turns, TranscriptTurn(user_text="Còn HPG thì sao?")),
+    )
+    roomy = ContextBudget(max_tokens=1_000_000)
+    charged = build_messages(before, roomy).estimated_tokens
+    grown = build_messages(after, roomy).estimated_tokens
+
+    context = build_messages(
+        after,
+        roomy,
+        UsageFeedback(real_input_tokens=charged + 900, estimate_at_real=charged),
+    )
+
+    assert grown > charged
+    assert context.composition.projected_tokens == charged + 900 + (grown - charged)
+    assert context.composition.estimate_bias == (charged + 900) / charged
+
+
+def test_an_estimate_that_reads_low_still_gives_ground_once_the_route_has_spoken() -> None:
+    """The route's count decides, and an estimate that fits does not overrule it."""
+    request = turn_request(history=long_history())
+    transcript = _long_transcript(request)
+    intact = build_messages(transcript, ContextBudget(max_tokens=1_000_000))
+    # A ceiling the estimate meets exactly, so nothing is given up on characters
+    # alone — and a route that says those same characters cost a tenth more.
+    ceiling = ContextBudget(max_tokens=intact.estimated_tokens)
+    bump = intact.estimated_tokens // 10
+    feedback = UsageFeedback(
+        real_input_tokens=intact.estimated_tokens + bump,
+        estimate_at_real=intact.estimated_tokens,
+    )
+
+    guessed = build_messages(transcript, ceiling)
+    measured = build_messages(transcript, ceiling, feedback)
+
+    assert (guessed.turns_dropped, guessed.results_collapsed) == (0, 0)
+    assert measured.turns_dropped > 0 or measured.results_collapsed > 0
+    assert measured.rung > guessed.rung
+    assert measured.composition.projected_tokens <= ceiling.max_tokens
+    # And the estimate is still exactly what it was: the two measures are kept
+    # apart, so the one admission reserves against has not been rewritten.
+    assert measured.composition.total == measured.estimated_tokens
+
+
+def test_an_estimate_that_reads_high_stops_pruning_once_the_route_disagrees() -> None:
+    """The correction runs both ways, or it is a compression schedule in disguise.
+
+    An estimate that overstates a context is the case that costs evidence: every
+    call of the Turn drops an older Turn the reader could have been answered
+    from, and nothing in the Turn ever says so.
+    """
+    request = turn_request(history=long_history())
+    transcript = _long_transcript(request)
+    intact = build_messages(transcript, ContextBudget(max_tokens=1_000_000))
+    bump = intact.estimated_tokens // 10
+    ceiling = ContextBudget(max_tokens=intact.estimated_tokens - bump)
+    feedback = UsageFeedback(
+        real_input_tokens=intact.estimated_tokens - 2 * bump,
+        estimate_at_real=intact.estimated_tokens,
+    )
+
+    guessed = build_messages(transcript, ceiling)
+    measured = build_messages(transcript, ceiling, feedback)
+
+    assert guessed.turns_dropped > 0 or guessed.results_collapsed > 0
+    assert (measured.turns_dropped, measured.results_collapsed) == (0, 0)
+    assert measured.rung == 0
+    # More transcript, and not merely a different arrangement of it: the rung
+    # the guess walked down to is a result the Turn no longer holds in full.
+    assert measured.estimated_tokens > guessed.estimated_tokens
+
+
+def test_room_reserved_after_the_fact_moves_both_measures_together() -> None:
+    """The gap between the two belongs to the last real call, not to a note."""
+    unmeasured = _composed().composition
+    with_note = unmeasured.plus(system_dynamic=SYSTEM_NOTE_TOKENS)
+
+    assert with_note.projected_tokens == with_note.total
+
+    measured = replace(
+        unmeasured,
+        projected_tokens=unmeasured.total + 500,
+        estimate_bias=1.2,
+    )
+    noted = measured.plus(system_dynamic=SYSTEM_NOTE_TOKENS)
+
+    assert noted.total == measured.total + SYSTEM_NOTE_TOKENS
+    assert noted.projected_tokens == measured.projected_tokens + SYSTEM_NOTE_TOKENS
+    assert noted.estimate_bias == 1.2
+
+
+def priced(text: str | None, input_tokens: int, **overrides: Any) -> Completion:
+    """One call the route answered, and said what it charged for the input."""
+    return Completion(
+        model=SESSION_MODEL,
+        text=text,
+        usage=Usage(input_tokens=input_tokens, output_tokens=5),
+        **overrides,
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_count_the_route_returned_decides_the_turns_next_call() -> None:
+    """The measurement reaches the loop, and not only the ledger.
+
+    Two Turns with the same script, the same ceiling and the same transcript,
+    differing in one thing: what the route said the first call's input cost.
+    The Turn that was told it cost three times the estimate sends less.
+    """
+    request = turn_request(history=long_history())
+    budget = ContextBudget(max_tokens=snug_ceiling(request))
+
+    async def second_call(input_tokens: int) -> int:
+        """What the Turn's answering call was built out of, in tokens."""
+        client = FakeClient(
+            [
+                priced(
+                    "Để tôi tra đã.",
+                    input_tokens,
+                    tool_calls=(
+                        ToolCall(id="c0", name="web_search", arguments={"query": "x"}),
+                    ),
+                ),
+                answer(),
+            ]
+        )
+        outcome = await loop(client, budget=budget).run(request)
+        assert outcome.status is TurnStatus.COMPLETE
+        return sum(
+            estimate_tokens(message) for message in client.requests[1].messages
+        )
+
+    honest = await second_call(budget.max_tokens)
+    understated = await second_call(budget.max_tokens * 6 // 5)
+
+    assert understated < honest
+
+
+@pytest.mark.asyncio
+async def test_a_pruned_construction_reports_what_it_gave_up_and_nothing_it_read() -> None:
+    """The part is the loop's own arithmetic; the page it dropped stays dropped."""
+    publisher = RecordingPublisher()
+    request = turn_request(history=long_history())
+    client = FakeClient([answer()])
+
+    await loop(
+        client,
+        budget=ContextBudget(max_tokens=snug_ceiling(request) - 2_000),
+        publisher=publisher,
+    ).run(request)
+
+    parts = only(publisher, ProgressKind.CONTEXT_PRUNED)
+    assert len(parts) == 1
+    payload = parts[0]
+    assert payload["rung"] > 0
+    assert payload["turns_dropped"] > 0 or payload["results_collapsed"] > 0
+    # Unmeasured on a Turn's first call, so the two measures agree — and the
+    # breakdown is the estimate, split.
+    assert payload["projected"] == payload["estimated"]
+    assert sum(payload["layers"].values()) == payload["estimated"]
+    assert list(payload["layers"]) == list(CONTEXT_LAYERS)
+    # Numbers and layer names, and no sentence from the transcript it trimmed.
+    assert all(isinstance(value, int) for key, value in payload.items() if key != "layers")
+    assert not any(
+        "Câu hỏi số" in text
+        for text in (*payload["layers"], *(str(value) for value in payload.values()))
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_context_that_fits_whole_is_not_an_event() -> None:
+    """A stage nobody entered is exactly what this channel refuses to carry."""
+    publisher = RecordingPublisher()
+    client = FakeClient([answer()])
+
+    await loop(client, publisher=publisher).run(turn_request())
+
+    assert only(publisher, ProgressKind.CONTEXT_PRUNED) == []
 
 
 # -- the projection the model reads, and the trace it does not shrink --------

@@ -203,7 +203,7 @@ export interface Thought {
 }
 
 /**
- * The seven loop events a Turn reports progress for (`agent/parts.py`).
+ * The eight loop events a Turn reports progress for (`agent/parts.py`).
  *
  * A closed set on the backend and a closed union here, for the same reason the
  * payload is an allowlist there: a kind nobody named is a kind nobody decided
@@ -214,6 +214,7 @@ export type ProgressKind =
   | "model_attempt"
   | "tool_round"
   | "recovery"
+  | "context_pruned"
   | "tools_halted"
   | "rounds_exhausted"
   | "deadline"

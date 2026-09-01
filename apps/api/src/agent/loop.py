@@ -185,6 +185,7 @@ from .messages import (
     TranscriptTurn,
     TurnAttachment,
     TurnToolCall,
+    UsageFeedback,
     build_messages,
     context_projection,
     display_results,
@@ -996,6 +997,19 @@ class _TurnState:
     #: wants the last one when a Turn ends badly. Overwritten each round, which
     #: is the honest shape — a round is what a composition describes.
     composition: ContextComposition = field(default_factory=ContextComposition)
+    #: What the route charged the last successful call of this Turn for its
+    #: input, and what this harness had estimated for exactly that input.
+    #:
+    #: The pair rather than either half: a real count is only usable next to the
+    #: guess it corrects, because what the next construction knows is how much
+    #: the transcript has *changed*, not what the route will make of it.
+    #:
+    #: Per-Turn, like the compression counters above and for the same reason —
+    #: and not carried across Turns, because the thing the correction is anchored
+    #: to is this Turn's own prompt. Zero until the route has answered once,
+    #: which is the state :class:`UsageFeedback` reads as "estimate only".
+    last_real_input_tokens: int = 0
+    estimate_at_last_real: int = 0
     #: What identifies the cacheable head every call of this Turn sends.
     #:
     #: Carried so it can be attached to each request and read back off a trace
@@ -1028,6 +1042,35 @@ class _TurnState:
         # has not told us the call was free, so it is skipped rather than added.
         if usage is not None:
             self.usage = self.usage + usage
+
+    def observe_input(self, usage: Usage | None, estimated: int) -> None:
+        """Record what one call's input really cost, beside what it was guessed at.
+
+        ``input_tokens + cached_input_tokens``, because a cached prefix is
+        prompt the model read: the discount is on the price and not on the
+        window, and a correction built from the uncached half alone would tell
+        the next construction there is room that does not exist.
+
+        A call the route said nothing about leaves the last measurement standing
+        — for the reason :meth:`add_usage` skips it rather than adding a zero: a
+        silent provider has not reported a free call, and treating it as one
+        would drop the correction back to the estimate at exactly the moment
+        there is least reason to trust it.
+        """
+        if usage is None or estimated <= 0:
+            return
+        real = usage.input_tokens + usage.cached_input_tokens
+        if real <= 0:
+            return
+        self.last_real_input_tokens = real
+        self.estimate_at_last_real = estimated
+
+    def feedback(self) -> UsageFeedback:
+        """The correction the next construction meets its ceiling against."""
+        return UsageFeedback(
+            real_input_tokens=self.last_real_input_tokens,
+            estimate_at_real=self.estimate_at_last_real,
+        )
 
     def narration(self) -> tuple[Mapping[str, Any], ...]:
         """What was said on the way to the answer, in round order."""
@@ -1433,10 +1476,16 @@ class AgentLoop:
     ) -> ConstructedContext:
         """Meet the constructed-context ceiling, notes and all.
 
-        The ceiling is this loop's estimate; the route's is the real one. When
-        the route says the estimate was wrong, ``state.compressions`` lowers ours
-        and the ladder does the rest — dropping older Turns and collapsing their
-        results in the order it already decided is safest.
+        The ceiling is this loop's, and what it is met against is the route's
+        own count of the last call corrected for whatever the transcript has
+        done since — ``state.feedback()``. Before the first answer of a Turn
+        there is no such count and the estimate stands alone, which is the one
+        thing it is good at: a preflight guess made from characters, with
+        nothing better to hand.
+
+        When the route rejects a context outright anyway, ``state.compressions``
+        lowers our ceiling and the ladder does the rest — dropping older Turns
+        and collapsing their results in the order it already decided is safest.
         """
         budget = self._budget
         if state.compressions:
@@ -1481,7 +1530,7 @@ class AgentLoop:
             summary=request.summary,
             summarised_turns=request.summarised_turns,
         )
-        return build_messages(transcript, budget)
+        return build_messages(transcript, budget, state.feedback())
 
     def _shown_calls(
         self, state: _TurnState, turn_budget: TurnBudget
@@ -1668,6 +1717,7 @@ class AgentLoop:
                 composition = composition.plus(**{layer: tokens})
             state.composition = composition
             reserved = composition.total - context.estimated_tokens
+            self._pruned(state, context, composition)
 
             try:
                 completion = await self._complete(
@@ -1683,6 +1733,12 @@ class AgentLoop:
                     continue
                 raise
 
+            # The one place a real count and the estimate of the very messages
+            # it was charged for are both in hand. Recorded before the nudge,
+            # because a call that came back empty was still read by the route
+            # and still says what this context costs it.
+            state.observe_input(completion.usage, composition.total)
+
             if self._nudge_empty(request, state, completion, started):
                 continue
 
@@ -1690,6 +1746,41 @@ class AgentLoop:
             # with tool calls does not carry it into a third attempt.
             state.note = None
             return completion
+
+    def _pruned(
+        self,
+        state: _TurnState,
+        context: ConstructedContext,
+        composition: ContextComposition,
+    ) -> None:
+        """Report a context that was built with less in it than the Turn holds.
+
+        Emitted from the construction that gave the ground, once per call the
+        loop is about to send — not from ``_compress``'s trial rebuild, which is
+        a question about whether there is anything left to give rather than a
+        context anybody is sending, and not on a clock. A construction that fit
+        without giving anything up reports nothing at all: a Turn is not doing
+        something worth a row on a reader's timeline by fitting.
+
+        Numbers only. What was dropped is a Turn the reader can still scroll to
+        and what was collapsed is a handle the model still holds, so the part
+        says *how much* and never *what* — the alternative would put a page's
+        prose on a rendered channel through a part about pruning it.
+        """
+        if not (context.turns_dropped or context.results_collapsed):
+            return
+        self._progress(
+            state,
+            ProgressKind.CONTEXT_PRUNED,
+            rung=context.rung,
+            turns_dropped=context.turns_dropped,
+            results_collapsed=context.results_collapsed,
+            # The pair the ceiling was actually met against: what the characters
+            # said, and what the route's own last count makes of them.
+            estimated=composition.total,
+            projected=composition.projected_tokens,
+            layers=composition.as_dict(),
+        )
 
     def _compress(
         self,
@@ -2514,6 +2605,7 @@ __all__ = [
     "TurnRequest",
     "TurnStatus",
     "TurnToolCall",
+    "UsageFeedback",
     "assert_distinct_ids",
     "rounds_exhausted_note",
     "domain_body_note",
