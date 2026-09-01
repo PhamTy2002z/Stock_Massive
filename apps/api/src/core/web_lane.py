@@ -22,6 +22,7 @@ URL_FRESH_SECONDS = 24 * 60 * 60
 URL_STALE_SECONDS = 7 * 24 * 60 * 60
 SINGLE_FLIGHT_TTL_SECONDS = 30
 REQUESTS_PER_MINUTE = 30
+REQUESTS_PER_DOMAIN_PER_MINUTE = 30
 
 WebKind = Literal["search", "url"]
 
@@ -49,7 +50,10 @@ class WebLane:
         *,
         clock: Callable[[], float] = time.time,
         requests_per_minute: int = REQUESTS_PER_MINUTE,
+        requests_per_domain_per_minute: int = REQUESTS_PER_DOMAIN_PER_MINUTE,
     ) -> None:
+        if requests_per_minute <= 0 or requests_per_domain_per_minute <= 0:
+            raise ValueError("web request allowances must be positive")
         if redis_factory is None:
             from src.core.redis import get_redis
 
@@ -57,8 +61,16 @@ class WebLane:
         self._redis_factory = redis_factory
         self._clock = clock
         self._requests_per_minute = requests_per_minute
+        self._requests_per_domain_per_minute = requests_per_domain_per_minute
 
-    def read(self, kind: WebKind, key: str, fetch: Callable[[], Any]) -> WebRead:
+    def read(
+        self,
+        kind: WebKind,
+        key: str,
+        fetch: Callable[[], Any],
+        *,
+        domain: str = "unknown",
+    ) -> WebRead:
         """Read through the cache, serving labelled stale data on upstream failure."""
         redis = self._client()
         digest = hashlib.sha256(key.strip().encode("utf-8")).hexdigest()
@@ -71,7 +83,7 @@ class WebLane:
         if token is None:
             return self._fallback(stored, stale_seconds, "another request is refreshing")
         try:
-            self._take_allowance(redis)
+            self._take_allowance(redis, domain)
             payload = fetch()
         except Exception as exc:  # noqa: BLE001 - stale service is the contract
             logger.warning("Open-web %s read failed: %s", kind, exc)
@@ -120,7 +132,7 @@ class WebLane:
             return WebRead(stored.payload, stored.fetched_at, stored.age_seconds, True)
         raise WebUnavailable(f"no open-web data is available: {reason}")
 
-    def _take_allowance(self, redis: Any) -> None:
+    def _take_allowance(self, redis: Any, domain: str) -> None:
         minute = int(self._clock() // 60)
         key = f"{KEY_PREFIX}:allowance:{minute}"
         try:
@@ -131,6 +143,34 @@ class WebLane:
             raise WebUnavailable(f"the web allowance is unreachable: {exc}") from exc
         if count > self._requests_per_minute:
             raise WebUnavailable("the independent web request allowance is exhausted")
+        normalized = self._domain(domain)
+        domain_key = f"{KEY_PREFIX}:allowance:domain:{normalized}:{minute}"
+        try:
+            domain_count = int(redis.incr(domain_key))
+            if domain_count == 1:
+                redis.expire(domain_key, 61)
+        except Exception as exc:  # noqa: BLE001
+            raise WebUnavailable(
+                f"the per-domain web allowance is unreachable: {exc}"
+            ) from exc
+        if domain_count > self._requests_per_domain_per_minute:
+            raise WebUnavailable(
+                "the per-domain web request allowance is exhausted"
+            )
+
+    @staticmethod
+    def _domain(value: str) -> str:
+        candidate = str(value or "unknown").strip().lower().rstrip(".")
+        try:
+            encoded = candidate.encode("idna").decode("ascii")
+        except UnicodeError:
+            return "unknown"
+        if not encoded or len(encoded) > 253 or any(
+            character not in "abcdefghijklmnopqrstuvwxyz0123456789.-"
+            for character in encoded
+        ):
+            return "unknown"
+        return encoded
 
     def _claim(self, redis: Any, kind: WebKind, digest: str) -> str | None:
         token = token_hex(8)

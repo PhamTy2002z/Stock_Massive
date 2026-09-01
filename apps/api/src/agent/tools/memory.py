@@ -49,6 +49,7 @@ from ..registry import (
     object_schema,
     register,
 )
+from ..permissions import AuthorizationDenied
 
 #: What one call of any of these tools may take. They are single statements
 #: against this deployment's own database, so a call still running after this
@@ -111,6 +112,7 @@ class MemoryTools:
                 content_trust=ContentTrust.TRUSTED_STRUCTURED,
                 concurrency=ToolConcurrency.PARALLEL_SAFE,
                 permission=ToolPermission.ALLOW,
+                resource_arg="query",
                 timeout_seconds=STORE_TIMEOUT_SECONDS,
                 contract_version="1",
             ),
@@ -160,6 +162,7 @@ class MemoryTools:
                 # for. Permission is declared here so that judgement is a line
                 # somebody can read and change, not an absence.
                 permission=ToolPermission.ALLOW,
+                resource_arg="title",
                 timeout_seconds=STORE_TIMEOUT_SECONDS,
                 contract_version="1",
             ),
@@ -186,6 +189,7 @@ class MemoryTools:
                 content_trust=ContentTrust.TRUSTED_STRUCTURED,
                 concurrency=ToolConcurrency.PARALLEL_SAFE,
                 permission=ToolPermission.ALLOW,
+                resource_arg="query",
                 timeout_seconds=STORE_TIMEOUT_SECONDS,
                 contract_version="1",
             ),
@@ -389,7 +393,7 @@ def _owner(context: ToolContext) -> int:
     for.
     """
     if context.user_id is None:
-        raise ValueError(
+        raise AuthorizationDenied(
             "this tool reads one user's own conversation and there is no user in "
             "this context"
         )

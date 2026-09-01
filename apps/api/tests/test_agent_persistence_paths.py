@@ -30,7 +30,7 @@ from src.agent.parts import (
     QuestionOption,
     QuestionPart,
 )
-from src.agent.registry import ToolAccess, ToolContext
+from src.agent.registry import ToolAccess, ToolContext, object_schema
 from src.agent.turns import assistant_message, frozen_message
 from src.alpha.models import AgentQuestion, AgentThread, AgentTurn
 from src.auth.models import User
@@ -329,6 +329,9 @@ async def dispatched(user_id: int, name: str, body: str, *, external: bool = Tru
     entry = stub_entry(
         name,
         handler=handler,
+        schema=object_schema(
+            {"url": {"type": "string"}}, ("url",)
+        ),
         access=ToolAccess.NETWORK if external else ToolAccess.STORE,
         reads_external=external,
     )

@@ -36,6 +36,7 @@ from typing import Any
 from src.core.llm import ToolSchema
 
 from . import registry
+from .permissions import PermissionPolicy
 from .toolsets import TOOLSETS, expansion_identity
 
 #: How many distinct toolset combinations stay cached. Well above the handful a
@@ -73,7 +74,12 @@ class ResolvedToolSurface:
         object.__setattr__(
             self,
             "offered_schemas",
-            tuple(tool.schema for tool in self.tools if tool.available),
+            tuple(
+                tool.schema
+                for tool in self.tools
+                if tool.available
+                and PermissionPolicy(tool.permission_rules).may_allow(tool.name)
+            ),
         )
         object.__setattr__(self, "by_name", MappingProxyType(lookup))
         object.__setattr__(
@@ -83,7 +89,7 @@ class ResolvedToolSurface:
     def identity_payload(self) -> dict[str, Any]:
         """Deterministic policy identity with no callables, secrets, or expiry."""
         return {
-            "resolver_version": "resolved-tool-surface@2",
+            "resolver_version": "resolved-tool-surface@3",
             "expanded_names": list(self.expanded_names),
             "tools": [
                 {
@@ -101,7 +107,15 @@ class ResolvedToolSurface:
                     "access": tool.access.value,
                     "content_trust": tool.content_trust.value,
                     "concurrency": tool.concurrency.value,
-                    "permission": tool.permission.value,
+                    "permission_rules": [
+                        {
+                            "capability": rule.capability,
+                            "resource": rule.resource,
+                            "action": rule.action.value,
+                        }
+                        for rule in tool.permission_rules
+                    ],
+                    "resource_arg": tool.resource_arg,
                     "timeout_seconds": tool.timeout_seconds,
                     "contract_version": tool.contract_version,
                     "handler_identity": tool.handler_identity,

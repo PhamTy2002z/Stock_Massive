@@ -123,6 +123,11 @@ class Settings(BaseSettings):
     web_tools_enabled: bool = False
     web_fetch_max_bytes: int = 512 * 1024
     web_domain_denylist: str = ""
+    # Redis-backed fleet windows. The first preserves the existing provider
+    # allowance; the second prevents one hot publisher from consuming all of
+    # it. Per-Turn egress remains owned by the agent lane profile.
+    web_fleet_requests_per_minute: int = 30
+    web_domain_requests_per_minute: int = 30
 
     # Khối giá mà Budget Validation đọc lúc khởi động. Đơn vị USD trên một
     # triệu token, khai riêng cho từng workload: batch và interactive là hai

@@ -290,7 +290,18 @@ def entry(name: str, handler=_ok, **overrides: Any) -> registry.ToolEntry:
     fields: dict[str, Any] = {
         "name": name,
         "toolset": "web" if name in WEB_TOOLS else "memory",
-        "schema": registry.object_schema({"query": {"type": "string"}}),
+        # This helper stands in for several shipped tools. Schema validation is
+        # now executable, so the fixture declares every argument its scripted
+        # calls use instead of relying on the old parser-only path.
+        "schema": registry.object_schema(
+            {
+                "query": {"type": "string"},
+                "url": {"type": "string"},
+                "value": {"type": "string"},
+                "title": {"type": "string"},
+                "body": {"type": "string"},
+            }
+        ),
         "handler": handler,
         "description": f"stub {name}",
         "display_name": shown,

@@ -46,6 +46,7 @@ from .parts import (
     QUESTION_SUPERSEDED,
     question_option_ids,
 )
+from .security import redact_trace_value
 from .symbols import normalize_symbol
 
 T = TypeVar("T")
@@ -1009,14 +1010,18 @@ class AgentPersistence:
                     if trace.get("tool_call_id")
                     else None
                 ),
-                arguments=dict(trace.get("arguments") or {}),
+                arguments=redact_trace_value(dict(trace.get("arguments") or {})),
                 result=(
-                    dict(trace["result"])
+                    redact_trace_value(dict(trace["result"]))
                     if trace.get("result") is not None
                     else None
                 ),
                 status=str(trace["status"]),
-                error=str(trace["error"])[:500] if trace.get("error") else None,
+                error=(
+                    str(redact_trace_value(str(trace["error"])))[:500]
+                    if trace.get("error")
+                    else None
+                ),
                 latency_ms=trace.get("latency_ms"),
                 prompt_tokens=trace.get("prompt_tokens"),
                 completion_tokens=trace.get("completion_tokens"),

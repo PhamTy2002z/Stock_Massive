@@ -59,6 +59,7 @@ import httpx
 from src.core.config import Settings, get_settings
 from src.core.web_lane import URL_FRESH_SECONDS, WebLane, WebUnavailable
 
+from ..security import refuse_secret_egress
 from ..registry import (
     ContentTrust,
     ToolAccess,
@@ -450,7 +451,11 @@ class WebTools:
         records: PageRecords | None = None,
     ) -> None:
         self._injected_settings = settings
-        self._lane = lane or WebLane()
+        configured = settings or get_settings()
+        self._lane = lane or WebLane(
+            requests_per_minute=configured.web_fleet_requests_per_minute,
+            requests_per_domain_per_minute=configured.web_domain_requests_per_minute,
+        )
         self._search = search or self._tavily_search
         self._download = download
         self._resolver = resolver
@@ -498,6 +503,7 @@ class WebTools:
                 content_trust=ContentTrust.UNTRUSTED,
                 concurrency=ToolConcurrency.PARALLEL_SAFE,
                 permission=ToolPermission.ALLOW,
+                resource_arg="query",
                 # Above the one provider round trip this makes, which is already
                 # bounded at ``FETCH_TIMEOUT_SECONDS`` on the wire, and below the
                 # round's own backstop. It ends a search that is not answering
@@ -552,6 +558,7 @@ class WebTools:
                 content_trust=ContentTrust.UNTRUSTED,
                 concurrency=ToolConcurrency.PARALLEL_SAFE,
                 permission=ToolPermission.ALLOW,
+                resource_arg="url",
                 # The widest of the shipped bounds because this call is the one
                 # that can legitimately be several requests: ``MAX_REDIRECTS``
                 # hops, each with its own ``FETCH_TIMEOUT_SECONDS``. Cutting at
@@ -573,12 +580,16 @@ class WebTools:
         query = str(arguments.get("query") or "").strip()
         if not query:
             raise ValueError("query must not be blank")
+        refuse_secret_egress(query, label="web search query")
         recency = arguments.get("recency_days")
         recency_days = int(recency) if recency is not None else None
         key = f"{query}\n{recency_days or ''}"
         try:
-            read = self._lane.read(
-                "search", key, lambda: list(self._search(query, recency_days))
+            read = self._lane_read(
+                "search",
+                key,
+                lambda: list(self._search(query, recency_days)),
+                domain="api.tavily.com",
             )
         except WebUnavailable as exc:
             return {"query": query, "results": [], "reason": "web_unavailable", "detail": str(exc)}
@@ -603,6 +614,7 @@ class WebTools:
         url = str(arguments.get("url") or "").strip()
         if not url:
             raise ValueError("url must not be blank")
+        refuse_secret_egress(url, label="URL")
         looking_for = str(arguments.get("looking_for") or "").strip()
         recorded = await self._recorded_page(context.thread_id, url)
         return await asyncio.to_thread(self._fetch_url, url, looking_for, recorded)
@@ -666,7 +678,12 @@ class WebTools:
             if served is not None:
                 return served
         try:
-            read = self._lane.read("url", initial, lambda: self._fetch_page(initial))
+            read = self._lane_read(
+                "url",
+                initial,
+                lambda: self._fetch_page(initial),
+                domain=urlsplit(initial).hostname or "unknown",
+            )
         except WebUnavailable as exc:
             return {"url": initial, "reason": "web_unavailable", "detail": str(exc)}
         page = dict(read.payload) if isinstance(read.payload, Mapping) else {}
@@ -690,6 +707,20 @@ class WebTools:
             "from_record": False,
             "reason": None,
         }
+
+    def _lane_read(
+        self, kind: str, key: str, fetch: Callable[[], Any], *, domain: str
+    ) -> Any:
+        """Use the domain-aware production lane while keeping replay seams small."""
+
+        try:
+            return self._lane.read(kind, key, fetch, domain=domain)
+        except TypeError as exc:
+            # Golden/offline lanes predate the policy dimension and do no real
+            # egress. Do not mask a TypeError raised by the loader itself.
+            if "unexpected keyword argument 'domain'" not in str(exc):
+                raise
+            return self._lane.read(kind, key, fetch)
 
     def _from_record(
         self, initial: str, recorded: Mapping[str, Any], looking_for: str
@@ -750,6 +781,7 @@ class WebTools:
         for redirect_count in range(MAX_REDIRECTS + 1):
             # Re-validated on every hop: a redirect is a new URL chosen by the
             # server, so the first validation says nothing about this one.
+            refuse_secret_egress(current, label="URL")
             current = validate_public_url(
                 current, denylist=self._denylist(), resolver=self._resolver
             )

@@ -166,7 +166,7 @@ def test_an_unknown_tool_is_treated_as_unsafe_to_overlap():
     calls = [call("web_search", "a"), call("mcp__server__do_thing", "b")]
 
     surface = Surface()
-    surface.add("web_search")
+    surface.add("web_search", reads_external=False)
     segments = executor.plan_segments(calls, lookup=surface.entries.get)
 
     assert [mode for mode, _ in segments] == ["parallel", "sequential"]
@@ -195,10 +195,10 @@ async def test_parallel_safe_calls_overlap_and_results_keep_the_issued_order():
 @pytest.mark.asyncio
 async def test_a_write_never_overlaps_the_reads_around_it():
     surface = Surface()
-    surface.add("web_search", delay=0.02)
-    surface.add("fetch_url", delay=0.02)
-    surface.add("remember_fact", delay=0.02)
-    calls = [call("web_search"), call("fetch_url"), call("remember_fact")]
+    surface.add("session_search", delay=0.02, reads_external=False)
+    surface.add("recall_facts", delay=0.02, reads_external=False)
+    surface.add("remember_fact", delay=0.02, reads_external=False)
+    calls = [call("session_search"), call("recall_facts"), call("remember_fact")]
 
     await surface.executor().run(calls)
 
@@ -402,7 +402,7 @@ async def test_a_write_already_running_finishes_once_and_the_stop_takes_the_rest
     """The asymmetry: a read may be abandoned, an effect may not be half made."""
     stop = asyncio.Event()
     surface = Surface()
-    surface.add("web_search")
+    surface.add("web_search", reads_external=False)
     surface.add("remember_fact")
     surface.add("session_search", delay=5.0)
     presses_stop(surface, "remember_fact", stop, work=0.01)
@@ -855,7 +855,9 @@ def page(surface: Surface, name: str, body: str) -> None:
 
     surface.add(name)
     surface.entries[name] = dataclasses.replace(
-        surface.entries[name], handler=handler
+        surface.entries[name],
+        schema=registry.object_schema({"url": {"type": "string"}}, ("url",)),
+        handler=handler,
     )
 
 

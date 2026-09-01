@@ -299,3 +299,28 @@ playbook-theo-intent chưa có số thật (golden owner/P9); `agent_tool_call` 
 index `thread_id` — cố ý để lại, cần đo trên bảng thật trước (P6); giá batch
 thật vs trần $0.015/owner chưa chạm bao giờ (P9); `estimate_bias` chưa có ai
 đọc (P9); `REPORT_SCHEMA@2` chưa có consumer (P5).
+
+## Lần chạy golden sau khi đóng phase (2026-09-01, 6 trial)
+
+Chạy `golden.release --ceiling-usd 9 --trials 6` trên host sau khi phase đóng.
+**Không cho verdict.** Run `incomplete`: 66/240 case-trial không có assistant
+message nào vì circuit breaker của route giữ (367 refusal trước dispatch, so
+với 583 call đi được). Turn không chạy thì settlement và budget đều tính trượt,
+nên bảng điểm đo tình trạng proxy chứ không đo chất lượng context engine.
+
+Artifact vẫn còn và chấm lại miễn phí được:
+`make golden-release CEILING_USD=1 RELEASE_ARGS="--grade-only golden/artifacts/release-v1-p04.json"`.
+
+Hai điều cần biết trước khi chạy lại:
+
+1. **Env.** `Settings.model_config` khai `env_file=".env"` — đường dẫn *tương
+   đối*, nên chạy từ `apps/api` thì `.env` ở gốc repo không được nạp và mọi
+   Turn chết với "Request URL is missing an 'http://' protocol". Phải
+   `set -a && . ../../.env && set +a` và override
+   `LLM_BASE_URL=http://127.0.0.1:8317/v1` (giá trị trong `.env` là
+   `host.docker.internal`, dành cho container).
+2. **Chưa loại trừ được:** compaction thêm một lượt BATCH sau mỗi Turn đủ dài,
+   tức nhiều call hơn trên cùng proxy. Không có bằng chứng đó làm breaker mở
+   (run này `concurrency=1`, baseline P1 dùng 6), cũng không có bằng chứng
+   ngược lại. Cần đo, không đoán. Đường lùi nếu đúng: bỏ `compactor=` khi build
+   service — một tham số, không phải refactor.
