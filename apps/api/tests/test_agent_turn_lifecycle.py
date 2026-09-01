@@ -630,6 +630,70 @@ async def test_the_last_event_sequence_is_persisted_with_the_checkpoint(owner):
     assert record.last_event_seq > 0
 
 
+@pytest.mark.asyncio
+async def test_the_checkpoint_and_the_replayed_snapshot_carry_the_loops_trail(owner):
+    """The audit trail has to survive the process that produced it.
+
+    A reader who reconnects after the Turn ended is answered from the
+    checkpoint, so the trail on the stream and the trail in the store are the
+    same trail or one of the two readers is being told a different story.
+    """
+    thread_id = await thread_for(owner)
+    turns = service(FakeClient([wants("web_search"), answer("Kết luận.")]))
+    turn_id = uuid.uuid4()
+    await turns.create(
+        user_id=owner,
+        thread_id=thread_id,
+        turn_id=turn_id,
+        user_text="FPT thế nào?",
+        runtime=runtime(owner),
+    )
+    await turns.running(turn_id).task
+
+    record = await store().read_turn(owner, turn_id)
+    trail = record.draft_content["progress"]
+    assert [part["kind"] for part in trail] == [
+        "lane_selected",
+        "model_attempt",
+        "model_attempt",
+        "tool_round",
+        "model_attempt",
+        "model_attempt",
+    ]
+    assert [part["seq"] for part in trail] == [1, 2, 3, 4, 5, 6]
+
+    subscriber = await turns.subscribe(owner, turn_id)
+    assert subscriber.snapshot.data["progress"] == trail
+
+
+@pytest.mark.asyncio
+async def test_the_canonical_message_says_which_lane_answered_and_why(owner):
+    """The transcript is the only view a reopened Thread has of the trail."""
+    thread_id = await thread_for(owner)
+    turns = service(FakeClient([answer("Xong.")]))
+    turn_id = uuid.uuid4()
+    await turns.create(
+        user_id=owner,
+        thread_id=thread_id,
+        turn_id=turn_id,
+        user_text="Viết memo về FPT giúp tôi.",
+        runtime=runtime(owner),
+    )
+    await turns.running(turn_id).task
+
+    assistant = [row for row in messages_of(thread_id) if row.role == "assistant"][0]
+    trail = assistant.content["progress"]
+    # The router's decision, carried from where it was taken to where it is
+    # read back: the loop reports the lane it was built with and the reason the
+    # Turn was routed to it, rather than re-deriving either.
+    assert trail[0]["kind"] == "lane_selected"
+    assert trail[0]["payload"] == {"lane": DEEP.name, "reason": "keyword:memo"}
+    assert [part["payload"]["status"] for part in trail[1:]] == [
+        "running",
+        "completed",
+    ]
+
+
 # --- the startup sweep -----------------------------------------------------
 
 
@@ -687,6 +751,53 @@ async def test_a_turn_left_running_by_a_restart_is_frozen_incomplete(owner):
     assert assistant.content["text"] == "Một phần đã kịp nói."
     assert assistant.content["status"] == TURN_INCOMPLETE
     assert [call["id"] for call in assistant.content["tool_calls"]] == ["c1"]
+    # A checkpoint written before parts existed reads as a Turn that reported no
+    # loop events, rather than as one whose trail was lost.
+    assert assistant.content["progress"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_swept_turn_keeps_the_trail_its_checkpoint_held(owner):
+    """The freeze knows two things — the status and the reason — and copies the rest."""
+    thread_id = await thread_for(owner)
+    message = await store().append_message(
+        thread_id, role="user", content={"text": "FPT thế nào?"}
+    )
+    trail = [
+        {
+            "seq": 1,
+            "kind": "lane_selected",
+            "round": 0,
+            "payload": {"lane": "light", "reason": "default"},
+            "at": "2026-08-14T02:00:00+00:00",
+        },
+        {
+            "seq": 2,
+            "kind": "model_attempt",
+            "round": 0,
+            "payload": {"status": "running", "terminal_reason": None},
+            "at": "2026-08-14T02:00:01+00:00",
+        },
+    ]
+    turn_id = uuid.uuid4()
+    with get_sync_db() as session:
+        session.add(
+            AgentTurn(
+                id=turn_id,
+                thread_id=thread_id,
+                request_message_id=message.id,
+                status=TURN_RUNNING,
+                last_event_seq=6,
+                started_at=datetime.now(timezone.utc),
+                draft_content={**_checkpoint_of_an_older_build(), "progress": trail},
+            )
+        )
+
+    await service(FakeClient([])).sweep()
+
+    assistant = [row for row in messages_of(thread_id) if row.role == "assistant"][0]
+    assert assistant.content["progress"] == trail
+    assert assistant.content["status"] == TURN_INCOMPLETE
 
 
 @pytest.mark.asyncio

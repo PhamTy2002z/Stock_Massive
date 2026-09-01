@@ -46,6 +46,7 @@ from src.agent.loop import (
     GATEWAY_TIMEOUT,
     LLM_CALL_TIMEOUT,
     MAX_CONTEXT_COMPRESSIONS,
+    MAX_EMPTY_NUDGES,
     MAX_EXTERNAL_TOOL_CALLS,
     MAX_OUTPUT_TOKENS_REDUCTIONS,
     MAX_TOOL_ROUNDS,
@@ -83,7 +84,8 @@ from src.agent.loop import (
     terminal_reason_for,
     trace_status,
 )
-from src.agent.lanes import LIGHT
+from src.agent.lanes import DEEP, LIGHT
+from src.agent.parts import RECOVERY_ACTIONS, ProgressKind
 from src.agent.messages import (
     COLLAPSED_RESULT_URLS,
     CONTEXT_LAYERS,
@@ -192,6 +194,7 @@ class RecordingPublisher:
         self.deltas: list[str] = []
         self.thoughts: list[str] = []
         self.calls: list[dict[str, Any]] = []
+        self.parts: list[dict[str, Any]] = []
         self.order: list[tuple[str, Any]] = []
 
     def content_delta(self, text: str, *, kind: str = ANSWER, round: int = 0) -> None:
@@ -208,6 +211,14 @@ class RecordingPublisher:
     def tool_call(self, payload) -> None:
         self.calls.append(dict(payload))
         self.order.append(("tool", dict(payload)))
+
+    def progress(self, part) -> None:
+        self.parts.append(dict(part))
+        self.order.append(("progress", dict(part)))
+
+    def kinds(self) -> list[str]:
+        """The trail as a list of kinds, which is what most assertions are about."""
+        return [part["kind"] for part in self.parts]
 
 
 def answer(text: str = "Xong.") -> Completion:
@@ -406,8 +417,10 @@ async def test_prose_before_a_tool_call_is_narration_and_not_the_answer() -> Non
     assert outcome.text == "Để tôi tra đã.\n\nKết quả là 6,5%."
 
     # The narration precedes the call it introduced, and both precede the reply:
-    # the transcript on screen has to read in the order it happened.
-    assert [kind for kind, _ in publisher.order] == [
+    # the transcript on screen has to read in the order it happened. The loop's
+    # own progress parts share this stream and are read out of it below, so what
+    # is pinned here is the order of the three things a reader is *shown*.
+    assert [kind for kind, _ in publisher.order if kind != "progress"] == [
         "thought",
         "tool",
         "tool",
@@ -1224,6 +1237,378 @@ async def test_a_truncated_answer_admits_that_it_stopped() -> None:
     assert outcome.text == "Câu trả lời bị"
 
 
+# -- the progress trail ------------------------------------------------------
+
+
+def statuses(publisher: RecordingPublisher) -> list[str]:
+    """Every model attempt's status, in the order it was reported."""
+    return [
+        part["payload"]["status"]
+        for part in publisher.parts
+        if part["kind"] == ProgressKind.MODEL_ATTEMPT.value
+    ]
+
+
+def only(publisher: RecordingPublisher, kind: ProgressKind) -> list[dict[str, Any]]:
+    """The payloads of one kind of part, in order."""
+    return [
+        part["payload"] for part in publisher.parts if part["kind"] == kind.value
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_trail_opens_with_the_lane_and_why_it_was_chosen() -> None:
+    """The one part about a decision taken before the Turn ran.
+
+    An operator reading a Turn that was allowed ten rounds of evidence has to be
+    able to see why without re-running the router over a question that may since
+    have been edited in the composer.
+    """
+    publisher = RecordingPublisher()
+    client = FakeClient([answer()])
+
+    await loop(client, lane=DEEP, publisher=publisher).run(
+        turn_request(lane_reason="keyword:memo")
+    )
+
+    assert publisher.parts[0]["seq"] == 1
+    assert publisher.parts[0]["kind"] == "lane_selected"
+    assert publisher.parts[0]["payload"] == {"lane": "deep", "reason": "keyword:memo"}
+    assert publisher.parts[0]["at"] == "2026-08-22T00:00:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_every_asking_of_the_model_is_opened_and_closed_in_order() -> None:
+    publisher = RecordingPublisher()
+    client = FakeClient([wants("web_search"), answer("Khoảng 6,5%.")])
+
+    outcome = await loop(client, publisher=publisher).run(turn_request())
+
+    assert outcome.status is TurnStatus.COMPLETE
+    # One attempt per round, closed before the tools of that round run: the
+    # asking is over by then, and a part that stayed open across the round would
+    # say a call was in flight while it was not.
+    assert publisher.kinds() == [
+        "lane_selected",
+        "model_attempt",
+        "model_attempt",
+        "tool_round",
+        "model_attempt",
+        "model_attempt",
+    ]
+    assert statuses(publisher) == ["running", "completed", "running", "completed"]
+    # Numbered within the Turn, and the ordinal is what a reader sorts by.
+    assert [part["seq"] for part in publisher.parts] == [1, 2, 3, 4, 5, 6]
+    # The round each part happened in, so a part reads against the calls and the
+    # narration of the same round.
+    assert [part["round"] for part in publisher.parts] == [0, 0, 0, 0, 1, 1]
+
+
+@pytest.mark.asyncio
+async def test_a_round_is_reported_by_its_shape_and_never_by_its_content() -> None:
+    """The ids are the join to ``tool.call``; the queries stay on that channel."""
+    publisher = RecordingPublisher()
+    client = FakeClient(
+        [wants("web_search", "session_search", "fetch_url"), answer()]
+    )
+
+    outcome = await loop(client, publisher=publisher).run(turn_request())
+
+    assert only(publisher, ProgressKind.TOOL_ROUND) == [
+        {
+            "calls": 3,
+            # Two of the three reach off this deployment; the session read is
+            # this system's own store and is not charged to that allowance.
+            "external_used": 2,
+            "call_ids": ["call_0", "call_1", "call_2"],
+        }
+    ]
+    # The ids are the ones the reader's rail was told about, so the two channels
+    # can be read against each other.
+    assert [call["id"] for call in publisher.calls][:3] == [
+        "call_0",
+        "call_1",
+        "call_2",
+    ]
+    assert [call.id for call in outcome.tool_calls] == ["call_0", "call_1", "call_2"]
+
+
+@pytest.mark.asyncio
+async def test_a_compression_that_ran_is_reported_once_with_its_bound() -> None:
+    publisher = RecordingPublisher()
+    client = FakeClient([ContextOverflow("the input did not fit"), answer()])
+    request = turn_request(history=long_history())
+
+    outcome = await loop(
+        client,
+        budget=ContextBudget(max_tokens=snug_ceiling(request)),
+        publisher=publisher,
+    ).run(request)
+
+    assert outcome.status is TurnStatus.COMPLETE
+    assert only(publisher, ProgressKind.RECOVERY) == [
+        {"action": "compress", "attempt": 1, "bound": MAX_CONTEXT_COMPRESSIONS}
+    ]
+    # Inside the one asking, not beside it: giving ground to the route and asking
+    # again is the same attempt, and a second ``running`` would count a call the
+    # Turn never made.
+    assert publisher.kinds() == [
+        "lane_selected",
+        "model_attempt",
+        "recovery",
+        "model_attempt",
+    ]
+    assert statuses(publisher) == ["running", "completed"]
+
+
+@pytest.mark.asyncio
+async def test_a_recovery_that_was_declined_is_not_in_the_trail() -> None:
+    """A short Turn has no older Turn to drop, so no compression happened.
+
+    The property the whole channel rests on: a part is an event that occurred,
+    not a stage somebody expected.
+    """
+    publisher = RecordingPublisher()
+    client = FakeClient([ContextOverflow("nope"), answer()])
+
+    outcome = await loop(client, publisher=publisher).run(turn_request())
+
+    assert outcome.terminal_reason == CONTEXT_OVERFLOW
+    assert only(publisher, ProgressKind.RECOVERY) == []
+    assert publisher.kinds() == ["lane_selected", "model_attempt", "model_attempt"]
+    assert statuses(publisher) == ["running", "error"]
+    assert only(publisher, ProgressKind.MODEL_ATTEMPT)[-1] == {
+        "status": "error",
+        "terminal_reason": CONTEXT_OVERFLOW,
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_lowered_output_ceiling_is_reported_as_its_own_recovery() -> None:
+    publisher = RecordingPublisher()
+    client = FakeClient([OutputCapExceeded("no room for the reservation"), answer()])
+
+    outcome = await loop(client, publisher=publisher).run(turn_request())
+
+    assert outcome.status is TurnStatus.COMPLETE
+    assert only(publisher, ProgressKind.RECOVERY) == [
+        {
+            "action": "lower_output_cap",
+            "attempt": 1,
+            "bound": MAX_OUTPUT_TOKENS_REDUCTIONS,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_one_nudge_a_turn_buys_is_reported_as_a_recovery() -> None:
+    publisher = RecordingPublisher()
+    client = FakeClient(
+        [wants("web_search"), Completion(model=SESSION_MODEL, text=""), answer("Rồi.")]
+    )
+
+    outcome = await loop(client, publisher=publisher).run(turn_request())
+
+    assert outcome.status is TurnStatus.COMPLETE
+    assert only(publisher, ProgressKind.RECOVERY) == [
+        {"action": "empty_nudge", "attempt": 1, "bound": MAX_EMPTY_NUDGES}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_ceiling_is_reported_once_with_the_lane_that_set_it() -> None:
+    tight = replace(
+        LIGHT,
+        name="tight",
+        max_tool_rounds=1,
+        owner_output_total=2 * LIGHT.max_output_tokens,
+    )
+    publisher = RecordingPublisher()
+    client = FakeClient([wants("web_search"), answer("Xong rồi.")])
+
+    outcome = await loop(client, lane=tight, publisher=publisher).run(turn_request())
+
+    assert outcome.rounds_exhausted is True
+    # Once, and with the number the Turn actually had: a Turn told it used four
+    # of a lane that gave it one would be the one message whose whole job is an
+    # honest account of what is left.
+    assert only(publisher, ProgressKind.ROUNDS_EXHAUSTED) == [{"rounds": 1}]
+
+
+@pytest.mark.asyncio
+async def test_a_halted_tool_loop_says_so_with_the_ladders_own_code() -> None:
+    """The ladder's guidance is prose for the model; this channel carries codes."""
+    publisher = RecordingPublisher()
+    # The same fan-out the halt rung is measured on: one round of a tool that
+    # fails as many times as the ladder allows before it stops the tool loop.
+    halting_round = Completion(
+        model=SESSION_MODEL,
+        tool_calls=tuple(
+            ToolCall(id=f"c{index}", name="broken", arguments={"query": f"q{index}"})
+            for index in range(MAX_EXTERNAL_TOOL_CALLS)
+        ),
+    )
+    client = FakeClient([halting_round, answer("Xong.")])
+
+    outcome = await loop(client, publisher=publisher).run(turn_request())
+
+    assert outcome.status is TurnStatus.COMPLETE
+    assert only(publisher, ProgressKind.TOOLS_HALTED) == [{"reason": "halted_turn"}]
+    # The rounds were not spent, so the trail does not say they were.
+    assert only(publisher, ProgressKind.ROUNDS_EXHAUSTED) == []
+
+
+@pytest.mark.asyncio
+async def test_a_turn_out_of_wall_clock_says_the_deadline_ended_it() -> None:
+    publisher = RecordingPublisher()
+    client = FakeClient([answer()])
+
+    outcome = await loop(client, deadline_seconds=0.0, publisher=publisher).run(
+        turn_request()
+    )
+
+    assert outcome.terminal_reason == TURN_DEADLINE
+    assert publisher.kinds() == ["lane_selected", "deadline"]
+    assert only(publisher, ProgressKind.DEADLINE) == [{}]
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_turn_says_it_will_not_ask_the_model_again() -> None:
+    publisher = RecordingPublisher()
+    client = FakeClient([answer()])
+
+    outcome = await loop(client, publisher=publisher).run(
+        turn_request(), lambda: True
+    )
+
+    assert outcome.status is TurnStatus.CANCELLED
+    assert statuses(publisher) == ["cancelled"]
+    assert only(publisher, ProgressKind.MODEL_ATTEMPT) == [
+        {"status": "cancelled", "terminal_reason": CANCELLED_BY_USER}
+    ]
+    assert client.requests == []
+
+
+@pytest.mark.asyncio
+async def test_the_trail_survives_on_the_checkpoint_and_on_the_outcome() -> None:
+    """A reader rebuilding from a checkpoint draws the timeline the stream drew."""
+    drafts: list[Any] = []
+    publisher = RecordingPublisher()
+    client = FakeClient([wants("web_search"), answer()])
+
+    outcome = await loop(
+        client, publisher=publisher, checkpoint=drafts.append
+    ).run(turn_request())
+
+    assert list(outcome.progress) == publisher.parts
+    assert list(drafts[-1].progress) == publisher.parts
+
+
+@pytest.mark.asyncio
+async def test_no_part_of_the_trail_reaches_the_model() -> None:
+    """A Turn's account of itself is not evidence about the world.
+
+    The transcript is built from prose and tool results, and there is no field on
+    it a part could arrive through — so what is pinned is the consequence: not one
+    kind, action or status this loop reports appears in anything sent to the
+    route, however much of the trail a Turn produced.
+    """
+    publisher = RecordingPublisher()
+    client = FakeClient(
+        [
+            ContextOverflow("the input did not fit"),
+            wants("web_search"),
+            answer("Khoảng 6,5%."),
+        ]
+    )
+    request = turn_request(history=long_history())
+
+    await loop(
+        client,
+        budget=ContextBudget(max_tokens=snug_ceiling(request)),
+        publisher=publisher,
+    ).run(request)
+
+    # The Turn really did produce a trail worth hiding.
+    assert set(publisher.kinds()) >= {"lane_selected", "recovery", "tool_round"}
+    sent = json.dumps(
+        [
+            [str(message.content) for message in request_sent.messages]
+            for request_sent in client.requests
+        ],
+        ensure_ascii=False,
+    )
+    # The kinds and the recovery actions, which are this harness's own words: a
+    # generic status like "running" would make the assertion about the prompt's
+    # vocabulary instead of about the trail.
+    for word in (*(kind.value for kind in ProgressKind), *RECOVERY_ACTIONS):
+        assert word not in sent
+
+
+def test_an_extra_key_on_a_stored_message_cannot_change_what_the_model_sees():
+    """The transcript reader ignores it, which is why persisting it is safe.
+
+    The trail is written to the canonical assistant message, and every later
+    Turn of the Thread reads that message back. The read has to be blind to it:
+    two Threads identical but for the trail must construct byte-identical
+    context.
+    """
+    from src.agent.router import history_of
+    from src.agent.persistence import MessageRecord
+    from src.agent.turns import assistant_message
+
+    def thread(**extra: Any) -> tuple[MessageRecord, ...]:
+        when = datetime(2026, 8, 22, tzinfo=timezone.utc)
+        return (
+            MessageRecord(
+                id=1,
+                thread_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+                seq=1,
+                role="user",
+                content={"text": "Lãi suất bao nhiêu?"},
+                created_at=when,
+            ),
+            MessageRecord(
+                id=2,
+                thread_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+                seq=2,
+                role="assistant",
+                content=assistant_message(
+                    text="Khoảng 6,5%.", status="complete", **extra
+                ),
+                created_at=when,
+            ),
+        )
+
+    trail = (
+        {
+            "seq": 1,
+            "kind": "lane_selected",
+            "round": 0,
+            "payload": {"lane": "deep", "reason": "keyword:memo"},
+            "at": "2026-08-22T00:00:00+00:00",
+        },
+    )
+    request = turn_request()
+
+    def constructed(records: tuple[MessageRecord, ...]) -> tuple[str, ...]:
+        built = build_messages(
+            Transcript(
+                system_prompt=render(request.runtime),
+                system_prefix=prompt_prefix(),
+                turns=(
+                    *history_of(records),
+                    TranscriptTurn(user_text=request.user_text),
+                ),
+            ),
+            ContextBudget(),
+        )
+        return tuple(str(message.content) for message in built.messages)
+
+    assert history_of(thread(progress=trail)) == history_of(thread())
+    assert constructed(thread(progress=trail)) == constructed(thread())
+
+
 # -- checkpoints and traces --------------------------------------------------
 
 
@@ -1572,6 +1957,9 @@ async def test_a_call_the_turn_refused_tells_the_surface_which_ceiling_refused_i
 
         def tool_call(self, payload):
             published.append(dict(payload))
+
+        def progress(self, _part) -> None:
+            return None
 
     outcome = await loop(FakeClient(rounds), publisher=Surface()).run(turn_request())
 

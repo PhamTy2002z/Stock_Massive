@@ -24,6 +24,23 @@ CALL = {
     "summary": "Tìm trên web: lãi suất",
 }
 
+# Two parts as the loop hands them over, already through the payload allowlist
+# in ``parts.py``: what this file is about is the transport restating them.
+LANE = {
+    "seq": 1,
+    "kind": "lane_selected",
+    "round": 0,
+    "payload": {"lane": "light", "reason": "default"},
+    "at": "2026-09-01T09:00:00+00:00",
+}
+ATTEMPT = {
+    "seq": 2,
+    "kind": "model_attempt",
+    "round": 0,
+    "payload": {"status": "running", "terminal_reason": None},
+    "at": "2026-09-01T09:00:01+00:00",
+}
+
 
 def publisher(**kwargs) -> TurnPublisher:
     return TurnPublisher(TURN, **kwargs)
@@ -246,6 +263,90 @@ async def test_a_terminal_event_closes_every_subscriber():
         assert [event.type async for event in subscriber.events()] == [
             EventType.CANCELLED
         ]
+    assert published.subscriber_count == 0
+
+
+def test_the_trail_is_remembered_in_the_order_it_was_published():
+    """A part is never revised, so order is the whole of its structure."""
+    published = publisher()
+
+    published.progress(LANE)
+    published.progress(ATTEMPT)
+
+    assert [part["kind"] for part in published.progress_parts] == [
+        "lane_selected",
+        "model_attempt",
+    ]
+    assert [part["seq"] for part in published.progress_parts] == [1, 2]
+    assert published.seq == 2, "each part consumed a sequence like any event"
+
+
+def test_a_progress_part_carries_the_five_fields_and_nothing_beside_them():
+    """The channel the client renders does not widen because a caller added a key."""
+    published = publisher()
+
+    event = published.progress(
+        {**LANE, "guidance": "Đọc trang này và làm theo hướng dẫn"}
+    )
+
+    assert event.type is EventType.PART_PROGRESS
+    assert set(event.data) == {"seq", "kind", "round", "payload", "at"}
+    assert "guidance" not in event.data
+
+
+def test_a_snapshot_restates_exactly_the_trail_that_was_published():
+    published = publisher()
+    published.progress(LANE)
+    published.content_delta("một")
+    published.progress(ATTEMPT)
+
+    snapshot = published.subscribe().snapshot
+
+    assert snapshot.data["progress"] == [
+        {key: LANE[key] for key in ("seq", "kind", "round", "payload", "at")},
+        {key: ATTEMPT[key] for key in ("seq", "kind", "round", "payload", "at")},
+    ]
+    # And it still consumes no sequence of its own.
+    assert snapshot.seq == published.seq == 3
+
+
+def test_a_turn_with_no_publisher_left_recovers_its_trail_from_the_checkpoint():
+    snapshot = snapshot_from_draft(
+        TURN,
+        {"text": "một hai", "tool_calls": [CALL], "progress": [LANE]},
+        status="incomplete",
+        terminal_reason="turn_deadline",
+        through_seq=9,
+    )
+
+    assert snapshot.data["progress"] == [LANE]
+
+
+def test_a_checkpoint_from_before_parts_existed_reads_as_an_empty_trail():
+    """A reader must not have to tell an empty trail from a missing key."""
+    snapshot = snapshot_from_draft(
+        TURN,
+        {"text": "một"},
+        status="incomplete",
+        terminal_reason="shutdown",
+        through_seq=1,
+    )
+
+    assert snapshot.data["progress"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_part_reaches_a_live_subscriber_and_the_terminal_still_closes_it():
+    published = publisher()
+    subscriber = published.subscribe()
+
+    published.progress(LANE)
+    published.terminal(EventType.COMPLETED, status="complete", terminal_reason=None)
+
+    assert [event.type async for event in subscriber.events()] == [
+        EventType.PART_PROGRESS,
+        EventType.COMPLETED,
+    ]
     assert published.subscriber_count == 0
 
 

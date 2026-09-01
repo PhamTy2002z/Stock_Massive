@@ -231,12 +231,17 @@ def draft_content(draft: TurnDraft) -> dict[str, Any]:
     has (whether a round went on to call tools), and a reader rebuilding from
     here has no way to work it out from ``text`` alone.
 
+    ``progress`` is the loop's own account of what it did — the lane, the model
+    attempts, the recoveries — in the order it happened. Checkpointed for the
+    same reason: it is the timeline a reconnecting reader draws, and there is
+    nothing in ``text`` to reconstruct it from.
     """
     return {
         "text": draft.text or "",
         "answer": draft.answer or "",
         "thoughts": [dict(thought) for thought in draft.thoughts],
         "tool_calls": [call.as_wire() for call in draft.tool_calls],
+        "progress": [dict(part) for part in draft.progress],
         "rounds_used": draft.rounds_used,
     }
 
@@ -248,6 +253,7 @@ def assistant_message(
     status: str,
     answer: str | None = None,
     thoughts: Sequence[Mapping[str, Any]] = (),
+    progress: Sequence[Mapping[str, Any]] = (),
     elapsed_ms: int = 0,
 ) -> dict[str, Any]:
     """The canonical assistant message, in the one place its shape is decided.
@@ -268,12 +274,21 @@ def assistant_message(
     ``answer`` defaults to ``text``, which is what a message written before this
     split existed means: no narration was recorded, so all of it is the reply.
 
+    ``progress`` is why this Turn ran the way it did — the lane, each asking of
+    the model, each recovery, the ceiling it reached — and the transcript is
+    where it has to survive. A reopened Thread renders the messages alone, and a
+    Turn whose account of itself lived only in a process's memory would be a
+    Turn nobody can audit an hour later. Defaults to empty, which is what a
+    message written before parts existed means: no trail was recorded, rather
+    than a trail that was lost.
+
     """
     content: dict[str, Any] = {
         "text": text,
         "answer": text if answer is None else answer,
         "thoughts": [dict(thought) for thought in thoughts],
         "tool_calls": [dict(call) for call in tool_calls],
+        "progress": [dict(part) for part in progress],
         "status": status,
         "elapsed_ms": elapsed_ms,
     }
@@ -303,6 +318,10 @@ def frozen_message(record: TurnRecord) -> Mapping[str, Any] | None:
         answer=draft.get("answer") or None,
         thoughts=tuple(draft.get("thoughts") or ()),
         tool_calls=tuple(draft.get("tool_calls") or ()),
+        # Carried through unchanged: the build that was answering wrote this
+        # trail, and this process knows nothing about the events in it beyond
+        # that they stopped.
+        progress=tuple(draft.get("progress") or ()),
         status=TURN_INCOMPLETE,
     )
 
@@ -438,6 +457,10 @@ class TurnService:
             summary=summary,
             summarised_turns=summarised_turns,
             attachments=attached,
+            # The lane the loop is built with says what this Turn may spend; this
+            # says why it was allowed to, and the loop's first progress part is
+            # where it is reported.
+            lane_reason=lane_reason,
         )
         running.task = asyncio.create_task(
             self._execute(running, request),
@@ -503,6 +526,7 @@ class TurnService:
                 answer=outcome.answer,
                 thoughts=outcome.thoughts,
                 tool_calls=calls,
+                progress=outcome.progress,
                 status=status,
                 elapsed_ms=outcome.elapsed_ms,
             )
@@ -519,6 +543,7 @@ class TurnService:
                     text=outcome.text,
                     rounds_used=outcome.rounds_used,
                     tool_calls=outcome.tool_calls,
+                    progress=outcome.progress,
                 )
             ),
             last_event_seq=running.publisher.next_seq,
@@ -557,6 +582,7 @@ class TurnService:
                 answer=None if draft is None else (draft.answer or None),
                 thoughts=() if draft is None else draft.thoughts,
                 tool_calls=calls,
+                progress=() if draft is None else draft.progress,
                 status=status,
             )
             if text

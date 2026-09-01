@@ -50,6 +50,15 @@ model produces is recorded and published as a delta in the same step, so a
 reconnecting browser rebuilding from a checkpoint and a browser that followed
 the stream cannot disagree about what was said.
 
+**What the loop did is reported, never inferred.** Every step this file takes
+that a reader or an operator would ask about — the lane it was given, each asking
+of the model and how it ended, each round of tools, each bounded recovery, the
+ceiling, the halt, the deadline — is emitted as a typed progress part
+(``parts.py``) from the code that takes it. There is no timer and no stage
+somebody decided a Turn must be in by now: the trail is an account of events that
+happened, or it is worthless. It goes nowhere near the model, because a Turn's
+account of itself is not evidence about the world.
+
 **Narration is not the answer, and the model is told both.** Prose from a round
 that went on to call tools describes work rather than concluding it, so it is
 published as a ``thought`` and the surface files it in the timeline instead of
@@ -121,10 +130,23 @@ from src.core.config import get_settings
 from . import registry
 from .budget import TurnBudget, thresholds_for_context, trim_text
 from .definitions import resolve_tool_surface
-from .executor import UNKNOWN_TOOL, ExecutionOutcome, ToolExecutor
+from .executor import HALTED_TURN, UNKNOWN_TOOL, ExecutionOutcome, ToolExecutor
 from .executor import ToolCall as ExecutorToolCall
 from .guardrails import TurnGuardrails
-from .lanes import LIGHT, LaneProfile
+from .lanes import DEFAULT_REASON, LIGHT, LaneProfile
+from .parts import (
+    ATTEMPT_CANCELLED,
+    ATTEMPT_COMPLETED,
+    ATTEMPT_ERROR,
+    ATTEMPT_RUNNING,
+    RECOVERY_COMPRESS,
+    RECOVERY_EMPTY_NUDGE,
+    RECOVERY_LOWER_OUTPUT_CAP,
+    ProgressKind,
+    ProgressPart,
+    progress_payload,
+    wire_parts,
+)
 # The transcript types and the context constructor live beside the loop rather
 # than inside it: the transport names the same ``TranscriptTurn`` when it reads a
 # Thread out of the store (``messages.py``).
@@ -682,6 +704,15 @@ class TurnRequest:
     #: metadata alone, which is what stops the n-th question of a Thread from
     #: resending n images.
     attachments: tuple[TurnAttachment, ...] = ()
+    #: Why this question was routed to the lane the loop was built with.
+    #:
+    #: On the request rather than on the loop because it is a fact about *what
+    #: was asked*, decided by ``lanes.route_reason`` from this text alone, while
+    #: the lane itself is the configuration the loop enforces. The loop only
+    #: reports it: the first progress part of every Turn says which ceilings it
+    #: got and on what grounds, so an operator reading a Turn that was allowed
+    #: ten rounds of evidence can see why without re-running the router.
+    lane_reason: str = DEFAULT_REASON
 
 
 @dataclass(frozen=True)
@@ -704,6 +735,11 @@ class TurnDraft:
     #: drew — a reader who reconnected must not lose the timeline.
     answer: str | None = None
     thoughts: tuple[Mapping[str, Any], ...] = ()
+    #: What the loop has done so far, one typed part per real event, in wire
+    #: form. Checkpointed for the same reason the thoughts are: the trail is
+    #: what a reader rebuilding from here draws the timeline from, and it cannot
+    #: be recomputed from the answer.
+    progress: tuple[Mapping[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -729,10 +765,15 @@ class TurnOutcome:
     #: traced back at the provider. ``None`` when the route supplied none: the
     #: whole value of the field is that somebody can look it up.
     provider_request_id: str | None = None
+    #: Every loop event this Turn reported, in wire form and in order. It travels
+    #: on the outcome so the terminal transaction can write it to the canonical
+    #: message: the transcript is where an answer's audit trail has to survive,
+    #: because it is the only view a reopened Thread has.
+    progress: tuple[Mapping[str, Any], ...] = ()
 
 
 class TurnPublisher(Protocol):
-    """The three events this loop emits, as the transport must accept them.
+    """The events this loop emits, as the transport must accept them.
 
     A protocol rather than an import so that the loop depends on the shape of
     the transport and not on its module: these methods are all a test needs to
@@ -747,6 +788,9 @@ class TurnPublisher(Protocol):
 
     def tool_call(self, payload: Mapping[str, Any]) -> Any:
         """One tool call's current state: ``id``, ``name``, ``status``, ``summary``."""
+
+    def progress(self, part_wire: Mapping[str, Any]) -> Any:
+        """One typed loop event, as :meth:`ProgressPart.as_wire` shaped it."""
 
 
 Checkpoint = Callable[[TurnDraft], Awaitable[None] | None]
@@ -818,6 +862,11 @@ class _TurnState:
     tool_rounds: int = 0
     usage: Usage = field(default_factory=Usage)
     calls: list[TurnToolCall] = field(default_factory=list)
+    #: One typed part per real loop event, in the order they happened. The
+    #: list's length is what numbers the next part, so the ordinal a reader
+    #: orders the trail by is the same number a checkpoint and the canonical
+    #: message carry.
+    progress: list[ProgressPart] = field(default_factory=list)
     #: Every page this Turn has already put in front of the reader, by the key
     #: that decides whether two links are one page (``messages.dedup_key``).
     #:
@@ -917,6 +966,7 @@ class _TurnState:
             thoughts=self.narration(),
             rounds_used=self.tool_rounds,
             tool_calls=tuple(self.calls),
+            progress=wire_parts(self.progress),
             boundary=boundary,
         )
 
@@ -1038,9 +1088,19 @@ class AgentLoop:
         )
         system_prompt = render(request.runtime)
         state.domain_body = True
+        # The first thing the trail says, and the only part that is about a
+        # decision taken before this Turn ran: which ceilings it got, and the
+        # machine reason the router gave for them.
+        self._progress(
+            state,
+            ProgressKind.LANE_SELECTED,
+            lane=self._lane.name,
+            reason=request.lane_reason,
+        )
 
         for round_index in range(self._lane.max_tool_rounds + 1):
             if cancelled():
+                self._cancelled_attempt(state)
                 return await self._ended(
                     state, TurnStatus.CANCELLED, CANCELLED_BY_USER
                 )
@@ -1050,6 +1110,7 @@ class AgentLoop:
                     request.request_message_id,
                     state.tool_rounds,
                 )
+                self._progress(state, ProgressKind.DEADLINE)
                 return await self._ended(
                     state, TurnStatus.INCOMPLETE, TURN_DEADLINE
                 )
@@ -1063,7 +1124,18 @@ class AgentLoop:
             # false.
             exhausted = round_index == self._lane.max_tool_rounds
             final = exhausted or state.tools_halted
+            if exhausted:
+                # Once per Turn by construction: this is the last iteration the
+                # range produces, and every branch below it returns. What the
+                # part says is what the model is being told in the same breath —
+                # the rounds are spent, answer from what is here.
+                self._progress(
+                    state,
+                    ProgressKind.ROUNDS_EXHAUSTED,
+                    rounds=self._lane.max_tool_rounds,
+                )
 
+            self._attempt(state, ATTEMPT_RUNNING)
             try:
                 completion = await self._call(
                     system_prompt, request, state, turn_budget, tools, final, exhausted
@@ -1077,6 +1149,7 @@ class AgentLoop:
                 # Our ceiling on one ``complete`` including every retry the
                 # client made inside it, distinct from the transport's per-request
                 # timeout and from the Turn deadline.
+                self._attempt(state, ATTEMPT_ERROR, terminal_reason=LLM_CALL_TIMEOUT)
                 return await self._ended(
                     state, TurnStatus.INCOMPLETE, LLM_CALL_TIMEOUT
                 )
@@ -1088,6 +1161,7 @@ class AgentLoop:
                     request.request_message_id,
                     refusal.operator_detail or refusal.reason,
                 )
+                self._attempt(state, ATTEMPT_ERROR, terminal_reason=refusal.reason)
                 return await self._ended(
                     state, TurnStatus.INCOMPLETE, refusal.reason
                 )
@@ -1098,12 +1172,17 @@ class AgentLoop:
                 state.add_usage(refusal.usage)
                 state.model_refused = True
                 self._append_text(state, refusal.refusal or "")
+                # ``completed`` and not ``error``: the attempt returned words
+                # that were paid for and are about to be published. What the
+                # route declined is the question, and the reason says so.
+                self._attempt(state, ATTEMPT_COMPLETED, terminal_reason=MODEL_REFUSAL)
                 return await self._ended(state, TurnStatus.COMPLETE, MODEL_REFUSAL)
             except LLMError as error:
-                return await self._ended(
-                    state, TurnStatus.INCOMPLETE, self._route_failure(request, error)
-                )
+                reason = self._route_failure(request, error)
+                self._attempt(state, ATTEMPT_ERROR, terminal_reason=reason)
+                return await self._ended(state, TurnStatus.INCOMPLETE, reason)
 
+            self._attempt(state, ATTEMPT_COMPLETED)
             state.add_usage(completion.usage)
             if completion.request_id:
                 state.request_id = completion.request_id
@@ -1180,6 +1259,7 @@ class AgentLoop:
             # there is nothing to roll back, and a half-cancel path costs more
             # than the call it would save.
             if cancelled():
+                self._cancelled_attempt(state)
                 return await self._ended(
                     state, TurnStatus.CANCELLED, CANCELLED_BY_USER
                 )
@@ -1499,6 +1579,16 @@ class AgentLoop:
             # waste the compression budget exists to bound.
             state.compressions -= 1
             raise error
+        # Here and not at the increment above: the two branches between them put
+        # the counter back and re-raise, so a part emitted earlier would report a
+        # compression that did not happen.
+        self._progress(
+            state,
+            ProgressKind.RECOVERY,
+            action=RECOVERY_COMPRESS,
+            attempt=state.compressions,
+            bound=MAX_CONTEXT_COMPRESSIONS,
+        )
         logger.info(
             "Turn %s did not fit at %d estimated token(s); compressing to %d "
             "(%d of %d) and asking again: %s",
@@ -1544,6 +1634,13 @@ class AgentLoop:
             # request and be refused the same way.
             state.output_reductions -= 1
             raise error
+        self._progress(
+            state,
+            ProgressKind.RECOVERY,
+            action=RECOVERY_LOWER_OUTPUT_CAP,
+            attempt=state.output_reductions,
+            bound=MAX_OUTPUT_TOKENS_REDUCTIONS,
+        )
         logger.info(
             "Turn %s could not reserve %d output token(s); asking for %d instead: %s",
             request.request_message_id,
@@ -1597,6 +1694,13 @@ class AgentLoop:
             return False
         state.empty_nudges += 1
         state.note = EMPTY_AFTER_TOOLS_NOTE
+        self._progress(
+            state,
+            ProgressKind.RECOVERY,
+            action=RECOVERY_EMPTY_NUDGE,
+            attempt=state.empty_nudges,
+            bound=MAX_EMPTY_NUDGES,
+        )
         logger.warning(
             "Turn %s produced no reply after %d round(s) of tools "
             "(model=%s finish_reason=%r); asking once more",
@@ -1674,6 +1778,18 @@ class AgentLoop:
         index = {record.id: position for position, record in enumerate(planned)}
         state.calls.extend(planned)
         offset = len(state.calls) - len(planned)
+        # The round by its shape, and never by its content: what each call asked
+        # and what it returned lives on the ``tool.call`` channel and in the Tool
+        # Call Trace, and copying a query onto this one would put a second copy of
+        # a page's neighbourhood where nothing reviewed it. The ids are the join
+        # between the two.
+        self._progress(
+            state,
+            ProgressKind.TOOL_ROUND,
+            calls=len(planned),
+            external_used=state.external_calls,
+            call_ids=[record.id for record in planned],
+        )
         for record in planned:
             # Only what is about to run is announced as running. A call the
             # budget already refused has one state, not two, and publishing a
@@ -1782,6 +1898,14 @@ class AgentLoop:
             # about the Turn, not about any one call, and the next call is the
             # answering one.
             state.note = outcome.guidance
+            # The ladder's own code for why it stopped, and not its guidance:
+            # the guidance is prose written for the model, and this channel
+            # carries codes.
+            self._progress(
+                state,
+                ProgressKind.TOOLS_HALTED,
+                reason=outcome.halt_reason or HALTED_TURN,
+            )
             logger.info(
                 "Tool calling halted after %d round(s): %s",
                 state.tool_rounds,
@@ -1887,6 +2011,67 @@ class AgentLoop:
         if self._publisher is not None:
             self._publisher.tool_call(call.as_wire())
 
+    def _progress(
+        self, state: _TurnState, kind: ProgressKind, **fields: Any
+    ) -> ProgressPart:
+        """Record one real loop event, and publish it in the same step.
+
+        One step rather than two, for the reason :meth:`_append_text` is one: the
+        trail a reader assembled from the stream and the trail a reader rebuilt
+        from a checkpoint must be the same trail, and two call sites are where
+        one of them comes to be forgotten.
+
+        Synchronous, so a part can be emitted from the recovery helpers — which
+        are synchronous because giving ground to the route is a decision and not
+        an I/O — and so that emitting one cannot reorder anything.
+
+        Every caller is the code that performs the event it names. There is no
+        path here from a timer, and none from a plan of what the Turn is about to
+        do: a stage announced before it happens is a claim, and this channel
+        carries only what happened.
+        """
+        part = ProgressPart(
+            seq=len(state.progress) + 1,
+            kind=kind,
+            round=state.tool_rounds,
+            payload=progress_payload(kind, **fields),
+            at=self._clock().isoformat(),
+        )
+        state.progress.append(part)
+        if self._publisher is not None:
+            self._publisher.progress(part.as_wire())
+        return part
+
+    def _attempt(
+        self, state: _TurnState, status: str, *, terminal_reason: str | None = None
+    ) -> None:
+        """Report where this round's asking of the model has got to.
+
+        One kind for the whole lifecycle rather than one per outcome, because the
+        question a reader asks of the timeline is a single one — what happened
+        when this Turn asked the model — and a screen draws four answers to it on
+        one line. The recoveries inside a call do not open a second attempt: they
+        are the same asking, given ground and asked again, and they say so on
+        their own kind.
+        """
+        self._progress(
+            state,
+            ProgressKind.MODEL_ATTEMPT,
+            status=status,
+            terminal_reason=terminal_reason,
+        )
+
+    def _cancelled_attempt(self, state: _TurnState) -> None:
+        """Say that the Turn will not ask the model again, because it was stopped.
+
+        Emitted where a cancellation ends the Turn, which is a round boundary:
+        the loop's next act would have been a model call, and the reader's stop
+        is why it is not made. Nothing about a call already answered changes —
+        its own ``completed`` part is already in the trail, and the prose it
+        produced is still the reader's.
+        """
+        self._attempt(state, ATTEMPT_CANCELLED, terminal_reason=CANCELLED_BY_USER)
+
     async def _save(self, state: _TurnState, *, boundary: bool = False) -> None:
         if self._checkpoint is None:
             return
@@ -1949,6 +2134,7 @@ class AgentLoop:
             usage=state.usage,
             summary_needed=state.summary_needed,
             provider_request_id=state.request_id,
+            progress=wire_parts(state.progress),
         )
 
     # -- clocks -----------------------------------------------------------
@@ -2055,6 +2241,8 @@ __all__ = [
     "ConstructedContext",
     "ConstructedContextTooLarge",
     "ContextBudget",
+    "ProgressKind",
+    "ProgressPart",
     "SessionCapacityExceeded",
     "SessionSlots",
     "ToolCallIdMismatch",

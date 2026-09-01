@@ -39,6 +39,14 @@ round that wrote it, and never joins ``text``. The reader sees it in the
 timeline of what happened; the model still sees all of it, because the loop
 keeps its own full string for the transcript and that is a separate concern from
 what this module streams.
+
+**What the loop did travels as a part, in the order it happened.** A lane
+chosen, a model attempt opened and closed, a recovery performed, the rounds
+spent — each is published once as ``part.progress`` and restated on the snapshot
+under ``progress``. This module does not decide what a part may say; ``parts.py``
+owns that allowlist, and what is added here is the one property the transport
+must guarantee, which is that the trail a reconnecting reader is handed is the
+trail that was published.
 """
 
 from __future__ import annotations
@@ -55,6 +63,7 @@ from typing import Any
 from src.alpha.models import ACTIVE_TURN_STATUSES, TURN_RUNNING
 
 from .messages import ANSWER, THOUGHT
+from .parts import PROGRESS_WIRE_FIELDS
 
 logger = logging.getLogger(__name__)
 
@@ -71,11 +80,20 @@ SUBSCRIBER_QUEUE_SIZE = 256
 
 
 class EventType(str, Enum):
-    """The seven v2 event types."""
+    """The v2 event types.
+
+    ``part.progress`` was added to the seven rather than in place of any of
+    them, and the addition is why ``ENVELOPE_VERSION`` did not move: the
+    envelope is unchanged, the other types are byte-identical, and a client that
+    only listens for the events it knows never sees this one.
+    """
 
     SNAPSHOT = "turn.snapshot"
     CONTENT_DELTA = "content.delta"
     TOOL_CALL = "tool.call"
+    #: One typed loop event — a lane, an attempt, a recovery — as ``parts.py``
+    #: builds it.
+    PART_PROGRESS = "part.progress"
     COMPLETED = "turn.completed"
     INCOMPLETE = "turn.incomplete"
     FAILED = "turn.failed"
@@ -243,6 +261,10 @@ class TurnPublisher:
         # published twice — running, then its outcome — and the second event
         # replaces the first rather than adding a row.
         self._tool_calls: dict[str, dict[str, Any]] = {}
+        # Every progress part published, in the order the loop emitted them. A
+        # list and not a dictionary: a part is never revised, so there is no key
+        # to upsert under, and the order it happened in *is* the information.
+        self._progress: list[dict[str, Any]] = []
         self._status = TURN_RUNNING
         self._terminal_reason: str | None = None
         # The canonical assistant message, once the terminal transaction has
@@ -305,6 +327,15 @@ class TurnPublisher:
         )
 
     @property
+    def progress_parts(self) -> tuple[Mapping[str, Any], ...]:
+        """Every loop event this Turn reported, in the order it happened.
+
+        Not ``progress``: that name belongs to the method the loop emits
+        through, and one of the two would have silently shadowed the other.
+        """
+        return tuple(dict(part) for part in self._progress)
+
+    @property
     def subscriber_count(self) -> int:
         return len(self._subscribers)
 
@@ -359,6 +390,20 @@ class TurnPublisher:
             {key: payload.get(key) for key in TOOL_CALL_FIELDS},
         )
 
+    def progress(self, part_wire: Mapping[str, Any]) -> TurnEvent:
+        """Emit one typed loop event, exactly as ``parts.py`` shaped it.
+
+        The keys are taken by name like a tool call's are, for the same reason:
+        this is the channel the browser renders, and a payload assembled
+        somewhere else must not be able to widen it by handing over an extra
+        field. The part's own allowlist has already decided what may be *inside*
+        ``payload``.
+        """
+        return self.publish(
+            EventType.PART_PROGRESS,
+            {key: part_wire.get(key) for key in PROGRESS_WIRE_FIELDS},
+        )
+
     def terminal(
         self,
         event_type: EventType,
@@ -406,6 +451,10 @@ class TurnPublisher:
                 "text": self._text,
                 "thoughts": [dict(thought) for thought in self.thoughts],
                 "tool_calls": [dict(call) for call in self._tool_calls.values()],
+                # Restated like the thoughts and the calls, and for the same
+                # reason: a reader who reconnects has to be able to draw the same
+                # timeline as the reader who never left.
+                "progress": [dict(part) for part in self._progress],
                 "message_id": self._message_id,
                 "elapsed_ms": self.elapsed_ms,
             },
@@ -434,6 +483,8 @@ class TurnPublisher:
             identifier = call.get("id")
             if identifier:
                 self._tool_calls[str(identifier)] = call
+        elif event.type is EventType.PART_PROGRESS:
+            self._progress.append(dict(event.data))
 
     def _fan_out(self, event: TurnEvent) -> None:
         surviving: list[Subscriber] = []
@@ -487,10 +538,15 @@ def snapshot_from_draft(
     text = ""
     tool_calls: Sequence[Mapping[str, Any]] = ()
     thoughts: Sequence[Mapping[str, Any]] = ()
+    progress: Sequence[Mapping[str, Any]] = ()
     if draft:
         text = str(draft.get("text") or "")
         tool_calls = tuple(draft.get("tool_calls") or ())
         thoughts = tuple(draft.get("thoughts") or ())
+        # Absent from every checkpoint written before parts existed, which is
+        # what the empty default means: a Turn from that build reported no loop
+        # events rather than one whose trail was lost.
+        progress = tuple(draft.get("progress") or ())
     return TurnEvent(
         seq=through_seq,
         type=EventType.SNAPSHOT,
@@ -502,6 +558,7 @@ def snapshot_from_draft(
             "text": text,
             "thoughts": [dict(thought) for thought in thoughts],
             "tool_calls": [dict(call) for call in tool_calls],
+            "progress": [dict(part) for part in progress],
             "message_id": message_id,
             "elapsed_ms": elapsed_ms,
         },
