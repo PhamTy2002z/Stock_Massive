@@ -79,9 +79,11 @@ from src.agent.loop import (
     estimate_tokens,
     shown_result,
     summarise_call,
+    rounds_exhausted_note,
     terminal_reason_for,
     trace_status,
 )
+from src.agent.lanes import LIGHT
 from src.agent.messages import (
     COLLAPSED_RESULT_URLS,
     CONTEXT_LAYERS,
@@ -558,6 +560,84 @@ async def test_the_turn_cannot_outspend_what_it_was_admitted_against() -> None:
     reserved = sum(spend.output_tokens for spend in client.spends)
     assert reserved <= TURN_OUTPUT_TOKENS
     assert (MAX_TOOL_ROUNDS + 1) * DEFAULT_MAX_OUTPUT_TOKENS <= TURN_OUTPUT_TOKENS
+
+
+@pytest.mark.asyncio
+async def test_the_default_turn_asks_admission_for_todays_aggregate_ceilings() -> None:
+    client = FakeClient([answer()])
+
+    await loop(client).run(turn_request())
+
+    # A Turn nothing routed anywhere names the ceilings this build has always
+    # enforced, so the ledger's own defaults and what the loop asks for agree.
+    assert client.spends[0].owner_output_total == LIGHT.owner_output_total
+    assert client.spends[0].owner_input_total == LIGHT.owner_input_total
+
+
+@pytest.mark.asyncio
+async def test_the_round_ceiling_is_the_turns_lane_and_not_the_builds() -> None:
+    # One round, and the aggregate output that funds its two calls. Every other
+    # ceiling stays the light lane's, because the subject here is the rounds.
+    tight = replace(
+        LIGHT,
+        name="tight",
+        max_tool_rounds=1,
+        owner_output_total=2 * LIGHT.max_output_tokens,
+    )
+    client = FakeClient(
+        [wants("web_search"), answer("Xong rồi."), answer("không bao giờ dùng")]
+    )
+
+    outcome = await loop(client, lane=tight).run(turn_request())
+
+    assert outcome.rounds_used == 1
+    assert outcome.rounds_exhausted is True
+    assert len(client.requests) == 2
+    last = client.requests[-1]
+    assert last.tool_choice == "none"
+    # And it is told the truth about what it had: the lane's rounds, not the
+    # module constant's.
+    assert any(
+        message.content == rounds_exhausted_note(1) for message in last.messages
+    )
+    assert not any(
+        message.content == ROUNDS_EXHAUSTED_NOTE for message in last.messages
+    )
+    # What the lane bought is what admission is asked to fund.
+    assert {spend.owner_output_total for spend in client.spends} == {
+        tight.owner_output_total
+    }
+    assert {spend.owner_input_total for spend in client.spends} == {
+        tight.owner_input_total
+    }
+
+
+@pytest.mark.asyncio
+async def test_the_external_call_ceiling_is_the_turns_lane_too() -> None:
+    # Two calls a round over two rounds, against a lane that funds three of them.
+    tight = replace(
+        LIGHT,
+        name="tight",
+        max_tool_rounds=2,
+        max_external_calls=3,
+        owner_output_total=3 * LIGHT.max_output_tokens,
+    )
+    client = FakeClient(
+        [
+            wants("web_search", "web_search", prefix=f"r{index}", query=f"q{index}")
+            for index in range(2)
+        ]
+        + [answer()]
+    )
+
+    outcome = await loop(client, lane=tight).run(turn_request())
+
+    dispatched = [call for call in outcome.tool_calls if call.dispatched]
+    assert len(dispatched) == tight.max_external_calls
+    refused = [
+        call for call in outcome.tool_calls if call.error == "external_budget_exhausted"
+    ]
+    assert len(refused) == 1
 
 
 @pytest.mark.asyncio

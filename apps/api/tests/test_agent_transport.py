@@ -189,7 +189,9 @@ class Desk:
         self.slots = SessionSlots()
         store = AgentPersistence()
 
-        def loop_factory(*, checkpoint, publisher):
+        # ``lane`` is accepted and dropped: a scripted loop runs no rounds, so it
+        # has no ceilings to take from the Turn's lane.
+        def loop_factory(*, checkpoint, publisher, lane):
             return ScriptedLoop(self.control, checkpoint=checkpoint, publisher=publisher)
 
         self.service = AlphaDeskService(

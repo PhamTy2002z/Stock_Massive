@@ -59,6 +59,7 @@ from .events import (
     snapshot_from_draft,
     terminal_event_for,
 )
+from .lanes import LIGHT, DEFAULT_REASON, LaneProfile, route_reason
 from .loop import (
     TurnAttachment,
     TurnDraft,
@@ -73,7 +74,8 @@ logger = logging.getLogger(__name__)
 
 # What ``TurnService`` is handed instead of building an ``AgentLoop`` itself: the
 # loop needs a Tool Catalog, an LLM client and a budget, none of which are this
-# module's business, and the checkpoint and publisher are.
+# module's business, and the checkpoint, the publisher and the Turn's lane are.
+# Called with ``checkpoint``, ``publisher`` and ``lane`` by keyword.
 LoopFactory = Callable[..., Any]
 CheckpointPayload = Callable[[TurnDraft], dict[str, Any]]
 
@@ -94,6 +96,12 @@ MAX_USER_INPUT_BYTES = 8 * 1024
 
 # The wall-clock ceiling for one Turn, including the time it
 # spends waiting for an execution slot.
+#
+# The light lane's figure, and what a Turn gets when nothing routed it anywhere
+# else. A Turn's own lane names the deadline it runs under; this service still
+# accepts one explicitly, and a number given here overrides every lane — which is
+# what an operator capping a deployment, or a test forcing an expiry, is asking
+# for.
 TURN_DEADLINE_SECONDS = 600.0
 
 # How long active Turns get to reach a safe checkpoint. The container's stop
@@ -133,6 +141,12 @@ class RunningTurn:
     task: asyncio.Task[Any] | None = None
     cancel_requested: bool = False
     shutting_down: bool = False
+    # What this Turn was routed to, and why. Decided once when the Turn was
+    # created and carried rather than re-derived: the loop is built from it, the
+    # wall clock comes from it, and the reason is what lets an operator ask why a
+    # Turn was allowed ten rounds of evidence.
+    lane: LaneProfile = LIGHT
+    lane_reason: str = DEFAULT_REASON
     # The last draft the loop checkpointed. It is what a Turn killed by the
     # deadline or by shutdown leaves behind, and the only place the prose it
     # managed to produce still exists in this process.
@@ -331,12 +345,16 @@ class TurnService:
         store: AgentPersistence,
         loop_factory: LoopFactory,
         config: LLMConfig,
-        deadline_seconds: float = TURN_DEADLINE_SECONDS,
+        deadline_seconds: float | None = None,
         shutdown_seconds: float = GRACEFUL_SHUTDOWN_SECONDS,
     ) -> None:
         self._store = store
         self._loop_factory = loop_factory
         self._config = config
+        # ``None`` means every Turn is held to its own lane's wall clock, which
+        # is the production wiring. A number here is a hard ceiling over all of
+        # them: one deadline for the deployment, whatever a question was routed
+        # to.
         self._deadline = deadline_seconds
         self._shutdown_seconds = shutdown_seconds
         self._running: dict[uuid.UUID, RunningTurn] = {}
@@ -394,7 +412,20 @@ class TurnService:
 
         record = creation.turn
         publisher = TurnPublisher(record.id)
-        running = RunningTurn(turn=record, publisher=publisher)
+        # Routed once, here, and never again: the ceilings a Turn runs under are
+        # decided before its first call and stay the same for its whole life. A
+        # lane re-derived per round could change under a Turn mid-flight, which
+        # would make "how many rounds did it have" a question with no answer.
+        lane, lane_reason = route_reason(user_text)
+        logger.info(
+            "Turn %s runs on the %s lane (%s)", record.id, lane.name, lane_reason
+        )
+        running = RunningTurn(
+            turn=record,
+            publisher=publisher,
+            lane=lane,
+            lane_reason=lane_reason,
+        )
         self._running[record.id] = running
         request = TurnRequest(
             thread_id=record.thread_id,
@@ -424,7 +455,15 @@ class TurnService:
             return draft_content(draft)
 
         checkpointer = Checkpointer(self._store, turn_id, publisher, payload=remember)
-        agent = self._loop_factory(checkpoint=checkpointer, publisher=publisher)
+        agent = self._loop_factory(
+            checkpoint=checkpointer, publisher=publisher, lane=running.lane
+        )
+        # The loop's own between-round check fires at this same number and fires
+        # first, which is what leaves a partial answer attached; this one is the
+        # backstop for a Turn stuck somewhere the loop does not get to look.
+        deadline = (
+            running.lane.deadline_seconds if self._deadline is None else self._deadline
+        )
         await self._store.mark_turn_running(turn_id)
         # The registry entry outlives execution by exactly one step: the Turn
         # stays reachable until its terminal event has been published, so a
@@ -434,7 +473,7 @@ class TurnService:
             try:
                 outcome = await asyncio.wait_for(
                     agent.run(request, running.cancelled),
-                    self._deadline,
+                    deadline,
                 )
             except TimeoutError:
                 return await self._finish_bare(running, "incomplete", "turn_deadline")

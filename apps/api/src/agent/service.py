@@ -117,11 +117,14 @@ def build_alpha_desk(
     # sides (``core/llm/admission.py``); ``None`` is unlimited in both.
     slots = SessionSlots(limit=resolved.ceilings.active_turns_system)
 
-    def loop_factory(*, checkpoint, publisher) -> AgentLoop:
+    def loop_factory(*, checkpoint, publisher, lane) -> AgentLoop:
         return AgentLoop(
             client=client,
             config=resolved,
             slots=slots,
+            # What the Turn was routed to. The service builds one loop per Turn,
+            # so the ceilings can be the Turn's own rather than the build's.
+            lane=lane,
             checkpoint=checkpoint,
             publisher=publisher,
             # Wired the same way the checkpoint is: one short transaction per

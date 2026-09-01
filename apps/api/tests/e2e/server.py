@@ -210,7 +210,9 @@ def build_service() -> AlphaDeskService:
     slots = SessionSlots()
     config = _config()
 
-    def loop_factory(*, checkpoint, publisher):
+    # ``lane`` is accepted and dropped: a scripted loop runs no rounds, so it has
+    # no ceilings to take from the Turn's lane.
+    def loop_factory(*, checkpoint, publisher, lane):
         return ScriptedLoop(CONTROL, checkpoint=checkpoint, publisher=publisher)
 
     return AlphaDeskService(

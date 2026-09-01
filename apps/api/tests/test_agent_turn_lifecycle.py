@@ -11,6 +11,7 @@ from sqlalchemy import delete, select
 
 from src.agent import toolsets
 from src.agent.events import EventType
+from src.agent.lanes import DEEP, DEFAULT_REASON, LIGHT, LaneProfile
 from src.agent.loop import AgentLoop, ContextBudget, TurnDraft
 from src.agent.persistence import (
     TURN_COMPLETE,
@@ -114,11 +115,12 @@ def wants(name: str) -> Completion:
 def service(client, *, loop=None, **overrides) -> TurnService:
     loop_kwargs = loop or {}
 
-    def loop_factory(*, checkpoint, publisher):
+    def loop_factory(*, checkpoint, publisher, lane):
         return AgentLoop(
             client=client,
             config=config(),
             budget=ContextBudget(max_tokens=30_000),
+            lane=lane,
             checkpoint=checkpoint,
             publisher=publisher,
             **loop_kwargs,
@@ -185,6 +187,62 @@ async def test_the_user_message_and_the_turn_commit_before_execution(owner):
 
     release.set()
     await turns.running(turn_id).task
+
+
+@pytest.mark.asyncio
+async def test_the_question_picks_the_lane_once_and_the_loop_is_built_from_it(owner):
+    thread_id = await thread_for(owner)
+    built: list[LaneProfile] = []
+
+    def loop_factory(*, checkpoint, publisher, lane):
+        built.append(lane)
+        return AgentLoop(
+            client=FakeClient([answer("Xong.")]),
+            config=config(),
+            lane=lane,
+            checkpoint=checkpoint,
+            publisher=publisher,
+        )
+
+    turns = TurnService(store=store(), loop_factory=loop_factory, config=config())
+    turn_id = uuid.uuid4()
+
+    await turns.create(
+        user_id=owner,
+        thread_id=thread_id,
+        turn_id=turn_id,
+        user_text="Viết memo về FPT giúp tôi.",
+        runtime=runtime(owner),
+    )
+    running = turns.running(turn_id)
+    await running.task
+
+    # Routed once, carried on the running Turn with the reason it was routed,
+    # and the loop is built from that same lane rather than a second reading of
+    # the question.
+    assert built == [DEEP]
+    assert running.lane is DEEP
+    assert running.lane_reason == "keyword:memo"
+
+
+@pytest.mark.asyncio
+async def test_an_ordinary_question_runs_on_the_lane_this_build_always_had(owner):
+    thread_id = await thread_for(owner)
+    turns = service(FakeClient([answer("Xong.")]))
+    turn_id = uuid.uuid4()
+
+    await turns.create(
+        user_id=owner,
+        thread_id=thread_id,
+        turn_id=turn_id,
+        user_text="FPT thế nào?",
+        runtime=runtime(owner),
+    )
+    running = turns.running(turn_id)
+    await running.task
+
+    assert running.lane is LIGHT
+    assert running.lane_reason == DEFAULT_REASON
 
 
 @pytest.mark.asyncio

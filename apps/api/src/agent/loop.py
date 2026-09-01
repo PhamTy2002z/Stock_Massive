@@ -15,13 +15,16 @@ protocol — is gone with the tools that fed it.
 
 Five properties are worth reading the code for.
 
-**Rounds, not calls.** :data:`MAX_TOOL_ROUNDS` tool rounds per Turn, and the
-constant is the authority. On the ceiling one further call with
+**Rounds, not calls.** A bounded number of tool rounds per Turn, and the Turn's
+:class:`~.lanes.LaneProfile` is the authority — the constants in this module are
+that profile's ``light`` values, kept under their old names because the arithmetic
+they document is what other modules read. On the ceiling one further call with
 ``tool_choice="none"`` lets the model answer from what it has, and it is told the
 rounds are spent — information, not an error. The round count is not free to
-choose: a Turn is admitted against ``TURN_OUTPUT_TOTAL`` and makes at most
-``MAX_TOOL_ROUNDS + 1`` calls, so the round count and
-:data:`DEFAULT_MAX_OUTPUT_TOKENS` are one piece of arithmetic.
+choose: a Turn is admitted against the lane's aggregate output total and makes at
+most ``max_tool_rounds + 1`` calls, so the round count and the per-call output
+ceiling are one piece of arithmetic — declared on the profile, which refuses to
+exist when they disagree.
 
 **Two recoveries that look alike and are opposites.** ``ContextOverflow`` means
 the input did not fit, so the transcript is compressed and asked again.
@@ -121,6 +124,7 @@ from .definitions import resolve_tool_surface
 from .executor import UNKNOWN_TOOL, ExecutionOutcome, ToolExecutor
 from .executor import ToolCall as ExecutorToolCall
 from .guardrails import TurnGuardrails
+from .lanes import LIGHT, LaneProfile
 # The transcript types and the context constructor live beside the loop rather
 # than inside it: the transport names the same ``TranscriptTurn`` when it reads a
 # Thread out of the store (``messages.py``).
@@ -162,6 +166,12 @@ logger = logging.getLogger(__name__)
 # against ``TURN_OUTPUT_TOTAL`` (20,000) and makes at most ``MAX_TOOL_ROUNDS +
 # 1`` calls at :data:`DEFAULT_MAX_OUTPUT_TOKENS` each. Raising one without
 # lowering the other spends a budget nothing has validated.
+#
+# This is ``lanes.LIGHT.max_tool_rounds`` written out, and the lane is what a
+# running Turn reads. The constant stays because the modules that reason about
+# the ceiling rather than enforce it — the guardrail rungs, the attachment token
+# arithmetic, the replay harness — are describing the lane nearly every Turn
+# gets, and a test compares the two so they cannot drift.
 MAX_TOOL_ROUNDS = 4
 
 # In-process is correct because uvicorn runs a single worker.
@@ -178,6 +188,9 @@ SESSION_CONCURRENCY = 3
 # an answer leaves the model no room to reach one. At 2,000 a route that thinks
 # at length spent the whole allowance thinking and returned four tokens of prose
 # with ``finish_reason`` ``length``: a truncated answer rather than a short one.
+#
+# Every lane carries this same figure, and that is a decision rather than an
+# oversight: a lane buys more *rounds of evidence*, not a longer reply.
 DEFAULT_MAX_OUTPUT_TOKENS = 4_000
 
 # What the route calls a completion it had to cut short, and the stable reason
@@ -280,6 +293,9 @@ TOOL_TIMEOUT_SECONDS = 30.0
 # same number as a hard ``wait_for``; this one fires first at a round boundary,
 # which is the difference between a Turn that ends with its partial answer
 # attached and a task that is simply cancelled.
+#
+# The light lane's figure. A Turn reads its own lane's deadline, and a caller may
+# still pass one explicitly — which is how a test forces the expiry it is about.
 TURN_DEADLINE_SECONDS = 600.0
 
 # How many calls to tools that cost money or reach off this deployment one Turn
@@ -318,7 +334,8 @@ TURN_DEADLINE_SECONDS = 600.0
 #
 # It expires. The prices above are the route's prices on the day of the
 # measurement, so a route change is a reason to run the arithmetic again rather
-# than to trust this comment.
+# than to trust this comment. A lane that raises it is making the same claim
+# about money and owes the same measurement.
 MAX_EXTERNAL_TOOL_CALLS = 7
 EXTERNAL_TOOL_EXHAUSTED_MESSAGE = (
     "This turn has reached its limit on external tool calls. Answer from what has "
@@ -370,11 +387,24 @@ def domain_body_tokens(state: "_TurnState") -> int:
     return active_pack().body_tokens if state.domain_body else 0
 
 
-ROUNDS_EXHAUSTED_NOTE = (
-    f"All {MAX_TOOL_ROUNDS} tool rounds for this turn have been used. Answer from "
-    "what has already been gathered, and say plainly what you were not able to "
-    "look up."
-)
+def rounds_exhausted_note(rounds: int) -> str:
+    """What the model is told on the ceiling, with the ceiling it actually had.
+
+    A function because the number is the Turn's lane, not the build's: telling a
+    Turn that had ten rounds it has used four would be a false statement in the
+    one message whose whole job is to be an honest account of what is left.
+    """
+    return (
+        f"All {rounds} tool rounds for this turn have been used. Answer from "
+        "what has already been gathered, and say plainly what you were not able "
+        "to look up."
+    )
+
+
+#: The note as the light lane's Turns get it. Kept under its old name because the
+#: prompt-accounting tests and the replay harness ask what a note costs, and that
+#: question has one answer per build rather than one per Turn.
+ROUNDS_EXHAUSTED_NOTE = rounds_exhausted_note(MAX_TOOL_ROUNDS)
 
 # What a system note is priced at, and the length it is held to. One reservation
 # rather than a measurement of the sentence that happens to apply: the budget
@@ -902,13 +932,14 @@ class AgentLoop:
         toolsets: Sequence[str] | str | None = None,
         budget: ContextBudget | None = None,
         slots: SessionSlots | None = None,
-        max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+        lane: LaneProfile = LIGHT,
+        max_output_tokens: int | None = None,
         checkpoint: Checkpoint | None = None,
         publisher: TurnPublisher | None = None,
         trace: TraceWriter | None = None,
         call_timeout_seconds: float = LLM_CALL_TIMEOUT_SECONDS,
         tool_timeout_seconds: float = TOOL_TIMEOUT_SECONDS,
-        deadline_seconds: float | None = TURN_DEADLINE_SECONDS,
+        deadline_seconds: float | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._client = client
@@ -919,13 +950,24 @@ class AgentLoop:
         self._toolsets = CHAT_TOOLSETS if toolsets is None else toolsets
         self._budget = budget or ContextBudget()
         self._slots = slots or SessionSlots()
-        self._max_output_tokens = max_output_tokens
+        # Every ceiling that depends on what was asked comes from here, and the
+        # default is the lane nearly every Turn gets — a caller that routes
+        # nothing behaves exactly as this loop did before lanes existed.
+        self._lane = lane
+        # The two knobs a caller may still name directly, because a test that is
+        # about the output cap or about the wall clock has to be able to set one
+        # without inventing a lane to carry it. Silence means the lane's.
+        self._max_output_tokens = (
+            lane.max_output_tokens if max_output_tokens is None else max_output_tokens
+        )
         self._checkpoint = checkpoint
         self._publisher = publisher
         self._trace = trace
         self._call_timeout = call_timeout_seconds
         self._tool_timeout = tool_timeout_seconds
-        self._deadline = deadline_seconds
+        self._deadline = (
+            lane.deadline_seconds if deadline_seconds is None else deadline_seconds
+        )
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         # Resolved once, here. Models split by workload and never inside the
         # loop, because an in-loop cheap-router split adds a
@@ -997,7 +1039,7 @@ class AgentLoop:
         system_prompt = render(request.runtime)
         state.domain_body = True
 
-        for round_index in range(MAX_TOOL_ROUNDS + 1):
+        for round_index in range(self._lane.max_tool_rounds + 1):
             if cancelled():
                 return await self._ended(
                     state, TurnStatus.CANCELLED, CANCELLED_BY_USER
@@ -1019,7 +1061,7 @@ class AgentLoop:
             # the *tool* loop rather than the Turn — this call is the answering
             # one — but the rounds are not gone, and saying they are would be
             # false.
-            exhausted = round_index == MAX_TOOL_ROUNDS
+            exhausted = round_index == self._lane.max_tool_rounds
             final = exhausted or state.tools_halted
 
             try:
@@ -1168,7 +1210,10 @@ class AgentLoop:
         if exhausted:
             appended.append(
                 (
-                    Message(role=Role.SYSTEM, content=ROUNDS_EXHAUSTED_NOTE),
+                    Message(
+                        role=Role.SYSTEM,
+                        content=rounds_exhausted_note(self._lane.max_tool_rounds),
+                    ),
                     SYSTEM_DYNAMIC,
                     SYSTEM_NOTE_TOKENS,
                 )
@@ -1307,6 +1352,12 @@ class AgentLoop:
             workload=Workload.SESSION,
             input_tokens=context.estimated_tokens + reserved_tokens,
             output_tokens=output_tokens,
+            # What this Turn's lane bought, told to the ledger rather than
+            # assumed by it. The ledger keeps its own hard ceiling over these,
+            # so a lane can widen a Turn's aggregate allowance and still not be
+            # the last word on it.
+            owner_output_total=self._lane.owner_output_total,
+            owner_input_total=self._lane.owner_input_total,
         )
         return await asyncio.wait_for(
             self._client.complete(
@@ -1602,7 +1653,7 @@ class AgentLoop:
                 resolved_tool=resolved,
             )
             if record.reads_external:
-                if state.external_calls >= MAX_EXTERNAL_TOOL_CALLS:
+                if state.external_calls >= self._lane.max_external_calls:
                     record = replace(
                         record,
                         status=ToolCallStatus.ERROR,
@@ -1910,9 +1961,11 @@ class AgentLoop:
         return time.monotonic() - started >= self._round_budget()
 
     def _expired(self, state: _TurnState) -> bool:
-        """Whether the Turn has run out of the wall clock it was given."""
-        if self._deadline is None:
-            return False
+        """Whether the Turn has run out of the wall clock it was given.
+
+        There is always a wall clock: every lane names one, so a Turn that runs
+        forever is not a state this loop can be configured into.
+        """
         return time.monotonic() - state.started >= self._deadline
 
 
@@ -2019,6 +2072,7 @@ __all__ = [
     "TurnStatus",
     "TurnToolCall",
     "assert_distinct_ids",
+    "rounds_exhausted_note",
     "domain_body_note",
     "domain_body_tokens",
     "build_messages",
