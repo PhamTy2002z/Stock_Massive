@@ -1,6 +1,6 @@
 # API Development Commands
 
-.PHONY: dev run test lint clean golden-run golden-grade golden-context-export golden-context-replay probe-prompt-cache probe-vision
+.PHONY: dev run test lint clean golden-run golden-grade golden-release golden-context-export golden-context-replay probe-prompt-cache probe-vision
 
 # Use venv python if exists
 PYTHON := $(shell if [ -d ".venv" ]; then echo ".venv/bin/python"; else echo "python"; fi)
@@ -80,3 +80,16 @@ golden-context-replay:
 golden-grade:
 	@test -n "$(ARTIFACT)" || (echo "ARTIFACT=path/to/artifact.json is required" >&2; exit 2)
 	$(PYTHON) -m golden.grade "$(ARTIFACT)" $(GRADE_ARGS)
+
+# The whole release corpus behind one invocation: run, rubric pass, score, gate.
+# Roadmap §10 Phase 1 asks for one command because a four-step measurement is a
+# measurement somebody eventually runs three steps of. The exit code is the
+# verdict: 0 green, 1 a hard dimension under 100% or a run that did not finish,
+# 2 an artifact that cannot be scored at all.
+#
+# TRIALS defaults to one. The first trial records the tape and the rest replay
+# it, so a multi-trial baseline varies the model and nothing else.
+golden-release:
+	@test -n "$(CEILING_USD)" || (echo "CEILING_USD is required: a run spends real money" >&2; exit 2)
+	$(PYTHON) -m golden.release --ceiling-usd "$(CEILING_USD)" \
+		--trials "$(or $(TRIALS),1)" $(RELEASE_ARGS)

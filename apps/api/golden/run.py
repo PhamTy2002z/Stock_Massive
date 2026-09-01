@@ -51,7 +51,13 @@ logger = logging.getLogger("golden.run")
 GOLDEN_EMAIL = "golden-runner@stockmassive.local"
 GOLDEN_NAME = "Golden Runner"
 
-SCHEMA = "golden.artifact@1"
+#: Bumped from ``@1`` when trials arrived. The bump is not cosmetic and the old
+#: number is refused rather than tolerated: every ``@1`` artifact in this
+#: repository was written *before* the Phase 0 teardown — they carry
+#: ``run_study`` and ``render_signal_desk`` in their tool calls — so an ``@1``
+#: file compared against an ``@2`` one would be comparing two different
+#: products. ``grade.py`` calls them ``unusable``, which is the truth.
+SCHEMA = "golden.artifact@2"
 WEB_FIRST_MODE = "web_first"
 MODES = (WEB_FIRST_MODE,)
 
@@ -87,13 +93,56 @@ class ReplayLane:
         self._inner = inner
         self._tape = tape
         self._replay = replay
+        # Strict only when the caller asked to replay a tape that already
+        # existed. The auto-replay the later trials switch on is a different
+        # situation with a different correct answer — see ``start_replaying``.
+        self._strict = replay
         self.misses: list[str] = []
+        self.fresh_reads: list[str] = []
         self.hits = 0
         self.recorded = 0
 
     @staticmethod
     def _slot(kind: str, key: str) -> str:
         return f"{kind}:{hashlib.sha256(key.strip().encode('utf-8')).hexdigest()}"
+
+    def start_replaying(self) -> None:
+        """Switch to the tape for the trials after the first.
+
+        This is what makes a multi-trial run measure the model rather than the
+        Internet: a query trial one already asked is served the page trial one
+        saw, so two trials of one case differ only by what the model did.
+
+        It does **not** make the run strict, and that distinction is the whole
+        subtlety of multi-trial. A miss here means the model searched for
+        something it had not searched for before — which is the model varying,
+        the very thing being measured — so the read goes out live, joins the
+        tape, and the run stays comparable. A miss under ``--replay`` means
+        something else: the tape does not match the corpus it claims to, and
+        that artifact is not comparable with anything, which is why that case
+        alone ends the run ``incomplete``.
+        """
+        self._replay = True
+
+    @property
+    def replaying(self) -> bool:
+        return self._replay
+
+    def retrieval_times(self) -> dict[tuple[str, str], float]:
+        """When each recorded read happened, keyed the way the lane keys it.
+
+        The runner hands this down to every source so that ``retrieved_at``
+        travels with the evidence. It is the *only* time a source carries today
+        — the search provider returns no publication date on general-topic
+        results — and a temporal grader with neither would have nothing to read.
+        """
+        return {
+            (str(entry.get("kind") or ""), str(entry.get("key") or "")): float(
+                entry.get("fetched_at") or 0.0
+            )
+            for entry in self._tape.values()
+            if isinstance(entry, Mapping)
+        }
 
     def read(self, kind: str, key: str, fetch: Callable[[], Any]) -> Any:
         from src.core.web_lane import WebRead
@@ -109,7 +158,7 @@ class ReplayLane:
                 stale=False,
             )
         if self._replay:
-            self.misses.append(f"{kind}:{key}")
+            (self.misses if self._strict else self.fresh_reads).append(f"{kind}:{key}")
         read = self._inner.read(kind, key, fetch)
         self._tape[slot] = {
             "kind": kind,
@@ -199,7 +248,7 @@ def release_stranded_turns(user_id: int) -> int:
     return len(rows)
 
 
-def runner_config() -> Any:
+def runner_config(concurrency: int = 1) -> Any:
     """The production configuration with the per-user ceilings lifted.
 
     ``turn_starts_per_day`` defaults to twenty, which a twenty-case corpus hits
@@ -211,18 +260,31 @@ def runner_config() -> Any:
     over. That is a deliberate swap, not a removal: this process refuses to
     start without a ceiling and stops at it, and every call is still reserved
     and reconciled into ``llm_call_usage`` the same way.
+
+    ``concurrency`` lifts the two active-Turn ceilings, and they are not the
+    same kind of ceiling. ``active_turns_per_user`` is a per-account policy, so
+    raising it for one synthetic account changes nothing about what a real
+    account may do. ``active_turns_system`` is a **deployment-wide** cap of
+    three, and raising it means this process may take slots a reader would
+    otherwise get: it is raised only as far as the run asks for, only inside
+    this process's own config object, and a measurement run is expected to be
+    the only workload on the deployment while it runs. At ``concurrency=1``,
+    the default, neither number moves.
     """
     from src.core.config import get_settings
     from src.core.llm import llm_config_from_settings
     from src.core.llm.config import UserCeilings
 
     base = llm_config_from_settings(get_settings())
+    system = base.ceilings.active_turns_system
+    if system is not None and concurrency > 1:
+        system = max(int(system), concurrency)
     return dataclasses.replace(
         base,
         ceilings=UserCeilings(
             turn_starts_per_day=None,
-            active_turns_per_user=1,
-            active_turns_system=base.ceilings.active_turns_system,
+            active_turns_per_user=max(1, concurrency),
+            active_turns_system=system,
             daily_usd=None,
             rolling_30d_usd=None,
         ),
@@ -245,10 +307,19 @@ def runtime_constants(config: Any) -> dict[str, Any]:
         MAX_RESULTS,
         MAX_SNIPPET_CHARS,
     )
+    from src.agent.toolsets import CHAT_TOOLSETS, resolve_toolset
     from src.core.llm.admission import TURN_COST_MICRO_USD
 
     pack = active_pack()
+    catalogue = resolve_toolset(CHAT_TOOLSETS)
     return {
+        # The surface the model was actually offered, resolved at run time. An
+        # artifact that records the ceilings but not the tool list cannot tell
+        # a regression in behaviour from a capability that was switched on
+        # between two runs — and this is the phase where a capability plane
+        # starts adding them.
+        "tool_catalog": list(catalogue),
+        "toolsets": list(CHAT_TOOLSETS),
         "MAX_EXTERNAL_TOOL_CALLS": MAX_EXTERNAL_TOOL_CALLS,
         "MAX_TOOL_ROUNDS": MAX_TOOL_ROUNDS,
         "MAX_EXTERNAL_CALLS_PER_ROUND": MAX_EXTERNAL_CALLS_PER_ROUND,
@@ -272,13 +343,20 @@ def _session_workload() -> Any:
     return Workload.SESSION
 
 
-def _turn_mode(mode: str) -> str:
-    """Map a harness lane to the persisted production Turn mode."""
-    from src.agent.loop import CHAT_MODE
+def check_mode(mode: str) -> str:
+    """Validate the harness lane name and hand it back.
 
-    if mode == WEB_FIRST_MODE:
-        return CHAT_MODE
-    raise ValueError(f"unknown golden mode: {mode!r}")
+    It used to map onto a Turn mode the service took as a keyword. That keyword
+    is gone — the Phase 0 teardown removed the board mode and left ``chat`` as
+    the only thing persistence records — so ``mode`` here is now purely the
+    harness's own label for which corpus lane produced an artifact. Kept because
+    the artifact records it and two lanes are not comparable; validated because
+    a lane name nobody registered should fail loudly rather than land in an
+    artifact as a string.
+    """
+    if mode not in MODES:
+        raise ValueError(f"unknown golden mode: {mode!r}")
+    return mode
 
 
 # -- reading one finished Turn back out of the store -----------------------
@@ -287,6 +365,48 @@ def _turn_mode(mode: str) -> str:
 def _domain(url: str) -> str | None:
     host = urlsplit(url or "").netloc.lower()
     return host or None
+
+
+def _retrieved_at(
+    call: Mapping[str, Any], times: Mapping[tuple[str, str], float]
+) -> str | None:
+    """When the read behind one call happened, as an ISO instant.
+
+    Reconstructs the lane's own key from the call's arguments rather than
+    storing a second copy of it: ``web_search`` keys on the query and its
+    recency window, ``fetch_url`` on the validated URL. A key the tape does not
+    hold returns ``None`` — a source with no retrieval time is a source the
+    temporal grader declines to judge, which is the honest outcome and not a
+    pass.
+    """
+    arguments = call.get("arguments") or {}
+    name = call.get("name")
+    if name == "web_search":
+        query = str(arguments.get("query") or "").strip()
+        recency = arguments.get("recency_days")
+        key = f"{query}\n{int(recency) if recency is not None else ''}"
+        stamp = times.get(("search", key))
+    elif name == "fetch_url":
+        url = str(arguments.get("url") or "").strip()
+        stamp = times.get(("url", url))
+        if stamp is None:
+            # ``validate_public_url`` normalises before the lane sees the key,
+            # so an argument that differs only in its tail still names the same
+            # read. Matching on the suffix recovers those without pretending a
+            # different page is the same one.
+            stamp = next(
+                (
+                    value
+                    for (kind, key), value in times.items()
+                    if kind == "url" and url and (key.startswith(url) or url.startswith(key))
+                ),
+                None,
+            )
+    else:
+        stamp = None
+    if not stamp:
+        return None
+    return datetime.fromtimestamp(float(stamp), tz=timezone.utc).isoformat()
 
 
 def spend_for(request_message_id: int) -> dict[str, Any]:
@@ -408,6 +528,8 @@ async def read_case(
     wall_ms: int,
     terminal_reason: str | None = None,
     mode: str = WEB_FIRST_MODE,
+    trial: int = 1,
+    retrieval_times: Mapping[tuple[str, str], float] | None = None,
 ) -> dict[str, Any]:
     """Assemble one case's slice of the artifact from what the runtime wrote.
 
@@ -448,11 +570,14 @@ async def read_case(
     store_chunks: list[str] = []
     seen_source: set[tuple[str, str]] = set()
 
+    times = dict(retrieval_times or {})
     for payload in payloads:
         call_id = str(payload.get("id") or "")
         kind = str(payload.get("kind") or "external")
         body = full_text_by_call.get(call_id, "")
         trace = trace_by_call.get(call_id)
+        arguments = dict(trace.arguments) if trace is not None else {}
+        retrieved_at = _retrieved_at({"name": payload.get("name"), "arguments": arguments}, times)
         calls.append(
             {
                 "id": call_id,
@@ -463,7 +588,8 @@ async def read_case(
                 "summary": payload.get("summary"),
                 "result_count": payload.get("result_count"),
                 "result_chars": len(body),
-                "arguments": dict(trace.arguments) if trace is not None else {},
+                "arguments": arguments,
+                "retrieved_at": retrieved_at,
                 "result_text": body,
                 # What the advisory threat scan made of this result. Read off
                 # the persisted call payload rather than a column of its own,
@@ -491,6 +617,11 @@ async def read_case(
                     "title": title,
                     "snippet": item.get("snippet"),
                     "published_at": item.get("published_at"),
+                    # When this Turn read the page, as opposed to when the page
+                    # was published. The two are different facts and the
+                    # temporal rules of §2 need both; this is the one the
+                    # runtime can supply today.
+                    "retrieved_at": retrieved_at,
                     "from_call": call_id,
                 }
             )
@@ -502,9 +633,13 @@ async def read_case(
 
     return {
         "id": case.get("id"),
+        "trial": trial,
         "question": case.get("question"),
         "family": case.get("family"),
         "expect": dict(case.get("expect") or {}),
+        "as_of": case.get("as_of"),
+        "traps": list(case.get("traps") or ()),
+        "ground_truth": dict(case.get("ground_truth") or {}) or None,
         "mode": mode,
         "why_a_fluent_answer_fails": case.get("why_a_fluent_answer_fails"),
         "turn": {
@@ -538,6 +673,8 @@ async def run_corpus(
     limit: int | None,
     git_sha: str | None = None,
     mode: str = WEB_FIRST_MODE,
+    trials: int = 1,
+    concurrency: int = 1,
 ) -> dict[str, Any]:
     from src.agent import tools
     from src.agent.prompt import RuntimeContext
@@ -546,9 +683,10 @@ async def run_corpus(
     from src.core.web_lane import WebLane
 
     started = datetime.now(timezone.utc)
+    mode = check_mode(mode)
     user_id, email = ensure_golden_user()
     released = release_stranded_turns(user_id)
-    config = runner_config()
+    config = runner_config(concurrency)
     desk = build_alpha_desk(config=config)
 
     # Registration replaces by name, so this swaps the two web tools for ones
@@ -569,17 +707,27 @@ async def run_corpus(
     status = "complete"
     reason: str | None = None
 
-    try:
-        for case in cases:
-            if spent >= ceiling_micro_usd:
-                status = "incomplete"
-                reason = (
-                    f"spend ceiling reached after {len(results)} of {len(cases)} case(s): "
-                    f"{spent} of {ceiling_micro_usd} micro-USD"
-                )
-                break
+    planned = len(cases) * trials
+    gate = asyncio.Semaphore(max(1, concurrency))
+    stopped = False
 
-            thread = await desk.store.create_thread(user_id, title=str(case.get("id")))
+    async def run_one(trial: int, index: int, case: Mapping[str, Any]) -> None:
+        """One case-trial, start to settled, holding one concurrency slot."""
+        nonlocal spent, status, reason, stopped
+        async with gate:
+            if stopped or spent >= ceiling_micro_usd:
+                if not stopped:
+                    stopped = True
+                    status = "incomplete"
+                    reason = (
+                        f"spend ceiling reached after {len(results)} of {planned} "
+                        f"case-trial(s): {spent} of {ceiling_micro_usd} micro-USD"
+                    )
+                return
+
+            thread = await desk.store.create_thread(
+                user_id, title=f"{case.get('id')} t{trial}"
+            )
             turn_id = uuid.uuid4()
             began = time.monotonic()
             handle = await desk.turns.create(
@@ -588,7 +736,6 @@ async def run_corpus(
                 turn_id=turn_id,
                 user_text=str(case.get("question") or ""),
                 runtime=RuntimeContext(today=datetime.now().date(), user_name=GOLDEN_NAME),
-                mode=_turn_mode(mode),
             )
             running = desk.turns.running(turn_id)
             if running is not None and running.task is not None:
@@ -606,20 +753,45 @@ async def run_corpus(
                 wall_ms=wall_ms,
                 terminal_reason=terminal_reason,
                 mode=mode,
+                trial=trial,
+                retrieval_times=lane.retrieval_times(),
             )
+            entry["_order"] = (trial, index)
             results.append(entry)
             spent += int(entry["cost"]["micro_usd"])
             logger.info(
-                "%s -> %s, %d source(s), %d micro-USD (%d/%d spent)",
+                "%s t%d -> %s, %d source(s), %d micro-USD (%d/%d spent, %d/%d done)",
                 case.get("id"),
+                trial,
                 entry["turn"]["status"],
                 len(entry["sources"]),
                 entry["cost"]["micro_usd"],
                 spent,
                 ceiling_micro_usd,
+                len(results),
+                planned,
+            )
+
+    try:
+        # Trials stay sequential and cases inside a trial go wide. That split is
+        # what keeps the tape meaningful: trial one must finish recording before
+        # trial two can be served what it recorded, while two cases of the same
+        # trial share nothing and can run side by side.
+        for trial in range(1, trials + 1):
+            if stopped:
+                break
+            if trial > 1 and not lane.replaying:
+                lane.start_replaying()
+            await asyncio.gather(
+                *(run_one(trial, index, case) for index, case in enumerate(cases))
             )
     finally:
         await desk.aclose()
+
+    # Completion order is not corpus order once cases run side by side, and an
+    # artifact whose cases are shuffled by how fast each answer came back is
+    # needlessly hard to read beside another one.
+    results.sort(key=lambda entry: entry.pop("_order"))
 
     if lane.misses:
         status = "incomplete"
@@ -639,17 +811,17 @@ async def run_corpus(
             f"{len(lost)} case(s) produced no assistant message at all "
             f"({', '.join(str(item) for item in lost[:5])}); the Turn never ran"
         )
-    if len(results) != len(cases) and status == "complete":
+    if len(results) != planned and status == "complete":
         status = "incomplete"
-        reason = f"ran {len(results)} of {len(cases)} case(s)"
+        reason = f"ran {len(results)} of {planned} case-trial(s)"
     if limit is not None and status == "complete":
         status = "partial"
         reason = f"--limit ran {len(cases)} of the corpus' {len(declared)} case(s)"
 
     tape_path.parent.mkdir(parents=True, exist_ok=True)
-    tape_path.write_text(
-        json.dumps({"entries": tape}, ensure_ascii=False), encoding="utf-8"
-    )
+    tape_body = json.dumps({"entries": tape}, ensure_ascii=False)
+    tape_path.write_text(tape_body, encoding="utf-8")
+    tape_sha = hashlib.sha256(tape_body.encode("utf-8")).hexdigest()
 
     return {
         "schema": SCHEMA,
@@ -671,6 +843,17 @@ async def run_corpus(
             # and an artifact that cannot say which it was would be compared
             # with a full one sooner or later.
             "corpus_declared_cases": len(declared),
+            # How many times each case was asked. One is a measurement of a
+            # single sample; the baseline this phase exists to produce needs
+            # several, because a pass rate read off one trial has no interval
+            # around it and cannot support a threshold.
+            "trials": trials,
+            "planned_case_trials": planned,
+            # How many Turns ran side by side. It changes no answer — Turns
+            # share nothing — but it does change ``turn.wall_ms``, so two runs
+            # at different concurrencies are comparable on every dimension
+            # except latency, and this is the field that says so.
+            "concurrency": concurrency,
             "limit": limit,
             "runner_user_id": user_id,
             "runner_email": email,
@@ -683,9 +866,35 @@ async def run_corpus(
             "web_replay": {
                 "mode": "replay" if replay else "record",
                 "tape": str(tape_path),
+                "tape_sha256": tape_sha,
                 "hits": lane.hits,
                 "recorded": lane.recorded,
                 "misses": lane.misses,
+                # Reads a later trial asked for that no earlier trial had. Not
+                # misses: the model exploring differently is the thing a
+                # multi-trial baseline exists to see, and the read is taped for
+                # the trials after it.
+                "fresh_reads": len(lane.fresh_reads),
+            },
+            # Everything needed to say what this artifact measured, gathered in
+            # one place rather than spread across the block above. An eval log
+            # a reader cannot re-identify months later is a log that quietly
+            # gets compared with the wrong thing — the failure mode both
+            # previous batteries died of.
+            "provenance": {
+                "artifact_schema": SCHEMA,
+                "git_sha": git_sha or _git_sha(),
+                "corpus_id": corpus.get("corpus_id"),
+                "corpus_schema": corpus.get("schema"),
+                "corpus_sha256": corpus_digest(corpus),
+                "tape_sha256": tape_sha,
+                "trials": trials,
+                "concurrency": concurrency,
+                # Filled in by the judge pass, which runs after this one and
+                # writes into the artifact it reads. Named here so the shape of
+                # the block does not depend on whether the judge ran.
+                "judge_model": None,
+                "judge_prompt_version": None,
             },
         },
         "cases": results,
@@ -721,6 +930,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="serve web reads from the tape instead of the live lane",
     )
     parser.add_argument("--limit", type=int, default=None, help="run only the first N cases")
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=1,
+        help=(
+            "how many Turns of one trial may run side by side; raises the "
+            "runner account's active-Turn ceilings and, above three, the "
+            "deployment-wide one. Changes latency, not answers"
+        ),
+    )
+    parser.add_argument(
+        "--trials",
+        type=int,
+        default=1,
+        help=(
+            "how many times to ask each case; trial 1 records the tape and the "
+            "rest replay it, so only the model varies between them"
+        ),
+    )
     # Passed in when the run happens somewhere without a checkout — the API
     # container, for one. An artifact that cannot name the build it measured is
     # not comparable with another artifact, which is the whole job here.
@@ -730,6 +958,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
     if args.ceiling_usd <= 0:
         parser.error("--ceiling-usd must be positive")
+    if args.trials < 1:
+        parser.error("--trials must be at least 1")
+    if args.concurrency < 1:
+        parser.error("--concurrency must be at least 1")
 
     corpus_path = args.corpus or "golden/web_first.json"
     corpus = json.loads(Path(corpus_path).read_text(encoding="utf-8"))
@@ -745,6 +977,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             limit=args.limit,
             git_sha=args.git_sha,
             mode=args.mode,
+            trials=args.trials,
+            concurrency=args.concurrency,
         )
     )
     out.parent.mkdir(parents=True, exist_ok=True)

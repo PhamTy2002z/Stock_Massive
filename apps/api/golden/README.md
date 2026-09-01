@@ -1,7 +1,95 @@
-# Golden — the smallest measurement that lets C1 graduate on numbers
+# Golden — the measurement Phase 1 graduates on
 
-Three files. A corpus, a runner, a grader. That is the whole thing, and keeping
-it that small is the design rather than a stage it will grow out of.
+It began as three files: a corpus, a runner, a grader. Phase 1 of the roadmap
+adds four more — a release corpus, a rubric judge, a gate, and one command that
+runs the lot — and keeping the whole thing this small is still the design rather
+than a stage it will grow out of. There is no framework here, no scorer
+registry, no plugin: seven files and a JSON file of thresholds that are
+deliberately empty.
+
+| File | What it owns |
+|---|---|
+| `web_first.json` | The original twenty-case corpus. Unchanged, still runnable |
+| `release.json` | The Phase 1 release corpus: forty cases, eleven families, the marker vocabulary and the dimension table |
+| `run.py` | Solver. Runs the corpus × trials through the real chat lane and writes one artifact |
+| `judge.py` | The rubric pass of §3. One model call per case-trial, written back into the artifact |
+| `grade.py` | Scorer. A pure function of the artifact: twelve dimensions, no network, no bar |
+| `graders.py` | The eight dimensions roadmap §10 Phase 1 names, one function each |
+| `gate.py` | The only file with a bar in it. Wilson intervals and the exit code |
+| `release.py` | The one command: run → judge → grade → gate |
+| `text.py` | Numbers, markers, URLs and dates — the primitives the graders compare with |
+| `thresholds.json` | Every soft bar, currently `null`. No threshold before a distribution |
+
+## The one command
+
+```bash
+make golden-release CEILING_USD=3 TRIALS=1                 # record
+make golden-release CEILING_USD=8 TRIALS=3 RELEASE_ARGS="--replay --tape golden/artifacts/<name>-tape.json"
+make golden-release CEILING_USD=1 RELEASE_ARGS="--grade-only golden/artifacts/<file>.json"   # free
+```
+
+The exit code is the verdict: `0` green, `1` a hard dimension under 100% or a
+run that did not finish, `2` an artifact that cannot be scored at all. Roadmap
+§10 Phase 1 asks for one command because a four-step measurement is a
+measurement somebody eventually runs three steps of — but each stage is still
+its own entry point, because a run that cost real money has to be re-gradeable
+for free.
+
+**Trials are epochs.** The first trial records the tape; every trial after it
+replays the same pages inside the same invocation. So a three-trial baseline
+varies the model and nothing else, which is the only reading under which a pass
+rate over three trials means anything.
+
+## The twelve dimensions, and which of them have teeth
+
+Seven are **hard**: fixed at 100%, not read from any file, not tunable.
+Roadmap §10 Phase 1 names five of them and §2 says why they cannot be a
+percentage; evidence identity and budget join them because a measurement that
+lost track of its own evidence, or blew its own ceiling, is not a measurement.
+
+| Hard | Fails when |
+|---|---|
+| `settlement` | A Turn ended with no message at all, or terminally with neither answer nor reason |
+| `citation_url` | The answer printed a link no call in that trial ever read |
+| `evidence_identity` | A source lost its url, domain, title, or the call it came from |
+| `material_claim` | A figure frozen as ground truth is missing from the answer or contradicted by it |
+| `temporal_validity` | A source *published* after the case's `as_of`. Retrieval time is carried and reported but is never the test — a case pinning a past cutoff is read today by definition. When no source can be dated at all the dimension is undecided, and the gate calls that `BLIND` |
+| `refusal_policy` | A case that must refuse did not, or refused and then advised anyway |
+| `budget` | Rounds or external calls over the caps the artifact itself records |
+
+Five are **reported**: `multi_source_label`, plus the four original signals.
+They get a verdict and an interval and no bar, because the runtime has no
+multi-source rule until Phase 6 and because a threshold set before a
+distribution is the mistake this directory was rebuilt to stop making.
+
+**A hard dimension nothing decided is `BLIND`, not green.** Until the material
+claim cases carry frozen ground truth, the gate refuses to call any run a
+release verdict. That is the state the corpus ships in, on purpose: a value
+written into `ground_truth` before anybody read a page would be a fabricated
+ground truth, which is worse than an empty one.
+
+The interval is Wilson at 95%, and its denominator is the **case**, not the
+case-trial: three trials of one question are repeated draws on one sample. Both
+counts are printed; only the first is a sample.
+
+## Where the judge sits, and what it is not allowed to see
+
+`judge.py` runs *between* the corpus and the grader and writes its verdicts into
+the artifact. That ordering is what lets a model-scored rubric exist while
+`grade.py` stays a pure function — the property this file opens with and the
+reason a months-old artifact can be re-scored for free.
+
+The judge sees the question, the family, and the answer. Not the evidence, not
+the tool calls, not what the deterministic dimensions concluded. A judge shown
+the evidence starts re-checking arithmetic the backend checks mechanically and
+better; a judge shown the other scores agrees with them, and the correlation
+would be an artefact of the prompt. A reply it cannot parse becomes
+`unavailable` with a reason — never a middling score, because a missing verdict
+is missing information whereas a three out of five is a claim.
+
+Its spend is read back from the ledger under its own owner id rather than
+estimated, and it never touches the `turn_request_message` rows a case's cost is
+read from.
 
 ## What "cited" means here, and why it is not what it sounds like
 
@@ -142,6 +230,15 @@ the wrong `DATABASE_URL` still creates threads, still writes turns, and still
 produces an artifact — of a different database.
 
 ## The thresholds
+
+**For the release corpus, there are none yet, and `thresholds.json` says so in
+every soft slot.** Phase 1 produces the machine; the numbers come from the first
+multi-trial baseline, and the file records which run they were read off when
+they are locked. The hard seven are not in that file at all — they are fixed in
+`gate.py` and a bar that can be lowered by editing JSON is not a hard gate.
+
+What follows is the old `web-first-v1` table, kept because that corpus is still
+runnable and those bars were read off real distributions.
 
 Set on 2026-08-29 from three real runs, after looking at the distribution and not
 before — which is the rule this file opens with. They live here and nowhere else:
