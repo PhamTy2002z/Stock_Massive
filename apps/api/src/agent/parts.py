@@ -1,4 +1,4 @@
-"""The typed parts a Turn produces beside its prose, starting with progress.
+"""The typed parts a Turn produces beside its prose: progress, and a question.
 
 A Turn already publishes two things a reader can see: the answer, delta by
 delta, and one row per tool call. What it never published is what the *loop*
@@ -34,11 +34,29 @@ Nothing here reaches the model. Progress is written for a reader and for an
 operator; the transcript the next call is built from is assembled by
 ``messages.build_messages`` out of prose and tool results, and there is no field
 on it a part could arrive through.
+
+A **question part** is the second kind, and it is a different animal: progress
+narrates a Turn, and a question *ends* one. When the harness cannot discover
+something it needs — a horizon, a cost basis, what the reader is deciding — it
+asks, and the asking terminates the Turn like any other terminal. There is no
+suspended Turn waiting for a tap: the ask and the answer are two Turns of a
+conversation, so nothing has to be kept alive between them and nothing is lost
+if the reader never taps at all.
+
+Two rules follow from that, and they are why this part validates instead of
+dropping. A malformed progress part must never be the thing that ends a Turn, so
+:func:`progress_payload` drops what it cannot carry; a malformed question has no
+safe fallback, because a card with no answerable option is a dead end the reader
+cannot leave — so :class:`QuestionPart` refuses to exist. And the part carries no
+state: what the reader did with it changes after the terminal transaction has
+committed, so the outcome lives on a row (``agent_question``) and the part stays
+the immutable thing that was asked.
 """
 
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
@@ -235,21 +253,213 @@ def wire_parts(parts: Sequence[ProgressPart]) -> tuple[dict[str, Any], ...]:
     return tuple(part.as_wire() for part in parts)
 
 
+# -- a question, and what became of it ------------------------------------
+
+
+#: The four outcomes of one asking, in the order they can be reached.
+#:
+#: ``pending`` is written by the terminal transaction that asked. The other three
+#: are ends: the reader chose (``answered``), the reader declined and the work
+#: runs on stated assumptions (``skipped``), or the reader typed into the
+#: composer instead of touching the card and the next Turn made the question moot
+#: (``superseded``). A resolved question is never reopened — a second answer to a
+#: question that has already branched the work would be a different question.
+#:
+#: They are not on the part. The part is what was asked and never changes; these
+#: change after the terminal transaction has committed, which is precisely why
+#: they live on a row of their own.
+QUESTION_PENDING = "pending"
+QUESTION_ANSWERED = "answered"
+QUESTION_SKIPPED = "skipped"
+QUESTION_SUPERSEDED = "superseded"
+
+QUESTION_STATES: tuple[str, ...] = (
+    QUESTION_PENDING,
+    QUESTION_ANSWERED,
+    QUESTION_SKIPPED,
+    QUESTION_SUPERSEDED,
+)
+
+#: A question offers two to four choices, and the bound is not cosmetic. One
+#: choice is not a question, and a list long enough to need scrolling is a form —
+#: the discipline is that an unanswerable question should have been research
+#: instead.
+MIN_QUESTION_OPTIONS = 2
+MAX_QUESTION_OPTIONS = 4
+
+#: How long each piece of a question may be. The prompt is a sentence a reader
+#: answers in one glance, a label is a button, and an id is a code the client
+#: posts back. Past these a card stops being a card, so the part is refused
+#: rather than truncated: a cut prompt asks something other than what was meant.
+MAX_QUESTION_PROMPT_CHARS = 400
+MAX_QUESTION_LABEL_CHARS = 120
+MAX_QUESTION_DETAIL_CHARS = 300
+MAX_QUESTION_OPTION_ID_CHARS = 64
+
+#: The choice that is always offered. Skipping is not cancelling: the work runs
+#: on default assumptions and prints them, which is what keeps a question card
+#: from ever being a door the reader has to open.
+DEFAULT_SKIP_LABEL = "Bỏ qua — dùng giả định mặc định"
+
+#: The keys one question carries on the wire, in the order they are written.
+#:
+#: Named here rather than in the transport for the reason the progress fields
+#: are: the publisher restating a question, the row persisting one and the client
+#: drawing one must not be able to disagree about its shape.
+QUESTION_WIRE_FIELDS = (
+    "question_id",
+    "prompt",
+    "options",
+    "multi_select",
+    "skip_label",
+)
+
+
+def _bounded(what: str, value: Any, limit: int) -> str:
+    """One piece of a question: a non-empty string inside its own ceiling."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"a question's {what} must be a non-empty string")
+    if len(value) > limit:
+        raise ValueError(
+            f"a question's {what} is {len(value)} characters; the ceiling is {limit}"
+        )
+    return value
+
+
+@dataclass(frozen=True)
+class QuestionOption:
+    """One choice, as data rather than as rendered text.
+
+    ``id`` is what the client posts back and what the row stores, so it is a
+    stable code and never the label: a reader's choice has to stay readable after
+    somebody rewords the button.
+
+    ``detail`` is the one line under the label — why this choice, or what it
+    assumes. Optional, because most choices are self-explanatory and a card of
+    explained buttons is a card nobody reads.
+    """
+
+    id: str
+    label: str
+    detail: str | None = None
+
+    def __post_init__(self) -> None:
+        _bounded("option id", self.id, MAX_QUESTION_OPTION_ID_CHARS)
+        _bounded("option label", self.label, MAX_QUESTION_LABEL_CHARS)
+        if self.detail is not None:
+            _bounded("option detail", self.detail, MAX_QUESTION_DETAIL_CHARS)
+
+    def as_wire(self) -> dict[str, Any]:
+        return {"id": self.id, "label": self.label, "detail": self.detail}
+
+
+@dataclass(frozen=True)
+class QuestionPart:
+    """One asking, immutable, and the whole of what a card is drawn from.
+
+    ``question_id`` is a UUID and is also the primary key of the row that records
+    what became of it. One identifier rather than two: a client answering a card
+    posts the id it was drawn with, and a second key would be a second thing that
+    can point at the wrong question.
+
+    ``multi_select`` is carried from the first version even though no surface
+    offers it yet. It is a fact about the *question* — whether choosing two
+    answers is coherent — and a flag added later would have to be guessed at for
+    every question already stored.
+    """
+
+    question_id: str
+    prompt: str
+    options: tuple[QuestionOption, ...]
+    multi_select: bool = False
+    skip_label: str = DEFAULT_SKIP_LABEL
+
+    def __post_init__(self) -> None:
+        try:
+            uuid.UUID(str(self.question_id))
+        except (AttributeError, TypeError, ValueError) as error:
+            raise ValueError(
+                f"{self.question_id!r} is not a question id; it is the primary key "
+                "of the row that records the outcome and has to be a UUID"
+            ) from error
+        _bounded("prompt", self.prompt, MAX_QUESTION_PROMPT_CHARS)
+        _bounded("skip label", self.skip_label, MAX_QUESTION_LABEL_CHARS)
+        # Coerced rather than demanded as a tuple: a caller building options in a
+        # list is the ordinary case, and a frozen part holding a mutable list
+        # would be frozen in name only.
+        object.__setattr__(self, "options", tuple(self.options))
+        if not MIN_QUESTION_OPTIONS <= len(self.options) <= MAX_QUESTION_OPTIONS:
+            raise ValueError(
+                f"a question offers {MIN_QUESTION_OPTIONS} to "
+                f"{MAX_QUESTION_OPTIONS} options; this one has {len(self.options)}"
+            )
+        if len(set(self.option_ids)) != len(self.options):
+            # Two options under one id would make an answer ambiguous at exactly
+            # the moment it is supposed to settle something.
+            raise ValueError("a question's option ids must be distinct")
+
+    @property
+    def option_ids(self) -> tuple[str, ...]:
+        return tuple(option.id for option in self.options)
+
+    def as_wire(self) -> dict[str, Any]:
+        return {
+            "question_id": self.question_id,
+            "prompt": self.prompt,
+            "options": [option.as_wire() for option in self.options],
+            "multi_select": self.multi_select,
+            "skip_label": self.skip_label,
+        }
+
+
+def question_option_ids(payload: Mapping[str, Any]) -> tuple[str, ...]:
+    """The ids a stored question was written with, read back off its payload.
+
+    The one reader of a persisted question's options, so that "is this a choice
+    this question offered" has a single answer wherever it is asked — the store
+    validating an answer, and anything later that has to render one.
+    """
+    options = payload.get("options") or ()
+    if not isinstance(options, Sequence) or isinstance(options, (str, bytes)):
+        return ()
+    return tuple(
+        str(option["id"])
+        for option in options
+        if isinstance(option, Mapping) and option.get("id")
+    )
+
+
 __all__ = [
     "ATTEMPT_CANCELLED",
     "ATTEMPT_COMPLETED",
     "ATTEMPT_ERROR",
     "ATTEMPT_RUNNING",
     "ATTEMPT_STATUSES",
+    "DEFAULT_SKIP_LABEL",
     "MAX_CODE_CHARS",
+    "MAX_QUESTION_DETAIL_CHARS",
+    "MAX_QUESTION_LABEL_CHARS",
+    "MAX_QUESTION_OPTIONS",
+    "MAX_QUESTION_OPTION_ID_CHARS",
+    "MAX_QUESTION_PROMPT_CHARS",
+    "MIN_QUESTION_OPTIONS",
     "PROGRESS_FIELDS",
     "PROGRESS_WIRE_FIELDS",
+    "QUESTION_ANSWERED",
+    "QUESTION_PENDING",
+    "QUESTION_SKIPPED",
+    "QUESTION_STATES",
+    "QUESTION_SUPERSEDED",
+    "QUESTION_WIRE_FIELDS",
     "RECOVERY_ACTIONS",
     "RECOVERY_COMPRESS",
     "RECOVERY_EMPTY_NUDGE",
     "RECOVERY_LOWER_OUTPUT_CAP",
     "ProgressKind",
     "ProgressPart",
+    "QuestionOption",
+    "QuestionPart",
     "progress_payload",
+    "question_option_ids",
     "wire_parts",
 ]

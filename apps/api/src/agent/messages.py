@@ -95,6 +95,47 @@ UNSETTLED_STATUSES = frozenset({ToolCallStatus.PENDING, ToolCallStatus.RUNNING})
 #: kept as it was, because that is the only fact anybody has about it.
 CALL_INTERRUPTED = "interrupted"
 
+#: The wire spellings of the states a call has not settled into.
+#:
+#: Derived from the enum rather than written out, so a state added to the
+#: projection cannot be a state a reader of a checkpoint silently keeps freezing.
+_UNSETTLED_WIRE_STATUSES = frozenset(status.value for status in UNSETTLED_STATUSES)
+
+
+def settle_orphan_calls(
+    calls: Sequence[Mapping[str, Any]], error: str
+) -> tuple[dict[str, Any], ...]:
+    """The same calls, with nothing left in a state somebody is waiting on.
+
+    A checkpoint is a photograph of a Turn in flight, so the calls in it are
+    routinely ``pending`` or ``running``. Copied into a canonical message or a
+    frozen snapshot unchanged, those states become permanent: a Thread reopened
+    tomorrow draws a spinner on a call that stopped being anybody's business
+    before the process running it was replaced, and a transcript that does that
+    is a transcript nobody can read the history off.
+
+    Only ``status`` changes, and ``error`` only where the record carries none — a
+    call that already said why it failed knows more than this function does.
+    Every other key is copied through, ``dispatched`` among them where a payload
+    carries one: whether the call's effect landed is a fact this function cannot
+    establish and must not invent.
+
+    Pure, and it lives here beside the vocabulary it reads rather than in the
+    lifecycle that first needed it. Three places turn a checkpoint into something
+    permanent — the loop's terminal gate, the lifecycle's bare finish, and the
+    startup freeze inside the store — and the store cannot import the lifecycle.
+    A second implementation for that third caller is exactly how one of them
+    comes to miss a state the others learned about.
+    """
+    settled: list[dict[str, Any]] = []
+    for call in calls:
+        entry = dict(call)
+        if entry.get("status") in _UNSETTLED_WIRE_STATUSES:
+            entry["status"] = ToolCallStatus.ERROR.value
+            entry["error"] = entry.get("error") or error
+        settled.append(entry)
+    return tuple(settled)
+
 
 #: How each tool is described on screen, and which one of its arguments may
 #: appear beside the description.
@@ -1620,6 +1661,7 @@ __all__ = [
     "dedup_key",
     "display_results",
     "estimate_tokens",
+    "settle_orphan_calls",
     "shown_result",
     "summarise_call",
 ]

@@ -54,6 +54,7 @@ from src.alpha.refusals import AlphaRefusal
 from src.core.llm.config import LLMConfig
 
 from .events import (
+    EventType,
     Subscriber,
     TurnPublisher,
     snapshot_from_draft,
@@ -67,8 +68,12 @@ from .loop import (
     TurnRequest,
     TurnStatus,
 )
-from .messages import CALL_INTERRUPTED, UNSETTLED_STATUSES, ToolCallStatus
-from .persistence import TURN_INCOMPLETE, AgentPersistence, TurnRecord
+# ``settle_orphan_calls`` is re-exported rather than defined here: it moved next
+# to the status vocabulary it reads once the startup freeze — which runs inside
+# the store, and the store cannot import this module — needed the same function.
+from .messages import CALL_INTERRUPTED, settle_orphan_calls
+from .parts import QUESTION_PENDING, QuestionPart
+from .persistence import TURN_COMPLETE, TURN_INCOMPLETE, AgentPersistence, TurnRecord
 from .prompt import RuntimeContext
 
 logger = logging.getLogger(__name__)
@@ -254,45 +259,6 @@ def draft_content(draft: TurnDraft) -> dict[str, Any]:
     }
 
 
-#: The wire spellings of the states a call has not settled into.
-#:
-#: Derived from the enum rather than written out here, so a state added to the
-#: projection cannot be a state this reader silently keeps freezing.
-_UNSETTLED_WIRE_STATUSES = frozenset(status.value for status in UNSETTLED_STATUSES)
-
-
-def settle_orphan_calls(
-    calls: Sequence[Mapping[str, Any]], error: str
-) -> tuple[dict[str, Any], ...]:
-    """The same calls, with nothing left in a state somebody is waiting on.
-
-    A checkpoint is a photograph of a Turn in flight, so the calls in it are
-    routinely ``pending`` or ``running``. Copied into a canonical message or a
-    frozen snapshot unchanged, those states become permanent: a Thread reopened
-    tomorrow draws a spinner on a call that stopped being anybody's business
-    before the process running it was replaced, and a transcript that does that
-    is a transcript nobody can read the history off.
-
-    Only ``status`` changes, and ``error`` only where the record carries none — a
-    call that already said why it failed knows more than this function does.
-    Every other key is copied through, ``dispatched`` among them where a payload
-    carries one: whether the call's effect landed is a fact this function cannot
-    establish and must not invent.
-
-    Pure, and shared by the two places a checkpoint becomes permanent, because
-    two implementations of "settle the leftovers" is how one of them comes to
-    miss a state the other one learned about.
-    """
-    settled: list[dict[str, Any]] = []
-    for call in calls:
-        entry = dict(call)
-        if entry.get("status") in _UNSETTLED_WIRE_STATUSES:
-            entry["status"] = ToolCallStatus.ERROR.value
-            entry["error"] = entry.get("error") or error
-        settled.append(entry)
-    return tuple(settled)
-
-
 def assistant_message(
     *,
     text: str,
@@ -301,6 +267,7 @@ def assistant_message(
     answer: str | None = None,
     thoughts: Sequence[Mapping[str, Any]] = (),
     progress: Sequence[Mapping[str, Any]] = (),
+    question: Mapping[str, Any] | None = None,
     elapsed_ms: int = 0,
 ) -> dict[str, Any]:
     """The canonical assistant message, in the one place its shape is decided.
@@ -329,6 +296,15 @@ def assistant_message(
     message written before parts existed means: no trail was recorded, rather
     than a trail that was lost.
 
+    ``question`` is the asking that ended this Turn, and the key is written only
+    when there was one. Absent rather than null on every ordinary answer, for two
+    reasons that pull the same way: a message written before questions existed
+    stays byte-identical to one written now, and a client can ask *is there a
+    card here* of the key itself instead of of its value.
+
+    What the reader then did with the card is deliberately **not** here. This
+    message is immutable and the outcome moves; the store merges the live state
+    in when the transcript is read (``persistence.read_thread``).
     """
     content: dict[str, Any] = {
         "text": text,
@@ -339,6 +315,8 @@ def assistant_message(
         "status": status,
         "elapsed_ms": elapsed_ms,
     }
+    if question is not None:
+        content["question"] = dict(question)
     return content
 
 
@@ -680,6 +658,68 @@ class TurnService:
             terminal_event_for(status, has_content=bool(text)),
             status=status,
             terminal_reason=terminal_reason,
+            data={"message_id": record.response_message_id},
+        )
+        return record
+
+    async def settle_with_question(
+        self,
+        running: RunningTurn,
+        *,
+        text: str,
+        question_part: QuestionPart,
+    ) -> TurnRecord:
+        """End a Turn by asking, which is an ordinary ``complete``.
+
+        A question is a terminal, not a suspension. The Turn settles ``complete``
+        with no terminal reason, exactly like a Turn that answered: the ask and
+        the reply are two Turns of a conversation, so there is no Turn state
+        anybody has to keep alive between them, nothing to time out, and nothing
+        lost if the reader never taps the card at all.
+
+        Three writes, in one order that matters. The terminal transaction writes
+        the assistant message carrying the part *and* the ``agent_question`` row
+        at ``pending`` together — a card a reader can tap with no row behind it
+        would take an answer nothing could record. Then the question is published,
+        so a reader watching live sees the card without refetching the Thread.
+        Then the terminal event, last, because the client refetches the transcript
+        when that arrives and must not race the row it is about to read.
+
+        **Nothing in production calls this yet, and that is deliberate.** Whether
+        to ask is a planning decision this phase does not make; what is settled
+        here is the contract — the shape, the persistence, the three outcomes and
+        the replay — so the decision can be wired to it later without touching
+        the lifecycle again. Its callers today are the tests that hold that
+        contract in place.
+        """
+        part_wire = question_part.as_wire()
+        # Written even when the Turn said nothing in prose: the card *is* the
+        # content, so the transcript's empty-bubble rule does not apply, and the
+        # question row needs a message to be anchored to.
+        message = assistant_message(
+            text=text,
+            status=TURN_COMPLETE,
+            question=part_wire,
+            elapsed_ms=running.publisher.elapsed_ms,
+        )
+        record = await self._store.finish_turn(
+            running.turn.id,
+            status=TURN_COMPLETE,
+            terminal_reason=None,
+            message=message,
+            question=part_wire,
+            # Two events follow this commit — the question, then the terminal —
+            # so the sequence persisted is the terminal's, one past the next.
+            # ``_finish`` needs only ``next_seq`` because it publishes one.
+            last_event_seq=running.publisher.next_seq + 1,
+        )
+        # The loop's last checkpoint is left exactly as it stands: this path adds
+        # a terminal and takes nothing away from the trail that reached it.
+        running.publisher.question(part_wire, state=QUESTION_PENDING)
+        running.publisher.terminal(
+            terminal_event_for(TURN_COMPLETE, has_content=True),
+            status=TURN_COMPLETE,
+            terminal_reason=None,
             data={"message_id": record.response_message_id},
         )
         return record

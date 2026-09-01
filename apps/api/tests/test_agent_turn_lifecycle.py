@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import delete, select
 
 from src.agent import registry, toolsets
-from src.agent.events import EventType
+from src.agent.events import EventType, TurnPublisher, snapshot_from_draft
 from src.agent.lanes import DEEP, DEFAULT_REASON, LIGHT, LaneProfile
 from src.agent.loop import AgentLoop, ContextBudget, TurnDraft
 from src.agent.persistence import (
@@ -21,9 +21,18 @@ from src.agent.persistence import (
     TurnPayloadConflict,
 )
 from src.agent.prompt import RuntimeContext
+from src.agent.parts import (
+    QUESTION_ANSWERED,
+    QUESTION_PENDING,
+    QUESTION_SKIPPED,
+    QUESTION_SUPERSEDED,
+    QuestionOption,
+    QuestionPart,
+)
 from src.agent.turns import (
     MAX_USER_INPUT_BYTES,
     Checkpointer,
+    RunningTurn,
     TurnService,
     UserInputTooLarge,
     assert_input_within_cap,
@@ -1354,3 +1363,177 @@ async def test_the_same_id_with_different_symbols_is_also_a_conflict(owner):
             symbols=("VCB",),
             runtime=runtime(owner),
         )
+
+
+# --- ending a Turn by asking ------------------------------------------------
+
+
+def card(**overrides) -> QuestionPart:
+    fields = {
+        "question_id": str(uuid.uuid4()),
+        "prompt": "Bạn mua mới hay trung bình giá?",
+        "options": [
+            QuestionOption(id="new", label="Mua mới"),
+            QuestionOption(id="average", label="Trung bình giá", detail="Đã có vị thế"),
+        ],
+    }
+    fields.update(overrides)
+    return QuestionPart(**fields)
+
+
+async def committed_turn(owner: int, thread_id: uuid.UUID) -> RunningTurn:
+    """A Turn committed and held the way the service holds one, and nothing run.
+
+    ``settle_with_question`` is a seam for the planning that decides to ask, and
+    no production path reaches it in this build — so the Turn is created and then
+    settled directly, with no loop in between. What is under test is the terminal
+    itself: one transaction, two events, and the order they happen in.
+    """
+    creation = await store().create_turn(
+        user_id=owner,
+        thread_id=thread_id,
+        turn_id=uuid.uuid4(),
+        user_text="VCB thế nào?",
+    )
+    return RunningTurn(turn=creation.turn, publisher=TurnPublisher(creation.turn.id))
+
+
+@pytest.mark.asyncio
+async def test_asking_ends_the_turn_the_way_answering_does(owner):
+    """A question is a terminal, not a suspension: nothing is left waiting."""
+    thread_id = await thread_for(owner)
+    turns = service(FakeClient([]))
+    running = await committed_turn(owner, thread_id)
+    part = card()
+
+    record = await turns.settle_with_question(
+        running, text="Tôi cần một dữ kiện trước khi kết luận.", question_part=part
+    )
+
+    assert record.status == TURN_COMPLETE
+    assert record.terminal_reason is None
+    assert record.finished_at is not None
+    assert record.response_message_id is not None
+    assistant = [row for row in messages_of(thread_id) if row.role == "assistant"][0]
+    assert assistant.id == record.response_message_id
+    assert assistant.content["question"] == part.as_wire()
+    assert assistant.content["status"] == TURN_COMPLETE
+
+
+@pytest.mark.asyncio
+async def test_the_card_is_published_before_the_terminal_and_not_after(owner):
+    """A reader watching live is handed the card without refetching the Thread."""
+    thread_id = await thread_for(owner)
+    turns = service(FakeClient([]))
+    running = await committed_turn(owner, thread_id)
+    subscriber = running.publisher.subscribe()
+    part = card()
+
+    await turns.settle_with_question(running, text="Cần một dữ kiện.", question_part=part)
+
+    seen = [event async for event in subscriber.events()]
+    assert [event.type for event in seen] == [
+        EventType.PART_QUESTION,
+        EventType.COMPLETED,
+    ]
+    published = seen[0].data
+    assert published["question_id"] == part.question_id
+    assert published["options"] == part.as_wire()["options"]
+    assert published["multi_select"] is False
+    assert published["state"] == QUESTION_PENDING
+    assert published["selected_option_ids"] is None
+    # The persisted sequence is the terminal's, so a subscriber arriving between
+    # the commit and the publish is not told the Turn got further than it did.
+    record = await store().read_turn(owner, running.turn.id)
+    assert record.last_event_seq == seen[-1].seq
+
+
+@pytest.mark.asyncio
+async def test_a_reader_who_arrives_after_the_terminal_still_sees_the_card(owner):
+    """Restated on the snapshot, like the trail and the calls, for the same reason."""
+    thread_id = await thread_for(owner)
+    turns = service(FakeClient([]))
+    running = await committed_turn(owner, thread_id)
+    part = card()
+    # The prose reached the reader as it was written, the way a Turn's answer
+    # always does; the card is what this terminal adds to it.
+    running.publisher.content_delta("Cần một dữ kiện.")
+
+    await turns.settle_with_question(running, text="Cần một dữ kiện.", question_part=part)
+
+    snapshot = running.publisher.subscribe().snapshot
+    assert snapshot.data["status"] == TURN_COMPLETE
+    assert snapshot.data["question"]["question_id"] == part.question_id
+    assert snapshot.data["question"]["state"] == QUESTION_PENDING
+    assert snapshot.data["text"] == "Cần một dữ kiện."
+
+
+def test_a_turn_that_asked_nothing_carries_a_null_card_on_its_snapshot():
+    """One shape for both, so a client never has to ask which snapshot it holds."""
+    published = TurnPublisher(uuid.uuid4())
+    published.content_delta("Xong.")
+
+    assert published.subscribe().snapshot.data["question"] is None
+    # And the same key on the other producer of a snapshot. Always null there:
+    # what became of a card changes after the Turn ended, so a checkpoint is the
+    # one view that could show a state the reader has already left.
+    rebuilt = snapshot_from_draft(
+        uuid.uuid4(),
+        {"text": "Xong.", "tool_calls": []},
+        status=TURN_COMPLETE,
+        terminal_reason=None,
+        through_seq=2,
+    )
+    assert rebuilt.data["question"] is None
+
+
+@pytest.mark.asyncio
+async def test_each_outcome_of_a_card_survives_into_a_reopened_thread(owner):
+    """The three states the gate asks for, read back off the canonical transcript.
+
+    The store is what the reader's answer reaches and the transcript is what a
+    reload draws, so this is the round trip the card's whole lifecycle rests on:
+    settle by asking, resolve, reopen.
+    """
+    turns = service(FakeClient([]))
+    outcomes = {}
+    for outcome in (QUESTION_ANSWERED, QUESTION_SKIPPED, QUESTION_SUPERSEDED):
+        thread_id = await thread_for(owner)
+        running = await committed_turn(owner, thread_id)
+        part = card()
+        await turns.settle_with_question(
+            running, text="Cần một dữ kiện.", question_part=part
+        )
+        if outcome == QUESTION_ANSWERED:
+            await store().answer_question(owner, part.question_id, ["average"])
+        elif outcome == QUESTION_SKIPPED:
+            await store().skip_question(owner, part.question_id)
+        else:
+            # The reader typed instead of tapping, which is the next Turn.
+            await turns.create(
+                user_id=owner,
+                thread_id=thread_id,
+                turn_id=uuid.uuid4(),
+                user_text="Thôi, hỏi kiểu khác.",
+                runtime=runtime(owner),
+            )
+        view = await store().read_thread(owner, thread_id)
+        drawn = next(
+            row.content["question"]
+            for row in view.messages
+            if row.role == "assistant" and row.content.get("question")
+        )
+        outcomes[outcome] = drawn
+
+    assert [entry["state"] for entry in outcomes.values()] == [
+        QUESTION_ANSWERED,
+        QUESTION_SKIPPED,
+        QUESTION_SUPERSEDED,
+    ]
+    assert outcomes[QUESTION_ANSWERED]["selected_option_ids"] == ["average"]
+    assert outcomes[QUESTION_SKIPPED]["selected_option_ids"] is None
+    # And the card itself is unchanged in every one of them: the transcript holds
+    # what was asked, and only the outcome moves.
+    for entry in outcomes.values():
+        assert entry["prompt"] == "Bạn mua mới hay trung bình giá?"
+        assert len(entry["options"]) == 2

@@ -46,9 +46,19 @@ from src.agent.router import (
     turn_events,
 )
 from src.agent.service import AlphaDeskService
-from src.agent.turns import TurnService
+from src.agent.parts import (
+    QUESTION_ANSWERED,
+    QUESTION_PENDING,
+    QUESTION_SKIPPED,
+    QUESTION_SUPERSEDED,
+    QuestionOption,
+    QuestionPart,
+)
+from src.agent.turns import TurnService, assistant_message
 from src.alpha.models import (
+    TURN_COMPLETE,
     AgentMessage,
+    AgentQuestion,
     AgentThread,
     AgentToolCall,
     AgentTurn,
@@ -220,6 +230,7 @@ def alpha_schema():
             AgentMessage.__table__,
             AgentToolCall.__table__,
             AgentTurn.__table__,
+            AgentQuestion.__table__,
             LlmCallUsage.__table__,
         ],
         checkfirst=True,
@@ -1265,3 +1276,273 @@ def _user_id_of(auth: dict) -> int:
 
     token = auth["Authorization"].removeprefix("Bearer ")
     return int(decode_access_token(token)["sub"])
+
+
+# -- resolving a question --------------------------------------------------
+
+
+def card(**overrides) -> QuestionPart:
+    fields = {
+        "question_id": str(uuid.uuid4()),
+        "prompt": "Bạn mua mới hay trung bình giá?",
+        "options": [
+            QuestionOption(id="new", label="Mua mới"),
+            QuestionOption(id="average", label="Trung bình giá"),
+        ],
+    }
+    fields.update(overrides)
+    return QuestionPart(**fields)
+
+
+def user_id_of(account: dict) -> int:
+    with get_sync_db() as session:
+        return int(
+            session.execute(
+                select(User).where(User.email == account["email"])
+            ).scalar_one().id
+        )
+
+
+async def ask(thread_id: str, user_id: int, part: QuestionPart) -> None:
+    """A Turn that ended by asking, committed through the store's own terminal.
+
+    The endpoints under test are the two that *resolve* a question; how the card
+    got into the transcript is the lifecycle's own test. Written through
+    ``finish_turn`` rather than as rows so the message and the question row are
+    the pair the endpoints will actually find.
+    """
+    store = AgentPersistence()
+    turn_id = uuid.uuid4()
+    await store.create_turn(
+        user_id=user_id,
+        thread_id=thread_id,
+        turn_id=turn_id,
+        user_text="VCB thế nào?",
+    )
+    await store.finish_turn(
+        turn_id,
+        status=TURN_COMPLETE,
+        terminal_reason=None,
+        message=assistant_message(
+            text="Cần một dữ kiện.", status=TURN_COMPLETE, question=part.as_wire()
+        ),
+        question=part.as_wire(),
+    )
+
+
+def stamp(body: dict) -> datetime:
+    """When a question was resolved, as an instant.
+
+    Compared rather than the string: the write answers from the value it just
+    set and a read answers from the column, and Postgres renders the same moment
+    in the session's own offset.
+    """
+    return datetime.fromisoformat(body["resolved_at"])
+
+
+async def drawn_card(client: AsyncClient, auth: dict, thread_id: str) -> dict:
+    """The card as a reopened Thread receives it, live state merged in."""
+    response = await client.get(f"{API}/threads/{thread_id}", headers=auth)
+    assert response.status_code == 200, response.text
+    return next(
+        message["content"]["question"]
+        for message in response.json()["messages"]
+        if message["role"] == "assistant" and message["content"].get("question")
+    )
+
+
+class TestQuestions:
+    pytestmark = pytest.mark.asyncio
+
+    async def test_an_answer_is_recorded_and_the_row_says_so(
+        self, client, auth, account, desk
+    ):
+        thread_id = await open_thread(client, auth)
+        part = card()
+        await ask(thread_id, user_id_of(account), part)
+
+        response = await client.post(
+            f"{API}/questions/{part.question_id}/answer",
+            json={"selected_option_ids": ["average"]},
+            headers=auth,
+        )
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["id"] == part.question_id
+        assert body["state"] == QUESTION_ANSWERED
+        assert body["selected_option_ids"] == ["average"]
+        assert body["resolved_at"] is not None
+        # A second tap is one decision: the same answer, and the same stamp.
+        again = await client.post(
+            f"{API}/questions/{part.question_id}/answer",
+            json={"selected_option_ids": ["average"]},
+            headers=auth,
+        )
+        assert again.status_code == 200
+        assert stamp(again.json()) == stamp(body)
+
+    async def test_whether_two_options_may_be_chosen_belongs_to_the_question(
+        self, client, auth, account, desk
+    ):
+        user_id = user_id_of(account)
+        single_thread = await open_thread(client, auth)
+        multi_thread = await open_thread(client, auth)
+        single = card()
+        multi = card(multi_select=True)
+        await ask(single_thread, user_id, single)
+        await ask(multi_thread, user_id, multi)
+
+        refused = await client.post(
+            f"{API}/questions/{single.question_id}/answer",
+            json={"selected_option_ids": ["new", "average"]},
+            headers=auth,
+        )
+        allowed = await client.post(
+            f"{API}/questions/{multi.question_id}/answer",
+            json={"selected_option_ids": ["new", "average"]},
+            headers=auth,
+        )
+
+        assert refused.status_code == 422
+        assert refused.json()["detail"]["reason"] == "option_not_offered"
+        assert allowed.status_code == 200
+        assert sorted(allowed.json()["selected_option_ids"]) == ["average", "new"]
+
+    async def test_an_option_the_card_never_offered_is_a_bad_request(
+        self, client, auth, account, desk
+    ):
+        thread_id = await open_thread(client, auth)
+        part = card()
+        await ask(thread_id, user_id_of(account), part)
+
+        unknown = await client.post(
+            f"{API}/questions/{part.question_id}/answer",
+            json={"selected_option_ids": ["hold"]},
+            headers=auth,
+        )
+        empty = await client.post(
+            f"{API}/questions/{part.question_id}/answer",
+            json={"selected_option_ids": []},
+            headers=auth,
+        )
+
+        assert unknown.status_code == 422
+        assert unknown.json()["detail"]["reason"] == "option_not_offered"
+        # Refused by the schema rather than the store, and still a 422: choosing
+        # nothing is a skip, and the two are different outcomes.
+        assert empty.status_code == 422
+        assert (await drawn_card(client, auth, thread_id))["state"] == QUESTION_PENDING
+
+    async def test_a_skip_needs_no_body_and_repeats_without_moving(
+        self, client, auth, account, desk
+    ):
+        thread_id = await open_thread(client, auth)
+        part = card()
+        await ask(thread_id, user_id_of(account), part)
+
+        skipped = await client.post(
+            f"{API}/questions/{part.question_id}/skip", headers=auth
+        )
+        again = await client.post(
+            f"{API}/questions/{part.question_id}/skip", headers=auth
+        )
+
+        assert skipped.status_code == 200, skipped.text
+        assert skipped.json()["state"] == QUESTION_SKIPPED
+        # Null and not an empty list: choosing nothing is what a skip is.
+        assert skipped.json()["selected_option_ids"] is None
+        assert stamp(again.json()) == stamp(skipped.json())
+
+    async def test_changing_a_settled_question_is_a_conflict(
+        self, client, auth, account, desk
+    ):
+        thread_id = await open_thread(client, auth)
+        part = card()
+        await ask(thread_id, user_id_of(account), part)
+        await client.post(
+            f"{API}/questions/{part.question_id}/answer",
+            json={"selected_option_ids": ["new"]},
+            headers=auth,
+        )
+
+        conflict = await client.post(
+            f"{API}/questions/{part.question_id}/answer",
+            json={"selected_option_ids": ["average"]},
+            headers=auth,
+        )
+        skipping = await client.post(
+            f"{API}/questions/{part.question_id}/skip", headers=auth
+        )
+
+        assert conflict.status_code == 409
+        assert conflict.json()["detail"]["reason"] == "question_already_resolved"
+        assert skipping.status_code == 409
+        assert (await drawn_card(client, auth, thread_id))["selected_option_ids"] == [
+            "new"
+        ]
+
+    async def test_another_readers_question_is_not_found_rather_than_forbidden(
+        self, client, auth, account, other_account, desk
+    ):
+        thread_id = await open_thread(client, auth)
+        part = card()
+        await ask(thread_id, user_id_of(account), part)
+        stranger = await authenticate(client, other_account)
+
+        theirs = await client.post(
+            f"{API}/questions/{part.question_id}/answer",
+            json={"selected_option_ids": ["new"]},
+            headers=stranger,
+        )
+        skipping = await client.post(
+            f"{API}/questions/{part.question_id}/skip", headers=stranger
+        )
+        nowhere = await client.post(
+            f"{API}/questions/{uuid.uuid4()}/answer",
+            json={"selected_option_ids": ["new"]},
+            headers=auth,
+        )
+
+        assert theirs.status_code == 404
+        assert skipping.status_code == 404
+        assert nowhere.status_code == 404
+        assert (await drawn_card(client, auth, thread_id))["state"] == QUESTION_PENDING
+
+    async def test_the_reopened_thread_draws_whichever_state_the_reader_left(
+        self, client, auth, account, desk
+    ):
+        """The transcript is what a reload reads, so the outcome has to be in it."""
+        user_id = user_id_of(account)
+        answered_thread = await open_thread(client, auth)
+        typed_thread = await open_thread(client, auth)
+        answered = card()
+        ignored = card()
+        await ask(answered_thread, user_id, answered)
+        await ask(typed_thread, user_id, ignored)
+
+        await client.post(
+            f"{API}/questions/{answered.question_id}/answer",
+            json={"selected_option_ids": ["average"]},
+            headers=auth,
+        )
+        # Typing instead of tapping is a new Turn, and it supersedes the card in
+        # the same transaction that creates the Turn.
+        desk.control.says("Câu trả lời khác.")
+        started = await start_turn(
+            client, auth, typed_thread, text="Thôi, hỏi kiểu khác."
+        )
+        assert started.status_code == 201, started.text
+        await asyncio.wait_for(desk.control.started.wait(), 2)
+        desk.control.finish()
+
+        assert (await drawn_card(client, auth, answered_thread)) == {
+            **answered.as_wire(),
+            "state": QUESTION_ANSWERED,
+            "selected_option_ids": ["average"],
+        }
+        assert (await drawn_card(client, auth, typed_thread)) == {
+            **ignored.as_wire(),
+            "state": QUESTION_SUPERSEDED,
+            "selected_option_ids": None,
+        }

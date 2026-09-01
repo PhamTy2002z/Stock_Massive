@@ -16,6 +16,7 @@ from src.alpha.models import (  # noqa: E402,F401
     AgentAttachment,
     AgentMessage,
     AgentKnowledge,
+    AgentQuestion,
     AgentThread,
     AgentToolCall,
     AgentTurn,

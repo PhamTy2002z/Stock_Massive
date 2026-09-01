@@ -364,6 +364,75 @@ class AgentTurn(Base):
         return f"<AgentTurn {self.id} {self.status}>"
 
 
+class AgentQuestion(Base):
+    """One question the harness asked a reader, and what became of it.
+
+    Its own table for the reason ``agent_turn`` has one: ``agent_message`` is
+    canonical and immutable, and this state changes *after* the terminal
+    transaction that wrote the message. The question itself is on the message,
+    inside the assistant content, where every other typed part lives; what moves
+    is the outcome, and a mutable column on an immutable row is the contradiction
+    both of these tables exist to avoid.
+
+    ``id`` is the part's own ``question_id``, so the card a client was handed and
+    the row it posts an answer against are addressed by one identifier.
+
+    ``user_id`` is a column here and not a join, unlike every other row in this
+    schema. The two endpoints that resolve a question are reached by id alone —
+    there is no Thread in the path to scope them — so ownership is the *first*
+    predicate of the query rather than a join it could be written without.
+
+    ``message_id`` is ``SET NULL`` rather than ``CASCADE``: the outcome of an
+    asking is a fact about the conversation, and it outliving the row it was
+    drawn on is better than a reader's answer disappearing with a message.
+    """
+
+    __tablename__ = "agent_question"
+
+    id = Column(Uuid, primary_key=True)
+    thread_id = Column(
+        Uuid,
+        ForeignKey("agent_thread.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    turn_id = Column(
+        Uuid,
+        ForeignKey("agent_turn.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    message_id = Column(
+        BigInteger,
+        ForeignKey("agent_message.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # The part exactly as it was published and written into the message: prompt,
+    # options, the multi-select flag, the skip label. Stored beside the outcome so
+    # that validating an answer — is this an option this question offered — reads
+    # one row instead of parsing a transcript.
+    payload = Column(JSONB, nullable=False)
+    # pending | answered | skipped | superseded
+    state = Column(String(16), nullable=False)
+    # The ids the reader chose, and null for every state that is not an answer:
+    # an empty list would read as "chose nothing", which is what skipping is.
+    selected_option_ids = Column(JSONB, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        # Both reads this table has: the pending question of a Thread, and the
+        # supersede the next Turn's transaction runs over exactly that set.
+        Index("ix_agent_question_thread_state", "thread_id", "state"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AgentQuestion {self.id} {self.state}>"
+
+
 class LlmCallUsage(Base):
     """One reservation against the budget, and what it actually cost.
 

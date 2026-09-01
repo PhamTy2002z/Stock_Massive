@@ -61,6 +61,9 @@ from starlette.datastructures import UploadFile
 from src.agent.messages import TranscriptTurn, TurnAttachment
 from src.agent.persistence import (
     MessageRecord,
+    QuestionAlreadyResolved,
+    QuestionOptionInvalid,
+    QuestionRecord,
     ThreadRecord,
     ThreadView,
     TurnPayloadConflict,
@@ -70,12 +73,14 @@ from src.agent.domain.trading_calendar import market_day
 from src.agent.prompt import RuntimeContext
 from src.agent.schemas import (
     AllowanceResponse,
+    AnswerQuestionRequest,
     AttachmentResponse,
     CreatedTurnResponse,
     CreateThreadRequest,
     CapabilitiesResponse,
     CreateTurnRequest,
     MessageResponse,
+    QuestionResponse,
     ThreadDetailResponse,
     ThreadListResponse,
     ThreadResponse,
@@ -763,6 +768,107 @@ async def read_attachment_bytes(
     # Written once and never updated, so a client may hold it as long as it likes.
     headers["Cache-Control"] = "private, max-age=31536000, immutable"
     return Response(content=found.content, media_type=media_type, headers=headers)
+
+
+# -- resolving a question --------------------------------------------------
+
+
+_QUESTION_NOT_FOUND = HTTPException(status_code=404, detail="Question not found")
+
+
+def _question(record: QuestionRecord) -> QuestionResponse:
+    return QuestionResponse(
+        id=record.id,
+        state=record.state,
+        selected_option_ids=(
+            None
+            if record.selected_option_ids is None
+            else list(record.selected_option_ids)
+        ),
+        resolved_at=record.resolved_at,
+    )
+
+
+def _resolved(record: QuestionRecord | None) -> QuestionResponse:
+    """One answer for a question that is not there and one that is not yours.
+
+    404 for both, deliberately: a caller who could tell them apart has been told
+    that an id exists. The same rule every other row in this surface follows.
+    """
+    if record is None:
+        raise _QUESTION_NOT_FOUND
+    return _question(record)
+
+
+@router.post("/questions/{question_id}/answer", response_model=QuestionResponse)
+async def answer_question(
+    question_id: uuid.UUID,
+    payload: AnswerQuestionRequest,
+    current_user: CurrentUser,
+    desk: Desk,
+) -> QuestionResponse:
+    """Record the reader's choice. Idempotent, and it starts nothing.
+
+    A question ended its Turn, so answering one does not resume anything: the
+    reply is a new Turn the reader sends, and this endpoint's whole job is to
+    write down what they chose so that Turn — and a reopened Thread — can see it.
+
+    Three refusals, and each says something different. 404 is a question that is
+    not this reader's; 422 is an option the card never offered, or several on a
+    single-select question; 409 is a question already resolved *differently*,
+    because the work has continued from the first answer and the way to change
+    course is another Turn. Re-sending the same choice is none of those and
+    answers 200 with the row unchanged.
+    """
+    try:
+        record = await desk.store.answer_question(
+            current_user.id, question_id, payload.selected_option_ids
+        )
+    except QuestionOptionInvalid as invalid:
+        raise HTTPException(
+            status_code=422,
+            detail={"reason": "option_not_offered", "message": str(invalid)},
+        ) from invalid
+    except QuestionAlreadyResolved as resolved:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "reason": "question_already_resolved",
+                "message": (
+                    "That question is already settled. Ask again in a new message "
+                    "to change course."
+                ),
+            },
+        ) from resolved
+    return _resolved(record)
+
+
+@router.post("/questions/{question_id}/skip", response_model=QuestionResponse)
+async def skip_question(
+    question_id: uuid.UUID,
+    current_user: CurrentUser,
+    desk: Desk,
+) -> QuestionResponse:
+    """Record that the reader declined to choose. No body, and no dead end.
+
+    Skipping is a decision with an outcome, not a cancellation: the work runs on
+    default assumptions and prints them. Idempotent on the same terms as an
+    answer, and 409 if the question was already resolved another way.
+    """
+    try:
+        record = await desk.store.skip_question(current_user.id, question_id)
+    except QuestionAlreadyResolved as resolved:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "reason": "question_already_resolved",
+                "message": (
+                    "That question is already settled. Ask again in a new message "
+                    "to change course."
+                ),
+            },
+        ) from resolved
+    return _resolved(record)
 
 
 @router.post("/turns/{turn_id}/cancel", response_model=TurnResponse)

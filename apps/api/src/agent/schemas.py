@@ -20,6 +20,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.agent.attachments import MAX_IMAGES_PER_TURN
+from src.agent.parts import MAX_QUESTION_OPTIONS
 from src.agent.turns import MAX_USER_INPUT_BYTES
 from src.alpha.models import FLAG_REASONS
 
@@ -283,6 +284,47 @@ class AttachmentResponse(BaseModel):
     estimated_tokens: int | None = None
 
 
+class AnswerQuestionRequest(BaseModel):
+    """The options the reader tapped, by the ids the card was drawn with.
+
+    A list even for a single-select question, because ``multi_select`` is a
+    property of the question and not of the request: one endpoint shape for both
+    means a client that gains multi-select later changes nothing here.
+
+    Which ids are *valid* is not decided in this file, and cannot be: the answer
+    is on the row the question was written to. The store checks it, refuses an
+    option the card never offered, and the router turns that into a 422 — this
+    validator only holds the shape.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    selected_option_ids: list[str] = Field(min_length=1, max_length=MAX_QUESTION_OPTIONS)
+
+    @field_validator("selected_option_ids")
+    @classmethod
+    def _each_option_once(cls, value: list[str]) -> list[str]:
+        # The same option twice is one choice, the same rule attachments follow:
+        # a double tap is not a bad request.
+        return list(dict.fromkeys(value))
+
+
+class QuestionResponse(BaseModel):
+    """What a question looks like once it has been resolved, or not yet.
+
+    The card itself is not restated. It is already in the transcript the client
+    is holding, and sending it back would give the same payload two owners; what
+    a caller needs from this response is what changed.
+    """
+
+    id: uuid.UUID
+    state: str
+    #: The ids the reader chose, and null for every state that is not an answer —
+    #: an empty list would read as "chose nothing", which is what a skip is.
+    selected_option_ids: list[str] | None
+    resolved_at: datetime | None
+
+
 class CreatedTurnResponse(TurnResponse):
     # False when the id was already known: the same payload returns the Turn
     # that exists and starts nothing at all.
@@ -291,6 +333,7 @@ class CreatedTurnResponse(TurnResponse):
 
 __all__ = [
     "AllowanceResponse",
+    "AnswerQuestionRequest",
     "AttachmentResponse",
     "CreateThreadRequest",
     "CreateTurnRequest",
@@ -298,6 +341,7 @@ __all__ = [
     "FlagMessageRequest",
     "MessageFlagResponse",
     "MessageResponse",
+    "QuestionResponse",
     "ThreadDetailResponse",
     "ThreadListResponse",
     "ThreadResponse",

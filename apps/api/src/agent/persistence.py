@@ -29,12 +29,21 @@ from src.alpha.models import (
     TURN_RUNNING,
     AgentAttachment,
     AgentMessage,
+    AgentQuestion,
     AgentThread,
     AgentToolCall,
     AgentTurn,
 )
 from src.core.database import sync_session_factory
 from .loop import CHAT_MODE
+from .messages import CALL_INTERRUPTED, settle_orphan_calls
+from .parts import (
+    QUESTION_ANSWERED,
+    QUESTION_PENDING,
+    QUESTION_SKIPPED,
+    QUESTION_SUPERSEDED,
+    question_option_ids,
+)
 from .symbols import normalize_symbol
 
 T = TypeVar("T")
@@ -172,6 +181,21 @@ class TurnRecord:
 
 
 @dataclass(frozen=True)
+class QuestionRecord:
+    """One asking and its outcome, as the service and the transport read it."""
+
+    id: uuid.UUID
+    thread_id: uuid.UUID
+    turn_id: uuid.UUID
+    message_id: int | None
+    payload: Mapping[str, Any]
+    state: str
+    selected_option_ids: tuple[str, ...] | None
+    created_at: datetime
+    resolved_at: datetime | None
+
+
+@dataclass(frozen=True)
 class TurnCreation:
     """The Turn the create transaction settled on, and whether it is new.
 
@@ -222,6 +246,40 @@ class TurnPayloadConflict(ValueError):
         self.turn_id = turn_id
 
 
+class QuestionAlreadyResolved(ValueError):
+    """The question is this user's, and it has already been settled otherwise.
+
+    Separate from "not found" and from a bad option, because it is neither: the
+    id exists, the request is well formed, and the answer would overwrite a
+    decision the work has already been continued from. Re-sending the *same*
+    outcome is not this exception — that is idempotent and answers 200. The
+    transport maps this to 409.
+    """
+
+    def __init__(self, question_id: uuid.UUID, state: str) -> None:
+        super().__init__(
+            f"Question {question_id} is already {state}; a question is answered "
+            "once and a later Turn is what changes course"
+        )
+        self.question_id = question_id
+        self.state = state
+
+
+class QuestionOptionInvalid(ValueError):
+    """The chosen ids are not a choice this question offered.
+
+    An id that is not on the card, nothing chosen at all, or several chosen on a
+    question that is single-select. Refused rather than trimmed to something
+    plausible: the whole value of an answer is that it says what the reader meant,
+    and a guess recorded as their choice is worse than no answer. The transport
+    maps this to 422.
+    """
+
+    def __init__(self, question_id: uuid.UUID, message: str) -> None:
+        super().__init__(f"Question {question_id}: {message}")
+        self.question_id = question_id
+
+
 def _uuid(value: uuid.UUID | str) -> uuid.UUID:
     """Coerce a Thread or Turn identifier, both of which arrive as either."""
     return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
@@ -258,18 +316,81 @@ def _thread_record(row: AgentThread) -> ThreadRecord:
     )
 
 
-def _message_record(row: AgentMessage) -> MessageRecord:
+def _message_record(
+    row: AgentMessage, questions: Mapping[str, AgentQuestion] | None = None
+) -> MessageRecord:
+    """One transcript row. ``questions`` merges the live state of its card.
+
+    Optional, and empty for every reader but the transcript read: a message
+    carries at most one question and almost none carry any, so the lookup is
+    passed in by the caller that already made it rather than re-made per row.
+    """
     return MessageRecord(
         id=row.id,
         thread_id=row.thread_id,
         seq=row.seq,
         role=row.role,
-        content=dict(row.content),
+        content=(
+            dict(row.content)
+            if not questions
+            else _with_question_state(row.content or {}, questions)
+        ),
         created_at=row.created_at,
         flagged_reason=row.flagged_reason,
         flagged_at=row.flagged_at,
         helpful_at=row.helpful_at,
     )
+
+
+def _question_record(row: AgentQuestion) -> QuestionRecord:
+    chosen = row.selected_option_ids
+    return QuestionRecord(
+        id=row.id,
+        thread_id=row.thread_id,
+        turn_id=row.turn_id,
+        message_id=None if row.message_id is None else int(row.message_id),
+        payload=dict(row.payload or {}),
+        state=row.state,
+        selected_option_ids=(
+            None if chosen is None else tuple(str(entry) for entry in chosen)
+        ),
+        created_at=row.created_at,
+        resolved_at=row.resolved_at,
+    )
+
+
+def _with_question_state(
+    content: Mapping[str, Any], states: Mapping[str, AgentQuestion]
+) -> dict[str, Any]:
+    """One message's content, with the live state of its card merged in.
+
+    The message is immutable and the outcome is not, so the transcript holds the
+    question exactly as it was asked and this is where the two are put back
+    together. The merge is on a copy — the row in the database keeps what was
+    written — and it adds two keys inside the ``question`` object rather than
+    beside it, so a client reads one card rather than a card and a lookup table.
+
+    A message whose question has no row is left alone. That is not a state worth
+    inventing a default for: it means the row was deleted under the transcript,
+    and a card drawn as ``pending`` on the strength of a missing row would invite
+    an answer nothing can record.
+    """
+    question = content.get("question")
+    if not isinstance(question, Mapping):
+        return dict(content)
+    row = states.get(str(question.get("question_id")))
+    if row is None:
+        return dict(content)
+    chosen = row.selected_option_ids
+    merged = dict(content)
+    merged["question"] = {
+        **question,
+        "state": row.state,
+        "selected_option_ids": (
+            None if chosen is None else [str(entry) for entry in chosen]
+        ),
+    }
+    return merged
 
 
 def _trace_record(row: AgentToolCall) -> ToolCallRecord:
@@ -353,6 +474,66 @@ def _insert_message(
     return message
 
 
+def _settled_draft(draft: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
+    """The checkpoint a freeze leaves behind, with no call still in flight.
+
+    Rewritten only when there is something to settle, so the column of an
+    ordinary interrupted Turn stays byte-identical to what its own process wrote.
+    ``interrupted`` and not a cancellation: a swept Turn is one whose process is
+    gone, and whether the reader had asked it to stop is not a thing this
+    transaction can know.
+    """
+    if not draft:
+        return draft
+    calls = draft.get("tool_calls") or ()
+    settled = settle_orphan_calls(calls, CALL_INTERRUPTED)
+    if list(settled) == list(calls):
+        return draft
+    return {**draft, "tool_calls": [dict(call) for call in settled]}
+
+
+def _same_choice(row: AgentQuestion, chosen: tuple[str, ...] | None) -> bool:
+    """Whether a repeated request is the outcome the row already holds.
+
+    Compared as sets: the order options were tapped in is not part of the answer,
+    so the same two choices sent the other way round are the same decision.
+    """
+    stored = row.selected_option_ids
+    if chosen is None:
+        return stored is None
+    return stored is not None and set(str(entry) for entry in stored) == set(chosen)
+
+
+def _pending_question(
+    session: Session,
+    turn: AgentTurn,
+    message_id: int,
+    payload: Mapping[str, Any],
+) -> AgentQuestion:
+    """The row that records what becomes of one asking, at ``pending``.
+
+    Built inside the caller's transaction, and the owner is resolved here from
+    the Thread rather than taken as an argument: the writer of a terminal Turn
+    has a Turn id, and copying a user id along the call chain is how a row comes
+    to be scoped to the wrong reader. The column exists because the endpoints
+    that resolve a question are reached by question id alone.
+    """
+    thread = session.execute(
+        select(AgentThread).where(AgentThread.id == turn.thread_id)
+    ).scalar_one()
+    return AgentQuestion(
+        # The part's own id, so the card a client holds and the row it posts
+        # against are one identifier rather than two that can drift apart.
+        id=_uuid(payload["question_id"]),
+        thread_id=turn.thread_id,
+        turn_id=turn.id,
+        message_id=message_id,
+        user_id=thread.user_id,
+        payload=dict(payload),
+        state=QUESTION_PENDING,
+    )
+
+
 class AgentPersistence:
     """The complete read/write surface for ticket #74."""
 
@@ -398,6 +579,14 @@ class AgentPersistence:
     async def read_thread(
         self, user_id: int, thread_id: uuid.UUID | str
     ) -> ThreadView | None:
+        """One Thread and its transcript, with every card's outcome merged in.
+
+        This is the one place the merge happens, and it is the right one: the
+        transcript read *is* the replay surface, so a question's three outcomes
+        survive a reload here or they do not survive at all. It costs one indexed
+        query per Thread open rather than one per message, and no other reader of
+        a message needs it — a flag or a helpful mark says nothing about a card.
+        """
         return await asyncio.to_thread(self._read_thread, user_id, _uuid(thread_id))
 
     def _read_thread(self, user_id: int, thread_id: uuid.UUID) -> ThreadView | None:
@@ -415,10 +604,22 @@ class AgentPersistence:
                 .where(AgentMessage.thread_id == thread_id)
                 .order_by(AgentMessage.seq.asc())
             ).scalars()
+            # Read in one go and keyed by the question's own id, because that is
+            # what the part inside the message carries. Almost every Thread has
+            # none of these, and the index makes that read a miss rather than a
+            # scan.
+            states = {
+                str(question.id): question
+                for question in session.execute(
+                    select(AgentQuestion).where(AgentQuestion.thread_id == thread_id)
+                ).scalars()
+            }
             base = _thread_record(row)
             return ThreadView(
                 **base.__dict__,
-                messages=tuple(_message_record(message) for message in messages),
+                messages=tuple(
+                    _message_record(message, states) for message in messages
+                ),
             )
 
     async def read_message(self, user_id: int, message_id: int) -> MessageRecord | None:
@@ -941,6 +1142,24 @@ class AgentPersistence:
                     )
                     .values(attached_turn_id=turn_id)
                 )
+            # A reader who types instead of tapping has answered the question by
+            # moving past it, so every card still open on this Thread is
+            # superseded in the transaction that creates the Turn. In the same
+            # transaction and not after it: two commits would leave a window
+            # where the new Turn exists beside a card that still takes answers,
+            # and an answer landing in that window would branch work that has
+            # already moved on.
+            session.execute(
+                update(AgentQuestion)
+                .where(
+                    AgentQuestion.thread_id == thread_id,
+                    AgentQuestion.state == QUESTION_PENDING,
+                )
+                .values(
+                    state=QUESTION_SUPERSEDED,
+                    resolved_at=datetime.now(timezone.utc),
+                )
+            )
             session.commit()
             return TurnCreation(turn=_turn_record(turn), created=True)
 
@@ -1043,17 +1262,29 @@ class AgentPersistence:
         symbols: Sequence[str] = (),
         draft: Mapping[str, Any] | None = None,
         last_event_seq: int | None = None,
+        question: Mapping[str, Any] | None = None,
     ) -> TurnRecord:
         """The one terminal transaction (#81).
 
         The canonical assistant message, ``status``, ``terminal_reason``,
         ``response_message_id`` and ``finished_at`` are written together. Before
         it commits the transcript holds no half-written answer at all.
+
+        ``question`` is the card a Turn ended by asking, as ``parts.py`` shaped
+        it, and it joins that same transaction: a message drawing a card with no
+        row behind it would take an answer nothing could record, and a row with
+        no message would be an outcome attached to nothing. It requires the
+        message it is anchored to, and a Turn that already reached a terminal
+        state writes neither — first terminal wins, question included.
         """
         if status in ACTIVE_TURN_STATUSES:
             raise ValueError(f"{status} is not a terminal Turn status")
         if status != TURN_COMPLETE and not terminal_reason:
             raise ValueError("a non-complete Turn must carry a terminal reason")
+        if question is not None and message is None:
+            raise ValueError(
+                "a question is anchored to the assistant message that asked it"
+            )
         normalized = tuple(dict.fromkeys(normalize_symbol(symbol) for symbol in symbols))
         return await asyncio.to_thread(
             self._finish_turn,
@@ -1064,6 +1295,7 @@ class AgentPersistence:
             normalized,
             None if draft is None else dict(draft),
             last_event_seq,
+            None if question is None else dict(question),
         )
 
     def _finish_turn(
@@ -1075,6 +1307,7 @@ class AgentPersistence:
         symbols: Sequence[str],
         draft: Mapping[str, Any] | None,
         last_event_seq: int | None,
+        question: Mapping[str, Any] | None,
     ) -> TurnRecord:
         def write(session: Session) -> TurnRecord:
             row = session.get(AgentTurn, turn_id)
@@ -1089,6 +1322,10 @@ class AgentPersistence:
                     session, row.thread_id, "assistant", message, symbols
                 )
                 row.response_message_id = written.id
+                if question is not None:
+                    session.add(
+                        _pending_question(session, row, written.id, question)
+                    )
             if draft is not None:
                 row.draft_content = dict(draft)
             if last_event_seq is not None:
@@ -1100,6 +1337,126 @@ class AgentPersistence:
             return _turn_record(row)
 
         return self._with_sequence_retry(write)
+
+    # -- what became of a question ----------------------------------------
+
+    async def read_question(
+        self, user_id: int, question_id: uuid.UUID | str
+    ) -> QuestionRecord | None:
+        """One asking and its outcome, or ``None`` if it is not this user's."""
+        return await asyncio.to_thread(
+            self._read_question, user_id, _uuid(question_id)
+        )
+
+    def _read_question(
+        self, user_id: int, question_id: uuid.UUID
+    ) -> QuestionRecord | None:
+        with self._session_factory() as session:
+            row = self._owned_question(session, user_id, question_id)
+            return None if row is None else _question_record(row)
+
+    async def answer_question(
+        self,
+        user_id: int,
+        question_id: uuid.UUID | str,
+        selected_option_ids: Sequence[str],
+    ) -> QuestionRecord | None:
+        """Record the reader's choice. First write wins; the same one repeats.
+
+        The ids are checked against the options this question was *asked* with,
+        read off its own stored payload rather than off whatever the client sent,
+        and a single-select question refuses more than one. ``None`` means the
+        question is not this user's — the same answer as one that does not exist,
+        because a caller who could tell those apart has been told an id exists.
+
+        Sending the identical choice again returns the row untouched, stamp
+        included: a double tap on a card is one decision, and re-stamping it
+        would move when the reader decided. A *different* choice against a
+        resolved question raises :class:`QuestionAlreadyResolved` — the work has
+        already continued from the first one, and the way to change course is the
+        next Turn rather than a rewritten row.
+        """
+        chosen = tuple(dict.fromkeys(str(entry) for entry in selected_option_ids))
+        return await asyncio.to_thread(
+            self._resolve_question, user_id, _uuid(question_id), QUESTION_ANSWERED, chosen
+        )
+
+    async def skip_question(
+        self, user_id: int, question_id: uuid.UUID | str
+    ) -> QuestionRecord | None:
+        """Record that the reader declined to choose.
+
+        Not a cancellation and not an absent answer: the work runs on default
+        assumptions and says which, so ``skipped`` is a decision with an outcome
+        of its own. Idempotent and owner-scoped on the same terms as an answer.
+        """
+        return await asyncio.to_thread(
+            self._resolve_question, user_id, _uuid(question_id), QUESTION_SKIPPED, None
+        )
+
+    @staticmethod
+    def _owned_question(
+        session: Session, user_id: int, question_id: uuid.UUID
+    ) -> AgentQuestion | None:
+        """The question, but only if this reader is the one who was asked.
+
+        A column and not a join, unlike every other owner check here: these rows
+        are reached by question id alone, with no Thread in the path, so
+        ownership is the query's own predicate.
+        """
+        return session.execute(
+            select(AgentQuestion).where(
+                AgentQuestion.id == question_id,
+                AgentQuestion.user_id == user_id,
+            )
+        ).scalar_one_or_none()
+
+    def _resolve_question(
+        self,
+        user_id: int,
+        question_id: uuid.UUID,
+        state: str,
+        chosen: tuple[str, ...] | None,
+    ) -> QuestionRecord | None:
+        with self._session_factory() as session:
+            row = self._owned_question(session, user_id, question_id)
+            if row is None:
+                return None
+            if chosen is not None:
+                self._assert_offered(row, chosen)
+            if row.state != QUESTION_PENDING:
+                if row.state == state and _same_choice(row, chosen):
+                    # The same outcome, already written. Returned as it stands so
+                    # a retried request is not a second decision.
+                    return _question_record(row)
+                raise QuestionAlreadyResolved(question_id, row.state)
+            row.state = state
+            # Null for a skip, and deliberately not an empty list: "chose
+            # nothing" is what a skip *is*, and a list would make the two states
+            # indistinguishable to anything reading the column alone.
+            row.selected_option_ids = None if chosen is None else list(chosen)
+            row.resolved_at = datetime.now(timezone.utc)
+            session.commit()
+            return _question_record(row)
+
+    @staticmethod
+    def _assert_offered(row: AgentQuestion, chosen: tuple[str, ...]) -> None:
+        """Refuse anything the card did not actually offer."""
+        if not chosen:
+            raise QuestionOptionInvalid(
+                row.id, "an answer names at least one option; choosing none is a skip"
+            )
+        payload = dict(row.payload or {})
+        if not payload.get("multi_select") and len(chosen) > 1:
+            raise QuestionOptionInvalid(
+                row.id, "this question takes one option, not several"
+            )
+        offered = set(question_option_ids(payload))
+        unknown = [entry for entry in chosen if entry not in offered]
+        if unknown:
+            raise QuestionOptionInvalid(
+                row.id, f"{', '.join(unknown)} is not an option this question offered"
+            )
 
     async def freeze_interrupted_turns(
         self, message_builder: MessageBuilder | None = None
@@ -1136,6 +1493,14 @@ class AgentPersistence:
         transcript row: the sweep appends assistant messages, so it races the
         same ``UNIQUE(thread_id, seq)`` as the Turn that is still finishing in
         another process during a rolling deploy.
+
+        The checkpoint is settled here as well as frozen into the message, and
+        both are needed. A reconnecting subscriber of a Turn no publisher is
+        holding is answered from ``draft_content`` rather than from the
+        transcript, so a checkpoint left exactly as the dead process wrote it
+        would keep replaying a call in flight that nothing is coming back for —
+        the transcript would say ``interrupted`` and the snapshot would still draw
+        a spinner.
         """
         rows = list(
             session.execute(
@@ -1152,6 +1517,7 @@ class AgentPersistence:
                     session, row.thread_id, "assistant", message, ()
                 )
                 row.response_message_id = written.id
+            row.draft_content = _settled_draft(row.draft_content)
             row.status = TURN_INCOMPLETE
             row.terminal_reason = INTERRUPTED_REASON
             row.finished_at = datetime.now(timezone.utc)
@@ -1171,6 +1537,9 @@ __all__ = [
     "TURN_RUNNING",
     "AgentPersistence",
     "MessageRecord",
+    "QuestionAlreadyResolved",
+    "QuestionOptionInvalid",
+    "QuestionRecord",
     "ThreadRecord",
     "ThreadView",
     "ToolCallRecord",
