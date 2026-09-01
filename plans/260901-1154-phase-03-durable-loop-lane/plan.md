@@ -206,7 +206,7 @@ Ma trận gate roadmap, mỗi ô một test, chạy bằng fake client/tool worl
 | Cancel giữa tool round | read hủy typed, write chạy nốt đúng **một** lần |
 | Disconnect/replay | snapshot mới = text + thoughts + tool_calls + progress đã phát; không call nào `running|pending` sau terminal |
 | Shutdown/sweep | frozen draft không còn orphan status |
-| Question ba trạng thái | answered/skipped/superseded persist, sống qua snapshot-from-draft và GET thread |
+| Question ba trạng thái | answered/skipped/superseded persist; card `pending` sống qua publisher snapshot (reconnect lúc live); ba trạng thái sau đó sống qua GET thread merge từ `agent_question` — draft/checkpoint không mang state đổi-sau-terminal vì đó là view nói dối (amend 2026-09-01, cửa hai chiều) |
 
 Cộng test đơn vị theo file: `test_agent_lanes.py` (router tất định + arithmetic
 profile), `test_agent_parts.py` (schema + allowlist), mở rộng
